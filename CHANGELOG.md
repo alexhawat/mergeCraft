@@ -88,6 +88,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Multi-reviewer rosters now dispatch secondary reviewers server-side when the
+  primary harness never spawns them, fail closed with a clear error when a
+  secondary cannot reach its provider, and always emit the `⏱ LLM review time`
+  line (including a zero-second fallback when no LLM calls were timed).
+- Exporting findings no longer crashes when a model supplies a slug-style
+  `fingerprint`; non-hex values are normalized to a stable lowercase hex digest
+  at write time.
+- `submit_review_verdict` drops malformed draft findings instead of rejecting
+  the whole terminal submission when one pre-recorded row is invalid.
+- Checkout integrity hashing skips nested `node_modules`, `.pnpm-store`, run
+  `evidence`, and OpenCode session dirs at any depth so harness scratch writes
+  during read-only review no longer trigger exit 12.
+
 - The OpenCode harness hands its isolated `XDG_DATA_HOME` tree to the
   unprivileged agent user before `setpriv` drops privileges. The action
   entrypoint creates `.../opencode/auth.json` as root, so the dropped CLI failed

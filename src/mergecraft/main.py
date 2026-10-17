@@ -1934,6 +1934,29 @@ async def _dispatch_agent_with_deadline(ctx: RunContext) -> AgentResult:
     return _promote_and_finalize_agent_result(ctx, winning_slug, result)
 
 
+async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> str | None:
+    """Dispatch secondary reviewers server-side; return a hard error message."""
+    assert ctx.tool_context is not None
+    assert ctx.tool_state is not None
+    assert ctx.settings is not None
+    assert ctx.run_ctx is not None
+    if ctx.tool_state.selected_mode not in {"Review", "IncrementalReview"}:
+        return None
+    from mergecraft.review.roster_execution import run_pending_roster_reviewers
+
+    remaining_s: float | None = None
+    if ctx.timeout_ms is not None:
+        remaining_s = max(1.0, (ctx.timeout_ms / 1000.0) - ctx.setup_elapsed_s)
+    summary = await run_pending_roster_reviewers(
+        tool_context=ctx.tool_context,
+        base_run_ctx=ctx.run_ctx,
+        settings=ctx.settings,
+        payload=ctx.payload,
+        per_reviewer_timeout_s=remaining_s,
+    )
+    return summary.hard_error
+
+
 async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentReview:
     """Setup script, MCP start, and payload-timed agent dispatch (review stage)."""
     await _apply_overrides_and_setup_git(ctx)
@@ -1983,7 +2006,14 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
 
     with gha_log.group("agent-dispatch"):
         await _prepare_agent_dispatch(ctx)
-        return await _dispatch_agent_with_deadline(ctx)
+        result = await _dispatch_agent_with_deadline(ctx)
+        roster_error = await _run_server_roster_reviewers_if_needed(ctx)
+        if roster_error:
+            from dataclasses import replace
+
+
+            result = replace(result, success=False, error=roster_error)
+        return result
 
 
 _SINK_SCAN_ARTIFACT_SOURCES: tuple[str, ...] = (

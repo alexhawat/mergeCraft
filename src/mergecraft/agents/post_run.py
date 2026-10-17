@@ -111,8 +111,16 @@ def build_unsubmitted_review_prompt(mode: str) -> str:
                 "MISSING REVIEW OUTPUT — you selected Review mode but stopped without "
                 "recording a terminal verdict via `submit_review_verdict`.",
                 "",
-                "call `submit_review_verdict` now (approve or request_changes); the run "
-                "publishes the recorded verdict to GitHub.",
+                "call `submit_review_verdict` now with:",
+                "- `verdict`: approve or request_changes",
+                "- `summary`: one short paragraph",
+                "- `findings`: a list of objects, each with required keys "
+                "`path` (string), `body` (string), `severity` (Critical|Major|Minor|Warning), "
+                "and optional `line` (number). Omit invalid or pre-seeded rows — only include "
+                "findings you are publishing in this call.",
+                "",
+                "Secondary reviewers use `record_reviewer_dispatch_run`; only the primary "
+                "orchestrator calls `submit_review_verdict`.",
                 "",
                 "do NOT stop again until `submit_review_verdict` has been called successfully.",
             ]

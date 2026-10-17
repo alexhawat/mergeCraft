@@ -765,6 +765,60 @@ def validate_submission(
     return SubmissionValidation(accepted=True, rejection_reason=None)
 
 
+def _sanitize_submit_findings(raw: list[object]) -> list[Any]:
+    """Drop malformed draft rows instead of failing the whole terminal submit."""
+    from pydantic import ValidationError
+
+    coerced: list[Any] = []
+    for index, item in enumerate(raw):
+        if isinstance(item, dict) and item.get("raised_by") is not None:
+            logger.warning(
+                "submit_review_verdict: dropped finding {} — raised_by is server-stamped",
+                index,
+            )
+            continue
+        try:
+            finding = coerce_agent_finding(item)
+        except (ValidationError, ValueError, TypeError) as exc:
+            logger.warning(
+                "submit_review_verdict: dropped malformed finding {}: {}",
+                index,
+                exc,
+            )
+            continue
+        if finding.severity not in FINDING_SEVERITIES:
+            msg = f"findings[{index}]: invalid severity {finding.severity!r}"
+            raise ValueError(msg)
+        coerced.append(finding)
+    return coerced
+
+
+def purge_malformed_agent_findings(tool_state: ToolState) -> int:
+    """Drop incomplete agent drafts that would block terminal submit (not ``Finding`` rows)."""
+    from pydantic import ValidationError
+
+    kept: list[dict[str, Any]] = []
+    removed = 0
+    for row in tool_state.agent_findings:
+        if not isinstance(row, dict):
+            removed += 1
+            continue
+        if _coerce_confirmed_finding(row) is not None:
+            kept.append(row)
+            continue
+        try:
+            coerce_agent_finding(row)
+        except (ValidationError, ValueError, TypeError):
+            path = row.get("path")
+            body = row.get("body")
+            if path in (None, "") and body in (None, ""):
+                removed += 1
+                continue
+        kept.append(row)
+    tool_state.agent_findings = kept
+    return removed
+
+
 class SubmitReviewVerdictParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -778,20 +832,7 @@ class SubmitReviewVerdictParams(BaseModel):
         if not isinstance(value, list):
             msg = "findings must be a list"
             raise ValueError(msg)
-        coerced: list[Any] = []
-        for item in value:
-            if isinstance(item, dict) and item.get("raised_by") is not None:
-                msg = (
-                    "raised_by is server-stamped at collection time and must not "
-                    "be supplied by agents"
-                )
-                raise ValueError(msg)
-            finding = coerce_agent_finding(item)
-            if finding.severity not in FINDING_SEVERITIES:
-                msg = f"severity must be one of {FINDING_SEVERITIES!r}, got {finding.severity!r}"
-                raise ValueError(msg)
-            coerced.append(finding)
-        return coerced
+        return _sanitize_submit_findings(list(value))
 
 
 def recorded_submission_payload(submission: Any) -> dict[str, Any]:
@@ -918,6 +959,12 @@ def after_terminal_submission_recorded(
 def submit_review_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         ensure_review_scope_for_terminal(ctx.tool_state, "submit_review_verdict")
+        dropped = purge_malformed_agent_findings(ctx.tool_state)
+        if dropped:
+            logger.warning(
+                "submit_review_verdict: purged {} malformed row(s) from agent_findings",
+                dropped,
+            )
         validated = SubmitReviewVerdictParams.model_validate(params)
         repo_root = Path(primary_repo_state(ctx.tool_state).dir)
         from mergecraft.agents.registry import load_registry

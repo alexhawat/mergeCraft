@@ -26,10 +26,23 @@ _SINK_SUFFIXES: frozenset[str] = frozenset({".log", ".txt", ".jsonl", ".ndjson"}
 _SINK_NAMES: frozenset[str] = frozenset({"stdout", "stderr", "output"})
 
 
-_HASH_EXCLUDE_DIRS: frozenset[str] = frozenset(
+# Directory *names* pruned at any depth. Workspace dependency prep creates nested
+# ``node_modules``; OpenCode writes session state under ``evidence`` and
+# ``opencode-xdg-data`` inside the run scratch when ``tmpdir`` sits in-repo.
+_HASH_EXCLUDE_DIR_NAMES: frozenset[str] = frozenset(
     {
         ".git",
         "node_modules",
+        ".pnpm-store",
+        "evidence",
+        "opencode-xdg-data",
+        ".opencode",
+    }
+)
+
+# Exact checkout-relative paths excluded from the digest.
+_HASH_EXCLUDE_REL_PATHS: frozenset[str] = frozenset(
+    {
         ".mergecraft/prep-scratch",
         ".mergecraft/analyzer-scratch",
         # Analyzer runtime files mergeCraft itself writes into the checkout when a gate
@@ -40,13 +53,14 @@ _HASH_EXCLUDE_DIRS: frozenset[str] = frozenset(
         ".mergecraft/analyzer-runs",
         ".mergecraft/analyzers.lock",
         ".mergecraft/analyzers.lock.lock",
-        "evidence",
     }
 )
 
 
 def _is_excluded_rel_path(rel: str) -> bool:
-    return any(rel == excluded or rel.startswith(f"{excluded}/") for excluded in _HASH_EXCLUDE_DIRS)
+    return any(
+        rel == excluded or rel.startswith(f"{excluded}/") for excluded in _HASH_EXCLUDE_REL_PATHS
+    )
 
 
 def _iter_tree_paths(root: Path) -> list[Path]:
@@ -61,7 +75,8 @@ def _iter_tree_paths(root: Path) -> list[Path]:
         dirnames[:] = [
             name
             for name in dirnames
-            if not _is_excluded_rel_path(Path(dirpath).relative_to(root).joinpath(name).as_posix())
+            if name not in _HASH_EXCLUDE_DIR_NAMES
+            and not _is_excluded_rel_path(Path(dirpath).relative_to(root).joinpath(name).as_posix())
         ]
         for name in dirnames:
             path = Path(dirpath) / name
