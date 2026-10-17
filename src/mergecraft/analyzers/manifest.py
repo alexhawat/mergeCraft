@@ -46,6 +46,7 @@ _PARSER_NATIVE_SEVERITIES: dict[str, frozenset[str]] = {
     "bundler_audit_json": frozenset({"error", "warning"}),
     "sqlfluff_json": frozenset({"warning"}),
     "rustc_json": frozenset({"error", "warning", "note"}),
+    "gherkin_lint_json": frozenset({"error", "warning"}),
     "htmlhint_json": frozenset({"error", "warning"}),
     "stylelint_json": frozenset({"error", "warning"}),
     "yamllint_parsable": frozenset({"error", "warning"}),

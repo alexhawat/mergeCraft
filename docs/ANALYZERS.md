@@ -32,6 +32,7 @@ Shipped mergeCraft catalog analyzers. Rows are generated from manifests — run 
 | `eslint` | lint | javascript, typescript | auto | repo-native | trusted | js-lint | — |
 | `flake8` | lint | python | disabled | repo-native | trusted | python-lint | Legacy opt-in — disabled by default; enable via config override. |
 | `fortitude` | lint | fortran | auto | managed | trusted | — | manifest-only — Fortitude not bundled on Linux runners (C6 out of scope) |
+| `gherkin-lint` | lint | gherkin | disabled | repo-native | trusted | — | Syntax/structure only — never runs scenarios or step definitions. Opt-in: runs the repo's own pinned gherkin-lint (no managed npm runtime). No .gherkin-lintrc → structure-only fallback config. |
 | `golangci-lint` | lint | go | auto | managed | trusted | go-lint | — |
 | `govulncheck` | vuln | go | auto | repo-native | trusted | — | — |
 | `hadolint` | lint | docker | auto | managed | untrusted | — | — |
@@ -158,7 +159,7 @@ to run the *repo's* tool against the *repo's* config.
 
 | runtime | trust | `shell: disabled` | `shell: restricted` / `enabled` |
 |---------|-------|-------------------|----------------------------------|
-| `repo-native` (34) | `trusted` | withheld — `runtime` needs repo-provided tooling | runs on trusted events; skipped on untrusted |
+| `repo-native` (35) | `trusted` | withheld — `runtime` needs repo-provided tooling | runs on trusted events; skipped on untrusted |
 | `repo-native` (1) | `untrusted` | withheld — `runtime` needs repo-provided tooling | runs |
 | `managed` (12) | `trusted` | runs on trusted events; skipped with a reason on untrusted ones | runs on trusted events; skipped on untrusted |
 | `managed` (17) | `untrusted` | **runs** (pinned binary only) | runs |
@@ -188,15 +189,15 @@ with a warning, rather than silently widening to `auto`.
 `full` requests more provisioning; it is never a trust override, and cannot
 re-admit a manifest the tier axis skipped.
 
-Counts below are analyzers passing selection, out of 68 shipped, with
+Counts below are analyzers passing selection, out of 69 shipped, with
 `shell: restricted` (the shell axis inert) so the mode axis is isolated.
 
 | mode | trusted event | untrusted event (`pull_request_target`, fork) |
 |------|---------------|-----------------------------------------------|
 | **`off`** | surface not registered | surface not registered |
-| **`auto`** | 68 of 68 | 18 of 68 — `auto` ⇒ `untrusted-only` |
-| **`full`** | 68 of 68 | 18 of 68 |
-| **`untrusted-only`** | 18 of 68 | 18 of 68 |
+| **`auto`** | 69 of 69 | 18 of 69 — `auto` ⇒ `untrusted-only` |
+| **`full`** | 69 of 69 | 18 of 69 |
+| **`untrusted-only`** | 18 of 69 | 18 of 69 |
 
 Passing these axes is necessary, not sufficient: a `container` manifest
 is eligible but still reports `unavailable` wherever no container runtime is
