@@ -488,7 +488,7 @@ def test_auth_logfire_validator_probes_eu_write_token(
     _patch_httpx_with(monkeypatch, _handler)
 
     validator = _load_validator()
-    assert validator("pylf_v2_eu_c8a1f2ec-deadbeef-1234") is True
+    assert validator("pylf_v2_eu_00000000-deadbeef-1234") is True
 
 
 def test_auth_logfire_validator_probes_us_write_token(
@@ -508,7 +508,7 @@ def test_auth_logfire_validator_probes_us_write_token(
     _patch_httpx_with(monkeypatch, _handler)
 
     validator = _load_validator()
-    assert validator("pylf_v1_us_c8a1f2ec-deadbeef-1234") is True
+    assert validator("pylf_v1_us_00000000-deadbeef-1234") is True
 
 
 def test_auth_logfire_validator_rejects_expired_write_token(
@@ -570,7 +570,9 @@ def test_auth_logfire_writes_token_unquoted(tmp_path: Path, monkeypatch: MonkeyP
     _write_env_value = _load_write_env_value()
 
     # Token contains the hyphen + underscore pattern of a real write token.
-    token_value = "pylf_v2_eu_c8a1f2ec-0521-40c0-8159-2625b0b3b485_JYx4yZjdxKxwHN3JgyvJm2sTvSQtdYjtyy1P9HV1SQQ1"
+    token_value = (
+        "pylf_v2_eu_00000000-0000-4000-8000-000000000000_fake-write-token_not-a-real-secret"
+    )
     project_value = "mergecraft-dev"
 
     result = _write_env_value(env_path, "MERGECRAFT_LOGFIRE_TOKEN", token_value)
