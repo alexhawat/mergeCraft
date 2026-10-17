@@ -197,6 +197,15 @@ Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:
 - `tests/harness/` — deterministic provider-harness RED/GREEN suites (no live API keys on `make test`)
 - `Makefile` — single command surface (sevn-style)
 - Docker Action via root `Dockerfile` + `action.yml`
+- `integrations/` — host-facing, **non-Python** assets, one directory per host, each
+  with a `README.md`. Shipped Python that mergeCraft imports at runtime stays in
+  `src/mergecraft/integrations/` (it ships in the wheel); the two names are the split
+  between assets and code. A host that dictates where its files live keeps them
+  there (`.claude-plugin/` and `commands/` at the repository root for Claude Code,
+  `.github/skills/` for Copilot) and its `integrations/<host>/README.md` points at
+  them. Generated Agent Skills packages live in `skills/<harness>/` and are never
+  edited by hand. See [`integrations/README.md`](integrations/README.md) for where a
+  new integration goes.
 
 ## Notes
 
@@ -272,9 +281,14 @@ Local mirrors: `make test-integration`, `make test-integration-live`,
    ```
 
 Or dispatch **Release** in GitHub Actions (`.github/workflows/release.yml`) with
-`version: auto` or an explicit semver. That workflow only prepares the release
-branch (least-privilege jobs; no `secrets: inherit`); image signing stays in
-CI/CD.
+`version: auto` or an explicit semver. That workflow prepares the release branch and
+then dispatches CI/CD on it, because a branch pushed with the workflow's own token
+does not start CI/CD by itself; CI/CD's `build-dist` job then builds the dist for
+that dispatch. It does not publish: step 3 above, run with publish credentials, is the
+only thing that does, and nothing reacts to a label or comment on an issue. The jobs
+are least-privilege (no `secrets: inherit`); image signing stays in CI/CD. The version
+on `main` stays the last released version until the next prepare; see
+[Release process](docs/release-process.md#version-on-main-between-releases).
 
 Dry-run locally: `craft prepare auto --dry-run`.
 

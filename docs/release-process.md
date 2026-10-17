@@ -20,9 +20,48 @@ changelog section.
    `pyproject.toml` and `server.json` in step, so the branch passes its own
    `mcp-server-json-check` drift gate.
 2. CI/CD on that branch must be green: `make ci`, image build, SBOM + Trivy
-   CRITICAL/HIGH, eval regression gate.
+   CRITICAL/HIGH, eval regression gate. That run is also what builds the Python
+   dist: its `build-dist` job installs the wheel outside the checkout, attests its
+   provenance and uploads `artifact-python-dist`, which `craft publish` reads.
+   See [Where the dist artifact comes from](#where-the-dist-artifact-comes-from).
 3. Tag the candidate as an RC (Craft/`pre-0.0.1` promotes images to `:rc`,
    never `:latest`). Do **not** call the cut stable yet.
+
+## Where the dist artifact comes from
+
+The publish step needs the `artifact-python-dist` artifact, and only the CI/CD
+workflow's `build-dist` job produces it. That job runs for a **push** to
+`release/**` or a `v*` tag, and for a **`workflow_dispatch`** on such a ref. It
+never runs for an ordinary branch, so `main` does not start producing a dist.
+
+The two ways of cutting a release reach the same artifact:
+
+- **Local path.** `craft prepare` pushes the release branch from contributor
+  credentials. A push by a person starts CI/CD, which builds the dist.
+- **Workflow path.** The Release workflow's `prepare` job pushes the branch with the
+  workflow's own `GITHUB_TOKEN`. GitHub does not start workflows from a
+  `GITHUB_TOKEN` push, so CI/CD would never run. The workflow's `dispatch-build` job
+  therefore dispatches CI/CD on the branch it just prepared (a `workflow_dispatch`
+  event created with `GITHUB_TOKEN` is the one event GitHub does start). It holds
+  only `actions: write` and reads no secret.
+
+Either way the publish step is the same local command, run with publish credentials:
+
+```bash
+craft publish <version>
+```
+
+Nothing publishes from a workflow, and nothing in this repository reacts to a label
+on an issue or to a comment: the command is the approval.
+
+## Version on `main` between releases
+
+The version in `pyproject.toml` (and in `server.json`) on `main`
+stays the last released version until the next prepare bumps it. Craft's post-release hook
+(`scripts/post-release.sh`) therefore edits nothing; it used to rewrite the version
+to a `-dev` one and leave the edit uncommitted. A `-dev` version committed to `main`
+would make the registry manifest advertise a version that does not exist, and the
+manifest drift check would fail on the next prepare.
 
 ## Soak period
 
