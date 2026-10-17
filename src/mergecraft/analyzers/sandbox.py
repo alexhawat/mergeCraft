@@ -1208,6 +1208,33 @@ def process_limit_for_drop(
     )
 
 
+def hand_tree_to_drop_target(root: Path, *, boundary: Path, uid: int, gid: int) -> None:
+    """Re-own ``root`` and everything under it to the drop target, without following links.
+
+    The root orchestrator creates a trusted analyzer's scratch directories, so a
+    payload dropped to the agent UID could not write them (#878). This hands the
+    tree over immediately before the payload starts. Safety properties, all of
+    which fail closed with ``OSError`` rather than touching anything:
+
+    * ``root`` must not itself be a symlink and must resolve inside ``boundary``
+      (the checkout) — a PR-planted link cannot redirect the chown out of the tree;
+    * the walk never descends into a symlinked directory and every entry is
+      re-owned with ``lchown``, so a link is re-owned as a link, never its target.
+    """
+    if root.is_symlink():
+        msg = f"refusing to re-own {root}: it is a symlink"
+        raise OSError(msg)
+    resolved_boundary = boundary.resolve()
+    resolved_root = root.resolve()
+    if resolved_root != resolved_boundary and resolved_boundary not in resolved_root.parents:
+        msg = f"refusing to re-own {root}: it resolves outside {boundary}"
+        raise OSError(msg)
+    os.lchown(root, uid, gid)
+    for current, dirnames, filenames in os.walk(root, followlinks=False):
+        for name in (*dirnames, *filenames):
+            os.lchown(os.path.join(current, name), uid, gid)
+
+
 def _analyzer_unshare_argv(*, isolate_network: bool) -> list[str]:
     caps = probe_capabilities()
     # Killing only the waiting unshare parent otherwise leaves PID 1 and its
@@ -1350,6 +1377,7 @@ __all__ = [
     "build_sandbox_exec_argv",
     "egress_trusted_for_host_networking",
     "evaluate_analyzer_egress_policy",
+    "hand_tree_to_drop_target",
     "plan_sandbox",
     "probe_capabilities",
     "process_count_for_uid",

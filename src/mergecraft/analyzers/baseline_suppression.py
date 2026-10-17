@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -94,6 +96,32 @@ def _checkout_base_worktree(repo_root: Path, base_ref: str) -> Path | None:
     return worktree
 
 
+def _hand_worktree_to_drop_target(worktree: Path) -> None:
+    """Re-own the base worktree to the analyzer drop target on the root backend (#878).
+
+    The worktree is a fresh ``mkdtemp`` tree owned by the root orchestrator, so an
+    analyzer dropped to the agent UID could not even traverse it and the base run
+    would read as unavailable — silently turning baseline suppression off. Nothing
+    here is PR-controlled: it is a detached checkout of the base ref. Best effort
+    and total: a failure leaves the base run to degrade exactly as before.
+    """
+    if sys.platform == "win32" or os.geteuid() != 0:
+        return
+    from mergecraft.analyzers import sandbox as sandbox_mod
+    from mergecraft.main import _ConfigurationError
+
+    try:
+        if not sandbox_mod.build_privilege_drop_argv():
+            return
+        uid = sandbox_mod.resolve_drop_target_uid()
+        gid = sandbox_mod.resolve_drop_target_gid()
+        if uid is None or gid is None:
+            return
+        sandbox_mod.hand_tree_to_drop_target(worktree, boundary=worktree, uid=uid, gid=gid)
+    except (_ConfigurationError, OSError) as exc:
+        logger.info("baseline suppression: could not hand {} to the drop target: {}", worktree, exc)
+
+
 def _remove_base_worktree(repo_root: Path, worktree: Path) -> None:
     subprocess.run(
         git_argv(["-C", str(repo_root), "worktree", "remove", "--force", str(worktree)]),
@@ -135,6 +163,7 @@ def collect_base_analyzer_findings(
     worktree = _checkout_base_worktree(repo_root, resolved)
     if worktree is None:
         return BaseCollectionResult(findings=[], collected=False)
+    _hand_worktree_to_drop_target(worktree)
 
     base_findings: list[Finding] = []
     succeeded: set[str] = set()

@@ -226,3 +226,35 @@ def test_root_backend_trusted_analyzer_payload_runs_unprivileged_and_writes_scra
     assert outcome.status == "passed", outcome.output
     assert "WROTE" in outcome.output
     assert (scratch / "uid.txt").read_text(encoding="utf-8").strip() != "0"
+
+
+def test_base_worktree_is_handed_to_the_drop_target_on_the_root_backend(
+    tmp_path: Path, pretend_root: dict[str, Any]
+) -> None:
+    """Baseline suppression runs analyzers on a root-owned ``mkdtemp`` checkout."""
+    from mergecraft.analyzers.baseline_suppression import _hand_worktree_to_drop_target
+
+    worktree = tmp_path / "base"
+    (worktree / "src").mkdir(parents=True)
+    (worktree / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
+
+    _hand_worktree_to_drop_target(worktree)
+
+    owned = {
+        path for path, uid, gid in pretend_root["chowned"] if (uid, gid) == (_DROP_UID, _DROP_GID)
+    }
+    assert {str(worktree), str(worktree / "src"), str(worktree / "src" / "a.py")} <= owned
+
+
+def test_base_worktree_is_untouched_off_the_root_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.analyzers.baseline_suppression import _hand_worktree_to_drop_target
+
+    calls: list[str] = []
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(os, "lchown", lambda path, *_a: calls.append(str(path)), raising=False)
+
+    _hand_worktree_to_drop_target(tmp_path)
+
+    assert calls == []
