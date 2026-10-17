@@ -14,6 +14,8 @@ import base64
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from mergecraft.scm.types import ListedItems
+
 if TYPE_CHECKING:
     import pytest
 
@@ -90,11 +92,11 @@ class FakeScm:
 
     async def list_check_runs_for_ref(
         self, owner: str, repo: str, ref: str, **_kwargs: Any
-    ) -> dict[str, Any]:
+    ) -> ListedItems:
         self.requests.append(f"checks:{ref}")
         if self._checks_error is not None:
             raise self._checks_error
-        return {"check_runs": self._check_runs}
+        return ListedItems(items=self._check_runs, incomplete=False)
 
 
 def _passing() -> list[dict[str, Any]]:

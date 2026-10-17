@@ -96,6 +96,7 @@ def resolvable_thread_ids(
     A thread qualifies only when every one of these holds:
 
     - it is still open (an already-resolved thread needs nothing);
+    - it was read in full (``commentsTruncated`` threads never resolve);
     - mergeCraft raised it — at least one comment carries a finding fingerprint;
     - **every comment is mergeCraft's**: its body carries a mergeCraft marker
       *and* its author login is in ``publishers``, the run's expected-publisher
@@ -146,6 +147,10 @@ def resolvable_thread_ids(
             continue
         comments = list(thread.get("comments") or [])
         if not comments:
+            continue
+        # A thread whose comments were not all read may hide a human reply past
+        # the cap; closing it would overrule somebody it never showed.
+        if thread.get("commentsTruncated"):
             continue
         if not all(_is_expected_publisher_comment(c, publishers) for c in comments):
             continue

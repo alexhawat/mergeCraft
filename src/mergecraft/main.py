@@ -700,6 +700,8 @@ async def _publish(
         # ``PacketDecision``, so that condition never holds and the reason never
         # reached the record — a refused run read as a clean one (plan 13 D5).
         rejection_reason = tool_context.tool_state.last_terminal_rejection
+        if rejection_reason is None and tool_context.tool_state.finalize_failure:
+            rejection_reason = tool_context.tool_state.finalize_failure
         review_run = tool_context.tool_state.selected_mode in {"Review", "IncrementalReview"}
         if rejection_reason is None and tool_context.tool_state.terminal_publication_failed:
             rejection_reason = "terminal_publication_failed"
@@ -2166,6 +2168,7 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
     tool_state = ctx.tool_state
     settings = ctx.settings
 
+    finalize_failure: str | None = None
     if isinstance(result, SkipAgentReview):
         agent_result = AgentResult(success=True)
     else:
@@ -2173,8 +2176,19 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
         if ctx.run_ctx is not None:
             try:
                 agent_result = await finalize_agent_result(ctx.run_ctx, agent_result)
-            except Exception as exc:
-                logger.debug("post-run finalize skipped: {}", exc)
+            except Exception as exc:  # finalize validates arbitrary recorded state
+                # ``finalize_agent_result`` re-validates the recorded submission, which
+                # can raise whatever that state makes it raise, so the catch stays broad
+                # but is never silent: the run cannot confirm its terminal verdict, fails
+                # closed (a Review run classifies ``inconclusive``), and says why.
+                finalize_failure = f"finalize_failed: {type(exc).__name__}"
+                tool_state.finalize_failure = finalize_failure
+                logger.warning(
+                    "» post-run finalize failed ({}): {}; the run cannot confirm its "
+                    "terminal verdict and fails closed",
+                    type(exc).__name__,
+                    exc,
+                )
         await _publish_recorded_verdict(
             tool_context,
             agent_result,
@@ -2246,6 +2260,11 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
             terminal_publication_mismatch=publication_mismatch,
             terminal_publication_unproven=_publication_unproven(tool_state),
         )
+        if finalize_failure is not None and outcome is RunOutcome.inconclusive:
+            failure_reason = (
+                f"{finalize_failure} — the post-run finalize step raised, so the terminal "
+                "verdict could not be confirmed"
+            )
     if sink_scan_error is not None:
         # A sink hit outranks the published verdict: the run failed, whatever
         # the review said, and ``failure_reason`` names the sink path so the

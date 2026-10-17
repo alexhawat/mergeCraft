@@ -15,6 +15,7 @@ import pytest
 from loguru import logger
 
 from mergecraft.findings.sweep import plan_carryover
+from mergecraft.scm.types import ListedItems
 from tests.findings.test_sweep import FakeGitHub, _graphql_thread
 
 
@@ -30,11 +31,11 @@ class ChecksGitHub(FakeGitHub):
 
     async def list_check_runs_for_ref(
         self, owner: str, repo: str, ref: str, **kwargs: Any
-    ) -> dict[str, Any]:
-        runs = []
+    ) -> ListedItems:
+        runs: list[dict[str, Any]] = []
         if self._app_slug is not None:
             runs.append({"name": "mergecraft-approval", "app": {"slug": self._app_slug}})
-        return {"check_runs": runs}
+        return ListedItems(items=runs, incomplete=False)
 
 
 @pytest.fixture(autouse=True)

@@ -553,6 +553,11 @@ class ToolState:
     # Plan 13 W5 — typed refusal from the last terminal tool attempt
     # (``submit_review_verdict`` / ``create_pull_request_review``).
     last_terminal_rejection: str | None = None
+    # Phase 4 — the specific reason ``finalize_agent_result`` failed
+    # (``finalize_failed: <ExceptionType>``). ``None`` when finalize ran clean.
+    # The run fails closed on it; the record names it instead of the generic
+    # missing-verdict reason.
+    finalize_failure: str | None = None
 
     def iter_finding_rows(self) -> list[dict[str, Any]]:
         """Return every dict-shaped finding row across analyzer and agent lanes."""

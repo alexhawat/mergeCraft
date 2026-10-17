@@ -104,7 +104,8 @@ class CarryoverPlan(BaseModel):
         pull_number: The pull request swept.
         to_file: Findings with no issue yet.
         already_filed: Findings skipped because an issue already carries them.
-        truncated: Whether the pull request had more threads than one page holds.
+        truncated: Whether the thread listing was incomplete — a page cap was hit,
+            or some thread's comments were not all read.
     """
 
     pull_number: int
@@ -187,9 +188,9 @@ async def plan_carryover(
     page = await fetch_review_threads(
         GitHubScmAdapter(github), owner, repo, pull_number, include_resolved=include_resolved
     )
-    if page.truncated:
+    if page.incomplete:
         logger.warning(
-            "carryover: PR #{} has {} review threads, more than one page — "
+            "carryover: PR #{} has {} review threads and the listing is incomplete — "
             "some findings were not examined",
             pull_number,
             page.total_count,
@@ -225,7 +226,7 @@ async def plan_carryover(
         pull_number=pull_number,
         to_file=to_file,
         already_filed=already,
-        truncated=page.truncated,
+        truncated=page.incomplete,
     )
 
 
