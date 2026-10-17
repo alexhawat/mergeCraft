@@ -26,21 +26,12 @@ _SINK_SUFFIXES: frozenset[str] = frozenset({".log", ".txt", ".jsonl", ".ndjson"}
 _SINK_NAMES: frozenset[str] = frozenset({"stdout", "stderr", "output"})
 
 
-# Directory *names* pruned at any depth. Workspace dependency prep creates nested
-# ``node_modules``; OpenCode writes session state under ``evidence`` and
-# ``opencode-xdg-data`` inside the run scratch when ``tmpdir`` sits in-repo.
-_HASH_EXCLUDE_DIR_NAMES: frozenset[str] = frozenset(
-    {
-        ".git",
-        "node_modules",
-        ".pnpm-store",
-        "evidence",
-        "opencode-xdg-data",
-        ".opencode",
-    }
-)
+# Directory names pruned at any depth (workspace prep writes nested trees).
+_HASH_EXCLUDE_DIR_NAMES: frozenset[str] = frozenset({".git", "node_modules", ".pnpm-store"})
 
-# Exact checkout-relative paths excluded from the digest.
+# Exact checkout-relative path prefixes excluded from the digest. ``evidence``,
+# ``.opencode``, and ``opencode-xdg-data`` are matched here (not as any-depth
+# directory names) so a tracked ``src/evidence`` tree stays covered.
 _HASH_EXCLUDE_REL_PATHS: frozenset[str] = frozenset(
     {
         ".mergecraft/prep-scratch",
@@ -53,6 +44,9 @@ _HASH_EXCLUDE_REL_PATHS: frozenset[str] = frozenset(
         ".mergecraft/analyzer-runs",
         ".mergecraft/analyzers.lock",
         ".mergecraft/analyzers.lock.lock",
+        "evidence",
+        ".opencode",
+        "opencode-xdg-data",
     }
 )
 

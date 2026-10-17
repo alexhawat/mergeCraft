@@ -52,21 +52,31 @@ def test_nested_pnpm_store_does_not_change_the_digest(tmp_path: Path) -> None:
     verify_tree_unchanged(checkout, before)
 
 
-def test_nested_evidence_scratch_does_not_change_the_digest(tmp_path: Path) -> None:
+def test_root_evidence_scratch_does_not_change_the_digest(tmp_path: Path) -> None:
     checkout = _baseline_checkout(tmp_path)
     before = hash_tree(checkout)
 
-    _write(checkout, "run-scratch/evidence/opencode-session.json", "{}\n")
+    _write(checkout, "evidence/opencode-session.json", "{}\n")
 
     assert hash_tree(checkout) == before
     verify_tree_unchanged(checkout, before)
 
 
-def test_nested_opencode_data_home_does_not_change_the_digest(tmp_path: Path) -> None:
+def test_prep_scratch_opencode_paths_do_not_change_the_digest(tmp_path: Path) -> None:
     checkout = _baseline_checkout(tmp_path)
     before = hash_tree(checkout)
 
-    _write(checkout, "scratch/opencode-xdg-data/opencode/auth.json", "{}\n")
+    _write(checkout, ".mergecraft/prep-scratch/opencode-xdg-data/opencode/auth.json", "{}\n")
+    _write(checkout, ".mergecraft/prep-scratch/evidence/opencode.json", "{}\n")
 
     assert hash_tree(checkout) == before
     verify_tree_unchanged(checkout, before)
+
+
+def test_nested_evidence_outside_excluded_prefix_changes_digest(tmp_path: Path) -> None:
+    checkout = _baseline_checkout(tmp_path)
+    before = hash_tree(checkout)
+
+    _write(checkout, "src/evidence/tracked.json", "{}\n")
+
+    assert hash_tree(checkout) != before

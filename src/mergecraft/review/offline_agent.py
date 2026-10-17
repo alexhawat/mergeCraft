@@ -343,7 +343,7 @@ async def run_offline_agent_review(
                 repo_root=cwd,
             )
             if roster_summary.hard_error:
-                result = AgentResult(success=False, error=roster_summary.hard_error)
+                result = replace(result, success=False, error=roster_summary.hard_error)
         promote_model_evidence(
             tool_state,
             requested_model=chain[0] if chain else model,

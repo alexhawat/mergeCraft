@@ -772,20 +772,25 @@ def _sanitize_submit_findings(raw: list[object]) -> list[Any]:
     coerced: list[Any] = []
     for index, item in enumerate(raw):
         if isinstance(item, dict) and item.get("raised_by") is not None:
-            logger.warning(
-                "submit_review_verdict: dropped finding {} — raised_by is server-stamped",
-                index,
+            msg = (
+                f"findings[{index}]: raised_by is server-stamped and must not "
+                "appear in submit_review_verdict payloads"
             )
-            continue
+            raise ValueError(msg)
         try:
             finding = coerce_agent_finding(item)
         except (ValidationError, ValueError, TypeError) as exc:
-            logger.warning(
-                "submit_review_verdict: dropped malformed finding {}: {}",
-                index,
-                exc,
-            )
-            continue
+            if isinstance(item, dict):
+                path = item.get("path")
+                body = item.get("body")
+                if path in (None, "") and body in (None, ""):
+                    logger.warning(
+                        "submit_review_verdict: dropped incomplete finding {}: {}",
+                        index,
+                        exc,
+                    )
+                    continue
+            raise
         if finding.severity not in FINDING_SEVERITIES:
             msg = f"findings[{index}]: invalid severity {finding.severity!r}"
             raise ValueError(msg)

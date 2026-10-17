@@ -115,7 +115,7 @@ def build_unsubmitted_review_prompt(mode: str) -> str:
                 "- `verdict`: approve or request_changes",
                 "- `summary`: one short paragraph",
                 "- `findings`: a list of objects, each with required keys "
-                "`path` (string), `body` (string), `severity` (Critical|Major|Minor|Warning), "
+                "`path` (string), `body` (string), `severity` (Critical|Major|Minor|Trivial), "
                 "and optional `line` (number). Omit invalid or pre-seeded rows — only include "
                 "findings you are publishing in this call.",
                 "",

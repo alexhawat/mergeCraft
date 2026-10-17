@@ -245,14 +245,7 @@ def finding_record_without_short_id(record: dict[str, Any]) -> dict[str, Any]:
 
 def write_findings_json(json_path: Path, findings: list[dict[str, Any]]) -> None:
     """Write validated findings to a pretty-printed JSON file with stable short ids."""
-    normalized_rows: list[dict[str, Any]] = []
-    for row in findings:
-        item = finding_record_without_short_id(row)
-        fp = item.get("fingerprint")
-        if isinstance(fp, str) and fp.strip():
-            item = {**item, "fingerprint": normalize_export_fingerprint(fp)}
-        normalized_rows.append(item)
-    models = [Finding.model_validate(row) for row in normalized_rows]
+    models = [Finding.model_validate(finding_record_without_short_id(row)) for row in findings]
     short_ids = resolve_finding_short_ids([row.fingerprint for row in models])
     records = [finding_json_record(row, short_id=short_ids[row.fingerprint]) for row in models]
     payload = {"findings": records}
@@ -262,13 +255,16 @@ def write_findings_json(json_path: Path, findings: list[dict[str, Any]]) -> None
     json_path.write_text(f"{encoded}\n", encoding="utf-8")
 
 
-def normalize_export_fingerprint(fingerprint: str) -> str:
-    """Coerce a model-supplied slug into lowercase hex for export and short ids."""
+def normalize_agent_supplied_fingerprint(fingerprint: str) -> str:
+    """Coerce a model-supplied slug into lowercase hex when a finding enters the run."""
     if not isinstance(fingerprint, str):
         msg = "fingerprint must be a string"
         raise TypeError(msg)
     text = fingerprint.strip()
-    if not text:
+    if not text or text in {".", ".."}:
+        msg = f"unsafe fingerprint value: {fingerprint!r}"
+        raise ValueError(msg)
+    if "/" in text or "\\" in text:
         msg = f"unsafe fingerprint value: {fingerprint!r}"
         raise ValueError(msg)
     try:
@@ -277,6 +273,9 @@ def normalize_export_fingerprint(fingerprint: str) -> str:
         import hashlib
 
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+normalize_export_fingerprint = normalize_agent_supplied_fingerprint
 
 
 def _validate_fingerprint_for_short_id(fingerprint: str) -> str:
@@ -408,6 +407,7 @@ __all__ = [
     "findings_export_schema",
     "findings_output_schema",
     "make_finding",
+    "normalize_agent_supplied_fingerprint",
     "normalize_export_fingerprint",
     "parse_findings_payload",
     "render_finding_markdown",

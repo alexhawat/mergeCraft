@@ -30,6 +30,8 @@ from mergecraft.utils.agent_resolve import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from mergecraft.agents.shared import AgentResult, AgentRunContext
     from mergecraft.config.settings import RepoSettings
     from mergecraft.mcp.context import ToolContext
@@ -166,16 +168,18 @@ async def _run_one_secondary_reviewer(
         settings.signed_commits,
         inline_budget=settings.analyzers.inline_budget,
     )
+    from mergecraft.config.settings import RepoInfo
+
     instructions = resolve_instructions(
         payload=payload,
-        repo=tool_context.repo,
+        repo=RepoInfo(owner=tool_context.repo.owner, name=tool_context.repo.name),
         modes=attempt_modes,
         agent_id=binding.agent_id,
         signed_commits=settings.signed_commits,
         learnings_file_path=tool_context.tool_state.learnings_file_path,
         learnings_headings=settings.learnings_headings,
-        setup_hook_failure=tool_context.tool_state.setup_hook_failure,
-        setup_script_skip_reason=tool_context.tool_state.setup_script_skip_reason,
+        setup_hook_failure=tool_context.tool_state.setup_hook_failure or "",
+        setup_script_skip_reason=tool_context.tool_state.setup_script_skip_reason or "",
         xrepo_brief=settings.xrepo_brief,
         xrepo_learnings_file_path=tool_context.tool_state.xrepo_learnings_file_path,
         xrepo_learnings_headings=settings.xrepo_learnings_headings,
@@ -186,7 +190,9 @@ async def _run_one_secondary_reviewer(
     system = (instructions.system or "").strip()
     instructions = replace(
         instructions,
-        system=f"{system}\n\n{_ROSTER_SUBMIT_INSTRUCTIONS}".strip() if system else _ROSTER_SUBMIT_INSTRUCTIONS,
+        system=f"{system}\n\n{_ROSTER_SUBMIT_INSTRUCTIONS}".strip()
+        if system
+        else _ROSTER_SUBMIT_INSTRUCTIONS,
     )
     previous_agent_id = tool_context.agent_id
     tool_context.agent_id = attempt_agent.name
@@ -263,6 +269,7 @@ async def run_pending_roster_reviewers(
     payload: dict[str, Any],
     repo_root: Path | None = None,
     per_reviewer_timeout_s: float | None = None,
+    remaining_timeout_s: Callable[[], float | None] | None = None,
 ) -> RosterExecutionSummary:
     """Dispatch every secondary reviewer that has not yet recorded an outcome."""
     from mergecraft.config.settings_snapshot import repo_settings_from_context
@@ -295,7 +302,11 @@ async def run_pending_roster_reviewers(
                 continue
             timeout = float(binding.timeout_s)
             timeout = min(timeout, 900.0)
-            if per_reviewer_timeout_s is not None:
+            if remaining_timeout_s is not None:
+                remaining = remaining_timeout_s()
+                if remaining is not None:
+                    timeout = min(timeout, max(1.0, remaining))
+            elif per_reviewer_timeout_s is not None:
                 timeout = min(timeout, per_reviewer_timeout_s)
             error = await _run_one_secondary_reviewer(
                 binding=binding,

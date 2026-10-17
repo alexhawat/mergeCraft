@@ -210,6 +210,7 @@ class RunContext:
     setup_hook_failure: str = ""
     setup_script_skip_reason: str = ""
     setup_elapsed_s: float = 0.0
+    agent_deadline_monotonic: float | None = None
     mcp_url: str = ""
     stop_mcp: Callable[[], None] | None = None
     subagent_denied: list[str] = field(default_factory=list)
@@ -1909,6 +1910,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
         if agent_timeout_ms is None:
             winning_slug, result = await agent_task
         else:
+            ctx.agent_deadline_monotonic = time.monotonic() + agent_timeout_ms / 1000.0
             try:
                 winning_slug, result = await asyncio.wait_for(
                     agent_task, timeout=agent_timeout_ms / 1000.0
@@ -1944,15 +1946,17 @@ async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> str | None:
         return None
     from mergecraft.review.roster_execution import run_pending_roster_reviewers
 
-    remaining_s: float | None = None
-    if ctx.timeout_ms is not None:
-        remaining_s = max(1.0, (ctx.timeout_ms / 1000.0) - ctx.setup_elapsed_s)
+    def _remaining_roster_timeout_s() -> float | None:
+        if ctx.agent_deadline_monotonic is None:
+            return None
+        return max(1.0, ctx.agent_deadline_monotonic - time.monotonic())
+
     summary = await run_pending_roster_reviewers(
         tool_context=ctx.tool_context,
         base_run_ctx=ctx.run_ctx,
         settings=ctx.settings,
         payload=ctx.payload,
-        per_reviewer_timeout_s=remaining_s,
+        remaining_timeout_s=_remaining_roster_timeout_s,
     )
     return summary.hard_error
 
@@ -2010,7 +2014,6 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
         roster_error = await _run_server_roster_reviewers_if_needed(ctx)
         if roster_error:
             from dataclasses import replace
-
 
             result = replace(result, success=False, error=roster_error)
         return result

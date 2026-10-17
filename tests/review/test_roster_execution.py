@@ -63,7 +63,9 @@ async def test_run_pending_roster_reviewers_dispatches_secondary(
     )
     settings = load_repo_settings(root=tmp_path)
     fake = _FakeAgent()
-    base_ctx = make_agent_run_context(tmp_path / "scratch", resolved_model="anthropic/claude-sonnet")
+    base_ctx = make_agent_run_context(
+        tmp_path / "scratch", resolved_model="anthropic/claude-sonnet"
+    )
     base_ctx = AgentRunContext(
         payload=base_ctx.payload,
         mcp_server_url=tool_context.mcp_server_url,
@@ -128,7 +130,9 @@ async def test_run_pending_roster_reviewers_dispatches_secondary(
     assert fake.models
 
 
-def test_roster_dispatch_gaps_detects_missing_secondary(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_roster_dispatch_gaps_detects_missing_secondary(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     write_config(tmp_path, two_reviewer_config())
     monkeypatch.chdir(tmp_path)
     from mergecraft.agents.registry import load_registry
