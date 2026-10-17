@@ -237,3 +237,29 @@ async def test_the_pull_request_title_body_and_labels_cannot_select_a_tier(
 
     assert rec.raised is None, rec.raised
     assert rec.agent_runs, "head-side config can never skip a review"
+
+
+async def test_a_skipped_run_with_only_minor_findings_is_never_a_success_decision(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The clamp itself: without it, a trusted run with a Minor finding would read ``success``."""
+    from mergecraft.classify.triage import TriageDecision
+    from mergecraft.evidence.run_packet import build_run_packet
+    from tests.evidence.test_run_packet import _make_ctx
+
+    monkeypatch.delenv("RUNNER_TEMP", raising=False)
+    monkeypatch.delenv("MERGECRAFT_EVIDENCE_DIR", raising=False)
+    ctx = _make_ctx(tmp_path)
+    ctx.authority_trust = "trusted"
+    reviewed = build_run_packet(ctx, run_succeeded=True)
+    assert reviewed.decision is not None
+    assert reviewed.decision.verdict == "success", "fixture premise: a reviewed run could approve"
+
+    ctx.tool_state.triage = TriageDecision(
+        tier="skip", recognizer="pinBump", reason="x", relied_on_checks=(_VERIFIER,)
+    )
+    skipped = build_run_packet(ctx, run_succeeded=True)
+
+    assert skipped.decision is not None
+    assert skipped.decision.verdict == "neutral"
+    assert "no LLM review ran" in skipped.decision.reason
