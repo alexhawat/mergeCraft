@@ -88,6 +88,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A review whose agent submits a verdict without calling `select_mode` now
+  publishes the formal review with the run record. Before, the PR got only a
+  short progress comment, with no tokens, cost, timing or findings, whenever the
+  OpenCode Go rung answered and the Codex fallback did not run.
+
+- The run record on the formal review shows the `Cost:` line. Cost was computed
+  but only reached the step summary.
+
 - The OpenCode harness hands its isolated `XDG_DATA_HOME` tree to the
   unprivileged agent user before `setpriv` drops privileges. The action
   entrypoint creates `.../opencode/auth.json` as root, so the dropped CLI failed
