@@ -41,6 +41,31 @@ def _rule_ids(state: Any) -> set[str]:
     return {f.rule_id for f in audit_trajectory(build_trajectory_record(state))}
 
 
+@pytest.mark.parametrize(
+    "wrapped",
+    [
+        "/bin/bash -lc 'pytest -q'",
+        "bash -c 'pytest -q'",
+        "/usr/bin/zsh -lc 'pytest -q'",
+        "sh -c 'pytest -q'",
+    ],
+)
+def test_a_driver_shell_wrapper_is_unwrapped_to_the_command_it_runs(wrapped: str) -> None:
+    """Codex hands the shell ``bash -lc '<command>'``; the MCP tool is handed ``<command>``."""
+    state = _state()
+
+    row = record_driver_exec(state, command=wrapped, exit_code=1, output="1 failed")
+    mcp = record_tool_call(
+        state, tool="shell", arguments={"command": "pytest -q"}, ok=True, outcome_ok=True
+    )
+
+    assert row is not None
+    assert row.command == "pytest -q"
+    assert row.intent == "verify"
+    assert row.signature == mcp.signature
+    assert build_trajectory_record(state).unresolved_errors == []
+
+
 def test_a_failing_command_records_an_unsuccessful_outcome() -> None:
     state = _state()
 

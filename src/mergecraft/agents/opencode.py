@@ -72,6 +72,7 @@ if TYPE_CHECKING:
     from typing import IO, Any
 
     from mergecraft.agents._stream_consumer import StreamSpanAccumulator
+    from mergecraft.mcp.tool_state import ToolState
     from mergecraft.tracing.content import ContentCapture
 
 OPENCODE_AUTH_ENV = "OPENCODE_AUTH_JSON"
@@ -874,6 +875,36 @@ def _parse_model(value: str | None) -> dict[str, str] | None:
     return {"providerID": value[:slash], "modelID": value[slash + 1 :]}
 
 
+def _record_opencode_bash(tool_state: ToolState | None, part: object) -> None:
+    """Record one finished OpenCode ``bash`` tool part on the run's trajectory (#858).
+
+    The part shape is ``{"tool": "bash", "state": {"status", "input": {"command"},
+    "output", "metadata": {"exit"}}}`` — in a ``run --format json`` ``tool_use``
+    event's ``part`` and in an HTTP turn's ``parts``. Anything else is ignored;
+    recording is evidence only and never raises.
+    """
+    if tool_state is None or not isinstance(part, dict) or part.get("tool") != "bash":
+        return
+    state = part.get("state")
+    if not isinstance(state, dict) or state.get("status") not in {"completed", "error"}:
+        return
+    tool_input = state.get("input")
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    metadata = state.get("metadata")
+    raw_exit = metadata.get("exit") if isinstance(metadata, dict) else None
+    from mergecraft.evidence.trajectory import record_driver_exec
+
+    record_driver_exec(
+        tool_state,
+        command=command,
+        exit_code=raw_exit
+        if isinstance(raw_exit, int) and not isinstance(raw_exit, bool)
+        else None,
+        output=str(state.get("output") or ""),
+        failed=state.get("status") == "error",
+    )
+
+
 async def _prompt_session(
     *,
     base_url: str,
@@ -882,6 +913,7 @@ async def _prompt_session(
     model: dict[str, str] | None,
     resolved_model: str | None = None,
     capture_policy: ContentCapture | None = None,
+    tool_state: ToolState | None = None,
 ) -> AgentResult:
     """Prompt the opencode session — the one harness path with full payload visibility.
 
@@ -898,7 +930,11 @@ async def _prompt_session(
     tracer = current_tracer()
     if tracer is None:
         return await _prompt_session_http(
-            base_url=base_url, session_id=session_id, text=text, model=model
+            base_url=base_url,
+            session_id=session_id,
+            text=text,
+            model=model,
+            tool_state=tool_state,
         )
     model_slug = f"{model['providerID']}/{model['modelID']}" if model else None
     gen_ai_system = model.get("providerID") if model else None
@@ -917,7 +953,11 @@ async def _prompt_session(
         except Exception as exc:
             logger.debug("opencode llm.call request attrs failed: {}", exc)
         result = await _prompt_session_http(
-            base_url=base_url, session_id=session_id, text=text, model=model
+            base_url=base_url,
+            session_id=session_id,
+            text=text,
+            model=model,
+            tool_state=tool_state,
         )
         from mergecraft.agents.curated_model_catalog import apply_catalog_cost_to_usage
 
@@ -959,6 +999,7 @@ async def _prompt_session_http(
     session_id: str,
     text: str,
     model: dict[str, str] | None,
+    tool_state: ToolState | None = None,
 ) -> AgentResult:
     payload: dict[str, object] = {
         "parts": [{"type": "text", "text": text}],
@@ -1010,6 +1051,8 @@ async def _prompt_session_http(
     usage: AgentUsage | None = None
     output = ""
     if isinstance(data, dict):
+        for part in data.get("parts") or []:
+            _record_opencode_bash(tool_state, part)
         output = str(
             data.get("result") or data.get("text") or data.get("output") or json.dumps(data)[:2000]
         )
@@ -1209,6 +1252,7 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
                 model=model_obj,
                 resolved_model=model,
                 capture_policy=capture_policy,
+                tool_state=ctx.tool_state,
             )
 
         try:
@@ -1224,6 +1268,7 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
                 model=model_obj,
                 resolved_model=model,
                 capture_policy=capture_policy,
+                tool_state=ctx.tool_state,
             )
             result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
         except ProviderTimeoutError as exc:
@@ -1386,9 +1431,9 @@ def _run_opencode_cli_streaming(
                     raw_stream=process.stdout,
                     accumulator=accumulator,
                     handler=(
-                        _session_event_handler(session)
+                        _session_event_handler(session, tool_state=ctx.tool_state)
                         if session is not None
-                        else lambda _acc, _event: None
+                        else _bash_only_handler(ctx.tool_state)
                     ),
                 )
                 returncode = wait_or_kill_process_group(
@@ -1419,8 +1464,22 @@ def _run_opencode_cli_streaming(
     return AgentResult(success=True, output=accumulator.final_output or None)
 
 
+def _bash_only_handler(
+    tool_state: ToolState | None,
+) -> Callable[[StreamSpanAccumulator, dict[str, Any]], None]:
+    """Stream handler for a run with no session: record bash calls, touch nothing else."""
+
+    def _handle(_accumulator: StreamSpanAccumulator, event: dict[str, Any]) -> None:
+        if event.get("type") == "tool_use":
+            _record_opencode_bash(tool_state, event.get("part"))
+
+    return _handle
+
+
 def _session_event_handler(
     session: dict[str, str],
+    *,
+    tool_state: ToolState | None = None,
 ) -> Callable[[StreamSpanAccumulator, dict[str, Any]], None]:
     """Record a 2.x ``run`` stream's session id and answer text.
 
@@ -1442,6 +1501,8 @@ def _session_event_handler(
             )
             session["error"] = str(message or event)[:1000]
         part = event.get("part")
+        if event.get("type") == "tool_use":
+            _record_opencode_bash(tool_state, part)
         if event.get("type") == "text" and isinstance(part, dict):
             text = part.get("text")
             if isinstance(text, str) and text:

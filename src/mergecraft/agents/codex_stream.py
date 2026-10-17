@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from mergecraft.agents._stream_consumer import StreamSpanAccumulator
+    from mergecraft.mcp.tool_state import ToolState
     from mergecraft.tracing.content import ContentCapture
     from mergecraft.tracing.tracer import Tracer
 
@@ -85,12 +86,35 @@ def _sole_open_llm_span(open_pairs: dict[str, ProviderLLMPair | None]) -> Any:
     return live[0] if len(live) == 1 else None
 
 
+def _record_command_execution(
+    tool_state: ToolState | None, item: dict[str, Any], output_text: str
+) -> None:
+    """Record one finished ``command_execution`` item on the run's trajectory (#858)."""
+    if tool_state is None:
+        return
+    from mergecraft.evidence.trajectory import record_driver_exec
+
+    raw_code = item.get("exit_code")
+    status = str(item.get("status") or "")
+    record_driver_exec(
+        tool_state,
+        command=item.get("command"),
+        exit_code=raw_code
+        if isinstance(raw_code, int) and not isinstance(raw_code, bool)
+        else None,
+        output=output_text,
+        failed=status == "failed",
+        declined=status == "declined",
+    )
+
+
 def codex_stream_event_handler(
     *,
     tracer: Tracer | None,
     model_id: str,
     capture_policy: ContentCapture | None = None,
     input_prompt: str | None = None,
+    tool_state: ToolState | None = None,
 ) -> tuple[
     Callable[[StreamSpanAccumulator, dict[str, Any]], None],
     Callable[[], None],
@@ -114,6 +138,11 @@ def codex_stream_event_handler(
       - ``turn.completed``: replace the accumulator's usage with the
         authoritative final usage and close the thread's ``llm.call``
         span.
+
+    ``item.completed`` with ``item.type == "command_execution"`` is also recorded
+    on ``tool_state``'s trajectory (#858) when one is supplied: a command Codex ran
+    natively never crosses the MCP door, so this is the only place its real outcome
+    is seen. Recording is evidence only and never raises.
 
     ``capture_policy=None`` (the default) keeps the pre-OB3 attribute
     surface byte-identical: no payload attrs are stamped. The driver
@@ -252,6 +281,7 @@ def codex_stream_event_handler(
                 )
 
                 output_text = str(item.get("aggregated_output") or "")
+                _record_command_execution(tool_state, item, output_text)
                 if (
                     is_user_namespace_failure(output_text)
                     and not accumulator.user_namespace_failure_reported

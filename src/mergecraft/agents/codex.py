@@ -783,6 +783,7 @@ def _run_codex_streaming(
         model_id=model or "default",
         capture_policy=capture_policy,
         input_prompt=prompt,
+        tool_state=ctx.tool_state,
     )
 
     try:
