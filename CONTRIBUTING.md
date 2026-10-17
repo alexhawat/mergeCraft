@@ -113,15 +113,50 @@ The scheduled Integration workflow's live-provider matrix runs the one leg
 this repository can authenticate: `github` (`GITHUB_TOKEN`). The `anthropic`, `openai` and `gemini` HTTP-API legs are
 **not exercised** — no Anthropic, OpenAI or Gemini API key is configured, and a
 subscription cannot call those HTTP endpoints. Real-harness live coverage runs
-as the nightly E2E live slice on the ChatGPT/Codex subscription
-(`vars.MERGECRAFT_E2E_LIVE_MODEL=openai/gpt-5.3-codex`, secret
-`CODEX_AUTH_JSON`), which the self-review workflow already consumes.
+as the nightly E2E live slice on the provider named by
+`vars.MERGECRAFT_E2E_LIVE_MODEL` (OpenCode Go, secret `OPENCODE_GO_API_KEY`). It
+no longer consumes the ChatGPT/Codex subscription, so it cannot retire the
+self-review's session.
 
-That subscription credential rotates: Codex refreshes the ChatGPT session during
-use and retires the old refresh token, so the E2E live slice serializes on a
-`codex-subscription-auth` concurrency group. If the credential is expired or
-rejected, the job reports **unavailable credential** rather than a product
-failure. To recover, re-mint it locally and store it:
+### Decision record: the Codex subscription credential (#970)
+
+`CODEX_AUTH_JSON` holds a ChatGPT-subscription login. Codex refreshes it while it
+is in use and retires the previous refresh token, so any consumer that refreshes
+it spends the copy stored in the secret, and nothing writes the new one back. The
+next run that needs a refresh fails with "refresh token was already used" until
+someone re-authenticates.
+
+What is decided and shipped:
+
+- The nightly E2E live slice moved to OpenCode Go (#975). It does not touch the
+  subscription.
+- The self-review's first rung is OpenCode Go (#988). The Codex subscription rung
+  is a fallback, not the primary reviewer.
+- Every job that receives `CODEX_AUTH_JSON` joins the `codex-subscription-auth`
+  concurrency group with `cancel-in-progress: false`, so two consumers never
+  refresh the same login at once (#882). GitHub keeps one running and one pending
+  job per group; a third queued review replaces the pending one and needs a re-run.
+- An expired credential is named instead of buried in a log: the run ends as
+  `infra_error` with *reviewer credential expired — re-authenticate*, in the check
+  summary and the run record (#922).
+- There is **no scheduled canary**. Exercising the credential on a schedule
+  refreshes it and spends the stored refresh token, which is the failure being
+  prevented.
+
+What is still open (the issue stays open until the maintainer chooses):
+
+| Option | What it buys | What it costs |
+| --- | --- | --- |
+| Run the OpenAI rung on an API key | No rotating credential in CI at all | A paid key, and a different billing path from the subscription |
+| Write the refreshed credential back to the secret after each run | The stored copy never goes stale | A token allowed to write repository secrets inside a review job: a significant permission to hand a job that runs on pull-request content |
+| Hold and refresh the login in one place outside CI (a small broker), CI receiving only short-lived access tokens | The subscription stays in use and nothing in CI can spend it | A service to run, secure and keep available |
+
+**Recommendation:** keep the subscription out of review-job secret writes — no
+write-back token, ever. Revisit a broker only if the Codex fallback rung becomes
+load-bearing. Until then the cost of the credential dying is one named, recoverable
+infrastructure outcome on a rung that is not the primary reviewer.
+
+To recover when the credential is retired, re-mint it locally and store it:
 
 ```bash
 mergecraft auth codex
@@ -162,6 +197,15 @@ Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:
 - `tests/harness/` — deterministic provider-harness RED/GREEN suites (no live API keys on `make test`)
 - `Makefile` — single command surface (sevn-style)
 - Docker Action via root `Dockerfile` + `action.yml`
+- `integrations/` — host-facing, **non-Python** assets, one directory per host, each
+  with a `README.md`. Shipped Python that mergeCraft imports at runtime stays in
+  `src/mergecraft/integrations/` (it ships in the wheel); the two names are the split
+  between assets and code. A host that dictates where its files live keeps them
+  there (`.claude-plugin/` and `commands/` at the repository root for Claude Code,
+  `.github/skills/` for Copilot) and its `integrations/<host>/README.md` points at
+  them. Generated Agent Skills packages live in `skills/<harness>/` and are never
+  edited by hand. See [`integrations/README.md`](integrations/README.md) for where a
+  new integration goes.
 
 ## Notes
 
@@ -237,9 +281,14 @@ Local mirrors: `make test-integration`, `make test-integration-live`,
    ```
 
 Or dispatch **Release** in GitHub Actions (`.github/workflows/release.yml`) with
-`version: auto` or an explicit semver. That workflow only prepares the release
-branch (least-privilege jobs; no `secrets: inherit`); image signing stays in
-CI/CD.
+`version: auto` or an explicit semver. That workflow prepares the release branch and
+then dispatches CI/CD on it, because a branch pushed with the workflow's own token
+does not start CI/CD by itself; CI/CD's `build-dist` job then builds the dist for
+that dispatch. It does not publish: step 3 above, run with publish credentials, is the
+only thing that does, and nothing reacts to a label or comment on an issue. The jobs
+are least-privilege (no `secrets: inherit`); image signing stays in CI/CD. The version
+on `main` stays the last released version until the next prepare; see
+[Release process](docs/release-process.md#version-on-main-between-releases).
 
 Dry-run locally: `craft prepare auto --dry-run`.
 

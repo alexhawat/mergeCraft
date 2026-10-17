@@ -48,6 +48,24 @@ _HTTP_404_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 
+# The ChatGPT-subscription login behind ``CODEX_AUTH_JSON`` rotates its refresh
+# token on use. Once another consumer refreshes it, the stored copy is dead and
+# Codex stops with one of these (#922, #970). Matched case-insensitively against
+# the provider's own message and stderr; deliberately narrow, so an ordinary
+# auth failure on another provider is not mislabelled.
+_EXPIRED_CREDENTIAL_NEEDLES: Final[tuple[str, ...]] = (
+    "refresh token was already used",
+    "refresh token has already been used",
+    "could not be refreshed",
+)
+
+
+def is_expired_subscription_credential(*texts: str | None) -> bool:
+    """True when provider output says the stored subscription login was retired."""
+    haystack = "\n".join(text for text in texts if text).lower()
+    return any(needle in haystack for needle in _EXPIRED_CREDENTIAL_NEEDLES)
+
+
 class ProviderFailureClass(StrEnum):
     """Distinct provider-failure classes for model-chain failover (#466)."""
 
@@ -179,5 +197,6 @@ __all__ = [
     "RATE_LIMIT_EXIT_CODES",
     "ProviderFailureClass",
     "classify_provider_failure",
+    "is_expired_subscription_credential",
     "is_retryable_cli_failure",
 ]

@@ -39,6 +39,7 @@ jobs:
           # has neither, so they answer "no" on PR builds while passing on
           # tag builds. Full history is what makes those answers truthful.
           fetch-depth: 0
+          persist-credentials: false
       - uses: ./.github/actions/bootstrap
         env:
           # Exporter unit tests run in coverage-measure (D14 / TH8) — match ci.yml.
@@ -75,7 +76,12 @@ jobs:
   build-dist:
     name: Build Python dist
     needs: verify
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))
+    # A push builds the dist for a release ref. A dispatch on a release ref builds it
+    # too: release.yml prepares and pushes the branch with the workflow's own
+    # GITHUB_TOKEN, and GitHub does not start workflows from such a push, so
+    # without this the documented workflow path never produced the artifact the
+    # publish step needs (#1004). An ordinary branch still builds no dist.
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -84,6 +90,8 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/bootstrap
       - name: Build and install-check the wheel
         run: make test-wheel-corpus
@@ -116,6 +124,8 @@ jobs:
       analyzers_ref: ${{ env.IMAGE_ANALYZERS }}@${{ steps.resolve.outputs.analyzers_digest || steps.build-analyzers.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -168,6 +178,8 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
@@ -256,6 +268,8 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
@@ -398,6 +412,8 @@ jobs:
       attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/bootstrap
       - name: Install cosign
         uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
@@ -428,6 +444,8 @@ jobs:
       attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/bootstrap
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Install cosign

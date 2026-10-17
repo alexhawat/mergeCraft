@@ -434,7 +434,7 @@ the process that produced it was not, and that is invisible to a diff review.
 
 | Check | Fires when | Severity |
 |---|---|---|
-| `changed-unread-file` | A file was modified that the run never read | Major |
+| `changed-unread-file` | A file was modified that the run never read (advisory: listed, never blocking) | Minor |
 | `ignored-tool-error` | A tool call errored and that tool was never called again | Major |
 | `no-post-edit-verification` | Files were modified and nothing verifying ran *afterwards* | Major |
 | `repeated-tool-loop` | The same call, with identical arguments, three or more times | Minor |

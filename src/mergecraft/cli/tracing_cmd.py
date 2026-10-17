@@ -32,7 +32,7 @@ from mergecraft.cli.exits import (
     CLI_SUCCESS_EXIT_CODE,
 )
 from mergecraft.cli.tracing_gh_visibility import detect_github_action_tracing
-from mergecraft.cli.tracing_precedence import resolve_tracing_settings
+from mergecraft.cli.tracing_precedence import resolve_tracing_settings, tracing_config_sources
 from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.config.env.tracing import TracingEnv
 from mergecraft.tracing.redaction import redact_attrs
@@ -40,6 +40,8 @@ from mergecraft.tracing.sinks import read_jsonl_events
 
 if TYPE_CHECKING:
     from rich.console import Console
+
+    from mergecraft.config.layered import ConfigSources
 
 app = mergecraft_typer(
     help="Trace inspection commands — show resolved config and read back local traces.",
@@ -66,6 +68,21 @@ config_app = mergecraft_typer(
     help="Inspect resolved mergeCraft settings.",
     no_args_is_help=True,
 )
+
+
+def _config_source_lines(sources: ConfigSources, *, explicit: str | None) -> list[tuple[str, str]]:
+    """Rows naming the config files that contributed, worded as ``doctor`` words them."""
+    rows: list[tuple[str, str]] = []
+    if sources.env_config_missing:
+        missing = os.environ.get("MERGECRAFT_CONFIG", "")
+        rows.append(("config note", f"MERGECRAFT_CONFIG={missing} does not exist"))
+    if sources.files:
+        rows.append(("config files", ", ".join(str(path) for path in sources.files)))
+    elif explicit:
+        rows.append(("config files", f"{explicit} does not exist"))
+    else:
+        rows.append(("config files", "(none — defaults apply)"))
+    return rows
 
 
 def _print_tracing_next_steps(console: Console) -> None:
@@ -104,15 +121,20 @@ def config_tracing(
     ),
 ) -> None:
     """Render the resolved tracing config — sinks, retention, redaction, token redacted."""
-    config_path = config or (
-        Path(os.environ["MERGECRAFT_CONFIG"]) if "MERGECRAFT_CONFIG" in os.environ else None
-    )
+    # Only an explicit ``--config`` bypasses the shared resolver. ``MERGECRAFT_CONFIG``
+    # is the resolver's business, so this view agrees with ``doctor`` and
+    # ``config explain`` about which files contribute (#919).
+    config_path = str(config) if config else None
+    root = Path.cwd()
     resolved = resolve_tracing_settings(
         cli_args=[],
         env=dict(os.environ),
-        config_path=str(config_path) if config_path else None,
-        cwd=Path.cwd(),
+        config_path=config_path,
+        cwd=root,
+        config_root=root,
+        warn_unknown_sink=True,
     )
+    sources = tracing_config_sources(config_path=config_path, root=root)
 
     table = Table(title="mergecraft config tracing", show_header=True, header_style="bold")
     table.add_column("Setting", style="cyan")
@@ -178,6 +200,9 @@ def config_tracing(
         table.add_row("status", "[yellow]disabled[/yellow]")
     else:
         table.add_row("status", "[green]enabled[/green]")
+
+    for label, text in _config_source_lines(sources, explicit=config_path):
+        table.add_row(label, text)
 
     # GitHub Action tracing visibility — a local ``.env`` cannot see the
     # Action's runtime env, but the workflow file tells the operator whether
@@ -286,7 +311,7 @@ def traces_callback(
 # ---------------------------------------------------------------------------
 
 
-def render_resolved(resolved: dict[str, Any]) -> str:
+def render_resolved(resolved: dict[str, Any], *, sources: ConfigSources | None = None) -> str:
     """Return a plain-text render of the resolved tracing state."""
     parts: list[str] = ["mergecraft tracing"]
     parts.append(f"  enabled: {'true' if resolved.get('enabled') else 'false'}")
@@ -328,6 +353,10 @@ def render_resolved(resolved: dict[str, Any]) -> str:
             "  next steps: mergecraft tracing logfire enable "
             "[--token X --project Y] | or set MERGECRAFT_TRACING=true "
             "MERGECRAFT_TRACING_TO=local_files"
+        )
+    if sources is not None:
+        parts.extend(
+            f"  {label}: {text}" for label, text in _config_source_lines(sources, explicit=None)
         )
     # GitHub Action tracing visibility — surfaced even though a local render
     # cannot see the Action's runtime env. Skipped when no workflow was found.

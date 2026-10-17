@@ -53,6 +53,34 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Dispatch the CI/CD build on the branch `prepare` just pushed. That push is made
+  # with the workflow's own GITHUB_TOKEN, and GitHub does not start workflows from
+  # such a push, so CI/CD (and with it the dist artifact the publish step needs)
+  # would never run for the release branch (#1004). A workflow_dispatch event
+  # created with GITHUB_TOKEN is the documented exception, so the workflow path and
+  # the local path (prepare, then push from contributor credentials) converge on
+  # the same artifact. This job holds only `actions: write`: it starts a workflow,
+  # it reads no secret and writes no repository content.
+  dispatch-build:
+    name: Dispatch CI/CD on the release branch
+    needs: prepare
+    if: ${{ needs.prepare.outputs.branch != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch CI/CD
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PREPARED_BRANCH: ${{ needs.prepare.outputs.branch }}
+        run: |
+          set -euo pipefail
+          gh workflow run ci-cd.yml --ref "${PREPARED_BRANCH}"
+          echo "Dispatched CI/CD on ${PREPARED_BRANCH}; its build-dist job uploads artifact-python-dist." >> "$GITHUB_STEP_SUMMARY"
+
   # EV3 eval regression gate — structural replay of the eval bank compared
   # against the committed baseline with the declared tolerance band
   # (mergecraft.evals.gate.DEFAULT_GATE_TOLERANCE). Blocking: a metric that
@@ -65,6 +93,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/bootstrap
       - name: Replay eval bank (candidate)
         run: |
@@ -95,7 +125,7 @@ jobs:
   # `craft publish` (PyPI + GHCR SHA→version retag via .craft.yml).
   publish:
     name: Publish gate
-    needs: [prepare, eval-gate]
+    needs: [prepare, dispatch-build, eval-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -110,10 +140,13 @@ jobs:
           Release branch:   ${{ needs.prepare.outputs.branch }}
           Release SHA:      ${{ needs.prepare.outputs.sha }}
 
-          Next: CI/CD on the release branch builds once, scans, cosign-signs,
-          and attests the image digests. After that is green, publish with:
+          CI/CD was dispatched on the release branch: it builds the Python dist
+          once, builds the images once, scans them, cosign-signs and attests the
+          image digests. After that run is green, publish from a machine that has
+          the publish credentials (GITHUB_TOKEN, TWINE_USERNAME, TWINE_PASSWORD):
 
             craft publish ${{ needs.prepare.outputs.version }}
 
-          (or approve the publish issue Craft opened with publish_repo: self).
+          That command is the only thing that publishes. No workflow publishes,
+          and nothing in this repository acts on an issue or a comment.
           EOF

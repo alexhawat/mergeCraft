@@ -61,6 +61,7 @@ jobs:
           # has neither, so they answer "no" on PR builds while passing on
           # tag builds. Full history is what makes those answers truthful.
           fetch-depth: 0
+          persist-credentials: false
       - uses: ./.github/actions/bootstrap
         with:
           python-version: ${{ matrix.python }}
@@ -84,6 +85,7 @@ jobs:
           # has neither, so they answer "no" on PR builds while passing on
           # tag builds. Full history is what makes those answers truthful.
           fetch-depth: 0
+          persist-credentials: false
       - uses: ./.github/actions/bootstrap
         with:
           python-version: ${{ matrix.python }}
@@ -106,6 +108,7 @@ jobs:
         with:
           # Merge-base ratchet (check_coverage_ratchet.py) needs full history.
           fetch-depth: 0
+          persist-credentials: false
       - name: Fetch base branch for merge-base ratchet
         if: github.event_name == 'pull_request'
         env:
@@ -138,6 +141,7 @@ jobs:
           # has neither, so they answer "no" on PR builds while passing on
           # tag builds. Full history is what makes those answers truthful.
           fetch-depth: 0
+          persist-credentials: false
       - uses: ./.github/actions/bootstrap
         with:
           python-version: ${{ matrix.python }}
@@ -240,6 +244,7 @@ jobs:
           # has neither, so they answer "no" on PR builds while passing on
           # tag builds. Full history is what makes those answers truthful.
           fetch-depth: 0
+          persist-credentials: false
       - uses: ./.github/actions/bootstrap
         with:
           python-version: ${{ matrix.python }}
@@ -337,6 +342,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: ./.github/actions/bootstrap
         with:
           python-version: "3.14"
