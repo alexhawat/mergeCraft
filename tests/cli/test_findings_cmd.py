@@ -94,6 +94,8 @@ def _patch(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr("mergecraft.cli.findings_cmd.GitHubClient", lambda *a, **k: _FakeClient())
     monkeypatch.setenv("GITHUB_TOKEN", "t0ken")
     monkeypatch.delenv("INPUT_TOKEN", raising=False)
+    # Carry-over trusts a thread only when its author is an expected publisher.
+    monkeypatch.setenv("MERGECRAFT_REVIEWER_BOT_LOGIN", "mergecraft[bot]")
 
 
 def test_export_json_lists_the_findings(monkeypatch: MonkeyPatch) -> None:

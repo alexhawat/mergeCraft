@@ -33,8 +33,15 @@ from pydantic import ValidationError
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.classify import ChangeSet, classify_blast_radius
 from mergecraft.evidence.build import build_packet
+from mergecraft.evidence.coverage import coverage_section_for_state
 from mergecraft.evidence.emit import write_packet
-from mergecraft.evidence.packet import DeterministicCheck, MergeEvidencePacket, ModePromptVersion
+from mergecraft.evidence.packet import (
+    CoverageSection,
+    DeterministicCheck,
+    MergeEvidencePacket,
+    ModePromptVersion,
+    TriageSection,
+)
 from mergecraft.utils.diff_paths import changed_paths_from_diff
 
 if TYPE_CHECKING:
@@ -45,6 +52,8 @@ if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import RepoToolState, ToolState
     from mergecraft.modes import Mode
+
+TRIAGE_SKIP_REASON = "no LLM review ran (triage tier skip)"
 
 PACKET_FILENAME = "merge-evidence-packet.json"
 """Stable basename for the emitted packet, under whichever directory wins."""
@@ -298,6 +307,14 @@ def _finalize_packet_with_gate(
     gate_mode = _resolve_gate_mode(ctx, pinned=pinned)
     gate_policy = _resolve_gate_policy(ctx, pinned=pinned)
     decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.authority_trust)
+    if packet.triage is not None and packet.triage.tier == "skip" and decision.verdict == "success":
+        # No LLM review ran, so mergeCraft never grants approval for it; a human does.
+        decision = decision.model_copy(
+            update={
+                "verdict": "neutral",
+                "reason": f"{TRIAGE_SKIP_REASON}; approval is left to a human",
+            }
+        )
     packet_with_decision = packet.model_copy(update={"decision": decision})
     action = decide_action(packet_with_decision, mode=gate_mode, policy=gate_policy)
     reason = decision.reason
@@ -323,6 +340,8 @@ def _assemble_packet_core(
     deterministic_checks: list[DeterministicCheck],
     blast_radius: BlastRadiusClassification | None,
     trajectory: dict[str, Any] | None,
+    coverage: CoverageSection | None = None,
+    triage: TriageSection | None = None,
 ) -> MergeEvidencePacket:
     """Shared evidence shell for happy-path and fail-closed packet assembly."""
     state = ctx.tool_state
@@ -354,6 +373,8 @@ def _assemble_packet_core(
         agent_terminal_verdict=(
             state.terminal_submission.verdict if state.terminal_submission is not None else None
         ),
+        coverage=coverage,
+        triage=triage,
     )
     return packet.model_copy(
         update={
@@ -442,8 +463,23 @@ def build_run_packet(
         deterministic_checks=_deterministic_checks(state),
         blast_radius=blast_radius,
         trajectory=trajectory.model_dump(mode="json"),
+        coverage=coverage_section_for_state(state),
+        triage=_triage_section(state),
     )
     return _finalize_packet_with_gate(packet, ctx=ctx, run_succeeded=run_succeeded)
+
+
+def _triage_section(state: ToolState) -> TriageSection | None:
+    """Project the run's triage decision into the packet section, or ``None``."""
+    decision = state.triage
+    if decision is None:
+        return None
+    return TriageSection(
+        tier=decision.tier,
+        recognizer=decision.recognizer,
+        reason=decision.reason,
+        relied_on_checks=list(decision.relied_on_checks),
+    )
 
 
 def _agent_version() -> str:
@@ -718,6 +754,18 @@ def emit_run_packet(
                 )
             except Exception as shadow_err:  # a shadow record never fails the run
                 logger.warning("shadow record: emission failed — {}", shadow_err)
+        if assembled.triage is not None:
+            from mergecraft.evidence.shadow import record_triage_decision
+
+            try:
+                record_triage_decision(
+                    assembled.triage,
+                    change_id=resolved_change_id,
+                    run_id=_shadow_run_id(ctx),
+                    output_path=path.with_name("merge-evidence-shadow.jsonl"),
+                )
+            except Exception as shadow_err:  # a shadow record never fails the run
+                logger.warning("triage shadow record: emission failed — {}", shadow_err)
         if verdict_prediction is not None:
             from mergecraft.evidence.shadow import live_target_for_packet, record_shadow_prediction
 

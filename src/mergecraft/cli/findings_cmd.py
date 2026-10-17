@@ -53,6 +53,7 @@ from mergecraft.findings.sweep import (
     CarryoverOutcome,
     CarryoverPlan,
     apply_carryover,
+    carryover_publishers,
     plan_carryover,
 )
 from mergecraft.findings.threads import fetch_review_threads
@@ -374,13 +375,16 @@ def export(
             page = await fetch_review_threads(
                 GitHubScmAdapter(client), owner, name, pr, include_resolved=include_resolved
             )
-            if page.truncated:
+            if page.incomplete:
                 console.print(
-                    f"[yellow]#{pr} has {page.total_count} review threads; only the "
-                    "first page was read.[/yellow]"
+                    f"[yellow]#{pr} has {page.total_count} review threads; the listing is "
+                    "incomplete (a page cap was hit or a thread's comments were not all "
+                    "read), so some findings were not examined.[/yellow]"
                 )
+            publishers = await carryover_publishers(client, owner, name, pr)
             return carryover_findings(
                 page.threads,
+                publishers=publishers,
                 include_resolved=include_resolved,
                 include_answered=include_answered,
             )

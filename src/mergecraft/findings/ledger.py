@@ -1260,6 +1260,19 @@ def render_deterministic_review_block(
         header_lines.append(
             "- **Reviewed files:** " + ", ".join(f"`{path}`" for path in changed_files)
         )
+    triage = getattr(packet, "triage", None)
+    if triage is not None and triage.tier == "skip":
+        header_lines.append(f"- **Tier:** skip ({triage.recognizer}) — no LLM review ran")
+    coverage = getattr(packet, "coverage", None)
+    if coverage is not None:
+        from mergecraft.evidence.coverage import coverage_summary_line
+
+        # The record is rendered without the run's settings, so it states the gap but
+        # not what the policy did about it; the checks carry that.
+        header_lines.append(
+            "- **Coverage:** "
+            + coverage_summary_line(coverage, on_incomplete=None).removeprefix("Coverage: ")
+        )
     if agent_meta is not None:
         provider = str(getattr(agent_meta, "provider", "") or "").strip()
         if provider:

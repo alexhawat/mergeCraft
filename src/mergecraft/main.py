@@ -31,6 +31,7 @@ from mergecraft.analyzers.trust import (
 from mergecraft.ci.sarif_ingest import ingest_ci_sarif_from_action_env
 from mergecraft.config.env import EnvSettingsError, validate_env_settings
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
+from mergecraft.fast_path import decide_fast_path, load_triage_inputs
 from mergecraft.main_outcome import (
     _classify_outcome,
     _is_review_mode,
@@ -243,7 +244,7 @@ class RunContext:
 
 @dataclass(frozen=True, slots=True)
 class SkipAgentReview:
-    """Review-stage outcome when setup-script policy skips the agent loop."""
+    """Review-stage outcome when setup-script policy or the triage fast path skips the agent."""
 
     reason: str
 
@@ -443,6 +444,8 @@ async def publish_deterministic_record(
         DETERMINISTIC_RECORD_MARKER,
         REVIEW_BODY_MARKER,
         _is_trusted_sticky_author,
+        _run_bound_sticky_id,
+        _run_sticky_scope,
         ensure_finding_ledger,
         fetch_sticky_progress_comment,
         hydrate_finding_ledger_from_progress_comment,
@@ -451,6 +454,7 @@ async def publish_deterministic_record(
     )
     from mergecraft.mcp.comment import add_footer
     from mergecraft.mcp.review import _truncate_review_body_for_github
+    from mergecraft.review.authorship import expected_publisher_logins
     from mergecraft.scm.github import create_github_scm
     from mergecraft.utils.learnings import merge_learnings_delta_into_review_body
     from mergecraft.utils.status_checks import _run_url
@@ -543,7 +547,25 @@ async def publish_deterministic_record(
         existing = await resolved_ctx.scm.get_review(owner, repo, pull_number, review.id)
         existing_body = str(existing.get("body") or "")
 
-    legacy = await fetch_sticky_progress_comment(resolved_ctx.scm, owner, repo, pull_number)
+    # The old progress comment is read through the same rule as every other "did
+    # mergeCraft post this?" decision: the run-bound comment id, then the run's
+    # expected-publisher set, never a bare bot-type match. With neither, the read is
+    # skipped and the record says so.
+    legacy: dict[str, Any] | None = None
+    if not expected_publisher_logins(resolved_ctx) and _run_bound_sticky_id(resolved_ctx) is None:
+        logger.info(
+            "learnings migration: earlier progress comment read skipped for PR #{} — no "
+            "publisher identity and no run-bound comment id prove who wrote it",
+            pull_number,
+        )
+        block = (
+            f"{block.rstrip()}\n\n**Earlier progress comment not read:** no publisher "
+            "identity proves which comment is mergeCraft's, so its learnings were not "
+            "carried into this record.\n"
+        )
+    else:
+        with _run_sticky_scope(resolved_ctx):
+            legacy = await fetch_sticky_progress_comment(resolved_ctx.scm, owner, repo, pull_number)
     legacy_body = str(legacy.get("body") or "") if legacy is not None else ""
     # Preserve the old comment's ephemeral learnings before retiring it. Its
     # run record and finding markers are rendered anew in this formal review.
@@ -700,6 +722,8 @@ async def _publish(
         # ``PacketDecision``, so that condition never holds and the reason never
         # reached the record — a refused run read as a clean one (plan 13 D5).
         rejection_reason = tool_context.tool_state.last_terminal_rejection
+        if rejection_reason is None and tool_context.tool_state.finalize_failure:
+            rejection_reason = tool_context.tool_state.finalize_failure
         review_run = tool_context.tool_state.selected_mode in {"Review", "IncrementalReview"}
         if rejection_reason is None and tool_context.tool_state.terminal_publication_failed:
             rejection_reason = "terminal_publication_failed"
@@ -1389,6 +1413,8 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
     )
     from mergecraft.config.settings_snapshot import capture_run_scope_snapshot
 
+    # The changed-line coverage follow-up only fires while the run has budget left.
+    tool_state.coverage.budget_tracker = ctx.budget_tracker
     snapshot = capture_run_scope_snapshot(
         ctx.tool_context,
         root=Path(primary_repo_state(tool_state).dir),
@@ -1934,6 +1960,46 @@ async def _dispatch_agent_with_deadline(ctx: RunContext) -> AgentResult:
     return _promote_and_finalize_agent_result(ctx, winning_slug, result)
 
 
+async def _triage_gate(ctx: RunContext) -> SkipAgentReview | None:
+    """Deterministic pre-dispatch triage (``review.fastPath``): skip the agent when certain.
+
+    Returns ``SkipAgentReview`` only for a ``skip`` tier. Off by default; the config is
+    honoured only when it is the operator's base-side config. The decision is recorded
+    on the run (packet, check summaries, shadow log) whenever the gate was evaluated,
+    and any doubt is ``full``. The PR's title, body, labels and head-side config are
+    never read.
+    """
+    assert ctx.settings is not None
+    assert ctx.tool_state is not None
+    config = ctx.settings.review.fast_path
+    if not config.enabled:
+        return None
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    pull = event.get("pull_request")
+    if not isinstance(pull, dict) or not isinstance(pull.get("number"), int):
+        return None
+    head = pull.get("head")
+    head_sha = str(head.get("sha") or "") if isinstance(head, dict) else ""
+    assert ctx.tool_context is not None
+    repo = ctx.tool_context.repo
+    decision = await decide_fast_path(
+        ctx.tool_context.scm,
+        repo.owner,
+        repo.name,
+        int(pull["number"]),
+        head_sha,
+        config=config,
+        operator_owned=ctx.settings_snapshot_operator_owned,
+        loader=load_triage_inputs,
+    )
+    ctx.tool_state.triage = decision
+    if decision.tier != "skip":
+        return None
+    logger.warning("» {} — {}", decision.record_line(), decision.reason)
+    gha_log.warning(decision.record_line())
+    return SkipAgentReview(reason=decision.reason)
+
+
 async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentReview:
     """Setup script, MCP start, and payload-timed agent dispatch (review stage)."""
     await _apply_overrides_and_setup_git(ctx)
@@ -1980,6 +2046,10 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
         )
         # Engine publish (``_finalize``) owns completion; do not publish here.
         return SkipAgentReview(reason=skip_reason)
+
+    triage_skip = await _triage_gate(ctx)
+    if triage_skip is not None:
+        return triage_skip
 
     with gha_log.group("agent-dispatch"):
         await _prepare_agent_dispatch(ctx)
@@ -2156,6 +2226,28 @@ async def _publish_recorded_verdict(
     )
 
 
+def _coverage_gate_reason(tool_context: ToolContext, settings: RepoSettings) -> str | None:
+    """Return the outcome reason when changed-line coverage is incomplete and gated.
+
+    Total: a failure to account for coverage must not fail the run it describes, so it
+    logs and reports no gate (the packet then simply carries no coverage section).
+    """
+    from mergecraft.evidence.coverage import (
+        coverage_gate_reason,
+        coverage_policy,
+        coverage_section_for_state,
+    )
+
+    try:
+        return coverage_gate_reason(
+            coverage_section_for_state(tool_context.tool_state),
+            on_incomplete=coverage_policy(tool_context, fallback=settings),
+        )
+    except Exception as exc:  # accounting is evidence, never a new way to crash a run
+        logger.warning("changed-line coverage could not be accounted for: {}", exc)
+        return None
+
+
 async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> MainResult:
     """Phase 4 — post-run, publish, outcome mapping (G4.2)."""
     assert ctx.tool_context is not None
@@ -2166,6 +2258,7 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
     tool_state = ctx.tool_state
     settings = ctx.settings
 
+    finalize_failure: str | None = None
     if isinstance(result, SkipAgentReview):
         agent_result = AgentResult(success=True)
     else:
@@ -2173,8 +2266,19 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
         if ctx.run_ctx is not None:
             try:
                 agent_result = await finalize_agent_result(ctx.run_ctx, agent_result)
-            except Exception as exc:
-                logger.debug("post-run finalize skipped: {}", exc)
+            except Exception as exc:  # finalize validates arbitrary recorded state
+                # ``finalize_agent_result`` re-validates the recorded submission, which
+                # can raise whatever that state makes it raise, so the catch stays broad
+                # but is never silent: the run cannot confirm its terminal verdict, fails
+                # closed (a Review run classifies ``inconclusive``), and says why.
+                finalize_failure = f"finalize_failed: {type(exc).__name__}"
+                tool_state.finalize_failure = finalize_failure
+                logger.warning(
+                    "» post-run finalize failed ({}): {}; the run cannot confirm its "
+                    "terminal verdict and fails closed",
+                    type(exc).__name__,
+                    exc,
+                )
         await _publish_recorded_verdict(
             tool_context,
             agent_result,
@@ -2213,6 +2317,7 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
     )
     outcome: RunOutcome
     failure_reason: str | None
+    coverage_reason = _coverage_gate_reason(tool_context, settings)
     if ctx.budget_exhaustion is not None:
         from mergecraft.utils.run_bounds import budget_exhaustion_outcome
 
@@ -2245,7 +2350,13 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
             terminal_publication_receipt=publication_receipt,
             terminal_publication_mismatch=publication_mismatch,
             terminal_publication_unproven=_publication_unproven(tool_state),
+            coverage_incomplete_reason=coverage_reason,
         )
+        if finalize_failure is not None and outcome is RunOutcome.inconclusive:
+            failure_reason = (
+                f"{finalize_failure} — the post-run finalize step raised, so the terminal "
+                "verdict could not be confirmed"
+            )
     if sink_scan_error is not None:
         # A sink hit outranks the published verdict: the run failed, whatever
         # the review said, and ``failure_reason`` names the sink path so the

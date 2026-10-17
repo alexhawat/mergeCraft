@@ -22,9 +22,15 @@ from __future__ import annotations
 import re
 from typing import Any, Final
 
+from loguru import logger
 from pydantic import BaseModel, Field
 
-from mergecraft.review_resolution import finding_fingerprints_in, is_mergecraft_comment
+from mergecraft.review_resolution import (
+    effective_publishers,
+    finding_fingerprints_in,
+    is_publisher_authored_comment,
+    is_publisher_login,
+)
 from mergecraft.review_taxonomy import (
     FINDING_MARKER_PREFIX,
     finding_fingerprint,
@@ -118,6 +124,7 @@ def _fingerprint_for(*, path: str, body: str) -> str:
 def carryover_findings(
     threads: list[dict[str, Any]],
     *,
+    publishers: frozenset[str],
     include_resolved: bool = False,
     include_answered: bool = False,
 ) -> list[CarryoverFinding]:
@@ -128,15 +135,24 @@ def carryover_findings(
     - it is still open, unless ``include_resolved`` — a resolved thread is a
       finding the author already dealt with;
     - mergeCraft raised it — the root comment carries a finding fingerprint or
-      the review footer. Human review threads belong to their humans;
+      the review footer **and** its author is in ``publishers``, the expected
+      publisher set (the same rule thread retirement uses; anyone can type a
+      marker, so the marker alone proves nothing). Human review threads belong
+      to their humans;
     - nobody else spoke in it, unless ``include_answered`` — a human reply means
       the finding already got an answer, and re-filing it overrules that answer;
     - its comments were read in full, unless ``include_answered``. A thread
       longer than one page might hold a human reply past the cap, and a sweep
       that cannot see every reply cannot claim nobody answered.
 
+    An empty ``publishers`` set trusts nothing, so nothing is selected. The shared
+    ``github-actions[bot]`` login never counts as a publisher. A reply is
+    mergeCraft's when its author is a publisher (no marker needed); every other
+    reply is a human answer, whatever its body says.
+
     Args:
         threads: Threads in the shape :func:`fetch_review_threads` returns.
+        publishers: Logins mergeCraft publishes as on this repository.
         include_resolved: Keep threads the author resolved.
         include_answered: Keep threads a human replied to, and threads whose
             comment list was truncated.
@@ -145,6 +161,12 @@ def carryover_findings(
         Findings in input order. Empty when nothing qualifies.
     """
     findings: list[CarryoverFinding] = []
+    if not effective_publishers(publishers):
+        logger.info(
+            "carryover: no expected publisher identity proves which review threads "
+            "mergeCraft wrote, so none are swept"
+        )
+        return findings
     for thread in threads or []:
         comments = list(thread.get("comments") or [])
         if not comments:
@@ -152,7 +174,7 @@ def carryover_findings(
 
         root = comments[0]
         root_body = str(root.get("body") or "")
-        if not is_mergecraft_comment(root_body):
+        if not is_publisher_authored_comment(root, publishers):
             continue
         if thread.get("isResolved") and not include_resolved:
             continue
@@ -160,7 +182,7 @@ def carryover_findings(
         answered_by = [
             str(c.get("author") or "")
             for c in comments[1:]
-            if not is_mergecraft_comment(str(c.get("body") or ""))
+            if not is_publisher_login(c.get("author"), publishers)
         ]
         if not include_answered and (answered_by or thread.get("commentsTruncated")):
             continue

@@ -104,7 +104,8 @@ class CarryoverPlan(BaseModel):
         pull_number: The pull request swept.
         to_file: Findings with no issue yet.
         already_filed: Findings skipped because an issue already carries them.
-        truncated: Whether the pull request had more threads than one page holds.
+        truncated: Whether the thread listing was incomplete — a page cap was hit,
+            or some thread's comments were not all read.
     """
 
     pull_number: int
@@ -154,12 +155,53 @@ async def filed_carryover_keys(
     return frozenset(seen)
 
 
+async def carryover_publishers(
+    github: GitHubClient, owner: str, repo: str, pull_number: int
+) -> frozenset[str]:
+    """Resolve which logins mergeCraft publishes as, for a sweep with no run context.
+
+    The sweep runs after merge, so it cannot read a run's credentials. It uses what
+    the read-side ledger uses: the configured reviewer App login
+    (``MERGECRAFT_REVIEWER_BOT_LOGIN`` / ``reviewerBotLogin``), then the app slug of
+    the ``mergecraft-approval`` check on the head. The shared ``github-actions[bot]``
+    login is never a publisher. With none, the set is empty, nothing is swept, and one
+    warning says why.
+    """
+    from mergecraft.findings.ledger import (
+        _publisher_logins_from_approval_checks,
+        configured_publisher_login,
+    )
+    from mergecraft.review_resolution import effective_publishers
+    from mergecraft.scm.github import GitHubScmAdapter
+
+    logins: set[str] = set()
+    configured = configured_publisher_login()
+    if configured:
+        logins.add(configured)
+    logins |= set(
+        await _publisher_logins_from_approval_checks(
+            GitHubScmAdapter(github), owner, repo, pull_number
+        )
+    )
+    publishers = effective_publishers(frozenset(logins))
+    if not publishers:
+        logger.warning(
+            "carryover: no expected publisher identity could be resolved for PR #{} "
+            "(no MERGECRAFT_REVIEWER_BOT_LOGIN / reviewerBotLogin, and no mergecraft-approval "
+            "check from a reviewer App), so no thread can be attributed to mergeCraft and "
+            "nothing is swept",
+            pull_number,
+        )
+    return publishers
+
+
 async def plan_carryover(
     github: GitHubClient,
     owner: str,
     repo: str,
     pull_number: int,
     *,
+    publishers: frozenset[str] | None = None,
     label: str = DEFAULT_LABEL,
     include_resolved: bool = False,
     include_answered: bool = False,
@@ -175,6 +217,8 @@ async def plan_carryover(
         label: Label used to find issues already filed.
         include_resolved: Carry over threads the author resolved.
         include_answered: Carry over threads a human replied to.
+        publishers: Logins mergeCraft publishes as. Derived with
+            :func:`carryover_publishers` when omitted.
         ledger_records: Open-PR ledger rows — fingerprints already tracked there
             are not filed while the pull request is open (D5).
 
@@ -187,16 +231,19 @@ async def plan_carryover(
     page = await fetch_review_threads(
         GitHubScmAdapter(github), owner, repo, pull_number, include_resolved=include_resolved
     )
-    if page.truncated:
+    if page.incomplete:
         logger.warning(
-            "carryover: PR #{} has {} review threads, more than one page — "
+            "carryover: PR #{} has {} review threads and the listing is incomplete — "
             "some findings were not examined",
             pull_number,
             page.total_count,
         )
 
+    if publishers is None:
+        publishers = await carryover_publishers(github, owner, repo, pull_number)
     findings = carryover_findings(
         page.threads,
+        publishers=publishers,
         include_resolved=include_resolved,
         include_answered=include_answered,
     )
@@ -225,7 +272,7 @@ async def plan_carryover(
         pull_number=pull_number,
         to_file=to_file,
         already_filed=already,
-        truncated=page.truncated,
+        truncated=page.incomplete,
     )
 
 
@@ -326,6 +373,7 @@ __all__ = [
     "FailedIssue",
     "FiledIssue",
     "apply_carryover",
+    "carryover_publishers",
     "filed_carryover_keys",
     "plan_carryover",
 ]

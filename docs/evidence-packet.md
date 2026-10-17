@@ -88,7 +88,7 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.11.0`.
+The current version is `1.15.0`.
 
 Wiring a consumer is **not** a shape change: #96 gave these models their first
 runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
@@ -124,8 +124,18 @@ not move.
   (`success` / `failure` / `neutral`). Gate actions such as `block` live
   on `action`, not `verdict`. Persisted packets that stored `block` as
   `verdict` no longer validate.
-- `1.11.0` — plan 12 W7 adds `run_health`: run-scoped findings and an
-  advisory conclusion, partitioned out of the top-level `findings` list.
+- `1.11.0` — adds `run_health`: run-scoped findings and an advisory
+  conclusion, partitioned out of the top-level `findings` list.
+- `1.12.0` — adds `agent_terminal_verdict`, the `verdict` the agent recorded
+  via `submit_review_verdict`, so `decide_approval` can apply its one-way
+  ratchet.
+- `1.13.0` — adds `reviewed_head_sha` and `progress_comment_id`, the run-bound
+  review identity the orchestrator writes from its own checkout and sticky
+  state.
+- `1.14.0` — adds `coverage`: changed-line coverage, written by the
+  orchestrator and defaulting to `null`.
+- `1.15.0` — adds `triage`: the tier the deterministic pre-dispatch triage
+  chose, defaulting to `null` (the fast path off).
 
 ## Top-level fields
 
@@ -196,6 +206,50 @@ section is omitted (`null`).
 |------|------|-------|
 | `findings` | `list[Finding]` | Run-scoped rows (`scope="run"`). |
 | `conclusion` | `str` | `clean` when empty; `advisory` when observations exist. |
+
+### `coverage` — `CoverageSection | None` (added in 1.14.0)
+
+Changed-line coverage: did every changed hunk of the PR diff reach the
+reviewer? Written by the orchestrator from the run's own checkout and delivery
+state — never by an agent. `null` when the run had no diff to account for. A
+hunk is covered only through mediated evidence (it was in the delivered diff,
+a mediated read returned its file, or the one follow-up turn handed it back);
+absence of evidence is uncovered. The section proves delivery, not
+comprehension.
+
+| Field | Type | Notes |
+|------|------|-------|
+| `hunks_total` | `int` | Changed hunks, plus one per file whose range is unknown. |
+| `hunks_covered` | `int` | Hunks that reached the reviewer. |
+| `lines_total` | `int` | New-side lines across the known hunks. |
+| `lines_covered` | `int` | New-side lines of the covered hunks. |
+| `uncovered` | `list[{path, start_line, end_line, cause}]` | Every range that did not reach the reviewer. `start_line` and `end_line` are `0` when the range is unknown. |
+| `complete` | `bool` | `true` when nothing is uncovered apart from `excluded_generated` rows. |
+
+`cause` is one of `diff_truncated` (the files listing hit its page cap, so
+later files were never seen), `no_inline_patch` (GitHub sent line counts but no
+patch), `excluded_generated` (removed by the generated/minified/vendored
+policy; listed, not counted against `complete`), `not_delivered` (absent from
+the delivered diff and never read or handed back), `budget_exhausted` (as
+`not_delivered`, and the run had no budget left for the follow-up).
+
+An incomplete section makes the run `inconclusive` under the default
+`review.coverage.onIncomplete: inconclusive`; blockers still win.
+
+### `triage` — `TriageSection | None` (added in 1.15.0)
+
+The tier the deterministic pre-dispatch triage (`review.fastPath`) chose.
+Written by the orchestrator when the fast path was evaluated; `null` when it is
+off, so a run with no `review.fastPath` config is unchanged.
+
+| Field | Type | Notes |
+|------|------|-------|
+| `tier` | `str` | `skip` (no LLM review ran) or `full`. |
+| `recognizer` | `str \| null` | The recognizer behind a `skip` (`pinBump`, `prose`, `whitespace`, `generated`). |
+| `reason` | `str` | Why. |
+| `relied_on_checks` | `list[str]` | Checks that had to pass on the head SHA for a `skip`. |
+
+A `skip` run never carries a `success` decision: approval is left to a human.
 
 ### `deterministic_checks` — required (`list[DeterministicCheck]`)
 

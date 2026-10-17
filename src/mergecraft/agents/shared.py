@@ -210,6 +210,8 @@ class PostRunIssues:
     dirty_tree: str | None = None
     summary_stale: SummaryStale | None = None
     unsubmitted_review: str | None = None  # "Review" | "IncrementalReview"
+    # The one bounded changed-line coverage follow-up (prompt + the hunks it carries).
+    coverage_followup: Any = None
     retryable: bool = True
 
 
@@ -219,6 +221,7 @@ def has_post_run_issues(issues: PostRunIssues) -> bool:
         or issues.dirty_tree is not None
         or issues.summary_stale is not None
         or issues.unsubmitted_review is not None
+        or issues.coverage_followup is not None
     )
 
 

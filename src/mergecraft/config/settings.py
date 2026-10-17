@@ -322,6 +322,52 @@ class RoundBudgetsSettings(BaseModel):
     multipliers: list[float] = Field(default_factory=lambda: [1.0])
 
 
+class ReviewCoverageSettings(BaseModel):
+    """Changed-line coverage policy (``review.coverage``).
+
+    ``onIncomplete`` decides what a run does when any changed hunk never reached the
+    reviewer: ``inconclusive`` (the default) ends the run ``inconclusive`` (a ``neutral``
+    check) even if the agent submitted a verdict; ``warn`` keeps the verdict and only
+    reports the gap. Blockers win either way.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    on_incomplete: Literal["inconclusive", "warn"] = Field(
+        default="inconclusive", alias="onIncomplete"
+    )
+
+
+FastPathRecognizer = Literal["pinBump", "prose", "whitespace", "generated"]
+
+
+class FastPathPinBumpSettings(BaseModel):
+    """``review.fastPath.pinBump``: which checks must have passed before a pin bump skips."""
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    require_checks: list[str] = Field(default_factory=list, alias="requireChecks")
+
+
+class FastPathSettings(BaseModel):
+    """Deterministic pre-dispatch triage (``review.fastPath``), off by default.
+
+    When ``enabled`` and read from the operator's **base** config, a diff that one of
+    the opted-in recognizers (``skipLlm``) matches end to end skips the LLM review: the
+    run posts the ``mergecraft`` check with the tier stated and leaves approval to a
+    human. Anything else, and any doubt, is a full review. A pin bump additionally
+    needs every ``pinBump.requireChecks`` check to have passed on the head SHA.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    enabled: bool = False
+    skip_llm: list[FastPathRecognizer] = Field(default_factory=list, alias="skipLlm")
+    pin_bump: FastPathPinBumpSettings = Field(
+        default_factory=FastPathPinBumpSettings, alias="pinBump"
+    )
+
+
 class ReviewSettings(BaseModel):
     """Review-depth knobs that are separate from analyzer placement (RC3, D2)."""
 
@@ -332,6 +378,10 @@ class ReviewSettings(BaseModel):
     verification_budget: int = Field(default=24, alias="verificationBudget")
     # RC10 / D7 — optional adversarial recall pass after aggregation (default off).
     recall_pass: bool = Field(default=False, alias="recallPass")
+    # Changed-line coverage gate (default: an incomplete run is ``inconclusive``).
+    coverage: ReviewCoverageSettings = Field(default_factory=ReviewCoverageSettings)
+    # Deterministic triage before dispatch (default off; base-side config only).
+    fast_path: FastPathSettings = Field(default_factory=FastPathSettings, alias="fastPath")
     # RC12 — optional per-round budget taper (default flat).
     round_budgets: RoundBudgetsSettings = Field(
         default_factory=RoundBudgetsSettings,

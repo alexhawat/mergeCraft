@@ -33,7 +33,7 @@ from mergecraft.mcp.inline_anchors import (
     is_comments_anchor_422_response,
     parse_comment_422_index,
 )
-from mergecraft.mcp.review_comments import fetch_review_threads, resolve_review_thread
+from mergecraft.mcp.review_comments import fetch_review_thread_page, resolve_review_thread
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import (
     ApprovalRecord,
@@ -454,10 +454,17 @@ async def _resolve_fixed_finding_threads(
 
     publishers = expected_publisher_logins(ctx)
     try:
-        threads = await fetch_review_threads(ctx, pull_number) if publishers else []
+        page = await fetch_review_thread_page(ctx, pull_number) if publishers else None
     except Exception as err:  # advisory cleanup; never fails a posted review
         logger.info("finding resolution: listing review threads soft-failed: {}", err)
         return 0
+    threads = page.threads if page is not None else []
+    if page is not None and page.incomplete:
+        logger.info(
+            "finding resolution: the thread listing for PR #{} is incomplete, so threads "
+            "that were not read in full stay open",
+            pull_number,
+        )
     targets = resolvable_thread_ids(
         threads,
         current_fingerprints=still_raised,

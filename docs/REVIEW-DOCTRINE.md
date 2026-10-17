@@ -195,6 +195,39 @@ feeds it `run_succeeded=False` (`run_outcome.run_succeeded_for_outcome`), so
 this taxonomy is additive detail on top of the earlier boolean, never a
 looser gate.
 
+### Changed-line coverage
+
+A run record is only worth reading if it describes the run, so a verdict is
+not allowed to look more complete than the review was. The orchestrator
+builds a coverage universe from the authoritative PR diff (every changed
+hunk, deleted-only hunks included) and counts a hunk as covered only through
+mediated evidence: it was in the diff the reviewer received, a mediated read
+returned its file, or the single follow-up turn handed it back. Unknown is not
+a state — absence of evidence is *uncovered*, the opposite of the trajectory
+auditor's silence rule, on purpose, because this check gates the verdict.
+
+When any hunk is still uncovered at finalize (policy exclusions such as
+generated files are listed but do not count), the run outcome is
+`inconclusive` even if the agent submitted a verdict. Blockers are never
+masked: the monotone rule in `decide_approval` is unchanged, so a Critical or
+Major finding still yields `failure`. `review.coverage.onIncomplete`
+(`inconclusive`, the default, or `warn`) is read from the pinned settings
+snapshot. The packet's `coverage` section (see
+[`evidence-packet.md`](evidence-packet.md)) records the totals and every
+uncovered range with its cause.
+
+### Deterministic triage
+
+The "genuinely trivial" rule in the review modes is a decision the agent makes,
+after the tokens are spent. `review.fastPath` moves a narrow slice of it in
+front of the agent as a pure function of the unified diff: recognizers for a
+verified pin substitution, prose, whitespace and regenerated lockfiles. The
+tier is `skip` or `full`; there is no partial credit and no "probably". The
+refusals are the design: a skipped run is stated as such on the check and the
+record, never grants approval, only counts a pin bump when its verifying check
+passed on the head SHA, reads its config from the base ref only, and treats any
+failure to read the pull request as a reason to review.
+
 ### Evidence weighting
 
 What the merge-evidence packet carries, and how each signal weights:

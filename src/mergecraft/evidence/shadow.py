@@ -587,6 +587,40 @@ def record_shadow_prediction(
     return record
 
 
+def triage_shadow_row(decision: Any, *, change_id: str, run_id: str) -> dict[str, Any]:
+    """Return the shadow-log row (a :class:`ShadowRecord` dump) for one triage decision.
+
+    ``decision`` is a ``TriageDecision`` or the packet's ``TriageSection``. The row
+    lets a ``skip`` prediction be compared with a later full review of the same change.
+    """
+    record = ShadowRecord(
+        run_id=run_id,
+        change_id=change_id,
+        policy_id="triage",
+        rule_id=str(decision.recognizer or "full"),
+        action=str(decision.tier),
+        metadata={
+            "tier": str(decision.tier),
+            "recognizer": decision.recognizer,
+            "reason": str(decision.reason),
+            "relied_on_checks": list(decision.relied_on_checks),
+        },
+    )
+    return record.model_dump(mode="json")
+
+
+def record_triage_decision(
+    decision: Any, *, change_id: str, run_id: str, output_path: Path
+) -> None:
+    """Append one triage row to the shadow log beside the packet."""
+    row = triage_shadow_row(decision, change_id=change_id, run_id=run_id)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row))
+        handle.write("\n")
+    logger.info("» shadow record: change={} triage tier={}", change_id, decision.tier)
+
+
 def disagree_with_outcome(
     *,
     predicted_action: str,

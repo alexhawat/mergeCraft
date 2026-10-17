@@ -313,7 +313,14 @@ async def list_mergecraft_reviews(ctx: ToolContext, *, pull_number: int) -> list
 _WORKFLOW_PATH = ".github/workflows/mergecraft.yml"
 _WORKFLOW_FILE = _WORKFLOW_PATH.rsplit("/", 1)[-1]
 _TRUSTED_RUN_EVENT = "pull_request_target"
-_TRUSTED_RUN_CONCLUSION = "success"
+# A self-review run that requests changes finishes ``failure`` (its gate step fails
+# when mergeCraft would not approve), and it is still a review. Trust comes from the
+# event and the workflow path, not from the conclusion; ``cancelled``, ``skipped``,
+# ``timed_out`` and runs still in progress carry no completed review.
+_TRUSTED_RUN_CONCLUSIONS = frozenset({"success", "failure"})
+# How many of the newest trusted runs are probed for a usable evidence artefact
+# before the reader gives up (each probe is an Actions API round trip).
+_RUN_BOUND_MAX_RUN_PROBES = 5
 # The evidence artefact each review rung uploads. ``mergecraft.yml`` names it
 # ``mergecraft-evidence-<rung>`` and stores the rung's packet at the artefact
 # root as ``packet-<rung>.json`` (``tests/mcp/test_checkout_run_bound_checkpoint.py``
@@ -357,8 +364,8 @@ def _as_mapping(value: object) -> Mapping[str, Any]:
 def _filter_trusted_runs(runs: object, *, pull_number: int) -> list[dict[str, Any]]:
     """Return the trusted runs for ``pull_number``, newest first (HS8).
 
-    Trusted means a ``pull_request_target`` run that concluded ``success`` and
-    names this PR. ``pull_request_target`` always runs the default branch's
+    Trusted means a ``pull_request_target`` run that completed (``success`` or
+    ``failure``) and names this PR. ``pull_request_target`` always runs the default branch's
     workflow definition, so a workflow added or edited on the PR branch cannot
     produce one — that is the property the checkpoint relies on.
     """
@@ -369,7 +376,7 @@ def _filter_trusted_runs(runs: object, *, pull_number: int) -> list[dict[str, An
         row = _as_mapping(run)
         if row.get("event") != _TRUSTED_RUN_EVENT:
             continue
-        if row.get("conclusion") != _TRUSTED_RUN_CONCLUSION:
+        if row.get("conclusion") not in _TRUSTED_RUN_CONCLUSIONS:
             continue
         pull_numbers = {
             _as_mapping(entry).get("number") for entry in row.get("pull_requests") or []
@@ -531,11 +538,11 @@ async def recover_run_bound_review_state(
 ) -> RunBoundReviewState:
     """Read the run-bound checkpoint and sticky id from trusted workflow runs (HS8).
 
-    A trusted run is a ``pull_request_target`` run of
-    ``.github/workflows/mergecraft.yml`` that concluded ``success`` for this PR.
-    Its evidence packet names ``reviewed_head_sha`` (taken from the newest
-    trusted run) and ``progress_comment_id``; the count of trusted runs is the
-    round index. Anything unavailable — an unreadable artefact, an Actions API
+    A trusted run is a completed (``success`` or ``failure``)
+    ``pull_request_target`` run of ``.github/workflows/mergecraft.yml`` for this PR
+    whose evidence artefact names a ``reviewed_head_sha``. The newest such run's
+    evidence packet supplies ``reviewed_head_sha`` and ``progress_comment_id``; the
+    round index counts that run and every older trusted run. Anything unavailable — an unreadable artefact, an Actions API
     error, no trusted run — is fail-closed (``""`` / ``0`` / ``None``) with one
     warning naming the reason, never a fabricated checkpoint.
     """
@@ -547,21 +554,39 @@ async def recover_run_bound_review_state(
     trusted = _filter_trusted_runs(runs, pull_number=pull_number)
     if not trusted:
         return _UNAVAILABLE_RUN_BOUND_STATE
-    run_id = _coerce_int(trusted[0].get("id"))
-    if run_id is None:
-        return _UNAVAILABLE_RUN_BOUND_STATE
-    try:
-        packet = await _read_run_evidence_packet(ctx, run_id=run_id)
-    except Exception as err:
-        logger.warning("run-bound checkpoint: reading run {} failed: {}", run_id, err)
-        return _UNAVAILABLE_RUN_BOUND_STATE
-    if packet is None:
-        return _UNAVAILABLE_RUN_BOUND_STATE
-    return RunBoundReviewState(
-        reviewed_head_sha=str(packet.get("reviewed_head_sha") or ""),
-        round_index=len(trusted),
-        progress_comment_id=_coerce_int(packet.get("progress_comment_id")),
+    # Newest first: a run that carries no usable evidence artefact (it failed before
+    # uploading one, or the artefact expired) is not a round and is skipped; the next
+    # older run is tried, up to a bound.
+    for index, run in enumerate(trusted[:_RUN_BOUND_MAX_RUN_PROBES]):
+        run_id = _coerce_int(run.get("id"))
+        if run_id is None:
+            continue
+        try:
+            packet = await _read_run_evidence_packet(ctx, run_id=run_id)
+        except Exception as err:
+            logger.warning("run-bound checkpoint: reading run {} failed: {}", run_id, err)
+            continue
+        reviewed_head_sha = str(packet.get("reviewed_head_sha") or "") if packet else ""
+        if not reviewed_head_sha:
+            if packet is not None:
+                logger.warning(
+                    "run-bound checkpoint: run {} evidence names no reviewed_head_sha; skipping",
+                    run_id,
+                )
+            continue
+        return RunBoundReviewState(
+            reviewed_head_sha=reviewed_head_sha,
+            # Runs skipped above carried no review; this one and every older one count.
+            round_index=len(trusted) - index,
+            progress_comment_id=_coerce_int(packet.get("progress_comment_id")) if packet else None,
+        )
+    logger.warning(
+        "run-bound checkpoint: none of the {} newest trusted run(s) for PR #{} carried a "
+        "usable evidence artefact; falling back",
+        min(len(trusted), _RUN_BOUND_MAX_RUN_PROBES),
+        pull_number,
     )
+    return _UNAVAILABLE_RUN_BOUND_STATE
 
 
 def _is_trusted_self_review_run(ctx: ToolContext) -> bool:
@@ -868,6 +893,21 @@ def _write_incremental_diff(
     return path, changed_paths_in_diff(diff)
 
 
+def _record_delivered_diff(
+    ctx: ToolContext, diff_text: str, *, unreviewable: list[str], truncated: bool
+) -> None:
+    """Record the diff this checkout built and what the files API could not deliver.
+
+    The coverage accounting at the end of the run reads it: the hunks in ``diff_text``
+    are the universe, ``unreviewable`` files had line changes but no patch, and
+    ``truncated`` means later files were never listed.
+    """
+    record = ctx.tool_state.coverage
+    record.authoritative_diff = str(diff_text)
+    record.unreviewable_paths = list(unreviewable)
+    record.diff_truncated = truncated
+
+
 def get_git_status(cwd: str) -> str:
     """Return porcelain status for *cwd* (monkeypatch hook for tests and callers)."""
     return _run_git(["status", "--porcelain"], cwd=cwd).strip()
@@ -969,6 +1009,9 @@ def checkout_pr_tool(ctx: ToolContext):
             )
             warning(fetch_degraded)
             Path(diff_path).write_text(fetch_diff, encoding="utf-8")
+            _record_delivered_diff(
+                ctx, fetch_diff, unreviewable=fetch_unreviewable, truncated=fetch_truncated
+            )
             state.issue_number = pull_number
             state.checkout_sha = head_sha
             from mergecraft.mcp.review_context import hydrate_review_context
@@ -1076,6 +1119,7 @@ def checkout_pr_tool(ctx: ToolContext):
             unreviewable = files_diff.unreviewable_paths
             diff_truncated = files_diff.truncated
         Path(diff_path).write_text(diff, encoding="utf-8")
+        _record_delivered_diff(ctx, diff, unreviewable=unreviewable, truncated=diff_truncated)
         from mergecraft.mcp.verdict import register_review_scope
 
         degraded_reason: str | None = None
