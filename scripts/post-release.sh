@@ -1,21 +1,48 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Bump pyproject.toml to the next patch dev version after a successful publish.
+# Bump the tree to the next development version after a successful publish.
+#
+# This reuses scripts/bump-version.sh so pyproject.toml, server.json and
+# uv.lock all move together: a post-release bump that touched pyproject.toml
+# alone would turn `lockcheck` and `mcp-server-json-check` red on the next
+# commit, which is the same defect the prepare bump was fixed for.
+#
+# The dev version is a canonical PEP 440 "successor development release":
+#
+#   0.1.0a3  -> 0.1.0a4.dev0     (likewise b, rc)
+#   0.1.0    -> 0.1.1.dev0
+#
+# `-dev` (the previous scheme) is not canonical PEP 440 and sorts *above* the
+# final release it follows.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-if [[ -z "${CRAFT_NEW_VERSION:-}" ]]; then
-  echo "CRAFT_NEW_VERSION is required" >&2
+# Craft exports CRAFT_NEW_VERSION; accept a positional argument too.
+released="${1:-${CRAFT_NEW_VERSION:-}}"
+if [[ -z "${released}" ]]; then
+  echo "post-release.sh: CRAFT_NEW_VERSION (or a positional released version) is required" >&2
   exit 1
 fi
 
-IFS='.' read -r major minor patch <<< "${CRAFT_NEW_VERSION%%-*}"
-patch="${patch%%[^0-9]*}"
-dev_version="${major}.${minor}.$((patch + 1))-dev"
+dev_version="$(python3 - "$released" <<'PY'
+import re
+import sys
 
-perl -i -pe "s/^version = \".*\"/version = \"${dev_version}\"/" pyproject.toml
-grep -q "version = \"${dev_version}\"" pyproject.toml
+released = sys.argv[1]
+match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:(a|b|rc)(\d+))?", released)
+if match is None:
+    raise SystemExit(
+        f"post-release.sh: not a canonical release version: {released!r}"
+    )
+major, minor, patch, pre, number = match.groups()
+if pre is None:
+    print(f"{major}.{minor}.{int(patch) + 1}.dev0")
+else:
+    print(f"{major}.{minor}.{patch}{pre}{int(number) + 1}.dev0")
+PY
+)"
 
+bash "$ROOT/scripts/bump-version.sh" "$released" "$dev_version"
 echo "Bumped development version to ${dev_version}"
