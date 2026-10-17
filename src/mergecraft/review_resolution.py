@@ -66,6 +66,32 @@ def _line_was_touched(
     return any(line in hunk for hunk in changed_lines.get(path) or ())
 
 
+def effective_publishers(publishers: frozenset[str]) -> frozenset[str]:
+    """Return ``publishers`` without the shared Actions login, which never counts.
+
+    The shared ``github-actions[bot]`` identity can be forged by any same-repo
+    collaborator, so it proves no authorship whoever passes it in.
+    """
+    # Imported here: ``mergecraft.review`` pulls in the agent and MCP packages,
+    # which import this module back through ``findings.select``.
+    from mergecraft.review.authorship import GITHUB_ACTIONS_BOT_LOGIN
+
+    return frozenset(
+        login for login in publishers if login.strip().casefold() != GITHUB_ACTIONS_BOT_LOGIN
+    )
+
+
+def is_publisher_login(login: object, publishers: frozenset[str]) -> bool:
+    """Whether ``login`` names one of the (effective) expected publishers."""
+    name = str(login or "").strip().casefold()
+    return bool(name) and name in {p.strip().casefold() for p in effective_publishers(publishers)}
+
+
+def is_publisher_authored_comment(comment: dict[str, Any], publishers: frozenset[str]) -> bool:
+    """Whether ``comment`` carries a mergeCraft marker and an expected-publisher author."""
+    return _is_expected_publisher_comment(comment, effective_publishers(publishers))
+
+
 def _is_expected_publisher_comment(comment: dict[str, Any], publishers: frozenset[str]) -> bool:
     """Whether ``comment`` carries a mergeCraft marker and an expected-publisher author.
 
@@ -125,14 +151,8 @@ def resolvable_thread_ids(
     Returns:
         Thread ids, in input order. Empty when nothing qualifies.
     """
-    # Imported here: ``mergecraft.review`` pulls in the agent and MCP packages,
-    # which import this module back through ``findings.select``.
-    from mergecraft.review.authorship import GITHUB_ACTIONS_BOT_LOGIN
-
     # The shared Actions login is never an expected publisher, whoever passes it.
-    publishers = frozenset(
-        login for login in publishers if login.strip().casefold() != GITHUB_ACTIONS_BOT_LOGIN
-    )
+    publishers = effective_publishers(publishers)
     if not publishers:
         logger.info(
             "thread retirement skipped: no expected publisher identity proves which "
@@ -172,4 +192,11 @@ def resolvable_thread_ids(
     return resolvable
 
 
-__all__ = ["finding_fingerprints_in", "is_mergecraft_comment", "resolvable_thread_ids"]
+__all__ = [
+    "effective_publishers",
+    "finding_fingerprints_in",
+    "is_mergecraft_comment",
+    "is_publisher_authored_comment",
+    "is_publisher_login",
+    "resolvable_thread_ids",
+]

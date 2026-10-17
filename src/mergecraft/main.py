@@ -443,6 +443,8 @@ async def publish_deterministic_record(
         DETERMINISTIC_RECORD_MARKER,
         REVIEW_BODY_MARKER,
         _is_trusted_sticky_author,
+        _run_bound_sticky_id,
+        _run_sticky_scope,
         ensure_finding_ledger,
         fetch_sticky_progress_comment,
         hydrate_finding_ledger_from_progress_comment,
@@ -451,6 +453,7 @@ async def publish_deterministic_record(
     )
     from mergecraft.mcp.comment import add_footer
     from mergecraft.mcp.review import _truncate_review_body_for_github
+    from mergecraft.review.authorship import expected_publisher_logins
     from mergecraft.scm.github import create_github_scm
     from mergecraft.utils.learnings import merge_learnings_delta_into_review_body
     from mergecraft.utils.status_checks import _run_url
@@ -543,7 +546,25 @@ async def publish_deterministic_record(
         existing = await resolved_ctx.scm.get_review(owner, repo, pull_number, review.id)
         existing_body = str(existing.get("body") or "")
 
-    legacy = await fetch_sticky_progress_comment(resolved_ctx.scm, owner, repo, pull_number)
+    # The old progress comment is read through the same rule as every other "did
+    # mergeCraft post this?" decision: the run-bound comment id, then the run's
+    # expected-publisher set, never a bare bot-type match. With neither, the read is
+    # skipped and the record says so.
+    legacy: dict[str, Any] | None = None
+    if not expected_publisher_logins(resolved_ctx) and _run_bound_sticky_id(resolved_ctx) is None:
+        logger.info(
+            "learnings migration: earlier progress comment read skipped for PR #{} — no "
+            "publisher identity and no run-bound comment id prove who wrote it",
+            pull_number,
+        )
+        block = (
+            f"{block.rstrip()}\n\n**Earlier progress comment not read:** no publisher "
+            "identity proves which comment is mergeCraft's, so its learnings were not "
+            "carried into this record.\n"
+        )
+    else:
+        with _run_sticky_scope(resolved_ctx):
+            legacy = await fetch_sticky_progress_comment(resolved_ctx.scm, owner, repo, pull_number)
     legacy_body = str(legacy.get("body") or "") if legacy is not None else ""
     # Preserve the old comment's ephemeral learnings before retiring it. Its
     # run record and finding markers are rendered anew in this formal review.

@@ -53,6 +53,7 @@ from mergecraft.findings.sweep import (
     CarryoverOutcome,
     CarryoverPlan,
     apply_carryover,
+    carryover_publishers,
     plan_carryover,
 )
 from mergecraft.findings.threads import fetch_review_threads
@@ -380,8 +381,10 @@ def export(
                     "incomplete (a page cap was hit or a thread's comments were not all "
                     "read), so some findings were not examined.[/yellow]"
                 )
+            publishers = await carryover_publishers(client, owner, name, pr)
             return carryover_findings(
                 page.threads,
+                publishers=publishers,
                 include_resolved=include_resolved,
                 include_answered=include_answered,
             )
