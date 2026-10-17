@@ -61,6 +61,19 @@ _SLUG_ENTROPY_SLACK = 0.12
 # exempt before the dense-token pass so glanceable catalog rows survive redaction.
 _METADATA_ASSIGNMENT_RE = re.compile(r"^(?P<key>[a-z][a-z0-9_]*)=(?P<value>[a-z][a-z0-9_-]*)$")
 _SIMPLE_METADATA_TOKEN_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
+# Numeric metadata assignments (``input_tokens=120``, ``output_tokens=4096``, #877).
+# A usage count is a handful of digits under a snake_case key; both bounds matter.
+# The value is capped at ten digits so a long numeric run (a card or account number)
+# is never blanket-exempt, and a key that names a credential keeps the entropy
+# pass: ``token`` / ``key`` / ``secret`` as a whole word, never the plural
+# ``tokens`` that counts them.
+_METADATA_NUMERIC_ASSIGNMENT_RE = re.compile(
+    r"^(?P<key>[a-z][a-z0-9]*(?:_[a-z0-9]+)+)=(?P<value>[0-9]{1,10})$"
+)
+_CREDENTIAL_KEY_WORD_RE = re.compile(
+    r"(?:^|_)(?:secret|passwd|password|passphrase|pwd|token|key|apikey|credential|auth|salt|otp"
+    r"|pin|cvv|ssn|card)(?:$|_)"
+)
 # Exact operator-remedy literals that are known-safe and must survive the dense
 # entropy pass so a fail-closed message stays actionable. R7-F4: the
 # CDP-unavailable remedy names ``--remote-debugging-port``, which is otherwise
@@ -139,8 +152,18 @@ def _is_simple_metadata_token(token: str) -> bool:
     return _shannon_entropy(token) < _entropy_threshold(len(token))
 
 
+def _is_numeric_metadata_assignment(token: str) -> bool:
+    """``snake_case_key=<digits>`` where the key does not name a credential (#877)."""
+    match = _METADATA_NUMERIC_ASSIGNMENT_RE.match(token)
+    if match is None:
+        return False
+    return _CREDENTIAL_KEY_WORD_RE.search(match.group("key")) is None
+
+
 def _is_benign_metadata_assignment(token: str) -> bool:
     """``key=value`` analyzer metadata where both sides are low-entropy identifiers."""
+    if _is_numeric_metadata_assignment(token):
+        return True
     match = _METADATA_ASSIGNMENT_RE.match(token)
     if match is None:
         return False

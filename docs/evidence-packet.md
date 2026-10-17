@@ -88,7 +88,7 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.11.0`.
+The current version is `1.14.0`.
 
 Wiring a consumer is **not** a shape change: #96 gave these models their first
 runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
@@ -126,6 +126,11 @@ not move.
   `verdict` no longer validate.
 - `1.11.0` — plan 12 W7 adds `run_health`: run-scoped findings and an
   advisory conclusion, partitioned out of the top-level `findings` list.
+- `1.14.0` — adds the optional `analyzers` section: where the analyzer settings
+  were resolved from, and the analyzer disposition ledger (one terminal
+  disposition per raw analyzer hit, per-stage counts, the persisted
+  baseline-suppression audit rows and any orphaned hit ids). Additive; `null`
+  for a run that executed no analyzer.
 
 ## Top-level fields
 
@@ -196,6 +201,29 @@ section is omitted (`null`).
 |------|------|-------|
 | `findings` | `list[Finding]` | Run-scoped rows (`scope="run"`). |
 | `conclusion` | `str` | `clean` when empty; `advisory` when observations exist. |
+
+### `analyzers` — `AnalyzersEvidence | None` (added in `1.14.0`)
+
+What the deterministic analyzers did, and under whose settings. `null` when the
+run executed no analyzer and resolved no analyzer settings.
+
+| Field | Type | Notes |
+|------|------|-------|
+| `settings_resolved_from` | `str \| null` | Where the analyzer settings came from: `base_snapshot` (operator-owned base checkout), `base_sha` (read from the PR's base commit), `run_start_snapshot` (no PR base to read), `defaults` (fail-closed fallback — see `settings_detail`) or `live_load` (offline). A PR's own `analyzers.*` config is never applied to its own review. |
+| `settings_detail` | `str \| null` | The named reason when the settings fell back to `defaults` (for example a symlinked config). |
+| `dispositions` | `list[DispositionSection]` | One section per source: `catalog` (the analyzer pipeline) and `ci_sarif` (SARIF ingested via `ciEvidence.sarifArtifacts`). |
+
+A `DispositionSection` is the **disposition ledger**: every raw hit a tool produced
+gets a stable `hit_id` (tool, rule, path, line range, message hash) when it is
+parsed, and every stage that removes or merges a hit records why.
+
+| Field | Type | Notes |
+|------|------|-------|
+| `source` | `catalog` \| `ci_sarif` | Which ingest the ledger covers. |
+| `counts` | object | `raw`, `kept`, `merged`, `downgraded` and `dropped_by_stage` (for example `{"out_of_scope": 9, "baseline": 2}`). `raw` equals the sum of the others for a closed ledger. |
+| `entries` | list | One terminal row per raw hit: `hit_id`, `disposition` (`kept`, `merged`, `downgraded`, `dropped:out_of_scope`, `dropped:baseline`, `dropped:withdrawn`, `dropped:generated`, `dropped:verifier`), `stage`, a **required non-empty** `reason`, and `ref` (the surviving or matched fingerprint). |
+| `suppression_audit` | list | The baseline-suppression decisions (`fingerprint`, `decision`, `reason`) — persisted here, not only logged. |
+| `orphaned_hit_ids` | `list[str]` | Raw hits no stage accounted for. Non-empty means the evidence is incomplete: the run is **inconclusive** (the approval conclusion cannot be `success`), a `scope="run"` finding in `run_health` names the hit ids, and a blocker still wins. |
 
 ### `deterministic_checks` — required (`list[DeterministicCheck]`)
 

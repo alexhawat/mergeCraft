@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from mergecraft.analyzers.finding import IntroducedByPr
+    from mergecraft.config.settings import AnalyzersSettings
 
 _TOOL = "antislop"
 _INTRODUCED: IntroducedByPr = "true"
@@ -43,8 +44,14 @@ def scan_changed_files(
     *,
     repo_root: Path,
     changed_files: list[str],
+    analyzers_settings: AnalyzersSettings | None = None,
 ) -> AntislopScanResult:
-    """Scan changed Python and JS/TS files with native YAML anti-slop rules."""
+    """Scan changed Python and JS/TS files with native YAML anti-slop rules.
+
+    ``analyzers_settings`` is the pinned (base-side) analyzer config; a PR's own
+    ``antislop`` ``rules`` / ``ignore`` are never applied to its own review (#942).
+    Without it the run-start snapshot is used, then — offline only — the checkout.
+    """
     repo_root = repo_root.resolve()
     scoped = [path for path in changed_files if _is_scoped_path(path)]
     if not scoped:
@@ -54,7 +61,7 @@ def scan_changed_files(
             skip_reason="skipped antislop: no changed source paths",
         )
 
-    rule_overrides, ignore_patterns = _load_repo_settings(repo_root)
+    rule_overrides, ignore_patterns = _load_repo_settings(repo_root, analyzers_settings)
     rules = _active_rules(load_native_rules(), rule_overrides=rule_overrides)
     if not rules:
         return AntislopScanResult(
@@ -92,9 +99,20 @@ def scan_changed_files(
     return AntislopScanResult(findings=cluster_findings(findings))
 
 
-def _load_repo_settings(repo_root: Path) -> tuple[dict[str, str] | None, list[str] | None]:
-    settings = load_repo_settings(root=repo_root, load_learnings_files=False)
-    override = settings.analyzers.overrides.get("antislop")
+def _load_repo_settings(
+    repo_root: Path, analyzers_settings: AnalyzersSettings | None = None
+) -> tuple[dict[str, str] | None, list[str] | None]:
+    if analyzers_settings is None:
+        from mergecraft.config.settings_snapshot import run_scope_settings_snapshot
+
+        snapshot = run_scope_settings_snapshot()
+        if snapshot is not None and snapshot.repo_root == repo_root.resolve():
+            analyzers_settings = snapshot.settings.analyzers
+        else:
+            analyzers_settings = load_repo_settings(
+                root=repo_root, load_learnings_files=False
+            ).analyzers
+    override = analyzers_settings.overrides.get("antislop")
     if override is None:
         return None, None
     return override.rules, override.ignore

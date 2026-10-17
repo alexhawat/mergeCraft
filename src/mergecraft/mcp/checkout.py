@@ -16,7 +16,6 @@ from loguru import logger
 
 from mergecraft.analyzers.impact import resolve_ast_grep_binary, write_impact
 from mergecraft.analyzers.trust import analyzers_enabled
-from mergecraft.config.settings import load_repo_settings
 from mergecraft.config.trust_policy import is_fork_pull_request
 from mergecraft.mcp.git import _git_env, _is_auth_failure, _run_git
 from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
@@ -1160,8 +1159,8 @@ def checkout_pr_tool(ctx: ToolContext):
         # S6 #94 — impact-path extraction (default off behind analyzers.impact).
         # Emitted only when enabled; returns None (-> no key) when the diff
         # has zero declarations, matching the incrementalDiffPath convention.
-        # The analyzers.impact toggle is read from the PR's own checkout (fine —
-        # repo config is safe to *read* regardless of trust tier), but gated
+        # The analyzers.impact toggle is read from the PR's pinned (base-side) settings,
+        # never the head checkout (#942), and gated
         # behind analyzers_enabled(ctx) first so the operator's effective
         # policy (analyzers: off, or analyzers.enabled: false) always wins over
         # whatever a PR sets in its own config — mirrors run_analyzers_tool's
@@ -1171,8 +1170,10 @@ def checkout_pr_tool(ctx: ToolContext):
         # available (D7).
         try:
             repo_root = Path(cwd)
-            settings_obj = load_repo_settings(root=repo_root, load_learnings_files=False)
-            if analyzers_enabled(ctx) and settings_obj.analyzers.impact:
+            from mergecraft.analyzers.settings_pin import resolve_pinned_analyzer_settings
+
+            pinned_settings = resolve_pinned_analyzer_settings(ctx, repo_root).settings
+            if analyzers_enabled(ctx) and pinned_settings.impact:
                 ast_grep_binary = resolve_ast_grep_binary()
                 if ast_grep_binary is None:
                     logger.info(
