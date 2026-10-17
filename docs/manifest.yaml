@@ -288,3 +288,21 @@ pages:
     template: satellite
     generator: null
     purpose: Plain-language definitions for landing-page jargon — trust tier, typed findings, and related terms.
+
+  - path: docs/railway-sandbox-evaluation.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Evaluation kit for Railway sandboxes as ephemeral review and test runners — spike script, measurement template, go/no-go criteria.
+
+  - path: docs/failure-trajectory-harvest.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Recipe for harvesting failure-shaped auditor trajectories from public commits as unlabelled drafts (operator-run).
+
+  - path: docs/language-coverage.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Language coverage matrix, sourced public pull requests per language, and the prioritized fixture work list (research, not a corpus).

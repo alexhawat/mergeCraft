@@ -21,7 +21,7 @@ SHELL := /bin/bash
 .PHONY: help setup install lockcheck npm-lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
 	mutation-test-decisions \
-	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-skill-corpus eval-cases-sync eval-cases-sync-check eval-gate eval-replay eval-convergence eval-trajectory eval-trajectory-gate shadow-compare \
+	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-skill-corpus eval-cases-sync eval-cases-sync-check eval-gate eval-replay eval-convergence eval-harvest-failures eval-trajectory eval-trajectory-gate shadow-compare \
 	review-skill-taxonomy-check review-skill-spec-check \
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector test-durations coverage-measure coverage-combine-gate coverage-gate npm-audit workflow-lint \
@@ -407,6 +407,10 @@ eval-gate: eval-cases-sync-check ## Check eval-bank integrity (structural; see '
 
 eval-replay: ## Replay structural eval-bank integrity; keyless, not live detection scores
 	$(UV) run mergecraft eval replay-bank
+
+HARVEST_COMMITS ?=
+eval-harvest-failures: ## Print the failure-trajectory harvest plan for HARVEST_COMMITS (runs nothing; see docs/failure-trajectory-harvest.md)
+	$(UV) run python scripts/harvest_failure_trajectories.py $(foreach sha,$(HARVEST_COMMITS),--commit $(sha))
 
 eval-convergence: ## Score multi-round convergence metric; write result set (RC6)
 	$(UV) run mergecraft eval convergence
