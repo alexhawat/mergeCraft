@@ -160,6 +160,7 @@ def _classify_outcome(
     terminal_publication_receipt: bool | None = None,
     terminal_publication_mismatch: tuple[str, str] | None = None,
     terminal_publication_unproven: bool = False,
+    coverage_incomplete_reason: str | None = None,
 ) -> tuple[RunOutcome, str | None]:
     """Map the run's result + side-channels to a ``RunOutcome`` (D3/W5.2 + S1/D5/D10).
 
@@ -183,7 +184,10 @@ def _classify_outcome(
     no verdict. The publication inputs default
     to "not applicable" (``None``), so a caller that never publishes (the
     offline classifier) is unchanged, and neither applies under the shadow
-    protocol. A roster slot skipped for missing credentials is not an input:
+    protocol. A review-mode run whose changed-line coverage is incomplete
+    (``coverage_incomplete_reason``, set only when the pinned policy gates on it) ->
+    ``RunOutcome.inconclusive`` naming the gap, even though the agent submitted a
+    verdict. A roster slot skipped for missing credentials is not an input:
     a published verdict classifies by that verdict. Otherwise (the closed ``SetupFailurePolicy``
     value ``"warn"`` or no failure surface) -> ``RunOutcome.passed``. Each
     non-pass branch logs a warning here so the call site only needs the tuple.
@@ -233,6 +237,9 @@ def _classify_outcome(
             )
             logger.warning("» {}", reason)
             return RunOutcome.inconclusive, reason
+    if coverage_incomplete_reason and _is_review_mode(mode):
+        logger.warning("» {}", coverage_incomplete_reason)
+        return RunOutcome.inconclusive, coverage_incomplete_reason
     # ``setup_policy`` is the closed ``SetupFailurePolicy`` vocabulary; any
     # value other than ``fail`` / ``inconclusive`` (i.e. ``warn``, or the
     # Pydantic default the action-input resolver accepted) means "proceed

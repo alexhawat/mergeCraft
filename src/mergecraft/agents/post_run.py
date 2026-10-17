@@ -153,6 +153,12 @@ async def collect_post_run_issues(
     unsubmitted = get_unsubmitted_review(ctx.tool_state)
     if unsubmitted:
         issues.unsubmitted_review = unsubmitted
+    else:
+        from mergecraft.evidence.coverage import plan_coverage_followup
+
+        # Only once the run holds its verdict: the follow-up hands back the hunks the
+        # reviewer never received, once, while budget remains (changed-line coverage).
+        issues.coverage_followup = plan_coverage_followup(ctx.tool_state)
     issues.retryable = _post_run_issues_retryable(issues, ctx.tool_state)
     return issues
 
@@ -167,6 +173,8 @@ def build_post_run_prompt(issues: PostRunIssues) -> str:
         parts.append(build_commit_prompt(issues.dirty_tree))
     if issues.summary_stale:
         parts.append(build_summary_stale_prompt(issues.summary_stale.file_path))
+    if issues.coverage_followup is not None:
+        parts.append(issues.coverage_followup.prompt)
     parts.append(_LEARNINGS_PROVENANCE_NOTE)
     return "\n\n---\n\n".join(parts)
 
@@ -266,6 +274,7 @@ def _post_run_issue_signature(issues: PostRunIssues) -> tuple[Any, ...]:
         issues.dirty_tree,
         issues.summary_stale.file_path if issues.summary_stale else None,
         issues.unsubmitted_review,
+        issues.coverage_followup.hunks if issues.coverage_followup is not None else None,
     )
 
 
@@ -317,6 +326,10 @@ async def run_post_run_retry_loop(
             # soft gate — nudge once
             skip_summary = True
         prompt = build_post_run_prompt(issues)
+        if issues.coverage_followup is not None:
+            from mergecraft.evidence.coverage import mark_followup_sent
+
+            mark_followup_sent(ctx.tool_state, issues.coverage_followup)
         logger.info("post-run retry {}/{}", attempt + 1, MAX_POST_RUN_RETRIES)
         result = await resume(prompt)
         usage = merge_agent_usage(usage, result.usage)

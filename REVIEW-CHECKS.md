@@ -130,6 +130,26 @@ fewer findings inline than were recorded lists the missing ones in the publish
 response. A recorded verdict that never reached GitHub reports `inconclusive`
 with its own reason. Each fresh run still posts its own review.
 
+**Changed-line coverage.** A verdict is only worth reading if the whole change
+reached the reviewer. At the end of the run mergeCraft accounts for every
+changed hunk of the PR diff: a hunk is *covered* when it was in the diff the
+reviewer was handed, when a mediated tool call read its file, or when the one
+follow-up turn handed it back. Absence of evidence counts as uncovered, not
+unknown. Files GitHub sent line counts for but no patch (`no_inline_patch`)
+and files beyond the files-API page cap (`diff_truncated`) are listed and can
+never be cleared, because there are no lines to hand back; generated, minified
+and vendored hunks removed by policy are listed as `excluded_generated` and do
+not count against completeness. Before finalizing, if known hunks remain
+uncovered and the run still has budget, the reviewer gets **one** follow-up
+turn listing exactly those hunks, and may replace its verdict in response.
+If anything is still uncovered, the run is `inconclusive` (a `neutral` check)
+even though a verdict was submitted; a Critical or Major finding still makes
+`mergecraft-approval` conclude `failure`. The checks and the run record state
+it (`Coverage: 41/44 hunks, 3 uncovered → inconclusive`) and the packet's
+`coverage` section carries the detail. Set `review.coverage.onIncomplete: warn`
+to keep the verdict and only report the gap. This proves delivery, not
+comprehension: a driver's native file reads never cross mergeCraft's wire.
+
 **Fallback interaction.** Semantic fallback advances when
 `terminal_submission_received` is false — whether because no submission
 was recorded or because the validator rejected one. A valid

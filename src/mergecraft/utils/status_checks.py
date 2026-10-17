@@ -118,6 +118,19 @@ def _run_health_lines(findings: list[Finding]) -> list[str]:
     return lines
 
 
+def _coverage_line(ctx: ToolContext, packet: MergeEvidencePacket | None) -> str | None:
+    """Return the changed-line coverage line for the checks, or ``None`` without a section."""
+    if packet is None or packet.coverage is None:
+        return None
+    from mergecraft.evidence.coverage import coverage_policy, coverage_summary_line
+
+    try:
+        return coverage_summary_line(packet.coverage, on_incomplete=coverage_policy(ctx))
+    except Exception as err:  # a summary line never fails a check
+        logger.debug("status checks: coverage line skipped: {}", err)
+        return None
+
+
 def _build_completion_summary(
     *,
     run_succeeded: bool,
@@ -126,6 +139,7 @@ def _build_completion_summary(
     catalog_banner: str | None,
     run_url: str | None,
     reviewed_sha: str | None,
+    coverage_line: str | None = None,
 ) -> str:
     if run_succeeded:
         lead = "The mergeCraft run finished successfully."
@@ -135,6 +149,8 @@ def _build_completion_summary(
             or "The mergeCraft run failed or timed out. See the run logs for details."
         )
     lines = [lead, *_run_health_lines(findings)]
+    if coverage_line:
+        lines.append(coverage_line)
     if catalog_banner:
         lines.append(catalog_banner)
     _append_run_metadata(lines, run_url=run_url, reviewed_sha=reviewed_sha)
@@ -176,12 +192,15 @@ def _build_approval_summary(
     catalog_banner: str | None,
     run_url: str | None,
     reviewed_sha: str | None,
+    coverage_line: str | None = None,
 ) -> str:
     from mergecraft.agents.gates import decision_summary_lines
 
     lines = [_build_approval_lead(approval_conclusion, findings, decision_reason=decision_reason)]
     if _change_findings(findings) and _run_health_lines(findings):
         lines.extend(_run_health_lines(findings))
+    if coverage_line:
+        lines.append(coverage_line)
     _append_run_metadata(lines, run_url=run_url, reviewed_sha=reviewed_sha)
     lines.append("Decision inputs:")
     lines.extend(decision_summary_lines(decision_inputs))
@@ -299,6 +318,7 @@ async def report_status_checks(
     approval = ctx.tool_state.approval
     run_url = _run_url(ctx)
     reviewed_sha = _reviewed_sha(approval, packet)
+    coverage_line = _coverage_line(ctx, packet)
     completion_summary = _build_completion_summary(
         run_succeeded=run_succeeded,
         failure_reason=failure_reason,
@@ -306,6 +326,7 @@ async def report_status_checks(
         catalog_banner=catalog_banner,
         run_url=run_url,
         reviewed_sha=reviewed_sha,
+        coverage_line=coverage_line,
     )
     try:
         await _create_check_run(
@@ -427,6 +448,7 @@ async def report_status_checks(
             catalog_banner=catalog_banner,
             run_url=run_url,
             reviewed_sha=reviewed_sha,
+            coverage_line=coverage_line,
         )
 
         await _create_check_run(

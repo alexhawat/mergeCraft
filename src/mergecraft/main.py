@@ -1412,6 +1412,8 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
     )
     from mergecraft.config.settings_snapshot import capture_run_scope_snapshot
 
+    # The changed-line coverage follow-up only fires while the run has budget left.
+    tool_state.coverage.budget_tracker = ctx.budget_tracker
     snapshot = capture_run_scope_snapshot(
         ctx.tool_context,
         root=Path(primary_repo_state(tool_state).dir),
@@ -2179,6 +2181,28 @@ async def _publish_recorded_verdict(
     )
 
 
+def _coverage_gate_reason(tool_context: ToolContext, settings: RepoSettings) -> str | None:
+    """Return the outcome reason when changed-line coverage is incomplete and gated.
+
+    Total: a failure to account for coverage must not fail the run it describes, so it
+    logs and reports no gate (the packet then simply carries no coverage section).
+    """
+    from mergecraft.evidence.coverage import (
+        coverage_gate_reason,
+        coverage_policy,
+        coverage_section_for_state,
+    )
+
+    try:
+        return coverage_gate_reason(
+            coverage_section_for_state(tool_context.tool_state),
+            on_incomplete=coverage_policy(tool_context, fallback=settings),
+        )
+    except Exception as exc:  # accounting is evidence, never a new way to crash a run
+        logger.warning("changed-line coverage could not be accounted for: {}", exc)
+        return None
+
+
 async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> MainResult:
     """Phase 4 — post-run, publish, outcome mapping (G4.2)."""
     assert ctx.tool_context is not None
@@ -2248,6 +2272,7 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
     )
     outcome: RunOutcome
     failure_reason: str | None
+    coverage_reason = _coverage_gate_reason(tool_context, settings)
     if ctx.budget_exhaustion is not None:
         from mergecraft.utils.run_bounds import budget_exhaustion_outcome
 
@@ -2280,6 +2305,7 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
             terminal_publication_receipt=publication_receipt,
             terminal_publication_mismatch=publication_mismatch,
             terminal_publication_unproven=_publication_unproven(tool_state),
+            coverage_incomplete_reason=coverage_reason,
         )
         if finalize_failure is not None and outcome is RunOutcome.inconclusive:
             failure_reason = (

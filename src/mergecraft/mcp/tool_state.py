@@ -87,6 +87,30 @@ class RepoToolState:
 
 
 @dataclass(slots=True)
+class CoverageRecord:
+    """What the run knows about which changed hunks reached the reviewer.
+
+    Written by the orchestrator (``checkout_pr``, the post-run loop), never by an agent.
+    ``authoritative_diff`` is the PR diff the checkout built; ``None`` means the run
+    had no checkout of its own, so the diff the reviewer was handed is the universe.
+    ``unreviewable_paths`` and ``diff_truncated`` record what the files API could not
+    deliver. The follow-up fields make the one bounded follow-up turn fire at most once
+    and keep the hunks it handed back covered.
+    """
+
+    authoritative_diff: str | None = None
+    unreviewable_paths: list[str] = field(default_factory=list)
+    diff_truncated: bool = False
+    followup_sent: bool = False
+    # While open, the reviewer may replace its recorded verdict once (the follow-up may change it).
+    followup_open: bool = False
+    followup_hunks: list[tuple[str, int, int]] = field(default_factory=list)
+    # Set when a follow-up was due but the run had no budget left for it.
+    budget_blocked: bool = False
+    budget_tracker: Any = None
+
+
+@dataclass(slots=True)
 class ProgressComment:
     id: str
     type: Literal["issue", "review"]
@@ -558,6 +582,8 @@ class ToolState:
     # The run fails closed on it; the record names it instead of the generic
     # missing-verdict reason.
     finalize_failure: str | None = None
+    # Changed-line coverage (#940): which hunks reached the reviewer, and the follow-up state.
+    coverage: CoverageRecord = field(default_factory=CoverageRecord)
 
     def iter_finding_rows(self) -> list[dict[str, Any]]:
         """Return every dict-shaped finding row across analyzer and agent lanes."""

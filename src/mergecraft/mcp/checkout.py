@@ -893,6 +893,21 @@ def _write_incremental_diff(
     return path, changed_paths_in_diff(diff)
 
 
+def _record_delivered_diff(
+    ctx: ToolContext, diff_text: str, *, unreviewable: list[str], truncated: bool
+) -> None:
+    """Record the diff this checkout built and what the files API could not deliver.
+
+    The coverage accounting at the end of the run reads it: the hunks in ``diff_text``
+    are the universe, ``unreviewable`` files had line changes but no patch, and
+    ``truncated`` means later files were never listed.
+    """
+    record = ctx.tool_state.coverage
+    record.authoritative_diff = str(diff_text)
+    record.unreviewable_paths = list(unreviewable)
+    record.diff_truncated = truncated
+
+
 def get_git_status(cwd: str) -> str:
     """Return porcelain status for *cwd* (monkeypatch hook for tests and callers)."""
     return _run_git(["status", "--porcelain"], cwd=cwd).strip()
@@ -994,6 +1009,9 @@ def checkout_pr_tool(ctx: ToolContext):
             )
             warning(fetch_degraded)
             Path(diff_path).write_text(fetch_diff, encoding="utf-8")
+            _record_delivered_diff(
+                ctx, fetch_diff, unreviewable=fetch_unreviewable, truncated=fetch_truncated
+            )
             state.issue_number = pull_number
             state.checkout_sha = head_sha
             from mergecraft.mcp.review_context import hydrate_review_context
@@ -1101,6 +1119,7 @@ def checkout_pr_tool(ctx: ToolContext):
             unreviewable = files_diff.unreviewable_paths
             diff_truncated = files_diff.truncated
         Path(diff_path).write_text(diff, encoding="utf-8")
+        _record_delivered_diff(ctx, diff, unreviewable=unreviewable, truncated=diff_truncated)
         from mergecraft.mcp.verdict import register_review_scope
 
         degraded_reason: str | None = None

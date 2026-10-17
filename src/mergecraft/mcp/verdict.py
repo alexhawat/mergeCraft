@@ -371,12 +371,23 @@ def record_validated_terminal_submission(
                 msg = f"terminal submission rejected: {validation.rejection_reason}"
                 raise ValueError(msg)
             return existing
-        ctx.tool_state.terminal_submission_conflict = True
-        msg = (
-            "terminal submission conflict: a different verdict payload was already "
-            "recorded for this run"
-        )
-        raise ValueError(msg)
+        coverage = ctx.tool_state.coverage
+        if coverage.followup_open and ctx.tool_state.review is None:
+            # The changed-line coverage follow-up handed the reviewer hunks it had not
+            # seen; it may replace its verdict once, before anything is published.
+            coverage.followup_open = False
+            logger.info(
+                "terminal submission replaced during the coverage follow-up ({} -> {})",
+                existing.verdict,
+                submission["verdict"],
+            )
+        else:
+            ctx.tool_state.terminal_submission_conflict = True
+            msg = (
+                "terminal submission conflict: a different verdict payload was already "
+                "recorded for this run"
+            )
+            raise ValueError(msg)
 
     validation = validate_submission(
         submission,

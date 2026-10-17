@@ -93,7 +93,12 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 #   sticky comment id that run owns. Both are written by the orchestrator from
 #   the run's own checkout and sticky state — never agent-controlled — and
 #   default to ``None``, so a packet built before this version still validates.
-PACKET_SCHEMA_VERSION = "1.13.0"
+# - 1.14.0 — changed-line coverage: the ``coverage`` section records how many
+#   changed hunks and lines reached the reviewer, which did not and why, and
+#   whether coverage was ``complete``. Written by the orchestrator from the run's
+#   own checkout and delivery state, never by an agent; defaults to ``None``, so a
+#   packet built before this version still validates.
+PACKET_SCHEMA_VERSION = "1.14.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
@@ -242,6 +247,49 @@ class ModePromptVersion(BaseModel):
     prompt_version: str
 
 
+UncoveredCause = Literal[
+    "diff_truncated",
+    "no_inline_patch",
+    "excluded_generated",
+    "not_delivered",
+    "budget_exhausted",
+]
+
+
+class UncoveredRange(BaseModel):
+    """One changed range (or file) that never reached the reviewer, and why.
+
+    ``start_line`` / ``end_line`` are new-side lines; both are ``0`` when the range is
+    unknown — a file GitHub sent line counts for but no patch, or the files beyond the
+    files-API page cap.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    start_line: int
+    end_line: int
+    cause: UncoveredCause
+
+
+class CoverageSection(BaseModel):
+    """Changed-line coverage: did every changed hunk reach the reviewer?
+
+    ``complete`` ignores ``excluded_generated`` rows (policy exclusions are listed but
+    do not count against completeness). ``hunks_total`` counts each unknown-range row as
+    one unreviewed hunk. Delivery is what is proven, not comprehension.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    hunks_total: int
+    hunks_covered: int
+    lines_total: int
+    lines_covered: int
+    uncovered: list[UncoveredRange]
+    complete: bool
+
+
 class MergeEvidencePacket(BaseModel):
     """The versioned, structured record of one mergeCraft run.
 
@@ -285,6 +333,9 @@ class MergeEvidencePacket(BaseModel):
     # the fields existed still validates.
     reviewed_head_sha: str | None = None
     progress_comment_id: int | None = None
+    # Changed-line coverage (#940), written by the orchestrator from the run's own
+    # checkout and delivery state. ``None`` when the run had no diff to account for.
+    coverage: CoverageSection | None = None
 
 
 def packet_output_schema() -> dict[str, Any]:
@@ -316,6 +367,19 @@ def packet_output_schema() -> dict[str, Any]:
     if isinstance(trajectory, dict) and "$ref" in trajectory:
         trajectory.clear()
         trajectory.update(TrajectoryRecord.model_json_schema())
+    coverage = schema.get("properties", {}).get("coverage")
+    if isinstance(coverage, dict):
+        ref = coverage.get("$ref") or next(
+            (
+                opt.get("$ref")
+                for opt in coverage.get("anyOf", [])
+                if isinstance(opt, dict) and "$ref" in opt
+            ),
+            None,
+        )
+        if ref:
+            coverage.clear()
+            coverage.update(CoverageSection.model_json_schema())
     run_health = schema.get("properties", {}).get("run_health")
     if isinstance(run_health, dict) and "$ref" in run_health:
         run_health.clear()
@@ -326,11 +390,14 @@ def packet_output_schema() -> dict[str, Any]:
 __all__ = [
     "PACKET_SCHEMA_VERSION",
     "AgentMetadata",
+    "CoverageSection",
     "Decision",
     "DeterministicCheck",
     "MergeEvidencePacket",
     "ModePromptVersion",
     "RunHealth",
     "SelfAssessment",
+    "UncoveredCause",
+    "UncoveredRange",
     "packet_output_schema",
 ]
