@@ -8,7 +8,6 @@
 # another.
 #
 docker/gh/dependencies.patch:generic-api-key:55
-plans/VERIFICATION.md:generic-api-key:126
 tests/agents/test_provider_config.py:generic-api-key:54
 tests/cli/test_provider_migrate_cmd.py:generic-api-key:52
 tests/scm/test_ingress_idempotency.py:generic-api-key:12
