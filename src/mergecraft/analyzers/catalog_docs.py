@@ -533,6 +533,12 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
                 "No markdownlint config → shipped fallback disables MD060 "
                 "(table-column-style) only."
             )
+        if manifest.id == "self-silencing":
+            notes.append(
+                "In-process, diff-only: reports added suppression markers and loosened "
+                "analyzer/linter config; a PR's own analyzer config is never applied to its "
+                "own review."
+            )
         if manifest.id == "gherkin-lint":
             notes.append(
                 "Syntax/structure only — never runs scenarios or step definitions. Opt-in: "

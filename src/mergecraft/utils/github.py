@@ -731,6 +731,38 @@ class GitHubClient:
         """List workflow runs for a check suite (every page, not only the first 100)."""
         return await self._list_workflow_runs(owner, repo, check_suite_id=check_suite_id)
 
+    async def list_workflow_runs_for_branch(
+        self,
+        owner: str,
+        repo: str,
+        branch: str,
+        *,
+        workflow_id: int | None = None,
+        per_page: int = 10,
+    ) -> ListedItems:
+        """List the newest completed workflow runs on ``branch`` (one page, newest first).
+
+        Deliberately a single bounded page: callers want the *recent* history of one
+        workflow on the base branch, not every run it ever had. ``incomplete`` is set
+        when GitHub reports more runs than were returned.
+        """
+        path = (
+            f"/repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs"
+            if workflow_id is not None
+            else f"/repos/{owner}/{repo}/actions/runs"
+        )
+        payload = await self.get(
+            path, params={"branch": branch, "status": "completed", "per_page": per_page}
+        )
+        runs = payload.get("workflow_runs") if isinstance(payload, dict) else None
+        items = [run for run in runs if isinstance(run, dict)] if isinstance(runs, list) else []
+        total = payload.get("total_count") if isinstance(payload, dict) else None
+        return ListedItems(
+            items=items,
+            incomplete=isinstance(total, int) and total > len(items),
+            total_count=total if isinstance(total, int) else None,
+        )
+
     async def list_workflow_runs_for_head_sha(
         self,
         owner: str,

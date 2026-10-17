@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.analyzers.dispositions import DispositionLedger
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import (
     AnalyzerRunKey,
@@ -78,6 +79,17 @@ def _load_diff_text(diff_path: Path | None, *, ctx: ToolContext) -> str:
         raise ValueError(msg) from error
 
 
+def _state_diff_text(ctx: ToolContext) -> str:
+    """The checkout's recorded full-PR diff, for analyzers that read the diff itself."""
+    raw = primary_repo_state(ctx.tool_state).diff_path
+    if not raw:
+        return ""
+    try:
+        return Path(raw).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
 def _resolve_tier(ctx: ToolContext) -> str:
     return ctx.trust_tier
 
@@ -111,6 +123,7 @@ def _merge_analyzer_segments(
     deferred_section: str | None = None
     pre_merge_summary: str | None = None
     lockfile_digest: str | None = None
+    ledger: DispositionLedger | None = None
     for segment in segments.values():
         for row in segment.findings:
             fingerprint = str(row.get("fingerprint") or "")
@@ -143,6 +156,10 @@ def _merge_analyzer_segments(
         deferred_section = segment.deferred_section or deferred_section
         pre_merge_summary = segment.pre_merge_summary or pre_merge_summary
         lockfile_digest = segment.lockfile_digest or lockfile_digest
+        if segment.dispositions is not None:
+            if ledger is None:
+                ledger = DispositionLedger()
+            ledger.merge(segment.dispositions)
     scope = latest.covered_scope or latest.key
     return AnalyzerRunState(
         ran=any(segment.ran for segment in segments.values()),
@@ -158,6 +175,9 @@ def _merge_analyzer_segments(
         verified_ids=verified,
         key=scope,
         covered_scope=scope,
+        dispositions=ledger,
+        settings_resolved_from=latest.settings_resolved_from,
+        settings_detail=latest.settings_detail,
     )
 
 
@@ -210,9 +230,11 @@ def run_analyzers_tool(ctx: ToolContext):
         diff_path = params.get("diff_path")
         diff_text = _load_diff_text(Path(diff_path) if diff_path else None, ctx=ctx)
 
-        from mergecraft.config import load_repo_settings
+        # #942 — analyzer settings come from the PR's base, never the head checkout.
+        from mergecraft.analyzers.settings_pin import resolve_pinned_analyzer_settings
 
-        settings = load_repo_settings(root=repo_root, load_learnings_files=False).analyzers
+        pinned = resolve_pinned_analyzer_settings(ctx, repo_root)
+        settings = pinned.settings
         offline = ctx.payload.event.trigger == "unknown"
         from mergecraft.analyzers.pipeline import run_analyzer_pipeline
 
@@ -258,10 +280,16 @@ def run_analyzers_tool(ctx: ToolContext):
                 # actually reaches the pipeline.
                 mode=ctx.analyzers_mode,
                 self_review_level=str(ctx.tool_state.trust_self_review_level or "off"),
+                analyzers_settings=settings,
+                settings_resolved_from=pinned.resolved_from,
+                settings_detail=pinned.detail,
+                adapter_diff_text=diff_text or _state_diff_text(ctx),
             )
             # N2 / D9 — record the covered selection this run is evidence for so
             # a later partial rerun supersedes only an equivalent scope.
             run_state.covered_scope = request_key
+        run_state.settings_resolved_from = pinned.resolved_from
+        run_state.settings_detail = pinned.detail
         _store_run_state(ctx, run_state)
 
         payload: dict[str, Any] = {
@@ -283,6 +311,16 @@ def run_analyzers_tool(ctx: ToolContext):
 
         scan_status = catalog_scan_status(run_state)
         payload["catalogScanStatus"] = str(scan_status)
+        if run_state.dispositions is not None:
+            summary = run_state.dispositions.summary()
+            payload["dispositions"] = {
+                "raw": summary.raw,
+                "kept": summary.kept,
+                "merged": summary.merged,
+                "downgraded": summary.downgraded,
+                "droppedByStage": summary.dropped_by_stage,
+                "orphanedHitIds": summary.orphaned,
+            }
         if not run_state.ran:
             payload["reason"] = run_state.reason or "analyzer catalog unavailable"
         if run_state.mechanical_section:

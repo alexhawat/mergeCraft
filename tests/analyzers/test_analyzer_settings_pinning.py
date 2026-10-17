@@ -59,7 +59,7 @@ def _pr_checkout(tmp_path: Path, *, base: str | None = _BASE_CONFIG, head: str =
     (repo / ".mergecraft").mkdir(exist_ok=True)
     (repo / ".mergecraft" / "config.yaml").write_text(head, encoding="utf-8")
     _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "head")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "head")
     return repo, base_sha
 
 
@@ -170,7 +170,7 @@ def test_a_symlinked_base_config_fails_closed_with_a_named_reason(tmp_path: Path
     (repo / ".mergecraft" / "config.yaml").unlink()
     (repo / ".mergecraft" / "config.yaml").write_text(_HEAD_CONFIG, encoding="utf-8")
     _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "head")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "head")
     ctx = _ctx(repo, base_sha=base_sha)
     _pin_run_start_snapshot(ctx, repo)
 

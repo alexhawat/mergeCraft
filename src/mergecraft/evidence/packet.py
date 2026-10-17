@@ -28,6 +28,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
 
+from mergecraft.analyzers.dispositions import (  # noqa: TC001 — pydantic field types
+    DispositionCounts,
+    DispositionEntry,
+    SuppressionAuditRow,
+)
 from mergecraft.analyzers.finding import Finding
 from mergecraft.classify import BlastRadiusClassification  # noqa: TC001
 from mergecraft.evals.eval_metadata import EvalMetadata
@@ -93,7 +98,12 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 #   sticky comment id that run owns. Both are written by the orchestrator from
 #   the run's own checkout and sticky state — never agent-controlled — and
 #   default to ``None``, so a packet built before this version still validates.
-PACKET_SCHEMA_VERSION = "1.13.0"
+# - 1.14.0 — adds the optional ``analyzers`` section: where the analyzer settings
+#   were resolved from (``resolved_from``) and the analyzer disposition ledger — one
+#   terminal disposition per raw analyzer hit, per-stage counts, the persisted
+#   baseline-suppression audit rows, and any orphaned hit ids. Additive; ``None``
+#   for a run that executed no analyzer.
+PACKET_SCHEMA_VERSION = "1.14.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
@@ -242,6 +252,34 @@ class ModePromptVersion(BaseModel):
     prompt_version: str
 
 
+class DispositionSection(BaseModel):
+    """One source's disposition ledger: every raw hit, its terminal fate and why (#941)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["catalog", "ci_sarif"]
+    counts: DispositionCounts
+    entries: list[DispositionEntry]
+    suppression_audit: list[SuppressionAuditRow] = Field(default_factory=list)
+    orphaned_hit_ids: list[str] = Field(default_factory=list)
+
+
+class AnalyzersEvidence(BaseModel):
+    """What the deterministic analyzers did, and under whose settings (#941, #942).
+
+    ``settings_resolved_from`` records where the analyzer settings came from, the same
+    way ``TrustPolicy.resolved_from`` is recorded: ``base_snapshot``, ``base_sha``,
+    ``run_start_snapshot``, ``defaults`` (a fail-closed fallback, with the reason in
+    ``settings_detail``) or ``live_load``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    settings_resolved_from: str | None = None
+    settings_detail: str | None = None
+    dispositions: list[DispositionSection] = Field(default_factory=list)
+
+
 class MergeEvidencePacket(BaseModel):
     """The versioned, structured record of one mergeCraft run.
 
@@ -285,6 +323,8 @@ class MergeEvidencePacket(BaseModel):
     # the fields existed still validates.
     reviewed_head_sha: str | None = None
     progress_comment_id: int | None = None
+    # #941/#942 — analyzer settings provenance and the disposition ledger.
+    analyzers: AnalyzersEvidence | None = None
 
 
 def packet_output_schema() -> dict[str, Any]:
@@ -326,8 +366,10 @@ def packet_output_schema() -> dict[str, Any]:
 __all__ = [
     "PACKET_SCHEMA_VERSION",
     "AgentMetadata",
+    "AnalyzersEvidence",
     "Decision",
     "DeterministicCheck",
+    "DispositionSection",
     "MergeEvidencePacket",
     "ModePromptVersion",
     "RunHealth",

@@ -404,3 +404,21 @@ def test_adapter_runs_it_and_skips_with_a_named_reason_without_a_diff(tmp_path: 
     assert skipped.skipped is True
     assert skipped.skip_reason
     assert "self-silencing" in skipped.skip_reason
+
+
+def test_minimal_fixture_diff_yields_its_documented_finding(tmp_path: Path) -> None:
+    import yaml
+
+    from tests.analyzers.support import FIXTURES_DIR
+
+    fixture = yaml.safe_load(
+        (FIXTURES_DIR / "self-silencing" / "self-silencing-minimal.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    findings = _scan(tmp_path, fixture["diff"])
+
+    assert [(f.rule_id, f.severity) for f in findings] == [
+        (fixture["rule_id"], fixture["severity"])
+    ]
