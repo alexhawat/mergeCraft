@@ -491,6 +491,10 @@ async def publish_deterministic_record(
             tool_state.usage_entries,
             budget_tracker=resolved_ctx.budget_tracker,
         ),
+        cost_summary=_cost_summary(
+            tool_state.usage_entries,
+            budget_tracker=resolved_ctx.budget_tracker,
+        ),
         llm_review_timing=tool_state.llm_review_timing,
         credential_degradations=list(tool_state.credential_degradations),
         agent_sandbox_decision=tool_state.agent_sandbox_decision,
