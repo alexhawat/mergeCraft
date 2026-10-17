@@ -33,7 +33,17 @@ def _case(
     lane: str = "normal",
     evidence: str | None = None,
 ) -> JudgeCalibrationCase:
-    fingerprint = f"fingerprint-{case_id}"
+    from mergecraft.agents.verifier import AgentFinding
+    from mergecraft.findings.agent_adapter import resolved_agent_fingerprint
+
+    draft = AgentFinding(
+        path="src/a.py",
+        body=f"finding {case_id}",
+        severity="Major",
+        line=3,
+        fingerprint=f"fingerprint-{case_id}",
+    )
+    fingerprint = resolved_agent_fingerprint(draft)
     human_severity = "Minor" if human == "downgrade" else None
     judge_severity = "Minor" if judge == "downgrade" else None
     outcome = None
