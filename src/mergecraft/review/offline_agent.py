@@ -328,6 +328,22 @@ async def run_offline_agent_review(
                 pin=settings.model_pin,
                 tool_state=tool_state,
             )
+            from mergecraft.review.roster_execution import run_pending_roster_reviewers
+
+            roster_summary = await run_pending_roster_reviewers(
+                tool_context=tool_context,
+                base_run_ctx=run_ctx,
+                settings=settings,
+                payload={
+                    "event": {"trigger": "unknown", "title": "offline diff-review"},
+                    "shell": shell,
+                    "push": "disabled",
+                    "prompt": prompt,
+                },
+                repo_root=cwd,
+            )
+            if roster_summary.hard_error:
+                result = replace(result, success=False, error=roster_summary.hard_error)
         promote_model_evidence(
             tool_state,
             requested_model=chain[0] if chain else model,
@@ -349,8 +365,32 @@ async def run_offline_agent_review(
         structured_output = tool_state.output
         markdown_output = result.output
         timing_snapshot = snapshot_llm_review_timing()
-        if timing_snapshot is not None:
-            tool_state.llm_review_timing = timing_snapshot
+        if timing_snapshot is None:
+            from mergecraft.utils.llm_review_timing import get_llm_review_timing_tracker
+
+            tracker = get_llm_review_timing_tracker()
+            if tracker is not None:
+                timing_snapshot = snapshot_llm_review_timing(tracker)
+        timing_payload = timing_snapshot.to_dict() if timing_snapshot is not None else None
+        if timing_payload is None:
+            from mergecraft.utils.llm_review_timing import (
+                LlmReviewTimingSnapshot,
+                format_llm_review_timing_line,
+            )
+
+            timing_payload = {
+                "per_reviewer": {},
+                "total_llm_seconds": 0.0,
+                "wall_seconds": 0.0,
+                "line": format_llm_review_timing_line(
+                    LlmReviewTimingSnapshot(
+                        per_reviewer_seconds=(),
+                        total_llm_seconds=0.0,
+                        wall_seconds=0.0,
+                    )
+                ),
+            }
+        tool_state.llm_review_timing = timing_payload
         packet_path = await asyncio.to_thread(
             _emit_offline_packet,
             tool_context,
@@ -360,7 +400,6 @@ async def run_offline_agent_review(
             structured_output=structured_output,
             output_path=evidence_packet_path,
         )
-        timing_payload = timing_snapshot.to_dict() if timing_snapshot is not None else None
         if outcome != RunOutcome.passed:
             return OfflineReviewResult(
                 success=False,

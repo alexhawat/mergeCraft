@@ -26,10 +26,22 @@ _SINK_SUFFIXES: frozenset[str] = frozenset({".log", ".txt", ".jsonl", ".ndjson"}
 _SINK_NAMES: frozenset[str] = frozenset({"stdout", "stderr", "output"})
 
 
-_HASH_EXCLUDE_DIRS: frozenset[str] = frozenset(
+# Directory *names* pruned at any depth, not just at the checkout root. Workspace
+# dependency prep (pnpm/yarn/npm) creates ``node_modules`` under every package —
+# ``apps/api/node_modules``, ``packages/*/node_modules`` — and pnpm can drop its
+# store in-tree as ``.pnpm-store``. Prep runs after the baseline, so hashing a
+# nested tree failed every workspace review closed. A nested worktree or submodule
+# keeps its own ``.git`` metadata directory for the same reason. Matched by
+# directory name only: the walk prunes ``dirnames``, so a regular *file* that
+# happens to share a name is still hashed.
+_HASH_EXCLUDE_DIR_NAMES: frozenset[str] = frozenset({".git", "node_modules", ".pnpm-store"})
+
+# Exact checkout-relative paths excluded from the digest, matched for directories
+# and files alike. Kept path-specific: ``evidence`` is a bare name here on purpose,
+# because turning it into an any-depth directory name would also drop a nested
+# directory of the same name that legitimately holds tracked files.
+_HASH_EXCLUDE_REL_PATHS: frozenset[str] = frozenset(
     {
-        ".git",
-        "node_modules",
         ".mergecraft/prep-scratch",
         ".mergecraft/analyzer-scratch",
         # Analyzer runtime files mergeCraft itself writes into the checkout when a gate
@@ -41,12 +53,17 @@ _HASH_EXCLUDE_DIRS: frozenset[str] = frozenset(
         ".mergecraft/analyzers.lock",
         ".mergecraft/analyzers.lock.lock",
         "evidence",
+        ".opencode",
+        "opencode-xdg-data",
     }
 )
 
 
 def _is_excluded_rel_path(rel: str) -> bool:
-    return any(rel == excluded or rel.startswith(f"{excluded}/") for excluded in _HASH_EXCLUDE_DIRS)
+    """Return whether a checkout-relative path is excluded from the digest."""
+    return any(
+        rel == excluded or rel.startswith(f"{excluded}/") for excluded in _HASH_EXCLUDE_REL_PATHS
+    )
 
 
 def _iter_tree_paths(root: Path) -> list[Path]:
@@ -61,7 +78,8 @@ def _iter_tree_paths(root: Path) -> list[Path]:
         dirnames[:] = [
             name
             for name in dirnames
-            if not _is_excluded_rel_path(Path(dirpath).relative_to(root).joinpath(name).as_posix())
+            if name not in _HASH_EXCLUDE_DIR_NAMES
+            and not _is_excluded_rel_path(Path(dirpath).relative_to(root).joinpath(name).as_posix())
         ]
         for name in dirnames:
             path = Path(dirpath) / name

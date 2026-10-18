@@ -210,6 +210,7 @@ class RunContext:
     setup_hook_failure: str = ""
     setup_script_skip_reason: str = ""
     setup_elapsed_s: float = 0.0
+    agent_deadline_monotonic: float | None = None
     mcp_url: str = ""
     stop_mcp: Callable[[], None] | None = None
     subagent_denied: list[str] = field(default_factory=list)
@@ -1913,6 +1914,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
         if agent_timeout_ms is None:
             winning_slug, result = await agent_task
         else:
+            ctx.agent_deadline_monotonic = time.monotonic() + agent_timeout_ms / 1000.0
             try:
                 winning_slug, result = await asyncio.wait_for(
                     agent_task, timeout=agent_timeout_ms / 1000.0
@@ -1936,6 +1938,31 @@ async def _dispatch_agent_with_deadline(ctx: RunContext) -> AgentResult:
     """
     winning_slug, result = await _run_agent_task_with_deadline(ctx)
     return _promote_and_finalize_agent_result(ctx, winning_slug, result)
+
+
+async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> str | None:
+    """Dispatch secondary reviewers server-side; return a hard error message."""
+    assert ctx.tool_context is not None
+    assert ctx.tool_state is not None
+    assert ctx.settings is not None
+    assert ctx.run_ctx is not None
+    if ctx.tool_state.selected_mode not in {"Review", "IncrementalReview"}:
+        return None
+    from mergecraft.review.roster_execution import run_pending_roster_reviewers
+
+    def _remaining_roster_timeout_s() -> float | None:
+        if ctx.agent_deadline_monotonic is None:
+            return None
+        return max(1.0, ctx.agent_deadline_monotonic - time.monotonic())
+
+    summary = await run_pending_roster_reviewers(
+        tool_context=ctx.tool_context,
+        base_run_ctx=ctx.run_ctx,
+        settings=ctx.settings,
+        payload=ctx.payload,
+        remaining_timeout_s=_remaining_roster_timeout_s,
+    )
+    return summary.hard_error
 
 
 async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentReview:
@@ -1987,7 +2014,13 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
 
     with gha_log.group("agent-dispatch"):
         await _prepare_agent_dispatch(ctx)
-        return await _dispatch_agent_with_deadline(ctx)
+        result = await _dispatch_agent_with_deadline(ctx)
+        roster_error = await _run_server_roster_reviewers_if_needed(ctx)
+        if roster_error:
+            from dataclasses import replace
+
+            result = replace(result, success=False, error=roster_error)
+        return result
 
 
 _SINK_SCAN_ARTIFACT_SOURCES: tuple[str, ...] = (
