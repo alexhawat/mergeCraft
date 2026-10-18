@@ -24,8 +24,13 @@ changelog section.
    dist: its `build-dist` job installs the wheel outside the checkout, attests its
    provenance and uploads `artifact-python-dist`, which `craft publish` reads.
    See [Where the dist artifact comes from](#where-the-dist-artifact-comes-from).
-3. Tag the candidate as an RC (Craft/`pre-0.0.1` promotes images to `:rc`,
-   never `:latest`). Do **not** call the cut stable yet.
+3. Tag the candidate as an RC (Craft/`pre-0.0.1` promotes images to `:rc`). CI/CD
+   owns `:latest`/`:analyzers` and promotes them from `main` only; `.craft.yml`
+   deliberately carries no `*-latest` targets, because Craft's `docker` target has
+   no preview detection and copies every configured target unconditionally
+   (`src/targets/docker.ts`, `publish()` → `copy()`, pinned `getsentry/craft`
+   `3f2abdc5`). A release moves only `:<version>` and `:analyzers-<version>`. Do
+   **not** call the cut stable yet.
 
 ## Where the dist artifact comes from
 

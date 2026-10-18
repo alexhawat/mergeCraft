@@ -10,9 +10,7 @@
 docker/gh/dependencies.patch:generic-api-key:55
 plans/VERIFICATION.md:generic-api-key:126
 tests/agents/test_provider_config.py:generic-api-key:54
-tests/cli/test_auth_logfire_cmd.py:generic-api-key:573
 tests/cli/test_provider_migrate_cmd.py:generic-api-key:52
-tests/cli/test_tracing_logfire_cmd.py:generic-api-key:366
 tests/scm/test_ingress_idempotency.py:generic-api-key:12
 tests/security/test_clone_hardening.py:generic-api-key:195
 tests/security/test_credential_theft.py:generic-api-key:28

@@ -7,49 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- Code-measured LLM review generation time in every posted review record and CLI
-  JSON/text output (`⏱ LLM review time: …`), including per-reviewer breakdown
-  when multiple reviewers run (#983).
-- `mergecraft workflow provider add` wires harness providers without a custom base
-  URL using `LLM_PROVIDER_<N>: <label>` plus provider-specific credential env keys
-  (for example `OPENCODE_GO_API_KEY` for `opencode-go`).
-- `mergecraft agent assign-model` on the committed roster registers missing models,
-  auto-wires harness providers into `mergecraft.yml`, and updates `with.model` for
-  p0 assignments.
-- OpenCode Zen / Go subscription billing via `mergecraft provider auth opencode`
-  (or `mergecraft auth opencode`): stores the same `auth.json` shape OpenCode
-  CLI uses (`OPENCODE_AUTH_JSON` / indexed `LLM_PROVIDER_<N>_OPENCODE_AUTH_JSON`).
-  The opencode harness writes that file under an isolated `XDG_DATA_HOME` for
-  `opencode serve` / `opencode run` and reinjects `OPENCODE_API_KEY` when needed.
-  OpenCode Zen authenticates with billing-backed API keys, not OAuth device
-  tokens like Codex — see [OpenCode Zen](https://opencode.ai/docs/zen/).
-
-### Removed
-
-- The MCP server no longer mounts a webhook endpoint; a signed delivery was
-  verified but processed nothing, and its replay window could never fire.
-
-- Provider circuit-breaker, health, budget and routing-eval helpers that no
-  review path called are removed.
-
-- Four context-retrieval modules no review path imported are removed.
-
 ### Changed
 
-- Agent entries with `dispatch: ensemble` or `shadow` are refused as not
-  implemented instead of being accepted and ignored.
-
-- `mergecraft policy` help and enforcement docs state that a review run does not
-  enforce policy rules.
-
-- Recorded Jev transports and the canary assertion moved out of the runtime
-  package into the test suite.
-
-- A prepared release branch keeps `server.json`'s advertised package version in
-  step with `pyproject.toml`, so the branch no longer fails its own
-  `mcp-server-json-check` drift gate.
 - A mistyped tracing sink (`tracing-to`, `MERGECRAFT_TRACING_TO` or `--tracing-to`
   with a typo such as `logfier`) now ends the run as `configuration_error` on the
   Action and exits with the configuration code on the CLI, naming the variable and
@@ -77,7 +36,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replayable: `inconclusive_rate` falls from 0.0816 to 0.0204 (3 of 49 cases were
   permanently blocked), with no behaviour change (#892).
 
-### Breaking
+### Fixed
+
+- A workspace review no longer fails closed with "checkout integrity failure:
+  tree changed during read-only review" when dependency prep creates nested
+  `node_modules`. pnpm/yarn/npm lay down `apps/api/node_modules`,
+  `packages/*/node_modules` and the like (and pnpm can drop `.pnpm-store`
+  in-tree), all after the integrity baseline, so the hash now prunes those
+  directory names at any depth instead of only at the checkout root. A nested
+  `.git` metadata directory is pruned the same way.
+- Multi-reviewer rosters now dispatch secondary reviewers server-side when the
+  primary harness never spawns them, fail closed with a clear error when a
+  secondary cannot reach its provider, and always emit the `⏱ LLM review time`
+  line (including a zero-second fallback when no LLM calls were timed).
+- Exporting findings no longer crashes when a model supplies a slug-style
+  `fingerprint`; non-hex values are normalized to a stable lowercase hex digest
+  at write time.
+- `submit_review_verdict` drops malformed draft findings instead of rejecting
+  the whole terminal submission when one pre-recorded row is invalid.
+- Checkout integrity hashing skips nested `node_modules`, `.pnpm-store`, run
+  `evidence`, and OpenCode session dirs at any depth so harness scratch writes
+  during read-only review no longer trigger exit 12.
+- A retired Codex subscription login ("refresh token was already used") is reported as
+  `infra_error` with *reviewer credential expired - re-authenticate* and the commands
+  that fix it, in the check summary and the run record, instead of an unexplained red
+  check. There is no scheduled canary: probing the login refreshes it (#922).
+- The carry-over workflow no longer falls back to the forgeable `github-actions[bot]`
+  login for `MERGECRAFT_REVIEWER_BOT_LOGIN`; an unconfigured App yields an empty login (#913).
+- `config tracing` lists the config files it read and agrees with `doctor` and
+  `config explain` about `config.local.yaml` and a missing `MERGECRAFT_CONFIG`; the
+  flag, environment and YAML precedence is unchanged (#919).
+- A column-0 comment between items of a top-level sequence no longer leaves trailing
+  items behind when the comment-preserving config writer replaces the key (#920).
+- Commands Codex, Claude and OpenCode run natively are recorded on the trajectory with
+  their exit status, so a failing command, a timeout and a later passing re-run are
+  visible to the auditor; environment and transient failures carry a named class.
+  Recording never fails a tool call and changes no review decision (#858).
+- `tests/mcp/test_rpc.py` no longer leaves a fake package version cached for later
+  tests (#1006).
+
+## [0.1.0a3] — 2026-10-17
+
+### Breaking — action required
 
 - The built-in Nous Portal provider is gone: the `nous/...` catalog models,
   `mergecraft auth nous`, and the flat `NOUS_API_KEY` credential no longer
@@ -112,2068 +112,885 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its value. **Fix:** correct the spelling; `MERGECRAFT_TRACING_REGION` still
   accepts `us` and `eu`.
 
-### Fixed
+- The MCP server no longer mounts a webhook endpoint. **Fix:** none — a signed
+  delivery was verified but processed nothing, and its replay window could never
+  fire, so no review path consumed the route.
 
-- The OpenCode harness hands its isolated `XDG_DATA_HOME` tree to the
-  unprivileged agent user before `setpriv` drops privileges. The action
-  entrypoint creates `.../opencode/auth.json` as root, so the dropped CLI failed
-  with `EACCES: permission denied, mkdir '.../opencode/log'` whenever
-  `OPENCODE_AUTH_JSON` was wired.
+- Provider circuit-breaker, health, budget and routing-eval helpers that no
+  review path called are removed. **Fix:** none — none of them was reachable
+  from a review.
 
-- `harness_env_for_active_provider` bridges a provider's flat workflow credential
-  to the harness env name when the indexed value is absent, so an `opencode-go`
-  run with only `OPENCODE_GO_API_KEY` set re-injects `OPENCODE_API_KEY` instead
-  of starting the CLI without a credential.
+- Four context-retrieval modules no review path imported are removed. **Fix:**
+  none — no review path imported them.
 
-- An offline review called as a library without a findings file now asks the
-  model for structured findings, as the CLI always does. It used to ask for a
-  markdown review and then reject it as malformed findings, so any model that
-  followed the prompt failed.
-- A review whose agent calls `run_analyzers` on a host without a sandbox no
-  longer fails closed with "checkout integrity failure: tree changed during
-  read-only review". The gate's output in `.mergecraft/analyzer-runs/` and the
-  provisioning lock `.mergecraft/analyzers.lock` (with its `.lock` sidecar) are
-  files mergeCraft itself writes into the checkout, so the integrity hash now
-  skips those three exact paths, as it already skipped `analyzer-scratch` and
-  `prep-scratch`. Every other file under `.mergecraft/` is still covered.
-- The Action images ship OpenCode 2.x (`@opencode/cli` 2.0.29) for every model
-  routed through the OpenCode harness (Nous, OpenCode Zen and Go, MiniMax,
-  TokenHub, custom providers). OpenCode 2.x moved its server API, so on 2.x a
-  review runs through `opencode run` in a private server per run and resumes the
-  same session for follow-up turns. OpenCode 1.x keeps the previous path.
+- Agent entries with `dispatch: ensemble` or `shadow` are refused as not
+  implemented instead of being accepted and ignored. **Fix:** use a `dispatch`
+  mode that is implemented; `ensemble` and `shadow` are refused.
 
-- The hardened example workflow's approval gate now receives only the review
-  verdict, not the whole evidence packet. On a large pull request the packet
-  exceeded the size one environment variable may hold, so the gate could not
-  start. Workflows copied from the example before this change should take the
-  new `REVIEW_VERDICT` line.
-
-- The Codex reviewer now runs in the repository it reviews. An offline review
-  started from another directory failed at once, because Codex refuses to run
-  outside a git repository.
-
-- The self-review passes each review step's evidence packet to later steps as a
-  file. A large pull request's packet exceeded the size one environment
-  variable may hold, so the verdict step could not start and an approving
-  review was recorded as no verdict.
-
-- Both Action images replace the brace-expansion and undici copies bundled
-  inside npm with their patched releases, pinned by checksum. No npm release
-  ships the fixes yet, and the old copies carried three HIGH advisories.
-
-- A self-review re-run on a job token now picks up the earlier run's checkpoint and
-  progress comment. The reader looked for a packet file name the workflow never
-  uploads, so every re-review started again from scratch. It now reads the file
-  each review step uploads, preferring the last step that ran.
-
-- `doctor`, `config show` / `config explain` and the config loader now agree on
-  which files contribute. `config.local.yaml` is reported outside CI, and a
-  `MERGECRAFT_CONFIG` that points at a missing file is reported by key and
-  filename instead of "no config file (defaults apply)".
-
-- `doctor` fails before printing anything when its rendered output would contain
-  a credential value, naming the environment key and never the value.
-
-- Comment-preserving config writes replace a top-level key in place instead of
-  appending a second copy, so a repeated write no longer duplicates a mapping or
-  a list (for example `models:` or `providers:`), and a list no longer unions its
-  old and new values.
-
-- `provider status --json` and `health --json` carry the shared
-  `schema_version: "1.0.0"` stamp; `provider status` keeps its existing
-  `schemaVersion: 1`. `health` now describes what it checks — liveness plus the
-  resolved telemetry mode, not a readiness probe.
-
-- Logfire workflow wiring accepts the lowercase `alexhawat/mergecraft@<ref>`
-  spelling the docs print, while still refusing similarly-prefixed forks and an
-  empty ref.
-
-- `watch` and the review comment's run link honour `GITHUB_API_URL` /
-  `GITHUB_SERVER_URL` for GitHub Enterprise hosts. `watch` also emits a timeline
-  event that carries no id once instead of on every poll.
-
-- Workflow failure annotations are escaped before they reach the command stream,
-  so a newline or `%` in a pull-request title or an exception message can no
-  longer inject a workflow command or a log group.
-
-- The unused hosted-plan residue is gone: the two `AccountPlan` vocabularies, the
-  context `plan` field and the `proxyModel` producers and consumers were removed,
-  none of which had a reader. `api_token`, the remote upload path, the local
-  upload fallback and the provider catalog are unchanged.
-
-- Provider commands read `.env` values the same way the CLI startup load does, so
-  a single-quoted value no longer keeps its surrounding quotes and `export `,
-  inline comments and `${VAR}` interpolation mean the same thing to every reader
-  of the file.
-- A retired Codex subscription login ("refresh token was already used") is reported as
-  `infra_error` with *reviewer credential expired - re-authenticate* and the commands
-  that fix it, in the check summary and the run record, instead of an unexplained red
-  check. There is no scheduled canary: probing the login refreshes it (#922).
-- The carry-over workflow no longer falls back to the forgeable `github-actions[bot]`
-  login for `MERGECRAFT_REVIEWER_BOT_LOGIN`; an unconfigured App yields an empty login (#913).
-- `config tracing` lists the config files it read and agrees with `doctor` and
-  `config explain` about `config.local.yaml` and a missing `MERGECRAFT_CONFIG`; the
-  flag, environment and YAML precedence is unchanged (#919).
-- A column-0 comment between items of a top-level sequence no longer leaves trailing
-  items behind when the comment-preserving config writer replaces the key (#920).
-- Commands Codex, Claude and OpenCode run natively are recorded on the trajectory with
-  their exit status, so a failing command, a timeout and a later passing re-run are
-  visible to the auditor; environment and transient failures carry a named class.
-  Recording never fails a tool call and changes no review decision (#858).
-- `tests/mcp/test_rpc.py` no longer leaves a fake package version cached for later
-  tests (#1006).
-
-### Added
-
-- `mergecraft review --capture-verdicts` (or `MERGECRAFT_CAPTURE_VERDICTS=1`)
-  persists every saved verifier verdict — including ones that end in `drop`,
-  which never publish and so cannot be reconstructed afterwards — as one
-  redacted line per verdict in `judge-verdicts.jsonl` beside the run's evidence
-  packet, in the calibration-case shape the judge-calibration tooling reads.
-  Capture is off by default, so an ordinary review writes nothing new.
-
-- A self-review's incremental checkpoint and progress-comment identity can come
-  from the workflow run itself: when the latest successful `pull_request_target`
-  run of the self-review workflow left an evidence artefact, its
-  `reviewed_head_sha` and sticky-comment id drive the checkpoint and the round
-  index. A workflow definition that exists only on a pull-request branch cannot
-  produce such a run, so the identity is not forgeable by the PR author.
-
-- `mergecraft eval trajectory-gate` reads an approved trajectory protocol —
-  pre-registered minimums per check plus a tolerance — and compares a candidate
-  report against a frozen baseline, failing and naming any check outside the
-  tolerance. Until a protocol is approved it reports `no approved protocol —
-  advisory` and exits 0.
-
-- Human golden-batch manifests declare their own batch id and case list, so a
-  later batch can be reviewed without a code change; the first batch's nine case
-  ids stay pinned as a frozen fixture.
-
-- Behaviour-verification reports record which driver produced them — `cdp`,
-  `stub`, or unset when not recorded — so a report says whether its page came
-  from a real browser or the non-browser fallback.
-
-- OpenCode plugin at `integrations/opencode/plugins/mergecraft/`: registers the
-  public MCP server, overrides `/mergecraft/review` with the configured engine,
-  redacts credentials from prompts, keeps the reviewer subagent read-only and
-  on-doctrine (`permission.evaluate` forces `edit`/`shell` to deny without
-  weakening a configured deny), bounds mergecraft shell timeouts, and emits one
-  `mergecraft.review.native` Logfire span per native review when a write token is
-  present.
-
-- `mergecraft opencode install` copies the commands, subagents, and plugin into
-  `.opencode/` (or `~/.config/opencode/` with `--global`), writes the V2
-  `mcp.servers.mergecraft` block, and sets `harness: opencode` in
-  `.mergecraft/config.yaml`. `mergecraft opencode doctor [--strict]` reports
-  whether the CLI, assets, config, MCP block, JEV credential, and Logfire token
-  are wired.
-
-- First-class OpenCode integration under `integrations/opencode/`: `/mergecraft/*`
-  slash commands for six review engines (native, cli, deep, mcp, quick,
-  thirdparty), a read-only `mergecraft/reviewer` subagent, a `mergecraft/fixer`
-  subagent for the review-only loop, and an `opencode.jsonc` template. The
-  generated `skills/opencode/mergecraft/SKILL.md` now carries an
-  OpenCode-specific install section instead of the generic body.
-
-- `docs/opencode.md` documents the integration: engine selection, commands,
-  subagents, V2 MCP wiring, JEV scope, and Logfire tracing.
-
-### Security
-
-- The Claude reviewer can no longer read the run's credential material. The
-  driver denies reads of the runner's file-command mounts, the runner home and
-  other processes' environments, writes the Codex auth file root-only, and
-  records a run warning when a `Read`, `Glob` or `Grep` call names a path outside
-  the checkout and the run's own temporary directory.
-
-- The review job declares `actions: read`, and no review rung falls back to the
-  shared `github-actions[bot]` login when no reviewer App is configured.
-
-### Changed
-
-- The local `.env` file and the tracing environment layer are read through one
-  typed model each, so a variable's exact name and type live in one place and a
-  new environment read has a defined home. Behaviour is unchanged apart from the
-  two entries above.
+- The `sarif_upload` action input no longer declares a default, so an unset
+  input reaches `.mergecraft/config.yaml`'s `analyzers.sarifUpload` as
+  intended. **Fix:** set `sarif_upload` (or `analyzers.sarifUpload`) explicitly
+  if you relied on the implicit `disabled`.
 
 - Progress comments are recognised by the identity that published them, not by
-  any bot: the sticky selector uses the run's expected-publisher set, or the
-  sticky id recorded by a trusted self-review run, and never falls back to
-  matching any bot-authored comment. **Breaking:** when neither identity is
-  available, a run creates a new progress comment rather than adopting an
-  existing bot-authored one, so a repository whose sticky was posted by the
-  shared Actions bot starts a fresh comment — and with it a fresh ledger —
-  instead of reusing the old one.
+  any bot. When neither the expected publisher nor a trusted self-review sticky
+  id is available, the run creates a new progress comment — and with it a fresh
+  ledger — rather than adopting a comment posted by the shared Actions bot.
+  **Fix:** none required; pin the reviewer App (or the self-review workflow) if
+  you want the existing sticky adopted.
 
-- The built wheel no longer ships seven test-, script- and eval-support modules
-  that no runtime caller imports (`evals/mcp_public.py`,
-  `evals/quality_metrics.py`, `evals/skill_taxonomy_gate.py`, `utils/git_ref.py`,
-  `integrations/live_providers.py`, `mcp/codegen.py`, `scm/errors.py`). Each is
-  still present in the checkout for the script, Make and test callers that use
-  it.
+- Enterprise audit events are no longer written to `.mergecraft/audit.jsonl`
+  inside the workspace by default. **Fix:** set `MERGECRAFT_AUDIT_ROOT`, or read
+  from the new default location.
 
-- The Gemini and Codex harness deny lists name the `push_branch` tool the way
-  each CLI documents it, matching the spelling the other harnesses already used.
+- Every exit under `src/mergecraft/cli/` now routes through named constants and
+  usage errors exit `2`. **Fix:** scripts that branched on exit code `1` for
+  generic CLI failures must follow the new table — most former `1` paths now
+  exit `30`; see [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md).
 
-- The release regression gate now fails when a run adds failed or inconclusive
-  cases, instead of scoring only what survived: a detection half whose every
-  case failed no longer reads as a perfect `1.0`, and a release candidate
-  missing a half the baseline carries fails instead of skipping it.
+### Known limitations
 
-- Finding matching against a baseline maximises the number of matched issues, so
-  recall no longer changes when baseline issues are reordered; the scorer
-  version is now `1.1.0`.
+- Evaluation in this release is structural replay only, not live detection, and
+  no human-adjudicated, calibrated or benchmarked result ships in it.
 
-- `docs/mcp.md` OpenCode install now shows the OpenCode V2 shape — servers nested
-  under `mcp.servers` with `disabled`, not the V1 top-level `mcp` map with
-  `enabled` — and includes the `opencode mcp add` one-liner.
+Full long-form history, including the entries condensed or omitted here:
+[docs/dev/changelog-archive.md](docs/dev/changelog-archive.md#010a3--long-form-entries).
 
-- `skills/harnesses.yaml` OpenCode row gains an `install_section` covering
-  commands, subagents, MCP, and JEV/Logfire, so the generated package matches the
-  install path OpenCode actually reads (`.opencode/skills/`).
+### Added
 
-- `mergecraft eval publish-benchmark` validates two saved provider runs against
-  an approved campaign manifest, independently adjudicated label and judge
-  receipts, immutable artifact and model identities, shared protocol pins, and
-  cost ceilings before writing a non-overwritable machine summary and report.
-  This is offline publication preparation: no approved human-labelled campaign,
-  live comparative result, benchmark claim, or release is included.
+- Code-measured LLM review generation time in every posted review record and CLI JSON/text output (`⏱ LLM review time: …`), including per-reviewer breakdown when multiple reviewers run (#983).
 
-- `mergecraft verify-behavior` now drives a real Chrome over the DevTools
-  Protocol and scores each acceptance criterion and reproduction claim through
-  Jev, instead of refusing every run. A reachable host Chrome yields a live
-  driver; an unreachable endpoint still fails closed, with a named, readable
-  skip in both the test run and the report. The report states what a green
-  verify does and does not prove (#752).
+- `mergecraft agent assign-model` on the committed roster registers missing models, auto-wires harness providers into `mergecraft.yml`, and updates `with.model` for p0 assignments.
 
-- `mergecraft jev enable|disable|status|set` configures the Jev advisory
-  screening gate. `enable` writes only `jev.enabled: true` — every other
-  value keeps coming from `JevSettings` defaults, so a later default change
-  still reaches repos that never pinned their own. `enable --github` /
-  `disable --github` open a PR against the default branch, mirroring
-  `trust set-self-review --gh-apply`, and `status --github` reports whether
-  the default branch has it on and whether the `TYPESAFE_API_KEY` Actions
-  secret is present. `set` round-trips any single value through
-  `JevSettings` and refuses an invalid one (a floating model alias, a
-  non-positive budget) before writing. YAML comments in an existing config
-  survive every write (#786).
+- Human golden-batch manifests declare their own batch id and case list, so a later batch can be reviewed without a code change; the first batch's nine case ids stay pinned as a frozen fixture.
 
-- Offline reviews now render a Jev summary section when Jev is enabled: a
-  collapsed table of per-unit predictions when it ran, or the recorded
-  `jev_skip_reason` (`credential_absent`, `kill_switch`) when it did not —
-  previously nothing surfaced that gap, so a missing credential looked
-  identical to a clean run. The section always states Jev is advisory
-  (`enforced` is always `false`) and never implies its thresholds are
-  calibrated. With Jev disabled, review output is unchanged (#786).
+- Behaviour-verification reports record which driver produced them — `cdp`, `stub`, or unset when not recorded — so a report says whether its page came from a real browser or the non-browser fallback.
 
-- Order-dependent test coupling now surfaces on a scheduled, non-blocking
-  unit-suite run whose seed is the per-run `github.run_id`, so a pinned seed
-  no longer hides it. `MERGECRAFT_PYTEST_RANDOM_SEED` is set only on the
-  `schedule` / `workflow_dispatch` path; PR runs keep the pinned `424242` and
-  the job adds no required check (#776).
+- `docs/opencode.md` documents the integration: engine selection, commands, subagents, V2 MCP wiring, JEV scope, and Logfire tracing.
 
-- Jev architecture checklist helpers (`jev/architecture.py`, `jev/pack_registry.py`):
-  fan-out question merge, answer+confidence routing, per-pack state filtering with
-  untrusted nonce fencing, and model/usage logging on every System One call.
-  Maintainer doc: `docs/jev-architecture-checklist.md`.
+- `mergecraft verify-behavior` can reproduce a bug or check a running app and write a versioned report under `.mergecraft/artifacts/`.
 
-- Bare CLI command names open a TTY interactive session. `mergecraft`,
-  `mergecraft review`, and groups such as `mergecraft provider` offer a menu
-  (or a review wizard) when stdin is a TTY. Scripts, CI, piped invocations,
-  and any invocation that already passes flags keep today's non-interactive
-  behaviour. Missing required arguments are prompted on a TTY instead of
-  failing with Click's "Missing argument". `mergecraft config set` writes
-  `models` / `tracing.enabled` into `.mergecraft/config.yaml`.
+- A versioned behaviour-verification report (`schema_version` 1.0.0) records what was observed, which criteria passed, and what blocked the run — without turning those results into code findings (#61)
+
+- Reviews can ingest declared coverage receipts and report change-risk scores on the functions the PR actually touched, advisory by default (#714)
+
+- Opt-in Jev / System One client (`jev.enabled`, default off) with cost accounting, a kill-switch, and GenAI spans; a missing TypeSafe key records a skip and does not fail the review (#728)
+
+- Parallel shadow judge grades review findings and prose against their cited evidence without replacing the reviewer (#728)
+
+- `mergecraft review --tracing-content` and Action `tracing-content` set the capture level without editing YAML
+
+- Multiple reviewer-role bindings run on one PR; findings merge by path/body/line and produce exactly one verdict with strictest severity winning
+
+- `mergecraft workflow sync` keeps `.github/workflows/mergecraft.yml` auth wiring aligned with roster models; unwired providers fail at CLI write time and at run start
+
+- First `mergecraft provider auth` after `init` seeds `agents.reviewer` p0 so review works with no third command
+
+- `docs/agent-roster.md` — operator guide for slots, named agents, local scope, multi-reviewer verdict rules, and the run-start trust snapshot
+
+- `establish_review_scope` — evidence-backed second route into review scope when a materialized diff already describes the PR head
+
+- Read-only git MCP verbs (`show-ref`, `for-each-ref`, `ls-remote`, `config --get`) and `checkout_pr` parameter aliases (`pr_number`, `issue_number`)
+
+- Agent stream logs render human-readable lines instead of dumping raw provider NDJSON.
+
+- `Finding.scope` (`change` | `run`, default `change`) and `FindingSource` `"trajectory"` so trajectory auditor rows are attributed as process evidence, not PR defects
+
+- Job step summary (`GITHUB_STEP_SUMMARY`) written from `_publish` with outcome, pre-merge rows, and findings — capped at GitHub's 1 MiB with the header intact
+
+- Evidence packet persisted to a workflow artifact on every review rung (`if: always`, 30-day retention) so the packet survives runner teardown
+
+- `MERGECRAFT_ACTION_SHA` workflow variable — one pin definition shared by all three review rungs, with `make action-pin-check` enforcing staleness and rung parity (#532)
+
+- Action image digest pin gate (`action-image-digest-check`) and halved `wait-for-ci` poll cadence (20s → 10s, #528)
+
+- `mergecraft tracing logfire wire-workflow --region us|eu` writes `MERGECRAFT_TRACING_REGION` into the wired step's `env:`.
+
+- `mergecraft provider disable <label>` clears a provider's credentials so GitHub CI stops using it, without hand-editing secrets or workflow YAML.
+
+- `mergecraft provider enable <label>` names the authenticate half of that toggle; it delegates to the existing `provider auth` flow (#520)
+
+- Offline public MCP tool-selection eval corpus under ``evals/mcp-public/`` with fixture prompts and deterministic scorer ``mergecraft.evals.mcp_public`` (no live LLM in ``make test``)
+
+- `make action-pin-check` also measures the pin against the default branch's own tip, not just against the other branch's pin.
+
+- `make action-pin-check` guards the self-review Action pin against drift.
+
+- Open-PR finding ledger in the sticky progress comment — `mergecraft findings ledger --pr N` inspects inline, deferred, withdrawn, and unpublished fingerprints without filing GitHub issues
+
+- Optional recall pass (`review.recallPass`, default off) dispatches `mergecraft-recall` after aggregation; novel findings always publish in the deferred lane
+
+- Optional round-aware budgets (`review.roundBudgets`) scale token, cost, tool-call, and subagent ceilings by review round; defaults stay flat until opted in
+
+- Lens execution recording on `ToolState`, review metadata, and merge-evidence packets; findings may carry optional `lens` attribution
+
+- Collateral lists on `Critical` and `Major` findings name callers, tests, and other files that must move with the fix; inline comments render them under **Also update:**
+
+- `make lint` checks that jobs calling local reusable workflows grant at least the permissions the callee declares, catching ``startup_failure`` permission mismatches at authoring time (#425)
+
+- Consumer glossary (`docs/glossary.md`) — plain-language definitions for trust tier, typed findings, blast radius, and related landing-page terms; manifest row and `llms.txt` entry.
+
+- Runnable CLI example trees under `examples/cli/` (local diff, branch range, patch file, and `--agent` JSONL) with `make cli-examples` / `cli-examples-check` and `docs/cli-examples.md` tour page
+
+- Agent-loop reference workflow (`docs/agent-loop.md`) for `mergecraft review --agent` (#383)
+
+- CLI and GitHub Action runs now enter one review engine over one immutable snapshot (#380)
+
+- `mergecraft explain`, `ask`, and `replay` plus `run inspect` / `run diff` print output-only change, line Q&A, and stored-run views (#377)
+
+- `mergecraft review --agent` negotiates protocol version against CLI JSON `schema_version` (both fields kept, aliased), reports retryable mismatches, and names token/cost/tool-call budgets (#379)
+
+- `mergecraft review --agent` streams the first finding before the verdict; `--use-cache` and `--resume` reuse a local result cache; cancelling a review cleans up child processes (#378)
+
+- `llms-full.txt` generated concatenation plus docs pin/link gate (`make llms-check`, folded into `make docs-check`).
+
+- Added: generated CLI and Action reference pages (`docs/cli.md`, `docs/action-reference.md`) plus a docs manifest; `make docs-check` replaces landing-README table splices.
+
+- Review specialists now report unique useful findings plus latency, cost, precision, and recall (#370)
+
+- `.mergecraft/config.yaml` now carries a `schema_version`; unversioned files migrate on load, unknown versions fail closed, and deprecated keys warn before a breaking removal (#368)
+
+- `mergecraft doctor --supply-chain` verifies lockfile reproducibility, bundled agent-CLI provenance, and analyzer version pins; every run manifest now records runtime and tool versions (#366)
+
+- `mergecraft requirements inspect` and `explain` map ticket and local-spec text to requirement states without writing the reviewed tree; policy can require that evidence before a review passes (#352)
+
+- `mergecraft describe` prints an output-only PR title, summary, walkthrough, risk, labels, TODOs, effort band, split advice, and similar-change notes (#351)
+
+- `mergecraft capabilities` prints the review-only capability manifest (modes Review, IncrementalReview, Plan; identify / investigate / verify / explain / prioritize / suggest) (#350)
+
+- Python 3.11 floor ADR (#343, option A): `docs/dev/python-version-floor.md` records parenthesize-now / binary-later.
+
+- `osv-scanner` detect globs now include `uv.lock`, so repos using uv's lock file trigger vulnerability scanning without pip-audit (#309)
+
+- docs: `flake8` and `pylint` catalog entries note they are legacy opt-in; enabled via config override only (#309)
+
+- Catalog manifests for `knip` (JS/TS unused exports/dependencies, `scope: repo`, `category: quality`) and `vulture` (Python dead code, `scope: repo`, `category: quality`) (#337)
+
+- `detekt` flipped to `default_enabled: auto`; activates on any `*.kt` or `*.kts` change, or when `detekt.yml` is detected — provides the default Kotlin lint path (#317)
+
+- `sqlfluff` flipped to `default_enabled: auto`; activates on any `*.sql` change or `.sqlfluff` config presence — skips silently when no SQL dialect is declared (#319)
+
+- `stylelint` flipped to `default_enabled: auto`; activates on any `*.css`/`*.scss` change or `stylelint.config.js`/`.stylelintrc.json` presence — provides the default CSS lint path (#320)
+
+- `htmlhint` flipped to `default_enabled: auto`; activates on any `*.html` change or `.htmlhintrc` presence — provides the default HTML lint path (#321)
+
+- `checkmake` flipped to `default_enabled: auto`; activates on any `Makefile`, `makefile`, or `*.mk` change — provides the default Make lint path (#325)
+
+- `markdownlint` flipped to `default_enabled: auto`; activates on any `*.md` change or `.markdownlint.json`/`.markdownlint.yaml` presence — provides the default Markdown lint path (#326)
+
+- `luacheck` flipped to `default_enabled: auto`; activates on any `*.lua` change or `.luacheckrc` presence — provides the default Lua lint path (#328)
+
+- `fortitude` flipped to `default_enabled: auto`; activates on Fortran files (`*.f90`, `*.f95`, `*.`, `*.f03`, `*.f`, `*.for`) or `.fortitude.toml` — provides the default Fortran lint path (#329)
+
+- `regal` flipped to `default_enabled: auto`; activates on any `*.rego` change — provides the default Rego/OPA policy lint path (#330)
+
+- `psscriptanalyzer` flipped to `default_enabled: auto`, adds `*.psd1` detect glob, and sets `supports_fix: true` — provides the default PowerShell lint and auto-fix path (#331)
+
+- `blinter` flipped to `default_enabled: auto`; activates on `*.bat`/`*.cmd` changes — provides the default Windows Batch lint path (#332)
+
+- `smarty-lint` flipped to `default_enabled: auto`; `ANALYZERS.md` notes that `*.tpl` is ambiguous (Go templates, Terraform) — enable only when `.smarty-lint.json` confirms Smarty intent (#334)
+
+- `ember-template-lint` flipped to `default_enabled: auto`, sets `supports_fix: true`; gates on `ember-cli-build.js` or `ember-source` in `package.json` — bare `*.hbs` files do not trigger it (#335)
+
+- `phpcs` and `phpmd` remain `default_enabled: false`; catalog entries note they are legacy opt-in — `phpstan` (auto) is the default PHP signal (#316)
+
+- `brakeman` flipped to `default_enabled: auto` with tight Rails detection — only activates on Rails marker files (`config/application.rb`, `config/routes.rb`), never on plain Ruby repos (#313)
+
+- New catalog manifest for `bundler-audit` (Ruby gem vulnerability audit, `category: vuln`, `scope: repo`, detects on `Gemfile.lock`) (#313)
+
+- `scripts/check_type_ignores.py` fails when a `type: ignore` or `cast(` in allowed `src/mergecraft/` lacks a one-line reason (#275); wired into `make lint`
+
+- `scripts/check_xpass.py` fails when unexpected pytest xpasses remain on the allowed test tree (#276)
+
+- xpass ratchet now runs as a `pytest_sessionfinish` conftest hook inside the coverage-gate pytest session — no standalone log file or extra CI step (#276)
+
+- docs: README requirements and `docs/distribution.md` Marketplace copy state that mergeCraft 0.1.0 is GitHub-only; GitLab support is planned via the `ScmProvider` abstraction (#279)
+
+- Added: a test-only provider-harness fixture schema and strict matcher (`tests/support/provider_harness`) so deterministic review tests can name the exact provider interaction they expect.
+
+- Added: provider-harness recording workflow and operator docs (`docs/dev/provider-harness.md`); opt-in sanitized capture under.
+
+- Repository context engine indexes per-file symbols (tree-sitter with generic fallback), provenance citations, and trust-gated instruction/skill discovery under `mergecraft.context`
+
+- Call graph, change graph (changed symbol → dependents → tests → contracts), and `mergecraft context inspect` for provenance-backed context retrieval
+
+- `mergecraft policy lint|test|explain` — validate policy rules, run should-trigger/should-not fixtures, and list effective rules with source layers
+
+- Per-run budgets, bounded external-operation timeouts, and honest large-diff degradation (`RunBounds`, scope reduction reports, downgraded outcomes) for offline and Action reviews
+
+- precision corpus gate (`evaluate_dg1_precision_corpus`) replays the corpus and compares confirmed precision against the pre-DG1 baseline
+
+- `mergecraft mcp serve` and `mergecraft mcp list` expose the reviewer's MCP tool surface to external clients without widening trust tier or tool-class policy
+
+- Named review profiles (`--profile fast|deep|security`) bundle model chain, analyzer focus, and run budgets; explicit CLI flags still win
+
+- `mergecraft cache info|clear|prune` inspect and maintain the byte-bounded on-disk run cache
+
+- `mergecraft doctor` diagnoses git, provider credentials, analyzer detection, auth, config, and MCP port availability without printing secrets
+
+- `mergecraft config show|explain|validate` generalizes precedence inspection beyond tracing; local private-repo reviews ship no remote telemetry by default
+
+- `mergecraft plan` previews model chain, toolset, analyzer detection, and token estimate without provider calls
+
+- Run manifest fingerprints (model/CLI versions plus prompt, config, and policy hashes) for reproducible offline reviews
+
+- `mergecraft review` machine contract: distinct process exit codes per `RunOutcome`, `--format text|json|jsonl|sarif`, and `--agent` JSONL streaming with an explicit `protocol_version`
+
+- Added tracer baseline attributes (`mergecraft.run_id`, `mergecraft.version`, `mergecraft.trust_tier`, VCS and CI fields) merged into spans at close time, with explicit attributes taking precedence
+
+- Added review-context env propagation into spawned agent CLI subprocesses, so subagent runs join the parent review's trace identity
+
+- Added richer tool-call tracing: `gen_ai.tool.call.id` correlating request and response, per-call duration, and an MCP-vs-native origin distinction
+
+- Added `mergecraft eval gate` — a release regression gate comparing a candidate result set against baseline with a declared tolerance band, wired as a blocking job in the release workflow
+
+- Added agent registry binding model, prompt, toolset and budget per role with `mergecraft agents list|show|set` and `make agents-check`
+
+- Added registry-driven harness render for Claude, OpenCode, Codex, Gemini, and Cursor with per-agent models and declared Codex degradation in run metadata
+
+- Added typed specialist handoff and model-diversity policy for verification.
+
+- Added change classifier and risk-based lens routing with recorded per-lens reasons in Review mode
+
+- Promoted 20 themed review lenses from Review prose into registry entries with `mergecraft lens list|show|test`
+
+- Added pluggable orchestrator with declarative pipeline file, trust gate for untrusted sources, and `mergecraft pipeline lint|show|explain`
+
+- Added declared decision nodes for hybrid orchestration — typed triviality, lens selection, and finding disposition seams with pipeline-owned control flow
+
+- Added: optional `harness` setting (`opencode` / `codex` / `claude` / `gemini` / `cursor`) to select the agent runtime independently of provider/model.
+
+- Added: terminal-verdict protocol shadow mode (`gates.terminal_verdict`, default `shadow`) with a closed `VerdictDiagnostic` vocabulary; enforce still applies the fail-closed missing-verdict branch
+
+- Added: `submit_review_verdict` — a typed MCP operation that records a review's terminal verdict (`approve` / `request_changes`), summary and structured findings.
+
+- Published Python distributions are installed outside the checkout and carry build provenance before upload
+
+- `pre-commit` blocks newly added large files and private keys, and scans staged changes for secrets with `gitleaks`
+
+- `make test-durations` refreshes the committed `.test_durations` that least-duration sharding balances by
+
+### Changed
+
+- Agent entries with `dispatch: ensemble` or `shadow` are refused as not implemented instead of being accepted and ignored.
+
+- `mergecraft policy` help and enforcement docs state that a review run does not enforce policy rules.
+
+- Recorded Jev transports and the canary assertion moved out of the runtime package into the test suite.
+
+- A prepared release branch keeps `server.json`'s advertised package version in step with `pyproject.toml`, so the branch no longer fails its own `mcp-server-json-check` drift gate.
+
+- The local `.env` file and the tracing environment layer are read through one typed model each, so a variable's exact name and type live in one place and a new environment read has a defined home.
+
+- The Gemini and Codex harness deny lists name the `push_branch` tool the way each CLI documents it, matching the spelling the other harnesses already used.
+
+- Finding matching against a baseline maximises the number of matched issues, so recall no longer changes when baseline issues are reordered; the scorer version is now `1.1.0`.
+
+- `mergecraft verify-behavior` now drives a real Chrome over the DevTools Protocol and scores each acceptance criterion and reproduction claim through Jev, instead of refusing every run.
+
+- `mergecraft jev enable|disable|status|set` configures the Jev advisory screening gate.
+
+- Order-dependent test coupling now surfaces on a scheduled, non-blocking unit-suite run whose seed is the per-run `github.run_id`, so a pinned seed no longer hides it.
+
+- Bare CLI command names open a TTY interactive session.
 
 - A second gate policy (prompt 2.0.0) records through the existing recorder.
-  The optional keyless job replays two hard-coded packets; it does not run a
-  model and leaves #737 open. The live review path never enforces a shadow
-  prediction.
 
-- Production false positives and human dismissals can be ingested into the eval
-  bank as versioned cases, each carrying explicit provenance. Ingest refuses a
-  case without provenance, refuses to record a human label that has not passed
-  independent adjudication, and drops a case rather than minting a label.
-  Ingested cases participate as structural replay cases only, never as
-  calibration labels (#738).
+- Production false positives and human dismissals can be ingested into the eval bank as versioned cases, each carrying explicit provenance.
 
-### Changed
+- Consumer setup guidance now lists every file produced by `mergecraft init` that may be committed: the config, learnings file, workflow, and added `.gitignore` lines.
 
-- Consumer setup guidance now lists every file produced by `mergecraft init`
-  that may be committed: the config, learnings file, workflow, and added
-  `.gitignore` lines. Authentication remains an interactive human step.
+- CLI `--json` payloads carry their own schema version, decoupled from the review snapshot's. Both stay `1.0.0`, so no payload changes; the two can now be bumped independently (#777).
 
-- The critical-path and per-prefix coverage floors are rebaselined from one
-  complete 2026-09-22 measurement at integrated HEAD `157f57a3`. Module line
-  and branch floors use separate counts with a two point buffer; prefix line
-  floors use two points and branch floors three points. `utils/token.py`
-  measures 95.7% line and 93.2% branch, yielding floors of 93.7% and 91.2%.
-  No current floor is lower than the prior PR #817 baseline, and the native
-  combined global `fail_under = 82` is unchanged. Report hashes, runtime,
-  counts and every floor delta are recorded in `plans/COVERAGE-BASELINE.md`
-  (#771, #797, #824).
+- `mergecraft jev enable` now requests `TYPESAFE_API_KEY` when it is not already set and writes it to `.env`.
 
-- CLI `--json` payloads carry their own schema version, decoupled from the
-  review snapshot's. Both stay `1.0.0`, so no payload changes; the two can now
-  be bumped independently (#777).
+- Review records, sticky progress comments, and the Actions step summary now show input and output token counts separately instead of one combined total (#801)
 
-- `mergecraft jev --help` (and each `enable` / `disable` / `status` / `set`
-  `--help`) now documents every command and option, including the
-  `TYPESAFE_API_KEY` local `.env` and Actions-secret paths (#803)
+- `make test` no longer runs the nine branch-walking `test_cov_*` suites: they carry a new `coverage` marker and the `make test` selector is now `-m "not integration and not coverage"`.
 
-- `mergecraft jev enable` now requests `TYPESAFE_API_KEY` when it is not
-  already set and writes it to `.env`. `enable --github` also stores the
-  key as the `TYPESAFE_API_KEY` Actions secret when a key is available
-  and the secret is missing (#803)
-
-- Review records, sticky progress comments, and the Actions step summary now
-  show input and output token counts separately instead of one combined total
-  (#801)
-
-- `make test` no longer runs the nine branch-walking `test_cov_*` suites: they
-  carry a new `coverage` marker and the `make test` selector is now
-  `-m "not integration and not coverage"`. They still run under
-  `make coverage-measure` and `make ci`, so the coverage number is no longer
-  inflated by suites filed among the product tests. The critical-path
-  `utils/token.py` floor stays in `MODULE_FLOORS` unchanged: removing it would
-  leave the token authentication path with no module-level branch check at all
-  (the tree-wide `fail_under` is a line floor), so it is retained until
-  behavioral tests and a measured replacement floor can land together (#771,
-  #797).
-
-- The coverage/mutation CI gate's `enforce` mode is now exercised under test —
-  both `shadow` and `enforce`, asserting the gate action and `reaches`. It had
-  shipped dark, so the branches deciding whether a finding blocks a merge had
-  never run. `review_policy/` and five production modules gained behavioral
-  suites, the `EvalMetadata` verdict vocabulary gained a rejection case, and
-  stale `xfail` markers tagged to a closed issue were deleted (#766, #767,
-  #768, #770).
+- The coverage/mutation CI gate's `enforce` mode is now exercised under test — both `shadow` and `enforce`, asserting the gate action and `reaches`.
 
 - The action-pin bump workflow no longer advertises a push it cannot perform.
-  `stage=pin` rewrites `.github/workflows/`, which GitHub refuses from a
-  `GITHUB_TOKEN` push by construction, so it prepares the four consumer
-  references in the runner and prints the exact local `make action-pin-prepare`
-  command instead; `stage=manifest` keeps its push but emits a Conventional
-  Commit subject inside the 72-character cap, and the workflow header drops the
-  claim that it automates the cycle's mechanical half (#749, #750).
 
-- PR #742 drops Playwright as the behaviour-verification driver. Live browsing
-  binds to `mergecraft.browser` (custom browser-use + JEV) and fails closed
-  until the CDP driver is wired (#752). The `mergecraft[browser]` extra and
-  `playwright==1.63.0` pin are removed (#752, #61)
-- `mergecraft verify-behavior` fails closed when the browser-use stack is
-  unavailable, even with `--artifacts-dir` / `--input`; `--allow-stub` is the only
-  stub opt-in (#61, #752)
-- `verify_behavior.enabled: false` skips the run (kill switch); default remains
-  enabled so invoking the CLI still runs on a trusted checkout (#61)
+- PR #742 drops Playwright as the behaviour-verification driver.
 
-- `verify_candidate` verifies the commit that introduced an image digest rather
-  than whichever commit the candidate range happens to end at. It treated any
-  commit whose `action.yml` image differed from the base as a freshly minted
-  manifest, and `verify_manifest` requires such a commit to differ from its
-  image source in `action.yml` alone — so a forward-port, a sync, or the merge
-  commit a manifest PR lands as was rejected outright. The introducing commit is
-  substituted only when the candidate's `action.yml` is identical to it, so
-  neither a digest minted mid-branch nor a later Action change riding on a
-  legitimate digest escapes verification (#684).
+- `mergecraft verify-behavior` fails closed when the browser-use stack is unavailable, even with `--artifacts-dir` / `--input`; `--allow-stub` is the only stub opt-in (#61, #752)
 
-- markdownlint follows the `markdownlint-cli` 0.49.1 bump: the catalog pin tracks
-  the engine, so it moves 0.37.4 → 0.41.1. A markdownlint `warning` now grades
-  **Minor** instead of Major — the parser reads the per-finding `severity` that
-  0.49.1 emits rather than hardcoding `error`, and an unrecognised severity
-  grades as `error` with a log line instead of failing the whole run. The engine
-  bump also enables `MD060` (`table-column-style`) by default. This repo's
-  `.markdownlint.json` disables it; consumers with no markdownlint config get
-  the same MD060-only disable via the shipped `markdownlint-default-config.json`
-  fallback, and a run note records that the fallback applied so operators can
-  tell repo-rules-clean from fallback-clean. A consumer whose own config
-  enables MD060 still gets it (#704).
+- `verify_behavior.enabled: false` skips the run (kill switch); default remains enabled so invoking the CLI still runs on a trusted checkout (#61)
 
-- trufflehog no longer reports secrets from virtualenv trees (`.venv`,
-  `.venv-dev`, `site-packages`) or four named intentional fixtures; each
-  fixture suppression names why it is exempt, and a newly committed secret
-  under `tests/` still fires.
+- `verify_candidate` verifies the commit that introduced an image digest rather than whichever commit the candidate range happens to end at.
 
-### Fixed
+- `trust.agentSandbox` ladder (`never` / `merged-only` / `dispatch` / `same-repo`) with `mergecraft trust show` and `mergecraft trust set-agent-sandbox` (#553)
 
-- A Review run that records its verdict now publishes exactly one GitHub
-  review from it, with the recorded findings as inline comments. A recorded
-  verdict that never reached GitHub reads `inconclusive` with its own reason
-  instead of passing, and a later attempt whose verdict differs from the review
-  already posted on the same head is reported as a mismatch naming both
-  verdicts rather than silently skipped. Findings that GitHub did not show
-  inline are listed. Each fresh run still posts its own review.
+- `docs/trust-policy.md` documents the sandbox override ladder, fork floor, and residual risks
 
-- Auto-resolving earlier review threads now requires the thread's line to have
-  changed (or GitHub to mark it outdated), every comment to come from the
-  run's expected publisher (never the shared Actions bot), and the finding to
-  be absent from the whole submission, including findings demoted to the body
-  or deferred. With no known publisher, nothing is resolved and the run says so.
-  A missing or malformed resolve response no longer counts as resolved.
+- Action `logfire-token` exports to `MERGECRAFT_LOGFIRE_TOKEN` before the Logfire sink initialises (#551)
 
-- Issue-comment and pull-request-review listings page through every result up
-  to the page cap and report `incomplete` when the cap cuts them, so the newest
-  reviews are no longer dropped after the first hundred.
+- Actions-visible warning when tracing targets Logfire but no token resolves (#551) #### Fixed
 
-- An unknown or missing trust tier is treated as `untrusted` everywhere,
-  including a tool context built without one. A malformed run timeout keeps a
-  finite chain deadline with a warning, and a failed closing-issues lookup is
-  reported as unavailable instead of as "no closing issues".
+- Self-review on PRs that edit `.mergecraft/config.yaml` publishes again after the publication guard re-baselines the config hash post-`checkout_pr` (#584)
 
-- Review prompts name only tools that exist and only finding fields the schemas
-  accept: every registered tool name is interpolated, so it renders as the
-  harness's real tool reference; the `collateral` list is gone (collateral still
-  renders in the inline body as the **Also update:** list); and the
-  classifier-router paragraph naming `classify_change`, `route_lenses` and
-  `selected_lens_ids` is removed.
+- Nous and custom gateway providers are detected when only `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` is set (#552)
 
-- Prompts no longer bake in a budget: the inline cap renders from
-  `analyzers.inlineBudget`, the verifier cap is described as
-  `review.verificationBudget` scaled per round by `review.roundBudgets`, and the
-  stale diff-coverage-nudge note and the Fix-button rationale are gone.
+- Bubblewrap namespace failures surface once as a non-blocking run observation instead of inflating the packet gate with repeated Major findings (#553)
 
-- The recorded prompt version now reflects the rendered prompt the reviewer
-  actually received, so two runs configured with different inline budgets record
-  different versions.
+- Entropy redaction no longer strips proven benign analyzer shapes — sweep evidence at `docs/dev/15-w6-entropy-sweep-report.json` (#537) #### Changed
 
-- A configured inline budget of `0` is honoured everywhere: the offline analyzer
-  pre-pass, the pipeline fallback and the rendered prompt now agree, instead of
-  the pre-pass silently using the default.
+- #553 boundary amended from the `pull_request_target` event to fork heads — same-repo `pull_request_target` may grant the override at `same-repo` tier
 
-- The review doctrine states the Python 3.11 install floor, and the `push`
-  input, the compatibility matrix and the review checks describe review-only
-  behaviour — no value grants commit or push.
+- Claude backstop no longer runs when an earlier rung succeeds or posts a verdict including `neutral` — only retryable rung failures without a verdict trigger Claude (#600) #### Changed
 
-- Documentation links and glossary anchors resolve on GitHub (the glossary's
-  `{#id}` headings become real anchors), and the operator-facing `MERGECRAFT_*`
-  knobs are documented in `docs/cli.md`.
+- Same-repo `pull_request_target` self-review runs trusted-tier analyzers when `trust.selfReview` is `analyzers` — execution trust without widening approval authority
 
-- CI failures with no evidence of cause are now reported as **unattributed** —
-  blocking, with `introduced_by_pr: unknown` — instead of being cleared as
-  not-this-PR. A passing or unrecognised base-branch status no longer clears a
-  failure: only a same-fingerprint base run that concluded `failure` does, and
-  one base-branch status can no longer clear more than one cluster
-  (per-fingerprint base runs can). "Pre-existing" now requires the base run to
-  have failed, and its summary names the ref and what that run concluded.
-  Failure paths come only from failure lines — `FAILED`/`ERROR` with a node,
-  line-start `path:line:`, and `path(line,col)` — with root-level files,
-  `(line,col)` and `./` forms accepted and normalised on both sides of the diff
-  comparison, so passed tests, collection lines and command echoes no longer
-  produce a blame path. The pre-merge CI row and the run payload report an
-  unattributed count.
+- Declared CI SARIF artifacts are downloaded and recorded when `wait-for-ci` reaches `state=complete` (green or red).
 
-- A negated acceptance criterion — "No error is shown", "Error is not shown" —
-  no longer passes against a page that shows the error: it is left unverified
-  with a named reason, and a negated reproduction claim is partial rather than a
-  false reproduction.
+- Action log phases (setup, model chain, agent dispatch, publish) emit collapsible `::group::` blocks in GitHub Actions logs #### Added
 
-- `--allow-stub` permits the stub only when the browser stack is unavailable and
-  logs why, instead of bypassing a reachable browser.
+- Dogfood config sets `trust.agentSandbox: same-repo` so Codex `danger-full-access` is honoured on same-repo review runs (#553)
 
-- Every agent CLI driver and the OpenCode server boot no longer hang when a
-  child fills its stderr pipe. Each driver drains stderr concurrently with the
-  stdout stream it already reads, keeping the two pipes separate so the
-  stream-json parse is unchanged and the stderr tail still reaches failure
-  diagnostics; the buffer is bounded and tail-kept.
+- CI SARIF ingest covers actionlint, zizmor, semgrep, and trufflehog alongside ruff, mypy, and bandit — matching `ci.yml` uploads and `ciEvidence.sarifArtifacts` (#464)
 
-- OpenCode server boot no longer blocks the event loop in a blocking
-  `readline()`. The process group is registered at spawn, both pipes are
-  drained from spawn, and boot waits on a URL event under its deadline, so a
-  server that logs a full pipe's worth of stderr before printing its URL now
-  starts instead of timing out, and a hung, exited or cancelled boot kills,
-  unregisters and reaps the group.
+- TruffleHog CI evidence converts JSONL to SARIF so a clean scan uploads a valid empty-results document with tool metadata, not a blank file
 
-- OpenCode falls back to the alternate prompt endpoint only on 404 or 405. Any
-  other error status is reported once, unretried, so a 429 or 5xx can no
-  longer start a second agent turn on the same session.
+- Hardened consumer template forwards wait-for-ci outputs and grants `actions: read` for ciEvidence SARIF ingest
 
-- The Claude and Gemini reviewers can no longer write files, run shell tools or
-  fetch the web. Their write, edit, shell and web tools are denied
-  unconditionally, including the subagent forms, matching the review-only
-  product boundary; permission prompting stays skipped in headless CI because
-  the deny list is the boundary.
+- `evals/README.md` Harbor install pin is `v0.1.0a1`, and live detection is documented as `mergecraft review` (Harbor still calls the hidden `diff-review` alias)
 
-- Tracing no longer clears a bound data-residency allowlist. The tracer factory
-  reads the bound enterprise block instead of re-binding it, makes no
-  enterprise call at all on the disabled path, and scopes repo settings to
-  sink construction only when nothing is bound.
-
-- The OTLP span recorder is a test-only seam again: it is installed on a
-  provider only when a test fixture enables it, never from an environment
-  variable, its payload list is bounded, and the module-level header copy masks
-  sensitive values instead of keeping a bearer token in a global.
-
-- The sticky progress comment keeps the finding ledger and the learnings delta
-  across the final deterministic-record write, so a later run hydrates every
-  prior record instead of losing it. A later run reuses the existing progress
-  comment rather than posting a second one, and only bot-authored comments are
-  read as progress state. The run record names the reviewer slot skipped for
-  missing credentials and the model that produced the recorded verdict, instead
-  of claiming no reviewer ran.
-
-- Managed analyzer caches and the semgrep pip install now live under the
-  operator's cache directory (`$XDG_CACHE_HOME`, else `~/.cache`, plus
-  `mergecraft/analyzer-cache`) instead of `<repo>/.mergecraft/`, so a pull
-  request can no longer commit a binary, a lock row and a receipt that the fast
-  path would then execute. A cache root that resolves inside the checkout is
-  refused with a named skip rather than used. The checkout's
-  `.mergecraft/analyzers.lock` is still written and digested for the pre-merge
-  row, but it never authenticates a binary: a cache hit now requires a receipt
-  binding the archive pin and the extracted binary's digest together. A lock row
-  missing a required key is skipped with a warning instead of raising, and a
-  lock write stages to a temporary file and renames into place under a sidecar
-  lock, so a failed write leaves the previous lock intact.
-
-- Analyzer findings are attributed to the file that actually caused them again.
-  `diff --git` headers are parsed with Git's C-style quoting, the path is taken
-  from `rename to` / `+++ b/` when present, and a header that cannot be parsed
-  drops its hunks instead of attaching them to the previous file. A SARIF URI
-  that points outside the repository is kept verbatim and labelled
-  `outside repository root` rather than shortened to a basename that may name an
-  unrelated file, and the CI trufflehog producer now emits
-  repository-relative URIs.
-
-- The `run_analyzers` tool confines `repo_root` to a directory the run already
-  registered as a checkout, and rejects a supplied `diff_path` that escapes the
-  authorized roots, is missing, is not a regular file, or is not valid UTF-8 —
-  each with a named reason and without running an analyzer. Previously an
-  out-of-root path was ignored in silence and the pipeline ran unscoped.
-
-- Negative memory that cannot be read no longer aborts a trusted run: malformed
-  rules and audit entries are skipped per entry, an unreadable store reports
-  every finding instead of suppressing them, and the audit trail is bounded.
-  The `sarif_upload` action input no longer declares a default, so an unset
-  input now reaches `.mergecraft/config.yaml`'s `analyzers.sarifUpload` as
-  intended; a consumer relying on the implicit `disabled` should set the input
-  or the config key explicitly.
-
-- Offline local diff materialization skips mergeCraft's generated
-  `.mergecraft/analyzer-cache/` entries before per-file untracked diff
-  generation, preventing a populated managed cache from adding thousands of
-  subprocess calls while preserving ordinary untracked source and tracked
-  changes (#829).
-
-- Managed analyzer provisioning failures now retain a bounded, redacted final
-  cause in logs and skip results, distinguishing transient GitHub release
-  outages from checksum, redirect, and other provisioning failures without
-  exposing credentials or download URLs (#825).
-
-- Persisted review trajectories redact secrets while retaining exact, safe
-  read-path attribution and ordinary repository filenames (#819, #823, #827). Terminal verdicts use normalized, deduplicated typed
-  findings, and publication retry state clears only after a matching scope/head
-  receipt is stored.
-
-- GitHub App runs mint separate least-privilege API, Git, and cross-repository
-  tokens. Cleanup attempts to revoke every internally minted token.
-
-- Coverage gates use native line/branch metrics and accept only complete,
-  fingerprinted shard sets. A single run trace covers setup through publication
-  across Action, offline, and MCP execution.
-
-- Evaluation records round-trip without dropping corpus data and write
-  atomically after validation. Offline tools prepare human-review batches,
-  score exact trajectory rule/path multiplicities, and support a sealed
-  judge-calibration protocol. The new trajectory fixtures are agent-seeded
-  development data and are ineligible for quality claims; actual human
-  validation, live-model benchmarking, release verification, and publication
-  remain pending.
-
-- The keyless shadow job is a fixture replay of two hard-coded packets. It
-  does not read a live review and leaves #737 open.
-- A live shadow row records the model on the packet (the slug that ran, else
-  the configured reviewer). When the packet has no model, the row leaves it
-  unset instead of claiming Claude.
-
-- `mergecraft eval ingest --from-dismissals` turns recorded dismissal signals
-  into structural eval cases. A dismissal is stored as `agent-seeded`, not as
-  a human label (#738).
-
-- The deterministic run record no longer publishes an approval-shaped verdict
-  when no credentialed reviewer ran: a skipped reviewer credential renders the
-  record `inconclusive` (the GitHub check conclusion stays `neutral`),
-  `Outcome` / `Verdict diagnostic` / `Decision` are reconciled so they cannot
-  disagree, and the record names which analyzers ran or were withheld and
-  whether a credentialed reviewer participated. The self-review roster points
-  at the workflow-wired `nous/tencent/hy3` provider instead of the unwired
-  synthetic `auto/efficient` (#775).
-
-- Resetting the MCP shell sandbox cache tolerates a patched capability probe —
-  it clears the probe cache only when a callable `cache_clear` is present — so
-  test-isolation teardown no longer errors.
-
-- `mergecraft verify-behavior` stays inert on a fork or `pull_request_target`
-  Actions event instead of always skipping the trust gate (#61)
-
-- `mergecraft review --verification-report` does not load a report on an
-  untrusted checkout, including when a workflow treats the workspace as trusted
-  (#61)
-
-- Verify criteria are scored per criterion; reproduce matches page text to
-  repro notes; `--start-command` retries navigate while the app comes up (#61)
-
-- Codex no longer lets a stale ambient `CODEX_AUTH_JSON` override a resolved
-  registry API key: the flat subscription fallback applies only when the
-  registry resolved no Codex credential, so the broker stays active and the
-  selected key is used instead of a stale `auth.json` (#711)
-
-### Added
-
-- `mergecraft verify-behavior` can reproduce a bug or check a running app and
-  write a versioned report under `.mergecraft/artifacts/`. It stays inert on an
-  untrusted tier or when `shell: disabled`. Optional YAML `actions` drive
-  click / fill / type (#61, #752)
-
-- A versioned behaviour-verification report (`schema_version` 1.0.0) records
-  what was observed, which criteria passed, and what blocked the run — without
-  turning those results into code findings (#61)
-- `mergecraft review --verification-report` (also `diff-review`) consumes a
-  behaviour-verification report, fences it before the prompt, and renders
-  results in a separate section — not as code findings. A blocked report
-  stays visible; no report leaves the review unchanged (#61)
-- Reviews can ingest declared coverage receipts and report change-risk scores on the functions the PR actually touched, advisory by default (#714)
-- Reviews can ingest declared mutation survivors the same way; local `mergecraft review --with-coverage` / `--with-mutation` require `--shell enabled`, wrap live tool runs in the existing sandbox backend (or refuse), and refuse a fork checkout (#714)
-
-- Opt-in Jev / System One client (`jev.enabled`, default off) with cost
-  accounting, a kill-switch, and GenAI spans; a missing TypeSafe key records a
-  skip and does not fail the review (#728)
-- Parallel shadow judge grades review findings and prose against their cited
-  evidence without replacing the reviewer (#728)
-
-- mergeCraft review loads `.github/skills/code-review/` as a self-contained
-  Agent Skills payload — `SKILL.md` plus one-level `references/` resolved into
-  the `REVIEW SKILLS` prompt section, with a 64 KiB instruction-bundle cap,
-  taxonomy/spec drift gates, and a small eval corpus that must beat the
-  366-byte pointer baseline; `review.instructionExtraFilenames` wires configured
-  extras through the CLI and Action review-context path
-- GitHub Copilot is a first-class Agent Skills harness: generated
-  `skills/copilot/mergecraft/`, install path `.github/skills/mergecraft/`,
-  a Copilot repo-MCP snippet with the six public tools, and a thin
-  `.github/agents/mergecraft.agent.md` (#621)
-- mergeCraft review prefers Copilot-style `.github/skills/code-review/`
-  (and other `.github/skills/*/SKILL.md`) over generic standing skills,
-  keeps the trust fence, and on the trusted tier can attach read-only
-  stdio consumer MCP servers from `review.mcpServers` / `.vscode/mcp.json`
-  (untrusted runs drop both) (#620)
-- `mergecraft trust set-self-review --gh-apply` opens a default-branch PR
-  so `pull_request_target` picks up `trust.selfReview` without a hand-edit
-  on main; comment-heavy configs are patched in place with or without
-  the flag, and a second `--gh-apply` reuses the existing branch/PR (#616)
-
-- Untrusted reviews can export prompt bodies to Logfire when `tracing.content`
-  is `full` **and** an operator-owned export flag is true (Action
-  `tracing-export-untrusted-content`, `MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT`,
-  `--tracing-export-untrusted-content`, trusted YAML, or the
-  `pull_request_target` base snapshot); fork HEAD YAML cannot lift the cap;
-  `content: full` alone still caps fork-PR bodies at metadata
-- `mergecraft review --tracing-content` and Action `tracing-content` set the
-  capture level without editing YAML
-- `mergecraft provider status` shows what CI will run — each reviewer agent's
-  `pN` slots, credential and workflow-wiring state, dispatch level, and skipped
-  slots — with `--json` for scripting and optional `--github` to report repo
-  secret presence without printing values (#520)
-- `mergecraft agent` and `mergecraft agent-local` author the agent roster —
-  positional `pN` slots, named agents, `after:` dispatch levels, and dense
-  `modelChain` editing; local overrides write `.mergecraft/config.local.yaml`
-  and are invisible to CI
-- Multiple reviewer-role bindings run on one PR; findings merge by path/body/line
-  and produce exactly one verdict with strictest severity winning
-- `mergecraft workflow sync` keeps `.github/workflows/mergecraft.yml` auth wiring
-  aligned with roster models; unwired providers fail at CLI write time and at run
-  start
-- First `mergecraft provider auth` after `init` seeds `agents.reviewer` p0 so
-  review works with no third command
-- `docs/agent-roster.md` — operator guide for slots, named agents, local scope,
-  multi-reviewer verdict rules, and the run-start trust snapshot
-- Operator trust knob (`trust.selfReview`: `off` / `analyzers` / `full`) with
-  two-axis resolution — execution trust for analyzers vs authority trust for
-  approval semantics — resolved from the base config snapshot so a PR cannot
-  raise its own tier; `mergecraft trust show` / `set-self-review` CLI
-- Degraded review scope: when the PR head cannot be fetched, `checkout_pr`
-  returns `scope: api-only` with an API-built diff and the run may still reach
-  a terminal verdict (including approve when findings allow)
-- `establish_review_scope` — evidence-backed second route into review scope
-  when a materialized diff already describes the PR head
-- Read-only git MCP verbs (`show-ref`, `for-each-ref`, `ls-remote`, `config
-  --get`) and `checkout_pr` parameter aliases (`pr_number`, `issue_number`)
-- Agent stream logs render human-readable lines instead of dumping raw provider
-  NDJSON. The raw dump is gone rather than demoted: the evidence packet now
-  ships as a workflow artifact, so the trajectory record — tool identity,
-  outcome, paths, failure class — is the forensic surface, and an interleaved
-  raw dump is not reinstated even under `ACTIONS_STEP_DEBUG`
-- Every review run that resolves a pull request number posts a deterministic run
-  record — a sticky progress comment and a mandatory review-body preamble rendered
-  from the same function, so a green review that says nothing is no longer
-  indistinguishable from a review that never ran (#546 post-mortem)
-- The merge-evidence packet gains a `run_health` section (schema `1.11.0`) for
-  run-scoped findings partitioned out of the top-level `findings` list; change
-  findings and run observations now have separate audiences and surfaces
-- `Finding.scope` (`change` | `run`, default `change`) and `FindingSource`
-  `"trajectory"` so trajectory auditor rows are attributed as process evidence,
-  not PR defects
-- Job step summary (`GITHUB_STEP_SUMMARY`) written from `_publish` with outcome,
-  pre-merge rows, and findings — capped at GitHub's 1 MiB with the header intact
-- Evidence packet persisted to a workflow artifact on every review rung
-  (`if: always()`, 30-day retention) so the packet survives runner teardown
-- `MERGECRAFT_ACTION_SHA` workflow variable — one pin definition shared by all
-  three review rungs, with `make action-pin-check` enforcing staleness and
-  rung parity (#532)
-- Action image digest pin gate (`action-image-digest-check`) and halved
-  `wait-for-ci` poll cadence (20s → 10s, #528)
-
-### Lane E — agent credential broker
-
-### Security
-
-- On the root Linux backend (`CAP_SYS_ADMIN`), the MCP shell sandbox and the
-  analyzer sandbox now drop root identity in the same `exec` that installs their
-  masks, so the kernel enforces the read-only binds, the scratch mount, and the
-  cleared capability sets against a process that can no longer lift them; a
-  `sudo`-elevated shell drops back to the orchestrator's own UID/GID, and macOS
-  `sandbox-exec` and unprivileged hosts are unchanged.
-
-- Static checks now run with an explicit default-deny environment keyed on the
-  trust tier, and path-safe `{files}` arguments: an entry that resolves outside
-  the checkout is dropped, an option-shaped relative entry reaches the gate as a
-  `./`-path, and no `--` separator is inserted.
-
-- Untrusted static checks run inside the sandbox against a disposable
-  copy-on-write view of the checkout. A gate that fails only because the sandbox
-  denied it the network or a write is reported as `declared-but-cannot-run`,
-  never as a finding about the diff, and the real checkout is left unchanged.
-
-- The image runtime tree under `/opt/mergecraft` stays root-owned — bytecode is
-  compiled at build time — instead of being chowned to the agent user, so a
-  process dropped to that user cannot rewrite the code the root orchestrator
-  imports.
-
-- Local log sinks are scanned for credentials after the run. A hit fails the run
-  and the approval gate, names the sink path without ever printing its contents,
-  and removes the sink before artifact upload.
-
-- Transitive `soupsieve` 2.8.4→2.9.2 in `uv.lock` for `pip-audit`
-  (CVE-2026-85999, CVE-2026-86000) (#728)
-- Fork-controlled `.mergecraft/config.yaml` can no longer lift the untrusted
-  tracing-content cap; export of prompt bodies on fork PRs requires the Action
-  input, env, or trusted base settings
-- Codex API-key runs proxy model calls through a loopback credential broker — a
-  stolen per-run bearer is worthless outside the container and after the run, but
-  outbound egress stays open and ChatGPT subscription auth (`CODEX_AUTH_JSON`) is
-  not brokered; clear that secret and use `OPENAI_API_KEY` when broker coverage
-  matters (#553)
-- The fork-head credential invariant now rejects indexed OAuth, device-code and
-  cloud-chain credentials (`LLM_PROVIDER_<N>_CLAUDE_CODE_OAUTH_TOKEN`,
-  `_CODEX_AUTH_JSON`, `_AWS_*`, `_GOOGLE_APPLICATION_CREDENTIALS`) instead of only
-  flat names and `_API_KEY`; a fork PR can no longer carry a credential past the
-  pre-dispatch rejection boundary (N1)
-- Indexed Codex `device_code` credentials reach the isolated run home's
-  `auth.json` and the broker reports `subscription`; `_setup_codex_auth` consumes
-  the resolved child mapping instead of reading `os.environ` (N19)
-- The fork-credential allowlist and the agent-env strip set both derive from
-  `config.runtime_provider_registry`, the single credential authority across every
-  `authKind`, cloud suffix and spelling — the pinned drift that dropped
-  `GOOGLE_API_KEY` is gone, and `AWS_SESSION_TOKEN` is covered (N21)
-- Critical and Major security findings are no longer demoted when incidental
-  maintainability or documentation words appear in the same message; the security
-  lane takes absolute precedence and capping rules are inapplicable when impact
-  evidence supports the asserted severity (N4)
-- Security category inference now recognizes `auth`/`unauth` stems and the named
-  vulnerability classes (RCE, deserialization, pickle, path traversal, SSRF, CSRF,
-  XXE, privilege escalation, prototype pollution, open redirect, hardcoded key)
-  (N20)
-
-### Fixed
-
-- Local `--shell enabled` now refuses when no sandbox backend is available unless
-  `MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1` is set; on macOS, `sandbox-exec` is
-  the backend when present (#593)
-- Tracked public markdown is linted for decision-ledger tokens, wave-dot
-  citations, and pointers into gitignored wave plans; Priority 1 docs were
-  rewritten to stand alone (#709)
-- `trivy` on Apple Silicon provisions the native ARM64 build so the local
-  coverage gate does not hang under Rosetta
-- Action reviews no longer crash at startup with `infra_error` when loading
-  the shared token cap (#741)
-- Enabled Jev reviews now keep the shadow-judge record next to the evidence
-  packet after the command finishes, so paid calibration rows are retrievable
-  (#728)
-- A TypeSafe connect, DNS, or timeout failure on the shadow judge records a
-  skip and leaves the completed review successful (#728)
-- `jev.model` accepts only the pinned `jev-1.13.0` id, so a configured newer
-  version cannot run while audit rows still claim the pin (#728)
-
-- Corroborating duplicates can no longer weaken a finding: clustering keeps the
-  strongest member's severity while the agent's prose stays canonical wording,
-  and semantic dedupe keeps the strongest paraphrase with the discarded members'
-  evidence — a weaker copy arriving first can no longer turn a CI blocker green
-  (N5)
-- A partial analyzer rerun no longer erases earlier blockers: results are
-  retained by covered scope, so a clean pass over a file the first pass did not
-  cover leaves the prior finding, the shared finding count and the
-  terminal-approve rejection intact (N2)
-- `get_commit_info` can no longer replace the canonical review scope with the
-  HEAD commit's patch; the single-commit diff stays an inspection artifact, so
-  admissible citations, inline anchors and blast radius remain bound to the
-  whole change under review (N3)
-- Default local review includes eligible untracked additions, so a brand-new
-  source file is reviewed without knowing an alternate flag; every exclusion —
-  gitignored, oversized, binary, symlink — is surfaced as a review-coverage
-  limitation, and an all-excluded diff can no longer render as a passed review
-  with "no changes to review" (N7)
-
-- The Action-pin staleness budget counts changes rather than landings. Without
-  `--no-merges`, a PR touching `src/mergecraft/` scored twice — its own commit
-  plus the merge that landed it — so the documented budget of 5 was really a
-  budget of about 2. Measured at the ceiling: 5 raw commits, 3 of them merges,
-  2 actual changes. `MERGECRAFT_MAX_ACTION_PIN_PRODUCT_LAG` is unchanged at 5;
-  it now means what it says.
-
-- A stale self-review Action pin on `main` no longer fails every open pull
-  request. `action-pin-check`'s staleness rule compared `main`'s pin against
-  `main`'s own tip, so it read nothing from the PR under review — one commit of
-  debt on `main` froze the whole queue, including the manifest PR that was the
-  only way to clear it (#669). The rule moved to `action-pin-staleness.yml`,
-  which runs on every push to `main` (with a daily cron backstop) and files one
-  tracking issue, keeps it current, and closes it once the pin is bumped. The required PR check
-  keeps every rule a branch can act on: rung self-consistency, drift from
-  `env.MERGECRAFT_ACTION_SHA`, and freshness against the default branch's pin.
-  `make action-pin-staleness-check` runs the full set locally.
-
-- The sticky run record lists Action pin (manifest C) next to baked image
-  source (S) so pin-lag (pinning S deploys the previous digest) is visible
-  without reading Action logs (#641)
-- Untrusted allowlisted analyzers in the Action image can use a userspace
-  filtered-egress backend (user+net namespace plus parent TCP relay) when
-  host `CAP_NET_ADMIN` / `CAP_SYS_ADMIN` are absent; the analyzer is forked
-  so the relay stays alive, and each hostname maps to its own resolved IPs
-  (#538)
-
-- Consolidated integration CI retains Python 3.11 and 3.14 coverage after
-  prerelease/main reconciliation; the coverage ratchet runs once on 3.14.
-
-- Bring the GitLab review-support matrix correction from main to the prerelease branch.
-
-- Local base-only reviews retain working-tree changes; remote comparisons deepen
-  bounded shared history and fail explicitly rather than substitute endpoint diffs.
-  Untracked text additions produce valid patches, including special filenames
-  and missing final newlines. Binary and non-UTF-8 untracked files are skipped
-  with a diagnostic rather than producing a lossy patch or crashing.
-- Installed convergence evaluations include their recall corpus. Example drift
-  checks run in disposable copies and no longer rewrite tracked outputs.
-- Redaction preserves closing assignment brackets and ordinary source paths while
-  retaining secret-pattern and high-entropy controls.
-- Optional image live checks require an actual terminal review rather than CLI help.
-- Self-review App tokens now refresh per provider attempt and revoke after the
-  job. Privileged approval uses a distinct App outside the reviewer action and
-  requires explicit maintainer dispatch for an exact run/head; reviewer checks
-  cannot automatically trigger approval. Missing App configuration fails closed.
-
-
-- Action images use patched, checksum-pinned npm and GitHub CLI tooling and
-  remove unused vulnerable pip bootstrap copies. Both images are scanned before
-  merge; release scans retain attributable JSON alongside SARIF without relaxing
-  the HIGH/CRITICAL gate. Python installation in the images uses uv.
-- Local review honors configured model chains, explicit/environment precedence,
-  fallback restrictions, and cumulative budgets; a process without a terminal
-  verdict is inconclusive (#592).
-- Provider authentication preflights the exact `--cwd` GitHub destination before
-  collecting credentials in both canonical commands and legacy aliases, rejects
-  unverified secret-management access, and
-  keeps explicit local scope independent of GitHub (#591).
-- Installed skills use a verified documentation commit containing every linked
-  target and teach canonical, explicitly scoped provider authentication (#589).
-- Analyzer isolation reports unsupported macOS accurately and warns when trusted
-  execution lacks isolation. Filtered Linux egress denies host INPUT access,
-  separates concurrent sessions, kills analyzer children on timeout, and cleans
-  only owned resources; a disposable
-  Linux integration harness exercises the production firewall boundary.
-- Credential broker stream failures now close the connection without inserting a
-  second HTTP response, and client disconnects release upstream responses (#595)
-- Brokered Codex runs preserve configured proxy bypass entries and always bypass
-  proxies for the loopback broker, without changing parent proxy settings (#597)
-- Removed an obsolete Codex broker auth branch that suppressed the API-key
-  authentication diagnostic; subscription authentication is unchanged (#596)
-
-- Release verification uses compatible GitHub CLI policy flags, validates deployment
-  candidates automatically, and publishes canonical image tags only after signed
-  staging digests verify. Pin preparation safely supports repeat invocations and
-  environment-only references; Docker source validation survives optimized Python.
-
-- Release E2E now runs for reusable workflow callers, and image promotion
-  requires verified signatures, source provenance, and SBOM attestations.
-  Action pin preparation separates the built source from the manifest commit
-  consumers execute, preventing deployment of the previous image (#579, #641).
-- CLI startup `.env` loading walks up to the git root, like the writers in
-  `mergecraft auth` and `tracing logfire` already did, so a credential written
-  from a subdirectory is visible on the next invocation instead of landing in
-  a nested `.env` nothing reads (#654)
-- Logfire `llm.call` rows now include the prompt mergeCraft sent and the model
-  output, with a real duration instead of an empty ~2µs span
-- Codex, Claude, and Gemini tool-use now shows up as `tool.call` children on
-  the same Logfire trace as the review run
-- Authentication quick start uses registry labels (`anthropic`, `openai`,
-  `google`) instead of harness names that `provider auth` rejects (#590)
-- GitHub Action Logfire tracing honors `MERGECRAFT_TRACING_REGION`, so an EU
-  write token is no longer posted to the US ingest host (#607)
-- Anchor-422 recovery no longer spins on an out-of-range comment index — it
-  demotes all inline comments and posts once (#570)
-- The published GitHub review body always matches the terminal submission;
-  probe strings and split publication races no longer land a placeholder review
-  (#572)
-- Multi-reviewer findings carry server-stamped `raised_by` attribution on the
-  published review; agents cannot supply the field via `submit_review_verdict`
-  (#574)
-- Token spend slightly over `runBounds.tokenBudget` warns and completes instead
-  of failing at the cliff; crossing the hard ceiling still ends the run (#571)
-- Coverage delta on pull requests no longer fails when the merge-base branch
-  cannot measure coverage; the PR checkout still runs `make coverage-gate` and
-  the skip is surfaced as an Actions warning and job-summary line naming the
-  base ref and reason (#536)
-- Base-branch coverage measurement reads that worktree's
-  `.mergecraft/config.yaml` instead of the PR head's — a PR that adds a config
-  key and its schema field no longer fails the base run (#573)
-- A refused terminal verdict now reaches the deterministic run record by name.
-  `rejection_reason` — and the record's reason line — were both gated on the
-  packet having no decision, but `decide_approval` always returns one, so
-  neither could fire: a run that refused for lack of review scope rendered
-  identically to a clean one. The refusal is read from the run state instead,
-  and the non-retryable post-run path records it rather than publishing a
-  second record that the finalize-time upsert would overwrite
-
-- Git MCP containment: refuse `--no-index`, confine positional paths, deny
-  credential paths (`.git/config`, askpass tree), and redact git failure text
-  before it becomes a tool result
-- Post-run retry loop classifies scope and policy refusals before resuming —
-  deterministic refusals no longer spend a second provider turn
-- Single Loguru writer with `enqueue=True` and explicit queue drain — runner
-  logs no longer interleave mid-line from concurrent stdout/stderr writers
-- Bubblewrap namespace failures surface `user_namespace_failure_hint()` once
-  per run (not gated behind a non-zero Codex exit code)
-- `checkov` and `yamllint` catalog rows document linux-amd64 manifest-only
-  provisioning instead of presenting as runtime failures
-- Git config MCP: deny `config --list` and credential-bearing keys on
-  `config --get-all` so brokered auth headers cannot leak through enumeration
-- `get_commit_info` validates unified diff evidence before establishing review
-  scope; successful `checkout_pr` records scope via `register_review_scope`
-- Claude driver: pass ``--verbose`` alongside ``--print
-  --output-format=stream-json``. The CLI refuses that pair without it and exits
-  1 before emitting a single event, so the Claude backstop failed on every run
-  it was ever asked to handle; the failure only became legible once zero-event
-  runs began reporting their stderr (#557)
-- Trajectory findings no longer block merge: `blocking_findings()` is the single
-  predicate shared by the terminal-verdict gate, packet gate, and approval check;
-  run-scoped rows are dropped before severity grading (D2/D3)
-- A review whose inline anchors are all invalid still lands its body and verdict
-  — anchors are pre-validated against the diff, 422 on non-APPROVE reviews is
-  recovered server-side, and a total anchor failure posts zero inline comments
-  instead of losing the review (#530)
-- Trajectory auditor classifies tool failures before counting them, so
-  self-corrected schema slips, policy refusals, and environment faults no
-  longer masquerade as ignored errors that block the PR
-- Status-check summaries are derived from the evidence packet they report — no
-  hardcoded prose that the packet can contradict; failed check posts log at
-  WARNING with a matching `::warning::` annotation (#546 post-mortem)
-- Codex fallback routing reads `decision.verdict` from the in-process evidence
-  packet instead of racing the check-runs API
-
-### Lane B — trust boundary & credential truth
-
-#### Security
-
-- The Codex `danger-full-access` override is gated by `trust.agentSandbox`
-  with a hard fork floor — re-check your tier if you expected the override to
-  apply on all `pull_request_target` runs or on fork PRs (#553)
-- Untrusted analyzer runs no longer grant host networking when a manifest
-  declares a non-empty `network_allowlist` — dependency scanners that need
-  upstream access are skipped with a named egress-policy outcome on untrusted
-  events unless the runner can enforce a filtered netns (`ip netns`, veth,
-  iptables). The GitHub Action image typically cannot, so that path stays
-  fail-closed (#538)
-
-#### Added
-
-- `trust.agentSandbox` ladder (`never` / `merged-only` / `dispatch` /
-  `same-repo`) with `mergecraft trust show` and
-  `mergecraft trust set-agent-sandbox` (#553)
-- `docs/trust-policy.md` documents the sandbox override ladder, fork floor,
-  and residual risks
-- `credential_status_for_slug` consolidates credential detection with four
-  routes (`registry-indexed`, `gateway-singleton`, `legacy-env`, `cli-auth`)
-  and names consulted env vars in `looked_for` skip messages (#552)
-- Action `logfire-token` exports to `MERGECRAFT_LOGFIRE_TOKEN` before the
-  Logfire sink initialises (#551)
-- Actions-visible warning when tracing targets Logfire but no token resolves
-  (#551)
-
-#### Fixed
-
-- Self-review on PRs that edit `.mergecraft/config.yaml` publishes again after
-  the publication guard re-baselines the config hash post-`checkout_pr` (#584)
-- Nous and custom gateway providers are detected when only
-  `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` is set (#552)
-- Bubblewrap namespace failures surface once as a non-blocking run observation
-  instead of inflating the packet gate with repeated Major findings (#553)
-- Entropy redaction no longer strips proven benign analyzer shapes — sweep
-  evidence at `docs/dev/15-w6-entropy-sweep-report.json` (#537)
-
-#### Changed
-
-- #553 boundary amended from the `pull_request_target` event to fork heads —
-  same-repo `pull_request_target` may grant the override at `same-repo` tier
-
-### Lane D — self-review evidence
-
-#### Fixed
-
-- Claude backstop no longer runs when an earlier rung succeeds or posts a
-  verdict including `neutral` — only retryable rung failures without a verdict
-  trigger Claude (#600)
-
-#### Changed
-
-- Same-repo `pull_request_target` self-review runs trusted-tier analyzers when
-  `trust.selfReview` is `analyzers` — execution trust without widening approval
-  authority
-- Declared CI SARIF artifacts are downloaded and recorded when `wait-for-ci`
-  reaches `state=complete` (green or red). The review job must forward
-  `wait-for-ci` `state` / `failed_count` (as `MERGECRAFT_CI_WAIT_STATE` /
-  `MERGECRAFT_CI_FAILED_COUNT` or `CI_STATE` / `CI_FAILED_COUNT`) and grant
-  `actions: read` to download artifacts. Wait states `timeout`, `absent`, and
-  `skipped` skip ingest
-- Action log phases (setup, model chain, agent dispatch, publish) emit
-  collapsible `::group::` blocks in GitHub Actions logs
-
-#### Added
-
-- Dogfood config sets `trust.agentSandbox: same-repo` so Codex
-  `danger-full-access` is honoured on same-repo review runs (#553)
-- CI SARIF ingest covers actionlint, zizmor, semgrep, and trufflehog
-  alongside ruff, mypy, and bandit — matching `ci.yml` uploads and
-  `ciEvidence.sarifArtifacts` (#464)
-- TruffleHog CI evidence converts JSONL to SARIF so a clean scan uploads
-  a valid empty-results document with tool metadata, not a blank file
-- Hardened consumer template forwards wait-for-ci outputs and grants
-  `actions: read` for ciEvidence SARIF ingest
-
-### Changed
-
-- Landing README Example 1 matches the `mergecraft init` / `examples/workflows/`
-  scaffold (PR types, `status_checks`, `checks: write`); default trigger copy no
-  longer teaches `@mergecraft review` comments, which the scaffold omits
-- `evals/README.md` Harbor install pin is `v0.1.0a1`, and live detection is
-  documented as `mergecraft review` (Harbor still calls the hidden
-  `diff-review` alias)
 - AGENTS.md and the consumer skill match the default workflow triggers
 
-- The self-review Action pin on all three review rungs moves to `93a7897c`,
-  pin 5 — GitHub Action Logfire honors `MERGECRAFT_TRACING_REGION` (#607)
-- Self-review Codex fallback uses `openai/gpt-terra` (GPT 5.6 Terra) instead of
-  `openai/gpt-codex`
-- The self-review Action pin on all three review rungs moves to `e5f9ed5f`,
-  the lane D sync on `pre-0.0.1` (#601). Reviews run the selfReview catalog,
-  Claude backstop, green-CI SARIF ingest, and `agentSandbox: same-repo`
-  instead of the lane E pin (`4ab87265`)
-- Dogfood `trust.selfReview` / `trust.agentSandbox` knobs apply after merge to
-  the default branch — `pull_request_target` reads the base config snapshot, not
-  the PR head
-- The self-review Action pin on all three review rungs moves to `4ab87265`,
-  pin 3 of 3 — lane E agent credential broker (#594). Reviews run the loopback
-  broker, pinned egress, and Codex routing fixes instead of the lane B pin
-  (`4182fd45`)
-- The self-review Action pin on all three review rungs moves to `3ed2c798`,
-  the lane A/C sync on `pre-0.0.1` (#582). Reviews run publication attribution,
-  the token-budget band, and the coverage-gate work instead of the #575 pin
-- `runBounds.tokenBudget` is the soft target; `tokenBudgetTolerance` (default
-  `0.10`) sets the hard ceiling — set tolerance `0` to restore strict enforcement
-- Run record and job step summary token lines name target, ceiling, over-target
-  status, and per-phase attribution when phases are recorded
-- Policy enforcement modes score a rule's blocking intent from the finding's
-  gate-facing severity, so ``contributes_blocker`` is
-  read off it rather than computed beside it. ``blocking`` floors a
-  non-blocking declared severity to ``Major`` and ``warning`` caps blocking
-  severities to ``Minor``, and ``required`` resolves to ``Major`` while declared
-  evidence is outstanding so a ``Minor`` or ``Trivial`` obligation still blocks;
-  the declared severity is preserved on the finding's ``evidence`` list. No
-  review path calls ``evaluate_enforcement``, so the scoring does not reach the
-  approval gate. **This reverses MCB-12's "blocking no longer promotes
-  Minor"**, which left the blocking intent in a field ``decide_approval`` never
-  read, so a ``blocking`` rule silently passed while a ``warning`` rule blocked
-  (#554)
-- Render path: skip short-id assignment for non-hex fingerprints instead of
-  aborting review output; export and explain paths stay strict (#493)
-- Cheat-signature lint: narrow ``getattr_tautology`` to ``object()`` targets so
-  legitimate missing-attribute fallback asserts are not flagged; severity stays
-  ``error`` (#501)
-- Coverage ratchet: merge-base lookup failures and lowered-floor comparison
-  failures are mutually exclusive, so honesty tests can assert which guard fired
-  (#503)
-- Coverage ratchet: document that the merge-base lowering guard is PR-only on
-  ``push`` / ``workflow_dispatch``; absolute ``fail_under`` checks still run on
-  all events (#506)
-- Coverage ratchet: pin ``_default_base_branch`` resolution order
-  (``GITHUB_BASE_REF`` → ``GITHUB_REF`` branch → ``pre-0.0.1``) without requiring
-  a git remote (#507)
-- ``indexed_credential_keys`` rejects unsupported ``cloud_chain`` provider labels
-  instead of silently mapping them to Bedrock credential suffixes; the error names
-  the offending label and the supported set (``bedrock``, ``vertex``) (#497)
-- ``scripts/mutate_decision_modules.py``: ``_enumerate_line_mutants`` and
-  ``_apply_mutant`` are importable without reading ``mutation_modules.toml`` at
-  module load; the module map is lazy-loaded on first CLI use (#502)
-- Regression coverage for the enterprise telemetry reset inside
-  ``reset_process_tracer_cache``: leaked ``telemetry: off`` bindings no longer
-  block OTLP ``claim_sink`` after cache reset under xdist (#509)
+- The self-review Action pin on all three review rungs moves to `93a7897c`, pin 5 — GitHub Action Logfire honors `MERGECRAFT_TRACING_REGION` (#607)
 
-### Security
+- Self-review Codex fallback uses `openai/gpt-terra` (GPT 5.6 Terra) instead of `openai/gpt-codex`
 
-- Review publication refuses a model-supplied pull number or commit SHA that
-  differs from the run's bound scope, and those identity fields are no longer
-  exposed on the ``create_pull_request_review`` tool schema (MCB-05)
+- Dogfood `trust.selfReview` / `trust.agentSandbox` knobs apply after merge to the default branch — `pull_request_target` reads the base config snapshot, not the PR head
 
-### Fixed
+- `runBounds.tokenBudget` is the soft target; `tokenBudgetTolerance` (default `0.10`) sets the hard ceiling — set tolerance `0` to restore strict enforcement
 
-- Pipeline predicate validation no longer rejects repository paths whose names
-  contain substrings such as ``subprocess`` or ``import``; the closed regex is
-  the sole control (MCB-29)
-- Pipeline severity predicates include ``Trivial`` and rank unknown severities
-  below every taxonomy member instead of treating them as ``Minor`` (MCB-34)
-- Pipeline preview marks non-executing steps as ``dispatched`` instead of
-  ``ran``, derives terminal verdicts from collected evidence instead of
-  hardcoding ``approve``, and documents ``PipelineExecutor`` as experimental
-  (MCB-37)
-- ``ReviewEngine.run`` clears the timeout callback on every invocation so a
-  second run with ``on_timeout=None`` does not retain the first run's handler
-  (MCB-36)
-- The test suite no longer mutates the project virtualenv: ``make`` exports
-  ``UV_PROJECT_ENVIRONMENT`` to a separate dev env, subprocess ``uv run`` calls
-  pass ``--no-sync``, and a session guard detects interpreter replacement
-  (MCB-23)
-- Gateway credential resolution reads repo settings from the run-scope snapshot
-  instead of reloading ``.mergecraft/config.yaml`` on every model lookup, with a
-  live-load fallback when no snapshot is installed (#496)
-- Gate mode and per-gate action overrides resolve from the run-scope settings
-  snapshot instead of package defaults, and packet assembly in ``enforce`` mode
-  fails closed with a neutral decision when assembly raises (MCB-17)
-- Required static checks block approval unless every row is explicitly
-  ``passed`` or ``not_applicable``; ``unavailable``, ``error``, ``timeout``,
-  and unknown statuses no longer satisfy the gate (MCB-16)
-- Policy ``required`` enforcement consults ``policy.evidence`` and scores the
-  rule as blocking until declared evidence is present; ``blocking`` no longer
-  promotes declared ``Minor`` findings to ``Major``. Review does not apply the
-  result: no review path calls ``evaluate_enforcement``, so a rule cannot gate a
-  merge yet (MCB-12)
-- Gate assembly attaches the structural ``decision`` row before ``decide_action`` runs,
-  refuses untrusted ``decided_by`` values on pre-set packet decisions, and requires an
-  explicit ``success`` verdict plus a completed run before ``low_risk_passing`` can select
-  ``auto_merge`` (MCB-15)
-- Review publication reads repo settings from the run-scope snapshot taken before
-  untrusted execution instead of reloading ``.mergecraft/config.yaml`` from the mutable
-  checkout (MCB-19)
-- Verifier citation paths are confined to the checkout root via
-  ``resolve_confined_path``, rejecting traversal, absolute paths, prefix collisions,
-  and out-of-root symlinks, and must fall inside the changed-path set (MCB-20)
-- Shipped ``operational_readiness`` policy pack rules now declare the required
-  evidence keys ``enforcement: required`` consults before it treats the rule as
-  satisfied (MCB-12)
+- Run record and job step summary token lines name target, ceiling, over-target status, and per-phase attribution when phases are recorded
 
-### Changed
+- Policy enforcement modes score a rule's blocking intent from the finding's gate-facing severity, so ``contributes_blocker`` is read off it rather than computed beside it.
 
-- Policy enforcement modes are pairwise distinguishable when a rule is
-  evaluated: ``advisory`` caps blocking severities to ``Trivial``, ``warning``
-  and ``required`` preserve declared severity, and ``required`` clears only when
-  ``policy.evidence`` is satisfied. Review does not consult these modes yet
-  (MCB-12)
+- Render path: skip short-id assignment for non-hex fingerprints instead of aborting review output; export and explain paths stay strict (#493)
 
-### Fixed
+- Cheat-signature lint: narrow ``getattr_tautology`` to ``object`` targets so legitimate missing-attribute fallback asserts are not flagged; severity stays ``error`` (#501)
 
-- Authenticated git operations against GitHub now work at all. The token was
-  brokered as `Authorization: Bearer <token>`, which GitHub's git transport
-  rejects with `remote: invalid credentials` — `Bearer` is the REST API form,
-  and the git endpoint wants HTTP basic auth carrying the token as the password
-  under the documented `x-access-token` username. With `GIT_TERMINAL_PROMPT=0`
-  and the askpass helper shredded at startup, git had nothing to fall back on,
-  so `checkout_pr` failed in every observed review run: reviews either produced
-  no verdict at all or reached one only by improvising around the missing
-  checkout, at 1.5M-4.8M tokens a run. Removing the persisted `actions/checkout`
-  header changed the failure's shape but not its outcome — the header that had
-  been doing the real work was checkout's basic one, and mergeCraft's own
-  scheme never authenticated a fetch either way. A fetch against a local git
-  remote that models GitHub's auth now covers the whole path, so the contract
-  is that authentication succeeds rather than that a header string is present
-- Git failures that come from a rejected or missing credential are reported as
-  terminal instead of as a generic git error, so the reviewing agent stops
-  re-running a fetch that cannot start working across attempts
-- `actions/checkout` no longer persists its token in the review workflow, the
-  shipped hardened example, its template, or the dogfood artifact. A persisted
-  `extraheader = AUTHORIZATION: basic ...` collided with the `Authorization:
-  Bearer ...` that mergeCraft's own git layer added at the time, and
-  `extraHeader` is multi-valued in git, so both headers went on one request and
-  GitHub answered `400 Duplicate header: "Authorization"`. `checkout_pr` failed,
-  review scope was never established, and every terminal verdict was rejected —
-  a review that found 45 issues posted none of them and burned 9.4M tokens
-  against a 5M budget before failing closed. The action authenticates from its
-  own `token:` input, so nothing needs persisting; the comment that claimed otherwise
-  predated lane A giving those tools header auth of their own
+- Coverage ratchet: merge-base lookup failures and lowered-floor comparison failures are mutually exclusive, so honesty tests can assert which guard fired (#503)
 
+- Coverage ratchet: document that the merge-base lowering guard is PR-only on ``push`` / ``workflow_dispatch``; absolute ``fail_under`` checks still run on all events (#506)
 
-### Changed
+- Coverage ratchet: pin ``_default_base_branch`` resolution order (``GITHUB_BASE_REF`` → ``GITHUB_REF`` branch → ``pre-0.0.1``) without requiring a git remote (#507)
 
-- The self-review Action pin on all three review rungs moves to `b3638ea7`,
-  the merge commit of #545. Every rung at the previous pin sent git the token
-  as `Authorization: Bearer`, which GitHub's git transport rejects, so
-  `checkout_pr` failed on every review and the scope guard then refused the
-  terminal verdict. A review that reached "approve" on #545 could not publish
-  it and the approval gate failed closed with no `mergecraft-approval` check at
-  all. `pull_request_target` resolves this workflow from the default branch, so
-  a self-review PR cannot consume its own fix; the bump has to follow the merge
-- The self-review Action pin on both review steps moved to `b34e9f25`. The
-  previous pin (`5b9ded9f`, 23 August) had drifted 107 commits on
-  `src/mergecraft/`, so every review since then ran product code that stale.
-  The image at that pin carries no `[tracing]` extra, which would have left
-  the Logfire wiring exporting nothing, and analyzer defects already fixed by
-  #458 / #459 kept surfacing in Action logs. `make action-pin-check` reports
-  the drift correctly but gates nothing; #532 tracks wiring it into `make ci`
+- **Breaking:** enterprise audit events are no longer written to ``.mergecraft/audit.jsonl`` inside the workspace by default; set ``MERGECRAFT_AUDIT_ROOT`` or read from the new default location
 
-### Security
+- Analyzer and trace redactors now emit the shared ``<redacted>`` placeholder from ``mergecraft.redaction_sentinel`` instead of the legacy ``[REDACTED]`` analyzer spelling
 
-- Enterprise audit log defaults outside the agent-writable workspace tree
-  (``MERGECRAFT_AUDIT_ROOT`` or ``~/.local/share/mergecraft/audit``); each
-  record is hash-chained and verifiable via ``mergecraft audit verify`` (MCB-21)
-- MCP HTTP startup no longer treats a TCP connect probe as proof of identity;
-  server-thread failures propagate and ``GET /health`` requires a per-run nonce
-  (MCB-27)
-- Trace span redaction no longer leaks CLI secrets after a flagged argv token
-  (MCB-02), applies deny-key scrubbing at every nested depth including
-  list/tuple containers (MCB-03), and redacts Basic-auth material via the
-  shared secret matcher
-- Analyzer JSON and JSONL outputs are structurally redacted by key and value before
-  persist, so non-prefixed secrets in trufflehog-style payloads do not reach
-  prompts or ``.mergecraft/analyzer-runs/``
-- Entropy-based secret redaction uses a length-relative threshold with benign-shape
-  exclusions for git SHAs, hex runs, and identifiers so legitimate code tokens in
-  logs are not mangled unnecessarily
-- OpenCode review sessions deny ``webfetch``, ``external_directory``, and
-  ``edit``; ``read`` is allowlisted to the checkout and evidence scratch
-  instead of ``*`` (MCB-06)
-- Post-run checkout integrity verification via
-  ``security.review_integrity`` hashes the tree before review and fails closed
-  on mutation (MCB-06)
-- Privilege drop gates on action-image identity (``IS_SANDBOX`` + ``/opt/mergecraft``)
-  instead of uid alone; root outside the image refuses with a policy diagnostic and
-  ``MERGECRAFT_ALLOW_ROOT=1`` override (MCB-24 / D11)
-- ``setpriv`` argv carries ``--no-new-privs``, ``--inh-caps=-all``, and
-  ``--bounding-set=-all``; fails closed when ``setpriv`` lacks ``--bounding-set``
-  support (MCB-32)
-- Root-side ``git`` subprocesses route through ``utils/git_hardening.git_argv`` with
-  pinned safe-config keys; ``make lint`` enforces the route via
-  ``scripts/check_git_argv.py`` (MCB-01)
-- ``prepare_workspace_for_agent`` no longer recursively chowns ``.git``; sandbox shell
-  binds every registered workspace root's ``.git`` read-only (MCB-01 / D3)
-- Linked-repo ``_rev_parse_commit`` rejects leading-dash revs, validates pinned SHA
-  shape, and passes ``--end-of-options`` before the rev (MCB-33)
-- Sandbox capability probes run real isolation checks instead of gating on ``CI``;
-  untrusted MCP shell refuses unsandboxed spawn unless
-  ``MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1`` (MCB-07 / MCB-10)
-- Skipped untrusted analyzers emit a ``Minor`` finding
-  (``rule_id: analyzers.sandbox-unavailable``) naming missing isolation primitives
-  (MCB-09 / D7)
-- ``sudo-unshare`` shell spawn passes env by name via ``--preserve-env`` with
-  ``env=env`` on ``Popen`` so provider keys never appear in argv (MCB-08)
-- Namespaced shell spawn hides every ``git`` binary and binds ``.git`` read-only
-  inside ``unshare`` / ``sudo-unshare`` branches; unsandboxed opt-in runs the raw
-  command without host mount soup (MCB-25)
-- Python ``prep`` installs into ``.mergecraft/prep-scratch/prep-venv`` with a
-  default-deny env allowlist so PR build deps cannot mutate the reviewer's
-  interpreter or inherit provider credentials (MCB-22 / D12)
+- Overflow agent findings now append to a server-written `### 🗂 Deferred findings` section with full finding text (non-blocking); analyzer overflow remains in `### 🔧 Mechanical findings`
 
-### Fixed
+- `review.verificationBudget` (default 24; `0` = no cap) caps verifier dispatches independently of `analyzers.inlineBudget`
 
-- ``prep`` lockfile selection prefers ``uv.lock`` over a stray ``requirements.txt``;
-  ``should_run`` threads one ``cwd`` into ``run`` instead of reading ``Path.cwd()``
-  twice (MCB-22)
-- The Action image now installs the `[tracing]` extra
-  (`uv sync --frozen --no-dev --extra tracing`). Without it, a workflow wired
-  with `tracing-to: logfire` looked correct and exported nothing: the sink
-  factory degrades a `logfire`/`otel` sink to `NullSink` and only logs a
-  warning, so every Action review since tracing shipped silently dropped its
-  spans. Verified against `uv.lock` — omitting the extra uninstalls logfire
-  plus its seven OpenTelemetry dependencies
-- `mergecraft.yml` now actually passes the tracing inputs it has supported
-  since W8.5. Both review steps (Nous and the Codex fallback) carry
-  `tracing: "true"`, `tracing-to: logfire`, `logfire-token`, and the
-  `MERGECRAFT_TRACING_PROJECT` / `MERGECRAFT_TRACING_REGION` env pair
+- Harbor `MergecraftReviewAgent` resolves the default `uv tool install` ref lazily in `install` via `action_pin_minimal` instead of calling it at module import (#403)
 
-### Added
+- Landing README promoted from `readme_test.md` draft: agent-first layout, glossary links, auth table with recommended models, CLI how-it-works section, and `v0.1.0a1` Action pin (RV6)
 
-- `mergecraft tracing logfire wire-workflow --region us|eu` writes
-  `MERGECRAFT_TRACING_REGION` into the wired step's `env:`. Logfire serves
-  region-specific OTLP hosts and the resolver defaults to `us`, so an EU write
-  token (`pylf_v{N}_eu_…`) previously posted spans to the wrong host with no
-  way to fix it short of hand-editing the workflow. The key is owned (so
-  `unwire-workflow` strips it) but not required, keeping a region-less wire
-  complete rather than partial
+- `mergecraft init` scaffolds a consumer-ready workflow (`alexhawat/mergeCraft@v0.1.0a1`, `pull_request` trigger, `models:` list) matching `examples/config.yaml` and Example 1 (RV6)
 
-### Changed
+- ``probe_capabilities`` is ``lru_cache``-backed; ``reset_detection_cache`` clears the probe cache for xdist isolation
 
-- **Breaking:** enterprise audit events are no longer written to
-  ``.mergecraft/audit.jsonl`` inside the workspace by default; set
-  ``MERGECRAFT_AUDIT_ROOT`` or read from the new default location (MCB-21)
-- Analyzer and trace redactors now emit the shared ``<redacted>`` placeholder from
-  ``mergecraft.redaction_sentinel`` instead of the legacy ``[REDACTED]`` analyzer spelling
-  (MCB-30)
-- Overflow agent findings now append to a server-written `### 🗂 Deferred findings` section with full finding text (non-blocking); analyzer overflow remains in `### 🔧 Mechanical findings` (RC1, RC2)
-- `review.verificationBudget` (default 24; `0` = no cap) caps verifier dispatches independently of `analyzers.inlineBudget` (RC3, D2)
-- Harbor `MergecraftReviewAgent` resolves the default `uv tool install` ref lazily in
-  `install()` via `action_pin_minimal()` instead of calling it at module import (#403)
-- Landing README promoted from `readme_test.md` draft: agent-first layout, glossary links,
-  auth table with recommended models, CLI how-it-works section, and `v0.1.0a1` Action pin (RV6)
-- `mergecraft init` scaffolds a consumer-ready workflow (`alexhawat/mergeCraft@v0.1.0a1`,
-  `pull_request` trigger, `models:` list) matching `examples/config.yaml` and Example 1 (RV6)
-- ``probe_capabilities()`` is ``lru_cache``-backed; ``reset_detection_cache()`` clears
-  the probe cache for xdist isolation (MCB-35 / D13)
-- ``detect_sandbox_method()`` and ``network_namespace_available()`` delegate to the
-  cached capability probe with one unified privilege ladder (D5)
-- Public MCP consumer docs: ``docs/mcp.md`` (install copy per runtime, OpenAI vs
-  Anthropic sections), README ``For LLM / Agents`` row linking public stdio install,
-  ``docs/agent-loop.md`` parity note, and ``skills/mergecraft/SKILL.md`` public stdio
-  plus runtime HTTP Bearer; registry ownership string
-  ``mcp-name: io.github.alexhawat/mergecraft``
+- ``detect_sandbox_method`` and ``network_namespace_available`` delegate to the cached capability probe with one unified privilege ladder
 
-### Added
-
-- `mergecraft provider disable <label>` clears a provider's credentials so GitHub
-  CI stops using it, without hand-editing secrets or workflow YAML. Honours
-  `--scope local|github|both` like `tracing logfire disable`, deletes both the
-  flat Actions secret (`NOUS_API_KEY`) and the indexed registry key
-  (`LLM_PROVIDER_<N>_API_KEY`) plus every alias a provider recognises, treats an
-  already-absent secret as cleared, and leaves the `providers:` registration
-  intact so `provider enable` re-uses the same env index. Reporting is
-  all-or-nothing: one credential that cannot be cleared fails the command rather
-  than claiming the provider is off. `--cwd` selects both destructive targets
-  (the `.env` and the `origin` repository). `auth` names (`codex`, `claude`,
-  `gemini`) resolve onto their registry labels (#520)
-- `mergecraft provider enable <label>` names the authenticate half of that
-  toggle; it delegates to the existing `provider auth` flow (#520)
-- Public MCP product profile: ``mergecraft mcp serve --role public`` mounts six
-  semantic tools at ``/mcp/public`` (``review_change``, ``get_review``,
-  ``inspect_finding``, ``explain_finding``, ``get_capabilities``, ``get_policy``)
-  over the completed-review store without extending ``ReviewEntry``
-- Public MCP stdio transport: ``mergecraft mcp serve --role public --transport stdio``
-  serves the same six-tool public profile over newline-delimited JSON-RPC on
-  stdin/stdout without Bearer auth (HTTP public still requires the per-serve token)
-- Generated MCP Registry ``server.json`` at the repo root plus ``docs/mcp-tools.md``
-  from public ``ToolSpec`` schemas; ``make mcp-server-json-check`` validates schema
-  and drift in ``CI_STEPS`` (live registry publish remains operator G3)
-- Offline public MCP tool-selection eval corpus under ``evals/mcp-public/`` with
-  fixture prompts and deterministic scorer ``mergecraft.evals.mcp_public`` (no live
-  LLM in ``make test``)
-- CI SARIF from ruff, mypy, and bandit is review evidence: `error` keeps
-  Major/Critical (not clamped to Minor); a listing error on one workflow run
-  does not skip later runs; a Major/Critical finding is kept over a less
-  severe duplicate fingerprint. Dogfood `.mergecraft/config.yaml` lists those
-  three `ciEvidence.sarifArtifacts`, and `.github/workflows/ci.yml` uploads
-  them. A ruff SARIF error can fail `mergecraft-approval` (#464)
-- `make action-pin-check` also measures the pin against the default branch's own
-  tip, not just against the other branch's pin. Comparing pins to each other
-  passes when both are equally stale, which is what happened after #457 merged:
-  both branches pinned the same SHA and the check reported OK while the reviewer
-  ran none of the fixes that had just landed. Lag is counted over
-  `src/mergecraft/` only, since docs and test commits do not change what the
-  reviewer executes (#450)
-- `make action-pin-check` guards the self-review Action pin against drift.
-  Because `.github/workflows/mergecraft.yml` runs on `pull_request_target`,
-  GitHub resolves its `uses:` pin from the **default branch**, so a fix merged
-  to `pre-0.0.1` does not reach the reviewer until it reaches `main` — a skew
-  that reached 687 commits undetected and made PR #443 time out on a ceiling
-  already fixed on the branch. The check also rejects a one-sided bump that
-  leaves the review and fallback steps on different SHAs. Advisory in CI: a
-  stale pin is a property of the default branch, not of the PR under review
-  (#450)
-- First-pass recall metric (`mergecraft eval convergence`, `make eval-convergence`) with multi-round bank cases and a paired regression gate that holds first-pass recall flat while the DG1 precision corpus stays at or above its floor
-- Open-PR finding ledger in the sticky progress comment — `mergecraft findings ledger --pr N` inspects inline, deferred, withdrawn, and unpublished fingerprints without filing GitHub issues (D4, D5)
-- Optional recall pass (`review.recallPass`, default off) dispatches `mergecraft-recall` after aggregation; novel findings always publish in the deferred lane (D1, D7)
-- Optional round-aware budgets (`review.roundBudgets`) scale token, cost, tool-call, and subagent ceilings by review round; defaults stay flat until opted in (RC12)
-- Lens execution recording on `ToolState`, review metadata, and merge-evidence packets; findings may carry optional `lens` attribution (D9)
-- Collateral lists on `Critical` and `Major` findings name callers, tests, and other files that must move with the fix; inline comments render them under **Also update:** (RC11)
-- Incremental reviews promote deferred findings when their cited path intersects the incremental diff, bias complement lens routing toward lenses that did not run last round, and label first-pass misses on unchanged lines honestly (RC9, D10)
-- Opt-in `antislop` analyzer: YAML rule pack for placeholder code, narrator comments,
-  swallowed errors, pass-through wrappers, phantom imports, and related low-quality patterns
-  on changed Python and JS/TS files (#393)
-- Append-only enterprise audit producer for ``.mergecraft/audit.jsonl`` via
-  ``append_audit_event`` and ``record_blocking_decision``; blocking terminal
-  verdicts now persist audit events consumable by ``mergecraft audit export``
-  (#417)
-- `make lint` checks that jobs calling local reusable workflows grant at least the
-  permissions the callee declares, catching ``startup_failure`` permission mismatches
-  at authoring time (#425)
-- Integration PR coverage now measures ``refs/pull/N/merge`` and reports delta vs the
-  base branch via ``scripts/check_coverage_delta.py``, distinguishing inherited floor
-  breaches from regressions caused by the PR (#432)
-
-### Fixed
-
-- ``prep`` lockfile selection prefers ``uv.lock`` over a stray ``requirements.txt``;
-  ``should_run`` threads one ``cwd`` into ``run`` instead of reading ``Path.cwd()``
-  twice (MCB-22)
-- ``redact_tool_payload`` caps UTF-8 byte length (not Python character count)
-  and keeps a head slice plus a visible truncation marker instead of discarding
-  the whole body (MCB-28)
-- ``redact_url`` preserves ``http`` vs ``https`` when redacting basic-auth
-  userinfo (MCB-31)
-- ``tests/tracing/test_redaction_doctests.py`` executes
-  ``mergecraft.tracing.redaction`` doctests (D3)
-- Webhook signature verification encodes signature operands with UTF-8 surrogateescape
-  before ``compare_digest``, so non-ASCII header bytes are rejected instead of raising
-  ``TypeError`` (MCB-11)
-- The MCP server no longer mounts a webhook endpoint: a signed delivery was verified
-  but processed nothing (MCB-13)
-- CI workflow log and SARIF artifact zip ingestion now use bounded
-  `zf.open(info).read(n)` decompression with per-member, aggregate, member-count,
-  and expansion-ratio caps instead of unbounded `zf.read(name)` (MCB-14)
-- Egress DNS pinning no longer replaces the process-global ``socket.getaddrinfo``;
-  guarded downloads use a per-client ``httpx`` transport that connects to
-  validated IPs while preserving hostname ``Host`` headers and TLS SNI (MCB-18)
-- `validate_http_url` rejects whitespace and control characters anywhere in a
-  provider URL, not just at the ends. A stored URL is written verbatim into the
-  consumer workflow YAML, so an interior newline could open a new key or step
-  there. `workflow provider add` also re-validates a stored row before wiring it
-- `mergecraft workflow` resolves a relative `--workflow` against `--cwd` on every
-  subcommand. The registry config was scoped by `--cwd` while the workflow path
-  stayed against the process working directory, so invoking from outside the
-  target repository could read config from one repo and rewrite another repo's
-  workflow
-- The consumer workflow file is replaced atomically by `mergecraft workflow`,
-  matching the config writer. A crash mid-write used to leave it truncated
-- `provider migrate` validates a migrated `NOUS_BASE_URL` through
-  `validate_http_url` like every other URL entry point, instead of storing it
-  unchecked
-- `.mergecraft/config.yaml` is replaced atomically (temporary file plus rename,
-  preserving permissions) by every CLI writer. An in-place write truncates
-  first, so a failure partway through left a half-written config behind
-- `mergecraft workflow provider add --apply` writes the registry config only
-  after the workflow file lands, and rolls the workflow back if that config
-  write then fails. Either half failing used to exit nonzero with config on one
-  endpoint and Actions on the other
-- `mergecraft workflow provider add --url` on an already-registered provider now
-  applies the validated endpoint to the row that is wired and persisted. The
-  override was validated and then discarded, leaving the workflow on the
-  superseded endpoint with no indication the flag was ignored
-- Indexed registry credentials survive the legacy credential re-injection in
-  `build_agent_env`. When an `LLM_PROVIDER_<N>_*` secret and its deprecated
-  counterpart were both set, the legacy value overwrote the registry one for
-  API keys, Claude Code OAuth tokens, and the Bedrock/Vertex chains, inverting
-  the documented precedence
-- `list_check_runs` omits `check_runs` when the listing is truncated, instead
-  of returning a partial catalog with `total_count`. Analyzer JSON arrays no
-  longer treat a leading `{"error": ...}` then `[]` as a clean scan
-- Check-suite log fetch skips with a distinct unavailable payload when no
-  GitHub client is bound, instead of looking like “no failed runs”
-- Catalog-check rejects all-zero `sha256` provenance pins (placeholders that
-  made `provision_managed_binary` treat a trailing-slash URL as a directory and
-  fail with `Is a directory`). Pip-style tools such as `checkov` and `yamllint`
-  now ship `provenance: {}` like `semgrep`; a trailing-slash URL is refused
-  with a `ProvisionError` that names the URL (#458)
-- Empty Bandit JSON stdout is a clean scan (zero findings) instead of a skip;
-  non-object `results` rows fail parse the same way as the SARIF converter;
-  unparsable stdout still skips without embedding a raw stdout snippet (#467)
-- A transient Nous HTTP 404 (including a false billing/credits refusal) now
-  fails over to the next model instead of stopping the run and reporting a
-  missing `set_output` schema failure (#466)
-- The approval gate now unions agent findings with analyzer findings, so an
-  agent Critical or Major finding fails ``mergecraft-approval`` and the
-  evidence packet's ``request_changes`` action. An empty finding list still
-  stays ``neutral``; untrusted runs still never ``success`` (#460)
-- Coverage already below `fail_under` on the base branch stays inherited
-  drift even if HEAD drops further; a drop of 1.0pp or more below the floor
-  when the base is already at the floor is also inherited, instead of always
-  treating `head < base` as caused by the PR (#485)
-- A clean mypy JSON typecheck no longer fails the SARIF convert step, so the
-  mypy artifact still uploads for review evidence
-- Evidence packet `decision.verdict` is a GitHub check conclusion
-  (`success` / `failure` / `neutral`); schema version 1.9.0
-- `mergecraft-approval` posts `neutral` when the evidence packet was not
-  assembled, instead of omitting the check
-- Custom provider slugs not in the operator registry now fail closed instead of silently routing to OpenCode; the built-in catalog allow-list was narrowed accordingly.
-- Seeded ``tokenhub``/``minimax`` registry rows no longer shadow legacy ``TOKENHUB_API_KEY`` / ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` credentials: ``resolve_runtime_agent`` honours the same legacy fallbacks as ``has_credentials_for_slug``, and ``provider migrate`` can index those keys.
-- Repo-native analyzers no longer fall back to an arbitrary PATH binary. When
-  the checkout did not provide a tool, resolution fell through to
-  `shutil.which`, so a system copy ran against the consumer's code at an
-  unpinned version of unverified provenance — Homebrew's `markdownlint`
-  locally, `/usr/local/bin/tsc` on a GitHub runner, which is why `tsc` resolved
-  instead of skipping. The six tools installed into the checkout
-  (`markdownlint`, `jscpd`, `tsc`, `knip`, `vulture`, `typos`) are now
-  repo-local only and skip when absent. Toolchain binaries with no repo-local
-  install convention (`cargo` for clippy, `go` for govulncheck) are unaffected
-  (#427)
-- mergeCraft's consumer workflow approval gate now runs in a separate job that
-  `needs:` the review-attempts job, so Codex fallback can post `mergecraft-approval`
-  before the fail-closed gate samples check-runs (#433)
-- An explicit `--model` now beats `MERGECRAFT_MODEL`. `resolve_model()` read the env override first and
-  returned before it ever looked at the flag, so a review asked for one model and ran another with no line
-  saying the request was dropped — inverting the repo's own `ConfigLayer` order (CLI > env > YAML > default)
-  and the flag's help text. The named model also heads the subagent chains the harness renders, so it
-  reaches the whole run rather than just the top-level dispatch, and `config explain model` now reports the
-  YAML layer as the config file alone instead of the env value promoted to its front (#468)
-- Offline reviews (`--base`/`--head`, `--diff`, `--cwd`) can record a terminal verdict. Review scope was
-  only ever established by `checkout_pr`, which an offline run has no PR for, so `submit_review_verdict` was
-  refused on every attempt and a completed review — analyzer findings and all — was never decided. The
-  materialized diff now establishes scope on the offline path. The post-run retry loop also stops when a
-  resume leaves the identical issue set, instead of replaying a precondition that cannot change between
-  attempts (#470)
-- Retryability now has one decision path. `_is_retryable_failure` gated on `metadata["retryable"]` alone
-  while `_retryable_failure_reason` inferred the same property from the error text, and only the
-  metadata-blind one decided — so a driver that omitted the flag was silently read as "permanent" and its
-  failure terminated the run. An explicit flag still wins in both directions; an omitted one now falls back
-  to inference. A retryable failure at the chain tail is bounded to one in-place retry and then returns that
-  failure, instead of re-asking a refusing provider until the attempt cap raised and replaced the real error
-  with a cap message (#447)
-- Codex `error` and `turn.failed` events are no longer discarded. Codex reports fatal failures as structured
-  events on stdout, and the stream handler had no branch for them, so the message was counted and dropped
-  and the run reported whatever unrelated text stderr happened to hold — PR #443 surfaced "Reading
-  additional input from stdin..." for a quota exhaustion, in the job annotation, the merge evidence packet,
-  and the chain log. The provider's own message is now the run's error and feeds retry classification (#445)
-- Provider quota exhaustion is now classified as retryable for failover. The CLI classifier matched only
-  rate-limit wording (`rate limit`, `too many requests`, `overloaded`, `429`), so Codex's "You've hit your
-  usage limit" matched nothing and read as permanent — the chain refused to try the next model even though
-  the next model was unaffected (#446)
-- `opencode serve` output is now drained for the process lifetime. Boot read the child's stdout only until
-  the listening URL appeared and nothing read either pipe afterwards, so once the child filled the ~64KB
-  pipe buffer it blocked in `write()` and stopped answering HTTP — a hang with no output, indistinguishable
-  from an unresponsive provider. A bounded tail of that output is now attached to a provider-timeout error,
-  which previously stringified to nothing at all — the tail is read under the same lock the drain threads
-  hold, so collecting it cannot raise `deque mutated during iteration` in place of the failure it explains
-  (#449)
-- A provider timeout no longer kills the review. `ProviderTimeoutError` on the opencode path returned an
-  `AgentResult` with no `retryable` metadata, and the model chain gates on that flag alone, so the single
-  most recoverable failure there is read as permanent and terminated the run at attempt 1 of 10 — leaving
-  the PR with no review rather than a review from the next model in the chain. Gateway 429/5xx responses on
-  the same path were mis-classified the same way. Two bounds keep the retries from multiplying: opencode
-  gets the initial attempt plus exactly one retry, and the chain now honours a wall-clock deadline derived
-  from `RunBounds.run_timeout_s` instead of relying on the attempt cap alone. Every prompt on that path is
-  covered, the initial review turn included — the likeliest one to time out, and the one whose timeout
-  previously escaped the harness and aborted the chain outright. When the allowance runs out at the chain
-  tail, the evidence packet now names the model that actually ran instead of the entry being skipped (#444)
-- `mergecraft --version` reported `0.1.0` while the project was at `0.1.0a1`: the number was restated as a literal in `mergecraft/__init__.py` alongside `pyproject.toml` and the two drifted. It is now read from the installed distribution. The value also keys the offline result cache and is stamped on telemetry and eval reproducibility pins, so the mismatch quietly mixed artefacts from different builds
-- Managed analyzers no longer report a clean scan as skipped: the adapter's fallback re-parse ran on the
-  human-readable output string, which carries the `version_note` prose prefix, so any managed tool whose
-  findings stream was empty failed with `Expecting value: line 1 column 1 (char 0)`. TruffleHog hit this on
-  every secret-free scan, making a passing scan indistinguishable from a broken analyzer. The fallback is
-  removed (it could only duplicate the file parse, and bypassed finding redaction when it did), the output
-  read is classified separately so an undecodable file no longer raises `UnboundLocalError`, and analyzer
-  output is persisted only from the raw stream
-- `staticChecks` withholding no longer depends on how a gate was declared: with `shell: disabled` on an
-  untrusted run, gates discovered from the repo's Makefile executed while configured ones were correctly
-  withheld — meaning commands from a Makefile that is itself part of the diff under review could run.
-  Both routes now go through the same cannot-run reporting, each with a truthful reason
-- `review --dry-run` skips the analyzer catalog while still materializing the diff and returning the review prompt (#401)
-- `load_audit_events` skips malformed JSONL lines and non-dict payloads instead of raising (#398)
-- `route_model` routes security specialist at `critical` risk to the same capable model as `high` instead of Haiku (#394)
-- Checkout and packaged `defaults.yaml` copies drifted after README v2; `make pins-check` gates byte identity (#402, #414)
-- Hermes generated skill package lists `GEMINI_API_KEY` and `NOUS_API_KEY` (not `GOOGLE_API_KEY`) in `required_environment_variables`, matching `docs/authentication.md` (#415)
-- Coverage ratchet floor raised to 80% after new docs contract tests increased measured line coverage above the prior ceiling
-- Transitive `h2` 4.4.0→4.4.1 in `uv.lock` for `pip-audit` (PYSEC-2026-3628)
-- `mergecraft init` no longer emits `uses: ./` in consumer repos — published Action ref instead (V8/D13)
-- `mergecraft init` scaffold drops comment triggers and unsafe `github.event.comment.body` prompt wiring; defaults to `CLAUDE_CODE_OAUTH_TOKEN` (README Example 1 parity)
-- Offline `mergecraft review` no longer runs the analyzer catalog twice: the pre-pass in
-  `run_offline_analyze` and the reviewing agent's `run_analyzers` call each provisioned tools and
-  executed every eligible analyzer over the same diff, doubling review time and duplicating the
-  skip block, sandbox probe, and semgrep/trufflehog output in the log. The pre-pass now records the
-  inputs it ran under (repo root, changed files, trust tier, shell, analyzer mode, inline budget,
-  offline flag, base ref, and a digest of the diff) and `run_analyzers` reuses that result when every
-  one of them matches; any difference — and the GitHub Action path, which has no pre-pass — runs the
-  pipeline exactly as before
-- Offline analyze stores ``AnalyzerRunState`` on the CLI tool context and merges analyzer findings into structured output so CC1 exit codes see Critical/Major hits the agent omitted; result-cache keys include mergeCraft version and a settings digest (#399)
-- Managed analyzer binaries are re-verified on every cache hit, not just at download time: the cache
-  directory is keyed by the *archive* sha256, so a tool that rewrites itself in place was executed on
-  every subsequent run while the path implied the pinned contents. TruffleHog's built-in updater did
-  exactly that, silently replacing the pinned 3.96.0 binary with 3.97.0. Provisioning now records the
-  installed binary's sha256 beside it and refuses to reuse a cache entry that no longer matches —
-  discarding it (updater state included) and re-provisioning from the pin, or failing closed with a
-  truthful skip reason when the pinned source is unreachable. TruffleHog is additionally run with
-  `--no-update` so the updater never fires
-
-### Changed
-
-- Offline `--use-cache` / `--resume` store only after structured-output finalize and re-validate on hit; cache keys include trust tier, `--prompt`, and related review inputs; `--resume` reads that cache and does not call a no-op checkpoint stub (#378)
-- CLI, Action, and SCM share one four-stage review engine (materialize / analyze / review / publish) with per-stage timeouts recorded after each stage; the 1h review budget is snapshot data (the agent self-times); `--resume` is an alias of `--use-cache`; `--agent` negotiates `MERGECRAFT_AGENT_PROTOCOL` and stamps protocol budgets, emitting `phase` events as each engine stage starts (#378, #379, #380)
 - Eval methodology: blocker precision is `None` (unpublished) when a run reports no blockers, and severity accuracy is `None` when there are no locality matches — never a vacuous 1.0
-- Landing README redesigned as a REACH-style product page (outline B): problem/solution
-  cards, D2 architecture hero, numbered install, and jump-nav. Long-form install,
-  authentication, and workflow essays moved to `docs/install.md`,
-  `docs/authentication.md`, and `docs/workflows.md`.
 
-### Added
+- Landing README redesigned as a REACH-style product page (outline B): problem/solution cards, architecture hero, numbered install, and jump-nav.
 
-- `mergecraft review --shell {disabled,restricted,enabled}` — operator opt-in that makes the seven
-  `runtime: repo-native` analyzers (ruff, mypy, bandit, vulture, typos, jscpd, markdownlint) reachable from
-  the offline CLI. The offline path previously hardcoded `shell: disabled` at three sites, so those tools
-  could never run locally under any configuration and a full local review exercised only the two managed
-  analyzers. Defaults to `disabled`, so runs that omit the flag are unchanged; raising it lets analyzers
-  execute tooling supplied by the repository under review and is unsafe for untrusted code
-- Consumer glossary (`docs/glossary.md`) — plain-language definitions for trust tier, typed
-  findings, blast radius, and related landing-page terms; manifest row and `llms.txt` entry.
-- Per-harness Agent Skills packages generated from `skills/mergecraft/SKILL.md` via
-  `scripts/gen_agent_packages.py`, with `skills/harnesses.yaml` install matrix,
-  `make agent-packages-check` in CI, and Hermes/OpenClaw surfaces (#383 bullet 1, RV3)
-- Runnable CLI example trees under `examples/cli/` (local diff, branch range, patch
-  file, and `--agent` JSONL) with `make cli-examples` / `cli-examples-check` and
-  `docs/cli-examples.md` tour page
-- Agent-loop reference workflow (`docs/agent-loop.md`) for `mergecraft review --agent` (#383)
-- CLI and GitHub Action runs now enter one review engine over one immutable snapshot (#380)
-- `mergecraft explain`, `ask`, and `replay` plus `run inspect` / `run diff` print output-only change, line Q&A, and stored-run views (#377)
-- `mergecraft review --agent` negotiates protocol version against CLI JSON `schema_version` (both fields kept, aliased), reports retryable mismatches, and names token/cost/tool-call budgets (#379)
-- `mergecraft review --agent` streams the first finding before the verdict; `--use-cache` and `--resume` reuse a local result cache; cancelling a review cleans up child processes (#378)
-- Generated six-axis support matrix (`docs/support-matrix.md`), RC/soak release process (`docs/release-process.md`), and a security-response plus coordinated vulnerability-disclosure path in `SECURITY.md` (#382)
-- Eval methodology (#384): quality metric set (`mergecraft.evals.quality_metrics`), ablation harness (`mergecraft.evals.ablation`), expanded human-reviewed golden corpus plus a separate synthetic mutation corpus (`mergecraft.evals.corpora`), and a `docs/eval-methodology.md` page registered in `docs/manifest.yaml`. Scores stay off the landing README; #140 still owns publishing precision/recall/F1.
-- Enterprise runtime (`mergecraft.enterprise`): offline/self-hosted install plan citing the Python 3.11 floor, HTTP(S) proxy with `HTTPS_PROXY`/`NO_PROXY` export, custom CA certificate loading via `ssl.SSLContext`, data-residency allow-list enforcement, configurable telemetry with on/opt-out/off modes, support bundles with secret redaction, audit-log and usage/cost export, blocking-decision explainability, trace-retention policy with privacy-aware log mode, operational diagnostics, organisation policy/memory distribution without a dashboard. New CLI verbs: `mergecraft health`, `mergecraft audit export`, `mergecraft support-bundle`. (#381)
-- Agent install surfaces: `AGENTS.md`, consumer skill (`skills/mergecraft/SKILL.md`),
-  Claude plugin manifests (`.claude-plugin/`), slash commands (`commands/`),
-  GitHub Copilot instructions (`.github/copilot-instructions.md`), curated
-  `llms.txt`, and a **For AI coding agents** section on the landing README.
-- `llms-full.txt` generated concatenation plus docs pin/link gate (`make llms-check`,
-  folded into `make docs-check`).
-- Added: generated CLI and Action reference pages (`docs/cli.md`,
-  `docs/action-reference.md`) plus a docs manifest; `make docs-check`
-  replaces landing-README table splices.
-- A provider capability catalog names context size, reasoning and tool support, structured-output support, cost, latency and data residency for the bundled models, and a residency allow-list check refuses a model outside the regions the enterprise policy permits (#371)
-- Review specialists now report unique useful findings plus latency, cost, precision, and recall (#370)
-- Review profiles now include `standard`, `api_compatibility`, `migration`, `monorepo`, and `cross_repo` (hyphen aliases on the CLI); `mergecraft profile recommend --risk` auto-selects from change risk, with CLI then policy overrides; profile budget exhaustion stays `inconclusive`, never a clean pass (#369)
-- `.mergecraft/config.yaml` now carries a `schema_version`; unversioned files migrate on load, unknown versions fail closed, and deprecated keys warn before a breaking removal (#368)
-- Review profiles record an explicit ``latency_budget_ms`` field beside their token, cost and tool-call budgets — the three budgets are exported to the run, the latency figure is recorded only; ensemble spend over the profile cost ceiling fails closed; cheap classification runs before specialists, independent work can run in parallel, and structural summaries compress context before an LLM step; early-stop fires when evidence is already sufficient, routing considers remaining budget, and regression/monorepo benches exist without publishing measured cost or latency numbers (#367)
-- `mergecraft doctor --supply-chain` verifies lockfile reproducibility, bundled agent-CLI provenance, and analyzer version pins; every run manifest now records runtime and tool versions (#366)
-- Failure-injection, soak, high-concurrency, monorepo, and large-PR harnesses now pin production SLOs for review completion, time to first finding, total review latency, and publication success, with a closed reliability error taxonomy and per-stage latency metrics (#364)
-- A mid-review provider outage degrades instead of crashing; corrupt local cache rebuilds, disk and memory preflight fail closed, giant repositories skip or partial, SCM publication is idempotent, runs resume from a checkpoint, cleanup runs on timeout/cancel/crash, and diagnostic bundles redact secrets (#365)
-- `mergecraft eval gate` now blocks a release when a prompt-injection, malicious-repository, or malicious-ticket corpus case regresses; reviewing a local path or public URL treats the tree as attacker-controlled input (#363)
-- `mergecraft memory validate` checks the learnings store; learned behaviour needs historical evidence or explicit approval; factual / policy / preference / false-positive memory stay distinct; organization memory is a pluggable backend; effectiveness metrics prove precision rises without losing recall (#360)
-- `mergecraft policy effective` and `simulate` resolve the effective rule set (with the source of every rule, including symbol scope), detect same-scope enforcement conflicts, emit policy audit artifacts, and report trigger / false-positive / waiver / blocking rates (#358)
-- Shipped policy packs for security, public API, migrations, dependency changes, authentication/authorization, testing, and operational readiness; each rule keeps stable identity fields and ships should-trigger / should-not fixtures for `mergecraft policy test` (#359)
-- `mergecraft context search` and `explain` score retrieved context, allocate per-specialist token budgets, fetch lazily through controlled tools, and record omitted scope so the evidence outcome is downgraded; retrieval quality is scored separately from the model (#356)
-- Reviewed-repo instruction discovery now includes `GEMINI.md`, GitHub Copilot instructions, Windsurf rules, `SKILL.md`, and a configurable extra list; injected instruction bytes are hashed into the run manifest, competing sources record a winner, untrusted files stay inside the nonce fence, and `--context` files enforce type, size, trust, and provenance (#357)
-- Review findings are ranked by materiality (security outranks style), confidence is calibrated from benchmark hit rates, and publication/blocking floors plus per-severity, category, file, and review budgets are configurable; dismissals record a closed reason code for evaluation (not durable memory), and a release-wired corpus gate requires blocker precision above 95% (#355)
-- `mergecraft evidence show` and `verify` display and replay a finding's evidence packet (six verifier states, freshness, provenance hash, completeness); unverified findings do not block unless policy allows it, and a failed verifier cannot promote a finding to proven (#354)
-- `mergecraft xrepo explain` reports SHA-pinned linked-repo producer/consumer contract breakage without writing the reviewed tree; policy can require cross-repo review before a public-contract change passes (#353)
-- `mergecraft requirements inspect` and `explain` map ticket and local-spec text to requirement states without writing the reviewed tree; policy can require that evidence before a review passes (#352)
-- `mergecraft describe` prints an output-only PR title, summary, walkthrough, risk, labels, TODOs, effort band, split advice, and similar-change notes (#351)
-- `mergecraft capabilities` prints the review-only capability manifest (modes Review, IncrementalReview, Plan; identify / investigate / verify / explain / prioritize / suggest) (#350)
-- Python 3.11 install floor (#343, option A): `requires-python` lowered to `>=3.11`; mypy/Pyright target 3.11; CI matrix runs on 3.11 and 3.14. README and `docs/distribution.md` install copy use stock `uv` from git (PyPI not published); Docker remains for pinned runtimes. Parenthesized the last PEP 758 site in `analyzers/detect.py` for the 3.11 compile gate; `harbor` extra gated to Python >=3.12.
-- Python 3.11 floor ADR (#343, option A): `docs/dev/python-version-floor.md` records parenthesize-now / binary-later (D8). PEP 758 multi-type `except` handlers under `src/mergecraft/` are parenthesized (44 sites / 27 files).
-- JS/TS lint: `biome` and `eslint` declare `supports_fix: true`; the JS-lint exclusive group (`js-lint`) now resolves the winner by config-file presence alone — `biome.json`/`biome.jsonc` beats any eslint config; eslint config beats any oxlint config — package-script and dependency signals are only consulted when no config file is found (D17, #310)
-- `mypy` is now the default type checker for Python repos with no explicit type-checker config: auto-enabled when neither `pyrightconfig.json` nor `[tool.pyright]`/`[tool.basedpyright]` is present (D16, #309)
-- `osv-scanner` detect globs now include `uv.lock`, so repos using uv's lock file trigger vulnerability scanning without pip-audit (#309)
-- docs: `flake8` and `pylint` catalog entries note they are legacy opt-in; enabled via config override only (#309)
-- Catalog manifests for `knip` (JS/TS unused exports/dependencies, `scope: repo`, `category: quality`) and `vulture` (Python dead code, `scope: repo`, `category: quality`) (#337)
-- Catalog manifests for `govulncheck` (Go vulnerability scan, `scope: repo`, network allowlist `vuln.go.dev`), `cargo-audit` (Rust advisory vulnerability scan, `category: vuln`), `cargo-deny` (Rust license/advisory check, `category: license`), and `typos` (universal typo checker, `scope: repo`, `supports_fix: true`) (#337)
-- Catalog manifests for `tsc` (TypeScript whole-program lint, `scope: repo`, `--noEmit`), `bandit` (Python security, version pinned to `make security` pin `1.9.4`), and `jscpd` (copy-paste detection, `scope: repo`, diff-line attribution via existing `filter_to_diff` pipeline — pre-existing clones off the diff are dropped) (#337)
-- Flip `golangci-lint`, `clippy`, `rubocop`, `phpstan` to `default_enabled: auto`; adds `go.mod`, `Gemfile`, `composer.json` to their detect globs; RuboCop gates on config presence (D11 — silent without `.rubocop.yml`/`Gemfile gem`); PHPStan injects `--level=0` when no `phpstan.neon` is found (D12) (#338)
-- `detekt` flipped to `default_enabled: auto`; activates on any `*.kt` or `*.kts` change, or when `detekt.yml` is detected — provides the default Kotlin lint path (#317)
-- `swiftlint` flipped to `default_enabled: auto`; activates on any `*.swift` change or when `.swiftlint.yml` is detected — provides the default Swift lint path (#318); reports `unavailable` on Linux runners (requires macOS, `declared_unavailable`)
-- `sqlfluff` flipped to `default_enabled: auto`; activates on any `*.sql` change or `.sqlfluff` config presence — skips silently when no SQL dialect is declared (#319)
-- `stylelint` flipped to `default_enabled: auto`; activates on any `*.css`/`*.scss` change or `stylelint.config.js`/`.stylelintrc.json` presence — provides the default CSS lint path (#320)
-- `htmlhint` flipped to `default_enabled: auto`; activates on any `*.html` change or `.htmlhintrc` presence — provides the default HTML lint path (#321)
-- `yamllint` flipped to `default_enabled: auto`; activates on any `*.yaml` or `*.yml` change or `.yamllint` config presence — provides the default YAML lint path (#323); `shellcheck` and `hadolint` were already `auto` (#322, #324)
-- `checkmake` flipped to `default_enabled: auto`; activates on any `Makefile`, `makefile`, or `*.mk` change — provides the default Make lint path (#325)
-- `markdownlint` flipped to `default_enabled: auto`; activates on any `*.md` change or `.markdownlint.json`/`.markdownlint.yaml` presence — provides the default Markdown lint path (#326)
-- `tflint` and `checkov` both flipped to `default_enabled: auto`; activate on any `*.tf` or `*.tfvars` change; the shared `iac-scanner` exclusive group was removed (split to `exclusive_group: null`) so both tools run concurrently — `tflint` provides Terraform lint, `checkov` provides IaC security scanning (#327)
-- `luacheck` flipped to `default_enabled: auto`; activates on any `*.lua` change or `.luacheckrc` presence — provides the default Lua lint path (#328)
-- `fortitude` flipped to `default_enabled: auto`; activates on Fortran files (`*.f90`, `*.f95`, `*.F90`, `*.f03`, `*.f`, `*.for`) or `.fortitude.toml` — provides the default Fortran lint path (#329)
-- `regal` flipped to `default_enabled: auto`; activates on any `*.rego` change — provides the default Rego/OPA policy lint path (#330)
-- `psscriptanalyzer` flipped to `default_enabled: auto`, adds `*.psd1` detect glob, and sets `supports_fix: true` — provides the default PowerShell lint and auto-fix path (#331)
-- `blinter` flipped to `default_enabled: auto`; activates on `*.bat`/`*.cmd` changes — provides the default Windows Batch lint path (#332)
-- `shopify-theme-check` flipped to `default_enabled: auto`; gates on `.theme-check.yml` or the canonical Shopify theme layout (`sections/`, `templates/`, `snippets/` dirs) — bare `*.liquid` files do not trigger it (#333)
-- `smarty-lint` flipped to `default_enabled: auto`; `ANALYZERS.md` notes that `*.tpl` is ambiguous (Go templates, Terraform) — enable only when `.smarty-lint.json` confirms Smarty intent (#334)
-- `ember-template-lint` flipped to `default_enabled: auto`, sets `supports_fix: true`; gates on `ember-cli-build.js` or `ember-source` in `package.json` — bare `*.hbs` files do not trigger it (#335)
-- `prisma-lint` flipped to `default_enabled: auto`; ships a conservative fallback ruleset (`prisma-lint-default-rules.yml`) and sets `config_note` referencing it when no repo-level prisma-lint config is found — avoids inert no-op runs (#336)
-- `cppcheck` flipped to `default_enabled: auto`; activates on any `*.c`, `*.cpp`, `*.h`, or `*.hpp` change — provides the default C/C++ SAST path (#315); `clang-tidy` remains `default_enabled: false` (requires `compile_commands.json`, C4)
-- `pmd` flipped to `default_enabled: auto`; activates on any `*.java` change or `pmd.ruleset.xml` presence — provides the default Java lint path (#312); `infer` remains `default_enabled: false` (requires compilation database, C4)
-- `phpcs` and `phpmd` remain `default_enabled: false`; catalog entries note they are legacy opt-in — `phpstan` (auto) is the default PHP signal (#316)
-- `brakeman` flipped to `default_enabled: auto` with tight Rails detection — only activates on Rails marker files (`config/application.rb`, `config/routes.rb`), never on plain Ruby repos (#313)
-- New catalog manifest for `bundler-audit` (Ruby gem vulnerability audit, `category: vuln`, `scope: repo`, detects on `Gemfile.lock`) (#313)
-- `scripts/check_type_ignores.py` fails when a `type: ignore` or `cast(` in allowed `src/mergecraft/` lacks a one-line reason (#275); wired into `make lint`
-- `scripts/check_xpass.py` fails when unexpected pytest xpasses remain on the allowed test tree (#276)
-- xpass ratchet now runs as a `pytest_sessionfinish` conftest hook inside the coverage-gate pytest session — no standalone log file or extra CI step (#276)
-- `MERGECRAFT_LIVE=1` opt-in gate for live provider tests (#278): `tests/conftest.py` centralizes skip policy via `pytest_collection_modifyitems`; `make test-integration-live` and the CI `integration-live` job export the flag so the suite stays fail-closed when secrets are absent
-- `UnsupportedScmCapability` raised by `GitLabScmAdapter` now reports `"GitLab support is not available in this release"` instead of only the raw capability token; GitLab message is passed explicitly via `message=` so the generic format string stays clean (#279)
-- docs: README requirements and `docs/distribution.md` Marketplace copy state that mergeCraft 0.1.0 is GitHub-only; GitLab support is planned via the `ScmProvider` abstraction (#279)
-- docs: README SHA-pin advice now links to CONTRIBUTING.md verify one-liners (`cosign verify` / `gh attestation verify`); `docs/distribution.md` Marketplace gate requires image attestations to pass before listing, pointing at the existing `sign-attest` job (#280)
-- SCM abstraction: `ScmProvider` protocol with `GitHubScmAdapter` (behaviour-preserving) and demand-gated `GitLabScmAdapter` that declares unsupported capabilities instead of emulating GitHub; core MCP tools and review publication route through `ToolContext.scm`
-- Added: a test-only provider-harness fixture schema and strict matcher
-  (`tests/support/provider_harness`) so deterministic review tests can name
-  the exact provider interaction they expect. Not used in production.
-- Added: provider-harness recording workflow and operator docs
-  (`docs/dev/provider-harness.md`); opt-in sanitized capture under
-  `.ignorelocal/provider-harness/records/`.
-- Cross-repository intelligence indexes linked repos at pinned commits, contract surfaces (OpenAPI, GraphQL, protobuf, exports), cross-repo blast radius, reproducible citations, and ticket acceptance-criteria mapping under `mergecraft.xrepo` and `mergecraft.requirements`
-- Repository context engine indexes per-file symbols (tree-sitter with generic fallback), provenance citations, and trust-gated instruction/skill discovery under `mergecraft.context`
-- Call graph, change graph (changed symbol → dependents → tests → contracts), and `mergecraft context inspect` for provenance-backed context retrieval
-- Feedback capture for findings (accepted / dismissed / disputed) keyed by fingerprint, with bounded negative-memory suppression, TTL/recency weighting, contradiction detection, and `mergecraft memory list|show|forget|export|import|feedback` lifecycle verbs (DG7)
-- Policy-as-code package (`mergecraft.policy`) with schema-validated YAML rules, deterministic org/repo/path scoping, enforcement modes that classify a rule's blocking intent (review does not consult them), required-evidence inconclusive handling (D8), and bounded exceptions with expiry
-- `mergecraft policy lint|test|explain` — validate policy rules, run should-trigger/should-not fixtures, and list effective rules with source layers
-- Per-run budgets, bounded external-operation timeouts, and honest large-diff degradation (`RunBounds`, scope reduction reports, downgraded outcomes) for offline and Action reviews
-- Large-PR review engine (DG2): cluster changed paths by dependency and intent, build hierarchical diff context (map → summaries → raw hunks) with token-budget scope reduction that reserves verbatim hunks for high-risk regions, record disputed/waived/stale finding lifecycle states, and emit advisory-only PR split recommendations from independent change groups
-- Finding precision pipeline (DG1): deduplicate agent/analyzer findings before publication, apply a code-defined severity rubric at the verifier seam, require structured causality on blocking findings, suppress pre-existing analyzer hits via baseline comparison, and classify generated/minified/vendored paths for review policy
-- DG1 precision corpus gate (`evaluate_dg1_precision_corpus`) proving recall holds while corpus-confirmed precision improves over the pre-DG1 baseline
-- PR utilities (DG8): standalone describe output (`mergecraft.pr.describe`), text-only changelog/docs/test suggestions (D11), deterministic TODO scan, classifier-derived effort bands, advisory label suggestions, and `/mergecraft review` comment routing with author-association and permission gating (`mergecraft.mcp.comment_router`)
-- `mergecraft mcp serve` and `mergecraft mcp list` expose the reviewer's MCP tool surface to external clients without widening trust tier or tool-class policy (D13)
-- Named review profiles (`--profile fast|deep|security`) bundle model chain, analyzer focus, and run budgets; explicit CLI flags still win
-- `mergecraft cache info|clear|prune` inspect and maintain the byte-bounded on-disk run cache
-- `mergecraft doctor` diagnoses git, provider credentials, analyzer detection, auth, config, and MCP port availability without printing secrets
-- `mergecraft config show|explain|validate` generalizes precedence inspection beyond tracing; local private-repo reviews ship no remote telemetry by default (D11)
-- `mergecraft plan` previews model chain, toolset, analyzer detection, and token estimate without provider calls
-- Run manifest fingerprints (model/CLI versions plus prompt, config, and policy hashes) for reproducible offline reviews
-- `mergecraft review` machine contract: distinct process exit codes per `RunOutcome`, `--format text|json|jsonl|sarif`, and `--agent` JSONL streaming with an explicit `protocol_version`
-- Added review-wide trace correlation: a `review.id` on every span across every process and agent of one logical review, plus a deterministic `review.correlation_key` (`sha256(repo|pr|head_sha)`) that groups re-reviews of the same commit; `trace_id` remains per agent run
-- Added tracer baseline attributes (`mergecraft.run_id`, `mergecraft.version`, `mergecraft.trust_tier`, VCS and CI fields) merged into spans at close time, with explicit attributes taking precedence
-- Added review-context env propagation into spawned agent CLI subprocesses, so subagent runs join the parent review's trace identity
-- Added a content-capture policy for model payloads (`tracing.content`: `off` / `metadata` / `redacted` / `full`, default `redacted`; env `MERGECRAFT_TRACING_CONTENT`) gating whether LLM bodies may be emitted onto spans, with per-payload size counts and a sha256 of the original at every level above `off`
-- Security: spans from untrusted sources are hard-capped at `metadata` content capture — prompt/completion bodies can never be shipped to a sink for an untrusted review, and the cap cannot be overridden by config or env
-- Added model-parameter and payload capture on LLM spans (`gen_ai.request.*` / `gen_ai.response.*` / `gen_ai.usage.*`), recording both the requested and executed model so fallbacks are visible, with extended-thinking capture gated by the content policy and per-harness coverage documented (CLI harnesses have no payload visibility; the OpenCode HTTP path and stream consumer do)
-- Added richer tool-call tracing: `gen_ai.tool.call.id` correlating request and response, per-call duration, and an MCP-vs-native origin distinction
-- Added outcome spans: review-phase spans, per-agent run spans with MCP-stamped attribution (`MERGECRAFT_AGENT_ID`) so tool calls chain under their agent, fingerprint-keyed finding lifecycle spans, a verdict span with a derived disagreement flag, and eval-score spans that inherit the active `review.id`
-- Added benchmark quality metrics: blocker precision scored separately from overall precision, semantic duplicate rate, unique accepted findings per lens, judge value (noise removed and recall lost), p50/p95 cost-latency summaries, and orchestrator kind as a scored dimension
-- Added an adversarial eval corpus (`evals/cases/adversarial/`) proving the prompt-injection fence holds against hostile PR bodies, review comments, and commit messages, and that poisoned context can neither suppress real findings nor manufacture approvals
-- Added `mergecraft eval gate` — a release regression gate comparing a candidate result set against baseline with a declared tolerance band, wired as a blocking job in the release workflow
-- Added agent registry binding model, prompt, toolset and budget per role with `mergecraft agents list|show|set` and `make agents-check`
-- Added registry-driven harness render for Claude, OpenCode, Codex, Gemini, and Cursor with per-agent models and declared Codex degradation in run metadata
-- Added typed specialist handoff and model-diversity policy for verification. An agent binding's `dispatch` key accepts `single`; `ensemble` and `shadow` are refused with a configuration error naming the mode as not implemented, instead of being accepted and then ignored
-- Added change classifier and risk-based lens routing with recorded per-lens reasons in Review mode
-- Promoted 20 themed review lenses from Review prose into registry entries with `mergecraft lens list|show|test`
-- Added pluggable orchestrator with declarative pipeline file, trust gate for untrusted sources, and `mergecraft pipeline lint|show|explain`
-- Added declared decision nodes for hybrid orchestration — typed triviality, lens selection, and finding disposition seams with pipeline-owned control flow
-- Added: optional `harness` setting (`opencode` / `codex` / `claude` / `gemini` / `cursor`) to select the agent runtime independently of provider/model. Existing configs with the key unset keep today's inference
-- Added: terminal-verdict protocol shadow mode (`gates.terminal_verdict`, default `shadow`) with a closed `VerdictDiagnostic` vocabulary; enforce still applies the fail-closed missing-verdict branch
-- Added: server-side semantic validation of the terminal verdict — `request_changes` with no findings, `approve` over a verifier-confirmed blocker, and `approve` with a failing required deterministic check are all rejected and fail closed
-- Added: `submit_review_verdict` — a typed MCP operation that records a review's terminal verdict
-  (`approve` / `request_changes`), summary and structured findings. Unknown fields and invalid
-  verdict values are rejected; an identical re-submission is idempotent, a conflicting one is an
-  error. Not yet enforced — the run outcome is unchanged in this release
-- `mergecraft tracing logfire wire-workflow` / `unwire-workflow` — surgical
-  YAML mutation of `.github/workflows/*.yml` to wire (or strip) the four
-  Logfire keys (`tracing: "true"`, `tracing-to: logfire`,
-  `logfire-token: ${{ secrets.LOGFIRE_TOKEN }}`,
-  `MERGECRAFT_TRACING_PROJECT: ${{ vars.LOGFIRE_PROJECT }}`) on selected
-  steps. Comment-preserving line-based mutator; refuses forks with
-  similarly-named action names; supports both the multi-line
-  (`- name: ...` / `  uses: alexhawat/mergeCraft@X`) and the inline
-  (`- uses: alexhawat/mergeCraft@X`) step forms; creates a `with:` block
-  when absent (README Example 1 has no `with:`); public API under
-  `mergecraft.cli.tracing_logfire_wf_yaml.apply_logfire_wiring` /
-  `remove_logfire_wiring` / `render_workflow_diff`
-- `scripts/gen_reference_docs.py` regenerates README's `action.yml` input/output
-  tables and CLI command table from the live sources (never a subprocess — it
-  walks the live Typer `app` object) and splices them between HTML sentinel
-  comments; `make reference-docs-check` (wired into `make ci-static`) fails the
-  build on drift. Closes the audit in the issues-showcase-readiness wave plan
-  (PR G2): the README table documented 9 of 24 real `action.yml` inputs and
-  neither declared output anywhere
-
-### Changed
-
-- `mergecraft review` uses `--output-format {text,json,jsonl,sarif}` (not `--format`) so it no longer collides with root `--format {table,json}`; root `--format json` selects JSON when `--output-format` is omitted; explicit `--output-format text` wins over inherited JSON. Human-readable review text stays on stderr (D14) — document `2>` for capture.
-- Thermo-nuclear CLI remediation: global `--format json` now drives every `--json`-capable subcommand (`eval`, `findings`, `learnings`, `memory`, …) with a pinned `schema_version`; invalid `--log-level` exits `2`; eval replay regressions exit `12` (`CLI_FAILED_EXIT_CODE`); duplicate `_bail()` helpers collapsed to `mergecraft.cli.errors.cli_bail`; `CLI_SUCCESS_EXIT_CODE` / `CLI_USAGE_EXIT_CODE` moved to `mergecraft.cli.exits`; colour policy runs once via pre-help bootstrap. `findings export` uses `--output-format {json,markdown}` (not `--format`) so it no longer collides with the root `--format {table,json}` switch; explicit markdown wins over inherited JSON. `eval_cmd` split into `eval_cli_output.py` / `eval_gate_cmd.py`; `diff_review_cmd` and `gha_cmd` route exit helpers through `mergecraft.cli.exits`.
-- Global CLI surface (#342): root `--format {table,json}`, `--quiet` / `--verbose` / `--log-level`, and `--color {auto,always,never}` honour `NO_COLOR`, `FORCE_COLOR`, and non-TTY sinks; JSON payloads carry `schema_version`; `review` is the documented command and `diff-review` is a hidden deprecated alias (one stderr line per invocation).
-- CLI exit-code contract (#341): every exit under `src/mergecraft/cli/` routes through named constants (`mergecraft.cli.exits` / `RunOutcome` helpers); usage errors exit `2`. See [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md). **Breaking:** scripts that branched on exit code `1` for generic CLI failures must follow the new table (most former `1` paths now exit `30`).
-- Shell completion for the `mergecraft` CLI: `mergecraft --install-completion` (bash/zsh/fish) and `mergecraft --show-completion` (#340). CLI status and Rich chrome now go through shared stderr consoles; machine-readable `--json` payloads stay on stdout only.
-- Dependabot now batches patch and minor bumps into one grouped PR per ecosystem (pip, github-actions, docker, and the `docker/agent-clis` npm lockfile), with security updates in their own group and majors still opened individually; `open-pull-requests-limit: 5` caps each ecosystem
-- `mergecraft review` skips PRs authored by `dependabot[bot]`: the gate failed closed on every version bump (the reviewer posted no `mergecraft-approval` check-run, so the enforce step's fail-closed branch blocked the PR). Both jobs are conditionally skipped rather than untriggered, so a rule requiring `mergecraft review` still reports. `changelog-preview` is deliberately left running — it already passes on bot PRs, and skipping a reusable-workflow caller would report under the bare caller job id rather than the two-part `changelog-preview / preview` check name. CI, CodeQL, the security-audit Verify job, and SHA pinning still gate these PRs
-- `.github/agents/dependency-pr-manager.md` — dry-run-first sweep agent for the dependency-PR queue: classifies each bot PR into auto / review / blocked / suspicious lanes, diff-audits that a bump touches only its manifest and lockfile, and writes a per-major review brief instead of merging majors blind
 - `mergecraft review --help` now states that no flags are required and includes full example commands for local worktrees, GitHub branches, and present or past PRs
+
 - Stale pytest `xfail(strict=False)` markers that were already passing are now real tests; remaining allowed-tree xfails are strict (#276)
+
 - Changed: `gates.terminal_verdict` now defaults to `enforce`; missing terminal verdict reports `inconclusive`. Operators can still set `shadow`
+
 - Changed: `create_pull_request_review` now records through the same validator as `submit_review_verdict`; GitHub posting is an internal publisher, not an agent tool
 
-### Fixed
+- The PR integration job runs keyless hermetic integration tests instead of passing on a check that a helper script exists, so a green run means tests executed
 
-- Evidence image uploads, issue comments, and PR label tools work on review-only runs again
-- Linked-repo contract breakage is included in ordinary PR checkout, not only `mergecraft xrepo explain`
-- Linked-repo checkout reads only operator-granted siblings, and skips a sibling whose HEAD is not the pinned SHA
-- Webhook signature verification fails closed without a configured secret
-- Untrusted download and clone URLs are SSRF-checked, and binary downloads pin DNS to the validated addresses
-- `bandit` now uses built-in `--format json` instead of the optional SARIF extra, so auto-enabled Python security coverage still runs on plain Bandit
-- `bundler-audit` now runs the gem CLI (`bundler-audit check --format json`) instead of `bundle audit`, so Ruby lockfile audits actually execute
-- `tflint` no longer passes changed `.tf` files as positional args (invalid since TFLint 0.47); it lints the working directory and the pipeline still scopes findings to the diff
-- `phpstan`, `golangci-lint`, and `sqlfluff` now skip when a PR only changes enablement markers (`composer.json`, `go.mod`, `.sqlfluff`) and has no source files to lint, instead of running with empty paths or linting the whole tree
-- `bundler-audit`, `cargo-audit`, and `cargo-deny` findings no longer fake a line-1 GitHub anchor when the tool did not report a line; crate/gem coordinates stay in the message
-- `clippy` now runs as `cargo clippy --message-format=json` (package/workspace) instead of passing PR paths as cargo args, so auto-enabled Clippy keeps rustc JSON findings
-- Auto-enabled analyzers whose stdout is not SARIF now keep findings: `cargo-audit` (`--json`), `cargo-deny` (`--format json`), `vulture` (line text), `tsc` (`--pretty false`), `knip` (`--reporter json`), `jscpd` (`--reporters json`), `bundler-audit` (`--format json`), `sqlfluff` (`--format json`), and `clippy` (`--message-format=json`); `typos` 1.32.0 already emits SARIF and stays on `parser: sarif` (Thermos Finding 1)
-- A successful analyzer with empty stdout (for example a clean `tsc --noEmit`) is treated as passed instead of unavailable
-- `tsc` project-level diagnostics without a file location (for example `error TS18003`) now surface as body-only findings instead of a silent pass
-- `tsc` help text and other unmatched nonempty stdout now fail closed instead of counting as a clean pass
-- Project-level `tsc` findings survive diff scoping when the PR only changes `.ts` / `.tsx` files
-- `phpstan`: command changed from `--error-format=json` to `--error-format=sarif` so the output aligns with `parser: sarif`; previously the JSON output caused `parse_sarif()` to raise `ValueError` and silently drop all findings (Thermos Finding 1, #338)
-- `brakeman`: command changed from `-o brakeman.sarif` (writes to file) to `-o -` (stdout) so the SARIF output is captured by the adapter; `parser: sarif` is unchanged (Thermos Finding 1, #338)
-- MCP HTTP server now issues a separate bearer token for the orchestrator ``/mcp`` route; reviewer/verifier harnesses keep ``ToolContext.mcp_auth_token`` for their role endpoints (#349)
-- OpenCode gateway ``extra_options`` generation knobs (temperature, ``top_p``, ``max_tokens`` when a context window is known) are applied through provider model ``limit`` / ``options`` and the primary ``build`` agent config instead of being copied into ``provider.options``; ``llm.call`` tracing stamps only params the config path actually applies (#295, #349)
-- `tracing/genai`: `_optional_float` now rejects non-finite float values (`NaN`, `Inf`) and their string representations (`"nan"`, `"inf"`), matching the existing behaviour of `_optional_int`; invalid temperature/top_p degrade to omitted knobs instead of propagating the sentinel value (#348)
-- OpenCode ``llm.call`` spans now carry ``ModelParams`` request knobs (``gen_ai.request.max_tokens``, temperature, and siblings) resolved from gateway ``extra_options`` env vars (``MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS``, indexed ``…_<N>``, or per-provider ``MERGECRAFT_PROVIDER_EXTRA_OPTIONS``) including named presets when only ``NOUS_API_KEY`` / ``TOKENHUB_API_KEY`` are set (#295)
-- OpenCode HTTP ``llm.call`` usage attrs omit unset counters instead of zero-filling ``gen_ai.usage.*`` when the session response reports output tokens only (#297)
-- `mcp/server`: `submit_review_verdict` (`TERMINAL_PROTOCOL`), `verify_agent_findings` (`VERIFICATION`), and `record_finding_verdict` (`REVIEW_WRITE` + `mutates=True`) were absent from the primary `/mcp/reviewer` surface — the playbook's C6 "verify then publish" loop could not execute. `TERMINAL_PROTOCOL` and `VERIFICATION` are added to `PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES`; `record_finding_verdict` is added to `PRIMARY_MUTATING_ALLOWLIST`. Subagents keep `REVIEWER_ALLOWED_TOOL_CLASSES` (none of the three classes) and `READONLY_MUTATING_ALLOWLIST`, so they remain denied all three tools. Verifier still has no `record_finding_verdict` and no `terminal-protocol` tools
-- `agents/claude`: `write_mcp_config` wrote a single MCP server entry pointing to `/mcp/reviewer` (derived from the orchestrator's `current_agent_id()` at `_run` start). Verifier subagents inherited that config and called `/mcp/reviewer` instead of `/mcp/verifier`. `write_mcp_config` now always writes two entries — `MERGECRAFT_MCP_NAME` → `/mcp/reviewer` and `MERGECRAFT_VERIFIER_MCP_NAME` → `/mcp/verifier` — without using `current_agent_id()`, so the verifier surface is available to subagents from the moment the orchestrator launches; `test_role_dispatch_urls.py` now tests the production call path rather than a fake `agent_run_span`
-- `tracing/sinks`: `sink_factory` dedupes resolved `OTLPSink` instances by endpoint and headers before fan-out, so a `logfire` + `otel` pair aimed at the same OTLP destination emits one span per `TraceEvent` instead of N identical rows; the #293 processor singleton guard is unchanged (#372)
-- `tracing/exporters`: `OTLPSink.write` now passes `TraceEvent.ts_start_ns` / `ts_end_ns` into OTel `start_span` / `span.end`, so Logfire span duration matches provider wall time instead of zero-width export-time stamps; the `duration_ms` attribute is unchanged (#373)
-- `tracing/exporters` / `tracing/otel_bridge`: exported spans now carry OTel parent context from `parent_span_id` and use mergeCraft `span_id` (first 16 hex chars) as the OTel `span_id`, so Logfire trace trees link correctly; `attach_trace_context` propagates the same ids for nested auto-instrumented calls (#374)
-- `llm.call` spans now stamp `gen_ai.system`, `gen_ai.usage.*`, and `gen_ai.response.model` when the provider reports them, and `mergecraft.usage.unavailable=True` when it does not — driver parity across OpenCode HTTP, Claude streaming, and the model-chain close site; codex and gemini already stamped `gen_ai.system` on their streaming close paths (#375)
-- `tracing/exporters`: `_setup_tracer_provider` no longer stacks a duplicate `BatchSpanProcessor` / OTLP exporter on every `OTLPSink` construction — when a real `TracerProvider` already exists and the same endpoint is already registered, the function reuses the existing processor pair instead of appending another one, eliminating the ~29× duplicate OTLP rows per span observed in production (#293)
-- `tracing/tracer`: `get_tracer_from_settings` pins `MERGECRAFT_TRACE_ID` on first mint and reuses a process-wide `Tracer` when tracing settings match, so MCP-style `tools/call` handlers on a worker thread share one Logfire `trace_id` instead of minting a new tree per call (#292)
-- `tracing/resolve`: ``MERGECRAFT_OTEL_ENDPOINT`` (or ``--otel-endpoint``) with no explicit ``tracing_to`` now selects an OTLP sink instead of falling through to ``jsonl_file`` — the endpoint env var implies OTLP export
-- `tracing/_tool_attrs`: `enrich_tool_response` now classifies `ToolResult.is_error=True` as an error span even when no Python exception is raised — `tool.exit_code=error`, span status `error`, and `gen_ai.tool.output` set for the GenAI dashboard; JSON-RPC is unchanged (#296)
-- `analyzers/trust`: `build_review_source` detects a linked git worktree of the same repo (same `git rev-parse --git-common-dir`) and sets kind `"local_worktree"`, which `derive_source_trust_tier` maps to `"trusted"` without `--trust`; temporary clones and unrelated repos remain `"untrusted"` (#294)
-- `mcp/git_guards`: six guard functions (`_is_config_flag`, `_subcommand_declares_shorts`, `_reject_config_flags`, `_reject_namespace_flag`, `_reject_branch_writes`, `_reject_file_writing_flags`) and ten guard constants extracted from the 754-line `mcp/git.py` into a dedicated `mcp/git_guards.py` module; `mcp/git.py` re-exports every name so existing `monkeypatch` targets continue to resolve (#299)
-- `cli/auth`: authenticating a provider left the contributor unable to run the CLI locally — `mergecraft auth codex|claude|gemini|cursor|nous|tokenhub|minimax` persisted the captured credential only through `gh secret set`, so it landed in GitHub Actions secrets and nowhere the local runtime reads. All seven now take `--scope local|github|both` (default `github`, so a CI-only setup keeps today's behaviour exactly, including the hard failure when the secret write fails), and `--scope local` needs no `gh` auth and no network. `auth codex` captures `auth.json` before its isolated `CODEX_HOME` tempdir is deleted, and the pretty-printed multi-line payload `codex login` writes is compacted to one line and quoted, so the `.env` entry round-trips through both `dotenv` and `source .env` (#221)
-- `cli/auth`: running `mergecraft auth … --scope local` from a subdirectory reported success while writing a nested `.env` that nothing reads — the local path fell back to `.env` in the current working directory; it is now anchored at the git repository root, and a run with no repository to anchor to fails with a pointer to `MERGECRAFT_ENV` instead of writing somewhere useless. `$MERGECRAFT_ENV` still wins when set (#221)
-- `agents/codex`: every Codex review failed to start whenever a custom OpenAI-compatible provider was configured (`MERGECRAFT_CUSTOM_PROVIDER_*`) — the generated `config.toml` emitted the `default_permissions` profile name *after* the `[model_providers.*]` tables, so TOML scoped it into a provider block and Codex never saw the read-only review permission profile; the generated file now always emits every root scalar ahead of the first table header, whatever order the writer populated them in, so the same ordering also covers `sandbox_mode` on the non-profile path (#222)
-- `agents/structured_handoff`: a specialist handoff whose `---typed-findings---` marker differed in casing from the documented lowercase spelling lost every finding it reported — the marker was detected case-insensitively but the text was then split on the exact-case literal, so the payload came back empty and `parse_specialist_handoff` raised `ValueError: … not valid JSON` instead of returning the findings; the split is now a case-insensitive regex search over the original text, which keeps the offsets valid even when the prose half contains non-ASCII characters that `casefold()` would lengthen (#261)
-- `agents/ensemble`: when two ensemble models disagreed, `reconcile_ensemble` returned only the primary model's findings, so a real problem that only the secondary reviewer caught — up to and including a Critical the primary missed entirely — was silently discarded and survived nowhere but the judge brief; the disagreement path now merges both models' findings, deduplicated by `_finding_key`, keeping the primary's copy of a corroborated finding and the judge escalation unchanged (#262)
-- `agents/ensemble`: the same defect reported at two different call sites in one file collapsed into a single finding when the two ensemble models' results were merged, so the second site never reached the reviewer — the deduplication key was the path and the finding body only; the line is now part of a finding's identity, and a row with no line keys on a value no line number can collide with (#262)
-- `agents/_stream_consumer`: streaming runs on OpenAI-shaped providers (Nous, MiniMax, opencode Responses / Chat Completions, Codex) over-reported their prompt size — and therefore the run's token and cost accounting — by the whole cached-prompt count whenever prompt caching was active, because `prompt_tokens_details.cached_tokens` / `input_tokens_details.cached_tokens` are already *inside* the reported `input_tokens` but were added to it a second time; `to_usage()` now adds the cached count only when it came from Anthropic's disjoint `cache_read_input_tokens` counter, and still reports it as `cache_read_tokens` in both cases (#273)
-- `agents/opencode`: reviews served over the opencode HTTP session path — every Nous and MiniMax run — over-reported their prompt size, and therefore the run's token and cost/budget accounting, by the whole cached-prompt count whenever prompt caching was active; this path re-implemented the cached-token scan inline and kept adding OpenAI-style `prompt_tokens_details.cached_tokens` / `input_tokens_details.cached_tokens` to an `input_tokens` that already contained them, so the fix landed in `_stream_consumer` only covered the streaming CLI drivers. It now shares `_resolve_cache_read`, adding the cached count only when it came from Anthropic's disjoint `cache_read_input_tokens` counter, and still reports it as `cache_read_tokens` in both cases (#273)
-- `mcp/verdict`: a pull request carrying an analyzer-reported Critical or Major could be approved as long as the reviewing agent never dispatched a verifier for it — `validate_submission`'s approve branch only walked verifier-confirmed findings, so skipping verification was a route to approval. Approve is now rejected whenever any finding the run knows about is still of blocking severity after the causality policy has run, whether or not a verifier looked at it, and a finding the gate cannot grade blocks rather than being skipped. The reviewing agent reopens the approve path by verifying and then `drop`ping a refuted finding, or by `downgrade` to a non-blocking severity — both are applied before the gate reads the state, and a `drop` recorded in an earlier run counts too. Attribution is deliberately not a second condition: under the default `baseComparison: diff` no base run happens and every diff-scoped finding stays `introduced_by_pr: "unknown"`, so gating on `"true"` exempted ruff, mypy, bandit and semgrep from the gate entirely; where a base run did happen, a pre-existing finding is stamped `"false"` and the causality policy already downgrades it below the blocking threshold (#263)
-- `mcp/verification`: a verifier `downgrade` that named no `new_severity` silently rewrote the finding to `Minor`, so a single such verdict retired any Critical the approve gate was holding; a downgrade is now rejected unless it names the severity it downgrades to, that severity must be one of the four in the taxonomy, and a downgrade landing on a still-blocking severity needs the same structured causality a `confirm` does (#263)
-- `mcp/check_runs`: the `list_check_runs` tool called GitHub's check-*suites* endpoint and returned a `check_suites` payload, so a reviewing agent that asked which checks ran on a ref got only per-suite rollups — the individual run names, their per-run conclusions, and therefore the logs of the one job that actually failed were unreachable through this tool; it now calls `list_check_runs_for_ref` and returns `check_runs`, and every returned run carries its parent suite's id as a top-level `check_suite_id` beside its own `id`, so the documented `get_check_suite_logs` follow-up can be handed a suite id without the agent having to pick between two nested ids. `GitHubScmAdapter.list_check_runs`, the protocol's MCP-read operation of the same name, forwarded to the suites endpoint too and is corrected with it (#266)
-- `mcp/server`: a malformed `tools/call` from the reviewing agent — a missing required argument, an unreadable one, or a property the tool never declared — reached the tool body and failed in whatever ad-hoc way that tool happened to fail, or partially succeeded, instead of being rejected at the protocol boundary; `handle_rpc` now validates `arguments` against the tool's `input_schema` before dispatch and returns JSON-RPC `-32602` with the offending JSON path and the validator's message. A string-encoded scalar sent where the schema declares `integer`, `number` or `boolean` — `"1"`, `"true"` — is read as that type and passed through rather than rejected: roughly 37 tool bodies were written for exactly that tolerance and the packaged workflow itself asks the agent for a bare `check_suite_id`, so rejecting it turned a tolerated shape into a hard error and silently degraded CI-log grounding. A union that already admits `string` is left alone, and a value that cannot be read as its declared type is still reported as the schema violation it is. `inf` / `nan` spellings such as `"1e999"` are refused rather than coerced — they satisfy the schema and then raise inside the tool body — and only `true`/`false`/`1`/`0` read as booleans, since no JSON consumer recognises `yes`/`no`. A tool whose declared schema cannot be compiled fails closed as `-32603` naming that tool, rather than running unvalidated arguments — reachable in production because `set_output` adopts a consumer-supplied `output_schema` verbatim and only its JSON-object-ness was ever checked. A non-dict `arguments` is still coerced to `{}` and is now rejected by any tool that requires a property, where it previously executed with no arguments. A call rejected here is charged no tool-call budget, so a schema mismatch the agent retries cannot burn the run budget with nothing executed, and the rejection is recorded on the trajectory instead of being invisible (#267)
-- `mcp/server`: a `tools/call` carrying a very long integer literal where the schema declares `number` — anything past the float range, from 309 digits up — returned HTTP 500 with no JSON-RPC envelope and no request `id`, which is the response shape Codex's MCP client cannot deserialize and answers by killing its transport worker. The non-finite guard added for the `inf`/`nan` spellings asked `math.isfinite()` about a Python `int`, which converts to float first and raises `OverflowError`, and argument coercion runs before the handler's error boundary, so nothing caught it. Only a float can be non-finite, so the guard now says so; a wide integer is passed through typed as any other number is. Reachable on every top-level `number` property, including `shell.timeout`, `git_fetch.depth` and the `check_suite_id` the packaged workflow asks the agent to pass to `get_check_suite_logs` as a bare number (#267)
-- `mcp/verdict`: a malformed finding the reviewing agent asserted could silently neutralise a real analyzer blocker that shared its fingerprint — the grader marked the fingerprint as already graded before discovering the row was unreadable, so the analyzer row carrying it was skipped and landed in neither the unverified nor the ungradable population, leaving the approve gate with nothing to block on. A row that cannot be read no longer spends its fingerprint (#263)
-- `mcp/shell`: the shell tool's git refusal missed `sudo -u <user> git …` and `doas -g <group> git …` — the target name is neither path-shaped nor numeric, so it read as the command word and ended the scan before the git behind it was inspected, putting the whole git surface (`git clean`, `filter-branch`, `-c alias.…`) back within reach of a `restricted` shell. A wrapper flag's separate name operand is now skipped rather than treated as the command (#257)
-- `wait-for-ci` job now declares a job-level `permissions: {contents: read, checks: read}` block so its `gh api …/check-runs` poll is no longer silently 403'd; stderr from the poll is no longer suppressed so permission failures are visible in the job log (#264)
-- `action.yml` outputs (`result`, `evidence_packet`, `verdict_diagnostic`) no longer carry `value: steps.run.outputs.*` composite-action wiring — those expressions are inert on a Docker action and prevented consumers from ever reading the outputs; outputs are now written exclusively via `$GITHUB_OUTPUT` (#272)
-- `verdict_diagnostic` output is now written to `$GITHUB_OUTPUT` on every run — the declared output was computed but never emitted, leaving the key permanently absent for consumers; an empty string is written when no terminal-verdict policy was evaluated (D10) (#265)
-- `docker/e2e/run_in_image_adversarial.sh`: bumped `pytest==9.0.3` → `pytest==9.1.1` to match the `pyproject.toml` dev-dependency pin; one pytest version now spans unit CI and the adversarial image run (#271)
-- `mcp/git`: `commit_changes` no longer attempts a doomed Git Data API `PATCH /git/refs/heads/{branch}` after a local commit; every return path now includes `pushed: false` so callers do not need a defensive `.get("pushed")` (#259)
-- `analyzers/parsers/osv_json`: escaped the unescaped middle dot in the `_fixed_version` regex (`r"\d+\.\d+.\d+"` → `r"\d+\.\d+\.\d+"`); the bare `.` wildcard let two-component versions with three or more digits after the decimal (e.g. `1.234`) be accepted as `N.N.N` — with the wildcard consuming the adjacent digit — producing a fabricated fix-version string handed verbatim to the reviewer as `Upgrade to 1.234 or later` (#270)
-- `analyzers/scope.base_comparison_available`: corrected inverted return — findings on an online `baseComparison: full` run were attributed as if the base comparison had not happened (all `introduced_by_pr` left `"unknown"`), while findings on an offline run were falsely attributed as introduced-by-PR; now returns `not offline` so that attribution is correct in both directions (#269)
-- `mcp/git`: corrected `commit_changes` tool description — it performs a local commit only and does not push to the remote or produce a GitHub-verified commit (#259)
-- `mcp/git`: `--namespace` is now refused outright rather than forwarded. It was the one extracted global option with no validation, and it cannot be path-confined because it sets `GIT_NAMESPACE`, a ref-namespace prefix rather than a path; no subcommand on the read-only allowlist consumes it (only `upload-pack` / `receive-pack` / `upload-archive` do), so refusal costs the reviewer no capability (#257)
-- `mcp/git`: genuinely read-only invocations were refused, because a flat short-flag blocklist cannot express that a letter means different things to different subcommands — `git ls-files -o` / `-c` / `-co`, `git log -c`, `git show -c`, `git branch -av` / `-ar` / `-vvv`, `git branch --list <pattern>`, and `git diff -C`, which was mistaken for git's chdir option and swallowed the following token as its directory. Short flags are now read against the subcommand that defines them, `-C` after a subcommand that owns it is left in place, and a positional argument to `git branch --list` is understood as the glob it is. Every write vector stays refused (#257)
-- `analyzers/adapters._run_ruff_format_check`: ruff format findings now cite the actual file that would reformat instead of always citing the first scoped file; with multiple files in a single `ruff format --check` invocation the reviewer was previously pointed at a file that was already correctly formatted (#268)
-- `analyzers/adapters._run_ruff_format_check`: corrected the fallback finding message for a ruff invocation failure; when `ruff format --check` exits non-zero with no parseable `Would reformat:` line (a crash, syntax error, or unexpected output), the finding now reports `"ruff format check failed: analyzer produced no parseable output"` instead of falsely claiming the attributed file would be reformatted
-- `analyzers/adapters._run_ruff_format_check`: on any repo running ruff 0.16 or newer every formatting finding disappeared and a clean run was mislabelled `"analyzer produced no parseable output"` — 0.16 routes `format --check` through the diagnostic renderer and no longer prints `Would reformat: <path>`; both output spellings are now parsed, ANSI colouring is stripped, and paths are taken only from `unformatted:` headers so an `invalid-syntax:` diagnostic is not read as an unformatted file. A sandbox refusal, or a ruff too old to support `format --check` at all, is now reported as a skipped analyzer rather than as a finding (#268)
-- `analyzers/adapters._run_ruff_format_check`: a ruff `unformatted:` header with no location line of its own adopted a *later* diagnostic's location, so a reformat was attributed to a file that did not need one, and a location whose trailing `:line:col` did not parse was taken whole as a path and became a finding against a file that does not exist; a header now claims only the location on the line immediately following it, and an unparseable location yields no path at all (#268)
-- Fixed `mergecraft review --format jsonl|sarif` writing empty output files and exiting 0 even with blockers — the CLI now threads a structured-findings sink through to the review so jsonl/sarif writers see real findings (#242 / `mergecraft-finding:v1:3f363546e98dad517048b8b9`)
-- Fixed the empty-diff early return in `run_offline_diff_review` silently reporting `RunOutcome.passed` when `apply_diff_line_budget` fully truncated (or untrusted-path filtering emptied) the diff; the run now applies the scope-reduction downgrade and reports `inconclusive` (D12) (#242 / `mergecraft-finding:v1:2e1cb9c2153087658c3481bd`)
-- Fixed `mergecraft review` default text mode never producing exit codes 10/11 — the CLI now requests structured findings internally so a CI script running `review` can block on the documented exit-code contract (#242 / `mergecraft-finding:v1:7a3cdf5ef1994610113e8e37`)
-- Fixed `mergecraft plan` reporting `diff_path` that pointed at a path inside a torn-down `TemporaryDirectory`; the materialized diff is now persisted to `<repo>/.mergecraft/plan-review.diff` so the report's `diff_path` is reachable after return (#242 / `mergecraft-finding:v1:e8bc195570ae6f1cc8ab5bc6`)
-- Fixed tool-call budget exhaustion only surfacing as a JSON-RPC error to the agent — `BudgetTracker` now records the `BudgetExhausted` it raises (`last_exhausted`) and `main._finalize` drains the tracker at finalize time, so a run that exhausts its tool-call budget is tagged `inconclusive` rather than approving on a partial signal (D12) (#242 / `mergecraft-finding:v1:aeb5d964c1d35e5a41784ded`)
-- Fixed eval corpus run directories splitting on slashes in model slugs (e.g. `openrouter/openai/gpt-5`) — run ids are sanitized to a single flat component (#219)
-- Fixed live corpus reviews running in an empty scratch directory — the case's repo context is materialized before the review (#220)
-- Benchmark result sets now record full version pins and a reproducibility digest, so same-commit runs are comparable (#140)
-- Two ensemble models that both report no findings no longer escalate to a judge (#238)
-- Reviews of Python repositories with `shell: disabled` no longer fail closed after a completed review just because dependency installation was skipped as a security policy
-- Fixed: model-chain fallback now advances when the provider succeeds without a terminal verdict; a valid `request_changes` is a usable result and does not trigger fallback
-- Fixed: explicit `harness:` now selects the runtime agent, not only span labels
-- Fixed: a previously recorded `approve` is re-validated before GitHub publish, so a later confirmed blocker cannot ship an `APPROVE` review
-- Fixed: body-only `create_pull_request_review` with `approved: false` no longer posts a GitHub `APPROVE`
-- Fixed: `create_pull_request_review` now requires established review scope in Review modes, matching `submit_review_verdict`
-- Fixed: terminal-verdict shadow mode now records a predicted outcome beside the legacy result on the live finalize path
-- Fixed: a body-only COMMENT is no longer recorded as `request_changes`, and body-only `request_changes` is rejected unless it has real findings
-- Fixed: publication must match the recorded terminal verdict and is re-validated before sending `APPROVE`
-- Fixed: IncrementalReview `report_progress` no longer advances the model chain
-- Fixed: Review completion via `create_pull_request_review` now records a terminal verdict, and IncrementalReview may complete via `report_progress` without mapping to `inconclusive`
-- Fixed: verifier confirms persist outside replaceable analyzer run state, including agent-authored findings
-- Fixed: a verifier `confirm` now persists the finding fingerprint so `approve` over a confirmed blocker is rejected on the live tool path, not only in unit tests that seed `verified_ids`
-- Fixed: a stored `approve` is re-validated at finalize against current evidence, so a later failed required gate or verifier confirm cannot leave the run `passed`
-- Fixed: a provider success without a usable terminal verdict now advances the model chain when fallback is allowed, instead of accepting the first process-successful result
-- Fixed: a later `run_static_checks` call that matches no gates no longer wipes a prior failed row, so `approve` still fails closed
-- Fixed: `approve` is now rejected on the live path when `run_static_checks` recorded a failed required gate; previously the validator only saw those rows in unit tests
-- Fixed: a review run that completes without submitting a terminal verdict now reports `inconclusive` (a `neutral` check conclusion) instead of `passed`. Previously a provider that returned successfully without reviewing anything produced a successful run. Prose such as "LGTM" has never been able to approve and still cannot
-- `submit_review_verdict` now rejects non-list `findings` and severities outside
-  the review taxonomy, hashes the validated payload so omitting `findings` matches
-  `findings: []`, keeps a conflict flag sticky for the attempt, and scopes the
-  recorded submit to the active model-chain attempt so a fallback cannot inherit
-  or conflict-reject the failed attempt's verdict
-- `README.md`'s CLI table documented `mergecraft traces <run-id>`, but the real
-  registered command is `mergecraft traces show <run-id>` — the stale
-  invocation is now generated from the live CLI app instead of hand-maintained
-- `tracing_logfire_wf_yaml` `uses_re` regex now matches the inline
-  `- uses: alexhawat/mergeCraft@X` step form (used by README Examples 1 and
-  6) — previously the regex required leading whitespace before `uses:` and
-  silently rejected every workflow the README documents. The `_do` closure
-  now also synthesises a `with:` block when absent (symmetric with
-  `_create_env_block`) — every `action.yml` input is `required: false`, and
-  the comment claiming otherwise was wrong
+- An E2E live slice with no model configured reports `unavailable` in a warning and the step summary instead of a green `skipped`; a configured-but-broken slice still fails
 
-### Security
+- Live-provider tests report the HTTP status before parsing a response body, and never echo the credential or the request URL; the Nous leg posts the documented default model
 
-- Mutating MCP tools other than review-session verbs (`select_mode`, checkout, review publication) are refused unless a write-capable mode is selected, including before mode selection (#350)
-- GitLab webhook `X-Gitlab-Token` is compared as a shared secret, not an HMAC of the body (#361)
-- External URL retrieval also blocks decimal, hex, and short IPv4 forms, IPv6-mapped loopback, and DNS that resolves to loopback, link-local, or metadata; DNS failure is fail-closed (#362)
-- Dependency and container-image vulnerability gates no longer report a pass without running a scanner (#362)
-- Network egress is allow-listed (`allow_egress`), external retrieval refuses SSRF targets (loopback, link-local metadata, `file:`), dependency and container-image vulnerability gates are invocable and the image gate is not `make security`, public comments redact secret tokens, and `docs/THREAT-MODEL.md` ties those controls to `tests/security/test_cd_egress.py` plus an independent security review before a stable release (#362)
-- GitHub webhooks are authenticated with a matching HMAC and GitLab with a shared-secret `X-Gitlab-Token`; a provider 429 surfaces as retryable instead of dropping the event, and webhook adapters still cannot commit, push, or edit (#361)
-- `SECURITY.md` states the review-only guarantee: identify, investigate, verify, explain, prioritize, and suggest; no source edits, applied fixes, commits, pushes, or code-changing pull requests (#350)
-- Review runs are review-only: `Fix`, `Build`, `Task`, `AddressReviews`, and `ResolveConflicts` are no longer selectable, and a Review or IncrementalReview run cannot edit the workspace, commit, push, or open a code-changing PR. Illustrative diffs stay GitHub suggestion comments (#350)
-- `mergecraft mcp serve` now mints a per-serve Bearer token and requires it on every MCP request; unauthenticated `tools/list` and `tools/call` are rejected with HTTP 401 / JSON-RPC `-32600` (#345). `build_mcp_tool_context` mints the token via `secrets.token_hex(32)`, stores it as `ctx.mcp_auth_token`, and passes it as `auth_token=` into `create_mcp_app`; the token is printed to stderr as `MERGECRAFT_MCP_BEARER=<token>` at startup.
-- `mcp/server`: primary `/mcp/reviewer` now admits session tools `set_output`, `select_mode`, and `report_progress` via `PRIMARY_MUTATING_ALLOWLIST`; routing the primary agent to `/mcp/reviewer` no longer drops tools required by the Action output schema, the mode-selection playbook (Step 1), and the no-action path. Repo mutations (`push_branch`, `commit_changes`, etc.) and review-write tools not in the allowlist (`resolve_review_thread`) stay off the reviewer surface; subagents continue to use the narrower `READONLY_MUTATING_ALLOWLIST`
-- docs: `SECURITY.md` secret-stripping claim narrowed to the agent subprocess (`build_agent_env` / `filter_env`) and the sandboxed `shell` tool (`resolve_env`); `_run_git` inherits the process environment and is not covered by the filter (#286)
-- Untrusted PR trees no longer receive a `shell` tool when PID-namespace isolation is unavailable (#287)
-- Untrusted PR trees no longer run package install lifecycle scripts in the Action process when `shell` is the default `restricted` (#284)
-- `mcp/git`: replaced permissive `_SUBCOMMAND_RE` with an explicit read-only allowlist (`status`, `log`, `diff`, `show`, `rev-parse`, `describe`, `ls-files`, `blame`, `cat-file`, `rev-list`, read-only `branch`); `git reset`, `git clean`, `git stash`, and all other mutating subcommands now raise `ValueError` unconditionally (#257)
-- `mcp/git`: `-c` / `--config-env` are now rejected unconditionally regardless of `payload.shell`, closing the `git -c alias.x='!cmd'` arbitrary-shell-execution vector that bypassed the former `shell: disabled` guard (#257)
-- `mcp/git`: the glued single-token spelling (`-ckey=value`) is refused alongside the spaced and inline forms, so the alias-execution block no longer depends on how the flag was written. The `-c`-shaped token is read against the short flags the subcommand defines before it is judged, which keeps `ls-files -co` and `log -c` working — a glued config payload cannot pass that test, because a key name, a `.` and an `=` are not short-flag letters (#257)
-- `mcp/git`: `git branch` write forms reached refs through a tool declared repository-*read* — only `-d` / `-D` / `-m` were blocked, leaving `--delete`, `--move`, `-M`, `--copy` and bare `git branch <name>` creation to succeed. Listing flags are now an allowlist rather than a list of remembered write spellings, bundled and repeated short flags are checked letter by letter so one write letter refuses the whole token, and a rename of the checked-out branch can no longer change what a later `commit_changes` or `push_branch` targets (#257)
-- `mcp/git`: `git diff --output=<path>` wrote an arbitrary file through a read-only tool — the subcommand allowlist constrains the verb, not the flags the verb accepts. `--output` and every unambiguous prefix git also honours (`--out`, `--outp`, …) are refused on every allowlisted subcommand, and `-o` is refused on the subcommands that do not define it themselves (#257)
-- `mcp/shell`: a `git` invocation on its own line was never inspected, because the guard's separator class omitted the newline while `bash -c` runs every line of its argument — so `git -c alias.z='!sh …'` reached the shell and bypassed the git tool's alias block along with the `clean` and `filter-branch` verbs that tool refuses by name. Every command position in the command string is now scanned, across newlines, command substitution and backticks; git is matched by path basename so `/usr/bin/git` and the alias-suppressing `\git` are seen; and leading environment assignments, a wrapper's own numeric or path argument, and wrapper commands (`env`, `xargs`, `timeout`, `sudo`, `flock`, `script`, nested `sh -c`, and others) are looked past. `grep git README` and `ls .git` still run. This stays defence in depth behind the git tools' own allowlist, not a shell parser — arbitrarily quoted payloads, variable indirection and `printf … | sh` remain out of reach of any token scan (#257)
-- `mcp/git`: `-C`, `--git-dir`, and `--work-tree` are now confined to the resolved primary repo root; any path outside raises `ValueError` with the offending path in the message (#257)
-- `mcp/upload`: `upload_file` now rejects symlinks and confines the requested path to the primary repo root or the session `tmpdir`; no `file://` URI is emitted for a path that fails confinement (#258)
-- `mcp/labels`: label names are now percent-encoded (`urllib.parse.quote(label, safe="")`) before interpolation into the `DELETE /labels/{label}` path segment, preventing `/` or `..` in a label name from shifting the URL path (#260)
-- `cli/auth`: credentials written by `mergecraft auth` inherited the umask, so a `.env` started from the documented `cp .env.example .env` stayed readable by every user on the machine while holding Codex OAuth JSON, Claude tokens and up to five provider API keys — the first path writing any of them outside a temporary directory. The file is narrowed to `0600` *before* the credential is written as well as after, so there is no window in which the secret sits in a world-readable file. A `chmod` that fails warns rather than refusing the write (#221)
-- Linked-repo reads are grant-gated (D9): a run can only load repos declared in its authorized set; linked-repo and ticket text render through the W4 fence as untrusted data
-- Discovered repo instruction and skill files (`CLAUDE.md`, `AGENTS.md`, `SKILL.md`, `.cursor/rules/*.md`) from an untrusted review source render through the W4 fence as evidence and never enter the instruction bundle
-- CLI offline reviews now derive a trust tier from review-source provenance; cloned or out-of-root paths review at untrusted tier unless the operator passes an explicit `--trust` override
-- Executable repo config (`setupScript`, `prepushScript`, `stopScript`, `staticChecks[].command`) from an untrusted review source is ignored; declarative config still applies
-- Third-party clone acquisition is bounded and credential-safe: HTTPS GitHub URLs only, no redirect following, no submodule recursion by default, size and file-count ceilings, symlink/path containment, tokens never persisted in `.git/config` or process argv
-- Added `mergecraft review` to target any local worktree, public GitHub repo, or private repo (with `--token` / `GH_TOKEN` / `gh auth token`), with `--head`, `--base`, `--staged`, `--unstaged`, and `--range` diff selection; `diff-review` remains as a hidden alias
-- Reviewer and verifier now hold distinct, class-derived MCP toolsets; the live
-  MCP server exposes those surfaces at `/mcp/reviewer` and `/mcp/verifier`,
-  mutating tools stay off both except `checkout_pr` on the reviewer, and
-  finding-verdict persistence stays orchestrator-only
-- `AgentRunContext.mcp_server_url` now carries the role endpoint for the primary reviewer (`/mcp/reviewer`); `write_mcp_config` maps the current agent span to the role URL so the Claude verifier connects to `/mcp/verifier`, not the orchestrator surface (#282)
-- `build_mcp_app_for_role` with `role="reviewer"` or `role="verifier"` no longer mounts the orchestrator toolset at `/mcp`; only the role-specific path is active (#282)
-- Primary reviewer surface (`/mcp/reviewer`) now includes `create_pull_request_review` (`ToolClass.REVIEW_WRITE`) via `PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES` and `PRIMARY_MUTATING_ALLOWLIST`; subagents retain the narrower `REVIEWER_ALLOWED_TOOL_CLASSES` complement so they remain denied review publication (D9, #282)
-- MCP HTTP server now issues a per-run secret at startup (`ToolContext.mcp_auth_token`); `tools/list` and `tools/call` reject unauthenticated requests with HTTP 401 / JSON-RPC `-32600`; the bearer token is wired into the harness MCP `headers` config for Claude, Gemini, OpenCode, and Cursor; Codex receives the token via `MERGECRAFT_MCP_TOKEN` and presents it through the documented `bearer_token_env_var` config key (D15/D16, #283)
-- Port allocator replaced: `_select_port` now uses `bind((MCP_HOST, 0))` to let the OS pick an ephemeral port instead of scanning a fixed 50-wide band from 3764; `MERGECRAFT_MCP_PORT` override is preserved; `mergecraft doctor` reports "ephemeral port" instead of a fixed number (#283)
-- `AgentRegistry.resolve_tool_names` and `_default_tool_classes` now align with `build_reviewer_tools`: reviewer binding uses `PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES` and `PRIMARY_MUTATING_ALLOWLIST`, so `create_pull_request_review` is correctly included in the registry-derived surface (D9, #282)
-- `offline_review` now routes agents to `MCP_REVIEWER_ENDPOINT` (`/mcp/reviewer`) rather than the orchestrator `/mcp`; terminal-protocol and orchestrator-only tools are no longer reachable from offline CLI reviews (#282)
-- The self-review fallback decision scripts run from a copy staged in the runner home before the first Action step mounts the workspace, re-verified against a recorded content hash, so a pull request that edits those scripts can no longer run its own version with the review job's token
-- Approval enforcement now takes the verdict from the review run's own evidence-packet output and requires a `mergecraft-approval` check issued by `github-actions` (or the configured App), on the reviewed head, carrying this run's `<run id>:<attempt>` id and agreeing with that verdict; an unattributable, absent, or disagreeing check fails closed, so a foreign check can neither pass a gate nor mask a genuine verdict
-- The `mergecraft init` scaffold requests `contents: read`, disables checkout credential persistence, and pins every action to a full commit sha; the shipped examples and the README example pin the same way
-- The changelog-preview workflow passes no repository secrets to the third-party reusable workflow it calls
+- CodeQL results upload to code scanning on the events whose token can write `security-events`, and an analysis failure fails the job; fork and Dependabot pull requests analyse without uploading
+
+- `make workflow-lint` no longer reports success on a host where it could not lint: it fails and says lint is unavailable
+
+- `make docker-build` tags the image with a lowercase repository name, so the target can succeed
+
+- Every runtime dependency is an exact pin, every third-party import in the package is declared, and the declarations nothing imports are gone
 
 ### Removed
+
+- The MCP server no longer mounts a webhook endpoint; a signed delivery was verified but processed nothing, and its replay window could never fire.
+
+- Provider circuit-breaker, health, budget and routing-eval helpers that no review path called are removed.
+
+- Four context-retrieval modules no review path imported are removed.
 
 - The unused `get-installation-token/main.py` script; the `get-installation-token` composite Action is unchanged
 
 ### Fixed
 
-- Comment-triggered reviews now resolve the pull request they will check out
-  before any trust, credential, or sandbox decision, so a maintainer's review
-  command on a fork pull request no longer runs with provider credentials or a
-  trusted sandbox; a pull request whose metadata cannot be fetched fails closed
-  with a message naming the unbound pull request. A `workflow_dispatch` review
-  that names a pull request is bound the same way, reading the composed review
-  prompt rather than only the operator's raw input.
+- The OpenCode harness hands its isolated `XDG_DATA_HOME` tree to the unprivileged agent user before `setpriv` drops privileges.
 
-- The checkout tool refuses a pull request number other than the one the run was
-  bound to, and refuses a fork pull request on a run trusted for execution or
-  authority.
+- An offline review called as a library without a findings file now asks the model for structured findings, as the CLI always does.
 
-- A checkout that falls back to the files API after a failed `git diff` now
-  records itself as a files-API diff with the reason instead of registering as a
-  full checkout; text patches GitHub omits from the files API are listed as
-  unreviewable, a page-cap truncation is recorded, and binary files are not
-  flagged.
+- A review whose agent calls `run_analyzers` on a host without a sandbox no longer fails closed with "checkout integrity failure: tree changed during read-only review".
 
-- The incremental checkpoint and review-round index accept a mergeCraft marker
-  only from the run's own expected publishers — an App bot login
-  (`<slug>[bot]`) or the `GET /user` login of a non-shared publication token —
-  and read paginated review history, so a marked review by any other author no
-  longer moves the checkpoint. A run that can only publish as the shared
-  `github-actions[bot]` has no attributable identity, so incremental checkpoints
-  and round counting stay unavailable until the reviewer App or a PAT is
-  configured.
+- The Action images ship OpenCode 2.x (`@opencode/cli` 2.0.29) for every model routed through the OpenCode harness (Nous, OpenCode Zen and Go, MiniMax, TokenHub, custom providers).
 
-- Repository instruction files are discovered and read only when their resolved
-  path stays inside the repository, so a symlinked `AGENTS.md` or a symlinked
-  directory pointing outside the checkout is skipped and recorded as a refusal.
+- The hardened example workflow's approval gate now receives only the review verdict, not the whole evidence packet.
 
-- The `MERGECRAFT_DISABLE_SECURITY_INSTRUCTIONS` environment switch is removed;
-  the security paragraph is always in the system prompt.
+- The Codex reviewer now runs in the repository it reviews. An offline review started from another directory failed at once, because Codex refuses to run outside a git repository.
 
-- Inside GitHub Actions the CLI no longer loads a `.env` from the checked-out
-  workspace at startup; set `MERGECRAFT_ENV` to load an explicit file. Local
-  (non-Actions) runs are unchanged.
+- The self-review passes each review step's evidence packet to later steps as a file.
 
-- Linked-repo grants now match an exact lowercase `owner/name`; a bare name no
-  longer authorizes a same-named repository, and two manifest entries sharing a
-  name are both refused.
+- Both Action images replace the brace-expansion and undici copies bundled inside npm with their patched releases, pinned by checksum.
 
-- Linked-repo findings report only contracts changed by a moved pin, and every
-  omission — ungranted, missing sibling, pin mismatch, unreachable pin, an
-  unreadable base manifest, or a manifest whose entries share a name — is listed
-  in the review payload.
+- A self-review re-run on a job token now picks up the earlier run's checkpoint and progress comment.
 
-- A fallback review rung reports only the model it actually ran: it no longer
-  names the primary provider's reviewer slot as a skipped credential when the
-  fallback carries its own provider's credentials.
+- `doctor`, `config show` / `config explain` and the config loader now agree on which files contribute.
 
-- Harbor's agent wrapper invokes `mergecraft review` instead of the deprecated
-  `diff-review` alias.
+- `doctor` fails before printing anything when its rendered output would contain a credential value, naming the environment key and never the value.
 
-- The sandbox write/network test and the symlink-target chown test run in the
-  privileged lanes built for them, and fail rather than skip inside those lanes
-- The keyless provider-catalog smoke no longer hides behind a live gate and runs
-  in the unit suite
-- Both in-image test scripts pin the same `pytest` and `pytest-asyncio` as the
-  project they test
+- Logfire workflow wiring accepts the lowercase `alexhawat/mergecraft@<ref>` spelling the docs print, while still refusing similarly-prefixed forks and an empty ref.
+
+- `watch` and the review comment's run link honour `GITHUB_API_URL` / `GITHUB_SERVER_URL` for GitHub Enterprise hosts.
+
+- The unused hosted-plan residue is gone: the two `AccountPlan` vocabularies, the context `plan` field and the `proxyModel` producers and consumers were removed, none of which had a reader.
+
+- A Review run that records its verdict now publishes exactly one GitHub review from it, with the recorded findings as inline comments.
+
+- An unknown or missing trust tier is treated as `untrusted` everywhere, including a tool context built without one.
+
+- The recorded prompt version now reflects the rendered prompt the reviewer actually received, so two runs configured with different inline budgets record different versions.
+
+- A configured inline budget of `0` is honoured everywhere: the offline analyzer pre-pass, the pipeline fallback and the rendered prompt now agree, instead of the pre-pass silently using the default.
+
+- The review doctrine states the Python 3.11 install floor, and the `push` input, the compatibility matrix and the review checks describe review-only behaviour — no value grants commit or push.
+
+- Documentation links and glossary anchors resolve on GitHub (the glossary's `{#id}` headings become real anchors), and the operator-facing `MERGECRAFT_*` knobs are documented in `docs/cli.md`.
+
+- CI failures with no evidence of cause are now reported as **unattributed** — blocking, with `introduced_by_pr: unknown` — instead of being cleared as not-this-PR.
+
+- `--allow-stub` permits the stub only when the browser stack is unavailable and logs why, instead of bypassing a reachable browser.
+
+- Every agent CLI driver and the OpenCode server boot no longer hang when a child fills its stderr pipe.
+
+- OpenCode server boot no longer blocks the event loop in a blocking `readline`.
+
+- The Claude and Gemini reviewers can no longer write files, run shell tools or fetch the web.
+
+- Tracing no longer clears a bound data-residency allowlist.
+
+- The sticky progress comment keeps the finding ledger and the learnings delta across the final deterministic-record write, so a later run hydrates every prior record instead of losing it.
+
+- Analyzer findings are attributed to the file that actually caused them again.
+
+- GitHub App runs mint separate least-privilege API, Git, and cross-repository tokens. Cleanup attempts to revoke every internally minted token.
+
+- Coverage gates use native line/branch metrics and accept only complete, fingerprinted shard sets. A single run trace covers setup through publication across Action, offline, and MCP execution.
+
+- Evaluation records round-trip without dropping corpus data and write atomically after validation.
+
+- The keyless shadow job is a fixture replay of two hard-coded packets. It does not read a live review and leaves #737 open.
+
+- A live shadow row records the model on the packet (the slug that ran, else the configured reviewer). When the packet has no model, the row leaves it unset instead of claiming Claude.
+
+- `mergecraft eval ingest --from-dismissals` turns recorded dismissal signals into structural eval cases. A dismissal is stored as `agent-seeded`, not as a human label (#738).
+
+- Resetting the MCP shell sandbox cache tolerates a patched capability probe — it clears the probe cache only when a callable `cache_clear` is present — so test-isolation teardown no longer errors.
+
+- `mergecraft verify-behavior` stays inert on a fork or `pull_request_target` Actions event instead of always skipping the trust gate (#61)
+
+- `mergecraft review --verification-report` does not load a report on an untrusted checkout, including when a workflow treats the workspace as trusted (#61)
+
+- Verify criteria are scored per criterion; reproduce matches page text to repro notes; `--start-command` retries navigate while the app comes up (#61)
+
+- Local `--shell enabled` now refuses when no sandbox backend is available unless `MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1` is set; on macOS, `sandbox-exec` is the backend when present (#593)
+
+- Tracked public markdown is linted for decision-ledger tokens, -dot citations, and pointers into gitignored plans; Priority 1 docs were rewritten to stand alone (#709)
+
+- `trivy` on Apple Silicon provisions the native ARM64 build so the local coverage gate does not hang under Rosetta
+
+- Action reviews no longer crash at startup with `infra_error` when loading the shared token cap (#741)
+
+- Enabled Jev reviews now keep the shadow-judge record next to the evidence packet after the command finishes, so paid calibration rows are retrievable (#728)
+
+- A TypeSafe connect, DNS, or timeout failure on the shadow judge records a skip and leaves the completed review successful (#728)
+
+- `jev.model` accepts only the pinned `jev-1.13.0` id, so a configured newer version cannot run while audit rows still claim the pin (#728)
+
+- The Action-pin staleness budget counts changes rather than landings.
+
+- A stale self-review Action pin on `main` no longer fails every open pull request.
+
+- The sticky run record lists Action pin (manifest C) next to baked image source (S) so pin-lag (pinning S deploys the previous digest) is visible without reading Action logs (#641)
+
+- Consolidated integration CI retains Python 3.11 and 3.14 coverage after prerelease/main reconciliation; the coverage ratchet runs once on 3.14.
+
+- Bring the GitLab review-support matrix correction from main to the prerelease branch.
+
+- Local base-only reviews retain working-tree changes; remote comparisons deepen bounded shared history and fail explicitly rather than substitute endpoint diffs.
+
+- Installed convergence evaluations include their recall corpus. Example drift checks run in disposable copies and no longer rewrite tracked outputs.
+
+- Redaction preserves closing assignment brackets and ordinary source paths while retaining secret-pattern and high-entropy controls.
+
+- Optional image live checks require an actual terminal review rather than CLI help.
+
+- Self-review App tokens now refresh per provider attempt and revoke after the job.
+
+- Action images use patched, checksum-pinned npm and GitHub CLI tooling and remove unused vulnerable pip bootstrap copies.
+
+- Local review honors configured model chains, explicit/environment precedence, fallback restrictions, and cumulative budgets; a process without a terminal verdict is inconclusive (#592).
+
+- Installed skills use a verified documentation commit containing every linked target and teach canonical, explicitly scoped provider authentication (#589).
+
+- Analyzer isolation reports unsupported macOS accurately and warns when trusted execution lacks isolation.
+
+- Credential broker stream failures now close the connection without inserting a second HTTP response, and client disconnects release upstream responses (#595)
+
+- Brokered Codex runs preserve configured proxy bypass entries and always bypass proxies for the loopback broker, without changing parent proxy settings (#597)
+
+- Removed an obsolete Codex broker auth branch that suppressed the API-key authentication diagnostic; subscription authentication is unchanged (#596)
+
+- Release verification uses compatible GitHub CLI policy flags, validates deployment candidates automatically, and publishes canonical image tags only after signed staging digests verify.
+
+- Release E2E now runs for reusable workflow callers, and image promotion requires verified signatures, source provenance, and SBOM attestations.
+
+- Logfire `llm.call` rows now include the prompt mergeCraft sent and the model output, with a real duration instead of an empty ~2µs span
+
+- Codex, Claude, and Gemini tool-use now shows up as `tool.call` children on the same Logfire trace as the review run
+
+- Authentication quick start uses registry labels (`anthropic`, `openai`, `google`) instead of harness names that `provider auth` rejects (#590)
+
+- GitHub Action Logfire tracing honors `MERGECRAFT_TRACING_REGION`, so an EU write token is no longer posted to the US ingest host (#607)
+
+- Anchor-422 recovery no longer spins on an out-of-range comment index — it demotes all inline comments and posts once (#570)
+
+- The published GitHub review body always matches the terminal submission; probe strings and split publication races no longer land a placeholder review (#572)
+
+- Multi-reviewer findings carry server-stamped `raised_by` attribution on the published review; agents cannot supply the field via `submit_review_verdict` (#574)
+
+- Token spend slightly over `runBounds.tokenBudget` warns and completes instead of failing at the cliff; crossing the hard ceiling still ends the run (#571)
+
+- Base-branch coverage measurement reads that worktree's `.mergecraft/config.yaml` instead of the PR head's — a PR that adds a config key and its schema field no longer fails the base run (#573)
+
+- A refused terminal verdict now reaches the deterministic run record by name.
+
+- Git MCP containment: refuse `--no-index`, confine positional paths, deny credential paths (`.git/config`, askpass tree), and redact git failure text before it becomes a tool result
+
+- Post-run retry loop classifies scope and policy refusals before resuming — deterministic refusals no longer spend a second provider turn
+
+- Single Loguru writer with `enqueue=True` and explicit queue drain — runner logs no longer interleave mid-line from concurrent stdout/stderr writers
+
+- Bubblewrap namespace failures surface `user_namespace_failure_hint` once per run (not gated behind a non-zero Codex exit code)
+
+- `checkov` and `yamllint` catalog rows document linux-amd64 manifest-only provisioning instead of presenting as runtime failures
+
+- Git config MCP: deny `config --list` and credential-bearing keys on `config --get-all` so brokered auth headers cannot leak through enumeration
+
+- `get_commit_info` validates unified diff evidence before establishing review scope; successful `checkout_pr` records scope via `register_review_scope`
+
+- Claude driver: pass ``--verbose`` alongside ``--print --output-format=stream-json``.
+
+- Trajectory auditor classifies tool failures before counting them, so self-corrected schema slips, policy refusals, and environment faults no longer masquerade as ignored errors that block the PR
+
+- Codex fallback routing reads `decision.verdict` from the in-process evidence packet instead of racing the check-runs API
+
+- Pipeline predicate validation no longer rejects repository paths whose names contain substrings such as ``subprocess`` or ``import``; the closed regex is the sole control
+
+- Pipeline severity predicates include ``Trivial`` and rank unknown severities below every taxonomy member instead of treating them as ``Minor``
+
+- ``ReviewEngine.run`` clears the timeout callback on every invocation so a second run with ``on_timeout=None`` does not retain the first run's handler
+
+- Required static checks block approval unless every row is explicitly ``passed`` or ``not_applicable``; ``unavailable``, ``error``, ``timeout``, and unknown statuses no longer satisfy the gate
+
+- Review publication reads repo settings from the run-scope snapshot taken before untrusted execution instead of reloading ``.mergecraft/config.yaml`` from the mutable checkout
+
+- Shipped ``operational_readiness`` policy pack rules now declare the required evidence keys ``enforcement: required`` consults before it treats the rule as satisfied
+
+- Authenticated git operations against GitHub now work at all.
+
+- `actions/checkout` no longer persists its token in the review workflow, the shipped hardened example, its template, or the dogfood artifact.
+
+- ``prep`` lockfile selection prefers ``uv.lock`` over a stray ``requirements.txt``; ``should_run`` threads one ``cwd`` into ``run`` instead of reading ``Path.cwd`` twice
+
+- The Action image now installs the `[tracing]` extra (`uv sync --frozen --no-dev --extra tracing`).
+
+- `mergecraft.yml` now actually passes the tracing inputs it has supported since.
+
+- ``redact_tool_payload`` caps UTF-8 byte length (not Python character count) and keeps a head slice plus a visible truncation marker instead of discarding the whole body
+
+- ``redact_url`` preserves ``http`` vs ``https`` when redacting basic-auth userinfo
+
+- ``tests/tracing/test_redaction_doctests.py`` executes ``mergecraft.tracing.redaction`` doctests
+
+- Webhook signature verification encodes signature operands with UTF-8 surrogateescape before ``compare_digest``, so non-ASCII header bytes are rejected instead of raising ``TypeError``
+
+- The MCP server no longer mounts a webhook endpoint: a signed delivery was verified but processed nothing
+
+- `validate_http_url` rejects whitespace and control characters anywhere in a provider URL, not just at the ends.
+
+- `mergecraft workflow` resolves a relative `--workflow` against `--cwd` on every subcommand.
+
+- The consumer workflow file is replaced atomically by `mergecraft workflow`, matching the config writer. A crash mid-write used to leave it truncated
+
+- `provider migrate` validates a migrated `NOUS_BASE_URL` through `validate_http_url` like every other URL entry point, instead of storing it unchecked
+
+- `.mergecraft/config.yaml` is replaced atomically (temporary file plus rename, preserving permissions) by every CLI writer.
+
+- `mergecraft workflow provider add --apply` writes the registry config only after the workflow file lands, and rolls the workflow back if that config write then fails.
+
+- `mergecraft workflow provider add --url` on an already-registered provider now applies the validated endpoint to the row that is wired and persisted.
+
+- Indexed registry credentials survive the legacy credential re-injection in `build_agent_env`.
+
+- `list_check_runs` omits `check_runs` when the listing is truncated, instead of returning a partial catalog with `total_count`.
+
+- Check-suite log fetch skips with a distinct unavailable payload when no GitHub client is bound, instead of looking like “no failed runs”
+
+- Catalog-check rejects all-zero `sha256` provenance pins (placeholders that made `provision_managed_binary` treat a trailing-slash URL as a directory and fail with `Is a directory`).
+
+- A transient Nous HTTP 404 (including a false billing/credits refusal) now fails over to the next model instead of stopping the run and reporting a missing `set_output` schema failure (#466)
+
+- The approval gate now unions agent findings with analyzer findings, so an agent Critical or Major finding fails ``mergecraft-approval`` and the evidence packet's ``request_changes`` action.
+
+- A clean mypy JSON typecheck no longer fails the SARIF convert step, so the mypy artifact still uploads for review evidence
+
+- Evidence packet `decision.verdict` is a GitHub check conclusion (`success` / `failure` / `neutral`); schema version 1.9.0
+
+- `mergecraft-approval` posts `neutral` when the evidence packet was not assembled, instead of omitting the check
+
+- Custom provider slugs not in the operator registry now fail closed instead of silently routing to OpenCode; the built-in catalog allow-list was narrowed accordingly.
+
+- Repo-native analyzers no longer fall back to an arbitrary PATH binary.
+
+- An explicit `--model` now beats `MERGECRAFT_MODEL`.
+
+- Offline reviews (`--base`/`--head`, `--diff`, `--cwd`) can record a terminal verdict.
+
+- Retryability now has one decision path.
+
+- Codex `error` and `turn.failed` events are no longer discarded.
+
+- Provider quota exhaustion is now classified as retryable for failover.
+
+- `opencode serve` output is now drained for the process lifetime.
+
+- A provider timeout no longer kills the review.
+
+- `mergecraft --version` reported `0.1.0` while the project was at `0.1.0a1`: the number was restated as a literal in `mergecraft/__init__.py` alongside `pyproject.toml` and the two drifted.
+
+- `review --dry-run` skips the analyzer catalog while still materializing the diff and returning the review prompt (#401)
+
+- `load_audit_events` skips malformed JSONL lines and non-dict payloads instead of raising (#398)
+
+- `route_model` routes security specialist at `critical` risk to the same capable model as `high` instead of Haiku (#394)
+
+- Checkout and packaged `defaults.yaml` copies drifted after README v2; `make pins-check` gates byte identity (#402, #414)
+
+- Hermes generated skill package lists `GEMINI_API_KEY` and `NOUS_API_KEY` (not `GOOGLE_API_KEY`) in `required_environment_variables`, matching `docs/authentication.md` (#415)
+
+- Coverage ratchet floor raised to 80% after new docs contract tests increased measured line coverage above the prior ceiling
+
+- Transitive `h2` 4.4.0→4.4.1 in `uv.lock` for `pip-audit` (PYSEC-2026-3628)
+
+- `mergecraft init` no longer emits `uses:./` in consumer repos — published Action ref instead (V8/)
+
+- `mergecraft init` scaffold drops comment triggers and unsafe `github.event.comment.body` prompt wiring; defaults to `CLAUDE_CODE_OAUTH_TOKEN` (README Example 1 parity)
+
+- Evidence image uploads, issue comments, and PR label tools work on review-only runs again
+
+- Linked-repo contract breakage is included in ordinary PR checkout, not only `mergecraft xrepo explain`
+
+- Linked-repo checkout reads only operator-granted siblings, and skips a sibling whose HEAD is not the pinned SHA
+
+- Webhook signature verification fails closed without a configured secret
+
+- Untrusted download and clone URLs are SSRF-checked, and binary downloads pin DNS to the validated addresses
+
+- `bandit` now uses built-in `--format json` instead of the optional SARIF extra, so auto-enabled Python security coverage still runs on plain Bandit
+
+- `bundler-audit` now runs the gem CLI (`bundler-audit check --format json`) instead of `bundle audit`, so Ruby lockfile audits actually execute
+
+- `tflint` no longer passes changed `.tf` files as positional args (invalid since TFLint 0.47); it lints the working directory and the pipeline still scopes findings to the diff
+
+- `bundler-audit`, `cargo-audit`, and `cargo-deny` findings no longer fake a line-1 GitHub anchor when the tool did not report a line; crate/gem coordinates stay in the message
+
+- `clippy` now runs as `cargo clippy --message-format=json` (package/workspace) instead of passing PR paths as cargo args, so auto-enabled Clippy keeps rustc JSON findings
+
+- A successful analyzer with empty stdout (for example a clean `tsc --noEmit`) is treated as passed instead of unavailable
+
+- `tsc` project-level diagnostics without a file location (for example `error TS18003`) now surface as body-only findings instead of a silent pass
+
+- `tsc` help text and other unmatched nonempty stdout now fail closed instead of counting as a clean pass
+
+- Project-level `tsc` findings survive diff scoping when the PR only changes `.ts` / `.tsx` files
+
+- `brakeman`: command changed from `-o brakeman.sarif` (writes to file) to `-o -` (stdout) so the SARIF output is captured by the adapter; `parser: sarif` is unchanged (Thermos Finding 1, #338)
+
+- MCP HTTP server now issues a separate bearer token for the orchestrator ``/mcp`` route; reviewer/verifier harnesses keep ``ToolContext.mcp_auth_token`` for their role endpoints (#349)
+
+- OpenCode HTTP ``llm.call`` usage attrs omit unset counters instead of zero-filling ``gen_ai.usage.*`` when the session response reports output tokens only (#297)
+
+- `agents/claude`: `write_mcp_config` wrote a single MCP server entry pointing to `/mcp/reviewer` (derived from the orchestrator's `current_agent_id` at `_run` start).
+
+- `mcp/git`: corrected `commit_changes` tool description — it performs a local commit only and does not push to the remote or produce a GitHub-verified commit (#259)
+
+- `mcp/git`: `--namespace` is now refused outright rather than forwarded.
+
+- Fixed eval corpus run directories splitting on slashes in model slugs (e.g. `openrouter/openai/gpt-5`) — run ids are sanitized to a single flat component (#219)
+
+- Fixed live corpus reviews running in an empty scratch directory — the case's repo context is materialized before the review (#220)
+
+- Benchmark result sets now record full version pins and a reproducibility digest, so same-commit runs are comparable (#140)
+
+- Two ensemble models that both report no findings no longer escalate to a judge (#238)
+
+- Reviews of Python repositories with `shell: disabled` no longer fail closed after a completed review just because dependency installation was skipped as a security policy
+
+- Fixed: model-chain fallback now advances when the provider succeeds without a terminal verdict; a valid `request_changes` is a usable result and does not trigger fallback
+
+- Fixed: explicit `harness:` now selects the runtime agent, not only span labels
+
+- Fixed: a previously recorded `approve` is re-validated before GitHub publish, so a later confirmed blocker cannot ship an `APPROVE` review
+
+- Fixed: body-only `create_pull_request_review` with `approved: false` no longer posts a GitHub `APPROVE`
+
+- Fixed: `create_pull_request_review` now requires established review scope in Review modes, matching `submit_review_verdict`
+
+- Fixed: terminal-verdict shadow mode now records a predicted outcome beside the legacy result on the live finalize path
+
+- Fixed: a body-only COMMENT is no longer recorded as `request_changes`, and body-only `request_changes` is rejected unless it has real findings
+
+- Fixed: publication must match the recorded terminal verdict and is re-validated before sending `APPROVE`
+
+- Fixed: IncrementalReview `report_progress` no longer advances the model chain
+
+- Fixed: Review completion via `create_pull_request_review` now records a terminal verdict, and IncrementalReview may complete via `report_progress` without mapping to `inconclusive`
+
+- Fixed: verifier confirms persist outside replaceable analyzer run state, including agent-authored findings
+
+- Fixed: a verifier `confirm` now persists the finding fingerprint so `approve` over a confirmed blocker is rejected on the live tool path, not only in unit tests that seed `verified_ids`
+
+- Fixed: a stored `approve` is re-validated at finalize against current evidence, so a later failed required gate or verifier confirm cannot leave the run `passed`
+
+- Fixed: a provider success without a usable terminal verdict now advances the model chain when fallback is allowed, instead of accepting the first process-successful result
+
+- Fixed: a later `run_static_checks` call that matches no gates no longer wipes a prior failed row, so `approve` still fails closed
+
+- Fixed: `approve` is now rejected on the live path when `run_static_checks` recorded a failed required gate; previously the validator only saw those rows in unit tests
+
+- Fixed: a review run that completes without submitting a terminal verdict now reports `inconclusive` (a `neutral` check conclusion) instead of `passed`.
+
+- The checkout tool refuses a pull request number other than the one the run was bound to, and refuses a fork pull request on a run trusted for execution or authority.
+
+- The `MERGECRAFT_DISABLE_SECURITY_INSTRUCTIONS` environment switch is removed; the security paragraph is always in the system prompt.
+
+- Inside GitHub Actions the CLI no longer loads a `.env` from the checked-out workspace at startup; set `MERGECRAFT_ENV` to load an explicit file. Local (non-Actions) runs are unchanged.
+
+- Linked-repo grants now match an exact lowercase `owner/name`; a bare name no longer authorizes a same-named repository, and two manifest entries sharing a name are both refused.
+
+- Harbor's agent wrapper invokes `mergecraft review` instead of the deprecated `diff-review` alias.
+
+- The sandbox write/network test and the symlink-target chown test run in the privileged lanes built for them, and fail rather than skip inside those lanes
+
+- The keyless provider-catalog smoke no longer hides behind a live gate and runs in the unit suite
+
+- Both in-image test scripts pin the same `pytest` and `pytest-asyncio` as the project they test
 
 ### Security
 
-- A single log patcher now both redacts secrets and carries the bound run
-  context, so every entrypoint — the Action, `mergecraft review` /
-  `diff-review` (including Harbor), and `mcp serve` — logs records that are
-  redacted **and** attributable to their run, repository, pull request and
-  phase. Previously the two patchers replaced each other, leaving the Action
-  redacted but uncorrelated and every other entrypoint correlated but not
-  redacted.
+- The Claude reviewer can no longer read the run's credential material.
 
-- Git subprocesses no longer inherit environment-injected git configuration or
-  credential redirection: ambient `GIT_CONFIG_*` pairs, the config-source
-  selectors (`GIT_CONFIG`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`), git trace
-  variables (`GIT_TRACE*`, `GIT_CURL_VERBOSE`), and askpass / ssh / proxy /
-  exec-path overrides are dropped before the subprocess environment is built, so
-  an ambient `credential.helper`, trace target, or substituted config file
-  cannot capture the brokered credential. The operator's own default
-  `~/.gitconfig` and system configuration are still honoured.
+- The review job declares `actions: read`, and no review rung falls back to the shared `github-actions[bot]` login when no reviewer App is configured.
 
-- GitHub Actions and runner metadata reach child processes by explicit
-  documented name rather than by prefix, so lookalike credential variables such
-  as `GITHUB_PAT` or `RUNNER_BLOB` no longer pass into agents, the restricted
-  shell, or analyzers. The Actions command-file channels (`GITHUB_ENV`,
-  `GITHUB_PATH`, `GITHUB_OUTPUT`, `GITHUB_STEP_SUMMARY`) are excluded from the
-  child environment: they are writable control channels for later steps and for
-  this action's outputs, not child metadata. `envAllowlist` remains the explicit
-  escape hatch.
+- Untrusted static checks run inside the sandbox against a disposable copy-on-write view of the checkout.
 
-- Cleanup and token-revocation failures are logged as warnings naming the step
-  and path — including a residual askpass file — instead of being suppressed.
-  Cleanup stays best-effort: no failure changes the run outcome.
+- Local log sinks are scanned for credentials after the run.
 
-### Changed
+- Transitive `soupsieve` 2.8.4→2.9.2 in `uv.lock` for `pip-audit` (CVE-2026-85999, CVE-2026-86000) (#728)
 
-- The PR integration job runs keyless hermetic integration tests instead of
-  passing on a check that a helper script exists, so a green run means tests
-  executed
-- Nightly live-provider coverage lists only the providers this repository holds
-  credentials for; the removed legs are named as not exercised instead of
-  failing on secrets the repository is not configured to hold
-- An E2E live slice with no model configured reports `unavailable` in a warning
-  and the step summary instead of a green `skipped`; a configured-but-broken
-  slice still fails
-- Live-provider tests report the HTTP status before parsing a response body, and
-  never echo the credential or the request URL; the Nous leg posts the
-  documented default model
-- CodeQL results upload to code scanning on the events whose token can write
-  `security-events`, and an analysis failure fails the job; fork and Dependabot
-  pull requests analyse without uploading
-- `make workflow-lint` no longer reports success on a host where it could not
-  lint: it fails and says lint is unavailable
-- `make docker-build` tags the image with a lowercase repository name, so the
-  target can succeed
-- Every runtime dependency is an exact pin, every third-party import in the
-  package is declared, and the declarations nothing imports are gone
+- Fork-controlled `.mergecraft/config.yaml` can no longer lift the untrusted tracing-content cap; export of prompt bodies on fork PRs requires the Action input, env, or trusted base settings
 
+- MCP HTTP startup no longer treats a TCP connect probe as proof of identity; server-thread failures propagate and ``GET /health`` requires a per-run nonce
 
-### Added
+- Analyzer JSON and JSONL outputs are structurally redacted by key and value before persist, so non-prefixed secrets in trufflehog-style payloads do not reach prompts or ``.mergecraft/analyzer-runs/``
 
-- Published Python distributions are installed outside the checkout and carry
-  build provenance before upload
-- `pre-commit` blocks newly added large files and private keys, and scans staged
-  changes for secrets with `gitleaks`
-- `make test-durations` refreshes the committed `.test_durations` that
-  least-duration sharding balances by
+- Entropy-based secret redaction uses a length-relative threshold with benign-shape exclusions for git SHAs, hex runs, and identifiers so legitimate code tokens in logs are not mangled unnecessarily
 
+- OpenCode review sessions deny ``webfetch``, ``external_directory``, and ``edit``; ``read`` is allowlisted to the checkout and evidence scratch instead of ``*``
+
+- Post-run checkout integrity verification via ``security.review_integrity`` hashes the tree before review and fails closed on mutation
+
+- ``setpriv`` argv carries ``--no-new-privs``, ``--inh-caps=-all``, and ``--bounding-set=-all``; fails closed when ``setpriv`` lacks ``--bounding-set`` support
+
+- Root-side ``git`` subprocesses route through ``utils/git_hardening.git_argv`` with pinned safe-config keys; ``make lint`` enforces the route via ``scripts/check_git_argv.py``
+
+- ``prepare_workspace_for_agent`` no longer recursively chowns ``.git``; sandbox shell binds every registered workspace root's ``.git`` read-only
+
+- Linked-repo ``_rev_parse_commit`` rejects leading-dash revs, validates pinned SHA shape, and passes ``--end-of-options`` before the rev
+
+- Sandbox capability probes run real isolation checks instead of gating on ``CI``; untrusted MCP shell refuses unsandboxed spawn unless ``MERGECRAFT_ALLOW_UNSANDBOXED_SHELL=1``
+
+- Skipped untrusted analyzers emit a ``Minor`` finding (``rule_id: analyzers.sandbox-unavailable``) naming missing isolation primitives
+
+- ``sudo-unshare`` shell spawn passes env by name via ``--preserve-env`` with ``env=env`` on ``Popen`` so provider keys never appear in argv
+
+- Namespaced shell spawn hides every ``git`` binary and binds ``.git`` read-only inside ``unshare`` / ``sudo-unshare`` branches; unsandboxed opt-in runs the raw command without host mount soup
+
+- Python ``prep`` installs into ``.mergecraft/prep-scratch/prep-venv`` with a default-deny env allowlist so PR build deps cannot mutate the reviewer's interpreter or inherit provider credentials
+
+- Mutating MCP tools other than review-session verbs (`select_mode`, checkout, review publication) are refused unless a write-capable mode is selected, including before mode selection (#350)
+
+- GitLab webhook `X-Gitlab-Token` is compared as a shared secret, not an HMAC of the body (#361)
+
+- External URL retrieval also blocks decimal, hex, and short IPv4 forms, IPv6-mapped loopback, and DNS that resolves to loopback, link-local, or metadata; DNS failure is fail-closed (#362)
+
+- Dependency and container-image vulnerability gates no longer report a pass without running a scanner (#362)
+
+- Untrusted PR trees no longer receive a `shell` tool when PID-namespace isolation is unavailable (#287)
+
+- Untrusted PR trees no longer run package install lifecycle scripts in the Action process when `shell` is the default `restricted` (#284)
+
+- `mcp/git`: the glued single-token spelling (`-ckey=value`) is refused alongside the spaced and inline forms, so the alias-execution block no longer depends on how the flag was written.
+
+- `mcp/git`: `git diff --output=<path>` wrote an arbitrary file through a read-only tool — the subcommand allowlist constrains the verb, not the flags the verb accepts.
+
+- `mcp/git`: `-C`, `--git-dir`, and `--work-tree` are now confined to the resolved primary repo root; any path outside raises `ValueError` with the offending path in the message (#257)
+
+- Linked-repo reads are grant-gated: a run can only load repos declared in its authorized set; linked-repo and ticket text render through the fence as untrusted data
+
+- CLI offline reviews now derive a trust tier from review-source provenance; cloned or out-of-root paths review at untrusted tier unless the operator passes an explicit `--trust` override
+
+- Executable repo config (`setupScript`, `prepushScript`, `stopScript`, `staticChecks[].command`) from an untrusted review source is ignored; declarative config still applies
+
+- `build_mcp_app_for_role` with `role="reviewer"` or `role="verifier"` no longer mounts the orchestrator toolset at `/mcp`; only the role-specific path is active (#282)
+
+- The changelog-preview workflow passes no repository secrets to the third-party reusable workflow it calls
+
+- Cleanup and token-revocation failures are logged as warnings naming the step and path — including a residual askpass file — instead of being suppressed.
 
 ## [0.1.0] — 2026-08-14
 
-Initial public release: mergeCraft is a standalone, BYOK GitHub Action for
-AI-powered PR review — no proprietary backend, no account, review runs
-against your own Claude/Codex/Gemini subscription or API key.
+> **Never published.** `0.1.0` was never tagged, has no GitHub release and no
+> package upload; its entries are kept here as history. The version above,
+> `0.1.0a3`, is the pre-release cut in its place. `0.1.0a1` (`521c0aed`) was an
+> Action-only tag — no PyPI upload and no GitHub release; `0.1.0a2` was skipped.
+> A consumer upgrading from `v0.1.0a1` should read the **Breaking — action
+> required** block above.
+
+Planned initial public release (never published): mergeCraft is a standalone,
+BYOK GitHub Action for AI-powered PR review — no proprietary backend, no
+account, review runs against your own Claude/Codex/Gemini subscription or API
+key.
 
 Full pre-release development history: see
 [`docs/dev/changelog-archive.md`](docs/dev/changelog-archive.md).

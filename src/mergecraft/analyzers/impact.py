@@ -13,8 +13,8 @@ artifact instead of publishing a partial result — a partial ``impactPath`` wit
 silently-empty references would read as "no other usages" when the truth is
 "we couldn't check".
 
-Design decisions documented at
-``.ignorelocal/waves/evidence/s6-design-decisions.md``.
+The measurement that decides whether this ships on by default is tracked in
+the eval-bank issue, #140.
 """
 
 from __future__ import annotations

@@ -32,7 +32,7 @@ writes the body to a file first:
 
 ```yaml
 - id: review
-  uses: alexhawat/mergeCraft@v0.1.0
+  uses: alexhawat/mergeCraft@521c0aedbf525a80a5bf6eddf0119ada85a8d381 # v0.1.0a1
   with:
     prompt: /review
 
