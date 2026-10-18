@@ -1185,6 +1185,25 @@ def _unwrap_shell_command(command: str) -> str:
     return command
 
 
+def _exec_outcome_ok(command: str, exit_code: int) -> bool | None:
+    """Read one driver-native exit code as an outcome claim (#885).
+
+    Exit 1 is the *expected* result of a command that answers a question:
+    ``rg``/``grep`` with no match, ``git diff --quiet``, ``diff``, ``cmp``,
+    ``test``, ``[``. Claiming ``outcome_ok=False`` there turned ordinary no-match
+    searches into Critical ``unresolved-failure`` rows in every review's
+    ``run_health`` — false Critical noise, the opposite of the goal. A
+    verify-intent command (``pytest``, ``make``, a linter) is the opposite: exit 1
+    is a real failure. Exit 0 is success and anything else (>= 2, or a signal) is
+    a failure, whatever the intent.
+    """
+    if exit_code == 0:
+        return True
+    if exit_code != 1:
+        return False
+    return False if classify_tool_intent("shell", {"command": command}) == "verify" else None
+
+
 def record_driver_exec(
     state: Any,
     *,
@@ -1202,12 +1221,16 @@ def record_driver_exec(
     stream consumer calls when a command finishes. The row is a ``shell`` row, so it
     shares a signature with the same command run through the MCP ``shell`` tool.
 
-    Outcome follows the signals the driver has. A zero exit is ``outcome_ok=True``;
-    a non-zero exit (or ``failed=True`` with no code) is ``outcome_ok=False`` with
-    the call itself ``ok`` — the command ran and failed, exactly as the MCP shell
-    tool reports it. When the tail of the output shows an environment or transient
-    fault, or the command timed out or was declined, the call is also marked not
-    ``ok`` and carries a named ``failure_class`` so ``ignored-tool-error`` and
+    Outcome follows the signals the driver has. A zero exit is ``outcome_ok=True``.
+    A failing exit on a command that *verifies* something (``pytest``, ``make``, a
+    linter) is ``outcome_ok=False`` with the call itself ``ok`` — the command ran
+    and failed, exactly as the MCP shell tool reports it. Exit 1 on anything else
+    claims nothing: it is the normal answer of a question-answering command (``rg``
+    with no match, ``git diff --quiet``), and calling that a failed outcome put a
+    Critical row nobody could resolve into every review's ``run_health`` (#885).
+    When the tail of the output shows an environment or transient fault, or the
+    command timed out or was declined, the call is marked not ``ok`` and carries a
+    named ``failure_class`` so ``ignored-tool-error`` and
     ``stale-assumption-after-failure`` can see it. With no signal at all
     ``outcome_ok`` stays ``None``; none is invented.
 
@@ -1234,7 +1257,7 @@ def record_driver_exec(
             error = f"command timed out: {tail}".strip()
         else:
             if exit_code is not None:
-                outcome_ok = exit_code == 0
+                outcome_ok = _exec_outcome_ok(bare, exit_code)
             elif failed:
                 outcome_ok = False
             else:

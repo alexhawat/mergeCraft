@@ -226,6 +226,45 @@ def test_a_call_with_no_outcome_signal_does_not_invent_one() -> None:
     assert row.outcome_ok is None
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "rg -n x src/",
+        "grep -rn todo src/",
+        "git diff --quiet",
+        "diff -u a b",
+        "cmp -s a b",
+        "test -f pyproject.toml",
+    ],
+    ids=["rg-no-match", "grep-no-match", "git-diff-quiet", "diff", "cmp", "test"],
+)
+def test_a_question_answering_exit_one_claims_nothing(command: str) -> None:
+    """These exit 1 by design; recording that as failure is Critical noise (#885)."""
+    state = _state()
+
+    row = record_driver_exec(state, command=command, exit_code=1, output="")
+
+    assert row is not None
+    assert row.outcome_ok is None
+    assert row.failure_class == "unknown"
+    assert "unresolved-failure" not in _rule_ids(state)
+
+
+@pytest.mark.parametrize(
+    "command", ["pytest -q", "make test", "ruff check src"], ids=["pytest", "make", "ruff"]
+)
+def test_a_verify_intent_exit_one_is_still_a_failure(command: str) -> None:
+    """The rule is the command's intent, not the exit code alone."""
+    state = _state()
+
+    row = record_driver_exec(state, command=command, exit_code=1, output="1 failed")
+
+    assert row is not None
+    assert row.intent == "verify"
+    assert row.outcome_ok is False
+    assert "unresolved-failure" in _rule_ids(state)
+
+
 def test_the_command_and_output_are_redacted_before_they_are_stored() -> None:
     state = _state()
 
