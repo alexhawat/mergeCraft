@@ -119,7 +119,9 @@ _LANGUAGE_RULES: tuple[tuple[frozenset[str], tuple[_Rule, ...]], ...] = (
     ),
 )
 
-# Markers any code file can carry; the first three silence a security scanner.
+# Markers any code file can carry. ``nosec`` and ``nosemgrep`` silence a security
+# scanner; the secret-scanner markers live in ``_SECRET_SCANNER_RULES`` because,
+# unlike these, they apply to every file.
 _GENERIC_RULES: tuple[_Rule, ...] = (
     _Rule("nosec", re.compile(r"(?:#|//)\s*#?\s*nosec\b(?P<codes>[^\n]*)"), security=True),
     _Rule(
@@ -127,13 +129,22 @@ _GENERIC_RULES: tuple[_Rule, ...] = (
         re.compile(r"(?:#|//)\s*nosemgrep(?::\s*(?P<codes>[\w.\-, ]+))?"),
         security=True,
     ),
-    _Rule("gitleaks:allow", re.compile(r"gitleaks:allow\b"), security=True),
     _Rule(
         "codeql",
         re.compile(r"(?:codeql|lgtm)\[(?P<codes>[^\]]*)\]"),
         security=True,
     ),
     _Rule("NOSONAR", re.compile(r"\bNOSONAR\b")),
+)
+
+# Secret scanners honour their own line markers in *any* file: a
+# ``<!-- trufflehog:ignore -->`` in a Markdown example silences a finding exactly
+# as ``# gitleaks:allow`` does in code (#1008). Prose suffixes and unknown
+# extensions get these and nothing else — ``# noqa`` in a document is not a
+# suppression.
+_SECRET_SCANNER_RULES: tuple[_Rule, ...] = (
+    _Rule("gitleaks:allow", re.compile(r"gitleaks:allow\b"), security=True),
+    _Rule("trufflehog:ignore", re.compile(r"trufflehog:ignore\b"), security=True),
 )
 
 _CODE_TOKEN = re.compile(r"[A-Za-z][\w:/.\-]*\d[\w]*|[\w:/.\-]+")
@@ -164,12 +175,13 @@ def _is_security(rule: _Rule, codes: tuple[str, ...]) -> bool:
 def _rules_for(path: str) -> tuple[_Rule, ...]:
     suffix = PurePosixPath(path).suffix.casefold()
     if suffix in _PROSE_SUFFIXES or suffix not in _CODE:
-        return ()
+        return _SECRET_SCANNER_RULES
     rules: list[_Rule] = []
     for suffixes, language_rules in _LANGUAGE_RULES:
         if suffix in suffixes:
             rules.extend(language_rules)
     rules.extend(_GENERIC_RULES)
+    rules.extend(_SECRET_SCANNER_RULES)
     return tuple(rules)
 
 

@@ -97,6 +97,14 @@ def _scan(repo: Path, diff: str, *, tier: str = "trusted") -> list[Any]:
         ("run.sh", "# shellcheck disable=SC2086", "shellcheck disable", ["SC2086"], "Minor"),
         ("app.py", "token = 'x'  # gitleaks:allow", "gitleaks:allow", [], "Major"),
         (
+            "docs/TRACING.md",
+            "<!-- trufflehog:ignore -->",
+            "trufflehog:ignore",
+            [],
+            "Major",
+        ),
+        ("app.py", "token = 'x'  # trufflehog:ignore", "trufflehog:ignore", [], "Major"),
+        (
             "app.py",
             "q = build(sql)  # nosemgrep: python.lang.security.audit",
             "nosemgrep",
@@ -174,6 +182,32 @@ def test_removed_lines_and_prose_files_never_produce_findings(tmp_path: Path) ->
     )
 
     assert _scan(repo, diff) == []
+
+
+def test_a_secret_scanner_marker_already_on_base_is_not_reported(tmp_path: Path) -> None:
+    before = "token = 'x'  # trufflehog:ignore\n"
+    after = "token = 'x'  # trufflehog:ignore\nmore = 2\n"
+    repo, diff = _commit_change(tmp_path, {"a.py": before}, {"a.py": after})
+
+    assert _scan(repo, diff) == []
+
+
+def test_code_only_markers_in_prose_are_prose_but_scanner_markers_are_not(tmp_path: Path) -> None:
+    """A secret scanner honours its marker in any file; `# noqa` in a document is prose."""
+    repo, diff = _commit_change(
+        tmp_path,
+        {"NOTES.md": "x\n"},
+        {
+            "NOTES.md": (
+                "Use `# noqa: E501` sparingly; avoid `// @ts-ignore`.\n<!-- trufflehog:ignore -->\n"
+            )
+        },
+    )
+
+    findings = _scan(repo, diff)
+
+    assert [f.start_line for f in findings] == [2]
+    assert "trufflehog:ignore" in findings[0].message
 
 
 # --------------------------------------------------------------------------- config edits
