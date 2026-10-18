@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in-tree), all after the integrity baseline, so the hash now prunes those
   directory names at any depth instead of only at the checkout root. A nested
   `.git` metadata directory is pruned the same way.
+- Multi-reviewer rosters now dispatch secondary reviewers server-side when the
+  primary harness never spawns them, fail closed with a clear error when a
+  secondary cannot reach its provider, and always emit the `⏱ LLM review time`
+  line (including a zero-second fallback when no LLM calls were timed).
+- Exporting findings no longer crashes when a model supplies a slug-style
+  `fingerprint`; non-hex values are normalized to a stable lowercase hex digest
+  at write time.
+- `submit_review_verdict` drops malformed draft findings instead of rejecting
+  the whole terminal submission when one pre-recorded row is invalid.
+- Checkout integrity hashing skips nested `node_modules`, `.pnpm-store`, run
+  `evidence`, and OpenCode session dirs at any depth so harness scratch writes
+  during read-only review no longer trigger exit 12.
 
 ## [0.1.0a3] — 2026-10-17
 

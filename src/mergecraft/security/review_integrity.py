@@ -53,6 +53,8 @@ _HASH_EXCLUDE_REL_PATHS: frozenset[str] = frozenset(
         ".mergecraft/analyzers.lock",
         ".mergecraft/analyzers.lock.lock",
         "evidence",
+        ".opencode",
+        "opencode-xdg-data",
     }
 )
 
