@@ -19,6 +19,8 @@ This module pins:
    (test 4), so one place knows which files carry the version.
 5. A missing or empty released version (test 5), or a version that is not
    canonical (test 6), exits non-zero and changes nothing.
+6. Craft's real call shape is pinned: an empty first argument, the version
+   second, and only ``CRAFT_RELEASED_VERSION`` exported.
 """
 
 from __future__ import annotations
@@ -81,6 +83,22 @@ def _run_post_release(
 def _env_with(released: str) -> dict[str, str]:
     env = dict(os.environ)
     env["CRAFT_NEW_VERSION"] = released
+    return env
+
+
+def _env_as_craft(released: str) -> dict[str, str]:
+    """The environment Craft really passes: its allowlist plus CRAFT_RELEASED_VERSION.
+
+    ``buildReleaseCommandEnv`` keeps PATH/HOME/USER/GIT_COMMITTER_NAME/
+    GIT_AUTHOR_NAME/EMAIL, every ``GITHUB_*``/``RUNNER_*`` variable and the
+    extras Craft sets — ``CRAFT_RELEASED_VERSION`` — and drops the rest.
+    ``CRAFT_NEW_VERSION`` is not among them (pinned Craft ``3f2abdc5``,
+    ``src/commands/publish.ts``).
+    """
+    allowlist = ("PATH", "HOME", "USER", "EMAIL")
+    env = {key: os.environ[key] for key in allowlist if key in os.environ}
+    env.update({k: v for k, v in os.environ.items() if k.startswith(("GITHUB_", "RUNNER_"))})
+    env["CRAFT_RELEASED_VERSION"] = released
     return env
 
 
@@ -162,6 +180,29 @@ def test_post_release_accepts_a_positional_version(tmp_path: Path) -> None:
     """Edge: a positional released version works when CRAFT_NEW_VERSION is unset."""
     root = _prepare_tree(tmp_path)
     completed = _run_post_release(root, "0.1.0a3", env=_env_without_craft_versions())
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    _assert_bumped(root, "0.1.0a4.dev0")
+
+
+def test_post_release_reads_crafts_second_argument(tmp_path: Path) -> None:
+    """Contract: Craft's exact call — `post-release.sh '' <version>` — bumps.
+
+    Craft always passes an empty first argument and the version second, with only
+    ``CRAFT_RELEASED_VERSION`` exported, so a script that reads ``$1`` (or
+    ``CRAFT_NEW_VERSION``) fails the publish after the targets are live.
+    """
+    root = _prepare_tree(tmp_path)
+    completed = _run_post_release(root, "", "0.1.0a3", env=_env_as_craft("0.1.0a3"))
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    _assert_bumped(root, "0.1.0a4.dev0")
+
+
+def test_post_release_reads_craft_released_version_env(tmp_path: Path) -> None:
+    """Contract: CRAFT_RELEASED_VERSION alone is enough when $2 is absent."""
+    root = _prepare_tree(tmp_path)
+    env = _env_as_craft("0.1.0a3")
+    assert "CRAFT_NEW_VERSION" not in env
+    completed = _run_post_release(root, "", env=env)
     assert completed.returncode == 0, completed.stdout + completed.stderr
     _assert_bumped(root, "0.1.0a4.dev0")
 

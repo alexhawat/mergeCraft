@@ -19,10 +19,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-# Craft exports CRAFT_NEW_VERSION; accept a positional argument too.
-released="${1:-${CRAFT_NEW_VERSION:-}}"
+# Craft calls this as `bash scripts/post-release.sh '' <released-version>`: the
+# first argument is always empty, the version arrives second, and only
+# CRAFT_RELEASED_VERSION is exported (Craft keeps PATH/HOME/USER/GITHUB_*/
+# RUNNER_* and drops the rest — CRAFT_NEW_VERSION is *not* set). $1 and
+# CRAFT_NEW_VERSION stay supported for manual runs.
+released="${2:-${1:-${CRAFT_RELEASED_VERSION:-${CRAFT_NEW_VERSION:-}}}}"
 if [[ -z "${released}" ]]; then
-  echo "post-release.sh: CRAFT_NEW_VERSION (or a positional released version) is required" >&2
+  echo "post-release.sh: a released version is required (Craft passes it as \$2; or set CRAFT_RELEASED_VERSION)" >&2
   exit 1
 fi
 
