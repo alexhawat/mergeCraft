@@ -52,16 +52,9 @@ craft publish <version>
 ```
 
 Nothing publishes from a workflow, and nothing in this repository reacts to a label
-on an issue or to a comment: the command is the approval.
-
-## Version on `main` between releases
-
-The version in `pyproject.toml` (and in `server.json`) on `main`
-stays the last released version until the next prepare bumps it. Craft's post-release hook
-(`scripts/post-release.sh`) therefore edits nothing; it used to rewrite the version
-to a `-dev` one and leave the edit uncommitted. A `-dev` version committed to `main`
-would make the registry manifest advertise a version that does not exist, and the
-manifest drift check would fail on the next prepare.
+on an issue or to a comment: the command is the approval. Craft does open a
+publish-request issue during `prepare`; the `prepare` job closes it as not planned
+and comments the command above, so it is informational and never a pending approval.
 
 ## Soak period
 

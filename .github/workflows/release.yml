@@ -38,6 +38,7 @@ jobs:
       version: ${{ steps.craft.outputs.version }}
       branch: ${{ steps.craft.outputs.branch }}
       sha: ${{ steps.craft.outputs.sha }}
+      issue_url: ${{ steps.craft.outputs.issue_url }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -52,6 +53,25 @@ jobs:
           publish_repo: self
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Craft's "Request publish" step always runs and opens
+      # `publish: <owner>/<repo>@<version>`. Nothing in this repository acts on
+      # that issue — the approval is the operator running `craft publish` with
+      # publish credentials — so leaving it open reads as a pending approval that
+      # nobody can give (#1005). It is closed here, with the real instruction in
+      # the comment, and its URL is recorded for the publish gate below.
+      - name: Close the informational publish issue
+        if: ${{ steps.craft.outputs.issue_url != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_URL: ${{ steps.craft.outputs.issue_url }}
+          RELEASED_VERSION: ${{ steps.craft.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh issue close "${ISSUE_URL}" --reason "not planned" \
+            --comment "Informational only: nothing in this repository acts on this issue. Publish with: craft publish ${RELEASED_VERSION} from a machine with publish credentials (docs/release-process.md)."
+          echo "Publish-request issue (closed automatically, informational only): ${ISSUE_URL}" \
+            >> "$GITHUB_STEP_SUMMARY"
 
   # Dispatch the CI/CD build on the branch `prepare` just pushed. That push is made
   # with the workflow's own GITHUB_TOKEN, and GitHub does not start workflows from
@@ -133,12 +153,16 @@ jobs:
       actions: read
     steps:
       - name: Record prepared release
+        env:
+          ISSUE_URL: ${{ needs.prepare.outputs.issue_url }}
         run: |
           set -euo pipefail
           cat <<EOF
           Prepared version: ${{ needs.prepare.outputs.version }}
           Release branch:   ${{ needs.prepare.outputs.branch }}
           Release SHA:      ${{ needs.prepare.outputs.sha }}
+          Publish-request issue (informational only, closed automatically):
+                            ${ISSUE_URL}
 
           CI/CD was dispatched on the release branch: it builds the Python dist
           once, builds the images once, scans them, cosign-signs and attests the

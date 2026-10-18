@@ -1,16 +1,15 @@
-"""Release output points at the real approval, and the dev bump is not a phantom (#1005).
+"""Release output points at the real approval, and the version bump is a real bump (#1005).
 
-Two release surfaces claimed more than they did:
+The publish gate used to tell maintainers they could approve a release by
+labelling the publish issue. No workflow reacts to that label or that issue: the
+only thing that publishes is ``craft publish`` run with publish credentials.
 
-* the publish gate told maintainers they could approve a release by labelling
-  the publish issue, but no workflow reacts to that label or that issue — the
-  only thing that publishes is ``craft publish`` run with publish credentials;
-* ``post-release.sh`` rewrote ``pyproject.toml`` to a ``-dev`` version and never
-  committed it. Committed, it would advertise a version that does not exist and
-  fail the registry-manifest drift check on the next release.
-
-The convention that replaces the edit: the version on ``main`` stays the last
-released version until the next prepare.
+``scripts/post-release.sh`` is Craft's ``postReleaseCommand``. It rewrites the
+versioned files — ``pyproject.toml``, both ``server.json`` version fields and
+``uv.lock`` — to the next development version through ``scripts/bump-version.sh``,
+so the successor the tree advertises is one it actually installs. That rewrite and
+Craft's real call shape are pinned in ``test_post_release_version_bump``; this
+module keeps the release surfaces around it honest.
 """
 
 from __future__ import annotations
@@ -47,18 +46,56 @@ def test_publish_gate_does_not_promise_a_label_approval() -> None:
     assert "approve" not in lowered
 
 
-def test_release_process_doc_states_the_version_convention() -> None:
-    text = read_text("docs/release-process.md")
-    assert "stays the last released version" in text
+def test_prepare_closes_the_informational_publish_issue() -> None:
+    """Craft opens a publish-request issue nobody can approve, so prepare closes it (#1005)."""
+    prepare = job(load_workflow("release.yml"), "prepare")
+    steps = [step for step in prepare["steps"] if isinstance(step, dict)]
+    closing = [
+        step for step in steps if step.get("name") == "Close the informational publish issue"
+    ]
+    assert len(closing) == 1, [step.get("name") for step in steps]
+    step = closing[0]
+
+    assert step.get("if") == "${{ steps.craft.outputs.issue_url != '' }}"
+    env = step.get("env") or {}
+    assert env.get("GH_TOKEN") == "${{ github.token }}"
+    assert env.get("ISSUE_URL") == "${{ steps.craft.outputs.issue_url }}"
+    assert env.get("RELEASED_VERSION") == "${{ steps.craft.outputs.version }}"
+
+    run = str(step.get("run", ""))
+    assert "gh issue close" in run
+    assert 'gh issue close "${ISSUE_URL}" --reason "not planned"' in run
+    assert "craft publish ${RELEASED_VERSION}" in run
+    # zizmor's template-injection rule: the URL and version arrive through env:,
+    # never interpolated into the shell text.
+    assert "${{" not in run
 
 
-def _run_post_release(tmp_path: Path, *, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def test_the_publish_issue_url_reaches_the_publish_gate() -> None:
+    workflow = load_workflow("release.yml")
+    assert workflow["jobs"]["prepare"]["outputs"]["issue_url"] == (
+        "${{ steps.craft.outputs.issue_url }}"
+    )
+    gate = _publish_gate_text().lower()
+    assert "informational" in gate
+    assert "craft publish" in gate
+
+
+def test_prepare_has_the_issues_scope_the_close_needs() -> None:
+    """The close step runs in the prepare job, which already holds `issues: write`."""
+    prepare = job(load_workflow("release.yml"), "prepare")
+    assert prepare["permissions"]["issues"] == "write"
+
+
+def _run_post_release(
+    tmp_path: Path, *args: str, env: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     shutil.copy(_SCRIPT, scripts / "post-release.sh")
     (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
     return subprocess.run(
-        ["bash", str(scripts / "post-release.sh")],
+        ["bash", str(scripts / "post-release.sh"), *args],
         cwd=tmp_path,
         env={**os.environ, **env},
         capture_output=True,
@@ -67,41 +104,15 @@ def _run_post_release(tmp_path: Path, *, env: dict[str, str]) -> subprocess.Comp
     )
 
 
-def test_post_release_no_longer_edits_pyproject(tmp_path: Path) -> None:
-    completed = _run_post_release(tmp_path, env={"CRAFT_NEW_VERSION": "0.1.0"})
-    assert completed.returncode == 0, completed.stderr
-    assert (tmp_path / "pyproject.toml").read_text(encoding="utf-8") == _PYPROJECT
-    assert "-dev" not in (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
+def test_post_release_refuses_a_call_with_no_released_version(tmp_path: Path) -> None:
+    """Craft always passes one; a manual run without it must stop before writing."""
+    env = {key: value for key, value in os.environ.items() if not key.startswith("CRAFT_")}
+    completed = _run_post_release(tmp_path, env=env)
 
-
-def test_post_release_states_the_convention(tmp_path: Path) -> None:
-    completed = _run_post_release(tmp_path, env={"CRAFT_NEW_VERSION": "0.1.0"})
-    assert "stays the last released version" in completed.stdout
-
-
-def test_post_release_still_requires_the_released_version(tmp_path: Path) -> None:
-    env = {key: value for key, value in os.environ.items() if key != "CRAFT_NEW_VERSION"}
-    scripts = tmp_path / "scripts"
-    scripts.mkdir()
-    shutil.copy(_SCRIPT, scripts / "post-release.sh")
-    (tmp_path / "pyproject.toml").write_text(_PYPROJECT, encoding="utf-8")
-    completed = subprocess.run(
-        ["bash", str(scripts / "post-release.sh")],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
     assert completed.returncode != 0
-    assert "CRAFT_NEW_VERSION" in completed.stderr
+    assert "a released version is required" in completed.stderr
+    assert (tmp_path / "pyproject.toml").read_text(encoding="utf-8") == _PYPROJECT
 
 
 def test_craft_config_still_names_the_post_release_hook() -> None:
     assert "postReleaseCommand: bash scripts/post-release.sh" in read_text(".craft.yml")
-
-
-def test_the_hook_script_no_longer_contains_the_dev_bump() -> None:
-    text = read_text("scripts/post-release.sh")
-    assert "perl -i" not in text
-    assert "dev_version" not in text

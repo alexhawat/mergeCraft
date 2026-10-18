@@ -55,15 +55,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Action and exits with the configuration code on the CLI, naming the variable and
   the value. It used to end as `infra_error`, the outcome of an unclassified crash.
   With tracing off the typo is still ignored and now logs a warning (#930).
-- The per-file `changed-unread-file` run-health finding is `Minor`: still listed in
-  the record, no longer a blocking severity. Per-hunk read coverage is the real gate (#885).
+- The per-file `changed-unread-file` run-health finding is `Minor` instead of
+  `Major`: still listed in the record, and the gate is unchanged — `gate_policy`
+  still maps `changed-unread-file` to `request-changes` by rule id, so this only
+  stops a Major row per unread file from burying the change-scoped reasons (#885).
 - The Release workflow now dispatches CI/CD on the release branch it prepares, and
   CI/CD's `build-dist` job accepts a dispatch on a `release/*` branch or a `v*` tag, so
   the workflow path produces the `artifact-python-dist` the publish step needs. Its
   publish gate names the real approval, `craft publish` with publish credentials, instead
   of a label that nothing acts on (#1004, #1005).
-- The post-release hook no longer rewrites `pyproject.toml` to a `-dev` version. The
-  version on `main` stays the last released version until the next prepare (#1005).
 - The wheel no longer ships five more checkout-only modules (`scm/webhooks.py`,
   `evidence/shadow_compare.py`, `evals/human_batch.py`, `evals/skill.py`,
   `agents/catalog_docs.py`); each is reached only from Make targets, scripts or tests (#947).
