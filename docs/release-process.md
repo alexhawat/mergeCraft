@@ -21,8 +21,13 @@ changelog section.
    `mcp-server-json-check` drift gate.
 2. CI/CD on that branch must be green: `make ci`, image build, SBOM + Trivy
    CRITICAL/HIGH, eval regression gate.
-3. Tag the candidate as an RC (Craft/`pre-0.0.1` promotes images to `:rc`,
-   never `:latest`). Do **not** call the cut stable yet.
+3. Tag the candidate as an RC. CI/CD owns `:latest`/`:analyzers` and promotes
+   them from `main` only; `.craft.yml` deliberately carries no `*-latest`
+   targets, because Craft's `docker` target has no preview detection and copies
+   every configured target unconditionally (`src/targets/docker.ts`,
+   `publish()` → `copy()`, pinned `getsentry/craft` `3f2abdc5`). A release moves
+   only `:<version>` and `:analyzers-<version>`. Do **not** call the cut stable
+   yet.
 
 ## Soak period
 
