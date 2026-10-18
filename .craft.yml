@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Craft release configuration — https://getsentry.github.io/craft/
 # Docker targets retag the CI/CD-built SHA tags (same digest that was scanned,
-# cosign-signed, and attested) onto version / latest tags — never rebuild.
+# cosign-signed, and attested) onto version tags — never rebuild. Craft has no
+# pre-release handling, so `:latest` / `:analyzers` are deliberately NOT targets
+# here: CI/CD promotes them from `main` only, and a release must not move them.
 minVersion: '2.21.0'
 
 github:
@@ -25,6 +27,7 @@ artifactProvider:
 requireNames:
   - /^merge[_-]craft.*\.(whl|tar\.gz)$/
 
+preReleaseCommand: bash scripts/bump-version.sh
 postReleaseCommand: bash scripts/post-release.sh
 
 targets:
@@ -42,14 +45,6 @@ targets:
       image: ghcr.io/alexhawat/mergecraft
       format: '{{{image}}}:{{{version}}}'
   - name: docker
-    id: slim-latest
-    source:
-      image: ghcr.io/alexhawat/mergecraft
-      format: '{{{image}}}:{{{revision}}}'
-    target:
-      image: ghcr.io/alexhawat/mergecraft
-      format: '{{{image}}}:latest'
-  - name: docker
     id: analyzers
     source:
       image: ghcr.io/alexhawat/mergecraft
@@ -57,11 +52,3 @@ targets:
     target:
       image: ghcr.io/alexhawat/mergecraft
       format: '{{{image}}}:analyzers-{{{version}}}'
-  - name: docker
-    id: analyzers-latest
-    source:
-      image: ghcr.io/alexhawat/mergecraft
-      format: '{{{image}}}:analyzers-{{{revision}}}'
-    target:
-      image: ghcr.io/alexhawat/mergecraft
-      format: '{{{image}}}:analyzers'

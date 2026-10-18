@@ -13,12 +13,21 @@ changelog section.
 
 ## Release candidate (RC)
 
-1. `craft prepare` (or the Release workflow) cuts `release/<version>` and
-   moves `CHANGELOG.md` `## [Unreleased]` into a dated version section.
+1. `craft prepare` (or the Release workflow) cuts `release/<version>`. It
+   generates a version section and inserts it **above** `CHANGELOG.md`
+   `## [Unreleased]`, which it leaves in place; fold the hand-written block
+   into the generated section by hand before pushing. It also bumps
+   `pyproject.toml` and `server.json` in step, so the branch passes its own
+   `mcp-server-json-check` drift gate.
 2. CI/CD on that branch must be green: `make ci`, image build, SBOM + Trivy
    CRITICAL/HIGH, eval regression gate.
-3. Tag the candidate as an RC (Craft/`pre-0.0.1` promotes images to `:rc`,
-   never `:latest`). Do **not** call the cut stable yet.
+3. Tag the candidate as an RC. CI/CD owns `:latest`/`:analyzers` and promotes
+   them from `main` only; `.craft.yml` deliberately carries no `*-latest`
+   targets, because Craft's `docker` target has no preview detection and copies
+   every configured target unconditionally (`src/targets/docker.ts`,
+   `publish()` → `copy()`, pinned `getsentry/craft` `3f2abdc5`). A release moves
+   only `:<version>` and `:analyzers-<version>`. Do **not** call the cut stable
+   yet.
 
 ## Soak period
 
