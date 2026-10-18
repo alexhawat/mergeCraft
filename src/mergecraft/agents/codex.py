@@ -310,6 +310,23 @@ def _resolved_parent_credentials(ctx: AgentRunContext) -> dict[str, str]:
     )
 
 
+def _uses_subscription_login(ctx: AgentRunContext) -> bool:
+    """Return whether this run's Codex auth is the ChatGPT-subscription login (#922).
+
+    ``resolve_codex_broker_posture`` is the single place that decides the auth
+    mode, and a usable ``CODEX_AUTH_JSON`` makes it ``subscription`` even when an
+    API key is also present — the same precedence ``_setup_codex_auth`` uses to
+    write ``auth.json``. Only that mode can report a retired refresh token; on an
+    API-key run the phrase means something else, or nothing (#1009).
+    """
+    credentials = _resolved_parent_credentials(ctx)
+    posture = resolve_codex_broker_posture(
+        codex_auth_json=credentials.get(CODEX_AUTH_ENV, ""),
+        openai_api_key=credentials.get(OPENAI_API_KEY_ENV, ""),
+    )
+    return posture.auth_mode == "subscription"
+
+
 def _codex_working_dir(ctx: AgentRunContext) -> str:
     """Return the directory Codex runs in: the review's primary repo, else this process's.
 
@@ -856,8 +873,13 @@ def _run_codex_streaming(
             )
             error = f"{hint}\n\ncodex stderr:\n{error}"
         # A retired subscription login is infrastructure, not a review failure,
-        # and no retry against the same login can succeed (#922).
-        if is_expired_subscription_credential(stream_error, stderr_text, output):
+        # and no retry against the same login can succeed (#922). Only a run
+        # actually using that login can see this: an API-key run that merely
+        # quotes the phrase (a review of this very code does) must fall through
+        # to the ordinary classification below.
+        if _uses_subscription_login(ctx) and is_expired_subscription_credential(
+            stream_error, stderr_text
+        ):
             logger.error(
                 "codex credential expired: {} — {}",
                 CODEX_CREDENTIAL_EXPIRED_REASON,

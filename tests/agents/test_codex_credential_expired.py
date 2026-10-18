@@ -40,6 +40,24 @@ _REFRESH_USED = (
     "Please log out and sign in again."
 )
 
+# A usable subscription login: what `subscription_auth_usable` accepts and what
+# `resolve_codex_broker_posture` reads as auth_mode="subscription".
+_SUBSCRIPTION_JSON = json.dumps(
+    {"tokens": {"access_token": "fake-access", "refresh_token": "fake-refresh"}}
+)
+
+
+def _subscription_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Put the run on the subscription login, the only mode that can report this."""
+    monkeypatch.setenv("CODEX_AUTH_JSON", _SUBSCRIPTION_JSON)
+    monkeypatch.delenv("OPENAI_API_KEY", None)
+
+
+def _api_key_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Put the run on an API key: the refresh-token message means nothing here."""
+    monkeypatch.delenv("CODEX_AUTH_JSON", None)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-api-key-not-a-real-secret")
+
 
 def _error_event(message: str) -> str:
     return json.dumps({"type": "error", "message": message})
@@ -61,6 +79,7 @@ def test_driver_names_the_expired_credential(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _subscription_run(monkeypatch)
     result, _ = _run_once(
         make_agent_run_context(tmp_path, resolved_model=None),
         monkeypatch,
@@ -77,6 +96,7 @@ def test_driver_keeps_the_providers_own_message_after_the_named_reason(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _subscription_run(monkeypatch)
     result, _ = _run_once(
         make_agent_run_context(tmp_path, resolved_model=None),
         monkeypatch,
@@ -92,6 +112,7 @@ def test_an_expired_credential_is_not_retried_against_the_same_login(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Re-issuing the call cannot help: the stored refresh token is already spent."""
+    _subscription_run(monkeypatch)
     result, _ = _run_once(
         make_agent_run_context(tmp_path, resolved_model=None),
         monkeypatch,
@@ -117,6 +138,8 @@ def test_other_codex_failures_are_unchanged(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The gate is open, so these prove the *message* match, not the auth mode.
+    _subscription_run(monkeypatch)
     result, _ = _run_once(
         make_agent_run_context(tmp_path, resolved_model=None),
         monkeypatch,
@@ -147,6 +170,51 @@ def test_a_successful_run_that_mentions_the_phrase_is_not_an_expired_credential(
 
     assert result.success is True
     assert "infra_reason" not in result.metadata
+
+
+def test_the_phrase_in_the_models_own_output_is_not_an_expired_credential(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed run whose *review text* quotes the phrase is not the login failing (#1009).
+
+    `output` is the model's own final message. Matching it meant any non-zero exit
+    after a review quoted "could not be refreshed" — which a review of this very
+    code does — skipped the retryable path and told the operator to re-authenticate
+    a working login.
+    """
+    _subscription_run(monkeypatch)
+    message = {
+        "type": "message.completed",
+        "message": {"content": f"The captured log said: {_REFRESH_USED}"},
+    }
+    result, _ = _run_once(
+        make_agent_run_context(tmp_path, resolved_model=None),
+        monkeypatch,
+        _FakeProcess(stdout=json.dumps(message), stderr="ordinary stream error", returncode=1),
+    )
+
+    assert result.success is False
+    assert "infra_reason" not in result.metadata
+    assert NAMED_REASON not in (result.error or "")
+    assert result.error == "ordinary stream error"
+
+
+def test_an_api_key_run_that_mentions_the_phrase_is_not_expired(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the subscription login rotates a refresh token, so only it can retire one."""
+    _api_key_run(monkeypatch)
+    result, _ = _run_once(
+        make_agent_run_context(tmp_path, resolved_model=None),
+        monkeypatch,
+        _FakeProcess(stdout="", stderr=_REFRESH_USED, returncode=1),
+    )
+
+    assert result.success is False
+    assert "infra_reason" not in result.metadata
+    assert NAMED_REASON not in (result.error or "")
 
 
 def _failed(metadata: dict[str, Any]) -> AgentResult:
