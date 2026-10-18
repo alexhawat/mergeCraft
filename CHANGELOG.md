@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A workspace review no longer fails closed with "checkout integrity failure:
+  tree changed during read-only review" when dependency prep creates nested
+  `node_modules`. pnpm/yarn/npm lay down `apps/api/node_modules`,
+  `packages/*/node_modules` and the like (and pnpm can drop `.pnpm-store`
+  in-tree), all after the integrity baseline, so the hash now prunes those
+  directory names at any depth instead of only at the checkout root. A nested
+  `.git` metadata directory is pruned the same way.
+
 ## [0.1.0a3] — 2026-10-17
 
 ### Breaking — action required
