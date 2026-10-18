@@ -129,18 +129,35 @@ def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _disabled(value: Any) -> bool:
+    """Whether a config value reads as "off" — including YAML's other spellings.
+
+    The settings model coerces ``analyzers.enabled: 0`` and ``"false"`` to
+    ``False``, so an edit that loosens a gate using either spelling has to be
+    reported too; only ``False`` was (#942). An absent key is ``None`` and reads
+    as "not disabled", which is what makes it a *change*.
+    """
+    if isinstance(value, bool):
+        return not value
+    if isinstance(value, (int, float)):
+        return value == 0
+    if isinstance(value, str):
+        return value.strip().casefold() in {"false", "no", "off", "0"}
+    return False
+
+
 def _mergecraft_changes(old: Any, new: Any) -> list[tuple[str, bool]]:
     old_a = _dict(_dict(old).get("analyzers"))
     new_a = _dict(_dict(new).get("analyzers"))
     changes: list[tuple[str, bool]] = []
-    if new_a.get("enabled") is False and old_a.get("enabled") is not False:
+    if _disabled(new_a.get("enabled")) and not _disabled(old_a.get("enabled")):
         changes.append(("disabled every catalog analyzer (`analyzers.enabled: false`)", True))
     old_over = _dict(old_a.get("overrides"))
     for tool, override in _dict(new_a.get("overrides")).items():
         if not isinstance(override, dict):
             continue
         before = _dict(old_over.get(tool))
-        if override.get("enabled") is False and before.get("enabled") is not False:
+        if _disabled(override.get("enabled")) and not _disabled(before.get("enabled")):
             changes.append(
                 (f"disabled analyzer `{tool}` (`analyzers.overrides.{tool}.enabled: false`)", True)
             )

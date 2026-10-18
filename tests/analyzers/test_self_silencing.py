@@ -249,6 +249,39 @@ def test_disabling_every_analyzer_is_reported(tmp_path: Path) -> None:
     assert [finding.severity for finding in findings] == ["Major"]
 
 
+@pytest.mark.parametrize(
+    "spelling",
+    ["0", '"false"', "no", "off"],
+    ids=["int-zero", "quoted-false", "no", "off"],
+)
+def test_a_disabling_edit_in_another_yaml_spelling_is_reported(
+    tmp_path: Path, spelling: str
+) -> None:
+    """The settings model reads these as ``False``, so the detector has to as well."""
+    repo, diff = _commit_change(
+        tmp_path,
+        {".mergecraft/config.yaml": "analyzers:\n  enabled: true\n"},
+        {".mergecraft/config.yaml": f"analyzers:\n  enabled: {spelling}\n"},
+    )
+
+    findings = _scan(repo, diff)
+
+    assert [finding.severity for finding in findings] == ["Major"]
+
+
+def test_an_already_disabled_analyzer_stays_unreported_in_another_spelling(
+    tmp_path: Path,
+) -> None:
+    """`enabled: 0 -> 'false'` is not a new loosening, so it is not reported."""
+    repo, diff = _commit_change(
+        tmp_path,
+        {".mergecraft/config.yaml": "analyzers:\n  enabled: 0\n"},
+        {".mergecraft/config.yaml": 'analyzers:\n  enabled: "false"\n'},
+    )
+
+    assert _scan(repo, diff) == []
+
+
 def test_widening_antislop_ignore_and_lowering_the_inline_budget_are_reported(
     tmp_path: Path,
 ) -> None:

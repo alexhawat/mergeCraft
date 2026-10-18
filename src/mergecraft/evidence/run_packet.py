@@ -553,12 +553,7 @@ def build_run_packet(
         packet,
         ctx=ctx,
         run_succeeded=run_succeeded and not orphaned_hits,
-        decision_reason_suffix=(
-            f"analyzer disposition ledger open ({len(orphaned_hits)} orphaned hit(s)) — "
-            "inconclusive"
-            if orphaned_hits
-            else None
-        ),
+        decision_reason_suffix=_open_ledger_reason(orphaned_hits),
     )
 
 
@@ -700,6 +695,24 @@ def _cached_packet_shell(cached: MergeEvidencePacket) -> MergeEvidencePacket:
     return cached.model_copy(update={"decision": None})
 
 
+def _orphaned_hit_ids(packet: MergeEvidencePacket) -> list[str]:
+    """Every raw analyzer hit the packet's ledgers leave unaccounted for (#941)."""
+    analyzers = packet.analyzers
+    if analyzers is None:
+        return []
+    orphans: list[str] = []
+    for section in analyzers.dispositions:
+        orphans.extend(section.orphaned_hit_ids)
+    return orphans
+
+
+def _open_ledger_reason(orphans: list[str]) -> str | None:
+    """The decision-reason suffix an open ledger carries, or ``None`` when closed."""
+    if not orphans:
+        return None
+    return f"analyzer disposition ledger open ({len(orphans)} orphaned hit(s)) — inconclusive"
+
+
 def resolve_prepared_run_packet(
     ctx: ToolContext,
     *,
@@ -722,7 +735,16 @@ def resolve_prepared_run_packet(
         )
         if shell is not cached:
             ctx.tool_state.prepared_run_packet = shell
-        return _finalize_packet_with_gate(shell, ctx=ctx, run_succeeded=run_succeeded)
+        # A re-finalization must reach the same verdict the first assembly would:
+        # the cached shell already names an open ledger's orphans, so the
+        # correction below cannot live only on the assembly path (#941).
+        orphans = _orphaned_hit_ids(shell)
+        return _finalize_packet_with_gate(
+            shell,
+            ctx=ctx,
+            run_succeeded=run_succeeded and not orphans,
+            decision_reason_suffix=_open_ledger_reason(orphans),
+        )
     packet = prepare_run_packet(
         ctx,
         run_succeeded=run_succeeded,

@@ -232,7 +232,17 @@ def classify_blast_radius(
         lane = "medium"
 
     source_override = rule_set is not None and "source_without_tests" in rule_set
-    if lane == "medium" and _is_small_isolated_source(paths, diff_stats) and not source_override:
+    # The carve-out exists for a tiny isolated source edit — not for a tiny edit
+    # to the config that governs how this PR is reviewed. `review_config` is
+    # "never auto-merge eligible": a ≤5-line `src/**/{ruff,pyproject,...}.toml`
+    # change is otherwise detected as both `source_without_tests` *and*
+    # `review_config`, and the downgrade made it `eligible` (#942).
+    if (
+        lane == "medium"
+        and "review_config" not in rule_categories
+        and _is_small_isolated_source(paths, diff_stats)
+        and not source_override
+    ):
         lane = "low"
 
     if "generated_files" in rule_categories and lane == "high":

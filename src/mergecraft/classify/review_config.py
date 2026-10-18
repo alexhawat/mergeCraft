@@ -73,7 +73,10 @@ _RUN_STATE_DIRS: Final[tuple[str, ...]] = (
 
 def is_review_config_path(path: str) -> bool:
     """True when ``path`` is analyzer, linter or mergeCraft config (not run state)."""
-    normalized = path.strip().lstrip("./") if path.startswith("./") else path.strip()
+    # Strip exactly one leading ``./``. ``lstrip("./")`` removed *every* leading
+    # dot and slash, so ``./.eslintrc`` became ``eslintrc`` and missed the
+    # dot-prefixed name it is (#942).
+    normalized = path.strip().removeprefix("./")
     posix = PurePosixPath(normalized)
     if normalized.startswith(".mergecraft/"):
         if normalized.startswith(_RUN_STATE_DIRS):

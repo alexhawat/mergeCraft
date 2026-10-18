@@ -9,7 +9,7 @@ import pytest
 
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.evidence.packet import PACKET_SCHEMA_VERSION, MergeEvidencePacket
-from mergecraft.evidence.run_packet import prepare_run_packet
+from mergecraft.evidence.run_packet import prepare_run_packet, resolve_prepared_run_packet
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import AnalyzerRunState, init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
@@ -174,6 +174,45 @@ def test_a_closed_ledger_does_not_degrade_a_successful_run(tmp_path: Path) -> No
     assert packet.decision is not None
     assert packet.decision.verdict == "success"
     assert packet.run_health is None
+
+
+def test_the_cached_re_finalization_keeps_an_open_ledger_neutral(tmp_path: Path) -> None:
+    """Re-finalizing the cached shell must not turn an open ledger back into success.
+
+    The second call takes the cached path, which assembles nothing: the shell it
+    already holds names the orphan, so the verdict has to come from that shell
+    rather than from the caller's ``run_succeeded`` alone (#941).
+    """
+    ctx = _ctx(tmp_path)
+    kept = [_hit(line=3)]
+    lost = _hit(line=4, message="swallowed by a stage")
+    _record(ctx, kept, _closed_ledger(kept, lost=[lost]))
+
+    first = resolve_prepared_run_packet(ctx, run_succeeded=True)
+    assert first is not None
+    assert first.decision is not None
+    assert first.decision.verdict == "neutral"
+
+    cached = resolve_prepared_run_packet(ctx, run_succeeded=True)
+
+    assert cached is not None
+    assert cached.decision is not None
+    assert cached.decision.verdict == "neutral"
+    assert cached.decision.reason is not None
+    assert "ledger open" in cached.decision.reason
+
+
+def test_the_cached_re_finalization_keeps_a_closed_ledger_successful(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    kept = [_hit(line=3)]
+    _record(ctx, kept, _closed_ledger(kept))
+
+    resolve_prepared_run_packet(ctx, run_succeeded=True)
+    cached = resolve_prepared_run_packet(ctx, run_succeeded=True)
+
+    assert cached is not None
+    assert cached.decision is not None
+    assert cached.decision.verdict == "success"
 
 
 def test_blockers_still_win_over_an_open_ledger(tmp_path: Path) -> None:

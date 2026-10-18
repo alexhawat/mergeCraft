@@ -31,6 +31,13 @@ def _classify(paths: list[str]):
         "setup.cfg",
         "tsconfig.json",
         ".pre-commit-config.yaml",
+        # A config file *under* `src/` is still review-governing config: the
+        # small-source carve-out (`_is_small_isolated_source`) must not downgrade
+        # it to `eligible` just because it is one file and a few lines (#942).
+        "src/mergecraft/pkg/ruff.toml",
+        # `./` must be stripped exactly once: `./.eslintrc` is the dot-prefixed
+        # name, not `eslintrc`.
+        "./.eslintrc",
     ],
 )
 def test_review_governing_config_is_never_auto_merge_eligible(path: str) -> None:
