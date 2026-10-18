@@ -286,9 +286,9 @@ then dispatches CI/CD on it, because a branch pushed with the workflow's own tok
 does not start CI/CD by itself; CI/CD's `build-dist` job then builds the dist for
 that dispatch. It does not publish: step 3 above, run with publish credentials, is the
 only thing that does, and nothing reacts to a label or comment on an issue. The jobs
-are least-privilege (no `secrets: inherit`); image signing stays in CI/CD. The version
-on `main` stays the last released version until the next prepare; see
-[Release process](docs/release-process.md#version-on-main-between-releases).
+are least-privilege (no `secrets: inherit`); image signing stays in CI/CD. After a
+publish, `scripts/post-release.sh` moves the versioned files to the next development
+version; see [Release process](docs/release-process.md).
 
 Dry-run locally: `craft prepare auto --dry-run`.
 
