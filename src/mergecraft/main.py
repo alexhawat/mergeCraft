@@ -52,6 +52,7 @@ from mergecraft.mcp.tool_state import (
 from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.prep.types import is_prep_install_failure
 from mergecraft.review.engine import ReviewEngine
+from mergecraft.review.roster_execution import RosterExecutionSummary, apply_roster_failure
 from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
@@ -1936,8 +1937,8 @@ async def _dispatch_agent_with_deadline(ctx: RunContext) -> AgentResult:
     return _promote_and_finalize_agent_result(ctx, winning_slug, result)
 
 
-async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> str | None:
-    """Dispatch secondary reviewers server-side; return a hard error message."""
+async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecutionSummary | None:
+    """Dispatch secondary reviewers server-side; return the dispatch summary."""
     assert ctx.tool_context is not None
     assert ctx.tool_state is not None
     assert ctx.settings is not None
@@ -1951,14 +1952,13 @@ async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> str | None:
             return None
         return max(1.0, ctx.agent_deadline_monotonic - time.monotonic())
 
-    summary = await run_pending_roster_reviewers(
+    return await run_pending_roster_reviewers(
         tool_context=ctx.tool_context,
         base_run_ctx=ctx.run_ctx,
         settings=ctx.settings,
         payload=ctx.payload,
         remaining_timeout_s=_remaining_roster_timeout_s,
     )
-    return summary.hard_error
 
 
 async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentReview:
@@ -2011,12 +2011,8 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
     with gha_log.group("agent-dispatch"):
         await _prepare_agent_dispatch(ctx)
         result = await _dispatch_agent_with_deadline(ctx)
-        roster_error = await _run_server_roster_reviewers_if_needed(ctx)
-        if roster_error:
-            from dataclasses import replace
-
-            result = replace(result, success=False, error=roster_error)
-        return result
+        roster = await _run_server_roster_reviewers_if_needed(ctx)
+        return apply_roster_failure(result, roster)
 
 
 _SINK_SCAN_ARTIFACT_SOURCES: tuple[str, ...] = (

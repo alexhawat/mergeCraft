@@ -1249,6 +1249,7 @@ def record_driver_exec(
         failure_class: FailureClass = "unknown"
         error: str | None = None
         ok = True
+        outcome_ok: bool | None = None
         if declined:
             ok, outcome_ok, failure_class = False, False, "policy"
             error = "command declined by the driver's approval policy"
