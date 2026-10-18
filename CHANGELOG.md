@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Checkout integrity hashing skips nested `node_modules`, `.pnpm-store`, run
   `evidence`, and OpenCode session dirs at any depth so harness scratch writes
   during read-only review no longer trigger exit 12.
+- A review whose agent submits a verdict without calling `select_mode` now
+  publishes the formal review with the run record. Before, the PR got only a
+  short progress comment, with no tokens, cost, timing or findings, whenever the
+  OpenCode Go rung answered and the Codex fallback did not run.
+- The run record on the formal review shows the `Cost:` line. Cost was computed
+  but only reached the step summary.
 
 ## [0.1.0a3] — 2026-10-17
 
