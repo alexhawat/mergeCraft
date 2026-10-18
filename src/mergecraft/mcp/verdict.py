@@ -765,6 +765,65 @@ def validate_submission(
     return SubmissionValidation(accepted=True, rejection_reason=None)
 
 
+def _sanitize_submit_findings(raw: list[object]) -> list[Any]:
+    """Drop malformed draft rows instead of failing the whole terminal submit."""
+    from pydantic import ValidationError
+
+    coerced: list[Any] = []
+    for index, item in enumerate(raw):
+        if isinstance(item, dict) and item.get("raised_by") is not None:
+            msg = (
+                f"findings[{index}]: raised_by is server-stamped and must not "
+                "appear in submit_review_verdict payloads"
+            )
+            raise ValueError(msg)
+        try:
+            finding = coerce_agent_finding(item)
+        except (ValidationError, ValueError, TypeError) as exc:
+            if isinstance(item, dict):
+                path = item.get("path")
+                body = item.get("body")
+                if path in (None, "") and body in (None, ""):
+                    logger.warning(
+                        "submit_review_verdict: dropped incomplete finding {}: {}",
+                        index,
+                        exc,
+                    )
+                    continue
+            raise
+        if finding.severity not in FINDING_SEVERITIES:
+            msg = f"findings[{index}]: invalid severity {finding.severity!r}"
+            raise ValueError(msg)
+        coerced.append(finding)
+    return coerced
+
+
+def purge_malformed_agent_findings(tool_state: ToolState) -> int:
+    """Drop incomplete agent drafts that would block terminal submit (not ``Finding`` rows)."""
+    from pydantic import ValidationError
+
+    kept: list[dict[str, Any]] = []
+    removed = 0
+    for row in tool_state.agent_findings:
+        if not isinstance(row, dict):
+            removed += 1
+            continue
+        if _coerce_confirmed_finding(row) is not None:
+            kept.append(row)
+            continue
+        try:
+            coerce_agent_finding(row)
+        except (ValidationError, ValueError, TypeError):
+            path = row.get("path")
+            body = row.get("body")
+            if path in (None, "") and body in (None, ""):
+                removed += 1
+                continue
+        kept.append(row)
+    tool_state.agent_findings = kept
+    return removed
+
+
 class SubmitReviewVerdictParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -778,20 +837,7 @@ class SubmitReviewVerdictParams(BaseModel):
         if not isinstance(value, list):
             msg = "findings must be a list"
             raise ValueError(msg)
-        coerced: list[Any] = []
-        for item in value:
-            if isinstance(item, dict) and item.get("raised_by") is not None:
-                msg = (
-                    "raised_by is server-stamped at collection time and must not "
-                    "be supplied by agents"
-                )
-                raise ValueError(msg)
-            finding = coerce_agent_finding(item)
-            if finding.severity not in FINDING_SEVERITIES:
-                msg = f"severity must be one of {FINDING_SEVERITIES!r}, got {finding.severity!r}"
-                raise ValueError(msg)
-            coerced.append(finding)
-        return coerced
+        return _sanitize_submit_findings(list(value))
 
 
 def recorded_submission_payload(submission: Any) -> dict[str, Any]:
@@ -915,9 +961,35 @@ def after_terminal_submission_recorded(
     maybe_audit_blocking_terminal_submission(ctx, recorded)
 
 
+def _adopt_review_mode_for_accepted_verdict(ctx: ToolContext) -> None:
+    """Record a modeless run as ``Review`` once its terminal verdict is accepted.
+
+    Some agents submit a verdict without ever calling ``select_mode``. Every
+    Review-mode gate keys on ``selected_mode``, so such a run published neither
+    its verdict nor its run record, and its progress went to a separate issue
+    comment (PR #1021). An accepted ``submit_review_verdict`` is a Review run;
+    an explicitly selected mode is never overwritten.
+    """
+    if ctx.tool_state.selected_mode is not None:
+        return
+    if not any(mode.name == "Review" for mode in ctx.modes):
+        return
+    ctx.tool_state.selected_mode = "Review"
+    logger.warning(
+        "submit_review_verdict: no mode was selected; recording this run as Review so "
+        "the run publishes the verdict and its run record"
+    )
+
+
 def submit_review_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         ensure_review_scope_for_terminal(ctx.tool_state, "submit_review_verdict")
+        dropped = purge_malformed_agent_findings(ctx.tool_state)
+        if dropped:
+            logger.warning(
+                "submit_review_verdict: purged {} malformed row(s) from agent_findings",
+                dropped,
+            )
         validated = SubmitReviewVerdictParams.model_validate(params)
         repo_root = Path(primary_repo_state(ctx.tool_state).dir)
         from mergecraft.agents.registry import load_registry
@@ -1005,6 +1077,7 @@ def submit_review_verdict_tool(ctx: ToolContext):
             findings=normalized_findings,
         )
         replayed = existing_id is not None and recorded.id == existing_id
+        _adopt_review_mode_for_accepted_verdict(ctx)
         after_terminal_submission_recorded(ctx, recorded, replayed=replayed)
         ctx.tool_state.review_phase = ReviewPhase.SUBMIT.value
         stamp_review_phase_on_active_span(ReviewPhase.SUBMIT)

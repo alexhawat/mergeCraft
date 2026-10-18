@@ -21,6 +21,17 @@ if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
 
 
+def resolved_agent_fingerprint(finding: AgentFinding) -> str:
+    """Stable fingerprint for drafts: normalize model slugs, derive when absent."""
+    from mergecraft.analyzers.finding import normalize_agent_supplied_fingerprint
+    from mergecraft.review_taxonomy import finding_fingerprint
+
+    supplied = finding.fingerprint.strip()
+    if not supplied:
+        return finding_fingerprint(path=finding.path, body=finding.body)
+    return normalize_agent_supplied_fingerprint(supplied)
+
+
 def coerce_agent_finding(item: Any) -> AgentFinding:
     """Parse an ``AgentFinding`` or wire dict into the typed draft shape."""
     from mergecraft.agents.verifier import AgentFinding

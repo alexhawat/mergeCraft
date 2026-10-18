@@ -18,12 +18,16 @@ This module pins the fix:
    ``scripts/gen_mcp_server_json.render_server_json()`` rendered for the new
    version, so the manifest the branch commits is the manifest the drift gate
    regenerates (test 4).
-4. It touches nothing else: no ``uv.lock``, no ``CHANGELOG.md``, no
-   ``docs/mcp-tools.md`` (test 5), and it keeps non-ASCII text unescaped the way
-   the generator does (test 6).
-5. A missing or empty new version exits non-zero and leaves both files
-   untouched (test 7), and a ``server.json`` that lost a version field fails
-   loudly instead of being silently repaired (test 8).
+4. It also rewrites the editable root package's ``version`` line in
+   ``uv.lock``, so ``make lockcheck`` (a required context) stays green, while
+   touching nothing else — no ``CHANGELOG.md``, no ``docs/mcp-tools.md``
+   (test 5). It keeps non-ASCII text unescaped the way the generator does
+   (test 6), and the lockfile block it rewrites is asserted directly
+   (test 10).
+5. A missing or empty new version exits non-zero and leaves the versioned
+   files untouched (test 7); a ``server.json`` that lost a version field
+   (test 8) or a ``uv.lock`` without its ``merge-craft`` block (test 10) fails
+   loudly instead of being silently repaired.
 6. It runs in the environment the Release workflow's ``prepare`` job has: no
    ``VIRTUAL_ENV`` and no project environment on ``PATH`` (test 3), which the
    script's own bootstrap-free shape backs (test 9).
@@ -40,6 +44,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tomllib
@@ -58,6 +63,7 @@ _BUMP_SCRIPT = "scripts/bump-version.sh"
 _GENERATOR_SCRIPT = "scripts/gen_mcp_server_json.py"
 _PYPROJECT = "pyproject.toml"
 _SERVER_JSON = "server.json"
+_UV_LOCK = "uv.lock"
 
 # The locked prepare command and the post-release hook it sits beside.
 _PRE_RELEASE_COMMAND = "bash scripts/bump-version.sh"
@@ -70,9 +76,9 @@ _NEW_VERSION = "9.9.9a9"
 _EMPTY_OLD_VERSION = "0.0.0"
 
 # The inputs a prepare run rewrites, plus the files it must leave alone: the
-# lockfile, the changelog Craft writes itself, and the generator's sibling page.
-_PREPARE_INPUTS = (_PYPROJECT, _SERVER_JSON)
-_WATCHED_SIBLINGS = ("uv.lock", "CHANGELOG.md", "docs/mcp-tools.md")
+# changelog Craft writes itself and the generator's sibling page.
+_PREPARE_INPUTS = (_PYPROJECT, _SERVER_JSON, _UV_LOCK)
+_WATCHED_SIBLINGS = ("CHANGELOG.md", "docs/mcp-tools.md")
 
 
 def _craft_config() -> dict[str, Any]:
@@ -188,8 +194,20 @@ def _snapshot(root: Path) -> dict[str, bytes]:
     }
 
 
+def _uv_lock_version(root: Path) -> str:
+    """Return the ``merge-craft`` package version recorded in a copied ``uv.lock``.
+
+    ``uv lock --check`` fails when pyproject.toml and uv.lock disagree, so this
+    line is the lockfile half of the bump contract.
+    """
+    text = (root / _UV_LOCK).read_text(encoding="utf-8")
+    match = re.search(r'\[\[package\]\]\nname = "merge-craft"\nversion = "([^"]*)"', text)
+    assert match is not None, f"{_UV_LOCK} must record the merge-craft package block"
+    return match.group(1)
+
+
 def _assert_bumped(root: Path, new_version: str) -> None:
-    """Assert all three version fields moved to *new_version*."""
+    """Assert all four version fields moved to *new_version*."""
     assert _pyproject_version(root) == new_version
     data = _server_json(root)
     assert data.get("version") == new_version, data.get("version")
@@ -197,6 +215,7 @@ def _assert_bumped(root: Path, new_version: str) -> None:
     assert isinstance(packages, list), data.get("packages")
     assert packages, data.get("packages")
     assert packages[0].get("version") == new_version, packages[0]
+    assert _uv_lock_version(root) == new_version
 
 
 def _drop_top_level_version(data: dict[str, Any]) -> None:
@@ -310,11 +329,11 @@ def test_server_json_after_bump_is_byte_identical_to_the_generator_render(
     assert actual == expected
 
 
-def test_prepare_bump_touches_only_pyproject_and_server_json(tmp_path: Path) -> None:
-    """Edge: nothing else in the checkout changes — no lockfile, changelog or docs page."""
+def test_prepare_bump_touches_only_the_versioned_files(tmp_path: Path) -> None:
+    """Edge: exactly pyproject.toml, server.json and uv.lock change."""
     root = _prepare_tree(tmp_path)
     before = _snapshot(root)
-    assert "uv.lock" in before, before.keys()
+    assert _UV_LOCK in before, before.keys()
     assert "CHANGELOG.md" in before, before.keys()
     assert "docs/mcp-tools.md" in before, before.keys()
 
@@ -325,7 +344,7 @@ def test_prepare_bump_touches_only_pyproject_and_server_json(tmp_path: Path) -> 
     changed = sorted(
         path for path in set(before) | set(after) if before.get(path) != after.get(path)
     )
-    assert changed == [_PYPROJECT, _SERVER_JSON]
+    assert changed == sorted([_PYPROJECT, _SERVER_JSON, _UV_LOCK])
 
 
 def test_prepare_bump_preserves_non_ascii_without_escaping(tmp_path: Path) -> None:
@@ -390,6 +409,34 @@ def test_prepare_bump_fails_loudly_when_server_json_drops_a_version_field(
         f"{completed.stdout}{completed.stderr}"
     )
     assert (root / _SERVER_JSON).read_bytes() == before
+
+
+def test_prepare_bump_fails_loudly_when_uv_lock_lacks_the_package_block(tmp_path: Path) -> None:
+    """Error: a lockfile without the merge-craft block stops the run, never guesses.
+
+    ``uv lock --check`` compares the recorded root package's version against
+    pyproject.toml. A lock that lost that block cannot be repaired from a
+    version string alone, so the run fails instead of writing a lock the gate
+    will reject.
+    """
+    root = _prepare_tree(tmp_path)
+    lock = root / _UV_LOCK
+    lock.write_text(
+        lock.read_text(encoding="utf-8").replace(
+            'name = "merge-craft"', 'name = "merge-craft-renamed"'
+        ),
+        encoding="utf-8",
+    )
+    before = {rel: (root / rel).read_bytes() for rel in _PREPARE_INPUTS}
+
+    completed = _run_bump(root, _OLD_VERSION, _NEW_VERSION)
+    assert completed.returncode != 0, (
+        "a uv.lock without the merge-craft package block must fail the prepare step: "
+        f"{completed.stdout}{completed.stderr}"
+    )
+    assert "merge-craft" in completed.stderr
+    for rel, original in before.items():
+        assert (root / rel).read_bytes() == original, f"{rel} changed despite the failed lock"
 
 
 def test_bump_script_stays_bootstrap_free() -> None:

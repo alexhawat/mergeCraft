@@ -132,7 +132,7 @@ def test_spawn_agent_cli_leaves_env_untouched_when_not_root(monkeypatch: MonkeyP
 
     monkeypatch.setattr(shared_module.subprocess, "Popen", _fake_popen)
 
-    env = {"HOME": "/Users/dev", "PATH": "/usr/bin"}
+    env = {"HOME": "/home/dev", "PATH": "/usr/bin"}
     spawn_agent_cli(["codex", "exec"], env=env)
 
     assert captured["cmd"] == ["codex", "exec"]
