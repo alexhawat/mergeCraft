@@ -498,6 +498,13 @@ class ToolState:
     # rather than ``list[ToolCallRecord]`` only to keep this module free of an
     # import cycle back into ``evidence``.
     tool_calls: list[Any] = field(default_factory=list)
+    # One-time diff line-range coverage nudge (review scope). Set the first
+    # time ``submit_review_verdict`` refuses with unread ranges so the second
+    # submission is accepted regardless; the nudge is guidance, never a gate.
+    diff_coverage_nudge_sent: bool = False
+    # Slice 7 — measured wall time by phase (setup / analyzers / agent / judge /
+    # publish). Measurement only: the run record and packet read it, no gate.
+    phase_elapsed_s: dict[str, float] = field(default_factory=dict)
     model: str | None = None
     # W10.2 / #20 — requested vs executed model evidence (always populated on
     # the live path so the packet can prove which model actually ran).

@@ -53,6 +53,7 @@ def record_trajectory(
     ok: bool,
     result: Any = None,
     error: str | None = None,
+    duration_ms: int | None = None,
 ) -> None:
     """Record one mediated tool call on the run's trajectory (#43, D8)."""
     if ctx is None:
@@ -67,6 +68,7 @@ def record_trajectory(
             ok=ok,
             outcome_ok=outcome_ok_from_result(result) if ok else None,
             error=error,
+            duration_ms=duration_ms,
         )
     except Exception as exc:  # an audit trail never breaks a tool call
         logger.debug("trajectory: failed to record {} — {}", name, exc)

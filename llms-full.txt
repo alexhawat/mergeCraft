@@ -1554,6 +1554,67 @@ Trajectory checks stamp `source="trajectory"`, `scope="run"`, and `introduced_by
 All three fields matter: `introduced_by_pr` drives causality, `scope` drives gating,
 `source` drives rendering.
 
+## Review scope is the materialised diff
+
+**The on-disk diff is the change set; git is not asked to re-derive it.**
+`checkout_pr` writes the full PR diff to `diffPath` (and an incremental range to
+`incrementalDiffPath` on a re-review). Review and IncrementalReview render the
+same hard instruction before their checklist: read `diffPath` first, read
+`incrementalDiffPath` instead when it is present, and do **not** run
+`git diff` / `git grep` / `git log` to reconstruct the change set. A
+re-derivation is invisible to the trajectory as a file read, pulls in
+base-branch noise, and fails outright on a shallow Actions checkout. Once the
+diff is read, surrounding files a candidate finding needs are fair game.
+
+**Incremental is the default on a re-review.** A PR that already has a
+mergeCraft review on an earlier head gets `incrementalDiffStatus` plus, when the
+range is real, `incrementalDiffPath` and `lastReviewedSha`. The checkpoint comes
+from the trusted run-bound evidence packet when available, then the publisher
+scan. `empty` and `unavailable` carry `incrementalDiffReason` instead of
+advertising a file that does not exist. The mode gate was removed: #1017's
+reviewer never called `select_mode`, and gating the range on that selection made
+the whole re-review read the full PR. When the incremental path is present it
+**is** the review scope; the full diff is only for anchoring.
+
+**Coverage is line-range, not file-level.** `changed-unread-file` now reports the
+unread added-line ranges (`path:start-end`) rather than "this file was never
+read", and the pre-submit check nudges **once** with exactly those ranges. The
+rule id, severity, and `scope="run"` (advisory, never a gate) are unchanged; what
+changed is what counts as read. Reads of the diff file itself count, via the
+`diff_read_path` / `diff_read` marker recorded from the raw command before the
+redactor can rewrite a run-temp path. Absent read evidence is still *unknown*,
+not zero: a run whose reads never cross MCP gets no nudge and no finding.
+
+**Batch independent reads.** The reviewer instruction is explicit: emit every
+independent read/grep/glob in one turn and keep dependent calls for the next
+turn. The packet's `run_metrics.read_tool_turns` is the cheap measurement — N
+adjacent read-intent calls collapse into one turn — so a later iteration can see
+whether the instruction changed the run's shape.
+
+## Run metrics and the idle watchdog
+
+`run_metrics` (packet schema `1.15.0`) is **measurement only**: tool-call count,
+read calls and read turns, distinct files read, diff line counts, elapsed by
+phase (setup / analyzers / agent / judge / publish), and the last watchdog
+diagnostic. It never feeds `decide_approval`; the deterministic record renders it
+as a one-line **Review cost** row.
+
+The wall-clock attempt budget and the idle watchdog answer different questions.
+A driver that accepts a request and then emits nothing for
+`agentIdleTimeout` seconds (default **900**, `0` disables) is killed and reported
+with the idle span, event count, whether the model produced any output, the last
+provider error, and the stderr tail. This is an `infra_error` (environment or
+provider fault), not a failed review: the attempt still fails so the model chain
+may advance, but the run is not recorded as a wrong verdict. The diagnostic
+reaches the packet's `run_metrics.agent_diagnostic` and the run record's
+**Agent stall** row.
+
+**Fan-out is planned, not enabled.** `review/file_group_fanout.py` splits a very
+large diff into at most six balanced read-only groups and degrades a failed group
+to a recorded row, never a failed run. It is not wired into the server-side
+roster dispatch in this release: group prompts and aggregation need live-provider
+validation before they replace the single-agent path.
+
 ## Makefile discovery, not tool inference
 
 **`DISCOVERABLE_TARGETS` discovers Makefile targets, not tools.** The tuple

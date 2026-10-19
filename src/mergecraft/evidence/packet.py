@@ -103,7 +103,11 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 #   terminal disposition per raw analyzer hit, per-stage counts, the persisted
 #   baseline-suppression audit rows, and any orphaned hit ids. Additive; ``None``
 #   for a run that executed no analyzer.
-PACKET_SCHEMA_VERSION = "1.14.0"
+# - 1.15.0 — adds the optional ``run_metrics`` section (slice 7): tool-call count,
+#   read-call count/turns, distinct files read, diff line counts, elapsed by
+#   phase, and the last idle-watchdog diagnostic. Measurement only — it never
+#   feeds a gate. Additive; ``None`` on packets built before this version.
+PACKET_SCHEMA_VERSION = "1.15.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
@@ -236,6 +240,28 @@ class RunHealth(BaseModel):
     conclusion: Literal["clean", "advisory"]
 
 
+class RunMetrics(BaseModel):
+    """How a review spent its time and its reads (slice 7).
+
+    Measurement only: none of these fields feeds a gate or a verdict. They
+    exist so the next iteration can tell whether diff-first reads, batched
+    tool calls, and the idle watchdog actually changed a run's shape.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool_calls: int = Field(ge=0)
+    read_tool_calls: int = Field(ge=0)
+    read_tool_turns: int = Field(ge=0)
+    """Runs of consecutive read-intent calls — the cheap batching signal."""
+    distinct_files_read: int = Field(ge=0)
+    diff_lines: int = Field(ge=0)
+    diff_added_lines: int = Field(ge=0)
+    diff_deleted_lines: int = Field(ge=0)
+    phase_elapsed_s: dict[str, float] = Field(default_factory=dict)
+    agent_diagnostic: str | None = None
+
+
 class ModePromptVersion(BaseModel):
     """Identifies the prompt body that produced a run for one mode (#145).
 
@@ -325,6 +351,9 @@ class MergeEvidencePacket(BaseModel):
     progress_comment_id: int | None = None
     # #941/#942 — analyzer settings provenance and the disposition ledger.
     analyzers: AnalyzersEvidence | None = None
+    # Slice 7 — measurement only: tool calls, distinct reads, diff size, and
+    # elapsed time by phase. Never an input to ``decide_approval``.
+    run_metrics: RunMetrics | None = None
 
 
 def packet_output_schema() -> dict[str, Any]:
@@ -360,6 +389,10 @@ def packet_output_schema() -> dict[str, Any]:
     if isinstance(run_health, dict) and "$ref" in run_health:
         run_health.clear()
         run_health.update(RunHealth.model_json_schema())
+    run_metrics = schema.get("properties", {}).get("run_metrics")
+    if isinstance(run_metrics, dict) and "$ref" in run_metrics:
+        run_metrics.clear()
+        run_metrics.update(RunMetrics.model_json_schema())
     return schema
 
 
@@ -373,6 +406,7 @@ __all__ = [
     "MergeEvidencePacket",
     "ModePromptVersion",
     "RunHealth",
+    "RunMetrics",
     "SelfAssessment",
     "packet_output_schema",
 ]

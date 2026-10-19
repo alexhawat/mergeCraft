@@ -88,7 +88,7 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.14.0`.
+The current version is `1.15.0`.
 
 Wiring a consumer is **not** a shape change: #96 gave these models their first
 runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
@@ -131,6 +131,11 @@ not move.
   disposition per raw analyzer hit, per-stage counts, the persisted
   baseline-suppression audit rows and any orphaned hit ids). Additive; `null`
   for a run that executed no analyzer.
+- `1.15.0` — adds the optional `run_metrics` section: tool-call count, read
+  calls and read turns, distinct files read, diff line counts, elapsed by phase
+  (setup / analyzers / agent / judge / publish), and the last idle-watchdog
+  diagnostic. Measurement only — it never feeds a gate. Additive; `null` on a
+  packet built before the field existed.
 
 ## Top-level fields
 
@@ -201,6 +206,23 @@ section is omitted (`null`).
 |------|------|-------|
 | `findings` | `list[Finding]` | Run-scoped rows (`scope="run"`). |
 | `conclusion` | `str` | `clean` when empty; `advisory` when observations exist. |
+
+### `run_metrics` — `RunMetrics | None` (added in `1.15.0`)
+
+Measurement only. It records how the review spent its time and its reads so the
+next iteration can compare run shapes; **no field here feeds a gate or a
+verdict.**
+
+| Field | Type | Notes |
+|------|------|-------|
+| `tool_calls` | `int` | Mediated MCP tool calls recorded in the trajectory. |
+| `read_tool_calls` | `int` | Calls the trajectory classified as `read`. |
+| `read_tool_turns` | `int` | Runs of consecutive read-intent calls — the cheap batching signal. |
+| `distinct_files_read` | `int` | Distinct paths in `trajectory.files_read`. |
+| `diff_lines` | `int` | Lines in the full PR diff (the packet's blast-radius scope). |
+| `diff_added_lines` / `diff_deleted_lines` | `int` | Added / deleted lines in that diff. |
+| `phase_elapsed_s` | `object` | Seconds by phase: `setup`, `analyzers`, `agent`, `judge`, `publish`. `judge` covers the verifier tool calls; native judge dispatches are part of `agent`. |
+| `agent_diagnostic` | `str \| null` | The last idle-watchdog diagnostic, when an attempt stalled. |
 
 ### `analyzers` — `AnalyzersEvidence | None` (added in `1.14.0`)
 

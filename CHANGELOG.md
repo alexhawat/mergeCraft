@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Reviews now read the materialised diff first. Review and IncrementalReview
+  render a shared hard instruction: `diffPath` (or `incrementalDiffPath`) is the
+  authoritative review scope, `git diff` / `git grep` / `git log` must not be used
+  to reconstruct it, and independent reads are batched into one turn. The
+  instruction is rendered for every consumer, not only this repository's
+  workflow.
+- Diff line-range coverage: `changed-unread-file` reports the unread added-line
+  ranges (`path:start-end`) instead of whole files, and `submit_review_verdict`
+  nudges once with exactly those ranges before accepting the verdict. Reads of
+  the diff file itself count (recorded as `diff_read_path` / `diff_read`), and a
+  run with no observed reads is *unknown*, not unread.
+- A no-output/idle watchdog for CLI agent drivers: no parsed event for
+  `agentIdleTimeout` seconds (default `900`, `0` disables) kills the attempt and
+  reports the idle span, event count, whether the model produced output, the last
+  provider error, and the stderr tail. The attempt still fails so the chain can
+  advance, but the run outcome is `infra_error`, not a failed review.
+- `run_metrics` on the merge evidence packet (schema `1.15.0`): tool calls, read
+  calls and read turns, distinct files read, diff line counts, elapsed by phase
+  (setup / analyzers / agent / judge / publish), and the last watchdog
+  diagnostic. The deterministic run record renders it as a **Review cost** row.
+  Measurement only — it never feeds the gate.
+- Bounded file-group fan-out planner (`review/file_group_fanout.py`): a large
+  diff splits into at most six balanced read-only groups, and a failed group is
+  recorded rather than raised. Planning and degradation only; it is not wired
+  into server-side roster dispatch in this release.
 - Analyzer disposition ledger: every raw analyzer hit gets a stable `hit_id` and
   ends `kept`, `merged`, `downgraded` or `dropped:<stage>` with a required reason.
   The merge evidence packet (schema `1.14.0`) carries the ledger, per-stage counts
@@ -33,6 +58,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Incremental re-review is the default on a re-review. `checkout_pr` now computes
+  the range whenever a prior reviewed sha is recoverable — not only when
+  `select_mode` chose IncrementalReview — and reports
+  `incrementalDiffStatus` (`ok` / `empty` / `unavailable`) with
+  `incrementalDiffReason` and `lastReviewedSha`. When the range exists it is the
+  review scope; the full diff is for anchoring only.
+- The merge evidence packet schema is `1.15.0`; the trajectory record schema is
+  `1.1.0` (optional `diff_read_path`, `diff_read`, `duration_ms` on a tool-call
+  row, all omitted while unset).
 - A PR's own `analyzers.*` configuration no longer applies to its own review. The
   analyzer settings (`enabled`, `overrides.<id>.enabled`, the `antislop` `rules` and
   `ignore`, `baseComparison`, `inlineBudget`, `impact`) are resolved from the PR's

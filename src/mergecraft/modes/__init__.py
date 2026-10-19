@@ -216,7 +216,10 @@ def _expand_template(
     signed_commits: bool,
     inline_budget: int | None = None,
 ) -> str:
+    from mergecraft.modes._diff_first import DIFF_FIRST_INSTRUCTION
+
     text = template
+    text = text.replace("${DIFF_FIRST_INSTRUCTION}", DIFF_FIRST_INSTRUCTION)
     text = text.replace("${REVIEWER_AGENT_NAME}", REVIEWER_AGENT_NAME)
     text = text.replace("${mergecraftMcpName}", MERGECRAFT_MCP_NAME)
     text = text.replace("${commitStep}", commit_step)

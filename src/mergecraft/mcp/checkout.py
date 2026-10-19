@@ -22,7 +22,6 @@ from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
 from mergecraft.mcp.tool_call import normalize_pull_number_aliases
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
 from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, degraded_checkout_reason
-from mergecraft.types import INCREMENTAL_REVIEW_MODE
 from mergecraft.utils.gha_log import warning
 from mergecraft.utils.git_hardening import read_remote_origin_url
 from mergecraft.utils.github import GitHubClient
@@ -33,6 +32,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "GitHubClient",
+    "IncrementalDiffResult",
     "RunBoundReviewState",
     "checkout_pr_tool",
     "ensure_local_base_branch_alias",
@@ -40,6 +40,23 @@ __all__ = [
     "list_mergecraft_reviews",
     "recover_run_bound_review_state",
 ]
+
+
+@dataclass(slots=True)
+class IncrementalDiffResult:
+    """Outcome of trying to materialise a re-review's incremental range.
+
+    ``status`` is closed: ``ok`` (``path`` is set), ``empty`` (the checkpoint
+    is reachable but nothing changed), or ``unavailable`` (no checkpoint, or it
+    could not be turned into a diff). ``reason`` is human-readable and is
+    surfaced in the tool result for the non-``ok`` cases.
+    """
+
+    status: str
+    prior_sha: str
+    path: str | None = None
+    changed_paths: tuple[str, ...] = ()
+    reason: str | None = None
 
 
 def _rebaseline_config_after_checkout(ctx: ToolContext) -> None:
@@ -832,12 +849,14 @@ def _fetch_head_with_retry(
 
 def _write_incremental_diff(
     *, cwd: str, temp: str, pull_number: int, prior_sha: str, git_token: str
-) -> tuple[str, list[str]] | None:
-    """Write the diff since ``prior_sha`` and return its path plus changed paths.
+) -> IncrementalDiffResult:
+    """Write the diff since ``prior_sha`` and report an explicit status.
 
-    Returns ``None`` — so the caller omits ``incrementalDiffPath`` entirely rather
-    than advertising a file that does not exist — when the prior commit is not
-    reachable in this checkout or the range turns out to be empty.
+    The caller advertises ``incrementalDiffPath`` only when ``status == "ok"``,
+    so a promised file always exists. ``empty`` and ``unavailable`` come with a
+    reason the tool result carries verbatim — a reviewer that is told *why*
+    there is no incremental range can decide whether to fall back to the full
+    diff, instead of guessing from an absent key.
     """
     try:
         _run_git(["cat-file", "-e", f"{prior_sha}^{{commit}}"], cwd=cwd)
@@ -853,18 +872,38 @@ def _write_incremental_diff(
             _run_git(["cat-file", "-e", f"{prior_sha}^{{commit}}"], cwd=cwd)
         except RuntimeError as err:
             logger.info("incremental diff: prior sha {} unreachable: {}", prior_sha, err)
-            return None
+            return IncrementalDiffResult(
+                status="unavailable",
+                prior_sha=prior_sha,
+                reason=(
+                    f"the last reviewed commit {prior_sha[:12]} is not reachable in this "
+                    "checkout (shallow clone or rewritten history)"
+                ),
+            )
     try:
         diff = _run_git(["diff", "--merge-base", prior_sha, "HEAD"], cwd=cwd)
     except RuntimeError as err:
         logger.info("incremental diff: range diff soft-failed: {}", err)
-        return None
+        return IncrementalDiffResult(
+            status="unavailable",
+            prior_sha=prior_sha,
+            reason=f"git diff against {prior_sha[:12]} failed: {err}",
+        )
     if not diff.strip():
         logger.info("incremental diff: no changes since {}; omitting path", prior_sha)
-        return None
+        return IncrementalDiffResult(
+            status="empty",
+            prior_sha=prior_sha,
+            reason=f"no changes since the last reviewed commit {prior_sha[:12]}",
+        )
     path = str(Path(temp) / f"pr-{pull_number}-incremental.diff")
     Path(path).write_text(diff, encoding="utf-8")
-    return path, changed_paths_in_diff(diff)
+    return IncrementalDiffResult(
+        status="ok",
+        prior_sha=prior_sha,
+        path=path,
+        changed_paths=tuple(changed_paths_in_diff(diff)),
+    )
 
 
 def get_git_status(cwd: str) -> str:
@@ -997,6 +1036,11 @@ def checkout_pr_tool(ctx: ToolContext):
                 "scope": API_ONLY_SCOPE,
                 "degraded": fetch_degraded,
                 "reviewPhase": ReviewPhase.ESTABLISH_SCOPE.value,
+                "incrementalDiffStatus": "unavailable",
+                "incrementalDiffReason": (
+                    "the PR head could not be fetched locally, so no incremental "
+                    "range can be computed in api-only scope"
+                ),
             }
             if fetch_unreviewable:
                 result["unreviewablePaths"] = fetch_unreviewable
@@ -1119,42 +1163,56 @@ def checkout_pr_tool(ctx: ToolContext):
         round_index = _round_index(run_bound, prior_reviews, publishers=publishers)
         ctx.tool_state.review_round_index = round_index
 
-        # A re-review should pay for the new commits, not the whole PR. The key is
-        # emitted only when the range is real: the prompt tells the reviewer to
-        # read this path first, so advertising a path that does not resolve is
-        # worse than not advertising one at all. The run-bound checkpoint (HS8)
+        # A re-review should pay for the new commits, not the whole PR. Compute
+        # the range whenever a prior reviewed sha is recoverable — regardless of
+        # whether ``select_mode`` has run yet, because #1017 showed a reviewer
+        # that never calls ``select_mode`` still needs the checkpointed scope.
+        # The run-bound checkpoint (HS8, read from the trusted persisted packet)
         # outranks the publisher scan when a trusted run named a head.
-        if ctx.tool_state.selected_mode == INCREMENTAL_REVIEW_MODE:
-            prior_sha = run_bound.reviewed_head_sha or (
-                last_reviewed_sha(
-                    prior_reviews,
-                    head_sha=state.checkout_sha or "",
-                    publishers=publishers,
-                )
-                or ""
+        prior_sha = run_bound.reviewed_head_sha or (
+            last_reviewed_sha(
+                prior_reviews,
+                head_sha=state.checkout_sha or "",
+                publishers=publishers,
             )
-            if prior_sha:
-                written = _write_incremental_diff(
-                    cwd=cwd,
-                    temp=temp,
-                    pull_number=pull_number,
-                    prior_sha=prior_sha,
-                    git_token=ctx.git_token,
+            or ""
+        )
+        if prior_sha:
+            incremental = _write_incremental_diff(
+                cwd=cwd,
+                temp=temp,
+                pull_number=pull_number,
+                prior_sha=prior_sha,
+                git_token=ctx.git_token,
+            )
+            result["lastReviewedSha"] = prior_sha
+            result["incrementalDiffStatus"] = incremental.status
+            if incremental.status == "ok" and incremental.path is not None:
+                state.last_reviewed_sha = prior_sha
+                state.incremental_diff_path = incremental.path
+                state.incremental_changed_paths = list(incremental.changed_paths)
+                result["incrementalDiffPath"] = incremental.path
+                logger.info(
+                    "incremental diff for PR #{} since {} -> {} ({} file(s))",
+                    pull_number,
+                    prior_sha,
+                    incremental.path,
+                    len(incremental.changed_paths),
                 )
-                if written is not None:
-                    incremental_path, changed = written
-                    state.last_reviewed_sha = prior_sha
-                    state.incremental_diff_path = incremental_path
-                    state.incremental_changed_paths = changed
-                    result["incrementalDiffPath"] = incremental_path
-                    result["lastReviewedSha"] = prior_sha
-                    logger.info(
-                        "incremental diff for PR #{} since {} -> {} ({} file(s))",
-                        pull_number,
-                        prior_sha,
-                        incremental_path,
-                        len(changed),
-                    )
+            else:
+                result["incrementalDiffReason"] = incremental.reason or "no incremental range"
+                logger.info(
+                    "incremental diff for PR #{} since {}: {} ({})",
+                    pull_number,
+                    prior_sha,
+                    incremental.status,
+                    incremental.reason,
+                )
+        else:
+            result["incrementalDiffStatus"] = "unavailable"
+            result["incrementalDiffReason"] = (
+                "no prior mergeCraft review checkpoint is recoverable for this PR"
+            )
 
         # S6 #94 — impact-path extraction (default off behind analyzers.impact).
         # Emitted only when enabled; returns None (-> no key) when the diff
@@ -1240,11 +1298,13 @@ def checkout_pr_tool(ctx: ToolContext):
         timeout_ms=600_000,
         description=(
             "Checkout a pull request branch locally. Returns diffPath pointing to the "
-            "formatted diff file, plus incrementalDiffPath (changes since the last "
-            "mergeCraft review) on a re-review when a prior reviewed commit is "
-            "recoverable and the range is non-empty. When the repo config enables "
-            "analyzers.impact, also returns impactPath pointing to a JSON file listing "
-            "declaration-level reference leads for the changed files."
+            "formatted diff file. On a re-review — a PR that already has a mergeCraft "
+            "review on an earlier head — also reports incrementalDiffStatus "
+            "(ok|empty|unavailable) and, when ok, incrementalDiffPath (changes since "
+            "that review) plus lastReviewedSha; incrementalDiffReason explains empty or "
+            "unavailable. When the repo config enables analyzers.impact, also returns "
+            "impactPath pointing to a JSON file listing declaration-level reference "
+            "leads for the changed files."
         ),
         input_schema=_CHECKOUT_PR_INPUT_SCHEMA,
         execute=execute(_run, "checkout_pr"),

@@ -189,6 +189,14 @@ def _classify_outcome(
     non-pass branch logs a warning here so the call site only needs the tuple.
     """
     if not result.success:
+        # Slice 6 — a no-output watchdog stall is an environment/provider
+        # fault, not a review that reached a wrong conclusion. The attempt
+        # still failed (so the chain may advance), but the run outcome is
+        # ``infra_error`` rather than ``failed``; the diagnostic travels in the
+        # packet and check summary.
+        if (result.metadata or {}).get("idle_timeout"):
+            logger.warning("» agent idle watchdog stalled the attempt: {}", result.error)
+            return RunOutcome.infra_error, result.error
         return RunOutcome.failed, result.error
     if setup_reason and setup_policy == "fail":
         # D10 ``fail`` — operator has declared the failure is unrecoverable.

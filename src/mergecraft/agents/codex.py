@@ -9,10 +9,12 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from loguru import logger
 
+from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_stream
+from mergecraft.agents.activity_watchdog import event_has_model_output, watchdog_for_process
 from mergecraft.agents.codex_broker import (
     OPENAI_API_KEY_ENV,
     active_broker_handle,
@@ -748,7 +750,6 @@ def _run_codex_streaming(
     """
     from mergecraft.agents._stream_consumer import (
         StreamSpanAccumulator,
-        consume_stream,
     )
     from mergecraft.tracing import resolve_driver_tracer
 
@@ -785,13 +786,25 @@ def _run_codex_streaming(
     # P4 / AR-D2 — drain stderr concurrently from spawn. Reading stdout to EOF
     # first would deadlock a child that fills the stderr pipe buffer.
     stderr_drain = start_stderr_drain(process.stderr)
+    watchdog = watchdog_for_process(
+        process,
+        label="codex",
+        interval_s=ctx.idle_timeout_s,
+        accumulator=accumulator,
+        stderr_text=stderr_drain.text,
+    )
+
+    def _watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
+        watchdog.touch(model_output=event_has_model_output(event))
+        handler(acc, event)
+
     try:
         with track_process_group(process):
             try:
                 consume_stream(
                     raw_stream=process.stdout,
                     accumulator=accumulator,
-                    handler=handler,
+                    handler=_watched_handler,
                 )
                 returncode = wait_or_kill_process_group(
                     process,
@@ -802,13 +815,26 @@ def _run_codex_streaming(
             finally:
                 # The process group is gone; collect the drained tail so the
                 # reader thread never outlives it.
+                watchdog.stop()
                 stderr_drain.join(timeout=STDERR_DRAIN_JOIN_TIMEOUT_S)
         stderr_text = stderr_drain.text()
     finally:
+        watchdog.stop()
         try:
             close_all_open_spans()
         except Exception as exc:
             logger.debug("codex stream handler cleanup failed: {}", exc)
+
+    if watchdog.stalled:
+        diagnostic = watchdog.diagnostic()
+        return with_prompt(
+            AgentResult(
+                success=False,
+                error=diagnostic.render(),
+                metadata=diagnostic.as_metadata(),
+            ),
+            prompt,
+        )
 
     if stderr_text.strip():
         for line in stderr_text.strip().splitlines()[-20:]:
