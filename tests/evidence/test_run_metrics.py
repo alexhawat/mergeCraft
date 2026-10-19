@@ -67,3 +67,39 @@ def test_run_metrics_carries_the_idle_diagnostic() -> None:
     metrics = _run_metrics(_Ctx(state), trajectory=TrajectoryRecord(), diff_text=_DIFF)
 
     assert metrics.agent_diagnostic == "codex stalled — no model event for 900s"
+
+
+def test_record_renders_review_cost_and_the_stall() -> None:
+    from types import SimpleNamespace
+
+    from mergecraft.evidence.packet import RunMetrics
+    from mergecraft.findings.ledger import render_deterministic_review_block
+
+    metrics = RunMetrics(
+        tool_calls=9,
+        read_tool_calls=4,
+        read_tool_turns=2,
+        distinct_files_read=3,
+        diff_lines=120,
+        diff_added_lines=20,
+        diff_deleted_lines=3,
+        phase_elapsed_s={"setup": 2.0, "agent": 90.0, "publish": 1.0},
+        agent_diagnostic="codex stalled — no model event for 900s",
+    )
+    packet = SimpleNamespace(
+        files_changed=[],
+        findings=[],
+        run_health=None,
+        deterministic_checks=[],
+        decision=None,
+        self_assessment=None,
+        agent=None,
+        run_metrics=metrics,
+        change_id="acme/demo#7",
+    )
+
+    text = render_deterministic_review_block(packet=packet)
+
+    assert "- **Review cost:** 9 tool calls · 3 files read · 120 diff lines" in text
+    assert "setup 2s, agent 90s, publish 1s" in text
+    assert "**Agent stall:** codex stalled" in text
