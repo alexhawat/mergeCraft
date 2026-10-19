@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from mergecraft.evidence.trajectory import build_trajectory_record, record_tool_call
-from mergecraft.mcp.tool_state import init_tool_state
+from mergecraft.evidence.trajectory import ToolCallRecord, TrajectoryRecord
 from mergecraft.modes import IncrementalReview, Review, compute_modes
 
 _FIXTURE = Path(__file__).resolve().parent / "fixtures" / "diff_first_trajectory.json"
@@ -59,28 +59,11 @@ def test_incremental_prompt_scopes_to_the_delta_not_the_whole_pr() -> None:
 
 def test_fixture_trajectory_reads_the_diff_before_any_git_call() -> None:
     diff_path = "/tmp/mergecraft/pr-1017.diff"
-    state = init_tool_state(owner="alexhawat", name="mergeCraft", dir="/work")
-    state.repos[state.primary_repo_key].diff_path = diff_path
-    record_tool_call(
-        state,
-        tool="checkout_pr",
-        arguments={"pull_number": 1017},
-        ok=True,
+    fixture = json.loads(_FIXTURE.read_text(encoding="utf-8"))
+    record = TrajectoryRecord(
+        tool_calls=[ToolCallRecord.model_validate(row) for row in fixture["tool_calls"]],
+        read_coverage=True,
     )
-    record_tool_call(
-        state,
-        tool="shell",
-        arguments={"command": f"cat {diff_path}"},
-        ok=True,
-        outcome_ok=True,
-    )
-    record_tool_call(
-        state,
-        tool="git",
-        arguments={"command": "diff", "args": ["origin/main..HEAD"]},
-        ok=True,
-    )
-    record = build_trajectory_record(state)
 
     first_diff_read = next(
         index for index, call in enumerate(record.tool_calls) if call.diff_read_path is not None
@@ -89,7 +72,6 @@ def test_fixture_trajectory_reads_the_diff_before_any_git_call() -> None:
 
     assert first_diff_read < first_git
     assert record.tool_calls[first_diff_read].diff_read_path == diff_path
-    assert _FIXTURE.is_file(), "the fixture trajectory must be checked in"
     assert diff_path in _FIXTURE.read_text(encoding="utf-8")
 
 
