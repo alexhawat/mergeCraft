@@ -34,6 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   OpenCode Go rung answered and the Codex fallback did not run.
 - The run record on the formal review shows the `Cost:` line. Cost was computed
   but only reached the step summary.
+- A recorded review verdict that reaches no GitHub review now says why. The run
+  publishes the verdict it recorded, and when it does not — the shadow protocol,
+  a run that is not in a review mode, or a submission the post-run re-validation
+  rejected (conflicting, stale-attempt, or semantically invalid) — the reason is
+  recorded on the run's trajectory instead of returning silently. PR #1017's
+  Codex rung recorded `request_changes`, published no review, and left nothing in
+  the evidence packet to distinguish that from never having tried; only the
+  failing `mergecraft-approval` check showed it.
 
 ## [0.1.0a3] — 2026-10-17
 

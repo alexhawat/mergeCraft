@@ -2133,6 +2133,45 @@ def _scan_sinks_after_run(ctx: RunContext, *, extra_paths: Sequence[Path] = ()) 
 _ORCHESTRATOR_PUBLISH_STEP = "orchestrator.publish_review"
 
 
+def owes_a_terminal_review(tool_state: ToolState) -> bool:
+    """Whether this run recorded a verdict that GitHub is owed.
+
+    A run that recorded no submission owes nothing: it records no publish step
+    and says nothing. Everything past this point is about a verdict that exists.
+    """
+    return tool_state.terminal_submission is not None
+
+
+def publication_skip_reason(
+    tool_state: ToolState,
+    agent_result: AgentResult,
+    *,
+    verdict_protocol: str | None,
+) -> str | None:
+    """Why this run will not publish its recorded verdict, or ``None`` when it will.
+
+    Call only when :func:`owes_a_terminal_review` is true; a run that recorded
+    nothing returns before this and records nothing. A recorded verdict that
+    stops short of a review must name itself: #1017's Codex rung recorded
+    ``request_changes``, published no review, and recorded nothing about why, so
+    the only visible trace was the failing ``mergecraft-approval`` check. The
+    three ways it happens are the shadow protocol, a run that is not a review
+    run, and a submission that the post-run re-validation rejected — the last one
+    is what to look for first when a review is expected and absent.
+    """
+    if verdict_protocol == "shadow":
+        return "the verdict protocol is shadow, so the verdict is recorded but not published"
+    if not _is_review_mode(tool_state.selected_mode):
+        return (
+            "the run is not a review run "
+            f"(selected_mode={tool_state.selected_mode!r}), so it publishes no review"
+        )
+    if not agent_result.terminal_submission_received:
+        rejection = str((agent_result.diagnostics or {}).get("rejection_reason") or "unknown")
+        return f"the recorded submission was rejected at post-run validation ({rejection})"
+    return None
+
+
 async def _publish_recorded_verdict(
     tool_context: ToolContext,
     agent_result: AgentResult,
@@ -2154,12 +2193,28 @@ async def _publish_recorded_verdict(
     the recorded findings GitHub's inline view lacks.
     """
     tool_state = tool_context.tool_state
-    if (
-        not _is_review_mode(tool_state.selected_mode)
-        or verdict_protocol == "shadow"
-        or not agent_result.terminal_submission_received
-        or tool_state.terminal_submission is None
-    ):
+    if not owes_a_terminal_review(tool_state):
+        # Nothing was recorded, so the run owes GitHub nothing and says nothing.
+        return
+    skip_reason = publication_skip_reason(
+        tool_state,
+        agent_result,
+        verdict_protocol=verdict_protocol,
+    )
+    if skip_reason is not None:
+        # A recorded verdict that reaches no review is evidence about the run, not
+        # a silent return: the packet's trajectory is where a missing review is
+        # explained, and #1017's Codex rung is what its absence looks like.
+        logger.warning("» the run did not publish the recorded review verdict: {}", skip_reason)
+        from mergecraft.evidence.trajectory import record_tool_call
+
+        record_tool_call(
+            tool_state,
+            tool=_ORCHESTRATOR_PUBLISH_STEP,
+            arguments=None,
+            ok=False,
+            error=skip_reason,
+        )
         return
     from mergecraft.evidence.trajectory import record_tool_call
     from mergecraft.mcp.review import publish_pull_request_review
