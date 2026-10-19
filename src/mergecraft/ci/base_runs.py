@@ -65,6 +65,40 @@ def _conclusion(run: dict[str, Any]) -> str:
     return str(run.get("conclusion") or "").strip().lower()
 
 
+def _pr_head_sha(event: dict[str, Any] | None) -> str:
+    pull_request = event.get("pull_request") if isinstance(event, dict) else None
+    head = pull_request.get("head") if isinstance(pull_request, dict) else None
+    sha = head.get("sha") if isinstance(head, dict) else None
+    return sha.strip() if isinstance(sha, str) else ""
+
+
+def _is_base_branch_run(
+    run: dict[str, Any],
+    *,
+    repo_full_name: str,
+    own_run_ids: set[int],
+    own_head_shas: set[str],
+) -> bool:
+    """Whether ``run`` is base-branch history rather than a run of this PR.
+
+    GitHub's ``branch`` filter matches a run's ``head_branch``, and a fork PR opened
+    from the fork's ``main`` has ``head_branch == "main"`` too: without this check the
+    PR's own failing run is listed as base evidence and clears its own failure. Only a
+    ``push`` run of the base repository, at a commit other than the PR head, counts.
+    The API call already asks for ``event=push``; this re-checks the rows it returned.
+    """
+    if run.get("id") in own_run_ids:
+        return False
+    if str(run.get("head_sha") or "") in own_head_shas:
+        return False
+    event = run.get("event")
+    if event is not None and event != "push":
+        return False
+    head_repo = run.get("head_repository")
+    full_name = head_repo.get("full_name") if isinstance(head_repo, dict) else None
+    return not (isinstance(full_name, str) and full_name.casefold() != repo_full_name.casefold())
+
+
 def _fingerprint_for_logs(job_name: str, run_id: int, log_text: str) -> str:
     """Fingerprint a base run's log through the same path a head failure takes."""
     from mergecraft.ci.intelligence import provider_jobs_to_raw_failures
@@ -138,16 +172,34 @@ async def collect_base_branch_runs(
         wanted = {fp for fps in workflows.values() for fp in fps}
         if not wanted:
             return BaseRunsCollection(note="no failing workflow run to compare against the base")
+        own_run_ids = {run["id"] for run in current_runs if isinstance(run.get("id"), int)}
+        own_head_shas = {
+            sha
+            for sha in (
+                _pr_head_sha(ctx.gh_event),
+                *(str(run.get("head_sha") or "") for run in current_runs),
+            )
+            if sha
+        }
+        repo_full_name = f"{ctx.repo.owner}/{ctx.repo.name}"
 
         rows: list[dict[str, Any]] = []
         downloads = 0
         for workflow_id in list(workflows)[:MAX_WORKFLOWS]:
-            listed = await lister(ctx.repo.owner, ctx.repo.name, branch, workflow_id=workflow_id)
+            listed = await lister(
+                ctx.repo.owner, ctx.repo.name, branch, workflow_id=workflow_id, event="push"
+            )
             completed = [
                 run
                 for run in listed.items
                 if run.get("workflow_id") == workflow_id
                 and str(run.get("status") or "completed") == "completed"
+                and _is_base_branch_run(
+                    run,
+                    repo_full_name=repo_full_name,
+                    own_run_ids=own_run_ids,
+                    own_head_shas=own_head_shas,
+                )
             ][:MAX_BASE_RUNS_PER_WORKFLOW]
             for position, run in enumerate(completed):
                 conclusion = _conclusion(run)

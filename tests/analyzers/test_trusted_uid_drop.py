@@ -67,6 +67,13 @@ def pretend_root(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(os, "chown", _record_chown)
     monkeypatch.setattr(os, "lchown", _record_chown, raising=False)
 
+    def _record_entry(_target: Any, *, dir_fd: Any, uid: int, gid: int, display: str) -> None:
+        _ = dir_fd
+        seen["chowned"].append((display, uid, gid))
+
+    # The hand-over re-owns through directory fds; ``display`` is the entry's path.
+    monkeypatch.setattr(sandbox_mod, "_chown_entry", _record_entry)
+
     def _run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         seen["argv"] = list(argv)
         seen["env"] = kwargs.get("env")
@@ -254,7 +261,88 @@ def test_base_worktree_is_untouched_off_the_root_backend(
     calls: list[str] = []
     monkeypatch.setattr(os, "geteuid", lambda: 1000)
     monkeypatch.setattr(os, "lchown", lambda path, *_a: calls.append(str(path)), raising=False)
+    monkeypatch.setattr(
+        sandbox_mod, "_chown_entry", lambda _t, **kw: calls.append(str(kw["display"]))
+    )
 
     _hand_worktree_to_drop_target(tmp_path)
 
     assert calls == []
+
+
+# ------------------------------------------------------------------ fd-relative hand-over
+
+
+def _recorded_hand_over(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    touched: list[str] = []
+
+    def _record(_target: Any, *, dir_fd: Any, uid: int, gid: int, display: str) -> None:
+        _ = (dir_fd, uid, gid)
+        touched.append(display)
+
+    monkeypatch.setattr(sandbox_mod, "_chown_entry", _record)
+    return touched
+
+
+def test_hand_over_reowns_the_whole_tree_through_directory_fds(tmp_path: Path) -> None:
+    """Real ``chown`` to our own uid/gid: the fd-relative walk works end to end."""
+    scratch = tmp_path / ".mergecraft" / "analyzer-scratch" / "jscpd"
+    (scratch / "home" / "deep").mkdir(parents=True)
+    (scratch / "home" / "deep" / "cache.db").write_text("x", encoding="utf-8")
+
+    sandbox_mod.hand_tree_to_drop_target(
+        scratch, boundary=tmp_path, uid=os.getuid(), gid=os.getgid()
+    )
+
+
+def test_hand_over_names_every_entry_it_reowns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scratch = tmp_path / ".mergecraft" / "analyzer-scratch" / "jscpd"
+    (scratch / "home").mkdir(parents=True)
+    (scratch / "home" / "cache.db").write_text("x", encoding="utf-8")
+    touched = _recorded_hand_over(monkeypatch)
+
+    sandbox_mod.hand_tree_to_drop_target(scratch, boundary=tmp_path, uid=1, gid=1)
+
+    assert set(touched) == {
+        str(scratch),
+        str(scratch / "home"),
+        str(scratch / "home" / "cache.db"),
+    }
+
+
+def test_a_symlinked_parent_of_scratch_is_refused_before_anything_is_reowned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An agent-UID process can swap a parent for a link: the walk must not follow it."""
+    checkout = tmp_path / "checkout"
+    outside = tmp_path / "outside"
+    (outside / "jscpd").mkdir(parents=True)
+    (outside / "jscpd" / "victim").write_text("x", encoding="utf-8")
+    (checkout / ".mergecraft").mkdir(parents=True)
+    (checkout / ".mergecraft" / "analyzer-scratch").symlink_to(outside, target_is_directory=True)
+    touched = _recorded_hand_over(monkeypatch)
+
+    with pytest.raises(OSError, match="not a plain directory"):
+        sandbox_mod.hand_tree_to_drop_target(
+            checkout / ".mergecraft" / "analyzer-scratch" / "jscpd",
+            boundary=checkout,
+            uid=1,
+            gid=1,
+        )
+
+    assert touched == []
+
+
+def test_a_root_outside_the_boundary_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    touched = _recorded_hand_over(monkeypatch)
+
+    with pytest.raises(OSError, match="outside"):
+        sandbox_mod.hand_tree_to_drop_target(
+            tmp_path / "checkout" / ".." / "elsewhere", boundary=tmp_path / "checkout", uid=1, gid=1
+        )
+
+    assert touched == []

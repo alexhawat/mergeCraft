@@ -32,6 +32,7 @@ from loguru import logger
 
 from mergecraft.analyzers.scope import DiffHunk, iter_diff_hunks
 from mergecraft.classify.review_config import is_review_config_path as _is_review_config_path
+from mergecraft.config.settings import AnalyzersSettings
 from mergecraft.utils.path_confinement import resolved_within_root
 
 _MAX_CONFIG_BYTES = 512 * 1024
@@ -47,17 +48,23 @@ _LOOSENING_LINE = re.compile(
     re.I,
 )
 _ESLINT_SECURITY_RULES = frozenset({"no-eval", "no-implied-eval", "no-new-func", "no-script-url"})
+#: An absent ``inlineBudget`` means the settings default, on either side of the diff.
+_DEFAULT_INLINE_BUDGET: int = AnalyzersSettings.model_fields["inline_budget"].default
 
 
 @dataclass(frozen=True, slots=True)
 class ConfigChange:
-    """One loosening change in one config file."""
+    """One loosening change in one config file.
+
+    ``line`` is a new-side line inside the file's hunks, so out-of-hunk scoping keeps
+    the finding; ``None`` (a deleted file, which has no new side) is file-level.
+    """
 
     path: str
     description: str
     security: bool
     mergecraft: bool
-    line: int = 1
+    line: int | None = 1
 
 
 def is_review_config_path(path: str) -> bool:
@@ -170,8 +177,8 @@ def _mergecraft_changes(old: Any, new: Any) -> list[tuple[str, bool]]:
             was_off = str(old_rules.get(rule, "")).strip().casefold() in {"off", "false", "0"}
             if off and not was_off:
                 changes.append((f"turned `{tool}` rule `{rule}` off", False))
-    old_budget = old_a.get("inlineBudget", 8)
-    new_budget = new_a.get("inlineBudget", old_budget)
+    old_budget = old_a.get("inlineBudget", _DEFAULT_INLINE_BUDGET)
+    new_budget = new_a.get("inlineBudget", _DEFAULT_INLINE_BUDGET)
     if isinstance(old_budget, int) and isinstance(new_budget, int) and new_budget < old_budget:
         changes.append((f"lowered inlineBudget {old_budget} -> {new_budget}", False))
     if new_a.get("baseComparison") == "full" and old_a.get("baseComparison") != "full":
@@ -287,6 +294,24 @@ def _read_head(repo_root: Path, rel: str) -> str | None:
     return data.decode("utf-8", errors="replace")
 
 
+def _first_changed_line(hunks: list[DiffHunk]) -> int:
+    """The first new-side line the diff changes in this file.
+
+    Structured changes are not tied to one line, but they must still sit inside a hunk:
+    the default line 1 is usually outside every hunk, and out-of-hunk scoping would drop
+    the finding (#942). A hunk that only removes lines anchors at its new-side start,
+    which is the zero-width range the scope parser records for it.
+    """
+    first = min(hunks, key=lambda hunk: hunk.new_start)
+    new_line = first.new_start
+    for line in first.lines:
+        if line.startswith("+"):
+            return new_line
+        if line[:1] != "-":
+            new_line += 1
+    return max(first.new_start, 1)
+
+
 def _heuristic_changes(path: str, hunks: list[DiffHunk]) -> list[ConfigChange]:
     """Added-line fallback for config we cannot (or do not) parse structurally."""
     name = PurePosixPath(path).name
@@ -329,6 +354,7 @@ def scan_config_changes(*, repo_root: Path, diff_text: str) -> list[ConfigChange
                     description="deleted the config file",
                     security=PurePosixPath(path).name in _SECURITY_CONFIG_NAMES,
                     mergecraft=mergecraft,
+                    line=None,
                 )
             )
             continue
@@ -343,8 +369,9 @@ def scan_config_changes(*, repo_root: Path, diff_text: str) -> list[ConfigChange
                 except (ValueError, yaml.YAMLError, tomllib.TOMLDecodeError) as err:
                     logger.debug("self-silencing: {} not machine-readable ({})", path, err)
         if structured is not None:
+            anchor = _first_changed_line(hunks)
             changes.extend(
-                ConfigChange(path, description, security, mergecraft)
+                ConfigChange(path, description, security, mergecraft, line=anchor)
                 for description, security in structured
             )
             continue

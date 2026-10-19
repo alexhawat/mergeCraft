@@ -203,15 +203,20 @@ def scan_added_markers(diff_text: str) -> list[MarkerHit]:
 
     A marker counts as pre-existing when the same file's removed lines carry the same
     marker with the same silenced codes — an edit to a line that keeps its ``# noqa``
-    is not a new suppression. Removed and context lines never produce a hit.
+    is not a new suppression, and neither is a line moved to another hunk of the same
+    file. Removed and context lines never produce a hit.
     """
-    hits: list[MarkerHit] = []
-    for hunk in iter_diff_hunks(diff_text):
-        removed: Counter[tuple[str, tuple[str, ...]]] = Counter()
+    hunks = list(iter_diff_hunks(diff_text))
+    removed_by_path: dict[str, Counter[tuple[str, tuple[str, ...]]]] = {}
+    for hunk in hunks:
+        removed = removed_by_path.setdefault(hunk.path, Counter())
         for line in hunk.lines:
             if line.startswith("-"):
                 for name, codes, _security in _markers_in(hunk.path, line[1:]):
                     removed[(name, tuple(sorted(codes)))] += 1
+    hits: list[MarkerHit] = []
+    for hunk in hunks:
+        removed = removed_by_path[hunk.path]
         new_line = hunk.new_start
         for line in hunk.lines:
             prefix = line[:1]

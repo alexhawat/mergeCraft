@@ -738,22 +738,26 @@ class GitHubClient:
         branch: str,
         *,
         workflow_id: int | None = None,
+        event: str | None = None,
         per_page: int = 10,
     ) -> ListedItems:
         """List the newest completed workflow runs on ``branch`` (one page, newest first).
 
         Deliberately a single bounded page: callers want the *recent* history of one
         workflow on the base branch, not every run it ever had. ``incomplete`` is set
-        when GitHub reports more runs than were returned.
+        when GitHub reports more runs than were returned. ``branch`` matches a run's
+        ``head_branch``, which a fork PR can share with the base, so callers reading
+        base-branch history pass ``event="push"``.
         """
         path = (
             f"/repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs"
             if workflow_id is not None
             else f"/repos/{owner}/{repo}/actions/runs"
         )
-        payload = await self.get(
-            path, params={"branch": branch, "status": "completed", "per_page": per_page}
-        )
+        params: dict[str, Any] = {"branch": branch, "status": "completed", "per_page": per_page}
+        if event is not None:
+            params["event"] = event
+        payload = await self.get(path, params=params)
         runs = payload.get("workflow_runs") if isinstance(payload, dict) else None
         items = [run for run in runs if isinstance(run, dict)] if isinstance(runs, list) else []
         total = payload.get("total_count") if isinstance(payload, dict) else None

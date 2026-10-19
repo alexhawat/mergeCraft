@@ -267,3 +267,55 @@ async def test_agent_supplied_runs_are_still_honoured_alongside_the_producer(
     )
 
     assert [cluster["blameVerdict"] for cluster in payload["clusters"]] == ["probably_not_this_pr"]
+
+
+@pytest.mark.asyncio
+async def test_the_base_listing_asks_for_push_runs_only(tmp_path: Path) -> None:
+    calls: list[dict[str, Any]] = []
+    github = _Github(base_runs=[_base_run(100, "failure")], base_logs={100: _FAILING_LOG})
+    original = github.list_workflow_runs_for_branch
+
+    async def _spy(owner: str, repo: str, branch: str, **kwargs: Any) -> ListedItems:
+        calls.append(kwargs)
+        return await original(owner, repo, branch, **kwargs)
+
+    github.list_workflow_runs_for_branch = _spy  # type: ignore[method-assign]
+    ctx = _ctx(tmp_path, github)
+
+    await run_ci_intelligence(ctx, check_suite_id=9, pr_diff_paths=["README.md"])
+
+    assert [call.get("event") for call in calls] == ["push"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fork_run",
+    [
+        # The PR's own run: a fork PR from the fork's ``main`` lists under ``branch=main``.
+        {"id": 1, "head_sha": HEAD_SHA, "event": "pull_request"},
+        # Another run at the PR head, whatever GitHub labels its event.
+        {"id": 500, "head_sha": HEAD_SHA, "event": "push"},
+        # A fork's pull_request run at some other commit.
+        {"id": 501, "head_sha": "f0f0" * 10, "event": "pull_request"},
+        # A push run that came from another repository.
+        {
+            "id": 502,
+            "head_sha": "e0e0" * 10,
+            "event": "push",
+            "head_repository": {"full_name": "mallory/demo"},
+        },
+    ],
+    ids=["own-run", "pr-head-sha", "fork-pull-request", "other-repo-push"],
+)
+async def test_a_run_of_this_pr_or_a_fork_never_clears_its_own_failure(
+    tmp_path: Path, fork_run: dict[str, Any]
+) -> None:
+    """GitHub's ``branch`` filter matches ``head_branch``, which a fork PR shares (#891)."""
+    run = {**_base_run(int(fork_run["id"]), "failure"), **fork_run}
+    github = _Github(base_runs=[run], base_logs={int(fork_run["id"]): _FAILING_LOG})
+    ctx = _ctx(tmp_path, github)
+
+    payload = await run_ci_intelligence(ctx, check_suite_id=9, pr_diff_paths=["README.md"])
+
+    assert [cluster["blameVerdict"] for cluster in payload["clusters"]] == ["unknown"]
+    assert payload["baseBranchRuns"] == []

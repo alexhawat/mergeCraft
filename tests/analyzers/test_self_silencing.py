@@ -489,3 +489,96 @@ def test_minimal_fixture_diff_yields_its_documented_finding(tmp_path: Path) -> N
     assert [(f.rule_id, f.severity) for f in findings] == [
         (fixture["rule_id"], fixture["severity"])
     ]
+
+
+# --------------------------------------------------------------------------- review fixes
+
+_PAD = "".join(f"# filler {index}\n" for index in range(30))
+
+
+def _scoped(repo: Path, diff: str) -> tuple[list[Any], list[Any]]:
+    """Run the scan through the pipeline's scoping stage, as ``run_analyzer_pipeline`` does."""
+    from mergecraft.analyzers.dispositions import DispositionLedger
+    from mergecraft.analyzers.scope import scope_findings
+
+    raw = _scan(repo, diff)
+    ledger = DispositionLedger()
+    ledger.register_raw(raw)
+    kept = scope_findings(raw, diff_text=diff, repo_root=repo, ledger=ledger)
+    return kept, ledger.entries()
+
+
+@pytest.mark.parametrize(
+    ("path", "before", "after"),
+    [
+        (
+            ".mergecraft/config.yaml",
+            f"version: 1\n{_PAD}analyzers:\n  enabled: true\n",
+            f"version: 1\n{_PAD}analyzers:\n  enabled: false\n",
+        ),
+        (
+            "ruff.toml",
+            f"line-length = 100\n{_PAD}[lint]\nignore = []\n",
+            f'line-length = 100\n{_PAD}[lint]\nignore = ["S101"]\n',
+        ),
+        (
+            "ruff.toml",
+            f'line-length = 100\n{_PAD}[lint]\nselect = ["E", "S"]\n',
+            f'line-length = 100\n{_PAD}[lint]\nselect = ["E"]\n',
+        ),
+    ],
+    ids=["mergecraft-enabled-false", "ruff-ignore-gained", "ruff-select-dropped"],
+)
+def test_config_loosening_far_from_line_one_survives_diff_scoping(
+    tmp_path: Path, path: str, before: str, after: str
+) -> None:
+    """A structured change anchors inside its hunk, so scoping cannot drop it (#942)."""
+    repo, diff = _commit_change(tmp_path, {path: before}, {path: after})
+
+    kept, entries = _scoped(repo, diff)
+
+    assert [finding.rule_id for finding in kept] == ["config-loosened"]
+    assert kept[0].start_line is not None
+    assert kept[0].start_line > 30
+    assert all(entry.disposition != "dropped:out_of_scope" for entry in entries)
+
+
+def test_deleting_a_config_file_survives_diff_scoping(tmp_path: Path) -> None:
+    repo, diff = _commit_change(
+        tmp_path, {"ruff.toml": "line-length = 100\n", "keep.txt": "x\n"}, {"keep.txt": "y\n"}
+    )
+    (repo / "ruff.toml").unlink()
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "delete")
+    diff = _git(repo, "diff", "HEAD~2", "HEAD")
+
+    kept, _entries = _scoped(repo, diff)
+
+    assert [(finding.path, finding.start_line) for finding in kept] == [("ruff.toml", None)]
+    assert "deleted the config file" in kept[0].message
+
+
+def test_removing_inline_budget_falls_back_to_the_default_and_is_reported(
+    tmp_path: Path,
+) -> None:
+    """Dropping ``inlineBudget: 12`` lowers the budget to the settings default."""
+    repo, diff = _commit_change(
+        tmp_path,
+        {".mergecraft/config.yaml": "analyzers:\n  inlineBudget: 12\n  enabled: true\n"},
+        {".mergecraft/config.yaml": "analyzers:\n  enabled: true\n"},
+    )
+
+    messages = [finding.message for finding in _scan(repo, diff)]
+
+    assert any("lowered inlineBudget 12 -> 8" in message for message in messages)
+
+
+def test_moving_an_existing_marker_to_another_hunk_is_not_a_new_suppression(
+    tmp_path: Path,
+) -> None:
+    body = "".join(f"x{index} = {index}\n" for index in range(40))
+    marker = "import os  # noqa: F401\n"
+    repo, diff = _commit_change(tmp_path, {"m.py": marker + body}, {"m.py": body + marker})
+
+    assert diff.count("@@ -") == 2  # the move spans two hunks
+    assert _scan(repo, diff) == []
