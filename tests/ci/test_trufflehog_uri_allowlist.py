@@ -104,14 +104,19 @@ def test_the_allowlist_is_finding_level_and_every_entry_is_reasoned() -> None:
     assert not any(path.endswith(("/", "**")) for path in paths), "no directory or glob entries"
 
 
-_CREDENTIAL_SHAPED_URI = re.compile(r"https?://[^\s/:@`]+:[^\s/@`]+@[\w.-]+")
+# TruffleHog's URI detector pattern: a user and a password of 3+ characters each.
+_TRUFFLEHOG_URI = re.compile(r"\b(?:[a-zA-Z][a-zA-Z0-9+.-]*)://\S{3,50}:(\S{3,50})@[-.%\w/:]+\b")
 
 
 @pytest.mark.parametrize("relative", ["docs/TRACING.md", "llms-full.txt"])
-def test_documented_credential_shaped_examples_carry_the_inline_marker(relative: str) -> None:
-    """TruffleHog skips a line that carries ``trufflehog:ignore``; the rest still scan."""
+def test_documented_basic_auth_examples_stay_below_the_detector(relative: str) -> None:
+    """The example is too short to be a URI finding, so it needs no suppression marker.
+
+    The in-review analyzer reports a ``trufflehog:ignore`` marker as self-silencing,
+    and did not honour it on this line anyway, so the example avoids the shape instead.
+    """
     for number, line in enumerate(read_text(relative).splitlines(), start=1):
-        if _CREDENTIAL_SHAPED_URI.search(line):
-            assert "trufflehog:ignore" in line, (
-                f"{relative}:{number} spells a credential-shaped URI without the inline marker"
-            )
+        assert not _TRUFFLEHOG_URI.search(line), (
+            f"{relative}:{number} spells a URI TruffleHog reports as a secret"
+        )
+        assert "trufflehog:ignore" not in line, f"{relative}:{number} carries a suppression marker"

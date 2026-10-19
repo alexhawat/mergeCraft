@@ -35,8 +35,14 @@ def _publish_gate_text() -> str:
 
 def test_publish_gate_names_the_publish_command() -> None:
     text = _publish_gate_text()
-    assert "craft publish ${{ needs.prepare.outputs.version }}" in text
+    assert "craft publish ${PREPARED_VERSION}" in text
     assert "publish credentials" in text.lower()
+    gate = job(load_workflow("release.yml"), "publish")
+    envs = [step.get("env") or {} for step in gate["steps"] if isinstance(step, dict)]
+    assert any(
+        env.get("PREPARED_VERSION") == "${{ needs.prepare.outputs.version }}" for env in envs
+    )
+    assert "${{" not in text, "the publish gate's run text expands no template (zizmor)"
 
 
 def test_publish_gate_does_not_promise_a_label_approval() -> None:
