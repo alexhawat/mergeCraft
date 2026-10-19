@@ -582,3 +582,35 @@ def test_moving_an_existing_marker_to_another_hunk_is_not_a_new_suppression(
 
     assert diff.count("@@ -") == 2  # the move spans two hunks
     assert _scan(repo, diff) == []
+
+
+def test_removing_an_enabled_eslint_rule_is_reported(tmp_path: Path) -> None:
+    before = '{"rules": {"no-eval": "error", "semi": "warn"}}\n'
+    after = '{"rules": {"semi": "warn"}}\n'
+    repo, diff = _commit_change(tmp_path, {".eslintrc.json": before}, {".eslintrc.json": after})
+
+    findings = _scan(repo, diff)
+
+    assert [finding.rule_id for finding in findings] == ["config-loosened"]
+    assert "`no-eval` removed" in findings[0].message
+    assert findings[0].category == "Security & Privacy"
+    assert findings[0].severity == "Major"
+
+
+def test_removing_a_rule_that_was_already_off_is_not_reported(tmp_path: Path) -> None:
+    before = '{"rules": {"no-console": "off", "semi": "warn"}}\n'
+    after = '{"rules": {"semi": "warn"}}\n'
+    repo, diff = _commit_change(tmp_path, {".eslintrc.json": before}, {".eslintrc.json": after})
+
+    assert _scan(repo, diff) == []
+
+
+def test_an_existing_per_file_ignores_glob_gaining_a_code_is_reported(tmp_path: Path) -> None:
+    before = '[lint.per-file-ignores]\n"src/*" = ["E501"]\n'
+    after = '[lint.per-file-ignores]\n"src/*" = ["E501", "S101"]\n'
+    repo, diff = _commit_change(tmp_path, {"ruff.toml": before}, {"ruff.toml": after})
+
+    messages = [finding.message for finding in _scan(repo, diff)]
+
+    assert len(messages) == 1
+    assert "`per-file-ignores` for `src/*` gained `S101`" in messages[0]

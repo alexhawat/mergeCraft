@@ -202,15 +202,29 @@ def _ruff_tables(doc: Any, *, pyproject: bool) -> list[dict[str, Any]]:
     return tables
 
 
+def _is_ruff_security_code(code: str) -> bool:
+    return code == "S" or (code.startswith("S") and code[1:].isdigit())
+
+
+def _per_file_ignore_changes(key: str, old: Any, new: Any) -> list[tuple[str, bool]]:
+    """Codes a ``per-file-ignores`` table gained, per glob — new globs and existing ones.
+
+    Comparing the table's keys alone misses the common loosening: an existing glob
+    such as ``"src/*"`` gaining ``S101`` keeps its key and changes only its value.
+    """
+    if not isinstance(new, dict):
+        return []
+    before = old if isinstance(old, dict) else {}
+    return [
+        (f"ruff `{key}` for `{pattern}` gained `{code}`", _is_ruff_security_code(code))
+        for pattern, codes in new.items()
+        for code in _added(before.get(pattern), codes)
+    ]
+
+
 def _ruff_changes(old: Any, new: Any, *, pyproject: bool) -> list[tuple[str, bool]]:
-    loosen_added = (
-        "ignore",
-        "extend-ignore",
-        "exclude",
-        "extend-exclude",
-        "per-file-ignores",
-        "extend-per-file-ignores",
-    )
+    loosen_added = ("ignore", "extend-ignore", "exclude", "extend-exclude")
+    loosen_per_file = ("per-file-ignores", "extend-per-file-ignores")
     loosen_removed = ("select", "extend-select")
     old_tables = _ruff_tables(old, pyproject=pyproject)
     new_tables = _ruff_tables(new, pyproject=pyproject)
@@ -220,17 +234,12 @@ def _ruff_changes(old: Any, new: Any, *, pyproject: bool) -> list[tuple[str, boo
         # A table at the same position in the old doc is its counterpart (root, lint).
         for key in loosen_added:
             for item in _added(before.get(key), table.get(key)):
-                changes.append(
-                    (f"ruff `{key}` gained `{item}`", item.startswith("S") and item[1:].isdigit())
-                )
+                changes.append((f"ruff `{key}` gained `{item}`", _is_ruff_security_code(item)))
+        for key in loosen_per_file:
+            changes.extend(_per_file_ignore_changes(key, before.get(key), table.get(key)))
         for key in loosen_removed:
             for item in _removed(before.get(key), table.get(key)):
-                changes.append(
-                    (
-                        f"ruff `{key}` dropped `{item}`",
-                        item == "S" or (item.startswith("S") and item[1:].isdigit()),
-                    )
-                )
+                changes.append((f"ruff `{key}` dropped `{item}`", _is_ruff_security_code(item)))
     return changes
 
 
@@ -249,6 +258,10 @@ def _eslint_off(value: Any) -> bool:
     return str(value).strip().casefold() in {"off", "0"}
 
 
+def _eslint_security(rule: object) -> bool:
+    return rule in _ESLINT_SECURITY_RULES or "security" in str(rule)
+
+
 def _eslint_changes(old: Any, new: Any) -> list[tuple[str, bool]]:
     old = old if isinstance(old, dict) else {}
     new = new if isinstance(new, dict) else {}
@@ -257,8 +270,14 @@ def _eslint_changes(old: Any, new: Any) -> list[tuple[str, bool]]:
     new_rules = new.get("rules") if isinstance(new.get("rules"), dict) else {}
     for rule, state in new_rules.items():
         if _eslint_off(state) and not _eslint_off(old_rules.get(rule, "error")):
-            security = rule in _ESLINT_SECURITY_RULES or "security" in str(rule)
-            changes.append((f"ESLint rule `{rule}` turned off", security))
+            changes.append((f"ESLint rule `{rule}` turned off", _eslint_security(rule)))
+    # Deleting a rule that was on loosens too: it falls back to whatever the shared
+    # config says, which may be nothing at all.
+    for rule, state in old_rules.items():
+        if rule not in new_rules and not _eslint_off(state):
+            changes.append(
+                (f"ESLint rule `{rule}` removed (was `{state}`)", _eslint_security(rule))
+            )
     for item in _added(old.get("ignorePatterns"), new.get("ignorePatterns")):
         changes.append((f"ESLint `ignorePatterns` gained `{item}`", False))
     return changes

@@ -188,7 +188,10 @@ def _apply_baseline_suppression(
     ):
         return annotate_introduced_by_pr(scoped, base_run_performed=base_run_performed)
 
-    from mergecraft.analyzers.baseline_suppression import collect_base_analyzer_findings
+    from mergecraft.analyzers.baseline_suppression import (
+        DIFF_ONLY_ANALYZER_IDS,
+        collect_base_analyzer_findings,
+    )
 
     collection = collect_base_analyzer_findings(
         repo_root=repo_root,
@@ -201,8 +204,9 @@ def _apply_baseline_suppression(
         allow_repo_binaries=allow_repo_binaries,
         analyzers_settings=analyzers_settings,
     )
+    # A diff-only analyzer never runs at base, so its head success is not owed there.
     expected = (
-        head_succeeded_manifest_ids
+        head_succeeded_manifest_ids - DIFF_ONLY_ANALYZER_IDS
         if head_succeeded_manifest_ids is not None
         else collection.succeeded_manifest_ids
     )

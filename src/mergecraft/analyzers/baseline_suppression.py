@@ -24,6 +24,13 @@ if TYPE_CHECKING:
 
 TrustTier = Literal["trusted", "untrusted"]
 
+#: Analyzers that read the PR's diff rather than the tree. They have no base-side run —
+#: at base there is no diff, so they would only ever skip — and their findings are
+#: introduced by the PR by construction. Base collection leaves them out, and the
+#: head-vs-base completeness check must not expect them, or a default-enabled diff
+#: analyzer would switch baseline suppression off for every PR.
+DIFF_ONLY_ANALYZER_IDS: frozenset[str] = frozenset({"self-silencing"})
+
 _MIN_CHANGED_LINES_FOR_BASELINE = 12
 
 
@@ -172,6 +179,8 @@ def collect_base_analyzer_findings(
     succeeded: set[str] = set()
     try:
         for manifest in manifests:
+            if manifest.id in DIFF_ONLY_ANALYZER_IDS:
+                continue
             try:
                 result = run_adapter(
                     tool_id=manifest.id,
