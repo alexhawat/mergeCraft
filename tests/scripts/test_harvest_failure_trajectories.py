@@ -207,3 +207,69 @@ def test_ordinary_paths_and_hashes_do_not_drop_a_clean_trajectory() -> None:
     packet["trajectory"]["files_modified"] = ["src/mergecraft/evidence/trajectory_audit.py"]
 
     assert harvest.make_draft(packet, _step()) is not None
+
+
+def test_each_step_gets_its_own_evidence_directory(tmp_path: Path) -> None:
+    plan = harvest.build_plan(
+        repo="alexhawat/mergeCraft",
+        commits=[_COMMIT, "abcdef1"],
+        phases=["environment"],
+        evidence_dir=tmp_path,
+    )
+
+    dirs = [step.env["MERGECRAFT_EVIDENCE_DIR"] for step in plan]
+    assert len(set(dirs)) == len(plan)
+
+
+def _fake_review(monkeypatch: pytest.MonkeyPatch, writes: dict[str, dict[str, Any]]) -> list[str]:
+    """Stand in for ``mergecraft review``: write ``writes`` into the step's evidence dir."""
+    runs: list[str] = []
+
+    def _run(argv: Any, *, env: dict[str, str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        directory = __import__("pathlib").Path(env["MERGECRAFT_EVIDENCE_DIR"])
+        directory.mkdir(parents=True, exist_ok=True)
+        for name, packet in writes.items():
+            (directory / name).write_text(json.dumps(packet), encoding="utf-8")
+        runs.append(argv[argv.index("--head") + 1])
+        return subprocess.CompletedProcess(args=argv, returncode=0)
+
+    monkeypatch.setattr(harvest.subprocess, "run", _run)
+    return runs
+
+
+def test_run_step_reads_the_packet_its_own_review_wrote(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan = harvest.build_plan(
+        repo="alexhawat/mergeCraft",
+        commits=["fffffff", "0000000"],
+        phases=["environment"],
+        evidence_dir=tmp_path,
+    )
+    for step in plan:
+        _fake_review(
+            monkeypatch,
+            {f"{step.commit}-{harvest.PACKET_FILENAME}": _packet(change_id=step.commit)},
+        )
+        packet = harvest._run_step(step, cwd=tmp_path)
+        assert packet is not None
+        assert packet["change_id"] == step.commit
+
+
+def test_run_step_ignores_a_packet_left_by_an_earlier_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    step = harvest.build_plan(
+        repo="alexhawat/mergeCraft",
+        commits=[_COMMIT],
+        phases=["environment"],
+        evidence_dir=tmp_path,
+    )[0]
+    stale_dir = __import__("pathlib").Path(step.env["MERGECRAFT_EVIDENCE_DIR"])
+    stale_dir.mkdir(parents=True)
+    (stale_dir / f"old-{harvest.PACKET_FILENAME}").write_text(
+        json.dumps(_packet(change_id="stale")), encoding="utf-8"
+    )
+    _fake_review(monkeypatch, {})
+
+    assert harvest._run_step(step, cwd=tmp_path) is None

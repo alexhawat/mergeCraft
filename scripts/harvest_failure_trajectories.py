@@ -151,7 +151,10 @@ def build_plan(
                 f"{commit}~1",
                 *_PHASE_FLAGS[phase],
             )
-            env = {**_PHASE_ENV[phase], "MERGECRAFT_EVIDENCE_DIR": str(evidence_dir / phase)}
+            # One directory per step: each review names its packet after the change,
+            # so a shared directory would hold every commit's packet at once.
+            step_dir = evidence_dir / phase / commit
+            env = {**_PHASE_ENV[phase], "MERGECRAFT_EVIDENCE_DIR": str(step_dir)}
             steps.append(HarvestStep(phase, repo, commit, argv, env))
     return steps
 
@@ -239,12 +242,22 @@ def _run_step(step: HarvestStep, *, cwd: Path) -> dict[str, Any] | None:
     for key, value in step.env.items():
         if value == "":
             env.pop(key, None)
+    evidence_dir = Path(step.env["MERGECRAFT_EVIDENCE_DIR"])
+    before = _packet_stamps(evidence_dir)
     subprocess.run(step.argv, cwd=cwd, env=env, check=False, timeout=3600)
-    packets = sorted(Path(step.env["MERGECRAFT_EVIDENCE_DIR"]).glob(f"*{PACKET_FILENAME}"))
-    if not packets:
+    # Only a packet this review wrote counts; one left by an earlier run of the
+    # same step is not this step's evidence.
+    written = sorted(
+        path for path, stamp in _packet_stamps(evidence_dir).items() if before.get(path) != stamp
+    )
+    if len(written) != 1:
         return None
-    loaded = json.loads(packets[-1].read_text(encoding="utf-8"))
+    loaded = json.loads(written[0].read_text(encoding="utf-8"))
     return loaded if isinstance(loaded, dict) else None
+
+
+def _packet_stamps(directory: Path) -> dict[Path, int]:
+    return {path: path.stat().st_mtime_ns for path in directory.glob(f"*{PACKET_FILENAME}")}
 
 
 def main(

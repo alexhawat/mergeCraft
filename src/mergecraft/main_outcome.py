@@ -166,7 +166,9 @@ def _classify_outcome(
 
     Mirrors the inline resolver that lived at the bottom of :func:`main`.
     Returns ``(outcome, failure_reason)``. The branches are:
-    ``result.success is False`` -> ``RunOutcome.failed``; trusted-tier
+    ``result.success is False`` -> ``RunOutcome.infra_error`` when the driver
+    named an infrastructure reason (``INFRA_REASON_KEY`` in its metadata, e.g.
+    an expired reviewer credential), else ``RunOutcome.failed``; trusted-tier
     ``setup_script`` failure under ``setup_failure_policy == "fail"`` ->
     ``RunOutcome.configuration_error``; same under
     ``setup_failure_policy == "inconclusive"`` -> ``RunOutcome.inconclusive``;
