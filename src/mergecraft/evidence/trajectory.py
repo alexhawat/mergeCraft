@@ -75,8 +75,15 @@ SOURCE_EXTERNAL_TRACE: Final[str] = "external-trace"
 Intent = Literal["read", "modify", "verify", "complete", "report", "other"]
 """What a tool call was *for*, as far as the trajectory is concerned."""
 
-FailureClass = Literal["schema", "policy", "environment", "transient", "unknown"]
-"""How a failed tool call should be interpreted by the trajectory auditor."""
+FailureClass = Literal["schema", "policy", "environment", "transient", "declined", "unknown"]
+"""How a failed tool call should be interpreted by the trajectory auditor.
+
+``declined`` is never derived from error text: the caller stamps it on a step
+that ran and chose not to act, so nothing raised and there is nothing to retry.
+The orchestrator's publish step is the one user — a recorded verdict it does not
+publish (shadow protocol, a non-review run, a rejected submission) is ``ok=False``
+with the reason in ``error``.
+"""
 
 # JSON-RPC ``-32602`` and pydantic/jsonschema validation shapes recorded in error
 # text. Classifying here by string match is weaker than inspecting the typed
@@ -1029,6 +1036,7 @@ def record_tool_call(
     error: str | None = None,
     payload_hash: str | None = None,
     publication_incomplete: list[str] | None = None,
+    failure_class: FailureClass | None = None,
 ) -> ToolCallRecord:
     """Append one mediated tool call to the run's trajectory (D8).
 
@@ -1044,7 +1052,9 @@ def record_tool_call(
 
     ``payload_hash`` and ``publication_incomplete`` are set only on the
     orchestrator's publish step: the receipt's binding and the recorded
-    findings GitHub's inline view lacks.
+    findings GitHub's inline view lacks. ``failure_class`` overrides the class
+    derived from ``error``; the publish step passes ``"declined"`` when it does
+    not publish a recorded verdict.
     """
     command_raw = str((arguments or {}).get("command") or "") or None
     error_text = _truncate(redact_secrets(error), _MAX_ERROR_CHARS) if error else None
@@ -1057,9 +1067,8 @@ def record_tool_call(
             ok=ok,
             outcome_ok=outcome_ok,
             error=error_text,
-            failure_class=classify_failure_class(error_text)
-            if not ok and error_text
-            else "unknown",
+            failure_class=failure_class
+            or (classify_failure_class(error_text) if not ok and error_text else "unknown"),
             command=_truncate(redact_secrets(command_raw), _MAX_COMMAND_CHARS)
             if command_raw
             else None,

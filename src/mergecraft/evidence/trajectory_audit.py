@@ -332,6 +332,10 @@ def _ignored_tool_error(record: TrajectoryRecord) -> list[Finding]:
             continue
         if call.failure_class == "environment":
             continue
+        if call.failure_class == "declined":
+            # The step chose not to act (the run's publish step skipping a
+            # recorded verdict); nothing raised, so there is nothing to retry.
+            continue
         if call.failure_class not in {"transient", "unknown"}:
             continue
         if _was_retried(call, calls):
