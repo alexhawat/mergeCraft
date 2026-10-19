@@ -71,6 +71,23 @@ def test_parse_diff_toc_keeps_added_ranges_and_skips_deletion_only_files() -> No
     assert entries[1].ranges == (LineRange(6, 6),)
 
 
+def test_parse_diff_toc_treats_an_added_plus_plus_line_as_content() -> None:
+    diff = """\
+diff --git a/src/loop.cpp b/src/loop.cpp
+--- a/src/loop.cpp
++++ b/src/loop.cpp
+@@ -1,1 +1,3 @@
+ int i = 0;
++++i;
++++j;
+"""
+    entries = parse_diff_toc(diff)
+
+    assert len(entries) == 1
+    assert entries[0].path == "src/loop.cpp"
+    assert entries[0].ranges == (LineRange(2, 3),)
+
+
 def test_full_diff_read_covers_every_added_line() -> None:
     diff_path = "/tmp/mergecraft/pr-7.diff"
     breakdown = compute_diff_coverage(
@@ -116,6 +133,45 @@ def test_command_fallback_finds_a_sed_read_of_the_diff_path() -> None:
 
     assert breakdown.observed is True
     assert breakdown.covered_lines > 0
+
+
+def test_a_read_starting_past_eof_is_not_coverage_and_does_not_raise() -> None:
+    diff_path = "/tmp/mergecraft/pr-7.diff"
+    breakdown = compute_diff_coverage(
+        _DIFF,
+        [_call(1, command=f"sed -n '200,300p' {diff_path}")],
+        diff_path=diff_path,
+    )
+
+    assert breakdown.observed is True
+    assert breakdown.covered_lines == 0
+
+
+def test_an_inverted_sed_range_is_ignored() -> None:
+    diff_path = "/tmp/mergecraft/pr-7.diff"
+    breakdown = compute_diff_coverage(
+        _DIFF,
+        [_call(1, command=f"sed -n '20,10p' {diff_path}")],
+        diff_path=diff_path,
+    )
+
+    assert breakdown.covered_lines == 0
+
+
+def test_a_ranged_read_of_a_different_diff_does_not_cover_the_incremental_scope() -> None:
+    incremental_path = "/tmp/mergecraft/pr-7-incremental.diff"
+    full_path = "/tmp/mergecraft/pr-7.diff"
+    call = _call(1, command=f"sed -n '1,40p' {full_path}")
+    call = call.model_copy(update={"diff_read_path": full_path, "diff_read": (1, 40)})
+
+    breakdown = compute_diff_coverage(
+        _DIFF,
+        [call],
+        diff_path=incremental_path,
+    )
+
+    assert breakdown.observed is True
+    assert breakdown.covered_lines == 0
 
 
 def test_source_file_read_covers_that_files_added_ranges_only() -> None:

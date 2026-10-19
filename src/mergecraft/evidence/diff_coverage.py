@@ -241,12 +241,14 @@ def _parse_file_section(
     """Collect added ranges and their diff-file lines from one file section."""
     added_lines: list[tuple[int, int]] = []
     new_line = 0
+    in_hunk = False
     for offset, raw in enumerate(lines[start_line - 1 : end_line], start=start_line):
         hunk = _HUNK_RE.match(raw)
         if hunk is not None:
+            in_hunk = True
             new_line = int(hunk.group("start"))
             continue
-        if raw.startswith(("+++", "---")):
+        if not in_hunk and raw.startswith(("+++", "---")):
             continue
         if raw.startswith("\\"):
             # "\ No newline at end of file" is metadata, not a content line.
@@ -277,6 +279,7 @@ def parse_diff_toc(diff_text: str) -> tuple[DiffTocEntry, ...]:
     section_starts: list[tuple[str, int]] = []
     current_path: str | None = None
     current_start = 0
+    seen_hunk = False
     for index, raw in enumerate(lines, start=1):
         git_match = _DIFF_GIT_RE.match(raw)
         if git_match is not None:
@@ -284,20 +287,28 @@ def parse_diff_toc(diff_text: str) -> tuple[DiffTocEntry, ...]:
                 section_starts.append((current_path, current_start))
             current_path = git_match.group(2)
             current_start = index
+            seen_hunk = False
             continue
-        if raw.startswith("+++ "):
+        if raw.startswith("@@"):
+            seen_hunk = True
+            continue
+        if raw.startswith("+++ ") and not seen_hunk:
             candidate = raw[4:].strip()
             if candidate == "/dev/null":
-                current_path = None
+                # A deletion-only file: keep the section boundary so the
+                # previous file's section does not swallow its hunks. It will
+                # produce no added ranges and be omitted below.
                 continue
             path = candidate.removeprefix("b/")
             if current_path is None:
                 current_path = path
                 current_start = index
+                seen_hunk = False
             elif path != current_path:
                 section_starts.append((current_path, current_start))
                 current_path = path
                 current_start = index
+                seen_hunk = False
     if current_path is not None:
         section_starts.append((current_path, current_start))
 
@@ -323,11 +334,14 @@ def parse_diff_toc(diff_text: str) -> tuple[DiffTocEntry, ...]:
     return tuple(entries)
 
 
-def _command_line_range(command: str | None) -> LineRange | None:
-    """Read a line range from the simple read commands a reviewer uses.
+def command_line_span(command: str | None) -> tuple[int, int] | None:
+    """Read a line span from the simple read commands a reviewer uses.
 
     Supports ``sed -n 'A,Bp'``, ``sed -n 'Ap'``, ``head -n N`` and
-    ``head -N``. Anything else returns ``None`` (whole-file semantics).
+    ``head -N``. Returns ``None`` when no explicit span was named (whole-file
+    semantics), and ``(0, 0)`` when a span was named but is invalid (an
+    inverted ``sed`` range). The sentinel is distinct from ``None`` so callers
+    do not credit an invalid range as a whole-file read.
     """
     if not command:
         return None
@@ -352,18 +366,18 @@ def _command_line_range(command: str | None) -> LineRange | None:
             if match is not None:
                 start = int(match.group("start"))
                 end = int(match.groupdict().get("end") or start)
-                return LineRange(start, end)
+                return (start, end) if end >= start else (0, 0)
         return None
     if tool == "head":
         for index, token in enumerate(argv[1:], start=1):
             if token in {"-n", "--lines"} and index + 1 < len(argv):
                 match = _HEAD_N_RE.match(argv[index + 1])
-                return LineRange(1, int(match.group("count"))) if match else None
+                return (1, int(match.group("count"))) if match else None
             if token.startswith("-n") and len(token) > 2:
                 match = _HEAD_N_RE.match(token[2:])
-                return LineRange(1, int(match.group("count"))) if match else None
+                return (1, int(match.group("count"))) if match else None
             if token.startswith("-") and token[1:].isdigit():
-                return LineRange(1, int(token[1:]))
+                return (1, int(token[1:]))
         return None
     return None
 
@@ -372,9 +386,14 @@ def command_line_range(command: str | None) -> LineRange | None:
     """Return the line span a simple read command asked for, if it named one.
 
     Public wrapper over the internal parser so the trajectory recorder can
-    capture a diff read before redaction rewrites the path.
+    capture a diff read before redaction rewrites the path. An invalid explicit
+    span returns ``None`` here; callers that need to distinguish it use
+    :func:`command_line_span`.
     """
-    return _command_line_range(command)
+    span = command_line_span(command)
+    if span is None or span[0] <= 0:
+        return None
+    return LineRange(*span)
 
 
 def _read_paths(command: str | None) -> list[str]:
@@ -428,14 +447,17 @@ def _diff_read_range(
     """Return the diff-file line range a call read, when it named the diff."""
     if call.diff_read_path is not None:
         # A read of *another* diff file (the full diff while review scope is
-        # incremental) still shows the review scope's lines; treat it as whole
-        # scope rather than dropping the evidence.
-        if diff_path is None or _normalize_path(call.diff_read_path) == _normalize_path(diff_path):
-            start, end = call.diff_read or (0, 0)
-        else:
-            start, end = 0, 0
+        # incremental) cannot be mapped onto this diff's line numbers. Ignore
+        # it rather than treating the whole scope as read: the reviewer was
+        # told to read the incremental scope, and over-crediting here would
+        # silence the nudge on exactly the re-review this feature targets.
+        if diff_path is None or _normalize_path(call.diff_read_path) != _normalize_path(diff_path):
+            return None
+        start, end = call.diff_read or (0, 0)
         if start <= 0:
-            return LineRange(1, max(total_diff_lines, 1))
+            return None if end < 0 else LineRange(1, max(total_diff_lines, 1))
+        if start > total_diff_lines:
+            return None
         return LineRange(start, min(end, max(total_diff_lines, 1)))
     if not diff_path:
         return None
@@ -446,10 +468,13 @@ def _diff_read_range(
     named = any(_normalize_path(item) == target for item in candidates)
     if not named and (not call.command or target not in call.command):
         return None
-    line_range = _command_line_range(call.command)
-    if line_range is None:
+    span = command_line_span(call.command)
+    if span is None:
         return LineRange(1, max(total_diff_lines, 1))
-    return LineRange(line_range.start, min(line_range.end, max(total_diff_lines, 1)))
+    start, end = span
+    if start <= 0 or start > total_diff_lines:
+        return None
+    return LineRange(start, min(end, max(total_diff_lines, 1)))
 
 
 def _source_ranges(
@@ -461,9 +486,13 @@ def _source_ranges(
     entry = next((item for item in entries if item.path == path), None)
     if entry is None:
         return ()
-    line_range = _command_line_range(command)
-    if line_range is None:
+    span = command_line_span(command)
+    if span is None:
         return entry.ranges
+    start, end = span
+    if start <= 0 or end < start:
+        return ()
+    line_range = LineRange(start, end)
     covered: list[LineRange] = []
     for item in entry.ranges:
         overlap = item.intersect(line_range)
@@ -486,6 +515,13 @@ def _diff_covered_ranges(entry: DiffTocEntry, *, diff_range: LineRange) -> tuple
         else:
             covered.append(LineRange(source_line, source_line))
     return tuple(covered)
+
+
+def _mentions_diff(command: str | None, diff_path: str | None) -> bool:
+    """Return whether a command text names the diff path."""
+    if not command or not diff_path:
+        return False
+    return _normalize_path(diff_path) in _normalize_path(command)
 
 
 def compute_diff_coverage(
@@ -518,16 +554,16 @@ def compute_diff_coverage(
     for call in calls:
         if not call.ok or call.intent != "read":
             continue
+        if call.diff_read_path is not None or call.paths or _mentions_diff(call.command, diff_path):
+            observed = True
         diff_range = _diff_read_range(call, diff_path=diff_path, total_diff_lines=total_diff_lines)
         if diff_range is not None:
-            observed = True
             for entry in entries:
                 covered_by_file[entry.path].extend(
                     _diff_covered_ranges(entry, diff_range=diff_range)
                 )
-        if not call.paths and diff_range is None:
+        if not call.paths:
             continue
-        observed = True
         for path in call.paths:
             matched_entry = entry_by_path.get(path)
             if matched_entry is None:
@@ -606,6 +642,7 @@ __all__ = [
     "FileDiffCoverage",
     "LineRange",
     "command_line_range",
+    "command_line_span",
     "compute_diff_coverage",
     "coverage_nudge",
     "parse_diff_toc",

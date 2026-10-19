@@ -62,6 +62,26 @@ class AgentDiagnostic:
     last_provider_error: str | None = None
     stderr_tail: tuple[str, ...] = field(default_factory=tuple)
 
+    def __post_init__(self) -> None:
+        """Redact provider/stderr text before it can reach a packet or record.
+
+        The diagnostic is published in the run record and the check summary.
+        Provider errors routinely echo the credential that caused them
+        (``Incorrect API key provided: sk-...``), and stderr is child-process
+        output, so both cross the same redaction boundary as tool errors.
+        """
+        from mergecraft.analyzers.redact import redact_secrets
+
+        if self.last_provider_error:
+            object.__setattr__(
+                self, "last_provider_error", redact_secrets(self.last_provider_error)
+            )
+        object.__setattr__(
+            self,
+            "stderr_tail",
+            tuple(redact_secrets(line) for line in self.stderr_tail),
+        )
+
     def render(self, *, timeout_kind: str = "no-output watchdog") -> str:
         """Render the operator-facing one-block diagnosis."""
         cause = f" — likely cause: `{self.last_provider_error}`" if self.last_provider_error else ""

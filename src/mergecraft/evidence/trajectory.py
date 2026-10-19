@@ -1062,11 +1062,15 @@ def _diff_read_marker(
     for raw in sorted(candidates, key=len, reverse=True):
         if raw not in command:
             continue
-        from mergecraft.evidence.diff_coverage import command_line_range
+        from mergecraft.evidence.diff_coverage import command_line_span
 
-        line_range = command_line_range(command)
-        span = (line_range.start, line_range.end) if line_range is not None else (0, 0)
-        return raw, span
+        span = command_line_span(command)
+        if span is None:
+            return raw, (0, 0)
+        start, end = span
+        if start <= 0:
+            return raw, (0, -1)
+        return raw, (start, end)
     return "", None
 
 

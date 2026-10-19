@@ -69,6 +69,12 @@ _IMMUTABLE_GIT_SHOW_RE: Final[re.Pattern[str]] = re.compile(
 _TOOL = "trajectory"
 _CATEGORY = "Maintainability & Code Quality"
 
+# Guidance refusals that intentionally stop one attempt but are not tool
+# failures. The diff-coverage nudge is raised once by ``submit_review_verdict``
+# and the agent is expected to resubmit with different arguments, so keying
+# ``ignored-tool-error`` on the changed signature would manufacture a finding.
+_GUIDANCE_ERROR_MARKERS: Final[tuple[str, ...]] = ("diff coverage pre-flight",)
+
 
 class TrajectoryCheck(BaseModel):
     """One named trajectory check's fixed metadata."""
@@ -351,6 +357,8 @@ def _ignored_tool_error(record: TrajectoryRecord) -> list[Finding]:
     calls = list(record.tool_calls)
     for call in calls:
         if call.ok:
+            continue
+        if call.error and any(marker in call.error for marker in _GUIDANCE_ERROR_MARKERS):
             continue
         if call.failure_class == "schema" and _schema_self_corrected(call, calls):
             continue

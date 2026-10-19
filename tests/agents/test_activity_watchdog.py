@@ -79,6 +79,24 @@ def test_diagnostic_names_provider_error_and_stderr_tail() -> None:
     assert diagnostic.as_metadata()["idle_timeout"] is True
 
 
+def test_diagnostic_redacts_provider_errors_and_stderr_before_publication() -> None:
+    diagnostic = AgentDiagnostic(
+        label="opencode",
+        event_count=0,
+        idle_seconds=10.0,
+        saw_model_output=False,
+        last_provider_error="Incorrect API key provided: sk-abcdefghijklmnopqrstuvwxyz123456",
+        stderr_tail=("Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz0123456789",),
+    )
+
+    rendered = diagnostic.render()
+    metadata = diagnostic.as_metadata()
+
+    assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in rendered
+    assert "ghp_abcdefghijklmnopqrstuvwxyz0123456789" not in rendered
+    assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in str(metadata)
+
+
 def test_metadata_and_render_are_advisory_not_a_verdict() -> None:
     diagnostic = AgentDiagnostic(
         label="codex",

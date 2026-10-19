@@ -154,9 +154,9 @@ def _diff_stats(diff_text: str) -> dict[str, object]:
     added = 0
     deleted = 0
     for line in diff_text.splitlines():
-        if line.startswith("+") and not line.startswith("+++"):
+        if line.startswith("+") and not line.startswith("+++ "):
             added += 1
-        elif line.startswith("-") and not line.startswith("---"):
+        elif line.startswith("-") and not line.startswith("--- "):
             deleted += 1
     return {"diff": diff_text, "lines_added": added, "lines_deleted": deleted}
 
@@ -476,9 +476,9 @@ def _run_metrics(
         phases.setdefault(phase, 0.0)
     added = deleted = 0
     for line in diff_text.splitlines():
-        if line.startswith("+") and not line.startswith("+++"):
+        if line.startswith("+") and not line.startswith("+++ "):
             added += 1
-        elif line.startswith("-") and not line.startswith("---"):
+        elif line.startswith("-") and not line.startswith("--- "):
             deleted += 1
     diagnostic = getattr(state, "agent_diagnostic", None)
     diagnostic_text = None
