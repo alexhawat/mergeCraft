@@ -2,7 +2,7 @@
 
 **Audience:** contributor
 
-The analyzer catalog spans 32 languages and formats. The eval corpus and the
+The analyzer catalog spans 33 languages and formats. The eval corpus and the
 planted-defect fixtures cover a small subset. This page is the three deliverables of
 the language sourcing sweep (#860): a coverage matrix, a sourced list of public pull
 requests, and a prioritized work list. It supplies **material**; the mechanisms that
@@ -32,6 +32,7 @@ entries in the table further down.
 | docker | 1 | no | no | 2 |
 | ember | 1 | no | no | 0 |
 | fortran | 1 | no | no | 0 |
+| gherkin | 1 | no | no | 0 |
 | go | 6 | yes | yes | 2 |
 | html | 1 | no | no | 0 |
 | java | 5 | yes | yes | 2 |
@@ -57,9 +58,9 @@ entries in the table further down.
 | typescript | 11 | yes | yes | 2 |
 | yaml | 5 | no | no | 0 |
 
-Totals: 7 of 32 languages have a golden corpus case, 10 have a planted-defect fixture
-(`c`, `cpp` and `kotlin` have a fixture but no golden case), and 22 have neither. Of
-those 22, only `php` (three tools) and `yaml` (five) carry three or more catalog tools.
+Totals: 7 of 33 languages have a golden corpus case, 10 have a planted-defect fixture
+(`c`, `cpp` and `kotlin` have a fixture but no golden case), and 23 have neither. Of
+those 23, only `php` (three tools) and `yaml` (five) carry three or more catalog tools.
 
 ### Fixture category and difficulty cells
 
@@ -153,9 +154,9 @@ the sweep issue prefers over the fix alone, was not traced.
    in-bounds sources for the failure-shaped trajectory harvest
    ([failure-trajectory-harvest.md](failure-trajectory-harvest.md)); until then their
    trajectories are out of bounds and must be flagged, not committed.
-6. **Config and format languages** (`terraform`, `docker`, `powershell`, `shell`, then the
-   rest): hand-pick sources or write labelled synthetic fixtures; the public search is too
-   noisy to mine.
+6. **Config and format languages** (`terraform`, `docker`, `powershell`, `shell`,
+   `gherkin`, then the rest): hand-pick sources or write labelled synthetic fixtures; the
+   public search is too noisy to mine.
 
 ## Constraints that apply to every item
 
