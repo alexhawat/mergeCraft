@@ -130,6 +130,8 @@ class DiffTocEntry:
     """``(diff_line, post_image_line)`` for every added line, in diff order."""
     diff_start: int
     diff_end: int
+    deletion_only: bool = False
+    """True for a deletion-only / binary / mode-only section (no added lines)."""
 
     @property
     def line_count(self) -> int:
@@ -145,6 +147,8 @@ class FileDiffCoverage:
     ranges: tuple[LineRange, ...]
     covered: tuple[LineRange, ...]
     unread: tuple[LineRange, ...]
+    deletion_only: bool = False
+    read: bool = False
 
     @property
     def line_count(self) -> int:
@@ -198,8 +202,10 @@ class DiffCoverageBreakdown:
         return round(self.covered_lines / total * 100, 2)
 
     def unread_files(self) -> tuple[FileDiffCoverage, ...]:
-        """Return only the files with at least one unread range."""
-        return tuple(item for item in self.files if item.unread)
+        """Return files with unread added lines or an unread deletion."""
+        return tuple(
+            item for item in self.files if item.unread or (item.deletion_only and not item.read)
+        )
 
 
 def _merge_ranges(ranges: Iterable[LineRange]) -> tuple[LineRange, ...]:
@@ -320,8 +326,6 @@ def parse_diff_toc(diff_text: str) -> tuple[DiffTocEntry, ...]:
             else len(lines)
         )
         ranges, line_map = _parse_file_section(lines, start_line=start, end_line=end)
-        if not ranges:
-            continue
         entries.append(
             DiffTocEntry(
                 path=path,
@@ -329,6 +333,7 @@ def parse_diff_toc(diff_text: str) -> tuple[DiffTocEntry, ...]:
                 line_map=line_map,
                 diff_start=start,
                 diff_end=end,
+                deletion_only=not ranges,
             )
         )
     return tuple(entries)
@@ -372,12 +377,19 @@ def command_line_span(command: str | None) -> tuple[int, int] | None:
         for index, token in enumerate(argv[1:], start=1):
             if token in {"-n", "--lines"} and index + 1 < len(argv):
                 match = _HEAD_N_RE.match(argv[index + 1])
-                return (1, int(match.group("count"))) if match else None
+                if match is None:
+                    return None
+                count = int(match.group("count"))
+                return (1, count) if count > 0 else (0, 0)
             if token.startswith("-n") and len(token) > 2:
                 match = _HEAD_N_RE.match(token[2:])
-                return (1, int(match.group("count"))) if match else None
+                if match is None:
+                    return None
+                count = int(match.group("count"))
+                return (1, count) if count > 0 else (0, 0)
             if token.startswith("-") and token[1:].isdigit():
-                return (1, int(token[1:]))
+                count = int(token[1:])
+                return (1, count) if count > 0 else (0, 0)
         return None
     return None
 
@@ -457,6 +469,8 @@ def _diff_read_range(
         if start <= 0:
             return None if end < 0 else LineRange(1, max(total_diff_lines, 1))
         if start > total_diff_lines:
+            return None
+        if end < start:
             return None
         return LineRange(start, min(end, max(total_diff_lines, 1)))
     if not diff_path:
@@ -549,6 +563,7 @@ def compute_diff_coverage(
         return DiffCoverageBreakdown(files=(), observed=False)
     total_diff_lines = max(len(diff_text.splitlines()), 1)
     covered_by_file: dict[str, list[LineRange]] = {entry.path: [] for entry in entries}
+    read_files: set[str] = set()
     observed = False
     entry_by_path = {entry.path: entry for entry in entries}
     for call in calls:
@@ -559,6 +574,9 @@ def compute_diff_coverage(
         diff_range = _diff_read_range(call, diff_path=diff_path, total_diff_lines=total_diff_lines)
         if diff_range is not None:
             for entry in entries:
+                section = LineRange(entry.diff_start, entry.diff_end)
+                if diff_range.intersect(section) is not None:
+                    read_files.add(entry.path)
                 covered_by_file[entry.path].extend(
                     _diff_covered_ranges(entry, diff_range=diff_range)
                 )
@@ -568,6 +586,7 @@ def compute_diff_coverage(
             matched_entry = entry_by_path.get(path)
             if matched_entry is None:
                 continue
+            read_files.add(path)
             covered_by_file[path].extend(_source_ranges(path, call.command, entries))
 
     files: list[FileDiffCoverage] = []
@@ -579,6 +598,8 @@ def compute_diff_coverage(
                 ranges=entry.ranges,
                 covered=covered,
                 unread=_subtract(entry.ranges, covered),
+                deletion_only=entry.deletion_only,
+                read=entry.path in read_files,
             )
         )
     return DiffCoverageBreakdown(files=tuple(files), observed=observed)
@@ -608,12 +629,11 @@ def coverage_nudge(breakdown: DiffCoverageBreakdown, *, diff_path: str) -> str |
     artifacts are named but marked skippable, so the agent can choose to skip
     them explicitly rather than have the reviewer silently ignore them.
     """
-    if not breakdown.observed or breakdown.unread_lines == 0:
+    if not breakdown.observed or not breakdown.unread_files():
         return None
     rows: list[str] = []
     generated_only = True
     for file in breakdown.unread_files():
-        ranges = ", ".join(str(item) for item in file.unread)
         generated = (
             " (generated — skip if not reviewing generated output)"
             if _is_generated(file.path)
@@ -621,6 +641,10 @@ def coverage_nudge(breakdown: DiffCoverageBreakdown, *, diff_path: str) -> str |
         )
         if not generated:
             generated_only = False
+        if file.deletion_only:
+            rows.append(f"- `{file.path}` (deleted file — read the deletion){generated}")
+            continue
+        ranges = ", ".join(str(item) for item in file.unread)
         rows.append(f"- `{file.path}:{ranges}`{generated}")
     if generated_only:
         return None

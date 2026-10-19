@@ -191,9 +191,13 @@ class IdleWatchdog:
 
     def diagnostic(self) -> AgentDiagnostic:
         """Build the diagnostic for the current (stalled) attempt."""
-        stderr_lines = tuple(
-            line for line in (self._stderr_text() if self._stderr_text else "").splitlines() if line
-        )[-20:]
+        from mergecraft.analyzers.redact import redact_secrets
+
+        # Redact the *full* tail before truncating. Truncating first can cut a
+        # credential in half, and the partial token no longer matches the
+        # redactor's patterns — the same order main.py uses for setup stderr.
+        raw_stderr = redact_secrets(self._stderr_text() if self._stderr_text else "")
+        stderr_lines = tuple(line for line in raw_stderr.splitlines() if line)[-20:]
         joined = "\n".join(stderr_lines)
         if len(joined) > _MAX_STDERR_CHARS:
             joined = f"... (older lines truncated)\n{joined[-_MAX_STDERR_CHARS:]}"

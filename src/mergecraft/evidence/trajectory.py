@@ -182,6 +182,9 @@ _TOOL_INTENTS: Final[dict[str, Intent]] = {
     "kill_background": "report",
 }
 
+# Commands that print the whole file, so a read of them covers every added line.
+_FULL_FILE_READ_COMMANDS: Final[frozenset[str]] = frozenset({"bat", "cat", "less", "more"})
+
 # Leading argv tokens that mean "this command looked at something".
 _READ_COMMANDS: Final[frozenset[str]] = frozenset(
     {
@@ -1065,12 +1068,15 @@ def _diff_read_marker(
         from mergecraft.evidence.diff_coverage import command_line_span
 
         span = command_line_span(command)
-        if span is None:
-            return raw, (0, 0)
-        start, end = span
-        if start <= 0:
-            return raw, (0, -1)
-        return raw, (start, end)
+        if span is not None:
+            start, end = span
+            return raw, (0, -1) if start <= 0 else (start, end)
+        # No explicit span: only commands that print the whole file earn
+        # whole-file coverage. ``grep``/``awk``/``tail``/``diff`` over the diff
+        # show a subset, so recording them as (0, 0) would suppress the nudge.
+        argv = _argv(command)
+        tool = argv[0].rsplit("/", maxsplit=1)[-1] if argv else ""
+        return raw, (0, 0) if tool in _FULL_FILE_READ_COMMANDS else (0, -1)
     return "", None
 
 

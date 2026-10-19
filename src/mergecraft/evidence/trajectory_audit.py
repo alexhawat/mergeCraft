@@ -211,21 +211,35 @@ def _changed_unread_lines(
     breakdown = compute_diff_coverage(diff_text, record.tool_calls, diff_path=diff_path)
     if not breakdown.observed:
         return []
-    return [
-        _finding(
-            "changed-unread-file",
-            message=(
-                f"{path} was modified but lines "
-                f"{', '.join(str(item) for item in ranges)} were never read during this run"
-            ),
-            path=path,
-            evidence=[
-                f"unread_ranges={','.join(str(item) for item in ranges)}",
-                f"coverage={breakdown.covered_lines}/{breakdown.total_lines} added lines",
-            ],
+    findings: list[Finding] = []
+    for file in breakdown.unread_files():
+        if file.deletion_only:
+            findings.append(
+                _finding(
+                    "changed-unread-file",
+                    message=f"{file.path} was deleted but never read during this run",
+                    path=file.path,
+                    evidence=[
+                        f"coverage={breakdown.covered_lines}/{breakdown.total_lines} added lines"
+                    ],
+                )
+            )
+            continue
+        findings.append(
+            _finding(
+                "changed-unread-file",
+                message=(
+                    f"{file.path} was modified but lines "
+                    f"{', '.join(str(item) for item in file.unread)} were never read during this run"
+                ),
+                path=file.path,
+                evidence=[
+                    f"unread_ranges={','.join(str(item) for item in file.unread)}",
+                    f"coverage={breakdown.covered_lines}/{breakdown.total_lines} added lines",
+                ],
+            )
         )
-        for path, ranges in ((item.path, item.unread) for item in breakdown.files if item.unread)
-    ]
+    return findings
 
 
 def _pr_target(call: ToolCallRecord) -> str | None:

@@ -63,12 +63,14 @@ def _call(
     )
 
 
-def test_parse_diff_toc_keeps_added_ranges_and_skips_deletion_only_files() -> None:
+def test_parse_diff_toc_keeps_added_ranges_and_marks_deletion_only_files() -> None:
     entries = parse_diff_toc(_DIFF)
 
-    assert [entry.path for entry in entries] == ["src/app.py", "src/other.py"]
+    assert [entry.path for entry in entries] == ["src/app.py", "src/gone.py", "src/other.py"]
     assert entries[0].ranges == (LineRange(2, 3), LineRange(23, 24))
-    assert entries[1].ranges == (LineRange(6, 6),)
+    assert entries[1].deletion_only is True
+    assert entries[1].ranges == ()
+    assert entries[2].ranges == (LineRange(6, 6),)
 
 
 def test_parse_diff_toc_treats_an_added_plus_plus_line_as_content() -> None:
@@ -158,6 +160,17 @@ def test_an_inverted_sed_range_is_ignored() -> None:
     assert breakdown.covered_lines == 0
 
 
+def test_head_zero_is_invalid_not_whole_file() -> None:
+    diff_path = "/tmp/mergecraft/pr-7.diff"
+    breakdown = compute_diff_coverage(
+        _DIFF,
+        [_call(1, command=f"head -0 {diff_path}")],
+        diff_path=diff_path,
+    )
+
+    assert breakdown.covered_lines == 0
+
+
 def test_a_ranged_read_of_a_different_diff_does_not_cover_the_incremental_scope() -> None:
     incremental_path = "/tmp/mergecraft/pr-7-incremental.diff"
     full_path = "/tmp/mergecraft/pr-7.diff"
@@ -180,10 +193,27 @@ def test_source_file_read_covers_that_files_added_ranges_only() -> None:
         [_call(1, paths=["src/app.py"])],
     )
 
-    assert breakdown.observed is True
-    app, other = breakdown.files
-    assert app.unread == ()
-    assert other.unread == (LineRange(6, 6),)
+    by_path = {file.path: file for file in breakdown.files}
+    assert by_path["src/app.py"].unread == ()
+    assert by_path["src/other.py"].unread == (LineRange(6, 6),)
+
+
+def test_a_deleted_file_is_unread_until_its_path_is_read() -> None:
+    unread = compute_diff_coverage(
+        _DIFF,
+        [_call(1, paths=["src/app.py"])],
+    )
+    read = compute_diff_coverage(
+        _DIFF,
+        [_call(1, paths=["src/app.py"]), _call(2, paths=["src/gone.py"])],
+    )
+
+    unread_gone = {file.path: file for file in unread.files}["src/gone.py"]
+    read_gone = {file.path: file for file in read.files}["src/gone.py"]
+    assert unread_gone.deletion_only is True
+    assert unread_gone.read is False
+    assert read_gone.read is True
+    assert "src/gone.py" in (coverage_nudge(unread, diff_path="/tmp/pr.diff") or "")
 
 
 def test_ranged_source_read_covers_only_the_intersection() -> None:

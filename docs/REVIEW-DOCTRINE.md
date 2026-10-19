@@ -56,10 +56,13 @@ mergeCraft review on an earlier head gets `incrementalDiffStatus` plus, when the
 range is real, `incrementalDiffPath` and `lastReviewedSha`. The checkpoint comes
 from the trusted run-bound evidence packet when available, then the publisher
 scan. `empty` and `unavailable` carry `incrementalDiffReason` instead of
-advertising a file that does not exist. The mode gate was removed: #1017's
-reviewer never called `select_mode`, and gating the range on that selection made
-the whole re-review read the full PR. When the incremental path is present it
-**is** the review scope; the full diff is only for anchoring.
+advertising a file that does not exist. `empty` means the checkpoint is
+reachable and nothing changed — the prompt says to report progress rather than
+re-read an unchanged PR; `unavailable` is the fall-back-to-full-diff case.
+The mode gate was removed: #1017's reviewer never called `select_mode`, and
+gating the range on that selection made the whole re-review read the full PR.
+When the incremental path is present it **is** the review scope; the full diff
+is only for anchoring.
 
 **Coverage is line-range, not file-level.** `changed-unread-file` now reports the
 unread added-line ranges (`path:start-end`) rather than "this file was never
@@ -67,8 +70,10 @@ read", and the pre-submit check nudges **once** with exactly those ranges. The
 rule id, severity, and `scope="run"` (advisory, never a gate) are unchanged; what
 changed is what counts as read. Reads of the diff file itself count, via the
 `diff_read_path` / `diff_read` marker recorded from the raw command before the
-redactor can rewrite a run-temp path. Absent read evidence is still *unknown*,
-not zero: a run whose reads never cross MCP gets no nudge and no finding.
+redactor can rewrite a run-temp path. Deletion-only and mode-only sections have
+no added lines but stay in scope until their path is read. Absent read evidence
+is still *unknown*, not zero: a run whose reads never cross MCP gets no nudge
+and no finding.
 
 **Batch independent reads.** The reviewer instruction is explicit: emit every
 independent read/grep/glob in one turn and keep dependent calls for the next

@@ -19,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ranges (`path:start-end`) instead of whole files, and `submit_review_verdict`
   nudges once with exactly those ranges before accepting the verdict. Reads of
   the diff file itself count (recorded as `diff_read_path` / `diff_read`), and a
-  run with no observed reads is *unknown*, not unread.
+  run with no observed reads is *unknown*, not unread. Deletion-only and
+  mode-only sections stay in scope and are named until their path is read.
 - A no-output/idle watchdog for CLI agent drivers: no parsed event for
   `agentIdleTimeout` seconds (default `900`, `0` disables) kills the attempt and
   reports the idle span, event count, whether the model produced output, the last

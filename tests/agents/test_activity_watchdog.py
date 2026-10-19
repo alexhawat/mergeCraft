@@ -97,6 +97,21 @@ def test_diagnostic_redacts_provider_errors_and_stderr_before_publication() -> N
     assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in str(metadata)
 
 
+def test_diagnostic_redacts_before_it_truncates_the_stderr_tail() -> None:
+    secret = "Authorization: Bearer ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+    padded = ("x" * 2990) + secret + ("y" * 100)
+    watchdog = IdleWatchdog(
+        label="codex",
+        interval_s=0,
+        stderr_text=lambda: padded,
+    )
+
+    rendered = watchdog.diagnostic().render()
+
+    assert "ghp_abcdefghijklmnopqrstuvwxyz0123456789" not in rendered
+    assert "ghp_abcdef" not in rendered
+
+
 def test_metadata_and_render_are_advisory_not_a_verdict() -> None:
     diagnostic = AgentDiagnostic(
         label="codex",
