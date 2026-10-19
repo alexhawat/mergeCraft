@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
@@ -17,8 +18,6 @@ from loguru import logger
 from mergecraft.analyzers.finding import Finding, make_finding
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from mergecraft.analyzers.egress import EgressSession
     from mergecraft.analyzers.manifest import AnalyzerManifest, TrustTier
 
@@ -1208,6 +1207,70 @@ def process_limit_for_drop(
     )
 
 
+def _chown_entry(
+    target: str | int, *, dir_fd: int | None, uid: int, gid: int, display: str
+) -> None:
+    """Re-own one entry, never through a symlink.
+
+    ``target`` is an open directory fd (``dir_fd=None``: ``fchown``) or a name relative
+    to ``dir_fd`` (re-owned with ``follow_symlinks=False``, so a link is re-owned as a
+    link). ``display`` is the entry's path, for logs and tests only — it is never
+    resolved.
+    """
+    logger.trace("re-owning {} to {}:{}", display, uid, gid)
+    if dir_fd is None:
+        os.chown(target, uid, gid)
+    else:
+        os.chown(target, uid, gid, dir_fd=dir_fd, follow_symlinks=False)
+
+
+def hand_tree_to_drop_target(root: Path, *, boundary: Path, uid: int, gid: int) -> None:
+    """Re-own ``root`` and everything under it to the drop target, without following links.
+
+    The root orchestrator creates a trusted analyzer's scratch directories, so a
+    payload dropped to the agent UID could not write them (#878). This hands the
+    tree over immediately before the payload starts.
+
+    ``root`` sits inside the checkout, which is itself owned by the agent user, so
+    every path here can be rewritten by an agent-UID process while this runs. Nothing
+    is therefore re-resolved by path: ``boundary`` is opened once, each component of
+    ``root`` below it is opened relative to its parent with ``O_NOFOLLOW``, and the
+    tree is walked with :func:`os.fwalk` and re-owned relative to directory fds. A
+    symlink swapped in anywhere — ``root``, a parent of it, or a directory mid-walk —
+    makes the open fail or is re-owned as a link, never followed. Any refusal raises
+    ``OSError`` before or instead of touching what the link points at.
+    """
+    try:
+        relative = Path(os.path.abspath(root)).relative_to(os.path.abspath(boundary))
+    except ValueError as exc:
+        msg = f"refusing to re-own {root}: it is outside {boundary}"
+        raise OSError(msg) from exc
+    if ".." in relative.parts:
+        msg = f"refusing to re-own {root}: it is outside {boundary}"
+        raise OSError(msg)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    fd = os.open(boundary.resolve(), os.O_RDONLY | os.O_DIRECTORY | cloexec)
+    try:
+        for part in relative.parts:
+            try:
+                next_fd = os.open(
+                    part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | cloexec, dir_fd=fd
+                )
+            except OSError as exc:
+                msg = f"refusing to re-own {root}: {part!r} is not a plain directory ({exc})"
+                raise OSError(msg) from exc
+            os.close(fd)
+            fd = next_fd
+        _chown_entry(fd, dir_fd=None, uid=uid, gid=gid, display=str(root))
+        for dirpath, dirnames, filenames, dir_fd in os.fwalk(".", dir_fd=fd, follow_symlinks=False):
+            for name in (*dirnames, *filenames):
+                _chown_entry(
+                    name, dir_fd=dir_fd, uid=uid, gid=gid, display=str(Path(root, dirpath, name))
+                )
+    finally:
+        os.close(fd)
+
+
 def _analyzer_unshare_argv(*, isolate_network: bool) -> list[str]:
     caps = probe_capabilities()
     # Killing only the waiting unshare parent otherwise leaves PID 1 and its
@@ -1350,6 +1413,7 @@ __all__ = [
     "build_sandbox_exec_argv",
     "egress_trusted_for_host_networking",
     "evaluate_analyzer_egress_policy",
+    "hand_tree_to_drop_target",
     "plan_sandbox",
     "probe_capabilities",
     "process_count_for_uid",

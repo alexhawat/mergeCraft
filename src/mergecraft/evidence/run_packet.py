@@ -25,16 +25,23 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from loguru import logger
 from pydantic import ValidationError
 
+from mergecraft.analyzers.dispositions import DispositionCounts
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.classify import ChangeSet, classify_blast_radius
 from mergecraft.evidence.build import build_packet
 from mergecraft.evidence.emit import write_packet
-from mergecraft.evidence.packet import DeterministicCheck, MergeEvidencePacket, ModePromptVersion
+from mergecraft.evidence.packet import (
+    AnalyzersEvidence,
+    DeterministicCheck,
+    DispositionSection,
+    MergeEvidencePacket,
+    ModePromptVersion,
+)
 from mergecraft.utils.diff_paths import changed_paths_from_diff
 
 if TYPE_CHECKING:
@@ -272,6 +279,90 @@ def _dropped_findings_health(dropped: int) -> Finding | None:
     )
 
 
+def _disposition_section(source: Literal["catalog", "ci_sarif"], ledger: Any) -> DispositionSection:
+    """Project one disposition ledger into its packet section."""
+    summary = ledger.summary()
+    return DispositionSection(
+        source=source,
+        counts=DispositionCounts(
+            raw=summary.raw,
+            kept=summary.kept,
+            merged=summary.merged,
+            downgraded=summary.downgraded,
+            dropped_by_stage=summary.dropped_by_stage,
+        ),
+        entries=ledger.entries(),
+        suppression_audit=ledger.suppression_audit,
+        orphaned_hit_ids=summary.orphaned,
+    )
+
+
+def _open_ledger_health(orphans: list[str]) -> Finding:
+    """Run-scoped finding naming the raw analyzer hits no stage accounted for (#941)."""
+    shown = ", ".join(orphans[:20])
+    more = f" (and {len(orphans) - 20} more)" if len(orphans) > 20 else ""
+    return make_finding(
+        tool="analyzers",
+        rule_id="disposition-ledger-open",
+        category="Data Integrity & Atomicity",
+        severity="Major",
+        confidence="certain",
+        message=(
+            f"{len(orphans)} raw analyzer hit(s) ended with no recorded disposition — a "
+            "pipeline stage lost them without saying why, so this run's analyzer evidence "
+            f"cannot be trusted as complete: {shown}{more}"
+        ),
+        path="",
+        start_line=1,
+        end_line=1,
+        source="trajectory",
+        scope="run",
+        evidence=[f"orphaned_hit_ids={shown}{more}"],
+        remediation=(
+            "Find the stage that dropped or merged the hit(s) without recording a "
+            "disposition (see the analyzer pipeline's stage functions) and make it record one."
+        ),
+        introduced_by_pr="false",
+    )
+
+
+def _analyzers_evidence(state: ToolState) -> tuple[AnalyzersEvidence | None, list[str]]:
+    """Build the packet's ``analyzers`` section; also return the orphaned hit ids.
+
+    Total by construction: the ledger is supplementary evidence about the evidence, so
+    a malformed one degrades to a missing section and never fails packet assembly.
+    """
+    run_state = state.analyzer_run
+    sarif_ledger = state.ci_evidence.sarif_dispositions if state.ci_evidence is not None else None
+    sections: list[DispositionSection] = []
+    orphans: list[str] = []
+    try:
+        if run_state is not None and run_state.dispositions is not None:
+            section = _disposition_section("catalog", run_state.dispositions)
+            sections.append(section)
+            orphans.extend(section.orphaned_hit_ids)
+        if sarif_ledger is not None:
+            sarif_section = _disposition_section("ci_sarif", sarif_ledger)
+            sections.append(sarif_section)
+            orphans.extend(sarif_section.orphaned_hit_ids)
+    except (ValidationError, ValueError, TypeError) as err:
+        logger.warning("evidence packet: disposition ledger could not be projected — {}", err)
+        sections = []
+        orphans = []
+    resolved_from = run_state.settings_resolved_from if run_state is not None else None
+    detail = run_state.settings_detail if run_state is not None else None
+    if not sections and resolved_from is None:
+        return None, orphans
+    return (
+        AnalyzersEvidence(
+            settings_resolved_from=resolved_from,
+            settings_detail=detail,
+            dispositions=sections,
+        ),
+        orphans,
+    )
+
+
 def _self_assessment(state: ToolState) -> dict[str, Any] | None:
     """Translate the legacy ``ApprovalRecord`` into the packet's input shape.
 
@@ -323,6 +414,7 @@ def _assemble_packet_core(
     deterministic_checks: list[DeterministicCheck],
     blast_radius: BlastRadiusClassification | None,
     trajectory: dict[str, Any] | None,
+    analyzers: AnalyzersEvidence | None = None,
 ) -> MergeEvidencePacket:
     """Shared evidence shell for happy-path and fail-closed packet assembly."""
     state = ctx.tool_state
@@ -354,6 +446,7 @@ def _assemble_packet_core(
         agent_terminal_verdict=(
             state.terminal_submission.verdict if state.terminal_submission is not None else None
         ),
+        analyzers=analyzers,
     )
     return packet.model_copy(
         update={
@@ -434,16 +527,34 @@ def build_run_packet(
     health_finding = _dropped_findings_health(dropped_finding_rows)
     run_health_findings = [health_finding] if health_finding is not None else []
 
+    # #941 closure check: every raw analyzer hit must have ended with a disposition.
+    # An open ledger makes the run inconclusive (a non-passing run → ``neutral`` at
+    # best) and a run-scoped finding names the orphans. ``run_succeeded=False`` never
+    # outranks a blocker: ``decide_approval`` is monotone in blockers.
+    analyzers_evidence, orphaned_hits = _analyzers_evidence(state)
+    ledger_findings = [_open_ledger_health(orphaned_hits)] if orphaned_hits else []
+
     packet = _assemble_packet_core(
         ctx,
         change_id=resolved_change_id,
         files_changed=changed_paths,
-        findings=[*loaded_findings, *run_health_findings, *trajectory_findings],
+        findings=[
+            *loaded_findings,
+            *run_health_findings,
+            *ledger_findings,
+            *trajectory_findings,
+        ],
         deterministic_checks=_deterministic_checks(state),
         blast_radius=blast_radius,
         trajectory=trajectory.model_dump(mode="json"),
+        analyzers=analyzers_evidence,
     )
-    return _finalize_packet_with_gate(packet, ctx=ctx, run_succeeded=run_succeeded)
+    return _finalize_packet_with_gate(
+        packet,
+        ctx=ctx,
+        run_succeeded=run_succeeded and not orphaned_hits,
+        decision_reason_suffix=_open_ledger_reason(orphaned_hits),
+    )
 
 
 def _agent_version() -> str:
@@ -584,6 +695,24 @@ def _cached_packet_shell(cached: MergeEvidencePacket) -> MergeEvidencePacket:
     return cached.model_copy(update={"decision": None})
 
 
+def _orphaned_hit_ids(packet: MergeEvidencePacket) -> list[str]:
+    """Every raw analyzer hit the packet's ledgers leave unaccounted for (#941)."""
+    analyzers = packet.analyzers
+    if analyzers is None:
+        return []
+    orphans: list[str] = []
+    for section in analyzers.dispositions:
+        orphans.extend(section.orphaned_hit_ids)
+    return orphans
+
+
+def _open_ledger_reason(orphans: list[str]) -> str | None:
+    """The decision-reason suffix an open ledger carries, or ``None`` when closed."""
+    if not orphans:
+        return None
+    return f"analyzer disposition ledger open ({len(orphans)} orphaned hit(s)) — inconclusive"
+
+
 def resolve_prepared_run_packet(
     ctx: ToolContext,
     *,
@@ -606,7 +735,16 @@ def resolve_prepared_run_packet(
         )
         if shell is not cached:
             ctx.tool_state.prepared_run_packet = shell
-        return _finalize_packet_with_gate(shell, ctx=ctx, run_succeeded=run_succeeded)
+        # A re-finalization must reach the same verdict the first assembly would:
+        # the cached shell already names an open ledger's orphans, so the
+        # correction below cannot live only on the assembly path (#941).
+        orphans = _orphaned_hit_ids(shell)
+        return _finalize_packet_with_gate(
+            shell,
+            ctx=ctx,
+            run_succeeded=run_succeeded and not orphans,
+            decision_reason_suffix=_open_ledger_reason(orphans),
+        )
     packet = prepare_run_packet(
         ctx,
         run_succeeded=run_succeeded,

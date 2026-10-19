@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Literal
 
 from mergecraft.analyzers.detect import (
     _eslint_command_prefix,
+    has_gherkin_lint_config,
     has_markdownlint_config,
     has_phpstan_config,
     has_prisma_lint_config,
@@ -194,6 +195,9 @@ def _detect_repo_tool_state(
 _PRISMA_LINT_FALLBACK_NOTE = (
     "@catalog:prisma-lint-default-rules.yml — conservative fallback ruleset"
 )
+_GHERKIN_LINT_FALLBACK_NOTE = (
+    "@catalog:gherkin-lint-default-config.json — conservative structure-only fallback"
+)
 _MARKDOWNLINT_FALLBACK_NOTE = (
     "@catalog:markdownlint-default-config.json — conservative fallback; MD060 disabled"
 )
@@ -233,6 +237,15 @@ def _apply_config_absent_patches(
         else:
             argv_list.extend(["--config", fallback])
         return tuple(argv_list), _MARKDOWNLINT_FALLBACK_NOTE
+    if manifest_id == "gherkin-lint" and not has_gherkin_lint_config(repo_root):
+        fallback = str(_CATALOG_DIR / "gherkin-lint-default-config.json")
+        argv_list = list(argv)
+        if FILES_TOKEN in argv_list:
+            idx = argv_list.index(FILES_TOKEN)
+            argv_list[idx:idx] = ["--config", fallback]
+        else:
+            argv_list.extend(["--config", fallback])
+        return tuple(argv_list), _GHERKIN_LINT_FALLBACK_NOTE
     return argv, None
 
 
