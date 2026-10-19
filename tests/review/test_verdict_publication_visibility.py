@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from mergecraft.agents.shared import AgentResult
+from mergecraft.evidence.trajectory import build_trajectory_record
+from mergecraft.evidence.trajectory_audit import audit_trajectory
 from mergecraft.mcp.verdict import submit_review_verdict_tool
 from tests.review_record.test_w15_deterministic_record import _context, _Scm
 
@@ -59,7 +61,7 @@ def test_a_received_submission_publishes() -> None:
     assert reason is None
 
 
-def test_a_run_that_recorded_nothing_owes_a_review() -> None:
+def test_a_run_that_recorded_nothing_owes_no_review() -> None:
     """Nothing owed. The caller returns before any reason is computed."""
     from mergecraft.main import owes_a_terminal_review
 
@@ -128,7 +130,83 @@ async def test_the_skip_reason_is_recorded_on_the_run_trajectory(tmp_path: Path)
     ]
     assert len(rows) == 1, [call.tool for call in ctx.tool_state.tool_calls]
     assert rows[0].ok is False
+    assert rows[0].failure_class == "declined"
     assert "stale_attempt" in (rows[0].error or "")
+
+
+def _ignored_tool_errors(ctx: Any) -> list[str]:
+    record = build_trajectory_record(ctx.tool_state)
+    return [
+        finding.message
+        for finding in audit_trajectory(record)
+        if finding.rule_id == "ignored-tool-error"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("protocol", "received", "mode"),
+    [
+        ("shadow", True, "Review"),
+        ("enforce", False, "Review"),
+        ("enforce", True, None),
+    ],
+    ids=["shadow-protocol", "rejected-submission", "not-a-review-run"],
+)
+@pytest.mark.asyncio
+async def test_a_skipped_publication_is_not_reported_as_an_ignored_tool_error(
+    tmp_path: Path,
+    protocol: str,
+    received: bool,
+    mode: str | None,
+) -> None:
+    """A skip is a decision, not a failed call: the auditor must not call it one.
+
+    The skip row is ``ok=False`` so it is no completion claim, and it would
+    otherwise read as ``orchestrator.publish_review failed and was never
+    retried`` (Major) in the completion check and the evidence packet.
+    """
+    import mergecraft.main as main_mod
+
+    ctx = await _state_with_a_recorded_verdict(tmp_path)
+    ctx.tool_state.selected_mode = mode
+    result = AgentResult(
+        success=True,
+        terminal_submission_received=received,
+        diagnostics={"rejection_reason": "stale_attempt"},
+    )
+
+    await main_mod._publish_recorded_verdict(ctx, result, verdict_protocol=protocol)
+
+    assert any(
+        call.tool == main_mod._ORCHESTRATOR_PUBLISH_STEP for call in ctx.tool_state.tool_calls
+    )
+    assert _ignored_tool_errors(ctx) == []
+
+
+@pytest.mark.asyncio
+async def test_a_publication_that_raised_is_still_an_ignored_tool_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Green guard: only the skip is exempt; a publish that failed is still a failure."""
+    import mergecraft.main as main_mod
+
+    ctx = await _state_with_a_recorded_verdict(tmp_path)
+
+    async def _failing_publish(tool_context: Any) -> dict[str, Any]:
+        raise RuntimeError("GitHub returned an error")
+
+    monkeypatch.setattr("mergecraft.mcp.review.publish_pull_request_review", _failing_publish)
+
+    await main_mod._publish_recorded_verdict(
+        ctx,
+        AgentResult(success=True, terminal_submission_received=True),
+        verdict_protocol="enforce",
+    )
+
+    assert _ignored_tool_errors(ctx) == [
+        f"{main_mod._ORCHESTRATOR_PUBLISH_STEP} failed and was never retried"
+    ]
 
 
 @pytest.mark.asyncio

@@ -2191,6 +2191,11 @@ async def _publish_recorded_verdict(
     when a receipt for the recorded verdict exists, including when the agent
     already published it. The row carries the receipt's ``payload_hash`` and
     the recorded findings GitHub's inline view lacks.
+
+    A run that recorded no verdict records no step. A recorded verdict the run
+    does not publish (:func:`publication_skip_reason`) is recorded as a not-ok
+    step stamped ``failure_class="declined"`` with the reason in ``error``, so
+    the trajectory auditor reads it as a decision, not a failed call.
     """
     tool_state = tool_context.tool_state
     if not owes_a_terminal_review(tool_state):
@@ -2214,6 +2219,7 @@ async def _publish_recorded_verdict(
             arguments=None,
             ok=False,
             error=skip_reason,
+            failure_class="declined",
         )
         return
     from mergecraft.evidence.trajectory import record_tool_call
