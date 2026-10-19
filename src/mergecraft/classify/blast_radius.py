@@ -7,6 +7,8 @@ from typing import Literal, cast
 from pydantic import BaseModel, ConfigDict
 from typing_extensions import TypedDict
 
+from mergecraft.classify.review_config import is_review_config_path
+
 Lane = Literal["low", "medium", "high"]
 AutoMergeLane = Literal["eligible", "assisted", "human_review", "forbidden"]
 Category = Literal[
@@ -18,6 +20,7 @@ Category = Literal[
     "dependency_changes",
     "source_without_tests",
     "irreversible_infra",
+    "review_config",
 ]
 
 
@@ -45,6 +48,7 @@ class RuleSet(TypedDict, total=False):
     dependency_changes: RuleOverride
     source_without_tests: RuleOverride
     irreversible_infra: RuleOverride
+    review_config: RuleOverride
 
 
 class BlastRadiusClassification(BaseModel):
@@ -68,6 +72,8 @@ DEFAULT_RULE_SET: dict[Category, RuleOverride] = {
     "dependency_changes": {"lane": "medium"},
     "source_without_tests": {"lane": "medium"},
     "irreversible_infra": {"lane": "high"},
+    # Config that governs how the PR is reviewed (#942): never auto-merge eligible.
+    "review_config": {"lane": "medium"},
 }
 
 _LANE_RANK: dict[Lane, int] = {"low": 0, "medium": 1, "high": 2}
@@ -166,6 +172,9 @@ def _detected_categories(paths: list[str], diff_text: str) -> tuple[list[str], s
     if source_paths and not test_paths and not generated_source:
         add("source_without_tests")
 
+    if any(is_review_config_path(path) for path in paths):
+        add("review_config")
+
     irreversible_diff = any(token in diff_text for token in ("rm -rf", "terraform destroy"))
     if any(path.startswith("infra/terraform/") for path in lowered) or irreversible_diff:
         add("irreversible_infra")
@@ -223,7 +232,17 @@ def classify_blast_radius(
         lane = "medium"
 
     source_override = rule_set is not None and "source_without_tests" in rule_set
-    if lane == "medium" and _is_small_isolated_source(paths, diff_stats) and not source_override:
+    # The carve-out exists for a tiny isolated source edit — not for a tiny edit
+    # to the config that governs how this PR is reviewed. `review_config` is
+    # "never auto-merge eligible": a ≤5-line `src/**/{ruff,pyproject,...}.toml`
+    # change is otherwise detected as both `source_without_tests` *and*
+    # `review_config`, and the downgrade made it `eligible` (#942).
+    if (
+        lane == "medium"
+        and "review_config" not in rule_categories
+        and _is_small_isolated_source(paths, diff_stats)
+        and not source_override
+    ):
         lane = "low"
 
     if "generated_files" in rule_categories and lane == "high":

@@ -47,7 +47,11 @@ async def ingest_ci_sarif_for_head_sha(ctx: ToolContext, head_sha: str) -> None:
     if not head_sha.strip():
         return
 
-    from mergecraft.ci.evidence import record_ci_findings, record_ci_ingest_metadata
+    from mergecraft.ci.evidence import (
+        record_ci_findings,
+        record_ci_ingest_metadata,
+        record_sarif_findings,
+    )
 
     client = github_client_from_scm(ctx.scm)
     if client is None:
@@ -73,7 +77,7 @@ async def ingest_ci_sarif_for_head_sha(ctx: ToolContext, head_sha: str) -> None:
 
     findings = await collect_ci_sarif_findings(ctx, client=client, runs=listed.items)
     if findings:
-        record_ci_findings(ctx.tool_state, findings)
+        record_sarif_findings(ctx.tool_state, findings)
 
     coverage_names = [name.strip() for name in ctx.ci_coverage_artifacts if name.strip()]
     mutation_names = [name.strip() for name in ctx.ci_mutation_artifacts if name.strip()]

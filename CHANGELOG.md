@@ -7,35 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Analyzer disposition ledger: every raw analyzer hit gets a stable `hit_id` and
+  ends `kept`, `merged`, `downgraded` or `dropped:<stage>` with a required reason.
+  The merge evidence packet (schema `1.14.0`) carries the ledger, per-stage counts
+  and the baseline-suppression audit rows that were previously only logged; the
+  pre-merge Analyzers row reads like `ruff 14 raw → 3 kept (9 out_of_scope, 2
+  baseline)`. SARIF ingested via `ciEvidence.sarifArtifacts` follows the same
+  contract (#941).
+- `self-silencing` analyzer (in-process, every trust tier, no shell): reports added
+  suppression markers (`# nosec`, `# noqa`, `// eslint-disable-next-line`,
+  `#[allow(..)]`, `//nolint`, …) with the rule codes they silence, and loosening
+  edits to `.mergecraft/config.yaml`, `ruff.toml` / `pyproject.toml`, ESLint config
+  and scanner ignore files. Edits to `.mergecraft/**` and analyzer/linter config
+  also keep a PR out of the `eligible` blast-radius lane (#942).
+- `analyze_ci_failures` reads the base branch's recent runs itself, so a
+  same-fingerprint base failure clears a failure as pre-existing with no
+  agent-supplied arguments; the runs it used are recorded in the result and the CI
+  evidence. A passing or unrecognised base status never clears one (#891).
+- Opt-in `gherkin-lint` catalog analyzer: syntax and structure lint for changed
+  `.feature` files, run through the repo's own pinned `gherkin-lint`. Disabled by
+  default because the catalog has no managed npm runtime; enable it with
+  `analyzers.overrides.gherkin-lint.enabled: true` (#854).
+
 ### Changed
+
+- A PR's own `analyzers.*` configuration no longer applies to its own review. The
+  analyzer settings (`enabled`, `overrides.<id>.enabled`, the `antislop` `rules` and
+  `ignore`, `baseComparison`, `inlineBudget`, `impact`) are resolved from the PR's
+  base — the operator-owned base snapshot, or the base commit's
+  `.mergecraft/config.yaml` — and a head-side change is reported by
+  `self-silencing` instead of applied. A symlinked or unreadable base config falls
+  back to built-in defaults with a named reason. **Fix:** land analyzer-config
+  changes in their own PR; they take effect from the next PR on (#942).
+
+- A run whose analyzer disposition ledger is open — a pipeline stage lost a raw hit
+  without recording why — now ends with a `neutral` approval conclusion instead of
+  possibly `success`, and a run-scoped finding names the orphaned hits. A blocker
+  still outranks it. **Fix:** none for consumers; the finding names the stage to fix
+  (#941).
 
 - A mistyped tracing sink (`tracing-to`, `MERGECRAFT_TRACING_TO` or `--tracing-to`
   with a typo such as `logfier`) now ends the run as `configuration_error` on the
   Action and exits with the configuration code on the CLI, naming the variable and
   the value. It used to end as `infra_error`, the outcome of an unclassified crash.
   With tracing off the typo is still ignored and now logs a warning (#930).
+
 - The per-file `changed-unread-file` run-health finding is `Minor` instead of
   `Major`: still listed in the record, and the gate is unchanged — `gate_policy`
   still maps `changed-unread-file` to `request-changes` by rule id, so this only
   stops a Major row per unread file from burying the change-scoped reasons (#885).
+
 - The Release workflow now dispatches CI/CD on the release branch it prepares, and
   CI/CD's `build-dist` job accepts a dispatch on a `release/*` branch or a `v*` tag, so
   the workflow path produces the `artifact-python-dist` the publish step needs. Its
   publish gate names the real approval, `craft publish` with publish credentials, instead
   of a label that nothing acts on (#1004, #1005).
+
 - The wheel no longer ships five more checkout-only modules (`scm/webhooks.py`,
   `evidence/shadow_compare.py`, `evals/human_batch.py`, `evals/skill.py`,
   `agents/catalog_docs.py`); each is reached only from Make targets, scripts or tests (#947).
+
 - The review job joins the `codex-subscription-auth` concurrency group, so two consumers
   never refresh the Codex subscription login at once. GitHub keeps one pending job per
   group, so a third queued review replaces the pending one and needs a re-run (#882).
+
 - Every `actions/checkout` that does not push sets `persist-credentials: false`, and the
   redaction module's own URI patterns no longer flag in the CI secret scan, which allows
   one detector in one file rather than the whole file (#885).
+
 - The structural eval baseline is regenerated with the three multi-round cases
   replayable: `inconclusive_rate` falls from 0.0816 to 0.0204 (3 of 49 cases were
   permanently blocked), with no behaviour change (#892).
-
 ### Fixed
 
 - A workspace review no longer fails closed with "checkout integrity failure:
@@ -57,24 +101,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Checkout integrity hashing skips nested `node_modules`, `.pnpm-store`, run
   `evidence`, and OpenCode session dirs at any depth so harness scratch writes
   during read-only review no longer trigger exit 12.
+- A review whose agent submits a verdict without calling `select_mode` now
+  publishes the formal review with the run record. Before, the PR got only a
+  short progress comment, with no tokens, cost, timing or findings, whenever the
+  OpenCode Go rung answered and the Codex fallback did not run.
+- The run record on the formal review shows the `Cost:` line. Cost was computed
+  but only reached the step summary.
+- agentsec no longer reads a changed instruction or MCP manifest whose symlink
+  resolves outside the repository root; the refusal is logged and reported as a
+  named skip when it was the only candidate (#851).
+- Numeric metadata such as `input_tokens=120` survives log redaction; credential
+  named keys and long numeric runs still redact (#877).
+- Trusted-tier catalog analyzers drop to the agent UID on the root backend, with
+  their scratch tree and the baseline worktree handed to that UID first; an
+  unlandable drop reports `unavailable` instead of running as root (#878).
+- `run_checks` refuses to run an untrusted static gate without a sandbox context,
+  whatever `shell` says, so the executor fails closed even if a caller does not
+  (#887).
+
 - A retired Codex subscription login ("refresh token was already used") is reported as
   `infra_error` with *reviewer credential expired - re-authenticate* and the commands
   that fix it, in the check summary and the run record, instead of an unexplained red
   check. There is no scheduled canary: probing the login refreshes it (#922).
+
 - The carry-over workflow no longer falls back to the forgeable `github-actions[bot]`
   login for `MERGECRAFT_REVIEWER_BOT_LOGIN`; an unconfigured App yields an empty login (#913).
+
 - `config tracing` lists the config files it read and agrees with `doctor` and
   `config explain` about `config.local.yaml` and a missing `MERGECRAFT_CONFIG`; the
   flag, environment and YAML precedence is unchanged (#919).
+
 - A column-0 comment between items of a top-level sequence no longer leaves trailing
   items behind when the comment-preserving config writer replaces the key (#920).
+
 - Commands Codex, Claude and OpenCode run natively are recorded on the trajectory with
   their exit status, so a failing command, a timeout and a later passing re-run are
   visible to the auditor; environment and transient failures carry a named class.
   Recording never fails a tool call and changes no review decision (#858).
+
 - `tests/mcp/test_rpc.py` no longer leaves a fake package version cached for later
   tests (#1006).
-
 ## [0.1.0a3] — 2026-10-17
 
 ### Breaking — action required
@@ -524,6 +590,38 @@ Full long-form history, including the entries condensed or omitted here:
 
 - Every runtime dependency is an exact pin, every third-party import in the package is declared, and the declarations nothing imports are gone
 
+- A mistyped tracing sink (`tracing-to`, `MERGECRAFT_TRACING_TO` or `--tracing-to`
+  with a typo such as `logfier`) now ends the run as `configuration_error` on the
+  Action and exits with the configuration code on the CLI, naming the variable and
+  the value. It used to end as `infra_error`, the outcome of an unclassified crash.
+  With tracing off the typo is still ignored and now logs a warning (#930).
+
+- The per-file `changed-unread-file` run-health finding is `Minor` instead of
+  `Major`: still listed in the record, and the gate is unchanged — `gate_policy`
+  still maps `changed-unread-file` to `request-changes` by rule id, so this only
+  stops a Major row per unread file from burying the change-scoped reasons (#885).
+
+- The Release workflow now dispatches CI/CD on the release branch it prepares, and
+  CI/CD's `build-dist` job accepts a dispatch on a `release/*` branch or a `v*` tag, so
+  the workflow path produces the `artifact-python-dist` the publish step needs. Its
+  publish gate names the real approval, `craft publish` with publish credentials, instead
+  of a label that nothing acts on (#1004, #1005).
+
+- The wheel no longer ships five more checkout-only modules (`scm/webhooks.py`,
+  `evidence/shadow_compare.py`, `evals/human_batch.py`, `evals/skill.py`,
+  `agents/catalog_docs.py`); each is reached only from Make targets, scripts or tests (#947).
+
+- The review job joins the `codex-subscription-auth` concurrency group, so two consumers
+  never refresh the Codex subscription login at once. GitHub keeps one pending job per
+  group, so a third queued review replaces the pending one and needs a re-run (#882).
+
+- Every `actions/checkout` that does not push sets `persist-credentials: false`, and the
+  redaction module's own URI patterns no longer flag in the CI secret scan, which allows
+  one detector in one file rather than the whole file (#885).
+
+- The structural eval baseline is regenerated with the three multi-round cases
+  replayable: `inconclusive_rate` falls from 0.0816 to 0.0204 (3 of 49 cases were
+  permanently blocked), with no behaviour change (#892).
 ### Removed
 
 - The MCP server no longer mounts a webhook endpoint; a signed delivery was verified but processed nothing, and its replay window could never fire.
@@ -906,6 +1004,28 @@ Full long-form history, including the entries condensed or omitted here:
 
 - Both in-image test scripts pin the same `pytest` and `pytest-asyncio` as the project they test
 
+- A retired Codex subscription login ("refresh token was already used") is reported as
+  `infra_error` with *reviewer credential expired - re-authenticate* and the commands
+  that fix it, in the check summary and the run record, instead of an unexplained red
+  check. There is no scheduled canary: probing the login refreshes it (#922).
+
+- The carry-over workflow no longer falls back to the forgeable `github-actions[bot]`
+  login for `MERGECRAFT_REVIEWER_BOT_LOGIN`; an unconfigured App yields an empty login (#913).
+
+- `config tracing` lists the config files it read and agrees with `doctor` and
+  `config explain` about `config.local.yaml` and a missing `MERGECRAFT_CONFIG`; the
+  flag, environment and YAML precedence is unchanged (#919).
+
+- A column-0 comment between items of a top-level sequence no longer leaves trailing
+  items behind when the comment-preserving config writer replaces the key (#920).
+
+- Commands Codex, Claude and OpenCode run natively are recorded on the trajectory with
+  their exit status, so a failing command, a timeout and a later passing re-run are
+  visible to the auditor; environment and transient failures carry a named class.
+  Recording never fails a tool call and changes no review decision (#858).
+
+- `tests/mcp/test_rpc.py` no longer leaves a fake package version cached for later
+  tests (#1006).
 ### Security
 
 - The Claude reviewer can no longer read the run's credential material.
@@ -1063,6 +1183,38 @@ Full pre-release development history: see
   the strictest tier (`untrusted-only`) instead of the most permissive
   (`auto`)
 
+- A mistyped tracing sink (`tracing-to`, `MERGECRAFT_TRACING_TO` or `--tracing-to`
+  with a typo such as `logfier`) now ends the run as `configuration_error` on the
+  Action and exits with the configuration code on the CLI, naming the variable and
+  the value. It used to end as `infra_error`, the outcome of an unclassified crash.
+  With tracing off the typo is still ignored and now logs a warning (#930).
+
+- The per-file `changed-unread-file` run-health finding is `Minor` instead of
+  `Major`: still listed in the record, and the gate is unchanged — `gate_policy`
+  still maps `changed-unread-file` to `request-changes` by rule id, so this only
+  stops a Major row per unread file from burying the change-scoped reasons (#885).
+
+- The Release workflow now dispatches CI/CD on the release branch it prepares, and
+  CI/CD's `build-dist` job accepts a dispatch on a `release/*` branch or a `v*` tag, so
+  the workflow path produces the `artifact-python-dist` the publish step needs. Its
+  publish gate names the real approval, `craft publish` with publish credentials, instead
+  of a label that nothing acts on (#1004, #1005).
+
+- The wheel no longer ships five more checkout-only modules (`scm/webhooks.py`,
+  `evidence/shadow_compare.py`, `evals/human_batch.py`, `evals/skill.py`,
+  `agents/catalog_docs.py`); each is reached only from Make targets, scripts or tests (#947).
+
+- The review job joins the `codex-subscription-auth` concurrency group, so two consumers
+  never refresh the Codex subscription login at once. GitHub keeps one pending job per
+  group, so a third queued review replaces the pending one and needs a re-run (#882).
+
+- Every `actions/checkout` that does not push sets `persist-credentials: false`, and the
+  redaction module's own URI patterns no longer flag in the CI secret scan, which allows
+  one detector in one file rather than the whole file (#885).
+
+- The structural eval baseline is regenerated with the three multi-round cases
+  replayable: `inconclusive_rate` falls from 0.0816 to 0.0204 (3 of 49 cases were
+  permanently blocked), with no behaviour change (#892).
 ### Security
 
 - Agent privilege drop fails closed: a run that cannot drop root aborts

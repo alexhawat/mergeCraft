@@ -961,6 +961,26 @@ def after_terminal_submission_recorded(
     maybe_audit_blocking_terminal_submission(ctx, recorded)
 
 
+def _adopt_review_mode_for_accepted_verdict(ctx: ToolContext) -> None:
+    """Record a modeless run as ``Review`` once its terminal verdict is accepted.
+
+    Some agents submit a verdict without ever calling ``select_mode``. Every
+    Review-mode gate keys on ``selected_mode``, so such a run published neither
+    its verdict nor its run record, and its progress went to a separate issue
+    comment (PR #1021). An accepted ``submit_review_verdict`` is a Review run;
+    an explicitly selected mode is never overwritten.
+    """
+    if ctx.tool_state.selected_mode is not None:
+        return
+    if not any(mode.name == "Review" for mode in ctx.modes):
+        return
+    ctx.tool_state.selected_mode = "Review"
+    logger.warning(
+        "submit_review_verdict: no mode was selected; recording this run as Review so "
+        "the run publishes the verdict and its run record"
+    )
+
+
 def submit_review_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         ensure_review_scope_for_terminal(ctx.tool_state, "submit_review_verdict")
@@ -1057,6 +1077,7 @@ def submit_review_verdict_tool(ctx: ToolContext):
             findings=normalized_findings,
         )
         replayed = existing_id is not None and recorded.id == existing_id
+        _adopt_review_mode_for_accepted_verdict(ctx)
         after_terminal_submission_recorded(ctx, recorded, replayed=replayed)
         ctx.tool_state.review_phase = ReviewPhase.SUBMIT.value
         stamp_review_phase_on_active_span(ReviewPhase.SUBMIT)

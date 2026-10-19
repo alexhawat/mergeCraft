@@ -18,6 +18,7 @@ from mergecraft.analyzers.finding import Finding
 from mergecraft.evidence.packet import (
     PACKET_SCHEMA_VERSION,
     AgentMetadata,
+    AnalyzersEvidence,
     Decision,
     DeterministicCheck,
     MergeEvidencePacket,
@@ -172,6 +173,7 @@ def build_packet(
     mode_prompt_versions: list[ModePromptVersion] | None = None,
     dispatched_lens_ids: list[str] | None = None,
     agent_terminal_verdict: Literal["approve", "request_changes"] | None = None,
+    analyzers: AnalyzersEvidence | None = None,
 ) -> MergeEvidencePacket:
     """Assemble a :class:`MergeEvidencePacket` from structured sources.
 
@@ -260,6 +262,7 @@ def build_packet(
         trajectory=_coerce_trajectory(trajectory),
         mode_prompt_versions=list(mode_prompt_versions) if mode_prompt_versions else None,
         agent_terminal_verdict=agent_terminal_verdict,
+        analyzers=analyzers,
     )
 
     # ``trajectory`` now lands as a sibling field (Batch C, #43). The rest --

@@ -13,9 +13,11 @@ from mergecraft.review_taxonomy import WITHDRAWN_FINDINGS_HEADING, finding_finge
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from mergecraft.analyzers.dispositions import DispositionLedger
     from mergecraft.analyzers.finding import Finding
 
 _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+_FULL_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _NEW_FILE_RE = re.compile(r"^new file mode ")
 _DEV_NULL_RE = re.compile(r"^--- /dev/null")
 _MIGRATION_PREFIXES: tuple[str, ...] = (
@@ -336,6 +338,66 @@ def iter_added_diff_lines(diff_text: str) -> Iterator[tuple[str, int, str]]:
             new_line += 1
 
 
+@dataclass(frozen=True, slots=True)
+class DiffHunk:
+    """One hunk of a unified diff: its file, old/new ranges and prefixed lines."""
+
+    path: str
+    old_start: int
+    old_count: int
+    new_start: int
+    new_count: int
+    lines: tuple[str, ...]
+
+
+def iter_diff_hunks(diff_text: str) -> Iterator[DiffHunk]:
+    """Yield every hunk of a unified diff with its ``' '``/``'+'``/``'-'``-prefixed lines.
+
+    Shares :class:`_DiffPathTracker` with :func:`parse_diff_scope` and
+    :func:`iter_added_diff_lines`, so all three attribute a hunk to the same file.
+    """
+    tracker = _DiffPathTracker()
+    header: tuple[str, int, int, int, int] | None = None
+    body: list[str] = []
+
+    def _flush() -> DiffHunk | None:
+        if header is None:
+            return None
+        path, old_start, old_count, new_start, new_count = header
+        return DiffHunk(path, old_start, old_count, new_start, new_count, tuple(body))
+
+    for raw_line in diff_text.splitlines():
+        if tracker.consume(raw_line):
+            flushed = _flush()
+            if flushed is not None:
+                yield flushed
+            header, body = None, []
+            continue
+        current_path = tracker.current_path
+        if current_path is None:
+            continue
+        hunk_match = _FULL_HUNK_RE.match(raw_line)
+        if hunk_match:
+            flushed = _flush()
+            if flushed is not None:
+                yield flushed
+            tracker.enter_hunk()
+            header = (
+                current_path,
+                int(hunk_match.group(1)),
+                int(hunk_match.group(2) if hunk_match.group(2) is not None else "1"),
+                int(hunk_match.group(3)),
+                int(hunk_match.group(4) if hunk_match.group(4) is not None else "1"),
+            )
+            body = []
+            continue
+        if header is not None and raw_line[:1] in {" ", "+", "-"}:
+            body.append(raw_line)
+    flushed = _flush()
+    if flushed is not None:
+        yield flushed
+
+
 def _record_exception_paths(
     path: str,
     *,
@@ -384,13 +446,32 @@ def _matches_scope_exception(path: str, scope: DiffScope) -> bool:
     return path in scope.changed_dependency_manifests
 
 
-def filter_to_diff(findings: list[Finding], *, diff_text: str) -> list[Finding]:
+def _record_out_of_scope(ledger: DispositionLedger | None, finding: Finding) -> None:
+    if ledger is None:
+        return
+    location = f"{finding.path}:{finding.start_line}" if finding.start_line else finding.path
+    ledger.record_dropped(
+        finding,
+        "dropped:out_of_scope",
+        stage="out_of_scope",
+        reason=f"{location} is outside every diff hunk and is not a scope-exception path",
+    )
+
+
+def filter_to_diff(
+    findings: list[Finding],
+    *,
+    diff_text: str,
+    ledger: DispositionLedger | None = None,
+) -> list[Finding]:
     """Drop findings whose line ranges do not intersect any diff hunk."""
     scope = parse_diff_scope(diff_text)
     kept: list[Finding] = []
     for finding in findings:
         if _line_intersects_hunks(finding.path, finding.start_line, finding.end_line, scope):
             kept.append(finding)
+        else:
+            _record_out_of_scope(ledger, finding)
     return kept
 
 
@@ -400,6 +481,7 @@ def apply_scope_exceptions(
     diff_text: str,
     repo_root: Path | None = None,
     scope: DiffScope | None = None,
+    ledger: DispositionLedger | None = None,
 ) -> list[Finding]:
     """Keep findings on changed hunks or on explicit PR-scope exception paths."""
     _ = repo_root
@@ -417,6 +499,8 @@ def apply_scope_exceptions(
         on_hunk = _line_intersects_hunks(finding.path, finding.start_line, finding.end_line, scope)
         if on_hunk or _matches_scope_exception(finding.path, scope):
             kept.append(finding)
+        else:
+            _record_out_of_scope(ledger, finding)
     return kept
 
 
@@ -466,12 +550,26 @@ def introduced_by_base_diff(
 def suppress_withdrawn_findings(
     findings: list[Finding],
     learnings_text: str,
+    *,
+    ledger: DispositionLedger | None = None,
 ) -> list[Finding]:
     """Drop findings whose fingerprint appears under ``WITHDRAWN_FINDINGS_HEADING`` (D11)."""
     withdrawn = withdrawn_fingerprints(learnings_text)
     if not withdrawn:
         return findings
-    return [finding for finding in findings if finding.fingerprint not in withdrawn]
+    kept: list[Finding] = []
+    for finding in findings:
+        if finding.fingerprint not in withdrawn:
+            kept.append(finding)
+        elif ledger is not None:
+            ledger.record_dropped(
+                finding,
+                "dropped:withdrawn",
+                stage="withdrawn",
+                reason="its fingerprint is listed under the withdrawn review findings in learnings",
+                ref=finding.fingerprint,
+            )
+    return kept
 
 
 def withdrawn_fingerprints(learnings_text: str) -> frozenset[str]:
@@ -518,6 +616,7 @@ def filter_generated_scope(
     *,
     diff_text: str,
     scope: DiffScope | None = None,
+    ledger: DispositionLedger | None = None,
 ) -> list[Finding]:
     """Drop generated/minified/vendored findings policy excludes (D4)."""
     from mergecraft.classify.generated_files import ChangeSet, finding_survives_generated_policy
@@ -528,6 +627,16 @@ def filter_generated_scope(
     for finding in findings:
         if finding_survives_generated_policy(finding.path, change=change):
             kept.append(finding)
+        elif ledger is not None:
+            ledger.record_dropped(
+                finding,
+                "dropped:generated",
+                stage="generated",
+                reason=(
+                    f"{finding.path} is a generated, minified or vendored path and no "
+                    "generator config changed"
+                ),
+            )
     return kept
 
 
@@ -538,6 +647,7 @@ def scope_findings(
     repo_root: Path | None = None,
     learnings_text: str = "",
     scope: DiffScope | None = None,
+    ledger: DispositionLedger | None = None,
 ) -> list[Finding]:
     """Apply diff scoping, exceptions, generated policy, and withdrawn suppression."""
     parsed = scope if scope is not None else parse_diff_scope(diff_text)
@@ -546,9 +656,10 @@ def scope_findings(
         diff_text=diff_text,
         repo_root=repo_root,
         scope=parsed,
+        ledger=ledger,
     )
-    scoped = filter_generated_scope(scoped, diff_text=diff_text, scope=parsed)
-    return suppress_withdrawn_findings(scoped, learnings_text)
+    scoped = filter_generated_scope(scoped, diff_text=diff_text, scope=parsed, ledger=ledger)
+    return suppress_withdrawn_findings(scoped, learnings_text, ledger=ledger)
 
 
 def line_intersects_hunks(
@@ -559,6 +670,7 @@ def line_intersects_hunks(
 
 
 __all__ = [
+    "DiffHunk",
     "DiffScope",
     "annotate_introduced_by_pr",
     "apply_scope_exceptions",
@@ -568,6 +680,7 @@ __all__ = [
     "filter_to_diff",
     "introduced_by_base_diff",
     "iter_added_diff_lines",
+    "iter_diff_hunks",
     "line_intersects_hunks",
     "parse_diff_scope",
     "scope_findings",

@@ -224,11 +224,7 @@ def _run_full_comparison_pipeline(
     from mergecraft.analyzers.registry import get_manifest
 
     settings_mod = import_module("mergecraft.config.settings")
-    monkeypatch.setattr(
-        pipeline,
-        "_analyzers_settings",
-        lambda _root: settings_mod.AnalyzersSettings(baseComparison="full"),
-    )
+    pinned = settings_mod.AnalyzersSettings(baseComparison="full")
     monkeypatch.setattr(pipeline, "detect_enabled", lambda **_: [get_manifest("ruff")])
 
     finding = _sample_finding("src/fixture_app/handler.py", 12)
@@ -245,6 +241,7 @@ def _run_full_comparison_pipeline(
         tier="trusted",
         offline=offline,
         shell="restricted",
+        analyzers_settings=pinned,
     )
     assert recorded, "the pipeline never reached annotate_introduced_by_pr"
     return recorded
@@ -423,9 +420,7 @@ def test_out_of_root_sarif_label_survives_to_the_published_finding(
     from mergecraft.analyzers.registry import get_manifest
 
     settings_mod = import_module("mergecraft.config.settings")
-    monkeypatch.setattr(
-        pipeline, "_analyzers_settings", lambda _root: settings_mod.AnalyzersSettings()
-    )
+    pinned = settings_mod.AnalyzersSettings()
 
     manifest = get_manifest("actionlint")
     monkeypatch.setattr(pipeline, "detect_enabled", lambda **_: [manifest])
@@ -446,6 +441,7 @@ def test_out_of_root_sarif_label_survives_to_the_published_finding(
         tier="trusted",
         diff_text="",
         shell="restricted",
+        analyzers_settings=pinned,
     )
 
     assert state.ran is True
