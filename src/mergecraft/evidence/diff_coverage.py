@@ -392,17 +392,24 @@ def _read_paths(command: str | None) -> list[str]:
         return []
     operands: list[str] = []
     skip_next = False
+    consumed_pattern = False
+    value_options = (
+        {"-e", "--expression", "-f", "--file"}
+        if tool in {"sed", "awk"}
+        else {"-n", "--lines", "-c", "--bytes"}
+    )
     for token in argv[1:]:
         if skip_next:
             skip_next = False
             continue
-        if token in {"-n", "--lines", "-e", "--expression", "-f", "--file"}:
+        if token in value_options:
             skip_next = True
+            consumed_pattern = consumed_pattern or tool in {"sed", "awk"}
             continue
         if token.startswith("-"):
             continue
         operands.append(token)
-    if tool in {"sed", "awk"} and operands:
+    if tool in {"sed", "awk"} and operands and not consumed_pattern:
         operands = operands[1:]
     return operands
 

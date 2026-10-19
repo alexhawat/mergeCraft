@@ -105,6 +105,19 @@ def test_partial_diff_read_names_the_unread_ranges() -> None:
     assert "one-time nudge" in nudge
 
 
+def test_command_fallback_finds_a_sed_read_of_the_diff_path() -> None:
+    """A constructed record (no ``diff_read_path``) still parses the command."""
+    diff_path = "/tmp/mergecraft/pr-7.diff"
+    breakdown = compute_diff_coverage(
+        _DIFF,
+        [_call(1, command=f"sed -n '1,12p' {diff_path}")],
+        diff_path=diff_path,
+    )
+
+    assert breakdown.observed is True
+    assert breakdown.covered_lines > 0
+
+
 def test_source_file_read_covers_that_files_added_ranges_only() -> None:
     breakdown = compute_diff_coverage(
         _DIFF,
