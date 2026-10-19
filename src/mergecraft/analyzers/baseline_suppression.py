@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,10 +17,19 @@ from mergecraft.review_policy.paths import normalize_repo_path
 from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
+    from mergecraft.analyzers.dispositions import DispositionLedger
     from mergecraft.analyzers.finding import Finding
     from mergecraft.analyzers.manifest import AnalyzerManifest
+    from mergecraft.config.settings import AnalyzersSettings
 
 TrustTier = Literal["trusted", "untrusted"]
+
+#: Analyzers that read the PR's diff rather than the tree. They have no base-side run —
+#: at base there is no diff, so they would only ever skip — and their findings are
+#: introduced by the PR by construction. Base collection leaves them out, and the
+#: head-vs-base completeness check must not expect them, or a default-enabled diff
+#: analyzer would switch baseline suppression off for every PR.
+DIFF_ONLY_ANALYZER_IDS: frozenset[str] = frozenset({"self-silencing"})
 
 _MIN_CHANGED_LINES_FOR_BASELINE = 12
 
@@ -94,6 +105,32 @@ def _checkout_base_worktree(repo_root: Path, base_ref: str) -> Path | None:
     return worktree
 
 
+def _hand_worktree_to_drop_target(worktree: Path) -> None:
+    """Re-own the base worktree to the analyzer drop target on the root backend (#878).
+
+    The worktree is a fresh ``mkdtemp`` tree owned by the root orchestrator, so an
+    analyzer dropped to the agent UID could not even traverse it and the base run
+    would read as unavailable — silently turning baseline suppression off. Nothing
+    here is PR-controlled: it is a detached checkout of the base ref. Best effort
+    and total: a failure leaves the base run to degrade exactly as before.
+    """
+    if sys.platform == "win32" or os.geteuid() != 0:
+        return
+    from mergecraft.analyzers import sandbox as sandbox_mod
+    from mergecraft.main import _ConfigurationError
+
+    try:
+        if not sandbox_mod.build_privilege_drop_argv():
+            return
+        uid = sandbox_mod.resolve_drop_target_uid()
+        gid = sandbox_mod.resolve_drop_target_gid()
+        if uid is None or gid is None:
+            return
+        sandbox_mod.hand_tree_to_drop_target(worktree, boundary=worktree, uid=uid, gid=gid)
+    except (_ConfigurationError, OSError) as exc:
+        logger.info("baseline suppression: could not hand {} to the drop target: {}", worktree, exc)
+
+
 def _remove_base_worktree(repo_root: Path, worktree: Path) -> None:
     subprocess.run(
         git_argv(["-C", str(repo_root), "worktree", "remove", "--force", str(worktree)]),
@@ -113,6 +150,7 @@ def collect_base_analyzer_findings(
     base_ref: str | None = None,
     offline: bool = False,
     allow_repo_binaries: bool = True,
+    analyzers_settings: AnalyzersSettings | None = None,
 ) -> BaseCollectionResult:
     """Run the same enabled analyzers at ``base_ref`` and return their findings."""
     from mergecraft.analyzers.adapters import run_adapter
@@ -135,11 +173,14 @@ def collect_base_analyzer_findings(
     worktree = _checkout_base_worktree(repo_root, resolved)
     if worktree is None:
         return BaseCollectionResult(findings=[], collected=False)
+    _hand_worktree_to_drop_target(worktree)
 
     base_findings: list[Finding] = []
     succeeded: set[str] = set()
     try:
         for manifest in manifests:
+            if manifest.id in DIFF_ONLY_ANALYZER_IDS:
+                continue
             try:
                 result = run_adapter(
                     tool_id=manifest.id,
@@ -149,6 +190,7 @@ def collect_base_analyzer_findings(
                     base_ref=resolved,
                     offline=offline,
                     allow_repo_binaries=allow_repo_binaries,
+                    analyzers_settings=analyzers_settings,
                 )
             except (KeyError, OSError, ValueError) as exc:
                 logger.info(
@@ -189,14 +231,21 @@ def suppress_baseline_findings(
     diff_text: str,
     base_comparison: str,
     scope: DiffScope | None = None,
+    ledger: DispositionLedger | None = None,
 ) -> SuppressionResult:
-    """Suppress analyzer hits that already existed on base (D3)."""
+    """Suppress analyzer hits that already existed on base (D3).
+
+    With a ``ledger``, each suppressed hit is recorded ``dropped:baseline`` naming the
+    base finding it matched, and every audit decision is persisted on the ledger
+    instead of only being logged.
+    """
     if base_comparison != "full":
         return SuppressionResult(reported=list(head_findings))
 
     touched = _touched_paths(diff_text, scope=scope)
     base_by_fingerprint = {finding.fingerprint: finding for finding in base_findings}
-    base_identities = {_baseline_identity(finding) for finding in base_findings}
+    base_by_identity = {_baseline_identity(finding): finding for finding in base_findings}
+    base_identities = set(base_by_identity)
 
     reported: list[Finding] = []
     suppressed: list[Finding] = []
@@ -210,13 +259,25 @@ def suppress_baseline_findings(
         )
         if preexisting and path not in touched:
             suppressed.append(finding)
+            audit_reason = "pre-existing analyzer hit on untouched line"
             audit_trail.append(
                 SuppressionAuditEntry(
                     fingerprint=finding.fingerprint,
                     decision="suppressed",
-                    reason="pre-existing analyzer hit on untouched line",
+                    reason=audit_reason,
                 )
             )
+            if ledger is not None:
+                match = base_by_fingerprint.get(finding.fingerprint) or base_by_identity.get(
+                    _baseline_identity(finding)
+                )
+                ledger.record_dropped(
+                    finding,
+                    "dropped:baseline",
+                    stage="baseline",
+                    reason=f"{audit_reason} (matched base hit {match.fingerprint if match else '?'})",
+                    ref=match.fingerprint if match is not None else None,
+                )
             continue
         reported.append(finding)
         audit_trail.append(
@@ -227,6 +288,11 @@ def suppress_baseline_findings(
             )
         )
 
+    if ledger is not None:
+        for entry in audit_trail:
+            ledger.add_suppression_audit(
+                fingerprint=entry.fingerprint, decision=entry.decision, reason=entry.reason
+            )
     return SuppressionResult(reported=reported, suppressed=suppressed, audit_trail=audit_trail)
 
 

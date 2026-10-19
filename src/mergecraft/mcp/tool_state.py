@@ -12,6 +12,7 @@ from loguru import logger
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from mergecraft.analyzers.dispositions import DispositionLedger
     from mergecraft.config.trust_policy import AgentSandboxDecision
     from mergecraft.findings.ledger import FindingLedger
     from mergecraft.modes import Mode
@@ -297,6 +298,14 @@ class AnalyzerRunState:
     # retained per covered scope, so a partial rerun cannot erase a finding
     # produced for a file it did not cover.
     covered_scope: AnalyzerRunKey | None = None
+    # #941 — the closed disposition ledger for this run's raw hits. ``None`` for a run
+    # that never executed an analyzer (disabled, nothing matched).
+    dispositions: DispositionLedger | None = None
+    # #942 — where the analyzer settings this run used were resolved from
+    # (``base_snapshot`` / ``base_sha`` / ``run_start_snapshot`` / ``defaults`` /
+    # ``live_load``), and why when that was a fail-closed fallback.
+    settings_resolved_from: str | None = None
+    settings_detail: str | None = None
 
     def all_rows(self) -> list[dict[str, Any]]:
         """Return every dict-shaped finding row held on this analyzer run."""
@@ -328,6 +337,10 @@ class CiEvidenceState:
     substitutions: list[dict[str, Any]] = field(default_factory=list)
     run_notes: list[str] = field(default_factory=list)
     skip_reasons: list[str] = field(default_factory=list)
+    # #941 — the disposition ledger for SARIF ingested via ``ciEvidence.sarifArtifacts``.
+    sarif_dispositions: DispositionLedger | None = None
+    # #891 — the base-branch runs the CI-intelligence producer used to attribute failures.
+    base_branch_runs: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -335,6 +348,9 @@ class ToolState:
     repos: dict[str, RepoToolState]
     primary_repo_key: str
     prepush_failure_count: int = 0
+    # #942 — cache for ``analyzers.settings_pin.resolve_pinned_analyzer_settings``:
+    # a ``(key, PinnedAnalyzerSettings)`` pair, so ``git`` reads the PR base once.
+    pinned_analyzer_settings: Any = None
     background_processes: dict[str, BackgroundProcess] = field(default_factory=dict)
     selected_mode: str | None = None
     # Built-in + custom ``Mode`` objects resolved at ``main()`` time

@@ -497,6 +497,44 @@ def record_ci_findings(state: ToolState, findings: Iterable[Finding]) -> list[Fi
     return changed
 
 
+def record_base_branch_runs(state: ToolState, rows: Iterable[dict[str, Any]]) -> None:
+    """Record the base-branch runs the CI-intelligence producer used (#891).
+
+    The recorded rows are the audit trail for a failure cleared as pre-existing: a
+    reader can see which base run, at which commit, concluded what.
+    """
+    evidence = _evidence_state(state)
+    seen = {(row.get("run_id"), row.get("fingerprint")) for row in evidence.base_branch_runs}
+    for row in rows:
+        key = (row.get("run_id"), row.get("fingerprint"))
+        if key not in seen:
+            evidence.base_branch_runs.append(dict(row))
+            seen.add(key)
+
+
+def record_sarif_findings(state: ToolState, findings: Iterable[Finding]) -> list[Finding]:
+    """Record SARIF-ingested findings under the disposition-ledger contract (#941).
+
+    Every ingested hit is registered raw before the evidence store dedupes anything;
+    afterwards the survivors close the ledger, and a hit the store collapsed into an
+    equal-fingerprint survivor is recorded ``merged``. Anything left unresolved is an
+    orphan the packet names.
+    """
+    from mergecraft.analyzers.dispositions import DispositionLedger
+
+    incoming = list(findings)
+    if not incoming:
+        return []
+    evidence = _evidence_state(state)
+    if evidence.sarif_dispositions is None:
+        evidence.sarif_dispositions = DispositionLedger()
+    ledger = evidence.sarif_dispositions
+    ledger.register_raw(incoming)
+    changed = record_ci_findings(state, incoming)
+    ledger.close(ci_evidence_findings(state), merge_by_fingerprint=True)
+    return changed
+
+
 def record_gate_substitutions(
     state: ToolState, substitutions: Iterable[GateSubstitution]
 ) -> list[dict[str, Any]]:
@@ -537,9 +575,11 @@ __all__ = [
     "ci_evidence_lines",
     "declared_check_run",
     "declared_gate_findings",
+    "record_base_branch_runs",
     "record_ci_findings",
     "record_ci_ingest_metadata",
     "record_gate_substitutions",
+    "record_sarif_findings",
     "sarif_findings",
     "substitute_declared_gates",
 ]

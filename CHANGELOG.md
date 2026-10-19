@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Analyzer disposition ledger: every raw analyzer hit gets a stable `hit_id` and
+  ends `kept`, `merged`, `downgraded` or `dropped:<stage>` with a required reason.
+  The merge evidence packet (schema `1.14.0`) carries the ledger, per-stage counts
+  and the baseline-suppression audit rows that were previously only logged; the
+  pre-merge Analyzers row reads like `ruff 14 raw → 3 kept (9 out_of_scope, 2
+  baseline)`. SARIF ingested via `ciEvidence.sarifArtifacts` follows the same
+  contract (#941).
+- `self-silencing` analyzer (in-process, every trust tier, no shell): reports added
+  suppression markers (`# nosec`, `# noqa`, `// eslint-disable-next-line`,
+  `#[allow(..)]`, `//nolint`, …) with the rule codes they silence, and loosening
+  edits to `.mergecraft/config.yaml`, `ruff.toml` / `pyproject.toml`, ESLint config
+  and scanner ignore files. Edits to `.mergecraft/**` and analyzer/linter config
+  also keep a PR out of the `eligible` blast-radius lane (#942).
+- `analyze_ci_failures` reads the base branch's recent runs itself, so a
+  same-fingerprint base failure clears a failure as pre-existing with no
+  agent-supplied arguments; the runs it used are recorded in the result and the CI
+  evidence. A passing or unrecognised base status never clears one (#891).
+- Opt-in `gherkin-lint` catalog analyzer: syntax and structure lint for changed
+  `.feature` files, run through the repo's own pinned `gherkin-lint`. Disabled by
+  default because the catalog has no managed npm runtime; enable it with
+  `analyzers.overrides.gherkin-lint.enabled: true` (#854).
+
+### Changed
+
+- A PR's own `analyzers.*` configuration no longer applies to its own review. The
+  analyzer settings (`enabled`, `overrides.<id>.enabled`, the `antislop` `rules` and
+  `ignore`, `baseComparison`, `inlineBudget`, `impact`) are resolved from the PR's
+  base — the operator-owned base snapshot, or the base commit's
+  `.mergecraft/config.yaml` — and a head-side change is reported by
+  `self-silencing` instead of applied. A symlinked or unreadable base config falls
+  back to built-in defaults with a named reason. **Fix:** land analyzer-config
+  changes in their own PR; they take effect from the next PR on (#942).
+
+- A run whose analyzer disposition ledger is open — a pipeline stage lost a raw hit
+  without recording why — now ends with a `neutral` approval conclusion instead of
+  possibly `success`, and a run-scoped finding names the orphaned hits. A blocker
+  still outranks it. **Fix:** none for consumers; the finding names the stage to fix
+  (#941).
+
 ### Fixed
 
 - A workspace review no longer fails closed with "checkout integrity failure:
@@ -42,6 +83,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Codex rung recorded `request_changes`, published no review, and left nothing in
   the evidence packet to distinguish that from never having tried; only the
   failing `mergecraft-approval` check showed it.
+- agentsec no longer reads a changed instruction or MCP manifest whose symlink
+  resolves outside the repository root; the refusal is logged and reported as a
+  named skip when it was the only candidate (#851).
+- Numeric metadata such as `input_tokens=120` survives log redaction; credential
+  named keys and long numeric runs still redact (#877).
+- Trusted-tier catalog analyzers drop to the agent UID on the root backend, with
+  their scratch tree and the baseline worktree handed to that UID first; an
+  unlandable drop reports `unavailable` instead of running as root (#878).
+- `run_checks` refuses to run an untrusted static gate without a sandbox context,
+  whatever `shell` says, so the executor fails closed even if a caller does not
+  (#887).
 
 ## [0.1.0a3] — 2026-10-17
 
