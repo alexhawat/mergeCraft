@@ -24,7 +24,7 @@ RUN tar -xzf /tmp/gh-source.tar.gz --strip-components=1 -C /src/gh \
         -ldflags="-s -w -X github.com/cli/cli/v2/internal/build.Version=2.100.0-mergecraft.1" \
         -o /out/gh ./cmd/gh
 
-FROM python:3.14-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f
+FROM python:3.15-slim-bookworm@sha256:2a41267d9de9d358f77a1de356e0f16ecba8d39827855be0ce9ef4792edce402
 
 ARG SOURCE_DATE_EPOCH
 ARG SOURCE_REVISION=""
