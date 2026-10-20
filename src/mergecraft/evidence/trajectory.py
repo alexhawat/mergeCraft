@@ -14,6 +14,15 @@ the record is populated with no configuration, no sinks, and no dependency on
 the tracing programme (#56). A richer external trace is declared here as
 *optional enrichment* (:class:`ExternalTraceRef`) and is never required.
 
+**Driver-native exec (#858).** The Codex, Claude and OpenCode drivers run shell
+commands natively, outside that door. Each driver's stream consumer therefore
+calls :func:`record_driver_exec` when one finishes, so a failing command, a
+timeout, and a later passing re-run of the same command become ``shell`` rows with
+the real ``outcome_ok`` and, for an environment or transient failure, a
+``failure_class`` stamped from the typed signals the driver has
+(:func:`classify_failure_at_execute`). Recording is evidence only: it is total,
+never raises, and changes no review decision.
+
 **What that substrate can and cannot see — read this before trusting a check.**
 MCP sees every tool mergeCraft exposes: ``shell``, ``git``, ``checkout_pr``,
 ``run_analyzers``, ``run_static_checks``, ``create_pull_request_review`` and the
@@ -48,6 +57,8 @@ Exports:
     build_trajectory_record: Assemble the record from run state (pure).
     classify_tool_intent: Map a tool call onto its trajectory intent.
     classify_failure_class: Derive a failure class from recorded error text.
+    classify_failure_at_execute: Derive it from the signals a driver has at execute.
+    record_driver_exec: Append one driver-native exec call to the run's state.
     record_tool_call: Append one mediated call to the run's state.
 """
 
@@ -55,9 +66,11 @@ from __future__ import annotations
 
 import hashlib
 import posixpath
+import re
 import shlex
 from typing import TYPE_CHECKING, Any, Final, Literal, Self
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mergecraft.analyzers.redact import redact_secrets
@@ -87,9 +100,9 @@ with the reason in ``error``.
 
 # JSON-RPC ``-32602`` and pydantic/jsonschema validation shapes recorded in error
 # text. Classifying here by string match is weaker than inspecting the typed
-# exception at ``mcp/shared.py::execute`` (plan 13's seam) — follow-up:
-# ``classify_failure_at_execute`` should stamp ``failure_class`` at the choke
-# point so this module never re-parses prose.
+# exception at ``mcp/shared.py::execute`` (plan 13's seam). ``classify_failure_at_execute``
+# is the typed-signal entry for the driver-native exec choke (#858); the MCP door
+# still re-parses prose because stamping there is a different file's seam.
 _SCHEMA_FAILURE_MARKERS: Final[tuple[str, ...]] = (
     "-32602",
     "invalid arguments for",
@@ -1052,9 +1065,12 @@ def record_tool_call(
 
     ``payload_hash`` and ``publication_incomplete`` are set only on the
     orchestrator's publish step: the receipt's binding and the recorded
-    findings GitHub's inline view lacks. ``failure_class`` overrides the class
-    derived from ``error``; the publish step passes ``"declined"`` when it does
-    not publish a recorded verdict.
+    findings GitHub's inline view lacks.
+
+    ``failure_class`` overrides the class derived from ``error``. A caller that
+    already knows it from typed signals stamps it (:func:`record_driver_exec`),
+    and the publish step passes ``"declined"`` when it does not publish a
+    recorded verdict.
     """
     command_raw = str((arguments or {}).get("command") or "") or None
     error_text = _truncate(redact_secrets(error), _MAX_ERROR_CHARS) if error else None
@@ -1085,6 +1101,193 @@ def record_tool_call(
     )
     state.tool_calls.append(row)
     return row
+
+
+# Markers that mean "the network or a remote hiccuped", for the output of a command
+# a driver ran natively. Deliberately narrower than ``_TRANSIENT_FAILURE_MARKERS``,
+# which classifies a short tool error: a command's output is arbitrary, and a bare
+# status code or the word "timeout" in a failing test's name must not make that
+# test failure look like a flaky network.
+_EXEC_TRANSIENT_MARKERS: Final[tuple[str, ...]] = (
+    "connection reset",
+    "reset by peer",
+    "connection timed out",
+    "operation timed out",
+    "temporarily unavailable",
+    "broken pipe",
+    "could not resolve host",
+    "temporary failure in name resolution",
+    "network is unreachable",
+    "too many requests",
+    "rate limit exceeded",
+)
+_EXEC_TRANSIENT_STATUS_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:\bhttp\s+(?:error\s+)?|returned error:\s+|status(?:\s+code)?[:=]\s*)50[234]\b"
+)
+# Only the end of a command's output explains why it stopped.
+_EXEC_OUTPUT_TAIL_CHARS: Final[int] = 2000
+_SHELL_WRAPPERS: Final[frozenset[str]] = frozenset({"bash", "sh", "zsh", "dash"})
+
+
+def _is_environment_failure(error: str) -> bool:
+    """True when the text shows the runner, not the command, is what failed."""
+    from mergecraft.agents.codex import USER_NAMESPACE_FAILURES, is_user_namespace_failure
+    from mergecraft.mcp.git import _AUTH_FAILURE_MARKERS
+
+    lowered = error.lower()
+    return (
+        is_user_namespace_failure(error)
+        or any(marker in error for marker in USER_NAMESPACE_FAILURES)
+        or any(marker in lowered for marker in _AUTH_FAILURE_MARKERS)
+        or "newuidmap" in lowered
+        or "bwrap" in lowered
+    )
+
+
+def classify_failure_at_execute(
+    error: str | None,
+    *,
+    timed_out: bool = False,
+    declined: bool = False,
+) -> FailureClass:
+    """Derive a failure class where a driver executes a command (#858).
+
+    Typed signals win over prose: a command the driver's policy declined is
+    ``policy``, and one that ran out its time budget is ``transient``. Only then
+    is the tail of the command's output read, and only for the environment and
+    network shapes that are unambiguous in arbitrary output. Anything else is
+    ``unknown``: an ordinary non-zero exit is a failed command, not a classified
+    infrastructure fault.
+    """
+    if declined:
+        return "policy"
+    if timed_out:
+        return "transient"
+    if not error:
+        return "unknown"
+    if _is_environment_failure(error):
+        return "environment"
+    lowered = error.lower()
+    if any(marker in lowered for marker in _EXEC_TRANSIENT_MARKERS) or (
+        _EXEC_TRANSIENT_STATUS_RE.search(lowered) is not None
+    ):
+        return "transient"
+    return "unknown"
+
+
+def _unwrap_shell_command(command: str) -> str:
+    """Return the command a ``bash -lc '<command>'`` wrapper runs, else ``command``.
+
+    Drivers hand the shell a wrapped string; the MCP ``shell`` tool is handed the
+    bare command. Unwrapping makes the two doors write the same signature and the
+    same intent, so a failed native run and a passing MCP re-run resolve each other.
+    """
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return command
+    if len(argv) >= 3 and argv[0].rsplit("/", maxsplit=1)[-1] in _SHELL_WRAPPERS:
+        flags = argv[1]
+        if flags.startswith("-") and "c" in flags[1:] and not flags.startswith("--"):
+            return argv[2]
+    return command
+
+
+def _exec_outcome_ok(command: str, exit_code: int) -> bool | None:
+    """Read one driver-native exit code as an outcome claim (#885).
+
+    Exit 1 is the *expected* result of a command that answers a question:
+    ``rg``/``grep`` with no match, ``git diff --quiet``, ``diff``, ``cmp``,
+    ``test``, ``[``. Claiming ``outcome_ok=False`` there turned ordinary no-match
+    searches into Critical ``unresolved-failure`` rows in every review's
+    ``run_health`` — false Critical noise, the opposite of the goal. A
+    verify-intent command (``pytest``, ``make``, a linter) is the opposite: exit 1
+    is a real failure. Exit 0 is success and anything else (>= 2, or a signal) is
+    a failure, whatever the intent.
+    """
+    if exit_code == 0:
+        return True
+    if exit_code != 1:
+        return False
+    return False if classify_tool_intent("shell", {"command": command}) == "verify" else None
+
+
+def record_driver_exec(
+    state: Any,
+    *,
+    command: object,
+    exit_code: int | None = None,
+    output: str | None = None,
+    failed: bool | None = None,
+    timed_out: bool = False,
+    declined: bool = False,
+) -> ToolCallRecord | None:
+    """Record one driver-native exec call on the run's trajectory (#858).
+
+    The Codex, Claude and OpenCode drivers execute shell commands natively, so the
+    MCP ``tools/call`` door never sees them. This is the shared choke each driver's
+    stream consumer calls when a command finishes. The row is a ``shell`` row, so it
+    shares a signature with the same command run through the MCP ``shell`` tool.
+
+    Outcome follows the signals the driver has. A zero exit is ``outcome_ok=True``.
+    A failing exit on a command that *verifies* something (``pytest``, ``make``, a
+    linter) is ``outcome_ok=False`` with the call itself ``ok`` — the command ran
+    and failed, exactly as the MCP shell tool reports it. Exit 1 on anything else
+    claims nothing: it is the normal answer of a question-answering command (``rg``
+    with no match, ``git diff --quiet``), and calling that a failed outcome put a
+    Critical row nobody could resolve into every review's ``run_health`` (#885).
+    When the tail of the output shows an environment or transient fault, or the
+    command timed out or was declined, the call is marked not ``ok`` and carries a
+    named ``failure_class`` so ``ignored-tool-error`` and
+    ``stale-assumption-after-failure`` can see it. With no signal at all
+    ``outcome_ok`` stays ``None``; none is invented.
+
+    **Total.** This is evidence, not control flow: a non-state ``state``, a
+    non-text ``command``, or any failure inside the recorder returns ``None``
+    after a debug log and never raises, so it can never fail the tool call it
+    describes or change a review decision.
+    """
+    try:
+        if not isinstance(command, str) or not command.strip():
+            return None
+        if not hasattr(state, "tool_calls"):
+            return None
+        bare = _unwrap_shell_command(command.strip())
+        tail = (output or "")[-_EXEC_OUTPUT_TAIL_CHARS:]
+        failure_class: FailureClass = "unknown"
+        error: str | None = None
+        ok = True
+        outcome_ok: bool | None = None
+        if declined:
+            ok, outcome_ok, failure_class = False, False, "policy"
+            error = "command declined by the driver's approval policy"
+        elif timed_out:
+            ok, outcome_ok, failure_class = False, False, "transient"
+            error = f"command timed out: {tail}".strip()
+        else:
+            if exit_code is not None:
+                outcome_ok = _exec_outcome_ok(bare, exit_code)
+            elif failed:
+                outcome_ok = False
+            else:
+                outcome_ok = None
+            if outcome_ok is False:
+                detected = classify_failure_at_execute(tail)
+                if detected in {"environment", "transient"}:
+                    ok, failure_class = False, detected
+                    error = tail or f"command exited {exit_code}"
+        return record_tool_call(
+            state,
+            tool="shell",
+            arguments={"command": bare},
+            ok=ok,
+            outcome_ok=outcome_ok,
+            error=error,
+            failure_class=failure_class,
+        )
+    except Exception as exc:  # an audit trail never breaks a tool call
+        logger.debug("trajectory: failed to record driver exec — {}", exc)
+        return None
 
 
 def outcome_ok_from_result(result: Any) -> bool | None:

@@ -37,6 +37,7 @@ from mergecraft.agents.openai_compatible_gateways import (
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
+    INFRA_REASON_KEY,
     STDERR_DRAIN_JOIN_TIMEOUT_S,
     AgentResult,
     AgentRunContext,
@@ -57,7 +58,10 @@ from mergecraft.types import (
     format_mcp_tool_ref,
 )
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
-from mergecraft.utils.provider_failure import is_retryable_cli_failure
+from mergecraft.utils.provider_failure import (
+    is_expired_subscription_credential,
+    is_retryable_cli_failure,
+)
 from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
@@ -66,6 +70,15 @@ if TYPE_CHECKING:
     from mergecraft.tracing.tracer import Tracer
 
 CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
+# The named reason for a dead subscription login (#922). It tells the operator the
+# two commands that fix it, so the check summary needs no log to act on. There is
+# no scheduled canary behind it on purpose: exercising the credential to find out
+# whether it works refreshes it, which spends the stored refresh token (#970).
+CODEX_CREDENTIAL_EXPIRED_REASON = (
+    "reviewer credential expired — re-authenticate "
+    f"(mergecraft auth codex, then gh secret set {CODEX_AUTH_ENV})"
+)
+CODEX_CREDENTIAL_EXPIRED_KIND = "reviewer_credential_expired"
 # A Codex ``config.toml`` is built as a nested mapping and rendered once; a
 # nested value is a table, a scalar is a key in the table that holds it.
 TomlTable: TypeAlias = dict[str, "str | bool | TomlTable"]
@@ -295,6 +308,23 @@ def _resolved_parent_credentials(ctx: AgentRunContext) -> dict[str, str]:
         build_agent_env("codex", model=ctx.resolved_model),
         model=ctx.resolved_model,
     )
+
+
+def _uses_subscription_login(ctx: AgentRunContext) -> bool:
+    """Return whether this run's Codex auth is the ChatGPT-subscription login (#922).
+
+    ``resolve_codex_broker_posture`` is the single place that decides the auth
+    mode, and a usable ``CODEX_AUTH_JSON`` makes it ``subscription`` even when an
+    API key is also present — the same precedence ``_setup_codex_auth`` uses to
+    write ``auth.json``. Only that mode can report a retired refresh token; on an
+    API-key run the phrase means something else, or nothing (#1009).
+    """
+    credentials = _resolved_parent_credentials(ctx)
+    posture = resolve_codex_broker_posture(
+        codex_auth_json=credentials.get(CODEX_AUTH_ENV, ""),
+        openai_api_key=credentials.get(OPENAI_API_KEY_ENV, ""),
+    )
+    return posture.auth_mode == "subscription"
 
 
 def _codex_working_dir(ctx: AgentRunContext) -> str:
@@ -770,6 +800,7 @@ def _run_codex_streaming(
         model_id=model or "default",
         capture_policy=capture_policy,
         input_prompt=prompt,
+        tool_state=ctx.tool_state,
     )
 
     try:
@@ -841,6 +872,29 @@ def _run_codex_streaming(
                 CODEX_SANDBOX_UNSANDBOXED,
             )
             error = f"{hint}\n\ncodex stderr:\n{error}"
+        # A retired subscription login is infrastructure, not a review failure,
+        # and no retry against the same login can succeed (#922). Only a run
+        # actually using that login can see this: an API-key run that merely
+        # quotes the phrase (a review of this very code does) must fall through
+        # to the ordinary classification below.
+        if _uses_subscription_login(ctx) and is_expired_subscription_credential(
+            stream_error, stderr_text
+        ):
+            logger.error(
+                "codex credential expired: {} — {}",
+                CODEX_CREDENTIAL_EXPIRED_REASON,
+                (stream_error or stderr_text.strip() or "no provider message")[:300],
+            )
+            return with_prompt(
+                AgentResult(
+                    success=False,
+                    output=output or None,
+                    error=f"{CODEX_CREDENTIAL_EXPIRED_REASON}\n\ncodex reported: {error}",
+                    usage=usage,
+                    metadata={INFRA_REASON_KEY: CODEX_CREDENTIAL_EXPIRED_KIND},
+                ),
+                prompt,
+            )
         # Classify against the provider's message too — a stdout-only failure
         # is invisible to a stderr-only classifier (#445, #446).
         retryable = is_retryable_cli_failure(

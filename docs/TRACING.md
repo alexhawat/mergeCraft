@@ -458,7 +458,7 @@ match wins per region:
 | Pattern | Before | After |
 |---------|--------|-------|
 | Telegram bot token | `https://api.telegram.org/bot123456:ABC/sendMessage` | `https://api.telegram.org/bot<redacted>/sendMessage` |
-| Basic auth | `https://user:pass@example.com/path` | `https://user:<redacted>@example.com/path` |
+| Basic auth | `https://u:pw@example.com/path` | `https://u:<redacted>@example.com/path` |
 | Query token (`api_key`, `access_token`, `token`, `key`, `secret`) | `https://example.com/v1/messages?api_key=sk-abc&x=1` | `https://example.com/v1/messages?api_key=<redacted>&x=1` |
 | Bearer header value | `Bearer ghp_longtoken123…` | `Bearer <redacted>` |
 | Embedded `sk-` / `ghp_` / `eyJ…` substring | `…sk-abc123def…` | `…<redacted>…` |
@@ -714,6 +714,19 @@ without touching `.mergecraft/config.yaml`:
 
 The Action wraps `${{ secrets.LOGFIRE_TOKEN }}` into `logfire-token`
 so the secret never appears in the workflow file.
+
+A `tracing-to` value outside `local_files` / `logfire` / `otel` is a
+configuration error, like a mistyped `tracing` flag. With tracing on, the Action
+ends the run as `configuration_error` and the CLI exits with the configuration
+code, with a message naming the variable (`INPUT_TRACING_TO`,
+`MERGECRAFT_TRACING_TO` or `--tracing-to`) and the value. With tracing off the
+value changes nothing about the run, so it is ignored and a warning names it.
+
+`mergecraft config tracing` lists the config files it read, the same set
+`mergecraft doctor` and `mergecraft config explain` use (the committed
+`.mergecraft/config.yaml`, `config.local.yaml` off CI, or `MERGECRAFT_CONFIG`
+when it names an existing file), and says so when `MERGECRAFT_CONFIG` names a
+file that is missing.
 
 ## CLI surface
 

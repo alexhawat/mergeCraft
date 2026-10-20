@@ -195,6 +195,16 @@ feeds it `run_succeeded=False` (`run_outcome.run_succeeded_for_outcome`), so
 this taxonomy is additive detail on top of the earlier boolean, never a
 looser gate.
 
+An agent failure that is the reviewer's infrastructure rather than the review is
+`infra_error`, not `failed`: a driver marks it with the `infra_reason` result
+metadata key (`mergecraft.agents.shared.INFRA_REASON_KEY`) and
+`main_outcome._classify_outcome` maps it. The one reason defined today is an
+expired Codex subscription login ("refresh token was already used"): the check
+summary and the run record carry *reviewer credential expired — re-authenticate*
+with the two commands that fix it, so the cause is visible without opening the
+log. Nothing probes the credential on a schedule to detect this earlier;
+refreshing it is what spends it.
+
 ### Evidence weighting
 
 What the merge-evidence packet carries, and how each signal weights:

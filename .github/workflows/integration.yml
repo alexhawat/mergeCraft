@@ -58,6 +58,7 @@ jobs:
             ${{ github.event_name == 'pull_request'
                 && format('refs/pull/{0}/merge', github.event.pull_request.number)
                 || github.ref }}
+          persist-credentials: false
       - uses: ./.github/actions/bootstrap
         with:
           python-version: ${{ matrix.python }}
@@ -120,6 +121,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
@@ -142,6 +145,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Resolve collector image
         # Pin: otel/opentelemetry-collector@sha256:1daa4312b48312dbae2d543e67b77e897dd5d9c48e7651d1416cdb417026ad06
         # (canonical copy: scripts/otel_collector_image.txt)
@@ -172,6 +177,7 @@ jobs:
           # has neither, so they answer "no" on PR builds while passing on
           # tag builds. Full history is what makes those answers truthful.
           fetch-depth: 0
+          persist-credentials: false
       - uses: ./.github/actions/bootstrap
       - name: Live-provider integration (${{ matrix.provider }})
         env:
@@ -205,6 +211,7 @@ jobs:
           # (README Action pin D25, tests/docs/support.py). A shallow fetch
           # has neither, so those answers are untruthful without full history.
           fetch-depth: 0
+          persist-credentials: false
       - uses: ./.github/actions/bootstrap
         with:
           python-version: "3.14"
