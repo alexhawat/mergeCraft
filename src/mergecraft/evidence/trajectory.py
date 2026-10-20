@@ -88,8 +88,15 @@ SOURCE_EXTERNAL_TRACE: Final[str] = "external-trace"
 Intent = Literal["read", "modify", "verify", "complete", "report", "other"]
 """What a tool call was *for*, as far as the trajectory is concerned."""
 
-FailureClass = Literal["schema", "policy", "environment", "transient", "unknown"]
-"""How a failed tool call should be interpreted by the trajectory auditor."""
+FailureClass = Literal["schema", "policy", "environment", "transient", "declined", "unknown"]
+"""How a failed tool call should be interpreted by the trajectory auditor.
+
+``declined`` is never derived from error text: the caller stamps it on a step
+that ran and chose not to act, so nothing raised and there is nothing to retry.
+The orchestrator's publish step is the one user — a recorded verdict it does not
+publish (shadow protocol, a non-review run, a rejected submission) is ``ok=False``
+with the reason in ``error``.
+"""
 
 # JSON-RPC ``-32602`` and pydantic/jsonschema validation shapes recorded in error
 # text. Classifying here by string match is weaker than inspecting the typed
@@ -1060,9 +1067,10 @@ def record_tool_call(
     orchestrator's publish step: the receipt's binding and the recorded
     findings GitHub's inline view lacks.
 
-    ``failure_class`` is stamped by a caller that already knows it from typed
-    signals (:func:`record_driver_exec`); without it a failed call's class is
-    derived from its error text.
+    ``failure_class`` overrides the class derived from ``error``. A caller that
+    already knows it from typed signals stamps it (:func:`record_driver_exec`),
+    and the publish step passes ``"declined"`` when it does not publish a
+    recorded verdict.
     """
     command_raw = str((arguments or {}).get("command") or "") or None
     error_text = _truncate(redact_secrets(error), _MAX_ERROR_CHARS) if error else None
