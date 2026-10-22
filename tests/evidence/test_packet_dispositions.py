@@ -85,7 +85,7 @@ def _record(ctx: ToolContext, kept: list[Finding], ledger: Any, **extra: Any) ->
 
 
 def test_schema_version_is_bumped_for_the_analyzers_section() -> None:
-    assert PACKET_SCHEMA_VERSION == "1.14.0"
+    assert PACKET_SCHEMA_VERSION == "1.15.0"
 
 
 def test_packet_persists_the_ledger_counts_entries_and_audit_rows(tmp_path: Path) -> None:

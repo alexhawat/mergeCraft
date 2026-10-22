@@ -207,6 +207,56 @@ def _scope_refusal_detail(tool_state: ToolState) -> str:
     return "no materialized diff has been recorded yet (review_phase is INIT)"
 
 
+def diff_coverage_nudge_for_state(tool_state: ToolState) -> str | None:
+    """Return the one-time unread-range nudge for this run, or ``None``.
+
+    Scope is the incremental diff when a re-review materialised one, otherwise
+    the full PR diff — the same text the reviewer was instructed to read. The
+    nudge fires at most once per run: after it is returned, the flag is set so
+    a second submission is accepted even if the agent chose not to read every
+    range. It is guidance, never a gate: nothing here changes findings,
+    verdicts, or approval.
+    """
+    from pathlib import Path
+
+    from mergecraft.evidence.diff_coverage import compute_diff_coverage, coverage_nudge
+    from mergecraft.evidence.trajectory import ToolCallRecord
+
+    if tool_state.diff_coverage_nudge_sent:
+        return None
+    repo = primary_repo_state(tool_state)
+    for raw in (repo.incremental_diff_path, repo.diff_path):
+        if not raw:
+            continue
+        path = Path(str(raw))
+        if not path.is_file():
+            continue
+        try:
+            diff_text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        calls: list[ToolCallRecord] = []
+        for row in tool_state.tool_calls:
+            try:
+                calls.append(
+                    row if isinstance(row, ToolCallRecord) else ToolCallRecord.model_validate(row)
+                )
+            except Exception:  # a malformed audit row must not block a verdict
+                continue
+        breakdown = compute_diff_coverage(diff_text, calls, diff_path=str(path))
+        nudge = coverage_nudge(breakdown, diff_path=str(path))
+        if nudge is None:
+            return None
+        tool_state.diff_coverage_nudge_sent = True
+        logger.info(
+            "diff coverage nudge: {} unread added line(s) across {} file(s)",
+            breakdown.unread_lines,
+            len(breakdown.unread_files()),
+        )
+        return nudge
+    return None
+
+
 def register_review_scope(
     tool_state: ToolState,
     *,
@@ -984,6 +1034,11 @@ def _adopt_review_mode_for_accepted_verdict(ctx: ToolContext) -> None:
 def submit_review_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         ensure_review_scope_for_terminal(ctx.tool_state, "submit_review_verdict")
+        coverage_nudge = diff_coverage_nudge_for_state(ctx.tool_state)
+        if coverage_nudge is not None:
+            # One-time, advisory, and not a gate: the next submission proceeds
+            # whether or not the agent read the named ranges.
+            raise ValueError(coverage_nudge)
         dropped = purge_malformed_agent_findings(ctx.tool_state)
         if dropped:
             logger.warning(
@@ -1199,6 +1254,7 @@ __all__ = [
     "VerdictDiagnostic",
     "after_terminal_submission_recorded",
     "build_validation_state",
+    "diff_coverage_nudge_for_state",
     "establish_offline_review_scope",
     "establish_review_scope_tool",
     "record_scope_rejection_if_blocked",

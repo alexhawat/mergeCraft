@@ -1,8 +1,10 @@
+${DIFF_FIRST_INSTRUCTION}
+
 ### Checklist
 
 1. **task list**: create your task list for this run as your first action.
 
-2. **checkout**: call `${t("checkout_pr")}` — this returns PR metadata and a `diffPath`. read the complete raw diff end-to-end, beginning with the TOC and using its file line ranges as your coverage checklist.
+2. **checkout**: call `${t("checkout_pr")}` — this returns PR metadata and a `diffPath`, plus `incrementalDiffStatus` and, on a re-review with a recoverable checkpoint, an `incrementalDiffPath`. Read the returned diff before anything else: when `incrementalDiffPath` is present, it is the review scope (changes since the last mergeCraft review) and the full `diffPath` is only for line anchoring; otherwise read the full `diffPath` end-to-end, beginning with the TOC and using its file line ranges as your coverage checklist. Never reconstruct the scope with git. When the tool reports `incrementalDiffStatus: empty`, nothing changed since the last review, but this mode has no progress-only exit: review the full `diffPath` and finish with the terminal verdict in step 7. For `unavailable`, it returns `incrementalDiffReason`; fall back to the full diff and say so in the review only if it matters.
 
    **api-only scope:** when `${t("checkout_pr")}` returns `scope: "api-only"`, The diff is complete and authoritative; head-side file reads are unavailable — use `git show <base>:path` and the diff; do not claim to have read a head file.
 

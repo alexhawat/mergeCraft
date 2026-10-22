@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_stream
+from mergecraft.agents.activity_watchdog import event_has_model_output, watchdog_for_process
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
@@ -1075,13 +1076,25 @@ def _run_claude_once(
     # P4 / AR-D2 — drain stderr concurrently from spawn. Reading stdout to EOF
     # first would deadlock a child that fills the stderr pipe buffer.
     stderr_drain = start_stderr_drain(process.stderr)
+    watchdog = watchdog_for_process(
+        process,
+        label="claude",
+        interval_s=ctx.idle_timeout_s,
+        accumulator=accumulator,
+        stderr_text=stderr_drain.text,
+    )
+
+    def _watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
+        watchdog.touch(model_output=event_has_model_output(event))
+        handler(acc, event)
+
     try:
         with track_process_group(process):
             try:
                 consume_stream(
                     raw_stream=process.stdout,
                     accumulator=accumulator,
-                    handler=handler,
+                    handler=_watched_handler,
                 )
                 returncode = wait_or_kill_process_group(
                     process,
@@ -1092,9 +1105,11 @@ def _run_claude_once(
             finally:
                 # The process group is gone; collect the drained tail so the
                 # reader thread never outlives it.
+                watchdog.stop()
                 stderr_drain.join(timeout=STDERR_DRAIN_JOIN_TIMEOUT_S)
         stderr_text = stderr_drain.text()
     finally:
+        watchdog.stop()
         # Defensive close: the streaming event order does not guarantee
         # LIFO span closure (e.g. ``message_stop`` before ``tool_result``
         # for the same assistant turn), so any still-open spans must be
@@ -1104,6 +1119,14 @@ def _run_claude_once(
             close_all_open_spans()
         except Exception as exc:
             logger.debug("claude stream handler cleanup failed: {}", exc)
+
+    if watchdog.stalled:
+        diagnostic = watchdog.diagnostic()
+        return AgentResult(
+            success=False,
+            error=diagnostic.render(),
+            metadata=diagnostic.as_metadata(),
+        )
 
     # HS4 — detection over the reads that actually happened: any ``Read`` /
     # ``Glob`` / ``Grep`` path outside the checkout and run tmpdir becomes a

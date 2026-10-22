@@ -41,6 +41,7 @@ from mergecraft.evidence.packet import (
     DispositionSection,
     MergeEvidencePacket,
     ModePromptVersion,
+    RunMetrics,
 )
 from mergecraft.utils.diff_paths import changed_paths_from_diff
 
@@ -122,6 +123,27 @@ def _read_diff_text(state: RepoToolState) -> str:
     return ""
 
 
+def _read_coverage_scope(state: RepoToolState) -> tuple[str, str | None]:
+    """Return the diff that defines *review* scope and its path.
+
+    Unlike :func:`_read_diff_text` (the whole PR, for blast radius), a
+    re-review is scoped to the incremental range: that is what the reviewer
+    was told to read, so that is what line coverage must measure. The full
+    diff is the fallback when no incremental range exists.
+    """
+    for raw in (state.incremental_diff_path, state.diff_path):
+        if not raw:
+            continue
+        path = Path(raw)
+        if not path.is_file():
+            continue
+        try:
+            return path.read_text(encoding="utf-8"), str(path)
+        except OSError as err:
+            logger.debug("evidence packet: cannot read coverage scope {} — {}", path, err)
+    return "", None
+
+
 def _diff_stats(diff_text: str) -> dict[str, object]:
     """Summarise a diff into the ``diff_stats`` shape the classifier reads.
 
@@ -132,9 +154,9 @@ def _diff_stats(diff_text: str) -> dict[str, object]:
     added = 0
     deleted = 0
     for line in diff_text.splitlines():
-        if line.startswith("+") and not line.startswith("+++"):
+        if line.startswith("+") and not line.startswith("+++ "):
             added += 1
-        elif line.startswith("-") and not line.startswith("---"):
+        elif line.startswith("-") and not line.startswith("--- "):
             deleted += 1
     return {"diff": diff_text, "lines_added": added, "lines_deleted": deleted}
 
@@ -405,6 +427,78 @@ def _finalize_packet_with_gate(
     return packet_with_decision.model_copy(update={"decision": final_decision})
 
 
+_ANALYZER_TOOLS: frozenset[str] = frozenset(
+    {"run_analyzers", "run_static_checks", "analyze_ci_failures", "analyzer_findings"}
+)
+_JUDGE_TOOLS: frozenset[str] = frozenset({"verify_agent_findings", "record_finding_verdict"})
+
+
+def _read_tool_turns(calls: Sequence[Any]) -> int:
+    """Count runs of consecutive read-intent calls.
+
+    MCP has no assistant-turn boundary, so this is the cheap proxy for
+    "batched independent reads": one read call is one turn, and N adjacent
+    read calls are one turn. Dependent calls break the run naturally.
+    """
+    turns = 0
+    previous_read = False
+    for call in calls:
+        is_read = getattr(call, "intent", None) == "read"
+        if is_read and not previous_read:
+            turns += 1
+        previous_read = is_read
+    return turns
+
+
+def _run_metrics(
+    ctx: ToolContext,
+    *,
+    trajectory: Any,
+    diff_text: str,
+) -> RunMetrics:
+    """Build the measurement-only run metrics (slice 7)."""
+    state = ctx.tool_state
+    calls = list(getattr(trajectory, "tool_calls", []) or [])
+    phases = dict(getattr(state, "phase_elapsed_s", {}) or {})
+    analyzer_ms = sum(
+        int(getattr(call, "duration_ms", 0) or 0)
+        for call in calls
+        if getattr(call, "tool", "") in _ANALYZER_TOOLS
+    )
+    judge_ms = sum(
+        int(getattr(call, "duration_ms", 0) or 0)
+        for call in calls
+        if getattr(call, "tool", "") in _JUDGE_TOOLS
+    )
+    phases.setdefault("analyzers", round(analyzer_ms / 1000, 3))
+    phases.setdefault("judge", round(judge_ms / 1000, 3))
+    for phase in ("setup", "agent", "publish"):
+        phases.setdefault(phase, 0.0)
+    added = deleted = 0
+    for line in diff_text.splitlines():
+        if line.startswith("+") and not line.startswith("+++ "):
+            added += 1
+        elif line.startswith("-") and not line.startswith("--- "):
+            deleted += 1
+    diagnostic = getattr(state, "agent_diagnostic", None)
+    diagnostic_text = None
+    if isinstance(diagnostic, dict):
+        diagnostic_text = diagnostic.get("diagnostic")
+    return RunMetrics(
+        tool_calls=len(calls),
+        read_tool_calls=sum(1 for call in calls if getattr(call, "intent", None) == "read"),
+        read_tool_turns=_read_tool_turns(calls),
+        distinct_files_read=len(set(getattr(trajectory, "files_read", []) or [])),
+        diff_lines=len(diff_text.splitlines()),
+        diff_added_lines=added,
+        diff_deleted_lines=deleted,
+        phase_elapsed_s={
+            key: round(float(value), 3) for key, value in phases.items() if value is not None
+        },
+        agent_diagnostic=diagnostic_text,
+    )
+
+
 def _assemble_packet_core(
     ctx: ToolContext,
     *,
@@ -415,6 +509,7 @@ def _assemble_packet_core(
     blast_radius: BlastRadiusClassification | None,
     trajectory: dict[str, Any] | None,
     analyzers: AnalyzersEvidence | None = None,
+    run_metrics: RunMetrics | None = None,
 ) -> MergeEvidencePacket:
     """Shared evidence shell for happy-path and fail-closed packet assembly."""
     state = ctx.tool_state
@@ -447,6 +542,7 @@ def _assemble_packet_core(
             state.terminal_submission.verdict if state.terminal_submission is not None else None
         ),
         analyzers=analyzers,
+        run_metrics=run_metrics,
     )
     return packet.model_copy(
         update={
@@ -516,12 +612,18 @@ def build_run_packet(
     from mergecraft.evidence.trajectory_audit import audit_trajectory
 
     changed_paths = changed_paths_from_diff(diff_text)
+    coverage_diff, coverage_path = _read_coverage_scope(repo_state)
     # Plan 12 D2/D4: trajectory findings are run-scoped and partition into
     # ``run_health`` at build time. They are advisory-only — never block via
     # ``blocking_findings`` — while gate-policy predicates still read them from
     # ``run_health.findings`` (see ``agents/gates._packet_attested_findings``).
     trajectory = build_trajectory_record(state, files_modified=changed_paths)
-    trajectory_findings = audit_trajectory(trajectory)
+    trajectory_findings = audit_trajectory(
+        trajectory,
+        diff_text=coverage_diff or None,
+        diff_path=coverage_path,
+    )
+    run_metrics = _run_metrics(ctx, trajectory=trajectory, diff_text=diff_text)
 
     loaded_findings, dropped_finding_rows = load_run_findings_with_drops(ctx, extra=extra_findings)
     health_finding = _dropped_findings_health(dropped_finding_rows)
@@ -548,6 +650,7 @@ def build_run_packet(
         blast_radius=blast_radius,
         trajectory=trajectory.model_dump(mode="json"),
         analyzers=analyzers_evidence,
+        run_metrics=run_metrics,
     )
     return _finalize_packet_with_gate(
         packet,

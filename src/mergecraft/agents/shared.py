@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Final, NamedTuple, Protocol
 
 from loguru import logger
 
+from mergecraft.agents.activity_watchdog import DEFAULT_IDLE_TIMEOUT_S
 from mergecraft.mcp.endpoints import mcp_role_url as _mcp_role_url
 from mergecraft.utils.git_hardening import git_argv
 
@@ -282,6 +283,8 @@ class AgentRunContext:
     mcp_auth_token: str = ""
     resolved_model: str | None = None
     verifier_denied_tools: Sequence[str] = ()
+    # Slice 6 — no-output watchdog interval for this attempt. ``0`` disables it.
+    idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S
 
 
 def mcp_auth_headers(ctx: AgentRunContext) -> dict[str, str]:

@@ -1538,6 +1538,7 @@ async def _run_setup_script_phase(ctx: RunContext) -> None:
     if setup_script_skip_reason:
         ctx.setup_script_skip_reason = setup_script_skip_reason
     ctx.setup_elapsed_s = setup_elapsed_s
+    tool_state.phase_elapsed_s["setup"] = round(setup_elapsed_s, 3)
 
 
 async def _prepare_agent_dispatch(ctx: RunContext) -> None:
@@ -1662,6 +1663,7 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
         tool_state=tool_state,
         api_token=run_context.api_token,
         resolved_model=ctx.resolved_model,
+        idle_timeout_s=float(settings.agent_idle_timeout_s),
     )
 
 
@@ -1681,6 +1683,10 @@ def _promote_and_finalize_agent_result(
     tool_context = ctx.tool_context
     chain_for_decision = ctx.chain_for_decision
     output_schema = ctx.output_schema
+    # Slice 6 — keep the watchdog diagnostic so the packet and the check
+    # summary can name *what* stalled, not only that the clock expired.
+    if (result.metadata or {}).get("idle_timeout"):
+        tool_state.agent_diagnostic = dict(result.metadata)
 
     if winning_slug:
         resolved_model = resolve_model(slug=winning_slug, respect_env_override=False)
@@ -2014,8 +2020,13 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
 
     with gha_log.group("agent-dispatch"):
         await _prepare_agent_dispatch(ctx)
+        dispatch_started = time.perf_counter()
         result = await _dispatch_agent_with_deadline(ctx)
         roster = await _run_server_roster_reviewers_if_needed(ctx)
+        if ctx.tool_state is not None:
+            ctx.tool_state.phase_elapsed_s["agent"] = round(
+                time.perf_counter() - dispatch_started, 3
+            )
         return apply_roster_failure(result, roster)
 
 
@@ -2222,7 +2233,9 @@ async def _publish_recorded_verdict(
     from mergecraft.mcp.review import publish_pull_request_review
 
     try:
+        publish_started = time.perf_counter()
         response = await publish_pull_request_review(tool_context)
+        tool_state.phase_elapsed_s["publish"] = round(time.perf_counter() - publish_started, 3)
     except Exception as exc:
         logger.warning("» the run could not publish the recorded review verdict: {}", exc)
         record_tool_call(

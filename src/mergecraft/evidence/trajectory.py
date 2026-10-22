@@ -78,8 +78,13 @@ from mergecraft.analyzers.redact import redact_secrets
 if TYPE_CHECKING:
     from mergecraft.mcp.tool_state import ToolState
 
-TRAJECTORY_SCHEMA_VERSION: Final[str] = "1.0.0"
-"""Version of the record's shape. Bump with ``PACKET_SCHEMA_VERSION`` (D7)."""
+TRAJECTORY_SCHEMA_VERSION: Final[str] = "1.1.0"
+"""Version of the record's shape. Bump with ``PACKET_SCHEMA_VERSION`` (D7).
+
+``1.1.0`` adds the optional ``diff_read_path`` / ``diff_read`` fields on
+``ToolCallRecord``. Both are omitted while unset, so a record written before
+the fields existed still validates and serialises byte-identically.
+"""
 
 SOURCE_MCP: Final[str] = "mcp-tool-calls"
 SOURCE_RUN_DIFF: Final[str] = "run-diff"
@@ -196,6 +201,9 @@ _TOOL_INTENTS: Final[dict[str, Intent]] = {
     "await_dependency_installation": "report",
     "kill_background": "report",
 }
+
+# Commands that print the whole file, so a read of them covers every added line.
+_FULL_FILE_READ_COMMANDS: Final[frozenset[str]] = frozenset({"bat", "cat", "less", "more"})
 
 # Leading argv tokens that mean "this command looked at something".
 _READ_COMMANDS: Final[frozenset[str]] = frozenset(
@@ -457,6 +465,15 @@ class ToolCallRecord(BaseModel):
     """Classifier for ``ok=False`` rows; derived from ``error`` when unset."""
     command: str | None = None
     paths: list[str] = Field(default_factory=list)
+    # A read of the materialised diff file, which lives outside the checkout and
+    # is therefore invisible to ``paths`` after sanitisation. ``(0, 0)`` means
+    # the whole diff; a positive pair is the 1-based line span the call read.
+    # Recorded from the raw command before redaction, because a run-temp path
+    # can look like a secret to the redactor.
+    diff_read_path: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    diff_read: tuple[int, int] | None = Field(default=None, exclude_if=lambda value: value is None)
+    duration_ms: int | None = Field(default=None, exclude_if=lambda value: value is None)
+    """Wall time the mediated call took, reported in the run's phase metrics."""
     # Both publish-step fields are omitted from serialization while unset, so a
     # record without them dumps byte-identically to one written before they
     # existed and committed ``trajectory_sha256`` pins stay valid.
@@ -1039,6 +1056,50 @@ def _sanitize_tool_call(call: ToolCallRecord) -> ToolCallRecord:
     return call.model_copy(update={"command": command, "error": error, "paths": paths})
 
 
+def _diff_read_marker(
+    state: ToolState,
+    *,
+    tool: str,
+    arguments: dict[str, Any] | None,
+) -> tuple[str, tuple[int, int] | None]:
+    """Return the diff path a call read and its line span, before redaction.
+
+    The diff lives in the run temp directory, so two mechanisms make a normal
+    read invisible to the trajectory: :func:`_sanitize_path` drops absolute
+    paths, and the redactor can rewrite a path that looks like a token. This
+    marker is computed from the raw command against the paths checkout
+    recorded, which is the only point where both are still intact.
+
+    Returns ``("", None)`` when the call did not read a diff file.
+    """
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    if tool not in {"shell", "git"}:
+        return "", None
+    command = str((arguments or {}).get("command") or "")
+    if not command:
+        return "", None
+    repo = primary_repo_state(state)
+    candidates = [raw for raw in (repo.incremental_diff_path, repo.diff_path) if raw]
+    # Longest first: the incremental path can contain the full path's prefix.
+    for raw in sorted(candidates, key=len, reverse=True):
+        if raw not in command:
+            continue
+        from mergecraft.evidence.diff_coverage import command_line_span
+
+        span = command_line_span(command)
+        if span is not None:
+            start, end = span
+            return raw, (0, -1) if start <= 0 else (start, end)
+        # No explicit span: only commands that print the whole file earn
+        # whole-file coverage. ``grep``/``awk``/``tail``/``diff`` over the diff
+        # show a subset, so recording them as (0, 0) would suppress the nudge.
+        argv = _argv(command)
+        tool = argv[0].rsplit("/", maxsplit=1)[-1] if argv else ""
+        return raw, (0, 0) if tool in _FULL_FILE_READ_COMMANDS else (0, -1)
+    return "", None
+
+
 def record_tool_call(
     state: ToolState,
     *,
@@ -1049,6 +1110,7 @@ def record_tool_call(
     error: str | None = None,
     payload_hash: str | None = None,
     publication_incomplete: list[str] | None = None,
+    duration_ms: int | None = None,
     failure_class: FailureClass | None = None,
 ) -> ToolCallRecord:
     """Append one mediated tool call to the run's trajectory (D8).
@@ -1074,6 +1136,7 @@ def record_tool_call(
     """
     command_raw = str((arguments or {}).get("command") or "") or None
     error_text = _truncate(redact_secrets(error), _MAX_ERROR_CHARS) if error else None
+    diff_read_path, diff_read = _diff_read_marker(state, tool=tool, arguments=arguments)
     row = _sanitize_tool_call(
         ToolCallRecord(
             sequence=len(state.tool_calls) + 1,
@@ -1095,6 +1158,9 @@ def record_tool_call(
                 ok=ok,
                 outcome_ok=outcome_ok,
             ),
+            diff_read_path=diff_read_path or None,
+            diff_read=diff_read,
+            duration_ms=duration_ms,
             payload_hash=payload_hash,
             publication_incomplete=sorted(publication_incomplete or []),
         )

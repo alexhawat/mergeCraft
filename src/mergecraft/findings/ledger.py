@@ -1279,6 +1279,26 @@ def render_deterministic_review_block(
         header_lines.append(f"- **Tokens:** {token_summary}")
     if cost_summary:
         header_lines.append(f"- **Cost:** {cost_summary}")
+    metrics = getattr(packet, "run_metrics", None)
+    if metrics is not None:
+        phase_elapsed = getattr(metrics, "phase_elapsed_s", {}) or {}
+        phase_order = ("setup", "analyzers", "agent", "judge", "publish")
+        phase_bits = [
+            f"{name} {float(phase_elapsed[name]):.0f}s"
+            for name in phase_order
+            if name in phase_elapsed
+        ]
+        phases_text = f" · phases: {', '.join(phase_bits)}" if phase_bits else ""
+        header_lines.append(
+            "- **Review cost:** "
+            f"{getattr(metrics, 'tool_calls', 0)} tool calls · "
+            f"{getattr(metrics, 'distinct_files_read', 0)} files read · "
+            f"{getattr(metrics, 'diff_lines', 0)} diff lines"
+            f"{phases_text}"
+        )
+        agent_diag = getattr(metrics, "agent_diagnostic", None)
+        if isinstance(agent_diag, str) and agent_diag.strip():
+            header_lines.append(f"- **Agent stall:** {agent_diag.strip().splitlines()[0]}")
     if llm_review_timing is not None:
         from mergecraft.utils.llm_review_timing import (
             LlmReviewTimingSnapshot,

@@ -9,6 +9,7 @@ Exports:
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.mcp.rpc_types import RpcError, rpc_error
@@ -124,19 +125,34 @@ async def dispatch_mcp_rpc(
             enrich_tool_request(span, arguments=arguments)
             mode = tool_ctx.tool_state.selected_mode if tool_ctx is not None else None
             mode_token = bind_selected_mode(mode)
+            started = time.perf_counter()
             try:
                 result = await tool.execute(arguments)
             except Exception as exc:
                 span.set_status("error", str(exc))
                 enrich_tool_response(span, output=None, error=exc)
-                record_trajectory(tool_ctx, name, arguments, ok=False, error=str(exc))
+                record_trajectory(
+                    tool_ctx,
+                    name,
+                    arguments,
+                    ok=False,
+                    error=str(exc),
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                )
                 if return_tool_errors:
                     return rpc_error(req_id, RpcError(-32603, str(exc)))
                 raise
             finally:
                 reset_selected_mode(mode_token)
             enrich_tool_response(span, output=result)
-            record_trajectory(tool_ctx, name, arguments, ok=True, result=result)
+            record_trajectory(
+                tool_ctx,
+                name,
+                arguments,
+                ok=True,
+                result=result,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            )
             emit_verb_subevent(
                 tracer,
                 parent_span_id=span.span_id,

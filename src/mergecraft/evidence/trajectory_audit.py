@@ -69,6 +69,12 @@ _IMMUTABLE_GIT_SHOW_RE: Final[re.Pattern[str]] = re.compile(
 _TOOL = "trajectory"
 _CATEGORY = "Maintainability & Code Quality"
 
+# Guidance refusals that intentionally stop one attempt but are not tool
+# failures. The diff-coverage nudge is raised once by ``submit_review_verdict``
+# and the agent is expected to resubmit with different arguments, so keying
+# ``ignored-tool-error`` on the changed signature would manufacture a finding.
+_GUIDANCE_ERROR_MARKERS: Final[tuple[str, ...]] = ("diff coverage pre-flight",)
+
 
 class TrajectoryCheck(BaseModel):
     """One named trajectory check's fixed metadata."""
@@ -188,6 +194,56 @@ def _changed_unread_file(record: TrajectoryRecord) -> list[Finding]:
         for path in record.files_modified
         if path not in read
     ]
+
+
+def _changed_unread_lines(
+    record: TrajectoryRecord,
+    *,
+    diff_text: str,
+    diff_path: str | None,
+) -> list[Finding]:
+    """Report unread *added-line ranges* when a diff scope is available.
+
+    This is the line-range replacement for the file-level check: a run that
+    read one line of a large file no longer counts that file as covered. The
+    rule id and severity are unchanged — this narrows what "read" means, it
+    does not add a gate. An unobserved record (no read evidence at all) still
+    reports nothing, because absence of evidence is *unknown*, not *unread*.
+    """
+    from mergecraft.evidence.diff_coverage import compute_diff_coverage
+
+    breakdown = compute_diff_coverage(diff_text, record.tool_calls, diff_path=diff_path)
+    if not breakdown.observed:
+        return []
+    findings: list[Finding] = []
+    for file in breakdown.unread_files():
+        if file.deletion_only:
+            findings.append(
+                _finding(
+                    "changed-unread-file",
+                    message=f"{file.path} was deleted but never read during this run",
+                    path=file.path,
+                    evidence=[
+                        f"coverage={breakdown.covered_lines}/{breakdown.total_lines} added lines"
+                    ],
+                )
+            )
+            continue
+        findings.append(
+            _finding(
+                "changed-unread-file",
+                message=(
+                    f"{file.path} was modified but lines "
+                    f"{', '.join(str(item) for item in file.unread)} were never read during this run"
+                ),
+                path=file.path,
+                evidence=[
+                    f"unread_ranges={','.join(str(item) for item in file.unread)}",
+                    f"coverage={breakdown.covered_lines}/{breakdown.total_lines} added lines",
+                ],
+            )
+        )
+    return findings
 
 
 def _pr_target(call: ToolCallRecord) -> str | None:
@@ -319,6 +375,8 @@ def _ignored_tool_error(record: TrajectoryRecord) -> list[Finding]:
     calls = list(record.tool_calls)
     for call in calls:
         if call.ok:
+            continue
+        if call.error and any(marker in call.error for marker in _GUIDANCE_ERROR_MARKERS):
             continue
         if call.failure_class == "schema" and _schema_self_corrected(call, calls):
             continue
@@ -490,7 +548,6 @@ def _missing_completion_signal(record: TrajectoryRecord) -> list[Finding]:
 
 
 _CHECK_FUNCTIONS = (
-    _changed_unread_file,
     _ignored_tool_error,
     _no_post_edit_verification,
     _repeated_tool_loop,
@@ -501,18 +558,32 @@ _CHECK_FUNCTIONS = (
 )
 
 
-def audit_trajectory(record: TrajectoryRecord) -> list[Finding]:
+def audit_trajectory(
+    record: TrajectoryRecord,
+    *,
+    diff_text: str | None = None,
+    diff_path: str | None = None,
+) -> list[Finding]:
     """Run every trajectory check over ``record`` and return the findings.
 
     Pure: no I/O, no logging, no module state, no clock. The same record always
     yields the same findings, which is what lets a promoted eval case replay a
     trajectory verdict deterministically.
 
+    When ``diff_text`` is supplied, ``changed-unread-file`` reports unread
+    added-line ranges instead of whole files. ``diff_path`` lets a read of the
+    diff file itself count as coverage. Both default to ``None``, preserving
+    the file-level behaviour for records with no materialised diff.
+
     Returns findings in check order. An empty list means every check was either
     satisfied or had no evidence to judge on — the two are deliberately
     indistinguishable to the caller, because both mean "nothing to report".
     """
     findings: list[Finding] = []
+    if diff_text:
+        findings.extend(_changed_unread_lines(record, diff_text=diff_text, diff_path=diff_path))
+    else:
+        findings.extend(_changed_unread_file(record))
     for check in _CHECK_FUNCTIONS:
         findings.extend(check(record))
     return findings

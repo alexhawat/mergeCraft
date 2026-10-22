@@ -24,6 +24,7 @@ from mergecraft.evidence.packet import (
     MergeEvidencePacket,
     ModePromptVersion,
     RunHealth,
+    RunMetrics,
     SelfAssessment,
 )
 from mergecraft.evidence.trajectory import TrajectoryRecord
@@ -174,6 +175,7 @@ def build_packet(
     dispatched_lens_ids: list[str] | None = None,
     agent_terminal_verdict: Literal["approve", "request_changes"] | None = None,
     analyzers: AnalyzersEvidence | None = None,
+    run_metrics: RunMetrics | None = None,
 ) -> MergeEvidencePacket:
     """Assemble a :class:`MergeEvidencePacket` from structured sources.
 
@@ -263,6 +265,7 @@ def build_packet(
         mode_prompt_versions=list(mode_prompt_versions) if mode_prompt_versions else None,
         agent_terminal_verdict=agent_terminal_verdict,
         analyzers=analyzers,
+        run_metrics=run_metrics,
     )
 
     # ``trajectory`` now lands as a sibling field (Batch C, #43). The rest --

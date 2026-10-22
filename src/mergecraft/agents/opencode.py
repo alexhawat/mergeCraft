@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Final
 import httpx
 from loguru import logger
 
+from mergecraft.agents.activity_watchdog import event_has_model_output, watchdog_for_process
 from mergecraft.agents.gates import GIT_NATIVE_READ_DENY_OPENCODE
 from mergecraft.agents.openai_compatible_gateways import (
     SINGLETON_PROVIDER_ID,
@@ -1422,6 +1423,23 @@ def _run_opencode_cli_streaming(
     # P4 / AR-D2 — drain stderr concurrently from spawn. Reading stdout to EOF
     # first would deadlock a child that fills the stderr pipe buffer.
     stderr_drain = start_stderr_drain(process.stderr)
+    watchdog = watchdog_for_process(
+        process,
+        label="opencode",
+        interval_s=ctx.idle_timeout_s,
+        accumulator=accumulator,
+        stderr_text=stderr_drain.text,
+    )
+    base_handler = (
+        _session_event_handler(session, tool_state=ctx.tool_state)
+        if session is not None
+        else _bash_only_handler(ctx.tool_state)
+    )
+
+    def _watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
+        watchdog.touch(model_output=event_has_model_output(event))
+        base_handler(acc, event)
+
     try:
         with track_process_group(process):
             try:
@@ -1430,11 +1448,7 @@ def _run_opencode_cli_streaming(
                 consume_stream(
                     raw_stream=process.stdout,
                     accumulator=accumulator,
-                    handler=(
-                        _session_event_handler(session, tool_state=ctx.tool_state)
-                        if session is not None
-                        else _bash_only_handler(ctx.tool_state)
-                    ),
+                    handler=_watched_handler,
                 )
                 returncode = wait_or_kill_process_group(
                     process,
@@ -1445,10 +1459,19 @@ def _run_opencode_cli_streaming(
             finally:
                 # The process group is gone; collect the drained tail so the
                 # reader thread never outlives it.
+                watchdog.stop()
                 stderr_drain.join(timeout=STDERR_DRAIN_JOIN_TIMEOUT_S)
         stderr_text = stderr_drain.text()
     finally:
-        pass
+        watchdog.stop()
+
+    if watchdog.stalled:
+        diagnostic = watchdog.diagnostic()
+        return AgentResult(
+            success=False,
+            error=diagnostic.render(),
+            metadata=diagnostic.as_metadata(),
+        )
 
     if returncode != 0:
         stream_error = (session or {}).get("error", "")
@@ -1500,6 +1523,7 @@ def _session_event_handler(
                 else detail
             )
             session["error"] = str(message or event)[:1000]
+            accumulator.set_stream_error(session["error"])
         part = event.get("part")
         if event.get("type") == "tool_use":
             _record_opencode_bash(tool_state, part)
