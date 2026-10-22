@@ -96,8 +96,8 @@ ENV IS_SANDBOX=1
 # Pinned artifact checksums (W0.6 / W3.6).
 ARG SHELLCHECK_VERSION=0.10.0
 ARG SHELLCHECK_SHA256=6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87
-ARG HADOLINT_VERSION=2.12.0
-ARG HADOLINT_SHA256=56de6d5e5ec427e17b74fa48d51271c7fc0d61244bf5c90e828aab8362d55010
+ARG HADOLINT_VERSION=2.15.1
+ARG HADOLINT_SHA256=c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
 ARG ZIZMOR_VERSION=1.28.0
 ARG ZIZMOR_SHA256=e87b67160194884e375a46a12c57ccc904f762b53845f254fab7f17d98809c09
 
@@ -138,7 +138,7 @@ RUN mkdir -p /usr/local/analyzers /tmp/analyzer-dl \
     && echo "${SHELLCHECK_SHA256}  /tmp/analyzer-dl/shellcheck.tar.xz" | sha256sum -c - \
     && tar -xJf /tmp/analyzer-dl/shellcheck.tar.xz -C /usr/local/analyzers --strip-components=1 shellcheck-v${SHELLCHECK_VERSION}/shellcheck \
     && curl -fsSL -o /tmp/analyzer-dl/hadolint \
-        "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-Linux-x86_64" \
+        "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-linux-x86_64" \
     && echo "${HADOLINT_SHA256}  /tmp/analyzer-dl/hadolint" | sha256sum -c - \
     && install -m 0755 /tmp/analyzer-dl/hadolint /usr/local/analyzers/hadolint \
     && curl -fsSL -o /tmp/analyzer-dl/zizmor.tar.gz \
