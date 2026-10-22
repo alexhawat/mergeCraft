@@ -267,6 +267,19 @@ jobs:
   review:
     name: mergecraft review attempts
     needs: wait-for-ci
+    # The Codex rung consumes the ChatGPT-subscription login in CODEX_AUTH_JSON,
+    # whose refresh token rotates while it is in use and retires the previous one
+    # (#882, #970). Two jobs refreshing the same login retire each other's
+    # session, and the later one fails with "refresh token was already used"
+    # instead of reviewing. A job-level group serialises every consumer of the
+    # credential: this job (all three rungs run inside it, so they are already
+    # serial with each other) and any other job that receives the secret.
+    # cancel-in-progress stays false: cancelling a running consumer mid-refresh
+    # would spend the stored token. GitHub keeps one running and one pending job
+    # per group, so a third queued review replaces the pending one; re-run it.
+    concurrency:
+      group: codex-subscription-auth
+      cancel-in-progress: false
     # Write scopes stay on the review job only (zizmor excessive-permissions).
     permissions:
       contents: read

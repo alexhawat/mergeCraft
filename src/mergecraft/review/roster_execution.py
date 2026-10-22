@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from loguru import logger
 
@@ -50,6 +50,40 @@ class RosterExecutionSummary:
 
     hard_error: str | None
     dispatched_agent_ids: tuple[str, ...]
+    # The named infrastructure reason a failed secondary carried, when it had
+    # one (an expired Codex subscription login, for instance). It travels with
+    # ``hard_error`` so the run can end as ``infra_error`` rather than as a
+    # failed review.
+    infra_reason: str | None = None
+
+
+class _SecondaryOutcome(NamedTuple):
+    """One secondary dispatch's hard error and its infrastructure reason, if any."""
+
+    error: str | None
+    infra_reason: str | None = None
+
+
+def apply_roster_failure(
+    result: AgentResult,
+    summary: RosterExecutionSummary | None,
+) -> AgentResult:
+    """Fold a roster dispatch failure into the run's result (D15).
+
+    A secondary reviewer that died of an infrastructure fault must read as
+    ``infra_error``, not as a failed review. The primary result carries no reason
+    of its own — the failure happened in another binding — so the roster's named
+    reason is merged onto the result the primary produced, leaving whatever
+    metadata the primary already carried intact.
+    """
+    if summary is None or not summary.hard_error:
+        return result
+    from mergecraft.agents.shared import INFRA_REASON_KEY
+
+    metadata = dict(result.metadata or {})
+    if summary.infra_reason:
+        metadata[INFRA_REASON_KEY] = summary.infra_reason
+    return replace(result, success=False, error=summary.hard_error, metadata=metadata)
 
 
 def secondary_reviewer_agent_ids(registry: object) -> tuple[str, ...]:
@@ -129,8 +163,8 @@ async def _run_one_secondary_reviewer(
     payload: dict[str, Any],
     repo_root: Path,
     timeout_s: float | None,
-) -> str | None:
-    """Dispatch one secondary reviewer; return a hard error string or ``None``."""
+) -> _SecondaryOutcome:
+    """Dispatch one secondary reviewer; return its hard error, if any."""
     from mergecraft.agents.registry import resolve_agent_model as _resolve
     from mergecraft.modes import compute_modes
     from mergecraft.utils.instructions import resolve_instructions
@@ -143,7 +177,7 @@ async def _run_one_secondary_reviewer(
             agent_id=binding.agent_id,
             reason=str(exc),
         )
-        return str(exc)
+        return _SecondaryOutcome(str(exc))
 
     slug = resolved.dispatched_model
     status = credential_status_for_slug(
@@ -159,7 +193,7 @@ async def _run_one_secondary_reviewer(
             agent_id=binding.agent_id,
             reason=reason,
         )
-        return reason
+        return _SecondaryOutcome(reason)
 
     attempt_model = resolve_model(slug=slug, respect_env_override=False)
     attempt_agent = resolve_runtime_agent(model=attempt_model, settings=settings)
@@ -239,16 +273,22 @@ async def _run_one_secondary_reviewer(
             agent_id=binding.agent_id,
             reason=reason,
         )
-        return reason
+        return _SecondaryOutcome(reason)
 
     if not result.success:
+        from mergecraft.agents.shared import INFRA_REASON_KEY
+
         reason = result.error or "secondary reviewer agent failed"
+        infra_reason = (result.metadata or {}).get(INFRA_REASON_KEY)
         record_reviewer_dispatch_error(
             tool_context.tool_state,
             agent_id=binding.agent_id,
             reason=reason,
         )
-        return reason
+        return _SecondaryOutcome(
+            reason,
+            infra_reason if isinstance(infra_reason, str) and infra_reason else None,
+        )
 
     if not _binding_already_recorded(tool_context.tool_state, binding.agent_id):
         findings = _findings_since(before_findings, tool_context.tool_state)
@@ -258,7 +298,7 @@ async def _run_one_secondary_reviewer(
             findings=findings,
             model_slug=slug,
         )
-    return None
+    return _SecondaryOutcome(None)
 
 
 async def run_pending_roster_reviewers(
@@ -288,6 +328,7 @@ async def run_pending_roster_reviewers(
     primary_id = reviewers[0].agent_id
     dispatched: list[str] = []
     hard_error: str | None = None
+    infra_reason: str | None = None
 
     for batch in batches:
         for agent_id in batch:
@@ -308,7 +349,7 @@ async def run_pending_roster_reviewers(
                     timeout = min(timeout, max(1.0, remaining))
             elif per_reviewer_timeout_s is not None:
                 timeout = min(timeout, per_reviewer_timeout_s)
-            error = await _run_one_secondary_reviewer(
+            outcome = await _run_one_secondary_reviewer(
                 binding=binding,
                 base_ctx=base_run_ctx,
                 tool_context=tool_context,
@@ -317,8 +358,9 @@ async def run_pending_roster_reviewers(
                 repo_root=root,
                 timeout_s=timeout,
             )
-            if error:
-                hard_error = error
+            if outcome.error:
+                hard_error = outcome.error
+                infra_reason = outcome.infra_reason
                 break
             dispatched.append(binding.agent_id)
         if hard_error:
@@ -327,7 +369,11 @@ async def run_pending_roster_reviewers(
     gaps = roster_dispatch_gaps(registry, tool_context.tool_state)
     if gaps and hard_error is None:
         hard_error = roster_dispatch_failure_message(gaps)
-    return RosterExecutionSummary(hard_error=hard_error, dispatched_agent_ids=tuple(dispatched))
+    return RosterExecutionSummary(
+        hard_error=hard_error,
+        dispatched_agent_ids=tuple(dispatched),
+        infra_reason=infra_reason,
+    )
 
 
 def primary_repo_state_dir(tool_state: ToolState) -> str:
@@ -339,6 +385,7 @@ def primary_repo_state_dir(tool_state: ToolState) -> str:
 
 __all__ = [
     "RosterExecutionSummary",
+    "apply_roster_failure",
     "roster_dispatch_failure_message",
     "roster_dispatch_gaps",
     "run_pending_roster_reviewers",

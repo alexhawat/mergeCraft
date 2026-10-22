@@ -90,7 +90,11 @@ class TrajectoryCheck(BaseModel):
 TRAJECTORY_CHECKS: Final[tuple[TrajectoryCheck, ...]] = (
     TrajectoryCheck(
         rule_id="changed-unread-file",
-        severity="Major",
+        # Advisory (#885): the per-file finding stays in the record at a lower
+        # severity. The gate itself is unchanged — ``gate_policy`` still maps this
+        # rule_id to ``request-changes`` — but one Major row per unread file buried
+        # the change-scoped reasons in process noise.
+        severity="Minor",
         recommended_action="Read the file before trusting the edit; re-review this change by hand.",
         summary="A file was modified that the run never read.",
     ),
@@ -389,6 +393,10 @@ def _ignored_tool_error(record: TrajectoryRecord) -> list[Finding]:
                 policy_observed = True
             continue
         if call.failure_class == "environment":
+            continue
+        if call.failure_class == "declined":
+            # The step chose not to act (the run's publish step skipping a
+            # recorded verdict); nothing raised, so there is nothing to retry.
             continue
         if call.failure_class not in {"transient", "unknown"}:
             continue

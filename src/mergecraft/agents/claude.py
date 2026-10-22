@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -70,6 +71,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from mergecraft.evidence.trajectory import ToolCallRecord
+    from mergecraft.mcp.tool_state import ToolState
     from mergecraft.tracing.content import ContentCapture
     from mergecraft.tracing.tracer import Tracer
 
@@ -111,6 +113,54 @@ _CLAUDE_READ_PATH_KEYS: tuple[str, ...] = ("file_path", "path", "pattern", "glob
 # parameter the claude harness exposes; the constant keeps the CLI flag and
 # the span attribute (``mergecraft.reasoning_effort``) from drifting apart.
 _CLAUDE_EFFORT = "high"
+
+
+# Claude Code's Bash tool reports a non-zero exit as a result that starts "Exit code N".
+_CLAUDE_EXIT_CODE_RE = re.compile(r"^\s*Exit code (-?\d+)\b")
+# The one native exec tool whose result the trajectory records (#858). Monitor,
+# REPL and Workflow are not command runs with an exit status.
+_CLAUDE_RECORDED_EXEC_TOOLS: frozenset[str] = frozenset({"Bash"})
+
+
+def _claude_result_text(content: object) -> str:
+    """Flatten a ``tool_result`` ``content`` (text, or a list of text blocks) to a string."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            str(block.get("text") or "")
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return ""
+
+
+def _record_claude_exec_result(
+    tool_state: ToolState | None,
+    pending: dict[str, str],
+    tool_use_id: str,
+    content: object,
+    is_error: object,
+) -> None:
+    """Close out one pending ``Bash`` call on the run's trajectory (#858)."""
+    command = pending.pop(tool_use_id, None)
+    if command is None or tool_state is None:
+        return
+    from mergecraft.evidence.trajectory import record_driver_exec
+
+    text = _claude_result_text(content)
+    match = _CLAUDE_EXIT_CODE_RE.match(text)
+    # Claude reports success as a bare result with ``is_error`` false, so an
+    # explicit ``False`` is a zero exit; an absent flag proves nothing either way.
+    exit_code = int(match.group(1)) if match else (0 if is_error is False else None)
+    record_driver_exec(
+        tool_state,
+        command=command,
+        exit_code=exit_code,
+        output=text,
+        failed=bool(is_error),
+        timed_out=bool(is_error) and text.lstrip().lower().startswith("command timed out"),
+    )
 
 
 def _strip_provider_prefix(specifier: str) -> str:
@@ -456,6 +506,7 @@ def _claude_stream_event_handler(
     capture_policy: ContentCapture | None = None,
     input_prompt: str | None = None,
     read_records: list[ToolCallRecord] | None = None,
+    tool_state: ToolState | None = None,
 ) -> tuple[Any, Callable[[], None]]:
     """Build a per-event handler that emits ``tool.call`` / ``llm.call`` spans.
 
@@ -485,10 +536,44 @@ def _claude_stream_event_handler(
     open_pairs: dict[str, ProviderLLMPair | None] = {}
     open_pair_bookkeeping: dict[str, dict[str, Any]] = {}
     open_tool_spans: dict[str, Any] = {}
+    # #858 — Bash calls awaiting their result, by tool_use id.
+    pending_execs: dict[str, str] = {}
+
+    def _note_exec_use(block: object) -> None:
+        if not isinstance(block, dict) or block.get("name") not in _CLAUDE_RECORDED_EXEC_TOOLS:
+            return
+        tool_input = block.get("input")
+        command = tool_input.get("command") if isinstance(tool_input, dict) else None
+        tool_id = str(block.get("id") or "")
+        if tool_id and isinstance(command, str) and command:
+            pending_execs.setdefault(tool_id, command)
+
+    def _note_message_blocks(event: dict[str, Any]) -> None:
+        """Handle the ``stream-json`` shapes: tool_use in ``assistant``, results in ``user``."""
+        message = event.get("message")
+        blocks = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(blocks, list):
+            return
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use":
+                _note_exec_use(block)
+            elif block.get("type") == "tool_result":
+                _record_claude_exec_result(
+                    tool_state,
+                    pending_execs,
+                    str(block.get("tool_use_id") or ""),
+                    block.get("content"),
+                    block.get("is_error"),
+                )
 
     def _handler(accumulator: StreamSpanAccumulator, event: dict[str, Any]) -> None:
         nonlocal open_pairs, open_pair_bookkeeping, open_tool_spans
         event_type = event.get("type")
+
+        if event_type in {"assistant", "user"}:
+            _note_message_blocks(event)
 
         if event_type == "message_start":
             message = event.get("message") or {}
@@ -641,6 +726,7 @@ def _claude_stream_event_handler(
             tool_id = str(content_block.get("id") or "")
             tool_name = str(content_block.get("name") or "unknown")
             tool_input = content_block.get("input") or {}
+            _note_exec_use(content_block)
             # HS4 — record the read tool's paths whether or not a tracer is
             # live. The post-run audit (``audit_read_boundary``) consumes this
             # list; it is detection over the reads that actually happened.
@@ -693,6 +779,13 @@ def _claude_stream_event_handler(
 
         if event_type == "tool_result":
             tool_use_id = str(event.get("tool_use_id") or "")
+            _record_claude_exec_result(
+                tool_state,
+                pending_execs,
+                tool_use_id,
+                event.get("content"),
+                event.get("is_error"),
+            )
             span = open_tool_spans.pop(tool_use_id, None)
             if span is not None:
                 output = event.get("content") or ""
@@ -975,6 +1068,7 @@ def _run_claude_once(
         capture_policy=capture_policy,
         input_prompt=user_prompt,
         read_records=read_records,
+        tool_state=ctx.tool_state,
     )
 
     stderr_text = ""

@@ -8,7 +8,7 @@ import threading
 from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
+from typing import TYPE_CHECKING, Any, Final, NamedTuple, Protocol
 
 from loguru import logger
 
@@ -231,6 +231,12 @@ class AgentUsage:
     cache_read_tokens: int | None = None
     cache_write_tokens: int | None = None
     cost_usd: float | None = None
+
+
+INFRA_REASON_KEY: Final[str] = "infra_reason"
+"""``AgentResult.metadata`` key a driver sets when a failure is the reviewer's
+infrastructure rather than the review (an expired credential, say). The run
+classifies such a failure as ``RunOutcome.infra_error`` instead of ``failed``."""
 
 
 @dataclass(slots=True)

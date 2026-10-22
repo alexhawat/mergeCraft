@@ -92,15 +92,20 @@ def _top_level_block_span(lines: list[str], key: str) -> tuple[int, int] | None:
     """Return ``(start, end)`` of the top-level *key* block, or ``None``.
 
     ``end`` is exclusive and covers the header plus every line that belongs to
-    its value — deeper-indented mapping entries, and the blank or comment lines
-    between them. Trailing blank lines are excluded so a replacement does not
-    swallow the separator before the next top-level key. A scalar value on the
-    header line (``key: value``) is a one-line block.
+    its value: deeper-indented entries and any blank or indented-comment lines
+    among them. Trailing blank and comment lines are excluded so a replacement
+    does not swallow the separator, or the comment that introduces the next
+    top-level key.
+    A scalar value on the header line (``key: value``) is a one-line block.
 
     ``yaml.safe_dump`` renders a top-level sequence's items at column 0
     (``models:\\n- a\\n- b``), so a column-0 ``- item`` is part of the current
     block, not the next top-level key; that only applies to a block whose
-    header carries no inline scalar value.
+    header carries no inline scalar value. For the same reason a column-0
+    comment cannot start a new top-level key: the scan keeps going past it, and
+    the comment belongs to the block only when a later line does (a comment
+    between two items goes with the block; one that precedes the next key stays
+    outside it).
     """
     header = re.compile(rf"^([ \t]*){re.escape(key)}:(.*)$")
     for index, line in enumerate(lines):
@@ -122,6 +127,11 @@ def _top_level_block_span(lines: list[str], key: str) -> tuple[int, int] | None:
                 end = offset + 1
                 continue
             candidate_indent = len(candidate) - len(candidate.lstrip(" \t"))
+            if candidate_indent == 0 and stripped.startswith("#"):
+                # A comment cannot start a new top-level key, so keep scanning.
+                # ``last_content`` is untouched: if a later line belongs to the
+                # block this comment is swept up with it, otherwise it stays out.
+                continue
             if candidate_indent == 0 and not _is_sequence_item(stripped):
                 # A new top-level key. A column-0 ``- item`` is this block's own
                 # sequence value, so it does not end the block.

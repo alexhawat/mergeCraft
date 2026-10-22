@@ -52,6 +52,7 @@ from mergecraft.mcp.tool_state import (
 from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.prep.types import is_prep_install_failure
 from mergecraft.review.engine import ReviewEngine
+from mergecraft.review.roster_execution import RosterExecutionSummary, apply_roster_failure
 from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
@@ -1946,8 +1947,8 @@ async def _dispatch_agent_with_deadline(ctx: RunContext) -> AgentResult:
     return _promote_and_finalize_agent_result(ctx, winning_slug, result)
 
 
-async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> str | None:
-    """Dispatch secondary reviewers server-side; return a hard error message."""
+async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecutionSummary | None:
+    """Dispatch secondary reviewers server-side; return the dispatch summary."""
     assert ctx.tool_context is not None
     assert ctx.tool_state is not None
     assert ctx.settings is not None
@@ -1961,14 +1962,13 @@ async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> str | None:
             return None
         return max(1.0, ctx.agent_deadline_monotonic - time.monotonic())
 
-    summary = await run_pending_roster_reviewers(
+    return await run_pending_roster_reviewers(
         tool_context=ctx.tool_context,
         base_run_ctx=ctx.run_ctx,
         settings=ctx.settings,
         payload=ctx.payload,
         remaining_timeout_s=_remaining_roster_timeout_s,
     )
-    return summary.hard_error
 
 
 async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentReview:
@@ -2022,16 +2022,12 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
         await _prepare_agent_dispatch(ctx)
         dispatch_started = time.perf_counter()
         result = await _dispatch_agent_with_deadline(ctx)
-        roster_error = await _run_server_roster_reviewers_if_needed(ctx)
+        roster = await _run_server_roster_reviewers_if_needed(ctx)
         if ctx.tool_state is not None:
             ctx.tool_state.phase_elapsed_s["agent"] = round(
                 time.perf_counter() - dispatch_started, 3
             )
-        if roster_error:
-            from dataclasses import replace
-
-            result = replace(result, success=False, error=roster_error)
-        return result
+        return apply_roster_failure(result, roster)
 
 
 _SINK_SCAN_ARTIFACT_SOURCES: tuple[str, ...] = (
@@ -2144,6 +2140,45 @@ def _scan_sinks_after_run(ctx: RunContext, *, extra_paths: Sequence[Path] = ()) 
 _ORCHESTRATOR_PUBLISH_STEP = "orchestrator.publish_review"
 
 
+def owes_a_terminal_review(tool_state: ToolState) -> bool:
+    """Whether this run recorded a verdict that GitHub is owed.
+
+    A run that recorded no submission owes nothing: it records no publish step
+    and says nothing. Everything past this point is about a verdict that exists.
+    """
+    return tool_state.terminal_submission is not None
+
+
+def publication_skip_reason(
+    tool_state: ToolState,
+    agent_result: AgentResult,
+    *,
+    verdict_protocol: str | None,
+) -> str | None:
+    """Why this run will not publish its recorded verdict, or ``None`` when it will.
+
+    Call only when :func:`owes_a_terminal_review` is true; a run that recorded
+    nothing returns before this and records nothing. A recorded verdict that
+    stops short of a review must name itself: #1017's Codex rung recorded
+    ``request_changes``, published no review, and recorded nothing about why, so
+    the only visible trace was the failing ``mergecraft-approval`` check. The
+    three ways it happens are the shadow protocol, a run that is not a review
+    run, and a submission that the post-run re-validation rejected — the last one
+    is what to look for first when a review is expected and absent.
+    """
+    if verdict_protocol == "shadow":
+        return "the verdict protocol is shadow, so the verdict is recorded but not published"
+    if not _is_review_mode(tool_state.selected_mode):
+        return (
+            "the run is not a review run "
+            f"(selected_mode={tool_state.selected_mode!r}), so it publishes no review"
+        )
+    if not agent_result.terminal_submission_received:
+        rejection = str((agent_result.diagnostics or {}).get("rejection_reason") or "unknown")
+        return f"the recorded submission was rejected at post-run validation ({rejection})"
+    return None
+
+
 async def _publish_recorded_verdict(
     tool_context: ToolContext,
     agent_result: AgentResult,
@@ -2163,14 +2198,36 @@ async def _publish_recorded_verdict(
     when a receipt for the recorded verdict exists, including when the agent
     already published it. The row carries the receipt's ``payload_hash`` and
     the recorded findings GitHub's inline view lacks.
+
+    A run that recorded no verdict records no step. A recorded verdict the run
+    does not publish (:func:`publication_skip_reason`) is recorded as a not-ok
+    step stamped ``failure_class="declined"`` with the reason in ``error``, so
+    the trajectory auditor reads it as a decision, not a failed call.
     """
     tool_state = tool_context.tool_state
-    if (
-        not _is_review_mode(tool_state.selected_mode)
-        or verdict_protocol == "shadow"
-        or not agent_result.terminal_submission_received
-        or tool_state.terminal_submission is None
-    ):
+    if not owes_a_terminal_review(tool_state):
+        # Nothing was recorded, so the run owes GitHub nothing and says nothing.
+        return
+    skip_reason = publication_skip_reason(
+        tool_state,
+        agent_result,
+        verdict_protocol=verdict_protocol,
+    )
+    if skip_reason is not None:
+        # A recorded verdict that reaches no review is evidence about the run, not
+        # a silent return: the packet's trajectory is where a missing review is
+        # explained, and #1017's Codex rung is what its absence looks like.
+        logger.warning("» the run did not publish the recorded review verdict: {}", skip_reason)
+        from mergecraft.evidence.trajectory import record_tool_call
+
+        record_tool_call(
+            tool_state,
+            tool=_ORCHESTRATOR_PUBLISH_STEP,
+            arguments=None,
+            ok=False,
+            error=skip_reason,
+            failure_class="declined",
+        )
         return
     from mergecraft.evidence.trajectory import record_tool_call
     from mergecraft.mcp.review import publish_pull_request_review
