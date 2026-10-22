@@ -46,12 +46,17 @@ import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from mergecraft.analyzers.scope import (
+    DIFF_HEADER_FILE,
+    DIFF_HEADER_RENAME,
+    classify_diff_header_line,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from mergecraft.evidence.trajectory import ToolCallRecord
 
-_DIFF_GIT_RE: Final[re.Pattern[str]] = re.compile(r"^diff --git a/(.+?) b/(.+)$")
 _HUNK_RE: Final[re.Pattern[str]] = re.compile(
     r"^@@ -\d+(?:,\d+)? \+(?P<start>\d+)(?:,(?P<count>\d+))? @@"
 )
@@ -282,44 +287,58 @@ def parse_diff_toc(diff_text: str) -> tuple[DiffTocEntry, ...]:
     there is nothing on the RIGHT side for a review to account for.
     """
     lines = diff_text.splitlines()
-    section_starts: list[tuple[str, int]] = []
+    # A ``None`` path is a section whose ``diff --git`` header could not be
+    # decoded: it still bounds the previous file's section, but its hunks are
+    # dropped rather than attributed to a neighbour.
+    section_starts: list[tuple[str | None, int]] = []
     current_path: str | None = None
     current_start = 0
+    in_section = False
     seen_hunk = False
     for index, raw in enumerate(lines, start=1):
-        git_match = _DIFF_GIT_RE.match(raw)
-        if git_match is not None:
-            if current_path is not None:
-                section_starts.append((current_path, current_start))
-            current_path = git_match.group(2)
-            current_start = index
-            seen_hunk = False
-            continue
         if raw.startswith("@@"):
             seen_hunk = True
             continue
-        if raw.startswith("+++ ") and not seen_hunk:
-            candidate = raw[4:].strip()
-            if candidate == "/dev/null":
-                # A deletion-only file: keep the section boundary so the
-                # previous file's section does not swallow its hunks. It will
-                # produce no added ranges and be omitted below.
-                continue
-            path = candidate.removeprefix("b/")
-            if current_path is None:
-                current_path = path
-                current_start = index
-                seen_hunk = False
-            elif path != current_path:
+        # Header paths decode exactly as the analyzer scope does, including
+        # Git's C-quoted form for a space or non-ASCII byte in the path.
+        header = classify_diff_header_line(raw, in_hunk=seen_hunk)
+        if header is None:
+            continue
+        kind, path = header
+        if kind == DIFF_HEADER_FILE:
+            if in_section:
                 section_starts.append((current_path, current_start))
-                current_path = path
-                current_start = index
-                seen_hunk = False
-    if current_path is not None:
+            current_path = path
+            current_start = index
+            in_section = True
+            seen_hunk = False
+            continue
+        if path is None:
+            # A ``+++ /dev/null`` deletion-only file (or an undecodable path):
+            # keep the section boundary so the previous file's section does
+            # not swallow its hunks. It produces no added ranges.
+            continue
+        if kind == DIFF_HEADER_RENAME and in_section:
+            current_path = path
+            continue
+        if not in_section:
+            current_path = path
+            current_start = index
+            in_section = True
+            seen_hunk = False
+        elif path != current_path:
+            section_starts.append((current_path, current_start))
+            current_path = path
+            current_start = index
+            seen_hunk = False
+    if in_section:
         section_starts.append((current_path, current_start))
 
     entries: list[DiffTocEntry] = []
-    for position, (path, start) in enumerate(section_starts):
+    for position, (section_path, start) in enumerate(section_starts):
+        if section_path is None:
+            continue
+        path = section_path
         end = (
             section_starts[position + 1][1] - 1
             if position + 1 < len(section_starts)

@@ -90,6 +90,58 @@ diff --git a/src/loop.cpp b/src/loop.cpp
     assert entries[0].ranges == (LineRange(2, 3),)
 
 
+def test_parse_diff_toc_decodes_git_quoted_paths() -> None:
+    # Git C-quotes a path with a non-ASCII byte or a space; the TOC must decode
+    # it, not keep the quotes or collapse the next file onto the previous one.
+    diff = """\
+diff --git "a/caf\\303\\251.py" "b/caf\\303\\251.py"
+--- "a/caf\\303\\251.py"
++++ "b/caf\\303\\251.py"
+@@ -1,1 +1,2 @@
+ x = 1
++y = 2
+diff --git a/with space.py b/with space.py
+--- a/with space.py
++++ b/with space.py
+@@ -1,1 +1,2 @@
+ a = 1
++b = 2
+diff --git a/src/next.py b/src/next.py
+--- a/src/next.py
++++ b/src/next.py
+@@ -3,1 +3,2 @@
+ c = 1
++d = 2
+"""
+    entries = parse_diff_toc(diff)
+
+    assert [entry.path for entry in entries] == ["café.py", "with space.py", "src/next.py"]
+    assert [entry.ranges for entry in entries] == [
+        (LineRange(2, 2),),
+        (LineRange(2, 2),),
+        (LineRange(4, 4),),
+    ]
+
+
+def test_parse_diff_toc_drops_an_undecodable_header_instead_of_misattributing() -> None:
+    diff = """\
+diff --git a/src/first.py b/src/first.py
+--- a/src/first.py
++++ b/src/first.py
+@@ -1,1 +1,2 @@
+ a = 1
++b = 2
+diff --git "a/bad\\q.py" "b/bad\\q.py"
+@@ -1,1 +1,2 @@
+ c = 1
++d = 2
+"""
+    entries = parse_diff_toc(diff)
+
+    assert [entry.path for entry in entries] == ["src/first.py"]
+    assert entries[0].ranges == (LineRange(2, 2),)
+
+
 def test_full_diff_read_covers_every_added_line() -> None:
     diff_path = "/tmp/mergecraft/pr-7.diff"
     breakdown = compute_diff_coverage(

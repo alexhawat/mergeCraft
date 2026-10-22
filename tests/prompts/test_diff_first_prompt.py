@@ -59,10 +59,16 @@ def test_incremental_prompt_scopes_to_the_delta_not_the_whole_pr() -> None:
     assert "do **not** run `git diff <prior-review-sha>..HEAD`" in prompt
 
 
-def test_review_prompt_does_not_re_read_the_pr_when_the_delta_is_empty() -> None:
+def test_review_prompt_still_submits_a_verdict_when_the_delta_is_empty() -> None:
+    # Review mode has no report_progress exit, and a Review run without a
+    # terminal submission is classified inconclusive — so an empty delta must
+    # still end in a verdict rather than a progress-only report.
     prompt = _rendered("Review")
 
     assert "`incrementalDiffStatus: empty`, nothing changed since the last review" in prompt
+    assert "this mode has no progress-only exit" in prompt
+    assert "finish with the terminal verdict in step 7" in prompt
+    assert "report progress instead of re-reading" not in prompt
 
 
 def test_fixture_trajectory_reads_the_diff_before_any_git_call() -> None:

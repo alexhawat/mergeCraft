@@ -189,6 +189,22 @@ def _classify_header_line(raw_line: str, *, in_hunk: bool) -> tuple[str, str | N
     return None
 
 
+DIFF_HEADER_FILE = _HEADER_FILE
+DIFF_HEADER_RENAME = _HEADER_RENAME
+DIFF_HEADER_POSTIMAGE = _HEADER_POSTIMAGE
+
+
+def classify_diff_header_line(raw_line: str, *, in_hunk: bool) -> tuple[str, str | None] | None:
+    """Classify a diff header line for diff walkers outside this module.
+
+    The same Git C-quote-aware parsing as :func:`parse_diff_scope`, so a
+    quoted or space-bearing path decodes to the same file everywhere. ``kind``
+    is one of :data:`DIFF_HEADER_FILE`, :data:`DIFF_HEADER_RENAME`, or
+    :data:`DIFF_HEADER_POSTIMAGE`; see :func:`_classify_header_line`.
+    """
+    return _classify_header_line(raw_line, in_hunk=in_hunk)
+
+
 class _DiffPathTracker:
     """Resolve the current file path while walking a unified diff.
 
