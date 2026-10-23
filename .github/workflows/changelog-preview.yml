@@ -24,7 +24,7 @@ jobs:
     # if/permissions, and actionlint rejects anything else. The preview stays
     # advisory because it is not in `require-ci-on-main`'s required contexts.
     # Pin: getsentry/craft changelog-preview@v2 → 2.30.1; dependabot owns bumps.
-    uses: getsentry/craft/.github/workflows/changelog-preview.yml@3f2abdc5703191d12ef2cc013f792f1bd220f44d # v2
+    uses: getsentry/craft/.github/workflows/changelog-preview.yml@0ff75896d43285ca376c7254e8143bac23acd429 # v2
     # Pin the craft binary too: the upstream default ("latest") queries
     # api.github.com unauthenticated, which 403s on rate-limit and fails the job.
     with:
