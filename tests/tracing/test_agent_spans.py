@@ -102,6 +102,27 @@ def test_agent_run_span_carries_identity(
     assert event.attrs["mergecraft.agent.executed_model"] == as_sink_value("claude-opus-test")
     assert event.attrs["mergecraft.agent.prompt_version"] == "3"
     assert event.attrs["mergecraft.agent.toolset"] == ["read_file", "run_analyzers"]
+    assert event.attrs["gen_ai.operation.name"] == "invoke_agent"
+    assert event.attrs["gen_ai.request.model"] == as_sink_value("claude-opus-test")
+    assert "gen_ai.provider.name" not in event.attrs
+
+
+def test_agent_run_span_splits_provider_from_model_slug(
+    tracer_and_sink: dict[str, Any], signals_module: Any
+) -> None:
+    """A ``provider/model`` slug yields the GenAI provider + request model (Datadog LLM Obs)."""
+    with signals_module.agent_run_span(
+        tracer_and_sink["tracer"],
+        agent_id="reviewer-1",
+        role="reviewer",
+        executed_model="opencode-go/glm-5.1",
+    ):
+        pass
+
+    attrs = tracer_and_sink["sink"].events[0].attrs
+    assert attrs["gen_ai.operation.name"] == "invoke_agent"
+    assert attrs["gen_ai.provider.name"] == as_sink_value("opencode-go")
+    assert attrs["gen_ai.request.model"] == as_sink_value("glm-5.1")
 
 
 def test_tool_calls_chain_under_their_agent(

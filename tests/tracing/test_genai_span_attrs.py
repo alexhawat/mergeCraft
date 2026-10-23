@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from tests.tracing.conftest import as_sink_value
+from tests.tracing.conftest import as_identifier_sink_value
 
 
 @pytest.fixture
@@ -88,7 +88,7 @@ def test_agent_attempt_attrs(memory_sink: Any) -> None:
     events = _events_by_kind(memory_sink["sink"]).get("agent.attempt", [])
     assert len(events) == 1
     attrs = events[0].attrs
-    assert attrs["model.id"] == as_sink_value("anthropic/claude-sonnet")
+    assert attrs["model.id"] == as_identifier_sink_value("anthropic/claude-sonnet")
     assert attrs["agent.provider"] == "anthropic"
     assert attrs["gen_ai.system"] == "anthropic"
     assert "agent.cli_argv" in attrs
@@ -191,3 +191,14 @@ __all__ = [
     "test_span_duration_nonzero",
     "test_tool_call_attrs",
 ]
+
+
+def test_usage_cost_is_also_the_datadog_estimated_total() -> None:
+    """Datadog LLM Observability reads cost from ``gen_ai.cost.*``."""
+    from mergecraft.tracing.genai import usage_attrs
+
+    attrs = usage_attrs(input_tokens=10, output_tokens=2, cost_usd=0.0125)
+
+    assert attrs["gen_ai.usage.cost_usd"] == 0.0125
+    assert attrs["gen_ai.cost.estimated_total"] == 0.0125
+    assert "gen_ai.cost.estimated_total" not in usage_attrs(input_tokens=10, output_tokens=2)

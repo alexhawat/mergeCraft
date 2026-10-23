@@ -120,6 +120,19 @@ def emit_phase(tracer: Tracer | NullTracer | None, *, phase: Any) -> None:
     )
 
 
+def _genai_model_attrs(model: str) -> dict[str, str]:
+    """Split a ``provider/model`` slug into the GenAI provider + request model attrs.
+
+    Datadog LLM Observability needs ``gen_ai.provider.name`` next to
+    ``gen_ai.operation.name`` to identify the instrumentation. A bare model id
+    (no ``/``) carries no provider, so only ``gen_ai.request.model`` is set.
+    """
+    provider, sep, name = model.partition("/")
+    if not sep or not provider or not name:
+        return {"gen_ai.request.model": model}
+    return {"gen_ai.provider.name": provider, "gen_ai.request.model": name}
+
+
 @contextmanager
 def agent_run_span(
     tracer: Tracer | NullTracer | None,
@@ -164,12 +177,14 @@ def agent_run_span(
                 attrs: dict[str, Any] = {
                     "mergecraft.agent.id": agent_id,
                     "gen_ai.agent.name": agent_id,
+                    "gen_ai.operation.name": "invoke_agent",
                     "mergecraft.agent.role": role,
                 }
                 if lens:
                     attrs["mergecraft.agent.lens"] = lens
                 if executed_model:
                     attrs["mergecraft.agent.executed_model"] = executed_model
+                    attrs.update(_genai_model_attrs(executed_model))
                 if prompt_version:
                     attrs["mergecraft.agent.prompt_version"] = prompt_version
                 if toolset:

@@ -15,6 +15,7 @@ tracing-specific additions are:
 
 Exports:
     DENY_KEYS -- tuple of attr keys whose values are dropped wholesale.
+    IDENTIFIER_KEYS -- attr keys redacted by explicit secret patterns only (no entropy).
     REDACTED -- sentinel literal ``"<redacted>"`` used by URL + tool-payload redaction.
     redact_attrs -- recursively redact an ``attrs`` dict, returning a new dict.
     redact_event -- return a deep-copied ``TraceEvent`` with redacted attrs.
@@ -29,7 +30,7 @@ import json
 import re
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.analyzers.redact import redact_secrets
+from mergecraft.analyzers.redact import redact_known_secret_patterns, redact_secrets
 from mergecraft.redaction_sentinel import REDACTION_SENTINEL
 from mergecraft.redaction_structured import DENY_KEYS, redact_structured_value
 from mergecraft.tracing.cap import TRACE_ATTRS_JSON_MAX_BYTES
@@ -77,14 +78,40 @@ class _RedactedCliLine(str):
         return iter(str(self).split(" "))
 
 
+# Top-level attrs that hold identifiers by construction. They still pass the
+# explicit secret patterns, but skip the entropy heuristic, which otherwise masks
+# the value itself: ``deepseek-v4.1-flash`` and 32-hex review ids read as dense
+# tokens, leaving traces with ``<redacted>`` model names and review ids.
+IDENTIFIER_KEYS: frozenset[str] = frozenset(
+    {
+        "model.id",
+        "model.requested",
+        "model.resolved",
+        "model.provider",
+        "gen_ai.request.model",
+        "gen_ai.response.model",
+        "mergecraft.agent.executed_model",
+        "review.id",
+        "session_id",
+        "gen_ai.tool.call.id",
+    }
+)
+
+
 def redact_attrs(attrs: dict[str, Any] | None) -> dict[str, Any]:
     """Return a redacted copy of ``attrs`` (never the input dict)."""
     if not attrs:
         return {}
-    redacted = redact_structured_value(attrs, redact_string=redact_secrets)
+    identifiers = {
+        key: redact_known_secret_patterns(value)
+        for key, value in attrs.items()
+        if key in IDENTIFIER_KEYS and isinstance(value, str)
+    }
+    rest = {key: value for key, value in attrs.items() if key not in identifiers}
+    redacted = redact_structured_value(rest, redact_string=redact_secrets)
     if not isinstance(redacted, dict):
         return {}
-    return redacted
+    return {**redacted, **identifiers}
 
 
 def redact_event(event: TraceEvent) -> TraceEvent:
@@ -274,6 +301,7 @@ def _truncate_utf8_payload(text: str, encoded: bytes, max_bytes: int) -> str:
 
 __all__ = [
     "DENY_KEYS",
+    "IDENTIFIER_KEYS",
     "REDACTED",
     "redact_attrs",
     "redact_cli_argv",

@@ -89,3 +89,25 @@ def test_attrs_payload_capped_with_truncation_marker(
         assert capped["span_id"] == trace_event_data["span_id"]
     else:
         assert capped["attrs"] == trace_event_data["attrs"]
+
+
+def test_identifier_attrs_skip_the_entropy_heuristic() -> None:
+    """Model slugs and hex run ids are identifiers, not secrets; known secret shapes still go."""
+    from mergecraft.tracing.redaction import redact_attrs
+
+    run_id = "749419e680604bc58d270676b0287855"
+    out = redact_attrs(
+        {
+            "model.id": "opencode-go/deepseek-v4.1-flash",
+            "gen_ai.request.model": "deepseek-v4.1-flash",
+            "review.id": run_id,
+            "gen_ai.response.model": "sk-abcdefghijklmnop1234",
+            "note": run_id,
+        }
+    )
+
+    assert out["model.id"] == "opencode-go/deepseek-v4.1-flash"
+    assert out["gen_ai.request.model"] == "deepseek-v4.1-flash"
+    assert out["review.id"] == run_id
+    assert "sk-abcdefghijklmnop1234" not in out["gen_ai.response.model"]
+    assert out["note"] != run_id

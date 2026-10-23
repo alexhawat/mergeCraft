@@ -16,7 +16,7 @@ from typing import Any, ClassVar
 import httpx
 import pytest
 from tests.agents.conftest import make_agent_run_context
-from tests.tracing.conftest import as_sink_value
+from tests.tracing.conftest import as_identifier_sink_value
 
 from mergecraft.agents import opencode as oc_module
 from mergecraft.agents.opencode import (
@@ -130,7 +130,7 @@ async def test_opencode_llm_call_stamps_max_tokens_at_metadata_capture(
     )
 
     attrs = _llm_call_attrs(opencode_tracer)
-    assert attrs.get("gen_ai.request.model") == as_sink_value("nous/deepseek-v4-flash")
+    assert attrs.get("gen_ai.request.model") == as_identifier_sink_value("nous/deepseek-v4-flash")
     assert attrs.get("gen_ai.request.max_tokens") == 4096
 
 
