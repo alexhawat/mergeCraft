@@ -191,14 +191,3 @@ __all__ = [
     "test_span_duration_nonzero",
     "test_tool_call_attrs",
 ]
-
-
-def test_usage_cost_is_also_the_datadog_estimated_total() -> None:
-    """Datadog LLM Observability reads cost from ``gen_ai.cost.*``."""
-    from mergecraft.tracing.genai import usage_attrs
-
-    attrs = usage_attrs(input_tokens=10, output_tokens=2, cost_usd=0.0125)
-
-    assert attrs["gen_ai.usage.cost_usd"] == 0.0125
-    assert attrs["gen_ai.cost.estimated_total"] == 0.0125
-    assert "gen_ai.cost.estimated_total" not in usage_attrs(input_tokens=10, output_tokens=2)

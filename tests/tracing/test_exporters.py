@@ -388,3 +388,61 @@ def test_llmobs_defaults_never_override_a_span_s_own(trace_event_data: dict[str,
     attrs = fake_tracer.calls[0]["attributes"]
     assert attrs["gen_ai.operation.name"] == "chat"
     assert attrs["gen_ai.provider.name"] == "anthropic"
+
+
+def test_llmobs_tool_payloads_use_the_genai_tool_call_names(
+    trace_event_data: dict[str, Any],
+) -> None:
+    """Datadog shows tool input/output only from ``gen_ai.tool.call.*``; the rest become tags."""
+    from mergecraft.tracing import OTLPSink, TraceEvent
+
+    trace_event_data["kind"] = "tool.call"
+    trace_event_data["parent_span_id"] = "p1"
+    trace_event_data["trace_id"] = "0af7651916cd43dd8448eb211c80319c"
+    trace_event_data["attrs"] = {
+        "gen_ai.operation.name": "execute_tool",
+        "tool.arguments": '{"command": "log", "args": ["--oneline"]}',
+        "tool.output": "a1b2c3 commit subject",
+        "gen_ai.tool.output": "a1b2c3 commit subject",
+    }
+    sink = OTLPSink(endpoint="http://127.0.0.1:1/x", headers=_LLMOBS, provider=object())
+    fake_tracer = _FakeOtelTracer()
+    sink._tracer = fake_tracer
+    sink.write(TraceEvent.model_validate(trace_event_data))
+
+    attrs = fake_tracer.calls[0]["attributes"]
+    assert attrs["gen_ai.tool.call.arguments"] == '{"command": "log", "args": ["--oneline"]}'
+    assert attrs["gen_ai.tool.call.result"] == "a1b2c3 commit subject"
+    for moved in ("tool.arguments", "tool.output", "gen_ai.tool.output"):
+        assert moved not in attrs
+
+
+def test_llmobs_renames_the_per_process_session_id(trace_event_data: dict[str, Any]) -> None:
+    """Datadog's session is ``gen_ai.conversation.id``; a second ``session_id`` tag conflicts."""
+    attrs = _llmobs_write(trace_event_data, headers=_LLMOBS, kind="mergecraft.phase", parent="p1")
+
+    assert "session_id" not in attrs
+    assert attrs["mergecraft.session_id"] == trace_event_data["session_id"]
+    assert attrs["gen_ai.conversation.id"] == "0af7651916cd43dd8448eb211c80319c"
+
+
+def test_other_backends_keep_tool_payload_and_session_names(
+    trace_event_data: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_HEADERS", raising=False)
+    from mergecraft.tracing import OTLPSink, TraceEvent
+
+    trace_event_data["parent_span_id"] = "p1"
+    trace_event_data["attrs"] = {"tool.arguments": '{"q": 1}', "gen_ai.tool.output": "ok"}
+    sink = OTLPSink(
+        endpoint="http://127.0.0.1:1/x", headers={"authorization": "Bearer lf"}, provider=object()
+    )
+    fake_tracer = _FakeOtelTracer()
+    sink._tracer = fake_tracer
+    sink.write(TraceEvent.model_validate(trace_event_data))
+
+    attrs = fake_tracer.calls[0]["attributes"]
+    assert attrs["tool.arguments"] == '{"q": 1}'
+    assert attrs["gen_ai.tool.output"] == "ok"
+    assert attrs["session_id"] == trace_event_data["session_id"]

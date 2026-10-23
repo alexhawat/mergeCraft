@@ -918,11 +918,13 @@ def _targets_datadog_llmobs(headers: dict[str, str]) -> bool:
 
 
 def _stamp_llmobs_defaults(attrs: dict[str, Any], *, kind: str, is_root: bool) -> None:
-    """Give a pipeline span the GenAI operation and provider Datadog requires.
+    """Map a span onto what Datadog LLM Observability reads.
 
     The run root is the mergeCraft reviewer agent (``invoke_agent``); every other
     span without an operation is a step mergeCraft executes (``execute_tool``,
-    named after the span). Spans that already carry these attributes keep them.
+    named after the span), and spans without a provider get ``mergecraft``. Spans
+    that already carry these attributes keep them. Tool payloads move to the
+    GenAI tool-call names, and the per-process ``session_id`` is renamed.
     """
     if "gen_ai.operation.name" not in attrs:
         if is_root:
@@ -932,6 +934,18 @@ def _stamp_llmobs_defaults(attrs: dict[str, Any], *, kind: str, is_root: bool) -
             attrs["gen_ai.operation.name"] = "execute_tool"
             attrs.setdefault("gen_ai.tool.name", kind)
     attrs.setdefault("gen_ai.provider.name", GENAI_PROVIDER_NAME)
+    # Datadog shows a tool span's input and output only from the GenAI tool-call names,
+    # and turns every other attribute into a tag, so the payloads move rather than copy
+    # (``tool.arguments`` otherwise lands as mangled tags such as ``command__``).
+    if "tool.arguments" in attrs:
+        attrs.setdefault("gen_ai.tool.call.arguments", attrs.pop("tool.arguments"))
+    if "gen_ai.tool.output" in attrs:
+        attrs.setdefault("gen_ai.tool.call.result", attrs.pop("gen_ai.tool.output"))
+        attrs.pop("tool.output", None)
+    # Datadog keys its session on ``gen_ai.conversation.id``; mergeCraft's per-process
+    # ``session_id`` would otherwise become a second, conflicting ``session_id`` tag.
+    if "session_id" in attrs:
+        attrs["mergecraft.session_id"] = attrs.pop("session_id")
 
 
 def review_conversation_id(otel_trace_id: int) -> str:

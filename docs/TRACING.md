@@ -422,18 +422,27 @@ Datadog builds LLM Observability from OTel GenAI attributes and drops a span
 with no `gen_ai.*` attribute. mergeCraft's OTLP export therefore stamps
 `gen_ai.conversation.id` (the review's 32-hex trace id) on every span: each
 review is one Datadog session, and pipeline spans (analyzers, phases, publish)
-stay in the trace as workflow spans. Known cost is exported as
-`gen_ai.cost.estimated_total` next to `gen_ai.usage.cost_usd`. Point the `otel`
-sink at `https://otlp.<site>/v1/traces` with
-`OTEL_EXPORTER_OTLP_TRACES_HEADERS=dd-api-key=…,dd-otlp-source=llmobs`.
+stay in the trace. Point the `otel` sink at `https://otlp.<site>/v1/traces`
+with `OTEL_EXPORTER_OTLP_TRACES_HEADERS=dd-api-key=…,dd-otlp-source=llmobs`.
+
+Datadog prices LLM spans only from its own model catalog, matched on the span's
+provider and model; it does not read a cost attribute from the span. A model the
+catalog does not list (for example `deepseek-v4.1-flash` via OpenCode Go) shows
+`cost_estimate_status:skipped_unsupported_model_pricing` and no cost, whatever
+mergeCraft exports. `gen_ai.usage.cost_usd` still carries mergeCraft's own cost
+figure for backends that read it.
 
 Datadog also flags any span without `gen_ai.operation.name` and
 `gen_ai.provider.name`. When the sink sends `dd-otlp-source: llmobs` (and only
 then), spans that lack them get defaults: the run root is `invoke_agent`
 (`gen_ai.agent.name=mergecraft`), every other step is `execute_tool` named after
 the span (`gen_ai.tool.name=mergecraft.publish`), and the provider is
-`mergecraft`. Other backends do not get these defaults, so their GenAI views do
-not list pipeline phases as tool calls. `gen_ai.conversation.id`,
+`mergecraft`. Tool payloads move to `gen_ai.tool.call.arguments` and
+`gen_ai.tool.call.result`, the names Datadog shows as a tool span's input and
+output (every other attribute becomes a tag), and the per-process `session_id`
+becomes `mergecraft.session_id` so it does not read as a second session. Other
+backends get none of this, so their GenAI views do not list pipeline phases as
+tool calls and their attribute names are unchanged. `gen_ai.conversation.id`,
 `gen_ai.operation.name` on real agent/LLM/tool spans and `gen_ai.provider.name`
 are standard OTel GenAI attributes and go to every backend.
 

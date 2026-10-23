@@ -207,8 +207,6 @@ def usage_attrs(
         attrs["gen_ai.usage.cache_creation_input_tokens"] = cache_creation_input_tokens
     if cost_usd is not None:
         attrs["gen_ai.usage.cost_usd"] = cost_usd
-        # Datadog LLM Observability reads the estimated cost from ``gen_ai.cost.*``.
-        attrs["gen_ai.cost.estimated_total"] = cost_usd
     return attrs
 
 

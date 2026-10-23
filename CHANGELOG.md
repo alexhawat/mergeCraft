@@ -12,11 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OTLP traces read properly in Datadog LLM Observability. Every exported span
   carries `gen_ai.conversation.id` (the review's trace id), so each review is one
   session and pipeline spans (analyzers, phases, publish) are no longer dropped;
-  OpenCode plugin spans join the same session. Known cost is also exported as
-  `gen_ai.cost.estimated_total`, the attribute Datadog reads. When the sink sends
+  OpenCode plugin spans join the same session. When the sink sends
   `dd-otlp-source: llmobs`, pipeline spans without a GenAI operation get
   `invoke_agent` (run root) or `execute_tool` and `gen_ai.provider.name=mergecraft`,
-  which Datadog requires on every span; other backends do not get these defaults.
+  which Datadog requires on every span; tool payloads move to
+  `gen_ai.tool.call.arguments` / `gen_ai.tool.call.result` so tool spans show their
+  input and output; and the per-process `session_id` is renamed
+  `mergecraft.session_id`. Other backends do not get these changes. Datadog prices
+  LLM spans only from its own model catalog, so a model it does not list (such as
+  `deepseek-v4.1-flash`) shows no cost there.
 - OpenCode 2.x runs can trace the inside of the session: set
   `MERGECRAFT_OPENCODE_OTEL_PLUGIN` to an
   [opencode-plugin-otel-v2](https://github.com/alexhawat/opencode-plugin-otel-v2)
