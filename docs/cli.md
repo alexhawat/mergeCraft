@@ -206,6 +206,7 @@ not part of the operator contract.
 | `MERGECRAFT_MAX_DIFF_LINES` | Diff line ceiling before scope reduction is recorded | `50000` | review diff loading |
 | `MERGECRAFT_MODEL` | Model slug override; wins over the config `models:` list | unset — the first configured model | model resolution |
 | `MERGECRAFT_NONINTERACTIVE` | Truthy disables interactive prompts | unset — prompts when stdin is a TTY | CLI interactive commands |
+| `MERGECRAFT_OPENCODE_OTEL_PLUGIN` | Package path or spec of [opencode-plugin-otel-v2](https://github.com/alexhawat/opencode-plugin-otel-v2); when set and tracing exports to `otel` or `logfire`, OpenCode 2.x runs emit per-LLM-step and per-tool spans into the review's trace | unset — not loaded | OpenCode tracing |
 | `MERGECRAFT_OTEL_ENDPOINT` | OTLP/HTTP endpoint for the `otel` tracing sink; setting it implies OTLP when no destination is chosen | unset | tracing sink resolution |
 | `MERGECRAFT_RUN_TIMEOUT_S` | Whole-run wall-clock ceiling, in seconds | `3600` | run bounds |
 | `MERGECRAFT_TEMP_DIR` | Run temp directory override | unset — the run's own temp dir, else `/tmp` | checkout, MCP shell, git, and agent seams |

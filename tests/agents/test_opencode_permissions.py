@@ -76,3 +76,52 @@ def test_review_mode_denies_git_config_under_checkout(tmp_path: Path) -> None:
 def test_bash_stays_denied(tmp_path: Path) -> None:
     """Guard — bash denial is already true on trunk; must not regress under AP5."""
     assert _permissions(tmp_path).get("bash") == "deny"
+
+
+def _split_ctx(tmp_path: Path) -> tuple[AgentRunContext, Path]:
+    """A run whose temp dir (and diff) sits outside the checkout, as in production."""
+    from mergecraft.mcp.verdict import establish_offline_review_scope
+
+    run_dir = tmp_path / "run"
+    repo = tmp_path / "repo"
+    run_dir.mkdir()
+    repo.mkdir()
+    ctx = AgentRunContext(
+        payload={"shell": "restricted", "push": "restricted"},
+        mcp_server_url="http://127.0.0.1:0/mcp",
+        tmpdir=str(run_dir),
+        subagent_denied_tools=(),
+        instructions="review",
+        tool_state=init_tool_state(owner="acme", name="demo", dir=str(repo)),
+        mcp_auth_token="token",
+    )
+    establish_offline_review_scope(ctx.tool_state, diff_path=str(run_dir / "review.diff"))
+    return ctx, run_dir
+
+
+def test_the_review_diff_outside_the_checkout_is_reachable(tmp_path: Path) -> None:
+    """OpenCode asks for ``<dir>/**``; without this grant ``read`` refuses the diff."""
+    ctx, run_dir = _split_ctx(tmp_path)
+
+    external = json.loads(build_security_config(ctx, "anthropic/claude-sonnet"))["permission"][
+        "external_directory"
+    ]
+
+    assert external[f"{run_dir.resolve().as_posix()}/**"] == "allow"
+
+
+def test_private_temp_dir_children_stay_denied(tmp_path: Path) -> None:
+    """The isolated auth store, config dir and scratch HOME must not ride the diff grant."""
+    ctx, run_dir = _split_ctx(tmp_path)
+
+    external = json.loads(build_security_config(ctx, "anthropic/claude-sonnet"))["permission"][
+        "external_directory"
+    ]
+
+    keys = list(external)
+    grant = keys.index(f"{run_dir.resolve().as_posix()}/**")
+    for child in ("opencode-xdg-data", "opencode-xdg-config", "home"):
+        deny = f"{run_dir.resolve().as_posix()}/{child}/**"
+        assert external[deny] == "deny"
+        # Last match wins: each deny must come after the grant it narrows.
+        assert keys.index(deny) > grant
