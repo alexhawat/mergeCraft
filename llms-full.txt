@@ -2485,10 +2485,10 @@ Review runs never load your global OpenCode config (each run gets an empty
 `OPENCODE_CONFIG_DIR`), so a copy of the plugin listed there does not join the
 review; the per-run entry is the only instance.
 
-When this run's policy is `off` or `metadata`, the plugin is loaded only if its
-`src/config.ts` or `dist/config.js` reads `captureContent`. An older copy would
-ignore the option and export every body, so it is skipped with a warning; a bare
-package spec cannot be checked and is skipped the same way.
+The plugin is loaded only if its `src/config.ts` or `dist/config.js` reads
+`captureContent`, whatever this run's content level. An older or unknown copy
+would ignore the option and could export every body unredacted, so it is skipped
+with a warning; a bare package spec cannot be checked and is skipped the same way.
 
 When it is set and tracing exports to an `otel` or `logfire` sink, each OpenCode
 2.x run gets a per-run plugin entry (in `OPENCODE_CONFIG_CONTENT`, replacing any

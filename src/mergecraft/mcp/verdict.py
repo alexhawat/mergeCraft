@@ -290,6 +290,7 @@ def establish_offline_review_scope(tool_state: ToolState, *, diff_path: str) -> 
     never record a verdict (issue #470).
     """
     register_review_scope(tool_state, diff_path=diff_path, provenance="local-diff")
+    tool_state.offline_review = True
 
 
 async def _resolve_pr_head_sha(ctx: ToolContext, *, pull_number: int) -> str:

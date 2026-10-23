@@ -554,6 +554,10 @@ class ToolState:
     # ``get_commit_info`` is deliberately not a value (N3 / D10): a metadata
     # read may not register canonical scope.
     scope_provenance: Literal["api", "checkout", "local-diff"] | None = None
+    # Set only by ``establish_offline_review_scope`` (``mergecraft review``): an
+    # offline run never commits. ``local-diff`` provenance alone does not say so,
+    # because ``establish_review_scope`` records it on PR runs too.
+    offline_review: bool = False
     # Memoized ``git show <rev>:<path>`` output paths keyed ``rev\\0path``.
     git_show_cache: dict[str, str] = field(default_factory=dict)
     confirmed_findings: list[dict[str, Any]] = field(default_factory=list)

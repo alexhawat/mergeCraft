@@ -180,8 +180,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `gen_ai.system` also gets `gen_ai.provider.name`.
 - A read-only review of a checkout with an in-tree virtualenv no longer fails its
   integrity check when Python writes bytecode mid-review: the checkout hash now
-  skips `__pycache__` and `.venv` directories at any depth, as it already did
-  `node_modules`.
+  skips `__pycache__` directories at any depth, as it already did `node_modules`.
+  The rest of a virtualenv stays hashed.
 - A workspace review no longer fails closed with "checkout integrity failure:
   tree changed during read-only review" when dependency prep creates nested
   `node_modules`. pnpm/yarn/npm lay down `apps/api/node_modules`,

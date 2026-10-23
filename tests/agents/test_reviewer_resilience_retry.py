@@ -213,3 +213,23 @@ async def test_unselected_mode_outside_offline_still_gates_a_dirty_tree(
     issues = await collect_post_run_issues(_run_ctx(tool_ctx))
 
     assert issues.dirty_tree == " M dirty.py"
+
+
+@pytest.mark.asyncio
+async def test_pr_scope_from_establish_review_scope_still_gates_a_dirty_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``establish_review_scope`` records ``local-diff`` on PR runs; that is not offline."""
+    from mergecraft.agents.post_run import collect_post_run_issues
+    from mergecraft.mcp.verdict import register_review_scope
+
+    monkeypatch.setattr("mergecraft.agents.post_run.get_git_status", lambda: " M dirty.py")
+    tool_ctx = _tool_ctx(tmp_path)
+    register_review_scope(
+        tool_ctx.tool_state, diff_path=str(tmp_path / "pr.diff"), provenance="local-diff"
+    )
+
+    issues = await collect_post_run_issues(_run_ctx(tool_ctx))
+
+    assert tool_ctx.tool_state.offline_review is False
+    assert issues.dirty_tree == " M dirty.py"

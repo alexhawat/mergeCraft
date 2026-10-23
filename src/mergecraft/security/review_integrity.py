@@ -35,18 +35,18 @@ _SINK_NAMES: frozenset[str] = frozenset({"stdout", "stderr", "output"})
 # directory name only: the walk prunes ``dirnames``, so a regular *file* that
 # happens to share a name is still hashed.
 #
-# Python and tool caches are pruned the same way: ``__pycache__`` gets fresh ``.pyc`` files
-# whenever a module is first (or newly) imported, and an in-tree ``.venv`` gets them
-# for its site-packages, so a review of an editable install whose agent subprocess
-# imports a lazily loaded module failed closed. Both are interpreter byproducts,
-# never review input.
+# Python and tool caches are pruned the same way: ``__pycache__`` gets fresh
+# ``.pyc`` files whenever a module is first (or newly) imported — in the checkout or
+# in an in-tree virtualenv's site-packages — so a review of an editable install whose
+# agent subprocess imports a lazily loaded module failed closed. The rest of a
+# virtualenv stays hashed: gates that rewrite it run inside ``run_static_checks``,
+# which re-pins the baseline, so any other write there is still caught.
 _HASH_EXCLUDE_DIR_NAMES: frozenset[str] = frozenset(
     {
         ".git",
         "node_modules",
         ".pnpm-store",
         "__pycache__",
-        ".venv",
         # Linter and test-runner caches that ``run_static_checks`` writes when it runs
         # repo gates in the checkout mid-review.
         ".ruff_cache",

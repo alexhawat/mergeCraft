@@ -18,9 +18,9 @@ plugin entry that:
 
 Opt-in is operator-only: ``MERGECRAFT_OPENCODE_OTEL_PLUGIN`` names the plugin
 package (a directory path or package spec). Repository config never enables it,
-so a reviewed fork cannot load code into the harness. When the policy withholds
-bodies, only a plugin copy that provably reads ``captureContent`` is loaded: an
-older copy would ignore it and export them. Header values never reach
+so a reviewed fork cannot load code into the harness. Only a plugin copy that
+provably reads ``captureContent`` is loaded, at every content level: an older or
+unknown copy would ignore it and export bodies unredacted. Header values never reach
 the config file on disk: each one rides an env var the config references as
 ``{env:NAME}``.
 
@@ -144,8 +144,8 @@ def _conversation_id(trace_id: str) -> str | None:
 def _supports_capture_content(package: str) -> bool:
     """Whether the plugin at ``package`` honours ``captureContent``.
 
-    An older plugin ignores the option and exports every body, so a run whose
-    policy withholds bodies must only load a copy that provably reads it. Only a
+    An older or unknown plugin ignores the option (and may not redact), so only a
+    copy that provably reads it is loaded, whatever this run's content level. Only a
     directory can be checked; a bare package spec cannot, and reads as unsupported.
     """
     root = Path(package).expanduser()
@@ -204,10 +204,13 @@ def opencode_otel_plugin_wiring(trust_tier: str | None) -> OtelPluginWiring | No
         header_refs.append(f"{name}={{env:{env_name}}}")
 
     capture = resolve_capture_policy(trust_tier)
-    if _PLUGIN_CONTENT[capture] != "full" and not _supports_capture_content(package):
+    if not _supports_capture_content(package):
+        # Required at every level, not only when bodies are withheld: under the default
+        # ``redacted`` the plugin must also redact, and a copy that cannot be shown to
+        # honour these options may export every prompt and tool body verbatim.
         logger.warning(
-            "opencode otel plugin: {} does not support captureContent; not enabling, "
-            "because this run's content policy ({}) withholds bodies",
+            "opencode otel plugin: {} does not support captureContent; not enabling "
+            "(this run's content policy is {})",
             package,
             capture.value,
         )

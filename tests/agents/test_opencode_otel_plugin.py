@@ -287,10 +287,10 @@ async def test_driver_never_loads_the_plugin_on_1x(
     assert captured == []
 
 
-def test_plugin_without_capture_content_is_refused_when_bodies_are_withheld(
+def test_plugin_without_capture_content_is_refused_at_every_level(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """An older plugin ignores ``captureContent``; loading it would export bodies anyway."""
+    """An older plugin ignores ``captureContent`` (and may not redact) even under ``redacted``."""
     old = _plugin_dir(tmp_path / "old-plugin", supports_capture=False)
     monkeypatch.setenv(OTEL_PLUGIN_ENV, old)
 
@@ -298,8 +298,7 @@ def test_plugin_without_capture_content_is_refused_when_bodies_are_withheld(
     trusted, _ = _wiring_under_span(_otel_sink(), trust_tier="trusted")
 
     assert untrusted is None
-    assert trusted is not None
-    assert trusted.entry["options"]["captureContent"] == "full"
+    assert trusted is None
 
 
 def test_a_package_spec_cannot_prove_support(monkeypatch: pytest.MonkeyPatch) -> None:

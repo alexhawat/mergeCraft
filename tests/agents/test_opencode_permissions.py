@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from mergecraft.agents.opencode import build_security_config
 from mergecraft.agents.shared import AgentRunContext
 from mergecraft.mcp.tool_state import init_tool_state
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def _ctx(tmp_path: Path) -> AgentRunContext:
@@ -125,3 +129,40 @@ def test_private_temp_dir_children_stay_denied(tmp_path: Path) -> None:
         assert external[deny] == "deny"
         # Last match wins: each deny must come after the grant it narrows.
         assert keys.index(deny) > grant
+
+
+def test_an_operator_set_shared_temp_dir_is_not_granted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``MERGECRAFT_TEMP_DIR`` may be a shared root; only a run-created dir is granted."""
+    import mergecraft.utils.git_setup as git_setup
+
+    shared = tmp_path / "shared-tmp"
+    shared.mkdir()
+    monkeypatch.setenv("MERGECRAFT_TEMP_DIR", str(shared))
+    monkeypatch.setattr(git_setup, "_temp_dir", None)
+    ctx, run_dir = _split_ctx(tmp_path)
+
+    external = json.loads(build_security_config(ctx, "anthropic/claude-sonnet"))["permission"][
+        "external_directory"
+    ]
+
+    assert f"{shared.resolve().as_posix()}/**" not in external
+    assert f"{run_dir.resolve().as_posix()}/**" in external
+
+
+def test_the_run_created_temp_dir_is_granted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import mergecraft.utils.git_setup as git_setup
+
+    created = tmp_path / "mergecraft-abc123"
+    created.mkdir()
+    monkeypatch.setattr(git_setup, "_temp_dir", str(created))
+    ctx, _ = _split_ctx(tmp_path)
+
+    external = json.loads(build_security_config(ctx, "anthropic/claude-sonnet"))["permission"][
+        "external_directory"
+    ]
+
+    assert external[f"{created.resolve().as_posix()}/**"] == "allow"

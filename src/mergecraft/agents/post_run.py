@@ -151,7 +151,7 @@ async def collect_post_run_issues(
     if status:
         if mode and mode in NON_COMMITTING_MODES:
             logger.info("dirty-tree gate suppressed: mode `{}` does not commit", mode)
-        elif ctx.tool_state.scope_provenance == "local-diff":
+        elif ctx.tool_state.offline_review:
             # An offline review (``mergecraft review``) is read-only whether or not the
             # agent selected a mode; asking it to commit and push only derails the
             # retry turn that should recover a missing verdict.

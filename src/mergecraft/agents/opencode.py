@@ -58,6 +58,7 @@ from mergecraft.tracing.genai import (
 )
 from mergecraft.tracing.http import instrument_httpx
 from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.utils.git_setup import created_temp_directory
 from mergecraft.utils.privilege import agent_subprocess_env, wrap_agent_command
 from mergecraft.utils.process_group import (
     kill_process_group,
@@ -628,11 +629,12 @@ def _review_diff_external_directory(ctx: AgentRunContext) -> dict[str, str]:
     the literal and the resolved path are listed, because the agent may use either
     (``/var`` and ``/private/var`` on macOS).
     """
+    # Only directories this run created: an operator-set ``MERGECRAFT_TEMP_DIR`` can
+    # be a shared root, and a registered diff path's parent is agent-chosen
+    # (``establish_review_scope``), so neither is granted on its own say-so.
     dirs = {Path(ctx.tmpdir)}
-    if temp := os.environ.get("MERGECRAFT_TEMP_DIR"):
+    if temp := created_temp_directory():
         dirs.add(Path(temp))
-    repo = primary_repo_state(ctx.tool_state)
-    dirs.update(Path(p).parent for p in (repo.diff_path, repo.incremental_diff_path) if p)
     forms = sorted({form.as_posix() for d in dirs for form in (d, d.resolve())})
     rules = {f"{root}/**": "allow" for root in forms}
     for root in forms:
