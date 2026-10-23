@@ -46,8 +46,14 @@ async def dispatch_mcp_rpc(
     validators: dict[str, Validator],
     agent_id: str | None = None,
     return_tool_errors: bool = False,
+    time_notice: bool = False,
 ) -> dict[str, Any]:
-    """Dispatch one JSON-RPC MCP request and return a response envelope."""
+    """Dispatch one JSON-RPC MCP request and return a response envelope.
+
+    ``time_notice`` appends the agent's elapsed/remaining minutes to successful
+    ``tools/call`` results once it is past the stop-exploring checkpoint. Only
+    the orchestrator route sets it: subagents do not submit the verdict.
+    """
     if method == "initialize":
         return {
             "jsonrpc": "2.0",
@@ -75,6 +81,7 @@ async def dispatch_mcp_rpc(
             record_trajectory,
             span_tool_call_id,
             tool_result_to_rpc,
+            with_elapsed_notice,
         )
 
         name = params.get("name")
@@ -159,10 +166,15 @@ async def dispatch_mcp_rpc(
                 tool_name=name,
                 attrs=call_attrs,
             )
+            rpc_result = tool_result_to_rpc(result)
+            # After the trace and trajectory recorded the result: the notice is
+            # live guidance for the agent, never part of replayed or hashed output.
+            if time_notice and tool_ctx is not None:
+                rpc_result = with_elapsed_notice(rpc_result, tool_ctx.tool_state)
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": tool_result_to_rpc(result),
+                "result": rpc_result,
             }
     return rpc_error(req_id, RpcError(-32601, f"Method not found: {method}"))
 

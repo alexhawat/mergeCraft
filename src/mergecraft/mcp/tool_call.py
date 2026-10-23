@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from math import isfinite
 from typing import TYPE_CHECKING, Any
 
@@ -13,11 +14,15 @@ from loguru import logger
 
 from mergecraft.mcp.rpc_types import RpcError
 from mergecraft.mcp.shared import JsonSchema, ToolResult, ToolSpec
+from mergecraft.modes._time_budget import elapsed_notice
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from jsonschema.protocols import Validator
 
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.tool_state import ToolState
 
 
 def tool_result_to_rpc(result: ToolResult | Any) -> dict[str, Any]:
@@ -29,6 +34,32 @@ def tool_result_to_rpc(result: ToolResult | Any) -> dict[str, Any]:
     if isinstance(result, dict) and "content" in result:
         return result
     return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
+
+
+def with_elapsed_notice(
+    rpc_result: dict[str, Any],
+    state: ToolState,
+    *,
+    now: Callable[[], float] = time.monotonic,
+) -> dict[str, Any]:
+    """Return ``rpc_result`` plus a trailing ⏱ text part once the agent is past 60%.
+
+    The notice is a separate content item, so ``content[0]`` stays the tool's own
+    payload, and the input is never mutated: the trajectory and trace already
+    hold the un-noticed result. Error results and runs with no deadline pass
+    through unchanged.
+    """
+    started = state.agent_started_monotonic
+    deadline_s = state.agent_deadline_s
+    content = rpc_result.get("content")
+    if started is None or deadline_s is None or rpc_result.get("isError"):
+        return rpc_result
+    if not isinstance(content, list):
+        return rpc_result
+    notice = elapsed_notice(now() - started, deadline_s)
+    if notice is None:
+        return rpc_result
+    return {**rpc_result, "content": [*content, {"type": "text", "text": notice}]}
 
 
 def span_tool_call_id() -> str:
@@ -186,4 +217,5 @@ __all__ = [
     "record_trajectory",
     "span_tool_call_id",
     "tool_result_to_rpc",
+    "with_elapsed_notice",
 ]

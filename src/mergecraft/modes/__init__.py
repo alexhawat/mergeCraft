@@ -49,6 +49,7 @@ from mergecraft.modes import (
     Task,
 )
 from mergecraft.modes._pr_summary_format import PR_SUMMARY_FORMAT
+from mergecraft.modes._time_budget import render_time_budget
 from mergecraft.types import (
     MERGECRAFT_MCP_NAME,
     RECALL_AGENT_NAME,
@@ -208,33 +209,6 @@ def _render_inline_budget(inline_budget: int | None) -> str:
     return str(inline_budget)
 
 
-def _render_time_budget(time_budget_minutes: int | None) -> str:
-    """Render the ``${TIME_BUDGET}`` marker for the agent's deadline.
-
-    ``time_budget_minutes`` is the agent deadline the harness enforces (the run
-    timeout minus setup elapsed). The 60% / 80% checkpoints are where the agent
-    must stop exploring and then submit; without them a slow run spends its
-    whole budget exploring and is killed with no verdict. ``None`` (no deadline)
-    renders a neutral line, so no rendered prompt keeps a ``${...}`` sequence.
-    """
-    if time_budget_minutes is None:
-        return (
-            "this run has no fixed time limit, but keep exploration proportional to risk: "
-            "once your open questions are answered or ruled out, move to verification and "
-            "drafting findings."
-        )
-    minutes = max(1, time_budget_minutes)
-    stop_exploring = max(1, round(minutes * 0.6))
-    submit_by = max(1, round(minutes * 0.8))
-    return (
-        f"you have about {minutes} minutes for this run. By about minute {stop_exploring} "
-        "(~60% of it), stop exploring and move to verification and drafting findings. "
-        f"By about minute {submit_by} (~80%), submit the verdict with what you have; an "
-        "unconfirmed concern goes in at lower severity or in the summary, not as a reason "
-        "to keep exploring."
-    )
-
-
 def _expand_template(
     template: str,
     *,
@@ -259,7 +233,7 @@ def _expand_template(
     text = text.replace("${RECALL_AGENT_NAME}", RECALL_AGENT_NAME)
     text = text.replace("${LENS_MENU_BLOCK}", _render_lens_menu_block())
     text = text.replace("${INLINE_BUDGET}", _render_inline_budget(inline_budget))
-    text = text.replace("${TIME_BUDGET}", _render_time_budget(time_budget_minutes))
+    text = text.replace("${TIME_BUDGET}", render_time_budget(time_budget_minutes))
 
     def signed_simple(m: re.Match[str]) -> str:
         return m.group(1) if signed_commits else m.group(2)
