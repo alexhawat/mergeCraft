@@ -156,11 +156,12 @@ def prompt_version_for(name: str) -> str:
     """Return the baseline prompt version for the built-in mode named ``name``.
 
     The baseline is the **default** render — every ``${...}`` marker expanded
-    with ``inline_budget=None`` (the config-key name, not a number) — for a
-    sentinel agent, so it is stable across the ``signed_commits`` toggle and the
-    caller's runtime agent. :func:`compute_modes` hashes the prompt it actually
-    renders, so a run that resolved a concrete ``inline_budget`` records that
-    render's version instead; this baseline is what a default caller records.
+    with ``inline_budget=None`` (the config-key name, not a number) and
+    ``time_budget_minutes=None`` (no deadline) — for a sentinel agent, so it is
+    stable across the ``signed_commits`` toggle and the caller's runtime agent.
+    :func:`compute_modes` hashes the prompt it actually renders, so a run that
+    resolved a concrete ``inline_budget`` or deadline records that render's
+    version instead; this baseline is what a default caller records.
     Raises :class:`KeyError` if the name does not match a built-in.
     """
     for mode_name, _, template in _MODE_DEFS:
@@ -207,6 +208,33 @@ def _render_inline_budget(inline_budget: int | None) -> str:
     return str(inline_budget)
 
 
+def _render_time_budget(time_budget_minutes: int | None) -> str:
+    """Render the ``${TIME_BUDGET}`` marker for the agent's deadline.
+
+    ``time_budget_minutes`` is the agent deadline the harness enforces (the run
+    timeout minus setup elapsed). The 60% / 80% checkpoints are where the agent
+    must stop exploring and then submit; without them a slow run spends its
+    whole budget exploring and is killed with no verdict. ``None`` (no deadline)
+    renders a neutral line, so no rendered prompt keeps a ``${...}`` sequence.
+    """
+    if time_budget_minutes is None:
+        return (
+            "this run has no fixed time limit, but keep exploration proportional to risk: "
+            "once your open questions are answered or ruled out, move to verification and "
+            "drafting findings."
+        )
+    minutes = max(1, time_budget_minutes)
+    stop_exploring = max(1, round(minutes * 0.6))
+    submit_by = max(1, round(minutes * 0.8))
+    return (
+        f"you have about {minutes} minutes for this run. By about minute {stop_exploring} "
+        "(~60% of it), stop exploring and move to verification and drafting findings. "
+        f"By about minute {submit_by} (~80%), submit the verdict with what you have; an "
+        "unconfirmed concern goes in at lower severity or in the summary, not as a reason "
+        "to keep exploring."
+    )
+
+
 def _expand_template(
     template: str,
     *,
@@ -215,6 +243,7 @@ def _expand_template(
     finalize_step: str,
     signed_commits: bool,
     inline_budget: int | None = None,
+    time_budget_minutes: int | None = None,
 ) -> str:
     from mergecraft.modes._diff_first import DIFF_FIRST_INSTRUCTION
 
@@ -230,6 +259,7 @@ def _expand_template(
     text = text.replace("${RECALL_AGENT_NAME}", RECALL_AGENT_NAME)
     text = text.replace("${LENS_MENU_BLOCK}", _render_lens_menu_block())
     text = text.replace("${INLINE_BUDGET}", _render_inline_budget(inline_budget))
+    text = text.replace("${TIME_BUDGET}", _render_time_budget(time_budget_minutes))
 
     def signed_simple(m: re.Match[str]) -> str:
         return m.group(1) if signed_commits else m.group(2)
@@ -250,13 +280,16 @@ def compute_modes(
     signed_commits: bool = False,
     *,
     inline_budget: int | None = None,
+    time_budget_minutes: int | None = None,
 ) -> list[Mode]:
     """Return built-in modes with tool refs formatted for ``agent_id``.
 
     ``inline_budget`` is the repo's ``analyzers.inlineBudget`` resolved by the
     caller. When omitted the prompt names the config key instead of baking in a
-    number; the ``${INLINE_BUDGET}`` marker always expands, so no rendered
-    prompt keeps a ``${...}`` sequence.
+    number. ``time_budget_minutes`` is the agent deadline the caller enforces;
+    when omitted (no deadline) the ``${TIME_BUDGET}`` marker renders a neutral
+    line. Both markers always expand, so no rendered prompt keeps a ``${...}``
+    sequence.
     """
 
     def t(tool_name: str) -> str:
@@ -279,28 +312,17 @@ def compute_modes(
     for name, description, template in _MODE_DEFS:
         # ``compute_prompt_version`` hashes the *rendered* body, so the version
         # names the prompt the reviewer actually received: a caller that resolved
-        # a concrete ``inline_budget`` records the version of the text that ran.
-        # The default (``inline_budget=None``) render is the baseline that
+        # a concrete ``inline_budget`` or deadline records the version of the text
+        # that ran. The default (both ``None``) render is the baseline that
         # ``prompt_version_for`` returns for a sentinel agent.
-        base_prompt = _expand_template(
+        prompt = _expand_template(
             template,
             t=t,
             commit_step=commit_step,
             finalize_step=finalize_step,
             signed_commits=signed_commits,
-            inline_budget=None,
-        )
-        prompt = (
-            base_prompt
-            if inline_budget is None
-            else _expand_template(
-                template,
-                t=t,
-                commit_step=commit_step,
-                finalize_step=finalize_step,
-                signed_commits=signed_commits,
-                inline_budget=inline_budget,
-            )
+            inline_budget=inline_budget,
+            time_budget_minutes=time_budget_minutes,
         )
         result.append(
             Mode(
