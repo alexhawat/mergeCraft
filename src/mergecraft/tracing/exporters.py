@@ -946,6 +946,13 @@ def _stamp_llmobs_defaults(attrs: dict[str, Any], *, kind: str, is_root: bool) -
     # ``session_id`` would otherwise become a second, conflicting ``session_id`` tag.
     if "session_id" in attrs:
         attrs["mergecraft.session_id"] = attrs.pop("session_id")
+    # Datadog splits an array attribute into stray tags (``verdict__``, ``summary_``).
+    # ``tool.input_keys`` repeats the argument names the input already shows; other
+    # arrays outside ``gen_ai.*`` are joined into one tag value.
+    attrs.pop("tool.input_keys", None)
+    for key, value in list(attrs.items()):
+        if isinstance(value, (list, tuple)) and not key.startswith("gen_ai."):
+            attrs[key] = "/".join(str(item) for item in value)
 
 
 def review_conversation_id(otel_trace_id: int) -> str:
