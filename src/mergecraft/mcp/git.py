@@ -220,6 +220,153 @@ def _git_show_preview(output_path: str) -> str:
     return preview
 
 
+# Grep context the tool passes through. Past this, grep is being used to read
+# whole function bodies: one timed-out self-review spent ~40 of its 102 git
+# calls on `git grep -A 40..70 'def X'` (437 KB of output) and never used a
+# line-range read. Larger context is dropped and the match locations returned.
+_GREP_MAX_CONTEXT_LINES = 10
+_GREP_UNBOUNDED_CONTEXT = 1 << 30
+_GREP_CONTEXT_LONG = frozenset({"--after-context", "--before-context", "--context"})
+_GREP_FUNCTION_CONTEXT = frozenset({"-W", "--function-context"})
+# Short letters whose value is the rest of the bundle or, failing that, the next token.
+_GREP_SHORT_VALUE_LETTERS = frozenset("ABCefm")
+_GREP_LONG_TAKING_VALUE = _GREP_CONTEXT_LONG | {"--max-depth", "--max-count", "--threads"}
+_GREP_CONTEXT_NOTE = (
+    "Context lines dropped: grep context over "
+    f"{_GREP_MAX_CONTEXT_LINES} lines (or -W) returns whole bodies. These are the "
+    "match locations (path:line:text). To read a body, open the file with your "
+    "file-read tool (read/Read) at offset=<match line> with a limit, not grep context."
+)
+# Shell readers agents reach for through this tool. Refused like any verb off
+# the allowlist, but the refusal names the read that does the job.
+_FILE_READER_VERBS = frozenset({"sed", "cat", "head", "tail", "awk"})
+_SED_LINE_RANGE_RE = re.compile(r"^(\d+),(\d+)p$")
+
+
+def _grep_option_groups(head: list[str]) -> tuple[list[list[str]], list[str], bool]:
+    """Split grep args before ``--`` into option groups and positionals.
+
+    Each group is an option token plus the separate value it consumes, if any.
+    The flag reports whether an option followed a positional: git grep stops
+    option parsing at the pattern, so ``grep 'def x' -A 4`` exits 128.
+    """
+    groups: list[list[str]] = []
+    positionals: list[str] = []
+    misplaced = False
+    idx = 0
+    while idx < len(head):
+        tok = head[idx]
+        if not tok.startswith("-") or tok == "-":
+            positionals.append(tok)
+            idx += 1
+            continue
+        misplaced = misplaced or bool(positionals)
+        if tok.startswith("--"):
+            takes_value = "=" not in tok and tok in _GREP_LONG_TAKING_VALUE
+        else:
+            body = tok[1:]
+            letter = next((c for c in body if c in _GREP_SHORT_VALUE_LETTERS), "")
+            takes_value = (
+                not body.isdigit() and bool(letter) and body.index(letter) == len(body) - 1
+            )
+        width = 2 if takes_value and idx + 1 < len(head) else 1
+        groups.append(head[idx : idx + width])
+        idx += width
+    return groups, positionals, misplaced
+
+
+def _context_value(value: str) -> int:
+    return int(value) if value.isdigit() else 0
+
+
+def _strip_grep_context(group: list[str]) -> tuple[list[str], int]:
+    """Return *group* without its context option, and the context lines it asked for."""
+    tok = group[0]
+    separate = group[1] if len(group) > 1 else ""
+    if tok in _GREP_FUNCTION_CONTEXT:
+        return [], _GREP_UNBOUNDED_CONTEXT
+    if tok.startswith("--"):
+        name, _, inline = tok.partition("=")
+        if name in _GREP_CONTEXT_LONG:
+            return [], _context_value(inline or separate)
+        return group, 0
+    body = tok[1:]
+    if body.isdigit():
+        return [], int(body)
+    kept: list[str] = []
+    lines = 0
+    for idx, char in enumerate(body):
+        if char == "W":
+            lines = _GREP_UNBOUNDED_CONTEXT
+            continue
+        if char in "ABC":
+            lines = max(lines, _context_value(body[idx + 1 :] or separate))
+            return ([f"-{''.join(kept)}"] if kept else []), lines
+        if char in _GREP_SHORT_VALUE_LETTERS:
+            # -e / -f / -m: the rest of the bundle (or the next token) is a value.
+            return [f"-{''.join(kept)}{body[idx:]}", *group[1:]], lines
+        kept.append(char)
+    return ([f"-{''.join(kept)}"] if kept else []), lines
+
+
+def _shows_line_numbers(groups: list[list[str]]) -> bool:
+    for group in groups:
+        tok = group[0]
+        if tok == "--line-number":
+            return True
+        if tok.startswith("-") and not tok.startswith("--"):
+            options = tok[1:]
+            for idx, char in enumerate(options):
+                if char in _GREP_SHORT_VALUE_LETTERS:
+                    options = options[:idx]
+                    break
+            if "n" in options:
+                return True
+    return False
+
+
+def _normalize_grep_args(args: list[str]) -> tuple[list[str], bool]:
+    """Move misplaced grep options before the pattern and drop oversized context.
+
+    Returns the args to run and whether context was dropped (``-n`` is then
+    added if missing, so every match carries the line to read from). Args come
+    back untouched when every option precedes the pattern and no context
+    exceeds ``_GREP_MAX_CONTEXT_LINES``. A ``(``/``)`` boolean expression is
+    left alone: its operators interleave with ``-e`` patterns.
+    """
+    end = args.index("--") if "--" in args else len(args)
+    head, tail = args[:end], args[end:]
+    if "(" in head or ")" in head:
+        return args, False
+    groups, positionals, misplaced = _grep_option_groups(head)
+    stripped = [_strip_grep_context(group) for group in groups]
+    oversized = any(lines > _GREP_MAX_CONTEXT_LINES for _, lines in stripped)
+    if not oversized and not misplaced:
+        return args, False
+    if oversized:
+        groups = [kept for kept, _ in stripped if kept]
+        if not _shows_line_numbers(groups):
+            groups.insert(0, ["-n"])
+    options = [tok for group in groups for tok in group]
+    return [*options, *positionals, *tail], oversized
+
+
+def _file_reader_hint(command: str, args: list[str]) -> str:
+    """Name the native read that replaces a refused ``sed``/``cat``/... call."""
+    for arg in args:
+        match = _SED_LINE_RANGE_RE.fullmatch(arg)
+        if command == "sed" and match is not None:
+            first, last = int(match.group(1)), int(match.group(2))
+            return (
+                f"To read lines {first}-{last}, use your file-read tool (read/Read) "
+                f"with offset={first} limit={last - first + 1}."
+            )
+    return (
+        "To read a file or a line range, use your file-read tool (read/Read) with "
+        "an offset and limit, e.g. offset=840 limit=100 for lines 840-939."
+    )
+
+
 def _is_auth_failure(stderr: str) -> bool:
     """Return whether git's failure output shows a rejected/absent credential."""
     lowered = stderr.lower()
@@ -382,6 +529,8 @@ def _validate_git_invocation(
             f"invalid git subcommand: {command!r} — not available through this "
             "tool (read-only allowlist)"
         )
+        if command in _FILE_READER_VERBS:
+            msg = f"{msg}. {_file_reader_hint(command, args)}"
         raise ValueError(msg)
     if command == "branch":
         _reject_branch_writes(args)
@@ -444,6 +593,9 @@ def git_tool(ctx: ToolContext):
                     "outputPath": cached_path,
                     "cached": True,
                 }
+        context_dropped = False
+        if command == "grep":
+            args, context_dropped = _normalize_grep_args(args)
         try:
             output = _run_git([*global_opts, command, *args], cwd=cwd)
         except RuntimeError as err:
@@ -459,16 +611,19 @@ def git_tool(ctx: ToolContext):
                 "output": _git_show_preview(path),
                 "outputPath": path,
             }
+        result: dict[str, Any] = {"output": output}
         if len(output) > 50_000:
             temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
             path = str(Path(temp) / f"git-{command}-{uuid.uuid4().hex[:8]}.txt")
             Path(path).write_text(output, encoding="utf-8")
             preview = "\n".join(output.splitlines()[:40])
-            return {
+            result = {
                 "output": (f"{preview}\n\n... [output truncated; full body saved to {path}] ..."),
                 "outputPath": path,
             }
-        return {"output": output}
+        if context_dropped:
+            result["note"] = _GREP_CONTEXT_NOTE
+        return result
 
     return tool(
         name="git",
