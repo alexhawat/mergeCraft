@@ -2423,7 +2423,7 @@ delivers today.
 | `claude` | Claude Code 2.1.226       | `--print --output-format stream-json`         | **Per-event**: one `llm.call` per `message_start`/`message_stop`; one `tool.call` per `content_block_start`/`stop`. Authoritative usage from the final `result` event. |
 | `codex`  | codex-cli 0.146.0         | `codex exec --json`                           | **Per-event**: one `llm.call` per `thread.started`; one `tool.call` per `item.started`/`item.completed`. Authoritative usage from the `turn.completed` event. |
 | `gemini` | gemini-cli 0.53.0         | `-p <prompt> --output-format stream-json`     | **Per-event**: one `llm.call` per `init`; one `tool.call` per `tool_use`/`tool_result`. Final usage from the `result` event. |
-| `opencode` | @opencode/cli 2.0.29    | `opencode run --standalone --format json` (1.x: HTTP via serve) | **Run-level only** — opencode's events are partial, so the driver degrades to a `run`-level span per `agent.attempt`. The HTTP polling path emits no NDJSON stream to consume. |
+| `opencode` | @opencode/cli 2.0.29    | `opencode run --standalone --format json` (1.x: HTTP via serve) | **Run-level only** — opencode's events are partial, so the driver degrades to a `run`-level span per `agent.attempt`. The HTTP polling path emits no NDJSON stream to consume. On 2.x, the opt-in [OpenTelemetry plugin](#opencode-plugin-spans) adds per-step and per-tool spans from inside the run. |
 | `cursor` | (cloud)                   | n/a — Cursor Cloud HTTP polling               | **Run-level only** — no local streaming; the driver intentionally does not change its read path. |
 
 Graceful degradation is the contract: a driver that cannot stream (or
@@ -2435,6 +2435,70 @@ and `test_cursor_degrades_to_run_level` regression pins in
 Malformed events are skipped and counted: the consumer never raises on
 a bad line. The counter is available via `StreamSpanAccumulator.malformed_event_count`
 and the line is logged at `warning` level.
+
+## Datadog LLM Observability
+
+Datadog builds LLM Observability from OTel GenAI attributes and drops a span
+with no `gen_ai.*` attribute. mergeCraft's OTLP export therefore stamps
+`gen_ai.conversation.id` (the review's 32-hex trace id) on every span: each
+review is one Datadog session, and pipeline spans (analyzers, phases, publish)
+stay in the trace as workflow spans. Known cost is exported as
+`gen_ai.cost.estimated_total` next to `gen_ai.usage.cost_usd`. Point the `otel`
+sink at `https://otlp.<site>/v1/traces` with
+`OTEL_EXPORTER_OTLP_TRACES_HEADERS=dd-api-key=…,dd-otlp-source=llmobs`.
+
+Datadog also flags any span without `gen_ai.operation.name` and
+`gen_ai.provider.name`. When the sink sends `dd-otlp-source: llmobs` (and only
+then), spans that lack them get defaults: the run root is `invoke_agent`
+(`gen_ai.agent.name=mergecraft`), every other step is `execute_tool` named after
+the span (`gen_ai.tool.name=mergecraft.publish`), and the provider is
+`mergecraft`. Other backends do not get these defaults, so their GenAI views do
+not list pipeline phases as tool calls. `gen_ai.conversation.id`,
+`gen_ai.operation.name` on real agent/LLM/tool spans and `gen_ai.provider.name`
+are standard OTel GenAI attributes and go to every backend.
+
+## OpenCode plugin spans
+
+OpenCode runs as a subprocess, so mergeCraft's own spans see one `llm.call` per
+review attempt. On OpenCode 2.x the
+[opencode-plugin-otel-v2](https://github.com/alexhawat/opencode-plugin-otel-v2)
+plugin emits the inside of the run: an `opencode.session` agent span, one
+`opencode.llm` span per model step (tokens, cost, cache, finish reason) and one
+`opencode.tool.<name>` span per tool call. Its spans follow the OpenInference
+conventions, which Logfire and Datadog LLM Observability both read.
+
+The plugin is **opt-in and operator-only**: set `MERGECRAFT_OPENCODE_OTEL_PLUGIN`
+to the plugin's package (a path to a checkout, or a package spec). Repository
+config cannot enable it — a reviewed fork must not be able to load code into the
+harness.
+
+Review runs never load your global OpenCode config (each run gets an empty
+`OPENCODE_CONFIG_DIR`), so a copy of the plugin listed there does not join the
+review; the per-run entry is the only instance.
+
+When this run's policy is `off` or `metadata`, the plugin is loaded only if its
+`src/config.ts` or `dist/config.js` reads `captureContent`. An older copy would
+ignore the option and export every body, so it is skipped with a warning; a bare
+package spec cannot be checked and is skipped the same way.
+
+When it is set and tracing exports to an `otel` or `logfire` sink, each OpenCode
+2.x run gets a per-run plugin entry (in `OPENCODE_CONFIG_CONTENT`, replacing any
+global entry for the same package) that:
+
+| Option | Value |
+| --- | --- |
+| `endpoint` | The active OTLP sink's endpoint, without `/v1/traces` |
+| `otlpHeaders` | The sink's headers — or, for an `otel` sink with none, `OTEL_EXPORTER_OTLP_TRACES_HEADERS` / `OTEL_EXPORTER_OTLP_HEADERS` — as `{env:…}` references; values travel in `MERGECRAFT_OPENCODE_OTLP_HEADER_<n>` env vars and never reach the config file on disk |
+| `resourceAttributes` | `service.name` of the sink (`mergecraft-otel` / `mergecraft-logfire`) |
+| `traceparent` | The active `mergecraft.agent.run` span, so the plugin's spans nest under it in the review's trace |
+| `captureContent` | From the [content-capture policy](#content-capture-policy-for-model-payloads), after the untrusted cap: `off` → `off`, `metadata` → `metadata`, `redacted` / `full` → `full` (bodies through the plugin's secret redaction) |
+| `logsEnabled`, `disabledMetrics` | Off — traces only |
+
+An untrusted run therefore exports the span structure, token counts and costs,
+but no prompt or tool bodies, unless the operator-owned
+`exportUntrustedContent` knob lifts the cap. OpenCode 1.x runs never load the
+plugin. With tracing off, or a `jsonl_file`-only sink, the variable has no
+effect.
 
 ## Provider and HTTP spans (T2)
 
