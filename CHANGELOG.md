@@ -118,6 +118,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reviews on PRs with many CI checks no longer stall and time out after listing
+  check runs. `list_check_runs` now returns each run's id, name, status,
+  conclusion, output title and `check_suite_id`, instead of GitHub's full
+  check-run objects with their complete output text. One listing on a ~35-check
+  PR had returned 184 KB to the reviewer, slowing every later turn to 90–120 s.
+  Full check output is still available from `get_check_suite_logs`
 - A workspace review no longer fails closed with "checkout integrity failure:
   tree changed during read-only review" when dependency prep creates nested
   `node_modules`. pnpm/yarn/npm lay down `apps/api/node_modules`,
