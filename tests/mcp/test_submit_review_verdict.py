@@ -779,3 +779,27 @@ async def test_known_trust_tier_is_passed_through(
 
     assert result.is_error is False, _error_text(result)
     assert seen == [tier]
+
+
+def test_backfill_normalizes_a_slug_fingerprint() -> None:
+    """A model-supplied slug enters the run as hex, so the review can still render.
+
+    Before the fix the slug reached ``resolve_finding_short_ids`` unchanged and the
+    CLI failed with "fingerprint must be lowercase hex" before printing the review.
+    """
+    from mergecraft.analyzers.finding import resolve_finding_short_ids
+    from mergecraft.mcp.tool_state import init_tool_state
+    from mergecraft.mcp.verdict import _backfill_agent_findings_from_terminal_submission
+
+    state = init_tool_state(owner="acme", name="demo", dir=".")
+    slug = {"fingerprint": "ci-static-llms-full-stale", "message": "llms-full.txt is stale"}
+
+    first = _backfill_agent_findings_from_terminal_submission(state, [slug])
+    again = _backfill_agent_findings_from_terminal_submission(state, [slug])
+
+    [fingerprint] = first
+    assert len(fingerprint) == 64
+    assert int(fingerprint, 16) >= 0
+    assert state.agent_findings[0]["fingerprint"] == fingerprint
+    assert again == []
+    assert resolve_finding_short_ids([fingerprint])[fingerprint].startswith("MC-")

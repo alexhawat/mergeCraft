@@ -942,6 +942,7 @@ def _backfill_agent_findings_from_terminal_submission(
         >>> _backfill_agent_findings_from_terminal_submission(state, [])
         []
     """
+    from mergecraft.analyzers.finding import normalize_agent_supplied_fingerprint
     from mergecraft.findings.agent_adapter import agent_finding_to_finding
 
     existing: set[str] = set()
@@ -955,7 +956,16 @@ def _backfill_agent_findings_from_terminal_submission(
         fingerprint = (
             str(item.identity()) if hasattr(item, "identity") else _finding_fingerprint(item)
         )
-        if not fingerprint or fingerprint in existing:
+        if not fingerprint:
+            continue
+        # A model-supplied slug (``ci-static-llms-full-stale``) must become hex here,
+        # as it does on every other way into the run: the short-id renderers reject
+        # anything else, and the CLI then fails before printing the review.
+        try:
+            fingerprint = normalize_agent_supplied_fingerprint(fingerprint)
+        except (TypeError, ValueError):
+            continue
+        if fingerprint in existing:
             continue
         # Store the ``Finding``-shaped row ``load_run_findings`` can actually
         # parse — mirrors ``verify_agent_findings_tool``'s storage (VF1.mcp/

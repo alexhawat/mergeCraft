@@ -179,3 +179,37 @@ async def test_non_retryable_scope_records_rejection_without_resuming(
     assert resumed == [], "a deterministic refusal must not spend a resume turn"
     assert tool_ctx.tool_state.last_terminal_rejection == "scope_unavailable"
     assert final.success is True
+
+
+@pytest.mark.asyncio
+async def test_offline_review_never_asks_to_commit_a_dirty_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An offline review is read-only even when the agent never selected a mode."""
+    from mergecraft.agents.post_run import build_post_run_prompt, collect_post_run_issues
+    from mergecraft.mcp.verdict import establish_offline_review_scope
+
+    monkeypatch.setattr("mergecraft.agents.post_run.get_git_status", lambda: " M dirty.py")
+    tool_ctx = _tool_ctx(tmp_path)
+    establish_offline_review_scope(tool_ctx.tool_state, diff_path=str(tmp_path / "review.diff"))
+    assert tool_ctx.tool_state.selected_mode is None
+
+    issues = await collect_post_run_issues(_run_ctx(tool_ctx))
+
+    assert issues.dirty_tree is None
+    assert "UNCOMMITTED CHANGES" not in build_post_run_prompt(issues)
+
+
+@pytest.mark.asyncio
+async def test_unselected_mode_outside_offline_still_gates_a_dirty_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The suppression is offline-only: a write-capable run must still commit."""
+    from mergecraft.agents.post_run import collect_post_run_issues
+
+    monkeypatch.setattr("mergecraft.agents.post_run.get_git_status", lambda: " M dirty.py")
+    tool_ctx = _tool_ctx(tmp_path)
+
+    issues = await collect_post_run_issues(_run_ctx(tool_ctx))
+
+    assert issues.dirty_tree == " M dirty.py"

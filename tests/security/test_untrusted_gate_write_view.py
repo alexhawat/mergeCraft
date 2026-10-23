@@ -153,6 +153,9 @@ async def test_gate_writes_the_view_and_leaves_the_real_checkout_untouched(
     assert checks[0]["status"] == "passed", payload
     assert checks[0]["status"] != "failed", payload
     assert hash_tree(repo) == before, "the real checkout must be byte-identical after the gate"
+    # ``.venv`` and ``node_modules`` are pruned from the digest, so check them directly.
+    assert not (repo / ".venv").exists()
+    assert not (repo / "node_modules").exists()
 
 
 @pytest.mark.asyncio

@@ -51,6 +51,29 @@ def test_nested_node_modules_does_not_change_the_digest(tmp_path: Path, rel: str
     verify_tree_unchanged(checkout, before)
 
 
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "src/pkg/__pycache__/mod.cpython-314.pyc",
+        "__pycache__/conftest.cpython-314.pyc",
+        ".venv/lib/python3.14/site-packages/otel/__pycache__/sdk.cpython-314.pyc",
+        "services/api/.venv/bin/python",
+        ".ruff_cache/0.16.7/1234567890",
+        ".mypy_cache/3.11/mergecraft/types.data.json",
+        "packages/core/.pytest_cache/v/cache/lastfailed",
+    ],
+)
+def test_python_caches_do_not_change_the_digest(tmp_path: Path, rel: str) -> None:
+    """Bytecode written by a lazy import mid-review, in-tree or in a venv, stays invisible."""
+    checkout = _baseline_checkout(tmp_path)
+    before = hash_tree(checkout)
+
+    _write(checkout, rel)
+
+    assert hash_tree(checkout) == before
+    verify_tree_unchanged(checkout, before)
+
+
 def test_nested_pnpm_store_does_not_change_the_digest(tmp_path: Path) -> None:
     checkout = _baseline_checkout(tmp_path)
     before = hash_tree(checkout)
