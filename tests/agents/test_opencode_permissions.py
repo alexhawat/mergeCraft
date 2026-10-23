@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -129,6 +130,34 @@ def test_private_temp_dir_children_stay_denied(tmp_path: Path) -> None:
         assert external[deny] == "deny"
         # Last match wins: each deny must come after the grant it narrows.
         assert keys.index(deny) > grant
+
+
+def _last_match(rules: dict[str, str], requested: str) -> str | None:
+    """Resolve ``requested`` the way OpenCode does: the last matching rule wins."""
+    verdict = None
+    for pattern, action in rules.items():
+        if fnmatch.fnmatchcase(requested, pattern.replace("**", "*")):
+            verdict = action
+    return verdict
+
+
+def test_spilled_tool_output_is_readable_but_the_auth_store_is_not(tmp_path: Path) -> None:
+    """A truncated tool result points the model at ``tool-output/``; reading it must work.
+
+    The re-allow is narrow: the ``auth.json`` beside it, and the rest of the data
+    home, still resolve to deny.
+    """
+    ctx, run_dir = _split_ctx(tmp_path)
+    root = run_dir.resolve().as_posix()
+
+    external = json.loads(build_security_config(ctx, "anthropic/claude-sonnet"))["permission"][
+        "external_directory"
+    ]
+
+    assert _last_match(external, f"{root}/opencode-xdg-data/opencode/tool-output/**") == "allow"
+    assert _last_match(external, f"{root}/opencode-xdg-data/opencode/**") == "deny"
+    assert _last_match(external, f"{root}/opencode-xdg-data/opencode/auth.json") == "deny"
+    assert _last_match(external, f"{root}/opencode-xdg-data/**") == "deny"
 
 
 def test_an_operator_set_shared_temp_dir_is_not_granted(

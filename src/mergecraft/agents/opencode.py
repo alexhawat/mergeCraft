@@ -620,6 +620,12 @@ _TEMP_DIR_PRIVATE_CHILDREN: Final[tuple[str, ...]] = (
     "home",
 )
 
+# Where OpenCode spills a tool result too large to return inline; the truncated
+# result tells the model to read the full text from there. It holds the agent's
+# own tool output, so it is re-allowed after the ``opencode-xdg-data`` deny — the
+# auth store beside it stays denied.
+_TEMP_DIR_TOOL_OUTPUT: Final[str] = "opencode-xdg-data/opencode/tool-output"
+
 
 def _review_diff_external_directory(ctx: AgentRunContext) -> dict[str, str]:
     """``external_directory`` rules that let the agent read the review's diff files.
@@ -628,7 +634,9 @@ def _review_diff_external_directory(ctx: AgentRunContext) -> dict[str, str]:
     dir (``review.diff`` offline; ``pr-<n>.diff``, ``pr-<n>-incremental.diff`` and
     ``commit-<sha>.diff`` from the MCP tools), outside the checkout. OpenCode asks
     for ``<file's directory>/**``, so the grant is the temp dir's ``/**``; the deny
-    rules after it (last match wins) keep the private children out of reach. Both
+    rules after it (last match wins) keep the private children out of reach, except
+    OpenCode's spilled tool output, re-allowed last so truncated results stay
+    readable. Both
     the literal and the resolved path are listed, because the agent may use either
     (``/var`` and ``/private/var`` on macOS).
     """
@@ -644,6 +652,8 @@ def _review_diff_external_directory(ctx: AgentRunContext) -> dict[str, str]:
         for child in _TEMP_DIR_PRIVATE_CHILDREN:
             rules[f"{root}/{child}"] = "deny"
             rules[f"{root}/{child}/**"] = "deny"
+        rules[f"{root}/{_TEMP_DIR_TOOL_OUTPUT}"] = "allow"
+        rules[f"{root}/{_TEMP_DIR_TOOL_OUTPUT}/**"] = "allow"
     return rules
 
 

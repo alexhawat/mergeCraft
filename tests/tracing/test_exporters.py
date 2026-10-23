@@ -35,10 +35,10 @@ import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+import pytest
+
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 class _FakeOtelSpan:
@@ -47,6 +47,10 @@ class _FakeOtelSpan:
     def __init__(self) -> None:
         self.ended = False
         self.end_time: int | None = None
+        self.status: Any | None = None
+
+    def set_status(self, status: Any) -> None:
+        self.status = status
 
     def end(self, *, end_time: int | None = None) -> None:
         self.ended = True
@@ -58,6 +62,7 @@ class _FakeOtelTracer:
 
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.spans: list[_FakeOtelSpan] = []
 
     def start_span(
         self,
@@ -75,7 +80,9 @@ class _FakeOtelTracer:
                 "context": context,
             }
         )
-        return _FakeOtelSpan()
+        span = _FakeOtelSpan()
+        self.spans.append(span)
+        return span
 
 
 def test_jsonl_sink_round_trips_every_field(
@@ -304,6 +311,34 @@ def test_otlp_sink_stamps_the_review_conversation_id(trace_event_data: dict[str,
 
     attrs = fake_tracer.calls[0]["attributes"]
     assert attrs["gen_ai.conversation.id"] == "0af7651916cd43dd8448eb211c80319c"
+
+
+@pytest.mark.parametrize(("status", "expected"), [("error", "ERROR"), ("ok", None)])
+def test_otlp_sink_exports_an_error_status(
+    trace_event_data: dict[str, Any], status: str, expected: str | None
+) -> None:
+    """A failed span exports OTel ``ERROR``, not ``unset``, with its error text.
+
+    A local review that crashed after its verdict showed ``status: ok`` in
+    Datadog with only an ``error`` attribute to say otherwise.
+    """
+    from mergecraft.tracing import OTLPSink, TraceEvent
+
+    trace_event_data["status"] = status
+    trace_event_data["attrs"] = {"error": "unsafe fingerprint value"}
+    sink = OTLPSink(endpoint="http://127.0.0.1:1/canary-no-network", provider=object())
+    fake_tracer = _FakeOtelTracer()
+    sink._tracer = fake_tracer
+
+    sink.write(TraceEvent.model_validate(trace_event_data))
+
+    span = fake_tracer.spans[0]
+    assert span.ended
+    if expected is None:
+        assert span.status is None
+    else:
+        assert span.status.status_code.name == expected
+        assert span.status.description == "unsafe fingerprint value"
 
 
 def _llmobs_write(

@@ -735,6 +735,16 @@ class OTLPSink:
                 override_span_context(span, otel_trace_id, otel_span_id)
             elif otel_trace_id is not None:
                 self._override_span_trace_id(span, otel_trace_id)
+            if event.status == "error":
+                # Without the OTel status a failed run exports as ``unset``: backends
+                # (Datadog LLM Observability, Logfire) count it as a success and only
+                # the ``error`` attribute says otherwise.
+                from opentelemetry.trace import Status, StatusCode
+
+                message = attrs.get("error")
+                span.set_status(
+                    Status(StatusCode.ERROR, message if isinstance(message, str) else None)
+                )
             span.end(end_time=event.ts_end_ns)
         except Exception as exc:
             # Convention 6 — never fail the caller's review on a remote sink.

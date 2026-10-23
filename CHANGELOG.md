@@ -143,7 +143,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ci-static-llms-full-stale`) now prints. The verdict back-fill stored the slug
   as-is; the CLI then failed with "fingerprint must be lowercase hex" before
   rendering anything. Back-filled fingerprints are now normalized to hex, as on
-  every other path into the run.
+  every other path into the run. A slug that carries a path
+  (`tests/x.py:30:pin-the-cli`) is hashed too, instead of failing the run with
+  "unsafe fingerprint value" (exit 30) after its verdict was recorded.
+- OpenCode reviews can read a tool result that was too large to return inline.
+  OpenCode saves the full text under the run's data directory and tells the model
+  to read it there, but the agent was denied that whole directory to keep the
+  auth store out of reach, so every such read failed. The `tool-output` folder is
+  now readable; the auth store beside it stays denied.
+- A failed span exports with OTel status `ERROR`. Spans mergeCraft marked as failed
+  went out as `unset`, so Datadog LLM Observability and Logfire counted a crashed
+  run as a success and only its `error` attribute said otherwise.
 - A trusted review whose repo gates write build output (`dist/`, regenerated docs)
   no longer fails its integrity check. `run_static_checks` re-pins the read-only
   baseline around in-place gates, as `checkout_pr` does, after first checking that
