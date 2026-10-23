@@ -149,6 +149,9 @@ def _opencode_config_home(ctx: AgentRunContext) -> Path:
     OpenCode otherwise merges ``~/.config/opencode``: its MCP servers, plugins and
     agents join the review. A global server named ``mergecraft`` even shadows the
     run's own MCP server, leaving the agent without ``submit_review_verdict``.
+    ``opencode debug config`` still lists the global file as a source with this set;
+    what a run loads is pinned against the real CLI in
+    ``tests/agents/test_opencode_config_isolation.py``.
     """
     return Path(ctx.tmpdir) / "opencode-xdg-config"
 
