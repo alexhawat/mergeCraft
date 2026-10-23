@@ -49,7 +49,8 @@ def render_time_budget(time_budget_minutes: int | None) -> str:
         f"By about minute {submit_by} (~{SUBMIT_FRACTION:.0%}), submit the verdict with what "
         "you have; an unconfirmed concern goes in at lower severity or in the summary, not as "
         "a reason to keep exploring. Once you pass the first checkpoint, tool results carry a "
-        "⏱ line with the minutes used and left."
+        "⏱ notice with the minutes used and left — a `timeBudget` field on JSON results, so "
+        "keep it when you return only part of a result."
     )
 
 

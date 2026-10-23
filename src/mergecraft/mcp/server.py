@@ -390,13 +390,18 @@ def create_mcp_app(
     if tools:
         _register_mcp_route(app, MCP_ENDPOINT, tools, ctx, primary_token, time_notice=True)
     for role, role_tool_list in (role_tools or {}).items():
+        path = f"{MCP_ENDPOINT}/{role}"
         _register_mcp_route(
             app,
-            f"{MCP_ENDPOINT}/{role}",
+            path,
             role_tool_list,
             ctx,
             auth_token,
             return_tool_errors=return_tool_errors,
+            # The review agent is handed ``mcp_role_url(url, None)`` — the
+            # reviewer route — so that is where the ⏱ notice must land. The
+            # verifier route serves one-shot verifier dispatches, not the verdict.
+            time_notice=path == MCP_REVIEWER_ENDPOINT,
         )
     return app
 

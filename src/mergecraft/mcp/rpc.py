@@ -51,8 +51,8 @@ async def dispatch_mcp_rpc(
     """Dispatch one JSON-RPC MCP request and return a response envelope.
 
     ``time_notice`` appends the agent's elapsed/remaining minutes to successful
-    ``tools/call`` results once it is past the stop-exploring checkpoint. Only
-    the orchestrator route sets it: subagents do not submit the verdict.
+    ``tools/call`` results once it is past the stop-exploring checkpoint. The
+    ``/mcp`` and ``/mcp/reviewer`` routes set it; ``/mcp/verifier`` does not.
     """
     if method == "initialize":
         return {

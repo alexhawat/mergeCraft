@@ -36,30 +36,53 @@ def tool_result_to_rpc(result: ToolResult | Any) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
 
 
+#: Key the ⏱ notice is added under in a JSON-object tool payload.
+TIME_BUDGET_FIELD = "timeBudget"
+
+
 def with_elapsed_notice(
     rpc_result: dict[str, Any],
     state: ToolState,
     *,
     now: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
-    """Return ``rpc_result`` plus a trailing ⏱ text part once the agent is past 60%.
+    """Return ``rpc_result`` carrying the ⏱ notice once the agent is past 60%.
 
-    The notice is a separate content item, so ``content[0]`` stays the tool's own
-    payload, and the input is never mutated: the trajectory and trace already
-    hold the un-noticed result. Error results and runs with no deadline pass
-    through unchanged.
+    OpenCode 2.x code mode joins a result's text parts and ``JSON.parse``s the
+    whole string, so a trailing text part turns every JSON result into a bare
+    string and the agent's ``r.output`` reads go ``undefined``. A JSON-object
+    payload therefore gets the notice as a :data:`TIME_BUDGET_FIELD` key, which
+    the parse keeps; a plain-text payload gets a trailing text part, since it is
+    a string either way. Any other JSON (array, scalar) is left alone.
+
+    The input is never mutated: the trajectory and trace already hold the
+    un-noticed result. Error results and runs with no deadline pass through.
     """
     started = state.agent_started_monotonic
     deadline_s = state.agent_deadline_s
     content = rpc_result.get("content")
     if started is None or deadline_s is None or rpc_result.get("isError"):
         return rpc_result
-    if not isinstance(content, list):
+    if not isinstance(content, list) or not content:
+        return rpc_result
+    first = content[0]
+    if not isinstance(first, dict) or not isinstance(first.get("text"), str):
         return rpc_result
     notice = elapsed_notice(now() - started, deadline_s)
     if notice is None:
         return rpc_result
-    return {**rpc_result, "content": [*content, {"type": "text", "text": notice}]}
+    try:
+        payload = json.loads(first["text"])
+    except ValueError:
+        return {**rpc_result, "content": [*content, {"type": "text", "text": notice}]}
+    if not isinstance(payload, dict) or TIME_BUDGET_FIELD in payload:
+        return rpc_result
+    # ``mcp.shared``'s dict layout, but with ⏱ left literal: drivers without code
+    # mode hand the model this text verbatim, and ``\u23f1`` reads as noise.
+    text = json.dumps(
+        {**payload, TIME_BUDGET_FIELD: notice}, indent=2, default=str, ensure_ascii=False
+    )
+    return {**rpc_result, "content": [{**first, "text": text}, *content[1:]]}
 
 
 def span_tool_call_id() -> str:
@@ -210,6 +233,7 @@ def argument_schema_error(
 
 
 __all__ = [
+    "TIME_BUDGET_FIELD",
     "argument_schema_error",
     "charge_tool_call_budget",
     "coerce_arguments",

@@ -505,7 +505,7 @@ class ToolState:
     # Slice 7 — measured wall time by phase (setup / analyzers / agent / judge /
     # publish). Measurement only: the run record and packet read it, no gate.
     phase_elapsed_s: dict[str, float] = field(default_factory=dict)
-    # Agent deadline behind the ⏱ notice on orchestrator tool results:
+    # Agent deadline behind the ⏱ notice on review-agent tool results:
     # ``time.monotonic()`` at dispatch and the budget in seconds. Both stay
     # ``None`` when the run has no timeout, and no notice is added.
     agent_started_monotonic: float | None = None
