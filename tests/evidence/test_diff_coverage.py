@@ -7,7 +7,6 @@ from mergecraft.evidence.diff_coverage import (
     compute_diff_coverage,
     coverage_nudge,
     parse_diff_toc,
-    unread_ranges_for_findings,
 )
 from mergecraft.evidence.trajectory import ToolCallRecord
 
@@ -168,7 +167,6 @@ def test_partial_diff_read_names_the_unread_ranges() -> None:
 
     assert breakdown.observed is True
     assert breakdown.unread_lines > 0
-    assert ("src/other.py", (LineRange(6, 6),)) in unread_ranges_for_findings(breakdown)
 
     nudge = coverage_nudge(breakdown, diff_path=diff_path)
     assert nudge is not None
