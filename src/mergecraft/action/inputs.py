@@ -34,8 +34,6 @@ from mergecraft.config.trust_policy import is_fork_pull_request, unbound_target_
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-Shorthand = Literal["local_files", "logfire", "otel"]
-
 SetupFailurePolicy = Literal["inconclusive", "fail", "warn"]
 """Closed S1 / D10 vocabulary for trusted-tier ``setupScript`` failure handling.
 
