@@ -135,7 +135,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inside the checkout. It refuses `blame --contents` / `--ignore-revs-file`,
   which read a file the tool cannot confine; `cat-file --filters`, which runs a
   smudge filter; and `ls-remote --upload-pack` / `--exec`, which run a named
-  command.
+  command. These options are refused anywhere in the arguments, including after
+  `--`, because git reads a `--` that follows `-e` as a pattern rather than
+  the end of options (`git grep -e -- --untracked` still searched untracked
+  files).
 - Multi-reviewer rosters now dispatch secondary reviewers server-side when the
   primary harness never spawns them, fail closed with a clear error when a
   secondary cannot reach its provider, and always emit the `⏱ LLM review time`

@@ -729,13 +729,19 @@ def _reject_no_index(tokens: list[str], *, subcommand: str = "") -> None:
 def _reject_refused_long_options(args: list[str], *, subcommand: str) -> None:
     """Refuse *subcommand*'s long options in ``_REFUSED_LONG_OPTIONS``, abbreviated or not.
 
-    Args after ``--`` are paths, not options, and are left to path confinement.
+    Every argument is checked, including those after a ``--``. Git does not end
+    option parsing at a ``--`` that is the value of a value-taking option: in
+    ``grep -e -- --untracked -e x`` the ``--`` is the first pattern and
+    ``--untracked`` still applies. Finding the real end of options would mean a
+    per-verb table of value-taking options that drifts with git releases, so
+    this fails closed instead, like the ``--no-index``, pager and content-filter
+    guards. The cost is refusing a pattern or pathspec spelled like a refused
+    option.
 
     Raises:
         ValueError: when an argument names a refused option.
     """
-    before, _ = _split_end_of_options(args)
-    for arg in before:
+    for arg in args:
         name = _refused_long_option(arg, subcommand)
         if name is not None:
             reason = _REFUSED_LONG_OPTIONS[subcommand][name]
@@ -744,6 +750,14 @@ def _reject_refused_long_options(args: list[str], *, subcommand: str) -> None:
 
 
 def _split_end_of_options(args: list[str]) -> tuple[list[str], list[str]]:
+    """Split *args* at the first ``--``.
+
+    The first ``--`` may be an option value (``grep -e --``) rather than git's
+    end of options, so this can split earlier than git does. Callers must only
+    get stricter from that: path confinement and the credential scan treat
+    every token after it as a path, a superset of git's own paths. An option
+    guard must not skip the tail; see ``_reject_refused_long_options``.
+    """
     if "--" in args:
         idx = args.index("--")
         return args[:idx], args[idx + 1 :]

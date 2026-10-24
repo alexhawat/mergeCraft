@@ -138,6 +138,50 @@ def test_ls_remote_refuses_command_naming_options(token: str, tmp_path: Path) ->
         _validate("ls-remote", [token, "origin"], tmp_path)
 
 
+# --- a ``--`` that is an option value does not end options -------------------
+# git consumes ``--`` as the value of ``-e`` (the first pattern), so a refused
+# option after it still applies: ``git grep -e -- --untracked -e x`` searches
+# untracked files. The guard scans every argument rather than trusting the split.
+
+
+@pytest.mark.parametrize(
+    ("verb", "args"),
+    [
+        ("grep", ["-e", "--", "--untracked", "-e", "x"]),
+        ("grep", ["-e", "--", "--untr", "-e", "x"]),
+        ("grep", ["-e", "--", "--no-exclude-standard", "-e", "x"]),
+        ("grep", ["-e", "--", "--no-inde", "-e", "x"]),
+        ("grep", ["-e--", "--untracked", "-e", "x"]),
+        ("grep", ["-f", "--", "--untracked"]),
+        ("blame", ["-L", "--", "--contents=README.md", "README.md"]),
+        ("cat-file", ["--path", "--", "--tex", "HEAD:README.md"]),
+        ("ls-remote", ["--sort", "--", "--upload-pack=x", "origin"]),
+    ],
+)
+def test_option_after_a_swallowed_double_dash_is_refused(
+    verb: str, args: list[str], tmp_path: Path
+) -> None:
+    with pytest.raises(ValueError, match="Blocked"):
+        _validate(verb, args, tmp_path)
+
+
+def test_refused_option_spelling_after_a_real_double_dash_fails_closed(tmp_path: Path) -> None:
+    """The guard cannot tell a real ``--`` from a swallowed one, so both are refused."""
+    with pytest.raises(ValueError, match="mergeCraft's own scratch"):
+        _validate("grep", ["-e", "x", "--", "--untracked"], tmp_path)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [["-e", "x", "--", "/some/repo/dir"], ["-e", "--", "/some/repo/dir"], ["-e", "--", "../x"]],
+)
+def test_path_confinement_holds_after_real_and_swallowed_double_dash(
+    args: list[str], tmp_path: Path
+) -> None:
+    with pytest.raises(ValueError, match="must be within"):
+        _validate("grep", args, tmp_path)
+
+
 # --- neighbouring options stay usable ---------------------------------------
 
 
@@ -150,7 +194,7 @@ def test_ls_remote_refuses_command_naming_options(token: str, tmp_path: Path) ->
         ("grep", ["--no-invert-match", "-n", "x"]),
         ("grep", ["--text", "-n", "x"]),
         ("grep", ["--cached", "-n", "x"]),
-        ("grep", ["-n", "x", "--", "--untracked"]),
+        ("grep", ["-e", "x", "--", "README.md"]),
         ("cat-file", ["--filter=blob:none", "--batch-all-objects", "--batch-check"]),
         ("cat-file", ["--batch-check"]),
         ("blame", ["--porcelain", "README.md"]),
@@ -212,6 +256,9 @@ _SCOPE_WIDENING_ARGS: list[list[str]] = [
     ["--untr", "-n", "MC_TEST"],
     ["--untracked", "--no-exclude-standard", "-n", "MC_TEST"],
     ["--u", "--no-exc", "-n", "MC_TEST"],
+    ["-e", "--", "--untracked", "-e", "MC_TEST"],
+    ["-e", "--", "--untracked", "--no-exclude-standard", "-e", "MC_TEST"],
+    ["-e--", "--untr", "--no-exc", "-e", "MC_TEST"],
 ]
 
 
@@ -246,12 +293,13 @@ async def test_git_tool_blame_cannot_read_untracked_secrets(
     assert ENV_MARKER not in text
 
 
-async def test_plain_grep_still_searches_tracked_files_only(tmp_path: Path) -> None:
+@pytest.mark.parametrize("args", [["-n", "MC_TEST"], ["-n", "-e", "MC_TEST", "--", "README.md"]])
+async def test_plain_grep_still_searches_tracked_files_only(
+    tmp_path: Path, args: list[str]
+) -> None:
     root = _checkout_with_untracked_secrets(tmp_path)
 
-    result = await git_tool(_ctx(root, "restricted")).execute(
-        {"command": "grep", "args": ["-n", "MC_TEST"]}
-    )
+    result = await git_tool(_ctx(root, "restricted")).execute({"command": "grep", "args": args})
 
     text = result.content[0]["text"]
     assert result.is_error is False, text
