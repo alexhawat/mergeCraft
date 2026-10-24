@@ -294,6 +294,16 @@ def _maybe_redact_entire_string(text: str, redacted: str) -> str:
     return redacted
 
 
+def redact_known_secret_patterns(text: str) -> str:
+    """Redact only the explicit secret shapes (``sk-…``, ``ghp_…``, ``AKIA…``, assignments).
+
+    For values that are identifiers by construction — model slugs, hex run ids —
+    where the entropy heuristic in :func:`redact_secrets` would mask the value
+    itself (``deepseek-v4.1-flash`` reads as a dense token).
+    """
+    return _pattern_redact(text) if text else text
+
+
 def redact_secrets(text: str) -> str:
     """Redact secret-like values from arbitrary text by pattern and entropy."""
     if not text:
@@ -511,6 +521,7 @@ __all__ = [
     "install_loguru_redaction_filter",
     "redact_analyzer_output",
     "redact_for_fingerprint",
+    "redact_known_secret_patterns",
     "redact_log_message",
     "redact_secrets",
 ]

@@ -34,7 +34,26 @@ _SINK_NAMES: frozenset[str] = frozenset({"stdout", "stderr", "output"})
 # keeps its own ``.git`` metadata directory for the same reason. Matched by
 # directory name only: the walk prunes ``dirnames``, so a regular *file* that
 # happens to share a name is still hashed.
-_HASH_EXCLUDE_DIR_NAMES: frozenset[str] = frozenset({".git", "node_modules", ".pnpm-store"})
+#
+# Python and tool caches are pruned the same way: ``__pycache__`` gets fresh
+# ``.pyc`` files whenever a module is first (or newly) imported — in the checkout or
+# in an in-tree virtualenv's site-packages — so a review of an editable install whose
+# agent subprocess imports a lazily loaded module failed closed. The rest of a
+# virtualenv stays hashed: gates that rewrite it run inside ``run_static_checks``,
+# which re-pins the baseline, so any other write there is still caught.
+_HASH_EXCLUDE_DIR_NAMES: frozenset[str] = frozenset(
+    {
+        ".git",
+        "node_modules",
+        ".pnpm-store",
+        "__pycache__",
+        # Linter and test-runner caches that ``run_static_checks`` writes when it runs
+        # repo gates in the checkout mid-review.
+        ".ruff_cache",
+        ".mypy_cache",
+        ".pytest_cache",
+    }
+)
 
 # Exact checkout-relative paths excluded from the digest, matched for directories
 # and files alike. Kept path-specific: ``evidence`` is a bare name here on purpose,
@@ -55,6 +74,7 @@ _HASH_EXCLUDE_REL_PATHS: frozenset[str] = frozenset(
         "evidence",
         ".opencode",
         "opencode-xdg-data",
+        "opencode-xdg-config",
     }
 )
 
@@ -125,33 +145,47 @@ def verify_tree_unchanged(root: Path, before_digest: str) -> None:
 
 @dataclass
 class TreeBaseline:
-    """Read-only review baseline, kept on ``ToolState`` so ``checkout_pr`` can re-pin it.
+    """Read-only review baseline, kept on ``ToolState`` so mergeCraft's own tools can re-pin it.
 
-    ``checkout_pr`` legitimately rewrites the tree: the Action checks out the
-    merge ref and the tool switches to the PR head, so every review of a branch
-    behind its base failed closed. The tool re-pins at that one controlled
-    boundary, after first checking nothing changed since the last pin; a change
-    there (ignored files survive the tool's ``git status`` gate) marks the
-    baseline broken so the change cannot be absorbed by the re-pin.
+    Two tools legitimately rewrite the tree, and each re-pins at its controlled
+    boundary, after first checking nothing changed since the last pin:
+
+    - ``checkout_pr``: the Action checks out the merge ref and the tool switches
+      to the PR head, so every review of a branch behind its base failed closed.
+    - ``run_static_checks`` on a trusted run: the repo's own gates run in place
+      and write build output (``dist/``, generated docs), which a reviewer that
+      calls the tool must not be blamed for. Untrusted gates run in the sandbox's
+      write view and never touch the checkout.
+
+    A change found at a boundary (ignored files survive ``git status`` gates)
+    marks the baseline broken, so the re-pin cannot absorb it.
     """
 
     root: Path
     digest: str
     broken: bool = False
+    broken_at: str = "checkout_pr"
 
-    def before_checkout(self) -> None:
+    def before_boundary(self, boundary: str) -> None:
         if not self.broken and hash_tree(self.root) != self.digest:
             self.broken = True
+            self.broken_at = boundary
 
-    def after_checkout(self) -> None:
+    def after_boundary(self) -> None:
         if not self.broken:
             self.digest = hash_tree(self.root)
+
+    def before_checkout(self) -> None:
+        self.before_boundary("checkout_pr")
+
+    def after_checkout(self) -> None:
+        self.after_boundary()
 
     def verify(self) -> None:
         if self.broken:
             msg = (
                 "checkout integrity failure: tree changed during read-only review "
-                f"before checkout_pr ({self.root})"
+                f"before {self.broken_at} ({self.root})"
             )
             raise RuntimeError(msg)
         verify_tree_unchanged(self.root, self.digest)

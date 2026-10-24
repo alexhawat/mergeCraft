@@ -28,6 +28,7 @@ from mergecraft.agents.openai_compatible_gateways import (
     resolve_gateway_endpoint,
     resolve_gateway_endpoints,
 )
+from mergecraft.agents.opencode_otel import apply_otel_plugin, opencode_otel_plugin_wiring
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.shared import (
     STDERR_DRAIN_JOIN_TIMEOUT_S,
@@ -57,6 +58,7 @@ from mergecraft.tracing.genai import (
 )
 from mergecraft.tracing.http import instrument_httpx
 from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.utils.git_setup import created_temp_directory
 from mergecraft.utils.privilege import agent_subprocess_env, wrap_agent_command
 from mergecraft.utils.process_group import (
     kill_process_group,
@@ -139,6 +141,19 @@ def _api_key_from_env(api_key_env: str) -> str:
 def _opencode_data_home(ctx: AgentRunContext) -> Path:
     """Return the XDG data root parent for this run's isolated ``auth.json``."""
     return Path(ctx.tmpdir) / "opencode-xdg-data"
+
+
+def _opencode_config_home(ctx: AgentRunContext) -> Path:
+    """Empty per-run ``OPENCODE_CONFIG_DIR``, so the operator's global config is not loaded.
+
+    OpenCode otherwise merges ``~/.config/opencode``: its MCP servers, plugins and
+    agents join the review. A global server named ``mergecraft`` even shadows the
+    run's own MCP server, leaving the agent without ``submit_review_verdict``.
+    ``opencode debug config`` still lists the global file as a source with this set;
+    what a run loads is pinned against the real CLI in
+    ``tests/agents/test_opencode_config_isolation.py``.
+    """
+    return Path(ctx.tmpdir) / "opencode-xdg-config"
 
 
 def _with_flat_opencode_auth(env: dict[str, str], *, model: str | None) -> dict[str, str]:
@@ -597,15 +612,63 @@ def _build_review_mode_read_allowlist(checkout: Path, evidence: Path) -> dict[st
     return read
 
 
+# Run temp-dir children the agent must never read: the isolated auth store, the
+# empty per-run config dir, and the scratch HOME.
+_TEMP_DIR_PRIVATE_CHILDREN: Final[tuple[str, ...]] = (
+    "opencode-xdg-data",
+    "opencode-xdg-config",
+    "home",
+)
+
+# Where OpenCode spills a tool result too large to return inline; the truncated
+# result tells the model to read the full text from there. It holds the agent's
+# own tool output, so it is re-allowed after the ``opencode-xdg-data`` deny — the
+# auth store beside it stays denied.
+_TEMP_DIR_TOOL_OUTPUT: Final[str] = "opencode-xdg-data/opencode/tool-output"
+
+
+def _review_diff_external_directory(ctx: AgentRunContext) -> dict[str, str]:
+    """``external_directory`` rules that let the agent read the review's diff files.
+
+    Every diff mergeCraft materialises is a top-level ``*.diff`` in the run's temp
+    dir (``review.diff`` offline; ``pr-<n>.diff``, ``pr-<n>-incremental.diff`` and
+    ``commit-<sha>.diff`` from the MCP tools), outside the checkout. OpenCode asks
+    for ``<file's directory>/**``, so the grant is the temp dir's ``/**``; the deny
+    rules after it (last match wins) keep the private children out of reach, except
+    OpenCode's spilled tool output, re-allowed last so truncated results stay
+    readable. Both
+    the literal and the resolved path are listed, because the agent may use either
+    (``/var`` and ``/private/var`` on macOS).
+    """
+    # Only directories this run created: an operator-set ``MERGECRAFT_TEMP_DIR`` can
+    # be a shared root, and a registered diff path's parent is agent-chosen
+    # (``establish_review_scope``), so neither is granted on its own say-so.
+    dirs = {Path(ctx.tmpdir)}
+    if temp := created_temp_directory():
+        dirs.add(Path(temp))
+    forms = sorted({form.as_posix() for d in dirs for form in (d, d.resolve())})
+    rules = {f"{root}/**": "allow" for root in forms}
+    for root in forms:
+        for child in _TEMP_DIR_PRIVATE_CHILDREN:
+            rules[f"{root}/{child}"] = "deny"
+            rules[f"{root}/{child}/**"] = "deny"
+        rules[f"{root}/{_TEMP_DIR_TOOL_OUTPUT}"] = "allow"
+        rules[f"{root}/{_TEMP_DIR_TOOL_OUTPUT}/**"] = "allow"
+    return rules
+
+
 def _build_review_mode_permissions(ctx: AgentRunContext) -> dict[str, object]:
     checkout = _checkout_root(ctx)
     evidence = _evidence_dir(ctx)
+    read = _build_review_mode_read_allowlist(checkout, evidence)
+    external_directory = _build_review_mode_external_directory_allowlist(checkout, evidence)
+    external_directory.update(_review_diff_external_directory(ctx))
     return {
         "bash": "deny",
         "edit": "deny",
-        "read": _build_review_mode_read_allowlist(checkout, evidence),
+        "read": read,
         "webfetch": "deny",
-        "external_directory": _build_review_mode_external_directory_allowlist(checkout, evidence),
+        "external_directory": external_directory,
         "skill": "allow",
     }
 
@@ -941,6 +1004,7 @@ async def _prompt_session(
     gen_ai_system = model.get("providerID") if model else None
     with tracer.start_span("llm.call") as span:
         try:
+            span.set_attribute("gen_ai.operation.name", "chat")
             if gen_ai_system:
                 span.set_attribute("gen_ai.system", gen_ai_system)
             model_params = opencode_applied_model_params(resolved_model or model_slug)
@@ -1121,6 +1185,15 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
 
     model = ctx.resolved_model
     config_json = build_security_config(ctx, model)
+    # The OTel plugin targets OpenCode 2.x's event stream; 1.x runs never load it.
+    major = await asyncio.to_thread(_opencode_major_version, cli)
+    otel_plugin = (
+        opencode_otel_plugin_wiring(ctx.tool_state.trust_tier)
+        if major is not None and major >= 2
+        else None
+    )
+    if otel_plugin is not None:
+        config_json = apply_otel_plugin(config_json, otel_plugin)
     config_dir = _evidence_dir(ctx)
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "opencode.json"
@@ -1128,6 +1201,8 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
 
     credential_env = _resolved_opencode_credentials(ctx)
     data_home = _opencode_data_home(ctx)
+    config_home = _opencode_config_home(ctx)
+    config_home.mkdir(parents=True, exist_ok=True)
     _setup_opencode_auth(ctx, data_home=data_home, credential_env=credential_env)
 
     # Baseline AFTER our own writes, before the agent runs. ``_evidence_dir``
@@ -1148,6 +1223,10 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     extras: dict[str, str] = {
         "OPENCODE_CONFIG_CONTENT": config_json,
         "OPENCODE_CONFIG": str(config_path),
+        "OPENCODE_CONFIG_DIR": str(config_home),
+        # A reviewed repository's ``opencode.json`` / ``.opencode/`` can declare
+        # plugins (code that runs in the harness) and MCP servers; never load them.
+        "OPENCODE_DISABLE_PROJECT_CONFIG": "1",
         "XDG_DATA_HOME": str(data_home),
     }
     model_s = (model or "").strip()
@@ -1159,11 +1238,14 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         extras["CLAUDE_CODE_USE_VERTEX"] = "1"
     env = build_agent_env("opencode", extras, model=model)
     env.update({k: v for k, v in credential_env.items() if k not in env})
+    if otel_plugin is not None:
+        # Header values the plugin entry references as ``{env:NAME}``; added after
+        # the allowlist filter, which would otherwise drop them.
+        env.update(otel_plugin.env)
 
     # OpenCode 2.x serves a different HTTP API (``/api/session/...``); the
     # 1.x ``POST /session`` below gets 405. Its ``run`` command keeps the JSON
     # event stream and resumes a session by id, so 2.x reviews go through it.
-    major = await asyncio.to_thread(_opencode_major_version, cli)
     if major is not None and major >= 2:
         return _apply_integrity_gate(
             await _run_v2(cli=cli, ctx=ctx, env=env, model=model),

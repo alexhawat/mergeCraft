@@ -182,6 +182,15 @@ def cleanup_temp_directory() -> None:
         logger.warning("» cleanup left residual path(s): {}", ", ".join(residual))
 
 
+def created_temp_directory() -> str | None:
+    """The per-run temp dir :func:`create_temp_directory` made, or ``None``.
+
+    Unlike ``MERGECRAFT_TEMP_DIR``, which an operator may point anywhere, this is
+    always a fresh ``mkdtemp`` owned by this run.
+    """
+    return _temp_dir
+
+
 def create_temp_directory() -> str:
     import tempfile
 
