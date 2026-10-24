@@ -23,6 +23,8 @@ Exports:
     _SUBCOMMAND_OWNS_DASH_C -- subcommands where -C is their own flag, not git chdir.
     _OUTPUT_FLAG_SPELLINGS -- --output-family spellings that write a file.
     _GREP_PAGER_EXEC_LONG_SPELLINGS -- --open-files-in-pager spellings git resolves.
+    _GREP_LONG_OPTIONS -- every long option git grep accepts, for abbreviation lookup.
+    resolve_grep_long_option -- resolve a git grep long-option abbreviation to its name.
     reject_if_leading_dash -- raise if value starts with a dash.
     reject_special_ref -- raise if value is a special/symbolic ref.
     validate_tag_name -- raise if tag contains refspec/flag characters.
@@ -230,6 +232,108 @@ _GREP_PAGER_EXEC_LONG_SPELLINGS: frozenset[str] = frozenset(
         "--open-files-in-pager",
     }
 )
+
+# Every long option ``git grep`` accepts (``git grep --git-completion-helper-all``,
+# git 2.53), negations included. git resolves any unique prefix of one of these,
+# so a guard keyed on full names (``--after-context``) misses ``--after=60``;
+# resolving against the whole list keeps ambiguous prefixes (``--a``, ``--co``)
+# unresolved, as git itself refuses them.
+_GREP_LONG_OPTIONS: frozenset[str] = frozenset(
+    [
+        "--after-context",
+        "--all-match",
+        "--and",
+        "--basic-regexp",
+        "--before-context",
+        "--break",
+        "--cached",
+        "--color",
+        "--column",
+        "--context",
+        "--count",
+        "--exclude-standard",
+        "--ext-grep",
+        "--extended-regexp",
+        "--files-with-matches",
+        "--files-without-match",
+        "--fixed-strings",
+        "--full-name",
+        "--function-context",
+        "--heading",
+        "--ignore-case",
+        "--index",
+        "--invert-match",
+        "--line-number",
+        "--max-count",
+        "--max-depth",
+        "--name-only",
+        "--no-all-match",
+        "--no-basic-regexp",
+        "--no-break",
+        "--no-cached",
+        "--no-color",
+        "--no-column",
+        "--no-context",
+        "--no-count",
+        "--no-exclude-standard",
+        "--no-ext-grep",
+        "--no-extended-regexp",
+        "--no-files-with-matches",
+        "--no-files-without-match",
+        "--no-fixed-strings",
+        "--no-full-name",
+        "--no-function-context",
+        "--no-heading",
+        "--no-ignore-case",
+        "--no-index",
+        "--no-invert-match",
+        "--no-line-number",
+        "--no-max-count",
+        "--no-name-only",
+        "--no-null",
+        "--no-only-matching",
+        "--no-open-files-in-pager",
+        "--no-perl-regexp",
+        "--no-quiet",
+        "--no-recurse-submodules",
+        "--no-recursive",
+        "--no-show-function",
+        "--no-text",
+        "--no-textconv",
+        "--no-threads",
+        "--no-untracked",
+        "--no-word-regexp",
+        "--not",
+        "--null",
+        "--only-matching",
+        "--open-files-in-pager",
+        "--or",
+        "--perl-regexp",
+        "--quiet",
+        "--recurse-submodules",
+        "--recursive",
+        "--show-function",
+        "--text",
+        "--textconv",
+        "--threads",
+        "--untracked",
+        "--word-regexp",
+    ]
+)
+
+
+def resolve_grep_long_option(token: str) -> str:
+    """Return the ``git grep`` long option *token* names, abbreviation resolved.
+
+    *token* may carry ``=value``; only the name is returned. A name that is
+    exact, unknown, or an ambiguous prefix comes back unchanged.
+    """
+    name = token.split("=", 1)[0]
+    if name in _GREP_LONG_OPTIONS:
+        return name
+    matches = [option for option in _GREP_LONG_OPTIONS if option.startswith(name)]
+    return matches[0] if len(matches) == 1 else name
+
 
 # ---------------------------------------------------------------------------
 # Q6 — Which flags run a configured content filter? (#623)
@@ -775,6 +879,7 @@ __all__ = [
     "_CONFIG_FLAGS_TAKING_VALUE",
     "_CONFIG_READONLY_FLAGS",
     "_CONTENT_FILTER_EXEC_SPELLINGS",
+    "_GREP_LONG_OPTIONS",
     "_GREP_PAGER_EXEC_LONG_SPELLINGS",
     "_OUTPUT_FLAG_SPELLINGS",
     "_READONLY_SUBCOMMANDS",
@@ -797,6 +902,7 @@ __all__ = [
     "_subcommand_declares_shorts",
     "reject_if_leading_dash",
     "reject_special_ref",
+    "resolve_grep_long_option",
     "shell_command_denies_credential_paths",
     "validate_tag_name",
 ]

@@ -594,6 +594,202 @@ async def test_grep_spaced_dash_capital_c_with_numeric_value_stays_in_place(
     assert recorder.calls == [["grep", "-C", "3", "pattern"]]
 
 
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        (["-n", "-A", "45", "def run", "src/app.py"], ["grep", "-n", "def run", "src/app.py"]),
+        (["-B", "10", "-A", "45", "def run"], ["grep", "-n", "def run"]),
+        (["-nA60", "def run"], ["grep", "-n", "def run"]),
+        (["--after-context=40", "def run"], ["grep", "-n", "def run"]),
+        (["--context", "20", "def run"], ["grep", "-n", "def run"]),
+        (["-30", "def run"], ["grep", "-n", "def run"]),
+        (["-W", "def run"], ["grep", "-n", "def run"]),
+        (["--function-context", "-i", "def run"], ["grep", "-n", "-i", "def run"]),
+        (["-nW", "def run", "--", "src/app.py"], ["grep", "-n", "def run", "--", "src/app.py"]),
+        # Abbreviations git resolves count like the full spelling.
+        (["--after=60", "def run"], ["grep", "-n", "def run"]),
+        (["--before", "60", "def run"], ["grep", "-n", "def run"]),
+        (["--cont=60", "def run"], ["grep", "-n", "def run"]),
+        (["--func", "def run"], ["grep", "-n", "def run"]),
+        (["--line", "-A", "60", "def run"], ["grep", "--line", "def run"]),
+        # git parses counts with strtoul(base 0) plus a k/m/g unit, not just digits.
+        (["-A", "+60", "def run"], ["grep", "-n", "def run"]),
+        (["-A", " 60", "def run"], ["grep", "-n", "def run"]),
+        (["-A+60", "def run"], ["grep", "-n", "def run"]),
+        (["-nA+60", "def run"], ["grep", "-n", "def run"]),
+        (["-B", "+60", "def run"], ["grep", "-n", "def run"]),
+        (["-C+60", "def run"], ["grep", "-n", "def run"]),
+        (["--after-context=+60", "def run"], ["grep", "-n", "def run"]),
+        (["--after=+60", "def run"], ["grep", "-n", "def run"]),
+        (["-A", "0x10", "def run"], ["grep", "-n", "def run"]),
+        (["-A", "1k", "def run"], ["grep", "-n", "def run"]),
+        (["-011", "def run"], ["grep", "-n", "def run"]),
+    ],
+)
+async def test_grep_large_context_returns_matches_only_with_a_read_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str], expected: list[str]
+) -> None:
+    """Over 10 lines of context (or -W) is a body read; return locations and point at read.
+
+    A timed-out self-review spent ~40 of its 102 git calls on ``grep -A 40..70``
+    pulling whole function bodies, 437 KB of output, and never used a line-range read.
+    """
+    recorder = _RunGitRecorder("src/app.py:12:def run(self):\n")
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "grep", "args": args})
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [expected]
+    payload = json.loads(result.content[0]["text"])
+    assert payload["output"] == "src/app.py:12:def run(self):\n"
+    assert "file-read tool" in payload["note"]
+    assert "offset" in payload["note"]
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["-A", "4", "^lint:", "Makefile"],
+        ["-nB10", "def run"],
+        ["--context=10", "def run"],
+        ["-A", "+4", "def run"],
+        ["-A", " 4", "def run"],
+        # Octal, as git reads it: eight lines.
+        ["-A", "010", "def run"],
+        ["-010", "def run"],
+    ],
+)
+async def test_grep_small_context_is_forwarded_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    recorder = _RunGitRecorder("Makefile:77:lint:\nMakefile-78-\t$(RUFF) check\n")
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "grep", "args": args})
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["grep", *args]]
+    assert "note" not in json.loads(result.content[0]["text"])
+
+
+async def test_grep_options_after_the_pattern_are_moved_before_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """git grep stops parsing options at the pattern; ``'def x' -A 4`` exits 128."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "grep", "args": ["def run", "-A", "4", "-n", "--", "src/app.py"]}
+    )
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["grep", "-A", "4", "-n", "def run", "--", "src/app.py"]]
+
+
+async def test_grep_boolean_expression_is_not_reordered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+    args = ["-e", "foo", "--and", "(", "-e", "bar", "--or", "-e", "baz", ")"]
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "grep", "args": args})
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["grep", *args]]
+
+
+@pytest.mark.parametrize("value", ["60 ", "-3", "08", "3x", "1e2"])
+async def test_grep_unparseable_context_count_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """A count the guard cannot read is dropped as oversized, never forwarded unexamined."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "grep", "args": ["-A", value, "def run"]}
+    )
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["grep", "-n", "def run"]]
+    assert "note" in json.loads(result.content[0]["text"])
+
+
+async def test_grep_ambiguous_long_prefix_is_left_for_git_to_refuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--co`` could be ``--color`` or ``--context``; git refuses it, so pass it through."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "grep", "args": ["--co=60", "def run"]}
+    )
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["grep", "--co=60", "def run"]]
+    assert "note" not in json.loads(result.content[0]["text"])
+
+
+async def test_grep_boolean_expression_still_loses_large_context_in_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Parentheses stop reordering, not the context guard."""
+    recorder = _RunGitRecorder("src/app.py:12:foo bar\n")
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+    args = ["-e", "foo", "-A", "60", "--and", "(", "-e", "bar", "--or", "-e", "baz", ")"]
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "grep", "args": args})
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [
+        ["grep", "-n", "-e", "foo", "--and", "(", "-e", "bar", "--or", "-e", "baz", ")"]
+    ]
+    assert "file-read tool" in json.loads(result.content[0]["text"])["note"]
+
+
+async def test_grep_boolean_expression_with_small_context_is_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+    args = ["-A", "4", "-e", "foo", "--and", "(", "-e", "bar", ")"]
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "grep", "args": args})
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["grep", *args]]
+
+
+@pytest.mark.parametrize(
+    ("command", "args", "hint"),
+    [
+        ("sed", ["-n", "840,940p", "src/app.py"], "offset=840 limit=101"),
+        ("cat", ["src/app.py"], "file-read tool"),
+        ("head", ["-n", "50", "src/app.py"], "file-read tool"),
+        ("tail", ["src/app.py"], "file-read tool"),
+        ("awk", ["NR>=840", "src/app.py"], "file-read tool"),
+    ],
+)
+async def test_refused_file_readers_name_the_read_alternative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str, args: list[str], hint: str
+) -> None:
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": command, "args": args})
+
+    assert result.is_error is True
+    text = result.content[0]["text"]
+    assert "invalid git subcommand" in text
+    assert "read-only allowlist" in text
+    assert hint in text
+    assert recorder.calls == []
+
+
 async def test_ls_tree_recursive_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """#619 Task 6 — ``git ls-tree -r HEAD`` is a plain read-only listing."""
     recorder = _RunGitRecorder()

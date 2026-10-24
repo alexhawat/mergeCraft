@@ -118,6 +118,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reviews on PRs with many CI checks no longer stall and time out after listing
+  check runs. `list_check_runs` now returns each run's id, name, status,
+  conclusion, output title and `check_suite_id`, instead of GitHub's full
+  check-run objects with their complete output text. One listing on a ~35-check
+  PR had returned 184 KB to the reviewer, slowing every later turn to 90–120 s.
+  Full check output is still available from `get_check_suite_logs`
+- Reviewers no longer read whole functions through `git grep` context. When a
+  `git grep` asks for more than 10 lines of context (`-A`/`-B`/`-C`, `-NUM`,
+  `-W`, or an abbreviated long form such as `--after=60`, including inside a
+  `(`…`)` expression), the `git` tool returns just the matching lines with their
+  line numbers and a note to open the file with the read tool at that line.
+  Options placed after the pattern are moved in front of it instead of failing
+  with exit 128. A refused `sed`/`cat`/`head`/`tail`/`awk` call now names the
+  read to use instead. In the same timed-out review, 102 `git` calls returned
+  437 KB, mostly from `git grep -A 40..70`
 - A workspace review no longer fails closed with "checkout integrity failure:
   tree changed during read-only review" when dependency prep creates nested
   `node_modules`. pnpm/yarn/npm lay down `apps/api/node_modules`,
