@@ -38,6 +38,7 @@ from mergecraft.mcp.git_guards import (
     _subcommand_declares_shorts,
     reject_if_leading_dash,
     reject_special_ref,
+    resolve_grep_long_option,
     validate_tag_name,
 )
 from mergecraft.mcp.shared import ToolClass, execute, repository_mutation_class_for_push, tool
@@ -227,7 +228,6 @@ def _git_show_preview(output_path: str) -> str:
 _GREP_MAX_CONTEXT_LINES = 10
 _GREP_UNBOUNDED_CONTEXT = 1 << 30
 _GREP_CONTEXT_LONG = frozenset({"--after-context", "--before-context", "--context"})
-_GREP_FUNCTION_CONTEXT = frozenset({"-W", "--function-context"})
 # Short letters whose value is the rest of the bundle or, failing that, the next token.
 _GREP_SHORT_VALUE_LETTERS = frozenset("ABCefm")
 _GREP_LONG_TAKING_VALUE = _GREP_CONTEXT_LONG | {"--max-depth", "--max-count", "--threads"}
@@ -243,26 +243,29 @@ _FILE_READER_VERBS = frozenset({"sed", "cat", "head", "tail", "awk"})
 _SED_LINE_RANGE_RE = re.compile(r"^(\d+),(\d+)p$")
 
 
-def _grep_option_groups(head: list[str]) -> tuple[list[list[str]], list[str], bool]:
-    """Split grep args before ``--`` into option groups and positionals.
+def _grep_segments(head: list[str]) -> tuple[list[tuple[bool, list[str]]], bool]:
+    """Split grep args before ``--`` into ordered option and positional segments.
 
-    Each group is an option token plus the separate value it consumes, if any.
-    The flag reports whether an option followed a positional: git grep stops
-    option parsing at the pattern, so ``grep 'def x' -A 4`` exits 128.
+    An option segment is the option token plus the separate value it consumes,
+    if any; a positional segment is one token. The flag reports whether an
+    option followed a positional: git grep stops option parsing at the pattern,
+    so ``grep 'def x' -A 4`` exits 128.
     """
-    groups: list[list[str]] = []
-    positionals: list[str] = []
-    misplaced = False
+    segments: list[tuple[bool, list[str]]] = []
+    seen_positional = misplaced = False
     idx = 0
     while idx < len(head):
         tok = head[idx]
         if not tok.startswith("-") or tok == "-":
-            positionals.append(tok)
+            segments.append((False, [tok]))
+            seen_positional = True
             idx += 1
             continue
-        misplaced = misplaced or bool(positionals)
+        misplaced = misplaced or seen_positional
         if tok.startswith("--"):
-            takes_value = "=" not in tok and tok in _GREP_LONG_TAKING_VALUE
+            takes_value = "=" not in tok and (
+                resolve_grep_long_option(tok) in _GREP_LONG_TAKING_VALUE
+            )
         else:
             body = tok[1:]
             letter = next((c for c in body if c in _GREP_SHORT_VALUE_LETTERS), "")
@@ -270,9 +273,9 @@ def _grep_option_groups(head: list[str]) -> tuple[list[list[str]], list[str], bo
                 not body.isdigit() and bool(letter) and body.index(letter) == len(body) - 1
             )
         width = 2 if takes_value and idx + 1 < len(head) else 1
-        groups.append(head[idx : idx + width])
+        segments.append((True, head[idx : idx + width]))
         idx += width
-    return groups, positionals, misplaced
+    return segments, misplaced
 
 
 def _context_value(value: str) -> int:
@@ -280,15 +283,20 @@ def _context_value(value: str) -> int:
 
 
 def _strip_grep_context(group: list[str]) -> tuple[list[str], int]:
-    """Return *group* without its context option, and the context lines it asked for."""
+    """Return *group* without its context option, and the context lines it asked for.
+
+    Long options are matched by the name git resolves them to, so an
+    abbreviation (``--after=60``, ``--func``) counts like its full spelling.
+    """
     tok = group[0]
     separate = group[1] if len(group) > 1 else ""
-    if tok in _GREP_FUNCTION_CONTEXT:
-        return [], _GREP_UNBOUNDED_CONTEXT
     if tok.startswith("--"):
-        name, _, inline = tok.partition("=")
+        name = resolve_grep_long_option(tok)
+        if name == "--function-context":
+            return [], _GREP_UNBOUNDED_CONTEXT
         if name in _GREP_CONTEXT_LONG:
-            return [], _context_value(inline or separate)
+            _, has_inline, inline = tok.partition("=")
+            return [], _context_value(inline if has_inline else separate)
         return group, 0
     body = tok[1:]
     if body.isdigit():
@@ -312,16 +320,17 @@ def _strip_grep_context(group: list[str]) -> tuple[list[str], int]:
 def _shows_line_numbers(groups: list[list[str]]) -> bool:
     for group in groups:
         tok = group[0]
-        if tok == "--line-number":
-            return True
-        if tok.startswith("-") and not tok.startswith("--"):
-            options = tok[1:]
-            for idx, char in enumerate(options):
-                if char in _GREP_SHORT_VALUE_LETTERS:
-                    options = options[:idx]
-                    break
-            if "n" in options:
+        if tok.startswith("--"):
+            if resolve_grep_long_option(tok) == "--line-number":
                 return True
+            continue
+        options = tok[1:]
+        for idx, char in enumerate(options):
+            if char in _GREP_SHORT_VALUE_LETTERS:
+                options = options[:idx]
+                break
+        if "n" in options:
+            return True
     return False
 
 
@@ -332,23 +341,31 @@ def _normalize_grep_args(args: list[str]) -> tuple[list[str], bool]:
     added if missing, so every match carries the line to read from). Args come
     back untouched when every option precedes the pattern and no context
     exceeds ``_GREP_MAX_CONTEXT_LINES``. A ``(``/``)`` boolean expression is
-    left alone: its operators interleave with ``-e`` patterns.
+    never reordered, since its operators interleave with ``-e`` patterns, but
+    oversized context is still removed from it in place.
     """
     end = args.index("--") if "--" in args else len(args)
     head, tail = args[:end], args[end:]
+    segments, misplaced = _grep_segments(head)
     if "(" in head or ")" in head:
-        return args, False
-    groups, positionals, misplaced = _grep_option_groups(head)
-    stripped = [_strip_grep_context(group) for group in groups]
+        misplaced = False
+    stripped = [
+        (_strip_grep_context(toks) if is_option else (toks, 0)) for is_option, toks in segments
+    ]
     oversized = any(lines > _GREP_MAX_CONTEXT_LINES for _, lines in stripped)
     if not oversized and not misplaced:
         return args, False
     if oversized:
-        groups = [kept for kept, _ in stripped if kept]
-        if not _shows_line_numbers(groups):
-            groups.insert(0, ["-n"])
-    options = [tok for group in groups for tok in group]
-    return [*options, *positionals, *tail], oversized
+        segments = [
+            (is_option, kept)
+            for (is_option, _), (kept, _) in zip(segments, stripped, strict=True)
+            if kept
+        ]
+        if not _shows_line_numbers([toks for is_option, toks in segments if is_option]):
+            segments.insert(0, (True, ["-n"]))
+    if misplaced:
+        segments = sorted(segments, key=lambda segment: not segment[0])
+    return [*(tok for _, toks in segments for tok in toks), *tail], oversized
 
 
 def _file_reader_hint(command: str, args: list[str]) -> str:

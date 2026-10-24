@@ -606,6 +606,12 @@ async def test_grep_spaced_dash_capital_c_with_numeric_value_stays_in_place(
         (["-W", "def run"], ["grep", "-n", "def run"]),
         (["--function-context", "-i", "def run"], ["grep", "-n", "-i", "def run"]),
         (["-nW", "def run", "--", "src/app.py"], ["grep", "-n", "def run", "--", "src/app.py"]),
+        # Abbreviations git resolves count like the full spelling.
+        (["--after=60", "def run"], ["grep", "-n", "def run"]),
+        (["--before", "60", "def run"], ["grep", "-n", "def run"]),
+        (["--cont=60", "def run"], ["grep", "-n", "def run"]),
+        (["--func", "def run"], ["grep", "-n", "def run"]),
+        (["--line", "-A", "60", "def run"], ["grep", "--line", "def run"]),
     ],
 )
 async def test_grep_large_context_returns_matches_only_with_a_read_hint(
@@ -667,6 +673,52 @@ async def test_grep_boolean_expression_is_not_reordered(
     recorder = _RunGitRecorder()
     monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
     args = ["-e", "foo", "--and", "(", "-e", "bar", "--or", "-e", "baz", ")"]
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "grep", "args": args})
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["grep", *args]]
+
+
+async def test_grep_ambiguous_long_prefix_is_left_for_git_to_refuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--co`` could be ``--color`` or ``--context``; git refuses it, so pass it through."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "grep", "args": ["--co=60", "def run"]}
+    )
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["grep", "--co=60", "def run"]]
+    assert "note" not in json.loads(result.content[0]["text"])
+
+
+async def test_grep_boolean_expression_still_loses_large_context_in_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Parentheses stop reordering, not the context guard."""
+    recorder = _RunGitRecorder("src/app.py:12:foo bar\n")
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+    args = ["-e", "foo", "-A", "60", "--and", "(", "-e", "bar", "--or", "-e", "baz", ")"]
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "grep", "args": args})
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [
+        ["grep", "-n", "-e", "foo", "--and", "(", "-e", "bar", "--or", "-e", "baz", ")"]
+    ]
+    assert "file-read tool" in json.loads(result.content[0]["text"])["note"]
+
+
+async def test_grep_boolean_expression_with_small_context_is_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+    args = ["-A", "4", "-e", "foo", "--and", "(", "-e", "bar", ")"]
 
     result = await git_tool(_ctx(tmp_path)).execute({"command": "grep", "args": args})
 
