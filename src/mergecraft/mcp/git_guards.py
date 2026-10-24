@@ -23,6 +23,8 @@ Exports:
     _SUBCOMMAND_OWNS_DASH_C -- subcommands where -C is their own flag, not git chdir.
     _OUTPUT_FLAG_SPELLINGS -- --output-family spellings that write a file.
     _GREP_PAGER_EXEC_LONG_SPELLINGS -- --open-files-in-pager spellings git resolves.
+    _GREP_LONG_OPTIONS -- every long option git grep accepts, for abbreviation lookup.
+    resolve_grep_long_option -- resolve a git grep long-option abbreviation to its name.
     reject_if_leading_dash -- raise if value starts with a dash.
     reject_special_ref -- raise if value is a special/symbolic ref.
     validate_tag_name -- raise if tag contains refspec/flag characters.
@@ -36,6 +38,9 @@ Exports:
     _reject_file_writing_flags -- raise on --output-family flags for a subcommand.
     _reject_grep_pager_exec -- raise on ``git grep -O`` / --open-files-in-pager (#619).
     _reject_content_filter_exec -- raise on --textconv / --ext-diff (#623).
+    _REFUSED_LONG_OPTIONS -- per-verb long options refused under any abbreviation.
+    long_option_candidates -- the long options a possibly-abbreviated token could name.
+    _reject_refused_long_options -- raise on any spelling of a refused long option.
 """
 
 from __future__ import annotations
@@ -231,6 +236,108 @@ _GREP_PAGER_EXEC_LONG_SPELLINGS: frozenset[str] = frozenset(
     }
 )
 
+# Every long option ``git grep`` accepts (``git grep --git-completion-helper-all``,
+# git 2.53), negations included. git resolves any unique prefix of one of these,
+# so a guard keyed on full names (``--after-context``) misses ``--after=60``;
+# resolving against the whole list keeps ambiguous prefixes (``--a``, ``--co``)
+# unresolved, as git itself refuses them.
+_GREP_LONG_OPTIONS: frozenset[str] = frozenset(
+    [
+        "--after-context",
+        "--all-match",
+        "--and",
+        "--basic-regexp",
+        "--before-context",
+        "--break",
+        "--cached",
+        "--color",
+        "--column",
+        "--context",
+        "--count",
+        "--exclude-standard",
+        "--ext-grep",
+        "--extended-regexp",
+        "--files-with-matches",
+        "--files-without-match",
+        "--fixed-strings",
+        "--full-name",
+        "--function-context",
+        "--heading",
+        "--ignore-case",
+        "--index",
+        "--invert-match",
+        "--line-number",
+        "--max-count",
+        "--max-depth",
+        "--name-only",
+        "--no-all-match",
+        "--no-basic-regexp",
+        "--no-break",
+        "--no-cached",
+        "--no-color",
+        "--no-column",
+        "--no-context",
+        "--no-count",
+        "--no-exclude-standard",
+        "--no-ext-grep",
+        "--no-extended-regexp",
+        "--no-files-with-matches",
+        "--no-files-without-match",
+        "--no-fixed-strings",
+        "--no-full-name",
+        "--no-function-context",
+        "--no-heading",
+        "--no-ignore-case",
+        "--no-index",
+        "--no-invert-match",
+        "--no-line-number",
+        "--no-max-count",
+        "--no-name-only",
+        "--no-null",
+        "--no-only-matching",
+        "--no-open-files-in-pager",
+        "--no-perl-regexp",
+        "--no-quiet",
+        "--no-recurse-submodules",
+        "--no-recursive",
+        "--no-show-function",
+        "--no-text",
+        "--no-textconv",
+        "--no-threads",
+        "--no-untracked",
+        "--no-word-regexp",
+        "--not",
+        "--null",
+        "--only-matching",
+        "--open-files-in-pager",
+        "--or",
+        "--perl-regexp",
+        "--quiet",
+        "--recurse-submodules",
+        "--recursive",
+        "--show-function",
+        "--text",
+        "--textconv",
+        "--threads",
+        "--untracked",
+        "--word-regexp",
+    ]
+)
+
+
+def resolve_grep_long_option(token: str) -> str:
+    """Return the ``git grep`` long option *token* names, abbreviation resolved.
+
+    *token* may carry ``=value``; only the name is returned. A name that is
+    exact, unknown, or an ambiguous prefix comes back unchanged.
+    """
+    name = token.split("=", 1)[0]
+    if name in _GREP_LONG_OPTIONS:
+        return name
+    matches = [option for option in _GREP_LONG_OPTIONS if option.startswith(name)]
+    return matches[0] if len(matches) == 1 else name
+
+
 # ---------------------------------------------------------------------------
 # Q6 — Which flags run a configured content filter? (#623)
 # ---------------------------------------------------------------------------
@@ -265,6 +372,174 @@ _CONTENT_FILTER_EXEC_SPELLINGS: frozenset[str] = frozenset(
         "--external-diff",
     }
 )
+
+# ---------------------------------------------------------------------------
+# Q7 — Which long-option abbreviations reach a refused option?
+# ---------------------------------------------------------------------------
+# Verbs built on git's parse-options resolve any unique prefix of a long option,
+# so an exact-spelling guard misses ``grep --no-inde`` (``--no-index``) or
+# ``cat-file --tex`` (``--textconv``). These tables are each verb's long options
+# from ``git <verb> --git-completion-helper-all`` (git 2.53), negations included;
+# grep's is ``_GREP_LONG_OPTIONS`` above. The diff family (``diff``, ``log``,
+# ``show``) and git's own global options do not abbreviate, so the exact
+# spellings in Q4-Q6 already cover them.
+_CAT_FILE_LONG_OPTIONS: frozenset[str] = frozenset(
+    [
+        "--allow-unknown-type",
+        "--batch",
+        "--batch-all-objects",
+        "--batch-check",
+        "--batch-command",
+        "--buffer",
+        "--filter",
+        "--filters",
+        "--follow-symlinks",
+        "--mailmap",
+        "--no-allow-unknown-type",
+        "--no-buffer",
+        "--no-filter",
+        "--no-follow-symlinks",
+        "--no-mailmap",
+        "--no-path",
+        "--no-unordered",
+        "--no-use-mailmap",
+        "--path",
+        "--textconv",
+        "--unordered",
+        "--use-mailmap",
+    ]
+)
+_BLAME_LONG_OPTIONS: frozenset[str] = frozenset(
+    [
+        "--abbrev",
+        "--color-by-age",
+        "--color-lines",
+        "--contents",
+        "--diff-algorithm",
+        "--ignore-rev",
+        "--ignore-revs-file",
+        "--incremental",
+        "--line-porcelain",
+        "--minimal",
+        "--no-abbrev",
+        "--no-color-by-age",
+        "--no-color-lines",
+        "--no-contents",
+        "--no-ignore-rev",
+        "--no-ignore-revs-file",
+        "--no-incremental",
+        "--no-line-porcelain",
+        "--no-minimal",
+        "--no-porcelain",
+        "--no-progress",
+        "--no-root",
+        "--no-score-debug",
+        "--no-show-email",
+        "--no-show-name",
+        "--no-show-number",
+        "--no-show-stats",
+        "--porcelain",
+        "--progress",
+        "--root",
+        "--score-debug",
+        "--show-email",
+        "--show-name",
+        "--show-number",
+        "--show-stats",
+    ]
+)
+_LS_REMOTE_LONG_OPTIONS: frozenset[str] = frozenset(
+    [
+        "--branches",
+        "--exec",
+        "--exit-code",
+        "--get-url",
+        "--heads",
+        "--no-branches",
+        "--no-exec",
+        "--no-exit-code",
+        "--no-get-url",
+        "--no-heads",
+        "--no-quiet",
+        "--no-refs",
+        "--no-server-option",
+        "--no-sort",
+        "--no-symref",
+        "--no-tags",
+        "--no-upload-pack",
+        "--quiet",
+        "--refs",
+        "--server-option",
+        "--sort",
+        "--symref",
+        "--tags",
+        "--upload-pack",
+    ]
+)
+
+# Per verb: the long options refused outright, with the reason the refusal gives.
+# ``grep --untracked`` / ``--no-exclude-standard`` widen the search to untracked
+# and ignored files — mergeCraft's own scratch (askpass helper, OpenCode
+# ``auth.json``) whenever the run temp dir sits inside the checkout — which no
+# path operand names, so ``_reject_credential_path_operands`` never sees them.
+# ``blame --contents`` / ``--ignore-revs-file`` read a file named by a flag
+# value that positional confinement does not inspect. ``ls-remote
+# --upload-pack`` / ``--exec`` name a command git runs.
+_REFUSED_LONG_OPTIONS: dict[str, dict[str, str]] = {
+    "grep": {
+        "--untracked": "searches untracked files, including mergeCraft's own scratch",
+        "--no-exclude-standard": "searches ignored files, including mergeCraft's own scratch",
+    },
+    "cat-file": {
+        "--textconv": "runs a git-config content filter — arbitrary command execution",
+        "--filters": "runs a git-config smudge filter — arbitrary command execution",
+    },
+    "blame": {
+        "--contents": "reads a file the reviewer surface cannot confine",
+        "--ignore-revs-file": "reads a file the reviewer surface cannot confine",
+    },
+    "ls-remote": {
+        "--upload-pack": "names a command git runs — arbitrary command execution",
+        "--exec": "names a command git runs — arbitrary command execution",
+    },
+}
+_VERB_LONG_OPTIONS: dict[str, frozenset[str]] = {
+    "grep": _GREP_LONG_OPTIONS,
+    "cat-file": _CAT_FILE_LONG_OPTIONS,
+    "blame": _BLAME_LONG_OPTIONS,
+    "ls-remote": _LS_REMOTE_LONG_OPTIONS,
+}
+
+
+def long_option_candidates(token: str, options: frozenset[str]) -> frozenset[str]:
+    """Return every long option in *options* that *token* could name.
+
+    An exact name wins, as it does in git (``grep --text`` is ``--text``, not
+    ``--textconv``). Otherwise every option *token* prefixes is a candidate: one
+    means git resolves it, several means this git refuses it as ambiguous.
+    *token* may carry ``=value``. A non-option token names nothing.
+    """
+    if not token.startswith("--") or token == "--":
+        return frozenset()
+    name = token.split("=", 1)[0]
+    if name in options:
+        return frozenset({name})
+    return frozenset(option for option in options if option.startswith(name))
+
+
+def _refused_long_option(token: str, subcommand: str) -> str | None:
+    """Return the refused option *token* could name for *subcommand*, if any.
+
+    An ambiguous prefix is refused when any candidate is refused. This git
+    already rejects it, so nothing is lost, and a git release whose option list
+    lacks the other candidate would resolve the same prefix to the refused one.
+    """
+    refused = _REFUSED_LONG_OPTIONS.get(subcommand)
+    if not refused:
+        return None
+    candidates = long_option_candidates(token, _VERB_LONG_OPTIONS[subcommand])
+    return next((name for name in sorted(candidates) if name in refused), None)
+
 
 # ---------------------------------------------------------------------------
 # Ref-validation helpers
@@ -436,15 +711,36 @@ def _no_index_message(token: str) -> str:
     )
 
 
-def _reject_no_index(tokens: list[str]) -> None:
+def _reject_no_index(tokens: list[str], *, subcommand: str = "") -> None:
     """Raise ValueError if any token is a ``--no-index`` spelling (plan 13 / D9).
 
     ``--no-index`` tells git to diff paths without a repository, which bypasses
-    every workspace confinement rule on the operands that follow.
+    every workspace confinement rule on the operands that follow. ``diff``
+    matches it exactly, but ``grep`` resolves abbreviations, so ``--no-ind`` and
+    ``--no-inde`` are ``--no-index`` there too.
     """
     for tok in tokens:
         if tok == "--no-index" or tok.startswith("--no-index="):
             raise ValueError(_no_index_message(tok))
+        if subcommand == "grep" and "--no-index" in long_option_candidates(tok, _GREP_LONG_OPTIONS):
+            raise ValueError(_no_index_message(tok))
+
+
+def _reject_refused_long_options(args: list[str], *, subcommand: str) -> None:
+    """Refuse *subcommand*'s long options in ``_REFUSED_LONG_OPTIONS``, abbreviated or not.
+
+    Args after ``--`` are paths, not options, and are left to path confinement.
+
+    Raises:
+        ValueError: when an argument names a refused option.
+    """
+    before, _ = _split_end_of_options(args)
+    for arg in before:
+        name = _refused_long_option(arg, subcommand)
+        if name is not None:
+            reason = _REFUSED_LONG_OPTIONS[subcommand][name]
+            msg = f"Blocked: '{subcommand} {arg}' ({name}) {reason}."
+            raise ValueError(msg)
 
 
 def _split_end_of_options(args: list[str]) -> tuple[list[str], list[str]]:
@@ -769,16 +1065,21 @@ def _reject_content_filter_exec(args: list[str]) -> None:
 
 __all__ = [
     "_BAD_REF_CHARS",
+    "_BLAME_LONG_OPTIONS",
     "_BRANCH_FLAGS_TAKING_VALUE",
     "_BRANCH_READONLY_FLAGS",
+    "_CAT_FILE_LONG_OPTIONS",
     "_CONFIG_FLAGS",
     "_CONFIG_FLAGS_TAKING_VALUE",
     "_CONFIG_READONLY_FLAGS",
     "_CONTENT_FILTER_EXEC_SPELLINGS",
+    "_GREP_LONG_OPTIONS",
     "_GREP_PAGER_EXEC_LONG_SPELLINGS",
+    "_LS_REMOTE_LONG_OPTIONS",
     "_OUTPUT_FLAG_SPELLINGS",
     "_READONLY_SUBCOMMANDS",
     "_REDIRECT_TO_TOOL",
+    "_REFUSED_LONG_OPTIONS",
     "_SUBCOMMAND_OWNS_DASH_C",
     "_SUBCOMMAND_SHORT_FLAGS",
     "_SYMBOLIC_REFS",
@@ -794,9 +1095,12 @@ __all__ = [
     "_reject_grep_pager_exec",
     "_reject_namespace_flag",
     "_reject_no_index",
+    "_reject_refused_long_options",
     "_subcommand_declares_shorts",
+    "long_option_candidates",
     "reject_if_leading_dash",
     "reject_special_ref",
+    "resolve_grep_long_option",
     "shell_command_denies_credential_paths",
     "validate_tag_name",
 ]
