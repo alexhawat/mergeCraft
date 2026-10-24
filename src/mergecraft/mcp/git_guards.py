@@ -39,7 +39,7 @@ Exports:
     _reject_grep_pager_exec -- raise on ``git grep -O`` / --open-files-in-pager (#619).
     _reject_content_filter_exec -- raise on --textconv / --ext-diff (#623).
     _REFUSED_LONG_OPTIONS -- per-verb long options refused under any abbreviation.
-    long_option_candidates -- the long options a possibly-abbreviated token could name.
+    _EXACT_NAME_EXCEPTIONS -- exact option names forwarded although they prefix a refused one.
     _reject_refused_long_options -- raise on any spelling of a refused long option.
 """
 
@@ -378,106 +378,16 @@ _CONTENT_FILTER_EXEC_SPELLINGS: frozenset[str] = frozenset(
 # ---------------------------------------------------------------------------
 # Verbs built on git's parse-options resolve any unique prefix of a long option,
 # so an exact-spelling guard misses ``grep --no-inde`` (``--no-index``) or
-# ``cat-file --tex`` (``--textconv``). These tables are each verb's long options
-# from ``git <verb> --git-completion-helper-all`` (git 2.53), negations included;
-# grep's is ``_GREP_LONG_OPTIONS`` above. The diff family (``diff``, ``log``,
-# ``show``) and git's own global options do not abbreviate, so the exact
+# ``cat-file --tex`` (``--textconv``). Which prefixes are unique depends on the
+# git release: ``cat-file --filter`` is its own object-filter option in git 2.53
+# but an abbreviation of ``--filters`` (smudge-filter execution) in the 2.39.5
+# Debian bookworm ships in the review image. So every prefix of a refused option
+# is refused, whatever this git's option list says, and an exact option name
+# that is also such a prefix is forwarded only when listed in
+# ``_EXACT_NAME_EXCEPTIONS``. The diff family (``diff``, ``log``, ``show``) and
+# git's own global options do not abbreviate in 2.39.5 or 2.53, so the exact
 # spellings in Q4-Q6 already cover them.
-_CAT_FILE_LONG_OPTIONS: frozenset[str] = frozenset(
-    [
-        "--allow-unknown-type",
-        "--batch",
-        "--batch-all-objects",
-        "--batch-check",
-        "--batch-command",
-        "--buffer",
-        "--filter",
-        "--filters",
-        "--follow-symlinks",
-        "--mailmap",
-        "--no-allow-unknown-type",
-        "--no-buffer",
-        "--no-filter",
-        "--no-follow-symlinks",
-        "--no-mailmap",
-        "--no-path",
-        "--no-unordered",
-        "--no-use-mailmap",
-        "--path",
-        "--textconv",
-        "--unordered",
-        "--use-mailmap",
-    ]
-)
-_BLAME_LONG_OPTIONS: frozenset[str] = frozenset(
-    [
-        "--abbrev",
-        "--color-by-age",
-        "--color-lines",
-        "--contents",
-        "--diff-algorithm",
-        "--ignore-rev",
-        "--ignore-revs-file",
-        "--incremental",
-        "--line-porcelain",
-        "--minimal",
-        "--no-abbrev",
-        "--no-color-by-age",
-        "--no-color-lines",
-        "--no-contents",
-        "--no-ignore-rev",
-        "--no-ignore-revs-file",
-        "--no-incremental",
-        "--no-line-porcelain",
-        "--no-minimal",
-        "--no-porcelain",
-        "--no-progress",
-        "--no-root",
-        "--no-score-debug",
-        "--no-show-email",
-        "--no-show-name",
-        "--no-show-number",
-        "--no-show-stats",
-        "--porcelain",
-        "--progress",
-        "--root",
-        "--score-debug",
-        "--show-email",
-        "--show-name",
-        "--show-number",
-        "--show-stats",
-    ]
-)
-_LS_REMOTE_LONG_OPTIONS: frozenset[str] = frozenset(
-    [
-        "--branches",
-        "--exec",
-        "--exit-code",
-        "--get-url",
-        "--heads",
-        "--no-branches",
-        "--no-exec",
-        "--no-exit-code",
-        "--no-get-url",
-        "--no-heads",
-        "--no-quiet",
-        "--no-refs",
-        "--no-server-option",
-        "--no-sort",
-        "--no-symref",
-        "--no-tags",
-        "--no-upload-pack",
-        "--quiet",
-        "--refs",
-        "--server-option",
-        "--sort",
-        "--symref",
-        "--tags",
-        "--upload-pack",
-    ]
-)
-
-# Per verb: the long options refused outright, with the reason the refusal gives.
+#
 # ``grep --untracked`` / ``--no-exclude-standard`` widen the search to untracked
 # and ignored files — mergeCraft's own scratch (askpass helper, OpenCode
 # ``auth.json``) whenever the run temp dir sits inside the checkout — which no
@@ -503,42 +413,40 @@ _REFUSED_LONG_OPTIONS: dict[str, dict[str, str]] = {
         "--exec": "names a command git runs — arbitrary command execution",
     },
 }
-_VERB_LONG_OPTIONS: dict[str, frozenset[str]] = {
-    "grep": _GREP_LONG_OPTIONS,
-    "cat-file": _CAT_FILE_LONG_OPTIONS,
-    "blame": _BLAME_LONG_OPTIONS,
-    "ls-remote": _LS_REMOTE_LONG_OPTIONS,
+# Exact option names that are prefixes of a refused option but name a different
+# option in every git release checked (``git <verb> --git-completion-helper-all``
+# on 2.39.5 and 2.53.0). Add one only after checking the oldest git shipped.
+_EXACT_NAME_EXCEPTIONS: dict[str, frozenset[str]] = {
+    # ``--ignore-rev <rev>`` (since 2.23), not ``--ignore-revs-file``.
+    "blame": frozenset({"--ignore-rev"}),
 }
 
 
-def long_option_candidates(token: str, options: frozenset[str]) -> frozenset[str]:
-    """Return every long option in *options* that *token* could name.
+def _names_prefix_of(token: str, options: frozenset[str] | dict[str, str]) -> str | None:
+    """Return the option in *options* that *token* is a prefix of, if any.
 
-    An exact name wins, as it does in git (``grep --text`` is ``--text``, not
-    ``--textconv``). Otherwise every option *token* prefixes is a candidate: one
-    means git resolves it, several means this git refuses it as ambiguous.
-    *token* may carry ``=value``. A non-option token names nothing.
+    *token* may carry ``=value``; only the name is compared. A non-option token,
+    or a bare ``--``, names nothing.
     """
     if not token.startswith("--") or token == "--":
-        return frozenset()
+        return None
     name = token.split("=", 1)[0]
-    if name in options:
-        return frozenset({name})
-    return frozenset(option for option in options if option.startswith(name))
+    return next((option for option in sorted(options) if option.startswith(name)), None)
 
 
 def _refused_long_option(token: str, subcommand: str) -> str | None:
     """Return the refused option *token* could name for *subcommand*, if any.
 
-    An ambiguous prefix is refused when any candidate is refused. This git
-    already rejects it, so nothing is lost, and a git release whose option list
-    lacks the other candidate would resolve the same prefix to the refused one.
+    A prefix that is ambiguous in this git is refused too: it errors here
+    anyway, and an older or newer git without the other candidate resolves it
+    to the refused option.
     """
     refused = _REFUSED_LONG_OPTIONS.get(subcommand)
     if not refused:
         return None
-    candidates = long_option_candidates(token, _VERB_LONG_OPTIONS[subcommand])
-    return next((name for name in sorted(candidates) if name in refused), None)
+    if token.split("=", 1)[0] in _EXACT_NAME_EXCEPTIONS.get(subcommand, frozenset()):
+        return None
+    return _names_prefix_of(token, refused)
 
 
 # ---------------------------------------------------------------------------
@@ -716,13 +624,14 @@ def _reject_no_index(tokens: list[str], *, subcommand: str = "") -> None:
 
     ``--no-index`` tells git to diff paths without a repository, which bypasses
     every workspace confinement rule on the operands that follow. ``diff``
-    matches it exactly, but ``grep`` resolves abbreviations, so ``--no-ind`` and
-    ``--no-inde`` are ``--no-index`` there too.
+    matches it exactly (2.39.5 reads ``--no-inde`` as ``--no-indent-heuristic``,
+    2.53 refuses it as ambiguous), but ``grep`` resolves abbreviations, so every
+    prefix of ``--no-index`` is refused there, as in ``_refused_long_option``.
     """
     for tok in tokens:
         if tok == "--no-index" or tok.startswith("--no-index="):
             raise ValueError(_no_index_message(tok))
-        if subcommand == "grep" and "--no-index" in long_option_candidates(tok, _GREP_LONG_OPTIONS):
+        if subcommand == "grep" and _names_prefix_of(tok, frozenset({"--no-index"})):
             raise ValueError(_no_index_message(tok))
 
 
@@ -1079,17 +988,15 @@ def _reject_content_filter_exec(args: list[str]) -> None:
 
 __all__ = [
     "_BAD_REF_CHARS",
-    "_BLAME_LONG_OPTIONS",
     "_BRANCH_FLAGS_TAKING_VALUE",
     "_BRANCH_READONLY_FLAGS",
-    "_CAT_FILE_LONG_OPTIONS",
     "_CONFIG_FLAGS",
     "_CONFIG_FLAGS_TAKING_VALUE",
     "_CONFIG_READONLY_FLAGS",
     "_CONTENT_FILTER_EXEC_SPELLINGS",
+    "_EXACT_NAME_EXCEPTIONS",
     "_GREP_LONG_OPTIONS",
     "_GREP_PAGER_EXEC_LONG_SPELLINGS",
-    "_LS_REMOTE_LONG_OPTIONS",
     "_OUTPUT_FLAG_SPELLINGS",
     "_READONLY_SUBCOMMANDS",
     "_REDIRECT_TO_TOOL",
@@ -1111,7 +1018,6 @@ __all__ = [
     "_reject_no_index",
     "_reject_refused_long_options",
     "_subcommand_declares_shorts",
-    "long_option_candidates",
     "reject_if_leading_dash",
     "reject_special_ref",
     "resolve_grep_long_option",

@@ -1,9 +1,14 @@
 """Long-option abbreviations must not slip past the git tool's exact-spelling guards.
 
 git's parse-options resolves any unique prefix of a long option, so ``git grep
---no-inde`` is ``--no-index`` and ``git cat-file --tex`` is ``--textconv``. The
-guards resolve each token against the verb's pinned option list instead of
-matching one spelling.
+--no-inde`` is ``--no-index`` and ``git cat-file --tex`` is ``--textconv``.
+Which prefixes are unique depends on the git release. Checked in the review
+image's base (``python:3.14-slim-bookworm`` + apt ``git``, git 2.39.5):
+``git cat-file --filter HEAD:t.txt`` and ``--filt`` run ``filter.<driver>.smudge``
+(they abbreviate ``--filters``), and ``--filter=blob:none`` fails with "option
+`filters' takes no value". On git 2.53, ``--filter`` is a separate object-filter
+option. So the guards refuse every prefix of a refused option and forward an
+exact name only when ``_EXACT_NAME_EXCEPTIONS`` lists it.
 
 The checkout test builds what a CI run can leave in the working tree — an
 untracked OpenCode ``auth.json`` under ``.mergecraft/prep-scratch/`` and an
@@ -20,14 +25,7 @@ import pytest
 
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.git import _validate_git_invocation, git_tool
-from mergecraft.mcp.git_guards import (
-    _BLAME_LONG_OPTIONS,
-    _CAT_FILE_LONG_OPTIONS,
-    _GREP_LONG_OPTIONS,
-    _LS_REMOTE_LONG_OPTIONS,
-    _REFUSED_LONG_OPTIONS,
-    long_option_candidates,
-)
+from mergecraft.mcp.git_guards import _EXACT_NAME_EXCEPTIONS, _REFUSED_LONG_OPTIONS
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
@@ -46,45 +44,18 @@ def _prefixes(option: str, shortest: str) -> list[str]:
     return [option[:end] for end in range(len(shortest), len(option) + 1)]
 
 
-# --- resolver ---------------------------------------------------------------
-
-
-def test_exact_name_wins_over_longer_options() -> None:
-    assert long_option_candidates("--text", _GREP_LONG_OPTIONS) == {"--text"}
-    assert long_option_candidates("--filter", _CAT_FILE_LONG_OPTIONS) == {"--filter"}
-
-
-def test_unique_prefix_resolves_and_value_is_ignored() -> None:
-    assert long_option_candidates("--no-inde", _GREP_LONG_OPTIONS) == {"--no-index"}
-    assert long_option_candidates("--cont=x", _BLAME_LONG_OPTIONS) == {"--contents"}
-
-
-def test_ambiguous_prefix_returns_every_candidate() -> None:
-    assert long_option_candidates("--no-in", _GREP_LONG_OPTIONS) == {
-        "--no-index",
-        "--no-invert-match",
-    }
-
-
-@pytest.mark.parametrize("token", ["-n", "pattern", "--", ""])
-def test_non_long_option_names_nothing(token: str) -> None:
-    assert long_option_candidates(token, _GREP_LONG_OPTIONS) == frozenset()
+# --- exceptions -------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    ("verb", "options"),
-    [
-        ("grep", _GREP_LONG_OPTIONS),
-        ("cat-file", _CAT_FILE_LONG_OPTIONS),
-        ("blame", _BLAME_LONG_OPTIONS),
-        ("ls-remote", _LS_REMOTE_LONG_OPTIONS),
-    ],
+    ("verb", "name"),
+    [(verb, name) for verb, names in _EXACT_NAME_EXCEPTIONS.items() for name in names],
 )
-def test_every_refused_option_is_in_its_verbs_pinned_list(
-    verb: str, options: frozenset[str]
-) -> None:
-    """A refused name missing from the list would never resolve, so never refuse."""
-    assert set(_REFUSED_LONG_OPTIONS[verb]) <= options
+def test_each_exception_is_a_prefix_of_a_refused_option_but_not_one(verb: str, name: str) -> None:
+    """An exception that prefixes nothing refused is dead; one that is refused is a hole."""
+    refused = _REFUSED_LONG_OPTIONS[verb]
+    assert name not in refused
+    assert any(option.startswith(name) for option in refused)
 
 
 # --- refused spellings ------------------------------------------------------
@@ -92,7 +63,7 @@ def test_every_refused_option_is_in_its_verbs_pinned_list(
 
 @pytest.mark.parametrize(
     "token",
-    [*_prefixes("--no-index", "--no-ind"), "--no-in", "--no-inde=x"],
+    [*_prefixes("--no-index", "--n"), "--no-inde=x"],
 )
 def test_grep_refuses_every_no_index_spelling(token: str, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="no-index"):
@@ -103,16 +74,22 @@ def test_grep_refuses_every_no_index_spelling(token: str, tmp_path: Path) -> Non
     "token",
     [
         *_prefixes("--untracked", "--u"),
-        *_prefixes("--no-exclude-standard", "--no-e"),
+        *_prefixes("--no-exclude-standard", "--n"),
     ],
 )
 def test_grep_refuses_untracked_and_ignored_file_scope(token: str, tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="mergeCraft's own scratch"):
+    # ``--n`` / ``--no`` / ``--no-`` also prefix ``--no-index`` and hit that guard first.
+    with pytest.raises(ValueError, match=r"mergeCraft's own scratch|no-index"):
         _validate("grep", [token, "-n", "x"], tmp_path)
 
 
 @pytest.mark.parametrize(
-    "token", [*_prefixes("--textconv", "--t"), *_prefixes("--filters", "--filters")]
+    "token",
+    [
+        *_prefixes("--textconv", "--t"),
+        *_prefixes("--filters", "--f"),
+        "--filter=blob:none",
+    ],
 )
 def test_cat_file_refuses_every_content_filter_spelling(token: str, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="command execution"):
@@ -122,9 +99,9 @@ def test_cat_file_refuses_every_content_filter_spelling(token: str, tmp_path: Pa
 @pytest.mark.parametrize(
     "token",
     [
-        *_prefixes("--contents", "--cont"),
+        *_prefixes("--contents", "--c"),
         "--contents=README.md",
-        *_prefixes("--ignore-revs-file", "--ignore-revs"),
+        *(t for t in _prefixes("--ignore-revs-file", "--i") if t != "--ignore-rev"),
     ],
 )
 def test_blame_refuses_flag_valued_file_reads(token: str, tmp_path: Path) -> None:
@@ -132,7 +109,9 @@ def test_blame_refuses_flag_valued_file_reads(token: str, tmp_path: Path) -> Non
         _validate("blame", [token, "README.md"], tmp_path)
 
 
-@pytest.mark.parametrize("token", [*_prefixes("--upload-pack", "--u"), "--exec", "--exe=x"])
+@pytest.mark.parametrize(
+    "token", [*_prefixes("--upload-pack", "--u"), *_prefixes("--exec", "--e"), "--exe=x"]
+)
 def test_ls_remote_refuses_command_naming_options(token: str, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="command execution"):
         _validate("ls-remote", [token, "origin"], tmp_path)
@@ -195,7 +174,6 @@ def test_path_confinement_holds_after_real_and_swallowed_double_dash(
         ("grep", ["--text", "-n", "x"]),
         ("grep", ["--cached", "-n", "x"]),
         ("grep", ["-e", "x", "--", "README.md"]),
-        ("cat-file", ["--filter=blob:none", "--batch-all-objects", "--batch-check"]),
         ("cat-file", ["--batch-check"]),
         ("blame", ["--porcelain", "README.md"]),
         ("blame", ["--no-contents", "README.md"]),

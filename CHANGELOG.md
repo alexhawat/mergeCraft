@@ -128,7 +128,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The reviewer's read-only `git` tool now refuses abbreviated spellings of the
   options it already blocks, plus a few that do the same harm. Git accepts any
   unique prefix of a long option, so `git grep --no-inde` went through as
-  `--no-index` and `git cat-file --tex` ran a configured textconv filter. The
+  `--no-index` and `git cat-file --tex` ran a configured textconv filter. Which
+  prefixes are unique depends on the git release: on the git 2.39 in the
+  review image, `cat-file --filter` is short for `--filters`, while on git
+  2.53 it is a different option. So every prefix of a blocked option is
+  refused, apart from a short list of exact names checked on both releases.
+  The
   tool also refuses `grep --untracked` / `--no-exclude-standard`, because they
   searched untracked and ignored files, including mergeCraft's own scratch
   (the askpass helper, OpenCode's `auth.json`) whenever the run temp dir is
