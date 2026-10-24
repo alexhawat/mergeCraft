@@ -227,6 +227,11 @@ def _git_show_preview(output_path: str) -> str:
 # line-range read. Larger context is dropped and the match locations returned.
 _GREP_MAX_CONTEXT_LINES = 10
 _GREP_UNBOUNDED_CONTEXT = 1 << 30
+# git's context count: strtoul base 0 after optional C whitespace and "+", then a k/m/g unit.
+_GIT_COUNT_RE = re.compile(r"[ \t\n\v\f\r]*\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)([kKmMgG]?)")
+_GIT_COUNT_UNITS = {"": 1, "k": 1 << 10, "m": 1 << 20, "g": 1 << 30}
+# The bare ``-NUM`` short form is decimal digits only (``-010`` is ten lines).
+_GREP_NUM_OPTION_RE = re.compile(r"-([0-9]+)")
 _GREP_CONTEXT_LONG = frozenset({"--after-context", "--before-context", "--context"})
 # Short letters whose value is the rest of the bundle or, failing that, the next token.
 _GREP_SHORT_VALUE_LETTERS = frozenset("ABCefm")
@@ -270,7 +275,9 @@ def _grep_segments(head: list[str]) -> tuple[list[tuple[bool, list[str]]], bool]
             body = tok[1:]
             letter = next((c for c in body if c in _GREP_SHORT_VALUE_LETTERS), "")
             takes_value = (
-                not body.isdigit() and bool(letter) and body.index(letter) == len(body) - 1
+                _GREP_NUM_OPTION_RE.fullmatch(tok) is None
+                and bool(letter)
+                and body.index(letter) == len(body) - 1
             )
         width = 2 if takes_value and idx + 1 < len(head) else 1
         segments.append((True, head[idx : idx + width]))
@@ -279,7 +286,24 @@ def _grep_segments(head: list[str]) -> tuple[list[tuple[bool, list[str]]], bool]
 
 
 def _context_value(value: str) -> int:
-    return int(value) if value.isdigit() else 0
+    """Parse a context count the way git does, or fail closed.
+
+    git reads it with ``strtoul(value, &end, 0)`` plus an optional k/m/g
+    suffix: leading whitespace and ``+`` are allowed, ``0x10`` is hex and
+    ``010`` octal, and ``1k`` is 1024 lines. Anything else counts as unbounded,
+    so the option is dropped rather than forwarded unexamined.
+    """
+    match = _GIT_COUNT_RE.fullmatch(value)
+    if match is None:
+        return _GREP_UNBOUNDED_CONTEXT
+    digits, unit = match.groups()
+    if digits[:2].lower() == "0x":
+        base = 16
+    elif digits.startswith("0"):
+        base = 8
+    else:
+        base = 10
+    return int(digits, base) * _GIT_COUNT_UNITS[unit.lower()]
 
 
 def _strip_grep_context(group: list[str]) -> tuple[list[str], int]:
@@ -299,7 +323,7 @@ def _strip_grep_context(group: list[str]) -> tuple[list[str], int]:
             return [], _context_value(inline if has_inline else separate)
         return group, 0
     body = tok[1:]
-    if body.isdigit():
+    if _GREP_NUM_OPTION_RE.fullmatch(tok) is not None:
         return [], int(body)
     kept: list[str] = []
     lines = 0
