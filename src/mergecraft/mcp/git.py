@@ -34,6 +34,7 @@ from mergecraft.mcp.git_guards import (
     _reject_grep_pager_exec,
     _reject_namespace_flag,
     _reject_no_index,
+    _reject_refused_long_options,
     _split_end_of_options,
     _subcommand_declares_shorts,
     reject_if_leading_dash,
@@ -68,6 +69,7 @@ __all__ = [
     "_reject_grep_pager_exec",
     "_reject_namespace_flag",
     "_reject_no_index",
+    "_reject_refused_long_options",
     "_split_end_of_options",
     "_subcommand_declares_shorts",
     "reject_if_leading_dash",
@@ -555,7 +557,7 @@ def _validate_git_invocation(
     _reject_config_flags(global_opts)
     _reject_config_flags(args, subcommand=command)
     _reject_no_index(global_opts)
-    _reject_no_index(args)
+    _reject_no_index(args, subcommand=command)
     # Unconditional: --namespace reaches the same pre-subcommand slot and is
     # the one extracted global option no path rule can confine.
     _reject_namespace_flag(global_opts)
@@ -579,6 +581,10 @@ def _validate_git_invocation(
         _reject_config_invocation(args)
     if command == "grep":
         _reject_grep_pager_exec(args)
+    # Verbs that resolve long-option abbreviations: refuse every spelling of an
+    # option that widens grep to untracked files, reads an unconfined file, or
+    # runs a command, not only the full name.
+    _reject_refused_long_options(args, subcommand=command)
     # Unconditional: --textconv / --ext-diff execute a git-config content
     # filter on every diff-family verb, not just the one #619 added (#623).
     _reject_content_filter_exec(global_opts)
