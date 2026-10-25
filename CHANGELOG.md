@@ -125,6 +125,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in-tree), all after the integrity baseline, so the hash now prunes those
   directory names at any depth instead of only at the checkout root. A nested
   `.git` metadata directory is pruned the same way.
+- The reviewer's read-only `git` tool now refuses abbreviated spellings of the
+  options it already blocks, plus a few that do the same harm. Git accepts any
+  unique prefix of a long option, so `git grep --no-inde` went through as
+  `--no-index` and `git cat-file --tex` ran a configured textconv filter. Which
+  prefixes are unique depends on the git release: on the git 2.39 in the
+  review image, `cat-file --filter` is short for `--filters`, while on git
+  2.53 it is a different option. So every prefix of a blocked option is
+  refused, apart from a short list of exact names checked on both releases.
+  The
+  tool also refuses `grep --untracked` / `--no-exclude-standard`, because they
+  searched untracked and ignored files, including mergeCraft's own scratch
+  (the askpass helper, OpenCode's `auth.json`) whenever the run temp dir is
+  inside the checkout. It refuses `blame --contents` / `--ignore-revs-file`,
+  which read a file the tool cannot confine; `cat-file --filters`, which runs a
+  smudge filter; and `ls-remote --upload-pack` / `--exec`, which run a named
+  command. These options are refused anywhere in the arguments, including after
+  `--`, because git reads a `--` that follows `-e` as a pattern rather than
+  the end of options (`git grep -e -- --untracked` still searched untracked
+  files).
 - Multi-reviewer rosters now dispatch secondary reviewers server-side when the
   primary harness never spawns them, fail closed with a clear error when a
   secondary cannot reach its provider, and always emit the `⏱ LLM review time`
