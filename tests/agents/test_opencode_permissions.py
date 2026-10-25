@@ -199,11 +199,15 @@ def test_a_tmpdir_this_run_did_not_create_is_not_granted(tmp_path: Path) -> None
         "external_directory"
     ]
 
+    from mergecraft.agents.opencode import _evidence_dir
+
     root = run_dir.resolve().as_posix()
     assert f"{root}/**" not in external
-    # Only the evidence scratch mergeCraft itself writes stays reachable.
+    # Only the evidence scratch mergeCraft itself writes stays reachable. Where it
+    # lives depends on the environment (``$RUNNER_TEMP`` in CI, else the temp dir).
+    evidence = _evidence_dir(ctx).resolve().as_posix()
     granted = {key for key in external if key.startswith(f"{root}/") or key == root}
-    assert granted == {f"{root}/evidence", f"{root}/evidence/*", f"{root}/evidence/**"}
+    assert all(key == evidence or key.startswith(f"{evidence}/") for key in granted)
 
 
 def test_the_run_created_temp_dir_is_granted(
