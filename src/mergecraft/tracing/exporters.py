@@ -292,13 +292,34 @@ def _provider_span_processors(provider: Any) -> tuple[Any, ...]:
 
 
 def _otlp_exporter_headers(exporter: Any) -> dict[str, str]:
-    """Return normalized OTLP exporter headers when the SDK exposes them."""
+    """Return the caller-supplied OTLP exporter headers when the SDK exposes them.
+
+    OpenTelemetry 1.45 moved the headers onto the exporter's HTTP client and
+    merges in transport defaults (``content-type``, ``user-agent``); those are
+    dropped so the result equals what ``mergecraft`` configured.
+    """
     raw = getattr(exporter, "_headers", None)
     if raw is None:
         raw = getattr(exporter, "headers", None)
-    if isinstance(raw, dict):
-        return {str(key): str(value) for key, value in raw.items()}
-    return {}
+    if raw is None:
+        raw = getattr(getattr(exporter, "_client", None), "_headers", None)
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(key): str(value)
+        for key, value in raw.items()
+        if not _is_otlp_transport_default(str(key), str(value))
+    }
+
+
+def _is_otlp_transport_default(name: str, value: str) -> bool:
+    """Return whether *name*/*value* is a header the OTLP HTTP client adds itself."""
+    key = name.lower()
+    if key == "content-type":
+        return value == "application/x-protobuf"
+    if key == "user-agent":
+        return value.startswith("OTel-OTLP-Exporter-Python/")
+    return False
 
 
 def _otlp_exporter_matches(exporter: Any, *, endpoint: str, headers: dict[str, str]) -> bool:

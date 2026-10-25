@@ -210,3 +210,20 @@ def test_get_tracer_from_settings_does_not_multiply_otlp_exports(
         "one tool.call span must produce exactly one OTLP payload, "
         f"got {len(payloads)} after {construction_count} tracer constructions"
     )
+
+
+def test_otlp_exporter_headers_ignore_the_clients_transport_defaults() -> None:
+    """OTel 1.45 keeps headers on ``_client`` next to its own content-type and user-agent."""
+    pytest.importorskip("opentelemetry")
+
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+    from mergecraft.tracing.exporters import _otlp_exporter_headers, _otlp_exporter_matches
+
+    configured = {"authorization": "Bearer canary", "x-source": "mergecraft"}
+    exporter = OTLPSpanExporter(endpoint="http://127.0.0.1:4318/v1/traces", headers=configured)
+
+    assert _otlp_exporter_headers(exporter) == configured
+    assert _otlp_exporter_matches(
+        exporter, endpoint="http://127.0.0.1:4318/v1/traces", headers=configured
+    )
