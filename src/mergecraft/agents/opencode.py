@@ -58,7 +58,7 @@ from mergecraft.tracing.genai import (
 )
 from mergecraft.tracing.http import instrument_httpx
 from mergecraft.types import MERGECRAFT_MCP_NAME
-from mergecraft.utils.git_setup import created_temp_directory
+from mergecraft.utils.git_setup import created_temp_directory, is_run_owned_directory
 from mergecraft.utils.privilege import agent_subprocess_env, wrap_agent_command
 from mergecraft.utils.process_group import (
     kill_process_group,
@@ -642,10 +642,11 @@ def _review_diff_external_directory(ctx: AgentRunContext) -> dict[str, str]:
     """
     # Only directories this run created: an operator-set ``MERGECRAFT_TEMP_DIR`` can
     # be a shared root, and a registered diff path's parent is agent-chosen
-    # (``establish_review_scope``), so neither is granted on its own say-so.
-    dirs = {Path(ctx.tmpdir)}
-    if temp := created_temp_directory():
-        dirs.add(Path(temp))
+    # (``establish_review_scope``), so neither is granted on its own say-so. Nor is
+    # ``ctx.tmpdir`` unless it is a registered ``mkdtemp``: a caller could hand in
+    # an operator-chosen or shared directory, and the whole tree would be readable.
+    dirs = {Path(d) for d in (ctx.tmpdir, created_temp_directory()) if d}
+    dirs = {d for d in dirs if is_run_owned_directory(str(d))}
     forms = sorted({form.as_posix() for d in dirs for form in (d, d.resolve())})
     rules = {f"{root}/**": "allow" for root in forms}
     for root in forms:

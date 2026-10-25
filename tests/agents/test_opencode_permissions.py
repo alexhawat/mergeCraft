@@ -83,14 +83,21 @@ def test_bash_stays_denied(tmp_path: Path) -> None:
     assert _permissions(tmp_path).get("bash") == "deny"
 
 
-def _split_ctx(tmp_path: Path) -> tuple[AgentRunContext, Path]:
-    """A run whose temp dir (and diff) sits outside the checkout, as in production."""
+def _split_ctx(tmp_path: Path, *, run_owned: bool = True) -> tuple[AgentRunContext, Path]:
+    """A run whose temp dir (and diff) sits outside the checkout, as in production.
+
+    ``run_owned`` registers the temp dir the way ``create_temp_directory`` and the
+    offline review's ``mkdtemp`` do; ``False`` models an operator-chosen directory.
+    """
     from mergecraft.mcp.verdict import establish_offline_review_scope
+    from mergecraft.utils.git_setup import register_run_owned_directory
 
     run_dir = tmp_path / "run"
     repo = tmp_path / "repo"
     run_dir.mkdir()
     repo.mkdir()
+    if run_owned:
+        register_run_owned_directory(str(run_dir))
     ctx = AgentRunContext(
         payload={"shell": "restricted", "push": "restricted"},
         mcp_server_url="http://127.0.0.1:0/mcp",
@@ -180,6 +187,25 @@ def test_an_operator_set_shared_temp_dir_is_not_granted(
     assert f"{run_dir.resolve().as_posix()}/**" in external
 
 
+def test_a_tmpdir_this_run_did_not_create_is_not_granted(tmp_path: Path) -> None:
+    """An operator-chosen or shared ``ctx.tmpdir`` must not open its whole tree.
+
+    Its siblings can be credentials or other runs' files; the diff read fails
+    closed instead, and the agent falls back to ``git diff`` once.
+    """
+    ctx, run_dir = _split_ctx(tmp_path, run_owned=False)
+
+    external = json.loads(build_security_config(ctx, "anthropic/claude-sonnet"))["permission"][
+        "external_directory"
+    ]
+
+    root = run_dir.resolve().as_posix()
+    assert f"{root}/**" not in external
+    # Only the evidence scratch mergeCraft itself writes stays reachable.
+    granted = {key for key in external if key.startswith(f"{root}/") or key == root}
+    assert granted == {f"{root}/evidence", f"{root}/evidence/*", f"{root}/evidence/**"}
+
+
 def test_the_run_created_temp_dir_is_granted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -188,6 +214,8 @@ def test_the_run_created_temp_dir_is_granted(
     created = tmp_path / "mergecraft-abc123"
     created.mkdir()
     monkeypatch.setattr(git_setup, "_temp_dir", str(created))
+    # ``create_temp_directory`` registers what it makes; mirror that here.
+    git_setup.register_run_owned_directory(str(created))
     ctx, _ = _split_ctx(tmp_path)
 
     external = json.loads(build_security_config(ctx, "anthropic/claude-sonnet"))["permission"][

@@ -169,7 +169,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenCode reviews can read the review diff with the `read` tool. The diff sits in
   the run's temp dir, outside the checkout, so `read` refused it and agents fell
   back to workarounds. The temp dir is now readable, except its isolated auth store,
-  config dir and scratch HOME.
+  config dir and scratch HOME, but only when this run created it with `mkdtemp`: an
+  operator-chosen or shared directory passed as the run's temp dir is not opened.
 - OpenCode reviews no longer load the reviewed repository's own OpenCode config
   (`opencode.json`, `.opencode/`). A repository could otherwise add MCP servers or
   plugins — code that runs inside the reviewer — including from a fork PR.

@@ -1067,6 +1067,11 @@ async def _run_offline_diff_review(
     )
 
     out_dir = Path(tempfile.mkdtemp(prefix="mergecraft-diff-review-"))
+    from mergecraft.utils.git_setup import register_run_owned_directory
+
+    # The diff and the agent's scratch live here; only a run-owned directory is
+    # opened to the reviewing agent.
+    register_run_owned_directory(str(out_dir))
     from mergecraft.review.engine import ReviewEngine
     from mergecraft.review.snapshot import canonical_review_snapshot
     from mergecraft.utils.process_group import kill_all_active_process_groups
