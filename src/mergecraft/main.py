@@ -128,7 +128,9 @@ if TYPE_CHECKING:
     from mergecraft.config.settings import RepoSettings, RunContextData
     from mergecraft.evidence.shadow import VerdictProtocolPrediction
     from mergecraft.mcp.verdict import VerdictDiagnostic
+    from mergecraft.modes import Mode
     from mergecraft.scm.protocol import ScmProvider
+    from mergecraft.types import AgentId
 
 
 @dataclass(slots=True)
@@ -1302,6 +1304,34 @@ async def _assemble_model_chain(ctx: RunContext) -> None:
     _stamp_requested_model(ctx, payload_model)
 
 
+def _agent_timeout_ms(ctx: RunContext) -> int | None:
+    """Return the agent deadline: the run timeout minus setup elapsed (S1 / F6).
+
+    A slow setup must NOT silently extend the total run deadline, so its
+    wall-clock duration comes out of the agent's share. ``None`` means the
+    run has no timeout.
+    """
+    if ctx.timeout_ms is None:
+        return None
+    return max(1, int(ctx.timeout_ms - ctx.setup_elapsed_s * 1000))
+
+
+def _render_run_modes(ctx: RunContext, agent_id: AgentId) -> list[Mode]:
+    """Render built-in plus custom modes for ``agent_id`` with this run's budgets."""
+    assert ctx.settings is not None
+    settings = ctx.settings
+    agent_timeout_ms = _agent_timeout_ms(ctx)
+    return [
+        *compute_modes(
+            agent_id,
+            settings.signed_commits,
+            inline_budget=settings.analyzers.inline_budget,
+            time_budget_minutes=None if agent_timeout_ms is None else agent_timeout_ms // 60_000,
+        ),
+        *_custom_modes(settings.modes),
+    ]
+
+
 async def _build_run_tool_context(ctx: RunContext) -> None:
     """Build ``tool_context`` — modes, output schema, analyzers mode, SARIF flag (S1/F3+F4).
 
@@ -1324,14 +1354,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
     token_ref = ctx.token_ref
     payload = ctx.payload
 
-    modes = [
-        *compute_modes(
-            ctx.agent_id,
-            settings.signed_commits,
-            inline_budget=settings.analyzers.inline_budget,
-        ),
-        *_custom_modes(settings.modes),
-    ]
+    modes = _render_run_modes(ctx, ctx.agent_id)
     tool_state.modes = modes
     ctx.modes = modes
     output_schema = resolve_output_schema()
@@ -1564,6 +1587,14 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
     payload = ctx.payload
     tmpdir = ctx.tmpdir
 
+    # The setup script ran after ``_build_run_tool_context`` rendered the modes;
+    # re-render so ``${TIME_BUDGET}`` states the deadline net of its elapsed time.
+    if ctx.setup_elapsed_s:
+        modes = _render_run_modes(ctx, ctx.agent_id)
+        ctx.modes = modes
+        tool_state.modes = modes
+        tool_context.modes = modes
+
     mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=ctx.output_schema)
     tool_context.mcp_server_url = mcp_url
     ctx.mcp_url = mcp_url
@@ -1786,14 +1817,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
         if attempt_agent_id == agent_id:
             attempt_ctx = replace(run_ctx, resolved_model=attempt_model)
         else:
-            attempt_modes = [
-                *compute_modes(
-                    attempt_agent_id,
-                    settings.signed_commits,
-                    inline_budget=settings.analyzers.inline_budget,
-                ),
-                *_custom_modes(settings.modes),
-            ]
+            attempt_modes = _render_run_modes(ctx, attempt_agent_id)
             attempt_instructions = resolve_instructions(
                 payload=payload,
                 repo=run_context.repo,
@@ -1904,24 +1928,23 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
         # by the bounded setup block above; ``timeout_ms`` is the
         # pre-deduction run budget.
         timeout_ms = ctx.timeout_ms
-        setup_elapsed_s = ctx.setup_elapsed_s
-        agent_timeout_ms: int | None
-        if timeout_ms is None:
-            agent_timeout_ms = None
-        else:
-            agent_timeout_ms = max(1, int(timeout_ms - setup_elapsed_s * 1000))
-            if agent_timeout_ms != timeout_ms:
-                logger.info(
-                    "» deducted setup elapsed {:.2f}s from agent deadline ({}s -> {}s)",
-                    setup_elapsed_s,
-                    timeout_ms / 1000,
-                    agent_timeout_ms / 1000,
-                )
+        agent_timeout_ms = _agent_timeout_ms(ctx)
+        if agent_timeout_ms is not None and agent_timeout_ms != timeout_ms:
+            logger.info(
+                "» deducted setup elapsed {:.2f}s from agent deadline ({}s -> {}s)",
+                ctx.setup_elapsed_s,
+                (timeout_ms or 0) / 1000,
+                agent_timeout_ms / 1000,
+            )
 
         if agent_timeout_ms is None:
             winning_slug, result = await agent_task
         else:
-            ctx.agent_deadline_monotonic = time.monotonic() + agent_timeout_ms / 1000.0
+            agent_started = time.monotonic()
+            ctx.agent_deadline_monotonic = agent_started + agent_timeout_ms / 1000.0
+            # The MCP server reads these to tell the agent how much time it has used.
+            tool_state.agent_started_monotonic = agent_started
+            tool_state.agent_deadline_s = agent_timeout_ms / 1000.0
             try:
                 winning_slug, result = await asyncio.wait_for(
                     agent_task, timeout=agent_timeout_ms / 1000.0

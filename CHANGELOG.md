@@ -59,6 +59,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Review and IncrementalReview now tell the agent how long it has and how to
+  read code, so a large review submits a verdict inside its timeout instead of
+  being killed while still exploring. The prompt states the agent deadline (run
+  timeout minus setup time) with checkpoints: stop exploring by ~60%, submit by
+  ~80%. It also makes `run_analyzers` and `run_static_checks` the first calls
+  after `checkout_pr`, reads code with a plain `grep -n` plus a ~60-line ranged
+  read, forbids repeating a call whose result is already in context or retrying
+  variants after a tool error, and runs `git diff <base>...HEAD` once when the
+  diff file is refused. Triage now investigates the riskiest hunks first instead
+  of pulling "as much context as you need". Because the agent has no clock, once
+  it passes 60% of its deadline each successful tool result on the review
+  agent's MCP route carries a notice such as `⏱ 16 of 25 min used, about 9 left:
+  stop exploring…`, switching to "submit the verdict now" at 80%. A JSON-object
+  result gets it as a `timeBudget` field (so OpenCode 2.x code mode, which
+  parses the joined text, still sees valid JSON); a plain-text result gets a
+  trailing line. Trajectory records and traces never see the notice. The
+  verifier route and runs with no timeout get none, and the prompt shows a
+  neutral line instead. `compute_modes` takes an optional `time_budget_minutes`.
+  The prompt version hash changes.
 - Incremental re-review is the default on a re-review. `checkout_pr` now computes
   the range whenever a prior reviewed sha is recoverable — not only when
   `select_mode` chose IncrementalReview — and reports
