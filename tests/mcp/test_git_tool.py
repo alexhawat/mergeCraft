@@ -718,6 +718,29 @@ async def test_grep_unparseable_context_count_fails_closed(
     assert "note" in json.loads(result.content[0]["text"])
 
 
+@pytest.mark.parametrize(
+    "args",
+    [
+        # Would be moved before the pattern by reordering.
+        ["def run", "--untr"],
+        # Would survive context stripping beside a dropped -A.
+        ["-A", "60", "--no-exclude-standard", "def run"],
+        ["-W", "def run", "--", "--untracked"],
+    ],
+)
+async def test_grep_normalization_never_runs_a_refused_option(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    """Guards see the agent's own args before reordering or context stripping."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "grep", "args": args})
+
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
 async def test_grep_ambiguous_long_prefix_is_left_for_git_to_refuse(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
