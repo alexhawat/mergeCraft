@@ -212,18 +212,106 @@ def test_get_tracer_from_settings_does_not_multiply_otlp_exports(
     )
 
 
-def test_otlp_exporter_headers_ignore_the_clients_transport_defaults() -> None:
-    """OTel 1.45 keeps headers on ``_client`` next to its own content-type and user-agent."""
+def _otlp_batch_processors(endpoint: str) -> list[object]:
+    """Return the OTLP ``BatchSpanProcessor`` s on the shared provider for *endpoint*."""
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+    return [
+        processor
+        for processor in _span_processors(trace.get_tracer_provider())
+        if isinstance(processor, BatchSpanProcessor)
+        and getattr(getattr(processor, "span_exporter", None), "_endpoint", None) == endpoint
+    ]
+
+
+def _construct_repeatedly(endpoint: str, headers: dict[str, str]) -> None:
+    import mergecraft.tracing.exporters as exporters
+
+    exporters._reset_test_seam()
+    _ensure_real_tracer_provider()
+    for _ in range(_N_CONSTRUCTIONS):
+        exporters._setup_tracer_provider(
+            endpoint=endpoint, headers=headers, service_name="mergecraft-otel"
+        )
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        pytest.param({"authorization": "Bearer x"}, id="lowercase"),
+        pytest.param({"Authorization": "Bearer x", "X-Api-Key": "k"}, id="mixed-case"),
+    ],
+)
+@pytest.mark.parametrize(
+    "env",
+    [
+        pytest.param({}, id="no-env"),
+        pytest.param({"OTEL_EXPORTER_OTLP_COMPRESSION": "gzip"}, id="compression"),
+        pytest.param({"OTEL_EXPORTER_OTLP_HEADERS": "x-env=1,x-team=a"}, id="env-headers"),
+        pytest.param(
+            {
+                "OTEL_EXPORTER_OTLP_COMPRESSION": "gzip",
+                "OTEL_EXPORTER_OTLP_TRACES_HEADERS": "x-env=1",
+            },
+            id="compression-and-traces-headers",
+        ),
+    ],
+)
+def test_real_exporter_is_reused_whatever_the_header_case_or_otlp_env(
+    headers: dict[str, str], env: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OTel 1.45 lowercases header names and merges env headers; reuse must still hold (#293)."""
+    pytest.importorskip("opentelemetry")
+
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    endpoint = f"http://127.0.0.1:1/canary-reuse-{abs(hash((tuple(headers), tuple(env))))}"
+
+    _construct_repeatedly(endpoint, headers)
+
+    assert len(_otlp_batch_processors(endpoint)) == 1
+
+
+def test_a_different_header_value_gets_its_own_exporter() -> None:
+    """Same endpoint, different credential: the old exporter must not be reused."""
+    pytest.importorskip("opentelemetry")
+
+    endpoint = "http://127.0.0.1:1/canary-different-credential"
+    _construct_repeatedly(endpoint, {"Authorization": "Bearer one"})
+    _construct_repeatedly(endpoint, {"authorization": "Bearer two"})
+
+    sent = sorted(
+        _exporter_header(processor, "authorization")
+        for processor in _otlp_batch_processors(endpoint)
+    )
+    assert sent == ["Bearer one", "Bearer two"]
+
+
+def test_an_exporter_with_unconfigured_credentials_is_not_reused() -> None:
+    """An exporter carrying an auth header mergeCraft did not configure stays out of reuse."""
     pytest.importorskip("opentelemetry")
 
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-    from mergecraft.tracing.exporters import _otlp_exporter_headers, _otlp_exporter_matches
+    from mergecraft.tracing.exporters import _otlp_exporter_matches
 
-    configured = {"authorization": "Bearer canary", "x-source": "mergecraft"}
-    exporter = OTLPSpanExporter(endpoint="http://127.0.0.1:4318/v1/traces", headers=configured)
-
-    assert _otlp_exporter_headers(exporter) == configured
-    assert _otlp_exporter_matches(
-        exporter, endpoint="http://127.0.0.1:4318/v1/traces", headers=configured
+    endpoint = "http://127.0.0.1:1/canary-extra-credential"
+    exporter = OTLPSpanExporter(
+        endpoint=endpoint, headers={"authorization": "Bearer x", "x-api-key": "other"}
     )
+
+    assert not _otlp_exporter_matches(
+        exporter, endpoint=endpoint, headers={"authorization": "Bearer x"}
+    )
+    assert _otlp_exporter_matches(
+        exporter,
+        endpoint=endpoint,
+        headers={"Authorization": "Bearer x", "X-Api-Key": "other"},
+    )
+
+
+def _exporter_header(processor: object, name: str) -> str:
+    from mergecraft.tracing.exporters import _otlp_exporter_headers
+
+    return _otlp_exporter_headers(getattr(processor, "span_exporter", None))[name]

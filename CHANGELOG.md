@@ -165,8 +165,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `tracing` extra moves to OpenTelemetry 1.45.1 (semantic conventions
   0.66b1), which fixes CVE-2026-114603 in `opentelemetry-api` 1.44.0. That
   advisory failed the `pip-audit` security check on every build. The 1.45 OTLP
-  exporter keeps its headers on its HTTP client, so exporter reuse for the same
-  endpoint and headers is matched there; two new transitive packages,
+  exporter keeps its headers on its HTTP client, lowercased and merged with
+  `OTEL_EXPORTER_OTLP_*` settings, so reuse of an exporter for the same endpoint
+  and headers is matched case-insensitively against those; two new transitive packages,
   `opentelemetry-exporter-http-transport` and `opentelemetry-exporter-otlp-common`,
   come with it.
 - A review whose verdict carries a finding with a model-made fingerprint

@@ -292,11 +292,11 @@ def _provider_span_processors(provider: Any) -> tuple[Any, ...]:
 
 
 def _otlp_exporter_headers(exporter: Any) -> dict[str, str]:
-    """Return the caller-supplied OTLP exporter headers when the SDK exposes them.
+    """Return the exporter's request headers, names lowercased, when the SDK exposes them.
 
-    OpenTelemetry 1.45 moved the headers onto the exporter's HTTP client and
-    merges in transport defaults (``content-type``, ``user-agent``); those are
-    dropped so the result equals what ``mergecraft`` configured.
+    OpenTelemetry 1.45 keeps them on the exporter's HTTP client, lowercases the
+    names, and merges in the transport defaults and the ``OTEL_EXPORTER_OTLP_*``
+    environment, so the map is a superset of what ``mergecraft`` configured.
     """
     raw = getattr(exporter, "_headers", None)
     if raw is None:
@@ -305,32 +305,43 @@ def _otlp_exporter_headers(exporter: Any) -> dict[str, str]:
         raw = getattr(getattr(exporter, "_client", None), "_headers", None)
     if not isinstance(raw, dict):
         return {}
-    return {
-        str(key): str(value)
-        for key, value in raw.items()
-        if not _is_otlp_transport_default(str(key), str(value))
-    }
+    return {str(key).lower(): str(value) for key, value in raw.items()}
 
 
-def _is_otlp_transport_default(name: str, value: str) -> bool:
-    """Return whether *name*/*value* is a header the OTLP HTTP client adds itself."""
-    key = name.lower()
-    if key == "content-type":
-        return value == "application/x-protobuf"
-    if key == "user-agent":
-        return value.startswith("OTel-OTLP-Exporter-Python/")
-    return False
+# Headers the OTLP HTTP client adds on its own; never a reason to refuse reuse.
+_OTLP_CLIENT_HEADERS = frozenset({"content-type", "content-encoding", "user-agent"})
+
+
+def _otlp_env_header_names() -> frozenset[str]:
+    """Return the header names a new exporter would merge in from the environment."""
+    from opentelemetry.util.re import parse_env_headers
+
+    raw = os.environ.get("OTEL_EXPORTER_OTLP_TRACES_HEADERS") or os.environ.get(
+        "OTEL_EXPORTER_OTLP_HEADERS", ""
+    )
+    return frozenset(name.lower() for name in parse_env_headers(raw, liberal=True))
 
 
 def _otlp_exporter_matches(exporter: Any, *, endpoint: str, headers: dict[str, str]) -> bool:
-    """Return whether *exporter* already targets the same endpoint and headers."""
+    """Return whether *exporter* already targets the same endpoint and headers.
+
+    Header names are case-insensitive. Every configured header must be present
+    with the same value; beyond those, the exporter may only carry what the
+    OTLP client or the environment adds, so an exporter with credentials
+    ``mergecraft`` did not configure is never reused.
+    """
     if exporter is None:
         return False
     if type(exporter).__name__ != "OTLPSpanExporter":
         return False
     if getattr(exporter, "_endpoint", None) != endpoint:
         return False
-    return _otlp_exporter_headers(exporter) == headers
+    actual = _otlp_exporter_headers(exporter)
+    wanted = {str(key).lower(): str(value) for key, value in headers.items()}
+    if any(actual.get(name) != value for name, value in wanted.items()):
+        return False
+    allowed = wanted.keys() | _OTLP_CLIENT_HEADERS | _otlp_env_header_names()
+    return actual.keys() <= allowed
 
 
 def _setup_tracer_provider(
