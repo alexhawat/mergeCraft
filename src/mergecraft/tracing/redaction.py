@@ -174,7 +174,7 @@ def redact_url(url: str) -> str:
     Patterns, applied in order (first match wins per region):
 
     1. ``api.telegram.org/bot<TOKEN>`` → ``api.telegram.org/bot<redacted>``
-    2. ``https://user:pass@host`` → ``https://user:<redacted>@host`` (basic auth)
+    2. ``https://user:pw@host`` → ``https://user:<redacted>@host`` (basic auth)
     3. ``?api_key=…&token=…&key=…`` → ``?<key>=<redacted>`` (query token params)
     4. ``Bearer sk-…`` / ``Basic <b64>`` → ``<scheme> <redacted>`` (header values)
     5. Catch-all for embedded ``sk-*`` / ``ghp_*`` / ``eyJ*`` substrings.
@@ -192,7 +192,7 @@ def redact_url(url: str) -> str:
     Examples:
         >>> redact_url("https://api.telegram.org/bot123456:ABC/sendMessage")
         'https://api.telegram.org/bot<redacted>/sendMessage'
-        >>> redact_url("https://user:pass@example.com/path")
+        >>> redact_url("https://user:pw@example.com/path")
         'https://user:<redacted>@example.com/path'
         >>> redact_url("https://example.com/v1/messages?api_key=sk-abc&x=1")
         'https://example.com/v1/messages?api_key=<redacted>&x=1'
