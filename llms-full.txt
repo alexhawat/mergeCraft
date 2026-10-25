@@ -2485,10 +2485,13 @@ Review runs never load your global OpenCode config (each run gets an empty
 `OPENCODE_CONFIG_DIR`), so a copy of the plugin listed there does not join the
 review; the per-run entry is the only instance.
 
-The plugin is loaded only if its `src/config.ts` or `dist/config.js` reads
-`captureContent`, whatever this run's content level. An older or unknown copy
-would ignore the option and could export every body unredacted, so it is skipped
-with a warning; a bare package spec cannot be checked and is skipped the same way.
+The plugin is loaded only if the code OpenCode will actually import reads
+`captureContent`, whatever this run's content level: the entry its `package.json`
+names (`exports["."]`, then `module`, then `main`) or the config module beside it.
+An older or unknown copy would ignore the option and could export every body
+unredacted, so it is skipped with a warning. So is a checkout whose source was
+updated but whose `dist/` build was not, a plugin with no resolvable entry, and a
+bare package spec, which cannot be checked.
 
 When it is set and tracing exports to an `otel` or `logfire` sink, each OpenCode
 2.x run gets a per-run plugin entry (in `OPENCODE_CONFIG_CONTENT`, replacing any
@@ -2497,7 +2500,8 @@ global entry for the same package) that:
 | Option | Value |
 | --- | --- |
 | `endpoint` | The active OTLP sink's endpoint, without `/v1/traces` |
-| `otlpHeaders` | The sink's headers — or, for an `otel` sink with none, `OTEL_EXPORTER_OTLP_TRACES_HEADERS` / `OTEL_EXPORTER_OTLP_HEADERS` — as `{env:…}` references; values travel in `MERGECRAFT_OPENCODE_OTLP_HEADER_<n>` env vars and never reach the config file on disk |
+| `otlpHeaders` | The sink's headers — or, for an `otel` sink with none, `OTEL_EXPORTER_OTLP_TRACES_HEADERS` / `OTEL_EXPORTER_OTLP_HEADERS` — as `{env:…}` references; values travel in `MERGECRAFT_OPENCODE_OTLP_HEADER_<n>` env vars and never reach the config file on disk. Env headers are URL-decoded first, as the Python OTLP exporter decodes them; a header whose decoded value holds `,`, `"`, `\` or a line break cannot be forwarded intact, and the plugin is not enabled |
+| `redactValues` | `{env:…}` references to every forwarded header value, plus the bare credential of a `Scheme credential` value, so a credential echoed into a prompt or tool body is masked even when it has no secret-looking name or prefix |
 | `resourceAttributes` | `service.name` of the sink (`mergecraft-otel` / `mergecraft-logfire`) |
 | `traceparent` | The active `mergecraft.agent.run` span, so the plugin's spans nest under it in the review's trace |
 | `captureContent` | From the [content-capture policy](#content-capture-policy-for-model-payloads), after the untrusted cap: `off` → `off`, `metadata` → `metadata`, `redacted` / `full` → `full` (bodies through the plugin's secret redaction) |

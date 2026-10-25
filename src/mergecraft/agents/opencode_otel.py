@@ -18,11 +18,13 @@ plugin entry that:
 
 Opt-in is operator-only: ``MERGECRAFT_OPENCODE_OTEL_PLUGIN`` names the plugin
 package (a directory path or package spec). Repository config never enables it,
-so a reviewed fork cannot load code into the harness. Only a plugin copy that
-provably reads ``captureContent`` is loaded, at every content level: an older or
-unknown copy would ignore it and export bodies unredacted. Header values never reach
-the config file on disk: each one rides an env var the config references as
-``{env:NAME}``.
+so a reviewed fork cannot load code into the harness. Only a plugin copy whose
+runtime entry provably reads ``captureContent`` is loaded, at every content level:
+an older or unknown copy would ignore it and export bodies unredacted. Header values
+are decoded as the Python OTLP exporter decodes them and never reach the config file
+on disk: each one rides an env var the config references as ``{env:NAME}``, and the
+same references feed the plugin's ``redactValues`` so a credential echoed into a
+prompt or tool body is masked.
 
 Exports:
     Classes:
@@ -63,10 +65,19 @@ __all__ = [
 
 OTEL_PLUGIN_ENV: Final[str] = "MERGECRAFT_OPENCODE_OTEL_PLUGIN"
 _HEADER_ENV_PREFIX: Final[str] = "MERGECRAFT_OPENCODE_OTLP_HEADER_"
+# Suffix of the env var holding a ``Scheme credential`` header's bare credential.
+_CREDENTIAL_ENV_SUFFIX: Final[str] = "_CREDENTIAL"
 _TRACES_SUFFIX: Final[str] = "/v1/traces"
 _CAPTURE_OPTION: Final[str] = "captureContent"
-# Where a plugin checkout or install declares its options.
-_CAPTURE_SOURCES: Final[tuple[str, ...]] = ("src/config.ts", "dist/config.js")
+# Package-entry conditions in the order Bun (OpenCode's runtime) resolves them.
+_ENTRY_CONDITIONS: Final[tuple[str, ...]] = ("bun", "import", "default", "node", "require")
+# Beside the runtime entry, the module that declares the plugin's options.
+_CONFIG_MODULES: Final[tuple[str, ...]] = ("config.ts", "config.js", "config.mjs")
+# The plugin's ``redactValues`` ignores anything shorter.
+_MIN_REDACT_LENGTH: Final[int] = 6
+# Characters a forwarded header value cannot carry: the plugin splits
+# ``otlpHeaders`` on ``,`` and the value is substituted into a JSON config.
+_UNFORWARDABLE_HEADER_CHARS: Final[frozenset[str]] = frozenset(',"\\\r\n')
 
 # mergeCraft's four levels onto the plugin's three. ``redacted`` maps to the
 # plugin's ``full``, whose bodies pass through its own secret redaction.
@@ -102,13 +113,16 @@ def _sink_otlp_targets(sink: Any) -> list[Any]:
 
 
 def _parse_header_env(raw: str | None) -> dict[str, str]:
-    """Parse an ``OTEL_EXPORTER_OTLP_*HEADERS`` value (``k=v,k=v``)."""
-    headers: dict[str, str] = {}
-    for pair in (raw or "").split(","):
-        key, sep, value = pair.partition("=")
-        if sep and key.strip():
-            headers[key.strip()] = value.strip()
-    return headers
+    """Parse an ``OTEL_EXPORTER_OTLP_*HEADERS`` value as the Python exporter does.
+
+    The exporter URL-decodes names and values (``Bearer%20tok`` is sent as
+    ``Bearer tok``) and lowercases names; the plugin forwards what it is given
+    verbatim, so the decoding happens here or the plugin authenticates with a
+    different credential than mergeCraft's own spans.
+    """
+    from opentelemetry.util.re import parse_env_headers
+
+    return dict(parse_env_headers(raw or "", liberal=True))
 
 
 def _effective_headers(sink_headers: dict[str, str]) -> dict[str, str]:
@@ -141,16 +155,57 @@ def _conversation_id(trace_id: str) -> str | None:
     return review_conversation_id(otel_trace) if otel_trace else None
 
 
+def _export_target(value: Any) -> str | None:
+    """The file an ``exports`` value names under Bun's condition order."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for condition in _ENTRY_CONDITIONS:
+            if condition in value:
+                return _export_target(value[condition])
+    return None
+
+
+def _runtime_entry(root: Path) -> Path | None:
+    """The file OpenCode imports for the plugin package at ``root``, if it can be named.
+
+    Read from ``package.json`` (``exports["."]``, then ``module``, then ``main``),
+    the same fields the runtime resolves. ``None`` when there is no manifest or
+    the named file does not exist.
+    """
+    try:
+        manifest = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    exports = manifest.get("exports")
+    if isinstance(exports, dict) and "." in exports:
+        exports = exports["."]
+    target = _export_target(exports) or manifest.get("module") or manifest.get("main")
+    if not isinstance(target, str):
+        return None
+    entry = (root / target).resolve()
+    if not entry.is_file() or not entry.is_relative_to(root.resolve()):
+        return None
+    return entry
+
+
 def _supports_capture_content(package: str) -> bool:
-    """Whether the plugin at ``package`` honours ``captureContent``.
+    """Whether the plugin code OpenCode will load at ``package`` honours ``captureContent``.
 
     An older or unknown plugin ignores the option (and may not redact), so only a
-    copy that provably reads it is loaded, whatever this run's content level. Only a
-    directory can be checked; a bare package spec cannot, and reads as unsupported.
+    copy that provably reads it is loaded, whatever this run's content level. The
+    proof comes from the runtime entry ``package.json`` names and the config module
+    beside it, never from source the runtime does not import: a checkout pulled
+    but not rebuilt has new ``src/`` and a stale ``dist/`` that exports bodies.
+    Only a directory can be checked; a bare package spec cannot, and reads as
+    unsupported.
     """
-    root = Path(package).expanduser()
-    for rel in _CAPTURE_SOURCES:
-        path = root / rel
+    entry = _runtime_entry(Path(package).expanduser())
+    if entry is None:
+        return False
+    for path in (entry, *(entry.parent / name for name in _CONFIG_MODULES)):
         try:
             if _CAPTURE_OPTION in path.read_text(encoding="utf-8"):
                 return True
@@ -197,11 +252,32 @@ def opencode_otel_plugin_wiring(trust_tier: str | None) -> OtelPluginWiring | No
     if endpoint.endswith(_TRACES_SUFFIX):
         endpoint = endpoint[: -len(_TRACES_SUFFIX)]
     header_refs: list[str] = []
+    redact_refs: list[str] = []
     env: dict[str, str] = {}
     for index, (name, value) in enumerate(_effective_headers(target.headers).items()):
+        if _UNFORWARDABLE_HEADER_CHARS.intersection(name + value) or "=" in name:
+            # Forwarding it mangled would leave the plugin's exports failing auth
+            # while mergeCraft's own spans keep arriving.
+            logger.warning(
+                "opencode otel plugin: OTLP header {!r} cannot be forwarded intact; not enabling",
+                name,
+            )
+            return None
         env_name = f"{_HEADER_ENV_PREFIX}{index}"
         env[env_name] = value
         header_refs.append(f"{name}={{env:{env_name}}}")
+        # Every forwarded value is a literal for the plugin's redactor: under
+        # ``redacted`` the plugin exports bodies, and the renamed env var hides the
+        # credential from its secret-name scan (an opaque API key has no telltale
+        # prefix either). ``Scheme credential`` values register the bare credential
+        # too, since that is what gets echoed. Env refs keep both off disk.
+        if len(value) >= _MIN_REDACT_LENGTH:
+            redact_refs.append(f"{{env:{env_name}}}")
+        scheme, _, credential = value.partition(" ")
+        if scheme and len(credential.strip()) >= _MIN_REDACT_LENGTH:
+            credential_env = f"{env_name}{_CREDENTIAL_ENV_SUFFIX}"
+            env[credential_env] = credential.strip()
+            redact_refs.append(f"{{env:{credential_env}}}")
 
     capture = resolve_capture_policy(trust_tier)
     if not _supports_capture_content(package):
@@ -234,6 +310,8 @@ def opencode_otel_plugin_wiring(trust_tier: str | None) -> OtelPluginWiring | No
         options["spanAttributes"] = f"gen_ai.conversation.id={conversation}"
     if header_refs:
         options["otlpHeaders"] = ",".join(header_refs)
+    if redact_refs:
+        options["redactValues"] = redact_refs
     logger.info(
         "opencode otel plugin: exporting to {} (content={})",
         endpoint,

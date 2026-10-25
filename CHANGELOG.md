@@ -29,7 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   review's `mergecraft.agent.run` span. The plugin's prompt and tool bodies follow
   `tracing.content` and the untrusted-tier cap; its header values travel in env
   vars, never in the on-disk OpenCode config. Operator-only: repository config
-  cannot enable it.
+  cannot enable it. Only a plugin whose runtime entry (the file `package.json`
+  names, not unbuilt source) reads `captureContent` is loaded. Encoded OTLP env
+  headers are decoded as the Python exporter decodes them, so the plugin
+  authenticates with the same credential, and every forwarded credential is handed
+  to the plugin's redactor so one echoed into a prompt or tool body is masked.
 - Reviews now read the materialised diff first. Review and IncrementalReview
   render a shared hard instruction: `diffPath` (or `incrementalDiffPath`) is the
   authoritative review scope, `git diff` / `git grep` / `git log` must not be used

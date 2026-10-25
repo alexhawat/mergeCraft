@@ -31,11 +31,30 @@ TRACE_ID = "0af7651916cd43dd8448eb211c80319c"
 PLUGIN = ""
 
 
+_SUPPORTED = "captureContent?: ContentCapture"
+_UNSUPPORTED = "logsEnabled?: boolean"
+
+
 def _plugin_dir(root: Path, *, supports_capture: bool) -> str:
-    """A plugin checkout whose ``src/config.ts`` does or does not read ``captureContent``."""
+    """A source-entry plugin checkout (``exports: ./src/index.ts``), as the plugin ships."""
     (root / "src").mkdir(parents=True)
-    option = "captureContent?: ContentCapture" if supports_capture else "logsEnabled?: boolean"
+    option = _SUPPORTED if supports_capture else _UNSUPPORTED
     (root / "src" / "config.ts").write_text(f"export type OtelPluginOptions = {{ {option} }}\n")
+    (root / "src" / "index.ts").write_text("export { plugin } from './plugin'\n")
+    (root / "package.json").write_text(json.dumps({"exports": {".": "./src/index.ts"}}))
+    return str(root)
+
+
+def _built_plugin_dir(root: Path, *, built_supports_capture: bool) -> str:
+    """A checkout whose runtime entry is ``dist/``, with up-to-date ``src/`` beside it."""
+    _plugin_dir(root, supports_capture=True)
+    (root / "dist").mkdir()
+    option = _SUPPORTED if built_supports_capture else _UNSUPPORTED
+    (root / "dist" / "config.js").write_text(f"// {option}\n")
+    (root / "dist" / "index.js").write_text("export { plugin } from './plugin.js'\n")
+    (root / "package.json").write_text(
+        json.dumps({"exports": {".": {"import": "./dist/index.js", "types": "./dist/index.d.ts"}}})
+    )
     return str(root)
 
 
@@ -142,7 +161,69 @@ def test_sink_headers_win_over_the_env_fallback(monkeypatch: pytest.MonkeyPatch)
     wiring, _ = _wiring_under_span(_otel_sink({"authorization": "Bearer lf-token"}))
 
     assert wiring is not None
-    assert wiring.env == {"MERGECRAFT_OPENCODE_OTLP_HEADER_0": "Bearer lf-token"}
+    assert wiring.env["MERGECRAFT_OPENCODE_OTLP_HEADER_0"] == "Bearer lf-token"
+
+
+def test_env_headers_are_decoded_like_the_python_exporter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The plugin forwards headers verbatim, so a percent-escape must be decoded first.
+
+    Otherwise mergeCraft's spans authenticate and every plugin export fails.
+    """
+    monkeypatch.setenv(OTEL_PLUGIN_ENV, PLUGIN)
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+        "Authorization=Bearer%20synthetic-token%2Bwith%2Fchars%3D",
+    )
+
+    wiring, _ = _wiring_under_span(_otel_sink())
+
+    assert wiring is not None
+    assert wiring.entry["options"]["otlpHeaders"] == (
+        "authorization={env:MERGECRAFT_OPENCODE_OTLP_HEADER_0}"
+    )
+    assert wiring.env["MERGECRAFT_OPENCODE_OTLP_HEADER_0"] == "Bearer synthetic-token+with/chars="
+
+
+@pytest.mark.parametrize("header", ["X-Scope=a%2Cb", "X-Quote=a%22b", "X-Line=a%0Ab"])
+def test_a_header_that_cannot_be_forwarded_intact_disables_the_plugin(
+    monkeypatch: pytest.MonkeyPatch, header: str
+) -> None:
+    """``,`` splits the plugin's header list and ``"``/newline break the JSON config."""
+    monkeypatch.setenv(OTEL_PLUGIN_ENV, PLUGIN)
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS", header)
+
+    wiring, _ = _wiring_under_span(_otel_sink())
+
+    assert wiring is None
+
+
+def test_forwarded_credentials_are_registered_with_the_plugin_redactor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An opaque key forwarded under a renamed env var is invisible to the plugin's
+    secret-name scan, so each value — and a ``Scheme`` value's bare credential — goes
+    to ``redactValues``, by env reference so it never reaches the config on disk.
+    """
+    opaque = "0123456789abcdef0123456789abcdef"
+    monkeypatch.setenv(OTEL_PLUGIN_ENV, PLUGIN)
+
+    wiring, _ = _wiring_under_span(
+        _otel_sink({"dd-api-key": opaque, "authorization": "Bearer lf-token-value"})
+    )
+
+    assert wiring is not None
+    assert wiring.entry["options"]["redactValues"] == [
+        "{env:MERGECRAFT_OPENCODE_OTLP_HEADER_0}",
+        "{env:MERGECRAFT_OPENCODE_OTLP_HEADER_1}",
+        "{env:MERGECRAFT_OPENCODE_OTLP_HEADER_1_CREDENTIAL}",
+    ]
+    assert wiring.env["MERGECRAFT_OPENCODE_OTLP_HEADER_0"] == opaque
+    assert wiring.env["MERGECRAFT_OPENCODE_OTLP_HEADER_1_CREDENTIAL"] == "lf-token-value"
+    serialized = json.dumps(wiring.entry)
+    assert opaque not in serialized
+    assert "lf-token-value" not in serialized
 
 
 @pytest.mark.parametrize(
@@ -299,6 +380,54 @@ def test_plugin_without_capture_content_is_refused_at_every_level(
 
     assert untrusted is None
     assert trusted is None
+
+
+def test_updated_source_with_a_stale_build_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A checkout pulled but not rebuilt: ``src/`` reads ``captureContent``, the
+    ``dist/`` OpenCode imports does not and would export bodies. Fail closed."""
+    stale = _built_plugin_dir(tmp_path / "stale", built_supports_capture=False)
+    monkeypatch.setenv(OTEL_PLUGIN_ENV, stale)
+
+    wiring, _ = _wiring_under_span(_otel_sink(), trust_tier="untrusted")
+
+    assert wiring is None
+
+
+def test_a_rebuilt_dist_entry_is_accepted(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    built = _built_plugin_dir(tmp_path / "built", built_supports_capture=True)
+    monkeypatch.setenv(OTEL_PLUGIN_ENV, built)
+
+    wiring, _ = _wiring_under_span(_otel_sink(), trust_tier="untrusted")
+
+    assert wiring is not None
+    assert wiring.entry["options"]["captureContent"] == "metadata"
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        None,
+        {"exports": {".": "./src/missing.ts"}},
+        {"exports": {".": "../outside/index.ts"}},
+        {"name": "no-entry"},
+    ],
+)
+def test_a_plugin_without_a_resolvable_runtime_entry_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, manifest: dict[str, Any] | None
+) -> None:
+    """Supporting source proves nothing unless it is the code OpenCode imports."""
+    root = Path(_plugin_dir(tmp_path / "plugin-x", supports_capture=True))
+    if manifest is None:
+        (root / "package.json").unlink()
+    else:
+        (root / "package.json").write_text(json.dumps(manifest))
+    monkeypatch.setenv(OTEL_PLUGIN_ENV, str(root))
+
+    wiring, _ = _wiring_under_span(_otel_sink(), trust_tier="trusted")
+
+    assert wiring is None
 
 
 def test_a_package_spec_cannot_prove_support(monkeypatch: pytest.MonkeyPatch) -> None:
