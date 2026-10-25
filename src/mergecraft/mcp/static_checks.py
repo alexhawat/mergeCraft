@@ -310,7 +310,17 @@ def run_static_checks_tool(ctx: ToolContext):
             )
             return _report(ctx, outcomes, substitutions, reason=reason)
 
-        outcomes = run_checks(checks, root=root, tier=tier)
+        # Trusted gates run in place and may write build output into the checkout.
+        # Re-pin the read-only integrity baseline around them, as ``checkout_pr``
+        # does, after first checking the agent changed nothing before the call.
+        baseline = ctx.tool_state.review_tree_baseline
+        if baseline is not None:
+            baseline.before_boundary("run_static_checks")
+        try:
+            outcomes = run_checks(checks, root=root, tier=tier)
+        finally:
+            if baseline is not None:
+                baseline.after_boundary()
         outcomes, substitutions = await _apply_ci_evidence(ctx, outcomes)
         executed = [o for o in outcomes if o.ran]
         logger.info(

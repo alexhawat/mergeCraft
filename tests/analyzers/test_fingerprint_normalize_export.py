@@ -19,9 +19,30 @@ def test_normalize_agent_supplied_fingerprint_hashes_slug() -> None:
     assert len(normalized) >= 24
 
 
-def test_normalize_agent_supplied_fingerprint_rejects_unsafe() -> None:
+@pytest.mark.parametrize(
+    "slug",
+    [
+        "tests/agents/test_opencode_config_isolation.py:30:opencode-cli-not-pinned-or-run-in-ci",
+        "../escape",
+        "..",
+        "src\\win\\path.py:4:slug",
+    ],
+)
+def test_normalize_agent_supplied_fingerprint_hashes_path_shaped_slugs(slug: str) -> None:
+    """A slug carrying a path is hashed, not rejected: the digest cannot traverse.
+
+    Rejecting the first one crashed a local review with exit 30 after its verdict
+    was already recorded.
+    """
+    normalized = normalize_agent_supplied_fingerprint(slug)
+    assert all(ch in "0123456789abcdef" for ch in normalized)
+    assert normalized == normalize_agent_supplied_fingerprint(slug)
+
+
+@pytest.mark.parametrize("slug", ["", "   "])
+def test_normalize_agent_supplied_fingerprint_rejects_empty(slug: str) -> None:
     with pytest.raises(ValueError, match="unsafe"):
-        normalize_agent_supplied_fingerprint("../escape")
+        normalize_agent_supplied_fingerprint(slug)
 
 
 def test_agent_finding_identity_normalizes_slug() -> None:

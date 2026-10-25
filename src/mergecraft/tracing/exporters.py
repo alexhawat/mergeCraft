@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import contextlib
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
 
@@ -66,6 +66,7 @@ __all__ = [
     "last_otel_endpoint",
     "last_otel_headers",
     "resolve_token_ref",
+    "review_conversation_id",
 ]
 
 
@@ -574,6 +575,10 @@ class OTLPSink:
     ) -> None:
         self.endpoint = endpoint
         self.headers = dict(headers or {})
+        # Datadog LLM Observability flags any span without a GenAI operation and
+        # provider; other backends (Logfire's GenAI views) would list every pipeline
+        # phase as a tool call, so the defaults apply to the llmobs intake only.
+        self._llmobs = _targets_datadog_llmobs(self.headers)
         self.service_name = service_name
         self.token = token
         self._provider = provider
@@ -682,6 +687,13 @@ class OTLPSink:
             for key, value in (event.attrs or {}).items():
                 if key not in attrs:
                     attrs[key] = _otel_safe_attr_value(value)
+            # ``gen_ai.system`` is deprecated in semconv 1.37+; backends such as
+            # Datadog LLM Observability identify the instrumentation by
+            # ``gen_ai.provider.name``. Mirror it here so every emit site gets it.
+            if "gen_ai.system" in attrs and "gen_ai.provider.name" not in attrs:
+                attrs["gen_ai.provider.name"] = attrs["gen_ai.system"]
+            if self._llmobs:
+                _stamp_llmobs_defaults(attrs, kind=event.kind, is_root=not event.parent_span_id)
             # If attrs is the truncation marker, forward the marker as an
             # attribute so consumers see it (D8).
             if event.attrs.get("truncated") is True:
@@ -703,6 +715,11 @@ class OTLPSink:
             if event.trace_id:
                 attrs["mergecraft.trace_id"] = event.trace_id
                 otel_trace_id = parse_mergecraft_otel_trace_id(event.trace_id)
+                if otel_trace_id and "gen_ai.conversation.id" not in attrs:
+                    # One review run is one trace; ``gen_ai.conversation.id`` makes it one
+                    # session in Datadog LLM Observability, and gives every span a
+                    # ``gen_ai.*`` attribute so pipeline spans are not dropped there.
+                    attrs["gen_ai.conversation.id"] = review_conversation_id(otel_trace_id)
             if event.span_id:
                 otel_span_id = parse_mergecraft_otel_span_id(event.span_id)
             parent_context: Any | None = None
@@ -718,6 +735,16 @@ class OTLPSink:
                 override_span_context(span, otel_trace_id, otel_span_id)
             elif otel_trace_id is not None:
                 self._override_span_trace_id(span, otel_trace_id)
+            if event.status == "error":
+                # Without the OTel status a failed run exports as ``unset``: backends
+                # (Datadog LLM Observability, Logfire) count it as a success and only
+                # the ``error`` attribute says otherwise.
+                from opentelemetry.trace import Status, StatusCode
+
+                message = attrs.get("error")
+                span.set_status(
+                    Status(StatusCode.ERROR, message if isinstance(message, str) else None)
+                )
             span.end(end_time=event.ts_end_ns)
         except Exception as exc:
             # Convention 6 — never fail the caller's review on a remote sink.
@@ -873,6 +900,74 @@ def _otlp_sink_identity(sink: OTLPSink) -> tuple[str, tuple[tuple[str, str], ...
     """Return the dedupe key for an :class:`OTLPSink` (endpoint + headers, D11)."""
     normalized_headers = tuple(sorted((str(k).lower(), str(v)) for k, v in sink.headers.items()))
     return sink.endpoint, normalized_headers
+
+
+_LLMOBS_SOURCE_HEADER: Final[str] = "dd-otlp-source"
+GENAI_PROVIDER_NAME: Final[str] = "mergecraft"
+
+
+def _targets_datadog_llmobs(headers: dict[str, str]) -> bool:
+    """Whether this sink exports to Datadog's LLM Observability OTLP intake.
+
+    The ``dd-otlp-source: llmobs`` header routes spans there. An ``otel`` sink
+    with no configured headers sends the standard OTLP header env vars instead.
+    """
+    sent = dict(headers)
+    if not sent:
+        raw = os.environ.get("OTEL_EXPORTER_OTLP_TRACES_HEADERS") or os.environ.get(
+            "OTEL_EXPORTER_OTLP_HEADERS", ""
+        )
+        for pair in raw.split(","):
+            key, sep, value = pair.partition("=")
+            if sep:
+                sent[key.strip()] = value.strip()
+    return any(
+        key.lower() == _LLMOBS_SOURCE_HEADER and value.strip().lower() == "llmobs"
+        for key, value in sent.items()
+    )
+
+
+def _stamp_llmobs_defaults(attrs: dict[str, Any], *, kind: str, is_root: bool) -> None:
+    """Map a span onto what Datadog LLM Observability reads.
+
+    The run root is the mergeCraft reviewer agent (``invoke_agent``); every other
+    span without an operation is a step mergeCraft executes (``execute_tool``,
+    named after the span), and spans without a provider get ``mergecraft``. Spans
+    that already carry these attributes keep them. Tool payloads move to the
+    GenAI tool-call names, and the per-process ``session_id`` is renamed.
+    """
+    if "gen_ai.operation.name" not in attrs:
+        if is_root:
+            attrs["gen_ai.operation.name"] = "invoke_agent"
+            attrs.setdefault("gen_ai.agent.name", GENAI_PROVIDER_NAME)
+        else:
+            attrs["gen_ai.operation.name"] = "execute_tool"
+            attrs.setdefault("gen_ai.tool.name", kind)
+    attrs.setdefault("gen_ai.provider.name", GENAI_PROVIDER_NAME)
+    # Datadog shows a tool span's input and output only from the GenAI tool-call names,
+    # and turns every other attribute into a tag, so the payloads move rather than copy
+    # (``tool.arguments`` otherwise lands as mangled tags such as ``command__``).
+    if "tool.arguments" in attrs:
+        attrs.setdefault("gen_ai.tool.call.arguments", attrs.pop("tool.arguments"))
+    if "gen_ai.tool.output" in attrs:
+        attrs.setdefault("gen_ai.tool.call.result", attrs.pop("gen_ai.tool.output"))
+        attrs.pop("tool.output", None)
+    # Datadog keys its session on ``gen_ai.conversation.id``; mergeCraft's per-process
+    # ``session_id`` would otherwise become a second, conflicting ``session_id`` tag.
+    if "session_id" in attrs:
+        attrs["mergecraft.session_id"] = attrs.pop("session_id")
+    # Datadog splits an array attribute into stray tags (``verdict__``, ``summary_``).
+    # ``tool.input_keys`` repeats the argument names the input already shows; other
+    # arrays outside ``gen_ai.*`` are joined into one tag value.
+    attrs.pop("tool.input_keys", None)
+    for key, value in list(attrs.items()):
+        if isinstance(value, (list, tuple)) and not key.startswith("gen_ai."):
+            attrs[key] = "/".join(str(item) for item in value)
+
+
+def review_conversation_id(otel_trace_id: int) -> str:
+    """The ``gen_ai.conversation.id`` for a review run: its OTel trace id as 32 hex."""
+    return f"{otel_trace_id:032x}"
 
 
 def dedupe_otlp_sinks(children: list[Any]) -> list[Any]:

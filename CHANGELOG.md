@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- OTLP traces read properly in Datadog LLM Observability. Every exported span
+  carries `gen_ai.conversation.id` (the review's trace id), so each review is one
+  session and pipeline spans (analyzers, phases, publish) are no longer dropped;
+  OpenCode plugin spans join the same session. When the sink sends
+  `dd-otlp-source: llmobs`, pipeline spans without a GenAI operation get
+  `invoke_agent` (run root) or `execute_tool` and `gen_ai.provider.name=mergecraft`,
+  which Datadog requires on every span; tool payloads move to
+  `gen_ai.tool.call.arguments` / `gen_ai.tool.call.result` so tool spans show their
+  input and output; and the per-process `session_id` is renamed
+  `mergecraft.session_id`. Other backends do not get these changes. Datadog prices
+  LLM spans only from its own model catalog, so a model it does not list (such as
+  `deepseek-v4.1-flash`) shows no cost there.
+- OpenCode 2.x runs can trace the inside of the session: set
+  `MERGECRAFT_OPENCODE_OTEL_PLUGIN` to an
+  [opencode-plugin-otel-v2](https://github.com/alexhawat/opencode-plugin-otel-v2)
+  checkout and, when tracing exports to `otel` or `logfire`, each run adds one span
+  per LLM step (tokens, cost, finish reason) and per tool call, nested under the
+  review's `mergecraft.agent.run` span. The plugin's prompt and tool bodies follow
+  `tracing.content` and the untrusted-tier cap; its header values travel in env
+  vars, never in the on-disk OpenCode config. Operator-only: repository config
+  cannot enable it. Only a plugin whose runtime entry (the file `package.json`
+  names, not unbuilt source) reads `captureContent` is loaded. Encoded OTLP env
+  headers are decoded as the Python exporter decodes them, so the plugin
+  authenticates with the same credential, and every forwarded credential is handed
+  to the plugin's redactor so one echoed into a prompt or tool body is masked.
 - Reviews now read the materialised diff first. Review and IncrementalReview
   render a shared hard instruction: `diffPath` (or `incrementalDiffPath`) is the
   authoritative review scope, `git diff` / `git grep` / `git log` must not be used
@@ -137,6 +162,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A review whose verdict carries a finding with a model-made fingerprint
+  (`ci-static-llms-full-stale`) now prints. The verdict back-fill stored the slug
+  as-is; the CLI then failed with "fingerprint must be lowercase hex" before
+  rendering anything. Back-filled fingerprints are now normalized to hex, as on
+  every other path into the run. A slug that carries a path
+  (`tests/x.py:30:pin-the-cli`) is hashed too, instead of failing the run with
+  "unsafe fingerprint value" (exit 30) after its verdict was recorded.
+- OpenCode reviews can read a tool result that was too large to return inline.
+  OpenCode saves the full text under the run's data directory and tells the model
+  to read it there, but the agent was denied that whole directory to keep the
+  auth store out of reach, so every such read failed. The `tool-output` folder is
+  now readable; the auth store beside it stays denied.
+- A failed span exports with OTel status `ERROR`. Spans mergeCraft marked as failed
+  went out as `unset`, so Datadog LLM Observability and Logfire counted a crashed
+  run as a success and only its `error` attribute said otherwise.
+- A trusted review whose repo gates write build output (`dist/`, regenerated docs)
+  no longer fails its integrity check. `run_static_checks` re-pins the read-only
+  baseline around in-place gates, as `checkout_pr` does, after first checking that
+  nothing changed before the call — so an agent's own writes still fail the review.
+- Model names, review ids, session ids and tool-call ids in trace attributes are no
+  longer masked as `<redacted>`. These identifier attributes still pass the explicit
+  secret patterns (`sk-…`, `ghp_…`, …) but skip the entropy heuristic, which read
+  `deepseek-v4.1-flash` and 32-hex ids as secrets.
+- OpenCode reviews can read the review diff with the `read` tool. The diff sits in
+  the run's temp dir, outside the checkout, so `read` refused it and agents fell
+  back to workarounds. The temp dir is now readable, except its isolated auth store,
+  config dir and scratch HOME, but only when this run created it with `mkdtemp`: an
+  operator-chosen or shared directory passed as the run's temp dir is not opened.
+- OpenCode reviews no longer load the reviewed repository's own OpenCode config
+  (`opencode.json`, `.opencode/`). A repository could otherwise add MCP servers or
+  plugins — code that runs inside the reviewer — including from a fork PR.
+- A review whose static checks run repo linters in the checkout no longer fails its
+  integrity check: `.ruff_cache`, `.mypy_cache` and `.pytest_cache` are skipped like
+  `__pycache__`.
+- OpenCode reviews no longer load the operator's global OpenCode config. Each run
+  gets an empty `OPENCODE_CONFIG_DIR`, so global MCP servers, plugins and agents
+  stay out of the review — and a global MCP server named `mergecraft` no longer
+  shadows the run's own server, which had left the agent without
+  `submit_review_verdict` and every local review ending in "no terminal review
+  verdict".
+- An offline review (`mergecraft review`) that stops without a verdict is no
+  longer told to commit and push a dirty working tree. The dirty-tree check now
+  skips offline reviews even when no mode was selected, so the retry turn asks
+  only for the missing verdict.
+- OTLP spans now satisfy Datadog LLM Observability's GenAI checks.
+  `mergecraft.agent.run` and `agent.attempt` carry
+  `gen_ai.operation.name=invoke_agent`, the agent span splits its model slug into
+  `gen_ai.provider.name` / `gen_ai.request.model`, OpenCode's `llm.call` carries
+  `gen_ai.operation.name=chat`, and every exported span with the deprecated
+  `gen_ai.system` also gets `gen_ai.provider.name`.
+- A read-only review of a checkout with an in-tree virtualenv no longer fails its
+  integrity check when Python writes bytecode mid-review: the checkout hash now
+  skips `__pycache__` directories at any depth, as it already did `node_modules`.
+  The rest of a virtualenv stays hashed.
 - Reviews on PRs with many CI checks no longer stall and time out after listing
   check runs. `list_check_runs` now returns each run's id, name, status,
   conclusion, output title and `check_suite_id`, instead of GitHub's full
