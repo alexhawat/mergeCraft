@@ -196,6 +196,104 @@ async def test_each_run_carries_the_suite_id_at_the_top_level(tmp_path: Path) ->
     assert run["check_suite"]["id"] == SUITE_ID
 
 
+_SUMMARY_KEYS = {"id", "name", "status", "conclusion", "title", "check_suite_id", "check_suite"}
+_LONG_OUTPUT_TEXT = "FAILED tests/test_widget.py::test_spin - AssertionError\n" * 2000
+
+
+class _RawRunGitHub(_RecordingGitHub):
+    """Returns one check run per call, shaped the way the REST API sends it."""
+
+    def __init__(self, run: dict[str, Any]) -> None:
+        super().__init__()
+        self._run = run
+
+    async def list_check_runs_for_ref(
+        self,
+        owner: str,
+        repo: str,
+        ref: str,
+        **kwargs: Any,
+    ) -> ListedItems:
+        self.run_calls.append((owner, repo, ref))
+        return ListedItems(items=[self._run], incomplete=False, total_count=1)
+
+
+def _raw_run(**overrides: Any) -> dict[str, Any]:
+    run: dict[str, Any] = {
+        "id": RUN_ID,
+        "name": RUN_NAME,
+        "node_id": "CR_kwDOA",
+        "head_sha": REF_SHA,
+        "external_id": "ext-1",
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": f"https://github.com/acme/demo/runs/{RUN_ID}",
+        "details_url": f"https://github.com/acme/demo/actions/runs/1/job/{RUN_ID}",
+        "url": f"https://api.github.com/repos/acme/demo/check-runs/{RUN_ID}",
+        "started_at": "2026-10-20T10:00:00Z",
+        "completed_at": "2026-10-20T10:04:00Z",
+        "output": {
+            "title": "3 tests failed",
+            "summary": "pytest reported 3 failures in tests/test_widget.py",
+            "text": _LONG_OUTPUT_TEXT,
+            "annotations_count": 3,
+            "annotations_url": "https://api.github.com/repos/acme/demo/check-runs/8484/annotations",
+        },
+        "check_suite": {"id": SUITE_ID, "node_id": "CS_kwDOA", "head_branch": "feature"},
+        "app": {"id": 15368, "slug": "github-actions", "owner": {"login": "github"}},
+        "pull_requests": [{"id": 1, "number": 7, "head": {"ref": "feature", "sha": REF_SHA}}],
+    }
+    run.update(overrides)
+    return run
+
+
+@pytest.mark.asyncio
+async def test_list_check_runs_returns_only_the_fields_agents_navigate_by(
+    tmp_path: Path,
+) -> None:
+    """A raw run's output text, app, PR links, URLs and timestamps never reach the agent.
+
+    One unprojected listing on a ~35-check PR returned 184 KB to the reviewer and
+    pushed every later turn to 90-120 s until the self-review timed out.
+    """
+    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+    ctx = _ctx(tmp_path, github=_RawRunGitHub(_raw_run()))
+
+    tool = check_runs.list_check_runs_tool(ctx)
+    text = (await tool.execute({"ref": REF_SHA})).content[0]["text"]
+    payload = json.loads(text)
+
+    run = payload["check_runs"][0]
+    assert set(run) == _SUMMARY_KEYS
+    assert run == {
+        "id": RUN_ID,
+        "name": RUN_NAME,
+        "status": "completed",
+        "conclusion": "failure",
+        "title": "3 tests failed",
+        "check_suite_id": SUITE_ID,
+        "check_suite": {"id": SUITE_ID},
+    }
+    assert "AssertionError" not in text
+    assert len(text) < 1_000
+
+
+@pytest.mark.asyncio
+async def test_list_check_runs_title_is_none_when_output_is_missing(tmp_path: Path) -> None:
+    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+    raw = _raw_run()
+    del raw["output"]
+    ctx = _ctx(tmp_path, github=_RawRunGitHub(raw))
+
+    tool = check_runs.list_check_runs_tool(ctx)
+    payload = json.loads((await tool.execute({"ref": REF_SHA})).content[0]["text"])
+
+    run = payload["check_runs"][0]
+    assert set(run) == _SUMMARY_KEYS
+    assert run["title"] is None
+    assert run["check_suite_id"] == SUITE_ID
+
+
 @pytest.mark.asyncio
 async def test_list_check_runs_incomplete_omits_partial_catalog(tmp_path: Path) -> None:
     """A truncated check-run walk must not look like a complete catalog."""
