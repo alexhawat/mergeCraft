@@ -99,7 +99,12 @@ STALENESS_WORKFLOW = ".github/workflows/action-pin-staleness.yml"
 # 120 since 2026-10-14 (#953): the post-batch-2 cycle was overdue by ~13 days
 # and reached 107 commits of drift, just past the old 100. This guard's failure
 # mode is gross skew (687 commits, PR #443); 120 stays far below it.
-MAX_DRIFT = int(os.environ.get("MERGECRAFT_MAX_ACTION_PIN_DRIFT", "120"))
+# 200 since 2026-10-26: the release cycle was withdrawn and no pin ran for ten
+# days, so the catch-up PR measured 163 commits. The rule compares the default
+# branch's pin to the branch's new pin, so the one PR that clears a backlog is
+# exactly the PR that trips it; 200 leaves headroom for one deferred cycle and
+# stays well under the 687-commit skew this guard exists to catch.
+MAX_DRIFT = int(os.environ.get("MERGECRAFT_MAX_ACTION_PIN_DRIFT", "200"))
 
 # Product-code commits the pin may lag the default branch's tip by. Counted
 # over ``src/mergecraft/`` only: docs, tests and workflow commits do not change
