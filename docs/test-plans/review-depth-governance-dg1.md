@@ -67,7 +67,6 @@ Wired through existing `AnalyzersSettings.base_comparison` / `baseComparison`.
 |--------|----------|
 | `FileKind` | `SOURCE`, `GENERATED`, `MINIFIED`, `VENDORED` |
 | `classify_path(path)` | Label path kind (D4) |
-| `review_includes_path(path, *, change)` | Generated output stays in scope when generator config changed |
 
 ### `src/mergecraft/findings/precision_corpus.py` (new)
 
