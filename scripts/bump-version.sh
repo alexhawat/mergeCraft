@@ -58,9 +58,9 @@ if (
 
 lock_path = Path("uv.lock")
 lock_text = lock_path.read_text(encoding="utf-8")
-lock_pattern = re.compile(r'(\[\[package\]\]\nname = "merge-craft"\nversion = )"([^"]*)"')
+lock_pattern = re.compile(r'(\[\[package\]\]\nname = "mergecraft-action"\nversion = )"([^"]*)"')
 if len(lock_pattern.findall(lock_text)) != 1:
-    raise SystemExit("uv.lock must carry exactly one merge-craft package block")
+    raise SystemExit("uv.lock must carry exactly one mergecraft-action package block")
 
 # --- write, with the manifest's own serialization --------------------------
 pyproject_path.write_text(

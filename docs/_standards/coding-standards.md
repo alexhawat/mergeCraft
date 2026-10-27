@@ -36,7 +36,7 @@ Standards and conventions for all code written in mergeCraft. Follow these consi
 - **Package manager:** uv (not pip directly)
 - **Build system:** hatchling
 - **Source layout:** `src/mergecraft/` (src layout, not flat)
-- **Distribution:** `merge-craft` on PyPI; CLI binary `mergecraft`; image `ghcr.io/alexhawat/mergecraft`
+- **Distribution:** `mergecraft-action` on PyPI; CLI binary `mergecraft`; image `ghcr.io/alexhawat/mergecraft`
 
 **Examples (shell).** Day-to-day commands go through the root `Makefile` (see [Makefiles & Command Surface](#makefiles--command-surface)). Raw `uv` is shown here for reference — in practice you call `make <target>`:
 
@@ -126,7 +126,7 @@ ignore = [
 | GitHub repo | `mergeCraft` |
 | Python package / import | `mergecraft` |
 | CLI binary | `mergecraft` (not `mc` — Midnight Commander collision) |
-| PyPI distribution | `merge-craft` |
+| PyPI distribution | `mergecraft-action` |
 | Container image | `ghcr.io/alexhawat/mergecraft` |
 | MCP server | `mergecraft` → `mcp__mergecraft__*` / `mergecraft_*` |
 | Config directory | `.mergecraft/` |

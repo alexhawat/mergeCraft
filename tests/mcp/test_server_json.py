@@ -43,7 +43,7 @@ def test_server_json_package_is_pypi_merge_craft_stdio_public() -> None:
     assert packages, data
     pkg = packages[0]
     assert pkg.get("registryType") == "pypi"
-    assert pkg.get("identifier") == "merge-craft"
+    assert pkg.get("identifier") == "mergecraft-action"
     transport = pkg.get("transport") or {}
     assert transport.get("type") == "stdio"
     package_args = pkg.get("packageArguments") or []
@@ -91,7 +91,7 @@ def test_generator_check_detects_drift() -> None:
     assert hasattr(gen, "main") or hasattr(gen, "run_check"), gen
     assert _SERVER_JSON.is_file(), "server.json must exist before drift check"
     original = _SERVER_JSON.read_text(encoding="utf-8")
-    mutated = original.replace("merge-craft", "merge-craft-drift", 1)
+    mutated = original.replace("mergecraft-action", "mergecraft-action-drift", 1)
     _SERVER_JSON.write_text(mutated, encoding="utf-8")
     try:
         completed = subprocess.run(

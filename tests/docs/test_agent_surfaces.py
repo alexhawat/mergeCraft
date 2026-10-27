@@ -35,7 +35,9 @@ LLMS_TXT = REPO_ROOT / "llms.txt"
 README = REPO_ROOT / "README.md"
 GITIGNORE = REPO_ROOT / ".gitignore"
 
-_UNPINNED_INSTALL = 'uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"'
+_UNPINNED_INSTALL = (
+    'uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"'
+)
 _VERSIONED_GIT_REF = re.compile(
     r"git\+https://github\.com/alexhawat/mergeCraft@([^\s\"')]+)",
     re.IGNORECASE,

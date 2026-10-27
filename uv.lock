@@ -1752,7 +1752,7 @@ wheels = [
 ]
 
 [[package]]
-name = "merge-craft"
+name = "mergecraft-action"
 version = "0.1.0a1"
 source = { editable = "." }
 dependencies = [

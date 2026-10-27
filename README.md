@@ -47,7 +47,7 @@ Do all of this yourself, without asking me, except where step 4 says STOP:
    Do NOT install Python. uv downloads a compatible interpreter on its own.
 
 2. Install the CLI:
-     uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"
+     uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
      mergecraft --version
 
 3. Scaffold config + workflow (non-interactive, writes no secrets):
@@ -381,7 +381,7 @@ For the GitHub Action path, see [How it works in GitHub Action](#how-it-works-in
 1. **Install the CLI and scaffold the repo:**
 
 ```bash
-uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"
+uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
 

@@ -844,7 +844,7 @@ def auth_logfire(
     config tracing`` shows the project and a redacted token.
 
     The ``\[tracing]`` extra must be installed for spans to actually leave
-    the runner — install with ``uv pip install 'merge-craft' --extra tracing``
+    the runner — install with ``uv pip install 'mergecraft-action' --extra tracing``
     (or ``uv sync --extra tracing``) when the warning fires.
 
     NOTE: the ``\[tracing]`` above is literal text, not a Rich markup tag.
@@ -901,7 +901,7 @@ def auth_logfire(
         )
         console.print(
             "Spans will not leave the runner until you run "
-            "`uv pip install 'merge-craft' --extra tracing`.",
+            "`uv pip install 'mergecraft-action' --extra tracing`.",
             markup=False,
         )
         console.print(

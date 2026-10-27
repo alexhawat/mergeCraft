@@ -26,7 +26,7 @@ This module pins the fix:
    (test 10).
 5. A missing or empty new version exits non-zero and leaves the versioned
    files untouched (test 7); a ``server.json`` that lost a version field
-   (test 8) or a ``uv.lock`` without its ``merge-craft`` block (test 10) fails
+   (test 8) or a ``uv.lock`` without its ``mergecraft-action`` block (test 10) fails
    loudly instead of being silently repaired.
 6. It runs in the environment the Release workflow's ``prepare`` job has: no
    ``VIRTUAL_ENV`` and no project environment on ``PATH`` (test 3), which the
@@ -195,14 +195,14 @@ def _snapshot(root: Path) -> dict[str, bytes]:
 
 
 def _uv_lock_version(root: Path) -> str:
-    """Return the ``merge-craft`` package version recorded in a copied ``uv.lock``.
+    """Return the ``mergecraft-action`` package version recorded in a copied ``uv.lock``.
 
     ``uv lock --check`` fails when pyproject.toml and uv.lock disagree, so this
     line is the lockfile half of the bump contract.
     """
     text = (root / _UV_LOCK).read_text(encoding="utf-8")
-    match = re.search(r'\[\[package\]\]\nname = "merge-craft"\nversion = "([^"]*)"', text)
-    assert match is not None, f"{_UV_LOCK} must record the merge-craft package block"
+    match = re.search(r'\[\[package\]\]\nname = "mergecraft-action"\nversion = "([^"]*)"', text)
+    assert match is not None, f"{_UV_LOCK} must record the mergecraft-action package block"
     return match.group(1)
 
 
@@ -412,7 +412,7 @@ def test_prepare_bump_fails_loudly_when_server_json_drops_a_version_field(
 
 
 def test_prepare_bump_fails_loudly_when_uv_lock_lacks_the_package_block(tmp_path: Path) -> None:
-    """Error: a lockfile without the merge-craft block stops the run, never guesses.
+    """Error: a lockfile without the mergecraft-action block stops the run, never guesses.
 
     ``uv lock --check`` compares the recorded root package's version against
     pyproject.toml. A lock that lost that block cannot be repaired from a
@@ -423,7 +423,7 @@ def test_prepare_bump_fails_loudly_when_uv_lock_lacks_the_package_block(tmp_path
     lock = root / _UV_LOCK
     lock.write_text(
         lock.read_text(encoding="utf-8").replace(
-            'name = "merge-craft"', 'name = "merge-craft-renamed"'
+            'name = "mergecraft-action"', 'name = "mergecraft-action-renamed"'
         ),
         encoding="utf-8",
     )
@@ -431,10 +431,10 @@ def test_prepare_bump_fails_loudly_when_uv_lock_lacks_the_package_block(tmp_path
 
     completed = _run_bump(root, _OLD_VERSION, _NEW_VERSION)
     assert completed.returncode != 0, (
-        "a uv.lock without the merge-craft package block must fail the prepare step: "
+        "a uv.lock without the mergecraft-action package block must fail the prepare step: "
         f"{completed.stdout}{completed.stderr}"
     )
-    assert "merge-craft" in completed.stderr
+    assert "mergecraft-action" in completed.stderr
     for rel, original in before.items():
         assert (root / rel).read_bytes() == original, f"{rel} changed despite the failed lock"
 

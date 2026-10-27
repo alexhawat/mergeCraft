@@ -144,9 +144,9 @@ COPY integrations/opencode ./integrations/opencode
 RUN uv sync --frozen --no-dev --extra tracing \
     && useradd -m -u 10001 -s /bin/bash mergecraft \
     && python -m compileall -q /opt/mergecraft \
-    && rm -f /opt/mergecraft/.venv/lib/python3.14/site-packages/merge_craft-*.dist-info/uv_cache.json \
+    && rm -f /opt/mergecraft/.venv/lib/python3.14/site-packages/mergecraft_action-*.dist-info/uv_cache.json \
     && sed -i '/uv_cache\.json/d' \
-        /opt/mergecraft/.venv/lib/python3.14/site-packages/merge_craft-*.dist-info/RECORD \
+        /opt/mergecraft/.venv/lib/python3.14/site-packages/mergecraft_action-*.dist-info/RECORD \
     && rm -rf /root/.cache/uv /tmp/* \
     && { command -v setpriv >/dev/null && getent passwd mergecraft >/dev/null || { echo "FATAL: privilege drop unavailable (setpriv or mergecraft user missing)"; exit 1; }; }
 

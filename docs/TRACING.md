@@ -226,7 +226,7 @@ does hit it, raise the `Final` constant; it is a single line to change.
 2. **Tracing never fails the run** (convention 6). A sink that raises on
    `write` is caught and logged at `logger.warning`; the run continues.
 3. **Optional extra.** `logfire` and `opentelemetry-*` are not base
-   dependencies. `pip install merge-craft[tracing]` pulls them in;
+   dependencies. `pip install mergecraft-action[tracing]` pulls them in;
    `make ci-resume` passes with them uninstalled (convention 5).
 4. **No network in `make ci-resume`** (convention 8). Exporter tests
    target a fake transport.
