@@ -88,7 +88,9 @@ ENV IS_SANDBOX=1
 
 # Official python:3.14-slim-bookworm last rebuilt 2026-09-01 still ships
 # libpcre2-8-0 10.42-1. Debian DLA-4772-1 / bookworm-security has the
-# HIGH fixes (CVE-2026-86145, CVE-2026-89157, CVE-2026-89161).
+# HIGH fixes (CVE-2026-86145, CVE-2026-89157, CVE-2026-89161). It also ships
+# openssl/libssl3 3.0.20-1~deb12u2, which bookworm-security supersedes for
+# CVE-2026-84782; both are pinned so the image cannot drift back.
 RUN apt-get update -qq \
     && apt-get install -qq -y --no-install-recommends \
         ca-certificates \
@@ -98,7 +100,9 @@ RUN apt-get update -qq \
         iptables \
         jq \
         libpcre2-8-0=10.42-1+deb12u2 \
+        libssl3=3.0.22-1~deb12u2 \
         openssh-client \
+        openssl=3.0.22-1~deb12u2 \
         procps \
         sudo \
         unzip \
