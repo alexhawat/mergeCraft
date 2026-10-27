@@ -6949,7 +6949,7 @@
     "tests/mcp/test_server_json.py::test_server_json_exists_and_matches_schema": 0.00514549994841218,
     "tests/mcp/test_server_json.py::test_server_json_name_is_io_github_alexhawat_mergecraft": 0.0012941670138388872,
     "tests/mcp/test_server_json.py::test_server_json_package_arguments_not_under_transport_args": 0.0006978340679779649,
-    "tests/mcp/test_server_json.py::test_server_json_package_is_pypi_merge_craft_stdio_public": 0.001042333198711276,
+    "tests/mcp/test_server_json.py::test_server_json_package_is_pypi_and_stdio_public": 0.001042333198711276,
     "tests/mcp/test_server_transport.py::test_batch_containing_a_request_still_gets_responses": 0.009619625052437186,
     "tests/mcp/test_server_transport.py::test_initialize_returns_a_response": 0.016887250007130206,
     "tests/mcp/test_server_transport.py::test_initialized_notification_gets_202_with_no_body": 0.010661707958206534,

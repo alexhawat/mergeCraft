@@ -32,7 +32,7 @@ postReleaseCommand: bash scripts/post-release.sh
 
 targets:
   - name: pypi
-    includeNames: /^merge[_-]craft.*$/
+    includeNames: /^mergecraft[_-]action.*$/
   - name: github
     tagPrefix: v
   # Build-once promote: source is the immutable SHA tag from ci-cd.yml.
