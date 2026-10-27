@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _SCRIPT = REPO_ROOT / "scripts" / "post-release.sh"
-_PYPROJECT = '[project]\nname = "merge-craft"\nversion = "0.1.0"\n'
+_PYPROJECT = '[project]\nname = "mergecraft-action"\nversion = "0.1.0"\n'
 
 
 def _publish_gate_text() -> str:

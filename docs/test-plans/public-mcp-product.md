@@ -69,7 +69,7 @@ Additive `MCP_PUBLIC_ENDPOINT = "/mcp/public"` in `src/mergecraft/mcp/endpoints.
 | --- | --- | --- |
 | `server.json` exists + schema-valid | `tests/mcp/test_server_json.py::test_server_json_exists_and_matches_schema` | functional |
 | Registry name | `…::test_server_json_name_is_io_github_alexhawat_mergecraft` | unit |
-| PyPI `merge-craft` stdio public command | `…::test_server_json_package_is_pypi_merge_craft_stdio_public` | unit |
+| PyPI `mergecraft-action` stdio public command | `…::test_server_json_package_is_pypi_and_stdio_public` | unit |
 | No runtime tool advertisement | `…::test_server_json_does_not_advertise_runtime_tool_names` | unit |
 | `mcp-server-json-check` in `CI_STEPS` | `…::test_make_mcp_server_json_check_in_ci_steps` | policy |
 | Generator `--check` catches drift | `…::test_generator_check_detects_drift` | functional |

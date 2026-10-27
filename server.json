@@ -6,7 +6,7 @@
   "packages": [
     {
       "registryType": "pypi",
-      "identifier": "merge-craft",
+      "identifier": "mergecraft-action",
       "version": "0.1.0a1",
       "transport": {
         "type": "stdio"

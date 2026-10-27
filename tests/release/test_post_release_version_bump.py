@@ -13,7 +13,7 @@ This module pins:
    ``0.1.1.dev0`` (test 2). The previous ``-dev`` suffix is not canonical PEP
    440 and sorts *above* the final release it follows.
 3. ``pyproject.toml``, both ``server.json`` version fields and ``uv.lock``'s
-   ``merge-craft`` block all carry the dev version (test 3), so the required
+   ``mergecraft-action`` block all carry the dev version (test 3), so the required
    ``lockcheck`` and ``mcp-server-json-check`` contexts stay green.
 4. It reuses ``scripts/bump-version.sh`` rather than duplicating the rewrite
    (test 4), so one place knows which files carry the version.
@@ -126,8 +126,8 @@ def _server_json(root: Path) -> dict[str, Any]:
 
 def _uv_lock_version(root: Path) -> str:
     text = (root / _UV_LOCK).read_text(encoding="utf-8")
-    match = re.search(r'\[\[package\]\]\nname = "merge-craft"\nversion = "([^"]*)"', text)
-    assert match is not None, f"{_UV_LOCK} must record the merge-craft package block"
+    match = re.search(r'\[\[package\]\]\nname = "mergecraft-action"\nversion = "([^"]*)"', text)
+    assert match is not None, f"{_UV_LOCK} must record the mergecraft-action package block"
     return match.group(1)
 
 

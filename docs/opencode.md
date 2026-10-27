@@ -48,7 +48,7 @@ The plugin makes the default configurable with the `engine` plugin option, so
 ## Install
 
 ```bash
-uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"
+uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
 mergecraft init                      # if the repo is not set up yet
 mergecraft opencode install          # commands, agents, plugin, MCP block, harness
 mergecraft opencode doctor --strict  # verify
@@ -193,7 +193,7 @@ mergeCraft's behalf.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `/mergecraft/review-deep` says the CLI is missing | mergeCraft not installed | `uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"` |
+| `/mergecraft/review-deep` says the CLI is missing | mergeCraft not installed | `uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"` |
 | MCP tools absent | server not configured or not connected | `opencode mcp list`; add the `mcp.servers.mergecraft` block |
 | Broken MCP config | V1 shape (`mcp.mergecraft`, `enabled`) | use `mcp.servers.mergecraft` and `disabled` |
 | Reviewer reports no diff | nothing changed | check `git status`; pass a ref to `/mergecraft/review` |

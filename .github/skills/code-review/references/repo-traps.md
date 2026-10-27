@@ -28,7 +28,7 @@ script name to quote:
 
 | Trap | Rule | Enforced by |
 | --- | --- | --- |
-| S1 naming surfaces | `mergeCraft` (repo) · `mergecraft` (package/CLI) · `merge-craft` (PyPI) · `.mergecraft/` (config) are not interchangeable | `CONTRIBUTING.md` S1 naming |
+| S1 naming surfaces | `mergeCraft` (repo) · `mergecraft` (package/CLI) · `mergecraft-action` (PyPI) · `.mergecraft/` (config) are not interchangeable | `CONTRIBUTING.md` S1 naming |
 | Workflow expression literals in YAML prose | GitHub evaluates `$\{\{ … \}\}` lexically in `description:` and other prose — breaks action load for every consumer | `scripts/check_action_yml_hygiene.py` |
 | stdlib `logging` under `src/mergecraft/` | Loguru only | `scripts/check_loguru_only.py` (`make lint`) |
 | Analyzer catalog edits | manifest ↔ fixture ↔ doc ↔ severity gate move together | `make catalog-check` |

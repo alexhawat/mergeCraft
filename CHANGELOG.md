@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking — action required
+
+- **The PyPI distribution is named `mergecraft-action`.** `merge-craft` cannot be
+  registered: PyPI refuses a new project whose name differs from an existing one
+  only by separators, and an unrelated `mergecraft` project already exists.
+  **Fix:** install with `uv tool install mergecraft-action`, or the pinned git
+  form. The CLI binary, the import package, the MCP server name, the Action name
+  and the container image are all unchanged.
+
 ### Added
 
 - OTLP traces read properly in Datadog LLM Observability. Every exported span

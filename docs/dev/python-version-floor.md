@@ -29,7 +29,7 @@ Issue #343 proposes two paths:
    t-strings, …). W12 found none beyond bare except tuples.
 3. **Lower** `requires-python` to `>=3.11` and run CI on 3.11 + 3.14 (W14).
 4. **Do not** add PyOxidizer, standalone, or PEX bundling in this program.
-5. **Do not** claim PyPI is published until Craft actually ships `merge-craft`.
+5. **Do not** claim PyPI is published until Craft actually ships `mergecraft-action`.
 
 Files actively edited on the parallel `open-issues-sweep-2026-08-19e` branch
 may defer parenthesization until that work merges; note any skips in the AF

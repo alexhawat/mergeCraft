@@ -13,7 +13,7 @@ from typing import Any
 # telemetry and eval reproducibility pins, so a wrong version silently mixes
 # artefacts from different builds.
 try:
-    __version__ = _distribution_version("merge-craft")
+    __version__ = _distribution_version("mergecraft-action")
 except PackageNotFoundError:  # pragma: no cover — source tree with nothing installed
     __version__ = "0.0.0+unknown"
 

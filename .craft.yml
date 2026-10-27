@@ -25,14 +25,14 @@ artifactProvider:
         - artifact-python-dist
 
 requireNames:
-  - /^merge[_-]craft.*\.(whl|tar\.gz)$/
+  - /^mergecraft[_-]action.*\.(whl|tar\.gz)$/
 
 preReleaseCommand: bash scripts/bump-version.sh
 postReleaseCommand: bash scripts/post-release.sh
 
 targets:
   - name: pypi
-    includeNames: /^merge[_-]craft.*$/
+    includeNames: /^mergecraft[_-]action.*$/
   - name: github
     tagPrefix: v
   # Build-once promote: source is the immutable SHA tag from ci-cd.yml.

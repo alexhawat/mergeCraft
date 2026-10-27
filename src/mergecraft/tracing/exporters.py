@@ -387,7 +387,7 @@ def _setup_tracer_provider(
         logger.warning(
             "tracing otel exporter requires the [tracing] extra "
             "(opentelemetry-sdk, opentelemetry-exporter-otlp); "
-            "pip install 'merge-craft[tracing]'"
+            "pip install 'mergecraft-action[tracing]'"
         )
         return None
 
@@ -1034,7 +1034,7 @@ def build_remote_sink(entry: Any) -> Any:
     if logfire_module is None and sink_type == "logfire":
         logger.warning(
             "tracing logfire sink: the [tracing] extra is not installed; "
-            "pip install 'merge-craft[tracing]' to enable logfire export"
+            "pip install 'mergecraft-action[tracing]' to enable logfire export"
         )
         # Degrade to NullSink — the warning has been logged.
         from mergecraft.tracing.sinks import NullSink
@@ -1052,7 +1052,7 @@ def build_remote_sink(entry: Any) -> Any:
         if _try_import_opentelemetry() is None:
             logger.warning(
                 "tracing otel sink: the [tracing] extra is not installed; "
-                "pip install 'merge-craft[tracing]' to enable OTLP export"
+                "pip install 'mergecraft-action[tracing]' to enable OTLP export"
             )
             from mergecraft.tracing.sinks import NullSink
 

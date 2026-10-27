@@ -16,7 +16,7 @@ Use this when asked to add AI PR review to another repository.
 2. **Install the CLI** (PyPI is not published yet):
 
    ```bash
-   uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"
+   uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
    mergecraft --install-completion   # optional shell completion
    ```
 

@@ -30,7 +30,7 @@ a compatible interpreter; no local Python install is needed.
 Install from git (PyPI is not published yet):
 
 ```bash
-uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"
+uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
 mergecraft --install-completion   # bash/zsh/fish — see --show-completion
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```

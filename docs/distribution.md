@@ -25,9 +25,9 @@ Verify a published digest locally (see [CONTRIBUTING.md](../CONTRIBUTING.md#veri
 
 ## Operator actions
 
-### PyPI (`merge-craft`)
+### PyPI (`mergecraft-action`)
 
-PyPI distribution name is **`merge-craft`** (hyphen); import and CLI remain
+PyPI distribution name is **`mergecraft-action`** (hyphen); import and CLI remain
 `mergecraft`. Craft publishes via the `pypi` target in [`.craft.yml`](../.craft.yml).
 
 **Prerequisites**
@@ -51,7 +51,7 @@ then `craft publish 0.1.0` after CI is green.
 Post-publish smoke:
 
 ```bash
-pip install merge-craft==0.1.0
+pip install mergecraft-action==0.1.0
 mergecraft --help
 ```
 
@@ -87,7 +87,7 @@ to add there. The one binary still outstanding is the demo capture; see
 ## Python version and Docker
 
 **Python >=3.11** is the install floor for `uv tool install` / local CLI development
-(`pyproject.toml`). CI runs on **3.11** and **3.14**. PyPI (`merge-craft`) is **not**
+(`pyproject.toml`). CI runs on **3.11** and **3.14**. PyPI (`mergecraft-action`) is **not**
 published yet — install from git or a local checkout via `uv`. Operators who want a
 pinned runtime without managing Python versions should use the **Docker Action**
 (`alexhawat/mergeCraft@…`) — the image ships a compatible runtime; no local Python
@@ -114,7 +114,7 @@ Repo-root [`server.json`](../server.json) is **generated** by
 `make mcp-server-json-check` (schema validation against a vendored snapshot plus
 `--check` drift gate). The artifact advertises the **public** six-tool stdio
 profile (`mergecraft mcp serve --role public --transport stdio`) and PyPI
-package `merge-craft` — not the runtime reviewer/verifier harness bag.
+package `mergecraft-action` — not the runtime reviewer/verifier harness bag.
 
 **Live registry publish is operator-owned (G3):** after a tagged release, run
 `mcp-publisher` against the generated `server.json` under namespace

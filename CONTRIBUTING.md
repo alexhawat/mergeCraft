@@ -221,7 +221,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:
 | GitHub repo | `mergeCraft` (camelCase) |
 | Python package / import | `mergecraft` (lowercase) |
 | CLI binary | `mergecraft` (not `mc` — Midnight Commander collision) |
-| PyPI distribution | `merge-craft` (published via [Craft](https://github.com/getsentry/craft)) |
+| PyPI distribution | `mergecraft-action` (published via [Craft](https://github.com/getsentry/craft)) |
 | Container image | `ghcr.io/alexhawat/mergecraft` (lowercase, hardcoded) |
 | MCP server | `mergecraft` → `mcp__mergecraft__*` / `mergecraft_*` |
 | Config directory | `.mergecraft/` |

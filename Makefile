@@ -473,4 +473,4 @@ test-sandbox-privileged: ## Sandbox write/network block, disposable root Linux l
 
 .PHONY: test-wheel-corpus
 test-wheel-corpus: build ## Verify installed convergence corpus outside the checkout
-	UV="$(UV)" $(UV) run python scripts/check_wheel_corpus.py dist/merge_craft-*.whl
+	UV="$(UV)" $(UV) run python scripts/check_wheel_corpus.py dist/mergecraft_action-*.whl
