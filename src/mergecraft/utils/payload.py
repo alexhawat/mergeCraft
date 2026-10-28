@@ -17,7 +17,6 @@ from mergecraft.types import AuthorPermission, PushPermission, ShellPermission, 
 from mergecraft.utils.time_parse import (
     TIMEOUT_DISABLED,
     normalize_timeout_input,
-    parse_timeout,
     resolve_timeout_ms,
 )
 
@@ -749,7 +748,6 @@ __all__ = [
     "is_collaborator",
     "is_mergecraft",
     "normalize_timeout_input",
-    "parse_timeout",
     "read_github_event",
     "resolve_cwd",
     "resolve_native_event",
