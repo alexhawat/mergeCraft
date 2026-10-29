@@ -243,6 +243,62 @@ self-report. Two consequences follow:
   `mergecraft.agents.gates.decide_approval` and
   `tests/status_checks/test_decide_approval.py`.
 
+### Attestation: what proves the review ran (#1072, #1076)
+
+The structural verdict needs *attestation* — non-prose evidence that the
+review actually ran — before it may read `success`. Two forms count:
+
+- **Typed findings.** A non-empty attested findings list (change-scoped rows
+  plus run-health rows, which attest only and never block) has always
+  attested the run.
+- **Terminal verdict + read coverage.** A validated terminal `approve`
+  (`agent_terminal_verdict`, accepted by `validate_submission`) together with
+  an observed read of the diff (`trajectory.read_coverage`) attests a *clean*
+  review — one whose correct result is an empty findings list. Without this
+  form, a thorough zero-finding review read `neutral — no typed findings to
+  attest to the review` and the fallback guard reran the whole review on the
+  next provider (PR #1068: 398,912 input tokens to re-review a 161-line
+  lockfile diff). Both signals are orchestrator-recorded facts about the run,
+  not agent narrative, so accepting them does not weaken the
+  evidence-not-proof rule — and no synthetic findings are created, because
+  those would pollute the ledger, fingerprints, carry-over, and eval
+  baselines with rows that describe nothing.
+
+The constraints around the new attestation are unchanged: the one-way
+ratchet still binds `request_changes` downward and never up (#619);
+`tier == "untrusted"` never yields `success`; a failed run never
+yields `success`; `self_assessment` stays advisory-only and is never
+an attestation input; and the legacy list-only overload of
+`decide_approval` keeps its empty-list `neutral` behaviour because no
+attestation metadata is available there. Absent read evidence stays
+*unknown*, not zero: `read_coverage=False` never attests (#1056 — unknown
+is never green).
+
+The gate-action routing table gained the matching pair of named rules:
+
+- **`clean_pass` → `auto_merge`** — a blocker-free packet with a trusted
+  success verdict on any lane whose `auto_merge_lane` is not `forbidden`,
+  not just `low`. Previously a clean medium-lane packet (any dependency
+  bump) matched no named rule and fell into the catch-all labelled
+  `schema_failure` → `block`, a schema-failure claim on a structurally
+  complete packet. Two vetoes stay explicit: a `forbidden` lane (every
+  `high` lane — see `docs/blast-radius.md`) is never auto-merged, and a
+  missing blast-radius classification is an *unknown* lane, which is never
+  green (#1056). `clean_pass` is ordered after the finding-driven rules, so
+  `has_blockers` / `changed-unread-file` / `tool_loop` /
+  `high_risk_migration` still win when their signals coexist with a success
+  verdict.
+- **`needs_human_review` → `require_human_review`** — a structurally
+  complete packet the gate has no automated route for: a `neutral` verdict
+  from an untrusted tier or a failed run, a run with nothing attested, or an
+  attested clean packet on an auto-merge-forbidden lane. This is #1056's
+  missing-signal escalation expressed in the routing table: the packet is
+  complete, the signal is insufficient or the lane forbids automation, and a
+  human decides.
+- **`schema_failure` → `block`**, re-scoped: it now fires only when the
+  packet's evidence is structurally absent (no decision row, no findings, no
+  blast radius, no trajectory) — never on a parsed, validated packet.
+
 ### Run outcome taxonomy
 
 A run ends in exactly one of six named outcomes —

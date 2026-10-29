@@ -172,6 +172,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The approval gate accepts terminal attestation for clean reviews, and the
+  gate-action table routes complete packets honestly (#1072, #1076). A review
+  that runs cleanly, reads the diff, and submits terminal `approve` with zero
+  typed findings now decides `success` — the validated terminal verdict plus
+  observed `trajectory.read_coverage` attest the review ran, so the fallback
+  guard no longer reruns the whole review on the next provider (on PR #1068
+  that cost 398,912 input tokens for a 161-line lockfile diff). The one-way
+  `request_changes` ratchet, untrusted-tier inertness, failed-run `neutral`,
+  and advisory-only `self_assessment` are unchanged, no synthetic findings are
+  created, and the legacy list-only overload keeps its empty-list `neutral`
+  behaviour. On the routing side, a new `clean_pass` rule maps a blocker-free
+  packet with a trusted success verdict to `auto_merge` on any lane whose
+  `auto_merge_lane` is not `forbidden` — clean medium-lane packets (any
+  dependency bump) no longer fall into a catch-all labelled `schema_failure`
+  → `block`, while forbidden (`high`) lanes and unclassified packets keep a
+  human in the loop. The catch-all is re-scoped so `schema_failure` fires
+  only on structurally absent evidence, and a complete packet with no
+  automated route falls to the new `needs_human_review` →
+  `require_human_review` (unknown is never green, #1056).
+
 - Honest trajectory plumbing for the run record (#1073, #1074, #1075). A tool
   call a guard refuses (read-only allowlist, path confinement, config-flag or
   mode guard) now records `ok=False` with `failure_class="refused"` on the run
