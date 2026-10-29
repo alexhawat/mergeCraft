@@ -242,6 +242,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Run-bound checkpoint recovery no longer 404s on every `pull_request_target`
+  run (#1082). The Actions API resolves `{workflow_id}` by numeric workflow id
+  or workflow *file name* only, but `_list_mergecraft_workflow_runs` tried the
+  repo-relative path spelling (`.github/workflows/mergecraft.yml`) first and
+  let its 404 abort the listing before the working file-name spelling ran. The
+  file name is now tried first and a 404 on either spelling falls through to
+  the next; when every spelling 404s the warning names the real cause once —
+  the workflow must exist on the repository's default branch and the run token
+  needs `actions: read` — instead of failing silently per run. Checkpoint
+  recovery stays fail-closed (unavailable, with the reason) when the listing
+  cannot be fetched. The same warnings no longer leak httpx's
+  "For more information check: https://developer.mozilla.org/…" docs hint into
+  the job log; HTTP failures are described as
+  `HTTP <status> <reason> for <method> <url>`.
+
 - The `git` tool no longer spends a reviewer turn on two read-only operations
   the prompts teach (#1077). `merge-base` is now on the read-only allowlist with
   the same ref/path confinement and config-flag refusal as `rev-parse`, so the
