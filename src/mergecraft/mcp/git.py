@@ -42,7 +42,13 @@ from mergecraft.mcp.git_guards import (
     resolve_grep_long_option,
     validate_tag_name,
 )
-from mergecraft.mcp.shared import ToolClass, execute, repository_mutation_class_for_push, tool
+from mergecraft.mcp.shared import (
+    ToolClass,
+    ToolRefusedError,
+    execute,
+    repository_mutation_class_for_push,
+    tool,
+)
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.utils.git_hardening import git_argv, git_authenticated_argv, read_remote_origin_url
 
@@ -91,7 +97,7 @@ def _confine_to_repo_root(value: str, flag: str, base: str) -> Path:
         return confine_to_workspace(value, base=base)
     except WorkspacePathError as exc:
         msg = f"Blocked: '{flag}' '{value}' must be within the repo checkout — {exc}"
-        raise ValueError(msg) from exc
+        raise ToolRefusedError(msg) from exc
 
 
 def _validate_path_confinement(global_opts: list[str], cwd: str) -> None:
@@ -548,8 +554,8 @@ def _validate_git_invocation(
     because it needs the cwd git will actually run in.
 
     Raises:
-        RuntimeError: when the verb has a dedicated tool to redirect to.
-        ValueError: for every other refusal.
+        ToolRefusedError: on every refusal — the verb redirect, the read-only
+        allowlist, and each guard's "Blocked:" stop all count (#1073).
     """
     # Unconditional: -c / --config-env are alias-execution vectors (#257 / D7).
     # global_opts is scanned with no subcommand — the pre-subcommand slot has no
@@ -565,7 +571,7 @@ def _validate_git_invocation(
     redirect = _REDIRECT_TO_TOOL.get(command)
     if redirect:
         msg = f"git {command} is not available through this tool — {redirect}"
-        raise RuntimeError(msg)
+        raise ToolRefusedError(msg)
     # Read-only allowlist: replace the old format-only _SUBCOMMAND_RE (#257 / D7).
     if not command or command not in _READONLY_SUBCOMMANDS:
         msg = (
@@ -574,7 +580,7 @@ def _validate_git_invocation(
         )
         if command in _FILE_READER_VERBS:
             msg = f"{msg}. {_file_reader_hint(command, args)}"
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
     if command == "branch":
         _reject_branch_writes(args)
     if command == "config":
@@ -739,7 +745,7 @@ def _require_push_allowed(
     """Enforce ``push`` disabled / restricted-default-branch policy (W2 / Final)."""
     if ctx.payload.push == "disabled":
         msg = "push is disabled for this run"
-        raise RuntimeError(msg)
+        raise ToolRefusedError(msg)
     state = primary_repo_state(ctx.tool_state)
     if (
         ctx.payload.push == "restricted"
@@ -757,7 +763,7 @@ def _require_push_allowed(
             f"Push blocked: cannot {verb} default branch "
             f"'{state.default_branch}' in restricted mode"
         )
-        raise RuntimeError(msg)
+        raise ToolRefusedError(msg)
 
 
 def push_branch_tool(ctx: ToolContext):
@@ -898,7 +904,7 @@ def commit_changes_tool(ctx: ToolContext):
         # the response, it only records why no remote update was attempted.
         try:
             _require_push_allowed(ctx, branch=branch, action="update")
-        except RuntimeError as err:
+        except ToolRefusedError as err:
             logger.info("API ref update skipped (push policy): {}", err)
         return {"success": True, "sha": sha, "branch": branch, "message": message, "pushed": False}
 

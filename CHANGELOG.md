@@ -118,9 +118,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `incrementalDiffStatus` (`ok` / `empty` / `unavailable`) with
   `incrementalDiffReason` and `lastReviewedSha`. When the range exists it is the
   review scope; the full diff is for anchoring only.
-- The merge evidence packet schema is `1.15.0`; the trajectory record schema is
-  `1.1.0` (optional `diff_read_path`, `diff_read`, `duration_ms` on a tool-call
-  row, all omitted while unset).
+- The merge evidence packet schema is `1.16.0`; the trajectory record schema is
+  `1.2.0` (optional `diff_read_path`, `diff_read`, `duration_ms` on a tool-call
+  row, all omitted while unset; `"refused"` joins the `failure_class`
+  vocabulary).
 - A PR's own `analyzers.*` configuration no longer applies to its own review. The
   analyzer settings (`enabled`, `overrides.<id>.enabled`, the `antislop` `rules` and
   `ignore`, `baseComparison`, `inlineBudget`, `impact`) are resolved from the PR's
@@ -170,6 +171,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   permanently blocked), with no behaviour change (#892).
 
 ### Fixed
+
+- Honest trajectory plumbing for the run record (#1073, #1074, #1075). A tool
+  call a guard refuses (read-only allowlist, path confinement, config-flag or
+  mode guard) now records `ok=False` with `failure_class="refused"` on the run
+  trajectory — the typed `ToolRefusedError` crosses the
+  `mcp/shared.py::execute` seam as a tagged error result, so the agent still
+  sees an ordinary tool error while run-health stops reading refusals as
+  successes. The merge evidence packet schema moves to `1.16.0` and the
+  trajectory record schema to `1.2.0` for the new enum value. A run whose
+  agent self-publishes via `create_pull_request_review` no longer gets a bogus
+  `missing-completion-signal` finding: the packet renders inside the terminal
+  call, before the call lands on the trajectory, so the audit now counts the
+  in-flight terminal call as the completion signal. And the run record's
+  **Review cost** row is honest on those self-published reviews: `agent`
+  renders elapsed-so-far instead of `0s`, `publish` is omitted when the run
+  has not stamped it yet (its stamp lands after the record renders), and
+  sub-second phases render with one decimal (`0.1s`) — or `<0.1s` — instead of
+  rounding to `0s`.
 
 - The `tracing` extra moves to OpenTelemetry 1.45.1 (semantic conventions
   0.66b1), which fixes CVE-2026-114603 in `opentelemetry-api` 1.44.0. That

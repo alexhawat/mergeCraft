@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
     from jsonschema.protocols import Validator
 
+    from mergecraft.evidence.trajectory import FailureClass
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import ToolState
 
@@ -108,8 +109,14 @@ def record_trajectory(
     result: Any = None,
     error: str | None = None,
     duration_ms: int | None = None,
+    failure_class: FailureClass | None = None,
 ) -> None:
-    """Record one mediated tool call on the run's trajectory (#43, D8)."""
+    """Record one mediated tool call on the run's trajectory (#43, D8).
+
+    ``failure_class`` is the typed classification the caller already knows —
+    ``"refused"`` when a guard stopped the call before it ran (#1073). When
+    omitted, ``record_tool_call`` derives the class from the error text.
+    """
     if ctx is None:
         return
     try:
@@ -123,6 +130,7 @@ def record_trajectory(
             outcome_ok=outcome_ok_from_result(result) if ok else None,
             error=error,
             duration_ms=duration_ms,
+            failure_class=failure_class,
         )
     except Exception as exc:  # an audit trail never breaks a tool call
         logger.debug("trajectory: failed to record {} — {}", name, exc)

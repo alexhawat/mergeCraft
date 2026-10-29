@@ -1937,13 +1937,16 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
                 agent_timeout_ms / 1000,
             )
 
+        # Stamped unconditionally (deadline or not) so a record rendered
+        # mid-dispatch — inside the terminal publish call — can report the
+        # agent phase as elapsed-so-far instead of 0s (#1075).
+        tool_state.agent_started_monotonic = time.monotonic()
         if agent_timeout_ms is None:
             winning_slug, result = await agent_task
         else:
-            agent_started = time.monotonic()
+            agent_started = tool_state.agent_started_monotonic
             ctx.agent_deadline_monotonic = agent_started + agent_timeout_ms / 1000.0
             # The MCP server reads these to tell the agent how much time it has used.
-            tool_state.agent_started_monotonic = agent_started
             tool_state.agent_deadline_s = agent_timeout_ms / 1000.0
             try:
                 winning_slug, result = await asyncio.wait_for(

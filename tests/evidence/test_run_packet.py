@@ -780,6 +780,47 @@ def test_dropped_finding_rows_warn_and_produce_run_health_finding(tmp_path: Path
     )
 
 
+def test_packet_audit_flags_a_worked_run_with_no_completion_signal(tmp_path: Path) -> None:
+    """Control for #1074: work without a completion claim is still flagged."""
+    from mergecraft.evidence.trajectory import record_tool_call
+
+    ctx = _make_ctx(tmp_path)
+    record_tool_call(
+        ctx.tool_state,
+        tool="shell",
+        arguments={"command": "cat src/app.py"},
+        ok=True,
+    )
+
+    packet = build_run_packet(ctx, run_succeeded=True)
+
+    health = packet.run_health
+    rule_ids = {finding.rule_id for finding in health.findings} if health else set()
+    assert "missing-completion-signal" in rule_ids
+
+
+def test_packet_audit_counts_the_in_flight_terminal_call_as_completion(
+    tmp_path: Path,
+) -> None:
+    """#1074: the record renders inside the terminal publish call, before that
+    call lands on the trajectory — the in-flight call is the signal."""
+    from mergecraft.evidence.trajectory import record_tool_call
+
+    ctx = _make_ctx(tmp_path)
+    record_tool_call(
+        ctx.tool_state,
+        tool="shell",
+        arguments={"command": "cat src/app.py"},
+        ok=True,
+    )
+
+    packet = build_run_packet(ctx, run_succeeded=True, in_flight_tool="create_pull_request_review")
+
+    health = packet.run_health
+    rule_ids = {finding.rule_id for finding in health.findings} if health else set()
+    assert "missing-completion-signal" not in rule_ids
+
+
 def test_emit_run_packet_skips_without_rebuild_when_packet_omitted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

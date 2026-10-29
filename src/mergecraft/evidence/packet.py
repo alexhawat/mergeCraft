@@ -107,7 +107,13 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 #   read-call count/turns, distinct files read, diff line counts, elapsed by
 #   phase, and the last idle-watchdog diagnostic. Measurement only — it never
 #   feeds a gate. Additive; ``None`` on packets built before this version.
-PACKET_SCHEMA_VERSION = "1.15.0"
+# - 1.16.0 — #1073 adds ``"refused"`` to the trajectory ``failure_class``
+#   vocabulary: a guard (allowlist, path confinement, config-flag, mode) that
+#   stops a tool call before it runs is stamped from the typed
+#   ``ToolRefusedError`` at the ``mcp/shared.py::execute`` seam, so the call
+#   records ``ok=False`` instead of a phantom ``ok=True, error=null``.
+#   Additive — a packet written before the value existed never carries it.
+PACKET_SCHEMA_VERSION = "1.16.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional

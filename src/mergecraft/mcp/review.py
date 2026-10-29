@@ -1415,7 +1415,12 @@ async def _publish_github_review(
     from mergecraft.evidence.run_packet import resolve_prepared_run_packet
 
     run_succeeded = True
-    packet = resolve_prepared_run_packet(ctx, run_succeeded=run_succeeded)
+    # The packet renders inside the terminal publish call, before ``mcp/rpc.py``
+    # appends that call to the trajectory — name it so the trajectory audit
+    # counts the in-flight terminal call as the completion signal (#1074).
+    packet = resolve_prepared_run_packet(
+        ctx, run_succeeded=run_succeeded, in_flight_tool=entrypoint
+    )
     await ensure_learnings_review_delta(ctx.tool_state)
     body_with_delta = merge_learnings_delta_into_review_body(ctx.tool_state, str(body or ""))
     agent_body = merge_analyzer_sections_into_review_body(ctx, body_with_delta)

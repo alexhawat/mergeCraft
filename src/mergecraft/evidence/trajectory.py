@@ -78,12 +78,18 @@ from mergecraft.analyzers.redact import redact_secrets
 if TYPE_CHECKING:
     from mergecraft.mcp.tool_state import ToolState
 
-TRAJECTORY_SCHEMA_VERSION: Final[str] = "1.1.0"
+TRAJECTORY_SCHEMA_VERSION: Final[str] = "1.2.0"
 """Version of the record's shape. Bump with ``PACKET_SCHEMA_VERSION`` (D7).
 
 ``1.1.0`` adds the optional ``diff_read_path`` / ``diff_read`` fields on
 ``ToolCallRecord``. Both are omitted while unset, so a record written before
 the fields existed still validates and serialises byte-identically.
+
+``1.2.0`` adds ``"refused"`` to the ``FailureClass`` vocabulary (#1073). A
+record written before the value existed never carries it, so old records still
+validate; the new value appears only when a guard refused the call before it
+ran and the typed ``ToolRefusedError`` crossed the ``mcp/shared.py::execute``
+seam.
 """
 
 SOURCE_MCP: Final[str] = "mcp-tool-calls"
@@ -93,7 +99,9 @@ SOURCE_EXTERNAL_TRACE: Final[str] = "external-trace"
 Intent = Literal["read", "modify", "verify", "complete", "report", "other"]
 """What a tool call was *for*, as far as the trajectory is concerned."""
 
-FailureClass = Literal["schema", "policy", "environment", "transient", "declined", "unknown"]
+FailureClass = Literal[
+    "schema", "policy", "environment", "transient", "declined", "refused", "unknown"
+]
 """How a failed tool call should be interpreted by the trajectory auditor.
 
 ``declined`` is never derived from error text: the caller stamps it on a step
@@ -101,13 +109,20 @@ that ran and chose not to act, so nothing raised and there is nothing to retry.
 The orchestrator's publish step is the one user — a recorded verdict it does not
 publish (shadow protocol, a non-review run, a rejected submission) is ``ok=False``
 with the reason in ``error``.
+
+``refused`` (#1073) is never derived from error text either: it is stamped from
+the typed ``ToolRefusedError`` at the ``mcp/shared.py::execute`` seam when a
+guard (allowlist, path confinement, config-flag, mode) stopped the call before
+it ran. ``policy`` remains the prose-derived fallback for guard-refusal-shaped
+errors on records that predate the seam.
 """
 
 # JSON-RPC ``-32602`` and pydantic/jsonschema validation shapes recorded in error
-# text. Classifying here by string match is weaker than inspecting the typed
-# exception at ``mcp/shared.py::execute`` (plan 13's seam). ``classify_failure_at_execute``
-# is the typed-signal entry for the driver-native exec choke (#858); the MCP door
-# still re-parses prose because stamping there is a different file's seam.
+# text. Classifying here by string match is the fallback for records that predate
+# the typed seam: ``mcp/shared.py::execute`` stamps guard refusals from
+# ``ToolRefusedError`` (#1073) and ``classify_failure_at_execute`` is the
+# typed-signal entry for the driver-native exec choke (#858); the MCP door still
+# re-parses prose for rows that arrive without a stamp.
 _SCHEMA_FAILURE_MARKERS: Final[tuple[str, ...]] = (
     "-32602",
     "invalid arguments for",
@@ -984,11 +999,12 @@ def _command_intent(tool: str, command: str) -> Intent:
 def classify_failure_class(error: str | None) -> FailureClass:
     """Derive a failure class from the error text stored on a tool call.
 
-    String matching on recorded prose is a deliberate trade-off: it lets plan 12
-    classify failures in the auditor without editing ``mcp/shared.py::execute``,
-    which plan 13 owns. The follow-up is to stamp ``failure_class`` from the
-    typed exception at that choke point and treat this function as a fallback
-    for records that predate the seam.
+    String matching on recorded prose is the fallback for records that predate
+    the typed seam: since #1073, guard refusals crossing
+    ``mcp/shared.py::execute`` are stamped ``"refused"`` from the
+    ``ToolRefusedError`` type, and ``classify_failure_at_execute`` stamps the
+    driver-native exec choke (#858) from typed signals. This function still
+    classifies rows that arrive with neither stamp.
     """
     if not error:
         return "unknown"
