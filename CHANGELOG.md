@@ -242,6 +242,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- One logical review no longer appears as one formal review per fallback rung
+  (#1078). When Codex is available, the OpenCode Go rung is non-terminal: a
+  neutral decision now records its run in the sticky progress comment and posts
+  no formal review, leaving the formal review to the rung that actually decides
+  the run. `success` and `failure` still publish normally. The Codex fallback
+  also skips a neutral verdict whose reason names the untrusted tier — that
+  tier is structurally inert (D14), so a second review can only reproduce the
+  same neutral at full cost.
+
 - A Codex run whose platform sandbox cannot start no longer claims "No review
   ran" (#1083). The review does run — through mergeCraft MCP tools — so the
   hint now names the actual capability loss (Codex-native shell tools are

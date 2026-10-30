@@ -423,7 +423,7 @@ def _decide_approval_from_packet(
         conclusion = "neutral"
     return PacketDecision(
         verdict=conclusion,
-        reason=_packet_decision_reason(conclusion, packet),
+        reason=_packet_decision_reason(conclusion, packet, tier=tier),
         decided_by="mergecraft.agents.gates.decide_approval",
     )
 
@@ -431,6 +431,8 @@ def _decide_approval_from_packet(
 def _packet_decision_reason(
     conclusion: Conclusion,
     packet: MergeEvidencePacket,
+    *,
+    tier: TrustTier | None = None,
 ) -> str:
     """Render a short, evidence-attributed reason for a packet verdict (#41).
 
@@ -439,6 +441,14 @@ def _packet_decision_reason(
     evidence lives in the packet itself and downstream consumers should
     read it from there.
     """
+    if conclusion == "neutral" and tier == "untrusted":
+        # #1078 — name the inertness so the fallback chain can skip a rung
+        # that can never produce a permissive verdict (D14), instead of
+        # spending a whole second review on the same structurally inert run.
+        return (
+            "neutral: untrusted tier — attestation is inert and a fallback rung "
+            "cannot change the verdict"
+        )
     if (
         conclusion == "neutral"
         and packet.agent_terminal_verdict == "request_changes"

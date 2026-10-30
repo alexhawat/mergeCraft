@@ -434,6 +434,49 @@ def test_routing_prefers_the_packet_verdict_over_a_foreign_check(
     )
 
 
+def test_routing_skips_codex_on_an_untrusted_tier_neutral(tmp_path: Path) -> None:
+    """#1078 — D14 inertness: a fallback rung cannot make an untrusted run green."""
+    root = stage_trusted_copy(tmp_path)
+    outputs, completed = run_decide_script(
+        tmp_path,
+        root / "scripts/decide_codex_fallback.sh",
+        env={
+            "OPENCODE_GO_OUTCOME": "success",
+            "OPENCODE_GO_PACKET": evidence_packet(
+                verdict="neutral",
+                reason=(
+                    "neutral: untrusted tier — attestation is inert and a fallback "
+                    "rung cannot change the verdict"
+                ),
+            ),
+        },
+        cwd=root,
+    )
+    assert completed.returncode == 0
+    assert outputs.get("need") == "false", (
+        "an untrusted-tier neutral is structurally inert; do not spend Codex on it"
+    )
+    assert "untrusted" in completed.stdout
+
+
+def test_routing_still_falls_back_on_an_ordinary_neutral(tmp_path: Path) -> None:
+    """Only the named untrusted reason is skipped; every other neutral retries."""
+    root = stage_trusted_copy(tmp_path)
+    outputs, completed = run_decide_script(
+        tmp_path,
+        root / "scripts/decide_codex_fallback.sh",
+        env={
+            "OPENCODE_GO_OUTCOME": "success",
+            "OPENCODE_GO_PACKET": evidence_packet(
+                verdict="neutral", reason="neutral: no typed findings to attest to the review"
+            ),
+        },
+        cwd=root,
+    )
+    assert completed.returncode == 0
+    assert outputs.get("need") == "true"
+
+
 def test_routing_never_treats_a_foreign_check_as_a_verdict(tmp_path: Path) -> None:
     root = stage_trusted_copy(tmp_path)
     gh_dir = write_gh_mock(

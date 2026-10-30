@@ -369,6 +369,11 @@ class ToolState:
     pending_review_publication: dict[str, Any] | None = None
     # Lane A W3 — which publication entrypoint won and whether 422 recovery demoted inline.
     review_publication_entrypoint: str | None = None
+    # #1078 — a non-terminal fallback rung whose decision is neutral records its
+    # run in the sticky progress comment instead of posting a formal review.
+    # The finalize path reads this so it does not create the formal review the
+    # publish seam deliberately skipped.
+    review_publication_sticky_only: bool = False
     review_inline_comments_demoted: bool = False
     # #619 Task 4b — set when every targeted 422 recovery (comments-anchor
     # demotion, APPROVE->COMMENT) failed and the last-resort bare COMMENT

@@ -2074,6 +2074,18 @@ other non-review modes are unchanged.
 `request_changes` with confirmed findings is a usable review result; a missing
 or semantically rejected submission is not.
 
+**Publication across fallback rungs.** One logical review must not become one
+formal review per rung. Without verifiable authorship (#1029) a later rung
+cannot supersede an earlier review, so the workflow marks a rung that a
+fallback will replace (`MERGECRAFT_STICKY_ONLY_NEUTRAL`, set on OpenCode Go
+whenever Codex is available). When that rung's structural decision is
+`neutral`, it writes its deterministic run record into the sticky progress
+comment and posts no formal review; the terminal rung owns the formal review.
+`success` and `failure` are terminal and publish normally. The fallback chain
+also skips Codex when the neutral reason names the untrusted tier: the tier is
+structurally inert, so a second rung can only reproduce the same neutral at
+full cost (#1078).
+
 See also [`REVIEW-CHECKS.md`](../REVIEW-CHECKS.md#terminal-verdict-vs-structural-verdict-vp2).
 
 ## Provenance

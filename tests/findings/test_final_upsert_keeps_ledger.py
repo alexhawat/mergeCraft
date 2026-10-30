@@ -269,6 +269,31 @@ async def test_path_b_persist_creates_then_record_keeps_ledger(tmp_path: Path) -
     assert set(recovered) == set(fingerprints)
 
 
+@pytest.mark.asyncio
+async def test_sticky_only_neutral_records_in_the_sticky_not_a_review(tmp_path: Path) -> None:
+    """#1078 — a non-terminal neutral rung leaves the formal review to the terminal rung.
+
+    The publish seam already skipped the formal review; finalize must write the
+    same deterministic record into the sticky instead of creating the review
+    the seam deliberately did not post.
+    """
+    scm = _FakeScm()
+    ctx = _ctx(tmp_path, scm)
+    ctx.tool_state.review_publication_sticky_only = True
+
+    await report_progress_tool(ctx).execute({"body": _RAW_BODY})
+    await publish_deterministic_record(
+        pull_number=_PR_NUMBER,
+        packet=_packet(),
+        ctx=ctx,
+    )
+
+    assert scm.reviews == {}, "a non-terminal neutral rung must not create a formal review"
+    assert scm.comments, "the run record must still be visible in the sticky comment"
+    body = str(next(iter(scm.comments.values()))["body"])
+    assert ledger.DETERMINISTIC_RECORD_MARKER in body, body
+
+
 def test_ledger_markers_are_v2_shaped() -> None:
     """Guard: the fixture records render v2 markers the assertions key on."""
     book = ledger.FindingLedger()

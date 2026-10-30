@@ -103,6 +103,9 @@ def test_untrusted_tier_stays_inert_despite_terminal_attestation() -> None:
     packet = _attested_clean_packet()
     decision = decide_approval(packet, run_succeeded=True, tier="untrusted")
     assert decision.verdict == "neutral"
+    assert "untrusted tier" in decision.reason, (
+        "the reason is the fallback chain's only signal that a retry cannot help (#1078)"
+    )
 
 
 def test_failed_run_stays_neutral_despite_terminal_attestation() -> None:

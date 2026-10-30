@@ -514,6 +514,18 @@ async def publish_deterministic_record(
     publication_lines = _publication_record_lines(tool_state)
     if publication_lines:
         block = "\n".join([block.rstrip(), *publication_lines]) + "\n"
+    from mergecraft.mcp.review import should_publish_sticky_only
+
+    if tool_state.review_publication_sticky_only or should_publish_sticky_only(packet):
+        # #1078 — this rung is non-terminal (a fallback rung will replace a
+        # neutral decision), so its record belongs in the sticky progress
+        # comment. It must not create the formal review the publish seam
+        # deliberately skipped, and must not retire the sticky as a legacy
+        # record: the sticky is the record.
+        from mergecraft.findings.ledger import upsert_sticky_progress_comment
+
+        await upsert_sticky_progress_comment(resolved_ctx, block)
+        return
     owner, repo = resolved_ctx.repo.owner, resolved_ctx.repo.name
     review = tool_state.review
     existing_body = ""

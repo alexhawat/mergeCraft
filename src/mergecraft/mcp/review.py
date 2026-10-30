@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -1348,6 +1349,24 @@ def _raised_by_lookup_key(row: dict[str, Any]) -> str | None:
     return f"{path}:{line}:{body}"
 
 
+def should_publish_sticky_only(packet: Any) -> bool:
+    """Return whether this rung must keep its neutral record off the formal review (#1078).
+
+    ``MERGECRAFT_STICKY_ONLY_NEUTRAL`` is set by the workflow on a rung that a
+    later fallback rung will replace when its decision is neutral (the
+    OpenCode Go -> Codex edge). Without verifiable authorship (#1029) that
+    later rung cannot supersede an earlier formal review, so the earlier
+    neutral rung records its run in the sticky progress comment only. A
+    non-neutral decision always publishes normally: ``failure`` needs a
+    blocking formal review, and ``success`` is terminal.
+    """
+    enabled = os.environ.get("MERGECRAFT_STICKY_ONLY_NEUTRAL", "").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return False
+    decision = getattr(packet, "decision", None)
+    return decision is not None and getattr(decision, "verdict", None) == "neutral"
+
+
 async def _publish_github_review(
     ctx: ToolContext,
     params: dict[str, Any],
@@ -1421,6 +1440,26 @@ async def _publish_github_review(
     packet = resolve_prepared_run_packet(
         ctx, run_succeeded=run_succeeded, in_flight_tool=entrypoint
     )
+    if should_publish_sticky_only(packet):
+        # #1078 — a non-terminal neutral rung does not spend a formal review
+        # the next rung cannot replace. The finalize path writes the same
+        # deterministic record into the sticky progress comment.
+        ctx.tool_state.review_publication_entrypoint = "sticky_only_neutral"
+        ctx.tool_state.review_publication_sticky_only = True
+        ctx.tool_state.was_updated = True
+        logger.info(
+            "decision neutral with a fallback rung available; recording this run in "
+            "the sticky progress comment instead of a formal review"
+        )
+        return {
+            "success": True,
+            "published": False,
+            "stickyOnly": True,
+            "reason": (
+                "decision neutral and a fallback rung is available; this rung's run "
+                "record goes to the sticky progress comment only"
+            ),
+        }
     await ensure_learnings_review_delta(ctx.tool_state)
     body_with_delta = merge_learnings_delta_into_review_body(ctx.tool_state, str(body or ""))
     agent_body = merge_analyzer_sections_into_review_body(ctx, body_with_delta)
