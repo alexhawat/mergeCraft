@@ -1561,11 +1561,15 @@ def _run_opencode_cli_streaming(
         retryable = is_retryable_cli_failure(
             returncode=returncode, stderr=f"{stream_error}\n{stderr_text}"
         )
+        # A failed attempt still burns tokens — often the attempt that
+        # escalates to the next model — so its usage belongs in the budget band
+        # (claude.py and codex.py report it on the same path).
+        failure_error = (stderr_text or stream_error or "").strip()
         return AgentResult(
             success=False,
-            error=(stderr_text or stream_error or "opencode failed").strip()
-            or f"opencode exited {returncode}",
+            error=failure_error or f"opencode failed (exit {returncode})",
             metadata={"retryable": True} if retryable else {},
+            usage=_priced_stream_usage(accumulator, ctx=ctx),
         )
     return AgentResult(
         success=True,

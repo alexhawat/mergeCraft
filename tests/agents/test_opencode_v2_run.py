@@ -411,6 +411,51 @@ def test_the_no_session_handler_also_records_usage() -> None:
     assert usage.output_tokens == 2
 
 
+def test_a_failed_2x_turn_still_reports_the_tokens_it_burned(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """The attempt that escalates to the next model still spent tokens."""
+    stdout = (
+        json.dumps(
+            {
+                "type": "step_finish",
+                "part": {"tokens": {"input": 900, "output": 12, "cache": {"read": 100}}},
+            }
+        )
+        + "\n"
+    )
+    monkeypatch.setattr(oc, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 1))
+
+    result = oc._run_opencode_cli_streaming(
+        cmd=["opencode"],
+        ctx=make_agent_run_context(tmp_path, resolved_model=None),
+        env={},
+        session={},
+    )
+
+    assert result.success is False
+    assert result.usage is not None, "a failed attempt must still report what it spent"
+    assert result.usage.input_tokens == 1000
+    assert result.usage.output_tokens == 12
+
+
+def test_a_failed_2x_turn_without_stderr_names_the_exit_code(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """An empty stderr must not hide why the turn failed."""
+    monkeypatch.setattr(oc, "spawn_agent_cli", lambda cmd, **kwargs: _Proc("", 3))
+
+    result = oc._run_opencode_cli_streaming(
+        cmd=["opencode"],
+        ctx=make_agent_run_context(tmp_path, resolved_model=None),
+        env={},
+        session={},
+    )
+
+    assert result.success is False
+    assert result.error == "opencode failed (exit 3)"
+
+
 def test_a_failed_2x_turn_names_its_stream_error(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """2.x reports the failure on stdout; with empty stderr it is the error."""
     stdout = json.dumps(
