@@ -32,6 +32,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
+import httpx
 import pytest
 from tests.ci.workflow_support import load_workflow
 from tests.evidence.support import sample_minimal_packet_dict
@@ -47,8 +48,32 @@ if TYPE_CHECKING:
 _PR_NUMBER = 7
 _OTHER_PR_NUMBER = 8
 _WORKFLOW = ".github/workflows/mergecraft.yml"
+_WORKFLOW_FILE_NAME = _WORKFLOW.split("/")[-1]
 _ARTIFACT_NAME = "mergecraft-evidence-claude"
 _PACKET_MEMBER = "packet-claude.json"
+
+
+def _http_status_error(status: int, reason: str, url: str) -> httpx.HTTPStatusError:
+    """Build the exact error ``httpx.Response.raise_for_status()`` raises (#1082).
+
+    The message carries httpx's second docs-hint line, so tests asserting the
+    warning text also pin that the hint never reaches a mergeCraft log.
+    """
+    request = httpx.Request("GET", url)
+    response = httpx.Response(status, request=request)
+    message = (
+        f"Client error '{status} {reason}' for url '{url}'\n"
+        "For more information check: "
+        f"https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/{status}"
+    )
+    return httpx.HTTPStatusError(message, request=request, response=response)
+
+
+def _runs_url(workflow_ref: str) -> str:
+    return (
+        f"https://api.github.test/repos/acme/demo/actions/workflows/{workflow_ref}/runs"
+        "?event=pull_request_target&per_page=100"
+    )
 
 
 @contextmanager
@@ -111,6 +136,8 @@ class _ActionsScm:
         artifacts: dict[int, list[dict[str, Any]]] | None = None,
         zips: dict[int, bytes] | None = None,
         runs_error: Exception | None = None,
+        path_runs: list[dict[str, Any]] | None = None,
+        path_runs_error: Exception | None = None,
         artifacts_error: Exception | None = None,
         zip_error: Exception | None = None,
     ) -> None:
@@ -118,13 +145,21 @@ class _ActionsScm:
         self._artifacts = artifacts or {}
         self._zips = zips or {}
         self._runs_error = runs_error
+        self._path_runs = path_runs
+        self._path_runs_error = path_runs_error
         self._artifacts_error = artifacts_error
         self._zip_error = zip_error
         self.requests: list[tuple[str, dict[str, Any]]] = []
 
     async def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         self.requests.append((path, dict(params or {})))
-        if path.endswith(f"/actions/workflows/{_WORKFLOW.split('/')[-1]}/runs"):
+        if path.endswith(f"/actions/workflows/{_WORKFLOW}/runs"):
+            if self._path_runs_error is not None:
+                raise self._path_runs_error
+            if self._path_runs is not None:
+                return {"workflow_runs": list(self._path_runs)}
+            return None
+        if path.endswith(f"/actions/workflows/{_WORKFLOW_FILE_NAME}/runs"):
             if self._runs_error is not None:
                 raise self._runs_error
             return {"workflow_runs": list(self._runs)}
@@ -245,8 +280,12 @@ async def test_reader_lists_the_trusted_workflow_with_the_pull_request_target_ev
     run_requests = [request for request in scm.requests if request[0].endswith("/runs")]
     assert run_requests, "the reader must list workflow runs through the Actions API"
     path, params = run_requests[0]
-    assert _WORKFLOW in path
+    # The Actions API resolves ``{workflow_id}`` by workflow file name (or
+    # numeric id) only — the repo-relative path spelling is answered with 404
+    # (#1082) — so the file name is the first, and here the only, request.
+    assert path.endswith(f"/actions/workflows/{_WORKFLOW_FILE_NAME}/runs")
     assert params.get("event") == "pull_request_target"
+    assert len(run_requests) == 1
 
 
 # ── untrusted runs are ignored ───────────────────────────────────────────────
@@ -339,6 +378,126 @@ async def test_no_trusted_run_is_fail_closed(tmp_path: Path) -> None:
     assert state.reviewed_head_sha == ""
     assert state.round_index == 0
     assert state.progress_comment_id is None
+
+
+# ── #1082: workflow-id spelling 404s and the httpx docs hint ─────────────────
+#
+# The Actions API resolves ``{workflow_id}`` by numeric workflow id or workflow
+# file name only; the repo-relative path spelling is answered with 404. The
+# reader must try the file name first, fall through to the path spelling on a
+# 404, fail closed with the cause named once when every spelling 404s, and
+# never let httpx's "For more information check: https://developer.mozilla.org/…"
+# line reach a mergeCraft log.
+
+
+@pytest.mark.asyncio
+async def test_a_404_on_the_file_name_spelling_falls_through_to_the_path_spelling(
+    tmp_path: Path,
+) -> None:
+    """A 404 on one spelling tries the next instead of aborting the listing."""
+    run, artifact, blob = _trusted_run(
+        run_id=111,
+        head_sha="1" * 40,
+        progress_comment_id=None,
+        created_at="2026-09-29T12:00:00Z",
+    )
+    scm = _ActionsScm(
+        runs=[],
+        runs_error=_http_status_error(404, "Not Found", _runs_url(_WORKFLOW_FILE_NAME)),
+        path_runs=[run],
+        artifacts={111: [artifact]},
+        zips={int(artifact["id"]): blob},
+    )
+
+    with _capture_warnings() as warnings:
+        state = await _recover(scm, tmp_path)
+
+    assert state.reviewed_head_sha == "1" * 40
+    run_requests = [request[0] for request in scm.requests if request[0].endswith("/runs")]
+    assert run_requests == [
+        f"/repos/acme/demo/actions/workflows/{_WORKFLOW_FILE_NAME}/runs",
+        f"/repos/acme/demo/actions/workflows/{_WORKFLOW}/runs",
+    ]
+    assert warnings == []
+
+
+@pytest.mark.asyncio
+async def test_a_404_on_every_spelling_fails_closed_with_one_named_cause(tmp_path: Path) -> None:
+    """Both spellings 404: fail closed, name the real cause once, no httpx hint."""
+    scm = _ActionsScm(
+        runs=[],
+        runs_error=_http_status_error(404, "Not Found", _runs_url(_WORKFLOW_FILE_NAME)),
+        path_runs_error=_http_status_error(404, "Not Found", _runs_url(_WORKFLOW)),
+    )
+
+    with _capture_warnings() as warnings:
+        state = await _recover(scm, tmp_path)
+
+    assert state.reviewed_head_sha == ""
+    assert state.round_index == 0
+    assert state.progress_comment_id is None
+    assert len(warnings) == 1, f"the cause is named once, not per spelling: {warnings!r}"
+    assert "404" in warnings[0]
+    assert "actions: read" in warnings[0]
+    assert "For more information check" not in warnings[0]
+    assert "mozilla" not in warnings[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_a_non_404_http_error_fails_closed_without_the_httpx_docs_hint(
+    tmp_path: Path,
+) -> None:
+    """A 403 is not spelling-dependent: no second spelling, one sanitized warning."""
+    scm = _ActionsScm(
+        runs=[],
+        runs_error=_http_status_error(403, "Forbidden", _runs_url(_WORKFLOW_FILE_NAME)),
+        path_runs=[_run(1)],
+    )
+
+    with _capture_warnings() as warnings:
+        state = await _recover(scm, tmp_path)
+
+    assert state.reviewed_head_sha == ""
+    assert state.round_index == 0
+    assert state.progress_comment_id is None
+    assert len(warnings) == 1
+    assert "HTTP 403 Forbidden" in warnings[0]
+    assert "For more information check" not in warnings[0]
+    assert "mozilla" not in warnings[0].lower()
+    run_requests = [request for request in scm.requests if request[0].endswith("/runs")]
+    assert len(run_requests) == 1, "a non-404 error must not fall through to the other spelling"
+
+
+@pytest.mark.asyncio
+async def test_a_run_read_http_error_fails_closed_without_the_httpx_docs_hint(
+    tmp_path: Path,
+) -> None:
+    """The artefact-listing failure site gets the same hint-free one-liner."""
+    run, _, _ = _trusted_run(
+        run_id=131,
+        head_sha="2" * 40,
+        progress_comment_id=None,
+        created_at="2026-09-29T12:00:00Z",
+    )
+    scm = _ActionsScm(
+        runs=[run],
+        artifacts_error=_http_status_error(
+            500,
+            "Internal Server Error",
+            "https://api.github.test/repos/acme/demo/actions/runs/131/artifacts",
+        ),
+    )
+
+    with _capture_warnings() as warnings:
+        state = await _recover(scm, tmp_path)
+
+    assert state.reviewed_head_sha == ""
+    assert state.round_index == 0
+    assert state.progress_comment_id is None
+    assert len(warnings) == 1
+    assert "HTTP 500 Internal Server Error" in warnings[0]
+    assert "For more information check" not in warnings[0]
+    assert "mozilla" not in warnings[0].lower()
 
 
 # ── the trusted-run gate reads the event name, never the PR action ────────────
