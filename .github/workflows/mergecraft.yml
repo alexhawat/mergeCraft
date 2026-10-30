@@ -140,7 +140,9 @@ on:
     # `pre-*` glob keeps every release-staging branch (pre-0.0.1, pre-0.0.2, …)
     # auto-reviewed without editing this list each cut (matches the old
     # .coderabbit.yaml `pre-.*` coverage).
-    branches: [main, develop, test-pre, "pre-*"]
+    # fix/review-pipeline-hardening is the stacked hardening base; each layer
+    # PR must get the same auto-review a main-targeted PR gets.
+    branches: [main, develop, test-pre, "pre-*", fix/review-pipeline-hardening]
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
     inputs:
