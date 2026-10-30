@@ -29,6 +29,8 @@ Verify a published digest locally (see [CONTRIBUTING.md](../CONTRIBUTING.md#veri
 
 PyPI distribution name is **`mergecraft-action`** (hyphen); import and CLI remain
 `mergecraft`. Craft publishes via the `pypi` target in [`.craft.yml`](../.craft.yml).
+The project was first published as `0.1.0a4`; before that no `mergecraft-action`
+(and no `merge-craft`) release existed.
 
 **Prerequisites**
 
@@ -51,8 +53,8 @@ then `craft publish 0.1.0` after CI is green.
 Post-publish smoke:
 
 ```bash
-pip install mergecraft-action==0.1.0
-mergecraft --help
+uv tool install mergecraft-action==0.1.0a4
+mergecraft --version
 ```
 
 ### GitHub Marketplace listing
@@ -87,8 +89,8 @@ to add there. The one binary still outstanding is the demo capture; see
 ## Python version and Docker
 
 **Python >=3.11** is the install floor for `uv tool install` / local CLI development
-(`pyproject.toml`). CI runs on **3.11** and **3.14**. PyPI (`mergecraft-action`) is **not**
-published yet — install from git or a local checkout via `uv`. Operators who want a
+(`pyproject.toml`). CI runs on **3.11** and **3.14**. PyPI carries the pre-release
+`mergecraft-action`; install from git only when you need an unreleased commit. Operators who want a
 pinned runtime without managing Python versions should use the **Docker Action**
 (`alexhawat/mergeCraft@…`) — the image ships a compatible runtime; no local Python
 install is required.

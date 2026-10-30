@@ -24,7 +24,7 @@ _PACKAGED_DEFAULTS = (
 _PINS_CHECK_TARGET = "pins-check"
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _LOCKED_CHECKOUT_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
-_LOCKED_ACTION_SHA = "521c0aedbf525a80a5bf6eddf0119ada85a8d381"
+_LOCKED_ACTION_SHA = "7080e962c2259757a34b9f745602f093e4ee3378"
 
 
 def test_checkout_and_packaged_defaults_yaml_are_byte_identical() -> None:

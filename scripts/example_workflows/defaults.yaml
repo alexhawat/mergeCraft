@@ -4,10 +4,10 @@
 # Override via env when generating examples: make examples
 action_repo: alexhawat/mergeCraft
 # A tagged release ref is fine for the minimal getting-started example.
-action_pin_minimal: v0.1.0a1
+action_pin_minimal: v0.1.0a4
 # The immutable commit the minimal Action pin above resolves to; rendered as
 # `@<commit> # <tag>` so a workflow runs the same code Harbor installs by tag.
-action_sha_minimal: 521c0aedbf525a80a5bf6eddf0119ada85a8d381
+action_sha_minimal: 7080e962c2259757a34b9f745602f093e4ee3378
 # One actions/checkout commit for every example, the scaffold and the self-workflow.
 checkout_sha: 3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 # Hardened workflow must pin a full commit SHA for org SHA-pinning policies.

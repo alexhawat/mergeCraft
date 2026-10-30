@@ -445,7 +445,7 @@ jobs:
           # Do not persist the checkout token into .git/config: mergeCraft adds
           # its own Authorization header, and git sends both on one request.
           persist-credentials: false
-      - uses: alexhawat/mergeCraft@521c0aedbf525a80a5bf6eddf0119ada85a8d381 # v0.1.0a1
+      - uses: alexhawat/mergeCraft@7080e962c2259757a34b9f745602f093e4ee3378 # v0.1.0a4
         with:
           # Event-aware: a pull_request run reviews the PR, a manual dispatch
           # uses the prompt the operator typed. Hardcoding the text here would

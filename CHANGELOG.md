@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The install line is `uv tool install mergecraft-action==0.1.0a4`. PyPI carries
+  the pre-release distribution `mergecraft-action`; the git install stays
+  documented for an unreleased commit.
+
 ## [0.1.0a4] — 2026-10-29
 
 > **First published release.** Nothing before this version was ever uploaded:

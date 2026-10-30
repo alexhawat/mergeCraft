@@ -13,12 +13,16 @@ Use this when asked to add AI PR review to another repository.
    [uv](https://docs.astral.sh/uv/), and an authenticated [`gh`](https://cli.github.com)
    CLI. If Python 3.11+ is unavailable locally, use the Docker Action path only
    ([`docs/install.md`](docs/install.md)) — no local CLI install required for CI.
-2. **Install the CLI** (PyPI is not published yet):
+2. **Install the CLI.** PyPI carries the pre-release `mergecraft-action`; the
+   CLI binary is still `mergecraft`:
 
    ```bash
-   uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
+   uv tool install mergecraft-action==0.1.0a4
    mergecraft --install-completion   # optional shell completion
    ```
+
+   To run an unreleased commit instead, pin the distribution to the repository:
+   `uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"`.
 
 3. **Scaffold config and workflow** — in the consumer repo root:
 
