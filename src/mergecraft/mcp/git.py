@@ -422,6 +422,27 @@ def _is_auth_failure(stderr: str) -> bool:
     return any(marker in lowered for marker in _AUTH_FAILURE_MARKERS)
 
 
+class _GitCommandError(RuntimeError):
+    """A non-zero git exit, carrying the exit code and stderr beside the message.
+
+    The message is the same redacted, auth-hint-annotated ``git … failed (N)``
+    string this tool has always raised; the attributes let an intent-aware
+    caller tell an expected non-zero answer (``git grep``'s no-match exit 1,
+    #1077) apart from a failure without parsing the message back out.
+    """
+
+    def __init__(self, args: list[str], result: subprocess.CompletedProcess[str]) -> None:
+        raw_err = (result.stderr or result.stdout or "").strip()
+        err = redact_secrets(raw_err)
+        message = f"git {' '.join(args)} failed ({result.returncode}): {err}"
+        if _is_auth_failure(raw_err):
+            logger.error("git auth failure on `git {}`: {}", " ".join(args), err)
+            message = f"{message}\n{_AUTH_FAILURE_HINT}"
+        super().__init__(message)
+        self.returncode = result.returncode
+        self.stderr = result.stderr or ""
+
+
 def _run_git(
     args: list[str],
     *,
@@ -445,14 +466,25 @@ def _run_git(
         check=False,
     )
     if result.returncode != 0:
-        raw_err = (result.stderr or result.stdout or "").strip()
-        err = redact_secrets(raw_err)
-        msg = f"git {' '.join(args)} failed ({result.returncode}): {err}"
-        if _is_auth_failure(raw_err):
-            logger.error("git auth failure on `git {}`: {}", " ".join(args), err)
-            msg = f"{msg}\n{_AUTH_FAILURE_HINT}"
-        raise RuntimeError(msg)
+        raise _GitCommandError(args, result)
     return result.stdout
+
+
+def _run_grep(args: list[str], *, cwd: str) -> tuple[str, bool]:
+    """Run ``git grep`` and return ``(stdout, matched)``.
+
+    Exit 1 with a clean stderr is grep's "no lines selected" answer — a
+    successful no-match, not a failure (#1077; the ``git``-door instance of
+    #1027's intent-aware outcome rule). Exit 1 carrying stderr output, and
+    every other non-zero exit, stays fail-closed: the ``_run_git`` error
+    propagates unchanged.
+    """
+    try:
+        return _run_git(args, cwd=cwd), True
+    except _GitCommandError as err:
+        if err.returncode != 1 or err.stderr.strip():
+            raise
+        return "", False
 
 
 def _run_authenticated_git(
@@ -647,10 +679,14 @@ def git_tool(ctx: ToolContext):
                     "cached": True,
                 }
         context_dropped = False
+        matched = True
         if command == "grep":
             args, context_dropped = _normalize_grep_args(args)
         try:
-            output = _run_git([*global_opts, command, *args], cwd=cwd)
+            if command == "grep":
+                output, matched = _run_grep([*global_opts, command, *args], cwd=cwd)
+            else:
+                output = _run_git([*global_opts, command, *args], cwd=cwd)
         except RuntimeError as err:
             raise RuntimeError(redact_secrets(str(err))) from err
         if show_target is not None:
@@ -676,6 +712,10 @@ def git_tool(ctx: ToolContext):
             }
         if context_dropped:
             result["note"] = _GREP_CONTEXT_NOTE
+        if not matched:
+            # grep's no-match answer, surfaced honestly instead of as a
+            # failure (#1077; the ``git``-door instance of #1027).
+            result["noMatches"] = True
         return result
 
     return tool(

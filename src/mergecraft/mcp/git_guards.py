@@ -85,6 +85,15 @@ _READONLY_SUBCOMMANDS: frozenset[str] = frozenset(
         # are the whole story for it.
         "grep",
         "ls-tree",
+        # #1077 — strictly read-only; every form (``A B``, ``--all``,
+        # ``--octopus``, ``--independent``, ``--is-ancestor``, ``--fork-point``)
+        # only reads the commit graph, and ``config/trust_policy.py`` itself
+        # runs ``merge-base --is-ancestor`` internally. No write-ish flag
+        # exists, so the shared ref/path confinement the rest of the allowlist
+        # gets (``rev-parse`` included) is the whole guard story here too —
+        # the prompts teach ``git diff --merge-base``, so refusing the bare
+        # verb only burned agent turns.
+        "merge-base",
     }
 )
 # Rejected verbs that have a dedicated tool. Not an auth gate — a redirect
@@ -175,6 +184,10 @@ _SUBCOMMAND_SHORT_FLAGS: dict[str, frozenset[str]] = {
     # -t show trees, -z NUL-terminate. No write, no pager-exec, no
     # output-file letter among git's real ls-tree flags.
     "ls-tree": frozenset("dlrtz"),
+    # #1077 — ``-a`` (``--all``) is merge-base's only short flag; the read
+    # forms are otherwise long-only. Declaring it keeps a bare ``-c`` after
+    # the verb refused (merge-base defines no ``-c``), exactly like rev-parse.
+    "merge-base": frozenset("a"),
 }
 
 # ---------------------------------------------------------------------------

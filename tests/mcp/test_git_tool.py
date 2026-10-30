@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Any, Literal
 
@@ -20,7 +21,7 @@ from mergecraft.mcp.context import (
     ResolvedPayload,
     ToolContext,
 )
-from mergecraft.mcp.git import commit_changes_tool, git_tool
+from mergecraft.mcp.git import _GitCommandError, commit_changes_tool, git_tool
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
@@ -897,6 +898,99 @@ async def test_grep_and_ls_tree_still_refuse_paths_outside_the_repo_root(
     assert recorder.calls == []
 
 
+# --- #1077 — git grep exit 1 is a no-match answer, not a failure ------------
+
+
+def _failing_git(returncode: int, *, stdout: str = "", stderr: str = "") -> Any:
+    """A ``_run_git`` double that exits the way git itself would."""
+
+    def _fake(args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
+        raise _GitCommandError(args, subprocess.CompletedProcess(args, returncode, stdout, stderr))
+
+    return _fake
+
+
+async def test_grep_no_match_exit_1_returns_success_with_no_matches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1077 / #1027's git-door instance: no lines selected is an answer.
+
+    The issue's repro: ``git grep`` over a freshly seeded (empty) learnings
+    file exits 1 and used to surface to the agent as ``✗ failed (1)``.
+    """
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", _failing_git(1))
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "grep", "args": ["-n", "Withdrawn review findings", "--", "learnings.md"]}
+    )
+
+    assert result.is_error is False, result.content[0]["text"]
+    payload = json.loads(result.content[0]["text"])
+    assert payload == {"output": "", "noMatches": True}
+
+
+@pytest.mark.parametrize("returncode", [2, 128])
+async def test_grep_error_exits_stay_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, returncode: int
+) -> None:
+    """Exit 2+ is a real grep error (bad pattern, not a repo) — it must not pass."""
+    monkeypatch.setattr(
+        "mergecraft.mcp.git._run_git",
+        _failing_git(returncode, stderr="fatal: command failed"),
+    )
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "grep", "args": ["pattern"]})
+
+    assert result.is_error is True, result.content[0]["text"]
+    assert f"failed ({returncode})" in result.content[0]["text"]
+
+
+async def test_grep_exit_1_with_stderr_stays_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An exit 1 that still wrote to stderr is not a clean no-match — fail closed."""
+    monkeypatch.setattr(
+        "mergecraft.mcp.git._run_git",
+        _failing_git(1, stderr="warning: unable to read a file"),
+    )
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "grep", "args": ["pattern"]})
+
+    assert result.is_error is True, result.content[0]["text"]
+    assert "failed (1)" in result.content[0]["text"]
+
+
+async def test_grep_untyped_runtime_error_stays_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the typed exit-1 is converted; any other failure still errors out."""
+
+    def _fake(args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
+        raise RuntimeError("git grep pattern failed (1): simulated legacy failure")
+
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", _fake)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "grep", "args": ["pattern"]})
+
+    assert result.is_error is True, result.content[0]["text"]
+
+
+async def test_grep_match_result_carries_no_no_matches_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real match keeps today's exact result shape — no ``noMatches`` key."""
+    recorder = _RunGitRecorder("learnings.md:3:Withdrawn review findings\n")
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "grep", "args": ["-n", "Withdrawn", "--", "learnings.md"]}
+    )
+
+    assert result.is_error is False, result.content[0]["text"]
+    payload = json.loads(result.content[0]["text"])
+    assert payload == {"output": "learnings.md:3:Withdrawn review findings\n"}
+
+
 @pytest.mark.parametrize("subcommand", ["push", "fetch", "pull", "clone"])
 async def test_auth_requiring_subcommands_name_their_dedicated_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str
@@ -986,6 +1080,7 @@ async def test_a_registered_cross_repo_checkout_is_reachable(
         "cat-file",
         "rev-list",
         "branch",
+        "merge-base",
     ],
 )
 async def test_readonly_subcommands_allowed(
@@ -998,6 +1093,71 @@ async def test_readonly_subcommands_allowed(
     result = await git_tool(_ctx(tmp_path)).execute({"command": subcommand})
     assert result.is_error is False, result.content[0]["text"]
     assert recorder.calls == [[subcommand]]
+
+
+# --- #1077 — merge-base allowlisted with rev-parse's confinement -------------
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(["HEAD", "main"], id="two-revs"),
+        pytest.param(["--is-ancestor", "HEAD", "origin/main"], id="is-ancestor"),
+        pytest.param(["--fork-point", "main", "HEAD"], id="fork-point"),
+        pytest.param(["--all", "HEAD", "main"], id="all-long"),
+        pytest.param(["-a", "HEAD", "main"], id="all-short"),
+        pytest.param(["--octopus", "a", "b", "c"], id="octopus"),
+        pytest.param(["--independent", "a", "b"], id="independent"),
+    ],
+)
+async def test_merge_base_read_forms_are_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    """#1077 — the reviewer prompts teach ``git diff --merge-base``, so agents
+    reach for the bare verb; every read form must run instead of burning a turn."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "merge-base", "args": args})
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [["merge-base", *args]]
+
+
+@pytest.mark.parametrize("subcommand", ["rev-parse", "merge-base"])
+async def test_merge_base_carries_the_rev_parse_path_confinement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str
+) -> None:
+    """#1077 — allowlisting must not loosen confinement: an absolute operand
+    outside the workspace is refused for merge-base exactly as for rev-parse."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": subcommand, "args": ["HEAD", OUTSIDE_DIR]}
+    )
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
+
+
+@pytest.mark.parametrize("subcommand", ["rev-parse", "merge-base"])
+@pytest.mark.parametrize(
+    "token",
+    [
+        pytest.param("-c", id="bare-short-ambiguous"),
+        pytest.param("-calias.x=!true", id="glued-alias-payload"),
+    ],
+)
+async def test_merge_base_refuses_config_flags_like_rev_parse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str, token: str
+) -> None:
+    """#1077 — merge-base declares only ``-a``, so a ``-c`` token is refused on
+    the same terms as rev-parse: ambiguous when bare, alias execution when glued."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": subcommand, "args": [token]})
+    assert result.is_error is True, result.content[0]["text"]
+    assert recorder.calls == []
 
 
 @pytest.mark.parametrize("shell", ["disabled", "restricted", "enabled"])
