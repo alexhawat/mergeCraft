@@ -242,6 +242,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A Codex run whose platform sandbox cannot start no longer claims "No review
+  ran" (#1083). The review does run — through mergeCraft MCP tools — so the
+  hint now names the actual capability loss (Codex-native shell tools are
+  unavailable), and only the true hard-failure path says no review ran. The
+  loss is recorded as structured run-scope evidence: the trajectory row is
+  stamped `failure_class="environment"` and run-health carries the
+  `codex-platform-sandbox-unavailable` advisory finding, visible to the gate
+  and fallback chain without parsing log prose. The sandbox refusal itself is
+  unchanged.
+
 - Run-bound checkpoint recovery no longer 404s on every `pull_request_target`
   run (#1082). The Actions API resolves `{workflow_id}` by numeric workflow id
   or workflow *file name* only, but `_list_mergecraft_workflow_runs` tried the
