@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.ci.log_excerpt import analyze_log as _analyze_log
 from mergecraft.ci.providers.github_actions import (
     GitHubActionsProvider,
     unavailable_check_suite_logs,
@@ -62,4 +61,4 @@ def get_check_suite_logs_tool(ctx: ToolContext):
     )
 
 
-__all__ = ["_analyze_log", "get_check_suite_logs_tool"]
+__all__ = ["get_check_suite_logs_tool"]
