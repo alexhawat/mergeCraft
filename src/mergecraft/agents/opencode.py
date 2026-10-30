@@ -1567,7 +1567,55 @@ def _run_opencode_cli_streaming(
             or f"opencode exited {returncode}",
             metadata={"retryable": True} if retryable else {},
         )
-    return AgentResult(success=True, output=accumulator.final_output or None)
+    return AgentResult(
+        success=True,
+        output=accumulator.final_output or None,
+        usage=_priced_stream_usage(accumulator, ctx=ctx),
+    )
+
+
+def _priced_stream_usage(
+    accumulator: StreamSpanAccumulator, *, ctx: AgentRunContext
+) -> AgentUsage | None:
+    """Return the stream's token usage, priced from the catalog when unpriced.
+
+    OpenCode 2.x reports its own cost per step; when a provider omits it, the
+    catalog fills it in the same way the session path does, so the run record's
+    ``Cost:`` line and the packet agree.
+    """
+    usage = accumulator.to_usage()
+    if usage is None or usage.cost_usd is not None:
+        return usage
+    from mergecraft.agents.curated_model_catalog import apply_catalog_cost_to_usage
+
+    return apply_catalog_cost_to_usage(usage, model=ctx.resolved_model)
+
+
+def _absorb_step_usage(accumulator: StreamSpanAccumulator, event: dict[str, Any]) -> None:
+    """Fold a 2.x step's reported tokens into the run's usage (#801).
+
+    OpenCode reports ``tokens`` on a ``step_finish`` part: ``input`` is the whole
+    prompt, with cached reads already inside it, so the cached count is recorded
+    without being added to the input total. Cost, when the provider reports it,
+    is passed through untouched.
+    """
+    part = event.get("part")
+    if not isinstance(part, dict):
+        return
+    tokens = part.get("tokens")
+    if not isinstance(tokens, dict):
+        return
+    cache = tokens.get("cache")
+    cache = cache if isinstance(cache, dict) else {}
+    payload: dict[str, Any] = {
+        "input_tokens": tokens.get("input") or 0,
+        "output_tokens": tokens.get("output") or 0,
+        "prompt_tokens_details": {"cached_tokens": cache.get("read") or 0},
+    }
+    cost = part.get("cost")
+    if isinstance(cost, (int, float)):
+        payload["cost_usd"] = float(cost)
+    accumulator.absorb_usage(payload)
 
 
 def _bash_only_handler(
@@ -1575,7 +1623,8 @@ def _bash_only_handler(
 ) -> Callable[[StreamSpanAccumulator, dict[str, Any]], None]:
     """Stream handler for a run with no session: record bash calls, touch nothing else."""
 
-    def _handle(_accumulator: StreamSpanAccumulator, event: dict[str, Any]) -> None:
+    def _handle(accumulator: StreamSpanAccumulator, event: dict[str, Any]) -> None:
+        _absorb_step_usage(accumulator, event)
         if event.get("type") == "tool_use":
             _record_opencode_bash(tool_state, event.get("part"))
 
@@ -1607,6 +1656,7 @@ def _session_event_handler(
             )
             session["error"] = str(message or event)[:1000]
             accumulator.set_stream_error(session["error"])
+        _absorb_step_usage(accumulator, event)
         part = event.get("part")
         if event.get("type") == "tool_use":
             _record_opencode_bash(tool_state, part)
