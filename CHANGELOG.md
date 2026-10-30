@@ -242,6 +242,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `git` tool no longer spends a reviewer turn on two read-only operations
+  the prompts teach (#1077). `merge-base` is now on the read-only allowlist with
+  the same ref/path confinement and config-flag refusal as `rev-parse`, so the
+  `git diff --merge-base` workflow the prompts describe actually runs. And
+  `git grep` exit 1 with clean stderr is grep's "no lines selected" answer: the
+  tool returns `{output: "", noMatches: true}` as success instead of
+  `✗ failed (1)`, while exit 2+ and an exit 1 that wrote to stderr stay
+  fail-closed. This is the `git`-door instance of #1027's intent-aware outcome
+  rule.
+
 - The approval gate accepts terminal attestation for clean reviews, and the
   gate-action table routes complete packets honestly (#1072, #1076). A review
   that runs cleanly, reads the diff, and submits terminal `approve` with zero

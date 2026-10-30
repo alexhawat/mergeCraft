@@ -41,8 +41,7 @@ _REQ_ID = 41
 
 async def _refusing_body(params: Mapping[str, Any]) -> ToolResult:
     raise ToolRefusedError(
-        "invalid git subcommand: 'merge-base' — not available through this tool "
-        "(read-only allowlist)"
+        "invalid git subcommand: 'gc' — not available through this tool (read-only allowlist)"
     )
 
 
@@ -178,10 +177,10 @@ def test_an_ordinary_tool_error_still_records_ok_true(tmp_path: Path) -> None:
 
 
 async def test_the_git_allowlist_refusal_is_tagged(tmp_path: Path) -> None:
-    """The issue's repro: ``git merge-base`` is refused before git ever runs."""
+    """A verb off the read-only allowlist is refused before git ever runs."""
     from mergecraft.mcp.git import git_tool
 
-    result = await git_tool(_ctx(tmp_path)).execute({"command": "merge-base"})
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "gc"})
 
     assert result.is_error is True
     assert result.refused is True
