@@ -1554,6 +1554,14 @@ Trajectory checks stamp `source="trajectory"`, `scope="run"`, and `introduced_by
 All three fields matter: `introduced_by_pr` drives causality, `scope` drives gating,
 `source` drives rendering.
 
+One run-scope signal is worth naming because the gate and the fallback chain key off
+its rule id: `codex-platform-sandbox-unavailable` records that Codex's Linux platform
+sandbox could not start (bubblewrap cannot nest a user namespace inside a container
+action), so Codex-native shell tools were unavailable and the review ran through
+mergeCraft MCP tools only. It is a typed **capability-loss** record — `scope="run"`,
+advisory, never a merge gate — so a degraded run is visible in `run_health` without
+anyone parsing log prose, and without weakening the sandbox refusal itself.
+
 ## Review scope is the materialised diff
 
 **The on-disk diff is the change set; git is not asked to re-derive it.**

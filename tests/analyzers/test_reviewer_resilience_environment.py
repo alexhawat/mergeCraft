@@ -22,6 +22,53 @@ def _command_execution_item(signature: str) -> dict[str, Any]:
     }
 
 
+def test_hint_names_capability_loss_without_claiming_no_review_ran() -> None:
+    """#1083: a review DID run (via MCP) when the sandbox fails mid-run."""
+    hint = user_namespace_failure_hint()
+    assert "No review ran" not in hint
+    assert "no review ran" not in hint.lower()
+    assert "Codex-native shell tools are unavailable" in hint
+    assert "mergeCraft MCP tools" in hint
+
+
+def test_user_namespace_failure_records_environment_capability_loss() -> None:
+    """The trajectory row is stamped ``environment`` so the packet's run_health
+    carries the capability loss even when the item's exit code would record the
+    refusal as an ordinary shell row (#1083)."""
+    from mergecraft.agents import codex_stream
+    from mergecraft.agents._stream_consumer import StreamSpanAccumulator
+    from mergecraft.evidence.trajectory import build_trajectory_record
+    from mergecraft.evidence.trajectory_audit import audit_trajectory
+    from mergecraft.mcp.tool_state import init_tool_state
+
+    state = init_tool_state(owner="acme", name="demo", dir="/tmp/demo")
+    handler, _finalize = codex_stream.codex_stream_event_handler(
+        tracer=None, model_id="gpt-test", tool_state=state
+    )
+    acc = StreamSpanAccumulator(agent_name="codex")
+
+    # exit_code 1 on a non-verify command would otherwise record outcome_ok=None
+    # (an ordinary, successful row) and the audit would never see the loss.
+    item = _command_execution_item(USER_NAMESPACE_FAILURES[0])
+    item["item"]["exit_code"] = 1
+    handler(acc, item)
+
+    assert len(state.tool_calls) == 1
+    row = state.tool_calls[0]
+    assert row.ok is False
+    assert row.failure_class == "environment"
+
+    findings = audit_trajectory(build_trajectory_record(state))
+    capability = [f for f in findings if f.rule_id == "codex-platform-sandbox-unavailable"]
+    assert len(capability) == 1
+    assert capability[0].scope == "run"
+    assert "No review ran" not in capability[0].message
+
+    from mergecraft.agents.gates import blocking_findings
+
+    assert blocking_findings(capability) == []
+
+
 def test_user_namespace_failure_hint_logged_once_on_exit_zero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
