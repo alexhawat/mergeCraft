@@ -66,10 +66,32 @@ verdict_from_packet() {
   fi
 }
 
+verdict_reason_from_packet() {
+  local packet="$1"
+  if [ -n "${packet}" ]; then
+    printf '%s' "$packet" | jq -r '.decision.reason // empty' 2>/dev/null || true
+  fi
+}
+
 # Codex fallback: only failure|success count as a posted verdict (neutral still falls back).
 verdict_blocks_codex_fallback() {
   case "$1" in
     failure|success) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# #1078 — a neutral verdict on the untrusted tier can never become permissive
+# (D14 inertness), so a second review run would reproduce the same neutral at
+# full cost. Skip the Codex fallback only for that named reason; every other
+# neutral still falls back, because the fallback may legitimately change it.
+neutral_is_untrusted_tier() {
+  case "$1" in
+    neutral) ;;
+    *) return 1 ;;
+  esac
+  case "$2" in
+    *"untrusted tier"*) return 0 ;;
     *) return 1 ;;
   esac
 }

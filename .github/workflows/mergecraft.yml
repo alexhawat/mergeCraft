@@ -689,6 +689,11 @@ jobs:
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
           MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_opencode_go.outputs.app-slug && format('{0}[bot]', steps.app_token_opencode_go.outputs.app-slug) || '' }}
+          # #1078 — when Codex is available it replaces a neutral OpenCode Go
+          # decision, so this rung is non-terminal in exactly that case. It
+          # records a neutral run in the sticky progress comment instead of
+          # posting a formal review the next rung cannot supersede.
+          MERGECRAFT_STICKY_ONLY_NEUTRAL: ${{ env.HAS_CODEX }}
           # OpenCode Go is registered in .mergecraft/config.yaml with envIndex 9.
           LLM_PROVIDER_9_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
