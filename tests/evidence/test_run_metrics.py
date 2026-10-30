@@ -103,3 +103,92 @@ def test_record_renders_review_cost_and_the_stall() -> None:
     assert "- **Review cost:** 9 tool calls · 3 files read · 120 diff lines" in text
     assert "setup 2s, agent 90s, publish 1s" in text
     assert "**Agent stall:** codex stalled" in text
+
+
+# ── #1075 — honest phase timing on agent-published records ──────────────────
+
+
+def test_run_metrics_reports_agent_elapsed_so_far_when_unstamped() -> None:
+    """The dispatch-end stamp is invisible mid-dispatch; elapsed-so-far is honest."""
+    state = init_tool_state(owner="acme", name="demo", dir="/repo")
+    state.agent_started_monotonic = 100.0
+
+    metrics = _run_metrics(
+        _Ctx(state), trajectory=TrajectoryRecord(), diff_text=_DIFF, now=lambda: 175.5
+    )
+
+    assert metrics.phase_elapsed_s["agent"] == 75.5
+
+
+def test_run_metrics_agent_falls_back_to_zero_without_a_dispatch_marker() -> None:
+    """A run that never dispatched an agent has no elapsed to derive."""
+    state = init_tool_state(owner="acme", name="demo", dir="/repo")
+
+    metrics = _run_metrics(
+        _Ctx(state), trajectory=TrajectoryRecord(), diff_text=_DIFF, now=lambda: 175.5
+    )
+
+    assert metrics.phase_elapsed_s["agent"] == 0.0
+
+
+def test_run_metrics_keeps_a_real_agent_stamp_over_elapsed_so_far() -> None:
+    """The end-of-run record renders the final stamp, not a mid-dispatch estimate."""
+    state = init_tool_state(owner="acme", name="demo", dir="/repo")
+    state.agent_started_monotonic = 100.0
+    state.phase_elapsed_s = {"agent": 416.0}
+
+    metrics = _run_metrics(
+        _Ctx(state), trajectory=TrajectoryRecord(), diff_text=_DIFF, now=lambda: 999.0
+    )
+
+    assert metrics.phase_elapsed_s["agent"] == 416.0
+
+
+def test_run_metrics_omits_publish_until_the_run_stamps_it() -> None:
+    """``publish`` is stamped after its own record renders — unstamped means omitted."""
+    state = init_tool_state(owner="acme", name="demo", dir="/repo")
+
+    metrics = _run_metrics(_Ctx(state), trajectory=TrajectoryRecord(), diff_text=_DIFF)
+
+    assert "publish" not in metrics.phase_elapsed_s
+    assert metrics.phase_elapsed_s["setup"] == 0.0
+
+    state.phase_elapsed_s = {"publish": 0.4}
+    stamped = _run_metrics(_Ctx(state), trajectory=TrajectoryRecord(), diff_text=_DIFF)
+
+    assert stamped.phase_elapsed_s["publish"] == 0.4
+
+
+def test_record_renders_sub_second_phases_honestly() -> None:
+    """Sub-second work must not read as ``0s``; an absent publish stays absent."""
+    from types import SimpleNamespace
+
+    from mergecraft.evidence.packet import RunMetrics
+    from mergecraft.findings.ledger import render_deterministic_review_block
+
+    metrics = RunMetrics(
+        tool_calls=22,
+        read_tool_calls=9,
+        read_tool_turns=4,
+        distinct_files_read=3,
+        diff_lines=161,
+        diff_added_lines=100,
+        diff_deleted_lines=61,
+        phase_elapsed_s={"setup": 0.0, "analyzers": 0.124, "agent": 416.0, "judge": 0.02},
+    )
+    packet = SimpleNamespace(
+        files_changed=[],
+        findings=[],
+        run_health=None,
+        deterministic_checks=[],
+        decision=None,
+        self_assessment=None,
+        agent=None,
+        run_metrics=metrics,
+        change_id="acme/demo#7",
+    )
+
+    text = render_deterministic_review_block(packet=packet)
+
+    assert "setup 0s, analyzers 0.1s, agent 416s, judge <0.1s" in text
+    assert "publish" not in text

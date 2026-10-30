@@ -159,5 +159,6 @@ def test_approve_never_raises_and_request_changes_never_leaves_success(
     decision = decide_approval(packet, run_succeeded=True, tier="trusted")
     if verdict == "request_changes":
         assert decision.verdict != "success"
-    # approve with no findings is neutral regardless (empty-findings guard) —
-    # the point pinned here is only that it is never *forced* to success.
+    # approve with no findings and no observed read coverage stays neutral —
+    # this fixture records no reads, so the #1072 terminal attestation cannot
+    # fire; the point pinned here is that approve is never *forced* to success.

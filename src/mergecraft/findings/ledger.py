@@ -1158,6 +1158,33 @@ def reconcile_outcome(*, value: Any, not_an_approval: bool, positive: str | Sequ
     return rendered
 
 
+def _format_phase_elapsed(seconds: float) -> str:
+    """Render one phase's elapsed seconds for the **Review cost** row (#1075).
+
+    ``{:.0f}s`` rounds real sub-second work (analyzers at 0.124s) down to
+    ``0s``, which reads as "the phase did not run". Sub-second values keep one
+    decimal instead; under 50 ms that decimal would still render ``0.0s``, so
+    those are named ``<0.1s`` — small, but not zero.
+
+    Examples:
+        >>> _format_phase_elapsed(0.0)
+        '0s'
+        >>> _format_phase_elapsed(0.124)
+        '0.1s'
+        >>> _format_phase_elapsed(0.02)
+        '<0.1s'
+        >>> _format_phase_elapsed(90.0)
+        '90s'
+    """
+    if seconds <= 0:
+        return "0s"
+    if seconds < 0.05:
+        return "<0.1s"
+    if seconds < 1:
+        return f"{seconds:.1f}s"
+    return f"{seconds:.0f}s"
+
+
 def render_deterministic_review_block(
     *,
     packet: Any,
@@ -1284,7 +1311,7 @@ def render_deterministic_review_block(
         phase_elapsed = getattr(metrics, "phase_elapsed_s", {}) or {}
         phase_order = ("setup", "analyzers", "agent", "judge", "publish")
         phase_bits = [
-            f"{name} {float(phase_elapsed[name]):.0f}s"
+            f"{name} {_format_phase_elapsed(float(phase_elapsed[name]))}"
             for name in phase_order
             if name in phase_elapsed
         ]

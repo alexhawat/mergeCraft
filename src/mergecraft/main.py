@@ -514,6 +514,18 @@ async def publish_deterministic_record(
     publication_lines = _publication_record_lines(tool_state)
     if publication_lines:
         block = "\n".join([block.rstrip(), *publication_lines]) + "\n"
+    from mergecraft.mcp.review import should_publish_sticky_only
+
+    if tool_state.review_publication_sticky_only or should_publish_sticky_only(packet):
+        # #1078 — this rung is non-terminal (a fallback rung will replace a
+        # neutral decision), so its record belongs in the sticky progress
+        # comment. It must not create the formal review the publish seam
+        # deliberately skipped, and must not retire the sticky as a legacy
+        # record: the sticky is the record.
+        from mergecraft.findings.ledger import upsert_sticky_progress_comment
+
+        await upsert_sticky_progress_comment(resolved_ctx, block)
+        return
     owner, repo = resolved_ctx.repo.owner, resolved_ctx.repo.name
     review = tool_state.review
     existing_body = ""
@@ -1937,13 +1949,16 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
                 agent_timeout_ms / 1000,
             )
 
+        # Stamped unconditionally (deadline or not) so a record rendered
+        # mid-dispatch — inside the terminal publish call — can report the
+        # agent phase as elapsed-so-far instead of 0s (#1075).
+        tool_state.agent_started_monotonic = time.monotonic()
         if agent_timeout_ms is None:
             winning_slug, result = await agent_task
         else:
-            agent_started = time.monotonic()
+            agent_started = tool_state.agent_started_monotonic
             ctx.agent_deadline_monotonic = agent_started + agent_timeout_ms / 1000.0
             # The MCP server reads these to tell the agent how much time it has used.
-            tool_state.agent_started_monotonic = agent_started
             tool_state.agent_deadline_s = agent_timeout_ms / 1000.0
             try:
                 winning_slug, result = await asyncio.wait_for(
@@ -2189,6 +2204,11 @@ def publication_skip_reason(
     run, and a submission that the post-run re-validation rejected — the last one
     is what to look for first when a review is expected and absent.
     """
+    if getattr(tool_state, "review_publication_sticky_only", False):
+        return (
+            "this non-terminal rung deferred its neutral verdict to the fallback "
+            "rung; the run record is in the sticky progress comment (#1078)"
+        )
     if verdict_protocol == "shadow":
         return "the verdict protocol is shadow, so the verdict is recorded but not published"
     if not _is_review_mode(tool_state.selected_mode):

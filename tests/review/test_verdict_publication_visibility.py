@@ -252,3 +252,45 @@ async def test_a_received_submission_is_still_published(
     )
 
     assert published == [ctx]
+
+
+@pytest.mark.asyncio
+async def test_a_sticky_only_rung_records_a_declined_publication(tmp_path: Path) -> None:
+    """#1078 — deferring to the fallback rung is a decision, not a failed publish."""
+    import mergecraft.main as main_mod
+
+    ctx = await _state_with_a_recorded_verdict(tmp_path)
+    ctx.tool_state.review_publication_sticky_only = True
+    result = AgentResult(success=True, terminal_submission_received=True)
+
+    await main_mod._publish_recorded_verdict(ctx, result, verdict_protocol="enforce")
+
+    rows = [
+        call
+        for call in ctx.tool_state.tool_calls
+        if call.tool == main_mod._ORCHESTRATOR_PUBLISH_STEP
+    ]
+    assert len(rows) == 1, [call.tool for call in ctx.tool_state.tool_calls]
+    assert rows[0].ok is False
+    assert rows[0].failure_class == "declined"
+    assert "sticky" in (rows[0].error or "")
+    assert _ignored_tool_errors(ctx) == []
+
+
+def test_a_sticky_only_rung_owes_no_publication_receipt() -> None:
+    """The run that deliberately deferred must not read as an unpublished verdict."""
+    from mergecraft.main_outcome import _publication_outcome_inputs
+
+    class _State:
+        selected_mode = "Review"
+        review_publication_sticky_only = True
+        terminal_submission = object()
+
+    receipt, mismatch = _publication_outcome_inputs(
+        _State(),  # type: ignore[arg-type]
+        result=AgentResult(success=True, terminal_submission_received=True),
+        verdict_protocol="enforce",
+    )
+
+    assert receipt is None
+    assert mismatch is None

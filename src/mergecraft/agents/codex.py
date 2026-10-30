@@ -447,7 +447,11 @@ def user_namespace_failure_hint(
     The failure is environmental, not a reviewer error, and the two are worth
     telling apart: a caller that swallows this with ``continue-on-error`` would
     otherwise see no difference between "this runner cannot sandbox Codex" and
-    "the review ran and found nothing".
+    "the review ran and found nothing". The hint deliberately does *not* claim
+    "no review ran" (#1083): when the sandbox fails to start mid-run the review
+    continues through mergeCraft MCP tools only, and the capability loss is
+    recorded as run-scope evidence. The hard-failure path in ``_run_codex_once``
+    (where Codex truly never started) names that case itself.
     """
     tier_line = ""
     if configured_tier is not None:
@@ -466,8 +470,10 @@ def user_namespace_failure_hint(
     return (
         "Codex could not start its Linux platform sandbox: bubblewrap cannot create "
         "a user namespace inside a container that is already namespaced (a Docker "
-        "container action, or a runner without unprivileged user namespaces). No "
-        "review ran.\n"
+        "container action, or a runner without unprivileged user namespaces). "
+        "Codex-native shell tools are unavailable for this run; the review can only "
+        "use mergeCraft MCP tools, and the capability loss is recorded as run-scope "
+        "evidence in the packet.\n"
         f"{tier_line}"
         "Remedies:\n"
         f"  - Request {CODEX_SANDBOX_ENV}={CODEX_SANDBOX_UNSANDBOXED} on the mergeCraft "
@@ -897,7 +903,11 @@ def _run_codex_streaming(
                 CODEX_SANDBOX_ENV,
                 CODEX_SANDBOX_UNSANDBOXED,
             )
-            error = f"{hint}\n\ncodex stderr:\n{error}"
+            error = (
+                f"{hint}\n\n"
+                "No review ran: the sandbox failure happened on Codex's first exec, "
+                f"before any review could start.\n\ncodex stderr:\n{error}"
+            )
         # A retired subscription login is infrastructure, not a review failure,
         # and no retry against the same login can succeed (#922). Only a run
         # actually using that login can see this: an API-key run that merely

@@ -11,7 +11,7 @@ from urllib.parse import urljoin
 import httpx
 from loguru import logger
 
-from mergecraft.mcp.shared import ToolClass, execute, tool
+from mergecraft.mcp.shared import ToolClass, ToolRefusedError, execute, tool
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.security.egress import guard_external_url
 
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 def _check_upload_path(path: Path, resolved_repo_root: str, resolved_tmpdir: str) -> None:
-    """Raise ValueError when *path* is a symlink or escapes the allowed roots (#258 / D8).
+    """Raise ToolRefusedError when *path* is a symlink or escapes the allowed roots (#258 / D8).
 
     A path must be a regular file (not a symlink) and must resolve into the repo
     checkout, a registered cross-repo checkout, or the session tmpdir — the same
@@ -31,12 +31,12 @@ def _check_upload_path(path: Path, resolved_repo_root: str, resolved_tmpdir: str
 
     if path.is_symlink():
         msg = f"Blocked: '{path}' is a symlink — symlink escapes are not permitted."
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
     try:
         confine_to_workspace(str(path), base=resolved_repo_root, extra_roots=(resolved_tmpdir,))
     except WorkspacePathError as exc:
         msg = f"Blocked: '{path}' resolves outside the allowed upload roots — {exc}"
-        raise ValueError(msg) from exc
+        raise ToolRefusedError(msg) from exc
 
 
 def upload_file_tool(ctx: ToolContext):

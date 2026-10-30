@@ -1,4 +1,4 @@
-"""The six default gate-action policies (#46 / W9.2 plus ``has_blockers``).
+"""The eight default gate-action policies (#46 / W9.2 plus ``has_blockers``, #1076).
 
 The thermostat is the structural successor to the ``Decision`` row Batch
 A shipped: every gate outcome maps to a *named* action, never to a
@@ -7,7 +7,12 @@ names literally, plus ``has_blockers`` so Critical/Major findings
 request changes under their own key — a schema failure blocks, a
 changed-unread-file asks for changes, ``has_blockers`` asks for
 changes, a low-risk passing change merges, a tool-loop asks for more
-tests, and a high-risk migration asks for human review.
+tests, and a high-risk migration asks for human review. #1076 adds
+``clean_pass`` — a complete, blocker-free packet with a trusted success
+verdict merges on any lane whose ``auto_merge_lane`` is not ``forbidden``
+— and ``needs_human_review`` — a structurally complete packet with no
+automated route asks for a human (#1056: unknown is never green), leaving
+``schema_failure`` to fire only on structurally absent evidence.
 
 The mapping is **declarative data, not a long if/elif**: a repository
 overrides any individual rule by ``lane`` or ``rule_id`` via
@@ -19,7 +24,8 @@ by ``decide_action()`` rather than silently widening the gate.
 Exports:
     GateAction: The closed action vocabulary (Pydantic enum / Literal).
     GateActionPolicy: A schema -> action mapping. Treated as data.
-    DEFAULT_GATE_POLICIES: The six policies (#46 examples plus ``has_blockers``).
+    DEFAULT_GATE_POLICIES: The eight policies (#46 examples plus ``has_blockers``,
+        ``clean_pass`` and ``needs_human_review``).
 """
 
 from __future__ import annotations
@@ -77,16 +83,27 @@ GateActionPolicy = dict[RuleId, GateAction]
 # Named rules in ``select_rule_id`` order (not including the catch-all).
 # ``agents.gates._RULE_PREDICATES`` walks the same keys; ``schema_failure``
 # is appended below and is never listed in the predicate table.
+# Order is match priority: the two #1076 rows come last so ``has_blockers``,
+# ``changed-unread-file`` and ``tool_loop`` keep winning over ``clean_pass``
+# when their findings coexist with a trusted success verdict, and
+# ``needs_human_review`` only fires once every specific rule has missed.
 NAMED_GATE_POLICY_ROWS: Final[tuple[tuple[str, GateAction], ...]] = (
     ("high_risk_migration", GateAction.REQUIRE_HUMAN_REVIEW),
     ("low_risk_passing", GateAction.AUTO_MERGE),
     ("has_blockers", GateAction.REQUEST_CHANGES),
     ("changed-unread-file", GateAction.REQUEST_CHANGES),
     ("tool_loop", GateAction.REQUIRE_MORE_TESTS),
+    ("clean_pass", GateAction.AUTO_MERGE),
+    ("needs_human_review", GateAction.REQUIRE_HUMAN_REVIEW),
 )
 
 # Catch-all ``schema_failure`` stays outside the named rows. Dict insertion
 # order is not match priority; ``select_rule_id`` chooses the key.
+# #1076 re-scoped the catch-all: ``schema_failure`` fires only when the
+# packet's evidence is structurally absent (no decision, findings, blast
+# radius, or trajectory) — a parsed, validated packet that matches no named
+# rule routes to ``needs_human_review`` instead, so the label never claims a
+# schema failure on complete evidence.
 DEFAULT_GATE_POLICIES: Final[GateActionPolicy] = {
     "schema_failure": GateAction.BLOCK,
     **{rule_id: action for rule_id, action in NAMED_GATE_POLICY_ROWS},

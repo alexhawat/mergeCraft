@@ -88,7 +88,7 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.15.0`.
+The current version is `1.16.0`.
 
 Wiring a consumer is **not** a shape change: #96 gave these models their first
 runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
@@ -136,6 +136,13 @@ not move.
   (setup / analyzers / agent / judge / publish), and the last idle-watchdog
   diagnostic. Measurement only — it never feeds a gate. Additive; `null` on a
   packet built before the field existed.
+- `1.16.0` — adds `"refused"` to the trajectory `failure_class` vocabulary
+  (#1073): a guard (allowlist, path confinement, config-flag, mode) that stops
+  a tool call before it runs is stamped from the typed `ToolRefusedError` at
+  the `mcp/shared.py::execute` seam, so the call records `ok=False` with
+  `failure_class="refused"` instead of `ok=True, error=null`. Additive — a
+  packet written before the value existed never carries it. The trajectory
+  record schema moves to `1.2.0` with it.
 
 ## Top-level fields
 

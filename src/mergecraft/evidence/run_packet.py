@@ -24,6 +24,7 @@ Exports:
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -46,7 +47,7 @@ from mergecraft.evidence.packet import (
 from mergecraft.utils.diff_paths import changed_paths_from_diff
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from mergecraft.classify import BlastRadiusClassification
     from mergecraft.evidence.gate_policy import GateActionPolicy
@@ -455,8 +456,18 @@ def _run_metrics(
     *,
     trajectory: Any,
     diff_text: str,
+    now: Callable[[], float] = time.monotonic,
 ) -> RunMetrics:
-    """Build the measurement-only run metrics (slice 7)."""
+    """Build the measurement-only run metrics (slice 7).
+
+    The ``agent`` phase is stamped in ``main.py`` only *after* the dispatch
+    returns, so a record rendered inside the terminal publish call would read
+    ``agent 0s`` on exactly the runs that self-publish (#1075). When the stamp
+    is missing but the dispatch start marker exists, the honest value is the
+    elapsed-so-far. ``publish`` gets no such fill-in: it is stamped after the
+    publish call returns, which is structurally after its own record renders,
+    so an unstamped ``publish`` is omitted rather than rendered as ``0s``.
+    """
     state = ctx.tool_state
     calls = list(getattr(trajectory, "tool_calls", []) or [])
     phases = dict(getattr(state, "phase_elapsed_s", {}) or {})
@@ -472,8 +483,14 @@ def _run_metrics(
     )
     phases.setdefault("analyzers", round(analyzer_ms / 1000, 3))
     phases.setdefault("judge", round(judge_ms / 1000, 3))
-    for phase in ("setup", "agent", "publish"):
-        phases.setdefault(phase, 0.0)
+    if "agent" not in phases:
+        agent_started = getattr(state, "agent_started_monotonic", None)
+        phases["agent"] = round(now() - agent_started, 3) if agent_started is not None else 0.0
+    phases.setdefault("setup", 0.0)
+    # ``publish`` gets no setdefault: the stamp lands after
+    # ``publish_pull_request_review`` returns, while the record renders inside
+    # that call, so an unstamped publish must be omitted rather than rendered
+    # as ``0s`` (#1075). A genuinely stamped value still renders.
     added = deleted = 0
     for line in diff_text.splitlines():
         if line.startswith("+") and not line.startswith("+++ "):
@@ -586,6 +603,7 @@ def build_run_packet(
     run_succeeded: bool,
     change_id: str | None = None,
     extra_findings: list[Finding] | None = None,
+    in_flight_tool: str | None = None,
 ) -> MergeEvidencePacket:
     """Assemble the packet for a completed run, decision included.
 
@@ -594,6 +612,11 @@ def build_run_packet(
     the returned verdict. That keeps the verdict a pure function of the
     evidence actually recorded, rather than of a parallel set of inputs.
     ``change_id`` defaults to the PR-derived identifier on ``ctx``.
+
+    ``in_flight_tool`` names the tool call this assembly runs inside of, when
+    the caller is a tool body (#1074): the terminal publish call is appended
+    to the trajectory only after it returns, so the trajectory audit needs
+    the name to see the completion signal being sent right now.
     """
     from mergecraft.evidence.findings import load_run_findings_with_drops
     from mergecraft.mcp.tool_state import primary_repo_state
@@ -622,6 +645,7 @@ def build_run_packet(
         trajectory,
         diff_text=coverage_diff or None,
         diff_path=coverage_path,
+        in_flight_tool=in_flight_tool,
     )
     run_metrics = _run_metrics(ctx, trajectory=trajectory, diff_text=diff_text)
 
@@ -822,6 +846,7 @@ def resolve_prepared_run_packet(
     run_succeeded: bool,
     change_id: str | None = None,
     extra_findings: list[Finding] | None = None,
+    in_flight_tool: str | None = None,
 ) -> MergeEvidencePacket | None:
     """Return the run's cached packet snapshot, assembling it at most once (D7).
 
@@ -829,7 +854,9 @@ def resolve_prepared_run_packet(
     the same evidence shell so findings cannot drift between publish time and
     finalize. The structural decision is re-finalized on every call so a
     publish-time ``run_succeeded=True`` snapshot does not stick when finalize
-    reports failed, timed_out, or inconclusive.
+    reports failed, timed_out, or inconclusive. ``in_flight_tool`` is used only
+    on the first (assembling) call — the cached shell already carries the
+    audit outcome it produced.
     """
     cached = ctx.tool_state.prepared_run_packet
     if cached is not None:
@@ -853,6 +880,7 @@ def resolve_prepared_run_packet(
         run_succeeded=run_succeeded,
         change_id=change_id,
         extra_findings=extra_findings,
+        in_flight_tool=in_flight_tool,
     )
     if packet is not None:
         ctx.tool_state.prepared_run_packet = _cached_packet_shell(packet)
@@ -865,6 +893,7 @@ def prepare_run_packet(
     run_succeeded: bool,
     change_id: str | None = None,
     extra_findings: list[Finding] | None = None,
+    in_flight_tool: str | None = None,
 ) -> MergeEvidencePacket | None:
     """Assemble once. ``None`` means skip write/approval, never rebuild."""
     resolved = change_id or _change_id(ctx)
@@ -876,6 +905,7 @@ def prepare_run_packet(
             change_id=resolved,
             run_succeeded=run_succeeded,
             extra_findings=extra_findings,
+            in_flight_tool=in_flight_tool,
         )
     except (KeyError, OSError, RuntimeError, ValueError, ValidationError) as err:
         logger.warning("evidence packet: assembly failed — {}", err)
