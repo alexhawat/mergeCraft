@@ -1584,8 +1584,14 @@ def _priced_stream_usage(
     ``Cost:`` line and the packet agree.
     """
     usage = accumulator.to_usage()
-    if usage is None or usage.cost_usd is not None:
+    if usage is None:
         return usage
+    if usage.cost_usd is not None and usage.cost_usd > 0:
+        return usage
+    if usage.cost_usd is not None:
+        # OpenCode emits ``cost: 0`` when it cannot price the model, which is
+        # "unknown", not "free" — let the catalog try.
+        usage = replace(usage, cost_usd=None)
     from mergecraft.agents.curated_model_catalog import apply_catalog_cost_to_usage
 
     return apply_catalog_cost_to_usage(usage, model=ctx.resolved_model)
@@ -1594,10 +1600,14 @@ def _priced_stream_usage(
 def _absorb_step_usage(accumulator: StreamSpanAccumulator, event: dict[str, Any]) -> None:
     """Fold a 2.x step's reported tokens into the run's usage (#801).
 
-    OpenCode reports ``tokens`` on a ``step_finish`` part: ``input`` is the whole
-    prompt, with cached reads already inside it, so the cached count is recorded
-    without being added to the input total. Cost, when the provider reports it,
-    is passed through untouched.
+    OpenCode's ``step_finish`` part carries five **disjoint** counters:
+    ``input`` is the non-cached prompt, ``output`` the visible completion,
+    ``reasoning`` separate from it, and ``cache.read`` / ``cache.write`` the
+    cached prompt halves. The CLI's own ``TokenUsage.total()`` sums all five, and
+    it bills ``cache.read``/``cache.write`` separately and ``output`` +
+    ``reasoning`` together, so the accumulator is fed the same way: cached
+    prompt tokens are Anthropic-style additive, and reasoning joins the output
+    total.
     """
     part = event.get("part")
     if not isinstance(part, dict):
@@ -1609,8 +1619,9 @@ def _absorb_step_usage(accumulator: StreamSpanAccumulator, event: dict[str, Any]
     cache = cache if isinstance(cache, dict) else {}
     payload: dict[str, Any] = {
         "input_tokens": tokens.get("input") or 0,
-        "output_tokens": tokens.get("output") or 0,
-        "prompt_tokens_details": {"cached_tokens": cache.get("read") or 0},
+        "output_tokens": (tokens.get("output") or 0) + (tokens.get("reasoning") or 0),
+        "cache_read_input_tokens": cache.get("read") or 0,
+        "cache_creation_input_tokens": cache.get("write") or 0,
     }
     cost = part.get("cost")
     if isinstance(cost, (int, float)):

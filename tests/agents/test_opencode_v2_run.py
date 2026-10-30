@@ -290,7 +290,7 @@ def test_a_2x_turn_records_token_usage_from_step_finish(
                     "tokens": {
                         "input": 1200,
                         "output": 34,
-                        "reasoning": 0,
+                        "reasoning": 7,
                         "cache": {"read": 300, "write": 10},
                     },
                 },
@@ -310,9 +310,12 @@ def test_a_2x_turn_records_token_usage_from_step_finish(
     assert result.success is True
     usage = result.usage
     assert usage is not None, "a stream that reports tokens must carry usage"
-    assert usage.input_tokens == 1200, "the prompt total is not inflated by cached reads"
-    assert usage.output_tokens == 34
+    # Disjoint counters: prompt = input + cache.read + cache.write; completion =
+    # output + reasoning, which is how the pinned CLI totals and bills them.
+    assert usage.input_tokens == 1200 + 300 + 10
+    assert usage.output_tokens == 34 + 7
     assert usage.cache_read_tokens == 300
+    assert usage.cache_write_tokens == 10
     assert usage.cost_usd == pytest.approx(0.0021)
 
 
@@ -356,6 +359,56 @@ def test_a_2x_turn_without_reported_tokens_carries_no_usage(
 
     assert result.success is True
     assert result.usage is None, "no reported tokens must not invent a usage row"
+
+
+def test_a_zero_cost_step_is_priced_from_the_catalog(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """OpenCode emits ``cost: 0`` when it cannot price a model — that is unknown, not free."""
+    stdout = (
+        json.dumps(
+            {
+                "type": "step_finish",
+                "sessionID": "ses_9",
+                "part": {
+                    "cost": 0,
+                    "tokens": {"input": 500_000, "output": 2_000, "cache": {}},
+                },
+            }
+        )
+        + "\n"
+    )
+    monkeypatch.setattr(oc, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 0))
+
+    result = oc._run_opencode_cli_streaming(
+        cmd=["opencode"],
+        ctx=make_agent_run_context(tmp_path, resolved_model="paperinstruments/ultramarine-1-flash"),
+        env={},
+        session={},
+    )
+
+    assert result.usage is not None
+    assert result.usage.cost_usd is not None
+    assert result.usage.cost_usd > 0, "a zero cost must fall back to the catalog price"
+
+
+def test_the_no_session_handler_also_records_usage() -> None:
+    """A run without a session id still reports tokens; the handler must keep them."""
+    handle = oc._bash_only_handler(None)
+    accumulator = StreamSpanAccumulator(agent_name="opencode")
+
+    handle(
+        accumulator,
+        {
+            "type": "step_finish",
+            "part": {"tokens": {"input": 40, "output": 2, "cache": {"read": 5}}},
+        },
+    )
+
+    usage = accumulator.to_usage()
+    assert usage is not None
+    assert usage.input_tokens == 45
+    assert usage.output_tokens == 2
 
 
 def test_a_failed_2x_turn_names_its_stream_error(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
