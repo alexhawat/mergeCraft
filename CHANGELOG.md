@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The install line is `uv tool install mergecraft-action==0.1.0a4`. PyPI carries
+  the pre-release distribution `mergecraft-action`; the git install stays
+  documented for an unreleased commit.
+
+- The merge evidence packet schema is `1.16.0`; the trajectory record schema is
+  `1.2.0` (optional `diff_read_path`, `diff_read`, `duration_ms` on a tool-call
+  row, all omitted while unset; `"refused"` joins the `failure_class`
+  vocabulary).
+
+
 ### Fixed
 
 - One logical review no longer appears as one formal review per fallback rung
@@ -92,12 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sub-second phases render with one decimal (`0.1s`) — or `<0.1s` — instead of
   rounding to `0s`.
 
-### Changed
 
-- The merge evidence packet schema is `1.16.0`; the trajectory record schema is
-  `1.2.0` (optional `diff_read_path`, `diff_read`, `duration_ms` on a tool-call
-  row, all omitted while unset; `"refused"` joins the `failure_class`
-  vocabulary).
 
 ## [0.1.0a4] — 2026-10-29
 

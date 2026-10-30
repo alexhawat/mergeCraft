@@ -61,6 +61,37 @@ on an issue or to a comment: the command is the approval. Craft does open a
 publish-request issue during `prepare`; the `prepare` job closes it as not planned
 and comments the command above, so it is informational and never a pending approval.
 
+### Publishing from a workstation
+
+A local publish can fail part-way through its target list, and the credentials are
+the part most likely to be wrong. Check these before running it:
+
+- **PyPI:** `TWINE_USERNAME=__token__` and `TWINE_PASSWORD` set to an API token.
+  The first upload of a new distribution needs a token that can create the
+  project; project-scoped tokens cannot exist until the project does.
+- **GHCR:** `GITHUB_TOKEN` must carry **`write:packages`**. A token from
+  `gh auth token` does not: it has `gist`, `read:org`, `repo` and `workflow`, so
+  the image retag fails with `403 Forbidden` *after* PyPI and the GitHub release
+  have already succeeded. Craft logs in with `GITHUB_TOKEN`, not with your
+  `docker login`.
+- **GitHub release:** the same `GITHUB_TOKEN` needs `repo`.
+
+Craft writes a publish-state file under `~/.local/state/craft/` after each target,
+so a re-run with a corrected credential skips what already published and retries
+the rest. Do not delete a tag, re-cut the branch, or bump the version to recover:
+finish the same candidate. After a successful run, discard the post-release
+version bump with `git restore pyproject.toml`; never commit it.
+
+Use `--no-merge --keep-branch` when the merge-back must go through a reviewed PR:
+
+```bash
+craft publish <version> --no-merge --keep-branch
+```
+
+Without those flags Craft checks out the default branch, merges the release branch
+and pushes it directly, which the branch ruleset rejects after the targets have
+already published.
+
 ## Soak period
 
 An RC soaks before a stable GitHub/PyPI/GHCR promotion:
@@ -119,6 +150,9 @@ After an approved CI/CD run completes, prepare **two separate reviewed changes**
    `make action-manifest-prepare`. This verifies provenance and changes only
    `action.yml`. Review, commit and merge this change. Record its resulting
    manifest commit C; if squash merging, record the actual merged commit.
+   For the post-release cycle, check the worktree out at S rather than at the
+   default branch's tip even when the trees are equal: the command refuses any
+   commit that changes more than `action.yml` relative to the image source.
 2. Fetch the target branch. In a clean isolated worktree based on that branch,
    set `MANIFEST_COMMIT` to C and `RELEASE_BASE_BRANCH` to `main` or `pre-0.0.1`,
    then run `make action-pin-prepare`. This requires C to be in the fetched

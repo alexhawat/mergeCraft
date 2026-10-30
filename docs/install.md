@@ -27,12 +27,19 @@ a compatible interpreter; no local Python install is needed.
 
 ## Path B — local CLI
 
-Install from git (PyPI is not published yet):
+PyPI carries the pre-release `mergecraft-action` (the CLI binary stays
+`mergecraft`):
+
+```bash
+uv tool install mergecraft-action==0.1.0a4
+mergecraft --install-completion   # bash/zsh/fish — see --show-completion
+mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
+```
+
+To run an unreleased commit, pin the distribution to the repository instead:
 
 ```bash
 uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
-mergecraft --install-completion   # bash/zsh/fish — see --show-completion
-mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
 
 Then authenticate and open a pull request — details in the README install steps

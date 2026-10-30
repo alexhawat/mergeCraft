@@ -1,6 +1,9 @@
 # Plan 015: Supersede the stale 0.1.0a2 candidate and verify a fresh release
 
-- Status: TODO candidate preparation; publication pending explicit operator approval
+- Status: **Shipped as `0.1.0a4`** on 2026-10-29 from S = `7080e962` on
+  `release/0.1.0a4`, under the operator's explicit approval of the publication
+  packet. Supersedes both the stale `0.1.0a2` request (#783) and the withdrawn
+  `0.1.0a3` candidate. The distribution is published as `mergecraft-action`.
 - Issue: [#783](https://github.com/alexhawat/mergeCraft/issues/783)
 - Priority: P2; effort: M plus CI/soak time; change risk: HIGH for publication.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
