@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a4] — 2026-10-29
+
+> **First published release.** Nothing before this version was ever uploaded:
+> the package did not exist on PyPI, and `0.1.0a1` was an Action-only tag. This
+> candidate also supersedes the withdrawn `0.1.0a3`, so everything recorded under
+> that heading applies here too.
+
 ### Breaking — action required
 
 - **The PyPI distribution is named `mergecraft-action`.** `merge-craft` cannot be
@@ -15,6 +22,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Fix:** install with `uv tool install mergecraft-action`, or the pinned git
   form. The CLI binary, the import package, the MCP server name, the Action name
   and the container image are all unchanged.
+
+- **The withdrawn `0.1.0a3` changes ship here.** Every break recorded under
+  [0.1.0a3] below also applies to this release: the removed Nous Portal provider,
+  `trust.agentSandbox` validation, the `model_pin` default, fail-closed tracing
+  values, the removed MCP webhook route and provider helpers, refused
+  `dispatch: ensemble` / `shadow`, the `sarif_upload` default, progress-comment
+  identity, the enterprise audit root, and the CLI exit-code table. **Fix:** read
+  that block once; it is the upgrade path from `v0.1.0a1`.
+
+- **Review prompts changed.** The reviewer is now told how long it has, runs
+  analyzers before reading source, investigates the riskiest hunks first, and
+  reads code by locating it with `grep -n` and then reading the range, instead of
+  pulling function bodies through `git grep` context. The prompt version hash
+  changes, so two reviews of the same diff can reach different verdicts than
+  before. **Fix:** none for consumers; anything that pins a rendered prompt
+  digest must be re-baselined.
+
+- **Analyzer configuration no longer comes from the pull request being
+  reviewed.** `analyzers.*` resolves from the operator-owned base snapshot or the
+  base commit, and a head-side edit is reported as self-silencing instead of
+  applied. **Fix:** land analyzer-config changes in their own pull request; they
+  take effect from the next one.
+
+- **`list_check_runs` returns a reduced shape:** id, name, status, conclusion,
+  output title and `check_suite_id` only. **Fix:** call `get_check_suite_logs` for
+  a run's output text.
+
+- **`git grep` with more than ten lines of context returns matching lines
+  only**, plus a note to read the file at that line, and options placed after the
+  pattern are moved in front of it. **Fix:** read the file with the ranged read
+  tool; context of ten lines or fewer is unchanged.
+
+- **A typo in a tracing sink now fails configuration.** `tracing-to`,
+  `MERGECRAFT_TRACING_TO` or `--tracing-to` with an unknown value ends the Action
+  as `configuration_error` and exits with the configuration code on the CLI,
+  naming the variable and the value. **Fix:** correct the value; with tracing off
+  a typo is ignored with a warning.
+
+- **Evidence packet schema `1.15.0`, trajectory schema `1.1.0`.** Both add
+  optional fields only. **Fix:** accept the new fields if you parse the packet
+  strictly.
+
+- **The wheel no longer ships five checkout-only modules** (`scm.webhooks`,
+  `evidence.shadow_compare`, `evals.human_batch`, `evals.skill`,
+  `agents.catalog_docs`), which are reached only from Make targets, scripts and
+  tests. **Fix:** import them from the repository rather than the installed
+  distribution.
+
+### Known limitations
+
+- Evaluation is structural replay only, not live detection. No
+  human-adjudicated, calibrated or benchmarked result ships in this release, and
+  the notes below claim none.
+- Bounded file-group fan-out is a planner only. It is not wired into
+  server-side roster dispatch, so a large diff still runs as one reviewer.
+- Datadog prices LLM spans only from its own model catalog, so an OpenCode Go
+  review on `deepseek-v4.1-flash` shows no cost there even though mergeCraft
+  records one.
+- OpenCode's code-mode `fetch` can still read local files and the network
+  regardless of `webfetch: deny`; no OpenCode setting turns it off while keeping
+  MCP tools reachable.
+- This is an alpha. The `:latest` and `:analyzers` image tags are promoted from
+  the default branch only, so this release does not move them.
 
 ### Added
 
@@ -375,7 +445,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `tests/mcp/test_rpc.py` no longer leaves a fake package version cached for later
   tests (#1006).
+
 ## [0.1.0a3] — 2026-10-17
+
+> **Never published.** This candidate was prepared and withdrawn before it
+> was uploaded: PyPI carries no release for it, and there is no tag and no
+> GitHub release. Its changes ship in `0.1.0a4` above, whose
+> **Breaking — action required** block lists them.
 
 ### Breaking — action required
 
@@ -1282,7 +1358,7 @@ Full long-form history, including the entries condensed or omitted here:
 
 > **Never published.** `0.1.0` was never tagged, has no GitHub release and no
 > package upload; its entries are kept here as history. The version above,
-> `0.1.0a3`, is the pre-release cut in its place. `0.1.0a1` (`521c0aed`) was an
+> `0.1.0a4`, is the pre-release cut in its place. `0.1.0a1` (`521c0aed`) was an
 > Action-only tag — no PyPI upload and no GitHub release; `0.1.0a2` was skipped.
 > A consumer upgrading from `v0.1.0a1` should read the **Breaking — action
 > required** block above.

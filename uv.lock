@@ -1753,7 +1753,7 @@ wheels = [
 
 [[package]]
 name = "mergecraft-action"
-version = "0.1.0a1"
+version = "0.1.0a4"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
