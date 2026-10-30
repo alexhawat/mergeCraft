@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import httpx
 from loguru import logger
 
 from mergecraft.analyzers.impact import resolve_ast_grep_binary, write_impact
@@ -324,8 +325,10 @@ async def list_mergecraft_reviews(ctx: ToolContext, *, pull_number: int) -> list
 
 
 # HS8 — the trusted self-review workflow whose runs carry the run-bound
-# checkpoint. The repo-relative path identifies the file; the basename is the
-# documented Actions-API ``{workflow_id}`` spelling, tried second.
+# checkpoint. The Actions API resolves ``{workflow_id}`` by numeric workflow id
+# or by workflow *file name* only — the repo-relative path spelling is answered
+# with 404 (#1082) — so the file name is tried first and the path is kept as a
+# fallback for recorded doubles that still serve it.
 _WORKFLOW_PATH = ".github/workflows/mergecraft.yml"
 _WORKFLOW_FILE = _WORKFLOW_PATH.rsplit("/", 1)[-1]
 _TRUSTED_RUN_EVENT = "pull_request_target"
@@ -397,23 +400,68 @@ def _filter_trusted_runs(runs: object, *, pull_number: int) -> list[dict[str, An
     return trusted
 
 
+def _describe_run_api_error(err: BaseException) -> str:
+    """Return a one-line description of an Actions-API failure (#1082).
+
+    ``str(httpx.HTTPStatusError)`` appends httpx's own docs hint on a second
+    line (``For more information check: https://developer.mozilla.org/...``);
+    in a job log it reads as if mergeCraft were pointing an Actions 404 at
+    web-fetch documentation. Name the status and the request instead.
+    """
+    if isinstance(err, httpx.HTTPStatusError):
+        response = err.response
+        reason = response.reason_phrase or "error"
+        try:
+            request = err.request
+        except RuntimeError:
+            return f"HTTP {response.status_code} {reason}"
+        return f"HTTP {response.status_code} {reason} for {request.method} {request.url}"
+    return str(err)
+
+
 async def _list_mergecraft_workflow_runs(ctx: ToolContext) -> object:
     """List this repo's trusted-event ``mergecraft.yml`` runs (HS8).
 
-    Both the repo-relative path and the file-name spellings of the Actions-API
-    ``{workflow_id}`` are tried so the read works against GitHub and against a
-    recorded double alike. Returns the raw ``workflow_runs`` list; when neither
-    form yields the expected shape it warns once naming the repo and returns
-    ``None`` (an unexpected Actions API shape, never a silent fallback).
+    The Actions API resolves ``{workflow_id}`` by numeric workflow id or by
+    workflow *file name*; the repo-relative path spelling is answered with 404
+    (#1082). The file name is tried first, the path spelling kept as a
+    fallback, and a 404 on either form falls through to the next instead of
+    aborting the listing. Returns the raw ``workflow_runs`` list; when every
+    spelling 404s it warns once naming the real cause (workflow not resolvable
+    through the Actions API for this token), and when no spelling yields the
+    expected shape it warns once naming the repo — never a silent fallback.
     """
-    for workflow_ref in (_WORKFLOW_PATH, _WORKFLOW_FILE):
+    saw_not_found = False
+    for workflow_ref in (_WORKFLOW_FILE, _WORKFLOW_PATH):
         endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/workflows/{workflow_ref}/runs"
-        payload = await ctx.scm.get(
-            endpoint,
-            params={"event": _TRUSTED_RUN_EVENT, "per_page": _REVIEWS_PAGE_SIZE},
-        )
+        try:
+            payload = await ctx.scm.get(
+                endpoint,
+                params={"event": _TRUSTED_RUN_EVENT, "per_page": _REVIEWS_PAGE_SIZE},
+            )
+        except httpx.HTTPStatusError as err:
+            if err.response.status_code != 404:
+                raise
+            saw_not_found = True
+            continue
         if isinstance(payload, Mapping) and isinstance(payload.get("workflow_runs"), list):
             return payload["workflow_runs"]
+    if saw_not_found:
+        # 404 on every ``{workflow_id}`` spelling means the workflow is not
+        # resolvable through the Actions API for this token: the file is absent
+        # from the repository's default branch (a consumer renamed it) or the
+        # run token lacks ``actions: read``. Named once here, not per spelling,
+        # and the checkpoint stays fail-closed (HS8 / P-8).
+        logger.warning(
+            "run-bound checkpoint: listing runs for {}/{} workflow {} returned 404 "
+            "Not Found for every Actions-API workflow-id spelling; the workflow "
+            "must exist on the repository's default branch and the run token "
+            "needs actions: read — checkpoint reuse is skipped",
+            ctx.repo.owner,
+            ctx.repo.name,
+            _WORKFLOW_FILE,
+        )
+        return None
     # Neither ``{workflow_id}`` spelling produced a mapping carrying a
     # ``workflow_runs`` list. That is an unexpected Actions API shape, not the
     # benign "this PR has no trusted runs" case (which returns an empty list),
@@ -516,7 +564,9 @@ async def _read_run_evidence_packet(ctx: ToolContext, *, run_id: int) -> dict[st
             blob = await ctx.scm.download_artifact_zip(ctx.repo.owner, ctx.repo.name, artifact_id)
         except Exception as err:
             logger.warning(
-                "run-bound checkpoint: artefact {} could not be downloaded: {}", artifact_id, err
+                "run-bound checkpoint: artefact {} could not be downloaded: {}",
+                artifact_id,
+                _describe_run_api_error(err),
             )
             continue
         packet = _packet_from_artifact_zip(
@@ -558,7 +608,10 @@ async def recover_run_bound_review_state(
     try:
         runs = await _list_mergecraft_workflow_runs(ctx)
     except Exception as err:
-        logger.warning("run-bound checkpoint: listing workflow runs failed: {}", err)
+        logger.warning(
+            "run-bound checkpoint: listing workflow runs failed: {}",
+            _describe_run_api_error(err),
+        )
         return _UNAVAILABLE_RUN_BOUND_STATE
     trusted = _filter_trusted_runs(runs, pull_number=pull_number)
     if not trusted:
@@ -569,7 +622,11 @@ async def recover_run_bound_review_state(
     try:
         packet = await _read_run_evidence_packet(ctx, run_id=run_id)
     except Exception as err:
-        logger.warning("run-bound checkpoint: reading run {} failed: {}", run_id, err)
+        logger.warning(
+            "run-bound checkpoint: reading run {} failed: {}",
+            run_id,
+            _describe_run_api_error(err),
+        )
         return _UNAVAILABLE_RUN_BOUND_STATE
     if packet is None:
         return _UNAVAILABLE_RUN_BOUND_STATE

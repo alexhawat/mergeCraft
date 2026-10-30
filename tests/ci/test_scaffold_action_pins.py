@@ -30,7 +30,7 @@ _HARDENED_PLACEHOLDER = "REPLACE_WITH_FULL_COMMIT_SHA"
 # Locked, published values. `make pins-check` re-derives `action_sha_minimal`
 # from the tag; these constants pin the pair this plan ships.
 LOCKED_CHECKOUT_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
-LOCKED_ACTION_SHA = "521c0aedbf525a80a5bf6eddf0119ada85a8d381"
+LOCKED_ACTION_SHA = "7080e962c2259757a34b9f745602f093e4ee3378"
 
 _RENDERED = render_all()
 

@@ -13,7 +13,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.mcp.rpc_types import RpcError, rpc_error
-from mergecraft.mcp.shared import bind_selected_mode, reset_selected_mode
+from mergecraft.mcp.shared import ToolResult, bind_selected_mode, reset_selected_mode
 from mergecraft.tracing._tool_attrs import (
     emit_verb_subevent,
     enrich_tool_request,
@@ -33,6 +33,20 @@ if TYPE_CHECKING:
 
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.shared import ToolSpec
+
+
+def _refused_result_error(result: ToolResult) -> str:
+    """Extract the refusal reason from a tagged error result for the trajectory.
+
+    ``handle_tool_error`` renders ``"Error: {message}"``; the strip keeps the
+    recorded text identical to the ``str(exc)`` an escaped exception would have
+    recorded.
+    """
+    for part in result.content:
+        text = part.get("text", "")
+        if text:
+            return text.removeprefix("Error: ")
+    return "tool call refused by a guard"
 
 
 async def dispatch_mcp_rpc(
@@ -152,12 +166,17 @@ async def dispatch_mcp_rpc(
             finally:
                 reset_selected_mode(mode_token)
             enrich_tool_response(span, output=result)
+            refused = isinstance(result, ToolResult) and result.refused
             record_trajectory(
                 tool_ctx,
                 name,
                 arguments,
-                ok=True,
+                # A guard refusal returns as a normal tool error to the agent,
+                # but it is not a success on the trajectory (#1073).
+                ok=not refused,
                 result=result,
+                error=_refused_result_error(result) if refused else None,
+                failure_class="refused" if refused else None,
                 duration_ms=int((time.perf_counter() - started) * 1000),
             )
             emit_verb_subevent(

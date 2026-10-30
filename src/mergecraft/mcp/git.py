@@ -42,7 +42,13 @@ from mergecraft.mcp.git_guards import (
     resolve_grep_long_option,
     validate_tag_name,
 )
-from mergecraft.mcp.shared import ToolClass, execute, repository_mutation_class_for_push, tool
+from mergecraft.mcp.shared import (
+    ToolClass,
+    ToolRefusedError,
+    execute,
+    repository_mutation_class_for_push,
+    tool,
+)
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.utils.git_hardening import git_argv, git_authenticated_argv, read_remote_origin_url
 
@@ -91,7 +97,7 @@ def _confine_to_repo_root(value: str, flag: str, base: str) -> Path:
         return confine_to_workspace(value, base=base)
     except WorkspacePathError as exc:
         msg = f"Blocked: '{flag}' '{value}' must be within the repo checkout — {exc}"
-        raise ValueError(msg) from exc
+        raise ToolRefusedError(msg) from exc
 
 
 def _validate_path_confinement(global_opts: list[str], cwd: str) -> None:
@@ -416,6 +422,27 @@ def _is_auth_failure(stderr: str) -> bool:
     return any(marker in lowered for marker in _AUTH_FAILURE_MARKERS)
 
 
+class _GitCommandError(RuntimeError):
+    """A non-zero git exit, carrying the exit code and stderr beside the message.
+
+    The message is the same redacted, auth-hint-annotated ``git … failed (N)``
+    string this tool has always raised; the attributes let an intent-aware
+    caller tell an expected non-zero answer (``git grep``'s no-match exit 1,
+    #1077) apart from a failure without parsing the message back out.
+    """
+
+    def __init__(self, args: list[str], result: subprocess.CompletedProcess[str]) -> None:
+        raw_err = (result.stderr or result.stdout or "").strip()
+        err = redact_secrets(raw_err)
+        message = f"git {' '.join(args)} failed ({result.returncode}): {err}"
+        if _is_auth_failure(raw_err):
+            logger.error("git auth failure on `git {}`: {}", " ".join(args), err)
+            message = f"{message}\n{_AUTH_FAILURE_HINT}"
+        super().__init__(message)
+        self.returncode = result.returncode
+        self.stderr = result.stderr or ""
+
+
 def _run_git(
     args: list[str],
     *,
@@ -439,14 +466,42 @@ def _run_git(
         check=False,
     )
     if result.returncode != 0:
-        raw_err = (result.stderr or result.stdout or "").strip()
-        err = redact_secrets(raw_err)
-        msg = f"git {' '.join(args)} failed ({result.returncode}): {err}"
-        if _is_auth_failure(raw_err):
-            logger.error("git auth failure on `git {}`: {}", " ".join(args), err)
-            msg = f"{msg}\n{_AUTH_FAILURE_HINT}"
-        raise RuntimeError(msg)
+        raise _GitCommandError(args, result)
     return result.stdout
+
+
+def _run_grep(args: list[str], *, cwd: str) -> tuple[str, bool]:
+    """Run ``git grep`` and return ``(stdout, matched)``.
+
+    Exit 1 with a clean stderr is grep's "no lines selected" answer — a
+    successful no-match, not a failure (#1077; the ``git``-door instance of
+    #1027's intent-aware outcome rule). Exit 1 carrying stderr output, and
+    every other non-zero exit, stays fail-closed: the ``_run_git`` error
+    propagates unchanged.
+    """
+    try:
+        return _run_git(args, cwd=cwd), True
+    except _GitCommandError as err:
+        if err.returncode != 1 or err.stderr.strip():
+            raise
+        return "", False
+
+
+def _run_merge_base(args: list[str], *, cwd: str) -> tuple[str, bool]:
+    """Run ``git merge-base`` and return ``(stdout, found)``.
+
+    Exit 1 with clean stderr is a successful negative answer: ``--is-ancestor``
+    returns it when the first commit is not an ancestor of the second, and the
+    plain form returns it when the commits share no merge base. Both are
+    answers, not failures (#1077). Exit 1 carrying stderr output, and every
+    other non-zero exit, stays fail-closed.
+    """
+    try:
+        return _run_git(args, cwd=cwd), True
+    except _GitCommandError as err:
+        if err.returncode != 1 or err.stderr.strip():
+            raise
+        return "", False
 
 
 def _run_authenticated_git(
@@ -548,8 +603,8 @@ def _validate_git_invocation(
     because it needs the cwd git will actually run in.
 
     Raises:
-        RuntimeError: when the verb has a dedicated tool to redirect to.
-        ValueError: for every other refusal.
+        ToolRefusedError: on every refusal — the verb redirect, the read-only
+        allowlist, and each guard's "Blocked:" stop all count (#1073).
     """
     # Unconditional: -c / --config-env are alias-execution vectors (#257 / D7).
     # global_opts is scanned with no subcommand — the pre-subcommand slot has no
@@ -565,7 +620,7 @@ def _validate_git_invocation(
     redirect = _REDIRECT_TO_TOOL.get(command)
     if redirect:
         msg = f"git {command} is not available through this tool — {redirect}"
-        raise RuntimeError(msg)
+        raise ToolRefusedError(msg)
     # Read-only allowlist: replace the old format-only _SUBCOMMAND_RE (#257 / D7).
     if not command or command not in _READONLY_SUBCOMMANDS:
         msg = (
@@ -574,7 +629,7 @@ def _validate_git_invocation(
         )
         if command in _FILE_READER_VERBS:
             msg = f"{msg}. {_file_reader_hint(command, args)}"
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
     if command == "branch":
         _reject_branch_writes(args)
     if command == "config":
@@ -641,10 +696,17 @@ def git_tool(ctx: ToolContext):
                     "cached": True,
                 }
         context_dropped = False
+        matched = True
+        merge_base_found = True
         if command == "grep":
             args, context_dropped = _normalize_grep_args(args)
         try:
-            output = _run_git([*global_opts, command, *args], cwd=cwd)
+            if command == "grep":
+                output, matched = _run_grep([*global_opts, command, *args], cwd=cwd)
+            elif command == "merge-base":
+                output, merge_base_found = _run_merge_base([*global_opts, command, *args], cwd=cwd)
+            else:
+                output = _run_git([*global_opts, command, *args], cwd=cwd)
         except RuntimeError as err:
             raise RuntimeError(redact_secrets(str(err))) from err
         if show_target is not None:
@@ -670,6 +732,16 @@ def git_tool(ctx: ToolContext):
             }
         if context_dropped:
             result["note"] = _GREP_CONTEXT_NOTE
+        if not matched:
+            # grep's no-match answer, surfaced honestly instead of as a
+            # failure (#1077; the ``git``-door instance of #1027).
+            result["noMatches"] = True
+        if not merge_base_found:
+            # merge-base's negative answer, same rule (#1077).
+            if "--is-ancestor" in args:
+                result["isAncestor"] = False
+            else:
+                result["noMergeBase"] = True
         return result
 
     return tool(
@@ -739,7 +811,7 @@ def _require_push_allowed(
     """Enforce ``push`` disabled / restricted-default-branch policy (W2 / Final)."""
     if ctx.payload.push == "disabled":
         msg = "push is disabled for this run"
-        raise RuntimeError(msg)
+        raise ToolRefusedError(msg)
     state = primary_repo_state(ctx.tool_state)
     if (
         ctx.payload.push == "restricted"
@@ -757,7 +829,7 @@ def _require_push_allowed(
             f"Push blocked: cannot {verb} default branch "
             f"'{state.default_branch}' in restricted mode"
         )
-        raise RuntimeError(msg)
+        raise ToolRefusedError(msg)
 
 
 def push_branch_tool(ctx: ToolContext):
@@ -898,7 +970,7 @@ def commit_changes_tool(ctx: ToolContext):
         # the response, it only records why no remote update was attempted.
         try:
             _require_push_allowed(ctx, branch=branch, action="update")
-        except RuntimeError as err:
+        except ToolRefusedError as err:
             logger.info("API ref update skipped (push policy): {}", err)
         return {"success": True, "sha": sha, "branch": branch, "message": message, "pushed": False}
 

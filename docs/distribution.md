@@ -35,25 +35,30 @@ The project was first published as `0.1.0a4`; before that no `mergecraft-action`
 **Prerequisites**
 
 1. Repository secrets: `TWINE_USERNAME`, `TWINE_PASSWORD` (API token as password).
-2. `GITHUB_TOKEN` with `repo` for `craft prepare` / `craft publish`.
+2. `GITHUB_TOKEN` with `repo` **and `write:packages`** for `craft prepare` /
+   `craft publish`. The registry login inside Craft uses this token, not your
+   local `docker login`; a `gh auth token` value has no `write:packages` and the
+   image retag fails after PyPI has already published.
 3. Release preconditions green on the release branch (live integration, E2E nightly,
    image SBOM + Trivy gate) — see [CONTRIBUTING.md](../CONTRIBUTING.md#releases-craft).
 
-**Cut and publish 0.1.0**
+**Cut and publish `<version>`**
 
 ```bash
-craft prepare 0.1.0          # first release — explicit version, not `auto`
+craft prepare <version>          # explicit version, not `auto`
 # Wait for CI/CD on the release branch (build, scan, sign, attest, promote).
-craft publish 0.1.0          # uploads dist/* to PyPI + GitHub release per .craft.yml
+craft publish <version> --no-merge --keep-branch
 ```
 
-Or dispatch **Release** (`.github/workflows/release.yml`) with `version: 0.1.0`,
-then `craft publish 0.1.0` after CI is green.
+Or dispatch **Release** (`.github/workflows/release.yml`) with `version: <version>`,
+then `craft publish <version> --no-merge --keep-branch` after CI is green. The two
+flags keep the merge-back a reviewed pull request; without them Craft pushes to the
+default branch, which the branch ruleset rejects after the targets have published.
 
-Post-publish smoke:
+Post-publish smoke — the version you just published:
 
 ```bash
-uv tool install mergecraft-action==0.1.0a4
+uv tool install mergecraft-action==<version>
 mergecraft --version
 ```
 

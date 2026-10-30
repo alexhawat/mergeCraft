@@ -459,7 +459,7 @@ jobs:
         env:
           # Keep equal to the `uses:` commit above — the container cannot read
           # it, so this is the only way the run records which pin it is running.
-          MERGECRAFT_ACTION_SHA: 521c0aedbf525a80a5bf6eddf0119ada85a8d381
+          MERGECRAFT_ACTION_SHA: 7080e962c2259757a34b9f745602f093e4ee3378
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 

@@ -49,6 +49,7 @@ import re
 import shlex
 from pathlib import Path
 
+from mergecraft.mcp.shared import ToolRefusedError
 from mergecraft.utils.git_setup import (
     reviewer_askpass_credentials_dir,
     reviewer_denied_relative_paths,
@@ -84,6 +85,15 @@ _READONLY_SUBCOMMANDS: frozenset[str] = frozenset(
         # are the whole story for it.
         "grep",
         "ls-tree",
+        # #1077 — strictly read-only; every form (``A B``, ``--all``,
+        # ``--octopus``, ``--independent``, ``--is-ancestor``, ``--fork-point``)
+        # only reads the commit graph, and ``config/trust_policy.py`` itself
+        # runs ``merge-base --is-ancestor`` internally. No write-ish flag
+        # exists, so the shared ref/path confinement the rest of the allowlist
+        # gets (``rev-parse`` included) is the whole guard story here too —
+        # the prompts teach ``git diff --merge-base``, so refusing the bare
+        # verb only burned agent turns.
+        "merge-base",
     }
 )
 # Rejected verbs that have a dedicated tool. Not an auth gate — a redirect
@@ -174,6 +184,10 @@ _SUBCOMMAND_SHORT_FLAGS: dict[str, frozenset[str]] = {
     # -t show trees, -z NUL-terminate. No write, no pager-exec, no
     # output-file letter among git's real ls-tree flags.
     "ls-tree": frozenset("dlrtz"),
+    # #1077 — ``-a`` (``--all``) is merge-base's only short flag; the read
+    # forms are otherwise long-only. Declaring it keeps a bare ``-c`` after
+    # the verb refused (merge-base defines no ``-c``), exactly like rev-parse.
+    "merge-base": frozenset("a"),
 }
 
 # ---------------------------------------------------------------------------
@@ -458,7 +472,7 @@ _BAD_REF_CHARS: re.Pattern[str] = re.compile(r"[:+^~?*[\\\s]")
 
 
 def reject_if_leading_dash(value: str, kind: str) -> None:
-    """Raise ``ValueError`` when *value* starts with a dash.
+    """Raise ``ToolRefusedError`` when *value* starts with a dash.
 
     Args:
         value: The ref or path string to check.
@@ -466,11 +480,11 @@ def reject_if_leading_dash(value: str, kind: str) -> None:
     """
     if value.startswith("-"):
         msg = f"Blocked: {kind} '{value}' starts with '-' — git could parse it as a flag."
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
 
 
 def reject_special_ref(value: str, kind: str) -> None:
-    """Raise ``ValueError`` when *value* is a special or symbolic git ref.
+    """Raise ``ToolRefusedError`` when *value* is a special or symbolic git ref.
 
     Args:
         value: The ref string to check.
@@ -479,21 +493,21 @@ def reject_special_ref(value: str, kind: str) -> None:
     reject_if_leading_dash(value, kind)
     if value.startswith("refs/"):
         msg = f"Blocked: {kind} '{value}' is a fully-qualified ref path. Use a bare branch name."
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
     if value in _SYMBOLIC_REFS:
         msg = f"Blocked: {kind} '{value}' is a git symbolic ref, not a branch name."
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
     match = _BAD_REF_CHARS.search(value)
     if match:
         msg = (
             f"Blocked: {kind} '{value}' contains '{match.group(0)}', which git "
             "interprets as refspec/revision syntax."
         )
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
 
 
 def validate_tag_name(tag: str) -> None:
-    """Raise ``ValueError`` when *tag* contains refspec or flag characters.
+    """Raise ``ToolRefusedError`` when *tag* contains refspec or flag characters.
 
     Args:
         tag: Tag name string to validate.
@@ -501,7 +515,7 @@ def validate_tag_name(tag: str) -> None:
     reject_if_leading_dash(tag, "tag")
     if not re.fullmatch(r"[A-Za-z0-9._/-]+", tag):
         msg = f"Blocked: tag '{tag}' contains characters that could be parsed as a refspec or flag."
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -575,25 +589,25 @@ def _reject_config_flags(tokens: list[str], *, subcommand: str = "") -> None:
     rather than proven hostile, and an unrecognised short bundle.
 
     Raises:
-        ValueError: on any of the three refusals.
+        ToolRefusedError: on any of the three refusals.
     """
     for tok in tokens:
         if tok.startswith("--"):
             if _is_config_flag(tok):
-                raise ValueError(_config_flag_message(tok))
+                raise ToolRefusedError(_config_flag_message(tok))
             continue
         if not tok.startswith("-c") or _subcommand_declares_shorts(tok, subcommand):
             continue
         if tok == "-c" and subcommand:
-            raise ValueError(_bare_dash_c_message(subcommand))
+            raise ToolRefusedError(_bare_dash_c_message(subcommand))
         if _is_config_flag(tok):
-            raise ValueError(_config_flag_message(tok))
+            raise ToolRefusedError(_config_flag_message(tok))
         msg = f"Blocked: '{tok}' bundles short flags {subcommand or 'git'} does not define."
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
 
 
 def _reject_namespace_flag(tokens: list[str]) -> None:
-    """Raise ValueError if any token is a ``--namespace`` spelling.
+    """Raise ToolRefusedError if any token is a ``--namespace`` spelling.
 
     ``--namespace`` sets ``GIT_NAMESPACE``, a ref-namespace prefix rather than a
     filesystem path, so ``confine_to_workspace`` cannot bound it the way it
@@ -608,7 +622,7 @@ def _reject_namespace_flag(tokens: list[str]) -> None:
                 f"Blocked: '{tok}' sets a ref namespace the reviewer surface "
                 "cannot confine, and no read-only subcommand honours it."
             )
-            raise ValueError(msg)
+            raise ToolRefusedError(msg)
 
 
 def _no_index_message(token: str) -> str:
@@ -620,7 +634,7 @@ def _no_index_message(token: str) -> str:
 
 
 def _reject_no_index(tokens: list[str], *, subcommand: str = "") -> None:
-    """Raise ValueError if any token is a ``--no-index`` spelling (plan 13 / D9).
+    """Raise ToolRefusedError if any token is a ``--no-index`` spelling (plan 13 / D9).
 
     ``--no-index`` tells git to diff paths without a repository, which bypasses
     every workspace confinement rule on the operands that follow. ``diff``
@@ -630,9 +644,9 @@ def _reject_no_index(tokens: list[str], *, subcommand: str = "") -> None:
     """
     for tok in tokens:
         if tok == "--no-index" or tok.startswith("--no-index="):
-            raise ValueError(_no_index_message(tok))
+            raise ToolRefusedError(_no_index_message(tok))
         if subcommand == "grep" and _names_prefix_of(tok, frozenset({"--no-index"})):
-            raise ValueError(_no_index_message(tok))
+            raise ToolRefusedError(_no_index_message(tok))
 
 
 def _reject_refused_long_options(args: list[str], *, subcommand: str) -> None:
@@ -648,14 +662,14 @@ def _reject_refused_long_options(args: list[str], *, subcommand: str) -> None:
     option.
 
     Raises:
-        ValueError: when an argument names a refused option.
+        ToolRefusedError: when an argument names a refused option.
     """
     for arg in args:
         name = _refused_long_option(arg, subcommand)
         if name is not None:
             reason = _REFUSED_LONG_OPTIONS[subcommand][name]
             msg = f"Blocked: '{subcommand} {arg}' ({name}) {reason}."
-            raise ValueError(msg)
+            raise ToolRefusedError(msg)
 
 
 def _split_end_of_options(args: list[str]) -> tuple[list[str], list[str]]:
@@ -744,7 +758,7 @@ def _reject_credential_path_operands(args: list[str], *, cwd: str, tmpdir: str) 
     for operand in _operands_for_credential_scan(args):
         path = _path_from_git_operand(operand)
         if _is_denied_credential_path(path, cwd=cwd, tmpdir=tmpdir):
-            raise ValueError(_credential_path_message(path))
+            raise ToolRefusedError(_credential_path_message(path))
 
 
 def _command_path_operands(command: str) -> list[str]:
@@ -811,7 +825,7 @@ def _config_key_from_get_arg(arg: str, args: list[str], idx: int) -> tuple[str, 
     if idx + 1 < len(args):
         return args[idx + 1], idx + 2
     msg = "Blocked: 'config --get' requires a key."
-    raise ValueError(msg)
+    raise ToolRefusedError(msg)
 
 
 def _reject_config_invocation(args: list[str]) -> None:
@@ -827,12 +841,12 @@ def _reject_config_invocation(args: list[str]) -> None:
                         "Blocked: 'config --list' enumerates all configuration including "
                         "credential material — not permitted on the reviewer surface."
                     )
-                    raise ValueError(msg)
+                    raise ToolRefusedError(msg)
                 msg = (
                     f"Blocked: 'config {arg}' — only --get and --get-all "
                     "are permitted on the reviewer surface."
                 )
-                raise ValueError(msg)
+                raise ToolRefusedError(msg)
             if name == "--get":
                 key, idx = _config_key_from_get_arg(arg, args, idx)
                 if _is_denied_config_key(key):
@@ -840,7 +854,7 @@ def _reject_config_invocation(args: list[str]) -> None:
                         f"Blocked: 'config --get {key}' reads credential material — "
                         "not permitted on the reviewer surface."
                     )
-                    raise ValueError(msg)
+                    raise ToolRefusedError(msg)
                 continue
             if name == "--get-all":
                 key, idx = _config_key_from_get_arg(arg, args, idx)
@@ -849,7 +863,7 @@ def _reject_config_invocation(args: list[str]) -> None:
                         f"Blocked: 'config --get-all {key}' reads credential material — "
                         "not permitted on the reviewer surface."
                     )
-                    raise ValueError(msg)
+                    raise ToolRefusedError(msg)
                 continue
             idx += 1
             continue
@@ -858,12 +872,12 @@ def _reject_config_invocation(args: list[str]) -> None:
                 f"Blocked: 'config {arg}' — only --get and --get-all "
                 "are permitted on the reviewer surface."
             )
-            raise ValueError(msg)
+            raise ToolRefusedError(msg)
         msg = (
             f"Blocked: 'config {arg}' would write configuration — "
             "config writes are not available on the reviewer surface."
         )
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
 
 
 def _reject_branch_writes(args: list[str]) -> None:
@@ -886,7 +900,7 @@ def _reject_branch_writes(args: list[str]) -> None:
                     f"Blocked: 'branch {arg}' — only listing flags "
                     "are permitted on the reviewer surface."
                 )
-                raise ValueError(msg)
+                raise ToolRefusedError(msg)
             listing = listing or name == "--list"
             # A listing flag spelled ``--contains <rev>`` consumes its value, so
             # the value must not be read as a branch name to create.
@@ -903,7 +917,7 @@ def _reject_branch_writes(args: list[str]) -> None:
                     f"Blocked: 'branch {arg}' — only listing flags "
                     "are permitted on the reviewer surface."
                 )
-                raise ValueError(msg)
+                raise ToolRefusedError(msg)
             idx += 1
             continue
         if listing:
@@ -914,7 +928,7 @@ def _reject_branch_writes(args: list[str]) -> None:
             f"Blocked: 'branch {arg}' would create a branch — "
             "branch creation is not available on the reviewer surface."
         )
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
 
 
 def _reject_file_writing_flags(command: str, args: list[str]) -> None:
@@ -933,7 +947,7 @@ def _reject_file_writing_flags(command: str, args: list[str]) -> None:
         name = arg.split("=", 1)[0]
         if name in _OUTPUT_FLAG_SPELLINGS or (writes_dash_o and name == "-o"):
             msg = f"Blocked: '{command} {arg}' writes a file — the reviewer surface is read-only."
-            raise ValueError(msg)
+            raise ToolRefusedError(msg)
 
 
 def _reject_grep_pager_exec(args: list[str]) -> None:
@@ -949,16 +963,16 @@ def _reject_grep_pager_exec(args: list[str]) -> None:
     cannot smuggle it past a check that only looked at position zero.
 
     Raises:
-        ValueError: when any argument enables the pager.
+        ToolRefusedError: when any argument enables the pager.
     """
     for arg in args:
         if arg.startswith("-") and not arg.startswith("--") and "O" in arg[1:]:
             msg = f"Blocked: 'grep {arg}' opens a pager — arbitrary command execution."
-            raise ValueError(msg)
+            raise ToolRefusedError(msg)
         name = arg.split("=", 1)[0]
         if name in _GREP_PAGER_EXEC_LONG_SPELLINGS:
             msg = f"Blocked: 'grep {arg}' opens a pager — arbitrary command execution."
-            raise ValueError(msg)
+            raise ToolRefusedError(msg)
 
 
 def _reject_content_filter_exec(args: list[str]) -> None:
@@ -974,7 +988,7 @@ def _reject_content_filter_exec(args: list[str]) -> None:
     matched and stay allowed.
 
     Raises:
-        ValueError: when any argument enables a configured content filter.
+        ToolRefusedError: when any argument enables a configured content filter.
     """
     for arg in args:
         name = arg.split("=", 1)[0]
@@ -983,7 +997,7 @@ def _reject_content_filter_exec(args: list[str]) -> None:
                 f"Blocked: {arg!r} runs a git-config content filter "
                 "(diff.<driver>.textconv / diff.external) — arbitrary command execution."
             )
-            raise ValueError(msg)
+            raise ToolRefusedError(msg)
 
 
 __all__ = [
