@@ -133,3 +133,29 @@ def test_catalog_check_passes_after_provisioning_fix() -> None:
         text=True,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_marker_text_in_a_successful_command_is_not_a_capability_loss() -> None:
+    """A successful `rg`/`cat` over this file contains the marker text (#1083)."""
+    from mergecraft.agents import codex_stream
+    from mergecraft.agents._stream_consumer import StreamSpanAccumulator
+    from mergecraft.evidence.trajectory import build_trajectory_record
+    from mergecraft.evidence.trajectory_audit import audit_trajectory
+    from mergecraft.mcp.tool_state import init_tool_state
+
+    state = init_tool_state(owner="acme", name="demo", dir="/tmp/demo")
+    handler, _finalize = codex_stream.codex_stream_event_handler(
+        tracer=None, model_id="gpt-test", tool_state=state
+    )
+    acc = StreamSpanAccumulator(agent_name="codex")
+
+    item = _command_execution_item(USER_NAMESPACE_FAILURES[0])
+    item["item"]["exit_code"] = 0
+    handler(acc, item)
+
+    assert len(state.tool_calls) == 1
+    assert state.tool_calls[0].failure_class != "environment"
+    findings = audit_trajectory(build_trajectory_record(state))
+    assert not [
+        finding for finding in findings if finding.rule_id == "codex-platform-sandbox-unavailable"
+    ]

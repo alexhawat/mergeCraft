@@ -316,11 +316,21 @@ def codex_stream_event_handler(
                 )
 
                 output_text = str(item.get("aggregated_output") or "")
-                sandbox_unavailable = is_user_namespace_failure(output_text)
+                raw_code = item.get("exit_code")
+                command_failed = (
+                    isinstance(raw_code, int) and not isinstance(raw_code, bool) and raw_code != 0
+                ) or str(item.get("status") or "").lower() in {"failed", "errored"}
+                # A successful `rg`/`cat` over this very file contains the bwrap
+                # strings; only a command the sandbox actually refused counts as
+                # the capability loss (#1083). The hint still follows the marker
+                # text, as it always has, so an exit-zero bubblewrap refusal is
+                # reported instead of silently passing.
+                sandbox_marker = is_user_namespace_failure(output_text)
+                sandbox_unavailable = command_failed and sandbox_marker
                 _record_command_execution(
                     tool_state, item, output_text, environment_failure=sandbox_unavailable
                 )
-                if sandbox_unavailable and not accumulator.user_namespace_failure_reported:
+                if sandbox_marker and not accumulator.user_namespace_failure_reported:
                     accumulator.user_namespace_failure_reported = True
                     hint = user_namespace_failure_hint()
                     logger.warning("{}", hint)

@@ -107,6 +107,11 @@ def _publication_outcome_inputs(
     sha, no verdict) is never a receipt, and neither is a review on this head
     that proves no verdict (see :func:`_publication_unproven`).
     """
+    if getattr(tool_state, "review_publication_sticky_only", False):
+        # A non-terminal neutral rung deliberately posts no formal review; the
+        # fallback rung owns it, so this run owes GitHub no publication receipt
+        # and must not be classified as an unpublished verdict (#1078).
+        return None, None
     if (
         not _is_review_mode(tool_state.selected_mode)
         or verdict_protocol == "shadow"

@@ -92,6 +92,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sub-second phases render with one decimal (`0.1s`) — or `<0.1s` — instead of
   rounding to `0s`.
 
+### Changed
+
+- The merge evidence packet schema is `1.16.0`; the trajectory record schema is
+  `1.2.0` (optional `diff_read_path`, `diff_read`, `duration_ms` on a tool-call
+  row, all omitted while unset; `"refused"` joins the `failure_class`
+  vocabulary).
+
 ## [0.1.0a4] — 2026-10-29
 
 > **First published release.** Nothing before this version was ever uploaded:
@@ -273,10 +280,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `incrementalDiffStatus` (`ok` / `empty` / `unavailable`) with
   `incrementalDiffReason` and `lastReviewedSha`. When the range exists it is the
   review scope; the full diff is for anchoring only.
-- The merge evidence packet schema is `1.16.0`; the trajectory record schema is
-  `1.2.0` (optional `diff_read_path`, `diff_read`, `duration_ms` on a tool-call
-  row, all omitted while unset; `"refused"` joins the `failure_class`
-  vocabulary).
 - A PR's own `analyzers.*` configuration no longer applies to its own review. The
   analyzer settings (`enabled`, `overrides.<id>.enabled`, the `antislop` `rules` and
   `ignore`, `baseComparison`, `inlineBudget`, `impact`) are resolved from the PR's

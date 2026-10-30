@@ -2204,6 +2204,11 @@ def publication_skip_reason(
     run, and a submission that the post-run re-validation rejected — the last one
     is what to look for first when a review is expected and absent.
     """
+    if getattr(tool_state, "review_publication_sticky_only", False):
+        return (
+            "this non-terminal rung deferred its neutral verdict to the fallback "
+            "rung; the run record is in the sticky progress comment (#1078)"
+        )
     if verdict_protocol == "shadow":
         return "the verdict protocol is shadow, so the verdict is recorded but not published"
     if not _is_review_mode(tool_state.selected_mode):
