@@ -7,6 +7,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- One logical review no longer appears as one formal review per fallback rung
+  (#1078). When Codex is available, the OpenCode Go rung is non-terminal: a
+  neutral decision now records its run in the sticky progress comment and posts
+  no formal review, leaving the formal review to the rung that actually decides
+  the run. `success` and `failure` still publish normally. The Codex fallback
+  also skips a neutral verdict whose reason names the untrusted tier — that
+  tier is structurally inert (D14), so a second review can only reproduce the
+  same neutral at full cost.
+
+- A Codex run whose platform sandbox cannot start no longer claims "No review
+  ran" (#1083). The review does run — through mergeCraft MCP tools — so the
+  hint now names the actual capability loss (Codex-native shell tools are
+  unavailable), and only the true hard-failure path says no review ran. The
+  loss is recorded as structured run-scope evidence: the trajectory row is
+  stamped `failure_class="environment"` and run-health carries the
+  `codex-platform-sandbox-unavailable` advisory finding, visible to the gate
+  and fallback chain without parsing log prose. The sandbox refusal itself is
+  unchanged.
+
+- Run-bound checkpoint recovery no longer 404s on every `pull_request_target`
+  run (#1082). The Actions API resolves `{workflow_id}` by numeric workflow id
+  or workflow *file name* only, but `_list_mergecraft_workflow_runs` tried the
+  repo-relative path spelling (`.github/workflows/mergecraft.yml`) first and
+  let its 404 abort the listing before the working file-name spelling ran. The
+  file name is now tried first and a 404 on either spelling falls through to
+  the next; when every spelling 404s the warning names the real cause once —
+  the workflow must exist on the repository's default branch and the run token
+  needs `actions: read` — instead of failing silently per run. Checkpoint
+  recovery stays fail-closed (unavailable, with the reason) when the listing
+  cannot be fetched. The same warnings no longer leak httpx's
+  "For more information check: https://developer.mozilla.org/…" docs hint into
+  the job log; HTTP failures are described as
+  `HTTP <status> <reason> for <method> <url>`.
+
+- The `git` tool no longer spends a reviewer turn on two read-only operations
+  the prompts teach (#1077). `merge-base` is now on the read-only allowlist with
+  the same ref/path confinement and config-flag refusal as `rev-parse`, so the
+  `git diff --merge-base` workflow the prompts describe actually runs. And
+  `git grep` exit 1 with clean stderr is grep's "no lines selected" answer: the
+  tool returns `{output: "", noMatches: true}` as success instead of
+  `✗ failed (1)`, while exit 2+ and an exit 1 that wrote to stderr stay
+  fail-closed. `merge-base` gets the same treatment: exit 1 with clean stderr is
+  a negative answer (`--is-ancestor` false, or no common base), not a failure.
+  This is the `git`-door instance of #1027's intent-aware outcome rule.
+
+- The approval gate accepts terminal attestation for clean reviews, and the
+  gate-action table routes complete packets honestly (#1072, #1076). A review
+  that runs cleanly, reads the diff, and submits terminal `approve` with zero
+  typed findings now decides `success` — the validated terminal verdict plus
+  observed `trajectory.read_coverage` attest the review ran, so the fallback
+  guard no longer reruns the whole review on the next provider (on PR #1068
+  that cost 398,912 input tokens for a 161-line lockfile diff). The one-way
+  `request_changes` ratchet, untrusted-tier inertness, failed-run `neutral`,
+  and advisory-only `self_assessment` are unchanged, no synthetic findings are
+  created, and the legacy list-only overload keeps its empty-list `neutral`
+  behaviour. On the routing side, a new `clean_pass` rule maps a blocker-free
+  packet with a trusted success verdict to `auto_merge` on any lane whose
+  `auto_merge_lane` is not `forbidden` — clean medium-lane packets (any
+  dependency bump) no longer fall into a catch-all labelled `schema_failure`
+  → `block`, while forbidden (`high`) lanes and unclassified packets keep a
+  human in the loop. The catch-all is re-scoped so `schema_failure` fires
+  only on structurally absent evidence, and a complete packet with no
+  automated route falls to the new `needs_human_review` →
+  `require_human_review` (unknown is never green, #1056).
+
+- Honest trajectory plumbing for the run record (#1073, #1074, #1075). A tool
+  call a guard refuses (read-only allowlist, path confinement, config-flag or
+  mode guard) now records `ok=False` with `failure_class="refused"` on the run
+  trajectory — the typed `ToolRefusedError` crosses the
+  `mcp/shared.py::execute` seam as a tagged error result, so the agent still
+  sees an ordinary tool error while run-health stops reading refusals as
+  successes. The merge evidence packet schema moves to `1.16.0` and the
+  trajectory record schema to `1.2.0` for the new enum value. A run whose
+  agent self-publishes via `create_pull_request_review` no longer gets a bogus
+  `missing-completion-signal` finding: the packet renders inside the terminal
+  call, before the call lands on the trajectory, so the audit now counts the
+  in-flight terminal call as the completion signal. And the run record's
+  **Review cost** row is honest on those self-published reviews: `agent`
+  renders elapsed-so-far instead of `0s`, `publish` is omitted when the run
+  has not stamped it yet (its stamp lands after the record renders), and
+  sub-second phases render with one decimal (`0.1s`) — or `<0.1s` — instead of
+  rounding to `0s`.
+
 ## [0.1.0a4] — 2026-10-29
 
 > **First published release.** Nothing before this version was ever uploaded:
@@ -241,88 +326,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   permanently blocked), with no behaviour change (#892).
 
 ### Fixed
-
-- One logical review no longer appears as one formal review per fallback rung
-  (#1078). When Codex is available, the OpenCode Go rung is non-terminal: a
-  neutral decision now records its run in the sticky progress comment and posts
-  no formal review, leaving the formal review to the rung that actually decides
-  the run. `success` and `failure` still publish normally. The Codex fallback
-  also skips a neutral verdict whose reason names the untrusted tier — that
-  tier is structurally inert (D14), so a second review can only reproduce the
-  same neutral at full cost.
-
-- A Codex run whose platform sandbox cannot start no longer claims "No review
-  ran" (#1083). The review does run — through mergeCraft MCP tools — so the
-  hint now names the actual capability loss (Codex-native shell tools are
-  unavailable), and only the true hard-failure path says no review ran. The
-  loss is recorded as structured run-scope evidence: the trajectory row is
-  stamped `failure_class="environment"` and run-health carries the
-  `codex-platform-sandbox-unavailable` advisory finding, visible to the gate
-  and fallback chain without parsing log prose. The sandbox refusal itself is
-  unchanged.
-
-- Run-bound checkpoint recovery no longer 404s on every `pull_request_target`
-  run (#1082). The Actions API resolves `{workflow_id}` by numeric workflow id
-  or workflow *file name* only, but `_list_mergecraft_workflow_runs` tried the
-  repo-relative path spelling (`.github/workflows/mergecraft.yml`) first and
-  let its 404 abort the listing before the working file-name spelling ran. The
-  file name is now tried first and a 404 on either spelling falls through to
-  the next; when every spelling 404s the warning names the real cause once —
-  the workflow must exist on the repository's default branch and the run token
-  needs `actions: read` — instead of failing silently per run. Checkpoint
-  recovery stays fail-closed (unavailable, with the reason) when the listing
-  cannot be fetched. The same warnings no longer leak httpx's
-  "For more information check: https://developer.mozilla.org/…" docs hint into
-  the job log; HTTP failures are described as
-  `HTTP <status> <reason> for <method> <url>`.
-
-- The `git` tool no longer spends a reviewer turn on two read-only operations
-  the prompts teach (#1077). `merge-base` is now on the read-only allowlist with
-  the same ref/path confinement and config-flag refusal as `rev-parse`, so the
-  `git diff --merge-base` workflow the prompts describe actually runs. And
-  `git grep` exit 1 with clean stderr is grep's "no lines selected" answer: the
-  tool returns `{output: "", noMatches: true}` as success instead of
-  `✗ failed (1)`, while exit 2+ and an exit 1 that wrote to stderr stay
-  fail-closed. This is the `git`-door instance of #1027's intent-aware outcome
-  rule.
-
-- The approval gate accepts terminal attestation for clean reviews, and the
-  gate-action table routes complete packets honestly (#1072, #1076). A review
-  that runs cleanly, reads the diff, and submits terminal `approve` with zero
-  typed findings now decides `success` — the validated terminal verdict plus
-  observed `trajectory.read_coverage` attest the review ran, so the fallback
-  guard no longer reruns the whole review on the next provider (on PR #1068
-  that cost 398,912 input tokens for a 161-line lockfile diff). The one-way
-  `request_changes` ratchet, untrusted-tier inertness, failed-run `neutral`,
-  and advisory-only `self_assessment` are unchanged, no synthetic findings are
-  created, and the legacy list-only overload keeps its empty-list `neutral`
-  behaviour. On the routing side, a new `clean_pass` rule maps a blocker-free
-  packet with a trusted success verdict to `auto_merge` on any lane whose
-  `auto_merge_lane` is not `forbidden` — clean medium-lane packets (any
-  dependency bump) no longer fall into a catch-all labelled `schema_failure`
-  → `block`, while forbidden (`high`) lanes and unclassified packets keep a
-  human in the loop. The catch-all is re-scoped so `schema_failure` fires
-  only on structurally absent evidence, and a complete packet with no
-  automated route falls to the new `needs_human_review` →
-  `require_human_review` (unknown is never green, #1056).
-
-- Honest trajectory plumbing for the run record (#1073, #1074, #1075). A tool
-  call a guard refuses (read-only allowlist, path confinement, config-flag or
-  mode guard) now records `ok=False` with `failure_class="refused"` on the run
-  trajectory — the typed `ToolRefusedError` crosses the
-  `mcp/shared.py::execute` seam as a tagged error result, so the agent still
-  sees an ordinary tool error while run-health stops reading refusals as
-  successes. The merge evidence packet schema moves to `1.16.0` and the
-  trajectory record schema to `1.2.0` for the new enum value. A run whose
-  agent self-publishes via `create_pull_request_review` no longer gets a bogus
-  `missing-completion-signal` finding: the packet renders inside the terminal
-  call, before the call lands on the trajectory, so the audit now counts the
-  in-flight terminal call as the completion signal. And the run record's
-  **Review cost** row is honest on those self-published reviews: `agent`
-  renders elapsed-so-far instead of `0s`, `publish` is omitted when the run
-  has not stamped it yet (its stamp lands after the record renders), and
-  sub-second phases render with one decimal (`0.1s`) — or `<0.1s` — instead of
-  rounding to `0s`.
 
 - The `tracing` extra moves to OpenTelemetry 1.45.1 (semantic conventions
   0.66b1), which fixes CVE-2026-114603 in `opentelemetry-api` 1.44.0. That

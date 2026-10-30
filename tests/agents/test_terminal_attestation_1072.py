@@ -113,6 +113,9 @@ def test_failed_run_stays_neutral_despite_terminal_attestation() -> None:
     packet = _attested_clean_packet()
     decision = decide_approval(packet, run_succeeded=False, tier="trusted")
     assert decision.verdict == "neutral"
+    assert "review attested by terminal verdict" not in decision.reason, (
+        "a refused attestation must not be named as the reason for the neutral verdict"
+    )
 
 
 def test_unknown_read_coverage_stays_neutral() -> None:

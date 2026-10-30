@@ -59,6 +59,10 @@ def test_user_namespace_failure_records_environment_capability_loss() -> None:
     assert row.failure_class == "environment"
 
     findings = audit_trajectory(build_trajectory_record(state))
+    rule_ids = {finding.rule_id for finding in findings}
+    assert "unresolved-failure" not in rule_ids, (
+        "the sandbox never started the command, so it has no outcome to resolve"
+    )
     capability = [f for f in findings if f.rule_id == "codex-platform-sandbox-unavailable"]
     assert len(capability) == 1
     assert capability[0].scope == "run"
@@ -66,7 +70,7 @@ def test_user_namespace_failure_records_environment_capability_loss() -> None:
 
     from mergecraft.agents.gates import blocking_findings
 
-    assert blocking_findings(capability) == []
+    assert blocking_findings(findings) == []
 
 
 def test_user_namespace_failure_hint_logged_once_on_exit_zero(

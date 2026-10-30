@@ -1364,7 +1364,13 @@ def should_publish_sticky_only(packet: Any) -> bool:
     if enabled not in {"1", "true", "yes", "on"}:
         return False
     decision = getattr(packet, "decision", None)
-    return decision is not None and getattr(decision, "verdict", None) == "neutral"
+    if decision is None or getattr(decision, "verdict", None) != "neutral":
+        return False
+    # An untrusted-tier neutral is terminal by construction: the fallback chain
+    # now skips Codex for it (a retry cannot change the verdict), and the Claude
+    # backstop only runs on a provider failure. Sticky-only here would leave the
+    # PR with no formal review at all (#1078).
+    return "untrusted tier" not in str(getattr(decision, "reason", ""))
 
 
 async def _publish_github_review(

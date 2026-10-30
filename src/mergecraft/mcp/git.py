@@ -487,6 +487,23 @@ def _run_grep(args: list[str], *, cwd: str) -> tuple[str, bool]:
         return "", False
 
 
+def _run_merge_base(args: list[str], *, cwd: str) -> tuple[str, bool]:
+    """Run ``git merge-base`` and return ``(stdout, found)``.
+
+    Exit 1 with clean stderr is a successful negative answer: ``--is-ancestor``
+    returns it when the first commit is not an ancestor of the second, and the
+    plain form returns it when the commits share no merge base. Both are
+    answers, not failures (#1077). Exit 1 carrying stderr output, and every
+    other non-zero exit, stays fail-closed.
+    """
+    try:
+        return _run_git(args, cwd=cwd), True
+    except _GitCommandError as err:
+        if err.returncode != 1 or err.stderr.strip():
+            raise
+        return "", False
+
+
 def _run_authenticated_git(
     args: list[str],
     *,
@@ -680,11 +697,14 @@ def git_tool(ctx: ToolContext):
                 }
         context_dropped = False
         matched = True
+        merge_base_found = True
         if command == "grep":
             args, context_dropped = _normalize_grep_args(args)
         try:
             if command == "grep":
                 output, matched = _run_grep([*global_opts, command, *args], cwd=cwd)
+            elif command == "merge-base":
+                output, merge_base_found = _run_merge_base([*global_opts, command, *args], cwd=cwd)
             else:
                 output = _run_git([*global_opts, command, *args], cwd=cwd)
         except RuntimeError as err:
@@ -716,6 +736,12 @@ def git_tool(ctx: ToolContext):
             # grep's no-match answer, surfaced honestly instead of as a
             # failure (#1077; the ``git``-door instance of #1027).
             result["noMatches"] = True
+        if not merge_base_found:
+            # merge-base's negative answer, same rule (#1077).
+            if "--is-ancestor" in args:
+                result["isAncestor"] = False
+            else:
+                result["noMergeBase"] = True
         return result
 
     return tool(

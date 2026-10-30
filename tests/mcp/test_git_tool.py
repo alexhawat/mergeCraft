@@ -991,6 +991,42 @@ async def test_grep_match_result_carries_no_no_matches_key(
     assert payload == {"output": "learnings.md:3:Withdrawn review findings\n"}
 
 
+async def test_merge_base_exit_1_is_a_negative_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1077 — ``--is-ancestor`` false and no common base are answers, not failures."""
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", _failing_git(1))
+
+    ancestor = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "merge-base", "args": ["--is-ancestor", "HEAD", "origin/main"]}
+    )
+    assert ancestor.is_error is False, ancestor.content[0]["text"]
+    assert json.loads(ancestor.content[0]["text"]) == {"output": "", "isAncestor": False}
+
+    no_base = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "merge-base", "args": ["HEAD", "main"]}
+    )
+    assert no_base.is_error is False, no_base.content[0]["text"]
+    assert json.loads(no_base.content[0]["text"]) == {"output": "", "noMergeBase": True}
+
+
+async def test_merge_base_exit_1_with_stderr_stays_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An exit 1 that wrote to stderr is not a clean negative answer."""
+    monkeypatch.setattr(
+        "mergecraft.mcp.git._run_git",
+        _failing_git(1, stderr="fatal: not a git repository"),
+    )
+
+    result = await git_tool(_ctx(tmp_path)).execute(
+        {"command": "merge-base", "args": ["HEAD", "main"]}
+    )
+
+    assert result.is_error is True, result.content[0]["text"]
+    assert "failed (1)" in result.content[0]["text"]
+
+
 @pytest.mark.parametrize("subcommand", ["push", "fetch", "pull", "clone"])
 async def test_auth_requiring_subcommands_name_their_dedicated_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, subcommand: str

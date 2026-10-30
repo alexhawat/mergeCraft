@@ -116,7 +116,11 @@ def _record_command_execution(
                 tool="shell",
                 arguments={"command": str(item.get("command") or "")},
                 ok=False,
-                outcome_ok=False,
+                # The sandbox never started the command, so it has no outcome.
+                # ``outcome_ok=False`` would also make the trajectory audit emit
+                # a Critical ``unresolved-failure`` for a capability loss that is
+                # advisory by design (#1083).
+                outcome_ok=None,
                 error=output_text[-_EXEC_OUTPUT_TAIL_CHARS:]
                 or "codex platform sandbox unavailable",
                 failure_class="environment",

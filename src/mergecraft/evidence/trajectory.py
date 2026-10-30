@@ -280,6 +280,7 @@ _GIT_READ_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
         "log",
         "ls-files",
         "ls-tree",
+        "merge-base",
         "show",
         "status",
     }

@@ -181,3 +181,16 @@ def test_the_explicit_refused_stamp_survives_model_validation() -> None:
 
     assert row.failure_class == "refused"
     assert ToolCallRecord.model_validate(row.model_dump(mode="json")).failure_class == "refused"
+
+
+def test_merge_base_is_classified_as_a_read_not_an_edit() -> None:
+    """#1077 — merge-base only reads the commit graph, so it must not arm verification.
+
+    ``_GIT_READ_SUBCOMMANDS`` drives ``_no_post_edit_verification``: a
+    ``merge-base`` call classified as ``modify`` would push ``last_edit``
+    forward and emit a false ``no-post-edit-verification`` Major.
+    """
+    from mergecraft.evidence.trajectory import _command_intent
+
+    assert _command_intent("git", "merge-base HEAD main") == "read"
+    assert _command_intent("git", "merge-base --is-ancestor HEAD origin/main") == "read"

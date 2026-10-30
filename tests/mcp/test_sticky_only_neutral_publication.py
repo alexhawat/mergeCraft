@@ -68,8 +68,8 @@ def ctx(tmp_path: Path) -> ToolContext:
     return tool_ctx
 
 
-def _packet(verdict: str) -> SimpleNamespace:
-    return SimpleNamespace(decision=SimpleNamespace(verdict=verdict))
+def _packet(verdict: str, reason: str = "") -> SimpleNamespace:
+    return SimpleNamespace(decision=SimpleNamespace(verdict=verdict, reason=reason))
 
 
 def test_sticky_only_requires_both_the_env_flag_and_a_neutral_decision(
@@ -83,6 +83,16 @@ def test_sticky_only_requires_both_the_env_flag_and_a_neutral_decision(
     assert should_publish_sticky_only(_packet("success")) is False
     assert should_publish_sticky_only(_packet("failure")) is False
     assert should_publish_sticky_only(SimpleNamespace(decision=None)) is False
+    assert (
+        should_publish_sticky_only(
+            _packet(
+                "neutral",
+                "neutral: untrusted tier — attestation is inert and a fallback rung "
+                "cannot change the verdict",
+            )
+        )
+        is False
+    ), "an untrusted-tier neutral is terminal: Codex is skipped, so it must publish"
 
 
 @pytest.mark.asyncio

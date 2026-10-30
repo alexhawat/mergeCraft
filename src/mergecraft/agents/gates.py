@@ -455,7 +455,11 @@ def _packet_decision_reason(
         and not _packet_has_blockers(packet)
     ):
         return "neutral: agent terminal verdict request_changes; no structural blocker attested"
-    if not _packet_attested_findings(packet) and _packet_terminal_attestation(packet):
+    if (
+        conclusion == "success"
+        and not _packet_attested_findings(packet)
+        and _packet_terminal_attestation(packet)
+    ):
         # #1072 — the findings list is empty *and* the review is attested by
         # its terminal verdict plus read coverage. Name that attestation so a
         # reader never mistakes the clean result for missing evidence. This
