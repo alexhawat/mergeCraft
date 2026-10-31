@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -12,9 +12,6 @@ from mergecraft.classify.blast_radius import (
     RuleSet,
     classify_blast_radius,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 RiskBand = Literal["low", "medium", "high"]
 
@@ -126,9 +123,8 @@ def classify_change(
     change: ChangeSet,
     *,
     rule_set: RuleSet | None = None,
-    agent_runner: Callable[..., dict[str, object]] | None = None,
 ) -> ChangeClassification:
-    """Classify ``change`` into a typed map; optional ``agent_runner`` runs once."""
+    """Classify ``change`` into a typed change/risk map."""
     paths = list(change.get("changed_paths", []))
     blast_radius = classify_blast_radius(change, rule_set=rule_set)
     generated_paths = [path for path in paths if _is_generated_path(path)]
@@ -140,8 +136,6 @@ def classify_change(
         "vendored_paths": vendored_paths,
     }
     is_trivial = _infer_is_trivial(change, blast_radius)
-    if agent_runner is not None:
-        agent_runner(change_payload=dict(change))
     return ChangeClassification(
         risk_band=blast_radius.lane,
         blast_radius=blast_radius,
