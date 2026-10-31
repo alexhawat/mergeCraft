@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from mergecraft.requirements.criteria import (
     AcceptanceCriterion,
@@ -23,18 +23,6 @@ from mergecraft.utils.fence import Fence, render_untrusted
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-RequirementSource = Literal[
-    "pr_description",
-    "linked_issue",
-    "local_spec",
-    "github_issue",
-    "gitlab_issue",
-    "jira",
-    "linear",
-    "adr",
-    "acceptance_criteria",
-]
 
 REQUIREMENT_SOURCES: frozenset[str] = frozenset(
     {
@@ -253,7 +241,6 @@ __all__ = [
     "REQUIREMENT_STATES",
     "IngestResult",
     "Requirement",
-    "RequirementSource",
     "RequirementState",
     "ingest_requirements",
 ]
