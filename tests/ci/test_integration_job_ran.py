@@ -40,7 +40,10 @@ def test_integration_job_runs_supported_python_matrix() -> None:
     bootstrap = next(step for step in steps if step.get("uses") == "./.github/actions/bootstrap")
     assert bootstrap["with"]["python-version"] == "${{ matrix.python }}"
     execution = next(step for step in steps if step.get("run") == "make test-integration")
-    assert not execution.get("if"), "every matrix entry must run the integration suite"
+    docs_only_if = "github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'"
+    assert execution.get("if") in (None, docs_only_if), (
+        "integration suite may skip only for docs-only PRs via the path classifier"
+    )
     assert not execution.get("continue-on-error"), "integration failures must block CI"
     assert not integration.get("continue-on-error")
 

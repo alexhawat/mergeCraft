@@ -33,20 +33,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Classify PR diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Docs-only vs code paths
+        id: classify
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci_pr_touches_code.py \
+            --event "${{ github.event_name }}" \
+            --base "${BASE_REF:-main}"
+
   integration-pr:
     name: Integration (PR / mocked + self-skip / py${{ matrix.python }})
+    needs: changes
     if: >-
       github.event_name == 'pull_request' ||
       github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 55
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
         python: ["3.11", "3.14"]
     steps:
+      - name: Docs-only skip
+        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
+        run: echo "::notice title=Integration skipped::Docs-only PR — integration leg skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
           # Ref-resolution checks ask git whether a tag or branch exists
           # (README Action pin D25, tests/docs/support.py). A shallow fetch
@@ -60,20 +89,87 @@ jobs:
                 || github.ref }}
           persist-credentials: false
       - uses: ./.github/actions/bootstrap
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
           python-version: ${{ matrix.python }}
         env:
           # Exporter unit tests run in coverage-measure (D14 / TH8).
           MERGECRAFT_UV_EXTRAS: tracing
+      - name: Restore base coverage from main cache
+        id: base_coverage_cache
+        if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14' && github.event_name == 'pull_request'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: coverage.json
+          key: mergecraft-coverage-main-${{ github.event.pull_request.base.sha }}
+      - name: Fetch base coverage (cache or ci-cd artifact)
+        if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14' && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dest="${{ runner.temp }}/coverage-base.json"
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          if [[ -f coverage.json ]]; then
+            cp coverage.json "${dest}"
+            echo "Using cached base coverage for ${base_sha} (coverage.json cache restore)"
+            exit 0
+          fi
+          chmod +x scripts/ci_fetch_coverage_artifact.sh
+          for attempt in $(seq 1 12); do
+            if scripts/ci_fetch_coverage_artifact.sh "${base_sha}" "${dest}"; then
+              echo "Base coverage artifact ready for ${base_sha} (attempt ${attempt})"
+              exit 0
+            fi
+            echo "Base coverage artifact not ready for ${base_sha} (attempt ${attempt}/12); sleeping 5s…" >&2
+            sleep 5
+          done
+          echo "Base coverage cache/artifact miss — coverage ratchet will measure base in a worktree" >&2
+          exit 1
+      - name: Fetch head coverage from ci.yml artifact
+        if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14' && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/ci_fetch_coverage_artifact.sh
+          dest="${{ runner.temp }}/coverage-head.json"
+          # integration-pr often starts before ci.yml finishes; poll for the artifact.
+          head_sha="${{ github.event.pull_request.head.sha }}"
+          for attempt in $(seq 1 72); do
+            if scripts/ci_fetch_coverage_artifact.sh "${head_sha}" "${dest}"; then
+              echo "Head coverage artifact ready for ${head_sha} (attempt ${attempt})"
+              exit 0
+            fi
+            echo "Head coverage artifact not ready for ${head_sha} (attempt ${attempt}/72); sleeping 5s…" >&2
+            sleep 5
+          done
+          echo "Head coverage artifact never appeared — coverage ratchet will fall back to make coverage-gate" >&2
+          exit 1
       - name: Integration suite
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         run: make test-integration
       - name: Coverage ratchet
-        if: matrix.python == '3.14'
+        if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_BASE_REF: ${{ github.base_ref }}
           GITHUB_WORKSPACE: ${{ github.workspace }}
+          MERGECRAFT_BASE_COVERAGE_PATH: ${{ runner.temp }}/coverage-base.json
+          MERGECRAFT_HEAD_COVERAGE_PATH: ${{ runner.temp }}/coverage-head.json
         run: bash scripts/ci_coverage_delta_gate.sh
+      - name: Seed main base coverage cache
+        if: >-
+          (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') &&
+          matrix.python == '3.14' &&
+          github.event_name == 'pull_request' &&
+          steps.base_coverage_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: coverage.json
+          key: mergecraft-coverage-main-${{ github.event.pull_request.base.sha }}
 
   filtered-egress:
     name: Integration (filtered egress / privileged)

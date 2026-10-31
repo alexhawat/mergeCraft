@@ -59,6 +59,19 @@ jobs:
         run: make action-candidate-check
       - name: make ci
         run: make ci
+      - name: Upload main coverage for PR delta reuse
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: mergecraft-coverage-json
+          path: coverage.json
+          if-no-files-found: error
+      - name: Cache main coverage.json by commit SHA
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: coverage.json
+          key: mergecraft-coverage-main-${{ github.sha }}
 
   e2e-gate:
     name: Action-image E2E (release gate)

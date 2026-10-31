@@ -197,6 +197,11 @@ jobs:
       failed_names: ${{ steps.wait.outputs.failed_names || '' }}
       check_suite_id: ${{ steps.wait.outputs.check_suite_id || '' }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'pull_request_target'
+        with:
+          fetch-depth: 1
+          persist-credentials: false
       - name: Wait for CI checks on the PR head SHA
         id: wait
         if: github.event_name == 'pull_request_target'
@@ -212,8 +217,15 @@ jobs:
           APPEAR_BUDGET_SECONDS: "300"
         run: |
           set -uo pipefail
-          # Selector for ci.yml's jobs — all of them are named "Verify (…)".
-          jq_verify='[.check_runs[]? | select(.name | startswith("Verify ("))]'
+          # Only the branch-protection required Verify checks — not advisory jobs
+          # such as mutation testing (continue-on-error, not required).
+          mapfile -t REQUIRED_CHECKS < <(grep -v '^[[:space:]]*#' scripts/ci_required_verify_checks.txt | grep -v '^[[:space:]]*$')
+          if ((${#REQUIRED_CHECKS[@]} == 0)); then
+            echo "::error title=mergecraft CI wait::scripts/ci_required_verify_checks.txt is empty" >&2
+            exit 0
+          fi
+          jq_names="$(printf '%s\n' "${REQUIRED_CHECKS[@]}" | jq -R . | jq -s .)"
+          jq_verify="[.check_runs[]? | select(.name as \$n | ${jq_names} | index(\$n))]"
           started="$(date +%s)"
           state="timeout"
           failed_count=0
@@ -225,16 +237,19 @@ jobs:
             elapsed=$(( now - started ))
 
             if runs="$(gh api "/repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100")"; then
-              total="$(printf '%s' "${runs}" | jq "${jq_verify} | length")"
-              pending="$(printf '%s' "${runs}" | jq "${jq_verify} | map(select(.status != \"completed\")) | length")"
+              matched="$(printf '%s' "${runs}" | jq "${jq_verify}")"
+              total="$(printf '%s' "${matched}" | jq 'length')"
+              expected="${#REQUIRED_CHECKS[@]}"
+              pending="$(printf '%s' "${matched}" | jq '[.[] | select(.status != "completed")] | length')"
+              seen_names="$(printf '%s' "${matched}" | jq -r '[.[].name] | unique | length')"
 
-              if [ "${total}" -gt 0 ] && [ "${pending}" -eq 0 ]; then
+              if [ "${total}" -ge "${expected}" ] && [ "${seen_names}" -ge "${expected}" ] && [ "${pending}" -eq 0 ]; then
                 state="complete"
-                failed_count="$(printf '%s' "${runs}" | jq "${jq_verify} | map(select(.conclusion != \"success\" and .conclusion != \"neutral\" and .conclusion != \"skipped\")) | length")"
-                failed_names="$(printf '%s' "${runs}" | jq -r "${jq_verify} | map(select(.conclusion != \"success\" and .conclusion != \"neutral\" and .conclusion != \"skipped\") | .name) | join(\", \")")"
+                failed_count="$(printf '%s' "${matched}" | jq '[.[] | select(.conclusion != "success" and .conclusion != "neutral" and .conclusion != "skipped")] | length')"
+                failed_names="$(printf '%s' "${matched}" | jq -r '[.[] | select(.conclusion != "success" and .conclusion != "neutral" and .conclusion != "skipped") | .name] | join(", ")')"
                 # Any failing Verify job carries the check_suite id the reviewer
                 # needs for get_check_suite_logs().
-                check_suite_id="$(printf '%s' "${runs}" | jq -r "${jq_verify} | map(select(.conclusion != \"success\" and .conclusion != \"neutral\" and .conclusion != \"skipped\") | .check_suite.id) | first // \"\"")"
+                check_suite_id="$(printf '%s' "${matched}" | jq -r '[.[] | select(.conclusion != "success" and .conclusion != "neutral" and .conclusion != "skipped") | .check_suite.id] | first // ""')"
                 break
               fi
 

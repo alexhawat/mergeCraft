@@ -90,6 +90,12 @@ def test_mutation_advisory_is_not_the_eval_gate() -> None:
     assert EVAL_GATE_JOB_ID != "mutation-advisory"
 
 
+def test_mutation_advisory_skips_pull_request_runs() -> None:
+    """Mutation harness runs on main/nightly only — not on the PR critical path."""
+    advisory = job(load_workflow("ci.yml"), "mutation-advisory")
+    assert advisory.get("if") == "github.event_name != 'pull_request'"
+
+
 def test_eval_gate_pr_check_summary_states_structural_not_live_scope() -> None:
     """E-D3 — the check says it proves structural replay, not live detection."""
     source = ci_eval_gate_source().casefold()

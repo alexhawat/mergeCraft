@@ -9,6 +9,9 @@ on:
     branches: [main, pre-0.0.1, fix/review-pipeline-hardening]
   push:
     branches: [main, pre-0.0.1, "release/**"]
+  schedule:
+    # Nightly mutation advisory (non-blocking); PRs skip this job.
+    - cron: "17 6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -19,6 +22,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Classify PR diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Docs-only vs code paths
+        id: classify
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci_pr_touches_code.py \
+            --event "${{ github.event_name }}" \
+            --base "${BASE_REF:-main}"
+
   deployment-candidate:
     name: Verify changed deployment candidates
     runs-on: ubuntu-latest
@@ -72,6 +96,7 @@ jobs:
 
   test:
     name: Verify (tests py${{ matrix.python }} ${{ matrix.group }}/2)
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -80,7 +105,11 @@ jobs:
         python: ["3.11", "3.14"]
         group: [1, 2]
     steps:
+      - name: Docs-only skip
+        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
+        run: echo "::notice title=Verify skipped::Docs-only PR — unit test shard skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
           # Ref-resolution checks ask git whether a tag or branch exists
           # (README Action pin D25, tests/docs/support.py). A shallow fetch
@@ -89,6 +118,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/bootstrap
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
           python-version: ${{ matrix.python }}
         env:
@@ -96,6 +126,7 @@ jobs:
           # installed, but static/toolchain jobs must not pay the sync cost (D14 / TH8).
           MERGECRAFT_UV_EXTRAS: tracing
       - name: Unit tests (shard ${{ matrix.group }} of 2)
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         env:
           MERGECRAFT_TEST_SPLITS: "2"
           MERGECRAFT_TEST_GROUP: ${{ matrix.group }}
@@ -103,32 +134,48 @@ jobs:
 
   coverage-gate:
     name: Verify (coverage gate py3.14)
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Docs-only skip
+        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
+        run: echo "::notice title=Verify skipped::Docs-only PR — coverage gate skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
           # Merge-base ratchet (check_coverage_ratchet.py) needs full history.
           fetch-depth: 0
           persist-credentials: false
       - name: Fetch base branch for merge-base ratchet
-        if: github.event_name == 'pull_request'
+        if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && github.event_name == 'pull_request'
         env:
           BASE_REF: ${{ github.base_ref }}
         run: git fetch --no-tags origin "$BASE_REF"
       - uses: ./.github/actions/bootstrap
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
           python-version: "3.14"
         env:
           # Tracing extra: exporter unit tests are part of coverage-measure (D14 / TH8).
           MERGECRAFT_UV_EXTRAS: tracing
       - name: Coverage floors and ratchet
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         env:
           GITHUB_BASE_REF: ${{ github.base_ref }}
+          MERGECRAFT_TEST_SPLITS: "2"
         run: make coverage-gate
+      - name: Upload coverage.json for integration delta reuse
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: mergecraft-coverage-json
+          path: coverage.json
+          if-no-files-found: error
 
   static:
     name: Verify (static + build py${{ matrix.python }})
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -136,6 +183,9 @@ jobs:
       matrix:
         python: ["3.11", "3.14"]
     steps:
+      - name: Docs-only notice
+        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
+        run: echo "::notice title=Verify (docs-only)::Running docs-check only — full static/build tier skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Ref-resolution checks ask git whether a tag or branch exists
@@ -148,9 +198,16 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Static, typecheck, build tier
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         run: make ci-static
+      - name: Docs-check (docs-only PRs)
+        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
+        run: make docs-check
+      - name: Docs/skills/eval guards (docs-only PRs)
+        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true' && matrix.python == '3.14'
+        run: uv run pytest tests/docs tests/skills tests/evals/test_packaged_cases_sync.py -q --tb=short
       - name: Action pin freshness
-        if: matrix.python == '3.14'
+        if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         run: |
           # PR-scoped rules only: rung self-consistency, env parity, and
           # freshness. Staleness (main's pin vs main's tip) reads nothing from
@@ -166,7 +223,7 @@ jobs:
       # First-wave CI SARIF for mergeCraft ingest (#464 / D8). Upload even when
       # the static tier failed so the review still sees the tool's findings.
       - name: Emit ruff and mypy SARIF
-        if: always() && matrix.python == '3.14'
+        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         env:
           # Makefile bootstrap installs dev tools into .venv-dev (AG8); bare
           # `uv run` would create a base-only .venv and fail to spawn ruff/mypy.
@@ -188,7 +245,7 @@ jobs:
           fi
           uv run python scripts/native_output_to_sarif.py mypy .sarif/mypy.json .sarif/mypy.sarif
       - name: Upload ruff SARIF
-        if: always() && matrix.python == '3.14'
+        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -196,7 +253,7 @@ jobs:
           path: .sarif/ruff.sarif
           if-no-files-found: warn
       - name: Upload mypy SARIF
-        if: always() && matrix.python == '3.14'
+        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -208,13 +265,13 @@ jobs:
       # (JSONL converted to SARIF). Uploads run on Python 3.14 only — one
       # canonical artifact set per PR.
       - name: Emit actionlint and zizmor SARIF
-        if: always() && matrix.python == '3.14'
+        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         continue-on-error: true
         env:
           MERGECRAFT_WORKFLOW_SARIF_DIR: .sarif
         run: ./scripts/workflow_lint.sh
       - name: Upload actionlint SARIF
-        if: always() && matrix.python == '3.14'
+        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -222,7 +279,7 @@ jobs:
           path: .sarif/actionlint.sarif
           if-no-files-found: warn
       - name: Upload zizmor SARIF
-        if: always() && matrix.python == '3.14'
+        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -232,6 +289,7 @@ jobs:
 
   security:
     name: Verify (security audit py${{ matrix.python }})
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -239,7 +297,11 @@ jobs:
       matrix:
         python: ["3.11", "3.14"]
     steps:
+      - name: Docs-only skip
+        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
+        run: echo "::notice title=Verify skipped::Docs-only PR — security audit skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
           # Ref-resolution checks ask git whether a tag or branch exists
           # (README Action pin D25, tests/docs/support.py). A shallow fetch
@@ -248,23 +310,25 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/bootstrap
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
           python-version: ${{ matrix.python }}
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: github.event_name == 'push'
+        if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && github.event_name == 'push'
         with:
           path: .mergecraft/analyzer-cache
           key: analyzer-cache-${{ runner.os }}-py${{ matrix.python }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
             analyzer-cache-${{ runner.os }}-py${{ matrix.python }}-
       - name: bandit + pip-audit (OSV.dev)
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         env:
           BANDIT_JSON: .sarif/bandit.json
         run: |
           mkdir -p .sarif
           make security
       - name: Convert bandit SARIF
-        if: always() && matrix.python == '3.14'
+        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         env:
           UV_PROJECT_ENVIRONMENT: .venv-dev
         run: uv run python scripts/native_output_to_sarif.py bandit .sarif/bandit.json .sarif/bandit.sarif
@@ -272,7 +336,7 @@ jobs:
       # 403 must not fail this job once `make security` has passed — and this one
       # is a required context, so that failure would block the merge.
       - name: Upload bandit SARIF
-        if: always() && matrix.python == '3.14'
+        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -282,12 +346,12 @@ jobs:
       # W5 extended SARIF (lane D / #600): semgrep for sandbox-blocked pattern scan.
       # Python 3.14 matrix leg only — one canonical semgrep-sarif artifact per PR.
       - name: Emit semgrep SARIF
-        if: always() && matrix.python == '3.14'
+        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         env:
           UV_PROJECT_ENVIRONMENT: .venv-dev
         run: uv run python scripts/ci_extended_sarif.py .sarif/semgrep.sarif
       - name: Upload semgrep SARIF
-        if: always() && matrix.python == '3.14'
+        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -297,12 +361,12 @@ jobs:
       # Catalog parser is JSONL; convert to SARIF so ingest stays one path.
       # A clean scan still uploads a valid empty-results document, not a 0-byte file.
       - name: Emit trufflehog SARIF
-        if: always() && matrix.python == '3.14'
+        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         env:
           UV_PROJECT_ENVIRONMENT: .venv-dev
         run: uv run python scripts/ci_extended_sarif.py trufflehog .sarif/trufflehog.sarif
       - name: Upload trufflehog SARIF
-        if: always() && matrix.python == '3.14'
+        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -312,15 +376,22 @@ jobs:
 
   privilege-root:
     name: Verify (root container privilege py3.14)
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Docs-only skip
+        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
+        run: echo "::notice title=Verify skipped::Docs-only PR — container privilege check skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
           fetch-depth: 0
           persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
       - name: Build action image
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -331,12 +402,14 @@ jobs:
           cache-from: type=gha,scope=mergeCraft-slim-privilege
           cache-to: type=gha,mode=max,scope=mergeCraft-slim-privilege
       - name: Privilege identity + trust-ordering (root and uid 65534)
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         run: |
           chmod +x docker/e2e/run_in_image_privilege.sh
           docker/e2e/run_in_image_privilege.sh mergecraft:lane-a
 
   mutation-advisory:
     name: Verify (mutation advisory py3.14)
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     continue-on-error: true
