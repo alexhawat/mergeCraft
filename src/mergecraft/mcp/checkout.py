@@ -625,7 +625,9 @@ async def recover_run_bound_review_state(
         return _UNAVAILABLE_RUN_BOUND_STATE
     # Newest first: a run that carries no usable evidence artefact (it failed before
     # uploading one, or the artefact expired) is not a round and is skipped; the next
-    # older run is tried, up to a bound.
+    # older run is tried, up to a bound. One warning is emitted at the fallback, and
+    # it names the last probe error so the cause is not lost.
+    last_probe_error: str | None = None
     for index, run in enumerate(trusted[:_RUN_BOUND_MAX_RUN_PROBES]):
         run_id = _coerce_int(run.get("id"))
         if run_id is None:
@@ -633,10 +635,9 @@ async def recover_run_bound_review_state(
         try:
             packet = await _read_run_evidence_packet(ctx, run_id=run_id)
         except Exception as err:
-            logger.warning(
-                "run-bound checkpoint: reading run {} failed: {}",
-                run_id,
-                _describe_run_api_error(err),
+            last_probe_error = _describe_run_api_error(err)
+            logger.debug(
+                "run-bound checkpoint: reading run {} failed: {}", run_id, last_probe_error
             )
             continue
         reviewed_head_sha = str(packet.get("reviewed_head_sha") or "") if packet else ""
@@ -653,11 +654,13 @@ async def recover_run_bound_review_state(
             round_index=len(trusted) - index,
             progress_comment_id=_coerce_int(packet.get("progress_comment_id")) if packet else None,
         )
+    detail = f"; last error: {last_probe_error}" if last_probe_error else ""
     logger.warning(
         "run-bound checkpoint: none of the {} newest trusted run(s) for PR #{} carried a "
-        "usable evidence artefact; falling back",
+        "usable evidence artefact; falling back{}",
         min(len(trusted), _RUN_BOUND_MAX_RUN_PROBES),
         pull_number,
+        detail,
     )
     return _UNAVAILABLE_RUN_BOUND_STATE
 
