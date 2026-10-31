@@ -10,7 +10,7 @@ def test_ci_has_pr_classifier_and_sharded_coverage_gate() -> None:
     assert "changes" in (doc.get("jobs") or {})
     text = read_text(".github/workflows/ci.yml")
     assert "ci_pr_touches_code.py" in text
-    assert "MERGECRAFT_TEST_SPLITS: \"2\"" in text
+    assert 'MERGECRAFT_TEST_SPLITS: "2"' in text
     assert "mergecraft-coverage-json" in text
 
 
