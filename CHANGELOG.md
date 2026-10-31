@@ -21,6 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Inline review comments are published again. Every review carrying inline
+  comments was rejected with a 422 (`Variable $threads ... invalid value for
+  N.fingerprint (Field is not defined on DraftPullRequestReviewThread)`): the
+  publisher sent its internal `fingerprint` key inside `comments[]`, which
+  GitHub maps onto the GraphQL review-thread input and refuses. The recovery
+  ladder then fell back to a bare COMMENT review, so the verdict and summary
+  posted but every inline comment was lost. The create-review request now
+  carries only `path`, `body`, `line`, `side`, `start_line` and `start_side`
+  per comment; the fingerprint still reaches GitHub as the hidden marker in
+  each comment body, which dedup, carryover and thread resolution read.
+
 - One logical review no longer appears as one formal review per fallback rung
   (#1078). When Codex is available, the OpenCode Go rung is non-terminal: a
   neutral decision now records its run in the sticky progress comment and posts

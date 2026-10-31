@@ -889,6 +889,27 @@ def _inline_anchor_index_for_diff(diff_text: str) -> InlineAnchorIndex | None:
 
 ANCHOR_RECOVERY_RETRY_CEILING = 8
 
+# The review-comment fields GitHub's create-review endpoint accepts. It maps
+# ``comments[]`` onto the GraphQL ``DraftPullRequestReviewThread`` input and
+# rejects the whole review with a 422 on any other key — the internal
+# ``fingerprint`` sank every inline comment that way. The fingerprint still
+# reaches GitHub as the hidden marker ``stamp_finding_fingerprint`` writes into
+# the body, which is what dedup, carryover and thread resolution read back.
+_GITHUB_REVIEW_COMMENT_FIELDS = ("path", "body", "line", "side", "start_line", "start_side")
+
+
+def _github_review_request(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return ``payload`` with each inline comment cut down to the fields GitHub accepts."""
+    comments = payload.get("comments")
+    if not comments:
+        return payload
+    request = dict(payload)
+    request["comments"] = [
+        {key: comment[key] for key in _GITHUB_REVIEW_COMMENT_FIELDS if key in comment}
+        for comment in comments
+    ]
+    return request
+
 
 def _payload_signature(payload: dict[str, Any]) -> tuple[str, int, int, int]:
     """Cheap structural signature for anchor-recovery progress checks (D1)."""
@@ -1073,7 +1094,7 @@ async def _create_github_review_with_anchor_recovery(
                 ctx.repo.owner,
                 ctx.repo.name,
                 pull_number,
-                **current,
+                **_github_review_request(current),
             )
             if posted is not None:
                 posted.append(dict(current))
