@@ -24,6 +24,12 @@ from mergecraft.utils.git_hardening import git_argv
 REGISTERED_KEY_ENV = "LLM_PROVIDER_1_API_KEY"
 PROVIDER_URL_ENV = "MERGECRAFT_E2E_LIVE_PROVIDER_URL"
 
+# One provider turn on the smoke's one-line diff reports ~160k tokens
+# (prompt + tool schemas + context), so the budget must clear a single turn
+# with room for the post-run retries. It stays far below the product default
+# (2,000,000) so a runaway loop still stops the smoke.
+LIVE_SMOKE_TOKEN_BUDGET = 400_000
+
 
 def register_live_provider(root: Path, model: str) -> Path | None:
     """Register the live model's provider in ``root`` when its key rides the indexed slot.
@@ -50,7 +56,7 @@ async def main() -> None:
     if not model.strip():
         raise ValueError("an explicit live model is required")
     os.environ["MERGECRAFT_RUN_TIMEOUT_S"] = "180"
-    os.environ["MERGECRAFT_TOKEN_BUDGET"] = "12000"
+    os.environ["MERGECRAFT_TOKEN_BUDGET"] = str(LIVE_SMOKE_TOKEN_BUDGET)
     os.environ["MERGECRAFT_TOOL_CALL_BUDGET"] = "30"
     os.environ["MERGECRAFT_COST_BUDGET_USD"] = "1"
     with tempfile.TemporaryDirectory(prefix="mergecraft-live-smoke-") as temporary:
