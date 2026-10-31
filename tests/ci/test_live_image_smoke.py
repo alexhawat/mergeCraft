@@ -63,6 +63,28 @@ async def test_live_smoke_reports_accepted_terminal(
     assert '"terminal_review": true' in capsys.readouterr().out
 
 
+async def test_live_smoke_token_budget_clears_one_provider_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A single provider turn on the smoke diff reports ~160k tokens.
+
+    The nightly of 2026-10-31 died with "token budget exhausted by single
+    increment (160450 > ceiling 13200)" once 2.x stream usage was recorded.
+    """
+    monkeypatch.setenv("MERGECRAFT_E2E_LIVE_MODEL", "openai/test")
+    seen: dict[str, str] = {}
+
+    async def review(**kwargs: Any) -> OfflineReviewResult:
+        seen["budget"] = os.environ["MERGECRAFT_TOKEN_BUDGET"]
+        return OfflineReviewResult(success=True, outcome=RunOutcome.passed, structured_output="{}")
+
+    monkeypatch.setattr(live_image_smoke, "run_offline_diff_review", review)
+    await live_image_smoke.main()
+    budget = int(seen["budget"])
+    assert budget >= 2 * 160_450, "the budget must clear one provider turn plus a retry"
+    assert budget < 2_000_000, "the smoke keeps a tighter ceiling than the product default"
+
+
 @pytest.fixture
 def live_step_script() -> str:
     workflow = yaml.safe_load(
