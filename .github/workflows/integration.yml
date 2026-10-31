@@ -128,7 +128,18 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x scripts/ci_fetch_coverage_artifact.sh
-          scripts/ci_fetch_coverage_artifact.sh "${{ github.sha }}" "${{ runner.temp }}/coverage-head.json"
+          dest="${{ runner.temp }}/coverage-head.json"
+          # integration-pr often starts before ci.yml finishes; poll for the artifact.
+          for attempt in $(seq 1 90); do
+            if scripts/ci_fetch_coverage_artifact.sh "${{ github.sha }}" "${dest}"; then
+              echo "Head coverage artifact ready (attempt ${attempt})"
+              exit 0
+            fi
+            echo "Head coverage artifact not ready (attempt ${attempt}/90); sleeping 10s…" >&2
+            sleep 10
+          done
+          echo "Head coverage artifact never appeared — coverage ratchet will fall back to make coverage-gate" >&2
+          exit 1
       - name: Coverage ratchet
         if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         env:
