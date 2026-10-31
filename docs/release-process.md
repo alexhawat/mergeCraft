@@ -20,9 +20,77 @@ changelog section.
    `pyproject.toml` and `server.json` in step, so the branch passes its own
    `mcp-server-json-check` drift gate.
 2. CI/CD on that branch must be green: `make ci`, image build, SBOM + Trivy
-   CRITICAL/HIGH, eval regression gate.
-3. Tag the candidate as an RC (Craft/`pre-0.0.1` promotes images to `:rc`,
-   never `:latest`). Do **not** call the cut stable yet.
+   CRITICAL/HIGH, eval regression gate. That run is also what builds the Python
+   dist: its `build-dist` job installs the wheel outside the checkout, attests its
+   provenance and uploads `artifact-python-dist`, which `craft publish` reads.
+   See [Where the dist artifact comes from](#where-the-dist-artifact-comes-from).
+3. Tag the candidate as an RC (Craft/`pre-0.0.1` promotes images to `:rc`). CI/CD
+   owns `:latest`/`:analyzers` and promotes them from `main` only; `.craft.yml`
+   deliberately carries no `*-latest` targets, because Craft's `docker` target has
+   no preview detection and copies every configured target unconditionally
+   (`src/targets/docker.ts`, `publish()` → `copy()`, pinned `getsentry/craft`
+   `3f2abdc5`). A release moves only `:<version>` and `:analyzers-<version>`. Do
+   **not** call the cut stable yet.
+
+## Where the dist artifact comes from
+
+The publish step needs the `artifact-python-dist` artifact, and only the CI/CD
+workflow's `build-dist` job produces it. That job runs for a **push** to
+`release/**` or a `v*` tag, and for a **`workflow_dispatch`** on such a ref. It
+never runs for an ordinary branch, so `main` does not start producing a dist.
+
+The two ways of cutting a release reach the same artifact:
+
+- **Local path.** `craft prepare` pushes the release branch from contributor
+  credentials. A push by a person starts CI/CD, which builds the dist.
+- **Workflow path.** The Release workflow's `prepare` job pushes the branch with the
+  workflow's own `GITHUB_TOKEN`. GitHub does not start workflows from a
+  `GITHUB_TOKEN` push, so CI/CD would never run. The workflow's `dispatch-build` job
+  therefore dispatches CI/CD on the branch it just prepared (a `workflow_dispatch`
+  event created with `GITHUB_TOKEN` is the one event GitHub does start). It holds
+  only `actions: write` and reads no secret.
+
+Either way the publish step is the same local command, run with publish credentials:
+
+```bash
+craft publish <version>
+```
+
+Nothing publishes from a workflow, and nothing in this repository reacts to a label
+on an issue or to a comment: the command is the approval. Craft does open a
+publish-request issue during `prepare`; the `prepare` job closes it as not planned
+and comments the command above, so it is informational and never a pending approval.
+
+### Publishing from a workstation
+
+A local publish can fail part-way through its target list, and the credentials are
+the part most likely to be wrong. Check these before running it:
+
+- **PyPI:** `TWINE_USERNAME=__token__` and `TWINE_PASSWORD` set to an API token.
+  The first upload of a new distribution needs a token that can create the
+  project; project-scoped tokens cannot exist until the project does.
+- **GHCR:** `GITHUB_TOKEN` must carry **`write:packages`**. A token from
+  `gh auth token` does not: it has `gist`, `read:org`, `repo` and `workflow`, so
+  the image retag fails with `403 Forbidden` *after* PyPI and the GitHub release
+  have already succeeded. Craft logs in with `GITHUB_TOKEN`, not with your
+  `docker login`.
+- **GitHub release:** the same `GITHUB_TOKEN` needs `repo`.
+
+Craft writes a publish-state file under `~/.local/state/craft/` after each target,
+so a re-run with a corrected credential skips what already published and retries
+the rest. Do not delete a tag, re-cut the branch, or bump the version to recover:
+finish the same candidate. After a successful run, discard the post-release
+version bump with `git restore pyproject.toml`; never commit it.
+
+Use `--no-merge --keep-branch` when the merge-back must go through a reviewed PR:
+
+```bash
+craft publish <version> --no-merge --keep-branch
+```
+
+Without those flags Craft checks out the default branch, merges the release branch
+and pushes it directly, which the branch ruleset rejects after the targets have
+already published.
 
 ## Soak period
 
@@ -82,6 +150,9 @@ After an approved CI/CD run completes, prepare **two separate reviewed changes**
    `make action-manifest-prepare`. This verifies provenance and changes only
    `action.yml`. Review, commit and merge this change. Record its resulting
    manifest commit C; if squash merging, record the actual merged commit.
+   For the post-release cycle, check the worktree out at S rather than at the
+   default branch's tip even when the trees are equal: the command refuses any
+   commit that changes more than `action.yml` relative to the image source.
 2. Fetch the target branch. In a clean isolated worktree based on that branch,
    set `MANIFEST_COMMIT` to C and `RELEASE_BASE_BRANCH` to `main` or `pre-0.0.1`,
    then run `make action-pin-prepare`. This requires C to be in the fetched

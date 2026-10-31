@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 from mergecraft.mcp.git_guards import shell_command_denies_credential_paths
-from mergecraft.mcp.shared import ToolClass, execute, tool
+from mergecraft.mcp.shared import ToolClass, ToolRefusedError, execute, tool
 from mergecraft.mcp.tool_state import BackgroundProcess, primary_repo_state
 from mergecraft.utils.process_group import kill_process_group
 from mergecraft.utils.secrets import resolve_env
@@ -424,7 +424,7 @@ def shell_tool(ctx: ToolContext):
                 "git commands are not allowed in the shell tool. use the dedicated "
                 "git tools instead"
             )
-            raise RuntimeError(msg)
+            raise ToolRefusedError(msg)
         timeout_ms = min(int(params.get("timeout") or 30_000), 120_000)
         default_dir = primary_repo_state(ctx.tool_state).dir
         working_directory = params.get("working_directory")
@@ -434,12 +434,12 @@ def shell_tool(ctx: ToolContext):
                 default=default_dir,
             )
         except WorkspacePathError as exc:
-            raise RuntimeError(str(exc)) from exc
+            raise ToolRefusedError(str(exc)) from exc
         # Checked once the working directory is known, so a relative operand
         # resolves against the directory the command will actually run in.
         credential_refusal = shell_command_denies_credential_paths(command, tmpdir=tmpdir, cwd=cwd)
         if credential_refusal:
-            raise RuntimeError(credential_refusal)
+            raise ToolRefusedError(credential_refusal)
         env = resolve_env("inherit" if ctx.payload.shell == "enabled" else "restricted")
         # W12.7 — untrusted MCP shell gets ``unshare --net`` when the host
         # supports it; otherwise network stays outside the sandbox guarantee.

@@ -9,7 +9,7 @@ import resource
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
@@ -181,6 +181,56 @@ def _command_string(argv: tuple[str, ...]) -> str:
     import shlex
 
     return shlex.join(argv)
+
+
+def _trusted_identity_drop(
+    plan: AnalyzerPlan, sandbox_context: SandboxContext | None
+) -> tuple[AnalyzerPlan, str | None]:
+    """Drop a trusted-tier catalog payload to the agent UID (#878).
+
+    Applies only to a catalog analyzer on the root backend: it carries a
+    ``SandboxContext`` that is *not* a read-only (untrusted) one. Static gates pass
+    no context and build their own drop prefix; untrusted payloads drop inside the
+    namespace script. Returns ``(plan_to_run, refusal)``; a refusal is a named
+    reason and the caller must not run the payload — an analyzer that cannot be
+    dropped never runs as root.
+
+    The scratch tree is re-owned to the drop target *before* the payload starts,
+    otherwise ``jscpd`` and the pattern scanners cannot write it and exit
+    ``failed``, which reads as a finding about the diff.
+    """
+    if (
+        sandbox_context is None
+        or sandbox_context.read_only_source
+        or sys.platform == "win32"
+        or os.geteuid() != 0
+    ):
+        return plan, None
+    from mergecraft.analyzers import sandbox as sandbox_mod
+    from mergecraft.main import _ConfigurationError
+    from mergecraft.utils.privilege import _path_owned_by_uid
+
+    try:
+        drop = sandbox_mod.build_privilege_drop_argv()
+    except _ConfigurationError as exc:
+        return plan, f"identity drop unavailable, analyzer not run as root: {exc}"
+    if not drop:
+        return plan, None
+    uid = sandbox_mod.resolve_drop_target_uid()
+    gid = sandbox_mod.resolve_drop_target_gid()
+    if uid is None or gid is None:
+        return plan, "identity drop unavailable, analyzer not run as root: no drop target"
+    scratch = sandbox_context.scratch_dir
+    try:
+        sandbox_mod.hand_tree_to_drop_target(
+            scratch, boundary=sandbox_context.repo_root, uid=uid, gid=gid
+        )
+    except OSError as exc:
+        return plan, f"analyzer scratch cannot be handed to the agent user: {exc}"
+    env = dict(plan.env or filter_env())
+    if not _path_owned_by_uid(env.get("HOME", ""), uid):
+        env["HOME"] = str(scratch)
+    return replace(plan, argv=(*drop, *plan.argv), env=env), None
 
 
 def _early_unavailable_outcome(plan: AnalyzerPlan) -> AnalyzerOutcome | None:
@@ -416,6 +466,12 @@ def run_plan(
     if sandbox_context is not None and sandbox_context.read_only_source:
         output_dir = sandbox_context.scratch_dir / "analyzer-runs"
     command = _command_string(plan.argv)
+    plan_to_run, drop_refusal = _trusted_identity_drop(plan, sandbox_context)
+    if drop_refusal is not None:
+        logger.info("analyzer {}: {}", plan.manifest_id, drop_refusal)
+        return AnalyzerOutcome(
+            name=plan.manifest_id, command=command, status="unavailable", output=drop_refusal
+        )
     from mergecraft.analyzers.egress import (
         EgressSession,
         FilteredEgressSetupError,
@@ -451,7 +507,7 @@ def run_plan(
                 )
     try:
         run_argv, preexec_fn = _sandboxed_argv(
-            plan,
+            plan_to_run,
             sandbox_context,
             event_name=resolved_event_name,
             event=resolved_event,
@@ -461,7 +517,7 @@ def run_plan(
         )
         result = _run_subprocess(
             run_argv,
-            plan=plan,
+            plan=plan_to_run,
             cwd=cwd,
             timeout_s=timeout_s,
             preexec_fn=preexec_fn,

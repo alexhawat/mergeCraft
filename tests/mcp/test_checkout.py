@@ -544,6 +544,7 @@ async def test_incremental_diff_covers_only_commits_since_the_last_review(
     payload = await _checkout(ctx)
 
     incremental = payload["incrementalDiffPath"]
+    assert payload["incrementalDiffStatus"] == "ok"
     assert _exists(incremental)
     text = _read(incremental)
     assert "new.py" in text
@@ -569,13 +570,20 @@ async def test_incremental_key_is_omitted_without_a_prior_mergecraft_review(
     payload = await _checkout(ctx)
 
     assert "incrementalDiffPath" not in payload
+    assert payload["incrementalDiffStatus"] == "unavailable"
+    assert "no prior mergeCraft review checkpoint" in payload["incrementalDiffReason"]
     assert _exists(payload["diffPath"])
 
 
 @pytest.mark.asyncio
-async def test_incremental_key_is_omitted_outside_incremental_review(
+async def test_incremental_diff_is_computed_outside_incremental_review(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A re-review gets the checkpointed range even when nobody selected a mode.
+
+    #1017's reviewer never called ``select_mode``; gating the incremental diff
+    on that selection made the whole re-review read the full PR.
+    """
     repo, reviewed_sha, head_sha = _pr_repo_with_two_commits(tmp_path)
     monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
     _pin_publishers(monkeypatch, frozenset({_PUBLISHER_LOGIN}))
@@ -584,10 +592,13 @@ async def test_incremental_key_is_omitted_outside_incremental_review(
         reviews=[{"commit_id": reviewed_sha, "body": _MERGECRAFT_BODY, "user": _BOT_USER}],
     )
     ctx = _ctx_for(repo, github, tmp_path, mode="Review")
+    ctx.tool_state.selected_mode = None
 
     payload = await _checkout(ctx)
 
-    assert "incrementalDiffPath" not in payload
+    assert payload["incrementalDiffStatus"] == "ok"
+    assert "incrementalDiffPath" in payload
+    assert payload["lastReviewedSha"] == reviewed_sha
 
 
 @pytest.mark.asyncio
@@ -606,6 +617,8 @@ async def test_incremental_key_is_omitted_when_the_prior_sha_is_unreachable(
     payload = await _checkout(ctx)
 
     assert "incrementalDiffPath" not in payload
+    assert payload["incrementalDiffStatus"] == "unavailable"
+    assert "not reachable" in payload["incrementalDiffReason"]
 
 
 @pytest.mark.asyncio

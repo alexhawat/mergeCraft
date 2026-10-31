@@ -1,0 +1,32 @@
+id: gherkin-lint
+category: lint
+languages:
+- gherkin
+detect:
+  files:
+  - '*.feature'
+  - .gherkin-lintrc
+  lint_files:
+  - '*.feature'
+command:
+- gherkin-lint
+- -f
+- json
+- '{files}'
+scope: diff
+parser: gherkin_lint_json
+supports_fix: false
+# Opt-in: the catalog has no managed npm runtime, so this runs the repo's own
+# pinned ``gherkin-lint`` (node_modules/.bin) like markdownlint does. Enable with
+# ``analyzers.overrides.gherkin-lint.enabled: true`` (#854).
+default_enabled: false
+version: 4.2.4
+runtime: repo-native
+timeout_s: 60
+trust: trusted
+severity_map:
+  error: Major
+  warning: Minor
+provenance: {}
+network_allowlist: []
+exclusive_group: null

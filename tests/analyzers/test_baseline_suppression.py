@@ -330,3 +330,73 @@ def test_partial_base_coverage_does_not_mark_introduced_by_pr(
 
     assert result == [head]
     assert head.introduced_by_pr == "unknown"
+
+
+def test_a_diff_only_analyzer_does_not_switch_baseline_suppression_off(monkeypatch) -> None:
+    """``self-silencing`` reads the diff and never runs at base; it is not owed there."""
+    from mergecraft.analyzers import baseline_suppression, pipeline
+
+    head, base = _head_and_base_hit(
+        path="src/fixture_app/handler.py",
+        line=12,
+        message="Unused import os",
+    )
+    monkeypatch.setattr(
+        baseline_suppression,
+        "collect_base_analyzer_findings",
+        lambda **_kwargs: baseline_suppression.BaseCollectionResult(
+            findings=[base],
+            collected=True,
+            succeeded_manifest_ids=frozenset({"ruff"}),
+        ),
+    )
+    large_diff = "\n".join(
+        [
+            "diff --git a/src/a.py b/src/a.py",
+            "@@ -1,20 +1,20 @@",
+            *(f"+line {index}" for index in range(20)),
+        ]
+    )
+
+    result = pipeline._apply_baseline_suppression(
+        [head],
+        repo_root=Path("/tmp/unused"),
+        manifests=[],
+        changed_files=["src/a.py"],
+        diff_text=large_diff,
+        base_comparison="full",
+        tier="trusted",
+        base_ref=None,
+        offline=False,
+        allow_repo_binaries=True,
+        base_run_performed=False,
+        head_succeeded_manifest_ids=frozenset({"ruff", "self-silencing"}),
+    )
+
+    assert result == []
+
+
+def test_base_collection_never_runs_a_diff_only_analyzer(monkeypatch, tmp_path: Path) -> None:
+    from mergecraft.analyzers import adapters, baseline_suppression, contracts
+
+    ran: list[str] = []
+
+    def _run_adapter(**kwargs):
+        ran.append(kwargs["tool_id"])
+        return SimpleNamespace(skipped=False, findings=[])
+
+    monkeypatch.setattr(contracts, "resolve_analyzer_base_ref", lambda *_a, **_kw: "base-sha")
+    monkeypatch.setattr(baseline_suppression, "_checkout_base_worktree", lambda *_a: tmp_path)
+    monkeypatch.setattr(baseline_suppression, "_hand_worktree_to_drop_target", lambda *_a: None)
+    monkeypatch.setattr(baseline_suppression, "_remove_base_worktree", lambda *_a: None)
+    monkeypatch.setattr(adapters, "run_adapter", _run_adapter)
+
+    result = baseline_suppression.collect_base_analyzer_findings(
+        repo_root=tmp_path,
+        manifests=[SimpleNamespace(id="ruff"), SimpleNamespace(id="self-silencing")],
+        changed_files=["src/a.py"],
+        head_findings=[],
+    )
+
+    assert ran == ["ruff"]
+    assert result.succeeded_manifest_ids == frozenset({"ruff"})

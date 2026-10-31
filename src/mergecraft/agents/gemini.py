@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.agents.activity_watchdog import event_has_model_output, watchdog_for_process
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
@@ -333,13 +334,25 @@ def _run_gemini_streaming(
     # P4 / AR-D2 — drain stderr concurrently from spawn. Reading stdout to EOF
     # first would deadlock a child that fills the stderr pipe buffer.
     stderr_drain = start_stderr_drain(process.stderr)
+    watchdog = watchdog_for_process(
+        process,
+        label="gemini",
+        interval_s=ctx.idle_timeout_s,
+        accumulator=accumulator,
+        stderr_text=stderr_drain.text,
+    )
+
+    def _watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
+        watchdog.touch(model_output=event_has_model_output(event))
+        handler(acc, event)
+
     try:
         with track_process_group(process):
             try:
                 consume_stream(
                     raw_stream=process.stdout,
                     accumulator=accumulator,
-                    handler=handler,
+                    handler=_watched_handler,
                 )
                 returncode = wait_or_kill_process_group(
                     process,
@@ -350,13 +363,26 @@ def _run_gemini_streaming(
             finally:
                 # The process group is gone; collect the drained tail so the
                 # reader thread never outlives it.
+                watchdog.stop()
                 stderr_drain.join(timeout=STDERR_DRAIN_JOIN_TIMEOUT_S)
         stderr_text = stderr_drain.text()
     finally:
+        watchdog.stop()
         try:
             close_all_open_spans()
         except Exception as exc:
             logger.debug("gemini stream handler cleanup failed: {}", exc)
+
+    if watchdog.stalled:
+        diagnostic = watchdog.diagnostic()
+        return with_prompt(
+            AgentResult(
+                success=False,
+                error=diagnostic.render(),
+                metadata=diagnostic.as_metadata(),
+            ),
+            prompt,
+        )
 
     if stderr_text.strip():
         for line in stderr_text.strip().splitlines()[-20:]:

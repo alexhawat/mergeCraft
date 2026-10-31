@@ -14,6 +14,7 @@ from mergecraft.analyzers.parsers.cargo_deny_json import parse_cargo_deny_json
 from mergecraft.analyzers.parsers.checkmake_text import parse_checkmake_text
 from mergecraft.analyzers.parsers.ember_template_lint_json import parse_ember_template_lint_json
 from mergecraft.analyzers.parsers.eslint_json import parse_eslint_json
+from mergecraft.analyzers.parsers.gherkin_lint_json import parse_gherkin_lint_json
 from mergecraft.analyzers.parsers.htmlhint_json import parse_htmlhint_json
 from mergecraft.analyzers.parsers.jscpd_json import parse_jscpd_json
 from mergecraft.analyzers.parsers.knip_json import parse_knip_json
@@ -67,6 +68,7 @@ _PARSERS: dict[str, ParserFn] = {
     "bundler_audit_json": parse_bundler_audit_json,
     "sqlfluff_json": parse_sqlfluff_json,
     "rustc_json": parse_rustc_json,
+    "gherkin_lint_json": parse_gherkin_lint_json,
     "htmlhint_json": parse_htmlhint_json,
     "stylelint_json": parse_stylelint_json,
     "yamllint_parsable": parse_yamllint_parsable,

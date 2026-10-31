@@ -227,6 +227,74 @@ def test_policy_high_risk_migration_maps_to_require_human_review() -> None:
     assert _find_action(action) == "require_human_review"
 
 
+def _clean_pass_packet() -> MergeEvidencePacket:
+    """A clean, attested packet on a non-low lane with a trusted success verdict (#1076)."""
+    from mergecraft.agents.gates import TRUSTED_PACKET_DECIDED_BY
+    from mergecraft.classify.blast_radius import BlastRadiusClassification
+    from mergecraft.evidence.packet import Decision
+
+    classification = BlastRadiusClassification(
+        lane="medium",
+        auto_merge_lane="assisted",
+        reason="Detected blast-radius categories: dependency_changes.",
+        next_action="Use assisted review and verify the affected behavior.",
+        categories=["dependency_changes"],
+    )
+    packet = _packet(blast_radius=classification)
+    decision = Decision(
+        verdict="success",
+        reason="success: review attested by terminal verdict and read coverage; no findings",
+        decided_by=TRUSTED_PACKET_DECIDED_BY,
+    )
+    return packet.model_copy(update={"decision": decision})
+
+
+def _needs_human_review_packet() -> MergeEvidencePacket:
+    """A complete packet (decision row present) with no automated route (#1076)."""
+    from mergecraft.agents.gates import TRUSTED_PACKET_DECIDED_BY
+    from mergecraft.evidence.packet import Decision
+
+    decision = Decision(
+        verdict="neutral",
+        reason="neutral: no typed findings to attest to the review",
+        decided_by=TRUSTED_PACKET_DECIDED_BY,
+    )
+    return _packet().model_copy(update={"decision": decision})
+
+
+def test_policy_clean_pass_maps_to_auto_merge() -> None:
+    """A clean attested packet on an auto-merge-eligible lane merges (#1076)."""
+    from mergecraft.agents.gates import decide_action
+    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
+
+    action = decide_action(_clean_pass_packet(), policy=DEFAULT_GATE_POLICIES)
+    assert _find_action(action) == "auto_merge"
+
+
+def test_policy_needs_human_review_maps_to_require_human_review() -> None:
+    """A complete packet with no automated route asks for a human — unknown is
+    never green (#1056), and the label never claims a schema failure."""
+    from mergecraft.agents.gates import decide_action, select_rule_id
+    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
+
+    packet = _needs_human_review_packet()
+    assert select_rule_id(packet) == "needs_human_review"
+    action = decide_action(packet, policy=DEFAULT_GATE_POLICIES)
+    assert _find_action(action) == "require_human_review"
+
+
+def test_schema_failure_only_fires_on_structurally_absent_evidence() -> None:
+    """#1076 re-scope: ``schema_failure`` fires on a bare packet (no decision,
+    findings, blast radius, or trajectory) and never on a complete one."""
+    from mergecraft.agents.gates import decide_action, select_rule_id
+    from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES
+
+    bare = _schema_failure_packet()
+    assert select_rule_id(bare) == "schema_failure"
+    action = decide_action(bare, policy=DEFAULT_GATE_POLICIES)
+    assert _find_action(action) == "block"
+
+
 # ── WD-T.2 — closed action vocabulary ─────────────────────────────────────────
 
 
@@ -256,10 +324,10 @@ def test_every_outcome_maps_to_a_named_action() -> None:
     actual = frozenset(action.value for action in GateAction)
     assert expected == actual
 
-    # The five named policies land on five of the seven; the other two
-    # (quarantine, escalate) are reachable when the policy set is
-    # extended or when a finding carries a recommended action that does
-    # not fit the named rules.
+    # The named policies land on five of the seven actions; ``quarantine``
+    # and ``escalate`` stay reachable when the policy set is extended or when
+    # a finding carries a recommended action that does not fit the named
+    # rules.
     action = decide_action(_low_risk_passing_packet(), policy=DEFAULT_GATE_POLICIES)
     assert _find_action(action) in expected
 
@@ -500,6 +568,13 @@ def test_rule_predicates_table_is_the_only_matcher_and_includes_has_blockers() -
     rule_ids = [rule_id for _predicate, rule_id, _action in _RULE_PREDICATES]
     assert "has_blockers" in rule_ids
     assert rule_ids.index("has_blockers") < rule_ids.index("changed-unread-file")
+    # #1076 — the complete-packet routes come after every finding-driven rule,
+    # ``needs_human_review`` last of all; the ``schema_failure`` catch-all is
+    # never listed in the predicate table.
+    assert rule_ids.index("changed-unread-file") < rule_ids.index("clean_pass")
+    assert rule_ids.index("tool_loop") < rule_ids.index("clean_pass")
+    assert rule_ids.index("high_risk_migration") < rule_ids.index("clean_pass")
+    assert rule_ids.index("clean_pass") < rule_ids.index("needs_human_review")
     assert "schema_failure" not in rule_ids
     # Behavioural ``select_rule_id`` / catch-all coverage lives in
     # ``tests/agents/test_gate_rule_selection.py`` (D4).
@@ -508,6 +583,6 @@ def test_rule_predicates_table_is_the_only_matcher_and_includes_has_blockers() -
     from mergecraft.evidence.gate_policy import DEFAULT_GATE_POLICIES, GateAction
 
     assert gate_policy.__doc__ is not None
-    assert "six" in gate_policy.__doc__
+    assert "eight" in gate_policy.__doc__
     assert "has_blockers" in gate_policy.__doc__
     assert DEFAULT_GATE_POLICIES["schema_failure"] is GateAction.BLOCK

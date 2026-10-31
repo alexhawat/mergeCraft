@@ -1,4 +1,4 @@
-"""VP4 terminal-protocol prompt contract — Review and IncrementalReview step text.
+"""VP4/VP5 terminal-protocol prompt contract — Review and IncrementalReview step text.
 
 Wave plan: ``.ignorelocal/01-review-integrity-wave-plan.md`` (VP4.1 RED,
 VP4.2 impl; xfail markers cleared after VP4.2).
@@ -17,6 +17,16 @@ never had an ``approved``, ``body``, or ``comments`` field. The window is
 everything from the step-7 / step-10 opening through the end of that step
 (up to the next top-level heading); content before or after it is still
 frozen byte-for-byte.
+
+VP5 deliberately re-baselines the frozen region (``*_vp5.txt`` replaces
+``*_vp4_1.txt``). A self-review of PR #1045 ran out its 25-minute limit with
+no verdict, so Review step 2 / IncrementalReview step 2 now make the analyzers
+the first calls after checkout and run ``git diff <base>...HEAD`` once when the
+diff file is refused; triage (Review step 3 / IncrementalReview step 5) reads
+risk-first with a code-reading rule and a ``${TIME_BUDGET}`` marker; and the
+specialist step's "no hard-budget threshold" sentence is narrowed to the
+specialist count. Regenerate the snapshots from the live templates; never
+hand-edit them.
 """
 
 from __future__ import annotations
@@ -28,8 +38,8 @@ from mergecraft.types import AgentId, format_mcp_tool_ref
 
 _T_SUBMIT = '${t("submit_review_verdict")}'
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
-_REVIEW_SNAPSHOT = _FIXTURES / "review_template_vp4_1.txt"
-_INCREMENTAL_SNAPSHOT = _FIXTURES / "incremental_review_template_vp4_1.txt"
+_REVIEW_SNAPSHOT = _FIXTURES / "review_template_vp5.txt"
+_INCREMENTAL_SNAPSHOT = _FIXTURES / "incremental_review_template_vp5.txt"
 
 # Terminal-protocol step VP4.2 / #619 Task 5 are allowed to replace —
 # the whole submit step, opening paragraph through the tier ladder.
@@ -83,7 +93,7 @@ def test_incremental_review_prompt_states_the_contract() -> None:
 
 
 def test_no_other_prompt_content_changed() -> None:
-    """Out-of-scope guard: VP4.2 may not rewrite the rest of either template."""
+    """Out-of-scope guard: only the terminal step may drift from the VP5 snapshot."""
     review_snapshot = _REVIEW_SNAPSHOT.read_text(encoding="utf-8")
     incremental_snapshot = _INCREMENTAL_SNAPSHOT.read_text(encoding="utf-8")
 

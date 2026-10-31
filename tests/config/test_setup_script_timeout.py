@@ -537,6 +537,12 @@ async def test_setup_timeout_is_deducted_from_the_run_budget(
         "agent deadline must reflect (timeout - setup_elapsed); today's "
         "non-deducted code passes timeout through verbatim"
     )
+    # The MCP server's ⏱ notice reads the same deducted deadline off ToolState.
+    assert rec.tool_context is not None
+    tool_state = rec.tool_context.tool_state
+    assert tool_state.agent_deadline_s == pytest.approx(agent_deadline)
+    assert tool_state.agent_started_monotonic is not None
+    assert started <= tool_state.agent_started_monotonic <= _time.monotonic()
 
 
 __all__ = [

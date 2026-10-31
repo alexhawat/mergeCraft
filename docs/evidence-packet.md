@@ -32,7 +32,7 @@ writes the body to a file first:
 
 ```yaml
 - id: review
-  uses: alexhawat/mergeCraft@v0.1.0
+  uses: alexhawat/mergeCraft@521c0aedbf525a80a5bf6eddf0119ada85a8d381 # v0.1.0a1
   with:
     prompt: /review
 
@@ -89,6 +89,8 @@ to ship a schema change. The rules are:
    the prose around it.
 
 The current version is `1.15.0`.
+The current version is `1.11.0`.
+The current version is `1.16.0`.
 
 Wiring a consumer is **not** a shape change: #96 gave these models their first
 runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
@@ -136,6 +138,27 @@ not move.
   orchestrator and defaulting to `null`.
 - `1.15.0` — adds `triage`: the tier the deterministic pre-dispatch triage
   chose, defaulting to `null` (the fast path off).
+- `1.11.0` — plan 12 W7 adds `run_health`: run-scoped findings and an
+  advisory conclusion, partitioned out of the top-level `findings` list.
+- `1.11.0` — plan 12 W7 adds `run_health`: run-scoped findings and an
+  advisory conclusion, partitioned out of the top-level `findings` list.
+- `1.14.0` — adds the optional `analyzers` section: where the analyzer settings
+  were resolved from, and the analyzer disposition ledger (one terminal
+  disposition per raw analyzer hit, per-stage counts, the persisted
+  baseline-suppression audit rows and any orphaned hit ids). Additive; `null`
+  for a run that executed no analyzer.
+- `1.15.0` — adds the optional `run_metrics` section: tool-call count, read
+  calls and read turns, distinct files read, diff line counts, elapsed by phase
+  (setup / analyzers / agent / judge / publish), and the last idle-watchdog
+  diagnostic. Measurement only — it never feeds a gate. Additive; `null` on a
+  packet built before the field existed.
+- `1.16.0` — adds `"refused"` to the trajectory `failure_class` vocabulary
+  (#1073): a guard (allowlist, path confinement, config-flag, mode) that stops
+  a tool call before it runs is stamped from the typed `ToolRefusedError` at
+  the `mcp/shared.py::execute` seam, so the call records `ok=False` with
+  `failure_class="refused"` instead of `ok=True, error=null`. Additive — a
+  packet written before the value existed never carries it. The trajectory
+  record schema moves to `1.2.0` with it.
 
 ## Top-level fields
 
@@ -250,6 +273,45 @@ off, so a run with no `review.fastPath` config is unchanged.
 | `relied_on_checks` | `list[str]` | Checks that had to pass on the head SHA for a `skip`. |
 
 A `skip` run never carries a `success` decision: approval is left to a human.
+### `run_metrics` — `RunMetrics | None` (added in `1.15.0`)
+
+Measurement only. It records how the review spent its time and its reads so the
+next iteration can compare run shapes; **no field here feeds a gate or a
+verdict.**
+
+| Field | Type | Notes |
+|------|------|-------|
+| `tool_calls` | `int` | Mediated MCP tool calls recorded in the trajectory. |
+| `read_tool_calls` | `int` | Calls the trajectory classified as `read`. |
+| `read_tool_turns` | `int` | Runs of consecutive read-intent calls — the cheap batching signal. |
+| `distinct_files_read` | `int` | Distinct paths in `trajectory.files_read`. |
+| `diff_lines` | `int` | Lines in the full PR diff (the packet's blast-radius scope). |
+| `diff_added_lines` / `diff_deleted_lines` | `int` | Added / deleted lines in that diff. |
+| `phase_elapsed_s` | `object` | Seconds by phase: `setup`, `analyzers`, `agent`, `judge`, `publish`. `judge` covers the verifier tool calls; native judge dispatches are part of `agent`. |
+| `agent_diagnostic` | `str \| null` | The last idle-watchdog diagnostic, when an attempt stalled. |
+
+### `analyzers` — `AnalyzersEvidence | None` (added in `1.14.0`)
+
+What the deterministic analyzers did, and under whose settings. `null` when the
+run executed no analyzer and resolved no analyzer settings.
+
+| Field | Type | Notes |
+|------|------|-------|
+| `settings_resolved_from` | `str \| null` | Where the analyzer settings came from: `base_snapshot` (operator-owned base checkout), `base_sha` (read from the PR's base commit), `run_start_snapshot` (no PR base to read), `defaults` (fail-closed fallback — see `settings_detail`) or `live_load` (offline). A PR's own `analyzers.*` config is never applied to its own review. |
+| `settings_detail` | `str \| null` | The named reason when the settings fell back to `defaults` (for example a symlinked config). |
+| `dispositions` | `list[DispositionSection]` | One section per source: `catalog` (the analyzer pipeline) and `ci_sarif` (SARIF ingested via `ciEvidence.sarifArtifacts`). |
+
+A `DispositionSection` is the **disposition ledger**: every raw hit a tool produced
+gets a stable `hit_id` (tool, rule, path, line range, message hash) when it is
+parsed, and every stage that removes or merges a hit records why.
+
+| Field | Type | Notes |
+|------|------|-------|
+| `source` | `catalog` \| `ci_sarif` | Which ingest the ledger covers. |
+| `counts` | object | `raw`, `kept`, `merged`, `downgraded` and `dropped_by_stage` (for example `{"out_of_scope": 9, "baseline": 2}`). `raw` equals the sum of the others for a closed ledger. |
+| `entries` | list | One terminal row per raw hit: `hit_id`, `disposition` (`kept`, `merged`, `downgraded`, `dropped:out_of_scope`, `dropped:baseline`, `dropped:withdrawn`, `dropped:generated`, `dropped:verifier`), `stage`, a **required non-empty** `reason`, and `ref` (the surviving or matched fingerprint). |
+| `suppression_audit` | list | The baseline-suppression decisions (`fingerprint`, `decision`, `reason`) — persisted here, not only logged. |
+| `orphaned_hit_ids` | `list[str]` | Raw hits no stage accounted for. Non-empty means the evidence is incomplete: the run is **inconclusive** (the approval conclusion cannot be `success`), a `scope="run"` finding in `run_health` names the hit ids, and a blocker still wins. |
 
 ### `deterministic_checks` — required (`list[DeterministicCheck]`)
 

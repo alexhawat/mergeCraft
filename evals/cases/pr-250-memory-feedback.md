@@ -7,7 +7,7 @@ run_id: pr-250
 pr_number: 250
 failure_mode: multi_round_miss
 expected_finding: "see rounds[].findings"
-expected_decision: neutral
+expected_decision: failure
 replay_command: "mergecraft eval convergence"
 provenance:
   run_id: pr-250
@@ -147,6 +147,43 @@ rounds:
     generated_fingerprints:
       - c9e635fbc425e010b41fbfe2
       - 4025b50883ddde0c496616cc
+recorded_findings:
+- path: src/mergecraft/utils/learnings.py
+  start_line: 744
+  end_line: 744
+  message: apply_repo_memory_to_findings has no callers in src
+  severity: Major
+  confidence: certain
+  category: Functional Correctness
+  source: agent
+  fingerprint: b7f9c1baadbf4344d16beb36
+  tool: agent
+  rule_id: agent:pr-250-memory-feedback
+  introduced_by_pr: 'true'
+  evidence:
+  - 'raised in review round 1 of PR #250'
+  remediation: null
+  autofix: null
+  cluster_id: null
+- path: src/mergecraft/cli/memory.py
+  start_line: 120
+  end_line: 120
+  message: memory forget silently no-ops on legacy layout
+  severity: Major
+  confidence: certain
+  category: Functional Correctness
+  source: agent
+  fingerprint: 5ab77564dfeba315ae57f109
+  tool: agent
+  rule_id: agent:pr-250-memory-feedback
+  introduced_by_pr: 'true'
+  evidence:
+  - 'raised in review round 1 of PR #250'
+  remediation: null
+  autofix: null
+  cluster_id: null
+run_succeeded: true
+trust_tier: trusted
 ---
 
 # pr-250-memory-feedback

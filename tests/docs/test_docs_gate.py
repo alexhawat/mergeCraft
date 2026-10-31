@@ -35,7 +35,9 @@ MANIFEST = REPO_ROOT / "docs" / "manifest.yaml"
 GEN_LLMS_FULL = REPO_ROOT / "scripts" / "gen_llms_full.py"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 
-_UNPINNED_INSTALL = 'uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"'
+_UNPINNED_INSTALL = (
+    'uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"'
+)
 _PIN_SCAN_PATHS = (README, AGENTS_MD, SKILL_MD, INSTALL_DOC, LLMS_TXT)
 _LINK_SURFACE_PATHS = (README, AGENTS_MD, SKILL_MD, LLMS_TXT)
 

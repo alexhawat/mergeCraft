@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Final
 import httpx
 from loguru import logger
 
+from mergecraft.agents.activity_watchdog import event_has_model_output, watchdog_for_process
 from mergecraft.agents.gates import GIT_NATIVE_READ_DENY_OPENCODE
 from mergecraft.agents.openai_compatible_gateways import (
     SINGLETON_PROVIDER_ID,
@@ -27,6 +28,7 @@ from mergecraft.agents.openai_compatible_gateways import (
     resolve_gateway_endpoint,
     resolve_gateway_endpoints,
 )
+from mergecraft.agents.opencode_otel import apply_otel_plugin, opencode_otel_plugin_wiring
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.shared import (
     STDERR_DRAIN_JOIN_TIMEOUT_S,
@@ -56,6 +58,7 @@ from mergecraft.tracing.genai import (
 )
 from mergecraft.tracing.http import instrument_httpx
 from mergecraft.types import MERGECRAFT_MCP_NAME
+from mergecraft.utils.git_setup import created_temp_directory, is_run_owned_directory
 from mergecraft.utils.privilege import agent_subprocess_env, wrap_agent_command
 from mergecraft.utils.process_group import (
     kill_process_group,
@@ -72,6 +75,7 @@ if TYPE_CHECKING:
     from typing import IO, Any
 
     from mergecraft.agents._stream_consumer import StreamSpanAccumulator
+    from mergecraft.mcp.tool_state import ToolState
     from mergecraft.tracing.content import ContentCapture
 
 OPENCODE_AUTH_ENV = "OPENCODE_AUTH_JSON"
@@ -137,6 +141,19 @@ def _api_key_from_env(api_key_env: str) -> str:
 def _opencode_data_home(ctx: AgentRunContext) -> Path:
     """Return the XDG data root parent for this run's isolated ``auth.json``."""
     return Path(ctx.tmpdir) / "opencode-xdg-data"
+
+
+def _opencode_config_home(ctx: AgentRunContext) -> Path:
+    """Empty per-run ``OPENCODE_CONFIG_DIR``, so the operator's global config is not loaded.
+
+    OpenCode otherwise merges ``~/.config/opencode``: its MCP servers, plugins and
+    agents join the review. A global server named ``mergecraft`` even shadows the
+    run's own MCP server, leaving the agent without ``submit_review_verdict``.
+    ``opencode debug config`` still lists the global file as a source with this set;
+    what a run loads is pinned against the real CLI in
+    ``tests/agents/test_opencode_config_isolation.py``.
+    """
+    return Path(ctx.tmpdir) / "opencode-xdg-config"
 
 
 def _with_flat_opencode_auth(env: dict[str, str], *, model: str | None) -> dict[str, str]:
@@ -595,15 +612,64 @@ def _build_review_mode_read_allowlist(checkout: Path, evidence: Path) -> dict[st
     return read
 
 
+# Run temp-dir children the agent must never read: the isolated auth store, the
+# empty per-run config dir, and the scratch HOME.
+_TEMP_DIR_PRIVATE_CHILDREN: Final[tuple[str, ...]] = (
+    "opencode-xdg-data",
+    "opencode-xdg-config",
+    "home",
+)
+
+# Where OpenCode spills a tool result too large to return inline; the truncated
+# result tells the model to read the full text from there. It holds the agent's
+# own tool output, so it is re-allowed after the ``opencode-xdg-data`` deny — the
+# auth store beside it stays denied.
+_TEMP_DIR_TOOL_OUTPUT: Final[str] = "opencode-xdg-data/opencode/tool-output"
+
+
+def _review_diff_external_directory(ctx: AgentRunContext) -> dict[str, str]:
+    """``external_directory`` rules that let the agent read the review's diff files.
+
+    Every diff mergeCraft materialises is a top-level ``*.diff`` in the run's temp
+    dir (``review.diff`` offline; ``pr-<n>.diff``, ``pr-<n>-incremental.diff`` and
+    ``commit-<sha>.diff`` from the MCP tools), outside the checkout. OpenCode asks
+    for ``<file's directory>/**``, so the grant is the temp dir's ``/**``; the deny
+    rules after it (last match wins) keep the private children out of reach, except
+    OpenCode's spilled tool output, re-allowed last so truncated results stay
+    readable. Both
+    the literal and the resolved path are listed, because the agent may use either
+    (``/var`` and ``/private/var`` on macOS).
+    """
+    # Only directories this run created: an operator-set ``MERGECRAFT_TEMP_DIR`` can
+    # be a shared root, and a registered diff path's parent is agent-chosen
+    # (``establish_review_scope``), so neither is granted on its own say-so. Nor is
+    # ``ctx.tmpdir`` unless it is a registered ``mkdtemp``: a caller could hand in
+    # an operator-chosen or shared directory, and the whole tree would be readable.
+    dirs = {Path(d) for d in (ctx.tmpdir, created_temp_directory()) if d}
+    dirs = {d for d in dirs if is_run_owned_directory(str(d))}
+    forms = sorted({form.as_posix() for d in dirs for form in (d, d.resolve())})
+    rules = {f"{root}/**": "allow" for root in forms}
+    for root in forms:
+        for child in _TEMP_DIR_PRIVATE_CHILDREN:
+            rules[f"{root}/{child}"] = "deny"
+            rules[f"{root}/{child}/**"] = "deny"
+        rules[f"{root}/{_TEMP_DIR_TOOL_OUTPUT}"] = "allow"
+        rules[f"{root}/{_TEMP_DIR_TOOL_OUTPUT}/**"] = "allow"
+    return rules
+
+
 def _build_review_mode_permissions(ctx: AgentRunContext) -> dict[str, object]:
     checkout = _checkout_root(ctx)
     evidence = _evidence_dir(ctx)
+    read = _build_review_mode_read_allowlist(checkout, evidence)
+    external_directory = _build_review_mode_external_directory_allowlist(checkout, evidence)
+    external_directory.update(_review_diff_external_directory(ctx))
     return {
         "bash": "deny",
         "edit": "deny",
-        "read": _build_review_mode_read_allowlist(checkout, evidence),
+        "read": read,
         "webfetch": "deny",
-        "external_directory": _build_review_mode_external_directory_allowlist(checkout, evidence),
+        "external_directory": external_directory,
         "skill": "allow",
     }
 
@@ -874,6 +940,36 @@ def _parse_model(value: str | None) -> dict[str, str] | None:
     return {"providerID": value[:slash], "modelID": value[slash + 1 :]}
 
 
+def _record_opencode_bash(tool_state: ToolState | None, part: object) -> None:
+    """Record one finished OpenCode ``bash`` tool part on the run's trajectory (#858).
+
+    The part shape is ``{"tool": "bash", "state": {"status", "input": {"command"},
+    "output", "metadata": {"exit"}}}`` — in a ``run --format json`` ``tool_use``
+    event's ``part`` and in an HTTP turn's ``parts``. Anything else is ignored;
+    recording is evidence only and never raises.
+    """
+    if tool_state is None or not isinstance(part, dict) or part.get("tool") != "bash":
+        return
+    state = part.get("state")
+    if not isinstance(state, dict) or state.get("status") not in {"completed", "error"}:
+        return
+    tool_input = state.get("input")
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    metadata = state.get("metadata")
+    raw_exit = metadata.get("exit") if isinstance(metadata, dict) else None
+    from mergecraft.evidence.trajectory import record_driver_exec
+
+    record_driver_exec(
+        tool_state,
+        command=command,
+        exit_code=raw_exit
+        if isinstance(raw_exit, int) and not isinstance(raw_exit, bool)
+        else None,
+        output=str(state.get("output") or ""),
+        failed=state.get("status") == "error",
+    )
+
+
 async def _prompt_session(
     *,
     base_url: str,
@@ -882,6 +978,7 @@ async def _prompt_session(
     model: dict[str, str] | None,
     resolved_model: str | None = None,
     capture_policy: ContentCapture | None = None,
+    tool_state: ToolState | None = None,
 ) -> AgentResult:
     """Prompt the opencode session — the one harness path with full payload visibility.
 
@@ -898,12 +995,17 @@ async def _prompt_session(
     tracer = current_tracer()
     if tracer is None:
         return await _prompt_session_http(
-            base_url=base_url, session_id=session_id, text=text, model=model
+            base_url=base_url,
+            session_id=session_id,
+            text=text,
+            model=model,
+            tool_state=tool_state,
         )
     model_slug = f"{model['providerID']}/{model['modelID']}" if model else None
     gen_ai_system = model.get("providerID") if model else None
     with tracer.start_span("llm.call") as span:
         try:
+            span.set_attribute("gen_ai.operation.name", "chat")
             if gen_ai_system:
                 span.set_attribute("gen_ai.system", gen_ai_system)
             model_params = opencode_applied_model_params(resolved_model or model_slug)
@@ -917,7 +1019,11 @@ async def _prompt_session(
         except Exception as exc:
             logger.debug("opencode llm.call request attrs failed: {}", exc)
         result = await _prompt_session_http(
-            base_url=base_url, session_id=session_id, text=text, model=model
+            base_url=base_url,
+            session_id=session_id,
+            text=text,
+            model=model,
+            tool_state=tool_state,
         )
         from mergecraft.agents.curated_model_catalog import apply_catalog_cost_to_usage
 
@@ -959,6 +1065,7 @@ async def _prompt_session_http(
     session_id: str,
     text: str,
     model: dict[str, str] | None,
+    tool_state: ToolState | None = None,
 ) -> AgentResult:
     payload: dict[str, object] = {
         "parts": [{"type": "text", "text": text}],
@@ -1010,6 +1117,8 @@ async def _prompt_session_http(
     usage: AgentUsage | None = None
     output = ""
     if isinstance(data, dict):
+        for part in data.get("parts") or []:
+            _record_opencode_bash(tool_state, part)
         output = str(
             data.get("result") or data.get("text") or data.get("output") or json.dumps(data)[:2000]
         )
@@ -1077,6 +1186,15 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
 
     model = ctx.resolved_model
     config_json = build_security_config(ctx, model)
+    # The OTel plugin targets OpenCode 2.x's event stream; 1.x runs never load it.
+    major = await asyncio.to_thread(_opencode_major_version, cli)
+    otel_plugin = (
+        opencode_otel_plugin_wiring(ctx.tool_state.trust_tier)
+        if major is not None and major >= 2
+        else None
+    )
+    if otel_plugin is not None:
+        config_json = apply_otel_plugin(config_json, otel_plugin)
     config_dir = _evidence_dir(ctx)
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "opencode.json"
@@ -1084,6 +1202,8 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
 
     credential_env = _resolved_opencode_credentials(ctx)
     data_home = _opencode_data_home(ctx)
+    config_home = _opencode_config_home(ctx)
+    config_home.mkdir(parents=True, exist_ok=True)
     _setup_opencode_auth(ctx, data_home=data_home, credential_env=credential_env)
 
     # Baseline AFTER our own writes, before the agent runs. ``_evidence_dir``
@@ -1104,6 +1224,10 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     extras: dict[str, str] = {
         "OPENCODE_CONFIG_CONTENT": config_json,
         "OPENCODE_CONFIG": str(config_path),
+        "OPENCODE_CONFIG_DIR": str(config_home),
+        # A reviewed repository's ``opencode.json`` / ``.opencode/`` can declare
+        # plugins (code that runs in the harness) and MCP servers; never load them.
+        "OPENCODE_DISABLE_PROJECT_CONFIG": "1",
         "XDG_DATA_HOME": str(data_home),
     }
     model_s = (model or "").strip()
@@ -1115,11 +1239,14 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         extras["CLAUDE_CODE_USE_VERTEX"] = "1"
     env = build_agent_env("opencode", extras, model=model)
     env.update({k: v for k, v in credential_env.items() if k not in env})
+    if otel_plugin is not None:
+        # Header values the plugin entry references as ``{env:NAME}``; added after
+        # the allowlist filter, which would otherwise drop them.
+        env.update(otel_plugin.env)
 
     # OpenCode 2.x serves a different HTTP API (``/api/session/...``); the
     # 1.x ``POST /session`` below gets 405. Its ``run`` command keeps the JSON
     # event stream and resumes a session by id, so 2.x reviews go through it.
-    major = await asyncio.to_thread(_opencode_major_version, cli)
     if major is not None and major >= 2:
         return _apply_integrity_gate(
             await _run_v2(cli=cli, ctx=ctx, env=env, model=model),
@@ -1209,6 +1336,7 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
                 model=model_obj,
                 resolved_model=model,
                 capture_policy=capture_policy,
+                tool_state=ctx.tool_state,
             )
 
         try:
@@ -1224,6 +1352,7 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
                 model=model_obj,
                 resolved_model=model,
                 capture_policy=capture_policy,
+                tool_state=ctx.tool_state,
             )
             result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
         except ProviderTimeoutError as exc:
@@ -1377,6 +1506,23 @@ def _run_opencode_cli_streaming(
     # P4 / AR-D2 — drain stderr concurrently from spawn. Reading stdout to EOF
     # first would deadlock a child that fills the stderr pipe buffer.
     stderr_drain = start_stderr_drain(process.stderr)
+    watchdog = watchdog_for_process(
+        process,
+        label="opencode",
+        interval_s=ctx.idle_timeout_s,
+        accumulator=accumulator,
+        stderr_text=stderr_drain.text,
+    )
+    base_handler = (
+        _session_event_handler(session, tool_state=ctx.tool_state)
+        if session is not None
+        else _bash_only_handler(ctx.tool_state)
+    )
+
+    def _watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
+        watchdog.touch(model_output=event_has_model_output(event))
+        base_handler(acc, event)
+
     try:
         with track_process_group(process):
             try:
@@ -1385,11 +1531,7 @@ def _run_opencode_cli_streaming(
                 consume_stream(
                     raw_stream=process.stdout,
                     accumulator=accumulator,
-                    handler=(
-                        _session_event_handler(session)
-                        if session is not None
-                        else lambda _acc, _event: None
-                    ),
+                    handler=_watched_handler,
                 )
                 returncode = wait_or_kill_process_group(
                     process,
@@ -1400,27 +1542,114 @@ def _run_opencode_cli_streaming(
             finally:
                 # The process group is gone; collect the drained tail so the
                 # reader thread never outlives it.
+                watchdog.stop()
                 stderr_drain.join(timeout=STDERR_DRAIN_JOIN_TIMEOUT_S)
         stderr_text = stderr_drain.text()
     finally:
-        pass
+        watchdog.stop()
+
+    if watchdog.stalled:
+        diagnostic = watchdog.diagnostic()
+        return AgentResult(
+            success=False,
+            error=diagnostic.render(),
+            metadata=diagnostic.as_metadata(),
+        )
 
     if returncode != 0:
         stream_error = (session or {}).get("error", "")
         retryable = is_retryable_cli_failure(
             returncode=returncode, stderr=f"{stream_error}\n{stderr_text}"
         )
+        # A failed attempt still burns tokens — often the attempt that
+        # escalates to the next model — so its usage belongs in the budget band
+        # (claude.py and codex.py report it on the same path).
+        failure_error = (stderr_text or stream_error or "").strip()
         return AgentResult(
             success=False,
-            error=(stderr_text or stream_error or "opencode failed").strip()
-            or f"opencode exited {returncode}",
+            error=failure_error or f"opencode failed (exit {returncode})",
             metadata={"retryable": True} if retryable else {},
+            usage=_priced_stream_usage(accumulator, ctx=ctx),
         )
-    return AgentResult(success=True, output=accumulator.final_output or None)
+    return AgentResult(
+        success=True,
+        output=accumulator.final_output or None,
+        usage=_priced_stream_usage(accumulator, ctx=ctx),
+    )
+
+
+def _priced_stream_usage(
+    accumulator: StreamSpanAccumulator, *, ctx: AgentRunContext
+) -> AgentUsage | None:
+    """Return the stream's token usage, priced from the catalog when unpriced.
+
+    OpenCode 2.x reports its own cost per step; when a provider omits it, the
+    catalog fills it in the same way the session path does, so the run record's
+    ``Cost:`` line and the packet agree.
+    """
+    usage = accumulator.to_usage()
+    if usage is None:
+        return usage
+    if usage.cost_usd is not None and usage.cost_usd > 0:
+        return usage
+    if usage.cost_usd is not None:
+        # OpenCode emits ``cost: 0`` when it cannot price the model, which is
+        # "unknown", not "free" — let the catalog try.
+        usage = replace(usage, cost_usd=None)
+    from mergecraft.agents.curated_model_catalog import apply_catalog_cost_to_usage
+
+    return apply_catalog_cost_to_usage(usage, model=ctx.resolved_model)
+
+
+def _absorb_step_usage(accumulator: StreamSpanAccumulator, event: dict[str, Any]) -> None:
+    """Fold a 2.x step's reported tokens into the run's usage (#801).
+
+    OpenCode's ``step_finish`` part carries five **disjoint** counters:
+    ``input`` is the non-cached prompt, ``output`` the visible completion,
+    ``reasoning`` separate from it, and ``cache.read`` / ``cache.write`` the
+    cached prompt halves. The CLI's own ``TokenUsage.total()`` sums all five, and
+    it bills ``cache.read``/``cache.write`` separately and ``output`` +
+    ``reasoning`` together, so the accumulator is fed the same way: cached
+    prompt tokens are Anthropic-style additive, and reasoning joins the output
+    total.
+    """
+    part = event.get("part")
+    if not isinstance(part, dict):
+        return
+    tokens = part.get("tokens")
+    if not isinstance(tokens, dict):
+        return
+    cache = tokens.get("cache")
+    cache = cache if isinstance(cache, dict) else {}
+    payload: dict[str, Any] = {
+        "input_tokens": tokens.get("input") or 0,
+        "output_tokens": (tokens.get("output") or 0) + (tokens.get("reasoning") or 0),
+        "cache_read_input_tokens": cache.get("read") or 0,
+        "cache_creation_input_tokens": cache.get("write") or 0,
+    }
+    cost = part.get("cost")
+    if isinstance(cost, (int, float)):
+        payload["cost_usd"] = float(cost)
+    accumulator.absorb_usage(payload)
+
+
+def _bash_only_handler(
+    tool_state: ToolState | None,
+) -> Callable[[StreamSpanAccumulator, dict[str, Any]], None]:
+    """Stream handler for a run with no session: record bash calls, touch nothing else."""
+
+    def _handle(accumulator: StreamSpanAccumulator, event: dict[str, Any]) -> None:
+        _absorb_step_usage(accumulator, event)
+        if event.get("type") == "tool_use":
+            _record_opencode_bash(tool_state, event.get("part"))
+
+    return _handle
 
 
 def _session_event_handler(
     session: dict[str, str],
+    *,
+    tool_state: ToolState | None = None,
 ) -> Callable[[StreamSpanAccumulator, dict[str, Any]], None]:
     """Record a 2.x ``run`` stream's session id and answer text.
 
@@ -1441,7 +1670,11 @@ def _session_event_handler(
                 else detail
             )
             session["error"] = str(message or event)[:1000]
+            accumulator.set_stream_error(session["error"])
+        _absorb_step_usage(accumulator, event)
         part = event.get("part")
+        if event.get("type") == "tool_use":
+            _record_opencode_bash(tool_state, part)
         if event.get("type") == "text" and isinstance(part, dict):
             text = part.get("text")
             if isinstance(text, str) and text:

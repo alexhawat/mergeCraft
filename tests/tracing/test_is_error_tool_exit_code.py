@@ -143,3 +143,31 @@ def test_plain_dict_with_is_error_data_stays_ok() -> None:
     by_kind = _events_by_kind(sink)
     tool_span = by_kind["tool.call"][0]
     assert tool_span.attrs.get("tool.exit_code") == "ok"
+
+
+def test_tool_result_output_is_its_text_not_its_repr() -> None:
+    """Tool spans show what the tool returned, not ``ToolResult(content=[...])``."""
+    from mergecraft.mcp.shared import ToolResult
+    from mergecraft.tracing._tool_attrs import enrich_tool_response
+
+    tracer, sink = _make_tracer()
+    with tracer.start_span("tool.call") as ok_span:
+        enrich_tool_response(
+            ok_span,
+            output=ToolResult(
+                content=[{"type": "text", "text": "line one"}, {"type": "image", "data": "x"}]
+            ),
+        )
+    with tracer.start_span("tool.call") as error_span:
+        enrich_tool_response(
+            error_span,
+            output=ToolResult(
+                content=[{"type": "text", "text": "push is disabled"}], is_error=True
+            ),
+        )
+
+    ok_attrs, error_attrs = (event.attrs for event in _events_by_kind(sink)["tool.call"])
+    assert ok_attrs["tool.output"] == "line one\n[image]"
+    assert ok_attrs["gen_ai.tool.output"] == "line one\n[image]"
+    assert error_attrs["gen_ai.tool.output"] == "push is disabled"
+    assert "ToolResult(" not in ok_attrs["gen_ai.tool.output"]

@@ -10,7 +10,7 @@ Set up mergeCraft in this repository per
 1. Install the CLI (uv fetches its own Python — do not install Python):
 
    ```bash
-   uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"
+   uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
    ```
 
 2. Scaffold:

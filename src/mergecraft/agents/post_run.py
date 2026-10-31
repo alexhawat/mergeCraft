@@ -111,8 +111,16 @@ def build_unsubmitted_review_prompt(mode: str) -> str:
                 "MISSING REVIEW OUTPUT — you selected Review mode but stopped without "
                 "recording a terminal verdict via `submit_review_verdict`.",
                 "",
-                "call `submit_review_verdict` now (approve or request_changes); the run "
-                "publishes the recorded verdict to GitHub.",
+                "call `submit_review_verdict` now with:",
+                "- `verdict`: approve or request_changes",
+                "- `summary`: one short paragraph",
+                "- `findings`: a list of objects, each with required keys "
+                "`path` (string), `body` (string), `severity` (Critical|Major|Minor|Trivial), "
+                "and optional `line` (number). Omit invalid or pre-seeded rows — only include "
+                "findings you are publishing in this call.",
+                "",
+                "Secondary reviewers use `record_reviewer_dispatch_run`; only the primary "
+                "orchestrator calls `submit_review_verdict`.",
                 "",
                 "do NOT stop again until `submit_review_verdict` has been called successfully.",
             ]
@@ -143,6 +151,11 @@ async def collect_post_run_issues(
     if status:
         if mode and mode in NON_COMMITTING_MODES:
             logger.info("dirty-tree gate suppressed: mode `{}` does not commit", mode)
+        elif ctx.tool_state.offline_review:
+            # An offline review (``mergecraft review``) is read-only whether or not the
+            # agent selected a mode; asking it to commit and push only derails the
+            # retry turn that should recover a missing verdict.
+            logger.info("dirty-tree gate suppressed: offline review does not commit")
         else:
             issues.dirty_tree = status
     summary_file = ctx.tool_state.summary_file_path

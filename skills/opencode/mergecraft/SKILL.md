@@ -73,7 +73,7 @@ a read-only verifier; typed findings drive inline comments and the
 2. **Install:**
 
    ```bash
-   uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"
+   uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
    mergecraft init
    ```
 

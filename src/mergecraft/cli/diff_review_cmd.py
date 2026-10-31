@@ -668,6 +668,22 @@ def run(
     elif tracing_export_untrusted_content is False:
         tracing_cli.append("--no-tracing-export-untrusted-content")
 
+    # A mistyped tracing sink (the flag, or MERGECRAFT_TRACING_TO) is a
+    # configuration failure, caught here before any review work starts instead of
+    # silently writing a local trace file for a sink nobody asked for (#930).
+    try:
+        from mergecraft.cli.tracing_precedence import resolve_tracing_settings
+        from mergecraft.config.env import EnvSettingsError
+
+        resolve_tracing_settings(
+            cli_args=tracing_cli,
+            env=dict(os.environ),
+            config_root=root,
+            warn_unknown_sink=True,
+        )
+    except EnvSettingsError as exc:
+        _exit_with_message(str(exc), cli_exit_code_for_review(RunOutcome.configuration_error))
+
     # The CLI always asks the agent for structured findings. Precedence of the
     # structured sink path:
     # 1. ``--json PATH`` if supplied — that is the canonical findings file.

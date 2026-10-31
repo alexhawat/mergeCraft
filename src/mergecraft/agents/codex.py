@@ -9,10 +9,12 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from loguru import logger
 
+from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_stream
+from mergecraft.agents.activity_watchdog import event_has_model_output, watchdog_for_process
 from mergecraft.agents.codex_broker import (
     OPENAI_API_KEY_ENV,
     active_broker_handle,
@@ -37,6 +39,7 @@ from mergecraft.agents.openai_compatible_gateways import (
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
+    INFRA_REASON_KEY,
     STDERR_DRAIN_JOIN_TIMEOUT_S,
     AgentResult,
     AgentRunContext,
@@ -57,7 +60,10 @@ from mergecraft.types import (
     format_mcp_tool_ref,
 )
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
-from mergecraft.utils.provider_failure import is_retryable_cli_failure
+from mergecraft.utils.provider_failure import (
+    is_expired_subscription_credential,
+    is_retryable_cli_failure,
+)
 from mergecraft.utils.secrets import build_agent_env
 
 if TYPE_CHECKING:
@@ -66,6 +72,15 @@ if TYPE_CHECKING:
     from mergecraft.tracing.tracer import Tracer
 
 CODEX_AUTH_ENV = "CODEX_AUTH_JSON"
+# The named reason for a dead subscription login (#922). It tells the operator the
+# two commands that fix it, so the check summary needs no log to act on. There is
+# no scheduled canary behind it on purpose: exercising the credential to find out
+# whether it works refreshes it, which spends the stored refresh token (#970).
+CODEX_CREDENTIAL_EXPIRED_REASON = (
+    "reviewer credential expired — re-authenticate "
+    f"(mergecraft auth codex, then gh secret set {CODEX_AUTH_ENV})"
+)
+CODEX_CREDENTIAL_EXPIRED_KIND = "reviewer_credential_expired"
 # A Codex ``config.toml`` is built as a nested mapping and rendered once; a
 # nested value is a table, a scalar is a key in the table that holds it.
 TomlTable: TypeAlias = dict[str, "str | bool | TomlTable"]
@@ -297,6 +312,23 @@ def _resolved_parent_credentials(ctx: AgentRunContext) -> dict[str, str]:
     )
 
 
+def _uses_subscription_login(ctx: AgentRunContext) -> bool:
+    """Return whether this run's Codex auth is the ChatGPT-subscription login (#922).
+
+    ``resolve_codex_broker_posture`` is the single place that decides the auth
+    mode, and a usable ``CODEX_AUTH_JSON`` makes it ``subscription`` even when an
+    API key is also present — the same precedence ``_setup_codex_auth`` uses to
+    write ``auth.json``. Only that mode can report a retired refresh token; on an
+    API-key run the phrase means something else, or nothing (#1009).
+    """
+    credentials = _resolved_parent_credentials(ctx)
+    posture = resolve_codex_broker_posture(
+        codex_auth_json=credentials.get(CODEX_AUTH_ENV, ""),
+        openai_api_key=credentials.get(OPENAI_API_KEY_ENV, ""),
+    )
+    return posture.auth_mode == "subscription"
+
+
 def _codex_working_dir(ctx: AgentRunContext) -> str:
     """Return the directory Codex runs in: the review's primary repo, else this process's.
 
@@ -415,7 +447,11 @@ def user_namespace_failure_hint(
     The failure is environmental, not a reviewer error, and the two are worth
     telling apart: a caller that swallows this with ``continue-on-error`` would
     otherwise see no difference between "this runner cannot sandbox Codex" and
-    "the review ran and found nothing".
+    "the review ran and found nothing". The hint deliberately does *not* claim
+    "no review ran" (#1083): when the sandbox fails to start mid-run the review
+    continues through mergeCraft MCP tools only, and the capability loss is
+    recorded as run-scope evidence. The hard-failure path in ``_run_codex_once``
+    (where Codex truly never started) names that case itself.
     """
     tier_line = ""
     if configured_tier is not None:
@@ -434,8 +470,10 @@ def user_namespace_failure_hint(
     return (
         "Codex could not start its Linux platform sandbox: bubblewrap cannot create "
         "a user namespace inside a container that is already namespaced (a Docker "
-        "container action, or a runner without unprivileged user namespaces). No "
-        "review ran.\n"
+        "container action, or a runner without unprivileged user namespaces). "
+        "Codex-native shell tools are unavailable for this run; the review can only "
+        "use mergeCraft MCP tools, and the capability loss is recorded as run-scope "
+        "evidence in the packet.\n"
         f"{tier_line}"
         "Remedies:\n"
         f"  - Request {CODEX_SANDBOX_ENV}={CODEX_SANDBOX_UNSANDBOXED} on the mergeCraft "
@@ -748,7 +786,6 @@ def _run_codex_streaming(
     """
     from mergecraft.agents._stream_consumer import (
         StreamSpanAccumulator,
-        consume_stream,
     )
     from mergecraft.tracing import resolve_driver_tracer
 
@@ -770,6 +807,7 @@ def _run_codex_streaming(
         model_id=model or "default",
         capture_policy=capture_policy,
         input_prompt=prompt,
+        tool_state=ctx.tool_state,
     )
 
     try:
@@ -785,13 +823,25 @@ def _run_codex_streaming(
     # P4 / AR-D2 — drain stderr concurrently from spawn. Reading stdout to EOF
     # first would deadlock a child that fills the stderr pipe buffer.
     stderr_drain = start_stderr_drain(process.stderr)
+    watchdog = watchdog_for_process(
+        process,
+        label="codex",
+        interval_s=ctx.idle_timeout_s,
+        accumulator=accumulator,
+        stderr_text=stderr_drain.text,
+    )
+
+    def _watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
+        watchdog.touch(model_output=event_has_model_output(event))
+        handler(acc, event)
+
     try:
         with track_process_group(process):
             try:
                 consume_stream(
                     raw_stream=process.stdout,
                     accumulator=accumulator,
-                    handler=handler,
+                    handler=_watched_handler,
                 )
                 returncode = wait_or_kill_process_group(
                     process,
@@ -802,13 +852,26 @@ def _run_codex_streaming(
             finally:
                 # The process group is gone; collect the drained tail so the
                 # reader thread never outlives it.
+                watchdog.stop()
                 stderr_drain.join(timeout=STDERR_DRAIN_JOIN_TIMEOUT_S)
         stderr_text = stderr_drain.text()
     finally:
+        watchdog.stop()
         try:
             close_all_open_spans()
         except Exception as exc:
             logger.debug("codex stream handler cleanup failed: {}", exc)
+
+    if watchdog.stalled:
+        diagnostic = watchdog.diagnostic()
+        return with_prompt(
+            AgentResult(
+                success=False,
+                error=diagnostic.render(),
+                metadata=diagnostic.as_metadata(),
+            ),
+            prompt,
+        )
 
     if stderr_text.strip():
         for line in stderr_text.strip().splitlines()[-20:]:
@@ -840,7 +903,34 @@ def _run_codex_streaming(
                 CODEX_SANDBOX_ENV,
                 CODEX_SANDBOX_UNSANDBOXED,
             )
-            error = f"{hint}\n\ncodex stderr:\n{error}"
+            error = (
+                f"{hint}\n\n"
+                "No review ran: the sandbox failure happened on Codex's first exec, "
+                f"before any review could start.\n\ncodex stderr:\n{error}"
+            )
+        # A retired subscription login is infrastructure, not a review failure,
+        # and no retry against the same login can succeed (#922). Only a run
+        # actually using that login can see this: an API-key run that merely
+        # quotes the phrase (a review of this very code does) must fall through
+        # to the ordinary classification below.
+        if _uses_subscription_login(ctx) and is_expired_subscription_credential(
+            stream_error, stderr_text
+        ):
+            logger.error(
+                "codex credential expired: {} — {}",
+                CODEX_CREDENTIAL_EXPIRED_REASON,
+                (stream_error or stderr_text.strip() or "no provider message")[:300],
+            )
+            return with_prompt(
+                AgentResult(
+                    success=False,
+                    output=output or None,
+                    error=f"{CODEX_CREDENTIAL_EXPIRED_REASON}\n\ncodex reported: {error}",
+                    usage=usage,
+                    metadata={INFRA_REASON_KEY: CODEX_CREDENTIAL_EXPIRED_KIND},
+                ),
+                prompt,
+            )
         # Classify against the provider's message too — a stdout-only failure
         # is invisible to a stderr-only classifier (#445, #446).
         retryable = is_retryable_cli_failure(

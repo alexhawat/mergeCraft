@@ -11,7 +11,7 @@ def package_version() -> str:
     from importlib.metadata import PackageNotFoundError, version
 
     try:
-        installed = version("merge-craft")
+        installed = version("mergecraft-action")
         if installed.strip():
             return installed
     except PackageNotFoundError:

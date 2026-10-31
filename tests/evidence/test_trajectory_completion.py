@@ -63,6 +63,68 @@ def test_an_unknown_tool_is_never_counted_as_completion() -> None:
     assert classify_tool_intent("orchestrator.something_else", {}) == "other"
 
 
+# ── #1074 — the in-flight terminal call is the completion signal ─────────────
+#
+# The run record renders *inside* the terminal ``create_pull_request_review``
+# call, before ``mcp/rpc.py`` appends that call to the trajectory, so
+# ``completion_claims`` is empty at audit time on a compliant self-published
+# run. ``audit_trajectory`` takes the in-flight tool name and counts it.
+
+
+def _worked_record_without_completion() -> Any:
+    from mergecraft.evidence.trajectory import ToolCallRecord, TrajectoryRecord
+
+    return TrajectoryRecord(
+        tool_calls=[
+            ToolCallRecord(
+                sequence=1,
+                tool="shell",
+                signature="shell:cat",
+                intent="read",
+                ok=True,
+                command="cat src/app.py",
+                paths=["src/app.py"],
+            )
+        ],
+        files_read=["src/app.py"],
+        completion_claims=[],
+        read_coverage=True,
+    )
+
+
+def test_missing_completion_fires_when_nothing_signalled() -> None:
+    """Control: with no claim and no in-flight terminal call, the finding fires."""
+    from mergecraft.evidence.trajectory_audit import audit_trajectory
+
+    findings = audit_trajectory(_worked_record_without_completion())
+
+    assert any(f.rule_id == "missing-completion-signal" for f in findings)
+
+
+def test_missing_completion_stays_quiet_for_the_in_flight_terminal_call() -> None:
+    """The record rendered inside ``create_pull_request_review`` is the signal."""
+    from mergecraft.evidence.trajectory_audit import audit_trajectory
+
+    findings = audit_trajectory(
+        _worked_record_without_completion(),
+        in_flight_tool="create_pull_request_review",
+    )
+
+    assert all(f.rule_id != "missing-completion-signal" for f in findings)
+
+
+def test_an_in_flight_non_terminal_tool_does_not_count_as_completion() -> None:
+    """Green guard: only a ``complete``-intent in-flight call silences the check."""
+    from mergecraft.evidence.trajectory_audit import audit_trajectory
+
+    findings = audit_trajectory(
+        _worked_record_without_completion(),
+        in_flight_tool="shell",
+    )
+
+    assert any(f.rule_id == "missing-completion-signal" for f in findings)
+
+
 @pytest.mark.asyncio
 async def test_a_compliant_run_published_by_the_orchestrator_has_a_complete_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

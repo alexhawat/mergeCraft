@@ -161,6 +161,33 @@ def test_ignored_tool_error_fires() -> None:
     assert "ignored-tool-error" in _rule_ids(findings)
 
 
+def test_diff_coverage_nudge_is_not_an_ignored_tool_error() -> None:
+    """A one-time guidance refusal is not a failed tool that was abandoned."""
+    findings = _audit(
+        _record(
+            tool_calls=[
+                _call(1, "checkout_pr", intent="read", paths=["src/app.py"]),
+                _call(
+                    2,
+                    "submit_review_verdict",
+                    intent="complete",
+                    ok=False,
+                    error=(
+                        "diff coverage pre-flight: some changed lines were not read "
+                        "before the verdict"
+                    ),
+                    signature="submit:first",
+                ),
+                _call(3, "submit_review_verdict", intent="complete", signature="submit:second"),
+            ],
+            files_read=["src/app.py"],
+            files_modified=["src/app.py"],
+        )
+    )
+
+    assert "ignored-tool-error" not in _rule_ids(findings)
+
+
 def test_ignored_tool_error_does_not_fire_when_the_tool_was_retried() -> None:
     """Retrying the failed tool is the sane response — that is not the defect."""
     findings = _audit(

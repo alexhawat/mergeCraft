@@ -90,11 +90,7 @@ def test_sandbox_unavailable_finding_survives_pipeline_scoping(
     from mergecraft.analyzers.registry import get_manifest
 
     settings_mod = __import__("mergecraft.config.settings", fromlist=["AnalyzersSettings"])
-    monkeypatch.setattr(
-        pipeline,
-        "_analyzers_settings",
-        lambda _root: settings_mod.AnalyzersSettings(),
-    )
+    pinned = settings_mod.AnalyzersSettings()
     monkeypatch.setattr(
         pipeline,
         "detect_enabled",
@@ -120,6 +116,7 @@ def test_sandbox_unavailable_finding_survives_pipeline_scoping(
         changed_files=[".github/workflows/ci.yml"],
         tier="untrusted",
         diff_text=diff,
+        analyzers_settings=pinned,
     )
     rule_ids = [row.get("rule_id") for row in state.findings]
     assert "analyzers.sandbox-unavailable" in rule_ids

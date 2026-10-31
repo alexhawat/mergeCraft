@@ -25,34 +25,41 @@ Verify a published digest locally (see [CONTRIBUTING.md](../CONTRIBUTING.md#veri
 
 ## Operator actions
 
-### PyPI (`merge-craft`)
+### PyPI (`mergecraft-action`)
 
-PyPI distribution name is **`merge-craft`** (hyphen); import and CLI remain
+PyPI distribution name is **`mergecraft-action`** (hyphen); import and CLI remain
 `mergecraft`. Craft publishes via the `pypi` target in [`.craft.yml`](../.craft.yml).
+The project was first published as `0.1.0a4`; before that no `mergecraft-action`
+(and no `merge-craft`) release existed.
 
 **Prerequisites**
 
 1. Repository secrets: `TWINE_USERNAME`, `TWINE_PASSWORD` (API token as password).
-2. `GITHUB_TOKEN` with `repo` for `craft prepare` / `craft publish`.
+2. `GITHUB_TOKEN` with `repo` **and `write:packages`** for `craft prepare` /
+   `craft publish`. The registry login inside Craft uses this token, not your
+   local `docker login`; a `gh auth token` value has no `write:packages` and the
+   image retag fails after PyPI has already published.
 3. Release preconditions green on the release branch (live integration, E2E nightly,
    image SBOM + Trivy gate) — see [CONTRIBUTING.md](../CONTRIBUTING.md#releases-craft).
 
-**Cut and publish 0.1.0**
+**Cut and publish `<version>`**
 
 ```bash
-craft prepare 0.1.0          # first release — explicit version, not `auto`
+craft prepare <version>          # explicit version, not `auto`
 # Wait for CI/CD on the release branch (build, scan, sign, attest, promote).
-craft publish 0.1.0          # uploads dist/* to PyPI + GitHub release per .craft.yml
+craft publish <version> --no-merge --keep-branch
 ```
 
-Or dispatch **Release** (`.github/workflows/release.yml`) with `version: 0.1.0`,
-then `craft publish 0.1.0` after CI is green.
+Or dispatch **Release** (`.github/workflows/release.yml`) with `version: <version>`,
+then `craft publish <version> --no-merge --keep-branch` after CI is green. The two
+flags keep the merge-back a reviewed pull request; without them Craft pushes to the
+default branch, which the branch ruleset rejects after the targets have published.
 
-Post-publish smoke:
+Post-publish smoke — the version you just published:
 
 ```bash
-pip install merge-craft==0.1.0
-mergecraft --help
+uv tool install mergecraft-action==<version>
+mergecraft --version
 ```
 
 ### GitHub Marketplace listing
@@ -87,8 +94,8 @@ to add there. The one binary still outstanding is the demo capture; see
 ## Python version and Docker
 
 **Python >=3.11** is the install floor for `uv tool install` / local CLI development
-(`pyproject.toml`). CI runs on **3.11** and **3.14**. PyPI (`merge-craft`) is **not**
-published yet — install from git or a local checkout via `uv`. Operators who want a
+(`pyproject.toml`). CI runs on **3.11** and **3.14**. PyPI carries the pre-release
+`mergecraft-action`; install from git only when you need an unreleased commit. Operators who want a
 pinned runtime without managing Python versions should use the **Docker Action**
 (`alexhawat/mergeCraft@…`) — the image ships a compatible runtime; no local Python
 install is required.
@@ -114,7 +121,7 @@ Repo-root [`server.json`](../server.json) is **generated** by
 `make mcp-server-json-check` (schema validation against a vendored snapshot plus
 `--check` drift gate). The artifact advertises the **public** six-tool stdio
 profile (`mergecraft mcp serve --role public --transport stdio`) and PyPI
-package `merge-craft` — not the runtime reviewer/verifier harness bag.
+package `mergecraft-action` — not the runtime reviewer/verifier harness bag.
 
 **Live registry publish is operator-owned (G3):** after a tagged release, run
 `mcp-publisher` against the generated `server.json` under namespace

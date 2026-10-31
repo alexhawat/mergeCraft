@@ -21,7 +21,10 @@ from tests.ci.workflow_support import REPO_ROOT
 
 _PYPROJECT = REPO_ROOT / "pyproject.toml"
 
-# The seven modules the installed-wheel smoke tolerates dropping.
+# The twelve modules the installed-wheel smoke tolerates dropping. The last five
+# were re-measured on the tree that landed them (#947): none has a production
+# importer, and every caller is a Make target, ``scripts/``, a workflow step
+# run from the checkout, or a test.
 _EXCLUDED = (
     "src/mergecraft/evals/mcp_public.py",
     "src/mergecraft/evals/quality_metrics.py",
@@ -30,6 +33,11 @@ _EXCLUDED = (
     "src/mergecraft/integrations/live_providers.py",
     "src/mergecraft/mcp/codegen.py",
     "src/mergecraft/scm/errors.py",
+    "src/mergecraft/scm/webhooks.py",
+    "src/mergecraft/evidence/shadow_compare.py",
+    "src/mergecraft/evals/human_batch.py",
+    "src/mergecraft/evals/skill.py",
+    "src/mergecraft/agents/catalog_docs.py",
 )
 
 # A shipped CLI path imports this one, so it must stay in the wheel.
@@ -80,3 +88,57 @@ def test_every_excluded_path_exists_on_disk() -> None:
 
 def test_the_kept_runtime_module_exists() -> None:
     assert (REPO_ROOT / _KEPT).is_file(), f"runtime module missing: {_KEPT}"
+
+
+# Each re-measured module is reached only from the checkout; if a shipped module
+# starts importing one, excluding it would break the installed CLI.
+_CHECKOUT_ONLY = (
+    "mergecraft.scm.webhooks",
+    "mergecraft.evidence.shadow_compare",
+    "mergecraft.evals.human_batch",
+    "mergecraft.evals.skill",
+    "mergecraft.agents.catalog_docs",
+)
+
+
+def test_no_shipped_module_imports_a_checkout_only_module() -> None:
+    """The exclusion is only safe while nothing the wheel ships imports these five."""
+    import ast
+
+    src = REPO_ROOT / "src" / "mergecraft"
+    excluded_files = {REPO_ROOT / relative for relative in _EXCLUDED}
+    offenders: list[str] = []
+    for path in sorted(src.rglob("*.py")):
+        if path in excluded_files:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            imported: list[str] = []
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imported.append(node.module)
+                imported.extend(f"{node.module}.{alias.name}" for alias in node.names)
+            elif isinstance(node, ast.Import):
+                imported.extend(alias.name for alias in node.names)
+            for name in imported:
+                if name in _CHECKOUT_ONLY:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)} imports {name}")
+    assert not offenders, offenders
+
+
+def test_every_checkout_only_module_has_a_checkout_caller() -> None:
+    """A module nobody calls at all is dead code, not a packaging decision."""
+    callers = "\n".join(
+        (REPO_ROOT / relative).read_text(encoding="utf-8")
+        for relative in (
+            "Makefile",
+            ".github/workflows/ci.yml",
+        )
+    )
+    tests = "\n".join(
+        path.read_text(encoding="utf-8") for path in (REPO_ROOT / "tests").rglob("*.py")
+    )
+    for module in _CHECKOUT_ONLY:
+        short = module.removeprefix("mergecraft.")
+        assert module in callers or module in tests or short in tests, (
+            f"{module} has no checkout caller; remove it rather than excluding it"
+        )

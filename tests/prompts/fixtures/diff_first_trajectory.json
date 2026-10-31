@@ -1,0 +1,34 @@
+{
+  "description": "Fixture trajectory for the diff-first reviewer contract: the materialised diff is read before any git call.",
+  "diffPath": "/tmp/mergecraft/pr-1017.diff",
+  "tool_calls": [
+    {
+      "sequence": 1,
+      "tool": "checkout_pr",
+      "signature": "checkout_pr:1017",
+      "intent": "read",
+      "ok": true,
+      "paths": []
+    },
+    {
+      "sequence": 2,
+      "tool": "shell",
+      "signature": "shell:cat-diff",
+      "intent": "read",
+      "ok": true,
+      "command": "cat /tmp/mergecraft/pr-1017.diff",
+      "paths": [],
+      "diff_read_path": "/tmp/mergecraft/pr-1017.diff",
+      "diff_read": [0, 0]
+    },
+    {
+      "sequence": 3,
+      "tool": "git",
+      "signature": "git:diff",
+      "intent": "read",
+      "ok": true,
+      "command": "diff",
+      "paths": []
+    }
+  ]
+}

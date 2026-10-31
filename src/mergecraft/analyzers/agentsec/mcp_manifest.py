@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from mergecraft.analyzers.agentsec.confinement import confined_changed_file
 from mergecraft.analyzers.agentsec.policy import ManifestDocument
 
 if TYPE_CHECKING:
@@ -21,12 +22,17 @@ def discover_mcp_documents(
     *,
     repo_root: Path,
     changed_files: list[str],
+    refusals: list[str] | None = None,
 ) -> list[ManifestDocument]:
-    """Return MCP manifest documents among ``changed_files``."""
+    """Return MCP manifest documents among ``changed_files``.
+
+    Same confinement as the skill reader: an out-of-repo symlink is refused unread
+    and appended to ``refusals`` (#851).
+    """
     documents: list[ManifestDocument] = []
     for rel in changed_files:
-        path = repo_root / rel
-        if not path.is_file():
+        path = confined_changed_file(repo_root, rel, refusals=refusals)
+        if path is None:
             continue
         parsed = parse_mcp_file(path, repo_relative=rel)
         if parsed is not None:

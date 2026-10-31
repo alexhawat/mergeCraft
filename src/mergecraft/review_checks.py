@@ -146,6 +146,12 @@ def _repo_relative(arg: str, root: Path) -> str:
         return arg
 
 
+_UNTRUSTED_WITHOUT_SANDBOX_REASON = (
+    "sandbox isolation is unavailable for untrusted static checks — a PR-authored gate "
+    "is never run bare on the checkout"
+)
+
+
 def run_checks(
     checks: list[StaticCheck],
     *,
@@ -165,6 +171,12 @@ def run_checks(
     from mergecraft.analyzers.sandbox import build_privilege_drop_argv
     from mergecraft.analyzers.trust import build_analyzer_env
     from mergecraft.utils.privilege import agent_subprocess_env
+
+    if tier == "untrusted" and sandbox_context is None:
+        # Fail closed at the executor too (#887): an untrusted gate is PR-authored
+        # code, and without the sandbox's copy-on-write view and network isolation
+        # it would run bare on the real checkout — whatever the caller believed.
+        return declared_cannot_run_outcomes(checks, reason=_UNTRUSTED_WITHOUT_SANDBOX_REASON)
 
     env = build_analyzer_env(tier=tier)
     if env_overrides:

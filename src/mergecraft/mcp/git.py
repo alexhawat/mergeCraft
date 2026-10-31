@@ -34,13 +34,21 @@ from mergecraft.mcp.git_guards import (
     _reject_grep_pager_exec,
     _reject_namespace_flag,
     _reject_no_index,
+    _reject_refused_long_options,
     _split_end_of_options,
     _subcommand_declares_shorts,
     reject_if_leading_dash,
     reject_special_ref,
+    resolve_grep_long_option,
     validate_tag_name,
 )
-from mergecraft.mcp.shared import ToolClass, execute, repository_mutation_class_for_push, tool
+from mergecraft.mcp.shared import (
+    ToolClass,
+    ToolRefusedError,
+    execute,
+    repository_mutation_class_for_push,
+    tool,
+)
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.utils.git_hardening import git_argv, git_authenticated_argv, read_remote_origin_url
 
@@ -67,6 +75,7 @@ __all__ = [
     "_reject_grep_pager_exec",
     "_reject_namespace_flag",
     "_reject_no_index",
+    "_reject_refused_long_options",
     "_split_end_of_options",
     "_subcommand_declares_shorts",
     "reject_if_leading_dash",
@@ -88,7 +97,7 @@ def _confine_to_repo_root(value: str, flag: str, base: str) -> Path:
         return confine_to_workspace(value, base=base)
     except WorkspacePathError as exc:
         msg = f"Blocked: '{flag}' '{value}' must be within the repo checkout — {exc}"
-        raise ValueError(msg) from exc
+        raise ToolRefusedError(msg) from exc
 
 
 def _validate_path_confinement(global_opts: list[str], cwd: str) -> None:
@@ -220,10 +229,218 @@ def _git_show_preview(output_path: str) -> str:
     return preview
 
 
+# Grep context the tool passes through. Past this, grep is being used to read
+# whole function bodies: one timed-out self-review spent ~40 of its 102 git
+# calls on `git grep -A 40..70 'def X'` (437 KB of output) and never used a
+# line-range read. Larger context is dropped and the match locations returned.
+_GREP_MAX_CONTEXT_LINES = 10
+_GREP_UNBOUNDED_CONTEXT = 1 << 30
+# git's context count: strtoul base 0 after optional C whitespace and "+", then a k/m/g unit.
+_GIT_COUNT_RE = re.compile(r"[ \t\n\v\f\r]*\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)([kKmMgG]?)")
+_GIT_COUNT_UNITS = {"": 1, "k": 1 << 10, "m": 1 << 20, "g": 1 << 30}
+# The bare ``-NUM`` short form is decimal digits only (``-010`` is ten lines).
+_GREP_NUM_OPTION_RE = re.compile(r"-([0-9]+)")
+_GREP_CONTEXT_LONG = frozenset({"--after-context", "--before-context", "--context"})
+# Short letters whose value is the rest of the bundle or, failing that, the next token.
+_GREP_SHORT_VALUE_LETTERS = frozenset("ABCefm")
+_GREP_LONG_TAKING_VALUE = _GREP_CONTEXT_LONG | {"--max-depth", "--max-count", "--threads"}
+_GREP_CONTEXT_NOTE = (
+    "Context lines dropped: grep context over "
+    f"{_GREP_MAX_CONTEXT_LINES} lines (or -W) returns whole bodies. These are the "
+    "match locations (path:line:text). To read a body, open the file with your "
+    "file-read tool (read/Read) at offset=<match line> with a limit, not grep context."
+)
+# Shell readers agents reach for through this tool. Refused like any verb off
+# the allowlist, but the refusal names the read that does the job.
+_FILE_READER_VERBS = frozenset({"sed", "cat", "head", "tail", "awk"})
+_SED_LINE_RANGE_RE = re.compile(r"^(\d+),(\d+)p$")
+
+
+def _grep_segments(head: list[str]) -> tuple[list[tuple[bool, list[str]]], bool]:
+    """Split grep args before ``--`` into ordered option and positional segments.
+
+    An option segment is the option token plus the separate value it consumes,
+    if any; a positional segment is one token. The flag reports whether an
+    option followed a positional: git grep stops option parsing at the pattern,
+    so ``grep 'def x' -A 4`` exits 128.
+    """
+    segments: list[tuple[bool, list[str]]] = []
+    seen_positional = misplaced = False
+    idx = 0
+    while idx < len(head):
+        tok = head[idx]
+        if not tok.startswith("-") or tok == "-":
+            segments.append((False, [tok]))
+            seen_positional = True
+            idx += 1
+            continue
+        misplaced = misplaced or seen_positional
+        if tok.startswith("--"):
+            takes_value = "=" not in tok and (
+                resolve_grep_long_option(tok) in _GREP_LONG_TAKING_VALUE
+            )
+        else:
+            body = tok[1:]
+            letter = next((c for c in body if c in _GREP_SHORT_VALUE_LETTERS), "")
+            takes_value = (
+                _GREP_NUM_OPTION_RE.fullmatch(tok) is None
+                and bool(letter)
+                and body.index(letter) == len(body) - 1
+            )
+        width = 2 if takes_value and idx + 1 < len(head) else 1
+        segments.append((True, head[idx : idx + width]))
+        idx += width
+    return segments, misplaced
+
+
+def _context_value(value: str) -> int:
+    """Parse a context count the way git does, or fail closed.
+
+    git reads it with ``strtoul(value, &end, 0)`` plus an optional k/m/g
+    suffix: leading whitespace and ``+`` are allowed, ``0x10`` is hex and
+    ``010`` octal, and ``1k`` is 1024 lines. Anything else counts as unbounded,
+    so the option is dropped rather than forwarded unexamined.
+    """
+    match = _GIT_COUNT_RE.fullmatch(value)
+    if match is None:
+        return _GREP_UNBOUNDED_CONTEXT
+    digits, unit = match.groups()
+    if digits[:2].lower() == "0x":
+        base = 16
+    elif digits.startswith("0"):
+        base = 8
+    else:
+        base = 10
+    return int(digits, base) * _GIT_COUNT_UNITS[unit.lower()]
+
+
+def _strip_grep_context(group: list[str]) -> tuple[list[str], int]:
+    """Return *group* without its context option, and the context lines it asked for.
+
+    Long options are matched by the name git resolves them to, so an
+    abbreviation (``--after=60``, ``--func``) counts like its full spelling.
+    """
+    tok = group[0]
+    separate = group[1] if len(group) > 1 else ""
+    if tok.startswith("--"):
+        name = resolve_grep_long_option(tok)
+        if name == "--function-context":
+            return [], _GREP_UNBOUNDED_CONTEXT
+        if name in _GREP_CONTEXT_LONG:
+            _, has_inline, inline = tok.partition("=")
+            return [], _context_value(inline if has_inline else separate)
+        return group, 0
+    body = tok[1:]
+    if _GREP_NUM_OPTION_RE.fullmatch(tok) is not None:
+        return [], int(body)
+    kept: list[str] = []
+    lines = 0
+    for idx, char in enumerate(body):
+        if char == "W":
+            lines = _GREP_UNBOUNDED_CONTEXT
+            continue
+        if char in "ABC":
+            lines = max(lines, _context_value(body[idx + 1 :] or separate))
+            return ([f"-{''.join(kept)}"] if kept else []), lines
+        if char in _GREP_SHORT_VALUE_LETTERS:
+            # -e / -f / -m: the rest of the bundle (or the next token) is a value.
+            return [f"-{''.join(kept)}{body[idx:]}", *group[1:]], lines
+        kept.append(char)
+    return ([f"-{''.join(kept)}"] if kept else []), lines
+
+
+def _shows_line_numbers(groups: list[list[str]]) -> bool:
+    for group in groups:
+        tok = group[0]
+        if tok.startswith("--"):
+            if resolve_grep_long_option(tok) == "--line-number":
+                return True
+            continue
+        options = tok[1:]
+        for idx, char in enumerate(options):
+            if char in _GREP_SHORT_VALUE_LETTERS:
+                options = options[:idx]
+                break
+        if "n" in options:
+            return True
+    return False
+
+
+def _normalize_grep_args(args: list[str]) -> tuple[list[str], bool]:
+    """Move misplaced grep options before the pattern and drop oversized context.
+
+    Returns the args to run and whether context was dropped (``-n`` is then
+    added if missing, so every match carries the line to read from). Args come
+    back untouched when every option precedes the pattern and no context
+    exceeds ``_GREP_MAX_CONTEXT_LINES``. A ``(``/``)`` boolean expression is
+    never reordered, since its operators interleave with ``-e`` patterns, but
+    oversized context is still removed from it in place.
+    """
+    end = args.index("--") if "--" in args else len(args)
+    head, tail = args[:end], args[end:]
+    segments, misplaced = _grep_segments(head)
+    if "(" in head or ")" in head:
+        misplaced = False
+    stripped = [
+        (_strip_grep_context(toks) if is_option else (toks, 0)) for is_option, toks in segments
+    ]
+    oversized = any(lines > _GREP_MAX_CONTEXT_LINES for _, lines in stripped)
+    if not oversized and not misplaced:
+        return args, False
+    if oversized:
+        segments = [
+            (is_option, kept)
+            for (is_option, _), (kept, _) in zip(segments, stripped, strict=True)
+            if kept
+        ]
+        if not _shows_line_numbers([toks for is_option, toks in segments if is_option]):
+            segments.insert(0, (True, ["-n"]))
+    if misplaced:
+        segments = sorted(segments, key=lambda segment: not segment[0])
+    return [*(tok for _, toks in segments for tok in toks), *tail], oversized
+
+
+def _file_reader_hint(command: str, args: list[str]) -> str:
+    """Name the native read that replaces a refused ``sed``/``cat``/... call."""
+    for arg in args:
+        match = _SED_LINE_RANGE_RE.fullmatch(arg)
+        if command == "sed" and match is not None:
+            first, last = int(match.group(1)), int(match.group(2))
+            return (
+                f"To read lines {first}-{last}, use your file-read tool (read/Read) "
+                f"with offset={first} limit={last - first + 1}."
+            )
+    return (
+        "To read a file or a line range, use your file-read tool (read/Read) with "
+        "an offset and limit, e.g. offset=840 limit=100 for lines 840-939."
+    )
+
+
 def _is_auth_failure(stderr: str) -> bool:
     """Return whether git's failure output shows a rejected/absent credential."""
     lowered = stderr.lower()
     return any(marker in lowered for marker in _AUTH_FAILURE_MARKERS)
+
+
+class _GitCommandError(RuntimeError):
+    """A non-zero git exit, carrying the exit code and stderr beside the message.
+
+    The message is the same redacted, auth-hint-annotated ``git … failed (N)``
+    string this tool has always raised; the attributes let an intent-aware
+    caller tell an expected non-zero answer (``git grep``'s no-match exit 1,
+    #1077) apart from a failure without parsing the message back out.
+    """
+
+    def __init__(self, args: list[str], result: subprocess.CompletedProcess[str]) -> None:
+        raw_err = (result.stderr or result.stdout or "").strip()
+        err = redact_secrets(raw_err)
+        message = f"git {' '.join(args)} failed ({result.returncode}): {err}"
+        if _is_auth_failure(raw_err):
+            logger.error("git auth failure on `git {}`: {}", " ".join(args), err)
+            message = f"{message}\n{_AUTH_FAILURE_HINT}"
+        super().__init__(message)
+        self.returncode = result.returncode
+        self.stderr = result.stderr or ""
 
 
 def _run_git(
@@ -249,14 +466,42 @@ def _run_git(
         check=False,
     )
     if result.returncode != 0:
-        raw_err = (result.stderr or result.stdout or "").strip()
-        err = redact_secrets(raw_err)
-        msg = f"git {' '.join(args)} failed ({result.returncode}): {err}"
-        if _is_auth_failure(raw_err):
-            logger.error("git auth failure on `git {}`: {}", " ".join(args), err)
-            msg = f"{msg}\n{_AUTH_FAILURE_HINT}"
-        raise RuntimeError(msg)
+        raise _GitCommandError(args, result)
     return result.stdout
+
+
+def _run_grep(args: list[str], *, cwd: str) -> tuple[str, bool]:
+    """Run ``git grep`` and return ``(stdout, matched)``.
+
+    Exit 1 with a clean stderr is grep's "no lines selected" answer — a
+    successful no-match, not a failure (#1077; the ``git``-door instance of
+    #1027's intent-aware outcome rule). Exit 1 carrying stderr output, and
+    every other non-zero exit, stays fail-closed: the ``_run_git`` error
+    propagates unchanged.
+    """
+    try:
+        return _run_git(args, cwd=cwd), True
+    except _GitCommandError as err:
+        if err.returncode != 1 or err.stderr.strip():
+            raise
+        return "", False
+
+
+def _run_merge_base(args: list[str], *, cwd: str) -> tuple[str, bool]:
+    """Run ``git merge-base`` and return ``(stdout, found)``.
+
+    Exit 1 with clean stderr is a successful negative answer: ``--is-ancestor``
+    returns it when the first commit is not an ancestor of the second, and the
+    plain form returns it when the commits share no merge base. Both are
+    answers, not failures (#1077). Exit 1 carrying stderr output, and every
+    other non-zero exit, stays fail-closed.
+    """
+    try:
+        return _run_git(args, cwd=cwd), True
+    except _GitCommandError as err:
+        if err.returncode != 1 or err.stderr.strip():
+            raise
+        return "", False
 
 
 def _run_authenticated_git(
@@ -358,8 +603,8 @@ def _validate_git_invocation(
     because it needs the cwd git will actually run in.
 
     Raises:
-        RuntimeError: when the verb has a dedicated tool to redirect to.
-        ValueError: for every other refusal.
+        ToolRefusedError: on every refusal — the verb redirect, the read-only
+        allowlist, and each guard's "Blocked:" stop all count (#1073).
     """
     # Unconditional: -c / --config-env are alias-execution vectors (#257 / D7).
     # global_opts is scanned with no subcommand — the pre-subcommand slot has no
@@ -367,7 +612,7 @@ def _validate_git_invocation(
     _reject_config_flags(global_opts)
     _reject_config_flags(args, subcommand=command)
     _reject_no_index(global_opts)
-    _reject_no_index(args)
+    _reject_no_index(args, subcommand=command)
     # Unconditional: --namespace reaches the same pre-subcommand slot and is
     # the one extracted global option no path rule can confine.
     _reject_namespace_flag(global_opts)
@@ -375,20 +620,26 @@ def _validate_git_invocation(
     redirect = _REDIRECT_TO_TOOL.get(command)
     if redirect:
         msg = f"git {command} is not available through this tool — {redirect}"
-        raise RuntimeError(msg)
+        raise ToolRefusedError(msg)
     # Read-only allowlist: replace the old format-only _SUBCOMMAND_RE (#257 / D7).
     if not command or command not in _READONLY_SUBCOMMANDS:
         msg = (
             f"invalid git subcommand: {command!r} — not available through this "
             "tool (read-only allowlist)"
         )
-        raise ValueError(msg)
+        if command in _FILE_READER_VERBS:
+            msg = f"{msg}. {_file_reader_hint(command, args)}"
+        raise ToolRefusedError(msg)
     if command == "branch":
         _reject_branch_writes(args)
     if command == "config":
         _reject_config_invocation(args)
     if command == "grep":
         _reject_grep_pager_exec(args)
+    # Verbs that resolve long-option abbreviations: refuse every spelling of an
+    # option that widens grep to untracked files, reads an unconfined file, or
+    # runs a command, not only the full name.
+    _reject_refused_long_options(args, subcommand=command)
     # Unconditional: --textconv / --ext-diff execute a git-config content
     # filter on every diff-family verb, not just the one #619 added (#623).
     _reject_content_filter_exec(global_opts)
@@ -444,8 +695,18 @@ def git_tool(ctx: ToolContext):
                     "outputPath": cached_path,
                     "cached": True,
                 }
+        context_dropped = False
+        matched = True
+        merge_base_found = True
+        if command == "grep":
+            args, context_dropped = _normalize_grep_args(args)
         try:
-            output = _run_git([*global_opts, command, *args], cwd=cwd)
+            if command == "grep":
+                output, matched = _run_grep([*global_opts, command, *args], cwd=cwd)
+            elif command == "merge-base":
+                output, merge_base_found = _run_merge_base([*global_opts, command, *args], cwd=cwd)
+            else:
+                output = _run_git([*global_opts, command, *args], cwd=cwd)
         except RuntimeError as err:
             raise RuntimeError(redact_secrets(str(err))) from err
         if show_target is not None:
@@ -459,16 +720,29 @@ def git_tool(ctx: ToolContext):
                 "output": _git_show_preview(path),
                 "outputPath": path,
             }
+        result: dict[str, Any] = {"output": output}
         if len(output) > 50_000:
             temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
             path = str(Path(temp) / f"git-{command}-{uuid.uuid4().hex[:8]}.txt")
             Path(path).write_text(output, encoding="utf-8")
             preview = "\n".join(output.splitlines()[:40])
-            return {
+            result = {
                 "output": (f"{preview}\n\n... [output truncated; full body saved to {path}] ..."),
                 "outputPath": path,
             }
-        return {"output": output}
+        if context_dropped:
+            result["note"] = _GREP_CONTEXT_NOTE
+        if not matched:
+            # grep's no-match answer, surfaced honestly instead of as a
+            # failure (#1077; the ``git``-door instance of #1027).
+            result["noMatches"] = True
+        if not merge_base_found:
+            # merge-base's negative answer, same rule (#1077).
+            if "--is-ancestor" in args:
+                result["isAncestor"] = False
+            else:
+                result["noMergeBase"] = True
+        return result
 
     return tool(
         name="git",
@@ -537,7 +811,7 @@ def _require_push_allowed(
     """Enforce ``push`` disabled / restricted-default-branch policy (W2 / Final)."""
     if ctx.payload.push == "disabled":
         msg = "push is disabled for this run"
-        raise RuntimeError(msg)
+        raise ToolRefusedError(msg)
     state = primary_repo_state(ctx.tool_state)
     if (
         ctx.payload.push == "restricted"
@@ -555,7 +829,7 @@ def _require_push_allowed(
             f"Push blocked: cannot {verb} default branch "
             f"'{state.default_branch}' in restricted mode"
         )
-        raise RuntimeError(msg)
+        raise ToolRefusedError(msg)
 
 
 def push_branch_tool(ctx: ToolContext):
@@ -696,7 +970,7 @@ def commit_changes_tool(ctx: ToolContext):
         # the response, it only records why no remote update was attempted.
         try:
             _require_push_allowed(ctx, branch=branch, action="update")
-        except RuntimeError as err:
+        except ToolRefusedError as err:
             logger.info("API ref update skipped (push policy): {}", err)
         return {"success": True, "sha": sha, "branch": branch, "message": message, "pushed": False}
 

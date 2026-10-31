@@ -65,11 +65,15 @@ jobs:
       HAS_APP: ${{ secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APP_PRIVATE_KEY != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/bootstrap
 
       # Same publisher identity the review workflow stamps on formal reviews.
-      # Without it, carryover falls back to github-actions[bot] and drops
-      # App-authored ledger records.
+      # Without an App the login resolves to an empty string, never to the
+      # shared github-actions[bot] login: any workflow in the repository can
+      # post as it, so it proves nothing (#913). The sweep withholds the empty
+      # login and warns instead of trusting a forgeable one.
       - name: Mint App token
         id: app_token
         if: env.HAS_APP == 'true'
@@ -87,7 +91,7 @@ jobs:
       - name: Sweep unresolved findings
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
-          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token.outputs.app-slug && format('{0}[bot]', steps.app_token.outputs.app-slug) || 'github-actions[bot]' }}
+          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token.outputs.app-slug && format('{0}[bot]', steps.app_token.outputs.app-slug) || '' }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
           # Merges write only once the repo opts in; manual runs write on request.

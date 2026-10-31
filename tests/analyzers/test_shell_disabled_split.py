@@ -88,7 +88,7 @@ def _ids_by_runtime(runtime: str) -> list[str]:
 # and no repo-provided binary, so the "needs repo tooling" premise this axis rests on is
 # false for them. Batch A withheld `agentsec` anyway and flagged it; #38 admits it
 # deliberately — see `IN_PROCESS_ANALYZER_IDS` in `analyzers/trust.py`.
-IN_PROCESS_IDS: frozenset[str] = frozenset({"agentsec", "antislop"})
+IN_PROCESS_IDS: frozenset[str] = frozenset({"agentsec", "antislop", "self-silencing"})
 
 REPO_NATIVE_IDS: list[str] = [
     analyzer_id

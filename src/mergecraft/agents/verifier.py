@@ -49,7 +49,6 @@ from mergecraft.policy.schema import SeverityLiteral
 from mergecraft.review_taxonomy import (
     FINDING_SEVERITIES,
     WITHDRAWN_FINDINGS_HEADING,
-    finding_fingerprint,
 )
 from mergecraft.types import VERIFIER_AGENT_NAME
 from mergecraft.utils.path_confinement import resolve_confined_path
@@ -224,8 +223,9 @@ class AgentFinding(BaseModel):
         body — so the identity used to skip an already-withdrawn finding is
         the same identity a drop verdict writes and a later run reads back.
         """
-        supplied = self.fingerprint.strip()
-        return supplied or finding_fingerprint(path=self.path, body=self.body)
+        from mergecraft.findings.agent_adapter import resolved_agent_fingerprint
+
+        return resolved_agent_fingerprint(self)
 
 
 class VerificationDispatch(BaseModel):

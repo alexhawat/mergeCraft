@@ -24,7 +24,9 @@ from pathlib import Path
 from typing import Any
 
 from mergecraft.config.env.tracing import TracingEnv
+from mergecraft.config.layered import ConfigSources, resolve_config_sources
 from mergecraft.config.settings import load_repo_settings
+from mergecraft.config.tracing_sink import check_tracing_sink
 
 
 def _flag_value(args: list[str], flag: str) -> str | None:
@@ -43,15 +45,41 @@ def _flag_present(args: list[str], flag: str) -> bool:
     return any(token == flag or token.startswith(flag + "=") for token in args)
 
 
-def _load_yaml_tracing(config_path: str | None) -> dict[str, Any]:
-    """Load the ``tracing`` block from YAML. Empty dict when no config."""
-    if not config_path:
+def tracing_config_sources(*, config_path: str | None, root: Path) -> ConfigSources:
+    """Return the config files the YAML tracing layer reads, lowest precedence first.
+
+    An explicit ``config_path`` (the ``--config`` flag) wins before the shared
+    resolver is consulted, exactly as for ``doctor`` and ``config explain``: it is
+    the sole contributor when it exists, and nothing contributes when it does not.
+    Without one, :func:`mergecraft.config.layered.resolve_config_sources` decides —
+    ``MERGECRAFT_CONFIG`` when it names an existing file, else the committed
+    ``.mergecraft/config.yaml`` plus ``config.local.yaml`` off CI — so this view
+    can never disagree with the other read views about which files contribute.
+    """
+    if config_path:
+        candidate = Path(config_path)
+        return ConfigSources(files=(candidate.resolve(),) if candidate.is_file() else ())
+    return resolve_config_sources(root)
+
+
+def _load_yaml_tracing(config_path: str | None, *, root: Path | None = None) -> dict[str, Any]:
+    """Load the ``tracing`` block from YAML. Empty dict when no config.
+
+    An explicit ``config_path`` is read on its own. With no path and a ``root``,
+    the layered loader reads the same files :func:`tracing_config_sources` reports.
+    With neither, nothing is read: the live sink path is handed its YAML layer
+    explicitly and must never start discovering one by itself.
+    """
+    if config_path:
+        settings = load_repo_settings(
+            path=Path(config_path),
+            root=Path(config_path).parent,
+            load_learnings_files=False,
+        )
+    elif root is not None:
+        settings = load_repo_settings(root=root, load_learnings_files=False)
+    else:
         return {}
-    settings = load_repo_settings(
-        path=Path(config_path),
-        root=Path(config_path).parent,
-        load_learnings_files=False,
-    )
     if settings.tracing is None:
         return {}
     return settings.tracing.model_dump(by_alias=True, exclude_unset=True)
@@ -134,11 +162,11 @@ def _resolve_env_layer(env: dict[str, str]) -> dict[str, Any]:
     return out
 
 
-def _resolve_config_layer(config_path: str | None) -> dict[str, Any]:
+def _resolve_config_layer(config_path: str | None, *, root: Path | None = None) -> dict[str, Any]:
     """Layer 3 — YAML ``tracing`` block."""
-    if not config_path:
+    if not config_path and root is None:
         return {}
-    block = _load_yaml_tracing(config_path)
+    block = _load_yaml_tracing(config_path, root=root)
     out: dict[str, Any] = {}
     if "enabled" in block:
         out["enabled"] = bool(block["enabled"])
@@ -177,6 +205,8 @@ def resolve_tracing_settings(
     env: dict[str, str] | None = None,
     config_path: str | None = None,
     cwd: Path | None = None,
+    config_root: Path | None = None,
+    warn_unknown_sink: bool = False,
 ) -> dict[str, Any]:
     """Resolve the CLI / env / config / default precedence to a plain dict.
 
@@ -190,12 +220,24 @@ def resolve_tracing_settings(
     can disable any combination of env/config truthy values. This matches
     the W7.6 parametrisation: each test case sets every layer except the
     one under test to ``false`` and asserts the under-test layer wins.
+
+    ``config_root`` opts the YAML layer into shared config discovery for a read
+    view (``mergecraft config tracing``): with no explicit ``config_path`` the
+    layer reads the files :func:`tracing_config_sources` reports for that root.
+    It never changes the ordering above, and leaving it ``None`` keeps the live
+    sink path reading only the YAML it is handed.
+
+    An unknown ``tracing_to`` shorthand from the flag or the environment raises
+    :class:`~mergecraft.config.tracing_sink.TracingSinkError` (a configuration
+    failure) when tracing resolves on; with tracing off it is ignored, and logs a
+    warning only when ``warn_unknown_sink`` is set, so the many resolutions a live
+    run makes do not repeat it.
     """
     env = env or {**os.environ}
     args = cli_args or []
     cli = _resolve_cli_layer(args)
     env_layer = _resolve_env_layer(env)
-    cfg = _resolve_config_layer(config_path)
+    cfg = _resolve_config_layer(config_path, root=config_root)
     defaults = _default_layer()
 
     merged: dict[str, Any] = {**defaults, **cfg, **env_layer, **cli}
@@ -217,6 +259,23 @@ def resolve_tracing_settings(
         enabled = False
     merged["enabled"] = enabled
 
+    # The sink selector is control-carrying: a typo must not silently fall through
+    # to the default local sink. The YAML layer only emits known shorthands, so only
+    # the flag and the environment can carry an unknown one.
+    if "tracing_to" in cli:
+        sink_variable = "--tracing-to"
+    elif "tracing_to" in env_layer:
+        sink_variable = "MERGECRAFT_TRACING_TO"
+    else:
+        sink_variable = ""
+    if sink_variable:
+        check_tracing_sink(
+            sink_variable,
+            merged.get("tracing_to"),
+            enabled=enabled,
+            warn=warn_unknown_sink,
+        )
+
     # ``trace_dir`` is a JSONL-file-only setting — derive a default path when
     # enabled and nothing else is configured.
     if (
@@ -232,4 +291,4 @@ def resolve_tracing_settings(
     return merged
 
 
-__all__ = ["resolve_tracing_settings"]
+__all__ = ["resolve_tracing_settings", "tracing_config_sources"]

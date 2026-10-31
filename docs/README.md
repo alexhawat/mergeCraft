@@ -36,14 +36,17 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [eval-bank](eval-bank.md) | contributor | Eval bank layout, promotion, and CI gate semantics. |
 | [eval-methodology](eval-methodology.md) | contributor | Eval quality metrics and corpus methodology (#384). Never README; issue 140 owns precision/recall/F1 publication. |
 | [evidence-packet](evidence-packet.md) | contributor | Merge evidence packet schema emitted as the evidence_packet action output. |
+| [failure-trajectory-harvest](failure-trajectory-harvest.md) | contributor | Recipe for harvesting failure-shaped auditor trajectories from public commits as unlabelled drafts (operator-run). |
 | [findings-carryover](findings-carryover.md) | contributor | Findings carryover and export CLI behaviour for unresolved review items. |
 | [glossary](glossary.md) | consumer | Plain-language definitions for landing-page jargon — trust tier, typed findings, and related terms. |
 | [install](install.md) | consumer | Install paths — Python 3.11+ floor, Action vs CLI, Docker fallback. |
 | [jev-architecture-checklist](jev-architecture-checklist.md) | contributor | TypeSafe System One checklist — fan-out routing, state filtering, stakes floors, and jaggedness constraints for Jev call sites. |
 | [jev-gate-patterns](jev-gate-patterns.md) | contributor | Pre-LLM Jev gate: dimension question packs, funnel thresholds, layering, and calibration status. |
+| [language-coverage](language-coverage.md) | contributor | Language coverage matrix, sourced public pull requests per language, and the prioritized fixture work list (research, not a corpus). |
 | [mcp-tools](mcp-tools.md) | consumer | Generated public MCP tool reference from ToolSpec schemas. |
 | [mcp](mcp.md) | consumer | Public MCP install — what agents can do, per-runtime stdio config, and review-only boundaries. |
 | [opencode](opencode.md) | consumer | OpenCode integration — commands, reviewer subagent, plugin, MCP wiring, and JEV/Logfire setup. |
+| [railway-sandbox-evaluation](railway-sandbox-evaluation.md) | contributor | Evaluation kit for Railway sandboxes as ephemeral review and test runners — spike script, measurement template, go/no-go criteria. |
 | [release-process](release-process.md) | contributor | Release candidates, soak periods, changelog, and per-release migration notes. |
 | [supply-chain](supply-chain.md) | contributor | Supply-chain and SBOM posture for releases and the Action image. |
 | [support-matrix](support-matrix.md) | consumer | Generated six-axis support matrix — OS, SCM, languages, analyzers, providers, models. |

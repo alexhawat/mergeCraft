@@ -1,7 +1,7 @@
 # Agent runtime & tracing — AR8.3 regression pins — test plan
 
 Wave plan: `.ignorelocal/waves/42-agent-runtime-tracing-wave-plan.md` (§AR8)
-Worktree/repo root: `/Users/alex/Documents/code/sevn.bot/mc-agents`
+Worktree/repo root: `../mc-agents` (a sibling worktree of the primary checkout)
 Authoring wave: **AR8.3** (owner: `test-creator`). Product fixes: **AR8.1** / **AR8.2** (uncommitted in the tree; orchestrator commits).
 Trace run: service `mergecraft-dev` · wave.plan=agent-runtime-tracing ·
 run.id=`fb108bac-7527-41db-92be-3529ec8b4e40` · wave.id=**AR8**.

@@ -209,6 +209,31 @@ mergecraft trust set-self-review full --i-understand-this-grants-approval-author
 `--cwd` selects every target — both the `.mergecraft/` path and git resolution
 (see PR #521).
 
+## A PR's own analyzer config never applies to its own review
+
+The base-snapshot rule covers the trust knobs; the analyzer settings follow it. The
+`analyzers.*` block — `enabled`, `overrides.<id>.enabled`, `overrides.antislop.rules` /
+`ignore`, `baseComparison`, `inlineBudget`, `impact` — is resolved **from the PR's base**,
+never from the checkout under review:
+
+| Event | Analyzer settings come from | Packet `analyzers.settings_resolved_from` |
+|-------|------------------------------|--------------------------------------------|
+| `pull_request_target` | the operator-owned base checkout snapshot | `base_snapshot` |
+| `pull_request`, `workflow_dispatch` / comment runs bound to a PR | `git show <base sha>:.mergecraft/config.yaml` (falling back to `origin/<base ref>`) | `base_sha` |
+| no PR base to read (push, offline review) | the run-start snapshot | `run_start_snapshot` |
+| base unreadable, or its config is a symlink | built-in defaults (fail closed, with the reason recorded) | `defaults` |
+
+A symlinked `.mergecraft/config.yaml` on the base is refused, not followed. Built-in
+defaults can only run *more* analyzers than a repo configured, never fewer than the
+operator-owned base allows.
+
+A head-side change to `analyzers.*` is therefore **reported, not applied**: the
+`self-silencing` analyzer flags a loosening edit (an analyzer disabled, a path added to
+`ignore`, a rule turned off, a lowered budget) and the blast-radius classifier keeps a
+PR that edits `.mergecraft/**` or analyzer/linter config out of the auto-merge lane, but
+the review of that same PR still runs the base's analyzers. To change analyzer
+configuration, land it in its own PR; it applies from the next PR on.
+
 ## Dogfood posture (mergeCraft repository)
 
 The mergeCraft repository's committed

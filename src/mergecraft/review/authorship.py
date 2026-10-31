@@ -1,6 +1,7 @@
-"""P-17 — mergeCraft authorship is the marker AND an expected publisher (TB-D7).
+"""mergeCraft authorship is the marker AND an expected publisher.
 
-Wave plan: ``.ignorelocal/waves/40-trust-boundaries-wave-plan.md`` (TB3).
+The rule and its threat model: ``docs/workflows.md`` § Self-review App token
+and approval lifecycle.
 
 A review body that carries ``*via mergecraft*`` (or a ``mergecraft-finding:v1:``
 marker) proves nothing on its own: anyone who can leave a PR review can paste

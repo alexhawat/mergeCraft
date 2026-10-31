@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
-import subprocess
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from tests.ci.workflow_support import REPO_ROOT
 from tests.docs.support import ci_steps, load_script_module
+
+if TYPE_CHECKING:
+    import pytest
 
 _SCHEMA_PATH = REPO_ROOT / "tests" / "fixtures" / "mcp" / "server.schema.2025-12-11.json"
 _SERVER_JSON = REPO_ROOT / "server.json"
@@ -36,14 +39,14 @@ def test_server_json_name_is_io_github_alexhawat_mergecraft() -> None:
     assert data.get("name") == "io.github.alexhawat/mergecraft"
 
 
-def test_server_json_package_is_pypi_merge_craft_stdio_public() -> None:
+def test_server_json_package_is_pypi_and_stdio_public() -> None:
     data = json.loads(_SERVER_JSON.read_text(encoding="utf-8"))
     packages = data.get("packages")
     assert isinstance(packages, list), data
     assert packages, data
     pkg = packages[0]
     assert pkg.get("registryType") == "pypi"
-    assert pkg.get("identifier") == "merge-craft"
+    assert pkg.get("identifier") == "mergecraft-action"
     transport = pkg.get("transport") or {}
     assert transport.get("type") == "stdio"
     package_args = pkg.get("packageArguments") or []
@@ -86,21 +89,34 @@ def test_make_mcp_server_json_check_in_ci_steps() -> None:
     assert "mcp-server-json-check" in ci_steps()
 
 
-def test_generator_check_detects_drift() -> None:
+def test_generator_check_detects_drift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The drift gate fails on a stale manifest, and passes on a fresh one.
+
+    The check runs against copies in ``tmp_path``, never the working tree: the
+    previous version rewrote the repository's ``server.json`` for the duration
+    of a subprocess, which another test reading that file could observe under
+    parallel execution and fail on a manifest that was not theirs.
+    """
     gen = load_script_module("scripts/gen_mcp_server_json.py")
-    assert hasattr(gen, "main") or hasattr(gen, "run_check"), gen
+    assert hasattr(gen, "main"), gen
     assert _SERVER_JSON.is_file(), "server.json must exist before drift check"
-    original = _SERVER_JSON.read_text(encoding="utf-8")
-    mutated = original.replace("merge-craft", "merge-craft-drift", 1)
-    _SERVER_JSON.write_text(mutated, encoding="utf-8")
-    try:
-        completed = subprocess.run(
-            ["make", "mcp-server-json-check"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert completed.returncode != 0, completed.stdout + completed.stderr
-    finally:
-        _SERVER_JSON.write_text(original, encoding="utf-8")
+
+    server_copy = tmp_path / "server.json"
+    tools_copy = tmp_path / "mcp-tools.md"
+    server_copy.write_text(_SERVER_JSON.read_text(encoding="utf-8"), encoding="utf-8")
+    tools_copy.write_text(gen.MCP_TOOLS_MD_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    # ``_check_or_write`` reports a path relative to ``REPO_ROOT``, so the
+    # patched root keeps the copies addressable while the real tree stays
+    # untouched.
+    monkeypatch.setattr(gen, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gen, "SERVER_JSON_PATH", server_copy)
+    monkeypatch.setattr(gen, "MCP_TOOLS_MD_PATH", tools_copy)
+
+    assert gen.main(["--check"]) == 0, "premise: the copies start in sync with the render"
+
+    original = server_copy.read_text(encoding="utf-8")
+    server_copy.write_text(
+        original.replace("mergecraft-action", "mergecraft-action-drift", 1),
+        encoding="utf-8",
+    )
+    assert gen.main(["--check"]) != 0, "a drifted manifest must fail the check"

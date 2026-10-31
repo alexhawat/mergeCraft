@@ -40,6 +40,23 @@ def resolve_confined_path(
     return str(candidate)
 
 
+def resolved_within_root(path: Path, root: Path) -> bool:
+    """True when ``path``'s resolved location stays inside the resolved ``root``.
+
+    The one reference-resolver rule shared by instruction discovery and the
+    agent-security scanner: resolve (following every symlink), then require the
+    result to sit under ``root``. A filename is not a location — a symlink whose
+    target lives outside the repository is not an in-repo file, however its link
+    is named. ``root`` must already be resolved. Any resolution failure counts as
+    an escape.
+    """
+    try:
+        path.resolve().relative_to(root)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def _is_under_root(candidate: Path, repo_root: Path) -> bool:
     try:
         candidate.relative_to(repo_root)
@@ -48,4 +65,4 @@ def _is_under_root(candidate: Path, repo_root: Path) -> bool:
     return True
 
 
-__all__ = ["resolve_confined_path"]
+__all__ = ["resolve_confined_path", "resolved_within_root"]

@@ -69,6 +69,12 @@ _IMMUTABLE_GIT_SHOW_RE: Final[re.Pattern[str]] = re.compile(
 _TOOL = "trajectory"
 _CATEGORY = "Maintainability & Code Quality"
 
+# Guidance refusals that intentionally stop one attempt but are not tool
+# failures. The diff-coverage nudge is raised once by ``submit_review_verdict``
+# and the agent is expected to resubmit with different arguments, so keying
+# ``ignored-tool-error`` on the changed signature would manufacture a finding.
+_GUIDANCE_ERROR_MARKERS: Final[tuple[str, ...]] = ("diff coverage pre-flight",)
+
 
 class TrajectoryCheck(BaseModel):
     """One named trajectory check's fixed metadata."""
@@ -84,7 +90,11 @@ class TrajectoryCheck(BaseModel):
 TRAJECTORY_CHECKS: Final[tuple[TrajectoryCheck, ...]] = (
     TrajectoryCheck(
         rule_id="changed-unread-file",
-        severity="Major",
+        # Advisory (#885): the per-file finding stays in the record at a lower
+        # severity. The gate itself is unchanged — ``gate_policy`` still maps this
+        # rule_id to ``request-changes`` — but one Major row per unread file buried
+        # the change-scoped reasons in process noise.
+        severity="Minor",
         recommended_action="Read the file before trusting the edit; re-review this change by hand.",
         summary="A file was modified that the run never read.",
     ),
@@ -184,6 +194,56 @@ def _changed_unread_file(record: TrajectoryRecord) -> list[Finding]:
         for path in record.files_modified
         if path not in read
     ]
+
+
+def _changed_unread_lines(
+    record: TrajectoryRecord,
+    *,
+    diff_text: str,
+    diff_path: str | None,
+) -> list[Finding]:
+    """Report unread *added-line ranges* when a diff scope is available.
+
+    This is the line-range replacement for the file-level check: a run that
+    read one line of a large file no longer counts that file as covered. The
+    rule id and severity are unchanged — this narrows what "read" means, it
+    does not add a gate. An unobserved record (no read evidence at all) still
+    reports nothing, because absence of evidence is *unknown*, not *unread*.
+    """
+    from mergecraft.evidence.diff_coverage import compute_diff_coverage
+
+    breakdown = compute_diff_coverage(diff_text, record.tool_calls, diff_path=diff_path)
+    if not breakdown.observed:
+        return []
+    findings: list[Finding] = []
+    for file in breakdown.unread_files():
+        if file.deletion_only:
+            findings.append(
+                _finding(
+                    "changed-unread-file",
+                    message=f"{file.path} was deleted but never read during this run",
+                    path=file.path,
+                    evidence=[
+                        f"coverage={breakdown.covered_lines}/{breakdown.total_lines} added lines"
+                    ],
+                )
+            )
+            continue
+        findings.append(
+            _finding(
+                "changed-unread-file",
+                message=(
+                    f"{file.path} was modified but lines "
+                    f"{', '.join(str(item) for item in file.unread)} were never read during this run"
+                ),
+                path=file.path,
+                evidence=[
+                    f"unread_ranges={','.join(str(item) for item in file.unread)}",
+                    f"coverage={breakdown.covered_lines}/{breakdown.total_lines} added lines",
+                ],
+            )
+        )
+    return findings
 
 
 def _pr_target(call: ToolCallRecord) -> str | None:
@@ -311,15 +371,20 @@ def _environment_failure_rollup(record: TrajectoryRecord) -> list[Finding]:
 def _ignored_tool_error(record: TrajectoryRecord) -> list[Finding]:
     """A call raised and that intent on that target was never invoked again."""
     findings: list[Finding] = list(_environment_failure_rollup(record))
-    policy_observed = False
+    refusal_observed = False
     calls = list(record.tool_calls)
     for call in calls:
         if call.ok:
             continue
+        if call.error and any(marker in call.error for marker in _GUIDANCE_ERROR_MARKERS):
+            continue
         if call.failure_class == "schema" and _schema_self_corrected(call, calls):
             continue
-        if call.failure_class == "policy":
-            if not policy_observed and not _was_retried(call, calls):
+        if call.failure_class in {"policy", "refused"}:
+            # A guard stopped the call before it ran. One Trivial row names the
+            # refusal (its error carries the guard's redirect); the loop check
+            # separately catches an agent banging on the same guard.
+            if not refusal_observed and not _was_retried(call, calls):
                 findings.append(
                     _finding(
                         "ignored-tool-error",
@@ -328,9 +393,13 @@ def _ignored_tool_error(record: TrajectoryRecord) -> list[Finding]:
                         severity="Trivial",
                     )
                 )
-                policy_observed = True
+                refusal_observed = True
             continue
         if call.failure_class == "environment":
+            continue
+        if call.failure_class == "declined":
+            # The step chose not to act (the run's publish step skipping a
+            # recorded verdict); nothing raised, so there is nothing to retry.
             continue
         if call.failure_class not in {"transient", "unknown"}:
             continue
@@ -353,7 +422,14 @@ def _no_post_edit_verification(record: TrajectoryRecord) -> list[Finding]:
     # question "was this verified?" is still answerable and still worth asking.
     if not record.files_modified:
         return []
-    edits = [c for c in record.tool_calls if c.intent == "modify"]
+    # A refused call never ran, so it is not an edit — letting one move
+    # ``last_edit`` forward would demand verification of a modification that
+    # never happened (#1073).
+    edits = [
+        c
+        for c in record.tool_calls
+        if c.intent == "modify" and c.failure_class not in {"policy", "refused"}
+    ]
     last_edit = max((c.sequence for c in edits), default=0)
     verified_after = any(c.intent == "verify" and c.sequence > last_edit for c in record.tool_calls)
     if verified_after:
@@ -446,6 +522,11 @@ def _stale_assumption_after_failure(record: TrajectoryRecord) -> list[Finding]:
     for index, call in enumerate(calls):
         if call.ok:
             continue
+        if call.failure_class in {"policy", "refused"}:
+            # A refusal's cause never moves — the error already names the
+            # redirect, so an identical retry is a loop (Minor past the
+            # threshold), not a stale assumption (#1073).
+            continue
         for later in calls[index + 1 :]:
             if later.signature != call.signature or later.ok:
                 continue
@@ -465,13 +546,26 @@ def _stale_assumption_after_failure(record: TrajectoryRecord) -> list[Finding]:
     return findings
 
 
-def _missing_completion_signal(record: TrajectoryRecord) -> list[Finding]:
+def _missing_completion_signal(
+    record: TrajectoryRecord,
+    *,
+    in_flight_tool: str | None = None,
+) -> list[Finding]:
     # An empty record is a driver mergeCraft did not mediate, not an abandoned
     # run — firing here would flag every such execution.
     if not record.tool_calls:
         return []
     if record.completion_claims:
         return []
+    if in_flight_tool is not None:
+        # The run record is rendered *inside* the terminal tool call, before
+        # ``mcp/rpc.py`` appends that call to the trajectory — so a compliant
+        # agent publishing right now reads as never signalling completion
+        # (#1074). The in-flight call is the signal.
+        from mergecraft.evidence.trajectory import classify_tool_intent
+
+        if classify_tool_intent(in_flight_tool, None) == "complete":
+            return []
     return [
         _finding(
             "missing-completion-signal",
@@ -482,31 +576,50 @@ def _missing_completion_signal(record: TrajectoryRecord) -> list[Finding]:
 
 
 _CHECK_FUNCTIONS = (
-    _changed_unread_file,
     _ignored_tool_error,
     _no_post_edit_verification,
     _repeated_tool_loop,
     _unresolved_failure,
     _suspicious_broad_edit,
     _stale_assumption_after_failure,
-    _missing_completion_signal,
 )
 
 
-def audit_trajectory(record: TrajectoryRecord) -> list[Finding]:
+def audit_trajectory(
+    record: TrajectoryRecord,
+    *,
+    diff_text: str | None = None,
+    diff_path: str | None = None,
+    in_flight_tool: str | None = None,
+) -> list[Finding]:
     """Run every trajectory check over ``record`` and return the findings.
 
     Pure: no I/O, no logging, no module state, no clock. The same record always
     yields the same findings, which is what lets a promoted eval case replay a
     trajectory verdict deterministically.
 
+    When ``diff_text`` is supplied, ``changed-unread-file`` reports unread
+    added-line ranges instead of whole files. ``diff_path`` lets a read of the
+    diff file itself count as coverage. Both default to ``None``, preserving
+    the file-level behaviour for records with no materialised diff.
+
+    ``in_flight_tool`` names the tool call the record is being rendered inside
+    of, when known (#1074): the terminal ``create_pull_request_review`` call is
+    appended to the trajectory only after it returns, so without the name the
+    audit would miss the completion signal being sent *right now*.
+
     Returns findings in check order. An empty list means every check was either
     satisfied or had no evidence to judge on — the two are deliberately
     indistinguishable to the caller, because both mean "nothing to report".
     """
     findings: list[Finding] = []
+    if diff_text:
+        findings.extend(_changed_unread_lines(record, diff_text=diff_text, diff_path=diff_path))
+    else:
+        findings.extend(_changed_unread_file(record))
     for check in _CHECK_FUNCTIONS:
         findings.extend(check(record))
+    findings.extend(_missing_completion_signal(record, in_flight_tool=in_flight_tool))
     return findings
 
 

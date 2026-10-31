@@ -219,7 +219,7 @@ def test_installed_wheel_reports_build_commit(tmp_path: Path) -> None:
     dist_dir = tmp_path / "dist"
     env_dir = tmp_path / "venv"
     subprocess.run(["uv", "build", "--out-dir", str(dist_dir)], cwd=repo_root, check=True)
-    wheels = sorted(dist_dir.glob("merge_craft-*.whl"))
+    wheels = sorted(dist_dir.glob("mergecraft_action-*.whl"))
     assert wheels, "uv build must produce a wheel"
     subprocess.run([sys.executable, "-m", "venv", str(env_dir)], check=True)
     python = env_dir / "bin" / "python"

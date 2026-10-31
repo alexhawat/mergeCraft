@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from mergecraft.agents._stream_consumer import StreamSpanAccumulator
+    from mergecraft.mcp.tool_state import ToolState
     from mergecraft.tracing.content import ContentCapture
     from mergecraft.tracing.tracer import Tracer
 
@@ -85,12 +86,70 @@ def _sole_open_llm_span(open_pairs: dict[str, ProviderLLMPair | None]) -> Any:
     return live[0] if len(live) == 1 else None
 
 
+def _record_command_execution(
+    tool_state: ToolState | None,
+    item: dict[str, Any],
+    output_text: str,
+    *,
+    environment_failure: bool = False,
+) -> None:
+    """Record one finished ``command_execution`` item on the run's trajectory (#858).
+
+    When the driver detected the nested user-namespace signature in the output,
+    the row is stamped ``failure_class="environment"`` explicitly (#1083): the
+    sandbox refused to *start* the command, and the exit code alone would record
+    that refusal as an ordinary — even successful — shell row, leaving the
+    capability loss invisible to the packet's ``run_health`` section.
+    """
+    if tool_state is None:
+        return
+    from mergecraft.evidence.trajectory import (
+        _EXEC_OUTPUT_TAIL_CHARS,
+        record_driver_exec,
+        record_tool_call,
+    )
+
+    if environment_failure:
+        try:
+            record_tool_call(
+                tool_state,
+                tool="shell",
+                arguments={"command": str(item.get("command") or "")},
+                ok=False,
+                # The sandbox never started the command, so it has no outcome.
+                # ``outcome_ok=False`` would also make the trajectory audit emit
+                # a Critical ``unresolved-failure`` for a capability loss that is
+                # advisory by design (#1083).
+                outcome_ok=None,
+                error=output_text[-_EXEC_OUTPUT_TAIL_CHARS:]
+                or "codex platform sandbox unavailable",
+                failure_class="environment",
+            )
+        except Exception as exc:  # evidence never breaks the stream it describes
+            logger.debug("trajectory: failed to record sandbox capability loss — {}", exc)
+        return
+
+    raw_code = item.get("exit_code")
+    status = str(item.get("status") or "")
+    record_driver_exec(
+        tool_state,
+        command=item.get("command"),
+        exit_code=raw_code
+        if isinstance(raw_code, int) and not isinstance(raw_code, bool)
+        else None,
+        output=output_text,
+        failed=status == "failed",
+        declined=status == "declined",
+    )
+
+
 def codex_stream_event_handler(
     *,
     tracer: Tracer | None,
     model_id: str,
     capture_policy: ContentCapture | None = None,
     input_prompt: str | None = None,
+    tool_state: ToolState | None = None,
 ) -> tuple[
     Callable[[StreamSpanAccumulator, dict[str, Any]], None],
     Callable[[], None],
@@ -114,6 +173,11 @@ def codex_stream_event_handler(
       - ``turn.completed``: replace the accumulator's usage with the
         authoritative final usage and close the thread's ``llm.call``
         span.
+
+    ``item.completed`` with ``item.type == "command_execution"`` is also recorded
+    on ``tool_state``'s trajectory (#858) when one is supplied: a command Codex ran
+    natively never crosses the MCP door, so this is the only place its real outcome
+    is seen. Recording is evidence only and never raises.
 
     ``capture_policy=None`` (the default) keeps the pre-OB3 attribute
     surface byte-identical: no payload attrs are stamped. The driver
@@ -252,10 +316,21 @@ def codex_stream_event_handler(
                 )
 
                 output_text = str(item.get("aggregated_output") or "")
-                if (
-                    is_user_namespace_failure(output_text)
-                    and not accumulator.user_namespace_failure_reported
-                ):
+                raw_code = item.get("exit_code")
+                command_failed = (
+                    isinstance(raw_code, int) and not isinstance(raw_code, bool) and raw_code != 0
+                ) or str(item.get("status") or "").lower() in {"failed", "errored"}
+                # A successful `rg`/`cat` over this very file contains the bwrap
+                # strings; only a command the sandbox actually refused counts as
+                # the capability loss (#1083). The hint still follows the marker
+                # text, as it always has, so an exit-zero bubblewrap refusal is
+                # reported instead of silently passing.
+                sandbox_marker = is_user_namespace_failure(output_text)
+                sandbox_unavailable = command_failed and sandbox_marker
+                _record_command_execution(
+                    tool_state, item, output_text, environment_failure=sandbox_unavailable
+                )
+                if sandbox_marker and not accumulator.user_namespace_failure_reported:
                     accumulator.user_namespace_failure_reported = True
                     hint = user_namespace_failure_hint()
                     logger.warning("{}", hint)
@@ -264,8 +339,9 @@ def codex_stream_event_handler(
                         "namespace inside this container. See logs for remedies."
                     )
                     run_health_line = (
-                        "Codex shell calls failed: bubblewrap cannot create a user namespace "
-                        "in this container (environmental; review may be degraded)."
+                        "Codex native shell unavailable: bubblewrap cannot create a user "
+                        "namespace in this container; the review continues with mergeCraft "
+                        "MCP tools only (capability loss recorded as run-scope evidence)."
                     )
                     accumulator.run_health_notes.append(run_health_line)
                     logger.info("run_health: {}", run_health_line)

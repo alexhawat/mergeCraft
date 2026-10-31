@@ -50,11 +50,12 @@ SHELL_DISABLED_ELIGIBLE_RUNTIMES: frozenset[str] = frozenset({"managed", "contai
 #: because convention 6 / D6 forbid widening the taxonomy. A drift guard in
 #: ``tests/analyzers/test_trust_aware_analyzer_mode.py`` asserts each id here
 #: really does resolve without repo-provided tooling.
-IN_PROCESS_ANALYZER_IDS: frozenset[str] = frozenset({"agentsec", "antislop"})
+IN_PROCESS_ANALYZER_IDS: frozenset[str] = frozenset({"agentsec", "antislop", "self-silencing"})
 
 IN_PROCESS_VERSION_NOTES: dict[str, str] = {
     "agentsec": "ran mergeCraft native agent-security policy engine",
     "antislop": "ran mergeCraft native anti-slop policy engine",
+    "self-silencing": "ran mergeCraft native self-silencing detector",
 }
 
 IN_PROCESS_CONFIG_NOTE = "native YAML rules"
@@ -451,7 +452,41 @@ def analyzers_enabled(ctx: ToolContext) -> bool:
     """
     if ctx.analyzers_mode == "off":
         return False
-    return bool(ctx.analyzers_settings_enabled)
+    if ctx.analyzers_settings_enabled:
+        return True
+    return _head_side_disable_is_not_authoritative(ctx)
+
+
+def _head_side_disable_is_not_authoritative(ctx: ToolContext) -> bool:
+    """Whether ``analyzers.enabled: false`` was read from a tree the PR controls (#942).
+
+    ``analyzers_settings_enabled`` is the run-start value. On a ``pull_request`` run the
+    run-start tree *is* the PR head, so a PR could switch the whole analyzer surface off
+    for its own review by editing its own config. When the event carries a PR base and
+    the settings snapshot is not operator-owned, the flag is therefore re-derived from
+    the base; if the base cannot be read the surface stays registered and the pipeline
+    (which applies the pinned settings itself) decides. A disable that no PR could have
+    written — offline, push, ``pull_request_target`` — stands.
+    """
+    from mergecraft.analyzers.settings_pin import resolve_pinned_analyzer_settings
+    from mergecraft.config.settings_snapshot import run_scope_settings_snapshot
+
+    event = ctx.gh_event
+    pull_request = event.get("pull_request") if isinstance(event, dict) else None
+    base = pull_request.get("base") if isinstance(pull_request, dict) else None
+    if not isinstance(base, dict) or not (base.get("sha") or base.get("ref")):
+        return False
+    snapshot = ctx.repo_settings_snapshot or run_scope_settings_snapshot()
+    if snapshot is not None and snapshot.operator_owned:
+        return False
+    try:
+        pinned = resolve_pinned_analyzer_settings(ctx)
+    except Exception as err:  # the gate never crashes registration
+        logger.debug("analyzers_enabled: pinned settings unavailable ({}); keeping surface", err)
+        return True
+    if pinned.resolved_from in {"base_sha", "base_snapshot"}:
+        return bool(pinned.settings.enabled)
+    return True
 
 
 __all__ = [

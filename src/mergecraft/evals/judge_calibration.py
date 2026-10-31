@@ -119,7 +119,9 @@ class JudgeCalibrationCase(BaseModel):
         expected_checks = [check.name for check in self.deterministic_checks]
         if verdict.deterministic_checks != expected_checks:
             raise ValueError("saved verdict deterministic checks do not match case evidence")
-        if verdict.fingerprint != self.finding.identity():
+        from mergecraft.findings.agent_adapter import resolved_agent_fingerprint
+
+        if verdict.fingerprint != resolved_agent_fingerprint(self.finding):
             raise ValueError("saved verdict fingerprint does not match the finding")
         if verdict.lane != self.lane:
             raise ValueError("saved verdict lane does not match the calibration case")

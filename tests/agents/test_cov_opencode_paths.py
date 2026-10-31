@@ -883,7 +883,7 @@ def test_cli_streaming_falls_back_to_a_generic_message_with_empty_stderr(
     result = oc._run_opencode_cli_streaming(cmd=["opencode"], ctx=ctx, env={})
 
     assert result.success is False
-    assert result.error == "opencode failed"
+    assert result.error == "opencode failed (exit 2)"
     assert result.metadata == {}
 
 
@@ -897,7 +897,7 @@ def test_cli_streaming_names_the_exit_code_for_whitespace_only_stderr(
     result = oc._run_opencode_cli_streaming(cmd=["opencode"], ctx=ctx, env={})
 
     assert result.success is False
-    assert result.error == "opencode exited 3"
+    assert result.error == "opencode failed (exit 3)"
 
 
 def test_cli_streaming_success_with_no_events_reports_none_output(

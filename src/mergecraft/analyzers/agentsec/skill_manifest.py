@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from mergecraft.analyzers.agentsec.confinement import confined_changed_file
 from mergecraft.analyzers.agentsec.policy import ManifestDocument
 
 if TYPE_CHECKING:
@@ -20,12 +21,17 @@ def discover_skill_documents(
     *,
     repo_root: Path,
     changed_files: list[str],
+    refusals: list[str] | None = None,
 ) -> list[ManifestDocument]:
-    """Return skill/instruction documents among ``changed_files``."""
+    """Return skill/instruction documents among ``changed_files``.
+
+    A changed file whose resolved location is outside ``repo_root`` (an
+    out-of-repo symlink) is refused unread and appended to ``refusals`` (#851).
+    """
     documents: list[ManifestDocument] = []
     for rel in changed_files:
-        path = repo_root / rel
-        if not path.is_file():
+        path = confined_changed_file(repo_root, rel, refusals=refusals)
+        if path is None:
             continue
         parsed = parse_skill_file(path, repo_relative=rel)
         if parsed is not None:

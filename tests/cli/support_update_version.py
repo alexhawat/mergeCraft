@@ -13,7 +13,7 @@ _VERSION_MOD = "mergecraft"
 DEFAULT_UPDATE_REF = "main"
 
 # README / AGENTS install spec shape (``uv tool install --reinstall`` target).
-MERGECRAFT_UV_INSTALL_PACKAGE = "merge-craft"
+MERGECRAFT_UV_INSTALL_PACKAGE = "mergecraft-action"
 MERGECRAFT_GIT_ORIGIN = "https://github.com/alexhawat/mergeCraft"
 
 

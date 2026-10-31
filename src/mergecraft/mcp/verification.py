@@ -514,6 +514,37 @@ def verify_agent_findings_tool(ctx: ToolContext):
     )
 
 
+def _record_verifier_disposition(
+    ctx: ToolContext, fingerprint: str, outcome: Any, params: dict[str, Any]
+) -> None:
+    """Record the verdict against the analyzer hit it concerns (#941).
+
+    Total and non-throwing: a verdict about an agent finding has no analyzer hit and
+    changes nothing, and a ledger problem must never fail the verdict.
+    """
+    try:
+        run_state = ctx.tool_state.analyzer_run
+        if run_state is None:
+            return
+        ledgers = [run_state.dispositions]
+        ledgers.extend(
+            segment.dispositions for segment in ctx.tool_state.analyzer_evidence.values()
+        )
+        seen: set[int] = set()
+        for ledger in ledgers:
+            if ledger is None or id(ledger) in seen:
+                continue
+            seen.add(id(ledger))
+            ledger.record_verifier(
+                fingerprint,
+                verdict=str(outcome.verdict),
+                reason=str(params.get("reason") or ""),
+                new_severity=str(params["new_severity"]) if params.get("new_severity") else None,
+            )
+    except Exception as err:  # a ledger note never fails a verdict
+        logger.warning("verifier disposition not recorded: {}", err)
+
+
 def record_finding_verdict_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         from mergecraft.agents.gates import BLOCKING_SEVERITIES
@@ -536,6 +567,7 @@ def record_finding_verdict_tool(ctx: ToolContext):
         path = ctx.tool_state.learnings_file_path or learnings_file_path(ctx.tmpdir)
         outcome = record_verifier_verdict(verdict, learnings_path=Path(path))
         _capture_verdict_if_enabled(ctx, verdict)
+        _record_verifier_disposition(ctx, verdict.fingerprint, outcome, params)
         stored_row = next(
             (
                 row

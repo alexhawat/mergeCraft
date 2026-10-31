@@ -1,4 +1,4 @@
-"""Async retry primitive (ported from mergecraft ``yes/op``)."""
+"""Async retry primitive used by the CLI watch loop."""
 
 from __future__ import annotations
 

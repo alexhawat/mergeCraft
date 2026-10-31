@@ -780,6 +780,98 @@ def test_dropped_finding_rows_warn_and_produce_run_health_finding(tmp_path: Path
     )
 
 
+def test_packet_audit_flags_a_worked_run_with_no_completion_signal(tmp_path: Path) -> None:
+    """Control for #1074: work without a completion claim is still flagged."""
+    from mergecraft.evidence.trajectory import record_tool_call
+
+    ctx = _make_ctx(tmp_path)
+    record_tool_call(
+        ctx.tool_state,
+        tool="shell",
+        arguments={"command": "cat src/app.py"},
+        ok=True,
+    )
+
+    packet = build_run_packet(ctx, run_succeeded=True)
+
+    health = packet.run_health
+    rule_ids = {finding.rule_id for finding in health.findings} if health else set()
+    assert "missing-completion-signal" in rule_ids
+
+
+def test_packet_audit_counts_the_in_flight_terminal_call_as_completion(
+    tmp_path: Path,
+) -> None:
+    """#1074: the record renders inside the terminal publish call, before that
+    call lands on the trajectory — the in-flight call is the signal."""
+    from mergecraft.evidence.trajectory import record_tool_call
+
+    ctx = _make_ctx(tmp_path)
+    record_tool_call(
+        ctx.tool_state,
+        tool="shell",
+        arguments={"command": "cat src/app.py"},
+        ok=True,
+    )
+
+    packet = build_run_packet(ctx, run_succeeded=True, in_flight_tool="create_pull_request_review")
+
+    health = packet.run_health
+    rule_ids = {finding.rule_id for finding in health.findings} if health else set()
+    assert "missing-completion-signal" not in rule_ids
+
+
+def test_zero_finding_packet_with_in_flight_terminal_call_has_no_run_health_rows(
+    tmp_path: Path,
+) -> None:
+    """#1074, the clean case: zero findings anywhere, and the audit stays silent.
+
+    No analyzer finding, no diff, one read call, no completion claim — the
+    in-flight terminal call alone suppresses ``missing-completion-signal``, so
+    a clean self-published run emits no run-health rows at all.
+
+    The approval gate's zero-typed-findings attestation still reads a non-empty
+    findings list, so this packet's decision remains ``neutral`` until the
+    clean-approve attestation change (#1072) lands; that layer owns
+    ``gates.py`` and pins ``decision.verdict == "success"`` for this shape.
+    """
+    from mergecraft.evidence.trajectory import record_tool_call
+
+    ctx = _make_ctx(tmp_path, diff_text=None, findings=[])
+    record_tool_call(
+        ctx.tool_state,
+        tool="shell",
+        arguments={"command": "cat src/app.py"},
+        ok=True,
+    )
+
+    packet = build_run_packet(ctx, run_succeeded=True, in_flight_tool="create_pull_request_review")
+
+    assert packet.findings == []
+    assert packet.run_health is None or packet.run_health.findings == []
+
+
+def test_zero_finding_packet_without_in_flight_tool_keeps_the_signal(
+    tmp_path: Path,
+) -> None:
+    """Green guard: the suppression is scoped to the in-flight terminal call."""
+    from mergecraft.evidence.trajectory import record_tool_call
+
+    ctx = _make_ctx(tmp_path, diff_text=None, findings=[])
+    record_tool_call(
+        ctx.tool_state,
+        tool="shell",
+        arguments={"command": "cat src/app.py"},
+        ok=True,
+    )
+
+    packet = build_run_packet(ctx, run_succeeded=True)
+
+    health = packet.run_health
+    assert health is not None
+    assert any(f.rule_id == "missing-completion-signal" for f in health.findings)
+
+
 def test_emit_run_packet_skips_without_rebuild_when_packet_omitted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

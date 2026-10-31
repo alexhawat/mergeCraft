@@ -1,4 +1,4 @@
-"""MCP tool primitives: ToolSpec, mutates flag, tool() helper."""
+"""MCP tool primitives: ToolSpec, ToolRefusedError, mutates flag, tool() helper."""
 
 from __future__ import annotations
 
@@ -17,6 +17,18 @@ JsonSchema = dict[str, Any]
 # Tool bodies vary across modules; wrap loosely then normalize in ``execute``.
 ToolBody = Callable[..., Awaitable[Any]]
 ToolHandler = Callable[[Mapping[str, Any]], Awaitable[Any]]
+
+
+class ToolRefusedError(ValueError):
+    """A guard refused the tool call before it ran (#1073).
+
+    Raised by the allowlist, path-confinement, config-flag and mode guards —
+    never by the tool's own work. ``execute()`` tags the error result so the
+    trajectory can record the call as ``ok=False, failure_class="refused"``
+    instead of a phantom success, while the agent still receives an ordinary
+    tool error. Subclasses ``ValueError`` so existing guard call sites and
+    their ``pytest.raises(ValueError)`` pins keep working unchanged.
+    """
 
 
 class ToolClass(StrEnum):
@@ -161,6 +173,11 @@ def repository_mutation_class_for_push(
 class ToolResult:
     content: list[dict[str, str]]
     is_error: bool = False
+    refused: bool = False
+    """True when a guard refused the call before it ran (#1073). Never
+    serialized onto the wire — ``tool_result_to_rpc`` copies only ``content``
+    and ``is_error`` — so the agent-visible result is unchanged; the flag
+    exists for the trajectory recorder in ``mcp/rpc.py``."""
 
 
 @dataclass(slots=True)
@@ -237,7 +254,8 @@ def tool(
             try:
                 guard_mutating_tool(name)
             except Exception as error:
-                return handle_tool_error(error)
+                # Everything the mutating-mode guard raises is a refusal.
+                return handle_tool_error(error, refused=True)
             return await inner(params)
 
         handler = _gated
@@ -258,11 +276,15 @@ def handle_tool_success(data: Mapping[str, Any] | str) -> ToolResult:
     return ToolResult(content=[{"type": "text", "text": text}])
 
 
-def handle_tool_error(error: object) -> ToolResult:
+def handle_tool_error(error: object, *, refused: bool = False) -> ToolResult:
     message = str(error)
     if isinstance(error, Exception):
         message = str(error)
-    return ToolResult(content=[{"type": "text", "text": f"Error: {message}"}], is_error=True)
+    return ToolResult(
+        content=[{"type": "text", "text": f"Error: {message}"}],
+        is_error=True,
+        refused=refused,
+    )
 
 
 def get_http_status(err: object) -> int | None:
@@ -287,6 +309,17 @@ def execute(fn: ToolBody, tool_name: str | None = None) -> ToolHandler:
             if isinstance(result, Mapping | str):
                 return handle_tool_success(result)
             return handle_tool_success({"result": result})
+        except ToolRefusedError as error:
+            # A guard refused the call before it ran: the agent gets an
+            # ordinary tool error, but the result is tagged so ``mcp/rpc.py``
+            # records ``ok=False, failure_class="refused"`` on the trajectory
+            # instead of a phantom success (#1073).
+            prefix = f"[{tool_name}]" if tool_name else "tool"
+            message = str(error)
+            logger.debug("{} refused: {}", prefix, message)
+            logger.debug("{} params: {}", prefix, params)
+            emit_tool_failure_line(tool_name or "tool", message)
+            return handle_tool_error(error, refused=True)
         except Exception as error:
             prefix = f"[{tool_name}]" if tool_name else "tool"
             message = str(error)

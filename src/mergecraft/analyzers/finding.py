@@ -255,6 +255,32 @@ def write_findings_json(json_path: Path, findings: list[dict[str, Any]]) -> None
     json_path.write_text(f"{encoded}\n", encoding="utf-8")
 
 
+def normalize_agent_supplied_fingerprint(fingerprint: str) -> str:
+    """Coerce a model-supplied slug into lowercase hex when a finding enters the run.
+
+    Anything that is not already valid hex is hashed, including slugs that carry a
+    path (``tests/x.py:30:pin-the-cli``) or are ``.``/``..``: the hex digest is
+    what gets used as an id or file name, so the raw text can never traverse.
+    Rejecting them instead crashed the CLI after a recorded verdict.
+    """
+    if not isinstance(fingerprint, str):
+        msg = "fingerprint must be a string"
+        raise TypeError(msg)
+    text = fingerprint.strip()
+    if not text:
+        msg = f"unsafe fingerprint value: {fingerprint!r}"
+        raise ValueError(msg)
+    try:
+        return _validate_fingerprint_for_short_id(text)
+    except ValueError:
+        import hashlib
+
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+normalize_export_fingerprint = normalize_agent_supplied_fingerprint
+
+
 def _validate_fingerprint_for_short_id(fingerprint: str) -> str:
     """Reject empty, traversal, and other unsafe fingerprint values."""
     if not isinstance(fingerprint, str):
@@ -384,6 +410,8 @@ __all__ = [
     "findings_export_schema",
     "findings_output_schema",
     "make_finding",
+    "normalize_agent_supplied_fingerprint",
+    "normalize_export_fingerprint",
     "parse_findings_payload",
     "render_finding_markdown",
     "render_finding_pr_comment",

@@ -24,28 +24,33 @@ Exports:
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from loguru import logger
 from pydantic import ValidationError
 
+from mergecraft.analyzers.dispositions import DispositionCounts
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.classify import ChangeSet, classify_blast_radius
 from mergecraft.evidence.build import build_packet
 from mergecraft.evidence.coverage import coverage_section_for_state
 from mergecraft.evidence.emit import write_packet
 from mergecraft.evidence.packet import (
+    AnalyzersEvidence,
     CoverageSection,
     DeterministicCheck,
+    DispositionSection,
     MergeEvidencePacket,
     ModePromptVersion,
+    RunMetrics,
     TriageSection,
 )
 from mergecraft.utils.diff_paths import changed_paths_from_diff
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from mergecraft.classify import BlastRadiusClassification
     from mergecraft.evidence.gate_policy import GateActionPolicy
@@ -124,6 +129,27 @@ def _read_diff_text(state: RepoToolState) -> str:
     return ""
 
 
+def _read_coverage_scope(state: RepoToolState) -> tuple[str, str | None]:
+    """Return the diff that defines *review* scope and its path.
+
+    Unlike :func:`_read_diff_text` (the whole PR, for blast radius), a
+    re-review is scoped to the incremental range: that is what the reviewer
+    was told to read, so that is what line coverage must measure. The full
+    diff is the fallback when no incremental range exists.
+    """
+    for raw in (state.incremental_diff_path, state.diff_path):
+        if not raw:
+            continue
+        path = Path(raw)
+        if not path.is_file():
+            continue
+        try:
+            return path.read_text(encoding="utf-8"), str(path)
+        except OSError as err:
+            logger.debug("evidence packet: cannot read coverage scope {} — {}", path, err)
+    return "", None
+
+
 def _diff_stats(diff_text: str) -> dict[str, object]:
     """Summarise a diff into the ``diff_stats`` shape the classifier reads.
 
@@ -134,9 +160,9 @@ def _diff_stats(diff_text: str) -> dict[str, object]:
     added = 0
     deleted = 0
     for line in diff_text.splitlines():
-        if line.startswith("+") and not line.startswith("+++"):
+        if line.startswith("+") and not line.startswith("+++ "):
             added += 1
-        elif line.startswith("-") and not line.startswith("---"):
+        elif line.startswith("-") and not line.startswith("--- "):
             deleted += 1
     return {"diff": diff_text, "lines_added": added, "lines_deleted": deleted}
 
@@ -281,6 +307,90 @@ def _dropped_findings_health(dropped: int) -> Finding | None:
     )
 
 
+def _disposition_section(source: Literal["catalog", "ci_sarif"], ledger: Any) -> DispositionSection:
+    """Project one disposition ledger into its packet section."""
+    summary = ledger.summary()
+    return DispositionSection(
+        source=source,
+        counts=DispositionCounts(
+            raw=summary.raw,
+            kept=summary.kept,
+            merged=summary.merged,
+            downgraded=summary.downgraded,
+            dropped_by_stage=summary.dropped_by_stage,
+        ),
+        entries=ledger.entries(),
+        suppression_audit=ledger.suppression_audit,
+        orphaned_hit_ids=summary.orphaned,
+    )
+
+
+def _open_ledger_health(orphans: list[str]) -> Finding:
+    """Run-scoped finding naming the raw analyzer hits no stage accounted for (#941)."""
+    shown = ", ".join(orphans[:20])
+    more = f" (and {len(orphans) - 20} more)" if len(orphans) > 20 else ""
+    return make_finding(
+        tool="analyzers",
+        rule_id="disposition-ledger-open",
+        category="Data Integrity & Atomicity",
+        severity="Major",
+        confidence="certain",
+        message=(
+            f"{len(orphans)} raw analyzer hit(s) ended with no recorded disposition — a "
+            "pipeline stage lost them without saying why, so this run's analyzer evidence "
+            f"cannot be trusted as complete: {shown}{more}"
+        ),
+        path="",
+        start_line=1,
+        end_line=1,
+        source="trajectory",
+        scope="run",
+        evidence=[f"orphaned_hit_ids={shown}{more}"],
+        remediation=(
+            "Find the stage that dropped or merged the hit(s) without recording a "
+            "disposition (see the analyzer pipeline's stage functions) and make it record one."
+        ),
+        introduced_by_pr="false",
+    )
+
+
+def _analyzers_evidence(state: ToolState) -> tuple[AnalyzersEvidence | None, list[str]]:
+    """Build the packet's ``analyzers`` section; also return the orphaned hit ids.
+
+    Total by construction: the ledger is supplementary evidence about the evidence, so
+    a malformed one degrades to a missing section and never fails packet assembly.
+    """
+    run_state = state.analyzer_run
+    sarif_ledger = state.ci_evidence.sarif_dispositions if state.ci_evidence is not None else None
+    sections: list[DispositionSection] = []
+    orphans: list[str] = []
+    try:
+        if run_state is not None and run_state.dispositions is not None:
+            section = _disposition_section("catalog", run_state.dispositions)
+            sections.append(section)
+            orphans.extend(section.orphaned_hit_ids)
+        if sarif_ledger is not None:
+            sarif_section = _disposition_section("ci_sarif", sarif_ledger)
+            sections.append(sarif_section)
+            orphans.extend(sarif_section.orphaned_hit_ids)
+    except (ValidationError, ValueError, TypeError) as err:
+        logger.warning("evidence packet: disposition ledger could not be projected — {}", err)
+        sections = []
+        orphans = []
+    resolved_from = run_state.settings_resolved_from if run_state is not None else None
+    detail = run_state.settings_detail if run_state is not None else None
+    if not sections and resolved_from is None:
+        return None, orphans
+    return (
+        AnalyzersEvidence(
+            settings_resolved_from=resolved_from,
+            settings_detail=detail,
+            dispositions=sections,
+        ),
+        orphans,
+    )
+
+
 def _self_assessment(state: ToolState) -> dict[str, Any] | None:
     """Translate the legacy ``ApprovalRecord`` into the packet's input shape.
 
@@ -331,6 +441,94 @@ def _finalize_packet_with_gate(
     return packet_with_decision.model_copy(update={"decision": final_decision})
 
 
+_ANALYZER_TOOLS: frozenset[str] = frozenset(
+    {"run_analyzers", "run_static_checks", "analyze_ci_failures", "analyzer_findings"}
+)
+_JUDGE_TOOLS: frozenset[str] = frozenset({"verify_agent_findings", "record_finding_verdict"})
+
+
+def _read_tool_turns(calls: Sequence[Any]) -> int:
+    """Count runs of consecutive read-intent calls.
+
+    MCP has no assistant-turn boundary, so this is the cheap proxy for
+    "batched independent reads": one read call is one turn, and N adjacent
+    read calls are one turn. Dependent calls break the run naturally.
+    """
+    turns = 0
+    previous_read = False
+    for call in calls:
+        is_read = getattr(call, "intent", None) == "read"
+        if is_read and not previous_read:
+            turns += 1
+        previous_read = is_read
+    return turns
+
+
+def _run_metrics(
+    ctx: ToolContext,
+    *,
+    trajectory: Any,
+    diff_text: str,
+    now: Callable[[], float] = time.monotonic,
+) -> RunMetrics:
+    """Build the measurement-only run metrics (slice 7).
+
+    The ``agent`` phase is stamped in ``main.py`` only *after* the dispatch
+    returns, so a record rendered inside the terminal publish call would read
+    ``agent 0s`` on exactly the runs that self-publish (#1075). When the stamp
+    is missing but the dispatch start marker exists, the honest value is the
+    elapsed-so-far. ``publish`` gets no such fill-in: it is stamped after the
+    publish call returns, which is structurally after its own record renders,
+    so an unstamped ``publish`` is omitted rather than rendered as ``0s``.
+    """
+    state = ctx.tool_state
+    calls = list(getattr(trajectory, "tool_calls", []) or [])
+    phases = dict(getattr(state, "phase_elapsed_s", {}) or {})
+    analyzer_ms = sum(
+        int(getattr(call, "duration_ms", 0) or 0)
+        for call in calls
+        if getattr(call, "tool", "") in _ANALYZER_TOOLS
+    )
+    judge_ms = sum(
+        int(getattr(call, "duration_ms", 0) or 0)
+        for call in calls
+        if getattr(call, "tool", "") in _JUDGE_TOOLS
+    )
+    phases.setdefault("analyzers", round(analyzer_ms / 1000, 3))
+    phases.setdefault("judge", round(judge_ms / 1000, 3))
+    if "agent" not in phases:
+        agent_started = getattr(state, "agent_started_monotonic", None)
+        phases["agent"] = round(now() - agent_started, 3) if agent_started is not None else 0.0
+    phases.setdefault("setup", 0.0)
+    # ``publish`` gets no setdefault: the stamp lands after
+    # ``publish_pull_request_review`` returns, while the record renders inside
+    # that call, so an unstamped publish must be omitted rather than rendered
+    # as ``0s`` (#1075). A genuinely stamped value still renders.
+    added = deleted = 0
+    for line in diff_text.splitlines():
+        if line.startswith("+") and not line.startswith("+++ "):
+            added += 1
+        elif line.startswith("-") and not line.startswith("--- "):
+            deleted += 1
+    diagnostic = getattr(state, "agent_diagnostic", None)
+    diagnostic_text = None
+    if isinstance(diagnostic, dict):
+        diagnostic_text = diagnostic.get("diagnostic")
+    return RunMetrics(
+        tool_calls=len(calls),
+        read_tool_calls=sum(1 for call in calls if getattr(call, "intent", None) == "read"),
+        read_tool_turns=_read_tool_turns(calls),
+        distinct_files_read=len(set(getattr(trajectory, "files_read", []) or [])),
+        diff_lines=len(diff_text.splitlines()),
+        diff_added_lines=added,
+        diff_deleted_lines=deleted,
+        phase_elapsed_s={
+            key: round(float(value), 3) for key, value in phases.items() if value is not None
+        },
+        agent_diagnostic=diagnostic_text,
+    )
+
+
 def _assemble_packet_core(
     ctx: ToolContext,
     *,
@@ -342,6 +540,8 @@ def _assemble_packet_core(
     trajectory: dict[str, Any] | None,
     coverage: CoverageSection | None = None,
     triage: TriageSection | None = None,
+    analyzers: AnalyzersEvidence | None = None,
+    run_metrics: RunMetrics | None = None,
 ) -> MergeEvidencePacket:
     """Shared evidence shell for happy-path and fail-closed packet assembly."""
     state = ctx.tool_state
@@ -375,6 +575,8 @@ def _assemble_packet_core(
         ),
         coverage=coverage,
         triage=triage,
+        analyzers=analyzers,
+        run_metrics=run_metrics,
     )
     return packet.model_copy(
         update={
@@ -418,6 +620,7 @@ def build_run_packet(
     run_succeeded: bool,
     change_id: str | None = None,
     extra_findings: list[Finding] | None = None,
+    in_flight_tool: str | None = None,
 ) -> MergeEvidencePacket:
     """Assemble the packet for a completed run, decision included.
 
@@ -426,6 +629,11 @@ def build_run_packet(
     the returned verdict. That keeps the verdict a pure function of the
     evidence actually recorded, rather than of a parallel set of inputs.
     ``change_id`` defaults to the PR-derived identifier on ``ctx``.
+
+    ``in_flight_tool`` names the tool call this assembly runs inside of, when
+    the caller is a tool body (#1074): the terminal publish call is appended
+    to the trajectory only after it returns, so the trajectory audit needs
+    the name to see the completion signal being sent right now.
     """
     from mergecraft.evidence.findings import load_run_findings_with_drops
     from mergecraft.mcp.tool_state import primary_repo_state
@@ -444,29 +652,55 @@ def build_run_packet(
     from mergecraft.evidence.trajectory_audit import audit_trajectory
 
     changed_paths = changed_paths_from_diff(diff_text)
+    coverage_diff, coverage_path = _read_coverage_scope(repo_state)
     # Plan 12 D2/D4: trajectory findings are run-scoped and partition into
     # ``run_health`` at build time. They are advisory-only — never block via
     # ``blocking_findings`` — while gate-policy predicates still read them from
     # ``run_health.findings`` (see ``agents/gates._packet_attested_findings``).
     trajectory = build_trajectory_record(state, files_modified=changed_paths)
-    trajectory_findings = audit_trajectory(trajectory)
+    trajectory_findings = audit_trajectory(
+        trajectory,
+        diff_text=coverage_diff or None,
+        diff_path=coverage_path,
+        in_flight_tool=in_flight_tool,
+    )
+    run_metrics = _run_metrics(ctx, trajectory=trajectory, diff_text=diff_text)
 
     loaded_findings, dropped_finding_rows = load_run_findings_with_drops(ctx, extra=extra_findings)
     health_finding = _dropped_findings_health(dropped_finding_rows)
     run_health_findings = [health_finding] if health_finding is not None else []
 
+    # #941 closure check: every raw analyzer hit must have ended with a disposition.
+    # An open ledger makes the run inconclusive (a non-passing run → ``neutral`` at
+    # best) and a run-scoped finding names the orphans. ``run_succeeded=False`` never
+    # outranks a blocker: ``decide_approval`` is monotone in blockers.
+    analyzers_evidence, orphaned_hits = _analyzers_evidence(state)
+    ledger_findings = [_open_ledger_health(orphaned_hits)] if orphaned_hits else []
+
     packet = _assemble_packet_core(
         ctx,
         change_id=resolved_change_id,
         files_changed=changed_paths,
-        findings=[*loaded_findings, *run_health_findings, *trajectory_findings],
+        findings=[
+            *loaded_findings,
+            *run_health_findings,
+            *ledger_findings,
+            *trajectory_findings,
+        ],
         deterministic_checks=_deterministic_checks(state),
         blast_radius=blast_radius,
         trajectory=trajectory.model_dump(mode="json"),
         coverage=coverage_section_for_state(state),
         triage=_triage_section(state),
+        analyzers=analyzers_evidence,
+        run_metrics=run_metrics,
     )
-    return _finalize_packet_with_gate(packet, ctx=ctx, run_succeeded=run_succeeded)
+    return _finalize_packet_with_gate(
+        packet,
+        ctx=ctx,
+        run_succeeded=run_succeeded and not orphaned_hits,
+        decision_reason_suffix=_open_ledger_reason(orphaned_hits),
+    )
 
 
 def _triage_section(state: ToolState) -> TriageSection | None:
@@ -620,12 +854,31 @@ def _cached_packet_shell(cached: MergeEvidencePacket) -> MergeEvidencePacket:
     return cached.model_copy(update={"decision": None})
 
 
+def _orphaned_hit_ids(packet: MergeEvidencePacket) -> list[str]:
+    """Every raw analyzer hit the packet's ledgers leave unaccounted for (#941)."""
+    analyzers = packet.analyzers
+    if analyzers is None:
+        return []
+    orphans: list[str] = []
+    for section in analyzers.dispositions:
+        orphans.extend(section.orphaned_hit_ids)
+    return orphans
+
+
+def _open_ledger_reason(orphans: list[str]) -> str | None:
+    """The decision-reason suffix an open ledger carries, or ``None`` when closed."""
+    if not orphans:
+        return None
+    return f"analyzer disposition ledger open ({len(orphans)} orphaned hit(s)) — inconclusive"
+
+
 def resolve_prepared_run_packet(
     ctx: ToolContext,
     *,
     run_succeeded: bool,
     change_id: str | None = None,
     extra_findings: list[Finding] | None = None,
+    in_flight_tool: str | None = None,
 ) -> MergeEvidencePacket | None:
     """Return the run's cached packet snapshot, assembling it at most once (D7).
 
@@ -633,7 +886,9 @@ def resolve_prepared_run_packet(
     the same evidence shell so findings cannot drift between publish time and
     finalize. The structural decision is re-finalized on every call so a
     publish-time ``run_succeeded=True`` snapshot does not stick when finalize
-    reports failed, timed_out, or inconclusive.
+    reports failed, timed_out, or inconclusive. ``in_flight_tool`` is used only
+    on the first (assembling) call — the cached shell already carries the
+    audit outcome it produced.
     """
     cached = ctx.tool_state.prepared_run_packet
     if cached is not None:
@@ -642,12 +897,22 @@ def resolve_prepared_run_packet(
         )
         if shell is not cached:
             ctx.tool_state.prepared_run_packet = shell
-        return _finalize_packet_with_gate(shell, ctx=ctx, run_succeeded=run_succeeded)
+        # A re-finalization must reach the same verdict the first assembly would:
+        # the cached shell already names an open ledger's orphans, so the
+        # correction below cannot live only on the assembly path (#941).
+        orphans = _orphaned_hit_ids(shell)
+        return _finalize_packet_with_gate(
+            shell,
+            ctx=ctx,
+            run_succeeded=run_succeeded and not orphans,
+            decision_reason_suffix=_open_ledger_reason(orphans),
+        )
     packet = prepare_run_packet(
         ctx,
         run_succeeded=run_succeeded,
         change_id=change_id,
         extra_findings=extra_findings,
+        in_flight_tool=in_flight_tool,
     )
     if packet is not None:
         ctx.tool_state.prepared_run_packet = _cached_packet_shell(packet)
@@ -660,6 +925,7 @@ def prepare_run_packet(
     run_succeeded: bool,
     change_id: str | None = None,
     extra_findings: list[Finding] | None = None,
+    in_flight_tool: str | None = None,
 ) -> MergeEvidencePacket | None:
     """Assemble once. ``None`` means skip write/approval, never rebuild."""
     resolved = change_id or _change_id(ctx)
@@ -671,6 +937,7 @@ def prepare_run_packet(
             change_id=resolved,
             run_succeeded=run_succeeded,
             extra_findings=extra_findings,
+            in_flight_tool=in_flight_tool,
         )
     except (KeyError, OSError, RuntimeError, ValueError, ValidationError) as err:
         logger.warning("evidence packet: assembly failed — {}", err)

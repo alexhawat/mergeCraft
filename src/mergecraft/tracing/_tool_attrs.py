@@ -130,6 +130,21 @@ def enrich_tool_request(
         span.set_attribute("tool.input_keys", sorted(arguments.keys()))
 
 
+def _tool_result_text(result: Any) -> str:
+    """The text an MCP ``ToolResult`` returns, without its Python ``repr`` wrapper.
+
+    Spans showed ``ToolResult(content=[{'type': 'text', 'text': '…'}], is_error=False)``
+    as the tool's output. Text parts are joined; any other part is named by type.
+    """
+    parts: list[str] = []
+    for part in getattr(result, "content", None) or []:
+        if isinstance(part, dict) and part.get("type") == "text":
+            parts.append(str(part.get("text", "")))
+        elif isinstance(part, dict):
+            parts.append(f"[{part.get('type', 'content')}]")
+    return "\n".join(parts)
+
+
 def enrich_tool_response(
     span: Span | NullSpan,
     *,
@@ -178,7 +193,7 @@ def enrich_tool_response(
         span.set_attribute("tool.exit_code", "error")
         span.set_attribute("tool.error_class", "ToolResult")
         span.set_status("error", "ToolResult.is_error=True")
-        span.set_attribute("gen_ai.tool.output", redact_tool_payload(output))
+        span.set_attribute("gen_ai.tool.output", redact_tool_payload(_tool_result_text(output)))
         return
 
     span.set_attribute("tool.exit_code", "ok")
@@ -189,11 +204,12 @@ def enrich_tool_response(
         span.set_attribute("tool.result_bytes", output_bytes)
         span.set_attribute("tool.output_bytes", output_bytes)
         span.set_attribute("tool.output_kind", kind)
-        span.set_attribute("tool.output", output)
+        body = _tool_result_text(output) if isinstance(output, ToolResult) else output
+        span.set_attribute("tool.output", body)
         # The full payload is stringified + redacted for ``gen_ai.tool.output``
         # so the GenAI dashboard sees the body without leaking tokens. The
         # redactor caps at TRACE_ATTRS_JSON_MAX_BYTES already.
-        span.set_attribute("gen_ai.tool.output", redact_tool_payload(output))
+        span.set_attribute("gen_ai.tool.output", redact_tool_payload(body))
 
 
 def emit_verb_subevent(

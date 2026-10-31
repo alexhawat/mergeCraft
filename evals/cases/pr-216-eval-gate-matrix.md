@@ -7,7 +7,7 @@ run_id: pr-216
 pr_number: 216
 failure_mode: multi_round_miss
 expected_finding: "see rounds[].findings"
-expected_decision: neutral
+expected_decision: failure
 replay_command: "mergecraft eval convergence"
 provenance:
   run_id: pr-216
@@ -120,6 +120,26 @@ rounds:
     findings: []
     ledger: []
     generated_fingerprints: []
+recorded_findings:
+- path: src/mergecraft/evals/benchmark.py
+  start_line: 332
+  end_line: 332
+  message: untrusted-tier neutral counted as buggy_unsafe_approval
+  severity: Major
+  confidence: certain
+  category: Functional Correctness
+  source: agent
+  fingerprint: 51df3ff413a7faeaa8cb5578
+  tool: agent
+  rule_id: agent:pr-216-eval-gate-matrix
+  introduced_by_pr: 'true'
+  evidence:
+  - 'raised in review round 1 of PR #216'
+  remediation: null
+  autofix: null
+  cluster_id: null
+run_succeeded: true
+trust_tier: trusted
 ---
 
 # pr-216-eval-gate-matrix

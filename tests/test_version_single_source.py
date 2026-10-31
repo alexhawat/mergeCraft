@@ -31,7 +31,7 @@ def test_version_matches_pyproject() -> None:
 def test_version_is_resolved_not_a_placeholder() -> None:
     """A missing distribution must not pass as a real version."""
     assert mergecraft.__version__ != "0.0.0+unknown", (
-        "no installed `merge-craft` distribution — run `make install` "
+        "no installed `mergecraft-action` distribution — run `make install` "
         "(a placeholder version would poison cache keys and telemetry)"
     )
 

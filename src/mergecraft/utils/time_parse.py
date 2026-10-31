@@ -26,11 +26,6 @@ def parse_time_string(input_value: str) -> int | None:
     return (hours * 3600 + minutes * 60 + seconds) * 1000
 
 
-def is_valid_time_string(input_value: str) -> bool:
-    """Return whether ``input_value`` is a valid time format."""
-    return parse_time_string(input_value) is not None
-
-
 def resolve_timeout_ms(input_value: str | None) -> int | None:
     """Resolve a timeout string to setTimeout-safe milliseconds, or ``None`` if unusable.
 

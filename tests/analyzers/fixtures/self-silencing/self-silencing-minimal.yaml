@@ -1,0 +1,10 @@
+rule_id: suppression/nosec
+severity: Major
+message: minimal self-silencing fixture — an added `# nosec B603` on a security rule
+diff: |
+  diff --git a/app.py b/app.py
+  --- a/app.py
+  +++ b/app.py
+  @@ -1 +1,2 @@
+   import subprocess
+  +subprocess.run(cmd)  # nosec B603

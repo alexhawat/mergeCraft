@@ -20,6 +20,7 @@ from mergecraft.analyzers.budget import (
     sync_deferred_section,
 )
 from mergecraft.analyzers.cluster import cluster_findings
+from mergecraft.analyzers.dispositions import DispositionLedger
 from mergecraft.analyzers.finding import Finding
 from mergecraft.analyzers.lockfile import lock_digest
 from mergecraft.analyzers.registry import detect_enabled
@@ -51,7 +52,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from mergecraft.analyzers.manifest import AnalyzerManifest
-    from mergecraft.config.settings import AnalyzersSettings
+    from mergecraft.config.settings import AnalyzersSettings, RepoSettings
 
 TrustTier = Literal["trusted", "untrusted"]
 
@@ -89,8 +90,27 @@ def _load_learnings(repo_root: Path) -> str:
     return learnings.read_text(encoding="utf-8")
 
 
-def _analyzers_settings(repo_root: Path) -> AnalyzersSettings:
-    return load_repo_settings(root=repo_root, load_learnings_files=False).analyzers
+def _pipeline_settings(
+    repo_root: Path, analyzers_settings: AnalyzersSettings | None
+) -> tuple[RepoSettings, AnalyzersSettings]:
+    """Return ``(full settings, analyzer settings)`` without trusting the PR head (#942).
+
+    Callers on a PR run pass the pinned ``analyzers_settings``; the checkout is then
+    never read. Without them (offline review, the CLI, tests) the run-start snapshot
+    wins and only a run with no snapshot at all falls back to the checkout.
+    """
+    from mergecraft.config.settings import RepoSettings
+    from mergecraft.config.settings_snapshot import run_scope_settings_snapshot
+
+    snapshot = run_scope_settings_snapshot()
+    snapshot_applies = snapshot is not None and snapshot.repo_root == repo_root.resolve()
+    if analyzers_settings is not None:
+        full = snapshot.settings if snapshot is not None else RepoSettings()
+        return full, analyzers_settings
+    if snapshot is not None and snapshot_applies:
+        return snapshot.settings, snapshot.settings.analyzers
+    live = load_repo_settings(root=repo_root, load_learnings_files=False)
+    return live, live.analyzers
 
 
 def _settings_overrides(settings: AnalyzersSettings) -> dict[str, Any]:
@@ -112,6 +132,7 @@ def _build_pre_merge_summary(
     rows: list[AnalyzerStatusRow],
     *,
     lockfile_digest_value: str,
+    ledger: DispositionLedger | None = None,
 ) -> str:
     ran = [row for row in rows if row.status in {"passed", "failed"}]
     skipped = [row for row in rows if row.status == "unavailable"]
@@ -119,6 +140,10 @@ def _build_pre_merge_summary(
     if skipped:
         reasons = ", ".join(f"{row.id}: {row.reason or 'skipped'}" for row in skipped)
         parts.append(f"{len(skipped)} skipped ({reasons})")
+    if ledger is not None:
+        dispositions = ledger.row_summary()
+        if dispositions:
+            parts.append(dispositions)
     parts.append(f"lock {lockfile_digest_value}")
     return "; ".join(parts)
 
@@ -153,6 +178,8 @@ def _apply_baseline_suppression(
     base_run_performed: bool,
     diff_scope: DiffScope | None = None,
     head_succeeded_manifest_ids: frozenset[str] | None = None,
+    ledger: DispositionLedger | None = None,
+    analyzers_settings: AnalyzersSettings | None = None,
 ) -> list[Finding]:
     """Annotate ``introduced_by_pr`` and run base-vs-head suppression when eligible."""
     if not should_run_baseline_suppression(
@@ -161,7 +188,10 @@ def _apply_baseline_suppression(
     ):
         return annotate_introduced_by_pr(scoped, base_run_performed=base_run_performed)
 
-    from mergecraft.analyzers.baseline_suppression import collect_base_analyzer_findings
+    from mergecraft.analyzers.baseline_suppression import (
+        DIFF_ONLY_ANALYZER_IDS,
+        collect_base_analyzer_findings,
+    )
 
     collection = collect_base_analyzer_findings(
         repo_root=repo_root,
@@ -172,9 +202,11 @@ def _apply_baseline_suppression(
         base_ref=base_ref,
         offline=offline,
         allow_repo_binaries=allow_repo_binaries,
+        analyzers_settings=analyzers_settings,
     )
+    # A diff-only analyzer never runs at base, so its head success is not owed there.
     expected = (
-        head_succeeded_manifest_ids
+        head_succeeded_manifest_ids - DIFF_ONLY_ANALYZER_IDS
         if head_succeeded_manifest_ids is not None
         else collection.succeeded_manifest_ids
     )
@@ -194,6 +226,7 @@ def _apply_baseline_suppression(
         diff_text=diff_text,
         base_comparison=base_comparison,
         scope=diff_scope,
+        ledger=ledger,
     )
     log_suppression_audit(suppression.audit_trail)
     logger.info(
@@ -218,6 +251,10 @@ def run_analyzer_pipeline(
     event_name: str | None = None,
     event: dict[str, Any] | None = None,
     self_review_level: str = "off",
+    analyzers_settings: AnalyzersSettings | None = None,
+    settings_resolved_from: str | None = None,
+    settings_detail: str | None = None,
+    adapter_diff_text: str = "",
 ) -> AnalyzerRunState:
     """Run enabled analyzers end-to-end and return scoped, budgeted findings.
 
@@ -230,14 +267,20 @@ def run_analyzer_pipeline(
     untrusted run (D8) — evaluates manifests at the untrusted tier and
     withholds those needing repo-provided tooling. Execution still uses the
     derived ``tier``, so a mode can never widen what a run may see (#38).
+
+    ``analyzers_settings`` are the *pinned* analyzer settings (resolved from the PR's
+    base by :mod:`mergecraft.analyzers.settings_pin`); ``settings_resolved_from`` /
+    ``settings_detail`` record their provenance on the returned state. A PR's own
+    ``analyzers.*`` config is never applied to its own review (#942).
+    ``adapter_diff_text`` is the diff the in-process ``self-silencing`` analyzer reads
+    when the caller scoped findings without supplying one.
     """
     from mergecraft.analyzers.sandbox import require_sandbox_for_enabled_shell
     from mergecraft.tracing.tracer import get_tracer_from_settings
 
     require_sandbox_for_enabled_shell(shell=shell)
-    full_settings = load_repo_settings(root=repo_root, load_learnings_files=False)
+    full_settings, settings = _pipeline_settings(repo_root, analyzers_settings)
     tracer = get_tracer_from_settings(full_settings)
-    settings = _analyzers_settings(repo_root)
     if not settings.enabled:
         return AnalyzerRunState(
             ran=False,
@@ -245,6 +288,8 @@ def run_analyzer_pipeline(
                 "analyzers disabled in .mergecraft/config.yaml — report the Analyzers "
                 "pre-merge row as skipped"
             ),
+            settings_resolved_from=settings_resolved_from,
+            settings_detail=settings_detail,
         )
 
     manifests = detect_enabled(
@@ -259,6 +304,8 @@ def run_analyzer_pipeline(
                 "no catalog analyzers matched this diff — report the Analyzers pre-merge "
                 "row as skipped"
             ),
+            settings_resolved_from=settings_resolved_from,
+            settings_detail=settings_detail,
         )
 
     import os
@@ -334,6 +381,8 @@ def run_analyzer_pipeline(
                         event_name=resolved_event_name,
                         event=resolved_event,
                         self_review_level=self_review_level,
+                        diff_text=diff_text or adapter_diff_text,
+                        analyzers_settings=settings,
                     )
                 except (KeyError, OSError, ValueError) as exc:
                     logger.info("analyzer {} unavailable: {}", manifest.id, exc)
@@ -389,6 +438,11 @@ def run_analyzer_pipeline(
                     (time.perf_counter() - run_started) * 1000
                 )
 
+        # #941 — every raw hit gets a stable id before any stage can remove it; each
+        # stage records what it removes, and ``ledger.close`` below marks survivors.
+        ledger = DispositionLedger()
+        ledger.register_raw(raw_findings)
+
         learnings_text = _load_learnings(repo_root)
         diff_scope: DiffScope | None = None
         if diff_text.strip():
@@ -399,13 +453,16 @@ def run_analyzer_pipeline(
                 repo_root=repo_root,
                 learnings_text=learnings_text,
                 scope=diff_scope,
+                ledger=ledger,
             )
         else:
-            scoped = suppress_withdrawn_findings(raw_findings, learnings_text)
+            scoped = suppress_withdrawn_findings(raw_findings, learnings_text, ledger=ledger)
 
         from mergecraft.utils.learnings import apply_repo_memory_to_findings
 
-        scoped = apply_repo_memory_to_findings(scoped, repo_root=repo_root, trust_tier=tier)
+        scoped = apply_repo_memory_to_findings(
+            scoped, repo_root=repo_root, trust_tier=tier, ledger=ledger
+        )
 
         base_run = base_comparison_available(
             base_comparison=settings.base_comparison,
@@ -425,10 +482,19 @@ def run_analyzer_pipeline(
             base_run_performed=base_run,
             diff_scope=diff_scope,
             head_succeeded_manifest_ids=frozenset(head_succeeded_manifest_ids),
+            ledger=ledger,
+            analyzers_settings=settings,
         )
 
         # Analyzer path: dedupe only — rubric/causality stay on agent findings.
-        clustered = dedupe_findings(cluster_findings(scoped))
+        clustered = dedupe_findings(cluster_findings(scoped, ledger=ledger), ledger=ledger)
+        ledger.close(clustered)
+        if ledger.orphans():
+            logger.warning(
+                "analyzers: {} raw hit(s) ended without a recorded disposition: {}",
+                len(ledger.orphans()),
+                ", ".join(ledger.orphans()),
+            )
         budget = inline_budget if inline_budget is not None else resolve_inline_budget(settings)
         placement = place_findings(clustered, inline_budget=budget)
 
@@ -451,7 +517,7 @@ def run_analyzer_pipeline(
 
         lock_path = repo_root / ".mergecraft" / "analyzers.lock"
         digest = lock_digest(lock_path)
-        summary = _build_pre_merge_summary(rows, lockfile_digest_value=digest)
+        summary = _build_pre_merge_summary(rows, lockfile_digest_value=digest, ledger=ledger)
         deferred_findings = [finding_to_deferred_row(finding) for finding in placement.deferred]
 
         executed = [row for row in rows if row.status in {"passed", "failed"}]
@@ -469,6 +535,9 @@ def run_analyzer_pipeline(
                 deferred_findings=deferred_findings,
                 pre_merge_summary=summary,
                 lockfile_digest=digest,
+                dispositions=ledger,
+                settings_resolved_from=settings_resolved_from,
+                settings_detail=settings_detail,
             )
             sync_deferred_section(run_state)
             return run_state
@@ -482,6 +551,9 @@ def run_analyzer_pipeline(
             deferred_findings=deferred_findings,
             pre_merge_summary=summary,
             lockfile_digest=digest,
+            dispositions=ledger,
+            settings_resolved_from=settings_resolved_from,
+            settings_detail=settings_detail,
         )
         sync_deferred_section(run_state)
         return run_state

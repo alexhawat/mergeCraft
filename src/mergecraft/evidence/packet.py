@@ -28,6 +28,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.fields import FieldInfo
 
+from mergecraft.analyzers.dispositions import (  # noqa: TC001 — pydantic field types
+    DispositionCounts,
+    DispositionEntry,
+    SuppressionAuditRow,
+)
 from mergecraft.analyzers.finding import Finding
 from mergecraft.classify import BlastRadiusClassification  # noqa: TC001
 from mergecraft.evals.eval_metadata import EvalMetadata
@@ -93,16 +98,29 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 #   sticky comment id that run owns. Both are written by the orchestrator from
 #   the run's own checkout and sticky state — never agent-controlled — and
 #   default to ``None``, so a packet built before this version still validates.
-# - 1.14.0 — changed-line coverage: the ``coverage`` section records how many
-#   changed hunks and lines reached the reviewer, which did not and why, and
-#   whether coverage was ``complete``. Written by the orchestrator from the run's
-#   own checkout and delivery state, never by an agent; defaults to ``None``, so a
+# - 1.14.0 — adds the optional ``analyzers`` section: where the analyzer settings
+#   were resolved from (``resolved_from``) and the analyzer disposition ledger — one
+#   terminal disposition per raw analyzer hit, per-stage counts, the persisted
+#   baseline-suppression audit rows, and any orphaned hit ids. Additive; ``None``
+#   for a run that executed no analyzer.
+# - 1.15.0 — adds the optional ``run_metrics`` section (slice 7): tool-call count,
+#   read-call count/turns, distinct files read, diff line counts, elapsed by
+#   phase, and the last idle-watchdog diagnostic. Measurement only — it never
+#   feeds a gate. Additive; ``None`` on packets built before this version.
+# - 1.16.0 — #1073 adds ``"refused"`` to the trajectory ``failure_class``
+#   vocabulary: a guard (allowlist, path confinement, config-flag, mode) that
+#   stops a tool call before it runs is stamped from the typed
+#   ``ToolRefusedError`` at the ``mcp/shared.py::execute`` seam, so the call
+#   records ``ok=False`` instead of a phantom ``ok=True, error=null``.
+#   Additive — a packet written before the value existed never carries it.
+# - 1.17.0 — adds the optional ``coverage`` section: how many changed hunks and
+#   lines reached the reviewer, which did not and why, and whether coverage was
+#   ``complete`` — written by the orchestrator from the run's own checkout and
+#   delivery state, never by an agent. Adds the optional ``triage`` section: the
+#   tier (``skip`` / ``full``) the pre-dispatch gate chose, the recognizer behind
+#   a skip, why, and the checks a skip relied on. Both default to ``None``, so a
 #   packet built before this version still validates.
-# - 1.15.0 — deterministic triage: the ``triage`` section records the tier
-#   (``skip`` / ``full``) the pre-dispatch gate chose, the recognizer behind a skip, why,
-#   and the checks a skip relied on. Orchestrator-written; defaults to ``None`` (the
-#   fast path off), so a packet built before this version still validates.
-PACKET_SCHEMA_VERSION = "1.15.0"
+PACKET_SCHEMA_VERSION = "1.17.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
@@ -235,6 +253,28 @@ class RunHealth(BaseModel):
     conclusion: Literal["clean", "advisory"]
 
 
+class RunMetrics(BaseModel):
+    """How a review spent its time and its reads (slice 7).
+
+    Measurement only: none of these fields feeds a gate or a verdict. They
+    exist so the next iteration can tell whether diff-first reads, batched
+    tool calls, and the idle watchdog actually changed a run's shape.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool_calls: int = Field(ge=0)
+    read_tool_calls: int = Field(ge=0)
+    read_tool_turns: int = Field(ge=0)
+    """Runs of consecutive read-intent calls — the cheap batching signal."""
+    distinct_files_read: int = Field(ge=0)
+    diff_lines: int = Field(ge=0)
+    diff_added_lines: int = Field(ge=0)
+    diff_deleted_lines: int = Field(ge=0)
+    phase_elapsed_s: dict[str, float] = Field(default_factory=dict)
+    agent_diagnostic: str | None = None
+
+
 class ModePromptVersion(BaseModel):
     """Identifies the prompt body that produced a run for one mode (#145).
 
@@ -305,6 +345,34 @@ class TriageSection(BaseModel):
     relied_on_checks: list[str] = Field(default_factory=list)
 
 
+class DispositionSection(BaseModel):
+    """One source's disposition ledger: every raw hit, its terminal fate and why (#941)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["catalog", "ci_sarif"]
+    counts: DispositionCounts
+    entries: list[DispositionEntry]
+    suppression_audit: list[SuppressionAuditRow] = Field(default_factory=list)
+    orphaned_hit_ids: list[str] = Field(default_factory=list)
+
+
+class AnalyzersEvidence(BaseModel):
+    """What the deterministic analyzers did, and under whose settings (#941, #942).
+
+    ``settings_resolved_from`` records where the analyzer settings came from, the same
+    way ``TrustPolicy.resolved_from`` is recorded: ``base_snapshot``, ``base_sha``,
+    ``run_start_snapshot``, ``defaults`` (a fail-closed fallback, with the reason in
+    ``settings_detail``) or ``live_load``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    settings_resolved_from: str | None = None
+    settings_detail: str | None = None
+    dispositions: list[DispositionSection] = Field(default_factory=list)
+
+
 class MergeEvidencePacket(BaseModel):
     """The versioned, structured record of one mergeCraft run.
 
@@ -353,6 +421,11 @@ class MergeEvidencePacket(BaseModel):
     coverage: CoverageSection | None = None
     # Deterministic pre-dispatch triage (#890); ``None`` when ``review.fastPath`` is off.
     triage: TriageSection | None = None
+    # #941/#942 — analyzer settings provenance and the disposition ledger.
+    analyzers: AnalyzersEvidence | None = None
+    # Slice 7 — measurement only: tool calls, distinct reads, diff size, and
+    # elapsed time by phase. Never an input to ``decide_approval``.
+    run_metrics: RunMetrics | None = None
 
 
 def packet_output_schema() -> dict[str, Any]:
@@ -401,18 +474,25 @@ def packet_output_schema() -> dict[str, Any]:
     if isinstance(run_health, dict) and "$ref" in run_health:
         run_health.clear()
         run_health.update(RunHealth.model_json_schema())
+    run_metrics = schema.get("properties", {}).get("run_metrics")
+    if isinstance(run_metrics, dict) and "$ref" in run_metrics:
+        run_metrics.clear()
+        run_metrics.update(RunMetrics.model_json_schema())
     return schema
 
 
 __all__ = [
     "PACKET_SCHEMA_VERSION",
     "AgentMetadata",
+    "AnalyzersEvidence",
     "CoverageSection",
     "Decision",
     "DeterministicCheck",
+    "DispositionSection",
     "MergeEvidencePacket",
     "ModePromptVersion",
     "RunHealth",
+    "RunMetrics",
     "SelfAssessment",
     "TriageSection",
     "UncoveredCause",

@@ -335,6 +335,16 @@ def _pip_target_valid(install_root: Path, *, package: str, script: str) -> bool:
     return (install_root / package.replace("-", "_")).is_dir() or (install_root / package).is_dir()
 
 
+def _pip_cache_entry_valid(install_root: Path, *, package: str, script: str) -> bool:
+    """True when ``install_root`` already holds a complete, usable install."""
+    script_path = install_root / "bin" / script
+    return script_path.is_file() and _pip_target_valid(
+        install_root,
+        package=package,
+        script=script,
+    )
+
+
 def provision_pip_script(
     *,
     package: str,
@@ -342,25 +352,54 @@ def provision_pip_script(
     script: str,
     cache_dir: Path,
 ) -> Path:
-    """Install a pinned PyPI package into cache and return its console script (semgrep)."""
-    install_root = cache_dir / "pip" / package / version
-    script_path = install_root / "bin" / script
-    if script_path.is_file() and _pip_target_valid(
-        install_root,
-        package=package,
-        script=script,
-    ):
-        return script_path
-    if install_root.is_dir():
-        shutil.rmtree(install_root)
+    """Install a pinned PyPI package into cache and return its console script (semgrep).
 
-    install_root.mkdir(parents=True, exist_ok=True)
+    The cache is shared by every process on the machine, so the install runs
+    under the same provisioning lock as the managed-binary path and publishes
+    into the live tree only by an atomic rename. Installing straight into
+    ``install_root`` while another worker walked it produced
+    ``[Errno 39] Directory not empty: 'bin'``, which surfaced as a silent
+    ``skipped semgrep`` — no pattern scanning for that run.
+    """
+    from mergecraft.analyzers.provision import cache_provision_lock
+
+    install_root = cache_dir / "pip" / package / version
+    if _pip_cache_entry_valid(install_root, package=package, script=script):
+        return install_root / "bin" / script
+
+    with cache_provision_lock(cache_dir):
+        # Another process may have finished while this one waited for the lock.
+        if _pip_cache_entry_valid(install_root, package=package, script=script):
+            return install_root / "bin" / script
+        _install_pip_script(
+            install_root=install_root, package=package, version=version, script=script
+        )
+    return install_root / "bin" / script
+
+
+def _install_pip_script(
+    *,
+    install_root: Path,
+    package: str,
+    version: str,
+    script: str,
+) -> None:
+    """Install into a staging tree, validate it, then publish it atomically.
+
+    Caller holds the cache lock. A stale entry is moved aside, never deleted
+    under a concurrent reader; a failed install leaves the existing entry intact.
+    """
+    # Provisioning once per interpreter: install into a staging tree, validate it, then publish it atomically.
+    staging = install_root.with_name(f".{install_root.name}.staging-{os.getpid()}")
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True, exist_ok=True)
     pip_python = _resolve_pip_python(package=package)
     logger.info(
         "provisioning {} {} via pip into {} (python={})",
         package,
         version,
-        install_root,
+        staging,
         pip_python,
     )
     completed = subprocess.run(
@@ -372,26 +411,40 @@ def provision_pip_script(
             "--python",
             pip_python,
             "--target",
-            str(install_root),
+            str(staging),
         ],
         capture_output=True,
         text=True,
         check=False,
     )
     if completed.returncode != 0:
+        shutil.rmtree(staging, ignore_errors=True)
         detail = (completed.stderr or completed.stdout or "").strip().splitlines()
         tail = detail[-1] if detail else f"exit {completed.returncode}"
         msg = f"pip install failed for {package}=={version}: {tail}"
         raise OSError(msg)
-    if not script_path.is_file() or not _pip_target_valid(
-        install_root,
-        package=package,
-        script=script,
-    ):
+    if not _pip_cache_entry_valid(staging, package=package, script=script):
+        shutil.rmtree(staging, ignore_errors=True)
         msg = f"{package} package missing after pip install of {package}=={version}"
         raise OSError(msg)
+
+    stale = install_root.with_name(f".{install_root.name}.stale-{os.getpid()}")
+    if stale.exists():
+        shutil.rmtree(stale)
+    if install_root.exists():
+        os.replace(install_root, stale)
+    try:
+        os.replace(staging, install_root)
+    except OSError:
+        if stale.exists() and not install_root.exists():
+            os.replace(stale, install_root)
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    finally:
+        shutil.rmtree(stale, ignore_errors=True)
+
+    script_path = install_root / "bin" / script
     script_path.chmod(script_path.stat().st_mode | os.X_OK)
-    return script_path
 
 
 __all__ = [

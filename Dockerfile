@@ -11,7 +11,7 @@ ARG SOURCE_DATE_EPOCH=1700000000
 
 # Build the upstream gh release with its remaining vulnerable Go module patched.
 # The archive, Go toolchain and dependency checksums are immutable inputs.
-FROM --platform=$BUILDPLATFORM golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61 AS gh-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 AS gh-builder
 ARG TARGETARCH
 ENV GOTOOLCHAIN=local CGO_ENABLED=0
 ADD --checksum=sha256:e16749bc0d99dc0633a3d5ebadf48ffff1c24beb1ce83e8f6a71bb64ce477e9a \
@@ -47,8 +47,8 @@ ADD --checksum=sha256:9f58bff01604cb1b14008fef14dceb14d836a49225e45c6c2e37de3be3
 # node-gyp wants undici ^6.25.0. Drop these two when npm ships them.
 ADD --checksum=sha256:ef8448ec78f20b692f04fa6d01f39b5ab34c66404bea3429f5a39c6c9e0be8b4 \
     https://registry.npmjs.org/brace-expansion/-/brace-expansion-5.0.12.tgz /tmp/brace-expansion.tgz
-ADD --checksum=sha256:e18191aac9c0ff43dac7fe9b10b7041a22d07addb7b66a6e8ac14a52a5b69b74 \
-    https://registry.npmjs.org/undici/-/undici-6.28.1.tgz /tmp/undici.tgz
+ADD --checksum=sha256:29c4b8e0b2d86cb8795571c1959012ce057a14ecfd34858335f47c31e770a04f \
+    https://registry.npmjs.org/undici/-/undici-6.29.1.tgz /tmp/undici.tgz
 RUN mkdir -p /usr/local/lib/node_modules/npm \
     && tar -xzf /tmp/npm.tgz --strip-components=1 -C /usr/local/lib/node_modules/npm \
     && rm -rf /usr/local/lib/node_modules/npm/node_modules/brace-expansion \
@@ -88,7 +88,9 @@ ENV IS_SANDBOX=1
 
 # Official python:3.14-slim-bookworm last rebuilt 2026-09-01 still ships
 # libpcre2-8-0 10.42-1. Debian DLA-4772-1 / bookworm-security has the
-# HIGH fixes (CVE-2026-86145, CVE-2026-89157, CVE-2026-89161).
+# HIGH fixes (CVE-2026-86145, CVE-2026-89157, CVE-2026-89161). It also ships
+# openssl/libssl3 3.0.20-1~deb12u2, which bookworm-security supersedes for
+# CVE-2026-84782; both are pinned so the image cannot drift back.
 RUN apt-get update -qq \
     && apt-get install -qq -y --no-install-recommends \
         ca-certificates \
@@ -98,7 +100,9 @@ RUN apt-get update -qq \
         iptables \
         jq \
         libpcre2-8-0=10.42-1+deb12u2 \
+        libssl3=3.0.22-1~deb12u2 \
         openssh-client \
+        openssl=3.0.22-1~deb12u2 \
         procps \
         sudo \
         unzip \
@@ -144,9 +148,9 @@ COPY integrations/opencode ./integrations/opencode
 RUN uv sync --frozen --no-dev --extra tracing \
     && useradd -m -u 10001 -s /bin/bash mergecraft \
     && python -m compileall -q /opt/mergecraft \
-    && rm -f /opt/mergecraft/.venv/lib/python3.14/site-packages/merge_craft-*.dist-info/uv_cache.json \
+    && rm -f /opt/mergecraft/.venv/lib/python3.14/site-packages/mergecraft_action-*.dist-info/uv_cache.json \
     && sed -i '/uv_cache\.json/d' \
-        /opt/mergecraft/.venv/lib/python3.14/site-packages/merge_craft-*.dist-info/RECORD \
+        /opt/mergecraft/.venv/lib/python3.14/site-packages/mergecraft_action-*.dist-info/RECORD \
     && rm -rf /root/.cache/uv /tmp/* \
     && { command -v setpriv >/dev/null && getent passwd mergecraft >/dev/null || { echo "FATAL: privilege drop unavailable (setpriv or mergecraft user missing)"; exit 1; }; }
 

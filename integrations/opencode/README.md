@@ -44,7 +44,7 @@ deterministic analyzers, the JEV screen, the verifier, and the evidence packet.
 ### One-step install
 
 ```bash
-uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"
+uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
 mergecraft init                      # if the repo is not set up yet
 mergecraft opencode install          # commands, agents, plugin, MCP block, harness
 mergecraft opencode doctor --strict  # verify

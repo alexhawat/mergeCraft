@@ -1,0 +1,22 @@
+[
+  {
+    "filePath": "features/login.feature",
+    "errors": [
+      {
+        "message": "(3:1): expected: #EOF, #TableRow, #DocString, #StepLine, #TagLine, #ScenarioLine, #Comment, #Empty, got 'Scenarioo: broken'",
+        "rule": "unexpected-error",
+        "line": "3"
+      }
+    ]
+  },
+  {
+    "filePath": "features/checkout.feature",
+    "errors": [
+      {
+        "message": "Scenario name is already used in Feature file: Pay by card",
+        "rule": "no-dupe-scenario-names",
+        "line": "12"
+      }
+    ]
+  }
+]

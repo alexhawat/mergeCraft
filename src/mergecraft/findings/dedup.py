@@ -16,6 +16,7 @@ from mergecraft.review_policy.paths import normalize_repo_path
 from mergecraft.review_policy.security_tokens import DOMAIN_HINT_GROUPS
 
 if TYPE_CHECKING:
+    from mergecraft.analyzers.dispositions import DispositionLedger
     from mergecraft.analyzers.finding import Finding
 
 _TOKEN_RE = re.compile(r"[a-z0-9]{3,}", re.IGNORECASE)
@@ -233,7 +234,31 @@ def _merge_member_evidence(survivor: Finding, cluster: list[tuple[int, Finding]]
     survivor.evidence = merged
 
 
-def dedupe_findings_with_indices(findings: list[Finding]) -> DedupeResult:
+def _record_merged(
+    ledger: DispositionLedger | None,
+    cluster: list[tuple[int, Finding]],
+    survivor: Finding,
+) -> None:
+    if ledger is None:
+        return
+    from mergecraft.analyzers.dispositions import hit_id_for
+
+    survivor_id = hit_id_for(survivor)
+    for _index, member in cluster:
+        if member is survivor or hit_id_for(member) == survivor_id:
+            continue
+        ledger.record_dropped(
+            member,
+            "merged",
+            stage="dedupe",
+            reason="semantically duplicates the strongest finding at this location",
+            ref=survivor.fingerprint,
+        )
+
+
+def dedupe_findings_with_indices(
+    findings: list[Finding], *, ledger: DispositionLedger | None = None
+) -> DedupeResult:
     """Return deduped findings and the input indices that survived.
 
     Within a semantic cluster the survivor is the **strongest** member, not the
@@ -263,15 +288,18 @@ def dedupe_findings_with_indices(findings: list[Finding]) -> DedupeResult:
                 clusters.append([(index, finding)])
         for cluster in clusters:
             survivor_index, survivor = _strongest_member(cluster)
+            _record_merged(ledger, cluster, survivor)
             _merge_member_evidence(survivor, cluster)
             deduped.append(survivor)
             kept_indices.append(survivor_index)
     return DedupeResult(findings=deduped, kept_indices=kept_indices)
 
 
-def dedupe_findings(findings: list[Finding]) -> list[Finding]:
+def dedupe_findings(
+    findings: list[Finding], *, ledger: DispositionLedger | None = None
+) -> list[Finding]:
     """Return findings with duplicate defects collapsed to one row each."""
-    return dedupe_findings_with_indices(findings).findings
+    return dedupe_findings_with_indices(findings, ledger=ledger).findings
 
 
 __all__ = ["DedupeResult", "dedupe_findings", "dedupe_findings_with_indices", "location_key"]

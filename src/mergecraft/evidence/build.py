@@ -18,11 +18,13 @@ from mergecraft.analyzers.finding import Finding
 from mergecraft.evidence.packet import (
     PACKET_SCHEMA_VERSION,
     AgentMetadata,
+    AnalyzersEvidence,
     Decision,
     DeterministicCheck,
     MergeEvidencePacket,
     ModePromptVersion,
     RunHealth,
+    RunMetrics,
     SelfAssessment,
 )
 from mergecraft.evidence.trajectory import TrajectoryRecord
@@ -175,6 +177,8 @@ def build_packet(
     agent_terminal_verdict: Literal["approve", "request_changes"] | None = None,
     coverage: CoverageSection | None = None,
     triage: TriageSection | None = None,
+    analyzers: AnalyzersEvidence | None = None,
+    run_metrics: RunMetrics | None = None,
 ) -> MergeEvidencePacket:
     """Assemble a :class:`MergeEvidencePacket` from structured sources.
 
@@ -265,6 +269,8 @@ def build_packet(
         agent_terminal_verdict=agent_terminal_verdict,
         coverage=coverage,
         triage=triage,
+        analyzers=analyzers,
+        run_metrics=run_metrics,
     )
 
     # ``trajectory`` now lands as a sibling field (Batch C, #43). The rest --

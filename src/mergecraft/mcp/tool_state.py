@@ -12,6 +12,7 @@ from loguru import logger
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from mergecraft.analyzers.dispositions import DispositionLedger
     from mergecraft.config.trust_policy import AgentSandboxDecision
     from mergecraft.findings.ledger import FindingLedger
     from mergecraft.modes import Mode
@@ -321,6 +322,14 @@ class AnalyzerRunState:
     # retained per covered scope, so a partial rerun cannot erase a finding
     # produced for a file it did not cover.
     covered_scope: AnalyzerRunKey | None = None
+    # #941 — the closed disposition ledger for this run's raw hits. ``None`` for a run
+    # that never executed an analyzer (disabled, nothing matched).
+    dispositions: DispositionLedger | None = None
+    # #942 — where the analyzer settings this run used were resolved from
+    # (``base_snapshot`` / ``base_sha`` / ``run_start_snapshot`` / ``defaults`` /
+    # ``live_load``), and why when that was a fail-closed fallback.
+    settings_resolved_from: str | None = None
+    settings_detail: str | None = None
 
     def all_rows(self) -> list[dict[str, Any]]:
         """Return every dict-shaped finding row held on this analyzer run."""
@@ -352,6 +361,10 @@ class CiEvidenceState:
     substitutions: list[dict[str, Any]] = field(default_factory=list)
     run_notes: list[str] = field(default_factory=list)
     skip_reasons: list[str] = field(default_factory=list)
+    # #941 — the disposition ledger for SARIF ingested via ``ciEvidence.sarifArtifacts``.
+    sarif_dispositions: DispositionLedger | None = None
+    # #891 — the base-branch runs the CI-intelligence producer used to attribute failures.
+    base_branch_runs: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -359,6 +372,9 @@ class ToolState:
     repos: dict[str, RepoToolState]
     primary_repo_key: str
     prepush_failure_count: int = 0
+    # #942 — cache for ``analyzers.settings_pin.resolve_pinned_analyzer_settings``:
+    # a ``(key, PinnedAnalyzerSettings)`` pair, so ``git`` reads the PR base once.
+    pinned_analyzer_settings: Any = None
     background_processes: dict[str, BackgroundProcess] = field(default_factory=dict)
     selected_mode: str | None = None
     # Built-in + custom ``Mode`` objects resolved at ``main()`` time
@@ -377,6 +393,11 @@ class ToolState:
     pending_review_publication: dict[str, Any] | None = None
     # Lane A W3 — which publication entrypoint won and whether 422 recovery demoted inline.
     review_publication_entrypoint: str | None = None
+    # #1078 — a non-terminal fallback rung whose decision is neutral records its
+    # run in the sticky progress comment instead of posting a formal review.
+    # The finalize path reads this so it does not create the formal review the
+    # publish seam deliberately skipped.
+    review_publication_sticky_only: bool = False
     review_inline_comments_demoted: bool = False
     # #619 Task 4b — set when every targeted 422 recovery (comments-anchor
     # demotion, APPROVE->COMMENT) failed and the last-resort bare COMMENT
@@ -506,6 +527,18 @@ class ToolState:
     # rather than ``list[ToolCallRecord]`` only to keep this module free of an
     # import cycle back into ``evidence``.
     tool_calls: list[Any] = field(default_factory=list)
+    # One-time diff line-range coverage nudge (review scope). Set the first
+    # time ``submit_review_verdict`` refuses with unread ranges so the second
+    # submission is accepted regardless; the nudge is guidance, never a gate.
+    diff_coverage_nudge_sent: bool = False
+    # Slice 7 — measured wall time by phase (setup / analyzers / agent / judge /
+    # publish). Measurement only: the run record and packet read it, no gate.
+    phase_elapsed_s: dict[str, float] = field(default_factory=dict)
+    # Agent deadline behind the ⏱ notice on review-agent tool results:
+    # ``time.monotonic()`` at dispatch and the budget in seconds. Both stay
+    # ``None`` when the run has no timeout, and no notice is added.
+    agent_started_monotonic: float | None = None
+    agent_deadline_s: float | None = None
     model: str | None = None
     # W10.2 / #20 — requested vs executed model evidence (always populated on
     # the live path so the packet can prove which model actually ran).
@@ -555,6 +588,10 @@ class ToolState:
     # ``get_commit_info`` is deliberately not a value (N3 / D10): a metadata
     # read may not register canonical scope.
     scope_provenance: Literal["api", "checkout", "local-diff"] | None = None
+    # Set only by ``establish_offline_review_scope`` (``mergecraft review``): an
+    # offline run never commits. ``local-diff`` provenance alone does not say so,
+    # because ``establish_review_scope`` records it on PR runs too.
+    offline_review: bool = False
     # Memoized ``git show <rev>:<path>`` output paths keyed ``rev\\0path``.
     git_show_cache: dict[str, str] = field(default_factory=dict)
     confirmed_findings: list[dict[str, Any]] = field(default_factory=list)

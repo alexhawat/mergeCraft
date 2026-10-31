@@ -32,6 +32,7 @@ MERGECRAFT_BOT_NAME = "mergecraft[bot]"
 _FORBIDDEN_TEMP_ROOTS = ("/tmp", "/private/tmp", "/var/tmp", "/usr/tmp")
 
 _created_paths: set[str] = set()
+_run_owned_dirs: set[str] = set()
 _temp_dir: str | None = None
 _atexit_registered = False
 
@@ -182,6 +183,34 @@ def cleanup_temp_directory() -> None:
         logger.warning("» cleanup left residual path(s): {}", ", ".join(residual))
 
 
+def created_temp_directory() -> str | None:
+    """The per-run temp dir :func:`create_temp_directory` made, or ``None``.
+
+    Unlike ``MERGECRAFT_TEMP_DIR``, which an operator may point anywhere, this is
+    always a fresh ``mkdtemp`` owned by this run.
+    """
+    return _temp_dir
+
+
+def register_run_owned_directory(path: str) -> None:
+    """Record a directory this run just created with ``mkdtemp``.
+
+    Only such a directory may be opened to a reviewing agent wholesale: an
+    operator-chosen or shared directory can hold credentials and other runs'
+    files. Unlike :func:`register_created_path`, this does not schedule a wipe,
+    so a review's output directory survives the run.
+    """
+    _run_owned_dirs.add(str(Path(path).resolve()))
+
+
+def is_run_owned_directory(path: str) -> bool:
+    """Whether ``path`` is a directory registered by :func:`register_run_owned_directory`."""
+    try:
+        return str(Path(path).resolve()) in _run_owned_dirs
+    except OSError:
+        return False
+
+
 def create_temp_directory() -> str:
     import tempfile
 
@@ -195,6 +224,7 @@ def create_temp_directory() -> str:
     _temp_dir = shared
     os.environ["MERGECRAFT_TEMP_DIR"] = shared
     register_created_path(shared)
+    register_run_owned_directory(shared)
     _prepare_temp_dir_for_agent(shared)
     _register_atexit_cleanup()
     logger.info("» created temp dir at {}", shared)

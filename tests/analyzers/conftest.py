@@ -37,7 +37,13 @@ def _ignore_analyzer_cache(_dir: str, names: list[str]) -> set[str]:
 
 @pytest.fixture
 def adapter_fixture_repo(fixture_repo: Path, tmp_path: Path) -> Path:
-    """Isolated copy of the W0.8 fixture so parallel workers do not share analyzer cache."""
+    """Isolated copy of the W0.8 fixture, without the per-repo analyzer cache.
+
+    This copies the fixture's own ``.mergecraft/analyzer-cache``, not the shared
+    provisioning cache under ``$XDG_CACHE_HOME`` — managed binaries and pip
+    installs are still machine-wide. Concurrent provisioning is serialized by
+    the cache lock instead (``tests/analyzers/test_pip_provision_lock.py``).
+    """
     import shutil
 
     dest = tmp_path / "fixture-repo"

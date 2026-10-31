@@ -303,8 +303,7 @@ class AnalyzersSettings(BaseModel):
     # #94 / S6 — change-impact extraction (impactPath), default off.
     # Produces a declaration-level reference-lead table for the diff at
     # review time. Off by default until the eval-bank corpus (#140) measures
-    # its cost-to-benefit ratio (see S6 design at
-    # .ignorelocal/waves/issues-setup-container-hygiene-wave-plan.md).
+    # its cost-to-benefit ratio.
     impact: bool = Field(default=False, alias="impact")
 
 
@@ -802,6 +801,12 @@ class RepoSettings(BaseModel):
     # HA3 / D11 — explicit harness selection. When unset, ``utils/agent_resolve``
     # infers the runtime from the model slug (today's behaviour).
     harness: Literal["opencode", "codex", "claude", "gemini", "cursor"] | None = None
+    # Slice 6 — fail an attempt that stops emitting stream events for this many
+    # seconds. Distinct from the wall-clock attempt budget: a silent provider is
+    # diagnosed as a stall (infra_error), not as a review that ran out of time.
+    # ``0`` disables the watchdog. Fifteen minutes is well inside the 25-minute
+    # per-attempt cap and far above any normal inter-event gap.
+    agent_idle_timeout_s: int = Field(default=900, alias="agentIdleTimeout", ge=0)
     model: str | None = None
     models: list[str] | None = None
     model_fallbacks: dict[str, list[str]] | None = Field(default=None, alias="modelFallbacks")

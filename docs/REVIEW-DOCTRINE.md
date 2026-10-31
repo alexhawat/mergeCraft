@@ -39,6 +39,80 @@ Trajectory checks stamp `source="trajectory"`, `scope="run"`, and `introduced_by
 All three fields matter: `introduced_by_pr` drives causality, `scope` drives gating,
 `source` drives rendering.
 
+One run-scope signal is worth naming because the gate and the fallback chain key off
+its rule id: `codex-platform-sandbox-unavailable` records that Codex's Linux platform
+sandbox could not start (bubblewrap cannot nest a user namespace inside a container
+action), so Codex-native shell tools were unavailable and the review ran through
+mergeCraft MCP tools only. It is a typed **capability-loss** record — `scope="run"`,
+advisory, never a merge gate — so a degraded run is visible in `run_health` without
+anyone parsing log prose, and without weakening the sandbox refusal itself.
+
+## Review scope is the materialised diff
+
+**The on-disk diff is the change set; git is not asked to re-derive it.**
+`checkout_pr` writes the full PR diff to `diffPath` (and an incremental range to
+`incrementalDiffPath` on a re-review). Review and IncrementalReview render the
+same hard instruction before their checklist: read `diffPath` first, read
+`incrementalDiffPath` instead when it is present, and do **not** run
+`git diff` / `git grep` / `git log` to reconstruct the change set. A
+re-derivation is invisible to the trajectory as a file read, pulls in
+base-branch noise, and fails outright on a shallow Actions checkout. Once the
+diff is read, surrounding files a candidate finding needs are fair game.
+
+**Incremental is the default on a re-review.** A PR that already has a
+mergeCraft review on an earlier head gets `incrementalDiffStatus` plus, when the
+range is real, `incrementalDiffPath` and `lastReviewedSha`. The checkpoint comes
+from the trusted run-bound evidence packet when available, then the publisher
+scan. `empty` and `unavailable` carry `incrementalDiffReason` instead of
+advertising a file that does not exist. `empty` means the checkpoint is
+reachable and nothing changed — the prompt says to report progress rather than
+re-read an unchanged PR; `unavailable` is the fall-back-to-full-diff case.
+The mode gate was removed: #1017's reviewer never called `select_mode`, and
+gating the range on that selection made the whole re-review read the full PR.
+When the incremental path is present it **is** the review scope; the full diff
+is only for anchoring.
+
+**Coverage is line-range, not file-level.** `changed-unread-file` now reports the
+unread added-line ranges (`path:start-end`) rather than "this file was never
+read", and the pre-submit check nudges **once** with exactly those ranges. The
+rule id, severity, and `scope="run"` (advisory, never a gate) are unchanged; what
+changed is what counts as read. Reads of the diff file itself count, via the
+`diff_read_path` / `diff_read` marker recorded from the raw command before the
+redactor can rewrite a run-temp path. Deletion-only and mode-only sections have
+no added lines but stay in scope until their path is read. Absent read evidence
+is still *unknown*, not zero: a run whose reads never cross MCP gets no nudge
+and no finding.
+
+**Batch independent reads.** The reviewer instruction is explicit: emit every
+independent read/grep/glob in one turn and keep dependent calls for the next
+turn. The packet's `run_metrics.read_tool_turns` is the cheap measurement — N
+adjacent read-intent calls collapse into one turn — so a later iteration can see
+whether the instruction changed the run's shape.
+
+## Run metrics and the idle watchdog
+
+`run_metrics` (packet schema `1.15.0`) is **measurement only**: tool-call count,
+read calls and read turns, distinct files read, diff line counts, elapsed by
+phase (setup / analyzers / agent / judge / publish), and the last watchdog
+diagnostic. It never feeds `decide_approval`; the deterministic record renders it
+as a one-line **Review cost** row.
+
+The wall-clock attempt budget and the idle watchdog answer different questions.
+A driver that accepts a request and then emits nothing for
+`agentIdleTimeout` seconds (default **900**, `0` disables) is killed and reported
+with the idle span, event count, whether the model produced any output, the last
+provider error, and the stderr tail. This is an `infra_error` (environment or
+provider fault), not a failed review: the attempt still fails so the model chain
+may advance, but the run is not recorded as a wrong verdict. The diagnostic
+reaches the packet's `run_metrics.agent_diagnostic` and the run record's
+**Agent stall** row.
+
+**Fan-out is planned, not enabled.** `review/file_group_fanout.py` splits a very
+large diff into at most six balanced read-only groups and degrades a failed group
+to a recorded row, never a failed run. It is not wired into the server-side
+roster dispatch in this release: group prompts and aggregation need live-provider
+validation before they replace the single-agent path.
+
 ## Makefile discovery, not tool inference
 
 **`DISCOVERABLE_TARGETS` discovers Makefile targets, not tools.** The tuple
@@ -177,6 +251,62 @@ self-report. Two consequences follow:
   `mergecraft.agents.gates.decide_approval` and
   `tests/status_checks/test_decide_approval.py`.
 
+### Attestation: what proves the review ran (#1072, #1076)
+
+The structural verdict needs *attestation* — non-prose evidence that the
+review actually ran — before it may read `success`. Two forms count:
+
+- **Typed findings.** A non-empty attested findings list (change-scoped rows
+  plus run-health rows, which attest only and never block) has always
+  attested the run.
+- **Terminal verdict + read coverage.** A validated terminal `approve`
+  (`agent_terminal_verdict`, accepted by `validate_submission`) together with
+  an observed read of the diff (`trajectory.read_coverage`) attests a *clean*
+  review — one whose correct result is an empty findings list. Without this
+  form, a thorough zero-finding review read `neutral — no typed findings to
+  attest to the review` and the fallback guard reran the whole review on the
+  next provider (PR #1068: 398,912 input tokens to re-review a 161-line
+  lockfile diff). Both signals are orchestrator-recorded facts about the run,
+  not agent narrative, so accepting them does not weaken the
+  evidence-not-proof rule — and no synthetic findings are created, because
+  those would pollute the ledger, fingerprints, carry-over, and eval
+  baselines with rows that describe nothing.
+
+The constraints around the new attestation are unchanged: the one-way
+ratchet still binds `request_changes` downward and never up (#619);
+`tier == "untrusted"` never yields `success`; a failed run never
+yields `success`; `self_assessment` stays advisory-only and is never
+an attestation input; and the legacy list-only overload of
+`decide_approval` keeps its empty-list `neutral` behaviour because no
+attestation metadata is available there. Absent read evidence stays
+*unknown*, not zero: `read_coverage=False` never attests (#1056 — unknown
+is never green).
+
+The gate-action routing table gained the matching pair of named rules:
+
+- **`clean_pass` → `auto_merge`** — a blocker-free packet with a trusted
+  success verdict on any lane whose `auto_merge_lane` is not `forbidden`,
+  not just `low`. Previously a clean medium-lane packet (any dependency
+  bump) matched no named rule and fell into the catch-all labelled
+  `schema_failure` → `block`, a schema-failure claim on a structurally
+  complete packet. Two vetoes stay explicit: a `forbidden` lane (every
+  `high` lane — see `docs/blast-radius.md`) is never auto-merged, and a
+  missing blast-radius classification is an *unknown* lane, which is never
+  green (#1056). `clean_pass` is ordered after the finding-driven rules, so
+  `has_blockers` / `changed-unread-file` / `tool_loop` /
+  `high_risk_migration` still win when their signals coexist with a success
+  verdict.
+- **`needs_human_review` → `require_human_review`** — a structurally
+  complete packet the gate has no automated route for: a `neutral` verdict
+  from an untrusted tier or a failed run, a run with nothing attested, or an
+  attested clean packet on an auto-merge-forbidden lane. This is #1056's
+  missing-signal escalation expressed in the routing table: the packet is
+  complete, the signal is insufficient or the lane forbids automation, and a
+  human decides.
+- **`schema_failure` → `block`**, re-scoped: it now fires only when the
+  packet's evidence is structurally absent (no decision row, no findings, no
+  blast radius, no trajectory) — never on a parsed, validated packet.
+
 ### Run outcome taxonomy
 
 A run ends in exactly one of six named outcomes —
@@ -227,6 +357,15 @@ refusals are the design: a skipped run is stated as such on the check and the
 record, never grants approval, only counts a pin bump when its verifying check
 passed on the head SHA, reads its config from the base ref only, and treats any
 failure to read the pull request as a reason to review.
+An agent failure that is the reviewer's infrastructure rather than the review is
+`infra_error`, not `failed`: a driver marks it with the `infra_reason` result
+metadata key (`mergecraft.agents.shared.INFRA_REASON_KEY`) and
+`main_outcome._classify_outcome` maps it. The one reason defined today is an
+expired Codex subscription login ("refresh token was already used"): the check
+summary and the run record carry *reviewer credential expired — re-authenticate*
+with the two commands that fix it, so the cause is visible without opening the
+log. Nothing probes the credential on a schedule to detect this earlier;
+refreshing it is what spends it.
 
 ### Evidence weighting
 
@@ -451,6 +590,18 @@ other non-review modes are unchanged.
 `not terminal_submission_received`, not on verdict content. A valid
 `request_changes` with confirmed findings is a usable review result; a missing
 or semantically rejected submission is not.
+
+**Publication across fallback rungs.** One logical review must not become one
+formal review per rung. Without verifiable authorship (#1029) a later rung
+cannot supersede an earlier review, so the workflow marks a rung that a
+fallback will replace (`MERGECRAFT_STICKY_ONLY_NEUTRAL`, set on OpenCode Go
+whenever Codex is available). When that rung's structural decision is
+`neutral`, it writes its deterministic run record into the sticky progress
+comment and posts no formal review; the terminal rung owns the formal review.
+`success` and `failure` are terminal and publish normally. The fallback chain
+also skips Codex when the neutral reason names the untrusted tier: the tier is
+structurally inert, so a second rung can only reproduce the same neutral at
+full cost (#1078).
 
 See also [`REVIEW-CHECKS.md`](../REVIEW-CHECKS.md#terminal-verdict-vs-structural-verdict-vp2).
 

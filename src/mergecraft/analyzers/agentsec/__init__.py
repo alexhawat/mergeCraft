@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from loguru import logger
+
 from mergecraft.analyzers.agentsec.mcp_manifest import discover_mcp_documents
 from mergecraft.analyzers.agentsec.policy import (
     NativeRule,
@@ -48,11 +50,28 @@ def scan_manifests(
             skip_reason="skipped agentsec: no changed manifest paths",
         )
 
+    refusals: list[str] = []
     documents = [
-        *discover_mcp_documents(repo_root=repo_root, changed_files=scoped),
-        *discover_skill_documents(repo_root=repo_root, changed_files=scoped),
+        *discover_mcp_documents(repo_root=repo_root, changed_files=scoped, refusals=refusals),
+        *discover_skill_documents(repo_root=repo_root, changed_files=scoped, refusals=refusals),
     ]
+    if refusals:
+        logger.warning(
+            "agentsec: refused {} changed file(s) that resolve outside the repository root: {}",
+            len(refusals),
+            ", ".join(sorted(set(refusals))),
+        )
     if not documents:
+        if refusals:
+            return AgentSecScanResult(
+                findings=[],
+                skipped=True,
+                skip_reason=(
+                    "skipped agentsec: refused "
+                    f"{len(set(refusals))} changed file(s) whose symlink resolves outside "
+                    "the repository root — not read"
+                ),
+            )
         return AgentSecScanResult(
             findings=[],
             skipped=True,

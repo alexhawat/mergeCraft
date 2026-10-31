@@ -53,13 +53,18 @@ def decide_script(step_id: str) -> Path:
     return path
 
 
-def evidence_packet(*, verdict: str | None = None, broken: bool = False) -> str:
+def evidence_packet(
+    *, verdict: str | None = None, reason: str | None = None, broken: bool = False
+) -> str:
     """Build a JSON evidence packet or an intentionally unparseable body."""
     if broken:
         return "{not-json"
     if verdict is None:
         return ""
-    return json.dumps({"decision": {"verdict": verdict}})
+    decision: dict[str, str] = {"verdict": verdict}
+    if reason is not None:
+        decision["reason"] = reason
+    return json.dumps({"decision": decision})
 
 
 def parse_github_output(path: Path) -> dict[str, str]:

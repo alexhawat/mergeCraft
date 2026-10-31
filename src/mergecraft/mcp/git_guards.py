@@ -23,6 +23,8 @@ Exports:
     _SUBCOMMAND_OWNS_DASH_C -- subcommands where -C is their own flag, not git chdir.
     _OUTPUT_FLAG_SPELLINGS -- --output-family spellings that write a file.
     _GREP_PAGER_EXEC_LONG_SPELLINGS -- --open-files-in-pager spellings git resolves.
+    _GREP_LONG_OPTIONS -- every long option git grep accepts, for abbreviation lookup.
+    resolve_grep_long_option -- resolve a git grep long-option abbreviation to its name.
     reject_if_leading_dash -- raise if value starts with a dash.
     reject_special_ref -- raise if value is a special/symbolic ref.
     validate_tag_name -- raise if tag contains refspec/flag characters.
@@ -36,6 +38,9 @@ Exports:
     _reject_file_writing_flags -- raise on --output-family flags for a subcommand.
     _reject_grep_pager_exec -- raise on ``git grep -O`` / --open-files-in-pager (#619).
     _reject_content_filter_exec -- raise on --textconv / --ext-diff (#623).
+    _REFUSED_LONG_OPTIONS -- per-verb long options refused under any abbreviation.
+    _EXACT_NAME_EXCEPTIONS -- exact option names forwarded although they prefix a refused one.
+    _reject_refused_long_options -- raise on any spelling of a refused long option.
 """
 
 from __future__ import annotations
@@ -44,6 +49,7 @@ import re
 import shlex
 from pathlib import Path
 
+from mergecraft.mcp.shared import ToolRefusedError
 from mergecraft.utils.git_setup import (
     reviewer_askpass_credentials_dir,
     reviewer_denied_relative_paths,
@@ -79,6 +85,15 @@ _READONLY_SUBCOMMANDS: frozenset[str] = frozenset(
         # are the whole story for it.
         "grep",
         "ls-tree",
+        # #1077 — strictly read-only; every form (``A B``, ``--all``,
+        # ``--octopus``, ``--independent``, ``--is-ancestor``, ``--fork-point``)
+        # only reads the commit graph, and ``config/trust_policy.py`` itself
+        # runs ``merge-base --is-ancestor`` internally. No write-ish flag
+        # exists, so the shared ref/path confinement the rest of the allowlist
+        # gets (``rev-parse`` included) is the whole guard story here too —
+        # the prompts teach ``git diff --merge-base``, so refusing the bare
+        # verb only burned agent turns.
+        "merge-base",
     }
 )
 # Rejected verbs that have a dedicated tool. Not an auth gate — a redirect
@@ -169,6 +184,10 @@ _SUBCOMMAND_SHORT_FLAGS: dict[str, frozenset[str]] = {
     # -t show trees, -z NUL-terminate. No write, no pager-exec, no
     # output-file letter among git's real ls-tree flags.
     "ls-tree": frozenset("dlrtz"),
+    # #1077 — ``-a`` (``--all``) is merge-base's only short flag; the read
+    # forms are otherwise long-only. Declaring it keeps a bare ``-c`` after
+    # the verb refused (merge-base defines no ``-c``), exactly like rev-parse.
+    "merge-base": frozenset("a"),
 }
 
 # ---------------------------------------------------------------------------
@@ -231,6 +250,108 @@ _GREP_PAGER_EXEC_LONG_SPELLINGS: frozenset[str] = frozenset(
     }
 )
 
+# Every long option ``git grep`` accepts (``git grep --git-completion-helper-all``,
+# git 2.53), negations included. git resolves any unique prefix of one of these,
+# so a guard keyed on full names (``--after-context``) misses ``--after=60``;
+# resolving against the whole list keeps ambiguous prefixes (``--a``, ``--co``)
+# unresolved, as git itself refuses them.
+_GREP_LONG_OPTIONS: frozenset[str] = frozenset(
+    [
+        "--after-context",
+        "--all-match",
+        "--and",
+        "--basic-regexp",
+        "--before-context",
+        "--break",
+        "--cached",
+        "--color",
+        "--column",
+        "--context",
+        "--count",
+        "--exclude-standard",
+        "--ext-grep",
+        "--extended-regexp",
+        "--files-with-matches",
+        "--files-without-match",
+        "--fixed-strings",
+        "--full-name",
+        "--function-context",
+        "--heading",
+        "--ignore-case",
+        "--index",
+        "--invert-match",
+        "--line-number",
+        "--max-count",
+        "--max-depth",
+        "--name-only",
+        "--no-all-match",
+        "--no-basic-regexp",
+        "--no-break",
+        "--no-cached",
+        "--no-color",
+        "--no-column",
+        "--no-context",
+        "--no-count",
+        "--no-exclude-standard",
+        "--no-ext-grep",
+        "--no-extended-regexp",
+        "--no-files-with-matches",
+        "--no-files-without-match",
+        "--no-fixed-strings",
+        "--no-full-name",
+        "--no-function-context",
+        "--no-heading",
+        "--no-ignore-case",
+        "--no-index",
+        "--no-invert-match",
+        "--no-line-number",
+        "--no-max-count",
+        "--no-name-only",
+        "--no-null",
+        "--no-only-matching",
+        "--no-open-files-in-pager",
+        "--no-perl-regexp",
+        "--no-quiet",
+        "--no-recurse-submodules",
+        "--no-recursive",
+        "--no-show-function",
+        "--no-text",
+        "--no-textconv",
+        "--no-threads",
+        "--no-untracked",
+        "--no-word-regexp",
+        "--not",
+        "--null",
+        "--only-matching",
+        "--open-files-in-pager",
+        "--or",
+        "--perl-regexp",
+        "--quiet",
+        "--recurse-submodules",
+        "--recursive",
+        "--show-function",
+        "--text",
+        "--textconv",
+        "--threads",
+        "--untracked",
+        "--word-regexp",
+    ]
+)
+
+
+def resolve_grep_long_option(token: str) -> str:
+    """Return the ``git grep`` long option *token* names, abbreviation resolved.
+
+    *token* may carry ``=value``; only the name is returned. A name that is
+    exact, unknown, or an ambiguous prefix comes back unchanged.
+    """
+    name = token.split("=", 1)[0]
+    if name in _GREP_LONG_OPTIONS:
+        return name
+    matches = [option for option in _GREP_LONG_OPTIONS if option.startswith(name)]
+    return matches[0] if len(matches) == 1 else name
+
+
 # ---------------------------------------------------------------------------
 # Q6 — Which flags run a configured content filter? (#623)
 # ---------------------------------------------------------------------------
@@ -267,6 +388,82 @@ _CONTENT_FILTER_EXEC_SPELLINGS: frozenset[str] = frozenset(
 )
 
 # ---------------------------------------------------------------------------
+# Q7 — Which long-option abbreviations reach a refused option?
+# ---------------------------------------------------------------------------
+# Verbs built on git's parse-options resolve any unique prefix of a long option,
+# so an exact-spelling guard misses ``grep --no-inde`` (``--no-index``) or
+# ``cat-file --tex`` (``--textconv``). Which prefixes are unique depends on the
+# git release: ``cat-file --filter`` is its own object-filter option in git 2.53
+# but an abbreviation of ``--filters`` (smudge-filter execution) in the 2.39.5
+# Debian bookworm ships in the review image. So every prefix of a refused option
+# is refused, whatever this git's option list says, and an exact option name
+# that is also such a prefix is forwarded only when listed in
+# ``_EXACT_NAME_EXCEPTIONS``. The diff family (``diff``, ``log``, ``show``) and
+# git's own global options do not abbreviate in 2.39.5 or 2.53, so the exact
+# spellings in Q4-Q6 already cover them.
+#
+# ``grep --untracked`` / ``--no-exclude-standard`` widen the search to untracked
+# and ignored files — mergeCraft's own scratch (askpass helper, OpenCode
+# ``auth.json``) whenever the run temp dir sits inside the checkout — which no
+# path operand names, so ``_reject_credential_path_operands`` never sees them.
+# ``blame --contents`` / ``--ignore-revs-file`` read a file named by a flag
+# value that positional confinement does not inspect. ``ls-remote
+# --upload-pack`` / ``--exec`` name a command git runs.
+_REFUSED_LONG_OPTIONS: dict[str, dict[str, str]] = {
+    "grep": {
+        "--untracked": "searches untracked files, including mergeCraft's own scratch",
+        "--no-exclude-standard": "searches ignored files, including mergeCraft's own scratch",
+    },
+    "cat-file": {
+        "--textconv": "runs a git-config content filter — arbitrary command execution",
+        "--filters": "runs a git-config smudge filter — arbitrary command execution",
+    },
+    "blame": {
+        "--contents": "reads a file the reviewer surface cannot confine",
+        "--ignore-revs-file": "reads a file the reviewer surface cannot confine",
+    },
+    "ls-remote": {
+        "--upload-pack": "names a command git runs — arbitrary command execution",
+        "--exec": "names a command git runs — arbitrary command execution",
+    },
+}
+# Exact option names that are prefixes of a refused option but name a different
+# option in every git release checked (``git <verb> --git-completion-helper-all``
+# on 2.39.5 and 2.53.0). Add one only after checking the oldest git shipped.
+_EXACT_NAME_EXCEPTIONS: dict[str, frozenset[str]] = {
+    # ``--ignore-rev <rev>`` (since 2.23), not ``--ignore-revs-file``.
+    "blame": frozenset({"--ignore-rev"}),
+}
+
+
+def _names_prefix_of(token: str, options: frozenset[str] | dict[str, str]) -> str | None:
+    """Return the option in *options* that *token* is a prefix of, if any.
+
+    *token* may carry ``=value``; only the name is compared. A non-option token,
+    or a bare ``--``, names nothing.
+    """
+    if not token.startswith("--") or token == "--":
+        return None
+    name = token.split("=", 1)[0]
+    return next((option for option in sorted(options) if option.startswith(name)), None)
+
+
+def _refused_long_option(token: str, subcommand: str) -> str | None:
+    """Return the refused option *token* could name for *subcommand*, if any.
+
+    A prefix that is ambiguous in this git is refused too: it errors here
+    anyway, and an older or newer git without the other candidate resolves it
+    to the refused option.
+    """
+    refused = _REFUSED_LONG_OPTIONS.get(subcommand)
+    if not refused:
+        return None
+    if token.split("=", 1)[0] in _EXACT_NAME_EXCEPTIONS.get(subcommand, frozenset()):
+        return None
+    return _names_prefix_of(token, refused)
+
+
+# ---------------------------------------------------------------------------
 # Ref-validation helpers
 # ---------------------------------------------------------------------------
 
@@ -275,7 +472,7 @@ _BAD_REF_CHARS: re.Pattern[str] = re.compile(r"[:+^~?*[\\\s]")
 
 
 def reject_if_leading_dash(value: str, kind: str) -> None:
-    """Raise ``ValueError`` when *value* starts with a dash.
+    """Raise ``ToolRefusedError`` when *value* starts with a dash.
 
     Args:
         value: The ref or path string to check.
@@ -283,11 +480,11 @@ def reject_if_leading_dash(value: str, kind: str) -> None:
     """
     if value.startswith("-"):
         msg = f"Blocked: {kind} '{value}' starts with '-' — git could parse it as a flag."
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
 
 
 def reject_special_ref(value: str, kind: str) -> None:
-    """Raise ``ValueError`` when *value* is a special or symbolic git ref.
+    """Raise ``ToolRefusedError`` when *value* is a special or symbolic git ref.
 
     Args:
         value: The ref string to check.
@@ -296,21 +493,21 @@ def reject_special_ref(value: str, kind: str) -> None:
     reject_if_leading_dash(value, kind)
     if value.startswith("refs/"):
         msg = f"Blocked: {kind} '{value}' is a fully-qualified ref path. Use a bare branch name."
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
     if value in _SYMBOLIC_REFS:
         msg = f"Blocked: {kind} '{value}' is a git symbolic ref, not a branch name."
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
     match = _BAD_REF_CHARS.search(value)
     if match:
         msg = (
             f"Blocked: {kind} '{value}' contains '{match.group(0)}', which git "
             "interprets as refspec/revision syntax."
         )
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
 
 
 def validate_tag_name(tag: str) -> None:
-    """Raise ``ValueError`` when *tag* contains refspec or flag characters.
+    """Raise ``ToolRefusedError`` when *tag* contains refspec or flag characters.
 
     Args:
         tag: Tag name string to validate.
@@ -318,7 +515,7 @@ def validate_tag_name(tag: str) -> None:
     reject_if_leading_dash(tag, "tag")
     if not re.fullmatch(r"[A-Za-z0-9._/-]+", tag):
         msg = f"Blocked: tag '{tag}' contains characters that could be parsed as a refspec or flag."
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -392,25 +589,25 @@ def _reject_config_flags(tokens: list[str], *, subcommand: str = "") -> None:
     rather than proven hostile, and an unrecognised short bundle.
 
     Raises:
-        ValueError: on any of the three refusals.
+        ToolRefusedError: on any of the three refusals.
     """
     for tok in tokens:
         if tok.startswith("--"):
             if _is_config_flag(tok):
-                raise ValueError(_config_flag_message(tok))
+                raise ToolRefusedError(_config_flag_message(tok))
             continue
         if not tok.startswith("-c") or _subcommand_declares_shorts(tok, subcommand):
             continue
         if tok == "-c" and subcommand:
-            raise ValueError(_bare_dash_c_message(subcommand))
+            raise ToolRefusedError(_bare_dash_c_message(subcommand))
         if _is_config_flag(tok):
-            raise ValueError(_config_flag_message(tok))
+            raise ToolRefusedError(_config_flag_message(tok))
         msg = f"Blocked: '{tok}' bundles short flags {subcommand or 'git'} does not define."
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
 
 
 def _reject_namespace_flag(tokens: list[str]) -> None:
-    """Raise ValueError if any token is a ``--namespace`` spelling.
+    """Raise ToolRefusedError if any token is a ``--namespace`` spelling.
 
     ``--namespace`` sets ``GIT_NAMESPACE``, a ref-namespace prefix rather than a
     filesystem path, so ``confine_to_workspace`` cannot bound it the way it
@@ -425,7 +622,7 @@ def _reject_namespace_flag(tokens: list[str]) -> None:
                 f"Blocked: '{tok}' sets a ref namespace the reviewer surface "
                 "cannot confine, and no read-only subcommand honours it."
             )
-            raise ValueError(msg)
+            raise ToolRefusedError(msg)
 
 
 def _no_index_message(token: str) -> str:
@@ -436,18 +633,54 @@ def _no_index_message(token: str) -> str:
     )
 
 
-def _reject_no_index(tokens: list[str]) -> None:
-    """Raise ValueError if any token is a ``--no-index`` spelling (plan 13 / D9).
+def _reject_no_index(tokens: list[str], *, subcommand: str = "") -> None:
+    """Raise ToolRefusedError if any token is a ``--no-index`` spelling (plan 13 / D9).
 
     ``--no-index`` tells git to diff paths without a repository, which bypasses
-    every workspace confinement rule on the operands that follow.
+    every workspace confinement rule on the operands that follow. ``diff``
+    matches it exactly (2.39.5 reads ``--no-inde`` as ``--no-indent-heuristic``,
+    2.53 refuses it as ambiguous), but ``grep`` resolves abbreviations, so every
+    prefix of ``--no-index`` is refused there, as in ``_refused_long_option``.
     """
     for tok in tokens:
         if tok == "--no-index" or tok.startswith("--no-index="):
-            raise ValueError(_no_index_message(tok))
+            raise ToolRefusedError(_no_index_message(tok))
+        if subcommand == "grep" and _names_prefix_of(tok, frozenset({"--no-index"})):
+            raise ToolRefusedError(_no_index_message(tok))
+
+
+def _reject_refused_long_options(args: list[str], *, subcommand: str) -> None:
+    """Refuse *subcommand*'s long options in ``_REFUSED_LONG_OPTIONS``, abbreviated or not.
+
+    Every argument is checked, including those after a ``--``. Git does not end
+    option parsing at a ``--`` that is the value of a value-taking option: in
+    ``grep -e -- --untracked -e x`` the ``--`` is the first pattern and
+    ``--untracked`` still applies. Finding the real end of options would mean a
+    per-verb table of value-taking options that drifts with git releases, so
+    this fails closed instead, like the ``--no-index``, pager and content-filter
+    guards. The cost is refusing a pattern or pathspec spelled like a refused
+    option.
+
+    Raises:
+        ToolRefusedError: when an argument names a refused option.
+    """
+    for arg in args:
+        name = _refused_long_option(arg, subcommand)
+        if name is not None:
+            reason = _REFUSED_LONG_OPTIONS[subcommand][name]
+            msg = f"Blocked: '{subcommand} {arg}' ({name}) {reason}."
+            raise ToolRefusedError(msg)
 
 
 def _split_end_of_options(args: list[str]) -> tuple[list[str], list[str]]:
+    """Split *args* at the first ``--``.
+
+    The first ``--`` may be an option value (``grep -e --``) rather than git's
+    end of options, so this can split earlier than git does. Callers must only
+    get stricter from that: path confinement and the credential scan treat
+    every token after it as a path, a superset of git's own paths. An option
+    guard must not skip the tail; see ``_reject_refused_long_options``.
+    """
     if "--" in args:
         idx = args.index("--")
         return args[:idx], args[idx + 1 :]
@@ -525,7 +758,7 @@ def _reject_credential_path_operands(args: list[str], *, cwd: str, tmpdir: str) 
     for operand in _operands_for_credential_scan(args):
         path = _path_from_git_operand(operand)
         if _is_denied_credential_path(path, cwd=cwd, tmpdir=tmpdir):
-            raise ValueError(_credential_path_message(path))
+            raise ToolRefusedError(_credential_path_message(path))
 
 
 def _command_path_operands(command: str) -> list[str]:
@@ -592,7 +825,7 @@ def _config_key_from_get_arg(arg: str, args: list[str], idx: int) -> tuple[str, 
     if idx + 1 < len(args):
         return args[idx + 1], idx + 2
     msg = "Blocked: 'config --get' requires a key."
-    raise ValueError(msg)
+    raise ToolRefusedError(msg)
 
 
 def _reject_config_invocation(args: list[str]) -> None:
@@ -608,12 +841,12 @@ def _reject_config_invocation(args: list[str]) -> None:
                         "Blocked: 'config --list' enumerates all configuration including "
                         "credential material — not permitted on the reviewer surface."
                     )
-                    raise ValueError(msg)
+                    raise ToolRefusedError(msg)
                 msg = (
                     f"Blocked: 'config {arg}' — only --get and --get-all "
                     "are permitted on the reviewer surface."
                 )
-                raise ValueError(msg)
+                raise ToolRefusedError(msg)
             if name == "--get":
                 key, idx = _config_key_from_get_arg(arg, args, idx)
                 if _is_denied_config_key(key):
@@ -621,7 +854,7 @@ def _reject_config_invocation(args: list[str]) -> None:
                         f"Blocked: 'config --get {key}' reads credential material — "
                         "not permitted on the reviewer surface."
                     )
-                    raise ValueError(msg)
+                    raise ToolRefusedError(msg)
                 continue
             if name == "--get-all":
                 key, idx = _config_key_from_get_arg(arg, args, idx)
@@ -630,7 +863,7 @@ def _reject_config_invocation(args: list[str]) -> None:
                         f"Blocked: 'config --get-all {key}' reads credential material — "
                         "not permitted on the reviewer surface."
                     )
-                    raise ValueError(msg)
+                    raise ToolRefusedError(msg)
                 continue
             idx += 1
             continue
@@ -639,12 +872,12 @@ def _reject_config_invocation(args: list[str]) -> None:
                 f"Blocked: 'config {arg}' — only --get and --get-all "
                 "are permitted on the reviewer surface."
             )
-            raise ValueError(msg)
+            raise ToolRefusedError(msg)
         msg = (
             f"Blocked: 'config {arg}' would write configuration — "
             "config writes are not available on the reviewer surface."
         )
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
 
 
 def _reject_branch_writes(args: list[str]) -> None:
@@ -667,7 +900,7 @@ def _reject_branch_writes(args: list[str]) -> None:
                     f"Blocked: 'branch {arg}' — only listing flags "
                     "are permitted on the reviewer surface."
                 )
-                raise ValueError(msg)
+                raise ToolRefusedError(msg)
             listing = listing or name == "--list"
             # A listing flag spelled ``--contains <rev>`` consumes its value, so
             # the value must not be read as a branch name to create.
@@ -684,7 +917,7 @@ def _reject_branch_writes(args: list[str]) -> None:
                     f"Blocked: 'branch {arg}' — only listing flags "
                     "are permitted on the reviewer surface."
                 )
-                raise ValueError(msg)
+                raise ToolRefusedError(msg)
             idx += 1
             continue
         if listing:
@@ -695,7 +928,7 @@ def _reject_branch_writes(args: list[str]) -> None:
             f"Blocked: 'branch {arg}' would create a branch — "
             "branch creation is not available on the reviewer surface."
         )
-        raise ValueError(msg)
+        raise ToolRefusedError(msg)
 
 
 def _reject_file_writing_flags(command: str, args: list[str]) -> None:
@@ -714,7 +947,7 @@ def _reject_file_writing_flags(command: str, args: list[str]) -> None:
         name = arg.split("=", 1)[0]
         if name in _OUTPUT_FLAG_SPELLINGS or (writes_dash_o and name == "-o"):
             msg = f"Blocked: '{command} {arg}' writes a file — the reviewer surface is read-only."
-            raise ValueError(msg)
+            raise ToolRefusedError(msg)
 
 
 def _reject_grep_pager_exec(args: list[str]) -> None:
@@ -730,16 +963,16 @@ def _reject_grep_pager_exec(args: list[str]) -> None:
     cannot smuggle it past a check that only looked at position zero.
 
     Raises:
-        ValueError: when any argument enables the pager.
+        ToolRefusedError: when any argument enables the pager.
     """
     for arg in args:
         if arg.startswith("-") and not arg.startswith("--") and "O" in arg[1:]:
             msg = f"Blocked: 'grep {arg}' opens a pager — arbitrary command execution."
-            raise ValueError(msg)
+            raise ToolRefusedError(msg)
         name = arg.split("=", 1)[0]
         if name in _GREP_PAGER_EXEC_LONG_SPELLINGS:
             msg = f"Blocked: 'grep {arg}' opens a pager — arbitrary command execution."
-            raise ValueError(msg)
+            raise ToolRefusedError(msg)
 
 
 def _reject_content_filter_exec(args: list[str]) -> None:
@@ -755,7 +988,7 @@ def _reject_content_filter_exec(args: list[str]) -> None:
     matched and stay allowed.
 
     Raises:
-        ValueError: when any argument enables a configured content filter.
+        ToolRefusedError: when any argument enables a configured content filter.
     """
     for arg in args:
         name = arg.split("=", 1)[0]
@@ -764,7 +997,7 @@ def _reject_content_filter_exec(args: list[str]) -> None:
                 f"Blocked: {arg!r} runs a git-config content filter "
                 "(diff.<driver>.textconv / diff.external) — arbitrary command execution."
             )
-            raise ValueError(msg)
+            raise ToolRefusedError(msg)
 
 
 __all__ = [
@@ -775,10 +1008,12 @@ __all__ = [
     "_CONFIG_FLAGS_TAKING_VALUE",
     "_CONFIG_READONLY_FLAGS",
     "_CONTENT_FILTER_EXEC_SPELLINGS",
+    "_GREP_LONG_OPTIONS",
     "_GREP_PAGER_EXEC_LONG_SPELLINGS",
     "_OUTPUT_FLAG_SPELLINGS",
     "_READONLY_SUBCOMMANDS",
     "_REDIRECT_TO_TOOL",
+    "_REFUSED_LONG_OPTIONS",
     "_SUBCOMMAND_OWNS_DASH_C",
     "_SUBCOMMAND_SHORT_FLAGS",
     "_SYMBOLIC_REFS",
@@ -794,9 +1029,11 @@ __all__ = [
     "_reject_grep_pager_exec",
     "_reject_namespace_flag",
     "_reject_no_index",
+    "_reject_refused_long_options",
     "_subcommand_declares_shorts",
     "reject_if_leading_dash",
     "reject_special_ref",
+    "resolve_grep_long_option",
     "shell_command_denies_credential_paths",
     "validate_tag_name",
 ]

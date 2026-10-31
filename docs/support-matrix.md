@@ -39,6 +39,7 @@ Analyzers with an empty language list are universal (any language).
 | docker | Analyzer catalog `languages:` |
 | ember | Analyzer catalog `languages:` |
 | fortran | Analyzer catalog `languages:` |
+| gherkin | Analyzer catalog `languages:` |
 | go | Analyzer catalog `languages:` |
 | html | Analyzer catalog `languages:` |
 | java | Analyzer catalog `languages:` |
@@ -95,6 +96,7 @@ Shipped catalog ids. The full catalog page is [ANALYZERS.md](ANALYZERS.md).
 | `eslint` | javascript, typescript | lint | auto |
 | `flake8` | python | lint | False |
 | `fortitude` | fortran | lint | auto |
+| `gherkin-lint` | gherkin | lint | False |
 | `golangci-lint` | go | lint | auto |
 | `govulncheck` | go | vuln | auto |
 | `hadolint` | docker | lint | auto |
@@ -122,6 +124,7 @@ Shipped catalog ids. The full catalog page is [ANALYZERS.md](ANALYZERS.md).
 | `regal` | rego | lint | auto |
 | `rubocop` | ruby | lint | auto |
 | `ruff` | python | lint | auto |
+| `self-silencing` | any / universal | security | True |
 | `semgrep` | python, javascript, typescript, go, java, ruby, rust, yaml | security | True |
 | `shellcheck` | shell | lint | auto |
 | `shopify-theme-check` | liquid | lint | auto |

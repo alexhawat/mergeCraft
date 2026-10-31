@@ -199,7 +199,7 @@ def _blocker_finding() -> Finding:
         end_line=12,
         source="agent",
         evidence=["logger.info(api_key)"],
-        fingerprint="vp2-blocker-cr",
+        fingerprint="a1b2c3d4e5f678901234abcd01",
     )
 
 
@@ -216,7 +216,7 @@ def _trivial_finding() -> Finding:
         end_line=1,
         source="agent",
         evidence=["line 1"],
-        fingerprint="vp2-trivial-tr",
+        fingerprint="b2c3d4e5f678901234abcd0123",
     )
 
 
@@ -226,7 +226,7 @@ def _agent_blocker() -> AgentFinding:
         body="Secret written to logs.",
         severity="Critical",
         line=12,
-        fingerprint="vp2-blocker-cr",
+        fingerprint="a1b2c3d4e5f678901234abcd01",
     )
 
 

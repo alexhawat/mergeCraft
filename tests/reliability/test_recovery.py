@@ -1,13 +1,11 @@
 """Behavioral suite for ``reliability/recovery.py`` (plan 29 T3 / #768).
 
-The prior coverage asserted only ``outcome.cleaned is True`` — a terminal
-assertion that cannot observe whether cleanup did anything, and cannot fail
-when the kill helper is skipped. These tests observe the cleanup itself:
+These tests observe the cleanup itself:
 
 - every recognised failure mode delegates to the process-group kill helper;
 - a registered process group is genuinely terminated by the cleanup call;
-- when the helper cannot complete, cleanup fails loudly instead of returning a
-  ``cleaned=True`` outcome it did not earn;
+- when the helper cannot complete, cleanup fails loudly instead of swallowing
+  the error;
 - the mode guard rejects an unknown mode *before* any process is signalled.
 """
 
@@ -35,11 +33,9 @@ def test_cleanup_invokes_the_process_group_kill_for_every_mode(
 
     monkeypatch.setattr(recovery, "kill_all_active_process_groups", _record)
 
-    outcome = cleanup_on_failure(mode)
+    cleanup_on_failure(mode)
 
     assert calls == [1], f"cleanup for {mode!r} never invoked the kill helper"
-    assert outcome.cleaned is True
-    assert outcome.status == "degraded"
 
 
 def test_cleanup_terminates_a_registered_process_group(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -56,8 +52,7 @@ def test_cleanup_terminates_a_registered_process_group(monkeypatch: pytest.Monke
     )
     monkeypatch.setattr(process_group, "active_process_groups", lambda: frozenset({proc.pid}))
     try:
-        outcome = cleanup_on_failure("timeout")
-        assert outcome.cleaned is True
+        cleanup_on_failure("timeout")
         assert proc.wait(timeout=5) is not None
     finally:
         if proc.poll() is None:

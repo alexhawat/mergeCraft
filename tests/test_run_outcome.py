@@ -420,6 +420,28 @@ def test_credential_gap_is_not_a_classifier_input() -> None:
     assert reason is None
 
 
+def test_idle_watchdog_stall_maps_to_infra_error_not_failed() -> None:
+    """A silent provider is an environment fault, not a wrong review verdict."""
+    from mergecraft.main_outcome import _classify_outcome
+
+    outcome, reason = _classify_outcome(
+        result=AgentResult(
+            success=False,
+            error="codex stalled — no model event for 900s",
+            metadata={"idle_timeout": True},
+        ),
+        setup_reason="",
+        setup_policy="warn",
+        prep_reason=None,
+        mode="Review",
+        verdict_protocol="enforce",
+    )
+
+    assert outcome is RunOutcome.infra_error
+    assert reason is not None
+    assert "stalled" in reason
+
+
 async def test_recorded_verdict_the_run_could_not_publish_is_not_passed(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

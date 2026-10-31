@@ -150,7 +150,15 @@ def capture_verdict_record(
             deterministic_checks=deterministic_checks,
             lane=lane,
         )
-        line = redact_secrets(json.dumps(record, ensure_ascii=False, sort_keys=True))
+        canonical_fp = verdict.fingerprint
+        redacted = redact_secrets(json.dumps(record, ensure_ascii=False, sort_keys=True))
+        parsed = json.loads(redacted)
+        # Hash-shaped fingerprints are not secrets, but the global redactor treats
+        # them like tokens; restore them so calibration validation stays stable.
+        parsed["case_id"] = canonical_fp
+        parsed["finding"]["fingerprint"] = canonical_fp
+        parsed["saved_judge_verdict"]["fingerprint"] = canonical_fp
+        line = json.dumps(parsed, ensure_ascii=False, sort_keys=True)
         path = Path(evidence_dir) / CAPTURE_FILENAME
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:

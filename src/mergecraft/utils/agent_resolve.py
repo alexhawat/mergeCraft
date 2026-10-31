@@ -1138,6 +1138,7 @@ async def run_with_model_chain(
                 # GenAI dashboard populates. ``gen_ai.system`` is the provider
                 # slug (anthropic/openai/google/opencode/...).
                 "gen_ai.system": _agent_provider_for_slug(slug),
+                "gen_ai.operation.name": "invoke_agent",
                 "gen_ai.agent.name": resolved_harness,
                 "gen_ai.request.model": slug,
                 "agent.cli_argv": cli_argv,
@@ -1554,6 +1555,7 @@ def _emit_advanced_attempt(
         "harness": harness,
         "agent.harness": harness,
         "gen_ai.system": _agent_provider_for_slug(slug),
+        "gen_ai.operation.name": "invoke_agent",
         "gen_ai.agent.name": harness,
         "gen_ai.request.model": slug,
         "agent.cli_argv": _redacted_cli_argv(),

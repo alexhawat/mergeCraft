@@ -47,7 +47,7 @@ Do all of this yourself, without asking me, except where step 4 says STOP:
    Do NOT install Python. uv downloads a compatible interpreter on its own.
 
 2. Install the CLI:
-     uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"
+     uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
      mergecraft --version
 
 3. Scaffold config + workflow (non-interactive, writes no secrets):
@@ -381,7 +381,7 @@ For the GitHub Action path, see [How it works in GitHub Action](#how-it-works-in
 1. **Install the CLI and scaffold the repo:**
 
 ```bash
-uv tool install "merge-craft @ git+https://github.com/alexhawat/mergeCraft"
+uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
 
@@ -445,7 +445,7 @@ jobs:
           # Do not persist the checkout token into .git/config: mergeCraft adds
           # its own Authorization header, and git sends both on one request.
           persist-credentials: false
-      - uses: alexhawat/mergeCraft@521c0aedbf525a80a5bf6eddf0119ada85a8d381 # v0.1.0a1
+      - uses: alexhawat/mergeCraft@7080e962c2259757a34b9f745602f093e4ee3378 # v0.1.0a4
         with:
           # Event-aware: a pull_request run reviews the PR, a manual dispatch
           # uses the prompt the operator typed. Hardcoding the text here would
@@ -459,7 +459,7 @@ jobs:
         env:
           # Keep equal to the `uses:` commit above — the container cannot read
           # it, so this is the only way the run records which pin it is running.
-          MERGECRAFT_ACTION_SHA: 521c0aedbf525a80a5bf6eddf0119ada85a8d381
+          MERGECRAFT_ACTION_SHA: 7080e962c2259757a34b9f745602f093e4ee3378
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 

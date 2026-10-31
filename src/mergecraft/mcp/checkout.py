@@ -12,18 +12,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import httpx
 from loguru import logger
 
 from mergecraft.analyzers.impact import resolve_ast_grep_binary, write_impact
 from mergecraft.analyzers.trust import analyzers_enabled
-from mergecraft.config.settings import load_repo_settings
 from mergecraft.config.trust_policy import is_fork_pull_request
 from mergecraft.mcp.git import _git_env, _is_auth_failure, _run_git
 from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
 from mergecraft.mcp.tool_call import normalize_pull_number_aliases
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
 from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, degraded_checkout_reason
-from mergecraft.types import INCREMENTAL_REVIEW_MODE
 from mergecraft.utils.gha_log import warning
 from mergecraft.utils.git_hardening import read_remote_origin_url
 from mergecraft.utils.github import GitHubClient
@@ -34,6 +33,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "GitHubClient",
+    "IncrementalDiffResult",
     "RunBoundReviewState",
     "checkout_pr_tool",
     "ensure_local_base_branch_alias",
@@ -41,6 +41,23 @@ __all__ = [
     "list_mergecraft_reviews",
     "recover_run_bound_review_state",
 ]
+
+
+@dataclass(slots=True)
+class IncrementalDiffResult:
+    """Outcome of trying to materialise a re-review's incremental range.
+
+    ``status`` is closed: ``ok`` (``path`` is set), ``empty`` (the checkpoint
+    is reachable but nothing changed), or ``unavailable`` (no checkpoint, or it
+    could not be turned into a diff). ``reason`` is human-readable and is
+    surfaced in the tool result for the non-``ok`` cases.
+    """
+
+    status: str
+    prior_sha: str
+    path: str | None = None
+    changed_paths: tuple[str, ...] = ()
+    reason: str | None = None
 
 
 def _rebaseline_config_after_checkout(ctx: ToolContext) -> None:
@@ -308,8 +325,10 @@ async def list_mergecraft_reviews(ctx: ToolContext, *, pull_number: int) -> list
 
 
 # HS8 — the trusted self-review workflow whose runs carry the run-bound
-# checkpoint. The repo-relative path identifies the file; the basename is the
-# documented Actions-API ``{workflow_id}`` spelling, tried second.
+# checkpoint. The Actions API resolves ``{workflow_id}`` by numeric workflow id
+# or by workflow *file name* only — the repo-relative path spelling is answered
+# with 404 (#1082) — so the file name is tried first and the path is kept as a
+# fallback for recorded doubles that still serve it.
 _WORKFLOW_PATH = ".github/workflows/mergecraft.yml"
 _WORKFLOW_FILE = _WORKFLOW_PATH.rsplit("/", 1)[-1]
 _TRUSTED_RUN_EVENT = "pull_request_target"
@@ -388,23 +407,68 @@ def _filter_trusted_runs(runs: object, *, pull_number: int) -> list[dict[str, An
     return trusted
 
 
+def _describe_run_api_error(err: BaseException) -> str:
+    """Return a one-line description of an Actions-API failure (#1082).
+
+    ``str(httpx.HTTPStatusError)`` appends httpx's own docs hint on a second
+    line (``For more information check: https://developer.mozilla.org/...``);
+    in a job log it reads as if mergeCraft were pointing an Actions 404 at
+    web-fetch documentation. Name the status and the request instead.
+    """
+    if isinstance(err, httpx.HTTPStatusError):
+        response = err.response
+        reason = response.reason_phrase or "error"
+        try:
+            request = err.request
+        except RuntimeError:
+            return f"HTTP {response.status_code} {reason}"
+        return f"HTTP {response.status_code} {reason} for {request.method} {request.url}"
+    return str(err)
+
+
 async def _list_mergecraft_workflow_runs(ctx: ToolContext) -> object:
     """List this repo's trusted-event ``mergecraft.yml`` runs (HS8).
 
-    Both the repo-relative path and the file-name spellings of the Actions-API
-    ``{workflow_id}`` are tried so the read works against GitHub and against a
-    recorded double alike. Returns the raw ``workflow_runs`` list; when neither
-    form yields the expected shape it warns once naming the repo and returns
-    ``None`` (an unexpected Actions API shape, never a silent fallback).
+    The Actions API resolves ``{workflow_id}`` by numeric workflow id or by
+    workflow *file name*; the repo-relative path spelling is answered with 404
+    (#1082). The file name is tried first, the path spelling kept as a
+    fallback, and a 404 on either form falls through to the next instead of
+    aborting the listing. Returns the raw ``workflow_runs`` list; when every
+    spelling 404s it warns once naming the real cause (workflow not resolvable
+    through the Actions API for this token), and when no spelling yields the
+    expected shape it warns once naming the repo — never a silent fallback.
     """
-    for workflow_ref in (_WORKFLOW_PATH, _WORKFLOW_FILE):
+    saw_not_found = False
+    for workflow_ref in (_WORKFLOW_FILE, _WORKFLOW_PATH):
         endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/actions/workflows/{workflow_ref}/runs"
-        payload = await ctx.scm.get(
-            endpoint,
-            params={"event": _TRUSTED_RUN_EVENT, "per_page": _REVIEWS_PAGE_SIZE},
-        )
+        try:
+            payload = await ctx.scm.get(
+                endpoint,
+                params={"event": _TRUSTED_RUN_EVENT, "per_page": _REVIEWS_PAGE_SIZE},
+            )
+        except httpx.HTTPStatusError as err:
+            if err.response.status_code != 404:
+                raise
+            saw_not_found = True
+            continue
         if isinstance(payload, Mapping) and isinstance(payload.get("workflow_runs"), list):
             return payload["workflow_runs"]
+    if saw_not_found:
+        # 404 on every ``{workflow_id}`` spelling means the workflow is not
+        # resolvable through the Actions API for this token: the file is absent
+        # from the repository's default branch (a consumer renamed it) or the
+        # run token lacks ``actions: read``. Named once here, not per spelling,
+        # and the checkpoint stays fail-closed (HS8 / P-8).
+        logger.warning(
+            "run-bound checkpoint: listing runs for {}/{} workflow {} returned 404 "
+            "Not Found for every Actions-API workflow-id spelling; the workflow "
+            "must exist on the repository's default branch and the run token "
+            "needs actions: read — checkpoint reuse is skipped",
+            ctx.repo.owner,
+            ctx.repo.name,
+            _WORKFLOW_FILE,
+        )
+        return None
     # Neither ``{workflow_id}`` spelling produced a mapping carrying a
     # ``workflow_runs`` list. That is an unexpected Actions API shape, not the
     # benign "this PR has no trusted runs" case (which returns an empty list),
@@ -507,7 +571,9 @@ async def _read_run_evidence_packet(ctx: ToolContext, *, run_id: int) -> dict[st
             blob = await ctx.scm.download_artifact_zip(ctx.repo.owner, ctx.repo.name, artifact_id)
         except Exception as err:
             logger.warning(
-                "run-bound checkpoint: artefact {} could not be downloaded: {}", artifact_id, err
+                "run-bound checkpoint: artefact {} could not be downloaded: {}",
+                artifact_id,
+                _describe_run_api_error(err),
             )
             continue
         packet = _packet_from_artifact_zip(
@@ -549,7 +615,10 @@ async def recover_run_bound_review_state(
     try:
         runs = await _list_mergecraft_workflow_runs(ctx)
     except Exception as err:
-        logger.warning("run-bound checkpoint: listing workflow runs failed: {}", err)
+        logger.warning(
+            "run-bound checkpoint: listing workflow runs failed: {}",
+            _describe_run_api_error(err),
+        )
         return _UNAVAILABLE_RUN_BOUND_STATE
     trusted = _filter_trusted_runs(runs, pull_number=pull_number)
     if not trusted:
@@ -564,7 +633,11 @@ async def recover_run_bound_review_state(
         try:
             packet = await _read_run_evidence_packet(ctx, run_id=run_id)
         except Exception as err:
-            logger.warning("run-bound checkpoint: reading run {} failed: {}", run_id, err)
+            logger.warning(
+                "run-bound checkpoint: reading run {} failed: {}",
+                run_id,
+                _describe_run_api_error(err),
+            )
             continue
         reviewed_head_sha = str(packet.get("reviewed_head_sha") or "") if packet else ""
         if not reviewed_head_sha:
@@ -858,12 +931,14 @@ def _fetch_head_with_retry(
 
 def _write_incremental_diff(
     *, cwd: str, temp: str, pull_number: int, prior_sha: str, git_token: str
-) -> tuple[str, list[str]] | None:
-    """Write the diff since ``prior_sha`` and return its path plus changed paths.
+) -> IncrementalDiffResult:
+    """Write the diff since ``prior_sha`` and report an explicit status.
 
-    Returns ``None`` — so the caller omits ``incrementalDiffPath`` entirely rather
-    than advertising a file that does not exist — when the prior commit is not
-    reachable in this checkout or the range turns out to be empty.
+    The caller advertises ``incrementalDiffPath`` only when ``status == "ok"``,
+    so a promised file always exists. ``empty`` and ``unavailable`` come with a
+    reason the tool result carries verbatim — a reviewer that is told *why*
+    there is no incremental range can decide whether to fall back to the full
+    diff, instead of guessing from an absent key.
     """
     try:
         _run_git(["cat-file", "-e", f"{prior_sha}^{{commit}}"], cwd=cwd)
@@ -879,18 +954,38 @@ def _write_incremental_diff(
             _run_git(["cat-file", "-e", f"{prior_sha}^{{commit}}"], cwd=cwd)
         except RuntimeError as err:
             logger.info("incremental diff: prior sha {} unreachable: {}", prior_sha, err)
-            return None
+            return IncrementalDiffResult(
+                status="unavailable",
+                prior_sha=prior_sha,
+                reason=(
+                    f"the last reviewed commit {prior_sha[:12]} is not reachable in this "
+                    "checkout (shallow clone or rewritten history)"
+                ),
+            )
     try:
         diff = _run_git(["diff", "--merge-base", prior_sha, "HEAD"], cwd=cwd)
     except RuntimeError as err:
         logger.info("incremental diff: range diff soft-failed: {}", err)
-        return None
+        return IncrementalDiffResult(
+            status="unavailable",
+            prior_sha=prior_sha,
+            reason=f"git diff against {prior_sha[:12]} failed: {err}",
+        )
     if not diff.strip():
         logger.info("incremental diff: no changes since {}; omitting path", prior_sha)
-        return None
+        return IncrementalDiffResult(
+            status="empty",
+            prior_sha=prior_sha,
+            reason=f"no changes since the last reviewed commit {prior_sha[:12]}",
+        )
     path = str(Path(temp) / f"pr-{pull_number}-incremental.diff")
     Path(path).write_text(diff, encoding="utf-8")
-    return path, changed_paths_in_diff(diff)
+    return IncrementalDiffResult(
+        status="ok",
+        prior_sha=prior_sha,
+        path=path,
+        changed_paths=tuple(changed_paths_in_diff(diff)),
+    )
 
 
 def _record_delivered_diff(
@@ -1041,6 +1136,11 @@ def checkout_pr_tool(ctx: ToolContext):
                 "scope": API_ONLY_SCOPE,
                 "degraded": fetch_degraded,
                 "reviewPhase": ReviewPhase.ESTABLISH_SCOPE.value,
+                "incrementalDiffStatus": "unavailable",
+                "incrementalDiffReason": (
+                    "the PR head could not be fetched locally, so no incremental "
+                    "range can be computed in api-only scope"
+                ),
             }
             if fetch_unreviewable:
                 result["unreviewablePaths"] = fetch_unreviewable
@@ -1164,48 +1264,62 @@ def checkout_pr_tool(ctx: ToolContext):
         round_index = _round_index(run_bound, prior_reviews, publishers=publishers)
         ctx.tool_state.review_round_index = round_index
 
-        # A re-review should pay for the new commits, not the whole PR. The key is
-        # emitted only when the range is real: the prompt tells the reviewer to
-        # read this path first, so advertising a path that does not resolve is
-        # worse than not advertising one at all. The run-bound checkpoint (HS8)
+        # A re-review should pay for the new commits, not the whole PR. Compute
+        # the range whenever a prior reviewed sha is recoverable — regardless of
+        # whether ``select_mode`` has run yet, because #1017 showed a reviewer
+        # that never calls ``select_mode`` still needs the checkpointed scope.
+        # The run-bound checkpoint (HS8, read from the trusted persisted packet)
         # outranks the publisher scan when a trusted run named a head.
-        if ctx.tool_state.selected_mode == INCREMENTAL_REVIEW_MODE:
-            prior_sha = run_bound.reviewed_head_sha or (
-                last_reviewed_sha(
-                    prior_reviews,
-                    head_sha=state.checkout_sha or "",
-                    publishers=publishers,
-                )
-                or ""
+        prior_sha = run_bound.reviewed_head_sha or (
+            last_reviewed_sha(
+                prior_reviews,
+                head_sha=state.checkout_sha or "",
+                publishers=publishers,
             )
-            if prior_sha:
-                written = _write_incremental_diff(
-                    cwd=cwd,
-                    temp=temp,
-                    pull_number=pull_number,
-                    prior_sha=prior_sha,
-                    git_token=ctx.git_token,
+            or ""
+        )
+        if prior_sha:
+            incremental = _write_incremental_diff(
+                cwd=cwd,
+                temp=temp,
+                pull_number=pull_number,
+                prior_sha=prior_sha,
+                git_token=ctx.git_token,
+            )
+            result["lastReviewedSha"] = prior_sha
+            result["incrementalDiffStatus"] = incremental.status
+            if incremental.status == "ok" and incremental.path is not None:
+                state.last_reviewed_sha = prior_sha
+                state.incremental_diff_path = incremental.path
+                state.incremental_changed_paths = list(incremental.changed_paths)
+                result["incrementalDiffPath"] = incremental.path
+                logger.info(
+                    "incremental diff for PR #{} since {} -> {} ({} file(s))",
+                    pull_number,
+                    prior_sha,
+                    incremental.path,
+                    len(incremental.changed_paths),
                 )
-                if written is not None:
-                    incremental_path, changed = written
-                    state.last_reviewed_sha = prior_sha
-                    state.incremental_diff_path = incremental_path
-                    state.incremental_changed_paths = changed
-                    result["incrementalDiffPath"] = incremental_path
-                    result["lastReviewedSha"] = prior_sha
-                    logger.info(
-                        "incremental diff for PR #{} since {} -> {} ({} file(s))",
-                        pull_number,
-                        prior_sha,
-                        incremental_path,
-                        len(changed),
-                    )
+            else:
+                result["incrementalDiffReason"] = incremental.reason or "no incremental range"
+                logger.info(
+                    "incremental diff for PR #{} since {}: {} ({})",
+                    pull_number,
+                    prior_sha,
+                    incremental.status,
+                    incremental.reason,
+                )
+        else:
+            result["incrementalDiffStatus"] = "unavailable"
+            result["incrementalDiffReason"] = (
+                "no prior mergeCraft review checkpoint is recoverable for this PR"
+            )
 
         # S6 #94 — impact-path extraction (default off behind analyzers.impact).
         # Emitted only when enabled; returns None (-> no key) when the diff
         # has zero declarations, matching the incrementalDiffPath convention.
-        # The analyzers.impact toggle is read from the PR's own checkout (fine —
-        # repo config is safe to *read* regardless of trust tier), but gated
+        # The analyzers.impact toggle is read from the PR's pinned (base-side) settings,
+        # never the head checkout (#942), and gated
         # behind analyzers_enabled(ctx) first so the operator's effective
         # policy (analyzers: off, or analyzers.enabled: false) always wins over
         # whatever a PR sets in its own config — mirrors run_analyzers_tool's
@@ -1215,8 +1329,10 @@ def checkout_pr_tool(ctx: ToolContext):
         # available (D7).
         try:
             repo_root = Path(cwd)
-            settings_obj = load_repo_settings(root=repo_root, load_learnings_files=False)
-            if analyzers_enabled(ctx) and settings_obj.analyzers.impact:
+            from mergecraft.analyzers.settings_pin import resolve_pinned_analyzer_settings
+
+            pinned_settings = resolve_pinned_analyzer_settings(ctx, repo_root).settings
+            if analyzers_enabled(ctx) and pinned_settings.impact:
                 ast_grep_binary = resolve_ast_grep_binary()
                 if ast_grep_binary is None:
                     logger.info(
@@ -1283,11 +1399,13 @@ def checkout_pr_tool(ctx: ToolContext):
         timeout_ms=600_000,
         description=(
             "Checkout a pull request branch locally. Returns diffPath pointing to the "
-            "formatted diff file, plus incrementalDiffPath (changes since the last "
-            "mergeCraft review) on a re-review when a prior reviewed commit is "
-            "recoverable and the range is non-empty. When the repo config enables "
-            "analyzers.impact, also returns impactPath pointing to a JSON file listing "
-            "declaration-level reference leads for the changed files."
+            "formatted diff file. On a re-review — a PR that already has a mergeCraft "
+            "review on an earlier head — also reports incrementalDiffStatus "
+            "(ok|empty|unavailable) and, when ok, incrementalDiffPath (changes since "
+            "that review) plus lastReviewedSha; incrementalDiffReason explains empty or "
+            "unavailable. When the repo config enables analyzers.impact, also returns "
+            "impactPath pointing to a JSON file listing declaration-level reference "
+            "leads for the changed files."
         ),
         input_schema=_CHECKOUT_PR_INPUT_SCHEMA,
         execute=execute(_run, "checkout_pr"),

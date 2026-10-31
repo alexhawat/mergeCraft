@@ -533,6 +533,18 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
                 "No markdownlint config → shipped fallback disables MD060 "
                 "(table-column-style) only."
             )
+        if manifest.id == "self-silencing":
+            notes.append(
+                "In-process, diff-only: reports added suppression markers and loosened "
+                "analyzer/linter config; a PR's own analyzer config is never applied to its "
+                "own review."
+            )
+        if manifest.id == "gherkin-lint":
+            notes.append(
+                "Syntax/structure only — never runs scenarios or step definitions. Opt-in: "
+                "runs the repo's own pinned gherkin-lint (no managed npm runtime). No "
+                ".gherkin-lintrc → structure-only fallback config."
+            )
         if manifest.id in ("flake8", "pylint"):
             notes.append("Legacy opt-in — disabled by default; enable via config override.")
         if manifest.id in ("phpcs", "phpmd"):

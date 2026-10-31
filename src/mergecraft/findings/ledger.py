@@ -1158,6 +1158,33 @@ def reconcile_outcome(*, value: Any, not_an_approval: bool, positive: str | Sequ
     return rendered
 
 
+def _format_phase_elapsed(seconds: float) -> str:
+    """Render one phase's elapsed seconds for the **Review cost** row (#1075).
+
+    ``{:.0f}s`` rounds real sub-second work (analyzers at 0.124s) down to
+    ``0s``, which reads as "the phase did not run". Sub-second values keep one
+    decimal instead; under 50 ms that decimal would still render ``0.0s``, so
+    those are named ``<0.1s`` — small, but not zero.
+
+    Examples:
+        >>> _format_phase_elapsed(0.0)
+        '0s'
+        >>> _format_phase_elapsed(0.124)
+        '0.1s'
+        >>> _format_phase_elapsed(0.02)
+        '<0.1s'
+        >>> _format_phase_elapsed(90.0)
+        '90s'
+    """
+    if seconds <= 0:
+        return "0s"
+    if seconds < 0.05:
+        return "<0.1s"
+    if seconds < 1:
+        return f"{seconds:.1f}s"
+    return f"{seconds:.0f}s"
+
+
 def render_deterministic_review_block(
     *,
     packet: Any,
@@ -1292,6 +1319,26 @@ def render_deterministic_review_block(
         header_lines.append(f"- **Tokens:** {token_summary}")
     if cost_summary:
         header_lines.append(f"- **Cost:** {cost_summary}")
+    metrics = getattr(packet, "run_metrics", None)
+    if metrics is not None:
+        phase_elapsed = getattr(metrics, "phase_elapsed_s", {}) or {}
+        phase_order = ("setup", "analyzers", "agent", "judge", "publish")
+        phase_bits = [
+            f"{name} {_format_phase_elapsed(float(phase_elapsed[name]))}"
+            for name in phase_order
+            if name in phase_elapsed
+        ]
+        phases_text = f" · phases: {', '.join(phase_bits)}" if phase_bits else ""
+        header_lines.append(
+            "- **Review cost:** "
+            f"{getattr(metrics, 'tool_calls', 0)} tool calls · "
+            f"{getattr(metrics, 'distinct_files_read', 0)} files read · "
+            f"{getattr(metrics, 'diff_lines', 0)} diff lines"
+            f"{phases_text}"
+        )
+        agent_diag = getattr(metrics, "agent_diagnostic", None)
+        if isinstance(agent_diag, str) and agent_diag.strip():
+            header_lines.append(f"- **Agent stall:** {agent_diag.strip().splitlines()[0]}")
     if llm_review_timing is not None:
         from mergecraft.utils.llm_review_timing import (
             LlmReviewTimingSnapshot,

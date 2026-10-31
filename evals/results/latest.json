@@ -371,26 +371,26 @@
     {
       "case_id": "pr-250-memory-feedback",
       "corpus_class": "correctness",
-      "current_decision": null,
-      "expected_decision": "neutral",
-      "replayable": false,
-      "status": "blocked"
+      "current_decision": "failure",
+      "expected_decision": "failure",
+      "replayable": true,
+      "status": "passed"
     },
     {
       "case_id": "pr-253-scm-provider",
       "corpus_class": "correctness",
-      "current_decision": null,
-      "expected_decision": "neutral",
-      "replayable": false,
-      "status": "blocked"
+      "current_decision": "failure",
+      "expected_decision": "failure",
+      "replayable": true,
+      "status": "passed"
     },
     {
       "case_id": "pr-216-eval-gate-matrix",
       "corpus_class": "correctness",
-      "current_decision": null,
-      "expected_decision": "neutral",
-      "replayable": false,
-      "status": "blocked"
+      "current_decision": "failure",
+      "expected_decision": "failure",
+      "replayable": true,
+      "status": "passed"
     }
   ],
   "convergence": null,
@@ -565,8 +565,8 @@
         "total": 12
       },
       "correctness": {
-        "correct": 16,
-        "inconclusive": 4,
+        "correct": 19,
+        "inconclusive": 1,
         "incorrect": 0,
         "total": 20
       },
@@ -583,16 +583,16 @@
         "total": 11
       }
     },
-    "cases_blocked": 3,
-    "cases_passed": 46,
+    "cases_blocked": 0,
+    "cases_passed": 49,
     "cases_regression": 0,
-    "cases_replayable": 46,
+    "cases_replayable": 49,
     "cases_total": 49,
     "clean_block_rate": 0.0,
     "decision_replay_pass_rate": 1.0,
     "gate_matrix": {
-      "buggy_correct_block": 32,
-      "buggy_inconclusive": 4,
+      "buggy_correct_block": 35,
+      "buggy_inconclusive": 1,
       "buggy_total": 36,
       "buggy_unsafe_approval": 0,
       "clean_correct_approval": 13,
@@ -600,7 +600,7 @@
       "clean_total": 13,
       "clean_unsafe_block": 0
     },
-    "inconclusive_rate": 0.08163265306122448,
+    "inconclusive_rate": 0.02040816326530612,
     "unsafe_approval_rate": 0.0
   },
   "pins": {
@@ -622,14 +622,14 @@
       }
     },
     "line_slack": 3,
-    "mergecraft_commit": "be925ebfe60d734a24501dbea8a557577a2dc98d",
+    "mergecraft_commit": "a1c24fc749a3fa21e2462fdaed76926667c7eb99",
     "mergecraft_version": "0.1.0a1",
     "mode_prompt_versions": {
-      "IncrementalReview": "c9173a877309",
+      "IncrementalReview": "dc75e9f4d031",
       "Plan": "1ffe2481d1b8",
-      "Review": "40a4d3c48cc2"
+      "Review": "6f6436244e9c"
     },
-    "recorded_at": "2026-09-25T15:45:24.600486Z",
+    "recorded_at": "2026-10-17T01:04:06.427862Z",
     "reviewing_model": {
       "claude": {
         "model_id": "claude-sonnet-5",

@@ -76,6 +76,31 @@ def test_mcp_observed_reads_are_still_read_coverage() -> None:
     assert record.read_coverage is True
 
 
+def test_diff_read_marker_only_credits_whole_file_read_commands() -> None:
+    from mergecraft.evidence.trajectory import record_tool_call
+
+    state = init_tool_state(owner="acme", name="demo", dir="/tmp/demo")
+    state.repos[state.primary_repo_key].diff_path = "/tmp/run/pr-7.diff"
+
+    grep_call = record_tool_call(
+        state,
+        tool="shell",
+        arguments={"command": "grep -n needle /tmp/run/pr-7.diff"},
+        ok=True,
+        outcome_ok=True,
+    )
+    cat_call = record_tool_call(
+        state,
+        tool="shell",
+        arguments={"command": "cat /tmp/run/pr-7.diff"},
+        ok=True,
+        outcome_ok=True,
+    )
+
+    assert grep_call.diff_read == (0, -1)
+    assert cat_call.diff_read == (0, 0)
+
+
 def test_shell_read_operands_drive_exact_audit_coverage() -> None:
     state = init_tool_state(owner="acme", name="demo", dir="/repo")
     record_tool_call(

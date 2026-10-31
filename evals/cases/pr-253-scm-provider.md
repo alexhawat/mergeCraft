@@ -7,7 +7,7 @@ run_id: pr-253
 pr_number: 253
 failure_mode: multi_round_miss
 expected_finding: "see rounds[].findings"
-expected_decision: neutral
+expected_decision: failure
 replay_command: "mergecraft eval convergence"
 provenance:
   run_id: pr-253
@@ -129,6 +129,43 @@ rounds:
     findings: []
     ledger: []
     generated_fingerprints: []
+recorded_findings:
+- path: src/mergecraft/scm/github.py
+  start_line: 237
+  end_line: 237
+  message: MCP-alias protocol ops diverge from the tools they name
+  severity: Major
+  confidence: certain
+  category: Functional Correctness
+  source: agent
+  fingerprint: adb01ec4fa14e0392d835c69
+  tool: agent
+  rule_id: agent:pr-253-scm-provider
+  introduced_by_pr: 'true'
+  evidence:
+  - 'raised in review round 1 of PR #253'
+  remediation: null
+  autofix: null
+  cluster_id: null
+- path: src/mergecraft/main.py
+  start_line: 102
+  end_line: 102
+  message: GitHub Client string obfuscation hides imports from scanners
+  severity: Major
+  confidence: certain
+  category: Functional Correctness
+  source: agent
+  fingerprint: abc23125e40c21dbf02a5659
+  tool: agent
+  rule_id: agent:pr-253-scm-provider
+  introduced_by_pr: 'true'
+  evidence:
+  - 'raised in review round 1 of PR #253'
+  remediation: null
+  autofix: null
+  cluster_id: null
+run_succeeded: true
+trust_tier: trusted
 ---
 
 # pr-253-scm-provider

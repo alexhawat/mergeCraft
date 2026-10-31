@@ -20,7 +20,9 @@ from mergecraft.utils.git_setup import (
     cleanup_temp_directory,
     create_temp_directory,
     git_env_for_token,
+    is_run_owned_directory,
     register_created_path,
+    register_run_owned_directory,
     setup_git,
     wipe_runner_leak_surface,
     write_askpass_script,
@@ -161,9 +163,39 @@ def test_create_temp_directory_prefers_runner_temp_over_tmp(
         assert created.startswith(str(runner))
         assert not _is_under_forbidden_temp(Path(created))
         assert os.environ["MERGECRAFT_TEMP_DIR"] == created
+        # The run's own temp dir is the one an agent may be granted wholesale.
+        assert is_run_owned_directory(created)
     finally:
         os.environ.pop("MERGECRAFT_TEMP_DIR", None)
         shutil.rmtree(staging, ignore_errors=True)
+
+
+def test_only_a_registered_directory_is_run_owned(tmp_path: Path) -> None:
+    """An operator-chosen directory is not run-owned until a run registers its mkdtemp."""
+    run_dir = tmp_path / "mergecraft-diff-review-x"
+    run_dir.mkdir()
+    shared = tmp_path / "shared"
+    shared.mkdir()
+
+    register_run_owned_directory(str(run_dir))
+
+    assert is_run_owned_directory(str(run_dir))
+    # Spelled differently (a ``..`` hop), the same directory still matches.
+    assert is_run_owned_directory(str(run_dir / ".." / run_dir.name))
+    assert not is_run_owned_directory(str(shared))
+
+
+def test_is_run_owned_directory_returns_false_on_resolve_oserror(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A path that cannot be resolved is never treated as run-owned."""
+
+    class BoomPath(type(Path())):  # type: ignore[misc]
+        def resolve(self, strict: bool = False):
+            raise OSError("boom")
+
+    monkeypatch.setattr(git_setup_mod, "Path", BoomPath)
+    assert is_run_owned_directory("/tmp/anything") is False
 
 
 def test_create_temp_directory_skips_forbidden_runner_temp(

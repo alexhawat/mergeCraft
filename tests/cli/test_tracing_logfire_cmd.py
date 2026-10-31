@@ -363,14 +363,14 @@ def test_tracing_logfire_enable_reads_token_from_env_when_flag_omitted(
     # picked them up (main() runs load_dotenv).
     env_path = tmp_path / ".env"
     env_path.write_text(
-        "MERGECRAFT_LOGFIRE_TOKEN=pylf_v2_eu_c8a1f2ec-0521-40c0-8159-2625b0b3b485_test\n"
+        "MERGECRAFT_LOGFIRE_TOKEN=pylf_v2_eu_00000000-0000-4000-8000-000000000000_test\n"
         "MERGECRAFT_TRACING_PROJECT=mergecraft-dev\n",
         encoding="utf-8",
     )
     # Simulate the already-loaded env (main() runs this before app()).
     monkeypatch.setenv(
         "MERGECRAFT_LOGFIRE_TOKEN",
-        "pylf_v2_eu_c8a1f2ec-0521-40c0-8159-2625b0b3b485_test",
+        "pylf_v2_eu_00000000-0000-4000-8000-000000000000_test",
     )
     monkeypatch.setenv("MERGECRAFT_TRACING_PROJECT", "mergecraft-dev")
 
@@ -380,7 +380,7 @@ def test_tracing_logfire_enable_reads_token_from_env_when_flag_omitted(
     # Prompt must NOT have been hit (token via env).
     assert "Logfire write token" not in result.stdout
     assert len(captured) == 1
-    assert captured[0]["value"] == "pylf_v2_eu_c8a1f2ec-0521-40c0-8159-2625b0b3b485_test"
+    assert captured[0]["value"] == "pylf_v2_eu_00000000-0000-4000-8000-000000000000_test"
 
 
 def test_tracing_logfire_enable_flag_overrides_env_token(

@@ -53,6 +53,7 @@ from mergecraft.mcp.tool_state import (
 from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.prep.types import is_prep_install_failure
 from mergecraft.review.engine import ReviewEngine
+from mergecraft.review.roster_execution import RosterExecutionSummary, apply_roster_failure
 from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
@@ -128,7 +129,9 @@ if TYPE_CHECKING:
     from mergecraft.config.settings import RepoSettings, RunContextData
     from mergecraft.evidence.shadow import VerdictProtocolPrediction
     from mergecraft.mcp.verdict import VerdictDiagnostic
+    from mergecraft.modes import Mode
     from mergecraft.scm.protocol import ScmProvider
+    from mergecraft.types import AgentId
 
 
 @dataclass(slots=True)
@@ -211,6 +214,7 @@ class RunContext:
     setup_hook_failure: str = ""
     setup_script_skip_reason: str = ""
     setup_elapsed_s: float = 0.0
+    agent_deadline_monotonic: float | None = None
     mcp_url: str = ""
     stop_mcp: Callable[[], None] | None = None
     subagent_denied: list[str] = field(default_factory=list)
@@ -495,6 +499,10 @@ async def publish_deterministic_record(
             tool_state.usage_entries,
             budget_tracker=resolved_ctx.budget_tracker,
         ),
+        cost_summary=_cost_summary(
+            tool_state.usage_entries,
+            budget_tracker=resolved_ctx.budget_tracker,
+        ),
         llm_review_timing=tool_state.llm_review_timing,
         credential_degradations=list(tool_state.credential_degradations),
         agent_sandbox_decision=tool_state.agent_sandbox_decision,
@@ -510,6 +518,18 @@ async def publish_deterministic_record(
     publication_lines = _publication_record_lines(tool_state)
     if publication_lines:
         block = "\n".join([block.rstrip(), *publication_lines]) + "\n"
+    from mergecraft.mcp.review import should_publish_sticky_only
+
+    if tool_state.review_publication_sticky_only or should_publish_sticky_only(packet):
+        # #1078 — this rung is non-terminal (a fallback rung will replace a
+        # neutral decision), so its record belongs in the sticky progress
+        # comment. It must not create the formal review the publish seam
+        # deliberately skipped, and must not retire the sticky as a legacy
+        # record: the sticky is the record.
+        from mergecraft.findings.ledger import upsert_sticky_progress_comment
+
+        await upsert_sticky_progress_comment(resolved_ctx, block)
+        return
     owner, repo = resolved_ctx.repo.owner, resolved_ctx.repo.name
     review = tool_state.review
     existing_body = ""
@@ -1320,6 +1340,34 @@ async def _assemble_model_chain(ctx: RunContext) -> None:
     _stamp_requested_model(ctx, payload_model)
 
 
+def _agent_timeout_ms(ctx: RunContext) -> int | None:
+    """Return the agent deadline: the run timeout minus setup elapsed (S1 / F6).
+
+    A slow setup must NOT silently extend the total run deadline, so its
+    wall-clock duration comes out of the agent's share. ``None`` means the
+    run has no timeout.
+    """
+    if ctx.timeout_ms is None:
+        return None
+    return max(1, int(ctx.timeout_ms - ctx.setup_elapsed_s * 1000))
+
+
+def _render_run_modes(ctx: RunContext, agent_id: AgentId) -> list[Mode]:
+    """Render built-in plus custom modes for ``agent_id`` with this run's budgets."""
+    assert ctx.settings is not None
+    settings = ctx.settings
+    agent_timeout_ms = _agent_timeout_ms(ctx)
+    return [
+        *compute_modes(
+            agent_id,
+            settings.signed_commits,
+            inline_budget=settings.analyzers.inline_budget,
+            time_budget_minutes=None if agent_timeout_ms is None else agent_timeout_ms // 60_000,
+        ),
+        *_custom_modes(settings.modes),
+    ]
+
+
 async def _build_run_tool_context(ctx: RunContext) -> None:
     """Build ``tool_context`` — modes, output schema, analyzers mode, SARIF flag (S1/F3+F4).
 
@@ -1342,14 +1390,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
     token_ref = ctx.token_ref
     payload = ctx.payload
 
-    modes = [
-        *compute_modes(
-            ctx.agent_id,
-            settings.signed_commits,
-            inline_budget=settings.analyzers.inline_budget,
-        ),
-        *_custom_modes(settings.modes),
-    ]
+    modes = _render_run_modes(ctx, ctx.agent_id)
     tool_state.modes = modes
     ctx.modes = modes
     output_schema = resolve_output_schema()
@@ -1558,6 +1599,7 @@ async def _run_setup_script_phase(ctx: RunContext) -> None:
     if setup_script_skip_reason:
         ctx.setup_script_skip_reason = setup_script_skip_reason
     ctx.setup_elapsed_s = setup_elapsed_s
+    tool_state.phase_elapsed_s["setup"] = round(setup_elapsed_s, 3)
 
 
 async def _prepare_agent_dispatch(ctx: RunContext) -> None:
@@ -1582,6 +1624,14 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
     tool_state = ctx.tool_state
     payload = ctx.payload
     tmpdir = ctx.tmpdir
+
+    # The setup script ran after ``_build_run_tool_context`` rendered the modes;
+    # re-render so ``${TIME_BUDGET}`` states the deadline net of its elapsed time.
+    if ctx.setup_elapsed_s:
+        modes = _render_run_modes(ctx, ctx.agent_id)
+        ctx.modes = modes
+        tool_state.modes = modes
+        tool_context.modes = modes
 
     mcp_url, stop_mcp = start_mcp_http_server(tool_context, output_schema=ctx.output_schema)
     tool_context.mcp_server_url = mcp_url
@@ -1682,6 +1732,7 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
         tool_state=tool_state,
         api_token=run_context.api_token,
         resolved_model=ctx.resolved_model,
+        idle_timeout_s=float(settings.agent_idle_timeout_s),
     )
 
 
@@ -1701,6 +1752,10 @@ def _promote_and_finalize_agent_result(
     tool_context = ctx.tool_context
     chain_for_decision = ctx.chain_for_decision
     output_schema = ctx.output_schema
+    # Slice 6 — keep the watchdog diagnostic so the packet and the check
+    # summary can name *what* stalled, not only that the clock expired.
+    if (result.metadata or {}).get("idle_timeout"):
+        tool_state.agent_diagnostic = dict(result.metadata)
 
     if winning_slug:
         resolved_model = resolve_model(slug=winning_slug, respect_env_override=False)
@@ -1800,14 +1855,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
         if attempt_agent_id == agent_id:
             attempt_ctx = replace(run_ctx, resolved_model=attempt_model)
         else:
-            attempt_modes = [
-                *compute_modes(
-                    attempt_agent_id,
-                    settings.signed_commits,
-                    inline_budget=settings.analyzers.inline_budget,
-                ),
-                *_custom_modes(settings.modes),
-            ]
+            attempt_modes = _render_run_modes(ctx, attempt_agent_id)
             attempt_instructions = resolve_instructions(
                 payload=payload,
                 repo=run_context.repo,
@@ -1918,23 +1966,26 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
         # by the bounded setup block above; ``timeout_ms`` is the
         # pre-deduction run budget.
         timeout_ms = ctx.timeout_ms
-        setup_elapsed_s = ctx.setup_elapsed_s
-        agent_timeout_ms: int | None
-        if timeout_ms is None:
-            agent_timeout_ms = None
-        else:
-            agent_timeout_ms = max(1, int(timeout_ms - setup_elapsed_s * 1000))
-            if agent_timeout_ms != timeout_ms:
-                logger.info(
-                    "» deducted setup elapsed {:.2f}s from agent deadline ({}s -> {}s)",
-                    setup_elapsed_s,
-                    timeout_ms / 1000,
-                    agent_timeout_ms / 1000,
-                )
+        agent_timeout_ms = _agent_timeout_ms(ctx)
+        if agent_timeout_ms is not None and agent_timeout_ms != timeout_ms:
+            logger.info(
+                "» deducted setup elapsed {:.2f}s from agent deadline ({}s -> {}s)",
+                ctx.setup_elapsed_s,
+                (timeout_ms or 0) / 1000,
+                agent_timeout_ms / 1000,
+            )
 
+        # Stamped unconditionally (deadline or not) so a record rendered
+        # mid-dispatch — inside the terminal publish call — can report the
+        # agent phase as elapsed-so-far instead of 0s (#1075).
+        tool_state.agent_started_monotonic = time.monotonic()
         if agent_timeout_ms is None:
             winning_slug, result = await agent_task
         else:
+            agent_started = tool_state.agent_started_monotonic
+            ctx.agent_deadline_monotonic = agent_started + agent_timeout_ms / 1000.0
+            # The MCP server reads these to tell the agent how much time it has used.
+            tool_state.agent_deadline_s = agent_timeout_ms / 1000.0
             try:
                 winning_slug, result = await asyncio.wait_for(
                     agent_task, timeout=agent_timeout_ms / 1000.0
@@ -2000,6 +2051,30 @@ async def _triage_gate(ctx: RunContext) -> SkipAgentReview | None:
     return SkipAgentReview(reason=decision.reason)
 
 
+async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecutionSummary | None:
+    """Dispatch secondary reviewers server-side; return the dispatch summary."""
+    assert ctx.tool_context is not None
+    assert ctx.tool_state is not None
+    assert ctx.settings is not None
+    assert ctx.run_ctx is not None
+    if ctx.tool_state.selected_mode not in {"Review", "IncrementalReview"}:
+        return None
+    from mergecraft.review.roster_execution import run_pending_roster_reviewers
+
+    def _remaining_roster_timeout_s() -> float | None:
+        if ctx.agent_deadline_monotonic is None:
+            return None
+        return max(1.0, ctx.agent_deadline_monotonic - time.monotonic())
+
+    return await run_pending_roster_reviewers(
+        tool_context=ctx.tool_context,
+        base_run_ctx=ctx.run_ctx,
+        settings=ctx.settings,
+        payload=ctx.payload,
+        remaining_timeout_s=_remaining_roster_timeout_s,
+    )
+
+
 async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentReview:
     """Setup script, MCP start, and payload-timed agent dispatch (review stage)."""
     await _apply_overrides_and_setup_git(ctx)
@@ -2053,7 +2128,14 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
 
     with gha_log.group("agent-dispatch"):
         await _prepare_agent_dispatch(ctx)
-        return await _dispatch_agent_with_deadline(ctx)
+        dispatch_started = time.perf_counter()
+        result = await _dispatch_agent_with_deadline(ctx)
+        roster = await _run_server_roster_reviewers_if_needed(ctx)
+        if ctx.tool_state is not None:
+            ctx.tool_state.phase_elapsed_s["agent"] = round(
+                time.perf_counter() - dispatch_started, 3
+            )
+        return apply_roster_failure(result, roster)
 
 
 _SINK_SCAN_ARTIFACT_SOURCES: tuple[str, ...] = (
@@ -2166,6 +2248,50 @@ def _scan_sinks_after_run(ctx: RunContext, *, extra_paths: Sequence[Path] = ()) 
 _ORCHESTRATOR_PUBLISH_STEP = "orchestrator.publish_review"
 
 
+def owes_a_terminal_review(tool_state: ToolState) -> bool:
+    """Whether this run recorded a verdict that GitHub is owed.
+
+    A run that recorded no submission owes nothing: it records no publish step
+    and says nothing. Everything past this point is about a verdict that exists.
+    """
+    return tool_state.terminal_submission is not None
+
+
+def publication_skip_reason(
+    tool_state: ToolState,
+    agent_result: AgentResult,
+    *,
+    verdict_protocol: str | None,
+) -> str | None:
+    """Why this run will not publish its recorded verdict, or ``None`` when it will.
+
+    Call only when :func:`owes_a_terminal_review` is true; a run that recorded
+    nothing returns before this and records nothing. A recorded verdict that
+    stops short of a review must name itself: #1017's Codex rung recorded
+    ``request_changes``, published no review, and recorded nothing about why, so
+    the only visible trace was the failing ``mergecraft-approval`` check. The
+    three ways it happens are the shadow protocol, a run that is not a review
+    run, and a submission that the post-run re-validation rejected — the last one
+    is what to look for first when a review is expected and absent.
+    """
+    if getattr(tool_state, "review_publication_sticky_only", False):
+        return (
+            "this non-terminal rung deferred its neutral verdict to the fallback "
+            "rung; the run record is in the sticky progress comment (#1078)"
+        )
+    if verdict_protocol == "shadow":
+        return "the verdict protocol is shadow, so the verdict is recorded but not published"
+    if not _is_review_mode(tool_state.selected_mode):
+        return (
+            "the run is not a review run "
+            f"(selected_mode={tool_state.selected_mode!r}), so it publishes no review"
+        )
+    if not agent_result.terminal_submission_received:
+        rejection = str((agent_result.diagnostics or {}).get("rejection_reason") or "unknown")
+        return f"the recorded submission was rejected at post-run validation ({rejection})"
+    return None
+
+
 async def _publish_recorded_verdict(
     tool_context: ToolContext,
     agent_result: AgentResult,
@@ -2185,20 +2311,44 @@ async def _publish_recorded_verdict(
     when a receipt for the recorded verdict exists, including when the agent
     already published it. The row carries the receipt's ``payload_hash`` and
     the recorded findings GitHub's inline view lacks.
+
+    A run that recorded no verdict records no step. A recorded verdict the run
+    does not publish (:func:`publication_skip_reason`) is recorded as a not-ok
+    step stamped ``failure_class="declined"`` with the reason in ``error``, so
+    the trajectory auditor reads it as a decision, not a failed call.
     """
     tool_state = tool_context.tool_state
-    if (
-        not _is_review_mode(tool_state.selected_mode)
-        or verdict_protocol == "shadow"
-        or not agent_result.terminal_submission_received
-        or tool_state.terminal_submission is None
-    ):
+    if not owes_a_terminal_review(tool_state):
+        # Nothing was recorded, so the run owes GitHub nothing and says nothing.
+        return
+    skip_reason = publication_skip_reason(
+        tool_state,
+        agent_result,
+        verdict_protocol=verdict_protocol,
+    )
+    if skip_reason is not None:
+        # A recorded verdict that reaches no review is evidence about the run, not
+        # a silent return: the packet's trajectory is where a missing review is
+        # explained, and #1017's Codex rung is what its absence looks like.
+        logger.warning("» the run did not publish the recorded review verdict: {}", skip_reason)
+        from mergecraft.evidence.trajectory import record_tool_call
+
+        record_tool_call(
+            tool_state,
+            tool=_ORCHESTRATOR_PUBLISH_STEP,
+            arguments=None,
+            ok=False,
+            error=skip_reason,
+            failure_class="declined",
+        )
         return
     from mergecraft.evidence.trajectory import record_tool_call
     from mergecraft.mcp.review import publish_pull_request_review
 
     try:
+        publish_started = time.perf_counter()
         response = await publish_pull_request_review(tool_context)
+        tool_state.phase_elapsed_s["publish"] = round(time.perf_counter() - publish_started, 3)
     except Exception as exc:
         logger.warning("» the run could not publish the recorded review verdict: {}", exc)
         record_tool_call(

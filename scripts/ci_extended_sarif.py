@@ -38,6 +38,20 @@ _TRUFFLEHOG_EXCLUDE_REGEXES = (
 )
 
 
+# Finding-level allowlist for CI SARIF: (repo-relative path, detector) -> why the
+# match is intentional. Narrower than ``analyzers.config``'s named fixtures, which
+# exempt a whole file from every detector: here one file is exempt from one
+# detector only, so a real secret of any other kind in the same file, or the same
+# detector anywhere else, still reaches the review (#885). A directory or glob is
+# never an entry.
+TRUFFLEHOG_ALLOWED_FINDINGS: dict[tuple[str, str], str] = {
+    ("src/mergecraft/tracing/redaction.py", "URI"): (
+        "The URL-redaction patterns and doctests spell scheme://user:pass@host on "
+        "purpose; the module exists to mask that shape"
+    ),
+}
+
+
 def _semgrep_catalog_version() -> str:
     from mergecraft.analyzers.registry import get_manifest
 
@@ -188,6 +202,22 @@ def _sarif_result_uri(result: object) -> str:
     return uri if isinstance(uri, str) else ""
 
 
+def _is_allowed_trufflehog_finding(result: object, *, repo_root: Path) -> bool:
+    """True when this (path, detector) pair is on :data:`TRUFFLEHOG_ALLOWED_FINDINGS`."""
+    from mergecraft.analyzers.parsers._common import resolve_repo_relative_path
+
+    if not isinstance(result, dict):
+        return False
+    rule_id = result.get("ruleId")
+    uri = _sarif_result_uri(result)
+    if not isinstance(rule_id, str) or not uri:
+        return False
+    path = (
+        resolve_repo_relative_path(uri, repo_root=repo_root).replace("\\", "/").removeprefix("./")
+    )
+    return (path, rule_id) in TRUFFLEHOG_ALLOWED_FINDINGS
+
+
 def _drop_suppressed_trufflehog_results(
     document: object,
     *,
@@ -197,7 +227,8 @@ def _drop_suppressed_trufflehog_results(
 
     Emit-path filtering — ``--exclude-paths`` alone does not apply the
     named-fixture set. A newly committed secret under ``tests/`` still
-    remains; there is no blanket ``tests/**`` skip.
+    remains; there is no blanket ``tests/**`` skip. A result is also dropped
+    when its exact (path, detector) pair is on the finding-level allowlist.
 
     Args:
         document: SARIF object from ``trufflehog_to_sarif``.
@@ -225,6 +256,7 @@ def _drop_suppressed_trufflehog_results(
                 _sarif_result_uri(result),
                 repo_root=repo_root,
             )
+            and not _is_allowed_trufflehog_finding(result, repo_root=repo_root)
         ]
     return document
 

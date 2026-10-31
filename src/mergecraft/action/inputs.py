@@ -28,6 +28,7 @@ from mergecraft.config.runtime_provider_registry import (
     provider_credential_env_suffixes,
 )
 from mergecraft.config.settings import RepoSettings, TraceSinkEntry, TracingSettings
+from mergecraft.config.tracing_sink import check_tracing_sink
 from mergecraft.config.trust_policy import is_fork_pull_request, unbound_target_pull_number
 
 if TYPE_CHECKING:
@@ -103,7 +104,7 @@ def _resolve_local_path(raw_path: str | None) -> str:
     return raw_path or ".mergecraft/traces/"
 
 
-def resolve_tracing_from_action_inputs() -> dict[str, Any]:
+def resolve_tracing_from_action_inputs(*, warn_unknown_sink: bool = False) -> dict[str, Any]:
     """Resolve the tracing action inputs to a tracing settings dict.
 
     The six ``INPUT_TRACING*`` values are read through :class:`ActionInputEnv`
@@ -116,6 +117,11 @@ def resolve_tracing_from_action_inputs() -> dict[str, Any]:
             "otel_endpoint": str | None,
             "settings": TracingSettings,
         }
+
+    An unknown ``INPUT_TRACING_TO`` (or ``MERGECRAFT_TRACING_TO``) raises
+    :class:`~mergecraft.config.tracing_sink.TracingSinkError` when tracing is on —
+    the Action maps it to ``RunOutcome.configuration_error`` — and is ignored, with
+    a warning when ``warn_unknown_sink`` is set, when tracing is off.
 
     ``enabled`` is ``None`` when ``INPUT_TRACING`` is unset — that preserves
     the next precedence layer (env → YAML → default). The dict is consumed by
@@ -134,6 +140,19 @@ def resolve_tracing_from_action_inputs() -> dict[str, Any]:
     enabled = inputs.tracing_enabled
     sinks: list[dict[str, Any]] = []
 
+    # Validate before building a sink so a typo is classified, not crashed on. The
+    # effective enablement may come from the environment when the input is unset.
+    effective_enabled = enabled if enabled is not None else bool(TracingEnv().tracing_enabled)
+    check_tracing_sink(
+        "INPUT_TRACING_TO", tracing_to, enabled=effective_enabled, warn=warn_unknown_sink
+    )
+    check_tracing_sink(
+        "MERGECRAFT_TRACING_TO",
+        TracingEnv().tracing_to,
+        enabled=effective_enabled,
+        warn=warn_unknown_sink,
+    )
+
     if enabled and tracing_to:
         if tracing_to == "local_files":
             sinks.append({"type": "jsonl_file", "path": _resolve_local_path(None)})
@@ -149,8 +168,10 @@ def resolve_tracing_from_action_inputs() -> dict[str, Any]:
                 entry["endpoint"] = otel_endpoint
             sinks.append(entry)
         else:
-            msg = f"unknown tracing-to value: {tracing_to!r}"
-            raise ValueError(msg)
+            # Unreachable for a validated value; kept so a new shorthand added to
+            # ``TRACING_SINK_SHORTHANDS`` without a branch here fails loudly.
+            msg = f"unhandled tracing-to value: {tracing_to!r}"
+            raise AssertionError(msg)
 
     settings_payload: dict[str, Any] = {
         "enabled": enabled,
@@ -187,7 +208,7 @@ def export_tracing_env_from_action_inputs() -> None:
     so the Action ``with:`` block wins over job env for this run; the capture
     policy reads those env vars, not the in-memory settings overlay.
     """
-    resolved = resolve_tracing_from_action_inputs()
+    resolved = resolve_tracing_from_action_inputs(warn_unknown_sink=True)
     token = resolved.get("logfire_token")
     if isinstance(token, str) and token.strip():
         os.environ["MERGECRAFT_LOGFIRE_TOKEN"] = token.strip()

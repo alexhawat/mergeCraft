@@ -9,10 +9,11 @@ Exports:
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.mcp.rpc_types import RpcError, rpc_error
-from mergecraft.mcp.shared import bind_selected_mode, reset_selected_mode
+from mergecraft.mcp.shared import ToolResult, bind_selected_mode, reset_selected_mode
 from mergecraft.tracing._tool_attrs import (
     emit_verb_subevent,
     enrich_tool_request,
@@ -34,6 +35,20 @@ if TYPE_CHECKING:
     from mergecraft.mcp.shared import ToolSpec
 
 
+def _refused_result_error(result: ToolResult) -> str:
+    """Extract the refusal reason from a tagged error result for the trajectory.
+
+    ``handle_tool_error`` renders ``"Error: {message}"``; the strip keeps the
+    recorded text identical to the ``str(exc)`` an escaped exception would have
+    recorded.
+    """
+    for part in result.content:
+        text = part.get("text", "")
+        if text:
+            return text.removeprefix("Error: ")
+    return "tool call refused by a guard"
+
+
 async def dispatch_mcp_rpc(
     req_id: Any,
     method: str | None,
@@ -45,8 +60,14 @@ async def dispatch_mcp_rpc(
     validators: dict[str, Validator],
     agent_id: str | None = None,
     return_tool_errors: bool = False,
+    time_notice: bool = False,
 ) -> dict[str, Any]:
-    """Dispatch one JSON-RPC MCP request and return a response envelope."""
+    """Dispatch one JSON-RPC MCP request and return a response envelope.
+
+    ``time_notice`` appends the agent's elapsed/remaining minutes to successful
+    ``tools/call`` results once it is past the stop-exploring checkpoint. The
+    ``/mcp`` and ``/mcp/reviewer`` routes set it; ``/mcp/verifier`` does not.
+    """
     if method == "initialize":
         return {
             "jsonrpc": "2.0",
@@ -74,6 +95,7 @@ async def dispatch_mcp_rpc(
             record_trajectory,
             span_tool_call_id,
             tool_result_to_rpc,
+            with_elapsed_notice,
         )
 
         name = params.get("name")
@@ -124,29 +146,54 @@ async def dispatch_mcp_rpc(
             enrich_tool_request(span, arguments=arguments)
             mode = tool_ctx.tool_state.selected_mode if tool_ctx is not None else None
             mode_token = bind_selected_mode(mode)
+            started = time.perf_counter()
             try:
                 result = await tool.execute(arguments)
             except Exception as exc:
                 span.set_status("error", str(exc))
                 enrich_tool_response(span, output=None, error=exc)
-                record_trajectory(tool_ctx, name, arguments, ok=False, error=str(exc))
+                record_trajectory(
+                    tool_ctx,
+                    name,
+                    arguments,
+                    ok=False,
+                    error=str(exc),
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                )
                 if return_tool_errors:
                     return rpc_error(req_id, RpcError(-32603, str(exc)))
                 raise
             finally:
                 reset_selected_mode(mode_token)
             enrich_tool_response(span, output=result)
-            record_trajectory(tool_ctx, name, arguments, ok=True, result=result)
+            refused = isinstance(result, ToolResult) and result.refused
+            record_trajectory(
+                tool_ctx,
+                name,
+                arguments,
+                # A guard refusal returns as a normal tool error to the agent,
+                # but it is not a success on the trajectory (#1073).
+                ok=not refused,
+                result=result,
+                error=_refused_result_error(result) if refused else None,
+                failure_class="refused" if refused else None,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            )
             emit_verb_subevent(
                 tracer,
                 parent_span_id=span.span_id,
                 tool_name=name,
                 attrs=call_attrs,
             )
+            rpc_result = tool_result_to_rpc(result)
+            # After the trace and trajectory recorded the result: the notice is
+            # live guidance for the agent, never part of replayed or hashed output.
+            if time_notice and tool_ctx is not None:
+                rpc_result = with_elapsed_notice(rpc_result, tool_ctx.tool_state)
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": tool_result_to_rpc(result),
+                "result": rpc_result,
             }
     return rpc_error(req_id, RpcError(-32601, f"Method not found: {method}"))
 

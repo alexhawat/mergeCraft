@@ -33,6 +33,13 @@ def as_sink_value(value: str) -> str:
     return redact_secrets(value)
 
 
+def as_identifier_sink_value(value: str) -> str:
+    """An ``IDENTIFIER_KEYS`` attr as stored: explicit secret patterns only, no entropy."""
+    from mergecraft.analyzers.redact import redact_known_secret_patterns
+
+    return redact_known_secret_patterns(value)
+
+
 @pytest.fixture
 def trace_dir(tmp_path: Path) -> Path:
     return tmp_path / ".mergecraft" / "traces"

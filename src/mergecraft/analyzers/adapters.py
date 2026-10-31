@@ -28,9 +28,12 @@ from mergecraft.analyzers.trust import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from mergecraft.analyzers.finding import Finding
     from mergecraft.analyzers.manifest import AnalyzerManifest
     from mergecraft.analyzers.sandbox import SandboxContext
+    from mergecraft.config.settings import AnalyzersSettings
 
 TrustTier = Literal["trusted", "untrusted"]
 
@@ -63,6 +66,7 @@ def _scan_agentsec_in_process(
     *,
     repo_root: Path,
     scoped: list[str],
+    **_context: Any,
 ) -> _NativeScanOutcome:
     from mergecraft.analyzers.agentsec import scan_manifests
 
@@ -81,10 +85,14 @@ def _scan_antislop_in_process(
     *,
     repo_root: Path,
     scoped: list[str],
+    analyzers_settings: AnalyzersSettings | None = None,
+    **_context: Any,
 ) -> _NativeScanOutcome:
     from mergecraft.analyzers.antislop import scan_changed_files
 
-    antislop_result = scan_changed_files(repo_root=repo_root, changed_files=scoped)
+    antislop_result = scan_changed_files(
+        repo_root=repo_root, changed_files=scoped, analyzers_settings=analyzers_settings
+    )
     return _NativeScanOutcome(
         findings=antislop_result.findings,
         skipped=antislop_result.skipped,
@@ -92,9 +100,25 @@ def _scan_antislop_in_process(
     )
 
 
-_IN_PROCESS_SCANNERS = {
+def _scan_self_silencing_in_process(
+    *,
+    repo_root: Path,
+    diff_text: str = "",
+    tier: TrustTier = "trusted",
+    **_context: Any,
+) -> _NativeScanOutcome:
+    from mergecraft.analyzers.self_silencing import scan_diff
+
+    result = scan_diff(repo_root=repo_root, diff_text=diff_text, tier=tier)
+    return _NativeScanOutcome(
+        findings=result.findings, skipped=result.skipped, skip_reason=result.skip_reason
+    )
+
+
+_IN_PROCESS_SCANNERS: dict[str, Callable[..., _NativeScanOutcome]] = {
     "agentsec": _scan_agentsec_in_process,
     "antislop": _scan_antislop_in_process,
+    "self-silencing": _scan_self_silencing_in_process,
 }
 
 
@@ -103,12 +127,21 @@ def _run_in_process_scan(
     *,
     repo_root: Path,
     scoped: list[str],
+    diff_text: str = "",
+    tier: TrustTier = "trusted",
+    analyzers_settings: AnalyzersSettings | None = None,
 ) -> _NativeScanOutcome:
     scanner = _IN_PROCESS_SCANNERS.get(tool_id)
     if scanner is None:
         msg = f"unsupported in-process analyzer {tool_id!r}"
         raise ValueError(msg)
-    return scanner(repo_root=repo_root, scoped=scoped)
+    return scanner(
+        repo_root=repo_root,
+        scoped=scoped,
+        diff_text=diff_text,
+        tier=tier,
+        analyzers_settings=analyzers_settings,
+    )
 
 
 def _run_in_process_native_adapter(
@@ -118,6 +151,8 @@ def _run_in_process_native_adapter(
     repo_root: Path,
     changed_files: list[str],
     tier: TrustTier,
+    diff_text: str = "",
+    analyzers_settings: AnalyzersSettings | None = None,
 ) -> AdapterRunResult:
     scoped_files = filter_changed_files_for_manifest(manifest, changed_files)
     if not scoped_files:
@@ -129,6 +164,9 @@ def _run_in_process_native_adapter(
         tool_id,
         repo_root=repo_root,
         scoped=scoped_files,
+        diff_text=diff_text,
+        tier=tier,
+        analyzers_settings=analyzers_settings,
     )
     version_note = IN_PROCESS_VERSION_NOTES[tool_id]
     if outcome.skipped:
@@ -327,8 +365,14 @@ def run_adapter(
     event_name: str | None = None,
     event: dict[str, Any] | None = None,
     self_review_level: str = "off",
+    diff_text: str = "",
+    analyzers_settings: AnalyzersSettings | None = None,
 ) -> AdapterRunResult:
     """Run one catalog analyzer and return normalized findings.
+
+    ``diff_text`` feeds the in-process ``self-silencing`` analyzer, which reads the diff
+    rather than files; ``analyzers_settings`` is the pinned (base-side) analyzer config
+    the in-process ``antislop`` analyzer takes its rules and ignores from (#942).
 
     ``allow_repo_binaries=False`` (set by the pipeline under ``shell:
     disabled``) forbids ``resolve_analyzer()`` from preferring a binary the
@@ -406,6 +450,8 @@ def run_adapter(
             repo_root=repo_root,
             changed_files=changed_files,
             tier=tier,
+            diff_text=diff_text,
+            analyzers_settings=analyzers_settings,
         )
 
     scoped_files = filter_changed_files_for_manifest(manifest, changed_files)

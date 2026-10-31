@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.evidence.merge import _severity_rank
 from mergecraft.review_taxonomy import FINDING_CONFIDENCES, finding_fingerprint
+
+if TYPE_CHECKING:
+    from mergecraft.analyzers.dispositions import DispositionLedger
 
 _CONFIDENCE_RANK = {name: index for index, name in enumerate(FINDING_CONFIDENCES)}
 
@@ -30,7 +35,9 @@ def _evidence_entry(finding: Finding) -> str:
     return f"{finding.tool}:{finding.rule_id} — {finding.message}"
 
 
-def _merge_into_canonical(members: list[Finding]) -> Finding:
+def _merge_into_canonical(
+    members: list[Finding], *, ledger: DispositionLedger | None = None
+) -> Finding:
     """Merge same-cluster findings into one canonical finding.
 
     Wording and severity are selected independently (D8). Canonical *wording*
@@ -84,6 +91,20 @@ def _merge_into_canonical(members: list[Finding]) -> Finding:
         confidence = floor
 
     key = cluster_key(canonical)
+    if ledger is not None:
+        from mergecraft.analyzers.dispositions import hit_id_for
+
+        canonical_id = hit_id_for(canonical)
+        for member in members:
+            if hit_id_for(member) == canonical_id:
+                continue
+            ledger.record_dropped(
+                member,
+                "merged",
+                stage="cluster",
+                reason=f"same root cause as the surviving cluster member (cluster {key})",
+                ref=canonical.fingerprint,
+            )
     return make_finding(
         tool=canonical.tool,
         rule_id=canonical.rule_id,
@@ -104,7 +125,9 @@ def _merge_into_canonical(members: list[Finding]) -> Finding:
     )
 
 
-def cluster_findings(findings: list[Finding]) -> list[Finding]:
+def cluster_findings(
+    findings: list[Finding], *, ledger: DispositionLedger | None = None
+) -> list[Finding]:
     """Group findings by cluster key; agent prose wins over analyzer duplicates (D12)."""
     buckets: dict[str, list[Finding]] = {}
     for finding in findings:
@@ -113,7 +136,7 @@ def cluster_findings(findings: list[Finding]) -> list[Finding]:
 
     clustered: list[Finding] = []
     for members in buckets.values():
-        clustered.append(_merge_into_canonical(members))
+        clustered.append(_merge_into_canonical(members, ledger=ledger))
     return clustered
 
 

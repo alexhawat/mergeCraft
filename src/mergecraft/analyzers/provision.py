@@ -316,6 +316,18 @@ def _cache_provision_lock(cache_root: Path) -> Iterator[None]:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
+@contextlib.contextmanager
+def cache_provision_lock(cache_root: Path) -> Iterator[None]:
+    """Serialize writes to the shared analyzer cache from any producer.
+
+    Public entry point for the pip-script path in ``analyzers/pattern.py``; the
+    managed-binary path uses the same lock, so two writers — or two processes on
+    one machine — cannot interleave inside the cache.
+    """
+    with _cache_provision_lock(cache_root):
+        yield
+
+
 def _install_cached_binary(*, staged: Path, cached: Path, artifact_pin: str) -> str:
     """Install the staged binary into the cache and record its bound receipt."""
     cached.parent.mkdir(parents=True, exist_ok=True)

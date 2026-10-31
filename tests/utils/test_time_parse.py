@@ -6,7 +6,6 @@ import pytest
 
 from mergecraft.utils.time_parse import (
     TIMEOUT_DISABLED,
-    is_valid_time_string,
     normalize_timeout_input,
     parse_time_string,
     parse_timeout,
@@ -39,16 +38,6 @@ def test_parse_time_string_valid(input_value: str, expected: int) -> None:
 )
 def test_parse_time_string_invalid(input_value: str) -> None:
     assert parse_time_string(input_value) is None
-
-
-@pytest.mark.parametrize("input_value", ["10m", "1h", "30s", "1h30m", "10m12s", "1h30m45s"])
-def test_is_valid_time_string_true(input_value: str) -> None:
-    assert is_valid_time_string(input_value) is True
-
-
-@pytest.mark.parametrize("input_value", ["", "abc", "10", "10x", "-10m", "10.5m"])
-def test_is_valid_time_string_false(input_value: str) -> None:
-    assert is_valid_time_string(input_value) is False
 
 
 @pytest.mark.parametrize(

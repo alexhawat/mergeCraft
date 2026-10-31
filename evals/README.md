@@ -202,6 +202,15 @@ make eval-replay
 # or: mergecraft eval replay-bank --json
 ```
 
+The multi-round convergence cases (`pr-216-eval-gate-matrix`,
+`pr-250-memory-feedback`, `pr-253-scm-provider`) also carry replay inputs: their
+`recorded_findings` are the findings the first review round raised on the real PR,
+so structural replay recomputes a verdict for them (`failure`, a blocker was raised)
+instead of leaving them `blocked`. A permanently blocked case counted as
+inconclusive on every run, which put a fixed floor under `inconclusive_rate`
+that no behaviour change could lower. Convergence across the later rounds is still
+scored separately by `mergecraft eval convergence`.
+
 Each result set records:
 
 - `rubric_version` (`VERIFIER_RUBRIC_VERSION`)

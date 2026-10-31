@@ -31,6 +31,7 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
+    from mergecraft.analyzers.dispositions import DispositionLedger
     from mergecraft.analyzers.finding import Finding
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import ToolState
@@ -784,6 +785,7 @@ def apply_repo_memory_to_findings(
     *,
     repo_root: Path,
     trust_tier: Literal["trusted", "untrusted"] = "trusted",
+    ledger: DispositionLedger | None = None,
 ) -> list[Finding]:
     """Apply dismissed feedback and negative-memory rules before publication."""
     from mergecraft.utils.memory import (
@@ -817,6 +819,14 @@ def apply_repo_memory_to_findings(
     for finding in findings:
         record = feedback.entries.get(finding.fingerprint)
         if record is not None and record.outcome == FeedbackOutcome.DISMISSED:
+            if ledger is not None:
+                ledger.record_dropped(
+                    finding,
+                    "dropped:withdrawn",
+                    stage="withdrawn",
+                    reason="dismissed in the repo feedback store",
+                    ref=finding.fingerprint,
+                )
             continue
         surviving.append(finding)
     if not memory_path.is_file():
@@ -831,6 +841,18 @@ def apply_repo_memory_to_findings(
             exc,
         )
         return surviving
+    if ledger is not None:
+        for finding in result.suppressed:
+            ledger.record_dropped(
+                finding,
+                "dropped:withdrawn",
+                stage="withdrawn",
+                reason=(
+                    "suppressed by repo negative memory: "
+                    f"{result.suppression_reasons.get(finding.fingerprint, 'no reason recorded')}"
+                ),
+                ref=finding.fingerprint,
+            )
     return result.reported
 
 

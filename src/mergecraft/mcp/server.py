@@ -261,6 +261,7 @@ def _register_mcp_route(
     auth_token: str | None = None,
     *,
     return_tool_errors: bool = False,
+    time_notice: bool = False,
 ) -> None:
     """Mount one JSON-RPC MCP endpoint with a fixed tool surface."""
     by_name = {t.name: t for t in tools}
@@ -282,6 +283,7 @@ def _register_mcp_route(
             validators=validators,
             agent_id=agent_id,
             return_tool_errors=return_tool_errors,
+            time_notice=time_notice,
         )
 
     async def mcp_endpoint(request: Request) -> Response:
@@ -386,15 +388,20 @@ def create_mcp_app(
 
     primary_token = orchestrator_auth_token if orchestrator_auth_token is not None else auth_token
     if tools:
-        _register_mcp_route(app, MCP_ENDPOINT, tools, ctx, primary_token)
+        _register_mcp_route(app, MCP_ENDPOINT, tools, ctx, primary_token, time_notice=True)
     for role, role_tool_list in (role_tools or {}).items():
+        path = f"{MCP_ENDPOINT}/{role}"
         _register_mcp_route(
             app,
-            f"{MCP_ENDPOINT}/{role}",
+            path,
             role_tool_list,
             ctx,
             auth_token,
             return_tool_errors=return_tool_errors,
+            # The review agent is handed ``mcp_role_url(url, None)`` — the
+            # reviewer route — so that is where the ⏱ notice must land. The
+            # verifier route serves one-shot verifier dispatches, not the verdict.
+            time_notice=path == MCP_REVIEWER_ENDPOINT,
         )
     return app
 

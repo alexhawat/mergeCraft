@@ -1,0 +1,24 @@
+id: self-silencing
+category: security
+languages: []
+detect:
+  files:
+    - "*"
+command:
+  - self-silencing
+scope: diff
+parser: self_silencing_native
+supports_fix: false
+default_enabled: true
+version: native
+runtime: repo-native
+timeout_s: 60
+trust: untrusted
+severity_map:
+  critical: Critical
+  major: Major
+  minor: Minor
+  trivial: Trivial
+provenance: {}
+network_allowlist: []
+exclusive_group: null

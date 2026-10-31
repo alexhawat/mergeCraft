@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.ci.archive_bounds import extract_sarif_documents
+from mergecraft.ci.base_runs import BaseRunsCollection, collect_base_branch_runs
 from mergecraft.ci.providers.github_actions import GitHubActionsProvider
 from mergecraft.scm.github import github_client_from_scm
 from mergecraft.utils import gha_log
@@ -244,6 +245,18 @@ async def collect_ci_sarif_findings(
     return findings
 
 
+def _with_base_run_evidence(finding: Finding, rows: list[dict[str, Any]]) -> Finding:
+    """Append the base runs that matched this cluster's fingerprint to its evidence."""
+    lines = [
+        f"base-branch run {row.get('run_id')} ({row.get('ref')}) concluded {row.get('conclusion')}"
+        for row in rows
+        if str(row.get("fingerprint") or "") == finding.fingerprint
+    ]
+    if not lines:
+        return finding
+    return finding.model_copy(update={"evidence": [*finding.evidence, *lines]})
+
+
 async def run_ci_intelligence(
     ctx: ToolContext,
     *,
@@ -268,13 +281,16 @@ async def run_ci_intelligence(
     """
     from mergecraft.ci.evidence import (
         ci_evidence_findings,
+        record_base_branch_runs,
         record_ci_findings,
         record_ci_ingest_metadata,
+        record_sarif_findings,
     )
     from mergecraft.ci.providers.github_actions import unbound_check_suite_logs
     from mergecraft.ci.review import analyze_ci_failures
 
     client = github_client_from_scm(ctx.scm)
+    runs: list[dict[str, Any]] = []
     if client is None:
         sarif: list[Finding] = []
         suite = unbound_check_suite_logs(check_suite_id)
@@ -296,7 +312,7 @@ async def run_ci_intelligence(
         # ``record_ci_findings`` dedupes on ``finding_dedupe_key``.
         sarif = await collect_ci_sarif_findings(ctx, client=client, runs=runs)
         if sarif:
-            record_ci_findings(ctx.tool_state, sarif)
+            record_sarif_findings(ctx.tool_state, sarif)
         coverage_names = [name.strip() for name in ctx.ci_coverage_artifacts if name.strip()]
         mutation_names = [name.strip() for name in ctx.ci_mutation_artifacts if name.strip()]
         if coverage_names or mutation_names:
@@ -376,10 +392,19 @@ async def run_ci_intelligence(
         return _unavailable_ci_intelligence(reason=reason, sarif_finding_count=len(sarif))
 
     raw_failures = provider_jobs_to_raw_failures(jobs)
+    # #891 — read the base branch's recent runs ourselves, so a same-fingerprint base
+    # *failure* clears a failure without the agent fetching and passing it by hand.
+    # Agent-supplied rows are still honoured; the producer's rows are added to them.
+    base_collection = BaseRunsCollection()
+    if client is not None:
+        base_collection = await collect_base_branch_runs(
+            ctx, client=client, current_runs=runs, jobs=jobs
+        )
+    effective_base_runs = [*(base_branch_runs or []), *base_collection.rows]
     reports, stats, overflow = analyze_ci_failures(
         raw_failures,
         pr_diff_paths=pr_diff_paths,
-        base_branch_runs=base_branch_runs,
+        base_branch_runs=effective_base_runs or None,
         retry_attempts=retry_attempts,
         base_branch_status=base_branch_status,
         total_failure_count=total_failed_runs,
@@ -392,7 +417,14 @@ async def run_ci_intelligence(
         raw_failures=raw_failures,
         fix_suggestions=fix_suggestions,
     )
-    record_ci_findings(ctx.tool_state, [report.finding for report in reports])
+    record_ci_findings(
+        ctx.tool_state,
+        [_with_base_run_evidence(report.finding, base_collection.rows) for report in reports],
+    )
+    record_base_branch_runs(ctx.tool_state, base_collection.rows)
+    payload["baseBranchRuns"] = list(base_collection.rows)
+    if base_collection.note and not base_collection.rows:
+        payload["baseBranchRunsNote"] = base_collection.note
     payload["available"] = True
     payload["checkSuiteId"] = check_suite_id
     payload["recordedFindingCount"] = len(ci_evidence_findings(ctx.tool_state))

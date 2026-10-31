@@ -162,6 +162,20 @@ def has_markdownlint_config(repo_root: Path) -> bool:
     return any((repo_root / name).is_file() for name in _MARKDOWNLINT_CONFIG_NAMES)
 
 
+_GHERKIN_LINT_CONFIG_NAMES = (
+    ".gherkin-lintrc",
+    ".gherkin-lintrc.json",
+    ".gherkin-lintrc.yml",
+    ".gherkin-lintrc.yaml",
+)
+
+
+def has_gherkin_lint_config(repo_root: Path) -> bool:
+    """Return True when a project-level gherkin-lint config file is present."""
+    repo_root = repo_root.resolve()
+    return any((repo_root / name).is_file() for name in _GHERKIN_LINT_CONFIG_NAMES)
+
+
 def _package_json(repo_root: Path) -> dict[str, object]:
     path = repo_root / "package.json"
     if not path.is_file():
@@ -328,6 +342,7 @@ _REPO_LOCAL_ONLY_BINARIES: frozenset[str] = frozenset(
     {
         # node_modules/.bin — installed by `make setup-local-analyzers`
         "markdownlint",
+        "gherkin-lint",
         "jscpd",
         "tsc",
         "knip",

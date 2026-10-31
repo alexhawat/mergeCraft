@@ -182,6 +182,26 @@ def _packet_attested_findings(packet: MergeEvidencePacket) -> list[Finding]:
     return attested
 
 
+def _packet_terminal_attestation(packet: MergeEvidencePacket) -> bool:
+    """True when the packet's terminal verdict and read coverage attest the review (#1072).
+
+    A clean review's correct result is an *empty* findings list, so the
+    non-empty-list attestation in ``_decide_approval_from_findings`` can never
+    vouch for it. What can vouch for it is MCP-recorded, non-prose evidence:
+    the agent's validated terminal ``approve`` (accepted by
+    ``validate_submission``, recorded as ``agent_terminal_verdict``) plus an
+    observed read of the diff (``trajectory.read_coverage``). Both are
+    orchestrator-recorded facts about the run, not agent narrative, so this
+    attests the review without manufacturing synthetic findings.
+    ``self_assessment`` stays advisory-only and is never an input here.
+    """
+    return (
+        packet.agent_terminal_verdict == "approve"
+        and packet.trajectory is not None
+        and packet.trajectory.read_coverage
+    )
+
+
 def _trusted_positive_decision(packet: MergeEvidencePacket) -> bool:
     """True when the packet carries a trusted structural success verdict with no blockers."""
     decision = packet.decision
@@ -287,6 +307,11 @@ def decide_approval(
       ``"success"`` when the finding list contains at least one finding
       (attested structural evidence the review ran), ``"neutral"`` when the
       list is empty (the run completed without findings to attest to).
+      The packet overload adds one more attestation (#1072): a validated
+      terminal ``approve`` plus observed ``trajectory.read_coverage`` attest
+      a clean review even with zero typed findings, yielding ``"success"``.
+      The legacy list-only overload has no attestation metadata and keeps
+      the empty-list ``"neutral"`` behaviour.
 
     #41 hard rule, enforced here: when the recorded self-assessment is the only
     positive signal, the verdict is **not** ``auto_merge``. With no findings,
@@ -363,6 +388,22 @@ def _decide_approval_from_packet(
     conclusion = _decide_approval_from_findings(
         _packet_attested_findings(packet), run_succeeded=run_succeeded, tier=tier
     )
+    # #1072 — a clean review's attestation is its validated terminal ``approve``
+    # plus observed read coverage, not a non-empty findings list. When the
+    # legacy conclusion is ``neutral`` only because the (blocker-free) finding
+    # list is empty — the run succeeded, the tier is trusted, and a blocker
+    # would already have yielded ``failure`` — terminal attestation upgrades it
+    # to ``success``. The guard list restates the legacy preconditions rather
+    # than inferring them from ``conclusion`` so the upgrade never silently
+    # widens past a failed run or an untrusted tier (D13 / D14).
+    if (
+        conclusion == "neutral"
+        and run_succeeded
+        and tier == "trusted"
+        and not _packet_has_blockers(packet)
+        and _packet_terminal_attestation(packet)
+    ):
+        conclusion = "success"
     # One-way ratchet (#619): the agent's own terminal ``submit_review_verdict``
     # call can bind the conclusion downward but never up. On PR #619 the
     # reviewing agent's verifier confirmed a blocking security finding and the
@@ -382,7 +423,7 @@ def _decide_approval_from_packet(
         conclusion = "neutral"
     return PacketDecision(
         verdict=conclusion,
-        reason=_packet_decision_reason(conclusion, packet),
+        reason=_packet_decision_reason(conclusion, packet, tier=tier),
         decided_by="mergecraft.agents.gates.decide_approval",
     )
 
@@ -390,6 +431,8 @@ def _decide_approval_from_packet(
 def _packet_decision_reason(
     conclusion: Conclusion,
     packet: MergeEvidencePacket,
+    *,
+    tier: TrustTier | None = None,
 ) -> str:
     """Render a short, evidence-attributed reason for a packet verdict (#41).
 
@@ -398,12 +441,31 @@ def _packet_decision_reason(
     evidence lives in the packet itself and downstream consumers should
     read it from there.
     """
+    if conclusion == "neutral" and tier == "untrusted":
+        # #1078 — name the inertness so the fallback chain can skip a rung
+        # that can never produce a permissive verdict (D14), instead of
+        # spending a whole second review on the same structurally inert run.
+        return (
+            "neutral: untrusted tier — attestation is inert and a fallback rung "
+            "cannot change the verdict"
+        )
     if (
         conclusion == "neutral"
         and packet.agent_terminal_verdict == "request_changes"
         and not _packet_has_blockers(packet)
     ):
         return "neutral: agent terminal verdict request_changes; no structural blocker attested"
+    if (
+        conclusion == "success"
+        and not _packet_attested_findings(packet)
+        and _packet_terminal_attestation(packet)
+    ):
+        # #1072 — the findings list is empty *and* the review is attested by
+        # its terminal verdict plus read coverage. Name that attestation so a
+        # reader never mistakes the clean result for missing evidence. This
+        # branch precedes the self_assessment line: the advisory row is never
+        # the basis for the verdict, so it is never named as one.
+        return f"{conclusion}: review attested by terminal verdict and read coverage; no findings"
     if packet.self_assessment is not None and packet.self_assessment.approved:
         # The agent said approved; the structural verdict is whatever the
         # evidence proved. Surface both so a human reader can see the
@@ -533,13 +595,15 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
     It reads *blockers*, not emptiness, and that is load-bearing.
     ``_decide_approval_from_findings`` returns ``"neutral"`` for an empty
     finding list and ``"success"`` only for a non-empty one, because a
-    non-empty list is the attestation that the review actually ran. Requiring
-    zero findings here therefore contradicted the verdict it also requires,
-    and no packet built by ``build_run_packet`` could satisfy both — the
-    ``low_risk_passing`` row was unreachable in production. Blocker-freedom is
-    the condition that was meant: two ``Minor`` findings on a low-risk diff are
-    still a clean low-risk PR, and ``_trusted_positive_decision`` already
-    re-checks blockers, so this cannot widen past the gate's own verdict.
+    non-empty list is the attestation that the review actually ran (the
+    packet path adds terminal verdict + read coverage as a second
+    attestation form — #1072). Requiring zero findings here therefore
+    contradicted the verdict it also requires, and no packet built by
+    ``build_run_packet`` could satisfy both — the ``low_risk_passing`` row
+    was unreachable in production. Blocker-freedom is the condition that
+    was meant: two ``Minor`` findings on a low-risk diff are still a clean
+    low-risk PR, and ``_trusted_positive_decision`` already re-checks
+    blockers, so this cannot widen past the gate's own verdict.
     """
     if _packet_has_blockers(packet):
         return False
@@ -550,17 +614,71 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
     return _trusted_positive_decision(packet)
 
 
+def _is_clean_pass(packet: MergeEvidencePacket) -> bool:
+    """True for a blocker-free packet with a trusted success verdict, any lane (#1076).
+
+    ``low_risk_passing`` gates on ``lane == "low"``, so a clean packet on a
+    ``medium`` lane used to match no named rule and fall into the
+    ``schema_failure`` catch-all — a block label on a structurally complete
+    packet. This rule is the lane-independent sibling: the trusted
+    ``Decision`` row already proves the structural gate attested success
+    (run succeeded, trusted tier, no blockers, findings or terminal
+    attestation present — see ``decide_approval``), so the packet routes to
+    the merge-shaped action. Two vetoes are kept explicit:
+
+    - the blast-radius lane's own ``auto_merge_lane == "forbidden"`` (every
+      ``high`` lane, per ``docs/blast-radius.md``) is respected — a clean
+      high-lane packet escalates for a human instead of merging;
+    - a missing ``blast_radius`` is an *unknown* lane, and unknown is never
+      green (#1056) — it escalates too.
+
+    Ordering: after the finding-driven rules so ``has_blockers`` /
+    ``changed-unread-file`` / ``tool_loop`` keep winning when their findings
+    coexist with a success verdict, and after ``high_risk_migration`` so a
+    high-lane migration still asks for a human.
+    """
+    if packet.blast_radius is None:
+        return False
+    if packet.blast_radius.auto_merge_lane == "forbidden":
+        return False
+    return _trusted_positive_decision(packet)
+
+
+def _has_structural_evidence(packet: MergeEvidencePacket) -> bool:
+    """True when the packet carries any section the gate routes on (#1076).
+
+    ``schema_failure`` is reserved for a packet whose evidence is
+    structurally absent: no decision row, no attested findings, no blast
+    radius, no trajectory. A parsed, validated packet carrying any of these
+    is complete — when no named rule matches it (a ``neutral`` verdict from
+    an untrusted tier or failed run, nothing attested, or an attested clean
+    packet on an auto-merge-forbidden lane) the honest label is
+    ``needs_human_review``, never a schema failure: the packet is complete,
+    the gate simply has no automated route for it, and unknown is never
+    green (#1056).
+    """
+    return (
+        packet.decision is not None
+        or bool(_packet_attested_findings(packet))
+        or packet.blast_radius is not None
+        or packet.trajectory is not None
+    )
+
+
 # Ordered ``(predicate, rule_id, action)`` rows; first match wins.
 # Keys and actions come from ``NAMED_GATE_POLICY_ROWS`` so
 # ``DEFAULT_GATE_POLICIES`` cannot drift from this table.
 # Catch-all ``schema_failure`` is not listed (see ``select_rule_id``).
-# Tests pin ``has_blockers`` before ``changed-unread-file`` / ``tool_loop``.
+# Tests pin ``has_blockers`` before ``changed-unread-file`` / ``tool_loop``,
+# and the #1076 rows (``clean_pass``, ``needs_human_review``) last.
 _PREDICATE_BY_RULE: Final[dict[str, Callable[[MergeEvidencePacket], bool]]] = {
     "high_risk_migration": _is_high_risk_migration,
     "low_risk_passing": _is_low_risk_passing,
     "has_blockers": _packet_has_blockers,
     "changed-unread-file": _has_changed_unread_file,
     "tool_loop": _has_tool_loop,
+    "clean_pass": _is_clean_pass,
+    "needs_human_review": _has_structural_evidence,
 }
 _RULE_PREDICATES: Final[
     tuple[tuple[Callable[[MergeEvidencePacket], bool], str, GateAction], ...]
@@ -573,8 +691,11 @@ def select_rule_id(packet: MergeEvidencePacket) -> str:
     """Pick the rule key the policy engine should consult for ``packet``.
 
     Pure: returns the rule id that matches the most specific signal on
-    the packet. ``"schema_failure"`` is the catch-all — it matches a
-    packet whose evidence is structurally absent.
+    the packet. ``"schema_failure"`` is the catch-all — after the #1076
+    re-scope it fires only when the packet's evidence is structurally
+    absent (no decision, findings, blast radius, or trajectory). A complete
+    packet that matches no named rule lands on ``needs_human_review``, the
+    last named row, instead.
     """
     for predicate, rule_id, _action in _RULE_PREDICATES:
         if predicate(packet):
@@ -613,15 +734,18 @@ def decide_action(
     vocabulary. The first step is consulting the policy map; the second
     is selecting the rule key the packet matches. Both are deterministic.
 
-    The six named policies ``DEFAULT_GATE_POLICIES`` ships are
+    The eight named policies ``DEFAULT_GATE_POLICIES`` ships are
     ``schema_failure``, ``changed-unread-file``, ``has_blockers``,
-    ``low_risk_passing``, ``tool_loop``, and ``high_risk_migration``:
-    a schema failure blocks, a changed-unread-file asks for changes,
-    blockers request changes, a low-risk passing change merges, a
-    tool-loop asks for more tests, and a high-risk migration asks for
-    human review. Repositories override the mapping at the call site:
-    the override is merged on top of the defaults and any value
-    outside the closed vocabulary is rejected.
+    ``low_risk_passing``, ``tool_loop``, ``high_risk_migration``,
+    ``clean_pass``, and ``needs_human_review``: a schema failure blocks, a
+    changed-unread-file asks for changes, blockers request changes, a
+    low-risk passing change merges, a tool-loop asks for more tests, a
+    high-risk migration asks for human review, a clean attested pass on any
+    auto-merge-eligible lane merges (#1076), and a complete packet with no
+    automated route asks for a human (#1056: unknown is never green).
+    Repositories override the mapping at the call site: the override is
+    merged on top of the defaults and any value outside the closed
+    vocabulary is rejected.
 
     ``mode`` is not consulted by this function — it is recorded on
     the resulting ``Decision`` row by the I/O shell. The gate's
