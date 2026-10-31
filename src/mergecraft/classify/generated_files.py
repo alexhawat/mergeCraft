@@ -46,24 +46,11 @@ def _generator_config_changed(change: ChangeSet) -> bool:
     return any(item.rsplit("/", 1)[-1] in GENERATOR_CONFIG_NAMES for item in changed)
 
 
-def review_includes_path(path: str, *, change: ChangeSet) -> bool:
-    """Return whether review scope includes ``path`` under generator policy (D4)."""
-    kind = classify_path(path)
-    if kind == FileKind.SOURCE:
-        return True
-    changed = {normalize_repo_path(item) for item in change.get("changed_paths", [])}
-    normalized_path = normalize_repo_path(path)
-    if kind == FileKind.GENERATED:
-        return _generator_config_changed(change) or normalized_path in changed
-    return normalized_path in changed
-
-
 def finding_survives_generated_policy(path: str, *, change: ChangeSet) -> bool:
     """Return whether findings on ``path`` survive post-diff generated filtering (D4).
 
-    Unlike ``review_includes_path``, this ignores the ``path in changed`` shortcut
-    for generated/minified/vendored paths — callers already scoped findings to
-    the diff.
+    Ignores the ``path in changed`` shortcut for generated/minified/vendored paths —
+    callers already scoped findings to the diff.
     """
     kind = classify_path(path)
     if kind == FileKind.SOURCE:
@@ -78,5 +65,4 @@ __all__ = [
     "FileKind",
     "classify_path",
     "finding_survives_generated_policy",
-    "review_includes_path",
 ]
