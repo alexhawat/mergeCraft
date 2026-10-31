@@ -21,3 +21,5 @@ def test_integration_reuses_coverage_artifacts() -> None:
     assert "MERGECRAFT_BASE_COVERAGE_PATH" in text
     assert "github.event.pull_request.head.sha" in text
     assert "lookup-only" not in text
+    assert "path: coverage.json" in text
+    assert "mergecraft-coverage-main-${{ github.event.pull_request.base.sha }}" in text

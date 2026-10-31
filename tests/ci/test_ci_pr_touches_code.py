@@ -29,7 +29,10 @@ def test_docs_only_markdown_and_docs_tree() -> None:
     changed = ["README.md", "docs/guide.md", "plans/008-coverage-shards.md"]
     assert pr_touches_code(changed) is False
     assert _matches_docs_only("CHANGELOG.md")
-    assert _matches_docs_only("evals/cases/foo.md")
+    assert not _matches_docs_only("evals/cases/foo.md")
+    assert pr_touches_code(["evals/cases/foo.md"]) is True
+    assert pr_touches_code([".github/skills/code-review/SKILL.md"]) is True
+    assert not _matches_docs_only(".github/skills/code-review/SKILL.md")
 
 
 def test_code_touch_in_src_or_workflows() -> None:

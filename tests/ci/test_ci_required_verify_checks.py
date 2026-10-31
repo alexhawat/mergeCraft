@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 
 import pytest
@@ -50,6 +51,8 @@ def test_mergecraft_wait_script_uses_required_list() -> None:
     reason="GITHUB_TOKEN on PR runners cannot read organization rulesets",
 )
 def test_required_verify_checks_file_matches_live_ruleset() -> None:
+    if shutil.which("gh") is None:
+        pytest.skip("gh CLI not installed")
     result = subprocess.run(
         [
             "gh",

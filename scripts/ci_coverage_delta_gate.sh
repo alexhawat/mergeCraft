@@ -28,6 +28,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 reuse_head=false
+reuse_base=false
 if [[ -n "${MERGECRAFT_HEAD_COVERAGE_PATH:-}" && -f "${MERGECRAFT_HEAD_COVERAGE_PATH}" ]]; then
   cp "${MERGECRAFT_HEAD_COVERAGE_PATH}" "${GITHUB_WORKSPACE}/coverage.json"
   reuse_head=true
@@ -35,6 +36,7 @@ fi
 
 if [[ -n "${MERGECRAFT_BASE_COVERAGE_PATH:-}" && -f "${MERGECRAFT_BASE_COVERAGE_PATH}" ]]; then
   cp "${MERGECRAFT_BASE_COVERAGE_PATH}" "${GITHUB_WORKSPACE}/coverage-base.json"
+  reuse_base=true
   echo "Reusing base coverage.json from cache/artifact (skipping base worktree measure)."
 fi
 
@@ -139,8 +141,13 @@ fi
 if [[ "${reuse_head}" != true ]]; then
 make coverage-gate
 else
-  echo "Reusing head coverage.json from ci.yml (skipping duplicate make coverage-gate)."
+  echo "Reusing head coverage.json from ci.yml (skipping duplicate coverage gate run)."
 fi
 if [[ -f coverage-base.json ]]; then
   uv run python scripts/check_coverage_delta.py coverage.json --base coverage-base.json
+fi
+
+# Match ci-cd.yml cache layout so the next integration run can restore base coverage.
+if [[ "${reuse_base}" != true && -f coverage-base.json ]]; then
+  cp coverage-base.json coverage.json
 fi

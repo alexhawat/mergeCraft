@@ -230,3 +230,52 @@ def test_head_coverage_regression_still_fails_when_base_skips(tmp_path: Path) ->
     assert result.returncode != 0, "head coverage regression must still fail the gate"
     assert not (scratch / "coverage-base.json").is_file()
     assert "coverage-gate" in combined or "ratchet" in combined or "fail_under" in combined
+
+
+def test_reuses_prefetched_head_and_base_coverage(tmp_path: Path) -> None:
+    """Reuse env paths must skip worktree measure and ``make coverage-gate``."""
+    scratch = clone_local_repo(tmp_path)
+    install_bare_origin(scratch, tmp_path)
+    noop_coverage_measure(scratch / "Makefile")
+    head_path = tmp_path / "head.json"
+    base_path = tmp_path / "base.json"
+    seed_passing_coverage_json(head_path)
+    seed_passing_coverage_json(base_path)
+
+    result = run_coverage_delta_gate(
+        scratch,
+        base_ref=resolve_push_branch(scratch),
+        extra_env={
+            "MERGECRAFT_HEAD_COVERAGE_PATH": str(head_path),
+            "MERGECRAFT_BASE_COVERAGE_PATH": str(base_path),
+        },
+        timeout=_INTEGRATION_TIMEOUT,
+    )
+    combined = result.stdout + result.stderr
+
+    assert result.returncode == 0, combined
+    assert "Reusing head coverage.json from ci.yml" in combined
+    assert "Reusing base coverage.json from cache/artifact" in combined
+    assert "make coverage-gate" not in combined
+    assert not worktree_path(scratch).exists()
+
+
+def test_reused_head_coverage_must_be_valid_json(tmp_path: Path) -> None:
+    scratch = clone_local_repo(tmp_path)
+    install_bare_origin(scratch, tmp_path)
+    head_path = tmp_path / "head.json"
+    head_path.write_text("{not-json", encoding="utf-8")
+    base_path = tmp_path / "base.json"
+    seed_passing_coverage_json(base_path)
+
+    result = run_coverage_delta_gate(
+        scratch,
+        base_ref=resolve_push_branch(scratch),
+        extra_env={
+            "MERGECRAFT_HEAD_COVERAGE_PATH": str(head_path),
+            "MERGECRAFT_BASE_COVERAGE_PATH": str(base_path),
+        },
+        timeout=_INTEGRATION_TIMEOUT,
+    )
+
+    assert result.returncode != 0

@@ -95,16 +95,14 @@ jobs:
         env:
           # Exporter unit tests run in coverage-measure (D14 / TH8).
           MERGECRAFT_UV_EXTRAS: tracing
-      - name: Integration suite
-        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
-        run: make test-integration
       - name: Restore base coverage from main cache
+        id: base_coverage_cache
         if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14' && github.event_name == 'pull_request'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ runner.temp }}/coverage-base-cache.json
+          path: coverage.json
           key: mergecraft-coverage-main-${{ github.event.pull_request.base.sha }}
-      - name: Fetch base coverage artifact (cache miss fallback)
+      - name: Fetch base coverage (cache or ci-cd artifact)
         if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14' && github.event_name == 'pull_request'
         continue-on-error: true
         env:
@@ -112,13 +110,23 @@ jobs:
         run: |
           set -euo pipefail
           dest="${{ runner.temp }}/coverage-base.json"
-          if [[ -f "${{ runner.temp }}/coverage-base-cache.json" ]]; then
-            cp "${{ runner.temp }}/coverage-base-cache.json" "${dest}"
-            echo "Using cached base coverage for ${{ github.event.pull_request.base.sha }}"
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          if [[ -f coverage.json ]]; then
+            cp coverage.json "${dest}"
+            echo "Using cached base coverage for ${base_sha} (coverage.json cache restore)"
             exit 0
           fi
           chmod +x scripts/ci_fetch_coverage_artifact.sh
-          scripts/ci_fetch_coverage_artifact.sh "${{ github.event.pull_request.base.sha }}" "${dest}"
+          for attempt in $(seq 1 12); do
+            if scripts/ci_fetch_coverage_artifact.sh "${base_sha}" "${dest}"; then
+              echo "Base coverage artifact ready for ${base_sha} (attempt ${attempt})"
+              exit 0
+            fi
+            echo "Base coverage artifact not ready for ${base_sha} (attempt ${attempt}/12); sleeping 5s…" >&2
+            sleep 5
+          done
+          echo "Base coverage cache/artifact miss — coverage ratchet will measure base in a worktree" >&2
+          exit 1
       - name: Fetch head coverage from ci.yml artifact
         if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14' && github.event_name == 'pull_request'
         continue-on-error: true
@@ -140,6 +148,9 @@ jobs:
           done
           echo "Head coverage artifact never appeared — coverage ratchet will fall back to make coverage-gate" >&2
           exit 1
+      - name: Integration suite
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+        run: make test-integration
       - name: Coverage ratchet
         if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         env:
@@ -149,6 +160,16 @@ jobs:
           MERGECRAFT_BASE_COVERAGE_PATH: ${{ runner.temp }}/coverage-base.json
           MERGECRAFT_HEAD_COVERAGE_PATH: ${{ runner.temp }}/coverage-head.json
         run: bash scripts/ci_coverage_delta_gate.sh
+      - name: Seed main base coverage cache
+        if: >-
+          (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') &&
+          matrix.python == '3.14' &&
+          github.event_name == 'pull_request' &&
+          steps.base_coverage_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: coverage.json
+          key: mergecraft-coverage-main-${{ github.event.pull_request.base.sha }}
 
   filtered-egress:
     name: Integration (filtered egress / privileged)

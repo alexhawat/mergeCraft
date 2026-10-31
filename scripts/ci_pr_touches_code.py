@@ -12,14 +12,19 @@ from pathlib import PurePosixPath
 
 # Paths that may change without running the full unit/coverage/integration matrix.
 _DOCS_ONLY_PATTERNS: tuple[str, ...] = (
-    "*.md",
     "plans/**",
     "evals/results/**",
-    "evals/cases/**",
     "llms-full.txt",
     "llms.txt",
     "LICENSE",
     "LICENSE.*",
+)
+
+# Paths that look like docs but are guarded by tests/skills/eval sync suites.
+_NEVER_DOCS_ONLY_PREFIXES: tuple[str, ...] = (
+    ".github/skills/",
+    "src/mergecraft/skills/",
+    "evals/cases/",
 )
 
 
@@ -27,6 +32,12 @@ def _matches_docs_only(path: str) -> bool:
     normalized = path.replace("\\", "/").lstrip("./")
     if not normalized:
         return False
+    for prefix in _NEVER_DOCS_ONLY_PREFIXES:
+        if normalized.startswith(prefix):
+            return False
+    # Root-level or docs/ Markdown only (not every *.md in the repo).
+    if normalized.endswith(".md") and ("/" not in normalized or normalized.startswith("docs/")):
+        return True
     name = PurePosixPath(normalized)
     for pattern in _DOCS_ONLY_PATTERNS:
         if fnmatch.fnmatch(normalized, pattern) or fnmatch.fnmatch(name.name, pattern):
