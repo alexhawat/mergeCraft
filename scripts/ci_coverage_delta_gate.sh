@@ -35,6 +35,7 @@ fi
 
 if [[ -n "${MERGECRAFT_BASE_COVERAGE_PATH:-}" && -f "${MERGECRAFT_BASE_COVERAGE_PATH}" ]]; then
   cp "${MERGECRAFT_BASE_COVERAGE_PATH}" "${GITHUB_WORKSPACE}/coverage-base.json"
+  echo "Reusing base coverage.json from cache/artifact (skipping base worktree measure)."
 fi
 
 if [[ ! -f "${GITHUB_WORKSPACE}/coverage-base.json" ]]; then
@@ -135,10 +136,10 @@ if [[ ! -f coverage-base.json ]]; then
 fi
 fi
 
-if [[ "${reuse_head}" == true ]]; then
-  echo "Reusing head coverage.json from ci.yml (skipping duplicate make coverage-gate)."
+if [[ "${reuse_head}" != true ]]; then
+make coverage-gate
 else
-  make coverage-gate
+  echo "Reusing head coverage.json from ci.yml (skipping duplicate make coverage-gate)."
 fi
 if [[ -f coverage-base.json ]]; then
   uv run python scripts/check_coverage_delta.py coverage.json --base coverage-base.json

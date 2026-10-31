@@ -62,7 +62,7 @@ jobs:
       github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 55
     permissions:
       contents: read
       actions: read
@@ -104,7 +104,6 @@ jobs:
         with:
           path: ${{ runner.temp }}/coverage-base-cache.json
           key: mergecraft-coverage-main-${{ github.event.pull_request.base.sha }}
-          lookup-only: true
       - name: Fetch base coverage artifact (cache miss fallback)
         if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14' && github.event_name == 'pull_request'
         continue-on-error: true
@@ -130,13 +129,14 @@ jobs:
           chmod +x scripts/ci_fetch_coverage_artifact.sh
           dest="${{ runner.temp }}/coverage-head.json"
           # integration-pr often starts before ci.yml finishes; poll for the artifact.
-          for attempt in $(seq 1 90); do
-            if scripts/ci_fetch_coverage_artifact.sh "${{ github.sha }}" "${dest}"; then
-              echo "Head coverage artifact ready (attempt ${attempt})"
+          head_sha="${{ github.event.pull_request.head.sha }}"
+          for attempt in $(seq 1 72); do
+            if scripts/ci_fetch_coverage_artifact.sh "${head_sha}" "${dest}"; then
+              echo "Head coverage artifact ready for ${head_sha} (attempt ${attempt})"
               exit 0
             fi
-            echo "Head coverage artifact not ready (attempt ${attempt}/90); sleeping 10s…" >&2
-            sleep 10
+            echo "Head coverage artifact not ready for ${head_sha} (attempt ${attempt}/72); sleeping 5s…" >&2
+            sleep 5
           done
           echo "Head coverage artifact never appeared — coverage ratchet will fall back to make coverage-gate" >&2
           exit 1

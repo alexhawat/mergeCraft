@@ -19,3 +19,5 @@ def test_integration_reuses_coverage_artifacts() -> None:
     assert "ci_fetch_coverage_artifact.sh" in text
     assert "MERGECRAFT_HEAD_COVERAGE_PATH" in text
     assert "MERGECRAFT_BASE_COVERAGE_PATH" in text
+    assert "github.event.pull_request.head.sha" in text
+    assert "lookup-only" not in text

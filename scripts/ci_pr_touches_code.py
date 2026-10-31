@@ -13,7 +13,6 @@ from pathlib import PurePosixPath
 # Paths that may change without running the full unit/coverage/integration matrix.
 _DOCS_ONLY_PATTERNS: tuple[str, ...] = (
     "*.md",
-    "docs/**",
     "plans/**",
     "evals/results/**",
     "evals/cases/**",
@@ -75,7 +74,8 @@ def main() -> int:
             handle.write(f"code={'true' if touches else 'false'}\n")
 
     print("true" if touches else "false")
-    return 0 if touches else 1
+    # Exit 0 always: callers run under ``set -e`` and read ``code`` from GITHUB_OUTPUT.
+    return 0
 
 
 if __name__ == "__main__":

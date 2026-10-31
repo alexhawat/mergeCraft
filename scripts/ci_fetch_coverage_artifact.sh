@@ -48,7 +48,7 @@ for run_id in ${run_ids}; do
     continue
   fi
   unzip -p "${tmp_zip}" "${extracted}" >"${output_path}"
-  echo "ci_fetch_coverage_artifact: restored coverage.json from run ${run_id} artifact ${artifact_id}"
+  echo "ci_fetch_coverage_artifact: reused mergecraft-coverage-json from run ${run_id} artifact ${artifact_id} for commit ${commit_sha}"
   exit 0
 done
 

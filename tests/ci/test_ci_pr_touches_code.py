@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from pathlib import Path
 
 from tests.ci.workflow_support import REPO_ROOT
 
@@ -35,6 +36,28 @@ def test_code_touch_in_src_or_workflows() -> None:
     assert pr_touches_code(["docs/x.md", "src/mergecraft/main.py"]) is True
     assert pr_touches_code([".github/workflows/ci.yml"]) is True
     assert pr_touches_code(["Makefile"]) is True
+    assert pr_touches_code(["docs/diagrams/pipeline.d2"]) is True
+
+
+def test_classifier_exits_zero_for_docs_only(tmp_path: Path) -> None:
+    import subprocess
+
+    repo = REPO_ROOT
+    result = subprocess.run(
+        [
+            "python3",
+            str(repo / "scripts" / "ci_pr_touches_code.py"),
+            "--event",
+            "pull_request",
+            "--base",
+            "main",
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
 
 
 def test_empty_diff_is_not_code() -> None:

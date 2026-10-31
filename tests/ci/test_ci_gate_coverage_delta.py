@@ -109,8 +109,8 @@ def test_head_coverage_gate_stays_unguarded_outside_subshell() -> None:
     """D5 guard — head ``make coverage-gate`` must not be wrapped in a tolerant guard."""
     text = script_text()
     tail = text.split(")\n", 1)[-1]
-    assert re.search(r"make coverage-gate", tail), (
-        "head make coverage-gate must remain the fallback when ci coverage is not reused"
+    assert re.search(r"^make coverage-gate\s*$", tail, re.MULTILINE), (
+        "head make coverage-gate must remain a hard gate when ci coverage is not reused"
     )
     assert "make coverage-gate ||" not in tail
 

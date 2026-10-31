@@ -183,11 +183,10 @@ jobs:
       matrix:
         python: ["3.11", "3.14"]
     steps:
-      - name: Docs-only skip
+      - name: Docs-only notice
         if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
-        run: echo "::notice title=Verify skipped::Docs-only PR — static/build tier skipped."
+        run: echo "::notice title=Verify (docs-only)::Running docs-check only — full static/build tier skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
           # Ref-resolution checks ask git whether a tag or branch exists
           # (README Action pin D25, tests/docs/support.py). A shallow fetch
@@ -196,12 +195,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/bootstrap
-        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
           python-version: ${{ matrix.python }}
       - name: Static, typecheck, build tier
         if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         run: make ci-static
+      - name: Docs-check (docs-only PRs)
+        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
+        run: make docs-check
       - name: Action pin freshness
         if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         run: |
