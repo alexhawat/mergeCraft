@@ -618,7 +618,6 @@ PROVIDERS: dict[str, ProviderConfig] = {
 # Back-compat lowercase alias matching TS `providers` export.
 providers = PROVIDERS
 
-ModelProvider = str  # dynamic keys of PROVIDERS
 
 
 # ── slug parsing ───────────────────────────────────────────────────────────────
