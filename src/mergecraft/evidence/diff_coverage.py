@@ -36,7 +36,6 @@ Exports:
     parse_diff_toc — Parse a unified diff into TOC entries.
     compute_diff_coverage — Map observed reads onto the TOC.
     coverage_nudge — One-time actionable nudge text naming unread ranges.
-    unread_ranges_for_findings — `(path, [ranges])` rows for the auditor.
 """
 
 from __future__ import annotations
@@ -413,20 +412,6 @@ def command_line_span(command: str | None) -> tuple[int, int] | None:
     return None
 
 
-def command_line_range(command: str | None) -> LineRange | None:
-    """Return the line span a simple read command asked for, if it named one.
-
-    Public wrapper over the internal parser so the trajectory recorder can
-    capture a diff read before redaction rewrites the path. An invalid explicit
-    span returns ``None`` here; callers that need to distinguish it use
-    :func:`command_line_span`.
-    """
-    span = command_line_span(command)
-    if span is None or span[0] <= 0:
-        return None
-    return LineRange(*span)
-
-
 def _read_paths(command: str | None) -> list[str]:
     """Return the path operands of one simple read command."""
     if not command:
@@ -624,13 +609,6 @@ def compute_diff_coverage(
     return DiffCoverageBreakdown(files=tuple(files), observed=observed)
 
 
-def unread_ranges_for_findings(
-    breakdown: DiffCoverageBreakdown,
-) -> tuple[tuple[str, tuple[LineRange, ...]], ...]:
-    """Return ``(path, unread ranges)`` rows for the trajectory auditor."""
-    return tuple((item.path, item.unread) for item in breakdown.files if item.unread)
-
-
 def _is_generated(path: str) -> bool:
     """Return whether ``path`` is a generated artifact the nudge may exempt."""
     lowered = path.casefold()
@@ -684,10 +662,8 @@ __all__ = [
     "DiffTocEntry",
     "FileDiffCoverage",
     "LineRange",
-    "command_line_range",
     "command_line_span",
     "compute_diff_coverage",
     "coverage_nudge",
     "parse_diff_toc",
-    "unread_ranges_for_findings",
 ]
