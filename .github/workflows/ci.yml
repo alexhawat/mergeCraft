@@ -205,6 +205,8 @@ jobs:
         run: make docs-check
       - name: Docs/skills/eval guards (docs-only PRs)
         if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true' && matrix.python == '3.14'
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-dev
         run: uv run pytest tests/docs tests/skills tests/evals/test_packaged_cases_sync.py -q --tb=short
       - name: Action pin freshness
         if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
