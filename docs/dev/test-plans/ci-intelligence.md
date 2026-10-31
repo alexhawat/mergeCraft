@@ -83,7 +83,7 @@ Raw capture zips live under `tests/ci/fixtures/raw/` (local-only; redacted JSON 
 | **K5** truncation | cap constant | overflow message | review section | `test_review_integration.py` |
 | **K6** cross-source cluster | — | CI + Ruff same line | — | `test_review_integration.py` |
 | **K8** redaction | canary absent | ingest path | comment body | `test_redaction.py` |
-| **K2** tool contract | `_analyze_log` | mocked MCP tool | — | `test_check_suite.py` |
+| **K2** tool contract | `analyze_log` | mocked MCP tool | — | `test_check_suite.py` |
 | **D14** budget | inline cap | CI section placement | — | `test_review_integration.py` |
 
 ## Constants
