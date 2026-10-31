@@ -91,8 +91,6 @@ def test_organization_memory_backend_is_pluggable() -> None:
     """#360 — org memory is a backend beside the local store."""
     module = _memory_api()
     backend_cls = getattr(module, "OrganizationMemoryBackend", None)
-    if backend_cls is None:
-        backend_cls = getattr(module, "MemoryBackend", None)
     assert backend_cls is not None
     for name in ("get", "put", "list"):
         assert callable(getattr(backend_cls, name, None)) or hasattr(backend_cls, name)

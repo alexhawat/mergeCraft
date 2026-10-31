@@ -157,9 +157,6 @@ class LocalMemoryBackend(OrganizationMemoryBackend):
         return list(self._items)
 
 
-MemoryBackend = OrganizationMemoryBackend
-
-
 class MemoryStoreError(ValueError):
     """The on-disk memory document is missing or not a valid learnings file."""
 
@@ -315,7 +312,6 @@ __all__ = [
     "FalsePositiveMemory",
     "IngestResult",
     "LocalMemoryBackend",
-    "MemoryBackend",
     "MemoryEffectivenessReport",
     "MemoryStoreError",
     "MemoryValidationReport",
