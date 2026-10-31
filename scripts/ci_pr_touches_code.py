@@ -67,10 +67,11 @@ def main() -> int:
     parser.add_argument("--base", default="main", help="PR base branch name")
     args = parser.parse_args()
 
-    if args.event != "pull_request":
-        touches = True
-    else:
-        touches = pr_touches_code(changed_files(args.base))
+    touches = (
+        True
+        if args.event != "pull_request"
+        else pr_touches_code(changed_files(args.base))
+    )
 
     github_output = os.environ.get("GITHUB_OUTPUT", "")
     if github_output:
