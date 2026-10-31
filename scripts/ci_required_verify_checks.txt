@@ -1,0 +1,11 @@
+# Required Verify check names from the protect-main / require-ci-on-main ruleset.
+# One exact GitHub check-run name per line; keep in sync with branch protection.
+Verify (static + build py3.11)
+Verify (static + build py3.14)
+Verify (tests py3.11 1/2)
+Verify (tests py3.11 2/2)
+Verify (tests py3.14 1/2)
+Verify (tests py3.14 2/2)
+Verify (security audit py3.11)
+Verify (security audit py3.14)
+Verify (coverage gate py3.14)

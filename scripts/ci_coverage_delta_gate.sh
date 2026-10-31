@@ -27,101 +27,119 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Drop a stale worktree left by a prior failed integration run before re-adding.
-git worktree remove "$worktree" --force 2>/dev/null || true
-git worktree prune 2>/dev/null || true
+reuse_head=false
+if [[ -n "${MERGECRAFT_HEAD_COVERAGE_PATH:-}" && -f "${MERGECRAFT_HEAD_COVERAGE_PATH}" ]]; then
+  cp "${MERGECRAFT_HEAD_COVERAGE_PATH}" "${GITHUB_WORKSPACE}/coverage.json"
+  reuse_head=true
+fi
 
-git fetch origin "${GITHUB_BASE_REF}"
-git worktree add "$worktree" "$base_ref"
-orig_workspace="$GITHUB_WORKSPACE"
-: >"$base_measure_log"
+if [[ -n "${MERGECRAFT_BASE_COVERAGE_PATH:-}" && -f "${MERGECRAFT_BASE_COVERAGE_PATH}" ]]; then
+  cp "${MERGECRAFT_BASE_COVERAGE_PATH}" "${GITHUB_WORKSPACE}/coverage-base.json"
+fi
+
+if [[ ! -f "${GITHUB_WORKSPACE}/coverage-base.json" ]]; then
+  # Drop a stale worktree left by a prior failed integration run before re-adding.
+  git worktree remove "$worktree" --force 2>/dev/null || true
+  git worktree prune 2>/dev/null || true
+
+  git fetch origin "${GITHUB_BASE_REF}"
+  git worktree add "$worktree" "$base_ref"
+  orig_workspace="$GITHUB_WORKSPACE"
+  : >"$base_measure_log"
+
 # BASE_WORKTREE_MEASURE_BLOCK — parsed by tests/ci/test_coverage_delta_wrapper.py (D10).
 (
-  set +e
-  cd "$worktree"
-  export GITHUB_WORKSPACE="$worktree"  # #573: base tree reads its own config, not head's
-  # The base worktree gets its own fresh venv. `dev` is a
-  # [project.optional-dependencies] extra, which `uv run` does not install, so
-  # `make coverage-measure` died with "Failed to spawn: pytest" before measuring
-  # anything. Sync the extra explicitly.
-  #
-  # Pin which venv that is, because this sync and the `make` below disagreed
-  # otherwise. MCB-23 made the Makefile export
-  # `UV_PROJECT_ENVIRONMENT ?= $(CURDIR)/.venv-dev`; this sync runs in a bare
-  # shell, so it filled `.venv` while `make coverage-measure` then looked in
-  # `.venv-dev` and hit the same "Failed to spawn: pytest" by a new route.
-  # Exporting it here settles both halves on one path, and `?=` means the
-  # Makefile defers to it — so this also works against an older base tree whose
-  # Makefile predates MCB-23 and would otherwise default to `.venv`.
-  # Always `$PWD/.venv-dev`: the parent `make test` job exports
-  # `UV_PROJECT_ENVIRONMENT` to the PR checkout's venv. Keeping that value
-  # made `uv sync` rewrite the job environment to the base worktree, so a
-  # later subprocess import of `mergecraft` loaded the base tree
-  # (`test_mergecraft_commit_is_lazy`).
-  export UV_PROJECT_ENVIRONMENT="$PWD/.venv-dev"
-  measure_ok=true
-  if ! "${UV:-uv}" sync --extra dev --extra tracing >>"$base_measure_log" 2>&1; then
-    measure_ok=false
-  fi
-  # Repo-native analyzer tests (#427) require tools/node_modules/.bin; bootstrap
-  # only runs on the PR checkout, not this detached base worktree.
-  if [[ "$measure_ok" == true ]]; then
-    if ! make setup-local-analyzers >>"$base_measure_log" 2>&1; then
+    set +e
+    cd "$worktree"
+    export GITHUB_WORKSPACE="$worktree"  # #573: base tree reads its own config, not head's
+    # The base worktree gets its own fresh venv. `dev` is a
+    # [project.optional-dependencies] extra, which `uv run` does not install, so
+    # `make coverage-measure` died with "Failed to spawn: pytest" before measuring
+    # anything. Sync the extra explicitly.
+    #
+    # Pin which venv that is, because this sync and the `make` below disagreed
+    # otherwise. MCB-23 made the Makefile export
+    # `UV_PROJECT_ENVIRONMENT ?= $(CURDIR)/.venv-dev`; this sync runs in a bare
+    # shell, so it filled `.venv` while `make coverage-measure` then looked in
+    # `.venv-dev` and hit the same "Failed to spawn: pytest" by a new route.
+    # Exporting it here settles both halves on one path, and `?=` means the
+    # Makefile defers to it — so this also works against an older base tree whose
+    # Makefile predates MCB-23 and would otherwise default to `.venv`.
+    # Always `$PWD/.venv-dev`: the parent `make test` job exports
+    # `UV_PROJECT_ENVIRONMENT` to the PR checkout's venv. Keeping that value
+    # made `uv sync` rewrite the job environment to the base worktree, so a
+    # later subprocess import of `mergecraft` loaded the base tree
+    # (`test_mergecraft_commit_is_lazy`).
+    export UV_PROJECT_ENVIRONMENT="$PWD/.venv-dev"
+    measure_ok=true
+    if ! "${UV:-uv}" sync --extra dev --extra tracing >>"$base_measure_log" 2>&1; then
       measure_ok=false
     fi
-  fi
-  if [[ "$measure_ok" == true ]]; then
-    if grep -q '^coverage-measure:' Makefile; then
-      if ! make coverage-measure >>"$base_measure_log" 2>&1; then
-        measure_ok=false
-      fi
-    else
-      # Pre-TH base trees only ship ``coverage-gate``; inline the measure recipe
-      # so the delta gate can compare against the merge base before TH lands.
-      if ! "${UV:-uv}" run pytest tests -q --tb=short --strict-markers -m "not integration" \
-        --cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
-        --randomly-seed="${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}" \
-        -rX >>"$base_measure_log" 2>&1; then
+    # Repo-native analyzer tests (#427) require tools/node_modules/.bin; bootstrap
+    # only runs on the PR checkout, not this detached base worktree.
+    if [[ "$measure_ok" == true ]]; then
+      if ! make setup-local-analyzers >>"$base_measure_log" 2>&1; then
         measure_ok=false
       fi
     fi
-  fi
-  if [[ "$measure_ok" == true ]]; then
-    if ! cp coverage.json "${orig_workspace}/coverage-base.json" 2>>"$base_measure_log"; then
-      measure_ok=false
+    if [[ "$measure_ok" == true ]]; then
+      if grep -q '^coverage-measure:' Makefile; then
+        if ! make coverage-measure >>"$base_measure_log" 2>&1; then
+          measure_ok=false
+        fi
+      else
+        # Pre-TH base trees only ship ``coverage-gate``; inline the measure recipe
+        # so the delta gate can compare against the merge base before TH lands.
+        if ! "${UV:-uv}" run pytest tests -q --tb=short --strict-markers -m "not integration" \
+          --cov=mergecraft --cov-branch --cov-report=term --cov-report=json:coverage.json \
+          --randomly-seed="${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}" \
+          -rX >>"$base_measure_log" 2>&1; then
+          measure_ok=false
+        fi
+      fi
     fi
-  fi
-  exit 0
+    if [[ "$measure_ok" == true ]]; then
+      if ! cp coverage.json "${orig_workspace}/coverage-base.json" 2>>"$base_measure_log"; then
+        measure_ok=false
+      fi
+    fi
+    exit 0
 )
 if [[ ! -f coverage-base.json ]]; then
-  base_detail=""
-  if [[ -s "$base_measure_log" ]]; then
-    base_detail="$(tail -n 5 "$base_measure_log" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | sed 's/^ //;s/ $//')"
-    base_detail="${base_detail//::/}"
-  fi
-  skip_msg="Coverage delta skipped: base ref ${GITHUB_BASE_REF} could not be measured (see .ci-base-measure.log)."
-  echo "warning: ${skip_msg}" >&2
-  if [[ -n "$base_detail" ]]; then
-    echo "warning: base measurement tail: ${base_detail}" >&2
-  fi
-  if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
-    escaped_msg="${skip_msg//'%'/'%25'}"
-    escaped_msg="${escaped_msg//$'\r'/'%0D'}"
-    escaped_msg="${escaped_msg//$'\n'/'%0A'}"
-    echo "::warning title=Coverage delta skipped::${escaped_msg}" >&2
-  fi
-  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-    {
-      echo "### Coverage delta skipped"
-      echo "${skip_msg}"
-      if [[ -n "$base_detail" ]]; then
-        echo ""
-        echo "Base measurement tail: ${base_detail}"
-      fi
-    } >>"$GITHUB_STEP_SUMMARY"
-  fi
+    base_detail=""
+    if [[ -s "$base_measure_log" ]]; then
+      base_detail="$(tail -n 5 "$base_measure_log" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | sed 's/^ //;s/ $//')"
+      base_detail="${base_detail//::/}"
+    fi
+    skip_msg="Coverage delta skipped: base ref ${GITHUB_BASE_REF} could not be measured (see .ci-base-measure.log)."
+    echo "warning: ${skip_msg}" >&2
+    if [[ -n "$base_detail" ]]; then
+      echo "warning: base measurement tail: ${base_detail}" >&2
+    fi
+    if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+      escaped_msg="${skip_msg//'%'/'%25'}"
+      escaped_msg="${escaped_msg//$'\r'/'%0D'}"
+      escaped_msg="${escaped_msg//$'\n'/'%0A'}"
+      echo "::warning title=Coverage delta skipped::${escaped_msg}" >&2
+    fi
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+      {
+        echo "### Coverage delta skipped"
+        echo "${skip_msg}"
+        if [[ -n "$base_detail" ]]; then
+          echo ""
+          echo "Base measurement tail: ${base_detail}"
+        fi
+      } >>"$GITHUB_STEP_SUMMARY"
+    fi
 fi
-make coverage-gate
+fi
+
+if [[ "${reuse_head}" == true ]]; then
+  echo "Reusing head coverage.json from ci.yml (skipping duplicate make coverage-gate)."
+else
+  make coverage-gate
+fi
 if [[ -f coverage-base.json ]]; then
   uv run python scripts/check_coverage_delta.py coverage.json --base coverage-base.json
 fi
