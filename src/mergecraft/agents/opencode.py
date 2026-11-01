@@ -29,6 +29,11 @@ from mergecraft.agents.openai_compatible_gateways import (
     resolve_gateway_endpoints,
 )
 from mergecraft.agents.opencode_otel import apply_otel_plugin, opencode_otel_plugin_wiring
+from mergecraft.agents.opencode_pricing import (
+    GO_COST_NOTE,
+    GO_ESTIMATED_COST_NOTE,
+    estimate_go_step_cost,
+)
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.shared import (
     STDERR_DRAIN_JOIN_TIMEOUT_S,
@@ -1514,9 +1519,9 @@ def _run_opencode_cli_streaming(
         stderr_text=stderr_drain.text,
     )
     base_handler = (
-        _session_event_handler(session, tool_state=ctx.tool_state)
+        _session_event_handler(session, tool_state=ctx.tool_state, model=ctx.resolved_model)
         if session is not None
-        else _bash_only_handler(ctx.tool_state)
+        else _bash_only_handler(ctx.tool_state, model=ctx.resolved_model)
     )
 
     def _watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
@@ -1601,7 +1606,9 @@ def _priced_stream_usage(
     return apply_catalog_cost_to_usage(usage, model=ctx.resolved_model)
 
 
-def _absorb_step_usage(accumulator: StreamSpanAccumulator, event: dict[str, Any]) -> None:
+def _absorb_step_usage(
+    accumulator: StreamSpanAccumulator, event: dict[str, Any], *, model: str | None = None
+) -> None:
     """Fold a 2.x step's reported tokens into the run's usage (#801).
 
     OpenCode's ``step_finish`` part carries five **disjoint** counters:
@@ -1613,6 +1620,8 @@ def _absorb_step_usage(accumulator: StreamSpanAccumulator, event: dict[str, Any]
     prompt tokens are Anthropic-style additive, and reasoning joins the output
     total.
     """
+    if event.get("type") != "step_finish":
+        return
     part = event.get("part")
     if not isinstance(part, dict):
         return
@@ -1630,16 +1639,33 @@ def _absorb_step_usage(accumulator: StreamSpanAccumulator, event: dict[str, Any]
     cost = part.get("cost")
     if isinstance(cost, (int, float)):
         payload["cost_usd"] = float(cost)
+    if (model or "").startswith("opencode-go/"):
+        if isinstance(cost, (int, float)) and cost > 0:
+            accumulator.cost_note = accumulator.cost_note or GO_COST_NOTE
+        else:
+            estimate = estimate_go_step_cost(
+                model=model,
+                input_tokens=int(payload["input_tokens"]),
+                output_tokens=int(payload["output_tokens"]),
+                cache_read_tokens=int(payload["cache_read_input_tokens"]),
+                cache_write_tokens=int(payload["cache_creation_input_tokens"]),
+                timestamp_ms=event.get("timestamp"),
+            )
+            if estimate is not None and estimate > 0:
+                payload["cost_usd"] = estimate
+                accumulator.cost_note = GO_ESTIMATED_COST_NOTE
     accumulator.absorb_usage(payload)
 
 
 def _bash_only_handler(
     tool_state: ToolState | None,
+    *,
+    model: str | None = None,
 ) -> Callable[[StreamSpanAccumulator, dict[str, Any]], None]:
     """Stream handler for a run with no session: record bash calls, touch nothing else."""
 
     def _handle(accumulator: StreamSpanAccumulator, event: dict[str, Any]) -> None:
-        _absorb_step_usage(accumulator, event)
+        _absorb_step_usage(accumulator, event, model=model)
         if event.get("type") == "tool_use":
             _record_opencode_bash(tool_state, event.get("part"))
 
@@ -1650,6 +1676,7 @@ def _session_event_handler(
     session: dict[str, str],
     *,
     tool_state: ToolState | None = None,
+    model: str | None = None,
 ) -> Callable[[StreamSpanAccumulator, dict[str, Any]], None]:
     """Record a 2.x ``run`` stream's session id and answer text.
 
@@ -1671,7 +1698,7 @@ def _session_event_handler(
             )
             session["error"] = str(message or event)[:1000]
             accumulator.set_stream_error(session["error"])
-        _absorb_step_usage(accumulator, event)
+        _absorb_step_usage(accumulator, event, model=model)
         part = event.get("part")
         if event.get("type") == "tool_use":
             _record_opencode_bash(tool_state, part)

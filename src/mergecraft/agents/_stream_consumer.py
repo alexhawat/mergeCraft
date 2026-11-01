@@ -92,6 +92,7 @@ class StreamSpanAccumulator:
     # has to be added to it — see ``CacheReadTokens``.
     cache_read_additive: int = 0
     cost_usd: float | None = None
+    cost_note: str | None = None
     final_output: str | None = None
     parsed_event_count: int = 0
     malformed_event_count: int = 0
@@ -205,6 +206,7 @@ class StreamSpanAccumulator:
             cache_read_tokens=self.cache_read or None,
             cache_write_tokens=self.cache_write or None,
             cost_usd=self.cost_usd,
+            cost_note=self.cost_note,
         )
 
 

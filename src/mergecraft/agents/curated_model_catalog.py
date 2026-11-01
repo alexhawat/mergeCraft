@@ -181,6 +181,7 @@ def apply_catalog_cost_to_usage(
             cache_read_tokens=usage.cache_read_tokens,
             cache_write_tokens=usage.cache_write_tokens,
             cost_usd=None,
+            cost_note=usage.cost_note,
         )
     if usage.cost_usd is not None:
         return usage
@@ -199,6 +200,7 @@ def apply_catalog_cost_to_usage(
         cache_read_tokens=usage.cache_read_tokens,
         cache_write_tokens=usage.cache_write_tokens,
         cost_usd=computed,
+        cost_note=usage.cost_note,
     )
 
 
@@ -207,22 +209,27 @@ def cost_summary_from_usage_entries(
     *,
     budget_tracker: object | None = None,
 ) -> str | None:
-    """Render a published cost line from per-attempt usage (curated models only)."""
+    """Render reported/estimated usage costs, retaining billing qualifications."""
     from mergecraft.utils.run_bounds import BudgetTracker
 
-    if isinstance(budget_tracker, BudgetTracker) and budget_tracker.cost_used > 0:
-        return f"${format_cost_usd(budget_tracker.cost_used)}"
     total = 0.0
     known = False
+    notes: list[str] = []
     for row in usage_entries:
         if not isinstance(row, AgentUsage):
             continue
         if row.cost_usd is not None and row.cost_usd > 0:
             total += row.cost_usd
             known = True
+            if row.cost_note and row.cost_note not in notes:
+                notes.append(row.cost_note)
+    if isinstance(budget_tracker, BudgetTracker) and budget_tracker.cost_used > 0:
+        total = budget_tracker.cost_used
+        known = True
     if not known:
         return None
-    return f"${format_cost_usd(total)}"
+    suffix = f" ({'; '.join(notes)})" if notes else ""
+    return f"${format_cost_usd(total)}{suffix}"
 
 
 __all__ = [

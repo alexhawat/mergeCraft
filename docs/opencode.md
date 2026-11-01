@@ -26,6 +26,30 @@ by copying from there; `mergecraft opencode install` automates it.
 | Set up / diagnose | `/mergecraft/setup`, `/mergecraft/doctor` |
 | MCP, JEV, Logfire | `/mergecraft/mcp`, `/mergecraft/jev`, `/mergecraft/logfire` |
 
+## OpenCode Go review costs
+
+Token/cost reporting works on the OpenCode 2.x stream in versions containing
+PR #1099; `v0.1.0a4` predates that fix. Positive costs reported by OpenCode
+are preserved. When a step reports zero or no cost, mergeCraft can estimate
+DeepSeek usage from these [published Go rates](https://opencode.ai/v2/docs/console/go/#usage-limits),
+verified November 1, 2026 (USD per million tokens):
+
+| Go model | Uncached input | Cached input | Output, including reasoning |
+|---------|---------------:|-------------:|----------------------------:|
+| `deepseek-v4.1-flash` | $0.15 | $0.003 | $0.60 |
+| `deepseek-v4-pro` | $0.66 | $0.022 | $1.98 |
+
+Rates double during weekday 01:00–04:00 and 06:00–10:00 UTC windows.
+The fallback uses each step's completion timestamp, so crossing a window
+does not reprice the whole review. Missing timestamps, unknown models and
+unpriced cache writes remain unknown. Provider billing, including holiday
+discounts and boundary-crossing requests, can differ from this estimate.
+
+The Cost line labels Go **usage value** and flags estimates. Go plans are
+$10/month, $40/month (Plus), or $20/member/month (Teams); mergeCraft neither
+allocates those fees per review nor knows whether Extra Usage billed a request.
+The Console is authoritative for allowance and charges.
+
 ## Engines
 
 The engine decides who reviews and how much evidence is gathered.

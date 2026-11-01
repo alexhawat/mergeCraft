@@ -12,6 +12,7 @@ import json
 import shutil
 import subprocess
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -20,7 +21,8 @@ from tests.agents.conftest import make_agent_run_context
 
 from mergecraft.agents import opencode as oc
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator
-from mergecraft.agents.shared import AgentResult, ResolvedInstructions
+from mergecraft.agents.curated_model_catalog import cost_summary_from_usage_entries
+from mergecraft.agents.shared import AgentResult, ResolvedInstructions, merge_agent_usage
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
@@ -390,6 +392,76 @@ def test_a_zero_cost_step_is_priced_from_the_catalog(
     assert result.usage is not None
     assert result.usage.cost_usd is not None
     assert result.usage.cost_usd > 0, "a zero cost must fall back to the catalog price"
+
+
+@pytest.mark.parametrize("session", [None, {}])
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_go_fills_each_missing_step_cost_and_preserves_reported_cost(
+    tmp_path: Path, monkeypatch: MonkeyPatch, session: Any, returncode: int
+) -> None:
+    """A mixed-cost stream crosses a price boundary and can finish in failure."""
+    steps = []
+    for hour, cost in [(0, None), (1, 0), (2, 0.11)]:
+        steps.append(
+            json.dumps(
+                {
+                    "type": "step_finish",
+                    "timestamp": datetime.fromisoformat(
+                        f"2026-11-02T0{hour}:00:00+00:00"
+                    ).timestamp()
+                    * 1000,
+                    "part": {
+                        "cost": cost,
+                        "tokens": {
+                            "input": 1_000_000,
+                            "output": 500_000,
+                            "reasoning": 500_000,
+                            "cache": {"read": 1_000_000, "write": 0},
+                        },
+                    },
+                }
+            )
+        )
+    monkeypatch.setattr(
+        oc, "spawn_agent_cli", lambda cmd, **kwargs: _Proc("\n".join(steps), returncode)
+    )
+    result = oc._run_opencode_cli_streaming(
+        cmd=["opencode"],
+        ctx=make_agent_run_context(tmp_path, resolved_model="opencode-go/deepseek-v4.1-flash"),
+        env={},
+        session=session,
+    )
+    assert result.success is (returncode == 0)
+    assert result.usage is not None
+    assert result.usage.input_tokens == 6_000_000
+    assert result.usage.output_tokens == 3_000_000
+    assert result.usage.cost_usd == pytest.approx(0.753 + 1.506 + 0.11)
+    # Follow-up turns and publication must not erase the estimate qualification.
+    copied = merge_agent_usage(None, result.usage)
+    combined = merge_agent_usage(copied, result.usage)
+    assert combined is not None
+    assert cost_summary_from_usage_entries([combined]) == (
+        "$4.7380 (includes estimated OpenCode Go usage value; subscription billed separately)"
+    )
+
+
+def test_reported_go_cost_is_not_recomputed() -> None:
+    """The working #1013 case stays provider-reported, with no estimate label."""
+    accumulator = StreamSpanAccumulator(agent_name="opencode")
+    handler = oc._session_event_handler({}, model="opencode-go/deepseek-v4.1-flash")
+    handler(
+        accumulator,
+        {
+            "type": "step_finish",
+            "part": {"cost": 0.11, "tokens": {"input": 11_870_631, "output": 61_422}},
+        },
+    )
+    usage = accumulator.to_usage()
+    assert usage is not None
+    assert usage.cost_usd == 0.11
+    assert cost_summary_from_usage_entries([usage]) == (
+        "$0.1100 (includes OpenCode Go usage value; subscription billed separately)"
+    )
 
 
 def test_the_no_session_handler_also_records_usage() -> None:
