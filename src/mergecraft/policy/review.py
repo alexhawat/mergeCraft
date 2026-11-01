@@ -191,15 +191,47 @@ def _load_error_summary(errors: Sequence[PolicyLoadError]) -> str | None:
     return "; ".join(f"{error.path}: {error.message}" for error in errors)
 
 
-def _read_local(repo_root: Path, rel: str) -> bytes | None:
+def _read_local(repo_root: Path, rel: str) -> tuple[bytes | None, PolicyLoadError | None]:
+    """Read one policy document from the working tree.
+
+    A document that is absent is not an error — its absence is the opt-in
+    signal. A document that is present but cannot be read (``PermissionError``,
+    an I/O error) is an error: treating it as absent would silently review with
+    no rules, which is the fail-open shape this module exists to prevent.
+
+    Returns:
+        tuple[bytes | None, PolicyLoadError | None]: The document bytes, and the
+        read failure when the document exists but could not be read.
+    """
     path = repo_root / rel
-    if not path.is_file():
-        return None
     try:
-        return path.read_bytes()
+        present = path.is_file()
+    except OSError as exc:  # pragma: no cover — ``is_file`` swallows most of these
+        logger.warning("policy: could not stat {}: {}", rel, exc)
+        return None, PolicyLoadError(path=rel, message=f"{rel} could not be read: {exc}")
+    if not present:
+        return None, None
+    try:
+        return path.read_bytes(), None
     except OSError as exc:
         logger.warning("policy: could not read {}: {}", rel, exc)
-        return None
+        return None, PolicyLoadError(path=rel, message=f"{rel} could not be read: {exc}")
+
+
+def _read_or_error(
+    repo_root: Path,
+    rel: str,
+    *,
+    parse: Any,
+) -> tuple[list[Any], PolicyLoadError | None, str]:
+    """Read and parse one document from the working tree.
+
+    A read failure replaces the parse: there are no bytes to parse, and the
+    read error is the one the row must name.
+    """
+    raw, read_error = _read_local(repo_root, rel)
+    rows, parse_error, digest = _read_document(raw, rel=rel, parse=parse)
+    return rows, read_error or parse_error, digest
 
 
 def _commit_exists(repo_root: Path, sha: str) -> bool:
@@ -247,8 +279,9 @@ def load_repo_policy(root: Path, *, operator_owned: bool = False) -> PolicySnaps
 
     Returns:
         PolicySnapshot: The parsed documents plus their provenance and digest.
-            A document that does not parse is recorded in ``load_errors``
-            rather than raised, so the review can fail closed with a row.
+            A document that does not parse, or that exists but cannot be read,
+            is recorded in ``load_errors`` rather than raised, so the review can
+            fail closed with a row that names the file and the reason.
 
     Examples:
         >>> import tempfile
@@ -257,15 +290,9 @@ def load_repo_policy(root: Path, *, operator_owned: bool = False) -> PolicySnaps
         ()
     """
     repo_root = root.resolve()
-    rules, rules_error, rules_digest = _read_document(
-        _read_local(repo_root, RULES_REL),
-        rel=RULES_REL,
-        parse=_parse_rules,
-    )
-    exceptions, exceptions_error, _exceptions_digest = _read_document(
-        _read_local(repo_root, EXCEPTIONS_REL),
-        rel=EXCEPTIONS_REL,
-        parse=_parse_exceptions,
+    rules, rules_error, rules_digest = _read_or_error(repo_root, RULES_REL, parse=_parse_rules)
+    exceptions, exceptions_error, _exceptions_digest = _read_or_error(
+        repo_root, EXCEPTIONS_REL, parse=_parse_exceptions
     )
     errors = tuple(error for error in (rules_error, exceptions_error) if error is not None)
     return PolicySnapshot(
