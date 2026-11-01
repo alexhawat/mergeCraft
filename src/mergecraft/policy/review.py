@@ -870,15 +870,27 @@ def _evaluate_run_policy(ctx: Any) -> list[Finding]:
         return []
     repo_root = _primary_repo_dir(ctx)
     snapshot = _run_policy_snapshot(ctx, repo_root)
-    if not snapshot.rules and not snapshot.exceptions and not snapshot.load_errors:
-        # No rules file, no change: a repository without a policy tree reviews
-        # exactly as it did before this feature existed.
-        return []
+    nothing_loaded = not snapshot.rules and not snapshot.exceptions and not snapshot.load_errors
+    # The change set is read before the "no policy tree" early return, because it
+    # is the only thing that tells a pull request which *deletes* the rules file
+    # apart from a repository that never had one: both leave an empty head copy.
     try:
         changed = _changed_paths(diff_path)
     except (OSError, UnicodeDecodeError) as exc:
+        if nothing_loaded:
+            # The diff is not a policy input for a repository with no policy
+            # tree, so a diff this run cannot read must not fail closed there:
+            # it reviews exactly as it did before this feature existed.
+            logger.debug("policy: no policy tree and no readable diff, skipping: {}", exc)
+            return []
         detail = str(exc) or type(exc).__name__
         return [_unevaluated_row(diff_path, detail=detail)]
+    if nothing_loaded and not _policy_paths_in(changed):
+        # No rules file, no change: a repository without a policy tree reviews
+        # exactly as it did before this feature existed. An untouched empty tree
+        # is that same repository, so it produces no rows — and this is the only
+        # place a change set that leaves the tree alone is allowed to short out.
+        return []
 
     resolved = load_review_policy(
         snapshot,
