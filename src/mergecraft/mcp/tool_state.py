@@ -88,6 +88,24 @@ class RepoToolState:
 
 
 @dataclass(slots=True)
+class CoverageRecord:
+    """What the run knows about which changed hunks reached the reviewer.
+
+    Written by the orchestrator (``checkout_pr``, the post-run loop), never by an agent.
+    ``authoritative_diff`` is the PR diff the checkout built; ``None`` means the run
+    had no checkout of its own, so the diff the reviewer was handed is the universe.
+    ``unreviewable_paths`` and ``diff_truncated`` record what the files API could not
+    deliver. Coverage is accounted at packet time from the delivered diff and the
+    observed reads; nothing here tracks a follow-up, because the pre-submit nudge
+    hands the unread ranges back before the verdict is accepted.
+    """
+
+    authoritative_diff: str | None = None
+    unreviewable_paths: list[str] = field(default_factory=list)
+    diff_truncated: bool = False
+
+
+@dataclass(slots=True)
 class ProgressComment:
     id: str
     type: Literal["issue", "review"]
@@ -590,6 +608,16 @@ class ToolState:
     # Plan 13 W5 — typed refusal from the last terminal tool attempt
     # (``submit_review_verdict`` / ``create_pull_request_review``).
     last_terminal_rejection: str | None = None
+    # Phase 4 — the specific reason ``finalize_agent_result`` failed
+    # (``finalize_failed: <ExceptionType>``). ``None`` when finalize ran clean.
+    # The run fails closed on it; the record names it instead of the generic
+    # missing-verdict reason.
+    finalize_failure: str | None = None
+    # Changed-line coverage (#940): which hunks reached the reviewer, and the follow-up state.
+    coverage: CoverageRecord = field(default_factory=CoverageRecord)
+    # Pre-dispatch triage (#890): the ``TriageDecision`` when ``review.fastPath`` was
+    # evaluated for this run; ``None`` when the fast path is off.
+    triage: Any = None
 
     def iter_finding_rows(self) -> list[dict[str, Any]]:
         """Return every dict-shaped finding row across analyzer and agent lanes."""

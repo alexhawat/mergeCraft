@@ -166,6 +166,9 @@ async def collect_post_run_issues(
     unsubmitted = get_unsubmitted_review(ctx.tool_state)
     if unsubmitted:
         issues.unsubmitted_review = unsubmitted
+    # Changed-line coverage is not retried here: the pre-submit nudge in
+    # ``submit_review_verdict`` hands back every unread range once, before the
+    # verdict is accepted, so a second follow-up turn would duplicate it.
     issues.retryable = _post_run_issues_retryable(issues, ctx.tool_state)
     return issues
 

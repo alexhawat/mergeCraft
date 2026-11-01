@@ -195,6 +195,18 @@ def publication_ctx(
     primary = primary_repo_state(ctx.tool_state)
     assert primary.diff_path is not None
     (tmp_path / "diff.patch").write_text(diff_text, encoding="utf-8")
+    # A real review reads the diff it was handed. Without that observation the
+    # changed-line coverage gate reads ``not_observed`` and the run is
+    # inconclusive by design, which would make every finalize test here assert
+    # the empty-run behaviour instead of the one it is named for.
+    from mergecraft.evidence.trajectory import record_tool_call
+
+    record_tool_call(
+        ctx.tool_state,
+        tool="shell",
+        arguments={"command": "cat src/app.py"},
+        ok=True,
+    )
     return ctx
 
 

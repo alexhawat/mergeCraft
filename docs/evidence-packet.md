@@ -88,7 +88,7 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.16.0`.
+The current version is `1.17.0`.
 
 Wiring a consumer is **not** a shape change: #96 gave these models their first
 runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
@@ -124,8 +124,14 @@ not move.
   (`success` / `failure` / `neutral`). Gate actions such as `block` live
   on `action`, not `verdict`. Persisted packets that stored `block` as
   `verdict` no longer validate.
-- `1.11.0` — plan 12 W7 adds `run_health`: run-scoped findings and an
-  advisory conclusion, partitioned out of the top-level `findings` list.
+- `1.11.0` — adds `run_health`: run-scoped findings and an advisory
+  conclusion, partitioned out of the top-level `findings` list.
+- `1.12.0` — adds `agent_terminal_verdict`, the `verdict` the agent recorded
+  via `submit_review_verdict`, so `decide_approval` can apply its one-way
+  ratchet.
+- `1.13.0` — adds `reviewed_head_sha` and `progress_comment_id`, the run-bound
+  review identity the orchestrator writes from its own checkout and sticky
+  state.
 - `1.14.0` — adds the optional `analyzers` section: where the analyzer settings
   were resolved from, and the analyzer disposition ledger (one terminal
   disposition per raw analyzer hit, per-stage counts, the persisted
@@ -143,6 +149,10 @@ not move.
   `failure_class="refused"` instead of `ok=True, error=null`. Additive — a
   packet written before the value existed never carries it. The trajectory
   record schema moves to `1.2.0` with it.
+- `1.17.0` — adds `coverage` (changed-line coverage, written by the orchestrator
+  and defaulting to `null`) and `triage` (the tier the deterministic
+  pre-dispatch triage chose, defaulting to `null` when the fast path is off).
+  Both are additive.
 
 ## Top-level fields
 
@@ -214,6 +224,51 @@ section is omitted (`null`).
 | `findings` | `list[Finding]` | Run-scoped rows (`scope="run"`). |
 | `conclusion` | `str` | `clean` when empty; `advisory` when observations exist. |
 
+### `coverage` — `CoverageSection | None` (added in 1.17.0)
+
+Changed-line coverage: did every changed hunk of the PR diff reach the
+reviewer? Written by the orchestrator from the run's own checkout and delivery
+state — never by an agent. `null` when the run had no diff to account for. A
+hunk is covered only through mediated evidence: it was in the delivered diff, or
+an observed read covered part of it. Absence of read evidence is uncovered, not
+unknown — a run whose reads were never observed cannot claim completeness. The
+pre-submit nudge in `submit_review_verdict` hands every unread range back once,
+before the verdict is accepted; there is no separate follow-up turn. The section
+proves delivery and observation, not comprehension.
+
+| Field | Type | Notes |
+|------|------|-------|
+| `hunks_total` | `int` | Changed hunks, plus one per file whose range is unknown. |
+| `hunks_covered` | `int` | Hunks that reached the reviewer. |
+| `lines_total` | `int` | New-side lines across the known hunks. |
+| `lines_covered` | `int` | New-side lines of the covered hunks. |
+| `uncovered` | `list[{path, start_line, end_line, cause}]` | Every range that did not reach the reviewer. `start_line` and `end_line` are `0` when the range is unknown. |
+| `complete` | `bool` | `true` when nothing is uncovered apart from `excluded_generated` rows. |
+
+`cause` is one of `diff_truncated` (the files listing hit its page cap, so
+later files were never seen), `no_inline_patch` (GitHub sent line counts but no
+patch), `excluded_generated` (removed by the generated/minified/vendored
+policy; listed, not counted against `complete`), `not_delivered` (absent from
+the delivered diff and never read), and `not_observed` (delivered, but the run's
+read tracking observed nothing at all, so nothing vouches for it).
+
+An incomplete section makes the run `inconclusive` under the default
+`review.coverage.onIncomplete: inconclusive`; blockers still win.
+
+### `triage` — `TriageSection | None` (added in 1.17.0)
+
+The tier the deterministic pre-dispatch triage (`review.fastPath`) chose.
+Written by the orchestrator when the fast path was evaluated; `null` when it is
+off, so a run with no `review.fastPath` config is unchanged.
+
+| Field | Type | Notes |
+|------|------|-------|
+| `tier` | `str` | `skip` (no LLM review ran) or `full`. |
+| `recognizer` | `str \| null` | The recognizer behind a `skip` (`pinBump`, `prose`, `whitespace`, `generated`). |
+| `reason` | `str` | Why. |
+| `relied_on_checks` | `list[str]` | Checks that had to pass on the head SHA, from a `pinBump.trustedCheckApps` GitHub App, for a `skip`. |
+
+A `skip` run never carries a `success` decision: approval is left to a human.
 ### `run_metrics` — `RunMetrics | None` (added in `1.15.0`)
 
 Measurement only. It records how the review spent its time and its reads so the

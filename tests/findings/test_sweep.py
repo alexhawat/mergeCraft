@@ -18,6 +18,14 @@ from mergecraft.review_resolution import finding_fingerprints_in
 from mergecraft.review_taxonomy import stamp_finding_fingerprint
 
 _PATH = "src/app.py"
+
+
+@pytest.fixture(autouse=True)
+def _expected_publisher(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Carry-over trusts a thread only when its author is an expected publisher."""
+    monkeypatch.setenv("MERGECRAFT_REVIEWER_BOT_LOGIN", "mergecraft[bot]")
+
+
 _BODY = stamp_finding_fingerprint(path=_PATH, body="Missing timeout on the retry loop.")
 _FP = next(iter(finding_fingerprints_in(_BODY)))
 _KEY = f"<!-- mergecraft-carryover:v1:7:{_FP} -->"

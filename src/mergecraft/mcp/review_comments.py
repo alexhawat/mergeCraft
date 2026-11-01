@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from mergecraft.findings.threads import ReviewThreadPage
 from mergecraft.findings.threads import fetch_review_threads as _fetch_review_threads
 from mergecraft.mcp.list_pages import collect_list_pages
 from mergecraft.mcp.shared import ToolClass, execute, tool
@@ -20,17 +21,24 @@ mutation($threadId: ID!) {
 """
 
 
-async def fetch_review_threads(
+async def fetch_review_thread_page(
     ctx: ToolContext, pull_number: int, *, include_resolved: bool = False
-) -> list[dict[str, Any]]:
-    """Return a PR's review threads, normalized for both the tool and callers in-process."""
-    page = await _fetch_review_threads(
+) -> ReviewThreadPage:
+    """Return a PR's review threads with the ``incomplete`` signal the page cap sets."""
+    return await _fetch_review_threads(
         ctx.scm,
         ctx.repo.owner,
         ctx.repo.name,
         pull_number,
         include_resolved=include_resolved,
     )
+
+
+async def fetch_review_threads(
+    ctx: ToolContext, pull_number: int, *, include_resolved: bool = False
+) -> list[dict[str, Any]]:
+    """Return a PR's review threads, normalized for both the tool and callers in-process."""
+    page = await fetch_review_thread_page(ctx, pull_number, include_resolved=include_resolved)
     return page.threads
 
 
@@ -53,19 +61,24 @@ def get_review_comments_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         pull_number = int(params["pull_number"])
         include_resolved = bool(params.get("include_resolved", False))
-        threads = await fetch_review_threads(ctx, pull_number, include_resolved=include_resolved)
-        return {
+        page = await fetch_review_thread_page(ctx, pull_number, include_resolved=include_resolved)
+        response: dict[str, Any] = {
             "pull_number": pull_number,
-            "threads": threads,
-            "count": len(threads),
+            "threads": page.threads,
+            "count": len(page.threads),
         }
+        if page.incomplete:
+            response["incomplete"] = True
+        return response
 
     return tool(
         name="get_review_comments",
         tool_class=ToolClass.REVIEW_READ,
         description=(
             "List review threads (inline comments) for a pull request, including "
-            "thread IDs for resolve_review_thread."
+            "thread IDs for resolve_review_thread. Every page is read; if the listing "
+            "hits the page cap the response carries incomplete: true and some threads "
+            "or comments are missing (a thread read in part says commentsTruncated)."
         ),
         input_schema={
             "type": "object",

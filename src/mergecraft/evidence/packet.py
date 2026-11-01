@@ -113,7 +113,14 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 #   ``ToolRefusedError`` at the ``mcp/shared.py::execute`` seam, so the call
 #   records ``ok=False`` instead of a phantom ``ok=True, error=null``.
 #   Additive — a packet written before the value existed never carries it.
-PACKET_SCHEMA_VERSION = "1.16.0"
+# - 1.17.0 — adds the optional ``coverage`` section: how many changed hunks and
+#   lines reached the reviewer, which did not and why, and whether coverage was
+#   ``complete`` — written by the orchestrator from the run's own checkout and
+#   delivery state, never by an agent. Adds the optional ``triage`` section: the
+#   tier (``skip`` / ``full``) the pre-dispatch gate chose, the recognizer behind
+#   a skip, why, and the checks a skip relied on. Both default to ``None``, so a
+#   packet built before this version still validates.
+PACKET_SCHEMA_VERSION = "1.17.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
@@ -284,6 +291,60 @@ class ModePromptVersion(BaseModel):
     prompt_version: str
 
 
+UncoveredCause = Literal[
+    "diff_truncated",
+    "no_inline_patch",
+    "excluded_generated",
+    "not_delivered",
+    "not_observed",
+]
+
+
+class UncoveredRange(BaseModel):
+    """One changed range (or file) that never reached the reviewer, and why.
+
+    ``start_line`` / ``end_line`` are new-side lines; both are ``0`` when the range is
+    unknown — a file GitHub sent line counts for but no patch, or the files beyond the
+    files-API page cap.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    start_line: int
+    end_line: int
+    cause: UncoveredCause
+
+
+class CoverageSection(BaseModel):
+    """Changed-line coverage: did every changed hunk reach the reviewer?
+
+    ``complete`` ignores ``excluded_generated`` rows (policy exclusions are listed but
+    do not count against completeness). ``hunks_total`` counts each unknown-range row as
+    one unreviewed hunk. Delivery is what is proven, not comprehension.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    hunks_total: int
+    hunks_covered: int
+    lines_total: int
+    lines_covered: int
+    uncovered: list[UncoveredRange]
+    complete: bool
+
+
+class TriageSection(BaseModel):
+    """The tier the deterministic pre-dispatch triage chose (``skip`` runs no LLM review)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tier: Literal["skip", "full"]
+    recognizer: str | None = None
+    reason: str
+    relied_on_checks: list[str] = Field(default_factory=list)
+
+
 class DispositionSection(BaseModel):
     """One source's disposition ledger: every raw hit, its terminal fate and why (#941)."""
 
@@ -355,6 +416,11 @@ class MergeEvidencePacket(BaseModel):
     # the fields existed still validates.
     reviewed_head_sha: str | None = None
     progress_comment_id: int | None = None
+    # Changed-line coverage (#940), written by the orchestrator from the run's own
+    # checkout and delivery state. ``None`` when the run had no diff to account for.
+    coverage: CoverageSection | None = None
+    # Deterministic pre-dispatch triage (#890); ``None`` when ``review.fastPath`` is off.
+    triage: TriageSection | None = None
     # #941/#942 — analyzer settings provenance and the disposition ledger.
     analyzers: AnalyzersEvidence | None = None
     # Slice 7 — measurement only: tool calls, distinct reads, diff size, and
@@ -391,6 +457,19 @@ def packet_output_schema() -> dict[str, Any]:
     if isinstance(trajectory, dict) and "$ref" in trajectory:
         trajectory.clear()
         trajectory.update(TrajectoryRecord.model_json_schema())
+    coverage = schema.get("properties", {}).get("coverage")
+    if isinstance(coverage, dict):
+        ref = coverage.get("$ref") or next(
+            (
+                opt.get("$ref")
+                for opt in coverage.get("anyOf", [])
+                if isinstance(opt, dict) and "$ref" in opt
+            ),
+            None,
+        )
+        if ref:
+            coverage.clear()
+            coverage.update(CoverageSection.model_json_schema())
     run_health = schema.get("properties", {}).get("run_health")
     if isinstance(run_health, dict) and "$ref" in run_health:
         run_health.clear()
@@ -406,6 +485,7 @@ __all__ = [
     "PACKET_SCHEMA_VERSION",
     "AgentMetadata",
     "AnalyzersEvidence",
+    "CoverageSection",
     "Decision",
     "DeterministicCheck",
     "DispositionSection",
@@ -414,5 +494,8 @@ __all__ = [
     "RunHealth",
     "RunMetrics",
     "SelfAssessment",
+    "TriageSection",
+    "UncoveredCause",
+    "UncoveredRange",
     "packet_output_schema",
 ]

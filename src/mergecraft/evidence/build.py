@@ -31,6 +31,7 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 
 if TYPE_CHECKING:
     from mergecraft.classify import BlastRadiusClassification
+    from mergecraft.evidence.packet import CoverageSection, TriageSection
 
 
 def _coerce_findings(raw: list[dict[str, Any]] | list[Finding] | None) -> list[Finding]:
@@ -174,6 +175,8 @@ def build_packet(
     mode_prompt_versions: list[ModePromptVersion] | None = None,
     dispatched_lens_ids: list[str] | None = None,
     agent_terminal_verdict: Literal["approve", "request_changes"] | None = None,
+    coverage: CoverageSection | None = None,
+    triage: TriageSection | None = None,
     analyzers: AnalyzersEvidence | None = None,
     run_metrics: RunMetrics | None = None,
 ) -> MergeEvidencePacket:
@@ -264,6 +267,8 @@ def build_packet(
         trajectory=_coerce_trajectory(trajectory),
         mode_prompt_versions=list(mode_prompt_versions) if mode_prompt_versions else None,
         agent_terminal_verdict=agent_terminal_verdict,
+        coverage=coverage,
+        triage=triage,
         analyzers=analyzers,
         run_metrics=run_metrics,
     )
