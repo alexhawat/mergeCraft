@@ -17,12 +17,24 @@ A policy document that exists but cannot be read is the third: ``PermissionError
 is an unreadable policy file, not an absent one, and the review must say so
 instead of reviewing with no rules.
 
-These tests are written before the run path resolves either shape, so they are
+The base copy has the same three ways to go missing as the working-tree copy: it
+can be absent at the commit (no policy, no change), it can exceed the module's
+read cap, or ``git show`` can fail to materialize it. Only the first is "the base
+has no rules"; the other two must produce a blocking row that names the file and
+the reason.
+
+Finally, the "no policy tree, no change" short-circuit must not swallow an
+unreadable *diff* when the base commit does carry policy: a pull request that
+deletes the rules file and whose diff cannot be read has not been evaluated, and
+``policy.unevaluated`` says so. With no policy tree anywhere it stays ``[]``.
+
+These tests are written before the run path resolves these shapes, so they are
 red until the implementation lands.
 """
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -46,8 +58,11 @@ if TYPE_CHECKING:
 _BILLING_SCOPE = {"path": "src/billing/**"}
 _BLOCKING_RULE = "billing.no-secret-in-source"
 _CHANGED_IN_PR = "policy.changed_in_pr"
+_UNEVALUATED = "policy.unevaluated"
 _UNREADABLE = "policy.unreadable"
 _UNVERIFIABLE = "policy.unverifiable_source"
+# Either reserved code is an acceptable way to say "the base copy was not read".
+_READ_FAILURE_IDS = frozenset({_UNREADABLE, _UNVERIFIABLE})
 # A commit id this checkout cannot resolve: the shape of a base the run was
 # told about but never fetched.
 _MISSING_BASE_SHA = "0" * 40
@@ -142,6 +157,48 @@ def _evaluate_loaded(root: Path, changed_paths: list[str]) -> list[Any]:
         exceptions_trusted=True,
         now=datetime(2030, 1, 1, tzinfo=UTC),
     )
+
+
+def _pad_rules_beyond_the_read_cap(repo: Path) -> int:
+    """Grow ``rules.yaml`` just past the module's own policy byte bound."""
+    import mergecraft.policy.review as review_module
+
+    path = repo / RULES_REL
+    body = path.read_text(encoding="utf-8")
+    line = "# padding keeps the document valid while it exceeds the read cap\n"
+    filler = line * ((review_module._MAX_POLICY_BYTES // len(line)) + 2)
+    path.write_text(body + filler, encoding="utf-8")
+    return len(body + filler)
+
+
+def _corrupt_object_for(repo: Path, *, commit: str, rel: str) -> str:
+    """Corrupt the loose object holding ``rel`` at ``commit``.
+
+    The commit object itself stays intact, so ``rev-parse`` still resolves it
+    while ``git show`` cannot inflate the blob — the shape of a partial clone or
+    a damaged object store, with no ``chmod`` and no root. Returns the blob id.
+    """
+    blob = git(repo, "rev-parse", f"{commit}:{rel}")
+    object_path = repo / ".git" / "objects" / blob[:2] / blob[2:]
+    assert object_path.is_file(), f"{blob} is not a loose object in this fixture"
+    # Git writes loose objects read-only; make our own temp file writable so the
+    # fixture can damage the blob (nothing here simulates a permission error).
+    object_path.chmod(0o644)
+    object_path.write_bytes(b"corrupt: not a zlib stream")
+    return blob
+
+
+def _blocking_read_failure(rows: list[Any]) -> Any:
+    """The one blocking row that says the base policy copy was not read."""
+    from mergecraft.agents.gates import blocking_findings
+
+    candidates = [
+        row
+        for row in rows
+        if row.rule_id in _READ_FAILURE_IDS and row.severity == "Major" and blocking_findings([row])
+    ]
+    assert len(candidates) == 1, rows
+    return candidates[0]
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +319,9 @@ def test_an_unreadable_rules_file_is_one_blocking_major_row(
     text = row_text(row)
     assert "rules.yaml" in text
     assert "Permission denied" in text
+    # The failure was a read, so the row must not claim the document was parsed.
+    assert "could not be parsed" not in text.casefold(), text
+    assert "could not be read" in text.casefold(), text
 
 
 def test_the_run_path_records_an_unreadable_rules_file(
@@ -299,3 +359,100 @@ def test_the_run_path_records_an_unreadable_rules_file(
     text = row_text(row)
     assert "rules.yaml" in text
     assert "Permission denied" in text
+    # Same wording contract on the run path: read failure, not parse failure.
+    assert "could not be parsed" not in text.casefold(), text
+    assert "could not be read" in text.casefold(), text
+
+
+# ---------------------------------------------------------------------------
+# a base blob that exists but cannot be materialized
+# ---------------------------------------------------------------------------
+
+
+def _deleting_pr_over_a_base_rules_file(repo: Path, tmp_path: Path) -> tuple[str, str, Path]:
+    """Commit the delete-the-rules PR and materialize its diff."""
+    head = _delete_rules_and_touch_the_guarded_path(repo)
+    base = git(repo, "rev-parse", "HEAD~1")
+    return base, head, _materialize_diff(repo, base=base, head=head, tmp_path=tmp_path)
+
+
+def test_an_oversized_base_rules_file_is_a_blocking_row(tmp_path: Path) -> None:
+    """A base document past the read cap is unreadable, not "no rules at base"."""
+    from mergecraft.policy.review import ensure_policy_evaluated
+
+    repo, _base = _base_repo_with_blocking_rule(tmp_path)
+    # The base copy is a real, valid document — simply larger than the bound the
+    # module refuses to read past.
+    size = _pad_rules_beyond_the_read_cap(repo)
+    base = commit_all(repo, "base: an oversized rules document")
+    assert git(repo, "cat-file", "-s", f"{base}:{RULES_REL}") == str(size)
+    _base_sha, _head, diff_path = _deleting_pr_over_a_base_rules_file(repo, tmp_path)
+    ctx = _run_ctx(repo, before_sha=base, diff_path=diff_path)
+
+    rows = ensure_policy_evaluated(ctx)
+
+    row = _blocking_read_failure(rows)
+    assert "rules.yaml" in row.message, row.message
+    reason = row.message.casefold()
+    assert any(
+        token in reason for token in ("large", "size", "byte", "limit", "cap", "exceed", "bound")
+    ), row.message
+
+
+def test_a_base_blob_git_show_cannot_read_is_a_blocking_row(tmp_path: Path) -> None:
+    """A damaged blob at a resolvable commit is unreadable, not absent."""
+    from mergecraft.policy.review import ensure_policy_evaluated
+
+    repo, base = _base_repo_with_blocking_rule(tmp_path)
+    _base_sha, _head, diff_path = _deleting_pr_over_a_base_rules_file(repo, tmp_path)
+    _corrupt_object_for(repo, commit=base, rel=RULES_REL)
+    # The fixture is the point: the commit resolves, the blob does not.
+    assert git(repo, "rev-parse", "--verify", f"{base}^{{commit}}") == base
+    with pytest.raises(subprocess.CalledProcessError):
+        git(repo, "show", f"{base}:{RULES_REL}")
+    ctx = _run_ctx(repo, before_sha=base, diff_path=diff_path)
+
+    rows = ensure_policy_evaluated(ctx)
+
+    row = _blocking_read_failure(rows)
+    assert "rules.yaml" in row.message, row.message
+    reason = row.message.casefold()
+    assert any(token in reason for token in ("show", "read", "materiali")), row.message
+
+
+# ---------------------------------------------------------------------------
+# a diff this run cannot read, over a base that carries policy
+# ---------------------------------------------------------------------------
+
+
+def test_an_unreadable_diff_over_a_policy_base_fails_closed(tmp_path: Path) -> None:
+    """The deleting PR's diff is the only way to learn it touched policy files."""
+    from mergecraft.agents.gates import blocking_findings
+    from mergecraft.policy.review import ensure_policy_evaluated
+
+    repo, base = _base_repo_with_blocking_rule(tmp_path)
+    _delete_rules_and_touch_the_guarded_path(repo)
+    missing_diff = tmp_path / "missing.diff"
+    ctx = _run_ctx(repo, before_sha=base, diff_path=missing_diff)
+
+    rows = ensure_policy_evaluated(ctx)
+
+    by_rule = {row.rule_id: row for row in rows}
+    assert _UNEVALUATED in by_rule, rows
+    row = by_rule[_UNEVALUATED]
+    assert row.severity == "Major"
+    assert str(missing_diff) in row.message
+    assert blocking_findings([row]), "an unevaluated policy must close the gate"
+
+
+def test_an_unreadable_diff_without_a_policy_tree_stays_empty(tmp_path: Path) -> None:
+    """Control: no policy tree anywhere still reviews exactly as before."""
+    from mergecraft.policy.review import ensure_policy_evaluated
+
+    repo = init_git_repo(tmp_path / "repo")
+    (repo / "src" / "billing").mkdir(parents=True)
+    (repo / "src" / "billing" / "x.py").write_text("VALUE = 1\n", encoding="utf-8")
+    base = commit_all(repo, "base: no policy tree")
+    ctx = _run_ctx(repo, before_sha=base, diff_path=tmp_path / "missing.diff")
+
+    assert ensure_policy_evaluated(ctx) == []

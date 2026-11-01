@@ -68,6 +68,7 @@ object it was read from.
 | An unparseable `exceptions.yaml` ⇒ the same, naming that file | unit | `…::test_a_policy_file_that_does_not_parse_is_one_blocking_major_row[exceptions-schema]` |
 | A `rules.yaml` that exists but cannot be read (`PermissionError`) ⇒ one `Major` `policy.unreadable` row naming the file and the error, through the loader | unit | `tests/policy/test_review_run_path.py::test_an_unreadable_rules_file_is_one_blocking_major_row` |
 | The same unreadable file on the run path ⇒ the same row, not a review with no rules | integration | `…::test_the_run_path_records_an_unreadable_rules_file` |
+| The unreadable row's message names a **read** failure (`could not be read`) and never claims the document `could not be parsed` | unit + integration | `…::test_an_unreadable_rules_file_is_one_blocking_major_row`, `…::test_the_run_path_records_an_unreadable_rules_file` |
 | The snapshot digest is the SHA-256 of the bytes read, and the row publishes it | unit | `…::test_the_snapshot_digest_is_the_sha256_of_the_rules_document` |
 | A diff that cannot be read once review scope exists ⇒ one `Major` `policy.unevaluated` row naming the path | integration | `tests/mcp/test_submit_review_verdict_policy.py::test_an_unreadable_diff_is_one_blocking_major_unevaluated_row` |
 
@@ -106,6 +107,10 @@ object it was read from.
 | An operator-owned snapshot governs, whatever the base commit says | integration | `…::test_an_operator_owned_snapshot_ignores_the_base_commit` |
 | Base unreadable and the diff touches `.mergecraft/policy/**` ⇒ `Major` `policy.unverifiable_source`; nothing from the PR head is evaluated | integration | `…::test_an_unreadable_base_with_a_policy_change_fails_closed` |
 | Base unreadable and the PR deleted `rules.yaml` ⇒ the run path records that same blocking `policy.unverifiable_source` row instead of an empty population | integration | `tests/policy/test_review_run_path.py::test_a_deleting_pr_with_an_unreadable_base_fails_closed` |
+| The base `rules.yaml` is past the module's policy byte cap ⇒ a blocking row naming the file and the size reason, not "the base has no rules" | integration | `…::test_an_oversized_base_rules_file_is_a_blocking_row` |
+| The base blob cannot be materialized (`git show` fails) at a commit that still resolves ⇒ a blocking row naming the file and the failure | integration | `…::test_a_base_blob_git_show_cannot_read_is_a_blocking_row` |
+| The run's diff file cannot be read while the base commit carries policy ⇒ `Major` `policy.unevaluated`, not `[]` | integration | `…::test_an_unreadable_diff_over_a_policy_base_fails_closed` |
+| Control: the same unreadable diff with no policy tree anywhere ⇒ `[]` (no change for a repository without policy) | integration | `…::test_an_unreadable_diff_without_a_policy_tree_stays_empty` |
 | Base unreadable and the diff leaves the policy tree alone ⇒ the head copy is used, labelled `head (unchanged)` | integration | `…::test_an_unreadable_base_without_a_policy_change_uses_the_head_copy` |
 | Touching `.mergecraft/policy/**` always adds an advisory change row that does not block and says it applies after merge | integration | `…::test_a_policy_change_in_the_pr_adds_an_advisory_row` |
 | The settings snapshot carries the policy; a rebaseline after checkout keeps the run-start rules; an operator-owned capture is recorded as such | integration | `tests/mcp/test_review_settings_snapshot.py::test_the_snapshot_carries_the_repository_policy`, `…::test_rebaseline_preserves_the_run_start_policy`, `…::test_a_pull_request_target_capture_is_operator_owned` |
@@ -167,6 +172,19 @@ fail-open shape — a deleted rules file, an unreadable base, an unreadable
 document — is asserted through the run path (and the terminal submission where
 the gate is the subject), never only against the resolver with hand-passed
 `base_sha` / `changed_paths`.
+
+The base-read path has the same three ways to lose a document as the
+working-tree read, and only one of them is the "no policy tree" opt-in:
+
+| Situation at the base commit | Rows |
+| --- | --- |
+| the path is absent | none — there is no policy file to enforce |
+| the blob is past the module's byte cap | a blocking row naming the file and the size |
+| `git show` cannot materialize the blob | a blocking row naming the file and the failure |
+
+The suite builds both unreadable shapes as real git fixtures — a valid document
+padded past the cap, and a damaged loose object under a commit that still
+resolves — so neither depends on `chmod`, root, or a mocked resolver.
 
 ## Deliberate non-assertions
 
