@@ -552,6 +552,11 @@ def test_an_operator_owned_snapshot_ignores_the_base_commit(tmp_path: Path) -> N
         tmp_path,
         rules=[rule("policy.a", severity="Major", enforcement="blocking", scope=_BILLING_SCOPE)],
     )
+    # The operator-owned capture happens before checkout, so it holds the rules
+    # that were on the default branch when the run started.
+    snapshot = _load_repo_policy_operator_owned(repo)
+    assert snapshot.rules[0].enforcement == "blocking"
+
     write_policy(
         repo,
         rules=[rule("policy.a", severity="Minor", enforcement="advisory", scope=_BILLING_SCOPE)],
@@ -559,7 +564,6 @@ def test_an_operator_owned_snapshot_ignores_the_base_commit(tmp_path: Path) -> N
     commit_all(repo, "pr: downgrade my own rule")
 
     changed = ["src/billing/x.py", RULES_REL]
-    snapshot = _load_repo_policy_operator_owned(repo)
     rows = _evaluate(_load_review(snapshot, base_sha="0" * 40, changed_paths=changed), changed)
 
     by_rule = _by_rule(rows)
@@ -620,7 +624,12 @@ def test_a_policy_change_in_the_pr_adds_an_advisory_row(tmp_path: Path) -> None:
         tmp_path,
         rules=[rule("policy.a", scope=_BILLING_SCOPE)],
     )
-    write_policy(repo, rules=[rule("policy.a", scope=_BILLING_SCOPE)])
+    # The pull request really changes the rules file (weakens the rule), so the
+    # diff touches .mergecraft/policy/** and the commit has something to stage.
+    write_policy(
+        repo,
+        rules=[rule("policy.a", severity="Minor", enforcement="advisory", scope=_BILLING_SCOPE)],
+    )
     commit_all(repo, "pr: touch the rules file")
 
     changed = ["src/billing/x.py", RULES_REL]
