@@ -66,6 +66,8 @@ object it was read from.
 | No `rules.yaml` ⇒ no rows, and the shipped packs are not loaded (a shipped blocking rule would have fired on the changed path) | unit | `tests/policy/test_review_evaluation.py::test_no_rules_file_produces_no_rows_and_loads_no_shipped_packs` |
 | An unparseable `rules.yaml` (invalid YAML or schema) ⇒ one `Major` `policy.unreadable` row naming the file and the error | unit | `…::test_a_policy_file_that_does_not_parse_is_one_blocking_major_row[rules-invalid-yaml]`, `…[rules-schema]` |
 | An unparseable `exceptions.yaml` ⇒ the same, naming that file | unit | `…::test_a_policy_file_that_does_not_parse_is_one_blocking_major_row[exceptions-schema]` |
+| A `rules.yaml` that exists but cannot be read (`PermissionError`) ⇒ one `Major` `policy.unreadable` row naming the file and the error, through the loader | unit | `tests/policy/test_review_run_path.py::test_an_unreadable_rules_file_is_one_blocking_major_row` |
+| The same unreadable file on the run path ⇒ the same row, not a review with no rules | integration | `…::test_the_run_path_records_an_unreadable_rules_file` |
 | The snapshot digest is the SHA-256 of the bytes read, and the row publishes it | unit | `…::test_the_snapshot_digest_is_the_sha256_of_the_rules_document` |
 | A diff that cannot be read once review scope exists ⇒ one `Major` `policy.unevaluated` row naming the path | integration | `tests/mcp/test_submit_review_verdict_policy.py::test_an_unreadable_diff_is_one_blocking_major_unevaluated_row` |
 
@@ -98,9 +100,12 @@ object it was read from.
 | A PR that adds a waiver for its own violation is still judged by the base rule, and gets the advisory change row | integration | `tests/policy/test_review_evaluation.py::test_a_pull_request_exception_is_ignored_when_policy_comes_from_the_base_commit` |
 | A PR that downgrades a rule is judged by the base rule | integration | `…::test_a_pull_request_that_downgrades_a_rule_is_judged_by_the_base_rule` |
 | A PR that deletes `rules.yaml` is judged by the base rules | integration | `…::test_a_pull_request_that_deletes_rules_yaml_is_judged_by_the_base_rules` |
+| The run path (`ensure_policy_evaluated`) resolves the base copy when the PR deletes `rules.yaml`, and still adds the advisory change row | integration | `tests/policy/test_review_run_path.py::test_a_pr_that_deletes_rules_yaml_is_judged_by_the_base_rules` |
+| The terminal submission over a deleting PR records `request_changes`, not an unqualified `approve` | functional | `…::test_the_submission_over_a_deleting_pr_is_not_an_unqualified_approve` |
 | Rows name `base:<sha>` and their digest | integration | `…::test_base_commit_rows_name_the_source_and_the_digest` |
 | An operator-owned snapshot governs, whatever the base commit says | integration | `…::test_an_operator_owned_snapshot_ignores_the_base_commit` |
 | Base unreadable and the diff touches `.mergecraft/policy/**` ⇒ `Major` `policy.unverifiable_source`; nothing from the PR head is evaluated | integration | `…::test_an_unreadable_base_with_a_policy_change_fails_closed` |
+| Base unreadable and the PR deleted `rules.yaml` ⇒ the run path records that same blocking `policy.unverifiable_source` row instead of an empty population | integration | `tests/policy/test_review_run_path.py::test_a_deleting_pr_with_an_unreadable_base_fails_closed` |
 | Base unreadable and the diff leaves the policy tree alone ⇒ the head copy is used, labelled `head (unchanged)` | integration | `…::test_an_unreadable_base_without_a_policy_change_uses_the_head_copy` |
 | Touching `.mergecraft/policy/**` always adds an advisory change row that does not block and says it applies after merge | integration | `…::test_a_policy_change_in_the_pr_adds_an_advisory_row` |
 | The settings snapshot carries the policy; a rebaseline after checkout keeps the run-start rules; an operator-owned capture is recorded as such | integration | `tests/mcp/test_review_settings_snapshot.py::test_the_snapshot_carries_the_repository_policy`, `…::test_rebaseline_preserves_the_run_start_policy`, `…::test_a_pull_request_target_capture_is_operator_owned` |
@@ -125,6 +130,7 @@ object it was read from.
 | `create_pull_request_review` with `approved` over a blocking rule is rejected and posts nothing | functional | `…::test_approve_through_create_pull_request_review_is_rejected` |
 | Post-run revalidation sees the policy population | functional | `…::test_post_run_revalidation_sees_the_policy_population` |
 | Re-submitting the same payload is idempotent: same id, one row | functional | `…::test_resubmitting_an_identical_payload_stays_idempotent` |
+| Policy never relaxes a verdict: agent findings that normalize to empty plus one advisory policy row still record `request_changes` | functional | `…::test_an_advisory_policy_row_never_relaxes_request_changes` |
 | `ValidationState` carries the rows from both builders, and withdrawal never removes them | integration | `…::test_validation_state_carries_policy_rows_outside_withdrawal` |
 | One evaluation per diff path, cached on `ToolState`; a re-scoped diff evaluates again | integration | `…::test_policy_evaluation_is_computed_once_per_diff_path`, `…::test_a_new_diff_path_is_evaluated_again` |
 | No rules file ⇒ the recorded submission is identical to one with no policy tree at all | functional | `…::test_no_rules_file_records_the_same_submission_as_before` |
@@ -150,6 +156,17 @@ object it was read from.
 | The `policy` group help says review enforces the rules in `.mergecraft/policy/rules.yaml` when a changed file matches a scope, keeps the verbs, and carries no stale non-enforcement claim | functional | `tests/cli/test_policy_help_honest.py::test_policy_group_help_says_review_enforces_the_rules_file` |
 | The enforcement module docstring names the mapping onto the approval gate through `policy/review.py` and drops the "nothing consumes this" sentences | unit | `…::test_enforcement_module_docstring_names_the_review_gate_mapping` |
 | With no `rules.yaml`, `policy effective` says the shipped example packs are shown and review evaluates no rules until the file exists, while still listing them | functional | `tests/cli/test_policy_verbs.py::test_policy_effective_says_review_evaluates_no_rules_without_rules_yaml` |
+
+## Run path, not only the resolver
+
+`load_review_policy` is the resolver; the seam a review actually drives is
+`ensure_policy_evaluated(ctx)`, which also reads provenance off `ToolState`
+(`before_sha`, `dir`, `diff_path`) and caches one population per diff. A correct
+resolver is unreachable if the run path returns early above it, so every
+fail-open shape — a deleted rules file, an unreadable base, an unreadable
+document — is asserted through the run path (and the terminal submission where
+the gate is the subject), never only against the resolver with hand-passed
+`base_sha` / `changed_paths`.
 
 ## Deliberate non-assertions
 

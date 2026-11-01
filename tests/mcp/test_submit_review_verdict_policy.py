@@ -245,18 +245,70 @@ async def test_resubmitting_an_identical_payload_stays_idempotent(tmp_path: Path
 
 
 # ---------------------------------------------------------------------------
+# policy never relaxes a verdict
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_an_advisory_policy_row_never_relaxes_request_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Appending a server row cannot turn ``request_changes`` into ``approve``.
+
+    The agent's own finding normalizes away, so the requested verdict is the
+    only thing holding the gate closed. The advisory policy row appended for
+    the record then becomes the whole (non-blocking) finding set — and the
+    second derivation would read it as an ``approve``. The recorded verdict
+    must stay ``request_changes``.
+    """
+    import mergecraft.mcp.verdict as verdict_module
+
+    ctx = await _submit_approve_over_policy(tmp_path, enforcement="advisory", severity="Major")
+    monkeypatch.setattr(
+        verdict_module,
+        "normalize_agent_findings_via_pipeline",
+        lambda *args, **kwargs: [],
+    )
+
+    result = await _submit(
+        ctx,
+        {
+            "verdict": "request_changes",
+            "summary": "The retry loop is untested.",
+            "findings": [
+                {
+                    "path": "src/billing/x.py",
+                    "body": "Retry loop is untested.",
+                    "severity": "Major",
+                    "line": 1,
+                }
+            ],
+        },
+    )
+
+    assert result.is_error is False, result.content[0]["text"]
+    submission = ctx.tool_state.terminal_submission
+    assert submission is not None
+    assert submission.verdict == "request_changes"
+    assert json.loads(result.content[0]["text"])["verdict"] == "request_changes"
+    matching = [item for item in submission.findings if "billing.no-secret" in row_text(item)]
+    assert len(matching) == 1, "the advisory row was appended, and still did not relax the verdict"
+    assert matching[0].severity == "Trivial", "an advisory row is non-blocking on its own"
+
+
+# ---------------------------------------------------------------------------
 # validation state and the population withdrawal cannot touch
 # ---------------------------------------------------------------------------
 
 
 def test_validation_state_carries_policy_rows_outside_withdrawal(tmp_path: Path) -> None:
     """``ValidationState.policy_findings`` is a population of its own."""
-    from mergecraft.policy.review import ensure_policy_evaluated
-
     from mergecraft.mcp.verdict import (
         validation_state_from_tool_context,
         validation_state_from_tool_state,
     )
+    from mergecraft.policy.review import ensure_policy_evaluated
 
     ctx = _ctx(tmp_path)
     write_policy(tmp_path, rules=[rule("billing.no-secret", scope=_BILLING_SCOPE)])
@@ -344,9 +396,8 @@ def test_an_unreadable_diff_is_one_blocking_major_unevaluated_row(tmp_path: Path
 @pytest.mark.asyncio
 async def test_no_rules_file_records_the_same_submission_as_before(tmp_path: Path) -> None:
     """A repository without a policy tree is byte-identical to today's review."""
-    from mergecraft.policy.review import ensure_policy_evaluated
-
     from mergecraft.mcp.verdict import recorded_submission_payload
+    from mergecraft.policy.review import ensure_policy_evaluated
 
     recorded: list[dict[str, Any]] = []
     for name, make_policy_dir in (("absent", False), ("empty", True)):
