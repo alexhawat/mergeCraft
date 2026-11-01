@@ -144,30 +144,32 @@ def test_a_hunk_missing_from_the_delivered_diff_is_uncovered_not_unknown() -> No
     )
 
 
-def test_a_mediated_read_of_the_file_covers_its_hunks() -> None:
+def test_an_unobserved_run_cannot_claim_completeness() -> None:
+    """Absence of read evidence is uncovered, not unknown: this gates the verdict."""
     from mergecraft.evidence.coverage import account_coverage
 
     section = account_coverage(
         authoritative_diff=_TWO_FILES,
-        delivered_diff=_only(_TWO_FILES, "src/a.py"),
-        read_paths={"src/b.py"},
+        delivered_diff=_TWO_FILES,
+        reads_observed=False,
+    )
+
+    assert section.complete is False
+    assert {row.cause for row in section.uncovered} == {"not_observed"}
+    assert section.hunks_covered == 0
+
+
+def test_an_observed_run_is_complete_when_every_hunk_was_delivered() -> None:
+    from mergecraft.evidence.coverage import account_coverage
+
+    section = account_coverage(
+        authoritative_diff=_TWO_FILES,
+        delivered_diff=_TWO_FILES,
+        reads_observed=True,
     )
 
     assert section.complete is True
     assert section.hunks_covered == 3
-
-
-def test_a_follow_up_turn_covers_exactly_the_hunks_it_handed_back() -> None:
-    from mergecraft.evidence.coverage import Hunk, account_coverage
-
-    section = account_coverage(
-        authoritative_diff=_TWO_FILES,
-        delivered_diff="",
-        followup_hunks={Hunk("src/a.py", 1, 3), Hunk("src/b.py", 6, 9)},
-    )
-
-    assert section.complete is False
-    assert [(r.path, r.start_line) for r in section.uncovered] == [("src/a.py", 11)]
 
 
 def test_a_file_with_no_inline_patch_is_listed_and_never_cleared() -> None:
@@ -176,7 +178,6 @@ def test_a_file_with_no_inline_patch_is_listed_and_never_cleared() -> None:
     section = account_coverage(
         authoritative_diff=_TWO_FILES,
         unreviewable_paths=["big/huge.py"],
-        read_paths={"big/huge.py"},
     )
 
     assert section.complete is False

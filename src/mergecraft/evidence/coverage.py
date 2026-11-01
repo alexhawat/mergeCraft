@@ -28,8 +28,6 @@ Exports:
     coverage_summary_line: The one line the checks and the record show.
     coverage_gate_reason: The outcome reason for an incomplete run, per policy.
     coverage_policy: ``review.coverage.onIncomplete`` from the pinned settings.
-    plan_coverage_followup: The one bounded follow-up, when due.
-    mark_followup_sent: Record that a follow-up handed hunks back.
 """
 
 from __future__ import annotations
@@ -45,7 +43,7 @@ from mergecraft.classify.generated_files import ChangeSet, finding_survives_gene
 from mergecraft.evidence.packet import CoverageSection, UncoveredCause, UncoveredRange
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Iterable, Sequence
+    from collections.abc import Collection, Iterable, Mapping, Sequence
 
     from mergecraft.config.settings import RepoSettings
     from mergecraft.mcp.context import ToolContext
@@ -89,17 +87,36 @@ def _excluded_by_policy(hunk: Hunk, change: ChangeSet) -> bool:
     return not finding_survives_generated_policy(hunk.path, change=change)
 
 
+def _hunk_was_read(hunk: Hunk, covered: Mapping[str, Sequence[tuple[int, int]]]) -> bool:
+    """True when an observed read covered any line of ``hunk``."""
+    for start, end in covered.get(hunk.path, ()):
+        if start <= hunk.end_line and hunk.start_line <= end:
+            return True
+    return False
+
+
 def _uncovered_known(
     universe: Sequence[Hunk],
     *,
     delivered: Collection[Hunk],
-    read_paths: Collection[str],
-    followed_up: Collection[Hunk],
+    covered_lines: Mapping[str, Sequence[tuple[int, int]]],
+    reads_observed: bool,
 ) -> list[Hunk]:
+    """Return the hunks nothing vouches for.
+
+    A hunk is covered when it reached the reviewer in the delivered diff, or when
+    an observed read covered lines inside it. ``reads_observed`` is the extra
+    condition this rebuild adds: a run whose read tracking produced nothing at
+    all cannot claim completeness, whatever was delivered. The read evidence is
+    :mod:`mergecraft.evidence.diff_coverage`'s line ranges — the same layer the
+    auditor and the pre-submit nudge use.
+    """
+    if not reads_observed:
+        return list(universe)
     return [
         hunk
         for hunk in universe
-        if hunk not in delivered and hunk.path not in read_paths and hunk not in followed_up
+        if hunk not in delivered and not _hunk_was_read(hunk, covered_lines)
     ]
 
 
@@ -109,8 +126,8 @@ def account_coverage(
     delivered_diff: str | None = None,
     unreviewable_paths: Iterable[str] = (),
     diff_truncated: bool = False,
-    read_paths: Collection[str] = (),
-    followup_hunks: Collection[Hunk] = (),
+    reads_observed: bool = True,
+    covered_lines: Mapping[str, Sequence[tuple[int, int]]] | None = None,
     budget_exhausted: bool = False,
 ) -> CoverageSection:
     """Account for which changed hunks reached the reviewer.
@@ -121,10 +138,12 @@ def account_coverage(
             authoritative diff was.
         unreviewable_paths: Files with line changes but no inline patch.
         diff_truncated: The files listing hit its page cap, so later files were never seen.
-        read_paths: Paths a mediated tool call read.
-        followup_hunks: Hunks a follow-up turn handed back.
-        budget_exhausted: The run had no budget left for a follow-up; what stayed
-            uncovered says so.
+        reads_observed: Whether any read in scope was observed at all. ``False``
+            means the run's read tracking produced nothing to vouch for the
+            delivered hunks; absence of evidence is uncovered, not unknown,
+            because this check gates the verdict.
+        budget_exhausted: The run had no budget left for the pre-submit nudge;
+            what stayed uncovered says so.
     """
     universe = coverage_universe(authoritative_diff)
     delivered = set(universe if delivered_diff is None else coverage_universe(delivered_diff))
@@ -134,8 +153,8 @@ def account_coverage(
         _uncovered_known(
             universe,
             delivered=delivered,
-            read_paths=set(read_paths),
-            followed_up=set(followup_hunks),
+            covered_lines=covered_lines or {},
+            reads_observed=reads_observed,
         )
     )
 
@@ -154,6 +173,9 @@ def account_coverage(
             cause = "excluded_generated"
         elif budget_exhausted:
             cause = "budget_exhausted"
+        elif hunk in delivered:
+            # Delivered, but the run's reads were never observed.
+            cause = "not_observed"
         else:
             cause = "not_delivered"
         rows.append(
@@ -203,19 +225,28 @@ def _delivered_diff(state: ToolState) -> str:
         return ""
 
 
-def _mediated_read_paths(state: ToolState) -> set[str]:
-    """Paths a successful mediated read call named (``shell`` / ``git`` reads)."""
-    from mergecraft.evidence.trajectory import ToolCallRecord
+def _read_evidence(
+    state: ToolState, authoritative: str
+) -> tuple[bool, dict[str, list[tuple[int, int]]]]:
+    """Return whether any read was observed, and the lines each read covered.
 
-    paths: set[str] = set()
-    for raw in getattr(state, "tool_calls", None) or []:
-        try:
-            call = ToolCallRecord.model_validate(raw)
-        except Exception:  # a malformed row proves nothing, and never fails the run
-            continue
-        if call.intent == "read" and call.ok and call.outcome_ok is not False:
-            paths.update(call.paths)
-    return paths
+    The evidence comes from :mod:`mergecraft.evidence.diff_coverage`, the same
+    line-range layer the auditor and the pre-submit nudge use — one read-tracking
+    system, not two. It is computed over the *authoritative* diff so a read of a
+    file the delivered diff omitted still counts.
+    """
+    from mergecraft.evidence.diff_coverage import compute_diff_coverage
+
+    if not authoritative:
+        return False, {}
+    reads = getattr(state, "tool_calls", None) or []
+    breakdown = compute_diff_coverage(authoritative, reads, diff_path=None)
+    covered = {
+        file.path: [(item.start, item.end) for item in file.covered]
+        for file in breakdown.files
+        if file.covered
+    }
+    return breakdown.observed, covered
 
 
 def coverage_section_for_state(state: ToolState) -> CoverageSection | None:
@@ -227,13 +258,14 @@ def coverage_section_for_state(state: ToolState) -> CoverageSection | None:
     )
     if not authoritative and not record.unreviewable_paths and not record.diff_truncated:
         return None
+    observed, covered = _read_evidence(state, authoritative)
     return account_coverage(
         authoritative_diff=authoritative,
         delivered_diff=delivered,
         unreviewable_paths=record.unreviewable_paths,
         diff_truncated=record.diff_truncated,
-        read_paths=_mediated_read_paths(state),
-        followup_hunks={Hunk(*row) for row in record.followup_hunks},
+        reads_observed=observed,
+        covered_lines=covered,
         budget_exhausted=record.budget_blocked,
     )
 
@@ -294,113 +326,7 @@ def coverage_policy(ctx: ToolContext, *, fallback: RepoSettings | None = None) -
     return settings.review.coverage.on_incomplete
 
 
-# ── the one bounded follow-up ────────────────────────────────────────────────
-
-
-@dataclass(frozen=True, slots=True)
-class CoverageFollowup:
-    """The follow-up turn: its prompt and the hunks whose text it carries."""
-
-    prompt: str
-    hunks: tuple[Hunk, ...]
-
-
-def _hunk_texts(diff_text: str) -> dict[Hunk, str]:
-    """Map each hunk of ``diff_text`` to its diff text (header lines included)."""
-    texts: dict[Hunk, str] = {}
-    for chunk in diff_text.split("diff --git ")[1:]:
-        lines = ("diff --git " + chunk).splitlines()
-        first = next((i for i, line in enumerate(lines) if line.startswith("@@")), None)
-        if first is None:
-            continue
-        header, body = lines[:first], lines[first:]
-        starts = [i for i, line in enumerate(body) if line.startswith("@@")]
-        for n, begin in enumerate(starts):
-            end = starts[n + 1] if n + 1 < len(starts) else len(body)
-            segment = body[begin:end]
-            for hunk in coverage_universe("\n".join([*header, *segment]) + "\n"):
-                texts[hunk] = "\n".join(segment)
-    return texts
-
-
-def plan_coverage_followup(state: ToolState) -> CoverageFollowup | None:
-    """Return the follow-up due before finalizing, or ``None``.
-
-    Due once, only for a review run that holds a verdict, only when known hunks remain
-    uncovered, and only while budget remains. With no budget it records why and returns
-    ``None`` — what stays uncovered is then named ``budget_exhausted``.
-    """
-    record = state.coverage
-    if record.followup_sent or state.selected_mode not in _REVIEW_MODES:
-        return None
-    if state.terminal_submission is None and not state.final_summary_written:
-        return None
-    delivered = _delivered_diff(state)
-    authoritative = (
-        record.authoritative_diff if record.authoritative_diff is not None else delivered
-    )
-    universe = coverage_universe(authoritative)
-    scope_change: ChangeSet = {
-        "changed_paths": changed_paths_from_scope(parse_diff_scope(authoritative))
-    }
-    pending = [
-        hunk
-        for hunk in _uncovered_known(
-            universe,
-            delivered=set(coverage_universe(delivered)),
-            read_paths=_mediated_read_paths(state),
-            followed_up={Hunk(*row) for row in record.followup_hunks},
-        )
-        if not _excluded_by_policy(hunk, scope_change)
-    ]
-    if not pending:
-        return None
-    tracker = record.budget_tracker
-    if tracker is not None and getattr(tracker, "last_exhausted", None) is not None:
-        record.budget_blocked = True
-        logger.warning(
-            "coverage: {} changed hunk(s) never reached the reviewer and the run has no "
-            "budget left for the follow-up turn",
-            len(pending),
-        )
-        return None
-    texts = _hunk_texts(authoritative)
-    sections: list[str] = []
-    handed: list[Hunk] = []
-    spent = 0
-    for hunk in pending:
-        text = texts.get(hunk)
-        if text is None or spent + len(text) > _FOLLOWUP_CHAR_BUDGET:
-            continue
-        spent += len(text)
-        handed.append(hunk)
-        sections.append(f"### {hunk.path}:{hunk.start_line}-{hunk.end_line}\n```diff\n{text}\n```")
-    if not handed:
-        return None
-    prompt = "\n\n".join(
-        [
-            "COVERAGE FOLLOW-UP — these changed hunks of the pull request never reached "
-            "you during this review. Read each one now and judge it like the rest of "
-            "the diff. Your recorded verdict stands unless you submit a replacement: if "
-            "these hunks change your assessment, call `submit_review_verdict` again with "
-            "the complete corrected verdict; otherwise stop.",
-            *sections,
-        ]
-    )
-    return CoverageFollowup(prompt=prompt, hunks=tuple(handed))
-
-
-def mark_followup_sent(state: ToolState, followup: CoverageFollowup) -> None:
-    """Record that the follow-up went out, so it never fires again and its hunks count."""
-    record = state.coverage
-    record.followup_sent = True
-    record.followup_open = True
-    record.followup_hunks.extend((h.path, h.start_line, h.end_line) for h in followup.hunks)
-    logger.info("coverage: follow-up turn handed back {} uncovered hunk(s)", len(followup.hunks))
-
-
 __all__ = [
-    "CoverageFollowup",
     "Hunk",
     "OnIncomplete",
     "account_coverage",
@@ -409,6 +335,4 @@ __all__ = [
     "coverage_section_for_state",
     "coverage_summary_line",
     "coverage_universe",
-    "mark_followup_sent",
-    "plan_coverage_followup",
 ]

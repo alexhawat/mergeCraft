@@ -9,7 +9,7 @@ no agent can set it. The ``mergecraft-approval`` summary states it.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -38,6 +38,18 @@ _DELIVERED_A_ONLY = _AUTHORITATIVE.split("diff --git a/src/b.py")[0]
 def _isolate_packet_dir(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RUNNER_TEMP", raising=False)
     monkeypatch.delenv("MERGECRAFT_EVIDENCE_DIR", raising=False)
+
+
+def _mark_read(ctx: Any, path: str) -> None:
+    """Record one successful source read so the run has observed read evidence."""
+    from mergecraft.evidence.trajectory import record_tool_call
+
+    record_tool_call(
+        ctx.tool_state,
+        tool="shell",
+        arguments={"command": f"cat {path}"},
+        ok=True,
+    )
 
 
 def test_the_schema_version_is_bumped_by_a_minor_for_the_coverage_section() -> None:
@@ -96,6 +108,7 @@ def test_the_run_packet_records_a_complete_coverage_for_a_fully_delivered_diff(
 ) -> None:
     ctx = _make_ctx(tmp_path, diff_text=_AUTHORITATIVE)
     ctx.tool_state.coverage.authoritative_diff = _AUTHORITATIVE
+    _mark_read(ctx, "src/a.py")
 
     packet = build_run_packet(ctx, run_succeeded=True)
 
@@ -107,6 +120,7 @@ def test_the_run_packet_records_a_complete_coverage_for_a_fully_delivered_diff(
 def test_the_run_packet_lists_a_hunk_the_reviewer_never_received(tmp_path: Path) -> None:
     ctx = _make_ctx(tmp_path, diff_text=_DELIVERED_A_ONLY)
     ctx.tool_state.coverage.authoritative_diff = _AUTHORITATIVE
+    _mark_read(ctx, "src/a.py")
 
     packet = build_run_packet(ctx, run_succeeded=True)
 
@@ -125,6 +139,7 @@ def test_the_run_packet_records_files_the_api_sent_no_patch_for(tmp_path: Path) 
     ctx = _make_ctx(tmp_path, diff_text=_AUTHORITATIVE)
     ctx.tool_state.coverage.authoritative_diff = _AUTHORITATIVE
     ctx.tool_state.coverage.unreviewable_paths = ["big/huge.py"]
+    _mark_read(ctx, "src/a.py")
 
     packet = build_run_packet(ctx, run_succeeded=True)
 
@@ -139,6 +154,7 @@ def test_the_run_packet_records_a_truncated_files_listing(tmp_path: Path) -> Non
     ctx = _make_ctx(tmp_path, diff_text=_AUTHORITATIVE)
     ctx.tool_state.coverage.authoritative_diff = _AUTHORITATIVE
     ctx.tool_state.coverage.diff_truncated = True
+    _mark_read(ctx, "src/a.py")
 
     packet = build_run_packet(ctx, run_succeeded=True)
 

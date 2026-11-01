@@ -26,6 +26,18 @@ if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
 
+def _mark_read(ctx: Any, path: str) -> None:
+    """Record one successful read so the run has observed coverage evidence."""
+    from mergecraft.evidence.trajectory import record_tool_call
+
+    record_tool_call(
+        ctx.tool_state,
+        tool="shell",
+        arguments={"command": f"cat {path}"},
+        ok=True,
+    )
+
+
 def _patched_file(name: str) -> dict[str, Any]:
     return {
         "filename": name,
@@ -52,6 +64,7 @@ async def test_a_files_api_diff_over_the_page_cap_is_recorded_as_truncated(
 
     assert is_error is False
     assert ctx.tool_state.coverage.diff_truncated is True
+    _mark_read(ctx, "feature.py")
     section = coverage_section_for_state(ctx.tool_state)
     assert section is not None
     assert section.complete is False
@@ -78,6 +91,7 @@ async def test_a_file_with_line_changes_and_no_patch_is_recorded_as_unreviewable
 
     assert is_error is False
     assert ctx.tool_state.coverage.unreviewable_paths == ["huge.py"]
+    _mark_read(ctx, "small.py")
     section = coverage_section_for_state(ctx.tool_state)
     assert section is not None
     assert [(r.path, r.cause) for r in section.uncovered] == [("huge.py", "no_inline_patch")]
@@ -102,6 +116,7 @@ async def test_a_binary_header_with_no_line_changes_is_not_an_uncovered_hunk(
 
     await _checkout(ctx)
 
+    _mark_read(ctx, "feature.py")
     section = coverage_section_for_state(ctx.tool_state)
     assert section is not None
     assert section.complete is True
@@ -118,6 +133,7 @@ async def test_a_clean_local_checkout_diff_is_fully_covered(tmp_path: Path) -> N
 
     assert is_error is False
     assert ctx.tool_state.coverage.authoritative_diff
+    _mark_read(ctx, "feature.py")
     section = coverage_section_for_state(ctx.tool_state)
     assert section is not None
     assert section.complete is True

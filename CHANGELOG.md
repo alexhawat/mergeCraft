@@ -225,13 +225,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   log. It only honours the base-side config of a `pull_request_target` run, and a
   pin bump needs its `pinBump.requireChecks` passed on the head SHA (#890).
 
-- The evidence packet carries a `coverage` section (schema `1.14.0`): how many
+- The evidence packet carries a `coverage` section (schema `1.17.0`): how many
   changed hunks and lines reached the reviewer, each uncovered range with its cause
   (`diff_truncated`, `no_inline_patch`, `excluded_generated`, `not_delivered`,
-  `budget_exhausted`), and whether coverage was `complete`. The `mergecraft` and
-  `mergecraft-approval` checks and the run record state it, for example
-  `Coverage: 41/44 hunks, 3 uncovered → inconclusive` (#940). The packet also
-  carries a `triage` section (schema `1.15.0`).
+  `not_observed`, `budget_exhausted`), and whether coverage was `complete`. The
+  `mergecraft` and `mergecraft-approval` checks and the run record state it, for
+  example `Coverage: 41/44 hunks, 3 uncovered → inconclusive` (#940). Read evidence
+  is the same line-range layer the auditor and the pre-submit nudge use, so a hunk
+  counts as covered when it was delivered or when an observed read covered part of
+  it — and a run whose reads were never observed counts as uncovered, not complete.
+  The packet also carries a `triage` section (schema `1.17.0`).
 
 - `get_review_comments` and the findings sweep report `incomplete` when a pull
   request has more review threads or comments than the page cap, instead of
@@ -655,12 +658,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A review run whose agent submitted a terminal verdict now ends `inconclusive` (a
   `neutral` `mergecraft` check) when any changed hunk never reached the reviewer —
-  a files-API diff over the page cap, a file GitHub sent no patch for, or a hunk
-  absent from the delivered diff — where it used to read `success`. A Critical or
-  Major finding still makes `mergecraft-approval` conclude `failure`, and one
-  bounded follow-up turn lists the uncovered hunks first when budget remains.
-  **Fix:** set `review.coverage.onIncomplete: warn` to keep the verdict and only
-  report the gap (#940).
+  a files-API diff over the page cap, a file GitHub sent no patch for, a hunk
+  absent from the delivered diff, or a run whose reads were never observed — where
+  it used to read `success`. A Critical or Major finding still makes
+  `mergecraft-approval` conclude `failure`. The existing pre-submit nudge lists the
+  unread ranges once before the verdict is accepted; there is no second follow-up
+  turn. **Fix:** set `review.coverage.onIncomplete: warn` to keep the verdict and
+  only report the gap (#940).
 
 - The carry-over sweep (`mergecraft findings carryover`) now treats a thread as
   mergeCraft's only when its root comment carries a mergeCraft marker **and** its

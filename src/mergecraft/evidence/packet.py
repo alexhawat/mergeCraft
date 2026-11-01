@@ -296,6 +296,7 @@ UncoveredCause = Literal[
     "no_inline_patch",
     "excluded_generated",
     "not_delivered",
+    "not_observed",
     "budget_exhausted",
 ]
 

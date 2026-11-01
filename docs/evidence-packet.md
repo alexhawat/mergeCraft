@@ -230,7 +230,7 @@ section is omitted (`null`).
 | `findings` | `list[Finding]` | Run-scoped rows (`scope="run"`). |
 | `conclusion` | `str` | `clean` when empty; `advisory` when observations exist. |
 
-### `coverage` — `CoverageSection | None` (added in 1.14.0)
+### `coverage` — `CoverageSection | None` (added in 1.17.0)
 
 Changed-line coverage: did every changed hunk of the PR diff reach the
 reviewer? Written by the orchestrator from the run's own checkout and delivery
@@ -253,13 +253,15 @@ comprehension.
 later files were never seen), `no_inline_patch` (GitHub sent line counts but no
 patch), `excluded_generated` (removed by the generated/minified/vendored
 policy; listed, not counted against `complete`), `not_delivered` (absent from
-the delivered diff and never read or handed back), `budget_exhausted` (as
-`not_delivered`, and the run had no budget left for the follow-up).
+the delivered diff and never read), `not_observed` (delivered, but the run's
+read tracking observed nothing at all, so nothing vouches for it), and
+`budget_exhausted` (known uncovered hunks, and no budget left for the
+pre-submit nudge).
 
 An incomplete section makes the run `inconclusive` under the default
 `review.coverage.onIncomplete: inconclusive`; blockers still win.
 
-### `triage` — `TriageSection | None` (added in 1.15.0)
+### `triage` — `TriageSection | None` (added in 1.17.0)
 
 The tier the deterministic pre-dispatch triage (`review.fastPath`) chose.
 Written by the orchestrator when the fast path was evaluated; `null` when it is

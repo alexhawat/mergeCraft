@@ -32,10 +32,23 @@ if TYPE_CHECKING:
 _MISSING = unified_diff("src/never_delivered.py", start=10, count=5)
 
 
+def _mark_read(ctx: ToolContext, path: str) -> None:
+    """Record one successful source read so the run has observed read evidence."""
+    from mergecraft.evidence.trajectory import record_tool_call
+
+    record_tool_call(
+        ctx.tool_state,
+        tool="shell",
+        arguments={"command": f"cat {path}"},
+        ok=True,
+    )
+
+
 def _ctx_with_an_undelivered_hunk(tmp_path: Path) -> ToolContext:
     """A context whose authoritative PR diff holds a hunk the delivered diff lacks."""
     ctx = publication_ctx(tmp_path, github=RecordingReviewGitHub(), trust_tier="trusted")
     ctx.tool_state.coverage.authoritative_diff = APP_DIFF + _MISSING
+    _mark_read(ctx, "src/app.py")
     return ctx
 
 
@@ -70,6 +83,7 @@ async def test_a_fully_delivered_diff_leaves_the_outcome_unchanged(
 ) -> None:
     ctx = publication_ctx(tmp_path, github=RecordingReviewGitHub(), trust_tier="trusted")
     ctx.tool_state.coverage.authoritative_diff = APP_DIFF
+    _mark_read(ctx, "src/app.py")
     await submit_verdict(ctx, "approve", [])
 
     record = await run_finalize(ctx, monkeypatch=monkeypatch)
