@@ -39,7 +39,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
@@ -88,15 +88,22 @@ _MAX_POLICY_BYTES = 1_000_000
 
 @dataclass(frozen=True, slots=True)
 class PolicyLoadError:
-    """One policy document that could not be read, with its reason.
+    """One policy document that could not be loaded, with its reason.
+
+    ``kind`` separates the two ways a document fails, so the row states the
+    right thing: a read failure (permission denied, a damaged object, a blob
+    past the read cap) is "could not be read", a schema or YAML failure is
+    "could not be parsed". Neither is ever reported as the other.
 
     Attributes:
         path (str): Repo-relative path of the document that failed.
-        message (str): The parser's own error text, naming what was wrong.
+        message (str): The failure's own text, naming what was wrong.
+        kind (Literal["read", "parse"]): Which failure this is.
     """
 
     path: str
     message: str
+    kind: Literal["read", "parse"] = "parse"
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,7 +188,7 @@ def _read_document(
     try:
         parsed = parse(_decode(raw, rel=rel))
     except (PolicyConfigError, ValueError) as exc:
-        return [], PolicyLoadError(path=rel, message=str(exc)), digest
+        return [], PolicyLoadError(path=rel, message=str(exc), kind="parse"), digest
     return list(parsed), None, digest
 
 
@@ -208,14 +215,18 @@ def _read_local(repo_root: Path, rel: str) -> tuple[bytes | None, PolicyLoadErro
         present = path.is_file()
     except OSError as exc:  # pragma: no cover — ``is_file`` swallows most of these
         logger.warning("policy: could not stat {}: {}", rel, exc)
-        return None, PolicyLoadError(path=rel, message=f"{rel} could not be read: {exc}")
+        return None, PolicyLoadError(
+            path=rel, message=f"{rel} could not be read: {exc}", kind="read"
+        )
     if not present:
         return None, None
     try:
         return path.read_bytes(), None
     except OSError as exc:
         logger.warning("policy: could not read {}: {}", rel, exc)
-        return None, PolicyLoadError(path=rel, message=f"{rel} could not be read: {exc}")
+        return None, PolicyLoadError(
+            path=rel, message=f"{rel} could not be read: {exc}", kind="read"
+        )
 
 
 def _read_or_error(
@@ -251,22 +262,135 @@ def _commit_exists(repo_root: Path, sha: str) -> bool:
     return completed.returncode == 0
 
 
-def _show_at_commit(repo_root: Path, sha: str, rel: str) -> bytes | None:
-    """Return ``rel``'s bytes at commit ``sha``, or ``None`` when absent."""
+def _show_at_commit(
+    repo_root: Path, sha: str, rel: str
+) -> tuple[bytes | None, PolicyLoadError | None]:
+    """Read ``rel`` at commit ``sha``, or report why it could not be read.
+
+    Three outcomes are distinct, and only the first is "the base has no rules":
+    the path is absent at the commit (``(None, None)``); ``git show`` cannot
+    materialize it — a damaged loose object, a partial clone — and the reason is
+    reported; or the blob is larger than this module's read cap, which is
+    refused rather than truncated and parsed.
+
+    Presence is asked of the tree (``git ls-tree``) and size of the blob
+    (``git cat-file -s``), so a commit that still resolves while its blob does
+    not cannot be mistaken for a commit that never carried the file.
+
+    Returns:
+        tuple[bytes | None, PolicyLoadError | None]: The document bytes, and the
+        failure when the document exists at ``sha`` but could not be read.
+    """
+    spec = f"{sha}:{rel}"
+    listing = _git(repo_root, ["ls-tree", sha, "--", rel])
+    if listing is None:
+        return None, _unreadable_at_commit(rel, sha, "git ls-tree could not run")
+    if listing.returncode != 0:
+        detail = _git_detail(listing) or f"git ls-tree exited {listing.returncode}"
+        return None, _unreadable_at_commit(rel, sha, f"git ls-tree failed: {detail}")
+    if not listing.stdout.strip():
+        return None, None
+
+    sized = _git(repo_root, ["cat-file", "-s", spec])
+    if sized is not None and sized.returncode == 0:
+        size = _parse_size(sized.stdout)
+        if size is not None and size > _MAX_POLICY_BYTES:
+            return None, _oversized_at_commit(rel, sha, size)
+
+    shown = _git(repo_root, ["show", spec])
+    if shown is None:
+        return None, _unreadable_at_commit(rel, sha, "git show could not run")
+    if shown.returncode != 0:
+        detail = _git_detail(shown) or f"git show exited {shown.returncode}"
+        return None, _unreadable_at_commit(rel, sha, f"git show failed: {detail}")
+    if len(shown.stdout) > _MAX_POLICY_BYTES:
+        return None, _oversized_at_commit(rel, sha, len(shown.stdout))
+    return shown.stdout, None
+
+
+def _unreadable_at_commit(rel: str, sha: str, detail: str) -> PolicyLoadError:
+    """Return the load error for a base document this run could not read."""
+    logger.warning("policy: could not read {} at {}: {}", rel, sha, detail)
+    return PolicyLoadError(
+        path=rel,
+        message=f"{rel} could not be read at {sha}: {detail}",
+        kind="read",
+    )
+
+
+def _oversized_at_commit(rel: str, sha: str, size: int) -> PolicyLoadError:
+    """Return the load error for a base document past this module's read cap."""
+    logger.warning(
+        "policy: refusing {} at {}: {} bytes exceeds the {}-byte read cap",
+        rel,
+        sha,
+        size,
+        _MAX_POLICY_BYTES,
+    )
+    return PolicyLoadError(
+        path=rel,
+        message=(
+            f"{rel} at {sha} is {size} bytes, larger than the {_MAX_POLICY_BYTES}-byte "
+            "policy read limit, so it was not read"
+        ),
+        kind="read",
+    )
+
+
+def _git_detail(completed: subprocess.CompletedProcess[bytes]) -> str:
+    """Return the first line of a failed git command's stderr."""
+    text = completed.stderr.decode("utf-8", errors="replace").strip()
+    return text.splitlines()[0].strip() if text else ""
+
+
+def _parse_size(raw: bytes) -> int | None:
+    """Return a ``git cat-file -s`` byte count, or ``None`` when unparseable."""
     try:
-        completed = subprocess.run(
-            git_argv(["show", f"{sha}:{rel}"]),
+        return int(raw.decode("ascii", errors="replace").strip())
+    except ValueError:
+        return None
+
+
+def _git(repo_root: Path, args: Sequence[str]) -> subprocess.CompletedProcess[bytes] | None:
+    """Run one hardened git command, or ``None`` when it could not run at all."""
+    try:
+        return subprocess.run(
+            git_argv(args),
             cwd=repo_root,
             capture_output=True,
             check=False,
             timeout=30,
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        logger.warning("policy: could not read {} at {}: {}", rel, sha, exc)
+        logger.warning("policy: git {} could not run: {}", " ".join(args[:2]), exc)
         return None
-    if completed.returncode != 0 or len(completed.stdout) > _MAX_POLICY_BYTES:
-        return None
-    return completed.stdout
+
+
+def _path_exists_at_commit(repo_root: Path, sha: str, rel: str) -> bool:
+    """Return whether the tree at ``sha`` carries ``rel`` (readable or not)."""
+    listing = _git(repo_root, ["ls-tree", sha, "--", rel])
+    return listing is not None and listing.returncode == 0 and bool(listing.stdout.strip())
+
+
+def _base_carries_policy(repo_root: Path, base_sha: str | None) -> bool:
+    """Return whether the base commit has a policy document this run would apply."""
+    base = (base_sha or "").strip()
+    if not base or not _commit_exists(repo_root, base):
+        return False
+    return any(_path_exists_at_commit(repo_root, base, rel) for rel in (RULES_REL, EXCEPTIONS_REL))
+
+
+def _read_at_commit(
+    repo_root: Path,
+    sha: str,
+    rel: str,
+    *,
+    parse: Any,
+) -> tuple[list[Any], PolicyLoadError | None, str]:
+    """Read and parse one document from a commit, keeping a read failure typed."""
+    raw, read_error = _show_at_commit(repo_root, sha, rel)
+    rows, parse_error, digest = _read_document(raw, rel=rel, parse=parse)
+    return rows, read_error or parse_error, digest
 
 
 def load_repo_policy(root: Path, *, operator_owned: bool = False) -> PolicySnapshot:
@@ -357,15 +481,11 @@ def load_review_policy(
 
     base = (base_sha or "").strip()
     if base and _commit_exists(snapshot.repo_root, base):
-        rules, rules_error, rules_digest = _read_document(
-            _show_at_commit(snapshot.repo_root, base, RULES_REL),
-            rel=RULES_REL,
-            parse=_parse_rules,
+        rules, rules_error, rules_digest = _read_at_commit(
+            snapshot.repo_root, base, RULES_REL, parse=_parse_rules
         )
-        exceptions, exceptions_error, _ = _read_document(
-            _show_at_commit(snapshot.repo_root, base, EXCEPTIONS_REL),
-            rel=EXCEPTIONS_REL,
-            parse=_parse_exceptions,
+        exceptions, exceptions_error, _ = _read_at_commit(
+            snapshot.repo_root, base, EXCEPTIONS_REL, parse=_parse_exceptions
         )
         errors = tuple(error for error in (rules_error, exceptions_error) if error is not None)
         return PolicySnapshot(
@@ -428,12 +548,19 @@ def _policy_row(
 
 
 def _unreadable_row(error: PolicyLoadError, *, source: str) -> Finding:
+    """Build the blocking row for one policy document this run could not load.
+
+    The row states the failure that actually happened — a document that could
+    not be read is never described as a document that could not be parsed, and
+    the cause (permission, a damaged object, the read cap, a schema error)
+    follows it verbatim.
+    """
     name = error.path.rsplit("/", 1)[-1]
+    verb = "could not be read" if error.kind == "read" else "could not be parsed"
     return _policy_row(
         rule_id=RULE_UNREADABLE,
         severity="Major",
-        message=f"Policy file {name} could not be parsed, so no rule in it was evaluated: "
-        f"{error.message}",
+        message=f"Policy file {name} {verb}, so no rule in it was evaluated: {error.message}",
         path=error.path,
         evidence=[f"policy file: {error.path}", f"policy source: {source}"],
     )
@@ -859,6 +986,22 @@ def _changed_paths(diff_path: str) -> list[str]:
     return changed_paths_from_diff(Path(diff_path).read_text(encoding="utf-8"))
 
 
+def _policy_source_says_fail_closed(ctx: Any, snapshot: PolicySnapshot, repo_root: Path) -> bool:
+    """Return whether an unreadable diff must still produce a policy row.
+
+    With nothing loaded from the working tree, a diff that cannot be read is
+    usually not a policy input — unless the base commit the run was told about
+    carries a policy document. A pull request may have deleted the head copy,
+    and the diff is the only way to learn that, so an unreadable diff there
+    means the change was never evaluated. An operator-owned snapshot was
+    captured from a tree the pull request cannot write: it is the whole policy
+    story on its own, so it never makes a diff read fail closed.
+    """
+    if snapshot.operator_owned:
+        return False
+    return _base_carries_policy(repo_root, _resolve_base_sha(ctx, repo_root))
+
+
 def _evaluate_run_policy(ctx: Any) -> list[Finding]:
     from mergecraft.mcp.tool_state import primary_repo_state
 
@@ -877,7 +1020,7 @@ def _evaluate_run_policy(ctx: Any) -> list[Finding]:
     try:
         changed = _changed_paths(diff_path)
     except (OSError, UnicodeDecodeError) as exc:
-        if nothing_loaded:
+        if nothing_loaded and not _policy_source_says_fail_closed(ctx, snapshot, repo_root):
             # The diff is not a policy input for a repository with no policy
             # tree, so a diff this run cannot read must not fail closed there:
             # it reviews exactly as it did before this feature existed.
