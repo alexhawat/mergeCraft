@@ -19,7 +19,8 @@ and do not block promotion.
 
 When a transitive CVE cannot be fixed immediately:
 
-1. Reproduce the finding locally (or from the `image-scan-reports` workflow artifact).
+1. Reproduce the finding locally (or from the `image-scan-reports-slim` or
+   `image-scan-reports-analyzers` workflow artifact).
 2. Add an entry to [`.trivyignore`](../.trivyignore) **above** the CVE id:
 
    ```text

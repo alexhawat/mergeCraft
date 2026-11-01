@@ -95,6 +95,10 @@ jobs:
         env:
           # Exporter unit tests run in coverage-measure (D14 / TH8).
           MERGECRAFT_UV_EXTRAS: tracing
+      # Exercise the independent suite while CI is producing coverage artifacts.
+      - name: Integration suite
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+        run: make test-integration
       - name: Restore base coverage from main cache
         id: base_coverage_cache
         if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14' && github.event_name == 'pull_request'
@@ -148,9 +152,6 @@ jobs:
           done
           echo "Head coverage artifact never appeared — coverage ratchet will fall back to make coverage-gate" >&2
           exit 1
-      - name: Integration suite
-        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
-        run: make test-integration
       - name: Coverage ratchet
         if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         env:
