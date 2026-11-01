@@ -253,8 +253,11 @@ def test_a_changed_file_inside_a_blocking_rules_scope_is_one_policy_row(
 def test_a_changed_file_outside_the_scope_produces_no_row(tmp_path: Path) -> None:
     """Scope still means scope: an untouched rule contributes nothing."""
     write_policy(tmp_path, rules=[rule(scope=_BILLING_SCOPE)])
+    snapshot = _load(tmp_path)
 
-    assert _evaluate(_load(tmp_path), ["docs/readme.md"]) == []
+    # Non-vacuity: the same rule does fire for a path inside its scope.
+    assert _ids(_evaluate(snapshot, ["src/billing/x.py"])) == ["billing.no-secret-in-source"]
+    assert _evaluate(snapshot, ["docs/readme.md"]) == []
 
 
 def test_three_matched_files_produce_one_row_with_a_deterministic_message(
@@ -682,8 +685,13 @@ def test_a_branch_scoped_rule_does_not_apply_on_a_different_branch(
 ) -> None:
     """A resolved branch that differs from the rule's scope still excludes it."""
     write_policy(tmp_path, rules=[rule(scope={"branch": "main"})])
+    snapshot = _load(tmp_path)
 
-    assert _evaluate(_load(tmp_path), ["src/app.py"], base_ref="release") == []
+    # Non-vacuity: on the matching branch the same rule is triggered.
+    assert _ids(_evaluate(snapshot, ["src/app.py"], base_ref="main")) == [
+        "billing.no-secret-in-source"
+    ]
+    assert _evaluate(snapshot, ["src/app.py"], base_ref="release") == []
 
 
 def test_resolve_effective_rules_treats_unresolved_dimensions_as_matching() -> None:
