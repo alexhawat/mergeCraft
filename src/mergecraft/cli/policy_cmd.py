@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
 import yaml
@@ -14,44 +14,58 @@ from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
 )
 from mergecraft.cli.typer_group import mergecraft_typer
-from mergecraft.policy.exceptions import PolicyException, parse_exceptions_document
 from mergecraft.policy.lifecycle import simulate_rule
 from mergecraft.policy.packs import load_shipped_pack_rules
-from mergecraft.policy.schema import PolicyConfigError, PolicyRule, parse_rule, parse_rules_document
+from mergecraft.policy.review import RULES_REL, PolicySnapshot, load_repo_policy
+from mergecraft.policy.schema import PolicyConfigError, PolicyRule, parse_rule
 from mergecraft.policy.scoping import EffectiveRule, ScopeContext, resolve_effective_rules
+
+if TYPE_CHECKING:
+    from mergecraft.policy.exceptions import PolicyException
 
 app = mergecraft_typer(
     name="policy",
     help=(
         "Lint, test, explain, and simulate versioned policy-as-code rules.\n\n"
-        "Review does not enforce policy rules."
+        "Review enforces the rules in .mergecraft/policy/rules.yaml: a rule "
+        "applies when a changed file matches its scope, and its enforcement mode "
+        "decides what the approval verdict does."
     ),
     no_args_is_help=True,
 )
 
 
-def _policy_dir(repo: Path) -> Path:
-    return repo / ".mergecraft" / "policy"
+def _load_policy(repo: Path) -> PolicySnapshot:
+    """Read ``.mergecraft/policy/`` through the loader review itself uses."""
+    snapshot = load_repo_policy(repo)
+    if snapshot.load_errors:
+        cli_bail(snapshot.load_errors[0].message)
+    return snapshot
+
+
+def _rules_file_exists(repo: Path) -> bool:
+    return (repo / RULES_REL).is_file()
 
 
 def _load_policy_rules(repo: Path) -> list[PolicyRule]:
-    rules_path = _policy_dir(repo) / "rules.yaml"
-    if not rules_path.is_file():
-        return load_shipped_pack_rules()
-    try:
-        return parse_rules_document(rules_path.read_text(encoding="utf-8"))
-    except PolicyConfigError as exc:
-        cli_bail(str(exc))
+    """Return the repo's rules, or the shipped example packs for authoring.
+
+    The packs are examples, not a default: review evaluates no rules until
+    ``rules.yaml`` exists, and saying so here stops an author from linting
+    against rules their pull requests are not actually judged by.
+    """
+    snapshot = _load_policy(repo)
+    if _rules_file_exists(repo):
+        return list(snapshot.rules)
+    console.print(
+        "[yellow]no .mergecraft/policy/rules.yaml: showing the shipped example packs.[/yellow] "
+        "Review evaluates no rules until that file exists."
+    )
+    return load_shipped_pack_rules()
 
 
 def _load_policy_exceptions(repo: Path) -> list[PolicyException]:
-    exceptions_path = _policy_dir(repo) / "exceptions.yaml"
-    if not exceptions_path.is_file():
-        return []
-    try:
-        return parse_exceptions_document(exceptions_path.read_text(encoding="utf-8"))
-    except PolicyConfigError as exc:
-        cli_bail(str(exc))
+    return list(_load_policy(repo).exceptions)
 
 
 @app.command("lint")
