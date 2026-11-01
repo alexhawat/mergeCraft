@@ -94,10 +94,9 @@ async def test_backfill_does_not_duplicate_the_policy_row_into_agent_findings(
     tmp_path: Path,
 ) -> None:
     """A policy row is not an agent claim, so the backfill leaves it alone."""
-    from mergecraft.policy.review import ensure_policy_evaluated
-
     from mergecraft.evidence.findings import load_run_findings_with_drops
     from mergecraft.mcp.verdict import submit_review_verdict_tool
+    from mergecraft.policy.review import ensure_policy_evaluated
 
     ctx = _policy_ctx(tmp_path)
     rows = ensure_policy_evaluated(ctx)
