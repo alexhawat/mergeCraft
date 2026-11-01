@@ -28,9 +28,9 @@ def test_e2e_yml_on_includes_workflow_call() -> None:
 
 
 def test_ci_cd_has_e2e_gate_job() -> None:
-    """``ci-cd.yml`` calls the reusable E2E workflow after ``verify``."""
+    """Independent E2E and verify gates overlap before image publication."""
     gate = job(load_workflow("ci-cd.yml"), "e2e-gate")
-    assert as_list(gate.get("needs")) == ["verify"] or "verify" in as_list(gate.get("needs"))
+    assert not as_list(gate.get("needs"))
     uses = gate.get("uses")
     assert uses == "./.github/workflows/e2e.yml", f"e2e-gate uses: {uses!r}"
 

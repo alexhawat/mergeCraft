@@ -254,7 +254,8 @@ Add repository secrets for Craft publish: `TWINE_USERNAME`, `TWINE_PASSWORD`.
    - builds each GHCR image **once**, pushes immutable `:${GITHUB_SHA}` /
      `:analyzers-${GITHUB_SHA}` tags, and captures the digests
    - generates an SBOM (syft) + Trivy scan per image (CRITICAL/HIGH gate on
-     `release/**` and `v*` tags); uploads `image-scan-reports`
+     `release/**` and `v*` tags); uploads `image-scan-reports-slim` and
+     `image-scan-reports-analyzers`
    - cosign keyless-signs both digests and attaches build-provenance + SBOM
      attestations
    - on `main`, promotes `:latest` / `:analyzers` by **retagging the same
@@ -331,7 +332,7 @@ gh attestation verify \
 ```
 
 SBOM and Trivy SARIF reports are attached to the CI/CD run as the
-`image-scan-reports` artifact.
+`image-scan-reports-slim` and `image-scan-reports-analyzers` artifacts.
 
 ## See also
 

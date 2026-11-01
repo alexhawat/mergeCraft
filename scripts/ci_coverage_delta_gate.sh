@@ -8,7 +8,9 @@ set -euo pipefail
 unset COVERAGE_PROCESS_START COVERAGE_PROCESS_CONFIG COVERAGE_FILE COVERAGE_RCFILE
 
 if [[ "${GITHUB_EVENT_NAME:-}" != "pull_request" ]]; then
-  make coverage-gate
+  # Only the head gate uses the bounded parallel orchestrator. Do not export
+  # selectors into the PR fallback's independent base measurement below.
+  MERGECRAFT_TEST_SPLITS=2 make coverage-gate
   exit 0
 fi
 

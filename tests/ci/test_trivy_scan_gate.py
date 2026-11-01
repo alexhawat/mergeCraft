@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import re
 from datetime import UTC, datetime
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
@@ -237,19 +238,45 @@ def test_waiver_docs_exist() -> None:
 
 def test_release_scans_both_images_and_retains_attribution_after_findings() -> None:
     """A slim failure must not hide the analyzer scan or its package/layer evidence."""
-    scan = job(load_workflow("ci-cd.yml"), "sbom-scan")
-    for image in ("slim", "analyzers"):
-        step = _step(scan, f"Trivy scan {image}")
-        assert not step.get("continue-on-error", False)
-        assert step["with"]["format"] == "json"
-        assert step["with"]["output"] == f"trivy-{image}.json"
-        assert step["with"]["exit-code"] == "${{ steps.gate.outputs.exit_code }}"
-    assert _step(scan, "Trivy scan analyzers")["if"] == "success() || failure()"
+    doc = load_workflow("ci-cd.yml")
+    scan = job(doc, "sbom-scan")
+    assert scan["strategy"]["fail-fast"] is False
+    assert not scan.get("continue-on-error", False)
+    rows = scan["strategy"]["matrix"]["include"]
+    assert {row["image"]: row["ref"] for row in rows} == {
+        "slim": "${{ needs.build-images.outputs.slim_ref }}",
+        "analyzers": "${{ needs.build-images.outputs.analyzers_ref }}",
+    }
+    assert len(rows) == 2
+    step = _step(scan, "Trivy scan")
+    assert not step.get("continue-on-error", False)
+    assert step["if"] == "success() || failure()"
+    assert step["with"]["image-ref"] == "${{ matrix.ref }}"
+    assert step["with"]["format"] == "json"
+    assert step["with"]["exit-code"] == "${{ steps.gate.outputs.exit_code }}"
     upload = _step(scan, "Upload SBOM + scan reports")
     assert upload["if"] == "always()"
+    signing = job(doc, "sign-attest")
+    assert "sbom-scan" in signing["needs"]
+    download = _step(signing, "Download SBOM + scan reports")["with"]
+    assert download["merge-multiple"] is True
+    artifact_names = set()
     for image in ("slim", "analyzers"):
+        assert step["with"]["output"].replace("${{ matrix.image }}", image) == f"trivy-{image}.json"
+        artifact = upload["with"]["name"].replace("${{ matrix.image }}", image)
+        assert fnmatchcase(artifact, download["pattern"])
+        artifact_names.add(artifact)
+        paths = upload["with"]["path"].replace("${{ matrix.image }}", image).splitlines()
+        sbom = _step(scan, "SBOM (syft via anchore/sbom-action)")["with"]
+        assert sbom["image"] == "${{ matrix.ref }}"
+        sbom_path = sbom["output-file"].replace("${{ matrix.image }}", image)
+        assert sbom_path in paths
+        assert _step(signing, f"Attest SBOM ({image})")["with"]["sbom-path"] == (
+            f"{download['path']}/{sbom_path}"
+        )
         for extension in ("json", "sarif"):
-            assert f"trivy-{image}.{extension}" in upload["with"]["path"]
+            assert f"trivy-{image}.{extension}" in paths
+    assert len(artifact_names) == 2, "matrix uploads must not collide"
 
 
 def test_pr_image_scan_has_no_release_authority_and_is_blocking() -> None:
