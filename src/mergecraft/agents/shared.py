@@ -231,6 +231,7 @@ class AgentUsage:
     cache_read_tokens: int | None = None
     cache_write_tokens: int | None = None
     cost_usd: float | None = None
+    cost_note: str | None = None
 
 
 INFRA_REASON_KEY: Final[str] = "infra_reason"
@@ -429,6 +430,7 @@ def merge_agent_usage(a: AgentUsage | None, b: AgentUsage | None) -> AgentUsage 
             cache_read_tokens=b.cache_read_tokens,
             cache_write_tokens=b.cache_write_tokens,
             cost_usd=b.cost_usd,
+            cost_note=b.cost_note,
         )
     if b is None:
         return AgentUsage(
@@ -438,6 +440,7 @@ def merge_agent_usage(a: AgentUsage | None, b: AgentUsage | None) -> AgentUsage 
             cache_read_tokens=a.cache_read_tokens,
             cache_write_tokens=a.cache_write_tokens,
             cost_usd=a.cost_usd,
+            cost_note=a.cost_note,
         )
     cache_read = (a.cache_read_tokens or 0) + (b.cache_read_tokens or 0)
     cache_write = (a.cache_write_tokens or 0) + (b.cache_write_tokens or 0)
@@ -449,6 +452,8 @@ def merge_agent_usage(a: AgentUsage | None, b: AgentUsage | None) -> AgentUsage 
         cache_read_tokens=cache_read or None,
         cache_write_tokens=cache_write or None,
         cost_usd=cost or None,
+        cost_note="; ".join(dict.fromkeys(note for note in (a.cost_note, b.cost_note) if note))
+        or None,
     )
 
 

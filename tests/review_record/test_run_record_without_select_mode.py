@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from mergecraft.agents._stream_consumer import StreamSpanAccumulator
+from mergecraft.agents.opencode import _session_event_handler
 from mergecraft.agents.shared import AgentUsage
 from mergecraft.mcp.verdict import submit_review_verdict_tool
 from tests.review_record.test_w15_deterministic_record import (
@@ -139,3 +141,45 @@ async def test_run_record_carries_the_cost_line(tmp_path: Path) -> None:
     )
 
     assert "- **Cost:** $0.0123" in scm.reviews[1]
+
+
+@pytest.mark.parametrize("with_budget", [False, True])
+async def test_go_estimate_reaches_the_published_record(tmp_path: Path, with_budget: bool) -> None:
+    """Publication preserves the subscription qualification with either cost source."""
+    from mergecraft.utils.run_bounds import BudgetTracker, resolve_run_bounds
+
+    accumulator = StreamSpanAccumulator(agent_name="opencode")
+    handler = _session_event_handler({}, model="opencode-go/deepseek-v4.1-flash")
+    handler(
+        accumulator,
+        {
+            "type": "step_finish",
+            "timestamp": 1793491200000,
+            "part": {
+                "cost": 0,
+                "tokens": {
+                    "input": 1_000_000,
+                    "output": 1_000_000,
+                    "cache": {"read": 1_000_000},
+                },
+            },
+        },
+    )
+    usage = accumulator.to_usage()
+    assert usage is not None
+    scm = _Scm()
+    ctx = _context(tmp_path, scm)
+    ctx.tool_state.usage_entries = [usage]
+    if with_budget:
+        tracker = BudgetTracker(resolve_run_bounds(env={}))
+        tracker.record_cost(usage.cost_usd or 0)
+        ctx.budget_tracker = tracker
+    await _publish_deterministic_record()(
+        pull_number=546,
+        packet=_sample_packet(findings=[], verdict="success", reason="approved"),
+        ctx=ctx,
+    )
+    assert (
+        "- **Cost:** $0.7530 (includes estimated OpenCode Go usage value; "
+        "subscription billed separately)"
+    ) in scm.reviews[1]

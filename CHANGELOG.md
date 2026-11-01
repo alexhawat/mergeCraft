@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- OpenCode Go steps with missing or zero cost use published DeepSeek V4.1
+  Flash / V4 Pro token rates when their timestamps are available, including
+  weekday peak windows and cached input. Reported costs are preserved; the
+  review labels Go usage value and estimated amounts separately from the
+  subscription fee.
+
 - Inline review comments are published again. Every review carrying inline
   comments was rejected with a 422 (`Variable $threads ... invalid value for
   N.fingerprint (Field is not defined on DraftPullRequestReviewThread)`): the
