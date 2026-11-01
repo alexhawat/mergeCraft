@@ -80,7 +80,7 @@ def test_an_uncovered_row_names_path_range_and_cause() -> None:
 
     for token in ("start_line", "end_line", "cause", "diff_truncated", "no_inline_patch"):
         assert token in text
-    for cause in ("excluded_generated", "not_delivered", "budget_exhausted"):
+    for cause in ("excluded_generated", "not_delivered", "not_observed"):
         assert cause in text
 
 

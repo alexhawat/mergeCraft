@@ -54,7 +54,10 @@ def _settings(*, enabled: bool = True) -> RepoSettings:
                 "fastPath": {
                     "enabled": enabled,
                     "skipLlm": ["pinBump"],
-                    "pinBump": {"requireChecks": [_VERIFIER]},
+                    "pinBump": {
+                        "requireChecks": [_VERIFIER],
+                        "trustedCheckApps": ["mergecraft-reviewer"],
+                    },
                 }
             }
         }

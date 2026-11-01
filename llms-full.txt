@@ -810,16 +810,15 @@ with its own reason. Each fresh run still posts its own review.
 **Changed-line coverage.** A verdict is only worth reading if the whole change
 reached the reviewer. At the end of the run mergeCraft accounts for every
 changed hunk of the PR diff: a hunk is *covered* when it was in the diff the
-reviewer was handed, when a mediated tool call read its file, or when the one
-follow-up turn handed it back. Absence of evidence counts as uncovered, not
-unknown. Files GitHub sent line counts for but no patch (`no_inline_patch`)
+reviewer was handed, or when an observed read covered part of it. Absence of
+read evidence counts as uncovered, not unknown. Files GitHub sent line counts for but no patch (`no_inline_patch`)
 and files beyond the files-API page cap (`diff_truncated`) are listed and can
 never be cleared, because there are no lines to hand back; generated, minified
 and vendored hunks removed by policy are listed as `excluded_generated` and do
-not count against completeness. Before finalizing, if known hunks remain
-uncovered and the run still has budget, the reviewer gets **one** follow-up
-turn listing exactly those hunks, and may replace its verdict in response.
-If anything is still uncovered, the run is `inconclusive` (a `neutral` check)
+not count against completeness. Before the verdict is accepted, one nudge names
+exactly the unread ranges so the reviewer can read them and submit again; that
+nudge fires once per session. If anything is still uncovered, the run is
+`inconclusive` (a `neutral` check)
 even though a verdict was submitted; a Critical or Major finding still makes
 `mergecraft-approval` conclude `failure`. The checks and the run record state
 it (`Coverage: 41/44 hunks, 3 uncovered → inconclusive`) and the packet's
@@ -835,15 +834,19 @@ worth running. Four recognizers answer "is *every* change in this diff of this
 kind?": `pinBump` (each changed line pair differs only in a 40-hex SHA or
 `sha256:` digest, always the same single old → new pair), `prose` (only
 `.md` / `.txt` edits outside code fences, front matter and high-stakes
-paths, proved against the head-side text), `whitespace` (the same tokens
-before and after; indentation counts in whitespace-sensitive languages) and
-`generated` (only lockfiles or generated paths, with no manifest or generator
-config beside them). A mixed diff matches nothing and gets a full review.
-`skipLlm` opts each recognizer in; a pin bump also needs every
-`pinBump.requireChecks` check to have passed on the head SHA. A skipped run
-posts the `mergecraft` check stating `Tier: skip (pinBump) — no LLM review
-ran`, names the checks it relied on, **never grants `mergecraft-approval`**,
-and records the tier in the evidence packet and the shadow log. Any read
+paths, never a dependency manifest, lockfile or agent-instruction file, proved
+against the head-side text), `whitespace` (the same tokens before and after;
+indentation counts in whitespace-sensitive languages) and `generated` (only
+lockfiles or generated paths, with no manifest or generator config beside
+them). A mixed diff matches nothing and gets a full review. `skipLlm` opts each
+recognizer in; a pin bump also needs every `pinBump.requireChecks` check to have
+passed on the head SHA **from a GitHub App named in
+`pinBump.trustedCheckApps`** — a check-run name is chosen by its creator, and
+the `github-actions` runs of a `pull_request` workflow come from the head ref, so
+neither can vouch. A skipped run posts the `mergecraft` check stating
+`Tier: skip (pinBump) — no LLM review ran`, names the checks it relied on,
+**never grants `mergecraft-approval`**, and records the tier in the evidence
+packet and the shadow log. Any read
 failure, truncated listing or file without a patch is a full review. The PR
 title, body and labels are never inputs.
 
@@ -1890,10 +1893,11 @@ A run record is only worth reading if it describes the run, so a verdict is
 not allowed to look more complete than the review was. The orchestrator
 builds a coverage universe from the authoritative PR diff (every changed
 hunk, deleted-only hunks included) and counts a hunk as covered only through
-mediated evidence: it was in the diff the reviewer received, a mediated read
-returned its file, or the single follow-up turn handed it back. Unknown is not
-a state — absence of evidence is *uncovered*, the opposite of the trajectory
-auditor's silence rule, on purpose, because this check gates the verdict.
+mediated evidence: it was in the diff the reviewer received, or an observed read
+covered part of it. Unknown is not a state — absence of read evidence is
+*uncovered*, the opposite of the trajectory auditor's silence rule, on purpose,
+because this check gates the verdict. The pre-submit nudge hands every unread
+range back once, before the verdict is accepted; there is no second turn.
 
 When any hunk is still uncovered at finalize (policy exclusions such as
 generated files are listed but do not count), the run outcome is
@@ -1914,8 +1918,9 @@ verified pin substitution, prose, whitespace and regenerated lockfiles. The
 tier is `skip` or `full`; there is no partial credit and no "probably". The
 refusals are the design: a skipped run is stated as such on the check and the
 record, never grants approval, only counts a pin bump when its verifying check
-passed on the head SHA, reads its config from the base ref only, and treats any
-failure to read the pull request as a reason to review.
+passed on the head SHA from a `pinBump.trustedCheckApps` GitHub App (a check
+name alone is set by its creator), reads its config from the base ref only, and
+treats any failure to read the pull request as a reason to review.
 An agent failure that is the reviewer's infrastructure rather than the review is
 `infra_error`, not `failed`: a driver marks it with the `infra_reason` result
 metadata key (`mergecraft.agents.shared.INFRA_REASON_KEY`) and

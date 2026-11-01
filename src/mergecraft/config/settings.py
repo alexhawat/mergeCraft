@@ -341,11 +341,20 @@ FastPathRecognizer = Literal["pinBump", "prose", "whitespace", "generated"]
 
 
 class FastPathPinBumpSettings(BaseModel):
-    """``review.fastPath.pinBump``: which checks must have passed before a pin bump skips."""
+    """``review.fastPath.pinBump``: which checks must have passed before a pin bump skips.
+
+    ``requireChecks`` names the check runs; ``trustedCheckApps`` names the GitHub Apps
+    whose runs may satisfy them. A check-run name is chosen by whatever created the run,
+    so a name is only verification when the run's ``app.slug`` is one the operator
+    trusts. Without at least one trusted App the pin bump never skips.
+    ``github-actions`` is refused on purpose: the job names in a ``pull_request``
+    workflow come from the head ref, which the pull request author controls.
+    """
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
     require_checks: list[str] = Field(default_factory=list, alias="requireChecks")
+    trusted_check_apps: list[str] = Field(default_factory=list, alias="trustedCheckApps")
 
 
 class FastPathSettings(BaseModel):
@@ -355,7 +364,8 @@ class FastPathSettings(BaseModel):
     the opted-in recognizers (``skipLlm``) matches end to end skips the LLM review: the
     run posts the ``mergecraft`` check with the tier stated and leaves approval to a
     human. Anything else, and any doubt, is a full review. A pin bump additionally
-    needs every ``pinBump.requireChecks`` check to have passed on the head SHA.
+    needs every ``pinBump.requireChecks`` check to have passed on the head SHA from a
+    ``pinBump.trustedCheckApps`` GitHub App.
     """
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)

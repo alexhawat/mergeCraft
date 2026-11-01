@@ -12,8 +12,10 @@ matches and hides one real change matches nothing and gets a full review.
 * ``pinBump`` — every changed line pair differs only in a 40-hex SHA (or a
   ``sha256:`` digest), and always by the same single old → new pair.
 * ``prose`` — only ``.md`` / ``.markdown`` / ``.txt`` files, outside high-stakes
-  paths, with no changed line in a code fence, front matter, or indented code. The
-  head-side file text proves that; without it nothing is proven.
+  paths, with no changed line in a code fence, front matter, or indented code. A
+  dependency manifest or lockfile named like prose, and an agent-instruction file
+  that steers later reviews, are never prose. The head-side file text proves the
+  rest; without it nothing is proven.
 * ``whitespace`` — every contiguous change block is the same tokens before and
   after. Whitespace-sensitive languages only get trailing-whitespace and blank-line
   changes; comment-only changes are not recognized (they need the language's string
@@ -23,12 +25,13 @@ matches and hides one real change matches nothing and gets a full review.
 
 Two tiers ship: ``skip`` (no LLM review) and ``full`` (today's review). A cheaper
 ``lite`` tier is not implemented; a recognizer that matches but is not enabled, or a
-pin bump whose verifying check has not passed, is ``full``.
+pin bump whose verifying check has not passed from a trusted GitHub App, is ``full``.
 
 The tier is a pure function of the diff, the config, head-side text used only to prove
 a markdown edit stays out of a code fence, and the names of the checks that passed on
-the head SHA. The pull request's title, body, labels and head-side config are not
-inputs: a fork author must not be able to opt themselves out of review.
+the head SHA from a configured trusted App (the I/O shell filters by ``app.slug``).
+The pull request's title, body, labels and head-side config are not inputs: a fork
+author must not be able to opt themselves out of review.
 
 Exports:
     TriageDecision: The tier, the recognizer behind it, and why.
@@ -42,6 +45,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Final, Literal
 
 from mergecraft.analyzers.scope import changed_paths_from_scope, parse_diff_scope
@@ -65,6 +69,35 @@ _SHA: Final[re.Pattern[str]] = re.compile(
 )
 _FENCE: Final[re.Pattern[str]] = re.compile(r"^\s{0,3}(```|~~~)")
 _PROSE_SUFFIXES: Final[tuple[str, ...]] = (".md", ".markdown", ".txt")
+# A prose skip must never hide a dependency change or an instruction that steers
+# later reviews: both kinds of file read as prose by suffix alone. Manifest and
+# lockfile names are compared lowercased (the path is lowercased first).
+_AGENT_INSTRUCTION_BASENAMES: Final[frozenset[str]] = frozenset(
+    {
+        "agents.md",
+        "claude.md",
+        "gemini.md",
+        "copilot-instructions.md",
+        ".cursorrules",
+        ".windsurfrules",
+        ".clinerules",
+    }
+)
+_PROSE_REFUSED_BASENAMES: Final[frozenset[str]] = (
+    frozenset(name.lower() for name in DEPENDENCY_MANIFEST_NAMES | LOCKFILE_NAMES)
+    | _AGENT_INSTRUCTION_BASENAMES
+)
+_PROSE_REFUSED_PATH_PARTS: Final[tuple[str, ...]] = (
+    ".github/skills/",
+    ".github/instructions/",
+    ".github/prompts/",
+    ".github/chatmodes/",
+    ".claude/",
+    ".cursor/",
+    ".agents/",
+    ".codex/",
+    "agent-instructions",
+)
 _MARKDOWN_SUFFIXES: Final[tuple[str, ...]] = (".md", ".markdown")
 # Whitespace carries meaning here, so only trailing whitespace and blank lines are noise.
 _INDENT_SENSITIVE_SUFFIXES: Final[tuple[str, ...]] = (
@@ -279,6 +312,10 @@ def recognize_prose_only(diff_text: str, *, head_files: Mapping[str, str]) -> bo
             return False
         if any(part in lowered for part in _HIGH_STAKES_PATH_PARTS):
             return False
+        if PurePosixPath(lowered).name in _PROSE_REFUSED_BASENAMES:
+            return False
+        if any(part in lowered for part in _PROSE_REFUSED_PATH_PARTS):
+            return False
         head_text = head_files.get(file.path)
         if head_text is None:
             return False
@@ -325,9 +362,16 @@ def recognize_whitespace_only(diff_text: str) -> bool:
 
 
 def _normalize(lines: list[str], *, strict: bool) -> list[str]:
+    """Normalize whitespace that carries no meaning, and only that.
+
+    ``strict`` (indent-sensitive languages) drops trailing whitespace; the rest
+    also drops leading whitespace so a re-indent reads as whitespace-only. Neither
+    collapses *internal* runs: ``const s = "a  b"`` and ``const s = "a b"`` differ
+    as string literals, and treating them as equal would hide a semantic edit.
+    """
     if strict:
         return [line.rstrip() for line in lines if line.strip()]
-    return [" ".join(line.split()) for line in lines if line.strip()]
+    return [line.strip() for line in lines if line.strip()]
 
 
 def recognize_generated(diff_text: str) -> bool:
@@ -359,6 +403,28 @@ def _full(reason: str) -> TriageDecision:
     return TriageDecision(tier="full", recognizer=None, reason=reason)
 
 
+# The Actions app creates the check runs of `pull_request` workflows, whose job names
+# come from the head ref. A pull request author controls that ref, so its identity alone
+# proves nothing about who verified the pin.
+_REFUSED_CHECK_APP_SLUGS: Final[frozenset[str]] = frozenset({"github-actions"})
+
+
+def trusted_check_apps(apps: Collection[str]) -> frozenset[str]:
+    """Normalize the configured App slugs, dropping the ones that cannot vouch.
+
+    A check run's name and conclusion are whatever its creator set, so a pin-bump skip
+    only accepts a run from an App the operator installed. ``github-actions`` is refused
+    because a ``pull_request`` workflow's job names are head-controlled; a workflow that
+    may vouch must publish as its own App.
+    """
+    trusted: set[str] = set()
+    for app in apps:
+        slug = app.strip().lower()
+        if slug and slug not in _REFUSED_CHECK_APP_SLUGS:
+            trusted.add(slug)
+    return frozenset(trusted)
+
+
 def triage_diff(
     diff_text: str,
     *,
@@ -370,7 +436,8 @@ def triage_diff(
 
     Pure: no I/O, no clock, no environment. ``head_files`` is the head-side text of
     prose files (only used to prove an edit stays out of a code fence) and
-    ``passed_checks`` the names of the checks that passed on the head SHA.
+    ``passed_checks`` the names of the checks that passed on the head SHA **from a
+    configured trusted App** — the I/O shell filters by ``app.slug`` before calling.
     """
     if not config.enabled:
         return _full("review.fastPath is not enabled")
@@ -397,16 +464,25 @@ def triage_diff(
                 return _full(
                     "a pin bump needs at least one review.fastPath.pinBump.requireChecks check"
                 )
+            apps = trusted_check_apps(config.pin_bump.trusted_check_apps)
+            if not apps:
+                return _full(
+                    "a pin bump needs at least one review.fastPath.pinBump.trustedCheckApps "
+                    "GitHub App; a check name alone cannot prove who verified it"
+                )
             missing = [check for check in required if check not in set(passed_checks)]
             if missing:
                 return _full(
-                    "a pin bump needs its verifying check(s) passed on the head SHA; "
-                    "not passed: " + ", ".join(missing)
+                    "a pin bump needs its verifying check(s) passed on the head SHA from a "
+                    "trusted App; not passed: " + ", ".join(missing)
                 )
             return TriageDecision(
                 tier="skip",
                 recognizer=name,
-                reason=f"every change is a {_DESCRIPTIONS[name]}; verified by {', '.join(required)}",
+                reason=(
+                    f"every change is a {_DESCRIPTIONS[name]}; verified by "
+                    f"{', '.join(required)} from {', '.join(sorted(apps))}"
+                ),
                 relied_on_checks=tuple(required),
             )
         return TriageDecision(

@@ -1454,8 +1454,6 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
     )
     from mergecraft.config.settings_snapshot import capture_run_scope_snapshot
 
-    # The changed-line coverage follow-up only fires while the run has budget left.
-    tool_state.coverage.budget_tracker = ctx.budget_tracker
     snapshot = capture_run_scope_snapshot(
         ctx.tool_context,
         root=Path(primary_repo_state(tool_state).dir),

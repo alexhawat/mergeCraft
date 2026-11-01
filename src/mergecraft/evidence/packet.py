@@ -297,7 +297,6 @@ UncoveredCause = Literal[
     "excluded_generated",
     "not_delivered",
     "not_observed",
-    "budget_exhausted",
 ]
 
 

@@ -25,6 +25,7 @@ _OLD = "1d479f7a0123456789abcdef0123456789abcdef"
 _NEW = "08274ddafedcba9876543210fedcba9876543210"
 _FIXTURES = Path(__file__).parent / "fixtures"
 _VERIFIER = "Verify changed deployment candidates"
+_TRUSTED_APP = "mergecraft-reviewer"
 _PIN_DIFF = (_FIXTURES / "pin_bump_pr_889_shape.diff").read_text(encoding="utf-8")
 
 
@@ -34,7 +35,7 @@ def _config(**overrides: object) -> FastPathSettings:
     base: dict[str, object] = {
         "enabled": True,
         "skipLlm": ["pinBump", "prose", "whitespace", "generated"],
-        "pinBump": {"requireChecks": [_VERIFIER]},
+        "pinBump": {"requireChecks": [_VERIFIER], "trustedCheckApps": [_TRUSTED_APP]},
     }
     base.update(overrides)
     return FastPathSettings.model_validate(base)
@@ -78,7 +79,10 @@ def test_the_yaml_spellings_parse() -> None:
                 "fastPath": {
                     "enabled": True,
                     "skipLlm": ["pinBump"],
-                    "pinBump": {"requireChecks": [_VERIFIER]},
+                    "pinBump": {
+                        "requireChecks": [_VERIFIER],
+                        "trustedCheckApps": [_TRUSTED_APP],
+                    },
                 }
             }
         }
@@ -87,6 +91,7 @@ def test_the_yaml_spellings_parse() -> None:
     assert settings.review.fast_path.enabled is True
     assert settings.review.fast_path.skip_llm == ["pinBump"]
     assert settings.review.fast_path.pin_bump.require_checks == [_VERIFIER]
+    assert settings.review.fast_path.pin_bump.trusted_check_apps == [_TRUSTED_APP]
 
 
 def test_an_unknown_recognizer_name_is_rejected() -> None:
@@ -136,10 +141,39 @@ def test_a_pin_bump_with_no_configured_verifier_check_is_full() -> None:
     assert decision.tier == "full"
 
 
+def test_a_pin_bump_with_no_trusted_app_is_full() -> None:
+    """A check name alone cannot prove which App produced the run."""
+    from mergecraft.classify.triage import triage_diff
+
+    config = _config(pinBump={"requireChecks": [_VERIFIER]})
+
+    decision = triage_diff(_PIN_DIFF, config=config, passed_checks=[_VERIFIER])
+
+    assert decision.tier == "full"
+    assert "trustedCheckApps" in decision.reason
+
+
+def test_the_actions_app_is_never_a_trusted_app() -> None:
+    """`pull_request` job names come from the head ref, so github-actions proves nothing."""
+    from mergecraft.classify.triage import triage_diff
+
+    config = _config(pinBump={"requireChecks": [_VERIFIER], "trustedCheckApps": ["github-actions"]})
+
+    decision = triage_diff(_PIN_DIFF, config=config, passed_checks=[_VERIFIER])
+
+    assert decision.tier == "full"
+    assert "trustedCheckApps" in decision.reason
+
+
 def test_every_required_check_must_have_passed() -> None:
     from mergecraft.classify.triage import triage_diff
 
-    config = _config(pinBump={"requireChecks": [_VERIFIER, "build"]})
+    config = _config(
+        pinBump={
+            "requireChecks": [_VERIFIER, "build"],
+            "trustedCheckApps": [_TRUSTED_APP],
+        }
+    )
 
     assert triage_diff(_PIN_DIFF, config=config, passed_checks=[_VERIFIER]).tier == "full"
     assert triage_diff(_PIN_DIFF, config=config, passed_checks=[_VERIFIER, "build"]).tier == "skip"

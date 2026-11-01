@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 _FIXTURES = Path(__file__).resolve().parent.parent / "classify" / "fixtures"
 _PIN_DIFF = (_FIXTURES / "pin_bump_pr_889_shape.diff").read_text(encoding="utf-8")
 _VERIFIER = "Verify changed deployment candidates"
+_TRUSTED_APP = "mergecraft-reviewer"
 _HEAD = "c" * 40
 
 
@@ -34,7 +35,7 @@ def _config(**overrides: Any) -> FastPathSettings:
     base: dict[str, Any] = {
         "enabled": True,
         "skipLlm": ["pinBump", "prose"],
-        "pinBump": {"requireChecks": [_VERIFIER]},
+        "pinBump": {"requireChecks": [_VERIFIER], "trustedCheckApps": [_TRUSTED_APP]},
     }
     base.update(overrides)
     return FastPathSettings.model_validate(base)
@@ -99,8 +100,17 @@ class FakeScm:
         return ListedItems(items=self._check_runs, incomplete=False)
 
 
+def _check(
+    name: str, conclusion: str | None = "success", *, app: str | None = _TRUSTED_APP
+) -> dict[str, Any]:
+    row: dict[str, Any] = {"name": name, "conclusion": conclusion}
+    if app is not None:
+        row["app"] = {"slug": app}
+    return row
+
+
 def _passing() -> list[dict[str, Any]]:
-    return [{"name": _VERIFIER, "conclusion": "success"}]
+    return [_check(_VERIFIER)]
 
 
 async def _decide(scm: FakeScm, **kwargs: Any) -> Any:
@@ -128,12 +138,19 @@ async def test_the_inputs_are_the_diff_the_head_text_and_the_passed_checks() -> 
     scm = FakeScm(
         files=_files_from_diff(_PIN_DIFF),
         check_runs=[
-            {"name": _VERIFIER, "conclusion": "success"},
-            {"name": "lint", "conclusion": "failure"},
+            _check(_VERIFIER),
+            _check("lint", "failure"),
         ],
     )
 
-    inputs = await load_triage_inputs(scm, "acme", "demo", 7, _HEAD)  # type: ignore[arg-type]
+    inputs = await load_triage_inputs(
+        scm,
+        "acme",
+        "demo",
+        7,
+        _HEAD,
+        trusted_apps=[_TRUSTED_APP],  # type: ignore[arg-type]
+    )
 
     assert isinstance(inputs, TriageInputs)
     assert "08274dda" in inputs.diff_text
@@ -144,10 +161,59 @@ async def test_a_failed_or_pending_verifier_check_does_not_count_as_passed() -> 
     for conclusion in ("failure", "neutral", None):
         scm = FakeScm(
             files=_files_from_diff(_PIN_DIFF),
-            check_runs=[{"name": _VERIFIER, "conclusion": conclusion}],
+            check_runs=[_check(_VERIFIER, conclusion)],
         )
 
         assert (await _decide(scm)).tier == "full"
+
+
+async def test_a_same_named_success_from_another_app_is_not_verification() -> None:
+    """A check-run name is set by its creator; only the configured App can vouch."""
+    scm = FakeScm(
+        files=_files_from_diff(_PIN_DIFF),
+        check_runs=[_check(_VERIFIER, app="some-other-app")],
+    )
+
+    decision = await _decide(scm)
+
+    assert decision.tier == "full"
+    assert _VERIFIER in decision.reason
+
+
+async def test_a_same_named_success_with_no_app_identity_is_not_verification() -> None:
+    scm = FakeScm(
+        files=_files_from_diff(_PIN_DIFF),
+        check_runs=[_check(_VERIFIER, app=None)],
+    )
+
+    assert (await _decide(scm)).tier == "full"
+
+
+async def test_the_actions_app_cannot_vouch_even_when_configured() -> None:
+    """A `pull_request` workflow's job names come from the head ref."""
+    scm = FakeScm(
+        files=_files_from_diff(_PIN_DIFF),
+        check_runs=[_check(_VERIFIER, app="github-actions")],
+    )
+
+    decision = await _decide(
+        scm,
+        config=_config(
+            pinBump={"requireChecks": [_VERIFIER], "trustedCheckApps": ["github-actions"]}
+        ),
+    )
+
+    assert decision.tier == "full"
+    assert "trustedCheckApps" in decision.reason
+
+
+async def test_a_pin_bump_with_no_trusted_app_never_skips() -> None:
+    scm = FakeScm(files=_files_from_diff(_PIN_DIFF), check_runs=_passing())
+
+    decision = await _decide(scm, config=_config(pinBump={"requireChecks": [_VERIFIER]}))
+
+    assert decision.tier == "full"
+    assert "trustedCheckApps" in decision.reason
 
 
 async def test_a_disabled_fast_path_makes_no_request_at_all() -> None:

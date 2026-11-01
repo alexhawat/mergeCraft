@@ -331,10 +331,11 @@ A run record is only worth reading if it describes the run, so a verdict is
 not allowed to look more complete than the review was. The orchestrator
 builds a coverage universe from the authoritative PR diff (every changed
 hunk, deleted-only hunks included) and counts a hunk as covered only through
-mediated evidence: it was in the diff the reviewer received, a mediated read
-returned its file, or the single follow-up turn handed it back. Unknown is not
-a state — absence of evidence is *uncovered*, the opposite of the trajectory
-auditor's silence rule, on purpose, because this check gates the verdict.
+mediated evidence: it was in the diff the reviewer received, or an observed read
+covered part of it. Unknown is not a state — absence of read evidence is
+*uncovered*, the opposite of the trajectory auditor's silence rule, on purpose,
+because this check gates the verdict. The pre-submit nudge hands every unread
+range back once, before the verdict is accepted; there is no second turn.
 
 When any hunk is still uncovered at finalize (policy exclusions such as
 generated files are listed but do not count), the run outcome is
@@ -355,8 +356,9 @@ verified pin substitution, prose, whitespace and regenerated lockfiles. The
 tier is `skip` or `full`; there is no partial credit and no "probably". The
 refusals are the design: a skipped run is stated as such on the check and the
 record, never grants approval, only counts a pin bump when its verifying check
-passed on the head SHA, reads its config from the base ref only, and treats any
-failure to read the pull request as a reason to review.
+passed on the head SHA from a `pinBump.trustedCheckApps` GitHub App (a check
+name alone is set by its creator), reads its config from the base ref only, and
+treats any failure to read the pull request as a reason to review.
 An agent failure that is the reviewer's infrastructure rather than the review is
 `infra_error`, not `failed`: a driver marks it with the `infra_reason` result
 metadata key (`mergecraft.agents.shared.INFRA_REASON_KEY`) and

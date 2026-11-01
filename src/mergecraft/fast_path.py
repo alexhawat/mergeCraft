@@ -7,7 +7,9 @@ passed on the head SHA — then asks the pure function.
 
 Everything here fails toward spending *more*: a failed read, a truncated listing, a file
 GitHub sent no patch for, or a config that is not the operator's base-side config all
-decide ``full``. The gate may only skip when it is certain.
+decide ``full``. The gate may only skip when it is certain — a pin-bump skip also needs
+the verifying check to belong to a GitHub App the operator named in
+``pinBump.trustedCheckApps``, because a check-run name alone is whoever set it.
 
 Exports:
     load_triage_inputs: Read one pull request's diff, head text and passed checks.
@@ -21,10 +23,15 @@ from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
 
-from mergecraft.classify.triage import TriageDecision, TriageInputs, triage_diff
+from mergecraft.classify.triage import (
+    TriageDecision,
+    TriageInputs,
+    triage_diff,
+    trusted_check_apps,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Collection
 
     from mergecraft.config.settings import FastPathSettings
     from mergecraft.scm.protocol import ScmProvider
@@ -104,7 +111,24 @@ async def _read_head_files(
     return texts
 
 
-async def _passed_checks(scm: ScmProvider, owner: str, repo: str, head_sha: str) -> tuple[str, ...]:
+async def _passed_checks(
+    scm: ScmProvider,
+    owner: str,
+    repo: str,
+    head_sha: str,
+    *,
+    trusted_apps: Collection[str],
+) -> tuple[str, ...]:
+    """Names of the successful head-SHA checks whose run belongs to a trusted App.
+
+    A check-run name and conclusion are chosen by the run's creator, so a matching name
+    proves nothing on its own. Only a run published by one of the operator's trusted
+    GitHub Apps counts; an absent or untrusted ``app.slug`` is skipped, and with no
+    trusted App this reads nothing at all.
+    """
+    trusted = trusted_check_apps(trusted_apps)
+    if not trusted:
+        return ()
     listing = await scm.list_check_runs_for_ref(owner, repo, head_sha)
     rows = getattr(listing, "items", None)
     if not isinstance(rows, list):
@@ -114,15 +138,35 @@ async def _passed_checks(scm: ScmProvider, owner: str, repo: str, head_sha: str)
         dict.fromkeys(
             str(row.get("name"))
             for row in rows
-            if isinstance(row, dict) and row.get("name") and row.get("conclusion") == "success"
+            if isinstance(row, dict)
+            and row.get("name")
+            and row.get("conclusion") == "success"
+            and _check_app_slug(row) in trusted
         )
     )
 
 
+def _check_app_slug(row: dict[str, Any]) -> str:
+    app = row.get("app")
+    if not isinstance(app, dict):
+        return ""
+    slug = app.get("slug")
+    return slug.strip().lower() if isinstance(slug, str) else ""
+
+
 async def load_triage_inputs(
-    scm: ScmProvider, owner: str, repo: str, pull_number: int, head_sha: str
+    scm: ScmProvider,
+    owner: str,
+    repo: str,
+    pull_number: int,
+    head_sha: str,
+    *,
+    trusted_apps: Collection[str] = (),
 ) -> TriageInputs:
-    """Read the diff, the head-side prose text and the passed checks for one pull request.
+    """Read the diff, the head-side prose text and the trusted Apps' passed checks.
+
+    ``trusted_apps`` is the operator's ``pinBump.trustedCheckApps``: a check run
+    only counts when its ``app.slug`` is in it.
 
     Raises:
         TriageUnavailableError: The diff could not be read completely.
@@ -130,7 +174,7 @@ async def load_triage_inputs(
     """
     diff_text, paths = await _read_diff(scm, owner, repo, pull_number)
     head_files = await _read_head_files(scm, owner, repo, head_sha, paths)
-    passed = await _passed_checks(scm, owner, repo, head_sha)
+    passed = await _passed_checks(scm, owner, repo, head_sha, trusted_apps=trusted_apps)
     return TriageInputs(diff_text=diff_text, head_files=head_files, passed_checks=passed)
 
 
@@ -166,7 +210,14 @@ async def decide_fast_path(
         )
     try:
         read = loader or load_triage_inputs
-        inputs = await read(scm, owner, repo, pull_number, head_sha)
+        inputs = await read(
+            scm,
+            owner,
+            repo,
+            pull_number,
+            head_sha,
+            trusted_apps=config.pin_bump.trusted_check_apps,
+        )
     except Exception as err:  # any read failure is a reason to review, never to skip
         logger.warning(
             "fast path: PR #{} could not be read, so it gets a full review: {}", pull_number, err

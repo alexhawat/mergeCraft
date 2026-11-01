@@ -7,17 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A deterministic triage tier, off by default (`review.fastPath.enabled`), decides
+  before the agent exists whether a diff needs an LLM review. Recognizers for a
+  verified pin substitution, prose, whitespace-only changes and regenerated
+  lockfiles skip the review when you opt them in with `skipLlm`; a mixed or
+  unproven diff gets a full review, and the prose recognizer never treats a
+  dependency manifest, lockfile or agent-instruction file as prose. A skipped run
+  posts the `mergecraft` check
+  stating `Tier: skip (pinBump) — no LLM review ran`, never grants
+  `mergecraft-approval`, and records the tier in the evidence packet and the shadow
+  log. It only honours the base-side config of a `pull_request_target` run, and a
+  pin bump needs its `pinBump.requireChecks` to have passed on the head SHA from a
+  GitHub App named in `pinBump.trustedCheckApps`, because a check-run name alone is
+  set by whoever created it (#890).
+- The evidence packet carries a `coverage` section (schema `1.17.0`): how many
+  changed hunks and lines reached the reviewer, each uncovered range with its cause
+  (`diff_truncated`, `no_inline_patch`, `excluded_generated`, `not_delivered`,
+  `not_observed`), and whether coverage was `complete`. The `mergecraft` and
+  `mergecraft-approval` checks and the run record state it, for example
+  `Coverage: 41/44 hunks, 3 uncovered → inconclusive` (#940). The packet also
+  carries a `triage` section (schema `1.17.0`).
+- `get_review_comments` and the findings sweep report `incomplete` when a pull
+  request has more review threads or comments than the page cap, instead of
+  silently dropping the rest (#902).
+
 ### Changed
 
 - The install line is `uv tool install mergecraft-action==0.1.0a4`. PyPI carries
   the pre-release distribution `mergecraft-action`; the git install stays
   documented for an unreleased commit.
 
-- The merge evidence packet schema is `1.16.0`; the trajectory record schema is
+- The merge evidence packet schema is `1.17.0`; the trajectory record schema is
   `1.2.0` (optional `diff_read_path`, `diff_read`, `duration_ms` on a tool-call
   row, all omitted while unset; `"refused"` joins the `failure_class`
   vocabulary).
-
+- The IncrementalReview prompt no longer tells the agent to reply to and resolve
+  threads, which a review session refuses; it says the run retires addressed
+  threads itself, and defines a mergeCraft-originated thread by the
+  expected-publisher rule rather than `author=mergecraft[bot]` (#904).
+- The learnings-migration read of the old progress comment follows the
+  run-bound-id-then-expected-publisher rule. With neither, the read is skipped and
+  the run record says `Earlier progress comment not read` (#914).
+- The carry-over sweep (`mergecraft findings carryover`) now treats a thread as
+  mergeCraft's only when its root comment carries a mergeCraft marker **and** its
+  author is an expected publisher (the configured reviewer App, or the app behind
+  the `mergecraft-approval` check); the shared `github-actions[bot]` login never
+  counts. A repository that publishes as `github-actions[bot]` and configures no
+  reviewer App sweeps nothing and the sweep says why. **Fix:** configure the
+  reviewer App (`MERGECRAFT_REVIEWER_BOT_LOGIN` / `reviewerBotLogin`) (#905).
 
 ### Fixed
 
@@ -114,8 +153,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has not stamped it yet (its stamp lands after the record renders), and
   sub-second phases render with one decimal (`0.1s`) — or `<0.1s` — instead of
   rounding to `0s`.
+- A re-review after a change request now resumes from its checkpoint: the run-bound
+  identity accepts completed `success` and `failure` runs that carry an evidence
+  artefact, so the next review no longer starts from round 0 and reads the whole
+  pull request again. Cancelled, skipped, unfinished and artefact-less runs are
+  still ignored (#926).
+- A post-run finalize failure is logged at `warning` with the exception type and
+  the run record names it (`finalize_failed: <Type>`) instead of reading as a
+  missing verdict; the run still fails closed (#903).
+- A review thread whose comments were not all read is never auto-resolved (#902).
 
+### Breaking
 
+- A review run whose agent submitted a terminal verdict now ends `inconclusive` (a
+  `neutral` `mergecraft` check) when any changed hunk never reached the reviewer —
+  a files-API diff over the page cap, a file GitHub sent no patch for, or a hunk
+  absent from the delivered diff — where it used to read `success`. A Critical or
+  Major finding still makes `mergecraft-approval` conclude `failure`, and one
+  pre-submit nudge names the unread ranges so the reviewer can read them and submit
+  again. **Fix:** set `review.coverage.onIncomplete: warn` to keep the verdict and
+  only report the gap (#940).
 
 ## [0.1.0a4] — 2026-10-29
 
@@ -198,83 +255,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Code-measured LLM review generation time in every posted review record and CLI
-  JSON/text output (`⏱ LLM review time: …`), including per-reviewer breakdown
-  when multiple reviewers run (#983).
-- `mergecraft workflow provider add` wires harness providers without a custom base
-  URL using `LLM_PROVIDER_<N>: <label>` plus provider-specific credential env keys
-  (for example `OPENCODE_GO_API_KEY` for `opencode-go`).
-- `mergecraft agent assign-model` on the committed roster registers missing models,
-  auto-wires harness providers into `mergecraft.yml`, and updates `with.model` for
-  p0 assignments.
-- OpenCode Zen / Go subscription billing via `mergecraft provider auth opencode`
-  (or `mergecraft auth opencode`): stores the same `auth.json` shape OpenCode
-  CLI uses (`OPENCODE_AUTH_JSON` / indexed `LLM_PROVIDER_<N>_OPENCODE_AUTH_JSON`).
-  The opencode harness writes that file under an isolated `XDG_DATA_HOME` for
-  `opencode serve` / `opencode run` and reinjects `OPENCODE_API_KEY` when needed.
-  OpenCode Zen authenticates with billing-backed API keys, not OAuth device
-  tokens like Codex — see [OpenCode Zen](https://opencode.ai/docs/zen/).
-
-- A deterministic triage tier, off by default (`review.fastPath.enabled`), decides
-  before the agent exists whether a diff needs an LLM review. Recognizers for a
-  verified pin substitution, prose, whitespace-only changes and regenerated
-  lockfiles skip the review when you opt them in with `skipLlm`; a mixed or
-  unproven diff gets a full review. A skipped run posts the `mergecraft` check
-  stating `Tier: skip (pinBump) — no LLM review ran`, never grants
-  `mergecraft-approval`, and records the tier in the evidence packet and the shadow
-  log. It only honours the base-side config of a `pull_request_target` run, and a
-  pin bump needs its `pinBump.requireChecks` passed on the head SHA (#890).
-
-- The evidence packet carries a `coverage` section (schema `1.17.0`): how many
-  changed hunks and lines reached the reviewer, each uncovered range with its cause
-  (`diff_truncated`, `no_inline_patch`, `excluded_generated`, `not_delivered`,
-  `not_observed`, `budget_exhausted`), and whether coverage was `complete`. The
-  `mergecraft` and `mergecraft-approval` checks and the run record state it, for
-  example `Coverage: 41/44 hunks, 3 uncovered → inconclusive` (#940). Read evidence
-  is the same line-range layer the auditor and the pre-submit nudge use, so a hunk
-  counts as covered when it was delivered or when an observed read covered part of
-  it — and a run whose reads were never observed counts as uncovered, not complete.
-  The packet also carries a `triage` section (schema `1.17.0`).
-
-- `get_review_comments` and the findings sweep report `incomplete` when a pull
-  request has more review threads or comments than the page cap, instead of
-  silently dropping the rest (#902).
-
-### Removed
-
-- The MCP server no longer mounts a webhook endpoint; a signed delivery was
-  verified but processed nothing, and its replay window could never fire.
-
-- Provider circuit-breaker, health, budget and routing-eval helpers that no
-  review path called are removed.
-
-- Four context-retrieval modules no review path imported are removed.
-- Code-measured LLM review generation time in every posted review record and CLI
-  JSON/text output (`⏱ LLM review time: …`), including per-reviewer breakdown
-  when multiple reviewers run (#983).
-- `mergecraft workflow provider add` wires harness providers without a custom base
-  URL using `LLM_PROVIDER_<N>: <label>` plus provider-specific credential env keys
-  (for example `OPENCODE_GO_API_KEY` for `opencode-go`).
-- `mergecraft agent assign-model` on the committed roster registers missing models,
-  auto-wires harness providers into `mergecraft.yml`, and updates `with.model` for
-  p0 assignments.
-- OpenCode Zen / Go subscription billing via `mergecraft provider auth opencode`
-  (or `mergecraft auth opencode`): stores the same `auth.json` shape OpenCode
-  CLI uses (`OPENCODE_AUTH_JSON` / indexed `LLM_PROVIDER_<N>_OPENCODE_AUTH_JSON`).
-  The opencode harness writes that file under an isolated `XDG_DATA_HOME` for
-  `opencode serve` / `opencode run` and reinjects `OPENCODE_API_KEY` when needed.
-  OpenCode Zen authenticates with billing-backed API keys, not OAuth device
-  tokens like Codex — see [OpenCode Zen](https://opencode.ai/docs/zen/).
-
-### Removed
-
-- The MCP server no longer mounts a webhook endpoint; a signed delivery was
-  verified but processed nothing, and its replay window could never fire.
-
-- Provider circuit-breaker, health, budget and routing-eval helpers that no
-  review path called are removed.
-
-- Four context-retrieval modules no review path imported are removed.
 - OTLP traces read properly in Datadog LLM Observability. Every exported span
   carries `gen_ai.conversation.id` (the review's trace id), so each review is one
   session and pipeline spans (analyzers, phases, publish) are no longer dropped;
@@ -401,29 +381,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still maps `changed-unread-file` to `request-changes` by rule id, so this only
   stops a Major row per unread file from burying the change-scoped reasons (#885).
 
-- A re-review after a change request now resumes from its checkpoint: the run-bound
-  identity accepts completed `success` and `failure` runs that carry an evidence
-  artefact, so the next review no longer starts from round 0 and reads the whole
-  pull request again. Cancelled, skipped, unfinished and artefact-less runs are
-  still ignored (#926).
-
-- A post-run finalize failure is logged at `warning` with the exception type and
-  the run record names it (`finalize_failed: <Type>`) instead of reading as a
-  missing verdict; the run still fails closed (#903).
-
-- The IncrementalReview prompt no longer tells the agent to reply to and resolve
-  threads, which a review session refuses; it says the run retires addressed
-  threads itself, and defines a mergeCraft-originated thread by the
-  expected-publisher rule rather than `author=mergecraft[bot]` (#904).
-
-- The learnings-migration read of the old progress comment follows the
-  run-bound-id-then-expected-publisher rule. With neither, the read is skipped and
-  the run record says `Earlier progress comment not read` (#914).
-
-- A review thread whose comments were not all read is never auto-resolved (#902).
-
-### Breaking
-### Breaking
 - The Release workflow now dispatches CI/CD on the release branch it prepares, and
   CI/CD's `build-dist` job accepts a dispatch on a `release/*` branch or a `v*` tag, so
   the workflow path produces the `artifact-python-dist` the publish step needs. Its
@@ -656,26 +613,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its value. **Fix:** correct the spelling; `MERGECRAFT_TRACING_REGION` still
   accepts `us` and `eu`.
 
-- A review run whose agent submitted a terminal verdict now ends `inconclusive` (a
-  `neutral` `mergecraft` check) when any changed hunk never reached the reviewer —
-  a files-API diff over the page cap, a file GitHub sent no patch for, a hunk
-  absent from the delivered diff, or a run whose reads were never observed — where
-  it used to read `success`. A Critical or Major finding still makes
-  `mergecraft-approval` conclude `failure`. The existing pre-submit nudge lists the
-  unread ranges once before the verdict is accepted; there is no second follow-up
-  turn. **Fix:** set `review.coverage.onIncomplete: warn` to keep the verdict and
-  only report the gap (#940).
-
-- The carry-over sweep (`mergecraft findings carryover`) now treats a thread as
-  mergeCraft's only when its root comment carries a mergeCraft marker **and** its
-  author is an expected publisher (the configured reviewer App, or the app behind
-  the `mergecraft-approval` check); the shared `github-actions[bot]` login never
-  counts. A repository that publishes as `github-actions[bot]` and configures no
-  reviewer App sweeps nothing and the sweep says why. **Fix:** configure the
-  reviewer App (`MERGECRAFT_REVIEWER_BOT_LOGIN` / `reviewerBotLogin`) (#905).
-
-### Fixed
-### Fixed
 - The MCP server no longer mounts a webhook endpoint. **Fix:** none — a signed
   delivery was verified but processed nothing, and its replay window could never
   fire, so no review path consumed the route.

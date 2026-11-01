@@ -231,19 +231,6 @@ def test_a_delivered_generated_hunk_is_simply_covered() -> None:
     assert section.uncovered == []
 
 
-def test_budget_exhaustion_is_named_as_the_cause_of_what_stayed_uncovered() -> None:
-    from mergecraft.evidence.coverage import account_coverage
-
-    section = account_coverage(
-        authoritative_diff=_TWO_FILES,
-        delivered_diff=_only(_TWO_FILES, "src/a.py"),
-        budget_exhausted=True,
-    )
-
-    assert [r.cause for r in section.uncovered] == ["budget_exhausted"]
-    assert section.complete is False
-
-
 def test_no_diff_at_all_is_complete_with_nothing_to_cover() -> None:
     from mergecraft.evidence.coverage import account_coverage
 

@@ -95,20 +95,14 @@ class CoverageRecord:
     ``authoritative_diff`` is the PR diff the checkout built; ``None`` means the run
     had no checkout of its own, so the diff the reviewer was handed is the universe.
     ``unreviewable_paths`` and ``diff_truncated`` record what the files API could not
-    deliver. The follow-up fields make the one bounded follow-up turn fire at most once
-    and keep the hunks it handed back covered.
+    deliver. Coverage is accounted at packet time from the delivered diff and the
+    observed reads; nothing here tracks a follow-up, because the pre-submit nudge
+    hands the unread ranges back before the verdict is accepted.
     """
 
     authoritative_diff: str | None = None
     unreviewable_paths: list[str] = field(default_factory=list)
     diff_truncated: bool = False
-    followup_sent: bool = False
-    # While open, the reviewer may replace its recorded verdict once (the follow-up may change it).
-    followup_open: bool = False
-    followup_hunks: list[tuple[str, int, int]] = field(default_factory=list)
-    # Set when a follow-up was due but the run had no budget left for it.
-    budget_blocked: bool = False
-    budget_tracker: Any = None
 
 
 @dataclass(slots=True)

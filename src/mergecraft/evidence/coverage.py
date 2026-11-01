@@ -7,12 +7,12 @@ nothing recorded that. This module accounts for it, as structural evidence.
   :func:`mergecraft.analyzers.scope.parse_diff_scope` (deleted-only hunks included,
   binary headers excluded).
 * **Covered** means mediated evidence only: the hunk was in the diff the reviewer was
-  handed, a mediated tool call read its file, or a follow-up turn handed it back.
-  Absence of evidence is *uncovered*, never *unknown* — the opposite of the trajectory
-  auditor's silence rule, on purpose, because this check gates the verdict.
+  handed, or an observed mediated read covered part of it. Absence of evidence is
+  *uncovered*, never *unknown* — the opposite of the trajectory auditor's silence
+  rule, on purpose, because this check gates the verdict.
 * **Unknown ranges** are never coverable: a file GitHub sent line counts for but no
   ``patch``, and the files beyond the files-API page cap, are listed by path and stay
-  uncovered, because no lines exist to hand back.
+  uncovered, because no lines exist to read.
 * **Policy exclusions** (generated, minified and vendored files) are listed as
   ``excluded_generated`` and do not count against completeness.
 
@@ -53,9 +53,6 @@ OnIncomplete = Literal["inconclusive", "warn"]
 
 # The rows a summary line names before it counts the rest.
 _SUMMARY_RANGE_CAP: Final[int] = 10
-# A follow-up prompt carries hunk text up to this many characters; hunks that do not
-# fit are not handed back, so they stay uncovered rather than pretending to be sent.
-_FOLLOWUP_CHAR_BUDGET: Final[int] = 120_000
 _TRUNCATED_LISTING_PATH: Final[str] = "(files beyond the files-API page cap)"
 _REVIEW_MODES: Final[frozenset[str]] = frozenset({"Review", "IncrementalReview"})
 
@@ -128,7 +125,6 @@ def account_coverage(
     diff_truncated: bool = False,
     reads_observed: bool = True,
     covered_lines: Mapping[str, Sequence[tuple[int, int]]] | None = None,
-    budget_exhausted: bool = False,
 ) -> CoverageSection:
     """Account for which changed hunks reached the reviewer.
 
@@ -142,8 +138,6 @@ def account_coverage(
             means the run's read tracking produced nothing to vouch for the
             delivered hunks; absence of evidence is uncovered, not unknown,
             because this check gates the verdict.
-        budget_exhausted: The run had no budget left for the pre-submit nudge;
-            what stayed uncovered says so.
     """
     universe = coverage_universe(authoritative_diff)
     delivered = set(universe if delivered_diff is None else coverage_universe(delivered_diff))
@@ -171,8 +165,6 @@ def account_coverage(
         cause: UncoveredCause
         if _excluded_by_policy(hunk, change):
             cause = "excluded_generated"
-        elif budget_exhausted:
-            cause = "budget_exhausted"
         elif hunk in delivered:
             # Delivered, but the run's reads were never observed.
             cause = "not_observed"
@@ -266,7 +258,6 @@ def coverage_section_for_state(state: ToolState) -> CoverageSection | None:
         diff_truncated=record.diff_truncated,
         reads_observed=observed,
         covered_lines=covered,
-        budget_exhausted=record.budget_blocked,
     )
 
 
