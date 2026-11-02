@@ -80,11 +80,22 @@ object it was read from.
 | --- | --- | --- |
 | A changed file inside a `blocking` rule's scope ⇒ one `Major`-or-worse row, `tool="policy"`, `introduced_by_pr="true"`, and `decide_approval` fails | unit | `tests/policy/test_review_evaluation.py::test_a_changed_file_inside_a_blocking_rules_scope_is_one_policy_row` |
 | A changed file outside the scope ⇒ no row | unit | `…::test_a_changed_file_outside_the_scope_produces_no_row` |
-| Three matched files ⇒ one row; the message is sorted, counts the files and is capped; evidence lists every matched path; re-evaluation in another order is identical | unit | `…::test_three_matched_files_produce_one_row_with_a_deterministic_message` |
+| Three matched files of one rule ⇒ one row; the message is sorted, counts the files and is capped; evidence lists every matched path; re-evaluation in another order is identical | unit | `…::test_three_matched_files_produce_one_row_with_a_deterministic_message` |
 | `advisory` / `warning` / `required` / `blocking` produce the engine's severities, asserted against `evaluate_enforcement` rather than literals | unit | `…::test_each_enforcement_mode_uses_the_engines_gate_severity[*]` |
 | An `advisory` rule over a declared blocker is recorded as `Trivial` and does not close the gate | unit | `…::test_an_advisory_rule_is_recorded_and_does_not_block` |
 | A `required` rule with keys blocks at `Major` and names every missing key | unit | `…::test_a_required_rule_names_every_missing_evidence_key` |
 | The submitted summary carries one *Policy rules* block naming rule, mode, gate severity and the missing key | unit | `…::test_a_summary_block_is_empty_without_rows_and_names_each_row` |
+
+**Row cardinality:** the review records **one row per effective rule** — one row
+for each rule that resolves for at least one changed path — so one rule matched
+on three files is one row, and rows **may share a `rule_id`** when the same id is
+declared at scopes that never match the same file. Sharing an id is not a reason
+to merge the rows: each effective rule keeps its own enforcement, and each row's
+matched-path evidence names only the paths that resolved to *that* rule, so a
+stricter rule cannot be shadowed by a first-seen weaker one or mislabelled with
+a union of paths. (Within one path, inheritance still collapses by id: the
+deepest matching scope wins, which is why the same-id repo/symbol case is a
+single row.)
 
 ### Exceptions are bounded waivers, filtered by rule
 
@@ -126,6 +137,7 @@ object it was read from.
 | With the base branch unknown a `branch`-scoped rule applies and says so; a resolved, different branch still excludes it | unit | `…::test_a_branch_scoped_rule_applies_when_the_base_branch_is_unknown`, `…::test_a_branch_scoped_rule_does_not_apply_on_a_different_branch` |
 | `resolve_effective_rules` gains `unresolved` without changing its default | unit | `…::test_resolve_effective_rules_treats_unresolved_dimensions_as_matching` |
 | Two rules with the same id at repo and symbol layers ⇒ one row, from the deeper rule | unit | `…::test_the_deeper_layer_wins_for_the_same_rule_id` |
+| Two rules with the same id over disjoint path scopes ⇒ two rows (one per effective rule): the blocking one reaches the gate, and each row's evidence names only its own matched paths | unit | `…::test_same_id_rules_over_disjoint_path_scopes_each_judge_their_own_paths` |
 
 ### The terminal submission
 

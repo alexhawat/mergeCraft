@@ -748,6 +748,42 @@ def test_the_deeper_layer_wins_for_the_same_rule_id(tmp_path: Path) -> None:
     assert rows[0].severity == "Major", "the symbol-layer (deeper) rule must win"
 
 
+def test_same_id_rules_over_disjoint_path_scopes_each_judge_their_own_paths(
+    tmp_path: Path,
+) -> None:
+    """One row per effective rule: a same-id rule on another path cannot shadow it.
+
+    The inheritance model makes the deeper *matching* scope win for an id, but
+    two path scopes that never match the same file are two effective rules. A
+    change set spanning both must reach the gate with both — first-seen
+    resolution keeps whichever rule the sorted path order hit first, which can
+    be the advisory one, and mislabels the matched paths as a union.
+    """
+    from mergecraft.agents.gates import blocking_findings
+
+    write_policy(
+        tmp_path,
+        rules=[
+            rule("shared", severity="Major", enforcement="advisory", scope={"path": "aaa/**"}),
+            rule("shared", severity="Major", enforcement="blocking", scope={"path": "zzz/**"}),
+        ],
+    )
+
+    rows = _evaluate(_load(tmp_path), ["aaa/x.py", "zzz/y.py"])
+
+    shared = [row for row in rows if row.rule_id == "shared"]
+    assert len(shared) == 2, rows
+    blocking = [row for row in shared if "zzz/y.py" in row_text(row)]
+    advisory = [row for row in shared if "aaa/x.py" in row_text(row)]
+    assert len(blocking) == 1, [row_text(row) for row in shared]
+    assert len(advisory) == 1, [row_text(row) for row in shared]
+    assert blocking[0] is not advisory[0], "the two scopes must not collapse into one row"
+    assert "aaa/x.py" not in row_text(blocking[0]), "the blocking row must not claim aaa/x.py"
+    assert "zzz/y.py" not in row_text(advisory[0]), "the advisory row must not claim zzz/y.py"
+    assert blocking_findings(rows), "the blocking rule for zzz/** must reach the gate"
+    assert blocking_findings([advisory[0]]) == [], "the advisory row is not the blocker"
+
+
 # ---------------------------------------------------------------------------
 # the snapshot itself
 # ---------------------------------------------------------------------------
