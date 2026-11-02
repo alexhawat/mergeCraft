@@ -1104,11 +1104,16 @@ def _evaluate_run_policy(ctx: Any) -> list[Finding]:
             return []
         detail = str(exc) or type(exc).__name__
         return [_unevaluated_row(diff_path, detail=detail)]
-    if nothing_loaded and not _policy_paths_in(changed):
-        # No rules file, no change: a repository without a policy tree reviews
-        # exactly as it did before this feature existed. An untouched empty tree
-        # is that same repository, so it produces no rows — and this is the only
-        # place a change set that leaves the tree alone is allowed to short out.
+    if (
+        nothing_loaded
+        and not _policy_paths_in(changed)
+        and not _policy_source_says_fail_closed(ctx, snapshot, repo_root)
+    ):
+        # No policy tree, no change: a repository without a policy tree reviews
+        # exactly as it did before this feature existed, and an untouched empty
+        # head tree is that same repository. A base commit that carries policy is
+        # *not* an empty tree, though — its rules still judge this change — so
+        # that case falls through to source resolution instead of shorting out.
         return []
 
     resolved = load_review_policy(
