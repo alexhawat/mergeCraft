@@ -680,6 +680,42 @@ def _scope_context(
     )
 
 
+def _rule_scope_key(rule: PolicyRule) -> str:
+    """Return a stable, human-readable key for one rule's declared scope."""
+    if rule.scope is None:
+        return ""
+    dumped = rule.scope.model_dump()
+    return ",".join(
+        f"{name}={value}" for name, value in sorted(dumped.items()) if value is not None
+    )
+
+
+def _rule_identity(rule: PolicyRule) -> tuple[str, str, str, str, int]:
+    """Return the structural identity of an effective rule.
+
+    Two matches merge only when they are the same rule: the id plus everything
+    that changes what the rule decides (scope, enforcement, severity, version).
+    Sharing an id is not enough — the inheritance model lets one id be declared
+    at scopes that never match the same file, and those are two effective rules.
+    """
+    return (rule.id, _rule_scope_key(rule), rule.enforcement, rule.severity, rule.version)
+
+
+def _rule_order_key(
+    entry: tuple[PolicyRule, str, Sequence[str]],
+) -> tuple[str, str, str, str, str, int]:
+    """Order rows deterministically: rule id, then source layer, then scope."""
+    rule, source_layer, _paths = entry
+    return (
+        rule.id,
+        source_layer,
+        _rule_scope_key(rule),
+        rule.enforcement,
+        rule.severity,
+        rule.version,
+    )
+
+
 def _matching_rules(
     snapshot: PolicySnapshot,
     *,
@@ -688,9 +724,24 @@ def _matching_rules(
     repo: str,
     base_ref: str | None,
     unresolved: frozenset[str],
-) -> dict[str, tuple[PolicyRule, tuple[str, ...]]]:
-    """Return each rule that matched, with every changed path it matched."""
-    matched: dict[str, tuple[PolicyRule, list[str]]] = {}
+) -> list[tuple[PolicyRule, str, tuple[str, ...]]]:
+    """Return one entry per effective rule, with only the paths it resolved for.
+
+    A path is appended to the rule that actually resolved for it —
+    ``resolve_effective_rules`` still collapses same-id rules within one path
+    (the deepest matching scope wins), so a single file never feeds two rows.
+    An id declared at scopes that never match the same file yields one entry per
+    effective rule, so a strict rule on one path cannot be shadowed by a weaker
+    same-id rule seen first, and no row carries a union of paths that did not
+    resolve to it.
+
+    Returns:
+        list[tuple[PolicyRule, str, tuple[str, ...]]]: Each effective rule, its
+        source layer, and its matched paths in sorted order; the list is ordered
+        by rule id, then source layer, then scope, so re-evaluating the same
+        change set in another file order is identical.
+    """
+    matched: dict[tuple[str, str, str, str, int], tuple[PolicyRule, str, list[str]]] = {}
     for path in sorted(set(changed_paths)):
         context = _scope_context(org=org, repo=repo, base_ref=base_ref, path=path)
         for entry in resolve_effective_rules(
@@ -698,12 +749,14 @@ def _matching_rules(
             context=context,
             unresolved=unresolved,
         ):
-            existing = matched.get(entry.rule.id)
+            key = _rule_identity(entry.rule)
+            existing = matched.get(key)
             if existing is None:
-                matched[entry.rule.id] = (entry.rule, [path])
+                matched[key] = (entry.rule, entry.source_layer, [path])
             else:
-                existing[1].append(path)
-    return {rule_id: (rule, tuple(paths)) for rule_id, (rule, paths) in matched.items()}
+                existing[2].append(path)
+    ordered = sorted(matched.values(), key=_rule_order_key)
+    return [(rule, source_layer, tuple(paths)) for rule, source_layer, paths in ordered]
 
 
 def _covering_exceptions(
@@ -858,9 +911,14 @@ def evaluate_review_policy(
         now (datetime): Clock used for waiver expiry, so a run is reproducible.
 
     Returns:
-        list[Finding]: One row per triggered rule, plus the rows this review
-        synthesises for unreadable files, an unverifiable source and a policy
-        change made by the pull request itself.
+        list[Finding]: One row per triggered **effective** rule — one row for each
+        rule that resolved for at least one changed path, so rows may share a
+        ``rule_id`` when the same id is declared at scopes that never match the
+        same file, and each row's matched-path evidence names only the paths that
+        resolved to it. Within a single path, inheritance still collapses same-id
+        rules to the deepest matching scope. The synthesised rows for unreadable
+        files, an unverifiable source and a policy change made by the pull
+        request itself follow the rule rows.
 
     Examples:
         >>> import tempfile
@@ -895,8 +953,7 @@ def evaluate_review_policy(
         base_ref=base_ref,
         unresolved=unresolved,
     )
-    for rule_id in sorted(matched):
-        rule, paths = matched[rule_id]
+    for rule, _source_layer, paths in matched:
         rows.append(
             _rule_finding(
                 snapshot,
