@@ -612,9 +612,15 @@ def test_the_run_path_refuses_an_oversized_working_tree_document(
 
 
 def _renamed_rules_ctx(tmp_path: Path) -> tuple[ToolContext, str]:
-    """Sibling of the delete-the-rules PR: the file is renamed out of the tree."""
+    """Sibling of the delete-the-rules PR: the file is renamed out of the tree.
+
+    The rename alone changes no path the blocking rule is scoped on, so the pull
+    request also edits the guarded file — otherwise no implementation could ever
+    produce the base rule's row, whatever the change set says.
+    """
     repo, base = _base_repo_with_blocking_rule(tmp_path)
     git(repo, "mv", RULES_REL, f"{RULES_REL}.bak")
+    (repo / "src" / "billing" / "x.py").write_text("VALUE =\n", encoding="utf-8")
     head = commit_all(repo, "pr: rename the rules file out of the policy dir")
     diff_path = _materialize_diff(repo, base=base, head=head, tmp_path=tmp_path)
     return _run_ctx(repo, before_sha=base, diff_path=diff_path), base
@@ -635,8 +641,11 @@ def test_a_renamed_rules_file_is_judged_by_the_base_rules(tmp_path: Path) -> Non
     assert blocking.introduced_by_pr == "true"
     assert any(f"base:{base}" in str(item) for item in blocking.evidence), blocking.evidence
     assert _CHANGED_IN_PR in by_rule, rows
-    assert by_rule[_CHANGED_IN_PR].severity == "Trivial"
-    assert RULES_REL in row_text(by_rule[_CHANGED_IN_PR])
+    changed = by_rule[_CHANGED_IN_PR]
+    assert changed.severity == "Trivial"
+    changed_evidence = [str(item) for item in changed.evidence]
+    assert f"policy change: {RULES_REL}" in changed_evidence, changed_evidence
+    assert f"policy change: {RULES_REL}.bak" in changed_evidence, changed_evidence
 
 
 @pytest.mark.asyncio
