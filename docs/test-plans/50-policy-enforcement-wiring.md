@@ -97,6 +97,23 @@ a union of paths. (Within one path, inheritance still collapses by id: the
 deepest matching scope wins, which is why the same-id repo/symbol case is a
 single row.)
 
+### The change set is every path a diff touches
+
+A rule triggers on a *path*, not on a line, so the change set cannot be built
+from hunk headers alone: a pure rename, a binary-only entry and a mode-only entry
+all touch a file without contributing a hunk.
+
+| Behaviour | Layer | Test |
+| --- | --- | --- |
+| A pure rename (`similarity index 100%`, `rename from`/`rename to`, no hunk) returns **both** the old and the new path | unit | `tests/utils/test_diff_paths.py::test_a_pure_rename_returns_both_paths` |
+| A binary-only entry (`Binary files a/… and b/… differ`) returns its path | unit | `…::test_a_binary_only_entry_returns_its_path` |
+| A mode-only entry (`old mode`/`new mode`) returns its path | unit | `…::test_a_mode_only_entry_returns_its_path` |
+| Ordinary hunk diffs are unchanged: sorted, deduplicated, additions included | unit | `…::test_a_hunk_diff_keeps_its_result_sorted_and_deduplicated` |
+| A PR that renames `rules.yaml` out of the policy dir is judged by the base rules (blocking row + `policy.changed_in_pr`) | integration | `tests/policy/test_review_run_path.py::test_a_renamed_rules_file_is_judged_by_the_base_rules` |
+| The terminal submission over that renaming PR records `request_changes` | functional | `…::test_the_submission_over_a_renamed_rules_file_requests_changes` |
+| A pure rename of a file inside a rule's `scope.path` (old path) fires that rule, and the row names only the old path | integration | `…::test_a_rename_of_a_guarded_source_file_fires_its_rule` |
+| A binary-only change inside a guarded path fires that rule | integration | `…::test_a_binary_only_change_inside_a_guarded_path_fires_its_rule` |
+
 ### Exceptions are bounded waivers, filtered by rule
 
 | Behaviour | Layer | Test |

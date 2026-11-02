@@ -604,3 +604,133 @@ def test_the_run_path_refuses_an_oversized_working_tree_document(
     text = row_text(row)
     assert "rules.yaml" in text
     assert "could not be parsed" not in text.casefold(), text
+
+
+# ---------------------------------------------------------------------------
+# entries with no hunk still name a path the policy must judge
+# ---------------------------------------------------------------------------
+
+
+def _renamed_rules_ctx(tmp_path: Path) -> tuple[ToolContext, str]:
+    """Sibling of the delete-the-rules PR: the file is renamed out of the tree."""
+    repo, base = _base_repo_with_blocking_rule(tmp_path)
+    git(repo, "mv", RULES_REL, f"{RULES_REL}.bak")
+    head = commit_all(repo, "pr: rename the rules file out of the policy dir")
+    diff_path = _materialize_diff(repo, base=base, head=head, tmp_path=tmp_path)
+    return _run_ctx(repo, before_sha=base, diff_path=diff_path), base
+
+
+def test_a_renamed_rules_file_is_judged_by_the_base_rules(tmp_path: Path) -> None:
+    """Renaming the file away is the delete shape with no hunk to notice."""
+    from mergecraft.policy.review import ensure_policy_evaluated
+
+    ctx, base = _renamed_rules_ctx(tmp_path)
+
+    rows = ensure_policy_evaluated(ctx)
+
+    by_rule = {row.rule_id: row for row in rows}
+    assert _BLOCKING_RULE in by_rule, rows
+    blocking = by_rule[_BLOCKING_RULE]
+    assert blocking.severity == "Major"
+    assert blocking.introduced_by_pr == "true"
+    assert any(f"base:{base}" in str(item) for item in blocking.evidence), blocking.evidence
+    assert _CHANGED_IN_PR in by_rule, rows
+    assert by_rule[_CHANGED_IN_PR].severity == "Trivial"
+    assert RULES_REL in row_text(by_rule[_CHANGED_IN_PR])
+
+
+@pytest.mark.asyncio
+async def test_the_submission_over_a_renamed_rules_file_requests_changes(
+    tmp_path: Path,
+) -> None:
+    """The terminal seam records the base rule, not a green gate."""
+    from mergecraft.mcp.verdict import submit_review_verdict_tool
+
+    ctx, _base = _renamed_rules_ctx(tmp_path)
+
+    result = await submit_review_verdict_tool(ctx).execute(
+        {"verdict": "approve", "summary": "No blocking issues in the diff.", "findings": []}
+    )
+
+    assert result.is_error is False, result.content[0]["text"]
+    submission = ctx.tool_state.terminal_submission
+    assert submission is not None
+    assert submission.verdict == "request_changes", "a renamed rules file cannot unlock the gate"
+    assert "Policy rules" in submission.summary
+    assert _BLOCKING_RULE in submission.summary
+
+
+def test_a_rename_of_a_guarded_source_file_fires_its_rule(tmp_path: Path) -> None:
+    """The old path is part of the change set, so a rule scoped on it triggers."""
+    from mergecraft.agents.gates import blocking_findings
+    from mergecraft.policy.review import ensure_policy_evaluated
+
+    repo = init_git_repo(tmp_path / "repo")
+    (repo / "legacy").mkdir(parents=True)
+    (repo / "legacy" / "old.py").write_text("VALUE = 1\n", encoding="utf-8")
+    write_policy(
+        repo,
+        rules=[
+            rule(
+                _BLOCKING_RULE,
+                severity="Major",
+                enforcement="blocking",
+                scope={"path": "legacy/**"},
+            )
+        ],
+    )
+    base = commit_all(repo, "base: a rule over the old path")
+    (repo / "modern").mkdir()
+    git(repo, "mv", "legacy/old.py", "modern/new.py")
+    head = commit_all(repo, "pr: move the module without changing it")
+    ctx = _run_ctx(
+        repo,
+        before_sha=base,
+        diff_path=_materialize_diff(repo, base=base, head=head, tmp_path=tmp_path),
+    )
+
+    rows = ensure_policy_evaluated(ctx)
+
+    assert [row.rule_id for row in rows] == [_BLOCKING_RULE], rows
+    row = rows[0]
+    assert row.severity == "Major"
+    assert "legacy/old.py" in row_text(row)
+    assert "modern/new.py" not in row_text(row), "only the old path matched the rule"
+    assert blocking_findings([row])
+
+
+def test_a_binary_only_change_inside_a_guarded_path_fires_its_rule(tmp_path: Path) -> None:
+    """A binary entry has no hunk, but it is still a change to that path."""
+    from mergecraft.agents.gates import blocking_findings
+    from mergecraft.policy.review import ensure_policy_evaluated
+
+    repo = init_git_repo(tmp_path / "repo")
+    (repo / "assets").mkdir(parents=True)
+    (repo / "assets" / "logo.bin").write_bytes(b"\x00\x01\x02")
+    write_policy(
+        repo,
+        rules=[
+            rule(
+                _BLOCKING_RULE,
+                severity="Major",
+                enforcement="blocking",
+                scope={"path": "assets/**"},
+            )
+        ],
+    )
+    base = commit_all(repo, "base: a rule over the asset directory")
+    (repo / "assets" / "logo.bin").write_bytes(b"\x00\x03\x04")
+    head = commit_all(repo, "pr: replace the binary asset")
+    ctx = _run_ctx(
+        repo,
+        before_sha=base,
+        diff_path=_materialize_diff(repo, base=base, head=head, tmp_path=tmp_path),
+    )
+
+    rows = ensure_policy_evaluated(ctx)
+
+    assert [row.rule_id for row in rows] == [_BLOCKING_RULE], rows
+    row = rows[0]
+    assert row.severity == "Major"
+    assert "assets/logo.bin" in row_text(row)
+    assert blocking_findings([row])
