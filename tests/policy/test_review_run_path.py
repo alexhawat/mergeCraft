@@ -28,6 +28,13 @@ unreadable *diff* when the base commit does carry policy: a pull request that
 deletes the rules file and whose diff cannot be read has not been evaluated, and
 ``policy.unevaluated`` says so. With no policy tree anywhere it stays ``[]``.
 
+The read cap applies to the working-tree copy too, and it has to be enforced
+*before* the bytes are pulled into the process: a pull request that commits a
+multi-gigabyte ``rules.yaml`` must cost the review worker no more than a
+``stat``. The working-tree tests below booby-trap ``read_bytes`` for the file
+under test, so they fail on the read itself rather than only on the row that
+should have been produced.
+
 These tests are written before the run path resolves these shapes, so they are
 red until the implementation lands.
 """
@@ -42,6 +49,7 @@ import pytest
 
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from tests.support.policy_fixtures import (
+    EXCEPTIONS_REL,
     RULES_REL,
     commit_all,
     git,
@@ -456,3 +464,143 @@ def test_an_unreadable_diff_without_a_policy_tree_stays_empty(tmp_path: Path) ->
     ctx = _run_ctx(repo, before_sha=base, diff_path=tmp_path / "missing.diff")
 
     assert ensure_policy_evaluated(ctx) == []
+
+
+# ---------------------------------------------------------------------------
+# a working-tree document past the read cap
+# ---------------------------------------------------------------------------
+
+
+def _write_document_of_size(root: Path, rel: str, size: int, *, header: str) -> int:
+    """Write ``rel`` as a valid ``header`` plus comment padding, exactly ``size`` bytes."""
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = "# padding keeps the document valid while it exceeds the read cap\n"
+    filler = line * ((size - len(header)) // len(line))
+    body = header + filler
+    body += "#" * (size - len(body))
+    path.write_text(body, encoding="utf-8")
+    written = path.stat().st_size
+    assert written == size
+    return written
+
+
+def _trap_read_bytes(monkeypatch: pytest.MonkeyPatch, *targets: Path) -> None:
+    """Fail if the loader pulls one of ``targets`` into the process.
+
+    The cap exists to keep a giant document out of the worker, so the test has
+    to observe the read itself — a loader that reads first and complains
+    afterwards would still exhaust the worker.
+    """
+    original = Path.read_bytes
+    guarded = {target.resolve() for target in targets}
+
+    def read_bytes(self: Path) -> bytes:
+        if self.resolve() in guarded:
+            msg = f"policy loader read {self} before checking its size"
+            raise AssertionError(msg)
+        return original(self)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+
+
+def _assert_names_the_size_bound(message: str, *, rel: str, size: int, cap: int) -> None:
+    """The reason names the file and either its size or the cap it broke."""
+    assert Path(rel).name in message, message
+    lowered = message.casefold()
+    assert any(
+        token in lowered for token in ("large", "size", "byte", "limit", "cap", "exceed", "bound")
+    ), message
+    assert str(size) in message or str(cap) in message, message
+
+
+@pytest.mark.parametrize(
+    ("rel", "header"),
+    [
+        (RULES_REL, "rules: []\n"),
+        (EXCEPTIONS_REL, "exceptions: []\n"),
+    ],
+    ids=["rules", "exceptions"],
+)
+def test_an_oversized_working_tree_document_is_refused_before_it_is_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rel: str,
+    header: str,
+) -> None:
+    """A one-byte-over-cap document is a read error, and it is never read."""
+    import mergecraft.policy.review as review_module
+
+    root = tmp_path / "repo"
+    cap = review_module._MAX_POLICY_BYTES
+    size = _write_document_of_size(root, rel, cap + 1, header=header)
+    _trap_read_bytes(monkeypatch, root / rel)
+
+    snapshot = review_module.load_repo_policy(root)
+
+    assert snapshot.rules == ()
+    assert snapshot.exceptions == ()
+    assert len(snapshot.load_errors) == 1, snapshot.load_errors
+    error = snapshot.load_errors[0]
+    assert error.kind == "read"
+    assert error.path == rel
+    _assert_names_the_size_bound(error.message, rel=rel, size=size, cap=cap)
+
+
+def test_an_oversized_working_tree_rules_file_is_one_blocking_row(tmp_path: Path) -> None:
+    """The row says the document was not read, and names the cap that stopped it."""
+    import mergecraft.policy.review as review_module
+    from mergecraft.agents.gates import blocking_findings
+
+    root = tmp_path / "repo"
+    cap = review_module._MAX_POLICY_BYTES
+    size = _write_document_of_size(root, RULES_REL, cap + 1, header="rules: []\n")
+
+    rows = _evaluate_loaded(root, ["src/billing/x.py"])
+
+    assert [row.rule_id for row in rows] == [_UNREADABLE], rows
+    row = rows[0]
+    assert row.severity == "Major"
+    assert row.introduced_by_pr == "true"
+    assert row.path == RULES_REL
+    text = row_text(row)
+    assert "could not be parsed" not in text.casefold(), text
+    assert "could not be read" in text.casefold(), text
+    _assert_names_the_size_bound(row.message, rel=RULES_REL, size=size, cap=cap)
+    assert blocking_findings([row]), "an unread policy document must close the gate"
+
+
+def test_the_run_path_refuses_an_oversized_working_tree_document(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No base commit, a huge head copy: fail closed, and never read the file."""
+    import mergecraft.policy.review as review_module
+    from mergecraft.policy.review import ensure_policy_evaluated
+
+    repo = init_git_repo(tmp_path / "repo")
+    (repo / "src" / "billing").mkdir(parents=True)
+    (repo / "src" / "billing" / "x.py").write_text("VALUE = 1\n", encoding="utf-8")
+    cap = review_module._MAX_POLICY_BYTES
+    _write_document_of_size(repo, RULES_REL, cap + 1, header="rules: []\n")
+    commit_all(repo, "pr: commit an oversized policy document")
+    diff_path = tmp_path / "pull-request.diff"
+    diff_path.write_text(
+        "diff --git a/src/billing/x.py b/src/billing/x.py\n"
+        "--- a/src/billing/x.py\n"
+        "+++ b/src/billing/x.py\n"
+        "@@ -1,2 +1,0 @@\n"
+        "-first line\n"
+        "-second line\n",
+        encoding="utf-8",
+    )
+    _trap_read_bytes(monkeypatch, repo / RULES_REL)
+    monkeypatch.delenv("GITHUB_BASE_REF", raising=False)
+    ctx = _run_ctx(repo, before_sha=None, diff_path=diff_path)
+
+    rows = ensure_policy_evaluated(ctx)
+
+    row = _blocking_read_failure(rows)
+    text = row_text(row)
+    assert "rules.yaml" in text
+    assert "could not be parsed" not in text.casefold(), text

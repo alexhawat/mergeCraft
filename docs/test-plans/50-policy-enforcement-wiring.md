@@ -69,6 +69,8 @@ object it was read from.
 | A `rules.yaml` that exists but cannot be read (`PermissionError`) ⇒ one `Major` `policy.unreadable` row naming the file and the error, through the loader | unit | `tests/policy/test_review_run_path.py::test_an_unreadable_rules_file_is_one_blocking_major_row` |
 | The same unreadable file on the run path ⇒ the same row, not a review with no rules | integration | `…::test_the_run_path_records_an_unreadable_rules_file` |
 | The unreadable row's message names a **read** failure (`could not be read`) and never claims the document `could not be parsed` | unit + integration | `…::test_an_unreadable_rules_file_is_one_blocking_major_row`, `…::test_the_run_path_records_an_unreadable_rules_file` |
+| A working-tree `rules.yaml` / `exceptions.yaml` one byte past the module's read cap ⇒ one `kind="read"` load error and a blocking `policy.unreadable` row naming the file and the cap — and the loader never calls `read_bytes` for it | unit | `tests/policy/test_review_run_path.py::test_an_oversized_working_tree_document_is_refused_before_it_is_read[rules]`, `…[exceptions]`, `…::test_an_oversized_working_tree_rules_file_is_one_blocking_row` |
+| On the run path, an oversized working-tree document with no base commit ⇒ a blocking row, and the file is still never read | integration | `…::test_the_run_path_refuses_an_oversized_working_tree_document` |
 | The snapshot digest is the SHA-256 of the bytes read, and the row publishes it | unit | `…::test_the_snapshot_digest_is_the_sha256_of_the_rules_document` |
 | A diff that cannot be read once review scope exists ⇒ one `Major` `policy.unevaluated` row naming the path | integration | `tests/mcp/test_submit_review_verdict_policy.py::test_an_unreadable_diff_is_one_blocking_major_unevaluated_row` |
 
@@ -185,6 +187,12 @@ working-tree read, and only one of them is the "no policy tree" opt-in:
 The suite builds both unreadable shapes as real git fixtures — a valid document
 padded past the cap, and a damaged loose object under a commit that still
 resolves — so neither depends on `chmod`, root, or a mocked resolver.
+
+The same bound governs the working-tree copy, and it is enforced from the file's
+size *before* `read_bytes`: a document past the cap is a read error, never a read
+that exhausts the worker and only then reports. The suite proves the ordering by
+booby-trapping `read_bytes` for the file under test, so a loader that reads first
+fails on the read instead of on the row.
 
 ## Deliberate non-assertions
 
