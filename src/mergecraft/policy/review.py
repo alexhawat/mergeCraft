@@ -206,6 +206,11 @@ def _read_local(repo_root: Path, rel: str) -> tuple[bytes | None, PolicyLoadErro
     an I/O error) is an error: treating it as absent would silently review with
     no rules, which is the fail-open shape this module exists to prevent.
 
+    The document's size is checked before its bytes are pulled into the process:
+    a pull request that commits a multi-gigabyte ``rules.yaml`` must cost the
+    worker no more than a ``stat``, so an oversized document is refused with the
+    same read error the base-blob path raises — never truncated and parsed.
+
     Returns:
         tuple[bytes | None, PolicyLoadError | None]: The document bytes, and the
         read failure when the document exists but could not be read.
@@ -220,6 +225,15 @@ def _read_local(repo_root: Path, rel: str) -> tuple[bytes | None, PolicyLoadErro
         )
     if not present:
         return None, None
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        logger.warning("policy: could not stat {}: {}", rel, exc)
+        return None, PolicyLoadError(
+            path=rel, message=f"{rel} could not be read: {exc}", kind="read"
+        )
+    if size > _MAX_POLICY_BYTES:
+        return None, _oversized_error(rel, size=size)
     try:
         return path.read_bytes(), None
     except OSError as exc:
@@ -295,7 +309,7 @@ def _show_at_commit(
     if sized is not None and sized.returncode == 0:
         size = _parse_size(sized.stdout)
         if size is not None and size > _MAX_POLICY_BYTES:
-            return None, _oversized_at_commit(rel, sha, size)
+            return None, _oversized_error(rel, size=size, where=sha)
 
     shown = _git(repo_root, ["show", spec])
     if shown is None:
@@ -304,7 +318,7 @@ def _show_at_commit(
         detail = _git_detail(shown) or f"git show exited {shown.returncode}"
         return None, _unreadable_at_commit(rel, sha, f"git show failed: {detail}")
     if len(shown.stdout) > _MAX_POLICY_BYTES:
-        return None, _oversized_at_commit(rel, sha, len(shown.stdout))
+        return None, _oversized_error(rel, size=len(shown.stdout), where=sha)
     return shown.stdout, None
 
 
@@ -318,19 +332,24 @@ def _unreadable_at_commit(rel: str, sha: str, detail: str) -> PolicyLoadError:
     )
 
 
-def _oversized_at_commit(rel: str, sha: str, size: int) -> PolicyLoadError:
-    """Return the load error for a base document past this module's read cap."""
+def _oversized_error(rel: str, *, size: int, where: str | None = None) -> PolicyLoadError:
+    """Return the read error for a policy document past this module's read cap.
+
+    Shared by the working-tree and base-blob readers so both name the file, its
+    size and the cap that stopped them in the same words.
+    """
+    location = f" at {where}" if where else ""
     logger.warning(
-        "policy: refusing {} at {}: {} bytes exceeds the {}-byte read cap",
+        "policy: refusing {}{}: {} bytes exceeds the {}-byte read cap",
         rel,
-        sha,
+        location,
         size,
         _MAX_POLICY_BYTES,
     )
     return PolicyLoadError(
         path=rel,
         message=(
-            f"{rel} at {sha} is {size} bytes, larger than the {_MAX_POLICY_BYTES}-byte "
+            f"{rel}{location} is {size} bytes, larger than the {_MAX_POLICY_BYTES}-byte "
             "policy read limit, so it was not read"
         ),
         kind="read",
