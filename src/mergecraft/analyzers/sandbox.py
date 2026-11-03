@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 from mergecraft.analyzers.finding import Finding, make_finding
+from mergecraft.config.env import ALLOW_UNSANDBOXED_SHELL_ENV, ControlSwitches
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.egress import EgressSession
@@ -25,7 +26,6 @@ NetworkDefault = Literal["deny", "allow"]
 PidNamespaceMethod = Literal["unshare", "sudo-unshare", "none"]
 SandboxExecutionContext = Literal["local CLI", "Action container", "container-without-cgroups"]
 
-ALLOW_UNSANDBOXED_SHELL_ENV = "MERGECRAFT_ALLOW_UNSANDBOXED_SHELL"
 _LOCAL_CLI: SandboxExecutionContext = "local CLI"
 _ACTION_CONTAINER: SandboxExecutionContext = "Action container"
 _CONTAINER_WITHOUT_CGROUPS: SandboxExecutionContext = "container-without-cgroups"
@@ -242,7 +242,7 @@ def require_sandbox_for_enabled_shell(*, shell: str) -> None:
     method = shell_mod.detect_sandbox_method()
     if method != "none":
         return
-    if os.environ.get(ALLOW_UNSANDBOXED_SHELL_ENV) == "1":
+    if ControlSwitches().allow_unsandboxed_shell.enabled:
         return
     msg = (
         "no sandbox backend is available for --shell enabled; "

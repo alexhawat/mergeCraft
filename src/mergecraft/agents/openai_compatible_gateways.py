@@ -22,10 +22,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.functional_serializers import PlainSerializer
 from pydantic.functional_validators import BeforeValidator
 
-from mergecraft.config.env import ProviderGatewayEnv
+from mergecraft.config.env import (
+    CUSTOM_PROVIDER_API_KEY_ENV,
+    CUSTOM_PROVIDER_BASE_URL_ENV,
+    ProviderGatewayEnv,
+)
 
-CUSTOM_PROVIDER_BASE_URL_ENV = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"
-CUSTOM_PROVIDER_API_KEY_ENV = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"
 CUSTOM_PROVIDER_EXTRA_OPTIONS_ENV = "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS"
 PROVIDER_EXTRA_OPTIONS_ENV = "MERGECRAFT_PROVIDER_EXTRA_OPTIONS"
 
@@ -252,8 +254,13 @@ def resolve_gateway_endpoint(model: str | None) -> tuple[str, str, str] | None:
     if registry_endpoint is not None:
         return registry_endpoint
 
-    custom_base = os.environ.get(CUSTOM_PROVIDER_BASE_URL_ENV, "").strip()
-    custom_key = os.environ.get(CUSTOM_PROVIDER_API_KEY_ENV, "").strip()
+    gateway = ProviderGatewayEnv()
+    custom_base = gateway.custom_provider_base_url or ""
+    custom_key = (
+        gateway.custom_provider_api_key.get_secret_value().strip()
+        if gateway.custom_provider_api_key is not None
+        else ""
+    )
     if custom_base and custom_key:
         return provider_id, custom_base, custom_key
 

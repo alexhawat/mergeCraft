@@ -20,14 +20,19 @@ The package is a leaf (see :mod:`mergecraft.config.env`); this module imports
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Final
 
 from pydantic import BeforeValidator, Field
 from pydantic_settings import SettingsConfigDict
 
 from mergecraft.config.env._base import EnvSettings, ExactFlag
 
-__all__ = ["ControlSwitches", "RuntimeOverridesEnv"]
+__all__ = ["ALLOW_UNSANDBOXED_SHELL_ENV", "ControlSwitches", "RuntimeOverridesEnv"]
+
+#: The unsandboxed-shell override's variable name. It lives beside the model that
+#: parses it so a module that only *labels* the override imports the name rather
+#: than re-declaring an env-name literal the read inventory would see.
+ALLOW_UNSANDBOXED_SHELL_ENV: Final[str] = "MERGECRAFT_ALLOW_UNSANDBOXED_SHELL"
 
 
 def _strip_or_none(value: Any) -> Any:

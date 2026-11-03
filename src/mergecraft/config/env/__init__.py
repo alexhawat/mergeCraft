@@ -26,7 +26,12 @@ from mergecraft.config.env._base import (
     validate_env_settings,
 )
 from mergecraft.config.env.action_inputs import ActionInputEnv
-from mergecraft.config.env.agents import AgentRuntimeEnv, ProviderGatewayEnv
+from mergecraft.config.env.agents import (
+    CUSTOM_PROVIDER_API_KEY_ENV,
+    CUSTOM_PROVIDER_BASE_URL_ENV,
+    AgentRuntimeEnv,
+    ProviderGatewayEnv,
+)
 from mergecraft.config.env.config import ConfigLocatorEnv, RunBoundsEnv
 from mergecraft.config.env.dotenv import (
     DotEnvFileSource,
@@ -41,10 +46,17 @@ from mergecraft.config.env.runtime import (
     ReviewEnv,
     RunInputsEnv,
 )
-from mergecraft.config.env.switches import ControlSwitches, RuntimeOverridesEnv
+from mergecraft.config.env.switches import (
+    ALLOW_UNSANDBOXED_SHELL_ENV,
+    ControlSwitches,
+    RuntimeOverridesEnv,
+)
 from mergecraft.config.env.tracing import TracingEnv
 
 __all__ = [
+    "ALLOW_UNSANDBOXED_SHELL_ENV",
+    "CUSTOM_PROVIDER_API_KEY_ENV",
+    "CUSTOM_PROVIDER_BASE_URL_ENV",
     "ENV_SETTINGS_CONFIG",
     "ActionInputEnv",
     "AgentRuntimeEnv",

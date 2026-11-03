@@ -22,14 +22,26 @@ from typing import Annotated, Any, Final
 from pydantic import BeforeValidator, Field, SecretStr
 from pydantic_settings import SettingsConfigDict
 
-from mergecraft.config.env._base import EnvSettings
+from mergecraft.config.env._base import EnvSettings, EnvSettingsError
 
-__all__ = ["OTEL_PLUGIN_ENV", "AgentRuntimeEnv", "ProviderGatewayEnv"]
+__all__ = [
+    "CUSTOM_PROVIDER_API_KEY_ENV",
+    "CUSTOM_PROVIDER_BASE_URL_ENV",
+    "OTEL_PLUGIN_ENV",
+    "AgentRuntimeEnv",
+    "ProviderGatewayEnv",
+]
 
 #: The OpenCode OTel plugin opt-in variable. The name lives beside the model
 #: that parses it; ``mergecraft.agents.opencode_otel`` re-exports it so callers
 #: keep naming the variable symbolically.
 OTEL_PLUGIN_ENV: Final[str] = "MERGECRAFT_OPENCODE_OTEL_PLUGIN"
+
+#: The singleton custom-provider pair's variable names. They live beside the
+#: model that parses them so a module that only *labels* the pair imports the
+#: names rather than re-declaring env-name literals the read inventory would see.
+CUSTOM_PROVIDER_BASE_URL_ENV: Final[str] = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"
+CUSTOM_PROVIDER_API_KEY_ENV: Final[str] = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"
 
 
 def _strip_or_none(value: Any) -> Any:
@@ -45,17 +57,34 @@ def _strip_or_none(value: Any) -> Any:
 _Stripped = Annotated[str | None, BeforeValidator(_strip_or_none)]
 
 
+def _validate_agent_timeout(value: Any) -> Any:
+    """Reject an empty or blank timeout the way the deleted ``int("")`` did.
+
+    The process-env model must **not** drop an empty value: before the
+    migration the drivers ran ``int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT",
+    "3600"))``, so an empty or whitespace-only variable raised instead of
+    silently becoming the default. The error names the variable and never the
+    value.
+    """
+    if isinstance(value, str) and value.strip() == "":
+        raise EnvSettingsError("MERGECRAFT_AGENT_TIMEOUT")
+    return value
+
+
 class AgentRuntimeEnv(EnvSettings):
     """The agent-runtime knobs: timeout, Codex home parent, model and agent."""
 
     model_config = SettingsConfigDict(
         case_sensitive=True,
         extra="ignore",
-        env_ignore_empty=True,
+        # Not "empty means absent": the timeout's empty-value rule is "raise".
+        env_ignore_empty=False,
     )
 
     #: Seconds; today's drivers default to ``3600`` and a malformed value raises.
-    agent_timeout: int = Field(default=3600, validation_alias="MERGECRAFT_AGENT_TIMEOUT")
+    agent_timeout: Annotated[int, BeforeValidator(_validate_agent_timeout)] = Field(
+        default=3600, validation_alias="MERGECRAFT_AGENT_TIMEOUT"
+    )
     codex_home_parent: _Stripped = Field(
         default=None, validation_alias="MERGECRAFT_CODEX_HOME_PARENT"
     )
