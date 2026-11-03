@@ -23,7 +23,7 @@ from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
 from mergecraft.mcp.tool_call import normalize_pull_number_aliases
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
 from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, degraded_checkout_reason
-from mergecraft.review_policy.ignore_paths import ReviewIgnore, filter_diff
+from mergecraft.review_policy.ignore_paths import ReviewIgnore, filter_diff, rename_sources
 from mergecraft.utils.gha_log import warning
 from mergecraft.utils.git_hardening import read_remote_origin_url
 from mergecraft.utils.github import GitHubClient
@@ -748,7 +748,7 @@ _PULL_FILES_MAX_PAGES = 30
 
 
 async def pull_request_path_expectations(
-    ctx: ToolContext, *, pull_number: int
+    ctx: ToolContext, *, pull_number: int, renames: dict[str, str] | None = None
 ) -> tuple[set[str], set[str]]:
     """Return ``(required, allowed)`` paths for the PR as GitHub reports them.
 
@@ -757,7 +757,8 @@ async def pull_request_path_expectations(
     file — a diff omitting one does not describe this PR. ``allowed`` adds
     rename pre-image names, because ``git diff`` writes a rename as
     ``a/<old> b/<new>`` and only ``<new>`` is the post-image path; counting
-    ``<old>`` as required would reject an honest rename.
+    ``<old>`` as required would reject an honest rename. ``renames``, when given,
+    is filled with each renamed post-image path's source.
     """
     endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/files"
     required: set[str] = set()
@@ -775,6 +776,8 @@ async def pull_request_path_expectations(
             previous = str(f.get("previous_filename") or "").strip()
             if previous:
                 allowed.add(previous)
+                if renames is not None and filename:
+                    renames[filename] = previous
         if len(batch) < _PULL_FILES_PAGE_SIZE:
             break
     return required, allowed
@@ -832,7 +835,10 @@ async def _diff_from_pull_files(ctx: ToolContext, *, pull_number: int) -> _Files
         batch = list(files or [])
         for f in batch:
             filename = str(f.get("filename") or "").strip()
-            parts.append(f"diff --git a/{filename} b/{filename}\n")
+            # A rename keeps its source on the ``a/`` side, as ``git diff`` writes it, so
+            # the pre-image is never lost to readers of the header.
+            previous = str(f.get("previous_filename") or "").strip() or filename
+            parts.append(f"diff --git a/{previous} b/{filename}\n")
             if f.get("patch"):
                 parts.append(f.get("patch") + "\n")
             elif filename and _line_change_count(f) > 0:
@@ -1048,11 +1054,13 @@ def _apply_review_ignore(
     if not isinstance(ignore, ReviewIgnore) or not ignore.active:
         return str(diff_text), list(unreviewable), []
     filtered = filter_diff(str(diff_text), ignore, changed_paths=unreviewable)
-    changed = [*filtered.kept_paths, *filtered.ignored_paths, *unreviewable]
+    changed = [*filtered.changed_paths, *unreviewable]
+    sources = rename_sources(str(diff_text))
     ignored = list(filtered.ignored_paths)
     kept_unreviewable: list[str] = []
     for path in unreviewable:
-        if ignore.is_ignored(path, changed_paths=changed):
+        named = [path, sources[path]] if path in sources else [path]
+        if ignore.all_ignored(named, changed_paths=changed):
             ignored.append(path)
         else:
             kept_unreviewable.append(path)
@@ -1323,7 +1331,9 @@ def checkout_pr_tool(ctx: ToolContext):
             diff = files_diff
             unreviewable = files_diff.unreviewable_paths
             diff_truncated = files_diff.truncated
-        pr_changed_paths = list(dict.fromkeys([*changed_paths_in_diff(diff), *unreviewable]))
+        pr_changed_paths = list(
+            dict.fromkeys([*filter_diff(diff, None).changed_paths, *unreviewable])
+        )
         diff, unreviewable, ignored_paths = _apply_review_ignore(
             ctx, diff, unreviewable=unreviewable, truncated=diff_truncated
         )

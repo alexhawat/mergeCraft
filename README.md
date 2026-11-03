@@ -494,7 +494,8 @@ and a pull request whose every changed file is ignored passes quickly with
 "nothing to review", leaving approval to a human. Changelogs (`**/CHANGELOG.md`),
 lockfiles (`**/*.lock`, `**/package-lock.json`) and generated or minified files
 are ignored by default; `review.ignorePaths` in `.mergecraft/config.yaml` adds
-globs, and `review.ignorePathDefaults: false` reviews the defaults again. The
+globs, and `review.ignorePathDefaults: false` reviews the defaults again. A
+renamed file is ignored only when both its old and new names match. The
 config is read from the base branch only, so a pull request cannot opt its own
 files out of review. If `mergecraft` or `mergecraft-approval` is a required check,
 rely on `ignore_paths` alone: a run that `paths-ignore` skips never reports either check.

@@ -19,29 +19,44 @@ from mergecraft.review_policy.ignore_paths import ReviewIgnore
 
 
 class _Scm:
-    def __init__(self, files: list[str] | None, *, fail: bool = False) -> None:
+    def __init__(
+        self,
+        files: list[str] | None,
+        *,
+        fail: bool = False,
+        renames: dict[str, str] | None = None,
+    ) -> None:
         self.files = files
         self.fail = fail
+        self.renames = renames or {}
 
     async def get(self, path: str, **kwargs: Any) -> Any:
         if path.endswith("/files"):
             if self.fail:
                 msg = "listing failed"
                 raise RuntimeError(msg)
-            return [{"filename": name} for name in self.files or []]
+            return [
+                {"filename": name, "previous_filename": self.renames.get(name)}
+                for name in self.files or []
+            ]
         msg = "no base config read expected on an operator-owned run"
         raise AssertionError(msg)
 
 
 def _ctx(
-    files: list[str] | None, *, fail: bool = False, settings: RepoSettings | None = None
+    files: list[str] | None,
+    *,
+    fail: bool = False,
+    settings: RepoSettings | None = None,
+    renames: dict[str, str] | None = None,
 ) -> Any:
     state = init_tool_state(owner="acme", name="demo", dir=".")
     return SimpleNamespace(
         settings=settings or RepoSettings(),
         tool_state=state,
         tool_context=SimpleNamespace(
-            repo=SimpleNamespace(owner="acme", name="demo"), scm=_Scm(files, fail=fail)
+            repo=SimpleNamespace(owner="acme", name="demo"),
+            scm=_Scm(files, fail=fail, renames=renames),
         ),
         gh_event={"pull_request": {"number": 3, "base": {"sha": "b" * 40}}},
         settings_snapshot_operator_owned=True,
@@ -107,3 +122,17 @@ async def test_comment_driven_runs_never_skip(monkeypatch: pytest.MonkeyPatch) -
     ctx = _ctx(["CHANGELOG.md"])
     assert await _ignore_paths_gate(ctx) is None
     assert isinstance(ctx.tool_state.review_ignore, ReviewIgnore)
+
+
+@pytest.mark.asyncio
+async def test_renaming_a_source_file_into_an_ignored_name_is_not_all_ignored() -> None:
+    ctx = _ctx(["CHANGELOG.md"], renames={"CHANGELOG.md": "src/auth.py"})
+    assert await _ignore_paths_gate(ctx) is None
+    assert ctx.tool_state.triage is None
+
+
+@pytest.mark.asyncio
+async def test_renaming_between_ignored_names_is_still_all_ignored() -> None:
+    ctx = _ctx(["docs/CHANGELOG.md"], renames={"docs/CHANGELOG.md": "CHANGELOG.md"})
+    out = await _ignore_paths_gate(ctx)
+    assert isinstance(out, SkipAgentReview)

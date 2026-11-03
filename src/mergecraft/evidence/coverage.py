@@ -249,7 +249,7 @@ def coverage_section_for_state(state: ToolState) -> CoverageSection | None:
         record.authoritative_diff if record.authoritative_diff is not None else delivered
     )
     unreviewable = list(record.unreviewable_paths)
-    from mergecraft.review_policy.ignore_paths import ReviewIgnore, filter_diff
+    from mergecraft.review_policy.ignore_paths import ReviewIgnore, filter_diff, rename_sources
 
     ignore = getattr(state, "review_ignore", None)
     if isinstance(ignore, ReviewIgnore) and ignore.active:
@@ -259,10 +259,15 @@ def coverage_section_for_state(state: ToolState) -> CoverageSection | None:
         # when its generator config changed too, so the check needs every changed path.
         # The record is not trusted as already filtered, because a caller-supplied scope
         # never went through the checkout.
-        changed = [*filter_diff(authoritative, None).kept_paths, *unreviewable]
+        changed = [*filter_diff(authoritative, None).changed_paths, *unreviewable]
+        sources = rename_sources(authoritative)
         filtered_authoritative = filter_diff(authoritative, ignore, changed_paths=changed).text
         filtered_unreviewable = [
-            path for path in unreviewable if not ignore.is_ignored(path, changed_paths=changed)
+            path
+            for path in unreviewable
+            if not ignore.all_ignored(
+                [path, sources[path]] if path in sources else [path], changed_paths=changed
+            )
         ]
         # Never filter down to an empty scope: nothing left to account for would read
         # as no gate at all. An all-ignored change is the triage skip's job instead.

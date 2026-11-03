@@ -184,7 +184,9 @@ title, body and labels are never inputs.
 **Ignored paths (`ignore_paths`, `review.ignorePaths`).** Changed files whose
 repo-relative path matches an ignore glob are cut from the diff the reviewer
 reads (`diffPath`, `incrementalDiffPath`) and from the changed-line coverage
-universe, so they are out of scope rather than unread. `checkout_pr` names them
+universe, so they are out of scope rather than unread. A rename or copy is matched on both
+its source and its new name and leaves review only when both are ignored, so
+`git mv src/auth.py CHANGELOG.md` is still reviewed. `checkout_pr` names them
 in `ignoredPaths`, and the review body lists them under "Not reviewed (ignored
 by config)". The globs are the `ignore_paths` Action input, `review.ignorePaths`
 and, unless `review.ignorePathDefaults: false`, the defaults: `**/CHANGELOG.md`,

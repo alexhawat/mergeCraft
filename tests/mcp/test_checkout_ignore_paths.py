@@ -347,3 +347,46 @@ async def test_rereview_keeps_generated_output_when_its_config_changed_in_an_ear
     assert "CHANGELOG_SECRET" not in incremental, "changelogs are still ignored"
     assert "GENERATED_CLIENT" in _read_text(payload["diffPath"])
     assert "api/generated/client.py" not in payload.get("ignoredPaths", [])
+
+
+@pytest.mark.asyncio
+async def test_files_api_rename_into_an_ignored_name_reaches_the_reviewer(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """``git mv src/auth.py CHANGELOG.md`` must not take the source out of review."""
+    repo = _mixed_pr_repo(tmp_path)
+    files = {
+        1: [
+            {
+                "filename": "CHANGELOG.md",
+                "previous_filename": "src/auth.py",
+                "status": "renamed",
+                "additions": 1,
+                "deletions": 1,
+                "patch": "@@ -1 +1 @@\n-return verify()\n+return True\n",
+            },
+            {
+                "filename": "uv.lock",
+                "previous_filename": "src/session.py",
+                "status": "renamed",
+                "additions": 900,
+                "deletions": 0,
+                "patch": None,
+            },
+            _patched_file("docs/CHANGELOG.md"),
+        ]
+    }
+    _fail_merge_base_diff(monkeypatch)
+    ctx = _ctx_for(repo, _StubGitHub(pages=files), tmp_path)
+    ctx.tool_state.review_ignore = _ignore(None)
+
+    is_error, payload = await _checkout(ctx)
+
+    assert is_error is False
+    assert isinstance(payload, dict)
+    diff_text = _read_text(payload["diffPath"])
+    assert "diff --git a/src/auth.py b/CHANGELOG.md" in diff_text
+    assert "return True" in diff_text
+    assert payload["unreviewablePaths"] == ["uv.lock"], "a patchless rename source is in scope"
+    assert payload["ignoredPaths"] == ["docs/CHANGELOG.md"]
+    assert ctx.tool_state.triage is None

@@ -347,7 +347,10 @@ async def reject_diff_that_does_not_match_the_pr(
     from mergecraft.mcp.checkout import changed_paths_in_diff, pull_request_path_expectations
 
     text = Path(diff_path).read_text(encoding="utf-8")
-    required, allowed = await pull_request_path_expectations(ctx, pull_number=pull_number)
+    renames: dict[str, str] = {}
+    required, allowed = await pull_request_path_expectations(
+        ctx, pull_number=pull_number, renames=renames
+    )
     if not required:
         msg = "could not resolve the PR's changed files from the API"
         raise ValueError(msg)
@@ -355,9 +358,16 @@ async def reject_diff_that_does_not_match_the_pr(
 
     ignore = ctx.tool_state.review_ignore
     if isinstance(ignore, ReviewIgnore) and ignore.active:
-        # Files the operator's ignore_paths keep out of review need not be in the diff.
-        changed = sorted(required)
-        required = {path for path in required if not ignore.is_ignored(path, changed_paths=changed)}
+        # Files the operator's ignore_paths keep out of review need not be in the diff,
+        # but a rename leaves scope only when its source is ignored too.
+        changed = sorted(allowed)
+        required = {
+            path
+            for path in required
+            if not ignore.all_ignored(
+                [path, renames[path]] if path in renames else [path], changed_paths=changed
+            )
+        }
     diff_paths = set(changed_paths_in_diff(text))
     if not diff_paths:
         msg = "diff_path names no files; it cannot describe the PR head"

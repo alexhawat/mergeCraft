@@ -191,6 +191,16 @@ class ReviewIgnore:
             path, change={"changed_paths": list(changed_paths) or [path]}
         )
 
+    def all_ignored(self, paths: Sequence[str], *, changed_paths: Sequence[str] = ()) -> bool:
+        """Return whether every path one change names is ignored.
+
+        A rename or copy names a pre-image and a post-image; it leaves review only when
+        both are ignored, so ``git mv src/auth.py CHANGELOG.md`` stays in scope.
+        """
+        return bool(paths) and all(
+            self.is_ignored(path, changed_paths=changed_paths) for path in paths
+        )
+
     def partition(self, paths: Sequence[str]) -> tuple[list[str], list[str]]:
         """Split ``paths`` into ``(kept, ignored)``, preserving order."""
         kept: list[str] = []
@@ -241,27 +251,38 @@ class FilteredDiff:
     text: str
     ignored_paths: list[str] = field(default_factory=list)
     kept_paths: list[str] = field(default_factory=list)
+    changed_paths: list[str] = field(default_factory=list)
+    """Every path the diff names, rename and copy pre-images included."""
 
 
-def _section_path(header: str) -> str | None:
+def _section_paths(header: str) -> tuple[str, ...]:
+    """``(post-image, pre-image)`` for one section header, deduplicated; ``()`` if unparsable."""
     match = _HEADER_RE.match(header.rstrip("\r\n"))
     if match is None:
-        return None
-    return match.group("qb") or match.group("b")
+        return ()
+    post = match.group("qb") or match.group("b")
+    pre = match.group("qa") or match.group("a")
+    return tuple(dict.fromkeys(path for path in (post, pre) if path))
 
 
-def _split_sections(diff_text: str) -> tuple[str, list[tuple[str | None, str]]]:
+def _split_sections(diff_text: str) -> tuple[str, list[tuple[tuple[str, ...], str]]]:
     lines = diff_text.splitlines(keepends=True)
     prefix: list[str] = []
-    sections: list[tuple[str | None, list[str]]] = []
+    sections: list[tuple[tuple[str, ...], list[str]]] = []
     for line in lines:
         if line.startswith("diff --git "):
-            sections.append((_section_path(line), [line]))
+            sections.append((_section_paths(line), [line]))
         elif sections:
             sections[-1][1].append(line)
         else:
             prefix.append(line)
-    return "".join(prefix), [(path, "".join(body)) for path, body in sections]
+    return "".join(prefix), [(paths, "".join(body)) for paths, body in sections]
+
+
+def rename_sources(diff_text: str) -> dict[str, str]:
+    """Map each renamed or copied post-image path in ``diff_text`` to its pre-image."""
+    _prefix, sections = _split_sections(str(diff_text))
+    return {paths[0]: paths[1] for paths, _ in sections if len(paths) == 2}
 
 
 def filter_diff(
@@ -270,7 +291,12 @@ def filter_diff(
     *,
     changed_paths: Sequence[str] | None = None,
 ) -> FilteredDiff:
-    """Drop the file sections of ``diff_text`` whose post-image path is ignored.
+    """Drop the file sections of ``diff_text`` whose every named path is ignored.
+
+    A rename or copy section names a pre-image and a post-image, and is dropped only
+    when both are ignored: renaming ``src/auth.py`` to ``CHANGELOG.md`` stays in review,
+    so a pull request cannot take a file out of scope by renaming it into an ignored
+    name. ``ignored_paths`` and ``kept_paths`` report post-image paths.
 
     ``changed_paths`` is the whole pull request's change set, used by the generated-file
     rule (a generated file stays in scope when its generator config changed anywhere in
@@ -280,24 +306,26 @@ def filter_diff(
     review less.
     """
     prefix, sections = _split_sections(str(diff_text))
-    paths = [path for path, _ in sections if path is not None]
+    posts = list(dict.fromkeys(paths[0] for paths, _ in sections if paths))
+    every = list(dict.fromkeys(path for paths, _ in sections for path in paths))
     if ignore is None or not ignore.active:
-        return FilteredDiff(text=str(diff_text), kept_paths=paths)
-    change_set = list(dict.fromkeys([*paths, *(changed_paths or ())]))
+        return FilteredDiff(text=str(diff_text), kept_paths=posts, changed_paths=every)
+    change_set = list(dict.fromkeys([*every, *(changed_paths or ())]))
     kept_parts: list[str] = [prefix]
     ignored: list[str] = []
     kept: list[str] = []
-    for path, body in sections:
-        if path is not None and ignore.is_ignored(path, changed_paths=change_set):
-            ignored.append(path)
+    for paths, body in sections:
+        if ignore.all_ignored(paths, changed_paths=change_set):
+            ignored.append(paths[0])
             continue
-        if path is not None:
-            kept.append(path)
+        if paths:
+            kept.append(paths[0])
         kept_parts.append(body)
     return FilteredDiff(
         text="".join(kept_parts),
         ignored_paths=list(dict.fromkeys(ignored)),
         kept_paths=list(dict.fromkeys(kept)),
+        changed_paths=every,
     )
 
 
@@ -389,7 +417,10 @@ async def resolve_review_ignore(
 async def list_pull_request_paths(
     scm: ScmProvider, owner: str, repo: str, pull_number: int
 ) -> list[str] | None:
-    """Return every changed post-image path of a pull request, or ``None`` on any doubt.
+    """Return every path a pull request changes, or ``None`` on any doubt.
+
+    Rename and copy sources (``previous_filename``) are listed alongside the new name,
+    so a file renamed into an ignored name still counts as in scope.
 
     ``None`` (a failed read, or the listing hit its page cap) means the caller cannot
     prove every file is ignored and must run the review.
@@ -402,9 +433,13 @@ async def list_pull_request_paths(
                 await scm.get(endpoint, params={"per_page": _FILES_PAGE_SIZE, "page": page}) or []
             )
             for entry in batch:
-                name = str(entry.get("filename") or "").strip() if isinstance(entry, dict) else ""
-                if name:
-                    paths.append(name)
+                if not isinstance(entry, dict):
+                    continue
+                # A rename names its source too: it is in scope unless both are ignored.
+                for key in ("filename", "previous_filename"):
+                    name = str(entry.get(key) or "").strip()
+                    if name:
+                        paths.append(name)
             if len(batch) < _FILES_PAGE_SIZE:
                 return list(dict.fromkeys(paths))
     except Exception as err:  # a failed listing proves nothing; the review runs
@@ -451,5 +486,6 @@ __all__ = [
     "list_pull_request_paths",
     "merge_ignored_paths_into_review_body",
     "parse_ignore_paths",
+    "rename_sources",
     "resolve_review_ignore",
 ]

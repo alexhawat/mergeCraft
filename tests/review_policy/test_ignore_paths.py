@@ -207,6 +207,54 @@ def test_filter_diff_uses_the_post_image_of_a_rename() -> None:
     assert filter_diff(diff, ignore).text == diff
 
 
+def test_rename_into_an_ignored_name_stays_in_the_diff() -> None:
+    diff = (
+        "diff --git a/src/evil.py b/CHANGELOG.md\n"
+        "similarity index 60%\n"
+        "rename from src/evil.py\n"
+        "rename to CHANGELOG.md\n"
+        "@@ -1 +1 @@\n"
+        "-def check(): return verify()\n"
+        "+def check(): return True\n"
+    )
+    ignore = build_review_ignore(input_value=None, review=ReviewSettings(), source="t")
+    filtered = filter_diff(diff, ignore)
+    assert filtered.text == diff
+    assert filtered.ignored_paths == []
+    assert filtered.changed_paths == ["CHANGELOG.md", "src/evil.py"]
+
+
+def test_copy_from_an_in_scope_file_into_an_ignored_name_stays_in_the_diff() -> None:
+    diff = (
+        "diff --git a/src/auth.py b/vendor.lock\n"
+        "similarity index 100%\n"
+        "copy from src/auth.py\n"
+        "copy to vendor.lock\n"
+    )
+    ignore = build_review_ignore(input_value=None, review=ReviewSettings(), source="t")
+    assert filter_diff(diff, ignore).text == diff
+
+
+def test_rename_between_two_ignored_names_is_dropped() -> None:
+    diff = (
+        "diff --git a/CHANGELOG.md b/docs/CHANGELOG.md\n"
+        "similarity index 100%\n"
+        "rename from CHANGELOG.md\n"
+        "rename to docs/CHANGELOG.md\n"
+    )
+    ignore = build_review_ignore(input_value=None, review=ReviewSettings(), source="t")
+    filtered = filter_diff(diff, ignore)
+    assert filtered.text == ""
+    assert filtered.ignored_paths == ["docs/CHANGELOG.md"]
+
+
+def test_rename_sources_maps_new_names_to_old() -> None:
+    from mergecraft.review_policy.ignore_paths import rename_sources
+
+    diff = "diff --git a/src/evil.py b/CHANGELOG.md\ndiff --git a/x.py b/x.py\n"
+    assert rename_sources(diff) == {"CHANGELOG.md": "src/evil.py"}
+
+
 def test_filter_diff_handles_quoted_headers() -> None:
     diff = 'diff --git "a/docs/my notes.md" "b/docs/my notes.md"\n@@ -0,0 +1 @@\n+x\n'
     ignore = build_review_ignore(input_value="docs/**", review=ReviewSettings(), source="t")
@@ -369,6 +417,15 @@ class _FilesScm:
 async def test_listing_returns_every_changed_path() -> None:
     scm = _FilesScm({1: [{"filename": "a.py"}, {"filename": "CHANGELOG.md"}]})
     assert await list_pull_request_paths(_as_scm(scm), "o", "r", 1) == ["a.py", "CHANGELOG.md"]
+
+
+@pytest.mark.asyncio
+async def test_listing_includes_rename_sources() -> None:
+    scm = _FilesScm({1: [{"filename": "CHANGELOG.md", "previous_filename": "src/auth.py"}]})
+    paths = await list_pull_request_paths(_as_scm(scm), "o", "r", 1)
+    assert paths == ["CHANGELOG.md", "src/auth.py"]
+    ignore = build_review_ignore(input_value=None, review=ReviewSettings(), source="t")
+    assert ignore.partition(paths) == (["src/auth.py"], ["CHANGELOG.md"])
 
 
 @pytest.mark.asyncio
