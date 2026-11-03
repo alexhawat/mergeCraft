@@ -33,6 +33,7 @@ from mergecraft.config.env.dotenv import (
     LocalDotEnv,
     local_dotenv_values,
 )
+from mergecraft.config.env.switches import ControlSwitches, RuntimeOverridesEnv
 from mergecraft.config.env.tracing import TracingEnv
 
 __all__ = [
@@ -40,6 +41,7 @@ __all__ = [
     "ActionInputEnv",
     "AgentRuntimeEnv",
     "ConfigLocatorEnv",
+    "ControlSwitches",
     "DotEnvFileSource",
     "EnvBool",
     "EnvSettings",
@@ -48,6 +50,7 @@ __all__ = [
     "LocalDotEnv",
     "ProviderGatewayEnv",
     "RunBoundsEnv",
+    "RuntimeOverridesEnv",
     "TracingEnv",
     "fail_closed_env_bool",
     "from_env",

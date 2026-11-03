@@ -1060,7 +1060,7 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
         ForkCredentialInvariantError,
         validate_fork_credential_invariant,
     )
-    from mergecraft.agents.codex import CODEX_SANDBOX_ENV, CODEX_SANDBOX_UNSANDBOXED
+    from mergecraft.agents.codex import CODEX_SANDBOX_UNSANDBOXED
     from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
     from mergecraft.config.trust_policy import (
         agent_sandbox_manifest_fields,
@@ -1148,9 +1148,9 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     )
     log_trust_policy_at_run_start(policy)
 
-    operator_override_requested = (
-        os.environ.get(CODEX_SANDBOX_ENV, "").strip().lower() == CODEX_SANDBOX_UNSANDBOXED
-    )
+    from mergecraft.config.env import RuntimeOverridesEnv
+
+    operator_override_requested = RuntimeOverridesEnv().codex_sandbox == CODEX_SANDBOX_UNSANDBOXED
     sandbox_decision = resolve_agent_sandbox_decision(
         event=gh_event,
         event_name=event_name,

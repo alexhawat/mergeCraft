@@ -410,7 +410,9 @@ def _operator_sandbox_override() -> str | None:
     ignored with a warning rather than passed through to the CLI, so a typo
     cannot silently widen or narrow the sandbox.
     """
-    raw = os.environ.get(CODEX_SANDBOX_ENV, "").strip().lower()
+    from mergecraft.config.env import RuntimeOverridesEnv
+
+    raw = RuntimeOverridesEnv().codex_sandbox
     if not raw:
         return None
     if raw == CODEX_SANDBOX_UNSANDBOXED:
