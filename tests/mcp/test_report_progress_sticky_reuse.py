@@ -28,6 +28,8 @@ if TYPE_CHECKING:
 _PR_NUMBER = 7
 _STICKY_ID = 55
 _PLAN_COMMENT_ID = 42
+_APP_BOT = "mergecraft-reviewer[bot]"
+_JOB_BOT = "github-actions[bot]"
 
 
 class _FakeScm:
@@ -119,9 +121,10 @@ async def test_second_run_first_call_reuses_the_existing_sticky(tmp_path: Path) 
     scm.comments[_STICKY_ID] = {
         "id": _STICKY_ID,
         "body": _bot_sticky_body(),
-        "user": {"login": "github-actions[bot]", "type": "Bot"},
+        "user": {"login": _APP_BOT, "type": "Bot"},
     }
     ctx = _ctx(tmp_path, scm)
+    ctx.publisher_logins = frozenset({_APP_BOT})
     assert ctx.tool_state.progress_comment is None
 
     result = await report_progress_tool(ctx).execute({"body": "Round two."})
@@ -190,3 +193,60 @@ async def test_lookup_failure_creates_and_does_not_raise(tmp_path: Path) -> None
     assert scm.creates == 1
     progress = ctx.tool_state.progress_comment
     assert isinstance(progress, ProgressComment)
+
+
+@pytest.mark.asyncio
+async def test_a_job_token_run_adopts_its_run_bound_sticky(tmp_path: Path) -> None:
+    """With no publisher identity, the run-bound id is what names the sticky (HS1 step 1)."""
+    scm = _FakeScm()
+    scm.comments[_STICKY_ID] = {
+        "id": _STICKY_ID,
+        "body": _bot_sticky_body(),
+        "user": {"login": _JOB_BOT, "type": "Bot"},
+    }
+    ctx = _ctx(tmp_path, scm)
+    ctx.publisher_logins = frozenset()
+    ctx.tool_state.run_bound_progress_comment_id = _STICKY_ID
+
+    result = await report_progress_tool(ctx).execute({"body": "Round two."})
+
+    assert _action(result) == "updated"
+    assert scm.updated_ids == [_STICKY_ID]
+    assert scm.creates == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "publishers",
+    [frozenset(), frozenset({_APP_BOT})],
+    ids=["job-token-only", "app-publisher"],
+)
+async def test_a_bot_sticky_outside_the_run_scope_is_not_adopted(
+    tmp_path: Path, publishers: frozenset[str]
+) -> None:
+    """A same-repo workflow's ``github-actions[bot]`` sticky must not be overwritten (#1011).
+
+    The comment has the right shape — heading, ledger marker, Bot author — but it
+    is neither the run-bound comment nor written by a login this run publishes
+    as, so ``report_progress`` creates its own comment and leaves it untouched.
+    """
+    scm = _FakeScm()
+    foreign_body = _bot_sticky_body()
+    scm.comments[_STICKY_ID] = {
+        "id": _STICKY_ID,
+        "body": foreign_body,
+        "user": {"login": _JOB_BOT, "type": "Bot"},
+    }
+    ctx = _ctx(tmp_path, scm)
+    ctx.publisher_logins = publishers
+
+    result = await report_progress_tool(ctx).execute({"body": "Round two."})
+
+    assert result.is_error is False
+    assert _action(result) == "created"
+    assert scm.creates == 1
+    assert _STICKY_ID not in scm.updated_ids
+    assert scm.comments[_STICKY_ID]["body"] == foreign_body
+    progress = ctx.tool_state.progress_comment
+    assert isinstance(progress, ProgressComment)
+    assert progress.id != str(_STICKY_ID)
