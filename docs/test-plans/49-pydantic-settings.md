@@ -1,14 +1,20 @@
-# Test plan — one reader for env and `.env` settings (release half)
+# Test plan — one reader for env and `.env` settings
 
-**Red wave:** the `test-creator` wave of the pydantic-settings plan (the first,
-release-carrying pull request).
-**Green waves:** the foundation + one `.env` reader; then the tracing family,
-its environment layer and its Action inputs.
+**Red wave:** the `test-creator` wave of the pydantic-settings plan. It ran
+twice: once for the release-carrying pull request (`3a0482c5`) and once for the
+parity pull request that follows it.
+**Green waves:** the foundation + one `.env` reader, then the tracing family,
+its environment layer and its Action inputs; then the parity migration of the
+remaining read sites, the control-switch model and the environment-read
+inventory.
 
-This is the RED suite for the release half of the plan — the typed environment
-foundation, the single `.env` reader, the provider-side `.env` read, and the
-tracing environment plus its Action inputs. The parity migration of the
-remaining read sites is a separate pull request and is **not** covered here.
+The document has two halves. *The release half* (sections 1–6) is the typed
+environment foundation, the single `.env` reader, the provider-side `.env`
+read, and the tracing environment plus its Action inputs. *The parity half*
+(sections 7–13) is the migration of every remaining read site, the frozen
+run-budget and locator tables, the control switches, the full Action-input
+model and the inventory that makes "all" durable. Each half had its own RED
+wave and its own green waves.
 
 The suite **collects** with no import/collection errors and `make lint` +
 `make typecheck` are clean. Every not-yet-implemented assertion is a plain
@@ -202,9 +208,176 @@ Both modules are hermetic (no workspace `.env`, no ambient `MERGECRAFT_*` /
 `GITHUB_*` / `INPUT_*`, no network) and rebind the process-global loguru sink
 after each test so a captured stream is never written to once it closes.
 
+## 7 — run budgets: a frozen table and one typed read
+
+The resolver keeps its merge arithmetic: the model parses, the resolver decides
+what "unset" means. The table is the oracle once the two hand parsers are gone.
+
+| Layer | Test file | Asserts |
+| --- | --- | --- |
+| Unit (parity) | `tests/utils/test_run_bounds_env_parity.py::test_resolve_run_bounds_keeps_the_frozen_table` | the eight knobs × {unset, empty, whitespace-only, `0`, valid} resolve to the frozen `RunBounds` field values |
+| Unit (parity, quirk) | `…::test_integer_zero_and_float_zero_keep_their_own_rules` | `MERGECRAFT_TOKEN_BUDGET=0` falls through to the configured budget; `MERGECRAFT_COST_BUDGET_USD=0` is honoured |
+| Unit (error) | `…::test_malformed_run_budget_still_raises_value_error` | every knob, malformed: `ValueError` (a `ValidationError` is one), with the variable named |
+| Unit (happy) | `…::test_a_configured_value_still_wins_when_the_knob_is_absent` | an absent knob still takes the configured value |
+| Unit (model) | `…::test_run_bounds_env_model_parses_every_knob`, `…::test_run_bounds_env_model_raises_on_a_malformed_value`, `…::test_run_bounds_env_declares_no_other_environment_name` | the model owns the eight exact names, numeric fields, `None` for absent/empty/whitespace, `ValidationError` for malformed |
+| Unit (seam) | `…::test_run_bounds_env_model_reads_nothing_from_the_process_environment` | a mapping-only read never falls back to `os.environ` |
+| Unit (registry) | `…::test_run_bounds_env_is_registered` | the startup pass validates the model |
+
+## 8 — the config-file locator
+
+| Layer | Test file | Asserts |
+| --- | --- | --- |
+| Integration (parity) | `tests/config/test_layered_config.py::test_resolve_config_sources_empty_env_config_is_absent`, `…::test_resolve_config_sources_blank_env_config_is_flagged_missing`, `…::test_load_layered_config_dict_empty_env_config_falls_through` | an empty `MERGECRAFT_CONFIG` is unset; a whitespace-only value stays "present but missing"; the layered loader follows the same rule |
+| Unit (model) | `…::test_config_locator_env_declares_the_exact_name`, `…::test_config_locator_env_keeps_the_empty_value_rule`, `…::test_config_locator_env_reads_nothing_from_the_process_environment` | one exact alias, the same empty/whitespace rule as the resolver, and a mapping-only read |
+
+The present, missing and short-circuit rows already existed and stay green
+(`test_resolve_config_sources_env_file_is_the_only_contributor`,
+`…flags_missing_env_file`, `…lists_committed_and_local`, `…omits_local_on_ci`,
+`…empty_repo`).
+
+## 9 — the repo YAML is not an env model
+
+| Layer | Test file | Asserts |
+| --- | --- | --- |
+| Unit (guard) | `tests/config/test_repo_settings_not_env.py::test_repo_settings_is_not_a_base_settings`, `…::test_no_repo_config_model_reads_the_environment` | no repo-config model is a `BaseSettings` |
+| Unit (parity) | `…::test_a_repo_field_name_in_the_environment_changes_nothing` | `SHELL`, `PUSH`, `MODEL`, `STATUS_CHECKS`, `TOKENBUDGET`, `MAXDIFFLINES` and `RUNBOUNDS` in the environment leave `load_repo_settings` equal to the defaults |
+| Unit (edge) | `…::test_the_login_shell_does_not_fail_shell_permission` | `SHELL=/bin/zsh` does not become the repo's shell policy |
+| Integration (happy) | `…::test_a_repo_file_still_decides_the_repo_fields` | the committed YAML still wins over the same poison |
+| Unit (guard) | `…::test_repo_settings_forbid_unknown_keys` | the repo YAML keeps `extra="forbid"` |
+| Integration | `…::test_the_config_locator_still_reads_mergecraft_config_explicitly` | the locator is an explicit read, not a field-name override |
+
+## 10 — control switches: exact `"1"`, never a knob
+
+| Layer | Test file | Asserts |
+| --- | --- | --- |
+| Unit (parity) | `tests/security/test_control_switch_exact.py::test_control_switch_is_enabled_only_by_exactly_one` | for each switch (`unsandboxed-shell`, `allow-root`, `filtered-egress-opt-in`): `"1"` enables; `true`/`TRUE`/`yes`/`on`/`t`/`01`/`""`/absent do not |
+| Unit (model) | `tests/config/test_env_reads_inventory.py::test_control_switch_fields_are_exact_flags_and_never_listed` | the three fields are not `bool`, carry the `control_switch` marker, and enable exactly `raw == "1"` including the whitespace variants the readers leave to the model; no switch is a repo-settings field and no settings dump carries one |
+| Unit (guard) | `tests/security/test_control_switch_exact.py::test_no_switch_is_a_repo_setting` | `config show` cannot render a switch: it prints repo settings |
+| Unit (guard) | `…::test_the_removed_security_instructions_switch_has_no_reader` | the deleted security-instructions switch keeps no reader |
+
+The `"1 "` / `" 1"` edge is not asserted on the readers: the locked type
+decision owns that comparison (`ExactFlag.enabled == (raw == "1")`), so it is
+pinned once, on the model, rather than re-stated per reader.
+
+## 11 — the agent runtime
+
+| Layer | Test file | Asserts |
+| --- | --- | --- |
+| Unit (happy) | `tests/agents/test_agent_timeout_env.py::test_agent_timeout_defaults_to_3600_and_honours_a_valid_value` | unset and empty read `3600`; `3600`, `120`, `1` are honoured |
+| Unit (error) | `…::test_agent_timeout_rejects_a_malformed_value` | `soon`, `1.5`, `10m`, `true` raise `ValueError` naming the variable |
+| Unit (edge) | `…::test_agent_timeout_reads_nothing_from_the_process_environment`, `…::test_agent_runtime_env_is_constructed_per_read` | the mapping is the only input; no cached instance |
+| Unit (shape) | `…::test_agent_runtime_env_declares_the_runtime_knobs` | the timeout, the Codex home parent, the model and the agent are exact aliases |
+
+The per-driver "no direct read remains" half of this contract is enforced by
+the inventory (section 13): the five drivers and the credential broker must stop
+reading the name themselves.
+
+## 12 — the Action inputs
+
+| Layer | Test file | Asserts |
+| --- | --- | --- |
+| Unit (shape) | `tests/utils/test_payload.py::test_action_input_model_declares_every_action_input` | every `INPUT_*` `action.yml` maps (24, tracing included) is a field with its exact name |
+| Unit (guard) | `…::test_action_input_model_does_not_carry_the_github_token` | `INPUT_TOKEN` is not a model field |
+| Unit (edge) | `…::test_an_empty_action_input_reads_as_unset` | the runtime's empty string reads as `None`, for every input |
+| Unit (seam) | `…::test_action_input_model_reads_nothing_from_the_process_environment` | a mapping-only read |
+| Functional (parity) | `…::test_get_action_input_keeps_its_frozen_behaviour`, `…::test_get_action_input_maps_hyphens_to_underscores` | unset → `""`, values are stripped, `tracing-to` → `INPUT_TRACING_TO` |
+| Functional (parity) | `…::test_resolve_payload_lowercases_the_permission_inputs` | push/shell/status-checks/model-pin keep today's lower-casing on the public payload |
+| Functional (parity) | `…::test_custom_provider_inputs_still_export_the_singleton_pair` | `provider_base_url` + `provider_api_key_env` still export the two env vars |
+
+## 13 — the inventory: "all" is a test, not a promise
+
+`tests/config/test_env_reads_inventory.py` is the durable evidence. It
+AST-scans `src/mergecraft/` for environment reads and classifies them.
+
+| Layer | Test | Asserts |
+| --- | --- | --- |
+| Static (per name) | `test_in_scope_name_is_declared_by_its_model` | each in-scope name is an exact alias of exactly one process-env model (`LocalDotEnv` is the `.env` file view and is exempt from the count) |
+| Static (per name) | `test_in_scope_name_is_read_only_through_a_model` | no in-scope read survives outside `config/env/` unless it is allowlisted with a class and a reason |
+| Static (registry) | `test_plan_named_models_are_registered` | the models the plan registers reach the startup pass |
+| Static (secrets) | `test_secret_names_are_secretstr_and_never_leak` | each secret name is a `SecretStr` and no `repr`/`model_dump`/`model_dump_json` renders it |
+| Static (switches) | `test_control_switch_fields_are_exact_flags_and_never_listed` | section 10's model pins |
+| Static (coverage) | `test_every_out_of_scope_read_is_allowlisted` | every read of a name outside the in-scope set matches a `(path, name, class, reason)` row |
+| Static (allowlist) | `test_allowlist_rows_carry_a_known_class_and_a_reason` | the allowlist is self-describing |
+
+The scan recognises the read shapes the codebase uses: a literal (or a
+module-level constant, including one imported from another module) passed to
+`os.environ.get` / `os.getenv` / `environ.get`, an `os.environ[...]` load, a
+`key in os.environ` membership test, a literal passed to one of the module-local
+env helpers, and a candidate-name tuple a loop reads through a mapping. Writes
+are not reads: a subscript store, `pop`, `setdefault` and an exporter's dict key
+are the writer's own business. A constant that is no longer referenced anywhere
+in its module is dead, not a read, so it is not flagged.
+
+**Allowlist policy.** A stale row (a read that has moved into `config/env/`) is
+tolerated; an *unlisted* read is a failure. That is the only rule compatible
+with a single-writer test tree: an implementation wave adds the read to a model,
+never to this allowlist. The test owner prunes the stale rows.
+
+**What the post-50 tree surfaced.** The definitive inventory at the parity
+wave's base (`d103e90c`) is **370 read lines in 115 files** for the plan's
+`git grep` command. The AST scan classifies **108 distinct `(path, name)`
+reads** — 85 of them in scope, 23 allowlisted out of scope. Beyond the plan's
+wave lists it surfaced four reads the release half left behind and one knob no
+wave had named:
+
+- `TYPESAFE_API_KEY` read directly in `cli/jev_cmd.py` (two places),
+  `cli/opencode_cmd.py` and `jev/client.py`;
+- `LOG_LEVEL` read directly in `utils/instructions.py`;
+- `MERGECRAFT_STICKY_ONLY_NEUTRAL`, `MERGECRAFT_CAPTURE_VERDICTS`,
+  `MERGECRAFT_REVIEWER_BOT_LOGIN` and `MERGECRAFT_OPENCODE_OTEL_PLUGIN`, which
+  PS-D2's classification rule makes operator knobs;
+- `MERGECRAFT_INSTALL_REF` and the Harbor harness reads, allowlisted as
+  generated benchmark inputs;
+- `cli/provider_cmd.py`'s legacy migration, allowlisted as a writer: its
+  `env_map` is the parsed `.env` file, not the process environment.
+
+## The parity half — scenario matrix
+
+Every contract above has a happy path, an edge case (empty / boundary / `0` /
+whitespace / overlap) and an error case that pins the failure type and the
+message contract (the variable named, the value never used as an oracle).
+
+## Frozen parity tables (parity half)
+
+Produced by running the pre-migration code before any reader moved, so the table
+— not the deleted helper — is the oracle:
+
+- the run-budget grid: `resolve_run_bounds(env=…)` over `default_settings()`,
+  every knob × {unset, `""`, `"   "`, `"0"`, a valid value, `"soon"`};
+- the control-switch table: `mcp.shell._allow_unsandboxed_shell`,
+  `utils.privilege._allow_root_override`, and the kernel-probe opt-in observed
+  through `analyzers.egress._can_unshare_net`;
+- the locator grid: `resolve_config_sources` and
+  `load_layered_config_dict` over an unset / empty / whitespace / present /
+  missing `MERGECRAFT_CONFIG`;
+- the repo-settings grid: `load_repo_settings` with the repo field names
+  present in the environment;
+- the Action-input parity: `get_action_input`, `resolve_payload`'s
+  lower-casing and `resolve_custom_provider_env_inputs`.
+
+The throwaway scripts that produced them are not committed.
+
+## Verification
+
+```text
+uv run --extra dev pytest tests/config/test_env_reads_inventory.py \
+    tests/config/test_repo_settings_not_env.py tests/config/test_layered_config.py \
+    tests/utils/test_run_bounds_env_parity.py tests/utils/test_payload.py \
+    tests/agents/test_agent_timeout_env.py tests/security/test_control_switch_exact.py -q -n8
+```
+
+At the RED wave: **449 collected**, 217 failing pending implementation, 232
+parity/guard passing; `make lint` and `make typecheck` clean.
+
 ## Out of scope
 
-The run budgets, the config-file locator, the repository-settings-not-env
-check, the control switches, the full `INPUT_*` model, the agents timeout and
-the environment-read inventory belong to the second pull request and are not
-authored here.
+The `.env` corpus and the tracing precedence pins are unchanged by the parity
+half — it adds no `.env` reader. `tests/cli/test_local_env_loader.py`,
+`tests/cli/test_local_env_path.py`, `tests/cli/test_provider_env_map.py`,
+`tests/tracing/test_env_layer_parity.py` and
+`tests/tracing/exporters/test_cli_precedence.py` stay as the release half left
+them and must keep passing.
+
+The GitHub token chain, platform context, the internal message bus, provider-native
+credentials, subprocess env forwarding and OS-standard variables stay out of the
+models; the inventory's allowlist keeps each of them, with its class.

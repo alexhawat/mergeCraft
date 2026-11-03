@@ -1,0 +1,967 @@
+"""The environment-read inventory: every in-scope name is read through a model.
+
+This module is the durable evidence for "all" in *one reader for every setting*.
+It AST-scans ``src/mergecraft/`` for environment reads and asserts three things:
+
+1. every in-scope name (the operator knobs, in-process secrets and Action
+   inputs mergeCraft itself parses) is declared by exactly one process-env
+   model in :mod:`mergecraft.config.env`, with the exact variable name as its
+   ``validation_alias``;
+2. no in-scope name is read anywhere outside ``config/env/`` except the reads
+   that are allowlisted below with a class and a reason — a message-bus read-back
+   or a writer that owns the key;
+3. every read of a name *outside* the in-scope set matches an allowlist entry
+   with its class and reason, so a new out-of-scope read cannot appear silently.
+
+The scan recognises the read shapes this codebase actually uses: a literal (or a
+module-level constant that names an environment variable) passed to
+``os.environ.get`` / ``os.getenv`` / ``environ.get``, an ``os.environ[...]``
+load, a ``key in os.environ`` membership test, a literal passed to one of the
+module-local env helpers, and a literal inside a candidate-name tuple that a
+loop reads through a mapping. Writes (subscript stores, ``pop``,
+``setdefault``, ``dict`` keys of an exporter) are not reads: the writer is the
+authority for a key it wrote itself.
+
+The contracts are red until the wave named in each row lands: the models do not
+exist yet, and the reads still happen where they always did. No ``xfail``
+marker is used.
+"""
+
+from __future__ import annotations
+
+import ast
+import functools
+import importlib
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Final
+
+import pytest
+from pydantic_settings import BaseSettings
+
+if TYPE_CHECKING:
+    from pydantic.fields import FieldInfo
+
+_REPO_ROOT: Final = Path(__file__).resolve().parents[2]
+_SRC: Final = _REPO_ROOT / "src" / "mergecraft"
+_ENV_PACKAGE: Final = "config/env/"
+
+_ENV_PREFIXES: Final = ("MERGECRAFT_", "INPUT_", "TYPESAFE_")
+#: Fallback aliases that are read directly today; they carry no prefix of their own.
+_FALLBACK_ALIASES: Final = frozenset({"LOG_LEVEL", "LOG_FORMAT", "CI_STATE", "CI_FAILED_COUNT"})
+
+_MAPPING_NAMES: Final = frozenset({"environ", "os_environ", "env", "env_map", "envmap"})
+_MAPPING_SUFFIXES: Final = ("_env", "_environ", "_env_map")
+_GETTERS: Final = frozenset({"get", "getenv"})
+#: Module-local helpers whose second argument is an environment variable name.
+_READ_HELPERS: Final = frozenset({"_env_int", "_env_float", "_read_input", "_get_env"})
+
+
+# ── the in-scope set (one row per name, with the wave that owns it) ──────────
+
+
+@dataclass(frozen=True, slots=True)
+class InScope:
+    """One environment variable mergeCraft itself parses."""
+
+    name: str
+    wave: str
+    model: str | None
+    """The model class the plan names, or ``None`` where the plan names only a module."""
+
+
+def _run_bounds_names() -> tuple[InScope, ...]:
+    return tuple(
+        InScope(name, "PS3", "RunBoundsEnv")
+        for name in (
+            "MERGECRAFT_TOKEN_BUDGET",
+            "MERGECRAFT_COST_BUDGET_USD",
+            "MERGECRAFT_TOOL_CALL_BUDGET",
+            "MERGECRAFT_MAX_DIFF_LINES",
+            "MERGECRAFT_CONTEXT_RETRIEVAL_TIMEOUT_S",
+            "MERGECRAFT_RUN_TIMEOUT_S",
+            "MERGECRAFT_EXTERNAL_OPERATION_TIMEOUT_S",
+            "MERGECRAFT_CACHE_MAX_BYTES",
+        )
+    )
+
+
+def _action_input_names() -> tuple[InScope, ...]:
+    tracing = {
+        "INPUT_TRACING",
+        "INPUT_TRACING_TO",
+        "INPUT_LOGFIRE_TOKEN",
+        "INPUT_OTEL_ENDPOINT",
+        "INPUT_TRACING_CONTENT",
+        "INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT",
+    }
+    names = (
+        "INPUT_PROMPT",
+        "INPUT_PROMPT_FILE",
+        "INPUT_TIMEOUT",
+        "INPUT_MODEL",
+        "INPUT_MODEL_PIN",
+        "INPUT_CWD",
+        "INPUT_PUSH",
+        "INPUT_SHELL",
+        "INPUT_STATUS_CHECKS",
+        "INPUT_ANALYZERS",
+        "INPUT_SARIF_UPLOAD",
+        "INPUT_OUTPUT_SCHEMA",
+        "INPUT_ALLOW_PR_TARGET_COMMENTS",
+        "INPUT_PROVIDER_BASE_URL",
+        "INPUT_PROVIDER_API_KEY_ENV",
+        "INPUT_SUGGEST_EVAL_ADD",
+        "INPUT_SETUP_FAILURE_POLICY",
+        "INPUT_SETUP_TIMEOUT",
+        "INPUT_TRACING",
+        "INPUT_TRACING_TO",
+        "INPUT_LOGFIRE_TOKEN",
+        "INPUT_OTEL_ENDPOINT",
+        "INPUT_TRACING_CONTENT",
+        "INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT",
+    )
+    return tuple(
+        InScope(name, "PS4" if name in tracing else "PS5", "ActionInputEnv") for name in names
+    )
+
+
+IN_SCOPE: Final[tuple[InScope, ...]] = (
+    # Config-file locator and run budgets.
+    InScope("MERGECRAFT_CONFIG", "PS3", "ConfigLocatorEnv"),
+    *_run_bounds_names(),
+    # The release half (already green): the `.env` view and the tracing layer.
+    InScope("MERGECRAFT_ENV", "PS2", "LocalDotEnv"),
+    InScope("TYPESAFE_API_KEY", "PS2", "LocalDotEnv"),
+    InScope("MERGECRAFT_TRACING", "PS4", "TracingEnv"),
+    InScope("MERGECRAFT_TRACING_TO", "PS4", "TracingEnv"),
+    InScope("MERGECRAFT_TRACE_DIR", "PS4", "TracingEnv"),
+    InScope("MERGECRAFT_LOGFIRE_TOKEN", "PS4", "TracingEnv"),
+    InScope("MERGECRAFT_OTEL_ENDPOINT", "PS4", "TracingEnv"),
+    InScope("MERGECRAFT_TRACING_PROJECT", "PS4", "TracingEnv"),
+    InScope("MERGECRAFT_TRACING_REGION", "PS4", "TracingEnv"),
+    InScope("MERGECRAFT_TRACING_CONTENT", "PS4", "TracingEnv"),
+    InScope("MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT", "PS4", "TracingEnv"),
+    # The Action inputs.
+    *_action_input_names(),
+    # Agent runtime, gateways and model selection.
+    InScope("MERGECRAFT_AGENT_TIMEOUT", "PS6", "AgentRuntimeEnv"),
+    InScope("MERGECRAFT_CODEX_HOME_PARENT", "PS6", "AgentRuntimeEnv"),
+    InScope("MERGECRAFT_MODEL", "PS6", "AgentRuntimeEnv"),
+    InScope("MERGECRAFT_AGENT", "PS6", "AgentRuntimeEnv"),
+    InScope("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "PS6", "ProviderGatewayEnv"),
+    InScope("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", "PS6", "ProviderGatewayEnv"),
+    InScope("MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS", "PS6", "ProviderGatewayEnv"),
+    InScope("MERGECRAFT_PROVIDER_EXTRA_OPTIONS", "PS6", "ProviderGatewayEnv"),
+    InScope("MERGECRAFT_OPENCODE_OTEL_PLUGIN", "PS6", None),
+    # Control switches (exact-`"1"`) and the operator knobs in the same files.
+    InScope("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL", "PS7", "ControlSwitches"),
+    InScope("MERGECRAFT_ALLOW_ROOT", "PS7", "ControlSwitches"),
+    InScope("MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME", "PS7", "ControlSwitches"),
+    InScope("MERGECRAFT_CODEX_SANDBOX", "PS7", None),
+    InScope("MERGECRAFT_AGENT_USER", "PS7", None),
+    InScope("MERGECRAFT_EGRESS_DNS_RESOLVERS", "PS7", None),
+    InScope("MERGECRAFT_AUTHORIZED_LINKED_REPOS", "PS7", None),
+    # Operational knobs: utils/, cli/, mcp/.
+    InScope("MERGECRAFT_LOG_LEVEL", "PS8", "LoggingEnv"),
+    InScope("LOG_LEVEL", "PS8", "LoggingEnv"),
+    InScope("MERGECRAFT_LOG_FORMAT", "PS8", "LoggingEnv"),
+    InScope("LOG_FORMAT", "PS8", "LoggingEnv"),
+    InScope("MERGECRAFT_NONINTERACTIVE", "PS8", "CliSessionEnv"),
+    InScope("MERGECRAFT_FORCE_INTERACTIVE", "PS8", "CliSessionEnv"),
+    InScope("MERGECRAFT_AGENT_PROTOCOL", "PS8", "CliSessionEnv"),
+    InScope("MERGECRAFT_MCP_PORT", "PS8", "McpEnv"),
+    InScope("MERGECRAFT_MCP_TOKEN", "PS8", "McpEnv"),
+    InScope("MERGECRAFT_API_URL", "PS8", "McpEnv"),
+    InScope("MERGECRAFT_CACHE_DIR", "PS8", "PathsEnv"),
+    InScope("MERGECRAFT_TEMP_PARENT", "PS8", "PathsEnv"),
+    InScope("MERGECRAFT_STICKY_ONLY_NEUTRAL", "PS8", None),
+    # Operational knobs: the remaining packages.
+    InScope("MERGECRAFT_AUDIT_ROOT", "PS9", "PathsEnv"),
+    InScope("MERGECRAFT_EVIDENCE_DIR", "PS9", "PathsEnv"),
+    InScope("MERGECRAFT_KEEP_TMP", "PS9", "PathsEnv"),
+    InScope("MERGECRAFT_CDP_URL", "PS9", "PathsEnv"),
+    InScope("MERGECRAFT_ANALYZERS", "PS9", "RunInputsEnv"),
+    InScope("MERGECRAFT_CI_WAIT_STATE", "PS9", "RunInputsEnv"),
+    InScope("CI_STATE", "PS9", "RunInputsEnv"),
+    InScope("MERGECRAFT_CI_FAILED_COUNT", "PS9", "RunInputsEnv"),
+    InScope("CI_FAILED_COUNT", "PS9", "RunInputsEnv"),
+    InScope("MERGECRAFT_ACTION_SHA", "PS9", "RunInputsEnv"),
+    InScope("MERGECRAFT_BUILD_COMMIT", "PS9", "RunInputsEnv"),
+    InScope("MERGECRAFT_PERMANENT_CURRENT_DECISION", "PS9", "RunInputsEnv"),
+    InScope("MERGECRAFT_CAPTURE_VERDICTS", "PS9", None),
+    InScope("MERGECRAFT_REVIEWER_BOT_LOGIN", "PS9", None),
+)
+
+IN_SCOPE_BY_NAME: Final = {row.name: row for row in IN_SCOPE}
+
+#: Models the plan registers for the one startup validation pass.
+REGISTERED_MODELS: Final[tuple[str, ...]] = (
+    "ConfigLocatorEnv",
+    "RunBoundsEnv",
+    "LoggingEnv",
+    "CliSessionEnv",
+    "McpEnv",
+    "PathsEnv",
+    "RunInputsEnv",
+)
+
+#: Secret-class names: every one is a ``SecretStr`` inside its model.
+SECRET_NAMES: Final[tuple[str, ...]] = (
+    "MERGECRAFT_LOGFIRE_TOKEN",
+    "INPUT_LOGFIRE_TOKEN",
+    "TYPESAFE_API_KEY",
+    "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
+    "MERGECRAFT_MCP_TOKEN",
+)
+
+#: The exact-``"1"`` control switches and the lattice of raw values the model
+#: must classify without widening the vocabulary.
+CONTROL_SWITCHES: Final[tuple[str, ...]] = (
+    "MERGECRAFT_ALLOW_UNSANDBOXED_SHELL",
+    "MERGECRAFT_ALLOW_ROOT",
+    "MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class AllowedRead:
+    """One environment read that legitimately stays outside ``config/env/``."""
+
+    path: str
+    name: str
+    kind: str
+    reason: str
+
+
+#: Classes an allowlisted read may carry. Kept small so the classification stays
+#: honest: a read is either the writer reading back a key it owns, a constant
+#: that is only written/labelled, platform/dynamic/runtime context, a test seam,
+#: or a message the code prints rather than reads.
+ALLOWED_KINDS: Final = frozenset(
+    {
+        "message bus",
+        "writer",
+        "descriptor",
+        "platform",
+        "dynamic",
+        "provider-native",
+        "github credential chain",
+        "test seam",
+        "generated",
+        "os standard",
+        "subprocess forwarding",
+    }
+)
+
+#: Reads that survive the migration, each with its class and reason. A read of an
+#: in-scope name that is *not* listed here is a violation: it must move into
+#: ``config/env/``. An out-of-scope read that is *not* listed here is a new
+#: unclassified read. Stale rows (a read that has moved) are pruned by the test
+#: owner, never by an implementation wave.
+ALLOWED_READS: Final[tuple[AllowedRead, ...]] = (
+    # ── message bus: mergeCraft wrote the key, so it reads its own value back ──
+    AllowedRead(
+        "src/mergecraft/agents/claude.py",
+        "MERGECRAFT_TEMP_DIR",
+        "message bus",
+        "written by git setup and read back by every child-facing module",
+    ),
+    AllowedRead(
+        "src/mergecraft/agents/codex.py",
+        "MERGECRAFT_TEMP_DIR",
+        "message bus",
+        "written by git setup and read back by every child-facing module",
+    ),
+    AllowedRead(
+        "src/mergecraft/agents/gemini.py",
+        "MERGECRAFT_TEMP_DIR",
+        "message bus",
+        "written by git setup and read back by every child-facing module",
+    ),
+    AllowedRead(
+        "src/mergecraft/ci/providers/github_actions.py",
+        "MERGECRAFT_TEMP_DIR",
+        "message bus",
+        "written by git setup and read back by every child-facing module",
+    ),
+    AllowedRead(
+        "src/mergecraft/mcp/checkout.py",
+        "MERGECRAFT_TEMP_DIR",
+        "message bus",
+        "written by git setup and read back by every child-facing module",
+    ),
+    AllowedRead(
+        "src/mergecraft/mcp/commit_info.py",
+        "MERGECRAFT_TEMP_DIR",
+        "message bus",
+        "written by git setup and read back by every child-facing module",
+    ),
+    AllowedRead(
+        "src/mergecraft/mcp/git.py",
+        "MERGECRAFT_TEMP_DIR",
+        "message bus",
+        "written by git setup and read back by every child-facing module",
+    ),
+    AllowedRead(
+        "src/mergecraft/mcp/shell.py",
+        "MERGECRAFT_TEMP_DIR",
+        "message bus",
+        "written by git setup and read back by every child-facing module",
+    ),
+    AllowedRead(
+        "src/mergecraft/utils/agent_resolve.py",
+        "MERGECRAFT_TEMP_DIR",
+        "message bus",
+        "written by git setup and read back by every child-facing module",
+    ),
+    AllowedRead(
+        "src/mergecraft/utils/git_setup.py",
+        "MERGECRAFT_TEMP_DIR",
+        "message bus",
+        "the writer itself: it restores the value it set for the run",
+    ),
+    AllowedRead(
+        "src/mergecraft/agents/codex.py",
+        "MERGECRAFT_MCP_TOKEN",
+        "message bus",
+        "the broker hands the child process its own token under this name",
+    ),
+    AllowedRead(
+        "src/mergecraft/analyzers/egress_bridge.py",
+        "MERGECRAFT_EGRESS_BRIDGE_IN_NS",
+        "message bus",
+        "re-exec marker the bridge sets before it enters the namespace",
+    ),
+    AllowedRead(
+        "src/mergecraft/security/broker.py",
+        "MERGECRAFT_CODEX_BROKER_TOKEN",
+        "message bus",
+        "the credential broker writes this and the child reads it back",
+    ),
+    AllowedRead(
+        "src/mergecraft/evidence/run_manifest.py",
+        "MERGECRAFT_TRACING",
+        "message bus",
+        "telemetry defaults are applied to os.environ and restored afterwards",
+    ),
+    AllowedRead(
+        "src/mergecraft/evidence/run_manifest.py",
+        "MERGECRAFT_TRACING_TO",
+        "message bus",
+        "telemetry defaults are applied to os.environ and restored afterwards",
+    ),
+    AllowedRead(
+        "src/mergecraft/evidence/run_manifest.py",
+        "MERGECRAFT_LOGFIRE_TOKEN",
+        "message bus",
+        "telemetry defaults are applied to os.environ and restored afterwards",
+    ),
+    AllowedRead(
+        "src/mergecraft/offline_review.py",
+        "MERGECRAFT_TRUST_TIER",
+        "message bus",
+        "the CLI flags export this for tracing and restore it in a finally block",
+    ),
+    AllowedRead(
+        "src/mergecraft/tracing/review_context.py",
+        "MERGECRAFT_REVIEW_ID",
+        "message bus",
+        "the run record exports its identity for the tracer",
+    ),
+    AllowedRead(
+        "src/mergecraft/tracing/review_context.py",
+        "MERGECRAFT_REVIEW_CORRELATION_KEY",
+        "message bus",
+        "the run record exports its identity for the tracer",
+    ),
+    AllowedRead(
+        "src/mergecraft/tracing/signals.py",
+        "MERGECRAFT_AGENT_ID",
+        "message bus",
+        "the orchestrator exports the agent identity for span attribution",
+    ),
+    AllowedRead(
+        "src/mergecraft/tracing/tracer.py",
+        "MERGECRAFT_TRACE_ID",
+        "message bus",
+        "the tracer writes its own trace identity and reads it back",
+    ),
+    AllowedRead(
+        "src/mergecraft/tracing/tracer.py",
+        "MERGECRAFT_TRACE_SESSION_ID",
+        "message bus",
+        "the tracer writes its own session identity and reads it back",
+    ),
+    AllowedRead(
+        "src/mergecraft/tracing/tracer.py",
+        "MERGECRAFT_TRUST_TIER",
+        "message bus",
+        "the trust tier is exported for span attributes, not parsed as a setting",
+    ),
+    AllowedRead(
+        "src/mergecraft/tracing/tracer.py",
+        "MERGECRAFT_RUN_ID",
+        "message bus",
+        "the wave runner exports the run identity for the tracer",
+    ),
+    # ── writers: the name is written, never parsed ──────────────────────────
+    AllowedRead(
+        "src/mergecraft/cli/auth_cmd.py",
+        "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
+        "writer",
+        "the auth command writes the .env entry; it does not parse the value",
+    ),
+    AllowedRead(
+        "src/mergecraft/cli/auth_cmd.py",
+        "MERGECRAFT_LOGFIRE_TOKEN",
+        "writer",
+        "the auth command writes the .env entry; it does not parse the value",
+    ),
+    AllowedRead(
+        "src/mergecraft/cli/auth_cmd.py",
+        "MERGECRAFT_TRACING_PROJECT",
+        "writer",
+        "the auth command writes the .env entry; it does not parse the value",
+    ),
+    AllowedRead(
+        "src/mergecraft/cli/provider_cmd.py",
+        "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL",
+        "writer",
+        "the legacy migration reads the parsed .env map and rewrites config",
+    ),
+    AllowedRead(
+        "src/mergecraft/cli/tracing_logfire_cmd.py",
+        "MERGECRAFT_TRACING_REGION",
+        "writer",
+        "the workflow and .env writers name the variable they emit",
+    ),
+    AllowedRead(
+        "src/mergecraft/jev/client.py",
+        "TYPESAFE_API_KEY",
+        "writer",
+        "the name is written to .env and labelled in the secrets help text",
+    ),
+    # ── descriptors: the constant names a variable for a message or probe ────
+    AllowedRead(
+        "src/mergecraft/agents/codex.py",
+        "MERGECRAFT_CODEX_SANDBOX",
+        "descriptor",
+        "the refusal warning names the override; the value read moves to the model",
+    ),
+    AllowedRead(
+        "src/mergecraft/agents/openai_compatible_gateways.py",
+        "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL",
+        "descriptor",
+        "the provider descriptor and presence probe name it; the value read moves",
+    ),
+    AllowedRead(
+        "src/mergecraft/agents/openai_compatible_gateways.py",
+        "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
+        "descriptor",
+        "the provider descriptor and presence probe name it; the value read moves",
+    ),
+    AllowedRead(
+        "src/mergecraft/agents/openai_compatible_gateways.py",
+        "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS",
+        "descriptor",
+        "the provider descriptor names it; the JSON read moves to the model",
+    ),
+    AllowedRead(
+        "src/mergecraft/agents/openai_compatible_gateways.py",
+        "MERGECRAFT_PROVIDER_EXTRA_OPTIONS",
+        "descriptor",
+        "the provider descriptor names it; the JSON read moves to the model",
+    ),
+    AllowedRead(
+        "src/mergecraft/analyzers/sandbox.py",
+        "MERGECRAFT_ALLOW_UNSANDBOXED_SHELL",
+        "descriptor",
+        "the fail-closed message names the override; the value read moves",
+    ),
+    AllowedRead(
+        "src/mergecraft/enterprise/audit.py",
+        "MERGECRAFT_AUDIT_ROOT",
+        "descriptor",
+        "the constant labels the directory variable; the path read moves",
+    ),
+    AllowedRead(
+        "src/mergecraft/evidence/run_packet.py",
+        "MERGECRAFT_EVIDENCE_DIR",
+        "descriptor",
+        "the constant labels the directory variable; the path read moves",
+    ),
+    AllowedRead(
+        "src/mergecraft/evidence/verdict_capture.py",
+        "MERGECRAFT_CAPTURE_VERDICTS",
+        "descriptor",
+        "the constant labels the opt-in flag; the value read moves",
+    ),
+    AllowedRead(
+        "src/mergecraft/review/linked_repos.py",
+        "MERGECRAFT_AUTHORIZED_LINKED_REPOS",
+        "descriptor",
+        "the constant names the list variable; the raw read moves",
+    ),
+    AllowedRead(
+        "src/mergecraft/utils/privilege.py",
+        "MERGECRAFT_ALLOW_ROOT",
+        "descriptor",
+        "the failure message names the override; the value read moves",
+    ),
+    # ── a dynamic name: the variable is constructed at runtime ───────────────
+    AllowedRead(
+        "src/mergecraft/agents/openai_compatible_gateways.py",
+        "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS_{n}",
+        "dynamic",
+        "the indexed multi-provider slot is enumerated, never a fixed setting",
+    ),
+    AllowedRead(
+        "src/mergecraft/cli/gha_cmd.py",
+        "INPUT_REPOS",
+        "dynamic",
+        "an input of the dispatching workflow, not of this action's action.yml",
+    ),
+    # ── classes that stay out by decision ──────────────────────────────────
+    AllowedRead(
+        "src/mergecraft/analyzers/sandbox.py",
+        "MERGECRAFT_PROBE_TEST_DOUBLE",
+        "test seam",
+        "selects the recorded probe output under pytest only",
+    ),
+    AllowedRead(
+        "src/mergecraft/harbor/agent.py",
+        "MERGECRAFT_MODEL",
+        "generated",
+        "the Harbor bench harness reads the values it constructs for a benchmark",
+    ),
+    AllowedRead(
+        "src/mergecraft/harbor/agent.py",
+        "MERGECRAFT_AGENT",
+        "generated",
+        "the Harbor bench harness reads the values it constructs for a benchmark",
+    ),
+    AllowedRead(
+        "src/mergecraft/harbor/agent.py",
+        "MERGECRAFT_INSTALL_REF",
+        "generated",
+        "the Harbor bench harness installs a pinned ref it selects itself",
+    ),
+    AllowedRead(
+        "src/mergecraft/utils/token.py",
+        "INPUT_TOKEN",
+        "github credential chain",
+        "an ordered credential resolution with its own fail-closed rules",
+    ),
+)
+
+
+# ── the scan ────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class ReadSite:
+    """One place ``src/mergecraft`` reads an environment variable."""
+
+    path: str
+    lineno: int
+    name: str
+    kind: str
+
+
+def _is_env_name(value: object) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    if value.endswith("_"):
+        # A prefix fragment (``MERGECRAFT_CUSTOM_PROVIDER_``), not a name.
+        return False
+    return value.startswith(_ENV_PREFIXES) or value in _FALLBACK_ALIASES
+
+
+def _names(node: ast.AST) -> list[str]:
+    """Return every env name in *node* that is a literal or a module constant."""
+    found: list[str] = []
+    for child in ast.walk(node):
+        if isinstance(child, ast.Constant) and _is_env_name(child.value):
+            found.append(child.value)
+    return found
+
+
+def _is_mapping(node: ast.AST) -> bool:
+    if isinstance(node, ast.Attribute):
+        return node.attr == "environ"
+    if isinstance(node, ast.Name):
+        return node.id in _MAPPING_NAMES or node.id.endswith(_MAPPING_SUFFIXES)
+    return False
+
+
+def _callee(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Name):
+        return node.id
+    return None
+
+
+def _constants_in_module(tree: ast.Module) -> dict[str, str]:
+    """Map a module-level ``UPPER = "<env name>"`` constant to its value."""
+    constants: dict[str, str] = {}
+    for node in tree.body:
+        targets: list[ast.AST] = []
+        value: ast.AST | None = None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            targets = [node.targets[0]]
+            value = node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+            value = node.value
+        if isinstance(value, ast.Constant) and _is_env_name(value.value):
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id.isupper():
+                    constants[target.id] = value.value
+    return constants
+
+
+def _referenced(tree: ast.Module, name: str) -> bool:
+    """True when *name* is loaded somewhere in the module (not a dead constant)."""
+    return any(
+        isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Load)
+        for node in ast.walk(tree)
+    )
+
+
+@functools.lru_cache(maxsize=1)
+def _global_constants() -> dict[str, str]:
+    """Every env-name constant defined at module level, across ``src/mergecraft``.
+
+    A name defined twice with different values is ambiguous and is not resolved;
+    the read then simply stays invisible rather than being misclassified.
+    """
+    values: dict[str, set[str]] = {}
+    for path in _SRC.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for constant, value in _constants_in_module(tree).items():
+            values.setdefault(constant, set()).add(value)
+    return {name: next(iter(found)) for name, found in values.items() if len(found) == 1}
+
+
+def _resolve(node: ast.AST, constants: dict[str, str]) -> str | None:
+    """Resolve one argument to an environment-variable name, if it is literal."""
+    if isinstance(node, ast.Constant) and _is_env_name(node.value):
+        return node.value
+    if isinstance(node, ast.Name) and node.id in constants:
+        return constants[node.id]
+    return None
+
+
+def _read_body_reads_a_mapping(body: list[ast.stmt]) -> bool:
+    """True when a loop body reads through a mapping (the candidate-name pattern)."""
+    for stmt in body:
+        for node in ast.walk(stmt):
+            if isinstance(node, ast.Call) and _callee(node.func) in _GETTERS:
+                func = node.func
+                if isinstance(func, ast.Attribute) and _is_mapping(func.value):
+                    return True
+            if isinstance(node, ast.Subscript) and _is_mapping(node.value):
+                return True
+            if isinstance(node, ast.Compare) and any(
+                _is_mapping(side) for side in (node.left, *node.comparators)
+            ):
+                return True
+    return False
+
+
+def _scan_file(path: Path, constants: dict[str, str]) -> list[ReadSite]:
+    rel = path.relative_to(_REPO_ROOT).as_posix()
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    sites: list[ReadSite] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            # A module constant that *is* an environment name is a read-site
+            # surrogate where the name is used dynamically — but only while the
+            # constant is referenced; a dead export is not a read.
+            value = node.value
+            if isinstance(value, ast.Constant) and _is_env_name(value.value):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    if (
+                        isinstance(target, ast.Name)
+                        and target.id.isupper()
+                        and _referenced(tree, target.id)
+                    ):
+                        sites.append(ReadSite(rel, node.lineno, value.value, "constant"))
+            continue
+        if isinstance(node, ast.Call):
+            callee = _callee(node.func)
+            if callee in _READ_HELPERS:
+                for arg in node.args:
+                    name = _resolve(arg, constants)
+                    if name is not None:
+                        sites.append(ReadSite(rel, node.lineno, name, f"helper:{callee}"))
+                continue
+            if callee not in _GETTERS:
+                continue
+            func = node.func
+            if not isinstance(func, ast.Attribute) or not _is_mapping(func.value):
+                continue
+            if not node.args:
+                continue
+            name = _resolve(node.args[0], constants)
+            if name is not None:
+                sites.append(ReadSite(rel, node.lineno, name, f"environ.{callee}"))
+        elif isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load):
+            if not _is_mapping(node.value):
+                continue
+            name = _resolve(node.slice, constants)
+            if name is not None:
+                sites.append(ReadSite(rel, node.lineno, name, "environ[load]"))
+        elif isinstance(node, ast.Compare):
+            for op, comparator in zip(node.ops, node.comparators, strict=True):
+                if not isinstance(op, (ast.In, ast.NotIn)):
+                    continue
+                if not _is_mapping(comparator):
+                    continue
+                name = _resolve(node.left, constants)
+                if name is not None:
+                    sites.append(ReadSite(rel, node.lineno, name, "environ.contains"))
+        elif isinstance(node, ast.For) and isinstance(node.iter, (ast.Tuple, ast.List)):
+            if not _read_body_reads_a_mapping(node.body):
+                continue
+            for element in node.iter.elts:
+                name = _resolve(element, constants)
+                if name is not None:
+                    sites.append(ReadSite(rel, node.lineno, name, "candidates"))
+    return sites
+
+
+@functools.lru_cache(maxsize=1)
+def _read_sites() -> list[ReadSite]:
+    """Every environment read in ``src/mergecraft`` outside ``config/env/``."""
+    constants = _global_constants()
+    sites: list[ReadSite] = []
+    for path in sorted(_SRC.rglob("*.py")):
+        rel = path.relative_to(_REPO_ROOT).as_posix()
+        if _ENV_PACKAGE in f"{rel}/":
+            continue
+        sites.extend(_scan_file(path, constants))
+    return sites
+
+
+# ── model discovery ─────────────────────────────────────────────────────────
+
+
+def _module(file: str) -> Any:
+    return importlib.import_module(f"mergecraft.config.env.{file}")
+
+
+def _env_modules() -> list[Any]:
+    """Every module in the leaf package, including submodules it does not export."""
+    package = importlib.import_module("mergecraft.config.env")
+    modules = [package]
+    for path in sorted(Path(package.__file__).parent.glob("*.py")):
+        if path.stem.startswith("_"):
+            continue
+        modules.append(importlib.import_module(f"mergecraft.config.env.{path.stem}"))
+    return modules
+
+
+def _env_models() -> dict[str, type[BaseSettings]]:
+    """Every ``BaseSettings`` subclass defined in the leaf package, by class name."""
+    models: dict[str, type[BaseSettings]] = {}
+    for module in _env_modules():
+        for value in vars(module).values():
+            if (
+                isinstance(value, type)
+                and issubclass(value, BaseSettings)
+                and value.__module__.startswith("mergecraft.config.env")
+            ):
+                models.setdefault(value.__name__, value)
+    return models
+
+
+def _alias_names(field: FieldInfo) -> tuple[str, ...]:
+    alias = field.validation_alias
+    if isinstance(alias, str):
+        return (alias,)
+    choices = getattr(alias, "choices", ())
+    return tuple(choice for choice in choices if isinstance(choice, str))
+
+
+def _declaring(models: dict[str, type[BaseSettings]], name: str) -> list[str]:
+    return sorted(
+        model_name
+        for model_name, model in models.items()
+        if any(name in _alias_names(field) for field in model.model_fields.values())
+    )
+
+
+def _field_name(models: dict[str, type[BaseSettings]], model_name: str, name: str) -> str:
+    model = models[model_name]
+    for field_name, field in model.model_fields.items():
+        if name in _alias_names(field):
+            return field_name
+    msg = f"{model_name} does not declare {name}"
+    raise AssertionError(msg)
+
+
+# ── 1. every in-scope name is declared once, by the model that owns it ──────
+
+
+@pytest.mark.parametrize(
+    "row",
+    IN_SCOPE,
+    ids=[f"{row.name}-{row.wave}" for row in IN_SCOPE],
+)
+def test_in_scope_name_is_declared_by_its_model(row: InScope) -> None:
+    """Each in-scope variable is a field alias of exactly one process-env model.
+
+    The ``.env`` view (``LocalDotEnv``) is exempt from the "exactly once" count:
+    it is a file view, not a process-environment reader, and it declares the
+    ``.env``-resident names a process model cannot own.
+    """
+    models = _env_models()
+    declaring = _declaring(models, row.name)
+
+    if row.model == "LocalDotEnv":
+        assert "LocalDotEnv" in declaring, (
+            f"{row.name} must be declared by LocalDotEnv; declared by {declaring}"
+        )
+        return
+
+    process_declaring = [name for name in declaring if name != "LocalDotEnv"]
+    assert len(process_declaring) == 1, (
+        f"{row.name} must be declared by exactly one process-env model, "
+        f"found {process_declaring or 'none'}"
+    )
+    if row.model is not None:
+        assert process_declaring == [row.model], (
+            f"{row.name} must be declared by {row.model}, found {process_declaring}"
+        )
+
+
+@pytest.mark.parametrize("model_name", REGISTERED_MODELS)
+def test_plan_named_models_are_registered(model_name: str) -> None:
+    """The models the plan registers reach ``validate_env_settings()``."""
+    from mergecraft.config.env import registered_env_models
+
+    models = _env_models()
+    assert model_name in models, f"mergecraft.config.env must export {model_name}"
+    assert models[model_name] in registered_env_models(), (
+        f"{model_name} must be registered so the startup pass validates it"
+    )
+
+
+# ── 2. no in-scope read survives outside the leaf package ──────────────────
+
+
+@pytest.mark.parametrize(
+    "row",
+    IN_SCOPE,
+    ids=[f"{row.name}-{row.wave}" for row in IN_SCOPE],
+)
+def test_in_scope_name_is_read_only_through_a_model(row: InScope) -> None:
+    """A read of an in-scope name outside ``config/env/`` must be allowlisted.
+
+    The allowlist holds only reads whose class is not "parse this setting": a
+    message-bus writer reading back its own key, a constant that is written
+    rather than read, or a name the code prints. Anything else belongs in the
+    leaf package.
+    """
+    allowed = {(entry.path, entry.name) for entry in ALLOWED_READS}
+    offenders = [
+        site
+        for site in _read_sites()
+        if site.name == row.name and (site.path, site.name) not in allowed
+    ]
+    rendered = "\n".join(f"  {site.path}:{site.lineno} ({site.kind})" for site in offenders)
+    assert not offenders, (
+        f"{row.name} is read outside mergecraft.config.env (owned by {row.wave}); "
+        f"move the read into the model:\n{rendered}"
+    )
+
+
+def test_secret_names_are_secretstr_and_never_leak() -> None:
+    """Every secret field is a ``SecretStr`` and no dump renders its value."""
+    from mergecraft.config.env import from_env
+
+    models = _env_models()
+    canary = "inv-canary-secret-value"
+    for name in SECRET_NAMES:
+        declaring = _declaring(models, name)
+        assert declaring, f"{name} must be declared by a model"
+        for model_name in declaring:
+            model = models[model_name]
+            field_name = _field_name(models, model_name, name)
+            annotation = str(model.model_fields[field_name].annotation)
+            assert "SecretStr" in annotation, (
+                f"{model_name}.{field_name} holds {name} and must be SecretStr, got {annotation}"
+            )
+            instance = from_env(model, {name: canary})
+            blob = f"{instance!r}\n{instance.model_dump()!s}\n{instance.model_dump_json()}"
+            assert canary not in blob, f"{model_name} leaked {name} through a dump"
+
+
+def test_control_switch_fields_are_exact_flags_and_never_listed() -> None:
+    """Control switches are exact-``"1"`` fields, marked hidden, never repo settings."""
+    from mergecraft.config.env import from_env
+    from mergecraft.config.settings import RepoSettings, default_settings
+
+    models = _env_models()
+    assert "ControlSwitches" in models, "mergecraft.config.env must export ControlSwitches"
+    raw_values = ["1", " 1", "1 ", "01", "true", "yes", "on", "t", "", None]
+
+    for name in CONTROL_SWITCHES:
+        field_name = _field_name(models, "ControlSwitches", name)
+        field = models["ControlSwitches"].model_fields[field_name]
+        annotation = str(field.annotation)
+        assert "bool" not in annotation, (
+            f"ControlSwitches.{field_name} ({name}) must not be a bool: {annotation}"
+        )
+        assert (field.json_schema_extra or {}).get("control_switch") is True, (
+            f"ControlSwitches.{field_name} must carry json_schema_extra control_switch=True"
+        )
+        for raw in raw_values:
+            env = {name: raw} if raw is not None else {}
+            value = getattr(from_env(models["ControlSwitches"], env), field_name)
+            assert getattr(value, "enabled", None) is (raw == "1"), (
+                f"{name}={raw!r} must enable the switch only for the exact string '1'"
+            )
+
+    repo_aliases = {
+        alias for field in RepoSettings.model_fields.values() for alias in _alias_names(field)
+    } | set(RepoSettings.model_fields)
+    leaked = sorted(set(CONTROL_SWITCHES) & repo_aliases)
+    assert not leaked, f"control switches must not be repo settings fields: {leaked}"
+    dump = default_settings().model_dump_json()
+    assert not [name for name in CONTROL_SWITCHES if name in dump], (
+        "no resolved-settings dump may carry a control switch"
+    )
+
+
+# ── 3. every out-of-scope read is allowlisted with a class and a reason ─────
+
+
+def test_allowlist_rows_carry_a_known_class_and_a_reason() -> None:
+    """The allowlist is self-describing: a class from the vocabulary and a reason."""
+    for entry in ALLOWED_READS:
+        assert entry.kind in ALLOWED_KINDS, f"{entry.path}:{entry.name} has class {entry.kind!r}"
+        assert len(entry.reason.strip()) >= 12, (
+            f"{entry.path}:{entry.name} needs a real reason, got {entry.reason!r}"
+        )
+
+
+def test_every_out_of_scope_read_is_allowlisted() -> None:
+    """A read of a name outside the in-scope set must carry class + reason."""
+    allowed = {(entry.path, entry.name) for entry in ALLOWED_READS}
+    offenders = [
+        site
+        for site in _read_sites()
+        if site.name not in IN_SCOPE_BY_NAME and (site.path, site.name) not in allowed
+    ]
+    rendered = "\n".join(
+        f"  {site.path}:{site.lineno} {site.name} ({site.kind})" for site in offenders
+    )
+    assert not offenders, (
+        "unclassified environment reads outside mergecraft.config.env — add an "
+        f"allowlist row with class + reason, or migrate the read:\n{rendered}"
+    )

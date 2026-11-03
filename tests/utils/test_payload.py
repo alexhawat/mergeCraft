@@ -32,6 +32,7 @@ from mergecraft.utils.payload import (
 # only, not the access helper).
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 
@@ -802,3 +803,198 @@ def test_explicit_input_disabled_beats_json_payload_pin(
     )
     assert payload["modelPin"] is False
     assert payload["modelExplicit"] is False
+
+
+# ── the Action-input model (49b) ────────────────────────────────────────────
+#
+# Every ``INPUT_*`` this action maps except the GitHub token becomes one field of
+# ``mergecraft.config.env.ActionInputEnv``: exact names, an empty value is
+# "unset", and the public ``ActionInputs`` shape does not move. The GitHub token
+# stays in its own resolution chain and is not a model field.
+
+#: The inputs ``action.yml`` maps into the container, minus ``INPUT_TOKEN``.
+#: ``codex_sandbox`` maps to ``MERGECRAFT_CODEX_SANDBOX`` instead and is an
+#: operator knob of the control-switch model.
+_ACTION_INPUT_NAMES: tuple[str, ...] = (
+    "INPUT_PROMPT",
+    "INPUT_PROMPT_FILE",
+    "INPUT_TIMEOUT",
+    "INPUT_MODEL",
+    "INPUT_MODEL_PIN",
+    "INPUT_CWD",
+    "INPUT_PUSH",
+    "INPUT_SHELL",
+    "INPUT_STATUS_CHECKS",
+    "INPUT_ANALYZERS",
+    "INPUT_SARIF_UPLOAD",
+    "INPUT_OUTPUT_SCHEMA",
+    "INPUT_ALLOW_PR_TARGET_COMMENTS",
+    "INPUT_PROVIDER_BASE_URL",
+    "INPUT_PROVIDER_API_KEY_ENV",
+    "INPUT_SUGGEST_EVAL_ADD",
+    "INPUT_TRACING",
+    "INPUT_TRACING_TO",
+    "INPUT_LOGFIRE_TOKEN",
+    "INPUT_OTEL_ENDPOINT",
+    "INPUT_TRACING_CONTENT",
+    "INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT",
+    "INPUT_SETUP_FAILURE_POLICY",
+    "INPUT_SETUP_TIMEOUT",
+)
+
+
+def _action_input_model() -> Any:
+    from mergecraft.config.env import ActionInputEnv
+
+    return ActionInputEnv
+
+
+def _declared_aliases(model: Any) -> set[str]:
+    declared: set[str] = set()
+    for field in model.model_fields.values():
+        alias = field.validation_alias
+        if isinstance(alias, str):
+            declared.add(alias)
+            continue
+        declared.update(
+            choice for choice in getattr(alias, "choices", ()) if isinstance(choice, str)
+        )
+    return declared
+
+
+def _field_for(model: Any, alias: str) -> str:
+    for name, field in model.model_fields.items():
+        declared = field.validation_alias
+        if declared == alias:
+            return name
+        if alias in getattr(declared, "choices", ()):
+            return name
+    msg = f"{model.__name__} does not declare {alias}"
+    raise AssertionError(msg)
+
+
+@pytest.mark.parametrize("name", _ACTION_INPUT_NAMES)
+def test_action_input_model_declares_every_action_input(name: str) -> None:
+    """Each mapped input is a field with its exact variable name."""
+    model = _action_input_model()
+    assert name in _declared_aliases(model), f"ActionInputEnv must declare {name}"
+
+
+def test_action_input_model_does_not_carry_the_github_token() -> None:
+    """``INPUT_TOKEN`` belongs to the GitHub token chain, not to this model."""
+    assert "INPUT_TOKEN" not in _declared_aliases(_action_input_model())
+
+
+@pytest.mark.parametrize("name", _ACTION_INPUT_NAMES)
+def test_an_empty_action_input_reads_as_unset(name: str) -> None:
+    """The Actions runtime injects an empty string for an unset input."""
+    model = _action_input_model()
+    field_name = _field_for(model, name)
+
+    assert getattr(model.from_env({name: ""}), field_name) is None
+    assert getattr(model.from_env({}), field_name) is None
+
+
+def test_action_input_model_reads_nothing_from_the_process_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mapping-only read never falls back to ``os.environ``."""
+    model = _action_input_model()
+    field_name = _field_for(model, "INPUT_PROMPT")
+    monkeypatch.setenv("INPUT_PROMPT", "from the process env")
+
+    assert getattr(model.from_env({}), field_name) is None
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(None, ""), ("", ""), ("  hi  ", "hi"), (" do work ", "do work")],
+)
+def test_get_action_input_keeps_its_frozen_behaviour(
+    raw: str | None,
+    expected: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unset is the empty string and the value is stripped, as today."""
+    from mergecraft.utils.payload import get_action_input
+
+    if raw is None:
+        monkeypatch.delenv("INPUT_PROMPT", raising=False)
+    else:
+        monkeypatch.setenv("INPUT_PROMPT", raw)
+
+    assert get_action_input("prompt") == expected
+
+
+def test_get_action_input_maps_hyphens_to_underscores(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``tracing-to`` reads ``INPUT_TRACING_TO``."""
+    from mergecraft.utils.payload import get_action_input
+
+    monkeypatch.setenv("INPUT_TRACING_TO", "logfire")
+
+    assert get_action_input("tracing-to") == "logfire"
+
+
+@pytest.mark.parametrize(
+    ("name", "raw", "expected"),
+    [
+        ("INPUT_PUSH", "Enabled", "enabled"),
+        ("INPUT_SHELL", "DISABLED", "disabled"),
+        ("INPUT_STATUS_CHECKS", "Enabled", True),
+        ("INPUT_MODEL_PIN", "Enabled", True),
+    ],
+)
+def test_resolve_payload_lowercases_the_permission_inputs(
+    name: str,
+    raw: str,
+    expected: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The permission inputs keep today's lower-casing on the public payload."""
+    monkeypatch.setenv("INPUT_PROMPT", "do work")
+    monkeypatch.delenv("INPUT_PROMPT_FILE", raising=False)
+    monkeypatch.setenv(name, raw)
+
+    payload = resolve_payload(repo_settings=default_settings())
+
+    key = {
+        "INPUT_PUSH": "push",
+        "INPUT_SHELL": "shell",
+        "INPUT_STATUS_CHECKS": "statusChecks",
+        "INPUT_MODEL_PIN": "modelPin",
+    }[name]
+    assert payload[key] == expected
+
+
+@pytest.fixture
+def _restore_provider_env() -> Iterator[None]:
+    """Restore the singleton provider env vars the resolver writes."""
+    import os as os_module
+
+    keys = ("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "MERGECRAFT_CUSTOM_PROVIDER_API_KEY")
+    before = {key: os_module.environ.get(key) for key in keys}
+    yield
+    for key, value in before.items():
+        if value is None:
+            os_module.environ.pop(key, None)
+        else:
+            os_module.environ[key] = value
+
+
+@pytest.mark.usefixtures("_restore_provider_env")
+def test_custom_provider_inputs_still_export_the_singleton_pair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``provider_base_url`` and ``provider_api_key_env`` write the same two env vars."""
+    import os
+
+    from mergecraft.utils.payload import resolve_custom_provider_env_inputs
+
+    monkeypatch.setenv("INPUT_PROVIDER_BASE_URL", "https://gateway.example/v1")
+    monkeypatch.setenv("INPUT_PROVIDER_API_KEY_ENV", "MY_GATEWAY_KEY")
+    monkeypatch.setenv("MY_GATEWAY_KEY", "sk-not-a-real-key")
+
+    resolve_custom_provider_env_inputs()
+
+    assert os.environ["MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"] == "https://gateway.example/v1"
+    assert os.environ["MERGECRAFT_CUSTOM_PROVIDER_API_KEY"] == "sk-not-a-real-key"
