@@ -223,6 +223,13 @@ outputs:
     description: |
       Closed VerdictDiagnostic code from the terminal-verdict policy path for
       this run. Empty when the run did not evaluate terminal protocol policy.
+  failover_eligible:
+    description: |
+      `true` when the run failed in a way the next reviewer vendor may not
+      share (an expired subscription login, for example), so a cascade should
+      hand the review to its next rung even though this rung emitted a
+      `neutral` evidence packet. This is not `retryable`: re-running the same
+      rung with the same credential cannot succeed. `false` otherwise.
 
 runs:
   using: "docker"

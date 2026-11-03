@@ -72,6 +72,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An expired Codex subscription login now hands the review to the next vendor
+  instead of ending it. The Codex driver marks that failure
+  `failover_eligible` (move on to the next vendor) while keeping it not
+  `retryable` (no retry of the same login), the model chain advances on it but
+  never re-runs the dead login at the tail, and the action exposes a
+  `failover_eligible` output. The self-review cascade reads that output, so a
+  `neutral` packet from the dead login no longer holds the Claude backstop back
+  when OpenCode Go also failed without a verdict (#1009).
+
 - OpenCode Go steps with missing or zero cost use published DeepSeek V4.1
   Flash / V4 Pro token rates when their timestamps are available, including
   weekday peak windows and cached input. Reported costs are preserved; the

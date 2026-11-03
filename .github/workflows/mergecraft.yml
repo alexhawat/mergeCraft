@@ -981,6 +981,10 @@ jobs:
           BASELINE_ID: ${{ steps.approval_baseline.outputs.id }}
           OPENCODE_GO_OUTCOME: ${{ steps.mergecraft_opencode_go.outcome }}
           CODEX_OUTCOME: ${{ steps.mergecraft_codex.outcome }}
+          # #1009 — "hand the review on", distinct from retryable: an expired
+          # subscription login emits a neutral packet that is not a verdict.
+          OPENCODE_GO_FAILOVER_ELIGIBLE: ${{ steps.mergecraft_opencode_go.outputs.failover_eligible }}
+          CODEX_FAILOVER_ELIGIBLE: ${{ steps.mergecraft_codex.outputs.failover_eligible }}
           OPENCODE_GO_PACKET_FILE: ${{ runner.temp }}/packet-opencode-go.json
           CODEX_PACKET_FILE: ${{ runner.temp }}/packet-codex.json
           TRUSTED_ROOT: ${{ steps.trusted_scripts.outputs.root }}

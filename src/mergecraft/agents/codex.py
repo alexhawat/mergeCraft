@@ -39,6 +39,7 @@ from mergecraft.agents.openai_compatible_gateways import (
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
+    FAILOVER_ELIGIBLE_KEY,
     INFRA_REASON_KEY,
     STDERR_DRAIN_JOIN_TIMEOUT_S,
     AgentResult,
@@ -909,7 +910,10 @@ def _run_codex_streaming(
                 f"before any review could start.\n\ncodex stderr:\n{error}"
             )
         # A retired subscription login is infrastructure, not a review failure,
-        # and no retry against the same login can succeed (#922). Only a run
+        # and no retry against the same login can succeed (#922), so it is
+        # explicitly not ``retryable``. It is ``failover_eligible`` though: the
+        # next vendor's credential is independent of this one, so the cascade
+        # must still hand the review on (#1009). Only a run
         # actually using that login can see this: an API-key run that merely
         # quotes the phrase (a review of this very code does) must fall through
         # to the ordinary classification below.
@@ -927,7 +931,11 @@ def _run_codex_streaming(
                     output=output or None,
                     error=f"{CODEX_CREDENTIAL_EXPIRED_REASON}\n\ncodex reported: {error}",
                     usage=usage,
-                    metadata={INFRA_REASON_KEY: CODEX_CREDENTIAL_EXPIRED_KIND},
+                    metadata={
+                        INFRA_REASON_KEY: CODEX_CREDENTIAL_EXPIRED_KIND,
+                        "retryable": False,
+                        FAILOVER_ELIGIBLE_KEY: True,
+                    },
                 ),
                 prompt,
             )
