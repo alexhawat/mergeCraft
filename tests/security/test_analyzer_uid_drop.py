@@ -5,7 +5,9 @@ untrusted analyzer payload must be a non-root process that can write its scratch
 and ``HOME``, cannot write a root-owned file outside the read-only checkout, and
 never reaches UID 0 on the userspace-egress path (or fails closed with a named
 reason). On any host without euid 0, Linux, ``unshare`` and ``setpriv`` the whole
-module skips with the precondition reason.
+module skips with the precondition reason — except in the privileged lane
+(``MERGECRAFT_PRIVILEGED_LANE=1``, ``make test-uid-drop-privileged``), where a
+missing precondition fails.
 """
 
 from __future__ import annotations
@@ -29,7 +31,23 @@ def _preconditions_met() -> bool:
     return shutil.which("unshare") is not None and shutil.which("setpriv") is not None
 
 
-pytestmark = pytest.mark.skipif(not _preconditions_met(), reason=_ROOT_PRECONDITION_REASON)
+def _privileged_lane() -> bool:
+    """Inside the lane built for this module, a missing precondition fails, not skips."""
+    return os.environ.get("MERGECRAFT_PRIVILEGED_LANE") == "1"
+
+
+pytestmark = pytest.mark.skipif(
+    not _preconditions_met() and not _privileged_lane(), reason=_ROOT_PRECONDITION_REASON
+)
+
+
+@pytest.fixture(autouse=True)
+def _require_preconditions_in_the_privileged_lane() -> None:
+    if not _preconditions_met():
+        pytest.fail(
+            "MERGECRAFT_PRIVILEGED_LANE=1 but the lane cannot run this module: "
+            f"{_ROOT_PRECONDITION_REASON}"
+        )
 
 
 def _make_traversable_for_dropped_uid(path: Path) -> None:

@@ -210,6 +210,12 @@ jobs:
         # test is written for; with the privileged-lane flag set it fails
         # rather than skips.
         run: sudo env MERGECRAFT_DISPOSABLE_LINUX=1 make test-sandbox-privileged
+      - name: Analyzer UID-drop proofs on the disposable host lane
+        # The trusted-tier and untrusted-sandbox identity-drop tests need euid
+        # 0 on Linux with setpriv and unshare, and self-skip in every other
+        # lane (#1015). With the privileged-lane flag set they fail rather than
+        # skip here.
+        run: sudo env MERGECRAFT_DISPOSABLE_LINUX=1 make test-uid-drop-privileged
 
   security-scope:
     name: npm audit + workflow lint
