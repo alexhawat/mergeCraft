@@ -41,6 +41,7 @@ from mergecraft.agents.verifier import (
     VERIFIER_SYSTEM_PROMPT,
     pinned_judge_model,
 )
+from mergecraft.config.env import AgentRuntimeEnv
 from mergecraft.tracing._tool_attrs import (
     emit_verb_subevent,
     enrich_tool_request,
@@ -1098,7 +1099,7 @@ def _run_claude_once(
                 )
                 returncode = wait_or_kill_process_group(
                     process,
-                    timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
+                    timeout=AgentRuntimeEnv().agent_timeout,
                 )
             except subprocess.TimeoutExpired:
                 return AgentResult(success=False, error="claude CLI timed out")
@@ -1260,7 +1261,7 @@ def _run_claude_legacy_subprocess(
             env=resolved_env,
             capture_output=True,
             text=True,
-            timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
+            timeout=AgentRuntimeEnv().agent_timeout,
             check=False,
         )
     except FileNotFoundError as err:

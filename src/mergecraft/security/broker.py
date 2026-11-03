@@ -32,6 +32,7 @@ import httpx
 from loguru import logger
 
 from mergecraft.analyzers.redact import redact_secrets
+from mergecraft.config.env import AgentRuntimeEnv
 from mergecraft.security.egress import (
     inspect_external_url,
     pinned_http_transport,
@@ -297,7 +298,7 @@ def _upstream_request_path(request_path: str) -> str:
 
 
 def _upstream_timeout() -> httpx.Timeout:
-    agent_timeout = float(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600"))
+    agent_timeout = float(AgentRuntimeEnv().agent_timeout)
     return httpx.Timeout(
         connect=30.0,
         read=agent_timeout,

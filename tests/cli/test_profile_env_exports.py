@@ -2,26 +2,44 @@
 
 ``profile_env_overrides`` used to export a latency budget and a profile name
 that nothing read. The three budget variables are consumed by
-``utils/run_bounds.resolve_run_bounds``; ``latency_budget_ms`` stays a recorded
-field on the profile.
+``utils/run_bounds.resolve_run_bounds`` through ``RunBoundsEnv``;
+``latency_budget_ms`` stays a recorded field on the profile.
+
+The accepted set is derived from the model that owns the parse, not from the
+text of ``utils/run_bounds.py``: the parser moved into ``RunBoundsEnv``, so a
+source-text scrape of the resolver no longer sees the variable names.
 """
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
+from typing import Any
 
 import pytest
 
 from mergecraft.cli.profiles import profile_env_overrides, resolve_profile
 from mergecraft.utils.run_bounds import resolve_run_bounds
 
-_RUN_BOUNDS_SOURCE = (
-    Path(__file__).resolve().parents[2] / "src" / "mergecraft" / "utils" / "run_bounds.py"
-)
-_READ_ENV = frozenset(
-    re.findall(r"MERGECRAFT_[A-Z0-9_]+", _RUN_BOUNDS_SOURCE.read_text(encoding="utf-8"))
-)
+
+def _declared_aliases(model: Any) -> frozenset[str]:
+    """Every exact environment name *model* declares."""
+    names: set[str] = set()
+    for field in model.model_fields.values():
+        alias = field.validation_alias
+        if isinstance(alias, str):
+            names.add(alias)
+            continue
+        names.update(choice for choice in getattr(alias, "choices", ()) if isinstance(choice, str))
+    return frozenset(names)
+
+
+def _read_env() -> frozenset[str]:
+    """The run-bounds reader's accepted set, as the model declares it."""
+    from mergecraft.config.env import RunBoundsEnv
+
+    return _declared_aliases(RunBoundsEnv)
+
+
+_READ_ENV = _read_env()
 _LATENCY_VAR = "MERGECRAFT_LATENCY_BUDGET_MS"
 _PROFILE_VAR = "MERGECRAFT_PROFILE"
 _BUDGET_VARS = frozenset(
@@ -35,10 +53,13 @@ _BUDGET_VARS = frozenset(
 
 @pytest.mark.parametrize("profile_name", ["fast", "deep", "security"])
 def test_profile_env_overrides_emits_no_unread_variable(profile_name: str) -> None:
-    """Every exported key is one the run-bounds reader resolves."""
+    """Every exported key is one the run-bounds model resolves."""
     profile = resolve_profile(profile_name)
     assert profile is not None
     emitted = set(profile_env_overrides(profile))
+    # Guard the oracle: the model must still declare the budget bundle, otherwise
+    # the subset check is weaker than it looks.
+    assert _READ_ENV >= _BUDGET_VARS, sorted(_BUDGET_VARS - _READ_ENV)
     assert emitted <= _READ_ENV, sorted(emitted - _READ_ENV)
     assert _LATENCY_VAR not in emitted
     assert _PROFILE_VAR not in emitted

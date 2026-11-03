@@ -23,12 +23,13 @@ def ci_wait_inputs_from_env() -> tuple[str, int] | None:
     ``CI_STATE`` / ``CI_FAILED_COUNT`` aliases — both pairs are set in dogfood
     ``mergecraft.yml`` for backward-compatible consumer templates.
     """
-    state = (os.environ.get("MERGECRAFT_CI_WAIT_STATE") or os.environ.get("CI_STATE") or "").strip()
+    from mergecraft.config.env import RunInputsEnv
+
+    env = RunInputsEnv()
+    state = (env.ci_wait_state or "").strip()
     if not state:
         return None
-    raw_count = (
-        os.environ.get("MERGECRAFT_CI_FAILED_COUNT") or os.environ.get("CI_FAILED_COUNT") or "0"
-    ).strip()
+    raw_count = (env.ci_failed_count or "0").strip()
     try:
         failed_count = int(raw_count)
     except ValueError:

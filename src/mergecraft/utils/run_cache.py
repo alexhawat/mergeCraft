@@ -6,7 +6,6 @@ import contextlib
 import fcntl
 import hashlib
 import json
-import os
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -153,7 +152,9 @@ class RunCache:
 
 def default_cache_root() -> Path:
     """Return the on-disk run-cache root (``MERGECRAFT_CACHE_DIR`` or XDG default)."""
-    raw = os.environ.get("MERGECRAFT_CACHE_DIR")
+    from mergecraft.config.env import PathsEnv
+
+    raw = PathsEnv().cache_dir
     if raw:
         return Path(raw).expanduser()
     return Path.home() / ".cache" / "mergecraft" / "run-cache"

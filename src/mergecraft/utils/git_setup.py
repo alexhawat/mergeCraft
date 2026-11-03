@@ -55,8 +55,11 @@ def _is_under_forbidden_temp(path: Path) -> bool:
 
 def _safe_temp_parent() -> Path | None:
     """Prefer a parent Codex accepts for PATH aliases (not world-writable /tmp)."""
-    for key in ("MERGECRAFT_TEMP_PARENT", "RUNNER_TEMP"):
-        raw = os.environ.get(key, "").strip()
+    from mergecraft.config.env import PathsEnv
+
+    candidates = (PathsEnv().temp_parent, os.environ.get("RUNNER_TEMP", ""))
+    for raw_candidate in candidates:
+        raw = (raw_candidate or "").strip()
         if not raw:
             continue
         candidate = Path(raw)

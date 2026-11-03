@@ -15,6 +15,7 @@ from loguru import logger
 
 from mergecraft.agents import agents, resolve_agent
 from mergecraft.agents.shared import AgentResult
+from mergecraft.config.env import AgentRuntimeEnv
 from mergecraft.models import (
     _MAX_FALLBACK_DEPTH,
     BEDROCK_MODEL_ID_ENV,
@@ -483,7 +484,7 @@ def _configured_model_slugs(settings: RepoSettings) -> list[str]:
 def effective_model_slugs(settings: RepoSettings) -> list[str]:
     """Config order with ``MERGECRAFT_MODEL`` promoted to the front when set."""
     base = _configured_model_slugs(settings)
-    env_model = os.environ.get("MERGECRAFT_MODEL", "").strip()
+    env_model = AgentRuntimeEnv().model or ""
     if not env_model:
         return base
     rest = [slug for slug in base if slug != env_model]
@@ -507,7 +508,7 @@ def resolve_effective_model_slug(settings: RepoSettings) -> str | None:
     slug regardless, else ``settings.model`` resolved through the alias
     catalog.
     """
-    env_model = os.environ.get("MERGECRAFT_MODEL", "").strip()
+    env_model = AgentRuntimeEnv().model or ""
     if env_model:
         return env_model
 
@@ -595,7 +596,7 @@ def effective_model_chain(
             if entry not in chain:
                 chain.append(entry)
 
-    env_model = os.environ.get("MERGECRAFT_MODEL", "").strip()
+    env_model = AgentRuntimeEnv().model or ""
     if env_model:
         if explicit_chain:
             expanded = [env_model]
@@ -1632,7 +1633,7 @@ def resolve_model(*, slug: str | None = None, respect_env_override: bool = True)
     reported.
     """
     cleaned = (slug or "").strip()
-    env_model = os.environ.get("MERGECRAFT_MODEL", "").strip() if respect_env_override else ""
+    env_model = (AgentRuntimeEnv().model or "") if respect_env_override else ""
 
     if cleaned:
         _enforce_resolved_model_residency(cleaned)
@@ -1673,7 +1674,7 @@ def resolve_runtime_agent(
     instead of Codex. When unset, today's provider/credential inference
     applies, including fail-loud for missing native-harness credentials.
     """
-    env_agent = os.environ.get("MERGECRAFT_AGENT", "").strip()
+    env_agent = AgentRuntimeEnv().agent or ""
     if env_agent:
         if env_agent in agents:
             return resolve_agent(env_agent)

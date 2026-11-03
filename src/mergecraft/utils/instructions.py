@@ -8,6 +8,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from mergecraft.config.env import LoggingEnv
 from mergecraft.review_taxonomy import WITHDRAWN_FINDINGS_HEADING
 from mergecraft.types import MERGECRAFT_MCP_NAME, format_mcp_tool_ref
 from mergecraft.utils.fence import Fence, fence_unless_trusted, render_untrusted
@@ -196,7 +197,7 @@ def _build_runtime_context(
         "repo": f"{repo.owner}/{repo.name}",
         "default_branch": repo.data.get("default_branch"),
         "working_directory": os.getcwd(),
-        "log_level": os.environ.get("LOG_LEVEL"),
+        "log_level": LoggingEnv().log_level,
         "git_status": git_status,
         "github_event_name": os.environ.get("GITHUB_EVENT_NAME"),
         "github_ref": os.environ.get("GITHUB_REF"),

@@ -14,12 +14,10 @@ from pathlib import Path
 from typing import Any
 
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
+from mergecraft.config.env import AgentRuntimeEnv, TracingEnv
 from mergecraft.config.layered import load_layered_config_dict, resolved_config_path
 from mergecraft.config.settings import default_settings, load_repo_settings
 from mergecraft.utils.agent_resolve import configured_model_slugs, resolve_effective_model_slug
-
-_TRUE_VALUES = {"true", "1", "yes", "on"}
-_FALSE_VALUES = {"false", "0", "no", "off"}
 
 
 class ConfigLayer(StrEnum):
@@ -44,22 +42,11 @@ def _load_yaml_raw(cwd: Path) -> dict[str, Any]:
     return load_layered_config_dict(root=cwd)
 
 
-def _parse_bool(value: str | None) -> bool | None:
-    if value is None:
-        return None
-    lowered = value.strip().lower()
-    if lowered in _TRUE_VALUES:
-        return True
-    if lowered in _FALSE_VALUES:
-        return False
-    return None
-
-
 def _resolve_model_layers(*, cwd: Path, cli_model: str | None = None) -> dict[ConfigLayer, Any]:
     layers: dict[ConfigLayer, Any] = {}
     if cli_model:
         layers[ConfigLayer.CLI] = cli_model
-    env_model = os.environ.get("MERGECRAFT_MODEL")
+    env_model = AgentRuntimeEnv().model
     if env_model:
         layers[ConfigLayer.ENV] = env_model.strip()
     settings = load_repo_settings(root=cwd, load_learnings_files=False)
@@ -87,7 +74,7 @@ def _resolve_tracing_enabled_layers(
     tracing_block = raw.get("tracing")
     if isinstance(tracing_block, dict) and "enabled" in tracing_block:
         layers[ConfigLayer.YAML] = bool(tracing_block["enabled"])
-    env_enabled = _parse_bool(os.environ.get("MERGECRAFT_TRACING"))
+    env_enabled = TracingEnv().tracing_enabled
     if env_enabled is not None:
         layers[ConfigLayer.ENV] = env_enabled
     if cli_args:

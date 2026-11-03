@@ -25,21 +25,58 @@ from mergecraft.config.env._base import (
     registered_env_models,
     validate_env_settings,
 )
+from mergecraft.config.env.action_inputs import ActionInputEnv
+from mergecraft.config.env.agents import (
+    CUSTOM_PROVIDER_API_KEY_ENV,
+    CUSTOM_PROVIDER_BASE_URL_ENV,
+    AgentRuntimeEnv,
+    ProviderGatewayEnv,
+)
+from mergecraft.config.env.config import ConfigLocatorEnv, RunBoundsEnv
 from mergecraft.config.env.dotenv import (
     DotEnvFileSource,
     LocalDotEnv,
     local_dotenv_values,
 )
+from mergecraft.config.env.runtime import (
+    CliSessionEnv,
+    LoggingEnv,
+    McpEnv,
+    PathsEnv,
+    ReviewEnv,
+    RunInputsEnv,
+)
+from mergecraft.config.env.switches import (
+    ALLOW_UNSANDBOXED_SHELL_ENV,
+    ControlSwitches,
+    RuntimeOverridesEnv,
+)
 from mergecraft.config.env.tracing import TracingEnv
 
 __all__ = [
+    "ALLOW_UNSANDBOXED_SHELL_ENV",
+    "CUSTOM_PROVIDER_API_KEY_ENV",
+    "CUSTOM_PROVIDER_BASE_URL_ENV",
     "ENV_SETTINGS_CONFIG",
+    "ActionInputEnv",
+    "AgentRuntimeEnv",
+    "CliSessionEnv",
+    "ConfigLocatorEnv",
+    "ControlSwitches",
     "DotEnvFileSource",
     "EnvBool",
     "EnvSettings",
     "EnvSettingsError",
     "ExactFlag",
     "LocalDotEnv",
+    "LoggingEnv",
+    "McpEnv",
+    "PathsEnv",
+    "ProviderGatewayEnv",
+    "ReviewEnv",
+    "RunBoundsEnv",
+    "RunInputsEnv",
+    "RuntimeOverridesEnv",
     "TracingEnv",
     "fail_closed_env_bool",
     "from_env",

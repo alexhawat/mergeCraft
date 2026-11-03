@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import Any
 from urllib.parse import urlparse
 
@@ -19,6 +18,7 @@ from mergecraft.agents.shared import (
     mcp_auth_headers,
     payload_event_branch,
 )
+from mergecraft.config.env import AgentRuntimeEnv
 from mergecraft.integrations.cursor_cloud.client import (
     CURSOR_API_KEY_ENV,
     CursorCloudClient,
@@ -159,7 +159,7 @@ async def _poll_run_to_terminal(
     *,
     run_id: str,
 ) -> dict[str, object]:
-    timeout_s = float(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600"))
+    timeout_s = float(AgentRuntimeEnv().agent_timeout)
     deadline = asyncio.get_running_loop().time() + timeout_s
     last: dict[str, object] = {}
 

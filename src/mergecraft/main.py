@@ -30,7 +30,7 @@ from mergecraft.analyzers.trust import (
 )
 from mergecraft.ci.sarif_ingest import ingest_ci_sarif_from_action_env
 from mergecraft.classify.triage import TriageDecision
-from mergecraft.config.env import EnvSettingsError, validate_env_settings
+from mergecraft.config.env import ActionInputEnv, EnvSettingsError, validate_env_settings
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.fast_path import decide_fast_path, load_triage_inputs
 from mergecraft.main_outcome import (
@@ -914,19 +914,20 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     but does not itself touch tokens or derive trust tier — that is the
     security boundary handled entirely by ``_resolve_credentials``.
     """
-    resolved_prompt = resolve_prompt_input()
-    ctx.resolved_prompt = resolved_prompt
     ctx.job_token = get_job_token()
     github_client = GitHubClient(ctx.job_token)
     ctx.scm = create_github_scm(ctx.job_token, client=github_client)
     run_context = await resolve_run_context_data(github_client)
     ctx.run_context = run_context
     try:
-        # Both the tracing Action-input model and the registered env models
-        # read malformed control-carrying settings here. Keeping the export
-        # inside the ``try`` maps an unparseable ``INPUT_TRACING`` to
-        # ``_ConfigurationError`` (→ ``configuration_error``) instead of
-        # letting it fall through to the generic ``infra_error`` bucket.
+        # Prompt resolution builds ``ActionInputEnv`` (the prompt fields share the
+        # model with the fail-closed tracing inputs), so it belongs inside this
+        # guard too: a malformed ``INPUT_TRACING`` must map to
+        # ``_ConfigurationError`` (→ ``configuration_error``), never fall through
+        # to the generic ``infra_error`` bucket. Plain prompt-validation errors
+        # are not ``EnvSettingsError`` and propagate exactly as before.
+        resolved_prompt = resolve_prompt_input()
+        ctx.resolved_prompt = resolved_prompt
         export_tracing_env_from_action_inputs()
         validate_env_settings()
     except EnvSettingsError as exc:
@@ -1071,7 +1072,7 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
         ForkCredentialInvariantError,
         validate_fork_credential_invariant,
     )
-    from mergecraft.agents.codex import CODEX_SANDBOX_ENV, CODEX_SANDBOX_UNSANDBOXED
+    from mergecraft.agents.codex import CODEX_SANDBOX_UNSANDBOXED
     from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
     from mergecraft.config.trust_policy import (
         agent_sandbox_manifest_fields,
@@ -1159,9 +1160,9 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     )
     log_trust_policy_at_run_start(policy)
 
-    operator_override_requested = (
-        os.environ.get(CODEX_SANDBOX_ENV, "").strip().lower() == CODEX_SANDBOX_UNSANDBOXED
-    )
+    from mergecraft.config.env import RuntimeOverridesEnv
+
+    operator_override_requested = RuntimeOverridesEnv().codex_sandbox == CODEX_SANDBOX_UNSANDBOXED
     sandbox_decision = resolve_agent_sandbox_decision(
         event=gh_event,
         event_name=event_name,
@@ -1215,7 +1216,7 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     # is carried into ToolContext later; it must not be reinterpreted after the
     # App tokens have already been minted.
     sarif_upload_enabled = resolve_sarif_upload_enabled(
-        action_input=os.environ.get("INPUT_SARIF_UPLOAD"),
+        action_input=ActionInputEnv().sarif_upload,
         repo_setting=settings.analyzers.sarif_upload,
     )
     ctx.sarif_upload_enabled = sarif_upload_enabled
@@ -1409,7 +1410,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
 
     ctx_payload = _payload_to_ctx(payload)
     ctx.ctx_payload = ctx_payload
-    analyzers_mode = resolve_analyzers_mode(os.environ.get("INPUT_ANALYZERS"))
+    analyzers_mode = resolve_analyzers_mode(ActionInputEnv().analyzers)
     ctx.analyzers_mode = analyzers_mode
     sarif_upload_enabled = ctx.sarif_upload_enabled
     from mergecraft.mcp.tool_state import primary_repo_state
