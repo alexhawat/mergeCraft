@@ -73,7 +73,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal, Self
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from mergecraft.analyzers.redact import redact_secrets
+from mergecraft.analyzers.redact import redact_known_secret_patterns, redact_secrets
 
 if TYPE_CHECKING:
     from mergecraft.mcp.tool_state import ToolState
@@ -632,10 +632,25 @@ def _sanitize_path(value: str) -> str | None:
     normalized = normalized.removeprefix("./")
     # A redacted path cannot be retained as evidence: keeping the original
     # leaks the value, while persisting a marker would manufacture a path.
-    redacted = redact_secrets(normalized)
-    if redacted != normalized:
+    if _path_carries_secret(normalized):
         return None
     return normalized
+
+
+def _path_carries_secret(path: str) -> bool:
+    """Return whether one repo path holds a secret-shaped value (#1007).
+
+    The explicit secret shapes (``AKIA…``, ``ghp_…``, ``sk-…``, assignments) are
+    matched over the whole path. The entropy heuristic runs **per segment**:
+    its token class includes ``/``, so over a whole path it reads an ordinary
+    long repository path (``src/mergecraft/evidence/trajectory_audit.py``) as
+    one dense token and dropped it as a secret — read evidence the trajectory
+    then never saw. Per segment it still catches a random-looking directory or
+    file stem.
+    """
+    if redact_known_secret_patterns(path) != path:
+        return True
+    return any(redact_secrets(segment) != segment for segment in path.split("/") if segment)
 
 
 def _paths_in(values: Any) -> list[str]:
@@ -1277,7 +1292,12 @@ def _unwrap_shell_command(command: str) -> str:
 
 
 def _exec_outcome_ok(command: str, exit_code: int) -> bool | None:
-    """Read one driver-native exit code as an outcome claim (#885).
+    """Read one shell exit code as an outcome claim (#885, #1027).
+
+    The single rule for both shell doors: :func:`record_driver_exec` (the
+    driver-native exec door) and :func:`outcome_ok_from_result` (the MCP
+    ``shell`` tool door) both call it, so the same command cannot read as "no
+    claim" through one door and "failed" through the other.
 
     Exit 1 is the *expected* result of a command that answers a question:
     ``rg``/``grep`` with no match, ``git diff --quiet``, ``diff``, ``cmp``,
@@ -1373,7 +1393,12 @@ def record_driver_exec(
         return None
 
 
-def outcome_ok_from_result(result: Any) -> bool | None:
+def outcome_ok_from_result(
+    result: Any,
+    *,
+    tool: str | None = None,
+    arguments: dict[str, Any] | None = None,
+) -> bool | None:
     """Read "did the thing the tool ran succeed?" out of a tool result.
 
     Returns ``None`` when the tool has no such notion, which is the common
@@ -1381,12 +1406,23 @@ def outcome_ok_from_result(result: Any) -> bool | None:
     separate from the call itself. ``None`` is what keeps
     ``unresolved-failure`` keyed to real reported failures rather than to
     every tool whose payload happens to lack an ``exitCode``.
+
+    A ``shell`` call's exit code is read through :func:`_exec_outcome_ok`, the
+    same rule the driver-native door uses (#1027): exit 1 from a
+    question-answering command (``rg`` with no match, ``git diff --quiet``)
+    claims nothing, while exit 1 from a verify-intent command is a failure.
+    Both doors write the same ``shell`` signature, so they must read the same
+    command the same way. Gate-running tools have no command to classify and
+    keep the strict reading: any non-zero exit is a failure.
     """
     if not isinstance(result, dict):
         return None
+    command = (arguments or {}).get("command") if tool == "shell" else None
     for key in ("exitCode", "exit_code"):
         value = result.get(key)
         if isinstance(value, int):
+            if isinstance(command, str) and command.strip():
+                return _exec_outcome_ok(_unwrap_shell_command(command.strip()), value)
             return value == 0
     for key in ("timedOut", "timed_out"):
         if result.get(key) is True:

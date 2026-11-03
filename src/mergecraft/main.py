@@ -59,7 +59,12 @@ from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.review_policy.ignore_paths import INPUT_ENV as IGNORE_PATHS_INPUT_ENV
 from mergecraft.review_policy.ignore_paths import list_pull_request_paths, resolve_review_ignore
-from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
+from mergecraft.run_outcome import (
+    RUN_OUTCOME_CONCLUSION,
+    RunOutcome,
+    outcome_with_disposition_ledger,
+    run_succeeded_for_outcome,
+)
 from mergecraft.scm.github import (
     create_github_scm,
     github_client_from_scm,
@@ -728,9 +733,12 @@ async def _publish(
 
     # Effective values the status report uses. The pre-emission scan may already
     # have failed the run; the post-emission scan (emit path) can update these
-    # before the report is posted.
-    effective_outcome = outcome
-    effective_failure_reason = failure_reason
+    # before the report is posted. An open analyzer disposition ledger makes a
+    # passed run inconclusive so the completion check agrees with the packet's
+    # ``neutral`` approval conclusion (#1014); ``_finalize`` applies the same
+    # rule to the run's own result.
+    effective_outcome, ledger_reason = outcome_with_disposition_ledger(outcome, prepared)
+    effective_failure_reason = ledger_reason or failure_reason
     effective_sink_error = sink_scan_error
 
     async def _learnings_and_status() -> None:
@@ -2627,6 +2635,12 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
         # completion and approval checks were already forced to ``failure``.
         outcome = RunOutcome.failed
         failure_reason = post_emission_sink[0]
+    # #1014 — the same open-ledger rule ``_publish`` applied to the checks, so
+    # this run's own result agrees with the completion check it posted.
+    outcome, ledger_reason = outcome_with_disposition_ledger(
+        outcome, tool_state.prepared_run_packet
+    )
+    failure_reason = ledger_reason or failure_reason
 
     # O9 (OB4) — the verdict span at the publish convergence point. Emitted
     # only when the agent actually submitted a terminal verdict: a run that
