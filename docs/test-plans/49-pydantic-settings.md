@@ -306,19 +306,26 @@ AST-scans `src/mergecraft/` for environment reads and classifies them.
 The scan recognises the read shapes the codebase uses: a literal (or a
 module-level constant, including one imported from another module) passed to
 `os.environ.get` / `os.getenv` / `environ.get`, an `os.environ[...]` load, a
-`key in os.environ` membership test, a literal passed to one of the module-local
-env helpers, and a candidate-name tuple — inline, a module-level constant, or a
-function-local constant — that a `for` loop or a comprehension/generator reads
-through the environment. The filters count as part of a comprehension body, so
+`key in os.environ` membership test, a fixed env name passed to an env helper
+(`_has_env`, `resolve_token_ref`, `_env_int` / `_env_float` / `_read_input` /
+`_get_env`), a `for key in os.environ` loop that selects fixed names, and a
+candidate-name tuple — inline, a module-level or function-local constant, or a
+local alias of one of those, a `|` union, or the credential authority — that a
+`for` loop or a comprehension/generator reads through the environment. The
+filters count as part of a comprehension body, so
 `[v for v in VARS if v in os.environ]` and `any(os.environ.get(n) for n in (...))`
 are both candidate reads. The non-obvious shapes have scratch-tree self-tests:
 `test_scan_reports_getenv_in_a_scratch_tree` for `os.getenv` / bare `getenv`
-(the real tree reads through `os.environ.get` only) and
+(the real tree reads through `os.environ.get` only),
 `test_scan_reports_candidate_reads_in_a_scratch_tree` for the five loop and
-comprehension spellings. Writes
-are not reads: a subscript store, `pop`, `setdefault` and an exporter's dict key
-are the writer's own business. A constant that is no longer referenced anywhere
-in its module is dead, not a read, so it is not flagged.
+comprehension spellings, and
+`test_scan_reports_helper_and_iteration_reads_in_a_scratch_tree` for a helper
+literal, a helper name-bound argument, `for ... in os.environ`, and a local
+variable bound to a tuple or to `provider_credential_env_names()` (the single
+credential authority; its indexed slots collapse to the `{n}` placeholder).
+Writes are not reads: a subscript store, `pop`, `setdefault` and an exporter's
+dict key are the writer's own business. A constant that is no longer referenced
+anywhere in its module is dead, not a read, so it is not flagged.
 
 **Allowlist policy.** A stale row (a read that has moved into `config/env/`) is
 tolerated; an *unlisted* read is a failure. That is the only rule compatible
@@ -495,6 +502,41 @@ executor's pass.
    `main()` with the production resolver (`run_main_for_test(...,
    real_prompt_input=True)`, with `INPUT_PROMPT` in the environment) and requires
    `configuration_error`, no agent, the input named and the value absent.
+
+## Third self-review pass (PR #1127)
+
+The next gate round found the inventory still blind to helper indirection and
+environment iteration, so the "every in-scope read names its owning model"
+guarantee was not enforced.
+
+- **Helpers that take a name.** `_READ_HELPERS` now includes `_has_env` and
+  `resolve_token_ref`; an argument that is a literal or a name bound to one is a
+  read. The same resolution as a direct getter applies.
+- **Environment iteration.** A `for key in os.environ` loop is dynamic, but a
+  fixed name the body compares the loop variable against (`key in (A, B)`,
+  `key == A`) is a read. New kind `environ.iteration`.
+- **Local bindings.** The tuple/list resolver follows aliases
+  (`keys = _PROVIDER_KEYS`), `|` unions (keeping the fixed half) and
+  `provider_credential_env_names()` — the single credential authority — so the
+  `_provider_credential_present` key sweep is visible. Indexed
+  `MERGECRAFT_CUSTOM_PROVIDER_API_KEY_<N>` slots collapse to the `{n}`
+  placeholder, consistent with the extra-options row.
+- **Self-tests.** `test_scan_reports_helper_and_iteration_reads_in_a_scratch_tree`
+  pins five shapes in a scratch tree: helper literal, helper name-bound,
+  `for ... in os.environ`, a local alias of a tuple, and a local alias of the
+  credential authority.
+
+Newly surfaced reads and their classification:
+
+- `src/mergecraft/tracing/exporters.py:906` —
+  `resolve_token_ref("MERGECRAFT_LOGFIRE_TOKEN")` is the documented `tokenRef`
+  fallback, so it carries a `dynamic` row.
+- `src/mergecraft/action/inputs.py:410` — `_provider_credential_present`
+  iterates the credential authority; the fixed singleton name is in scope and
+  RED, and the indexed slots carry the `{n}` `dynamic` row.
+- `src/mergecraft/agents/openai_compatible_gateways.py:213` and
+  `src/mergecraft/agents/codex.py:538` — the singleton pair is in scope and RED;
+  no row. It must move to `ProviderGatewayEnv`.
 
 ## Out of scope
 

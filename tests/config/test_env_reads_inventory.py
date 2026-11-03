@@ -16,16 +16,18 @@ It AST-scans ``src/mergecraft/`` for environment reads and asserts three things:
 The scan recognises the read shapes this codebase actually uses: a literal (or a
 module-level constant that names an environment variable) passed to
 ``os.environ.get`` / ``os.getenv`` / ``environ.get``, an ``os.environ[...]``
-load, a ``key in os.environ`` membership test, a literal passed to one of the
-module-local env helpers, and a candidate-name tuple — inline, module-level or
-function-local — that a ``for`` loop or a comprehension reads through the
-environment. Writes (subscript stores, ``pop``, ``setdefault``, ``dict`` keys of
-an exporter) are not reads: the writer is the authority for a key it wrote
-itself.
+load, a ``key in os.environ`` membership test, a fixed env name passed to an env
+helper (``_has_env``, ``resolve_token_ref`` and the module-local parsers), a
+``for key in os.environ`` loop that selects fixed names, and a candidate-name
+tuple — inline, module-level or function-local, including an alias of another
+binding or of the credential authority — that a ``for`` loop or a comprehension
+reads through the environment. Writes (subscript stores, ``pop``,
+``setdefault``, ``dict`` keys of an exporter) are not reads: the writer is the
+authority for a key it wrote itself.
 
-The contracts are red until the wave named in each row lands: the models do not
-exist yet, and the reads still happen where they always did. No ``xfail``
-marker is used.
+A read of an in-scope name that is not listed in the allowlist fails
+``test_in_scope_name_is_read_only_through_a_model``; the failure is the
+migration work, not a skipped test. No ``xfail`` marker is used.
 """
 
 from __future__ import annotations
@@ -55,8 +57,15 @@ _MAPPING_NAMES: Final = frozenset({"environ", "os_environ", "env", "env_map", "e
 _MAPPING_SUFFIXES: Final = ("_env", "_environ", "_env_map")
 #: Modules whose ``getenv`` is the process environment's own accessor.
 _GETENV_MODULES: Final = frozenset({"os"})
-#: Module-local helpers whose second argument is an environment variable name.
-_READ_HELPERS: Final = frozenset({"_env_int", "_env_float", "_read_input", "_get_env"})
+#: Helpers whose argument is an environment variable name, not a value.
+#:
+#: ``_env_int`` / ``_env_float`` / ``_read_input`` / ``_get_env`` are the
+#: module-local parsers; ``_has_env`` is the presence probe in the gateway,
+#: Codex and agent-resolution modules; ``resolve_token_ref`` resolves a
+#: ``tokenRef`` to the value of the env var it names.
+_READ_HELPERS: Final = frozenset(
+    {"_env_int", "_env_float", "_read_input", "_get_env", "_has_env", "resolve_token_ref"}
+)
 
 
 # ── the in-scope set (one row per name, with the wave that owns it) ──────────
@@ -507,6 +516,18 @@ ALLOWED_READS: Final[tuple[AllowedRead, ...]] = (
         "an input of the dispatching workflow, not of this action's action.yml",
     ),
     AllowedRead(
+        "src/mergecraft/tracing/exporters.py",
+        "MERGECRAFT_LOGFIRE_TOKEN",
+        "dynamic",
+        "the documented tokenRef fallback resolves a runtime-named token; the literal is its default name",
+    ),
+    AllowedRead(
+        "src/mergecraft/action/inputs.py",
+        "MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{n}",
+        "dynamic",
+        "the credential authority's indexed provider slots are enumerated at runtime",
+    ),
+    AllowedRead(
         "src/mergecraft/cli/doctor_cmd.py",
         "MERGECRAFT_LOGFIRE_TOKEN",
         "dynamic",
@@ -688,15 +709,46 @@ def _reads_the_environment(nodes: list[ast.AST]) -> bool:
     return False
 
 
-def _tuple_constants_in_module(tree: ast.Module) -> dict[str, tuple[ast.expr, ...]]:
-    """Map a ``UPPER = (...)`` / ``[...]`` constant to its element nodes.
+#: The placeholder a runtime-indexed provider credential collapses to.
+_INDEXED_PROVIDER_CREDENTIAL_PLACEHOLDER: Final = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY_{n}"
 
-    The tuple may be declared at module level or inside a function: the CLI
-    modules build their candidate-name tuples locally. A name assigned twice
-    with different elements is ambiguous and is not resolved, matching the
-    single-value rule for env-name constants.
+
+def _is_indexed_provider_credential(name: str) -> bool:
+    """True for ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY_<N>``."""
+    return (
+        name.startswith("MERGECRAFT_CUSTOM_PROVIDER_API_KEY_") and name.rsplit("_", 1)[-1].isdigit()
+    )
+
+
+@functools.lru_cache(maxsize=1)
+def _credential_env_names() -> tuple[str, ...]:
+    """The env names the provider-credential authority can consume.
+
+    ``provider_credential_env_names`` is the single authority for "is this env
+    var a provider credential", so the inventory resolves it rather than
+    copying the list. Indexed slots collapse to the ``{n}`` placeholder the scan
+    already uses for runtime-named variables.
     """
-    found: dict[str, list[tuple[ast.expr, ...]]] = {}
+    from mergecraft.config.runtime_provider_registry import provider_credential_env_names
+
+    names: list[str] = []
+    for name in provider_credential_env_names():
+        if not _is_env_name(name):
+            continue
+        if _is_indexed_provider_credential(name):
+            name = _INDEXED_PROVIDER_CREDENTIAL_PLACEHOLDER
+        if name not in names:
+            names.append(name)
+    return tuple(names)
+
+
+#: Calls whose result is a set of environment names, resolved by the inventory.
+_ENV_SET_CALLS: Final = {"provider_credential_env_names": _credential_env_names}
+
+
+def _assigned_values(tree: ast.Module) -> dict[str, list[ast.AST]]:
+    """Every ``NAME = value`` binding in the module, at any scope."""
+    bindings: dict[str, list[ast.AST]] = {}
     for node in ast.walk(tree):
         targets: list[ast.AST]
         value: ast.AST | None
@@ -708,17 +760,66 @@ def _tuple_constants_in_module(tree: ast.Module) -> dict[str, tuple[ast.expr, ..
             value = node.value
         else:
             continue
-        if not isinstance(value, (ast.Tuple, ast.List)):
+        if value is None:
             continue
-        elements = tuple(value.elts)
         for target in targets:
-            if isinstance(target, ast.Name) and target.id.isupper():
-                found.setdefault(target.id, []).append(elements)
+            if isinstance(target, ast.Name):
+                bindings.setdefault(target.id, []).append(value)
+    return bindings
+
+
+def _tuple_constants_in_module(tree: ast.Module) -> dict[str, tuple[ast.expr, ...]]:
+    """Map a name bound to a tuple/list of env names to its element nodes.
+
+    The binding may be a literal tuple/list, a module-level or function-local
+    constant (``_TRACE_ENV_VARS``, ``keys = _PROVIDER_CREDENTIAL_ENV_KEYS``), a
+    ``|`` union (whose left half is the fixed set), or the result of a known
+    env-name-set call. A name bound to different elements in different places is
+    ambiguous and stays unresolved, matching the single-value rule for env-name
+    constants.
+    """
+    bindings = _assigned_values(tree)
+    aliases: dict[str, tuple[ast.expr, ...]] = {}
+
+    def elements_of(value: ast.AST) -> tuple[ast.expr, ...] | None:
+        if isinstance(value, (ast.Tuple, ast.List)):
+            return tuple(value.elts)
+        if isinstance(value, ast.Name):
+            return aliases.get(value.id)
+        if isinstance(value, ast.BinOp) and isinstance(value.op, ast.BitOr):
+            # ``keys | extra`` keeps the fixed half; the other half is dynamic.
+            return elements_of(value.left)
+        if isinstance(value, ast.Call):
+            resolver = _ENV_SET_CALLS.get(_callee(value.func) or "")
+            if resolver is not None:
+                return tuple(ast.Constant(name) for name in resolver())
+        return None
+
+    changed = True
+    while changed:
+        changed = False
+        for name, values in bindings.items():
+            if name in aliases:
+                continue
+            candidates = [c for c in (elements_of(value) for value in values) if c is not None]
+            if not candidates:
+                continue
+            shape = tuple(ast.dump(element) for element in candidates[0])
+            if all(
+                tuple(ast.dump(element) for element in candidate) == shape
+                for candidate in candidates
+            ):
+                aliases[name] = candidates[0]
+                changed = True
+
     resolved: dict[str, tuple[ast.expr, ...]] = {}
-    for name, variants in found.items():
-        shapes = {tuple(ast.dump(element) for element in variant) for variant in variants}
+    for name, values in bindings.items():
+        candidates = [c for c in (elements_of(value) for value in values) if c is not None]
+        if not candidates:
+            continue
+        shapes = {tuple(ast.dump(element) for element in candidate) for candidate in candidates}
         if len(shapes) == 1:
-            resolved[name] = variants[0]
+            resolved[name] = candidates[0]
     return resolved
 
 
@@ -745,6 +846,37 @@ def _candidate_names(
         for element in _iterable_elements(node, tuple_constants)
         if (name := _resolve(element, constants)) is not None
     ]
+
+
+def _environment_iteration_names(
+    node: ast.For,
+    constants: dict[str, str],
+    tuple_constants: dict[str, tuple[ast.expr, ...]],
+) -> list[str]:
+    """Fixed env names a ``for key in os.environ`` loop selects on.
+
+    The iteration itself is dynamic, but a name the body compares the loop
+    variable against (``key in (A, B)`` / ``key == A``) is a fixed read.
+    """
+    if not isinstance(node.target, ast.Name):
+        return []
+    target = node.target.id
+    found: list[str] = []
+    for statement in node.body:
+        for child in ast.walk(statement):
+            if not isinstance(child, ast.Compare):
+                continue
+            sides = [child.left, *child.comparators]
+            if not any(isinstance(side, ast.Name) and side.id == target for side in sides):
+                continue
+            for side in sides:
+                if isinstance(side, ast.Name) and side.id == target:
+                    continue
+                found.extend(_candidate_names(side, constants, tuple_constants))
+                name = _resolve(side, constants)
+                if name is not None:
+                    found.append(name)
+    return list(dict.fromkeys(found))
 
 
 def _scan_tree(
@@ -805,8 +937,14 @@ def _scan_tree(
                 if name is not None:
                     sites.append(ReadSite(rel, node.lineno, name, "environ.contains"))
         elif isinstance(node, ast.For):
-            # The iterable may be an inline tuple/list or a name bound to one,
-            # at module level or in the enclosing function.
+            # A loop over the environment itself is a dynamic read; the fixed
+            # names it selects on still belong to a model.
+            if _is_mapping(node.iter):
+                for name in _environment_iteration_names(node, constants, tuple_constants):
+                    sites.append(ReadSite(rel, node.lineno, name, "environ.iteration"))
+                continue
+            # Otherwise the iterable is an inline tuple/list or a name bound to
+            # one, at module level or in the enclosing function.
             if not _reads_the_environment(node.body):
                 continue
             for name in _candidate_names(node.iter, constants, tuple_constants):
@@ -1214,3 +1352,120 @@ def test_scan_reports_candidate_reads_in_a_scratch_tree(
     reported = {(site.name, site.kind) for site in sites}
 
     assert (expected, "candidates") in reported, reported
+
+
+#: A planted module per helper / environment-iteration shape. The helper-taking
+#: arg may be a literal or a name bound to one; the iteration may be over the
+#: environment itself; a local variable may alias a tuple or the credential
+#: authority.
+_HELPER_AND_ITERATION_SHAPES: dict[str, tuple[str, str, str]] = {
+    "helper-argument-literal": (
+        """\
+import os
+
+
+def resolve_token_ref(token_ref):
+    return os.environ.get(token_ref)
+
+
+TOKEN = resolve_token_ref("MERGECRAFT_MCP_TOKEN")
+""",
+        "MERGECRAFT_MCP_TOKEN",
+        "helper:resolve_token_ref",
+    ),
+    "helper-argument-name-bound": (
+        """\
+import os
+
+_BASE_URL_ENV = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"
+
+
+def _has_env(name):
+    return isinstance(os.environ.get(name), str)
+
+
+PRESENT = _has_env(_BASE_URL_ENV)
+""",
+        "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL",
+        "helper:_has_env",
+    ),
+    "for-over-os-environ": (
+        """\
+import os
+
+_BASE_URL_ENV = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"
+_API_KEY_ENV = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"
+
+
+def probe():
+    for key in os.environ:
+        if key in (_BASE_URL_ENV, _API_KEY_ENV):
+            return True
+    return False
+""",
+        "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
+        "environ.iteration",
+    ),
+    "local-variable-bound-to-tuple": (
+        """\
+import os
+
+_PROVIDER_KEYS = ("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL",)
+
+
+def probe():
+    keys = _PROVIDER_KEYS
+    return [name for name in keys if os.environ.get(name)]
+""",
+        "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL",
+        "candidates",
+    ),
+    "local-variable-bound-to-credential-authority": (
+        """\
+import os
+
+_PROVIDER_CREDENTIAL_ENV_KEYS = provider_credential_env_names()
+
+
+def probe(env):
+    keys = _PROVIDER_CREDENTIAL_ENV_KEYS
+    for key in keys:
+        if env.get(key):
+            return True
+    return False
+""",
+        "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
+        "candidates",
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("source", "expected", "kind"),
+    list(_HELPER_AND_ITERATION_SHAPES.values()),
+    ids=list(_HELPER_AND_ITERATION_SHAPES),
+)
+def test_scan_reports_helper_and_iteration_reads_in_a_scratch_tree(
+    source: str,
+    expected: str,
+    kind: str,
+    tmp_path: Path,
+) -> None:
+    """Helper indirection and ``for ... in os.environ`` are reads too.
+
+    A fixed env name passed to a helper, a name selected out of an environment
+    iteration, and a local variable that aliases a tuple or the credential
+    authority all bypass the models if the scan looks at the literal sites only.
+    Each shape is planted in a throwaway tree, with its module constants passed
+    the way the real scan passes them.
+    """
+    root = tmp_path / "repo"
+    module = root / "src" / "mergecraft" / "planted_probe.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(source, encoding="utf-8")
+
+    constants = _constants_in_module(ast.parse(source))
+    sites = _scan_file(module, constants, root=root)
+    reported = {(site.name, site.kind) for site in sites}
+
+    assert (expected, kind) in reported, reported
