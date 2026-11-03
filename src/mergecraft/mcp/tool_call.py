@@ -100,6 +100,41 @@ def charge_tool_call_budget(ctx: ToolContext | None) -> None:
     ctx.budget_tracker.record_tool_call()
 
 
+_OUTCOME_KEYS: tuple[str, ...] = ("exitCode", "exit_code", "timedOut", "timed_out")
+
+
+def _result_payload(result: Any) -> Any:
+    """Return the structured payload a tool result carries, for outcome reading.
+
+    ``rpc.py`` hands the recorder the :class:`ToolResult` that ``execute()``
+    wrapped the tool body's return value in, so the body's dict (the shell
+    tool's ``exit_code``, a gate tool's ``exitCode``) only survives as the JSON
+    text of the first content item. Without unwrapping it, every MCP tool call
+    read as "no outcome claimed" (#1027). An error result, or text that is not
+    a JSON object, carries no payload; a bare dict passes through unchanged.
+
+    Only the execution-outcome keys (exit code, timed out) are kept. Several
+    publication tools return ``{"success": False, "skipped": True, ...}`` for a
+    deliberate, already-diagnosed skip; those never reached the recorder
+    before, and reading them as failed outcomes would add unresolvable
+    ``unresolved-failure`` rows — the false Critical noise #885 removed.
+    """
+    if not isinstance(result, ToolResult):
+        return result
+    if result.is_error or not result.content:
+        return None
+    text = result.content[0].get("text")
+    if not isinstance(text, str):
+        return None
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return {key: payload[key] for key in _OUTCOME_KEYS if key in payload}
+
+
 def record_trajectory(
     ctx: ToolContext | None,
     name: str,
@@ -128,7 +163,9 @@ def record_trajectory(
             arguments=arguments,
             ok=ok,
             outcome_ok=(
-                outcome_ok_from_result(result, tool=name, arguments=arguments) if ok else None
+                outcome_ok_from_result(_result_payload(result), tool=name, arguments=arguments)
+                if ok
+                else None
             ),
             error=error,
             duration_ms=duration_ms,

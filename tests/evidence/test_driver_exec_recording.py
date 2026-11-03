@@ -13,7 +13,7 @@ tool call it describes.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -22,7 +22,7 @@ import pytest
 from mergecraft.evidence import trajectory
 from mergecraft.evidence.trajectory import build_trajectory_record, record_tool_call
 from mergecraft.evidence.trajectory_audit import audit_trajectory
-from mergecraft.mcp.tool_call import record_trajectory
+from mergecraft.mcp.rpc import dispatch_mcp_rpc
 from mergecraft.mcp.tool_state import init_tool_state
 from tests.support.tool_context import make_tool_context
 
@@ -342,49 +342,110 @@ def test_classify_failure_at_execute_prefers_typed_signals_over_prose() -> None:
     assert classify_failure_at_execute("E501 line too long") == "unknown"
 
 
-def _mcp_shell_door(state: Any, tmp_path: Path, *, command: str, exit_code: int) -> None:
-    """Run one result through the MCP ``tools/call`` recorder, as ``rpc.py`` does."""
+class _FinishedProcess:
+    """Stands in for the spawned shell: the command ran and exited ``returncode``."""
+
+    pid = 4242
+
+    def __init__(self, returncode: int) -> None:
+        self.returncode = returncode
+
+    def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
+        del timeout
+        return b"", b""
+
+
+async def _mcp_shell_door(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, command: str, exit_code: int
+) -> Any:
+    """Run ``command`` through ``tools/call`` exactly as production does.
+
+    The real ``shell`` tool spec, its ``execute()`` wrapper (which turns the
+    body's dict into a :class:`ToolResult`) and ``dispatch_mcp_rpc`` all run;
+    only the process spawn is replaced, so the test needs no sandbox.
+    """
+    import mergecraft.mcp.shell as shell_mod
+
+    def _spawn(*_args: Any, **_kwargs: Any) -> _FinishedProcess:
+        return _FinishedProcess(exit_code)
+
+    monkeypatch.setattr(shell_mod, "_spawn_shell", _spawn)
+    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+    # ``shell`` is a mutating tool; ``rpc.py`` binds the run's mode before it runs.
+    state.selected_mode = "Fix"
     ctx = make_tool_context(tmp_path, trust_tier="trusted", tool_state=state)
-    record_trajectory(
-        ctx,
-        "shell",
-        {"command": command, "description": "probe"},
-        ok=True,
-        result={"output": "", "exit_code": exit_code, "timed_out": False},
+    spec = shell_mod.shell_tool(ctx)
+    response = await dispatch_mcp_rpc(
+        1,
+        "tools/call",
+        {"name": "shell", "arguments": {"command": command, "description": "probe"}},
+        tools=[spec],
+        by_name={"shell": spec},
+        tool_ctx=ctx,
+        validators={},
     )
+    assert "result" in response, response
+    assert response["result"].get("isError") is not True, response
+    return state
 
 
-def _driver_door(state: Any, tmp_path: Path, *, command: str, exit_code: int) -> None:
-    del tmp_path
+async def _driver_door(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, command: str, exit_code: int
+) -> Any:
+    del tmp_path, monkeypatch
+    state = _state()
     record_driver_exec(state, command=command, exit_code=exit_code, output="")
+    return state
 
 
-_Door = Callable[..., None]
+_Door = Callable[..., Awaitable[Any]]
 
 
 @pytest.mark.parametrize("door", [_mcp_shell_door, _driver_door], ids=["mcp-shell", "driver"])
-def test_a_no_match_search_claims_nothing_through_either_door(door: _Door, tmp_path: Path) -> None:
+async def test_a_no_match_search_claims_nothing_through_either_door(
+    door: _Door, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``rg`` with no match exits 1; neither door may call that a failure (#1027)."""
-    state = _state()
+    state = await door(tmp_path, monkeypatch, command="rg -n x src/", exit_code=1)
 
-    door(state, tmp_path, command="rg -n x src/", exit_code=1)
-
-    assert [row.outcome_ok for row in state.tool_calls] == [None]
+    assert [(row.tool, row.outcome_ok) for row in state.tool_calls] == [("shell", None)]
     assert "unresolved-failure" not in _rule_ids(state)
 
 
 @pytest.mark.parametrize("door", [_mcp_shell_door, _driver_door], ids=["mcp-shell", "driver"])
-def test_a_failing_verify_command_is_one_unresolved_failure_through_either_door(
-    door: _Door, tmp_path: Path
+async def test_a_failing_verify_command_is_one_unresolved_failure_through_either_door(
+    door: _Door, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``pytest -q`` exiting 1 is a real failure through both doors (#1027)."""
-    state = _state()
+    state = await door(tmp_path, monkeypatch, command="pytest -q", exit_code=1)
 
-    door(state, tmp_path, command="pytest -q", exit_code=1)
-
-    assert [row.outcome_ok for row in state.tool_calls] == [False]
+    assert [(row.tool, row.outcome_ok) for row in state.tool_calls] == [("shell", False)]
     findings = audit_trajectory(build_trajectory_record(state))
     assert [f.rule_id for f in findings].count("unresolved-failure") == 1
+
+
+async def test_a_passing_command_through_the_mcp_door_is_a_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = await _mcp_shell_door(tmp_path, monkeypatch, command="pytest -q", exit_code=0)
+
+    assert [row.outcome_ok for row in state.tool_calls] == [True]
+
+
+def test_an_error_or_publication_skip_result_claims_no_outcome() -> None:
+    """Only execution-outcome keys are read out of a wrapped result."""
+    from mergecraft.mcp.shared import ToolResult, handle_tool_error, handle_tool_success
+    from mergecraft.mcp.tool_call import _result_payload
+
+    skip = handle_tool_success({"success": False, "skipped": True, "reason": "mismatch"})
+    exited = handle_tool_success({"output": "", "exit_code": 1, "timed_out": False})
+    not_json = ToolResult(content=[{"type": "text", "text": "plain text"}])
+
+    assert _result_payload(skip) == {}
+    assert _result_payload(handle_tool_error(RuntimeError("boom"))) is None
+    assert _result_payload(not_json) is None
+    assert _result_payload(exited) == {"exit_code": 1, "timed_out": False}
+    assert trajectory.outcome_ok_from_result(_result_payload(skip)) is None
 
 
 @pytest.mark.parametrize(
