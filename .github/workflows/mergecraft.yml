@@ -1169,11 +1169,23 @@ jobs:
           set -euo pipefail
           # Only the two earlier rungs: a Claude packet from a previous attempt of
           # this job must never be taken for this attempt's.
+          #
+          # download-artifact nests each artifact under its name only when the
+          # pattern matched more than one; a lone artifact (OpenCode Go posted
+          # the verdict, so Codex never ran) lands flat in the download path.
           for rung in opencode-go codex; do
-            src="${RUNNER_TEMP}/earlier-rungs/mergecraft-evidence-${rung}/packet-${rung}.json"
-            if [ -s "${src}" ]; then
-              cp "${src}" "${RUNNER_TEMP}/packet-${rung}.json"
-              echo "placed the ${rung} packet"
+            placed=""
+            for src in \
+              "${RUNNER_TEMP}/earlier-rungs/mergecraft-evidence-${rung}/packet-${rung}.json" \
+              "${RUNNER_TEMP}/earlier-rungs/packet-${rung}.json"; do
+              if [ -s "${src}" ]; then
+                cp "${src}" "${RUNNER_TEMP}/packet-${rung}.json"
+                placed="${src}"
+                break
+              fi
+            done
+            if [ -n "${placed}" ]; then
+              echo "placed the ${rung} packet from ${placed}"
             else
               echo "no ${rung} packet"
             fi
