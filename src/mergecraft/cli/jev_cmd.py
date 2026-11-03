@@ -442,6 +442,17 @@ def _current_repo_slug() -> str | None:
     return slug or None
 
 
+def _typesafe_key_from_process_env() -> str:
+    """Read the process-environment credential through the ``.env`` model.
+
+    ``LocalDotEnv`` owns ``TYPESAFE_API_KEY`` (the file view declares it), so the
+    same model serves the process-env half via the mapping-only seam. The value
+    stays a ``SecretStr`` and is unwrapped only here.
+    """
+    token = LocalDotEnv.from_env(os.environ).TYPESAFE_API_KEY
+    return token.get_secret_value().strip() if token is not None else ""
+
+
 def _typesafe_key_from_env_or_file(cwd: Path) -> str | None:
     """Return a non-empty ``TYPESAFE_API_KEY`` from the process env or the repo ``.env``.
 
@@ -450,7 +461,7 @@ def _typesafe_key_from_env_or_file(cwd: Path) -> str | None:
     here as it does to the startup load. The credential stays a ``SecretStr``
     inside the model and is unwrapped only at this consumer boundary.
     """
-    from_process_env = os.environ.get(TYPESAFE_API_KEY_ENV, "").strip()
+    from_process_env = _typesafe_key_from_process_env()
     if from_process_env:
         return from_process_env
     env_path = local_env_path_for_cwd(cwd)
@@ -662,7 +673,7 @@ def status_cmd(
     console.print(f"packs: {packs}")
     thresholds = ", ".join(f"{name}={value}" for name, value in sorted(jev.thresholds.items()))
     console.print(f"thresholds: {thresholds}")
-    has_credential = bool(os.environ.get(TYPESAFE_API_KEY_ENV))
+    has_credential = bool(_typesafe_key_from_process_env())
     console.print(f"{TYPESAFE_API_KEY_ENV} present locally: {has_credential}")
     console.print("advisory only — Jev never skips the reviewer or blocks a merge")
 

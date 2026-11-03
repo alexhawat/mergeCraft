@@ -7,7 +7,6 @@ Exports:
 
 from __future__ import annotations
 
-import os
 from typing import Final
 
 import httpx
@@ -26,7 +25,9 @@ def cdp_base_url() -> str:
         >>> isinstance(cdp_base_url(), str)
         True
     """
-    raw = os.environ.get("MERGECRAFT_CDP_URL", _DEFAULT_CDP_URL).strip()
+    from mergecraft.config.env import PathsEnv
+
+    raw = PathsEnv().cdp_url or _DEFAULT_CDP_URL
     return raw.rstrip("/") or _DEFAULT_CDP_URL
 
 

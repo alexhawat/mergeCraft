@@ -41,9 +41,9 @@ if TYPE_CHECKING:
 
 
 def agent_user_name() -> str:
-    return (
-        os.environ.get("MERGECRAFT_AGENT_USER", _DEFAULT_AGENT_USER).strip() or _DEFAULT_AGENT_USER
-    )
+    from mergecraft.config.env import RuntimeOverridesEnv
+
+    return RuntimeOverridesEnv().agent_user or _DEFAULT_AGENT_USER
 
 
 def _in_action_image() -> bool:
@@ -57,7 +57,9 @@ def _in_action_image() -> bool:
 
 
 def _allow_root_override() -> bool:
-    return os.environ.get(_ALLOW_ROOT_ENV, "").strip() == "1"
+    from mergecraft.config.env import ControlSwitches
+
+    return ControlSwitches().allow_root.enabled
 
 
 def _refuse_root_outside_action_image() -> None:

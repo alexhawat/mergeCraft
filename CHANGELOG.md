@@ -69,6 +69,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `mergecraft policy --help` and `mergecraft policy effective` now say that review
   enforces the repository's rules file; `policy effective` also says when it is
   showing the shipped example packs because the repository has no rules file.
+- Environment settings for run budgets, timeouts, Action inputs and the
+  operational knobs are read through one validated model: a malformed numeric
+  value names the variable instead of failing with a bare parse error, an empty
+  `MERGECRAFT_AGENT_TIMEOUT` fails instead of silently defaulting, and secrets
+  read from the environment stay masked in diagnostics.
 
 ### Fixed
 

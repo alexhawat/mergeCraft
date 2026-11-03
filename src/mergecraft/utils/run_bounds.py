@@ -209,20 +209,6 @@ def record_agent_usage(
         tracker.record_cost(usage.cost_usd)
 
 
-def _env_float(env: Mapping[str, str], key: str) -> float | None:
-    raw = env.get(key)
-    if raw is None or not str(raw).strip():
-        return None
-    return float(raw)
-
-
-def _env_int(env: Mapping[str, str], key: str) -> int | None:
-    raw = env.get(key)
-    if raw is None or not str(raw).strip():
-        return None
-    return int(raw)
-
-
 def round_budget_multiplier(
     round_budgets: RoundBudgetsSettings | None,
     *,
@@ -251,28 +237,31 @@ def resolve_run_bounds(
     round_index: int = 1,
 ) -> RunBounds:
     """Resolve :class:`RunBounds` from repo settings with env overrides."""
+    from mergecraft.config.env import RunBoundsEnv
     from mergecraft.config.settings import default_settings
 
     resolved_settings = settings if settings is not None else default_settings()
     cfg: RunBoundsSettings = resolved_settings.run_bounds
     environ = dict(env if env is not None else os.environ)
+    # One typed read owns the parse; the merge arithmetic below is unchanged.
+    env_bounds = RunBoundsEnv.from_env(environ)
 
-    token_budget = _env_int(environ, "MERGECRAFT_TOKEN_BUDGET") or cfg.token_budget
-    cost_budget = _env_float(environ, "MERGECRAFT_COST_BUDGET_USD")
+    token_budget = env_bounds.token_budget or cfg.token_budget
+    cost_budget = env_bounds.cost_budget_usd
     if cost_budget is None:
         cost_budget = float(cfg.cost_budget_usd)
-    tool_call_budget = _env_int(environ, "MERGECRAFT_TOOL_CALL_BUDGET") or cfg.tool_call_budget
-    max_diff_lines = _env_int(environ, "MERGECRAFT_MAX_DIFF_LINES") or cfg.max_diff_lines
-    context_timeout = _env_float(environ, "MERGECRAFT_CONTEXT_RETRIEVAL_TIMEOUT_S")
+    tool_call_budget = env_bounds.tool_call_budget or cfg.tool_call_budget
+    max_diff_lines = env_bounds.max_diff_lines or cfg.max_diff_lines
+    context_timeout = env_bounds.context_retrieval_timeout_s
     if context_timeout is None:
         context_timeout = float(cfg.context_retrieval_timeout_s)
-    run_timeout = _env_float(environ, "MERGECRAFT_RUN_TIMEOUT_S")
+    run_timeout = env_bounds.run_timeout_s
     if run_timeout is None:
         run_timeout = _DEFAULT_RUN_TIMEOUT_S
-    external_timeout = _env_float(environ, "MERGECRAFT_EXTERNAL_OPERATION_TIMEOUT_S")
+    external_timeout = env_bounds.external_operation_timeout_s
     if external_timeout is None:
         external_timeout = _DEFAULT_EXTERNAL_OPERATION_TIMEOUT_S
-    cache_max = _env_int(environ, "MERGECRAFT_CACHE_MAX_BYTES") or cfg.cache_max_bytes
+    cache_max = env_bounds.cache_max_bytes or cfg.cache_max_bytes
 
     multiplier = round_budget_multiplier(
         resolved_settings.review.round_budgets,

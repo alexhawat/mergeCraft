@@ -31,7 +31,6 @@ Exports:
 from __future__ import annotations
 
 import json
-import os
 from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -61,7 +60,9 @@ def capture_verdicts_enabled(tool_state: Any | None = None) -> bool:
     """
     if tool_state is not None and bool(getattr(tool_state, "capture_verdicts", False)):
         return True
-    return os.environ.get(CAPTURE_ENV, "").strip() == "1"
+    from mergecraft.config.env import ReviewEnv
+
+    return ReviewEnv().capture_verdicts == "1"
 
 
 def resolve_capture_dir(*, tmpdir: str) -> Path:

@@ -500,17 +500,19 @@ Until then the docstring rules are **review guidance, not a gate** — and this 
 - **Pydantic `BaseModel`** for configuration, Action inputs, and anything crossing a wire boundary (validation, aliasing, serialization)
 - **`dataclass`** for internal structures where validation buys nothing
 - **`TypedDict`** for dict-shaped payloads that stay dicts through the pipeline (`NormalizedFailure`)
-- **`pydantic_settings.BaseSettings`** for settings assembled from env + files
+- **`pydantic_settings.BaseSettings`** for settings assembled from the environment, a `.env` file or Action inputs, through the typed models in `mergecraft.config.env`
 - Avoid raw dicts for anything crossing a module boundary — use a typed model
+
+**Environment settings live in `mergecraft.config.env`.** That leaf package is the only place `os.environ`, `.env` and `INPUT_*` are parsed. Every field declares its exact variable name with `validation_alias` (no `env_prefix` arithmetic), every read constructs the model at use time so an in-process write is seen by the next read (no cached instance), credentials are held as `SecretStr`, and a new environment read belongs in a model rather than in the module that needs it. Control-weakening switches keep their raw value and enable only for exactly `"1"`; they are never typed `bool`, which would also accept `true` / `yes` / `on`. The repo YAML is deliberately **not** a `BaseSettings` — it stays a plain `BaseModel` fed by the layered loader, because environment names such as `SHELL` would otherwise override repo fields.
 
 **Pydantic + mypy.** `make typecheck` runs mypy `strict` with the `pydantic.mypy` plugin (`init_forbid_extra`, `init_typed`, `warn_required_dynamic_aliases`). Expect those on new and changed models. Do **not** weaken global `strict` to land a model.
 
-**camelCase config keys** map to `snake_case` fields via Pydantic aliases with `populate_by_name=True`. Repo config uses `extra="ignore"` so an unknown key in a consumer's `.mergecraft/config.yaml` never hard-fails their review.
+**camelCase config keys** map to `snake_case` fields via Pydantic aliases with `populate_by_name=True`. Repo config uses `extra="forbid"`, so an unknown key in a consumer's `.mergecraft/config.yaml` hard-fails configuration instead of being silently dropped — the hard-fail class and its rationale are in [`docs/config-failure-policy.md`](../config-failure-policy.md).
 
 ```python
 # Config — Pydantic, aliased to the camelCase wire key
 class AnalyzersSettings(BaseModel):
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     enabled: bool = True
     inline_budget: int = Field(default=10, alias="inlineBudget")
@@ -609,7 +611,7 @@ docs/                 # ANALYZERS, CONTRIBUTING-ANALYZERS, REVIEW-DOCTRINE, test
 dependencies = [
     "loguru==0.7.3",
     "httpx==0.28.1",
-    "pydantic==2.13.3",
+    "pydantic==2.13.5",
     "pydantic-settings==2.15.0",
 ]
 
@@ -763,7 +765,7 @@ feat: Added the analyzer.
 - **Action inputs:** `action.yml`, surfaced to the container as `INPUT_<NAME>` (`INPUT_ANALYZERS`)
 - **Env prefix:** `MERGECRAFT_` (`MERGECRAFT_AGENT`, `MERGECRAFT_ANALYZERS`, `MERGECRAFT_MODEL`, `MERGECRAFT_TEMP_DIR`)
 - **Credentials come from Actions secrets / env**, never from config files: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_AUTH_JSON`, `OPENAI_API_KEY`
-- Unknown keys are **ignored, not fatal** (`extra="ignore"`) — a consumer on an older schema still gets a review
+- Unknown keys are a **configuration error** (`extra="forbid"`), not silently dropped — see [`docs/config-failure-policy.md`](../config-failure-policy.md)
 
 ```yaml
 # .mergecraft/config.yaml

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -1388,7 +1387,9 @@ def should_publish_sticky_only(packet: Any) -> bool:
     non-neutral decision always publishes normally: ``failure`` needs a
     blocking formal review, and ``success`` is terminal.
     """
-    enabled = os.environ.get("MERGECRAFT_STICKY_ONLY_NEUTRAL", "").strip().lower()
+    from mergecraft.config.env import ReviewEnv
+
+    enabled = (ReviewEnv().sticky_only_neutral or "").strip().lower()
     if enabled not in {"1", "true", "yes", "on"}:
         return False
     decision = getattr(packet, "decision", None)

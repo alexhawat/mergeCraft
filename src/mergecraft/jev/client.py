@@ -225,7 +225,10 @@ def _answer_to_mapping(answer: object) -> dict[str, Any]:
 def _resolve_api_key(explicit: str | None) -> str | None:
     if explicit is not None and explicit.strip():
         return explicit.strip()
-    env = os.environ.get(TYPESAFE_API_KEY_ENV, "").strip()
+    from mergecraft.config.env import LocalDotEnv
+
+    token = LocalDotEnv.from_env(os.environ).TYPESAFE_API_KEY
+    env = token.get_secret_value().strip() if token is not None else ""
     return env or None
 
 

@@ -148,7 +148,9 @@ def resolve_effective_log_level(
         return "DEBUG"
     if quiet:
         return "WARNING"
-    mergecraft_level = (os.environ.get("MERGECRAFT_LOG_LEVEL") or "").strip().upper()
+    from mergecraft.config.env import LoggingEnv
+
+    mergecraft_level = (LoggingEnv().mergecraft_log_level or "").strip().upper()
     if mergecraft_level in _LOG_LEVELS:
         return mergecraft_level
     from mergecraft.utils.log import resolve_log_level

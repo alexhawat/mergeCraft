@@ -48,6 +48,7 @@ from mergecraft.agents.shared import (
     start_stderr_drain,
     with_prompt,
 )
+from mergecraft.config.env import AgentRuntimeEnv
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.security.review_integrity import TreeBaseline, hash_tree
 from mergecraft.tracing import current_tracer
@@ -122,10 +123,12 @@ _URL_RE: Final[re.Pattern[str]] = re.compile(r"https?://[^\s]+")
 
 def _opencode_provider_http_timeout_s() -> float:
     """Return the httpx timeout for OpenCode provider HTTP session calls."""
-    raw = os.environ.get("MERGECRAFT_EXTERNAL_OPERATION_TIMEOUT_S", "").strip()
-    if raw:
-        return float(raw)
-    return _OPENCODE_PROVIDER_HTTP_TIMEOUT_DEFAULT_S
+    from mergecraft.config.env import RunBoundsEnv
+
+    timeout = RunBoundsEnv().external_operation_timeout_s
+    if timeout is None:
+        return _OPENCODE_PROVIDER_HTTP_TIMEOUT_DEFAULT_S
+    return timeout
 
 
 class ProviderTimeoutError(RuntimeError):
@@ -1540,7 +1543,7 @@ def _run_opencode_cli_streaming(
                 )
                 returncode = wait_or_kill_process_group(
                     process,
-                    timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
+                    timeout=AgentRuntimeEnv().agent_timeout,
                 )
             except subprocess.TimeoutExpired:
                 return AgentResult(success=False, error="opencode run timed out")

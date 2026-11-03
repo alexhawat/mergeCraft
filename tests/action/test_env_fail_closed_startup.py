@@ -81,6 +81,44 @@ async def test_malformed_tracing_env_fails_closed_before_the_agent(
     assert canary not in rendered, f"the error must never print the value: {rendered!r}"
 
 
+async def test_malformed_tracing_input_fails_closed_with_the_real_prompt_reader(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The production prompt resolver must not bypass the fail-closed guard.
+
+    ``resolve_prompt_input`` constructs the full ``ActionInputEnv`` to read the
+    ``prompt`` / ``prompt_file`` fields, so in the real Action path a malformed
+    ``INPUT_TRACING`` reaches the model *before* ``_setup_run``'s guarded tracing
+    block. The harness's scripted prompt resolver would hide that ordering, so
+    this case leaves the production reader in place and supplies ``INPUT_PROMPT``.
+    """
+    canary = "flase-canary-prompt-49b"
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        env={"INPUT_PROMPT": "review the diff", "INPUT_TRACING": canary},
+        event_name=_TRUSTED_EVENT,
+        event_payload=_TRUSTED_PAYLOAD,
+        real_prompt_input=True,
+    )
+
+    assert rec.result is not None, f"main() raised instead of returning: {rec.raised!r}"
+    assert rec.result.outcome is RunOutcome.configuration_error, (
+        "a malformed INPUT_TRACING must fail closed as configuration_error even when "
+        f"resolve_prompt_input builds ActionInputEnv first, got {rec.result.outcome!r} "
+        f"(error={rec.result.error!r})"
+    )
+    assert rec.result.success is False
+    assert rec.agent_runs == [], "no agent may be spawned after a configuration error"
+
+    rendered = "\n".join(
+        part for part in (rec.result.error, rec.result.output, rec.result.result) if part
+    )
+    assert "INPUT_TRACING" in rendered, f"the error must name the input: {rendered!r}"
+    assert canary not in rendered, f"the error must never print the value: {rendered!r}"
+
+
 async def test_valid_tracing_env_does_not_abort_the_run(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -64,8 +64,10 @@ def accepted_protocol_versions(
     env: Mapping[str, str] | None = None,
 ) -> tuple[str, ...]:
     """Consumer protocol offer: ``MERGECRAFT_AGENT_PROTOCOL`` or version ``1``."""
+    from mergecraft.config.env import CliSessionEnv
+
     environ = os.environ if env is None else env
-    raw = environ.get("MERGECRAFT_AGENT_PROTOCOL", "").strip()
+    raw = (CliSessionEnv.from_env(environ).agent_protocol or "").strip()
     if not raw:
         return (AGENT_PROTOCOL_VERSION,)
     return tuple(part.strip() for part in raw.split(",") if part.strip())
