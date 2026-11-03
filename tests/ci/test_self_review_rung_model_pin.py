@@ -13,10 +13,8 @@ from typing import Any
 
 from mergecraft.config.runtime_provider_registry import indexed_env_key
 from mergecraft.config.settings import load_repo_settings
-from tests.ci.workflow_support import REPO_ROOT, job, load_workflow
+from tests.ci.workflow_support import REPO_ROOT, self_review_steps
 
-_WORKFLOW = "mergecraft.yml"
-_REVIEW_JOB = "review"
 _MERGECRAFT_ACTION = "alexhawat/mergeCraft@"
 
 # Built-in provider prefix of `with.model` -> the credential env vars that rung
@@ -38,14 +36,10 @@ def _registered_credentials() -> dict[str, frozenset[str]]:
 
 
 def _rungs() -> list[dict[str, Any]]:
-    steps = job(load_workflow(_WORKFLOW), _REVIEW_JOB).get("steps")
-    assert isinstance(steps, list), "review job steps must be a list"
     rungs = [
         step
-        for step in steps
-        if isinstance(step, dict)
-        and isinstance(step.get("uses"), str)
-        and step["uses"].startswith(_MERGECRAFT_ACTION)
+        for step in self_review_steps()
+        if isinstance(step.get("uses"), str) and step["uses"].startswith(_MERGECRAFT_ACTION)
     ]
     assert len(rungs) == 3, f"expected three review rungs, found {len(rungs)}"
     return rungs

@@ -12,6 +12,7 @@ from tests.ci.support_self_review_cascade import (
     run_decide_script,
     write_gh_mock,
 )
+from tests.ci.workflow_support import job, load_workflow
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -168,7 +169,13 @@ def test_codex_success_short_circuits_even_when_lookups_fail(tmp_path: Path) -> 
 
 
 def test_claude_decide_step_not_gated_on_opencode_go_failure_when_codex_succeeded() -> None:
-    """W3 Step 1 — decide step must not run when Codex already succeeded."""
+    """W3 Step 1 — decide step must not run when Codex already succeeded.
+
+    The Codex rung runs in its own job (#1026), so its outcome reaches the
+    backstop job as ``env.CODEX_OUTCOME``, built from that job's output.
+    """
     expr = claude_step_if_expression()
     compact = "".join(expr.split())
-    assert "mergecraft_codex.outcome!='success'" in compact
+    assert "env.CODEX_OUTCOME!='success'" in compact
+    backstop_env = job(load_workflow("mergecraft.yml"), "review-backstop").get("env") or {}
+    assert "needs.review-codex.outputs.codex_outcome" in str(backstop_env.get("CODEX_OUTCOME"))

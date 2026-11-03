@@ -134,8 +134,12 @@ What is decided and shipped:
   is a fallback, not the primary reviewer.
 - Every job that receives `CODEX_AUTH_JSON` joins the `codex-subscription-auth`
   concurrency group with `cancel-in-progress: false`, so two consumers never
-  refresh the same login at once (#882). GitHub keeps one running and one pending
-  job per group; a third queued review replaces the pending one and needs a re-run.
+  refresh the same login at once (#882). In the self-review that is only the
+  `review-codex` job, which runs the Codex rung alone (#1026): the OpenCode Go
+  rung and the Claude backstop run in their own jobs outside the group. GitHub
+  keeps one running and one pending job per group, so a third queued *Codex*
+  fallback still replaces the pending one, but reviews that never reach Codex
+  no longer queue on it.
 - An expired credential is named instead of buried in a log: the run ends as
   `infra_error` with *reviewer credential expired — re-authenticate*, in the check
   summary and the run record (#922).

@@ -20,12 +20,11 @@ from tests.ci.support_self_review_cascade import (
     run_decide_script,
     step_by_id,
 )
-from tests.ci.workflow_support import job, load_workflow
+from tests.ci.workflow_support import self_review_steps
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-_WORKFLOW = "mergecraft.yml"
 _ENV_VALUE_CAP = 128 * 1024
 _RUNGS = ("opencode-go", "codex", "claude")
 _RUNG_LABELS = {"opencode-go": "OpenCode Go", "codex": "Codex", "claude": "Claude"}
@@ -39,9 +38,7 @@ def _large_packet(verdict: str) -> str:
 
 
 def _review_steps() -> list[dict[str, Any]]:
-    steps = job(load_workflow(_WORKFLOW), "review").get("steps")
-    assert isinstance(steps, list)
-    return [step for step in steps if isinstance(step, dict)]
+    return self_review_steps()
 
 
 def _persist_step(rung: str) -> dict[str, Any]:
@@ -49,7 +46,7 @@ def _persist_step(rung: str) -> dict[str, Any]:
     for step in _review_steps():
         if step.get("name") == name:
             return step
-    raise AssertionError(f"review job has no step named {name!r}")
+    raise AssertionError(f"self-review cascade has no step named {name!r}")
 
 
 def _run_step(step: dict[str, Any], tmp_path: Path, env: dict[str, str]) -> None:
@@ -167,3 +164,46 @@ def test_the_claude_backstop_decision_reads_a_large_packet_file(tmp_path: Path) 
     )
 
     assert outputs.get("need") == "false"
+
+
+def _step_named(name: str) -> dict[str, Any]:
+    for step in _review_steps():
+        if step.get("name") == name:
+            return step
+    raise AssertionError(f"self-review cascade has no step named {name!r}")
+
+
+def test_the_backstop_job_places_the_earlier_rungs_packets_where_the_cascade_read_them(
+    tmp_path: Path,
+) -> None:
+    """The earlier rungs ran on other runners (#1026); their artifacts become the files."""
+    downloaded = tmp_path / "earlier-rungs"
+    for rung in ("opencode-go", "codex", "claude"):
+        artifact = downloaded / f"mergecraft-evidence-{rung}"
+        (artifact / "mergecraft").mkdir(parents=True)
+        (artifact / f"packet-{rung}.json").write_text(_large_packet("success"), encoding="utf-8")
+        (artifact / "mergecraft" / "judge-verdicts.jsonl").write_text("{}\n", encoding="utf-8")
+
+    _run_step(
+        _step_named("Place earlier rungs' evidence packets"),
+        tmp_path,
+        {"RUNNER_TEMP": str(tmp_path)},
+    )
+
+    assert (tmp_path / "packet-opencode-go.json").is_file()
+    assert (tmp_path / "packet-codex.json").is_file()
+    assert not (tmp_path / "packet-claude.json").exists(), (
+        "a Claude packet from an earlier attempt must never stand in for this attempt's"
+    )
+
+
+def test_the_backstop_job_tolerates_absent_earlier_packets(tmp_path: Path) -> None:
+    """A rung that did not run uploads nothing; that is an absent packet, not an error."""
+    _run_step(
+        _step_named("Place earlier rungs' evidence packets"),
+        tmp_path,
+        {"RUNNER_TEMP": str(tmp_path)},
+    )
+
+    assert not (tmp_path / "packet-opencode-go.json").exists()
+    assert not (tmp_path / "packet-codex.json").exists()
