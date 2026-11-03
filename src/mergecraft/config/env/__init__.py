@@ -26,6 +26,7 @@ from mergecraft.config.env._base import (
     validate_env_settings,
 )
 from mergecraft.config.env.action_inputs import ActionInputEnv
+from mergecraft.config.env.agents import AgentRuntimeEnv, ProviderGatewayEnv
 from mergecraft.config.env.config import ConfigLocatorEnv, RunBoundsEnv
 from mergecraft.config.env.dotenv import (
     DotEnvFileSource,
@@ -37,6 +38,7 @@ from mergecraft.config.env.tracing import TracingEnv
 __all__ = [
     "ENV_SETTINGS_CONFIG",
     "ActionInputEnv",
+    "AgentRuntimeEnv",
     "ConfigLocatorEnv",
     "DotEnvFileSource",
     "EnvBool",
@@ -44,6 +46,7 @@ __all__ = [
     "EnvSettingsError",
     "ExactFlag",
     "LocalDotEnv",
+    "ProviderGatewayEnv",
     "RunBoundsEnv",
     "TracingEnv",
     "fail_closed_env_bool",

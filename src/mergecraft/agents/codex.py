@@ -50,6 +50,7 @@ from mergecraft.agents.shared import (
     with_prompt,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
+from mergecraft.config.env import AgentRuntimeEnv
 from mergecraft.config.trust_policy import AgentSandboxDecision
 from mergecraft.mcp.endpoints import MCP_VERIFIER_ENDPOINT
 from mergecraft.security.broker import CodexBrokerPosture, subscription_auth_usable
@@ -156,8 +157,13 @@ def _safe_codex_home_parent(ctx: AgentRunContext) -> Path:
     tmp = Path(ctx.tmpdir)
     if not _is_under_forbidden_temp(tmp):
         return tmp
-    for key in ("MERGECRAFT_CODEX_HOME_PARENT", "RUNNER_TEMP", "GITHUB_WORKSPACE"):
-        raw = os.environ.get(key, "").strip()
+    candidates = (
+        AgentRuntimeEnv().codex_home_parent,
+        os.environ.get("RUNNER_TEMP", ""),
+        os.environ.get("GITHUB_WORKSPACE", ""),
+    )
+    for raw_candidate in candidates:
+        raw = (raw_candidate or "").strip()
         if not raw:
             continue
         candidate = Path(raw)
@@ -845,7 +851,7 @@ def _run_codex_streaming(
                 )
                 returncode = wait_or_kill_process_group(
                     process,
-                    timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
+                    timeout=AgentRuntimeEnv().agent_timeout,
                 )
             except subprocess.TimeoutExpired:
                 return with_prompt(AgentResult(success=False, error="codex CLI timed out"), prompt)

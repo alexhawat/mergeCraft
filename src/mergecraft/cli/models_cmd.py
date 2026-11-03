@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -13,6 +12,7 @@ from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.config import load_repo_settings
+from mergecraft.config.env import AgentRuntimeEnv
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL
 from mergecraft.models import MODEL_ALIASES
 from mergecraft.utils.agent_resolve import (
@@ -117,7 +117,7 @@ def show_cmd(
     repo_root = cwd.resolve()
     settings = load_repo_settings(root=repo_root, load_learnings_files=False)
     order = effective_model_slugs(settings)
-    env_override = os.environ.get("MERGECRAFT_MODEL", "").strip()
+    env_override = AgentRuntimeEnv().model or ""
     winner = resolve_effective_model_slug(settings)
 
     if env_override:
