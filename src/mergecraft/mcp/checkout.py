@@ -23,6 +23,7 @@ from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
 from mergecraft.mcp.tool_call import normalize_pull_number_aliases
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
 from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, degraded_checkout_reason
+from mergecraft.review_policy.ignore_paths import ReviewIgnore, filter_diff
 from mergecraft.utils.gha_log import warning
 from mergecraft.utils.git_hardening import read_remote_origin_url
 from mergecraft.utils.github import GitHubClient
@@ -933,7 +934,13 @@ def _fetch_head_with_retry(
 
 
 def _write_incremental_diff(
-    *, cwd: str, temp: str, pull_number: int, prior_sha: str, git_token: str
+    *,
+    cwd: str,
+    temp: str,
+    pull_number: int,
+    prior_sha: str,
+    git_token: str,
+    ignore: ReviewIgnore | None = None,
 ) -> IncrementalDiffResult:
     """Write the diff since ``prior_sha`` and report an explicit status.
 
@@ -981,6 +988,17 @@ def _write_incremental_diff(
             prior_sha=prior_sha,
             reason=f"no changes since the last reviewed commit {prior_sha[:12]}",
         )
+    if ignore is not None and ignore.active:
+        diff = filter_diff(diff, ignore).text
+        if not diff.strip():
+            return IncrementalDiffResult(
+                status="empty",
+                prior_sha=prior_sha,
+                reason=(
+                    f"every change since the last reviewed commit {prior_sha[:12]} is in "
+                    "files ignored by config"
+                ),
+            )
     path = str(Path(temp) / f"pr-{pull_number}-incremental.diff")
     Path(path).write_text(diff, encoding="utf-8")
     return IncrementalDiffResult(
@@ -1004,6 +1022,55 @@ def _record_delivered_diff(
     record.authoritative_diff = str(diff_text)
     record.unreviewable_paths = list(unreviewable)
     record.diff_truncated = truncated
+
+
+def _apply_review_ignore(
+    ctx: ToolContext, diff_text: str, *, unreviewable: list[str]
+) -> tuple[str, list[str], list[str]]:
+    """Drop files ignored by config from the reviewer's diff (#1109).
+
+    Returns ``(diff, unreviewable, ignored)``: the diff without the ignored file
+    sections, the unreviewable paths that are still in scope, and the ignored paths.
+    The filtered diff is what the coverage gate accounts against, so an ignored file
+    is out of scope rather than unread. The ignored paths are recorded on the tool
+    state for the review body.
+    """
+    ignore = ctx.tool_state.review_ignore
+    if not isinstance(ignore, ReviewIgnore) or not ignore.active:
+        return str(diff_text), list(unreviewable), []
+    filtered = filter_diff(str(diff_text), ignore)
+    changed = [*filtered.kept_paths, *filtered.ignored_paths]
+    ignored = list(filtered.ignored_paths)
+    kept_unreviewable: list[str] = []
+    for path in unreviewable:
+        if ignore.is_ignored(path, changed_paths=changed):
+            ignored.append(path)
+        else:
+            kept_unreviewable.append(path)
+    ignored = list(dict.fromkeys(ignored))
+    if ignored:
+        ctx.tool_state.ignored_review_paths = list(
+            dict.fromkeys([*ctx.tool_state.ignored_review_paths, *ignored])
+        )
+        logger.info(
+            "ignore_paths: {} changed file(s) left out of the review diff: {}",
+            len(ignored),
+            ", ".join(ignored[:10]),
+        )
+    return filtered.text, kept_unreviewable, ignored
+
+
+_IGNORED_PATHS_NOTE = (
+    "These changed files match the operator's ignore_paths / review.ignorePaths and were "
+    "left out of diffPath. They are not reviewed (ignored by config): do not read them or "
+    "report findings on them."
+)
+
+
+def _annotate_ignored(result: dict[str, Any], ignored: list[str]) -> None:
+    if ignored:
+        result["ignoredPaths"] = ignored
+        result["ignoredPathsNote"] = _IGNORED_PATHS_NOTE
 
 
 def get_git_status(cwd: str) -> str:
@@ -1099,9 +1166,11 @@ def checkout_pr_tool(ctx: ToolContext):
             fetch_degraded = degraded_checkout_reason(
                 detail=(fetch_err or "git fetch failed").splitlines()[0]
             )
-            fetch_diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
-            fetch_unreviewable = fetch_diff.unreviewable_paths
-            fetch_truncated = fetch_diff.truncated
+            fetch_files_diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
+            fetch_truncated = fetch_files_diff.truncated
+            fetch_diff, fetch_unreviewable, fetch_ignored = _apply_review_ignore(
+                ctx, fetch_files_diff, unreviewable=fetch_files_diff.unreviewable_paths
+            )
             fetch_degraded = _append_diff_degradations(
                 fetch_degraded, truncated=fetch_truncated, unreviewable=fetch_unreviewable
             )
@@ -1149,6 +1218,7 @@ def checkout_pr_tool(ctx: ToolContext):
                 result["unreviewablePaths"] = fetch_unreviewable
             if fetch_truncated:
                 result["diffTruncated"] = True
+            _annotate_ignored(result, fetch_ignored)
 
             await hydrate_review_context(
                 ctx,
@@ -1221,6 +1291,9 @@ def checkout_pr_tool(ctx: ToolContext):
             diff = files_diff
             unreviewable = files_diff.unreviewable_paths
             diff_truncated = files_diff.truncated
+        diff, unreviewable, ignored_paths = _apply_review_ignore(
+            ctx, diff, unreviewable=unreviewable
+        )
         Path(diff_path).write_text(diff, encoding="utf-8")
         _record_delivered_diff(ctx, diff, unreviewable=unreviewable, truncated=diff_truncated)
         from mergecraft.mcp.verdict import register_review_scope
@@ -1261,6 +1334,7 @@ def checkout_pr_tool(ctx: ToolContext):
             result["unreviewablePaths"] = unreviewable
         if diff_truncated:
             result["diffTruncated"] = True
+        _annotate_ignored(result, ignored_paths)
 
         prior_reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
         publishers = expected_publisher_logins(ctx) if prior_reviews else frozenset()
@@ -1288,6 +1362,11 @@ def checkout_pr_tool(ctx: ToolContext):
                 pull_number=pull_number,
                 prior_sha=prior_sha,
                 git_token=ctx.git_token,
+                ignore=(
+                    ctx.tool_state.review_ignore
+                    if isinstance(ctx.tool_state.review_ignore, ReviewIgnore)
+                    else None
+                ),
             )
             result["lastReviewedSha"] = prior_sha
             result["incrementalDiffStatus"] = incremental.status

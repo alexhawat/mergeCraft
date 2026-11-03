@@ -29,6 +29,7 @@ from mergecraft.analyzers.trust import (
     resolve_analyzers_mode,
 )
 from mergecraft.ci.sarif_ingest import ingest_ci_sarif_from_action_env
+from mergecraft.classify.triage import TriageDecision
 from mergecraft.config.env import EnvSettingsError, validate_env_settings
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.fast_path import decide_fast_path, load_triage_inputs
@@ -56,6 +57,8 @@ from mergecraft.review.engine import ReviewEngine
 from mergecraft.review.roster_execution import RosterExecutionSummary, apply_roster_failure
 from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.review_checks import StaticCheckConfig
+from mergecraft.review_policy.ignore_paths import INPUT_ENV as IGNORE_PATHS_INPUT_ENV
+from mergecraft.review_policy.ignore_paths import list_pull_request_paths, resolve_review_ignore
 from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
 from mergecraft.scm.github import (
     create_github_scm,
@@ -2049,6 +2052,65 @@ async def _triage_gate(ctx: RunContext) -> SkipAgentReview | None:
     return SkipAgentReview(reason=decision.reason)
 
 
+_IGNORE_SKIP_EVENTS: frozenset[str] = frozenset({"pull_request", "pull_request_target"})
+
+
+async def _ignore_paths_gate(ctx: RunContext) -> SkipAgentReview | None:
+    """Resolve review path ignoring (#1109); skip the agent when every changed file is ignored.
+
+    The matcher is built from the ``ignore_paths`` Action input, the built-in defaults
+    and ``review.ignorePaths`` read from the operator's side of the pull request only,
+    and is recorded on the tool state so ``checkout_pr`` trims the reviewer's diff.
+    Only a ``pull_request`` / ``pull_request_target`` run whose complete file listing is
+    ignored skips the agent; it then records a ``skip`` triage tier, so the run passes
+    with "nothing to review" and approval is left to a human. Any doubt reviews.
+    """
+    assert ctx.settings is not None
+    assert ctx.tool_state is not None
+    assert ctx.tool_context is not None
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    repo = ctx.tool_context.repo
+    try:
+        ignore = await resolve_review_ignore(
+            ctx.tool_context.scm,
+            repo.owner,
+            repo.name,
+            event=event,
+            run_start_review=ctx.settings.review,
+            operator_owned=ctx.settings_snapshot_operator_owned,
+            input_value=os.environ.get(IGNORE_PATHS_INPUT_ENV),
+        )
+    except Exception as err:  # path ignoring is an optimisation; failing it reviews everything
+        logger.warning("ignore_paths: could not resolve the matcher, reviewing every file: {}", err)
+        return None
+    ctx.tool_state.review_ignore = ignore
+    logger.info(
+        "ignore_paths: {} glob(s), generated defaults {}, config from {}",
+        len(ignore.patterns),
+        "on" if ignore.generated_defaults else "off",
+        ignore.source,
+    )
+    pull = event.get("pull_request")
+    if not ignore.active or not isinstance(pull, dict) or not isinstance(pull.get("number"), int):
+        return None
+    if os.environ.get("GITHUB_EVENT_NAME", "") not in _IGNORE_SKIP_EVENTS:
+        return None
+    paths = await list_pull_request_paths(
+        ctx.tool_context.scm, repo.owner, repo.name, int(pull["number"])
+    )
+    if not paths:
+        return None
+    kept, ignored = ignore.partition(paths)
+    if kept:
+        return None
+    reason = f"nothing to review: all {len(ignored)} changed file(s) are ignored by config"
+    ctx.tool_state.ignored_review_paths = ignored
+    ctx.tool_state.triage = TriageDecision(tier="skip", recognizer="ignorePaths", reason=reason)
+    logger.warning("» {} — {}", ctx.tool_state.triage.record_line(), reason)
+    gha_log.notice(f"mergeCraft: {reason}")
+    return SkipAgentReview(reason=reason)
+
+
 async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecutionSummary | None:
     """Dispatch secondary reviewers server-side; return the dispatch summary."""
     assert ctx.tool_context is not None
@@ -2123,6 +2185,9 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
     triage_skip = await _triage_gate(ctx)
     if triage_skip is not None:
         return triage_skip
+    ignore_skip = await _ignore_paths_gate(ctx)
+    if ignore_skip is not None:
+        return ignore_skip
 
     with gha_log.group("agent-dispatch"):
         await _prepare_agent_dispatch(ctx)

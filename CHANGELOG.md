@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The `ignore_paths` Action input and `review.ignorePaths` keep changed files
+  matching a glob (newline- or comma-separated, `**` crosses directories) out of
+  the diff the reviewer reads, so eval data, changelogs and lockfiles no longer
+  cost review time on a mixed pull request. The review lists them under "Not
+  reviewed (ignored by config)" and the changed-line coverage gate treats them as
+  out of scope. `**/CHANGELOG.md`, `**/*.lock`, `**/package-lock.json` and
+  generated or minified files are ignored by default; set
+  `review.ignorePathDefaults: false` to review them. A pull request whose every
+  changed file is ignored passes with "nothing to review" and approval left to a
+  human. The repo config is read from the base side only, so a pull request
+  cannot ignore its own files (#1109).
 - A deterministic triage tier, off by default (`review.fastPath.enabled`), decides
   before the agent exists whether a diff needs an LLM review. Recognizers for a
   verified pin substitution, prose, whitespace-only changes and regenerated

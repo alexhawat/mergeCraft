@@ -181,6 +181,23 @@ packet and the shadow log. Any read
 failure, truncated listing or file without a patch is a full review. The PR
 title, body and labels are never inputs.
 
+**Ignored paths (`ignore_paths`, `review.ignorePaths`).** Changed files whose
+repo-relative path matches an ignore glob are cut from the diff the reviewer
+reads (`diffPath`, `incrementalDiffPath`) and from the changed-line coverage
+universe, so they are out of scope rather than unread. `checkout_pr` names them
+in `ignoredPaths`, and the review body lists them under "Not reviewed (ignored
+by config)". The globs are the `ignore_paths` Action input, `review.ignorePaths`
+and, unless `review.ignorePathDefaults: false`, the defaults: `**/CHANGELOG.md`,
+`**/*.lock`, `**/package-lock.json`, and generated or minified files (a
+generated file stays in scope when its generator config changed too). The YAML
+half is read from the operator's side only — the base snapshot of a
+`pull_request_target` run, the base commit's config on any other pull request —
+so a pull request cannot ignore its own files. When the complete file listing of
+a `pull_request` / `pull_request_target` run is ignored, the agent never starts:
+the run passes with `Tier: skip (ignorePaths) — no LLM review ran`, "nothing to
+review", and `mergecraft-approval` is left to a human. A failed or truncated
+listing reviews as usual.
+
 **Fallback interaction.** Semantic fallback advances when
 `terminal_submission_received` is false — whether because no submission
 was recorded or because the validator rejected one. A valid

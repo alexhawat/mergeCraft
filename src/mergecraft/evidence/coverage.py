@@ -248,13 +248,23 @@ def coverage_section_for_state(state: ToolState) -> CoverageSection | None:
     authoritative = (
         record.authoritative_diff if record.authoritative_diff is not None else delivered
     )
-    if not authoritative and not record.unreviewable_paths and not record.diff_truncated:
+    unreviewable = list(record.unreviewable_paths)
+    from mergecraft.review_policy.ignore_paths import ReviewIgnore, filter_diff
+
+    ignore = getattr(state, "review_ignore", None)
+    if isinstance(ignore, ReviewIgnore) and ignore.active:
+        # Files ignored by config are out of scope, not unread (#1109): whatever diff
+        # established scope, their hunks never enter the universe.
+        authoritative = filter_diff(authoritative, ignore).text
+        delivered = filter_diff(delivered, ignore).text
+        unreviewable = [path for path in unreviewable if not ignore.is_ignored(path)]
+    if not authoritative and not unreviewable and not record.diff_truncated:
         return None
     observed, covered = _read_evidence(state, authoritative)
     return account_coverage(
         authoritative_diff=authoritative,
         delivered_diff=delivered,
-        unreviewable_paths=record.unreviewable_paths,
+        unreviewable_paths=unreviewable,
         diff_truncated=record.diff_truncated,
         reads_observed=observed,
         covered_lines=covered,

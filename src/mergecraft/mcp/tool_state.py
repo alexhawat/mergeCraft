@@ -623,6 +623,11 @@ class ToolState:
     # Pre-dispatch triage (#890): the ``TriageDecision`` when ``review.fastPath`` was
     # evaluated for this run; ``None`` when the fast path is off.
     triage: Any = None
+    # Review path ignoring (#1109): the run's ``ReviewIgnore`` matcher (``None`` when it
+    # was never resolved, so ``checkout_pr`` filters nothing) and the changed files kept
+    # out of the reviewer's diff, which the review body lists as not reviewed.
+    review_ignore: Any = None
+    ignored_review_paths: list[str] = field(default_factory=list)
 
     def iter_finding_rows(self) -> list[dict[str, Any]]:
         """Return every dict-shaped finding row across analyzer and agent lanes."""

@@ -351,6 +351,13 @@ async def reject_diff_that_does_not_match_the_pr(
     if not required:
         msg = "could not resolve the PR's changed files from the API"
         raise ValueError(msg)
+    from mergecraft.review_policy.ignore_paths import ReviewIgnore
+
+    ignore = ctx.tool_state.review_ignore
+    if isinstance(ignore, ReviewIgnore) and ignore.active:
+        # Files the operator's ignore_paths keep out of review need not be in the diff.
+        changed = sorted(required)
+        required = {path for path in required if not ignore.is_ignored(path, changed_paths=changed)}
     diff_paths = set(changed_paths_in_diff(text))
     if not diff_paths:
         msg = "diff_path names no files; it cannot describe the PR head"
