@@ -34,6 +34,7 @@ from mergecraft.cli.exits import (
 from mergecraft.cli.tracing_gh_visibility import detect_github_action_tracing
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings, tracing_config_sources
 from mergecraft.cli.typer_group import mergecraft_typer
+from mergecraft.config.env import ConfigLocatorEnv
 from mergecraft.config.env.tracing import TracingEnv
 from mergecraft.tracing.redaction import redact_attrs
 from mergecraft.tracing.sinks import read_jsonl_events
@@ -74,7 +75,7 @@ def _config_source_lines(sources: ConfigSources, *, explicit: str | None) -> lis
     """Rows naming the config files that contributed, worded as ``doctor`` words them."""
     rows: list[tuple[str, str]] = []
     if sources.env_config_missing:
-        missing = os.environ.get("MERGECRAFT_CONFIG", "")
+        missing = ConfigLocatorEnv().config_path or ""
         rows.append(("config note", f"MERGECRAFT_CONFIG={missing} does not exist"))
     if sources.files:
         rows.append(("config files", ", ".join(str(path) for path in sources.files)))

@@ -25,6 +25,7 @@ from mergecraft.config.env._base import (
     registered_env_models,
     validate_env_settings,
 )
+from mergecraft.config.env.config import ConfigLocatorEnv, RunBoundsEnv
 from mergecraft.config.env.dotenv import (
     DotEnvFileSource,
     LocalDotEnv,
@@ -34,12 +35,14 @@ from mergecraft.config.env.tracing import TracingEnv
 
 __all__ = [
     "ENV_SETTINGS_CONFIG",
+    "ConfigLocatorEnv",
     "DotEnvFileSource",
     "EnvBool",
     "EnvSettings",
     "EnvSettingsError",
     "ExactFlag",
     "LocalDotEnv",
+    "RunBoundsEnv",
     "TracingEnv",
     "fail_closed_env_bool",
     "from_env",
