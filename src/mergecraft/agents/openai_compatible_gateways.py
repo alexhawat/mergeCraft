@@ -209,8 +209,17 @@ def _has_env(name: str) -> bool:
 
 
 def has_custom_provider_env() -> bool:
-    """Return whether both generic custom-provider env vars are set."""
-    return _has_env(CUSTOM_PROVIDER_BASE_URL_ENV) and _has_env(CUSTOM_PROVIDER_API_KEY_ENV)
+    """Return whether both generic custom-provider env vars are set.
+
+    Presence is the model's: an unset or blank base URL is ``None``, and the key
+    is a ``SecretStr`` that is only unwrapped to test for a non-blank value —
+    never rendered.
+    """
+    gateway = ProviderGatewayEnv()
+    key = gateway.custom_provider_api_key
+    return gateway.custom_provider_base_url is not None and (
+        key is not None and bool(key.get_secret_value().strip())
+    )
 
 
 def has_gateway_credentials(provider_id: str) -> bool:

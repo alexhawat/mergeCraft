@@ -29,9 +29,15 @@ from mergecraft.agents.codex_stream import (
     CODEX_MODEL_REASONING_EFFORT,
     codex_stream_event_handler,
 )
+
+# The two singleton names are re-exported for callers that read them from here.
 from mergecraft.agents.openai_compatible_gateways import (
-    CUSTOM_PROVIDER_API_KEY_ENV,
-    CUSTOM_PROVIDER_BASE_URL_ENV,
+    CUSTOM_PROVIDER_API_KEY_ENV as CUSTOM_PROVIDER_API_KEY_ENV,
+)
+from mergecraft.agents.openai_compatible_gateways import (
+    CUSTOM_PROVIDER_BASE_URL_ENV as CUSTOM_PROVIDER_BASE_URL_ENV,
+)
+from mergecraft.agents.openai_compatible_gateways import (
     INDEXED_CUSTOM_PROVIDER_API_KEY_RE,
     INDEXED_CUSTOM_PROVIDER_BASE_URL_RE,
     resolve_gateway_endpoints,
@@ -50,7 +56,7 @@ from mergecraft.agents.shared import (
     with_prompt,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
-from mergecraft.config.env import AgentRuntimeEnv
+from mergecraft.config.env import AgentRuntimeEnv, ProviderGatewayEnv
 from mergecraft.config.trust_policy import AgentSandboxDecision
 from mergecraft.mcp.endpoints import MCP_VERIFIER_ENDPOINT
 from mergecraft.security.broker import CodexBrokerPosture, subscription_auth_usable
@@ -522,11 +528,6 @@ def _codex_use_permission_profiles(ctx: AgentRunContext) -> bool:
     return bool(ctx.mcp_server_url) and _sandbox_mode(ctx) == "read-only"
 
 
-def _has_env(name: str) -> bool:
-    val = os.environ.get(name)
-    return isinstance(val, str) and bool(val.strip())
-
-
 def _has_any_custom_provider_env() -> bool:
     """True when at least one ``MERGECRAFT_CUSTOM_PROVIDER_*`` env var is set.
 
@@ -534,16 +535,21 @@ def _has_any_custom_provider_env() -> bool:
     read it as a dict regardless of whether any pair was complete. The
     contract is that the table's *contents* reflect valid pairs only —
     partial pairs (only one of ``_KEY_<N>`` / ``_URL_<N>``) are dropped.
+
+    The singleton pair is read through :class:`ProviderGatewayEnv`; the indexed
+    slots are still enumerated from the environment names at runtime.
     """
-    for key in os.environ:
-        if INDEXED_CUSTOM_PROVIDER_BASE_URL_RE.match(key):
-            return True
-        if INDEXED_CUSTOM_PROVIDER_API_KEY_RE.match(key):
-            return True
-        if key in (CUSTOM_PROVIDER_BASE_URL_ENV, CUSTOM_PROVIDER_API_KEY_ENV):
-            if _has_env(key):
-                return True
-    return False
+    gateway = ProviderGatewayEnv()
+    key = gateway.custom_provider_api_key
+    if gateway.custom_provider_base_url is not None or (
+        key is not None and bool(key.get_secret_value().strip())
+    ):
+        return True
+    return any(
+        INDEXED_CUSTOM_PROVIDER_BASE_URL_RE.match(name) is not None
+        or INDEXED_CUSTOM_PROVIDER_API_KEY_RE.match(name) is not None
+        for name in os.environ
+    )
 
 
 def _add_custom_provider_tables(config: TomlTable) -> None:

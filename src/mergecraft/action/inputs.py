@@ -404,9 +404,18 @@ def _provider_credential_present(
     env: Mapping[str, str],
     settings: RepoSettings | None = None,
 ) -> bool:
-    keys = _PROVIDER_CREDENTIAL_ENV_KEYS
+    from mergecraft.config.env import CUSTOM_PROVIDER_API_KEY_ENV, ProviderGatewayEnv
+
+    singleton_key = ProviderGatewayEnv.from_env(env).custom_provider_api_key
+    if singleton_key is not None and singleton_key.get_secret_value().strip():
+        return True
+
+    credential_names = _PROVIDER_CREDENTIAL_ENV_KEYS
     if settings is not None:
-        keys = keys | provider_credential_env_names(settings)
+        credential_names = credential_names | provider_credential_env_names(settings)
+    # The singleton key is read through its model above; keep it out of the
+    # credential-authority sweep so it has exactly one reader.
+    keys = {key for key in credential_names if key != CUSTOM_PROVIDER_API_KEY_ENV}
     for key in keys:
         value = env.get(key)
         if isinstance(value, str) and value.strip():
