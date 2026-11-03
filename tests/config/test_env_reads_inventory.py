@@ -52,7 +52,8 @@ _FALLBACK_ALIASES: Final = frozenset({"LOG_LEVEL", "LOG_FORMAT", "CI_STATE", "CI
 
 _MAPPING_NAMES: Final = frozenset({"environ", "os_environ", "env", "env_map", "envmap"})
 _MAPPING_SUFFIXES: Final = ("_env", "_environ", "_env_map")
-_GETTERS: Final = frozenset({"get", "getenv"})
+#: Modules whose ``getenv`` is the process environment's own accessor.
+_GETENV_MODULES: Final = frozenset({"os"})
 #: Module-local helpers whose second argument is an environment variable name.
 _READ_HELPERS: Final = frozenset({"_env_int", "_env_float", "_read_input", "_get_env"})
 
@@ -436,78 +437,60 @@ ALLOWED_READS: Final[tuple[AllowedRead, ...]] = (
         "writer",
         "the workflow and .env writers name the variable they emit",
     ),
-    AllowedRead(
-        "src/mergecraft/jev/client.py",
-        "TYPESAFE_API_KEY",
-        "writer",
-        "the name is written to .env and labelled in the secrets help text",
-    ),
     # ── descriptors: the constant names a variable for a message or probe ────
+    #
+    # A descriptor row may cover only a *constant that labels* a variable. It is
+    # never a home for a live ``os.environ`` read: the leaf package owns that
+    # read, and a name a module keeps only to print must be imported from
+    # ``config/env/`` rather than re-declared here (the scan treats a referenced
+    # module-level env-name constant as a read site).
     AllowedRead(
         "src/mergecraft/agents/codex.py",
         "MERGECRAFT_CODEX_SANDBOX",
         "descriptor",
-        "the refusal warning names the override; the value read moves to the model",
-    ),
-    AllowedRead(
-        "src/mergecraft/agents/openai_compatible_gateways.py",
-        "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL",
-        "descriptor",
-        "the provider descriptor and presence probe name it; the value read moves",
-    ),
-    AllowedRead(
-        "src/mergecraft/agents/openai_compatible_gateways.py",
-        "MERGECRAFT_CUSTOM_PROVIDER_API_KEY",
-        "descriptor",
-        "the provider descriptor and presence probe name it; the value read moves",
+        "the refusal warning names the override; the value read is on the model",
     ),
     AllowedRead(
         "src/mergecraft/agents/openai_compatible_gateways.py",
         "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS",
         "descriptor",
-        "the provider descriptor names it; the JSON read moves to the model",
+        "the provider descriptor labels it; the singleton JSON read is on the model",
     ),
     AllowedRead(
         "src/mergecraft/agents/openai_compatible_gateways.py",
         "MERGECRAFT_PROVIDER_EXTRA_OPTIONS",
         "descriptor",
-        "the provider descriptor names it; the JSON read moves to the model",
-    ),
-    AllowedRead(
-        "src/mergecraft/analyzers/sandbox.py",
-        "MERGECRAFT_ALLOW_UNSANDBOXED_SHELL",
-        "descriptor",
-        "the fail-closed message names the override; the value read moves",
+        "the provider descriptor labels it; the per-provider JSON read is on the model",
     ),
     AllowedRead(
         "src/mergecraft/enterprise/audit.py",
         "MERGECRAFT_AUDIT_ROOT",
         "descriptor",
-        "the constant labels the directory variable; the path read moves",
+        "the constant labels the directory variable; the path read is on the model",
     ),
     AllowedRead(
         "src/mergecraft/evidence/run_packet.py",
         "MERGECRAFT_EVIDENCE_DIR",
         "descriptor",
-        "the constant labels the directory variable; the path read moves",
+        "the constant labels the directory variable; the path read is on the model",
     ),
     AllowedRead(
         "src/mergecraft/evidence/verdict_capture.py",
         "MERGECRAFT_CAPTURE_VERDICTS",
         "descriptor",
-        "the constant labels the opt-in flag; the value read moves",
+        "the constant labels the opt-in flag; the value read is on the model",
     ),
     AllowedRead(
         "src/mergecraft/review/linked_repos.py",
         "MERGECRAFT_AUTHORIZED_LINKED_REPOS",
         "descriptor",
-        "the constant names the list variable; the raw read moves",
+        "the constant names the list variable; the raw read is on the model",
     ),
     AllowedRead(
         "src/mergecraft/utils/privilege.py",
         "MERGECRAFT_ALLOW_ROOT",
         "descriptor",
-        "the failure message names the override; the value read moves",
+        "the failure message names the override; the value read is on the model",
     ),
     # ── a dynamic name: the variable is constructed at runtime ───────────────
     AllowedRead(
@@ -603,6 +586,27 @@ def _callee(node: ast.AST) -> str | None:
     return None
 
 
+def _is_getenv_reference(func: ast.AST) -> bool:
+    """True for ``os.getenv(...)`` and for a bare ``getenv`` imported from ``os``.
+
+    ``os.getenv`` is a module-level function, not a method on ``os.environ``, so
+    the mapping test that recognises ``os.environ.get`` misses it. A bare
+    ``getenv`` (``from os import getenv``) is the same read.
+    """
+    if isinstance(func, ast.Name):
+        return func.id == "getenv"
+    if isinstance(func, ast.Attribute) and func.attr == "getenv":
+        if isinstance(func.value, ast.Name) and func.value.id in _GETENV_MODULES:
+            return True
+        return _is_mapping(func.value)
+    return False
+
+
+def _is_mapping_get(func: ast.AST) -> bool:
+    """True for ``os.environ.get`` / ``env_map.get`` — a getter on a mapping."""
+    return isinstance(func, ast.Attribute) and func.attr == "get" and _is_mapping(func.value)
+
+
 def _constants_in_module(tree: ast.Module) -> dict[str, str]:
     """Map a module-level ``UPPER = "<env name>"`` constant to its value."""
     constants: dict[str, str] = {}
@@ -655,13 +659,13 @@ def _resolve(node: ast.AST, constants: dict[str, str]) -> str | None:
 
 
 def _read_body_reads_a_mapping(body: list[ast.stmt]) -> bool:
-    """True when a loop body reads through a mapping (the candidate-name pattern)."""
+    """True when a loop body reads the environment (the candidate-name pattern)."""
     for stmt in body:
         for node in ast.walk(stmt):
-            if isinstance(node, ast.Call) and _callee(node.func) in _GETTERS:
-                func = node.func
-                if isinstance(func, ast.Attribute) and _is_mapping(func.value):
-                    return True
+            if isinstance(node, ast.Call) and (
+                _is_mapping_get(node.func) or _is_getenv_reference(node.func)
+            ):
+                return True
             if isinstance(node, ast.Subscript) and _is_mapping(node.value):
                 return True
             if isinstance(node, ast.Compare) and any(
@@ -671,9 +675,8 @@ def _read_body_reads_a_mapping(body: list[ast.stmt]) -> bool:
     return False
 
 
-def _scan_file(path: Path, constants: dict[str, str]) -> list[ReadSite]:
-    rel = path.relative_to(_REPO_ROOT).as_posix()
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+def _scan_tree(tree: ast.Module, rel: str, constants: dict[str, str]) -> list[ReadSite]:
+    """Classify every environment read in one parsed module."""
     sites: list[ReadSite] = []
     for node in ast.walk(tree):
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -699,10 +702,10 @@ def _scan_file(path: Path, constants: dict[str, str]) -> list[ReadSite]:
                     if name is not None:
                         sites.append(ReadSite(rel, node.lineno, name, f"helper:{callee}"))
                 continue
-            if callee not in _GETTERS:
-                continue
-            func = node.func
-            if not isinstance(func, ast.Attribute) or not _is_mapping(func.value):
+            if callee == "getenv":
+                if not _is_getenv_reference(node.func):
+                    continue
+            elif not _is_mapping_get(node.func):
                 continue
             if not node.args:
                 continue
@@ -732,6 +735,22 @@ def _scan_file(path: Path, constants: dict[str, str]) -> list[ReadSite]:
                 if name is not None:
                     sites.append(ReadSite(rel, node.lineno, name, "candidates"))
     return sites
+
+
+def _scan_source(source: str, rel: str, constants: dict[str, str]) -> list[ReadSite]:
+    """Classify every environment read in one source string."""
+    return _scan_tree(ast.parse(source), rel, constants)
+
+
+def _scan_file(
+    path: Path,
+    constants: dict[str, str],
+    *,
+    root: Path = _REPO_ROOT,
+) -> list[ReadSite]:
+    """Classify one module on disk; *root* anchors the reported relative path."""
+    rel = path.relative_to(root).as_posix()
+    return _scan_source(path.read_text(encoding="utf-8"), rel, constants)
 
 
 @functools.lru_cache(maxsize=1)
@@ -965,3 +984,40 @@ def test_every_out_of_scope_read_is_allowlisted() -> None:
         "unclassified environment reads outside mergecraft.config.env — add an "
         f"allowlist row with class + reason, or migrate the read:\n{rendered}"
     )
+
+
+# ── the scan's own contract: the shapes it says it recognises ──────────────
+
+#: A planted module: every read shape the module docstring promises to catch.
+_PLANTED_READS = """\
+import os
+from os import getenv
+
+PORT = os.getenv("MERGECRAFT_MCP_PORT")
+TOKEN = getenv("MERGECRAFT_MCP_TOKEN")
+API = os.environ.get("MERGECRAFT_API_URL")
+PRESENT = "MERGECRAFT_MCP_PORT" in os.environ
+"""
+
+
+def test_scan_reports_getenv_in_a_scratch_tree(tmp_path: Path) -> None:
+    """A planted ``os.getenv``/bare ``getenv`` is reported, not just mapping ``get``.
+
+    ``os.getenv`` is a module-level function rather than a method on
+    ``os.environ``, so a mapping-only scan is blind to it. The planted module
+    lives in a throwaway tree: proving the shape without adding a read to
+    ``src/`` is the whole point.
+    """
+    root = tmp_path / "repo"
+    module = root / "src" / "mergecraft" / "planted_probe.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(_PLANTED_READS, encoding="utf-8")
+
+    sites = _scan_file(module, {}, root=root)
+    reported = {(site.name, site.kind) for site in sites}
+
+    assert ("MERGECRAFT_MCP_PORT", "environ.getenv") in reported, reported
+    assert ("MERGECRAFT_MCP_TOKEN", "environ.getenv") in reported, reported
+    assert ("MERGECRAFT_API_URL", "environ.get") in reported, reported
+    assert ("MERGECRAFT_MCP_PORT", "environ.contains") in reported, reported
+    assert {site.path for site in sites} == {"src/mergecraft/planted_probe.py"}

@@ -263,8 +263,9 @@ pinned once, on the model, rather than re-stated per reader.
 
 | Layer | Test file | Asserts |
 | --- | --- | --- |
-| Unit (happy) | `tests/agents/test_agent_timeout_env.py::test_agent_timeout_defaults_to_3600_and_honours_a_valid_value` | unset and empty read `3600`; `3600`, `120`, `1` are honoured |
-| Unit (error) | `…::test_agent_timeout_rejects_a_malformed_value` | `soon`, `1.5`, `10m`, `true` raise `ValueError` naming the variable |
+| Unit (happy) | `tests/agents/test_agent_timeout_env.py::test_agent_timeout_defaults_to_3600_and_honours_a_valid_value` | unset reads `3600`; `3600`, `120`, `1` are honoured |
+| Unit (error) | `…::test_agent_timeout_rejects_a_malformed_value`, `…::test_agent_timeout_rejects_an_empty_value_like_today` | `soon`, `1.5`, `10m`, `true` raise `ValueError` naming the variable; `""` and `"   "` raise too, as `int("")` did before the migration |
+| Unit (parity audit) | `…::test_numeric_knobs_do_not_turn_an_empty_value_into_a_default` | every numeric run-budget/timeout knob keeps today's empty rule: only the agent timeout raised; the eight `RunBoundsEnv` fields and the MCP port read as absent and `MERGECRAFT_*=` resolves exactly like unset |
 | Unit (edge) | `…::test_agent_timeout_reads_nothing_from_the_process_environment`, `…::test_agent_runtime_env_is_constructed_per_read` | the mapping is the only input; no cached instance |
 | Unit (shape) | `…::test_agent_runtime_env_declares_the_runtime_knobs` | the timeout, the Codex home parent, the model and the agent are exact aliases |
 
@@ -303,7 +304,10 @@ The scan recognises the read shapes the codebase uses: a literal (or a
 module-level constant, including one imported from another module) passed to
 `os.environ.get` / `os.getenv` / `environ.get`, an `os.environ[...]` load, a
 `key in os.environ` membership test, a literal passed to one of the module-local
-env helpers, and a candidate-name tuple a loop reads through a mapping. Writes
+env helpers, and a candidate-name tuple a loop reads through a mapping. The
+`os.getenv` / bare-`getenv` shape has its own scratch-tree self-test
+(`test_scan_reports_getenv_in_a_scratch_tree`), because the real tree currently
+reads through `os.environ.get` only. Writes
 are not reads: a subscript store, `pop`, `setdefault` and an exporter's dict key
 are the writer's own business. A constant that is no longer referenced anywhere
 in its module is dead, not a read, so it is not flagged.
@@ -312,6 +316,14 @@ in its module is dead, not a read, so it is not flagged.
 tolerated; an *unlisted* read is a failure. That is the only rule compatible
 with a single-writer test tree: an implementation wave adds the read to a model,
 never to this allowlist. The test owner prunes the stale rows.
+
+A `descriptor` row may cover only a module-level constant that *labels* a
+variable for a message or a provider descriptor. It is never a home for a live
+`os.environ` read: the leaf package owns that read. Because the scan records a
+referenced env-name constant as a read surrogate (a dynamic read is represented
+by the constant that names it), a module keeping a name only to print must
+import it from `config/env/` — the leaf is out of scan scope, as
+`OTEL_PLUGIN_ENV` already demonstrates — rather than re-declare it locally.
 
 **What the post-50 tree surfaced.** The definitive inventory at the parity
 wave's base (`d103e90c`) is **370 read lines in 115 files** for the plan's
@@ -368,6 +380,65 @@ uv run --extra dev pytest tests/config/test_env_reads_inventory.py \
 
 At the RED wave: **449 collected**, 217 failing pending implementation, 232
 parity/guard passing; `make lint` and `make typecheck` clean.
+
+## Gate reconciliation (test-owner pass)
+
+The 49b verifier gate returned `changes_required`, with three test-owned findings
+and three product findings. The test-owned findings are fixed here; the product
+findings are deliberately left red.
+
+**Test-owned fixes.**
+
+1. *Stale oracle.* `tests/cli/test_profile_env_exports.py` derived `_READ_ENV`
+   by regexing `src/mergecraft/utils/run_bounds.py`, which now contains no
+   `MERGECRAFT_*` names because the parser moved into `RunBoundsEnv`. The
+   accepted set is now the model's declared aliases, with a `_BUDGET_VARS`
+   guard so a model that lost a knob cannot make the subset check vacuous.
+   `test_profile_env_overrides_emits_no_unread_variable[fast|deep|security]`
+   is green again.
+2. *Scan gap.* The inventory accepted a getter only when its receiver was a
+   mapping (`os.environ.get`, `env_map.get`), so `os.getenv("MERGECRAFT_MCP_PORT")`
+   was invisible. `_is_getenv_reference` now recognises `os.getenv` and a bare
+   `getenv` imported from `os`; the candidate-name loop uses the same predicate.
+   `test_scan_reports_getenv_in_a_scratch_tree` plants `os.getenv` / bare
+   `getenv` / `os.environ.get` / membership in a `tmp_path` tree and asserts all
+   four are reported. `_scan_file(..., root=...)` and `_scan_source` exist so a
+   tree outside the repo can be scanned. The real tree has no `os.getenv`
+   calls, so the classification is unchanged.
+3. *Empty-value parity.* `MERGECRAFT_AGENT_TIMEOUT=""` raised `ValueError` from
+   `int("")` before the migration; `env_ignore_empty=True` turned it into
+   `3600`. `test_agent_timeout_rejects_an_empty_value_like_today` pins the raise
+   for `""` and `"   "`, and
+   `test_numeric_knobs_do_not_turn_an_empty_value_into_a_default` audits the
+   whole numeric run-budget/timeout family: the eight `RunBoundsEnv` fields and
+   the MCP port read as absent for `""` (and the run-budget knobs resolve
+   exactly like unset); only the agent timeout raised.
+
+**Product findings left red** — the exemptions that hid the live reads are
+removed, so the inventory fails until the reads move:
+
+| Read | Removed row | Node id |
+| --- | --- | --- |
+| `src/mergecraft/analyzers/sandbox.py:245` (fail-closed sandbox gate) | `MERGECRAFT_ALLOW_UNSANDBOXED_SHELL`, class `descriptor` | `test_in_scope_name_is_read_only_through_a_model[MERGECRAFT_ALLOW_UNSANDBOXED_SHELL-PS7]` |
+| `src/mergecraft/agents/openai_compatible_gateways.py:255-256` (singleton gateway pair) | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` and `MERGECRAFT_CUSTOM_PROVIDER_API_KEY`, class `descriptor` | `…[MERGECRAFT_CUSTOM_PROVIDER_BASE_URL-PS6]`, `…[MERGECRAFT_CUSTOM_PROVIDER_API_KEY-PS6]` |
+| `src/mergecraft/jev/client.py:228` (Jev credential) | `TYPESAFE_API_KEY`, class `writer` | `…[TYPESAFE_API_KEY-PS2]` |
+
+The `writer` row was mislabelled: `jev/client.py` returns the value, it does not
+write it. The gateway rows claimed "the value read moves" while the read was
+still there.
+
+**Executor note.** The scan reports a referenced module-level constant whose
+value is an environment name (`kind="constant"`). After the value read moves,
+`sandbox.py` and the gateway module still reference their constants as labels,
+so the constant site keeps failing unless the name is imported from
+`mergecraft.config.env` (out of scan scope — the `OTEL_PLUGIN_ENV` precedent) or
+the test owner re-adds a descriptor row during reconciliation.
+`TYPESAFE_API_KEY_ENV` becomes unreferenced once the read moves, and a dead
+constant is not a read site.
+
+Rows that stay are message-only descriptors whose value read is already on a
+model (codex sandbox, the extra-options labels, audit root, evidence dir,
+verdict capture, linked repos, allow-root); their reasons now say so.
 
 ## Out of scope
 
