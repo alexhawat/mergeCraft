@@ -454,8 +454,15 @@ verdict capture, linked repos, allow-root); their reasons now say so.
 
 ## Second self-review pass (PR #1127)
 
+**Closed by the product pass.** All three findings were fixed at `4e0183ef`
+(timeout is a float again, the tracing diagnostics read `TracingEnv`, and a
+malformed `INPUT_TRACING` through the real `main()` path is
+`configuration_error`); the gate re-ran green at that head (477 plan-selection
+tests, 191 inventory with 0 unlisted reads).
+
 The PR self-review returned three more findings, one of them a suite gap. All
-three are pinned here as RED; the product findings stay red for the executor.
+three were pinned here as RED; the product findings were left red for the
+executor's pass.
 
 1. **Agent-timeout type.** `AgentRuntimeEnv.agent_timeout` is `int`, but
    `agents/cursor.py` and `security/broker.py` parsed with `float(...)` before
