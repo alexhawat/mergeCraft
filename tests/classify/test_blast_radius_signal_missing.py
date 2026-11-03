@@ -53,7 +53,8 @@ MISSING_SIGNAL_CASES: list[tuple[str, dict[str, Any], tuple[str, ...]]] = [
 def test_a_missing_signal_is_never_low_or_eligible(
     change: dict[str, Any], missing: tuple[str, ...]
 ) -> None:
-    result = classify_blast_radius(change)  # type: ignore[arg-type]  # malformed shapes on purpose
+    # Passes malformed ChangeSet shapes on purpose (non-list paths, non-dict stats).
+    result = classify_blast_radius(change)  # type: ignore[arg-type]  # malformed ChangeSet on purpose
 
     assert result.lane == "medium"
     assert result.auto_merge_lane == "assisted"

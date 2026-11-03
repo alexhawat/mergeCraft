@@ -39,9 +39,9 @@ Unknown is never green. A classification that was not given what it measures can
 
 `signal_missing` is applied after every other rule, including the small-isolated-source carve-out, and it is not a `RuleSet` key, so no repository override can lower it. The reason names the missing input, for example `Missing classifier input: changed_paths, diff_stats.` A higher lane from another category still wins.
 
-Two consumers follow the same rule:
+The approval gate and the risk-band ordering follow the same rule:
 
-- The approval gate's `low_risk_passing` row (the one that maps to `auto_merge`) requires a `low` lane **and** evidence that the classification had inputs: a non-empty `files_changed` on the packet and no `signal_missing` category. A packet that claims `low` with nothing measured falls through to a later row.
+- Both gate rows that map to `auto_merge` require evidence that the classification had inputs: a non-empty `files_changed` on the packet and no `signal_missing` category. `low_risk_passing` also requires a `low` lane. `clean_pass` covers every lane that is not `forbidden`, including `medium`, so without this check it would auto-merge a `signal_missing` packet. A packet that claims a lane with nothing measured falls through to `needs_human_review`.
 - `risk_at_or_above` ranks an unrecognised risk band above `critical`, so a misspelt or unknown band meets every threshold instead of reading as `low`.
 
 ## Per-repository overrides
