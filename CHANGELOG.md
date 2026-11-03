@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generated or minified files are ignored by default; set
   `review.ignorePathDefaults: false` to review them. A pull request whose every
   changed file is ignored passes with "nothing to review" and approval left to a
-  human. The repo config is read from the base side only, so a pull request
+  human, including a comment-driven review or one whose file listing failed; an
+  all-ignored scope is never approved. The repo config is read from the base side only, so a pull request
   cannot ignore its own files (#1109).
 - A deterministic triage tier, off by default (`review.fastPath.enabled`), decides
   before the agent exists whether a diff needs an LLM review. Recognizers for a

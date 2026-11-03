@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import base64
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
@@ -21,6 +21,15 @@ from mergecraft.review_policy.ignore_paths import (
     parse_ignore_paths,
     resolve_review_ignore,
 )
+
+if TYPE_CHECKING:
+    from mergecraft.scm.protocol import ScmProvider
+
+
+def _as_scm(stub: object) -> ScmProvider:
+    """The stubs implement only ``get``, the one method these readers call."""
+    return cast("ScmProvider", stub)
+
 
 # ── glob matching ────────────────────────────────────────────────────────────
 
@@ -254,7 +263,7 @@ _HEAD_REVIEW = ReviewSettings.model_validate(
 async def test_head_side_config_never_opts_a_pr_out_of_review() -> None:
     scm = _Scm(contents=_file_payload("review:\n  ignorePaths:\n    - fixtures/**\n"))
     ignore = await resolve_review_ignore(
-        scm,  # type: ignore[arg-type]
+        _as_scm(scm),
         "acme",
         "demo",
         event=_pr_event(),
@@ -273,7 +282,7 @@ async def test_head_side_config_never_opts_a_pr_out_of_review() -> None:
 async def test_operator_owned_snapshot_is_used_directly() -> None:
     scm = _Scm(error=AssertionError("must not read"))
     ignore = await resolve_review_ignore(
-        scm,  # type: ignore[arg-type]
+        _as_scm(scm),
         "acme",
         "demo",
         event=_pr_event(),
@@ -293,7 +302,7 @@ async def test_base_without_config_uses_defaults_and_input() -> None:
         "404", request=request, response=httpx.Response(404, request=request)
     )
     ignore = await resolve_review_ignore(
-        _Scm(error=missing),  # type: ignore[arg-type]
+        _as_scm(_Scm(error=missing)),
         "acme",
         "demo",
         event=_pr_event(),
@@ -316,7 +325,7 @@ async def test_base_without_config_uses_defaults_and_input() -> None:
 @pytest.mark.asyncio
 async def test_unreadable_base_config_drops_only_the_yaml_half(scm: _Scm) -> None:
     ignore = await resolve_review_ignore(
-        scm,  # type: ignore[arg-type]
+        _as_scm(scm),
         "acme",
         "demo",
         event=_pr_event(),
@@ -332,7 +341,7 @@ async def test_unreadable_base_config_drops_only_the_yaml_half(scm: _Scm) -> Non
 @pytest.mark.asyncio
 async def test_no_pull_request_uses_the_run_start_tree() -> None:
     ignore = await resolve_review_ignore(
-        _Scm(error=AssertionError("must not read")),  # type: ignore[arg-type]
+        _as_scm(_Scm(error=AssertionError("must not read"))),
         "acme",
         "demo",
         event={},
@@ -359,7 +368,7 @@ class _FilesScm:
 @pytest.mark.asyncio
 async def test_listing_returns_every_changed_path() -> None:
     scm = _FilesScm({1: [{"filename": "a.py"}, {"filename": "CHANGELOG.md"}]})
-    assert await list_pull_request_paths(scm, "o", "r", 1) == ["a.py", "CHANGELOG.md"]  # type: ignore[arg-type]
+    assert await list_pull_request_paths(_as_scm(scm), "o", "r", 1) == ["a.py", "CHANGELOG.md"]
 
 
 @pytest.mark.asyncio
@@ -368,5 +377,9 @@ async def test_truncated_or_failed_listing_is_doubt(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(module, "_FILES_MAX_PAGES", 2)
     full = [{"filename": f"f{i}.lock"} for i in range(100)]
-    assert await list_pull_request_paths(_FilesScm({1: full, 2: full}), "o", "r", 1) is None  # type: ignore[arg-type]
-    assert await list_pull_request_paths(_Scm(error=RuntimeError("x")), "o", "r", 1) is None  # type: ignore[arg-type]
+    assert (
+        await list_pull_request_paths(_as_scm(_FilesScm({1: full, 2: full})), "o", "r", 1) is None
+    )
+    assert (
+        await list_pull_request_paths(_as_scm(_Scm(error=RuntimeError("x"))), "o", "r", 1) is None
+    )

@@ -1441,7 +1441,13 @@ async def _publish_github_review(
     primary.issue_number = pull_number
 
     event = "COMMENT"
-    if approved and ctx.pr_approve_enabled and ctx.authority_trust == "trusted":
+    triage_skipped = getattr(ctx.tool_state.triage, "tier", None) == "skip"
+    if (
+        approved
+        and ctx.pr_approve_enabled
+        and ctx.authority_trust == "trusted"
+        and not triage_skipped  # nothing was in review scope; a human approves (#1109)
+    ):
         event = "APPROVE"
     elif request_changes:
         event = "REQUEST_CHANGES"

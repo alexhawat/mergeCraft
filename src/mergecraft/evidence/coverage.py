@@ -255,9 +255,14 @@ def coverage_section_for_state(state: ToolState) -> CoverageSection | None:
     if isinstance(ignore, ReviewIgnore) and ignore.active:
         # Files ignored by config are out of scope, not unread (#1109): whatever diff
         # established scope, their hunks never enter the universe.
-        authoritative = filter_diff(authoritative, ignore).text
-        delivered = filter_diff(delivered, ignore).text
-        unreviewable = [path for path in unreviewable if not ignore.is_ignored(path)]
+        filtered_authoritative = filter_diff(authoritative, ignore).text
+        filtered_unreviewable = [path for path in unreviewable if not ignore.is_ignored(path)]
+        # Never filter down to an empty scope: nothing left to account for would read
+        # as no gate at all. An all-ignored change is the triage skip's job instead.
+        if filtered_authoritative.strip() or filtered_unreviewable or not authoritative.strip():
+            authoritative = filtered_authoritative
+            delivered = filter_diff(delivered, ignore).text
+            unreviewable = filtered_unreviewable
     if not authoritative and not unreviewable and not record.diff_truncated:
         return None
     observed, covered = _read_evidence(state, authoritative)

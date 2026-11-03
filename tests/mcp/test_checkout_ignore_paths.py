@@ -7,6 +7,7 @@ unread. The tool result names the ignored files and the review body lists them.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -27,8 +28,9 @@ if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
 
-def _mixed_pr_repo(tmp_path: Path) -> Path:
-    """A PR that changes source, a changelog, a lockfile and eval data."""
+def _mixed_pr_repo(tmp_path: Path, *, with_source: bool = True) -> Path:
+    """A PR that changes source (unless ``with_source`` is false), a changelog, a lockfile
+    and eval data."""
     origin = tmp_path / "origin.git"
     work = tmp_path / "work"
     work.mkdir()
@@ -40,7 +42,8 @@ def _mixed_pr_repo(tmp_path: Path) -> Path:
     _git(work, "commit", "-m", "base")
     _git(work, "branch", "-M", "base")
     _git(work, "checkout", "-b", "feature")
-    (work / "feature.py").write_text("changed = 1\n", encoding="utf-8")
+    if with_source:
+        (work / "feature.py").write_text("changed = 1\n", encoding="utf-8")
     (work / "CHANGELOG.md").write_text("# Changelog\n- CHANGELOG_SECRET\n", encoding="utf-8")
     (work / "uv.lock").write_text("LOCK_CONTENT = 1\n", encoding="utf-8")
     evals = work / "host" / "evals" / "suite"
@@ -53,6 +56,16 @@ def _mixed_pr_repo(tmp_path: Path) -> Path:
     clone = tmp_path / "clone"
     _git(tmp_path, "clone", str(origin), str(clone))
     return clone
+
+
+def _git_diff(repo: Path) -> str:
+    return subprocess.run(
+        ["git", "diff", "--merge-base", "origin/base", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
 
 
 def _read_text(path: str) -> str:
@@ -149,22 +162,98 @@ async def test_files_api_diff_drops_ignored_and_unreviewable_ignored_files(
     assert section.complete is True
 
 
-def test_coverage_treats_ignored_hunks_as_out_of_scope_for_any_scope_source() -> None:
+def test_coverage_drops_ignored_hunks_but_never_filters_to_an_empty_scope() -> None:
     from mergecraft.evidence.coverage import coverage_section_for_state
     from mergecraft.mcp.tool_state import init_tool_state
 
-    state = init_tool_state(owner="acme", name="demo", dir=".")
-    state.coverage.authoritative_diff = (
+    changelog = (
         "diff --git a/CHANGELOG.md b/CHANGELOG.md\n"
         "--- a/CHANGELOG.md\n"
         "+++ b/CHANGELOG.md\n"
         "@@ -0,0 +1 @@\n"
         "+x\n"
     )
-    state.coverage.unreviewable_paths = ["uv.lock"]
-    without = coverage_section_for_state(state)
-    assert without is not None
-    assert without.complete is False
-
+    source = "diff --git a/src/app.py b/src/app.py\n@@ -0,0 +1 @@\n+y\n"
+    state = init_tool_state(owner="acme", name="demo", dir=".")
     state.review_ignore = _ignore(None)
-    assert coverage_section_for_state(state) is None, "nothing left in scope to account for"
+
+    state.coverage.authoritative_diff = source + changelog
+    mixed = coverage_section_for_state(state)
+    assert mixed is not None
+    assert {row.path for row in mixed.uncovered} == {"src/app.py"}
+
+    state.coverage.authoritative_diff = changelog
+    state.coverage.unreviewable_paths = ["uv.lock"]
+    all_ignored = coverage_section_for_state(state)
+    assert all_ignored is not None, "an all-ignored scope must not read as nothing to gate"
+    assert all_ignored.complete is False
+
+
+@pytest.mark.asyncio
+async def test_all_ignored_pr_on_a_comment_driven_review_cannot_be_approved(
+    tmp_path: Path,
+) -> None:
+    """MC-d4c038: the pre-dispatch gate skips neither a slash-command review nor a run
+    whose file listing failed, so the checkout must not hand the agent an empty scope it
+    could approve: a complete diff of only ignored files records the skip tier."""
+    from tests.evidence.test_run_packet import _make_ctx
+
+    from mergecraft.evidence.run_packet import build_run_packet
+
+    (tmp_path / "pr").mkdir()
+    repo = _mixed_pr_repo(tmp_path / "pr", with_source=False)
+    ctx = _ctx_for(repo, _StubGitHub(), tmp_path / "pr")
+    ctx.tool_state.review_ignore = _ignore()  # resolved by the gate, which did not skip
+
+    is_error, payload = await _checkout(ctx)
+
+    assert is_error is False
+    assert isinstance(payload, dict)
+    filtered = _read_text(payload["diffPath"])
+    assert filtered.strip() == ""
+    assert ctx.tool_state.triage is not None
+    assert (ctx.tool_state.triage.tier, ctx.tool_state.triage.recognizer) == (
+        "skip",
+        "ignorePaths",
+    )
+
+    # The strongest case: evidence that would otherwise approve (the unfiltered change
+    # set, an approving agent, no findings). The skip tier must still hold approval back.
+    unfiltered = _git_diff(repo)
+    packet_dir = tmp_path / "packet"
+    packet_dir.mkdir()
+    packet_ctx = _make_ctx(packet_dir, diff_text=unfiltered, findings=[])
+    packet_ctx.authority_trust = "trusted"
+    premise = build_run_packet(packet_ctx, run_succeeded=True)
+    assert premise.decision is not None
+    assert premise.decision.verdict == "success", "fixture premise: this evidence approves"
+
+    packet_ctx.tool_state.triage = ctx.tool_state.triage
+    packet = build_run_packet(packet_ctx, run_succeeded=True)
+    assert packet.decision is not None
+    assert packet.decision.verdict != "success"
+    assert packet.decision.verdict == "neutral"
+
+
+@pytest.mark.asyncio
+async def test_truncated_listing_of_ignored_files_is_reviewed_unfiltered(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    from mergecraft.mcp import checkout as checkout_module
+
+    monkeypatch.setattr(checkout_module, "_PULL_FILES_MAX_PAGES", 1)
+    page = [_patched_file(f"pkg{i}/yarn.lock") for i in range(100)]
+    repo = _mixed_pr_repo(tmp_path)
+    _fail_merge_base_diff(monkeypatch)
+    ctx = _ctx_for(repo, _StubGitHub(pages={1: page}), tmp_path)
+    ctx.tool_state.review_ignore = _ignore()
+
+    is_error, payload = await _checkout(ctx)
+
+    assert is_error is False
+    assert isinstance(payload, dict)
+    assert payload["diffTruncated"] is True
+    assert "ignoredPaths" not in payload
+    assert "pkg0/yarn.lock" in _read_text(payload["diffPath"])
+    assert ctx.tool_state.triage is None
+    assert ctx.tool_state.ignored_review_paths == []

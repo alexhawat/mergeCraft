@@ -1025,7 +1025,7 @@ def _record_delivered_diff(
 
 
 def _apply_review_ignore(
-    ctx: ToolContext, diff_text: str, *, unreviewable: list[str]
+    ctx: ToolContext, diff_text: str, *, unreviewable: list[str], truncated: bool
 ) -> tuple[str, list[str], list[str]]:
     """Drop files ignored by config from the reviewer's diff (#1109).
 
@@ -1034,6 +1034,12 @@ def _apply_review_ignore(
     The filtered diff is what the coverage gate accounts against, so an ignored file
     is out of scope rather than unread. The ignored paths are recorded on the tool
     state for the review body.
+
+    A filter that would leave nothing in scope never yields an empty review that can
+    approve. When the diff is complete, every changed file is provably ignored: the
+    run records the ``skip (ignorePaths)`` triage tier, which keeps
+    ``mergecraft-approval`` neutral whatever the agent submits. When the files-API
+    listing was truncated, the change set is unknown, so nothing is filtered.
     """
     ignore = ctx.tool_state.review_ignore
     if not isinstance(ignore, ReviewIgnore) or not ignore.active:
@@ -1048,6 +1054,14 @@ def _apply_review_ignore(
         else:
             kept_unreviewable.append(path)
     ignored = list(dict.fromkeys(ignored))
+    if ignored and not filtered.text.strip() and not kept_unreviewable:
+        if truncated:
+            logger.warning(
+                "ignore_paths: every listed file is ignored but the listing was truncated; "
+                "reviewing the unfiltered diff"
+            )
+            return str(diff_text), list(unreviewable), []
+        _record_all_ignored_skip(ctx, ignored)
     if ignored:
         ctx.tool_state.ignored_review_paths = list(
             dict.fromkeys([*ctx.tool_state.ignored_review_paths, *ignored])
@@ -1058,6 +1072,18 @@ def _apply_review_ignore(
             ", ".join(ignored[:10]),
         )
     return filtered.text, kept_unreviewable, ignored
+
+
+def _record_all_ignored_skip(ctx: ToolContext, ignored: list[str]) -> None:
+    """Record the ``skip (ignorePaths)`` tier: nothing in scope, so approval stays neutral."""
+    from mergecraft.classify.triage import TriageDecision
+
+    current = ctx.tool_state.triage
+    if getattr(current, "tier", None) == "skip":
+        return
+    reason = f"nothing to review: all {len(ignored)} changed file(s) are ignored by config"
+    ctx.tool_state.triage = TriageDecision(tier="skip", recognizer="ignorePaths", reason=reason)
+    logger.warning("» Tier: skip (ignorePaths) — {}", reason)
 
 
 _IGNORED_PATHS_NOTE = (
@@ -1169,7 +1195,10 @@ def checkout_pr_tool(ctx: ToolContext):
             fetch_files_diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
             fetch_truncated = fetch_files_diff.truncated
             fetch_diff, fetch_unreviewable, fetch_ignored = _apply_review_ignore(
-                ctx, fetch_files_diff, unreviewable=fetch_files_diff.unreviewable_paths
+                ctx,
+                fetch_files_diff,
+                unreviewable=fetch_files_diff.unreviewable_paths,
+                truncated=fetch_truncated,
             )
             fetch_degraded = _append_diff_degradations(
                 fetch_degraded, truncated=fetch_truncated, unreviewable=fetch_unreviewable
@@ -1292,7 +1321,7 @@ def checkout_pr_tool(ctx: ToolContext):
             unreviewable = files_diff.unreviewable_paths
             diff_truncated = files_diff.truncated
         diff, unreviewable, ignored_paths = _apply_review_ignore(
-            ctx, diff, unreviewable=unreviewable
+            ctx, diff, unreviewable=unreviewable, truncated=diff_truncated
         )
         Path(diff_path).write_text(diff, encoding="utf-8")
         _record_delivered_diff(ctx, diff, unreviewable=unreviewable, truncated=diff_truncated)

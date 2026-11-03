@@ -907,8 +907,13 @@ half is read from the operator's side only — the base snapshot of a
 so a pull request cannot ignore its own files. When the complete file listing of
 a `pull_request` / `pull_request_target` run is ignored, the agent never starts:
 the run passes with `Tier: skip (ignorePaths) — no LLM review ran`, "nothing to
-review", and `mergecraft-approval` is left to a human. A failed or truncated
-listing reviews as usual.
+review", and `mergecraft-approval` is left to a human. A run the gate does not
+skip — a comment-driven review, or a failed or truncated listing — is never
+handed an empty scope it could approve: when the checkout's complete diff holds
+only ignored files, it records the same skip tier, so `mergecraft-approval` stays
+neutral and no GitHub approval is posted whatever the agent submits; when the
+files-API listing was truncated, nothing is filtered and the whole diff is
+reviewed. The coverage gate likewise never filters down to an empty scope.
 
 **Fallback interaction.** Semantic fallback advances when
 `terminal_submission_received` is false — whether because no submission
