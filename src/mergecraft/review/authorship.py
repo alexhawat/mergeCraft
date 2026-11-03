@@ -125,7 +125,9 @@ def _collect_publisher_logins(ctx: ToolContext) -> frozenset[str]:
     # when no App minted); a client authenticated with the App JWT can instead
     # read it from ``GET /app``. Both are authorities the PR cannot write — as
     # long as the login is not the shared job bot itself.
-    declared = os.environ.get("MERGECRAFT_REVIEWER_BOT_LOGIN", "").strip()
+    from mergecraft.config.env import ReviewEnv
+
+    declared = ReviewEnv().reviewer_bot_login or ""
     if declared:
         if declared.casefold() == GITHUB_ACTIONS_BOT_LOGIN:
             # A no-App workflow historically declared the shared job bot here.

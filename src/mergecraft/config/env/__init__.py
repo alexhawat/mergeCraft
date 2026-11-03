@@ -39,6 +39,7 @@ from mergecraft.config.env.runtime import (
     McpEnv,
     PathsEnv,
     ReviewEnv,
+    RunInputsEnv,
 )
 from mergecraft.config.env.switches import ControlSwitches, RuntimeOverridesEnv
 from mergecraft.config.env.tracing import TracingEnv
@@ -62,6 +63,7 @@ __all__ = [
     "ProviderGatewayEnv",
     "ReviewEnv",
     "RunBoundsEnv",
+    "RunInputsEnv",
     "RuntimeOverridesEnv",
     "TracingEnv",
     "fail_closed_env_bool",

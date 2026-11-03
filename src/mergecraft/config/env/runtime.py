@@ -22,7 +22,7 @@ from pydantic_settings import SettingsConfigDict
 
 from mergecraft.config.env._base import EnvSettings, register_env_model
 
-__all__ = ["CliSessionEnv", "LoggingEnv", "McpEnv", "PathsEnv", "ReviewEnv"]
+__all__ = ["CliSessionEnv", "LoggingEnv", "McpEnv", "PathsEnv", "ReviewEnv", "RunInputsEnv"]
 
 
 def _strip_or_none(value: Any) -> Any:
@@ -98,7 +98,12 @@ class McpEnv(EnvSettings):
 
 @register_env_model
 class PathsEnv(EnvSettings):
-    """Filesystem roots mergeCraft owns."""
+    """Filesystem roots mergeCraft owns.
+
+    ``keep_tmp`` and ``evidence_dir`` keep their raw presence semantics (any
+    non-empty value), so they are not stripped: ``MERGECRAFT_KEEP_TMP=0`` still
+    keeps the temp tree, exactly as today.
+    """
 
     model_config = SettingsConfigDict(
         case_sensitive=True,
@@ -108,6 +113,40 @@ class PathsEnv(EnvSettings):
 
     cache_dir: str | None = Field(default=None, validation_alias="MERGECRAFT_CACHE_DIR")
     temp_parent: _Stripped = Field(default=None, validation_alias="MERGECRAFT_TEMP_PARENT")
+    audit_root: str | None = Field(default=None, validation_alias="MERGECRAFT_AUDIT_ROOT")
+    evidence_dir: str | None = Field(default=None, validation_alias="MERGECRAFT_EVIDENCE_DIR")
+    keep_tmp: str | None = Field(default=None, validation_alias="MERGECRAFT_KEEP_TMP")
+    cdp_url: _Stripped = Field(default=None, validation_alias="MERGECRAFT_CDP_URL")
+
+
+@register_env_model
+class RunInputsEnv(EnvSettings):
+    """Inputs the consumer workflow forwards into the run (analyzers, CI, build)."""
+
+    model_config = SettingsConfigDict(
+        case_sensitive=True,
+        extra="ignore",
+        env_ignore_empty=True,
+        # ``AliasChoices`` is a dynamic alias; the pydantic mypy plugin wants a
+        # name fallback alongside it. Field names never collide with these
+        # variables, so allowing them changes no environment read.
+        populate_by_name=True,
+    )
+
+    analyzers: _Stripped = Field(default=None, validation_alias="MERGECRAFT_ANALYZERS")
+    ci_wait_state: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MERGECRAFT_CI_WAIT_STATE", "CI_STATE"),
+    )
+    ci_failed_count: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MERGECRAFT_CI_FAILED_COUNT", "CI_FAILED_COUNT"),
+    )
+    action_sha: _Stripped = Field(default=None, validation_alias="MERGECRAFT_ACTION_SHA")
+    build_commit: _Stripped = Field(default=None, validation_alias="MERGECRAFT_BUILD_COMMIT")
+    permanent_current_decision: str | None = Field(
+        default=None, validation_alias="MERGECRAFT_PERMANENT_CURRENT_DECISION"
+    )
 
 
 class ReviewEnv(EnvSettings):
@@ -121,4 +160,10 @@ class ReviewEnv(EnvSettings):
 
     sticky_only_neutral: _Stripped = Field(
         default=None, validation_alias="MERGECRAFT_STICKY_ONLY_NEUTRAL"
+    )
+    capture_verdicts: _Stripped = Field(
+        default=None, validation_alias="MERGECRAFT_CAPTURE_VERDICTS"
+    )
+    reviewer_bot_login: _Stripped = Field(
+        default=None, validation_alias="MERGECRAFT_REVIEWER_BOT_LOGIN"
     )

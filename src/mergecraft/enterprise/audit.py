@@ -85,7 +85,9 @@ def _resolve_root(root: Path | None) -> Path:
 
 def resolve_audit_root() -> Path:
     """Return the configured audit sink directory (not the JSONL file itself)."""
-    raw = os.environ.get(MERGECRAFT_AUDIT_ROOT_ENV)
+    from mergecraft.config.env import PathsEnv
+
+    raw = PathsEnv().audit_root
     if raw:
         return Path(raw).expanduser()
     data_home = os.environ.get("XDG_DATA_HOME")
@@ -102,7 +104,9 @@ def resolve_audit_log_path(*, root: Path | None = None) -> Path:
     """
     workspace = _resolve_root(root)
     audit_root = resolve_audit_root()
-    if os.environ.get(MERGECRAFT_AUDIT_ROOT_ENV):
+    from mergecraft.config.env import PathsEnv
+
+    if PathsEnv().audit_root:
         return audit_root / AUDIT_LOG_FILENAME
     workspace_key = hashlib.sha256(str(workspace.resolve()).encode()).hexdigest()[:16]
     return audit_root / workspace_key / AUDIT_LOG_FILENAME

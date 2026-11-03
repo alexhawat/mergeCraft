@@ -479,7 +479,9 @@ BAKED_ANALYZER_ROOT = Path("/usr/local/analyzers")
 
 def resolve_baked_binary(manifest: AnalyzerManifest) -> Path | None:
     """Return a pre-baked binary path when running in the analyzers image (D10)."""
-    if os.environ.get("MERGECRAFT_ANALYZERS", "").strip().lower() != "full":
+    from mergecraft.config.env import RunInputsEnv
+
+    if (RunInputsEnv().analyzers or "").lower() != "full":
         return None
     binary = manifest.command[0]
     candidate = BAKED_ANALYZER_ROOT / binary
