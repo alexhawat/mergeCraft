@@ -197,6 +197,23 @@ def test_the_backstop_job_places_the_earlier_rungs_packets_where_the_cascade_rea
     )
 
 
+def test_the_backstop_job_places_a_lone_artifact_downloaded_flat(tmp_path: Path) -> None:
+    """download-artifact nests by name only for several matches; one lands flat (#1125)."""
+    downloaded = tmp_path / "earlier-rungs"
+    (downloaded / "mergecraft").mkdir(parents=True)
+    (downloaded / "packet-opencode-go.json").write_text(_large_packet("success"), encoding="utf-8")
+    (downloaded / "mergecraft" / "judge-verdicts.jsonl").write_text("{}\n", encoding="utf-8")
+
+    _run_step(
+        _step_named("Place earlier rungs' evidence packets"),
+        tmp_path,
+        {"RUNNER_TEMP": str(tmp_path)},
+    )
+
+    assert (tmp_path / "packet-opencode-go.json").is_file()
+    assert not (tmp_path / "packet-codex.json").exists()
+
+
 def test_the_backstop_job_tolerates_absent_earlier_packets(tmp_path: Path) -> None:
     """A rung that did not run uploads nothing; that is an absent packet, not an error."""
     _run_step(
