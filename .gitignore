@@ -106,3 +106,5 @@ evals/results/structural-replay-convergence-*.json
 /scripts/sync_agent_prompts.py
 /scripts/wave_agents_kit.sh
 /tests/scripts/test_wave_close.py
+test-cli.env
+results/
