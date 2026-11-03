@@ -1,19 +1,24 @@
 """Agent runtime knobs: the timeout keeps its 3600-second default.
 
 ``MERGECRAFT_AGENT_TIMEOUT`` is read by five provider drivers and by the
-credential broker. Every read site defaulted to ``3600`` and honoured a valid
-integer; a malformed value failed at the read rather than mid-run. The typed
-model owns that parse, and the drivers keep reading the resolved value.
+credential broker. Every read site defaulted to ``3600``; a malformed value
+failed at the read rather than mid-run. The typed model owns that parse, and the
+drivers keep reading the resolved value.
 
-The provider drivers used ``int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT",
-"3600"))``, so an **empty** value raised ``ValueError`` from ``int("")`` while an
-absent value took the default. ``env_ignore_empty=True`` would silently turn
-``""`` into ``3600`` and move that empty-value rule, so the empty case is pinned
-here as a raise. The last test audits every other numeric run-budget/timeout
-knob for the same corruption.
+The old reads disagreed on the value type: ``claude``, ``codex``, ``gemini``,
+``opencode`` and the broker's callers parsed with ``int(...)``, while
+``agents/cursor.py`` and ``security/broker.py`` parsed with ``float(...)``. So
+``MERGECRAFT_AGENT_TIMEOUT=1.5`` (and ``3600.0``) were accepted on those two
+paths. One model cannot be both, and every consumer accepts a float at runtime,
+so the field is a ``float`` with the same ``3600`` default; integer spellings
+still compare equal. A single model is a superset, not a narrowing.
 
-The model does not exist yet, so the model assertions are red; no ``xfail``
-marker is used.
+An **empty** value raised ``ValueError`` from the old ``int("")`` /
+``float("")`` while an absent value took the default; the empty case stays a
+raise naming the variable. The last test audits every other numeric
+run-budget/timeout knob for the same ``env_ignore_empty`` corruption.
+
+No ``xfail`` marker is used: a not-yet-implemented assertion is a plain failure.
 """
 
 from __future__ import annotations
@@ -82,7 +87,43 @@ def test_agent_timeout_defaults_to_3600_and_honours_a_valid_value(
     assert getattr(model.from_env(env), field_name) == expected
 
 
-@pytest.mark.parametrize("raw", ["soon", "1.5", "10m", "true"])
+def test_agent_timeout_field_is_a_float() -> None:
+    """Fractional seconds were accepted on the cursor and broker paths."""
+    model = _agent_runtime_env()
+    field_name = _field_for(model, "MERGECRAFT_AGENT_TIMEOUT")
+    field = model.model_fields[field_name]
+
+    annotation = str(field.annotation)
+    assert "float" in annotation, (
+        f"AgentRuntimeEnv.{field_name} must accept fractional seconds, got {annotation}"
+    )
+    assert field.default == _DEFAULT_TIMEOUT
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("1.5", 1.5),
+        ("3600.0", 3600.0),
+        ("0.5", 0.5),
+    ],
+)
+def test_agent_timeout_accepts_fractional_seconds(raw: str, expected: float) -> None:
+    """``cursor.py`` and ``security/broker.py`` parsed with ``float(...)``.
+
+    ``MERGECRAFT_AGENT_TIMEOUT=1.5`` was valid on those paths before the
+    migration, so the shared model must not reject it.
+    """
+    model = _agent_runtime_env()
+    field_name = _field_for(model, "MERGECRAFT_AGENT_TIMEOUT")
+
+    value = getattr(model.from_env({"MERGECRAFT_AGENT_TIMEOUT": raw}), field_name)
+
+    assert value == expected
+    assert isinstance(value, float), f"{raw} must resolve to a float, got {type(value)!r}"
+
+
+@pytest.mark.parametrize("raw", ["soon", "10m", "true"])
 def test_agent_timeout_rejects_a_malformed_value(raw: str) -> None:
     """A malformed timeout raises ``ValueError`` and never echoes the value."""
     model = _agent_runtime_env()
@@ -116,7 +157,7 @@ def test_agent_timeout_rejects_an_empty_value_like_today(raw: str) -> None:
 #: ``_env_int`` / ``_env_float`` returned ``None`` for an empty value, so each
 #: run-budget knob fell through exactly as if it were unset. The MCP port's own
 #: ``if not raw`` guard does the same. Only the agent timeout parsed with a bare
-#: ``int()``, which made the empty string an error.
+#: ``int()`` / ``float()``, which made the empty string an error.
 _EMPTY_VALUE_PARITY: tuple[tuple[str, str, str], ...] = (
     ("AgentRuntimeEnv", "MERGECRAFT_AGENT_TIMEOUT", "raise"),
     ("RunBoundsEnv", "MERGECRAFT_TOKEN_BUDGET", "absent"),

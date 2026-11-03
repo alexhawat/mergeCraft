@@ -17,10 +17,11 @@ The scan recognises the read shapes this codebase actually uses: a literal (or a
 module-level constant that names an environment variable) passed to
 ``os.environ.get`` / ``os.getenv`` / ``environ.get``, an ``os.environ[...]``
 load, a ``key in os.environ`` membership test, a literal passed to one of the
-module-local env helpers, and a literal inside a candidate-name tuple that a
-loop reads through a mapping. Writes (subscript stores, ``pop``,
-``setdefault``, ``dict`` keys of an exporter) are not reads: the writer is the
-authority for a key it wrote itself.
+module-local env helpers, and a candidate-name tuple — inline, module-level or
+function-local — that a ``for`` loop or a comprehension reads through the
+environment. Writes (subscript stores, ``pop``, ``setdefault``, ``dict`` keys of
+an exporter) are not reads: the writer is the authority for a key it wrote
+itself.
 
 The contracts are red until the wave named in each row lands: the models do not
 exist yet, and the reads still happen where they always did. No ``xfail``
@@ -505,6 +506,18 @@ ALLOWED_READS: Final[tuple[AllowedRead, ...]] = (
         "dynamic",
         "an input of the dispatching workflow, not of this action's action.yml",
     ),
+    AllowedRead(
+        "src/mergecraft/cli/doctor_cmd.py",
+        "MERGECRAFT_LOGFIRE_TOKEN",
+        "dynamic",
+        "the doctor enumerates secret names to report presence and scan its own output",
+    ),
+    AllowedRead(
+        "src/mergecraft/cli/tracing_logfire_wf_yaml.py",
+        "MERGECRAFT_TRACING_PROJECT",
+        "generated",
+        "the workflow writer checks its own YAML env mapping, not the process environment",
+    ),
     # ── classes that stay out by decision ──────────────────────────────────
     AllowedRead(
         "src/mergecraft/analyzers/sandbox.py",
@@ -658,24 +671,88 @@ def _resolve(node: ast.AST, constants: dict[str, str]) -> str | None:
     return None
 
 
-def _read_body_reads_a_mapping(body: list[ast.stmt]) -> bool:
-    """True when a loop body reads the environment (the candidate-name pattern)."""
-    for stmt in body:
-        for node in ast.walk(stmt):
-            if isinstance(node, ast.Call) and (
-                _is_mapping_get(node.func) or _is_getenv_reference(node.func)
+def _reads_the_environment(nodes: list[ast.AST]) -> bool:
+    """True when any of *nodes* reads the process environment."""
+    for node in nodes:
+        for child in ast.walk(node):
+            if isinstance(child, ast.Call) and (
+                _is_mapping_get(child.func) or _is_getenv_reference(child.func)
             ):
                 return True
-            if isinstance(node, ast.Subscript) and _is_mapping(node.value):
+            if isinstance(child, ast.Subscript) and _is_mapping(child.value):
                 return True
-            if isinstance(node, ast.Compare) and any(
-                _is_mapping(side) for side in (node.left, *node.comparators)
+            if isinstance(child, ast.Compare) and any(
+                _is_mapping(side) for side in (child.left, *child.comparators)
             ):
                 return True
     return False
 
 
-def _scan_tree(tree: ast.Module, rel: str, constants: dict[str, str]) -> list[ReadSite]:
+def _tuple_constants_in_module(tree: ast.Module) -> dict[str, tuple[ast.expr, ...]]:
+    """Map a ``UPPER = (...)`` / ``[...]`` constant to its element nodes.
+
+    The tuple may be declared at module level or inside a function: the CLI
+    modules build their candidate-name tuples locally. A name assigned twice
+    with different elements is ambiguous and is not resolved, matching the
+    single-value rule for env-name constants.
+    """
+    found: dict[str, list[tuple[ast.expr, ...]]] = {}
+    for node in ast.walk(tree):
+        targets: list[ast.AST]
+        value: ast.AST | None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            targets = [node.targets[0]]
+            value = node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+            value = node.value
+        else:
+            continue
+        if not isinstance(value, (ast.Tuple, ast.List)):
+            continue
+        elements = tuple(value.elts)
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id.isupper():
+                found.setdefault(target.id, []).append(elements)
+    resolved: dict[str, tuple[ast.expr, ...]] = {}
+    for name, variants in found.items():
+        shapes = {tuple(ast.dump(element) for element in variant) for variant in variants}
+        if len(shapes) == 1:
+            resolved[name] = variants[0]
+    return resolved
+
+
+def _iterable_elements(
+    node: ast.AST,
+    tuple_constants: dict[str, tuple[ast.expr, ...]],
+) -> list[ast.expr]:
+    """The element nodes of an inline tuple/list, or of a name bound to one."""
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return list(node.elts)
+    if isinstance(node, ast.Name):
+        return list(tuple_constants.get(node.id, ()))
+    return []
+
+
+def _candidate_names(
+    node: ast.AST,
+    constants: dict[str, str],
+    tuple_constants: dict[str, tuple[ast.expr, ...]],
+) -> list[str]:
+    """Every env name in a candidate-name iterable, whatever its spelling."""
+    return [
+        name
+        for element in _iterable_elements(node, tuple_constants)
+        if (name := _resolve(element, constants)) is not None
+    ]
+
+
+def _scan_tree(
+    tree: ast.Module,
+    rel: str,
+    constants: dict[str, str],
+    tuple_constants: dict[str, tuple[ast.expr, ...]],
+) -> list[ReadSite]:
     """Classify every environment read in one parsed module."""
     sites: list[ReadSite] = []
     for node in ast.walk(tree):
@@ -727,19 +804,34 @@ def _scan_tree(tree: ast.Module, rel: str, constants: dict[str, str]) -> list[Re
                 name = _resolve(node.left, constants)
                 if name is not None:
                     sites.append(ReadSite(rel, node.lineno, name, "environ.contains"))
-        elif isinstance(node, ast.For) and isinstance(node.iter, (ast.Tuple, ast.List)):
-            if not _read_body_reads_a_mapping(node.body):
+        elif isinstance(node, ast.For):
+            # The iterable may be an inline tuple/list or a name bound to one,
+            # at module level or in the enclosing function.
+            if not _reads_the_environment(node.body):
                 continue
-            for element in node.iter.elts:
-                name = _resolve(element, constants)
-                if name is not None:
+            for name in _candidate_names(node.iter, constants, tuple_constants):
+                sites.append(ReadSite(rel, node.lineno, name, "candidates"))
+        elif isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            # A comprehension reads the environment from its element or from a
+            # filter (``v in os.environ`` / ``os.environ.get(v)``), so both are
+            # part of the body. Nested generators contribute their own iterables.
+            expressions: list[ast.AST] = (
+                [node.key, node.value] if isinstance(node, ast.DictComp) else [node.elt]
+            )
+            for generator in node.generators:
+                expressions.extend(generator.ifs)
+            if not _reads_the_environment(expressions):
+                continue
+            for generator in node.generators:
+                for name in _candidate_names(generator.iter, constants, tuple_constants):
                     sites.append(ReadSite(rel, node.lineno, name, "candidates"))
     return sites
 
 
 def _scan_source(source: str, rel: str, constants: dict[str, str]) -> list[ReadSite]:
     """Classify every environment read in one source string."""
-    return _scan_tree(ast.parse(source), rel, constants)
+    tree = ast.parse(source)
+    return _scan_tree(tree, rel, constants, _tuple_constants_in_module(tree))
 
 
 def _scan_file(
@@ -1021,3 +1113,104 @@ def test_scan_reports_getenv_in_a_scratch_tree(tmp_path: Path) -> None:
     assert ("MERGECRAFT_API_URL", "environ.get") in reported, reported
     assert ("MERGECRAFT_MCP_PORT", "environ.contains") in reported, reported
     assert {site.path for site in sites} == {"src/mergecraft/planted_probe.py"}
+
+
+#: A planted module per candidate-name shape: a loop or comprehension whose
+#: iterable is an inline tuple, a module tuple, or a function-local tuple.
+_CANDIDATE_SHAPES: dict[str, tuple[str, str]] = {
+    "for-over-module-tuple": (
+        """\
+import os
+
+_SECRET_ENV_KEYS = ("MERGECRAFT_MCP_TOKEN", "GH_TOKEN")
+
+
+def probe() -> list[str]:
+    present = []
+    for key in _SECRET_ENV_KEYS:
+        if os.environ.get(key, "").strip():
+            present.append(key)
+    return present
+""",
+        "MERGECRAFT_MCP_TOKEN",
+    ),
+    "for-over-local-tuple": (
+        """\
+import os
+
+
+def probe() -> list[str]:
+    _TRACE_ENV_VARS = ("MERGECRAFT_TRACING", "MERGECRAFT_TRACE_DIR")
+    present = []
+    for name in _TRACE_ENV_VARS:
+        if os.environ.get(name):
+            present.append(name)
+    return present
+""",
+        "MERGECRAFT_TRACING",
+    ),
+    "list-comprehension-membership": (
+        """\
+import os
+
+_TRACE_ENV_VARS = ("MERGECRAFT_TRACING", "MERGECRAFT_TRACE_DIR")
+
+
+def probe() -> list[str]:
+    return [v for v in _TRACE_ENV_VARS if v in os.environ]
+""",
+        "MERGECRAFT_TRACING",
+    ),
+    "list-comprehension-getter": (
+        """\
+import os
+
+
+def probe() -> list[str]:
+    _TRACE_ENV_VARS = ("MERGECRAFT_TRACING", "MERGECRAFT_TRACE_DIR")
+    return [v for v in _TRACE_ENV_VARS if os.environ.get(v)]
+""",
+        "MERGECRAFT_TRACE_DIR",
+    ),
+    "generator-over-inline-tuple": (
+        """\
+import os
+
+
+def probe() -> bool:
+    return any(
+        os.environ.get(name, "").strip()
+        for name in ("MERGECRAFT_LOGFIRE_TOKEN", "LOGFIRE_TOKEN")
+    )
+""",
+        "MERGECRAFT_LOGFIRE_TOKEN",
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    list(_CANDIDATE_SHAPES.values()),
+    ids=list(_CANDIDATE_SHAPES),
+)
+def test_scan_reports_candidate_reads_in_a_scratch_tree(
+    source: str,
+    expected: str,
+    tmp_path: Path,
+) -> None:
+    """A loop or comprehension over env names is a read, however it is spelled.
+
+    The iterable may be inline, a module tuple, or a tuple built inside the
+    function; the environment read may be the element or a ``if v in os.environ``
+    filter. Each shape is planted in a throwaway tree so the scan is proven
+    without adding a read to ``src/``.
+    """
+    root = tmp_path / "repo"
+    module = root / "src" / "mergecraft" / "planted_probe.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(source, encoding="utf-8")
+
+    sites = _scan_file(module, {}, root=root)
+    reported = {(site.name, site.kind) for site in sites}
+
+    assert (expected, "candidates") in reported, reported

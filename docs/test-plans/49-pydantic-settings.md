@@ -107,6 +107,7 @@ behaviour (frozen in the grid) and never raises.
 | Layer | Test file | Asserts |
 | --- | --- | --- |
 | Functional / E2E | `tests/action/test_env_fail_closed_startup.py::test_malformed_tracing_env_fails_closed_before_the_agent` | driving the real orchestrator through the instrumented harness: a malformed control value lands the run in `configuration_error`, no agent is spawned, the MCP server never starts, the variable is named and the value is absent from all output |
+| Functional / E2E (real prompt reader) | `…::test_malformed_tracing_input_fails_closed_with_the_real_prompt_reader` | driving `main()` with the **production** `resolve_prompt_input` (the harness does not script it): an invalid `INPUT_TRACING` still lands in `configuration_error`, no agent is spawned, the input is named and the value is absent — even though prompt resolution constructs `ActionInputEnv` first |
 | Functional (guard) | `…::test_valid_tracing_env_does_not_abort_the_run` | a well-formed value still reaches the agent |
 
 ---
@@ -264,7 +265,9 @@ pinned once, on the model, rather than re-stated per reader.
 | Layer | Test file | Asserts |
 | --- | --- | --- |
 | Unit (happy) | `tests/agents/test_agent_timeout_env.py::test_agent_timeout_defaults_to_3600_and_honours_a_valid_value` | unset reads `3600`; `3600`, `120`, `1` are honoured |
-| Unit (error) | `…::test_agent_timeout_rejects_a_malformed_value`, `…::test_agent_timeout_rejects_an_empty_value_like_today` | `soon`, `1.5`, `10m`, `true` raise `ValueError` naming the variable; `""` and `"   "` raise too, as `int("")` did before the migration |
+| Unit (shape) | `…::test_agent_timeout_field_is_a_float` | the field accepts fractional seconds (`float`) and keeps the `3600` default |
+| Unit (parity) | `…::test_agent_timeout_accepts_fractional_seconds` | `1.5`, `3600.0` and `0.5` resolve to floats: `agents/cursor.py` and `security/broker.py` parsed with `float(...)` before the migration, and one model must not narrow what those paths accepted |
+| Unit (error) | `…::test_agent_timeout_rejects_a_malformed_value`, `…::test_agent_timeout_rejects_an_empty_value_like_today` | `soon`, `10m`, `true` raise `ValueError` naming the variable; `""` and `"   "` raise too, as the old bare `int("")` / `float("")` did |
 | Unit (parity audit) | `…::test_numeric_knobs_do_not_turn_an_empty_value_into_a_default` | every numeric run-budget/timeout knob keeps today's empty rule: only the agent timeout raised; the eight `RunBoundsEnv` fields and the MCP port read as absent and `MERGECRAFT_*=` resolves exactly like unset |
 | Unit (edge) | `…::test_agent_timeout_reads_nothing_from_the_process_environment`, `…::test_agent_runtime_env_is_constructed_per_read` | the mapping is the only input; no cached instance |
 | Unit (shape) | `…::test_agent_runtime_env_declares_the_runtime_knobs` | the timeout, the Codex home parent, the model and the agent are exact aliases |
@@ -304,10 +307,15 @@ The scan recognises the read shapes the codebase uses: a literal (or a
 module-level constant, including one imported from another module) passed to
 `os.environ.get` / `os.getenv` / `environ.get`, an `os.environ[...]` load, a
 `key in os.environ` membership test, a literal passed to one of the module-local
-env helpers, and a candidate-name tuple a loop reads through a mapping. The
-`os.getenv` / bare-`getenv` shape has its own scratch-tree self-test
-(`test_scan_reports_getenv_in_a_scratch_tree`), because the real tree currently
-reads through `os.environ.get` only. Writes
+env helpers, and a candidate-name tuple — inline, a module-level constant, or a
+function-local constant — that a `for` loop or a comprehension/generator reads
+through the environment. The filters count as part of a comprehension body, so
+`[v for v in VARS if v in os.environ]` and `any(os.environ.get(n) for n in (...))`
+are both candidate reads. The non-obvious shapes have scratch-tree self-tests:
+`test_scan_reports_getenv_in_a_scratch_tree` for `os.getenv` / bare `getenv`
+(the real tree reads through `os.environ.get` only) and
+`test_scan_reports_candidate_reads_in_a_scratch_tree` for the five loop and
+comprehension spellings. Writes
 are not reads: a subscript store, `pop`, `setdefault` and an exporter's dict key
 are the writer's own business. A constant that is no longer referenced anywhere
 in its module is dead, not a read, so it is not flagged.
@@ -443,6 +451,43 @@ constant is not a read site.
 Rows that stay are message-only descriptors whose value read is already on a
 model (codex sandbox, the extra-options labels, audit root, evidence dir,
 verdict capture, linked repos, allow-root); their reasons now say so.
+
+## Second self-review pass (PR #1127)
+
+The PR self-review returned three more findings, one of them a suite gap. All
+three are pinned here as RED; the product findings stay red for the executor.
+
+1. **Agent-timeout type.** `AgentRuntimeEnv.agent_timeout` is `int`, but
+   `agents/cursor.py` and `security/broker.py` parsed with `float(...)` before
+   the migration, so `MERGECRAFT_AGENT_TIMEOUT=1.5` and `3600.0` were valid on
+   those paths. `test_agent_timeout_field_is_a_float` and
+   `test_agent_timeout_accepts_fractional_seconds` require the field to be a
+   `float` with the same `3600` default; `1.5` moved out of the malformed table.
+   The empty-value rule is unchanged (raise, naming the variable).
+2. **Scan gap.** `_scan_tree` handled only `ast.For` over an inline tuple, so
+   named constants, function-local constants and comprehension/generator bodies
+   were invisible. The scan now resolves `UPPER = (...)` / `[...]` constants at
+   module or function scope (an ambiguous redefinition stays unresolved) and
+   covers `ListComp` / `SetComp` / `GeneratorExp` / `DictComp`, with the filters
+   treated as part of the body. Five scratch-tree self-tests pin the shapes:
+   module tuple, local tuple, membership filter, getter filter, inline-tuple
+   generator. Newly surfaced reads:
+   - `src/mergecraft/cli/tracing_cmd.py:194,350` — the seven `MERGECRAFT_TRACING*`
+     / `MERGECRAFT_TRACE_DIR` names are in scope and now RED (no row).
+   - `src/mergecraft/cli/opencode_cmd.py:273` — `MERGECRAFT_LOGFIRE_TOKEN` is in
+     scope and now RED.
+   - `src/mergecraft/cli/doctor_cmd.py:112,334` — the secret-name iteration is
+     the documented dynamic probe, so it carries a `dynamic` row and stays green.
+   - `src/mergecraft/cli/tracing_logfire_wf_yaml.py:884` — the Logfire workflow
+     writer checks its own YAML `env:` mapping, not the process environment, so
+     it carries a `generated` row and stays green.
+3. **Prompt resolution before the guard.** `resolve_prompt_input` constructs the
+   full `ActionInputEnv`, and `_setup_run` calls it before the guarded tracing
+   block, so an invalid `INPUT_TRACING` was classified `infra_error`.
+   `test_malformed_tracing_input_fails_closed_with_the_real_prompt_reader` drives
+   `main()` with the production resolver (`run_main_for_test(...,
+   real_prompt_input=True)`, with `INPUT_PROMPT` in the environment) and requires
+   `configuration_error`, no agent, the input named and the value absent.
 
 ## Out of scope
 
