@@ -29,7 +29,7 @@ from mergecraft.analyzers.trust import (
     resolve_analyzers_mode,
 )
 from mergecraft.ci.sarif_ingest import ingest_ci_sarif_from_action_env
-from mergecraft.config.env import EnvSettingsError, validate_env_settings
+from mergecraft.config.env import ActionInputEnv, EnvSettingsError, validate_env_settings
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.fast_path import decide_fast_path, load_triage_inputs
 from mergecraft.main_outcome import (
@@ -1204,7 +1204,7 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     # is carried into ToolContext later; it must not be reinterpreted after the
     # App tokens have already been minted.
     sarif_upload_enabled = resolve_sarif_upload_enabled(
-        action_input=os.environ.get("INPUT_SARIF_UPLOAD"),
+        action_input=ActionInputEnv().sarif_upload,
         repo_setting=settings.analyzers.sarif_upload,
     )
     ctx.sarif_upload_enabled = sarif_upload_enabled
@@ -1398,7 +1398,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
 
     ctx_payload = _payload_to_ctx(payload)
     ctx.ctx_payload = ctx_payload
-    analyzers_mode = resolve_analyzers_mode(os.environ.get("INPUT_ANALYZERS"))
+    analyzers_mode = resolve_analyzers_mode(ActionInputEnv().analyzers)
     ctx.analyzers_mode = analyzers_mode
     sarif_upload_enabled = ctx.sarif_upload_enabled
     from mergecraft.mcp.tool_state import primary_repo_state
