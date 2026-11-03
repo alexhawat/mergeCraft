@@ -383,9 +383,13 @@ parity/guard passing; `make lint` and `make typecheck` clean.
 
 ## Gate reconciliation (test-owner pass)
 
+**Closed by the product pass.** The four product findings were migrated at
+`60d45a88`; the full gate re-ran green at that head (461 plan-selection tests,
+inventory 186 passed with 0 unlisted reads, 10,378 in the wider selection).
+
 The 49b verifier gate returned `changes_required`, with three test-owned findings
 and three product findings. The test-owned findings are fixed here; the product
-findings are deliberately left red.
+findings were deliberately left red for that pass.
 
 **Test-owned fixes.**
 
