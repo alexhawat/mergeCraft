@@ -72,6 +72,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A blast-radius classification that was missing its inputs no longer reads as
+  safe. No changed paths, or no diff statistics, now adds a `signal_missing`
+  category and puts the lane at `medium` (`assisted`) or higher instead of
+  `low` / `eligible`, and no repository override can lower it. An
+  unrecognised risk band ranks above `critical` in `risk_at_or_above` instead
+  of as `low`. The approval gate's `low_risk_passing` and `clean_pass` rows
+  (both map to `auto_merge`) also require the classification to have had
+  inputs: changed paths on the packet and no `signal_missing` category
+  (#1056, part 1).
+
 - An expired Codex subscription login now hands the review to the next vendor
   instead of ending it. The Codex driver marks that failure
   `failover_eligible` (move on to the next vendor) while keeping it not
