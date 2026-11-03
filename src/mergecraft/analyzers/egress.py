@@ -244,7 +244,9 @@ def probe_filtered_egress() -> FilteredEgressProbe:
     from mergecraft.analyzers.egress_userspace import probe_userspace_egress
 
     userspace = probe_userspace_egress()
-    want_kernel = os.environ.get("MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME") == "1"
+    from mergecraft.config.env import ControlSwitches
+
+    want_kernel = ControlSwitches().filtered_egress_opt_in.enabled
     if want_kernel:
         kernel = _probe_kernel_filtered_egress()
         if kernel.available:
@@ -375,7 +377,9 @@ def default_dns_resolvers() -> tuple[str, ...]:
     the DNS-tunneling exfiltration channel documented in the module
     docstring.
     """
-    override = os.environ.get("MERGECRAFT_EGRESS_DNS_RESOLVERS", "").strip()
+    from mergecraft.config.env import RuntimeOverridesEnv
+
+    override = RuntimeOverridesEnv().egress_dns_resolvers or ""
     if override:
         resolvers = tuple(
             ip.strip() for ip in override.split(",") if ip.strip() and _is_ipv4(ip.strip())

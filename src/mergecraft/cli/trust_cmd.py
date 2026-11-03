@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import re
 import subprocess
 from pathlib import Path
@@ -278,8 +277,9 @@ def _effective_event_for_cli() -> dict[str, Any]:
 
 
 def _operator_override_requested() -> bool:
-    raw = os.environ.get(CODEX_SANDBOX_ENV, "").strip().lower()
-    return raw == CODEX_SANDBOX_UNSANDBOXED
+    from mergecraft.config.env import RuntimeOverridesEnv
+
+    return RuntimeOverridesEnv().codex_sandbox == CODEX_SANDBOX_UNSANDBOXED
 
 
 @app.command("show")

@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from mergecraft.analyzers.finding import Finding
+    from mergecraft.evidence.packet import MergeEvidencePacket
 
 
 class RunOutcome(StrEnum):
@@ -92,6 +93,46 @@ def run_succeeded_for_outcome(outcome: RunOutcome) -> bool:
     return outcome is RunOutcome.passed
 
 
+def packet_orphaned_hit_ids(packet: MergeEvidencePacket | None) -> list[str]:
+    """Every raw analyzer hit the packet's disposition ledgers leave unaccounted for.
+
+    An empty list means the ledger closed (or the packet carries no analyzer
+    section). ``None`` — no packet was assembled — has nothing to say.
+    """
+    if packet is None or packet.analyzers is None:
+        return []
+    orphans: list[str] = []
+    for section in packet.analyzers.dispositions:
+        orphans.extend(section.orphaned_hit_ids)
+    return orphans
+
+
+def outcome_with_disposition_ledger(
+    outcome: RunOutcome,
+    packet: MergeEvidencePacket | None,
+) -> tuple[RunOutcome, str | None]:
+    """Fold an open analyzer disposition ledger into the run outcome (#1014).
+
+    The packet's approval conclusion already goes ``neutral`` when a pipeline
+    stage lost a raw hit without recording why (#941). The completion check is
+    derived from ``RunOutcome``, so without this a run could report ``success``
+    on the completion check while the approval check read ``neutral``.
+
+    Monotone, like :func:`mergecraft.agents.gates.decide_approval`: only
+    ``passed`` is downgraded, to ``inconclusive``. ``failed`` (blockers, a sink
+    hit, a declared failure) and every error outcome win and pass through
+    unchanged, and nothing is ever upgraded. Returns the outcome and, when it
+    was downgraded, the reason naming the orphan count.
+    """
+    if outcome is not RunOutcome.passed:
+        return outcome, None
+    orphans = packet_orphaned_hit_ids(packet)
+    if not orphans:
+        return outcome, None
+    reason = f"analyzer disposition ledger open ({len(orphans)} orphaned hit(s)) — inconclusive"
+    return RunOutcome.inconclusive, reason
+
+
 def error_code_for_outcome(outcome: RunOutcome) -> str:
     """Stable, machine-readable error code for the ``result`` output JSON (W5.3).
 
@@ -146,5 +187,7 @@ __all__ = [
     "cli_exit_code_for_review",
     "error_code_for_outcome",
     "exit_code_for_outcome",
+    "outcome_with_disposition_ledger",
+    "packet_orphaned_hit_ids",
     "run_succeeded_for_outcome",
 ]

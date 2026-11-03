@@ -23,7 +23,7 @@ providers:
 prApproveEnabled: false
 
 runBounds:
-  tokenBudget: 5000000
+  tokenBudget: 8000000
 
 # Artifact names must match .github/workflows/ci.yml uploads (not mergecraft.yml).
 ciEvidence:

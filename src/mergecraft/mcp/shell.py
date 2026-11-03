@@ -298,7 +298,9 @@ def _git_binary_unavailable_fragment() -> str:
 
 
 def _allow_unsandboxed_shell() -> bool:
-    return os.environ.get("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL") == "1"
+    from mergecraft.config.env import ControlSwitches
+
+    return ControlSwitches().allow_unsandboxed_shell.enabled
 
 
 def _dropped_payload(command: str, drop_argv: list[str]) -> str:

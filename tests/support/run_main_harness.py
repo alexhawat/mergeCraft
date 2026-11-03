@@ -216,6 +216,7 @@ async def run_main_for_test(
     packet_payload: str | None = None,
     cleanup_tmpdir: bool = True,
     prompt: str = "review the diff",
+    real_prompt_input: bool = False,
     capture_status_checks: bool = False,
     stop_mcp_error: bool = False,
 ) -> MainRunRecord:
@@ -228,6 +229,9 @@ async def run_main_for_test(
     skip (``skipped=True``, ``status="completed"``) — ``shell: disabled`` must
     not map that skip to ``RunOutcome.inconclusive``. ``cleanup_tmpdir=False`` leaves the run's
     temp dir alone so cleanup-contract tests can observe what ``main()`` did.
+    ``real_prompt_input=True`` leaves the production ``resolve_prompt_input`` in
+    place, so a test can exercise the real Action ordering; set ``INPUT_PROMPT``
+    (or ``INPUT_PROMPT_FILE``) in ``env`` instead of relying on ``prompt``.
     ``capture_status_checks=True`` runs the real ``report_status_checks`` against
     a recording client and records the check-runs it would post in
     ``record.status_check_runs`` (``name`` / ``conclusion`` / ``summary``),
@@ -283,7 +287,12 @@ async def run_main_for_test(
         return run_context
 
     monkeypatch.setattr(main_mod, "resolve_run_context_data", _fake_run_context)
-    monkeypatch.setattr(main_mod, "resolve_prompt_input", lambda: prompt)
+    if not real_prompt_input:
+        # The default scripts the prompt resolver. ``real_prompt_input=True``
+        # leaves the production reader in place so a test can exercise its real
+        # ordering (it constructs ``ActionInputEnv``); the prompt then comes from
+        # ``INPUT_PROMPT`` / ``INPUT_PROMPT_FILE`` in ``env``.
+        monkeypatch.setattr(main_mod, "resolve_prompt_input", lambda: prompt)
     monkeypatch.setattr(main_mod, "get_job_token", lambda: "ghs_fake_job_token")
 
     real_create_temp = main_mod.create_temp_directory

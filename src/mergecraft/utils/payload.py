@@ -12,6 +12,7 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mergecraft import __version__
+from mergecraft.config.env import ActionInputEnv
 from mergecraft.config.settings import RepoSettings
 from mergecraft.types import AuthorPermission, PushPermission, ShellPermission, XrepoConfig
 from mergecraft.utils.time_parse import (
@@ -160,7 +161,15 @@ def _package_version() -> str:
 
 
 def get_action_input(name: str) -> str:
-    """Read a GitHub Actions input from ``INPUT_<NAME>`` (uppercase)."""
+    """Read a GitHub Actions input from ``INPUT_<NAME>`` (uppercase).
+
+    This is the dynamic escape hatch: the key is built from *name*, so it also
+    serves inputs that are not fields of
+    :class:`~mergecraft.config.env.ActionInputEnv` (the tracing shorthand and a
+    provider key's env-var name). The declared inputs are read through the model
+    at their call sites; this helper keeps its frozen "unset is the empty string,
+    value is stripped" contract for every other name.
+    """
     env_key = "INPUT_" + name.upper().replace("-", "_")
     return os.environ.get(env_key, "").strip()
 
@@ -269,7 +278,7 @@ def _allow_pr_target_comments_optin() -> bool:
 
     D6: default is refuse; opt-in is a deliberate workflow-level choice.
     """
-    raw = get_action_input("allow_pr_target_comments")
+    raw = ActionInputEnv().allow_pr_target_comments or ""
     return raw.strip().lower() in {"true", "1", "yes", "on"}
 
 
@@ -505,8 +514,9 @@ def resolve_prompt_input(
     prompt_file: str | None = None,
 ) -> str | JsonPayload:
     """Resolve ``prompt`` / ``prompt_file`` into plain text or a validated ``JsonPayload``."""
-    prompt_input = prompt if prompt is not None else get_action_input("prompt")
-    file_input = prompt_file if prompt_file is not None else get_action_input("prompt_file")
+    inputs = ActionInputEnv()
+    prompt_input = prompt if prompt is not None else (inputs.prompt or "")
+    file_input = prompt_file if prompt_file is not None else (inputs.prompt_file or "")
 
     if prompt_input and file_input:
         msg = "set exactly one of 'prompt' or 'prompt_file' inputs, not both."
@@ -533,16 +543,17 @@ def resolve_prompt_input(
 
 
 def resolve_non_prompt_inputs() -> ActionInputs:
+    inputs = ActionInputEnv()
     return ActionInputs.model_validate(
         {
-            "model": get_action_input("model") or None,
-            "model_pin": get_action_input("model_pin") or None,
-            "timeout": get_action_input("timeout") or None,
-            "cwd": get_action_input("cwd") or None,
-            "push": get_action_input("push") or None,
-            "shell": get_action_input("shell") or None,
-            "status_checks": get_action_input("status_checks") or None,
-            "suggest_eval_add": get_action_input("suggest_eval_add") or None,
+            "model": inputs.model,
+            "model_pin": inputs.model_pin,
+            "timeout": inputs.timeout,
+            "cwd": inputs.cwd,
+            "push": inputs.push,
+            "shell": inputs.shell,
+            "status_checks": inputs.status_checks,
+            "suggest_eval_add": inputs.suggest_eval_add,
         }
     )
 
@@ -567,8 +578,9 @@ def resolve_custom_provider_env_inputs() -> None:
     No-op when neither input is set. When only one is set, the existing
     helper behaviour wins — a partial singleton pair is dropped.
     """
-    base_url_input = get_action_input("provider_base_url")
-    api_key_env_input = get_action_input("provider_api_key_env")
+    inputs = ActionInputEnv()
+    base_url_input = inputs.provider_base_url
+    api_key_env_input = inputs.provider_api_key_env
     if not base_url_input and not api_key_env_input:
         return
     if base_url_input:
@@ -717,7 +729,7 @@ def resolve_payload(
 
 def resolve_output_schema(raw: str | None = None) -> dict[str, Any] | None:
     """Parse optional ``output_schema`` action input into a JSON object."""
-    value = raw if raw is not None else get_action_input("output_schema")
+    value = raw if raw is not None else ActionInputEnv().output_schema
     if not value:
         return None
     try:

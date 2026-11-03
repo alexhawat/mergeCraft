@@ -58,14 +58,6 @@ consumes the whole run budget.
 _SETUP_FAILURE_POLICY_VALUES: frozenset[str] = frozenset({"inconclusive", "fail", "warn"})
 
 
-def _read_input(name: str) -> str | None:
-    """Read an ``INPUT_*`` env var injected by the GitHub Actions runtime."""
-    value = os.environ.get(name)
-    if value is None or value == "":
-        return None
-    return value
-
-
 def _read_logfire_region() -> Literal["us", "eu"] | None:
     """Return a valid Logfire region from ``MERGECRAFT_TRACING_REGION``.
 
@@ -132,7 +124,11 @@ def resolve_tracing_from_action_inputs(*, warn_unknown_sink: bool = False) -> di
     """
     inputs = ActionInputEnv()
     tracing_to = inputs.tracing_to
-    logfire_token = inputs.logfire_token
+    # The token stays a ``SecretStr`` inside the model and is unwrapped at this
+    # single consumer boundary (PS-D12); the dict keeps returning ``str | None``.
+    logfire_token = (
+        inputs.logfire_token.get_secret_value() if inputs.logfire_token is not None else None
+    )
     otel_endpoint = inputs.otel_endpoint
     tracing_content = inputs.tracing_content
     export_untrusted = inputs.export_untrusted_content
@@ -307,7 +303,7 @@ def resolve_setup_failure_policy() -> SetupFailurePolicy | None:
     ``ValueError`` so the run fails closed as ``RunOutcome.configuration_error``
     *before* the agent starts (test ``test_invalid_policy_value_fails_closed``).
     """
-    raw = _read_input("INPUT_SETUP_FAILURE_POLICY")
+    raw = ActionInputEnv().setup_failure_policy
     if raw is None:
         return None
     candidate = raw.strip().lower()
@@ -324,9 +320,6 @@ def resolve_setup_failure_policy() -> SetupFailurePolicy | None:
     raise ValueError(msg)
 
 
-_INPUT_SETUP_TIMEOUT = "INPUT_SETUP_TIMEOUT"
-
-
 def resolve_setup_timeout_s() -> int | None:
     """Resolve ``INPUT_SETUP_TIMEOUT`` (F6) to a positive number of seconds.
 
@@ -341,7 +334,7 @@ def resolve_setup_timeout_s() -> int | None:
     """
     from mergecraft.utils.time_parse import resolve_timeout_ms
 
-    raw = _read_input(_INPUT_SETUP_TIMEOUT)
+    raw = ActionInputEnv().setup_timeout
     if raw is None:
         return None
     parsed = resolve_timeout_ms(raw)
@@ -411,9 +404,18 @@ def _provider_credential_present(
     env: Mapping[str, str],
     settings: RepoSettings | None = None,
 ) -> bool:
-    keys = _PROVIDER_CREDENTIAL_ENV_KEYS
+    from mergecraft.config.env import CUSTOM_PROVIDER_API_KEY_ENV, ProviderGatewayEnv
+
+    singleton_key = ProviderGatewayEnv.from_env(env).custom_provider_api_key
+    if singleton_key is not None and singleton_key.get_secret_value().strip():
+        return True
+
+    credential_names = _PROVIDER_CREDENTIAL_ENV_KEYS
     if settings is not None:
-        keys = keys | provider_credential_env_names(settings)
+        credential_names = credential_names | provider_credential_env_names(settings)
+    # The singleton key is read through its model above; keep it out of the
+    # credential-authority sweep so it has exactly one reader.
+    keys = {key for key in credential_names if key != CUSTOM_PROVIDER_API_KEY_ENV}
     for key in keys:
         value = env.get(key)
         if isinstance(value, str) and value.strip():

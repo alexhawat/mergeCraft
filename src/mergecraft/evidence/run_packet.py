@@ -85,7 +85,9 @@ def resolve_evidence_dir(*, tmpdir: str) -> Path:
     (:func:`mergecraft.evidence.verdict_capture.resolve_capture_dir`) both
     resolve through it, so a workflow that uploads one finds the other.
     """
-    override = os.environ.get(_PACKET_DIR_ENV)
+    from mergecraft.config.env import PathsEnv
+
+    override = PathsEnv().evidence_dir
     runner_temp = os.environ.get("RUNNER_TEMP")
     if override:
         return Path(override)

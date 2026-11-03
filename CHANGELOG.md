@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The `ignore_paths` Action input and `review.ignorePaths` keep changed files
+  matching a glob (newline- or comma-separated, `**` crosses directories) out of
+  the diff the reviewer reads, so eval data, changelogs and lockfiles no longer
+  cost review time on a mixed pull request. The review lists them under "Not
+  reviewed (ignored by config)" and the changed-line coverage gate treats them as
+  out of scope. `**/CHANGELOG.md`, `**/*.lock`, `**/package-lock.json` and
+  generated or minified files are ignored by default; set
+  `review.ignorePathDefaults: false` to review them. A pull request whose every
+  changed file is ignored passes with "nothing to review" and approval left to a
+  human, including a comment-driven review or one whose file listing failed; an
+  all-ignored scope is never approved. The repo config is read from the base side only, so a pull request
+  cannot ignore its own files (#1109).
+
 - A daily security sweep (`security-sweep.yml`, also on `workflow_dispatch`) runs
   `make lockcheck`, `make security` and a Trivy scan of the published `:latest` and
   `:analyzers` images on `main`, and keeps one tracking issue listing each package,
@@ -86,6 +99,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `mergecraft policy --help` and `mergecraft policy effective` now say that review
   enforces the repository's rules file; `policy effective` also says when it is
   showing the shipped example packs because the repository has no rules file.
+- Environment settings for run budgets, timeouts, Action inputs and the
+  operational knobs are read through one validated model: a malformed numeric
+  value names the variable instead of failing with a bare parse error, an empty
+  `MERGECRAFT_AGENT_TIMEOUT` fails instead of silently defaulting, and secrets
+  read from the environment stay masked in diagnostics.
 
 ### Fixed
 

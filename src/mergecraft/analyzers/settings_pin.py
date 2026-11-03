@@ -28,6 +28,7 @@ Exports:
         PinnedAnalyzerSettings — Settings plus where they were resolved from.
     Functions:
         resolve_pinned_analyzer_settings — The analyzer settings this run may apply.
+        repo_settings_from_text — Validate base config text into ``RepoSettings``.
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ from mergecraft.config.settings import AnalyzersSettings
 from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
+    from mergecraft.config.settings import RepoSettings
     from mergecraft.config.settings_snapshot import RepoSettingsSnapshot
     from mergecraft.mcp.context import ToolContext
 
@@ -94,15 +96,23 @@ def _resolvable_base(repo_root: Path, sha: str, ref: str) -> str | None:
     return None
 
 
-def _settings_from_text(text: str) -> AnalyzersSettings:
-    """Validate config text through the normal loader, in a scratch tree (no overlays)."""
+def repo_settings_from_text(text: str) -> RepoSettings:
+    """Validate base config text through the normal loader, in a scratch tree (no overlays).
+
+    Raises whatever the loader raises for an invalid config; callers fail closed on it.
+    """
     from mergecraft.config.settings import load_repo_settings
 
     with tempfile.TemporaryDirectory(prefix="mergecraft-base-config-") as tmp:
         target = Path(tmp) / ".mergecraft"
         target.mkdir()
         (target / "config.yaml").write_text(text, encoding="utf-8")
-        return load_repo_settings(root=Path(tmp), load_learnings_files=False).analyzers
+        return load_repo_settings(root=Path(tmp), load_learnings_files=False)
+
+
+def _settings_from_text(text: str) -> AnalyzersSettings:
+    """Validate config text and return its analyzer settings."""
+    return repo_settings_from_text(text).analyzers
 
 
 def _from_base(repo_root: Path, sha: str, ref: str) -> PinnedAnalyzerSettings:
@@ -199,4 +209,8 @@ def resolve_pinned_analyzer_settings(
     return pinned
 
 
-__all__ = ["PinnedAnalyzerSettings", "resolve_pinned_analyzer_settings"]
+__all__ = [
+    "PinnedAnalyzerSettings",
+    "repo_settings_from_text",
+    "resolve_pinned_analyzer_settings",
+]

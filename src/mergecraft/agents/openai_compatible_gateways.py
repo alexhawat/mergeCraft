@@ -22,8 +22,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.functional_serializers import PlainSerializer
 from pydantic.functional_validators import BeforeValidator
 
-CUSTOM_PROVIDER_BASE_URL_ENV = "MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"
-CUSTOM_PROVIDER_API_KEY_ENV = "MERGECRAFT_CUSTOM_PROVIDER_API_KEY"
+from mergecraft.config.env import (
+    CUSTOM_PROVIDER_API_KEY_ENV,
+    CUSTOM_PROVIDER_BASE_URL_ENV,
+    ProviderGatewayEnv,
+)
+
 CUSTOM_PROVIDER_EXTRA_OPTIONS_ENV = "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS"
 PROVIDER_EXTRA_OPTIONS_ENV = "MERGECRAFT_PROVIDER_EXTRA_OPTIONS"
 
@@ -205,8 +209,17 @@ def _has_env(name: str) -> bool:
 
 
 def has_custom_provider_env() -> bool:
-    """Return whether both generic custom-provider env vars are set."""
-    return _has_env(CUSTOM_PROVIDER_BASE_URL_ENV) and _has_env(CUSTOM_PROVIDER_API_KEY_ENV)
+    """Return whether both generic custom-provider env vars are set.
+
+    Presence is the model's: an unset or blank base URL is ``None``, and the key
+    is a ``SecretStr`` that is only unwrapped to test for a non-blank value —
+    never rendered.
+    """
+    gateway = ProviderGatewayEnv()
+    key = gateway.custom_provider_api_key
+    return gateway.custom_provider_base_url is not None and (
+        key is not None and bool(key.get_secret_value().strip())
+    )
 
 
 def has_gateway_credentials(provider_id: str) -> bool:
@@ -250,8 +263,13 @@ def resolve_gateway_endpoint(model: str | None) -> tuple[str, str, str] | None:
     if registry_endpoint is not None:
         return registry_endpoint
 
-    custom_base = os.environ.get(CUSTOM_PROVIDER_BASE_URL_ENV, "").strip()
-    custom_key = os.environ.get(CUSTOM_PROVIDER_API_KEY_ENV, "").strip()
+    gateway = ProviderGatewayEnv()
+    custom_base = gateway.custom_provider_base_url or ""
+    custom_key = (
+        gateway.custom_provider_api_key.get_secret_value().strip()
+        if gateway.custom_provider_api_key is not None
+        else ""
+    )
     if custom_base and custom_key:
         return provider_id, custom_base, custom_key
 
@@ -262,20 +280,25 @@ def resolve_gateway_endpoint(model: str | None) -> tuple[str, str, str] | None:
     return None
 
 
-def _parse_extra_options_env(env_name: str) -> dict[str, Any]:
-    """Parse a JSON object env var into ``extra_options``; missing/invalid → ``{}``."""
-    raw = os.environ.get(env_name, "").strip()
-    if not raw:
+def _parse_extra_options_value(label: str, raw: str | None) -> dict[str, Any]:
+    """Parse one JSON-object string into ``extra_options``; missing/invalid → ``{}``."""
+    text = (raw or "").strip()
+    if not text:
         return {}
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(text)
     except json.JSONDecodeError as exc:
-        logger.debug("invalid {} JSON: {}", env_name, exc)
+        logger.debug("invalid {} JSON: {}", label, exc)
         return {}
     if not isinstance(parsed, dict):
-        logger.debug("{} must be a JSON object, got {}", env_name, type(parsed).__name__)
+        logger.debug("{} must be a JSON object, got {}", label, type(parsed).__name__)
         return {}
     return parsed
+
+
+def _parse_extra_options_env(env_name: str) -> dict[str, Any]:
+    """Parse an indexed (runtime-named) JSON object env var into ``extra_options``."""
+    return _parse_extra_options_value(env_name, os.environ.get(env_name, ""))
 
 
 def _extra_options_for_provider(
@@ -288,14 +311,19 @@ def _extra_options_for_provider(
     2. Singleton ``MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS``.
     3. Per-provider entry in ``MERGECRAFT_PROVIDER_EXTRA_OPTIONS`` JSON map.
     """
+    gateway = ProviderGatewayEnv()
     if indexed_env is not None:
         indexed = _parse_extra_options_env(indexed_env)
         if indexed:
             return indexed
-    singleton = _parse_extra_options_env(CUSTOM_PROVIDER_EXTRA_OPTIONS_ENV)
+    singleton = _parse_extra_options_value(
+        CUSTOM_PROVIDER_EXTRA_OPTIONS_ENV, gateway.custom_provider_extra_options
+    )
     if singleton:
         return singleton
-    by_provider = _parse_extra_options_env(PROVIDER_EXTRA_OPTIONS_ENV)
+    by_provider = _parse_extra_options_value(
+        PROVIDER_EXTRA_OPTIONS_ENV, gateway.provider_extra_options
+    )
     provider_entry = by_provider.get(provider_id)
     if isinstance(provider_entry, dict):
         return provider_entry
@@ -378,8 +406,13 @@ def _resolve_singleton_provider() -> ProviderConfig | None:
 
     Returns ``None`` if either half of the singleton pair is missing or empty.
     """
-    base_url = os.environ.get(CUSTOM_PROVIDER_BASE_URL_ENV, "").strip()
-    api_key = os.environ.get(CUSTOM_PROVIDER_API_KEY_ENV, "").strip()
+    gateway = ProviderGatewayEnv()
+    base_url = gateway.custom_provider_base_url or ""
+    api_key = (
+        gateway.custom_provider_api_key.get_secret_value().strip()
+        if gateway.custom_provider_api_key is not None
+        else ""
+    )
     if not base_url or not api_key:
         return None
     return _provider_config_from_env_pair(

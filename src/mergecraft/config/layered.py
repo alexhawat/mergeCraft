@@ -11,6 +11,7 @@ import yaml
 from loguru import logger
 
 from mergecraft.config.compat import migrate_config
+from mergecraft.config.env import ConfigLocatorEnv
 from mergecraft.config.io import config_path_for_root
 
 if TYPE_CHECKING:
@@ -70,7 +71,7 @@ def load_layered_config_dict(
             return {}
         return migrate_config(_read_yaml_mapping(candidate))
 
-    env_path = os.environ.get("MERGECRAFT_CONFIG")
+    env_path = ConfigLocatorEnv().config_path
     if env_path:
         candidate = Path(env_path)
         if candidate.is_file():
@@ -116,7 +117,7 @@ def resolve_config_sources(root: Path) -> ConfigSources:
     An explicit path (a ``--config`` flag) is the caller's concern; it wins
     before this resolver is consulted.
     """
-    env_path = os.environ.get("MERGECRAFT_CONFIG")
+    env_path = ConfigLocatorEnv().config_path
     env_config_missing = False
     if env_path:
         candidate = Path(env_path)

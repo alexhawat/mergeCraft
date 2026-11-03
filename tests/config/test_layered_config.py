@@ -117,3 +117,97 @@ def test_resolve_config_sources_empty_repo(tmp_path: Path, monkeypatch) -> None:
     sources = _sources(tmp_path)
     assert sources.files == ()
     assert sources.env_config_missing is False
+
+
+# ── MERGECRAFT_CONFIG: the locator read, through a model (49b) ──────────────
+#
+# The locator is an env *layer* read: the merge arithmetic stays in the
+# resolver, the parse moves into ``ConfigLocatorEnv``. An empty value means
+# "absent" (it already does today), and a whitespace-only value is still
+# "present but not a file", so the doctor keeps reporting it — a frozen quirk,
+# not a bug to fix here.
+
+
+def test_resolve_config_sources_empty_env_config_is_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``MERGECRAFT_CONFIG=""`` resolves exactly like an unset variable."""
+    _clear_env(monkeypatch)
+    _write_pair(tmp_path)
+    monkeypatch.setenv("MERGECRAFT_CONFIG", "")
+    sources = _sources(tmp_path)
+    assert _names(sources) == ("config.yaml", "config.local.yaml")
+    assert sources.env_config_missing is False
+
+
+def test_resolve_config_sources_blank_env_config_is_flagged_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A whitespace-only value stays "present but missing" — today's behaviour."""
+    _clear_env(monkeypatch)
+    _write_pair(tmp_path)
+    monkeypatch.setenv("MERGECRAFT_CONFIG", "   ")
+    sources = _sources(tmp_path)
+    assert sources.env_config_missing is True
+
+
+def test_load_layered_config_dict_empty_env_config_falls_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The layered loader treats an empty locator as unset too."""
+    _clear_env(monkeypatch)
+    cfg_dir = tmp_path / ".mergecraft"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.yaml").write_text("model: anthropic/claude-sonnet\n", encoding="utf-8")
+    monkeypatch.setenv("MERGECRAFT_CONFIG", "")
+    loaded = load_layered_config_dict(root=tmp_path)
+    assert loaded["model"] == "anthropic/claude-sonnet"
+
+
+def _config_locator_env():
+    from mergecraft.config.env import ConfigLocatorEnv
+
+    return ConfigLocatorEnv
+
+
+def _located_field() -> str:
+    model = _config_locator_env()
+    for name, field in model.model_fields.items():
+        if field.validation_alias == "MERGECRAFT_CONFIG":
+            return name
+    raise AssertionError("ConfigLocatorEnv does not declare MERGECRAFT_CONFIG")
+
+
+def test_config_locator_env_declares_the_exact_name() -> None:
+    """``ConfigLocatorEnv`` names ``MERGECRAFT_CONFIG`` exactly, with no prefix arithmetic."""
+    model = _config_locator_env()
+    declared = {
+        field.validation_alias
+        for field in model.model_fields.values()
+        if isinstance(field.validation_alias, str)
+    }
+    assert declared == {"MERGECRAFT_CONFIG"}, declared
+
+
+def test_config_locator_env_keeps_the_empty_value_rule() -> None:
+    """An empty value is absent; a whitespace-only value is still present."""
+    model = _config_locator_env()
+    field_name = _located_field()
+
+    assert getattr(model.from_env({"MERGECRAFT_CONFIG": ""}), field_name) is None
+    assert getattr(model.from_env({}), field_name) is None
+    assert getattr(model.from_env({"MERGECRAFT_CONFIG": "   "}), field_name) is not None
+    assert (
+        getattr(model.from_env({"MERGECRAFT_CONFIG": "/tmp/x.yaml"}), field_name) == "/tmp/x.yaml"
+    )
+
+
+def test_config_locator_env_reads_nothing_from_the_process_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mapping-only read never falls back to ``os.environ``."""
+    model = _config_locator_env()
+    field_name = _located_field()
+    monkeypatch.setenv("MERGECRAFT_CONFIG", "/tmp/from-process-env.yaml")
+
+    assert getattr(model.from_env({}), field_name) is None

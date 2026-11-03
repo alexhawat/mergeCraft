@@ -51,10 +51,13 @@ def is_interactive_session(
     ``MERGECRAFT_FORCE_INTERACTIVE=1`` (still requires a TTY or that flag
     together with a prompt monkeypatch).
     """
+    from mergecraft.config.env import CliSessionEnv
+
     env_map = os.environ if env is None else env
-    if _env_truthy(env_map.get("MERGECRAFT_NONINTERACTIVE")):
+    session = CliSessionEnv.from_env(env_map)
+    if _env_truthy(session.noninteractive):
         return False
-    if _env_truthy(env_map.get("MERGECRAFT_FORCE_INTERACTIVE")):
+    if _env_truthy(session.force_interactive):
         return True
     if _env_truthy(env_map.get("CI")):
         return False

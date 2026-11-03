@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import contextvars
 import json
-import os
 import re
 from collections.abc import Mapping
 from contextlib import contextmanager
@@ -230,7 +229,9 @@ def _expected_publisher_login() -> str:
     ``reviewerBotLogin`` from repo config, then the job-token default.
     Any other bot, including another installed App, is not this publisher.
     """
-    configured = os.environ.get("MERGECRAFT_REVIEWER_BOT_LOGIN", "").strip()
+    from mergecraft.config.env import ReviewEnv
+
+    configured = ReviewEnv().reviewer_bot_login or ""
     if configured:
         return configured
     override = _publisher_logins_override.get()
@@ -242,7 +243,9 @@ def _expected_publisher_login() -> str:
 
 def _allowed_publisher_logins() -> frozenset[str]:
     """Logins that may own a formal review or legacy sticky comment."""
-    configured = os.environ.get("MERGECRAFT_REVIEWER_BOT_LOGIN", "").strip()
+    from mergecraft.config.env import ReviewEnv
+
+    configured = ReviewEnv().reviewer_bot_login or ""
     if configured:
         return frozenset({configured})
     override = _publisher_logins_override.get()
@@ -262,7 +265,9 @@ def configured_publisher_login() -> str:
     comment and says the result is unauthenticated. The shared Actions job bot is
     not an App identity, so it counts as unconfigured.
     """
-    declared = os.environ.get("MERGECRAFT_REVIEWER_BOT_LOGIN", "").strip()
+    from mergecraft.config.env import ReviewEnv
+
+    declared = ReviewEnv().reviewer_bot_login or ""
     if declared:
         if declared.casefold() == _DEFAULT_PUBLISHER_LOGIN.casefold():
             return ""
@@ -664,7 +669,9 @@ async def fetch_review_ledger(
 ) -> FindingLedger:
     """Fold historical formal reviews and legacy comment state into one ledger."""
     token: contextvars.Token[frozenset[str] | None] | None = None
-    if not os.environ.get("MERGECRAFT_REVIEWER_BOT_LOGIN", "").strip():
+    from mergecraft.config.env import ReviewEnv
+
+    if not ReviewEnv().reviewer_bot_login:
         derived = set(await _publisher_logins_from_approval_checks(scm, owner, repo, pull_number))
         from_config = _publisher_login_from_repo_config()
         if from_config:
