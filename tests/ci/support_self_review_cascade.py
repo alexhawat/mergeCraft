@@ -25,6 +25,9 @@ TRUSTED_SCRIPTS = (
     "scripts/decide_codex_fallback.sh",
     "scripts/decide_claude_fallback.sh",
     "scripts/lib/provider_verdict_guard.sh",
+    # Runs on the runner host after the Codex rung; the workspace holds the
+    # reviewed branch by then, so it too must come from the trusted copy.
+    "scripts/codex_auth_writeback.py",
 )
 # A stable head SHA and run identity the mock check-run payload and the decide
 # steps agree on. The real gate binds a check to ``<run_id>:<run_attempt>``.

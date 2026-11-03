@@ -505,6 +505,15 @@ in `.mergecraft/config.yaml` to log diagnostics only.
 | [LiteLLM](https://docs.litellm.ai/) proxy | — | same custom-provider env pair — [`examples/config-litellm.yaml`](examples/config-litellm.yaml) | `default/<model>` or `<label>/<model>` |
 | Logfire tracing | `mergecraft auth logfire` | see [`docs/TRACING.md`](docs/TRACING.md) | — |
 
+A ChatGPT-subscription login (`CODEX_AUTH_JSON`) rotates its refresh token on
+use: each run that refreshes it spends the stored token, and a secret nobody
+writes back fails a few days later with "refresh token was already used". This
+repository's self-review writes the refreshed login back to `CODEX_AUTH_JSON`
+after every Codex run, from a dedicated App token whose only permission is
+repository secrets — the reviewer App needs **Secrets: Read and write** for the
+write-back to run; see [`docs/authentication.md`](docs/authentication.md#repository-self-review-app-identity).
+`OPENAI_API_KEY` remains the alternative that never expires.
+
 Custom OpenAI-compatible endpoints (including [LiteLLM](https://docs.litellm.ai/)
 proxies — no native `litellm` provider id), multi-provider indexed env vars, and
 `model:` chain semantics: [`docs/authentication.md`](docs/authentication.md).
@@ -3601,6 +3610,18 @@ and repository scopes needed by their role:
 | Git fetch with push disabled | Current repository plus configured cross-repository write targets | `contents: read` |
 | Git fetch/push with push restricted or enabled | Current repository plus configured cross-repository write targets | `contents: write`, `workflows: write` |
 | Cross-repository read checkout | Configured read repositories only | `contents: read` |
+| `CODEX_AUTH_JSON` write-back (self-review workflow) | Current repository only | `secrets: write` |
+
+The `CODEX_AUTH_JSON` write-back is a workflow step, not something the action
+does: Codex rotates the ChatGPT-subscription login's refresh token on use, so
+the self-review's Codex rung exports the refreshed `auth.json` (the driver
+copies it to `MERGECRAFT_CODEX_AUTH_EXPORT` only when the refresh token
+changed) and a post-step stores it with `gh secret set CODEX_AUTH_JSON` under
+a token minted with only `secrets: write`. **Operator step:** grant the
+reviewer App the *Secrets: Read and write* repository permission and accept
+the permission update on the installation; until then the mint fails and the
+write-back is skipped with a notice, leaving the secret as it was.
+`OPENAI_API_KEY` is the alternative that never expires.
 
 The reviewer, Git, and cross-repository read credentials are minted separately
 when their permissions or repository scopes differ. The current repository

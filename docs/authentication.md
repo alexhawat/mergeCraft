@@ -393,6 +393,18 @@ and repository scopes needed by their role:
 | Git fetch with push disabled | Current repository plus configured cross-repository write targets | `contents: read` |
 | Git fetch/push with push restricted or enabled | Current repository plus configured cross-repository write targets | `contents: write`, `workflows: write` |
 | Cross-repository read checkout | Configured read repositories only | `contents: read` |
+| `CODEX_AUTH_JSON` write-back (self-review workflow) | Current repository only | `secrets: write` |
+
+The `CODEX_AUTH_JSON` write-back is a workflow step, not something the action
+does: Codex rotates the ChatGPT-subscription login's refresh token on use, so
+the self-review's Codex rung exports the refreshed `auth.json` (the driver
+copies it to `MERGECRAFT_CODEX_AUTH_EXPORT` only when the refresh token
+changed) and a post-step stores it with `gh secret set CODEX_AUTH_JSON` under
+a token minted with only `secrets: write`. **Operator step:** grant the
+reviewer App the *Secrets: Read and write* repository permission and accept
+the permission update on the installation; until then the mint fails and the
+write-back is skipped with a notice, leaving the secret as it was.
+`OPENAI_API_KEY` is the alternative that never expires.
 
 The reviewer, Git, and cross-repository read credentials are minted separately
 when their permissions or repository scopes differ. The current repository

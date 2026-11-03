@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The self-review's Codex rung writes the refreshed ChatGPT-subscription login
+  back to the `CODEX_AUTH_JSON` repository secret after each run, so the
+  rotated refresh token is never left spent (#970). The Codex driver exports
+  the refreshed `auth.json` to `MERGECRAFT_CODEX_AUTH_EXPORT` only when the
+  refresh token changed; `scripts/codex_auth_writeback.py` compares it with the
+  stored secret and runs `gh secret set` under an App token minted with only
+  `secrets: write`. A missing, unparsable or token-less file, an unchanged
+  token, a different account, or a rung that reported the login expired each
+  end in a notice and no write. Operators grant the reviewer App *Secrets:
+  Read and write*; `OPENAI_API_KEY` remains the alternative that never expires.
+
 - A deterministic triage tier, off by default (`review.fastPath.enabled`), decides
   before the agent exists whether a diff needs an LLM review. Recognizers for a
   verified pin substitution, prose, whitespace-only changes and regenerated
