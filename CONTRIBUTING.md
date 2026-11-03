@@ -118,6 +118,23 @@ as the nightly E2E live slice on the provider named by
 no longer consumes the ChatGPT/Codex subscription, so it cannot retire the
 self-review's session.
 
+### Scheduled security sweep (#1069)
+
+`security-sweep.yml` runs daily (and on `workflow_dispatch`) on `main`:
+`make lockcheck`, `make security` (bandit + pip-audit against OSV) and a Trivy
+scan of the published `:latest` and `:analyzers` images, with the same Trivy
+pin, policy and `.trivyignore` as the PR image scan. Findings go to one
+tracking issue, *Security sweep: advisories on main*, which a later run with
+the same findings updates and a clean run closes. It adds no PR check; the
+required `Verify (security audit …)` and image-scan gates are unchanged.
+
+**Runbook:** when the sweep files that issue, the fix is a lockfile bump PR
+(`uv lock --upgrade-package <package>` for each package the issue lists),
+with `make lockcheck` and `make security` green before you push. An image-only
+OS-package advisory clears once a rebuilt image is promoted. Where the issue
+says no fixed version is published, record that on the issue rather than
+waiving the finding.
+
 ### Decision record: the Codex subscription credential (#970)
 
 `CODEX_AUTH_JSON` holds a ChatGPT-subscription login. Codex refreshes it while it
