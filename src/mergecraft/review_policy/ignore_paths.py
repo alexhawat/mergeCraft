@@ -264,21 +264,31 @@ def _split_sections(diff_text: str) -> tuple[str, list[tuple[str | None, str]]]:
     return "".join(prefix), [(path, "".join(body)) for path, body in sections]
 
 
-def filter_diff(diff_text: str, ignore: ReviewIgnore | None) -> FilteredDiff:
+def filter_diff(
+    diff_text: str,
+    ignore: ReviewIgnore | None,
+    *,
+    changed_paths: Sequence[str] | None = None,
+) -> FilteredDiff:
     """Drop the file sections of ``diff_text`` whose post-image path is ignored.
 
-    A section whose header cannot be parsed is kept: an unreadable header is never a
-    reason to review less.
+    ``changed_paths`` is the whole pull request's change set, used by the generated-file
+    rule (a generated file stays in scope when its generator config changed anywhere in
+    the PR). Pass it whenever ``diff_text`` covers less than the full PR, such as an
+    incremental range; without it the diff's own paths are the change set. A section
+    whose header cannot be parsed is kept: an unreadable header is never a reason to
+    review less.
     """
     prefix, sections = _split_sections(str(diff_text))
     paths = [path for path, _ in sections if path is not None]
     if ignore is None or not ignore.active:
         return FilteredDiff(text=str(diff_text), kept_paths=paths)
+    change_set = list(dict.fromkeys([*paths, *(changed_paths or ())]))
     kept_parts: list[str] = [prefix]
     ignored: list[str] = []
     kept: list[str] = []
     for path, body in sections:
-        if path is not None and ignore.is_ignored(path, changed_paths=paths):
+        if path is not None and ignore.is_ignored(path, changed_paths=change_set):
             ignored.append(path)
             continue
         if path is not None:

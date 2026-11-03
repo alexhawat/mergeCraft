@@ -283,3 +283,67 @@ def test_unreviewable_generated_file_with_its_generator_config_stays_uncovered()
         (row.path, row.cause) for row in section.uncovered
     }
     assert section.complete is False
+
+
+def _generator_then_output_repo(tmp_path: Path) -> tuple[Path, str, str]:
+    """Commit A (reviewed) changes the generator config; commit B regenerates output."""
+    origin = tmp_path / "origin.git"
+    work = tmp_path / "work"
+    work.mkdir()
+    _git(work, "init")
+    _git(work, "config", "user.email", "test@example.com")
+    _git(work, "config", "user.name", "Test")
+    (work / "README.md").write_text("base\n", encoding="utf-8")
+    _git(work, "add", "README.md")
+    _git(work, "commit", "-m", "base")
+    _git(work, "branch", "-M", "base")
+    _git(work, "checkout", "-b", "feature")
+    (work / "openapi-generator.yaml").write_text("version: 2\n", encoding="utf-8")
+    _git(work, "add", ".")
+    _git(work, "commit", "-m", "bump the generator config")
+    reviewed = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=work, text=True).strip()
+    generated = work / "api" / "generated"
+    generated.mkdir(parents=True)
+    (generated / "client.py").write_text("GENERATED_CLIENT = 2\n", encoding="utf-8")
+    (work / "CHANGELOG.md").write_text("# Changelog\n- CHANGELOG_SECRET\n", encoding="utf-8")
+    _git(work, "add", ".")
+    _git(work, "commit", "-m", "regenerate the client")
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=work, text=True).strip()
+    _git(work, "clone", "--bare", str(work), str(origin))
+    _git(work, "push", str(origin), "feature:refs/pull/1/head")
+    clone = tmp_path / "clone"
+    _git(tmp_path, "clone", str(origin), str(clone))
+    return clone, reviewed, head
+
+
+@pytest.mark.asyncio
+async def test_rereview_keeps_generated_output_when_its_config_changed_in_an_earlier_round(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """The incremental range alone lacks the generator config; the PR's change set has it."""
+    from tests.mcp import test_checkout as base_checkout
+
+    repo, reviewed_sha, head_sha = _generator_then_output_repo(tmp_path)
+    monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
+    base_checkout._pin_publishers(monkeypatch, frozenset({base_checkout._PUBLISHER_LOGIN}))
+    github = base_checkout._StubGitHub(
+        head_sha=head_sha,
+        reviews=[
+            {
+                "commit_id": reviewed_sha,
+                "body": base_checkout._MERGECRAFT_BODY,
+                "user": base_checkout._BOT_USER,
+            }
+        ],
+    )
+    ctx = base_checkout._ctx_for(repo, github, tmp_path, mode="IncrementalReview")
+    ctx.tool_state.review_ignore = _ignore(None)
+
+    payload = await base_checkout._checkout(ctx)
+
+    assert payload["incrementalDiffStatus"] == "ok"
+    incremental = _read_text(payload["incrementalDiffPath"])
+    assert "GENERATED_CLIENT" in incremental, "generated output stays in scope"
+    assert "CHANGELOG_SECRET" not in incremental, "changelogs are still ignored"
+    assert "GENERATED_CLIENT" in _read_text(payload["diffPath"])
+    assert "api/generated/client.py" not in payload.get("ignoredPaths", [])

@@ -941,6 +941,7 @@ def _write_incremental_diff(
     prior_sha: str,
     git_token: str,
     ignore: ReviewIgnore | None = None,
+    pr_changed_paths: list[str] | None = None,
 ) -> IncrementalDiffResult:
     """Write the diff since ``prior_sha`` and report an explicit status.
 
@@ -989,7 +990,9 @@ def _write_incremental_diff(
             reason=f"no changes since the last reviewed commit {prior_sha[:12]}",
         )
     if ignore is not None and ignore.active:
-        diff = filter_diff(diff, ignore).text
+        # Judge against the whole PR, not just this range: a generator config reviewed
+        # in an earlier round still keeps its generated output in scope now.
+        diff = filter_diff(diff, ignore, changed_paths=pr_changed_paths).text
         if not diff.strip():
             return IncrementalDiffResult(
                 status="empty",
@@ -1044,8 +1047,8 @@ def _apply_review_ignore(
     ignore = ctx.tool_state.review_ignore
     if not isinstance(ignore, ReviewIgnore) or not ignore.active:
         return str(diff_text), list(unreviewable), []
-    filtered = filter_diff(str(diff_text), ignore)
-    changed = [*filtered.kept_paths, *filtered.ignored_paths]
+    filtered = filter_diff(str(diff_text), ignore, changed_paths=unreviewable)
+    changed = [*filtered.kept_paths, *filtered.ignored_paths, *unreviewable]
     ignored = list(filtered.ignored_paths)
     kept_unreviewable: list[str] = []
     for path in unreviewable:
@@ -1320,6 +1323,7 @@ def checkout_pr_tool(ctx: ToolContext):
             diff = files_diff
             unreviewable = files_diff.unreviewable_paths
             diff_truncated = files_diff.truncated
+        pr_changed_paths = list(dict.fromkeys([*changed_paths_in_diff(diff), *unreviewable]))
         diff, unreviewable, ignored_paths = _apply_review_ignore(
             ctx, diff, unreviewable=unreviewable, truncated=diff_truncated
         )
@@ -1396,6 +1400,7 @@ def checkout_pr_tool(ctx: ToolContext):
                     if isinstance(ctx.tool_state.review_ignore, ReviewIgnore)
                     else None
                 ),
+                pr_changed_paths=pr_changed_paths,
             )
             result["lastReviewedSha"] = prior_sha
             result["incrementalDiffStatus"] = incremental.status
