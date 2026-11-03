@@ -19,6 +19,7 @@ import pytest
 from mergecraft.analyzers import sandbox as sandbox_mod
 from mergecraft.analyzers.resolve import AnalyzerPlan
 from mergecraft.analyzers.run import run_plan
+from tests.uid_drop_support import make_traversable_for_dropped_uid
 
 _DROP_UID = 4242
 _DROP_GID = 4343
@@ -225,6 +226,9 @@ def test_root_backend_trusted_analyzer_payload_runs_unprivileged_and_writes_scra
         pytest.fail(
             f"MERGECRAFT_PRIVILEGED_LANE=1 but the lane cannot run this test: {_ROOT_REASON}"
         )
+    # pytest's tmp base is root-owned 0700; the dropped uid must be able to
+    # traverse down to its scratch (#1015). Open the chain before the leaf.
+    make_traversable_for_dropped_uid(tmp_path)
     os.chmod(tmp_path, 0o755)
     context = _trusted_context(tmp_path)
     scratch = context.scratch_dir
