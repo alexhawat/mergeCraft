@@ -257,3 +257,29 @@ async def test_truncated_listing_of_ignored_files_is_reviewed_unfiltered(
     assert "pkg0/yarn.lock" in _read_text(payload["diffPath"])
     assert ctx.tool_state.triage is None
     assert ctx.tool_state.ignored_review_paths == []
+
+
+def test_unreviewable_generated_file_with_its_generator_config_stays_uncovered() -> None:
+    """A generated file kept in scope because its generator config changed must still
+    count as unread when GitHub sent no patch for it."""
+    from mergecraft.evidence.coverage import coverage_section_for_state
+    from mergecraft.mcp.tool_state import init_tool_state
+
+    state = init_tool_state(owner="acme", name="demo", dir=".")
+    state.review_ignore = _ignore(None)
+    state.coverage.authoritative_diff = (
+        "diff --git a/openapi-generator.yaml b/openapi-generator.yaml\n"
+        "@@ -1 +1 @@\n"
+        "-version: 1\n"
+        "+version: 2\n"
+        "diff --git a/api/generated/client.py b/api/generated/client.py\n"
+    )
+    state.coverage.unreviewable_paths = ["api/generated/client.py"]
+
+    section = coverage_section_for_state(state)
+
+    assert section is not None
+    assert ("api/generated/client.py", "no_inline_patch") in {
+        (row.path, row.cause) for row in section.uncovered
+    }
+    assert section.complete is False
