@@ -467,6 +467,9 @@ Each test has an id. Use it as the `run` helper's first argument.
 | A7 | `echo | mc provider` (stdin not a TTY) | prints group help, does not open an interactive session, exits 0 |
 | A8 | `mc review --diff /dev/null` ; `mc review --cwd /tmp/not-a-repo` ; `mc config show nonexistent.key` | clean, actionable error, exit 2 or 30, no traceback |
 | A9 | `MERGECRAFT_TRACING=banana mc version` | exit 30 with a message naming `MERGECRAFT_TRACING`, no traceback |
+| A10 | Known offline defects from the review (re-check they still reproduce): `mc agent show reviewer` with no credential; `mc traces show <id>`; `mc model add x` with stdin from `/dev/null`; `mc review` in a repo with no `models:` and no roster | each either fixed or reproduces exactly as described in `plans/cli-review-2026-11-03.md` §4.2 |
+| A11 | After `mc init` in an empty repo: `cat .gitignore`; after `mc plan`: `git status --short` | `.env` is ignored (currently it is not); `.mergecraft/plan-review.diff` is not left untracked (currently it is) |
+| A12 | `mc analyzers docs --cwd <clone>` from the testbed clone, then `git -C /path/to/mergeCraft status` | the mergeCraft checkout is untouched (currently `docs/ANALYZERS.md` there is rewritten) |
 
 ### 5.B Credential plumbing
 
