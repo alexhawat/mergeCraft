@@ -72,6 +72,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The in-review trufflehog analyzer can now exempt one detector in one file,
+  keyed on (path, detector) like the CI SARIF emitter's allowlist, instead of
+  only exempting a whole file from every detector. The URI detector is allowed
+  in `src/mergecraft/tracing/redaction.py`, whose redaction patterns spell
+  `scheme://user:pass@host` on purpose, which ends the recurring "URI secret
+  detected" self-review finding there. Any other detector still reports that
+  file (#1008).
+
 - A blast-radius classification that was missing its inputs no longer reads as
   safe. No changed paths, or no diff statistics, now adds a `signal_missing`
   category and puts the lane at `medium` (`assisted`) or higher instead of
