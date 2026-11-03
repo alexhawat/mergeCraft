@@ -391,6 +391,25 @@ class ReviewSettings(BaseModel):
     coverage: ReviewCoverageSettings = Field(default_factory=ReviewCoverageSettings)
     # Deterministic triage before dispatch (default off; base-side config only).
     fast_path: FastPathSettings = Field(default_factory=FastPathSettings, alias="fastPath")
+    # Globs whose changed files are kept out of the reviewer's diff (#1109). Read only
+    # from the operator's side of a pull request (``mergecraft.review.ignore_paths``),
+    # and merged with the ``ignore_paths`` Action input.
+    ignore_paths: list[str] = Field(
+        default_factory=list,
+        alias="ignorePaths",
+        description=(
+            "Globs (``**`` supported) whose changed files are left out of the diff the "
+            "reviewer sees and listed as not reviewed. Honoured only from the PR base."
+        ),
+    )
+    ignore_path_defaults: bool = Field(
+        default=True,
+        alias="ignorePathDefaults",
+        description=(
+            "Also ignore the built-in defaults: changelogs, lockfiles, package-lock.json, "
+            "and generated or minified files. ``false`` reviews them."
+        ),
+    )
     # RC12 — optional per-round budget taper (default flat).
     round_budgets: RoundBudgetsSettings = Field(
         default_factory=RoundBudgetsSettings,

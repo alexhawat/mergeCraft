@@ -248,13 +248,40 @@ def coverage_section_for_state(state: ToolState) -> CoverageSection | None:
     authoritative = (
         record.authoritative_diff if record.authoritative_diff is not None else delivered
     )
-    if not authoritative and not record.unreviewable_paths and not record.diff_truncated:
+    unreviewable = list(record.unreviewable_paths)
+    from mergecraft.review_policy.ignore_paths import ReviewIgnore, filter_diff, rename_sources
+
+    ignore = getattr(state, "review_ignore", None)
+    if isinstance(ignore, ReviewIgnore) and ignore.active:
+        # Files ignored by config are out of scope, not unread (#1109): whatever diff
+        # established scope, their hunks never enter the universe.
+        # Same change set ``checkout_pr`` judged against: a generated file stays in scope
+        # when its generator config changed too, so the check needs every changed path.
+        # The record is not trusted as already filtered, because a caller-supplied scope
+        # never went through the checkout.
+        changed = [*filter_diff(authoritative, None).changed_paths, *unreviewable]
+        sources = rename_sources(authoritative)
+        filtered_authoritative = filter_diff(authoritative, ignore, changed_paths=changed).text
+        filtered_unreviewable = [
+            path
+            for path in unreviewable
+            if not ignore.all_ignored(
+                [path, sources[path]] if path in sources else [path], changed_paths=changed
+            )
+        ]
+        # Never filter down to an empty scope: nothing left to account for would read
+        # as no gate at all. An all-ignored change is the triage skip's job instead.
+        if filtered_authoritative.strip() or filtered_unreviewable or not authoritative.strip():
+            authoritative = filtered_authoritative
+            delivered = filter_diff(delivered, ignore, changed_paths=changed).text
+            unreviewable = filtered_unreviewable
+    if not authoritative and not unreviewable and not record.diff_truncated:
         return None
     observed, covered = _read_evidence(state, authoritative)
     return account_coverage(
         authoritative_diff=authoritative,
         delivered_diff=delivered,
-        unreviewable_paths=record.unreviewable_paths,
+        unreviewable_paths=unreviewable,
         diff_truncated=record.diff_truncated,
         reads_observed=observed,
         covered_lines=covered,
