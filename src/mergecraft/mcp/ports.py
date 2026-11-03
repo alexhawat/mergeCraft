@@ -14,7 +14,6 @@ must rely on :func:`wait_for_bound_port` polling or an explicit
 from __future__ import annotations
 
 import json
-import os
 import socket
 import time
 from typing import TYPE_CHECKING
@@ -32,7 +31,9 @@ _SERVE_ERRORS_ATTR = "mergecraft_serve_errors"
 
 
 def read_env_port() -> int | None:
-    raw = os.environ.get("MERGECRAFT_MCP_PORT")
+    from mergecraft.config.env import McpEnv
+
+    raw = McpEnv().mcp_port
     if not raw:
         return None
     try:

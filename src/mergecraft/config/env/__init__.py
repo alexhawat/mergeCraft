@@ -33,6 +33,13 @@ from mergecraft.config.env.dotenv import (
     LocalDotEnv,
     local_dotenv_values,
 )
+from mergecraft.config.env.runtime import (
+    CliSessionEnv,
+    LoggingEnv,
+    McpEnv,
+    PathsEnv,
+    ReviewEnv,
+)
 from mergecraft.config.env.switches import ControlSwitches, RuntimeOverridesEnv
 from mergecraft.config.env.tracing import TracingEnv
 
@@ -40,6 +47,7 @@ __all__ = [
     "ENV_SETTINGS_CONFIG",
     "ActionInputEnv",
     "AgentRuntimeEnv",
+    "CliSessionEnv",
     "ConfigLocatorEnv",
     "ControlSwitches",
     "DotEnvFileSource",
@@ -48,7 +56,11 @@ __all__ = [
     "EnvSettingsError",
     "ExactFlag",
     "LocalDotEnv",
+    "LoggingEnv",
+    "McpEnv",
+    "PathsEnv",
     "ProviderGatewayEnv",
+    "ReviewEnv",
     "RunBoundsEnv",
     "RuntimeOverridesEnv",
     "TracingEnv",

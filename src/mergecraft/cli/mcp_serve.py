@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -61,7 +60,10 @@ def _resolve_serve_auth_token() -> str:
     Honors ``MERGECRAFT_MCP_TOKEN`` when set; otherwise issues a fresh secret
     so ``tools/list`` and ``tools/call`` are never left unauthenticated.
     """
-    configured = os.environ.get("MERGECRAFT_MCP_TOKEN", "").strip()
+    from mergecraft.config.env import McpEnv
+
+    token = McpEnv().mcp_token
+    configured = token.get_secret_value().strip() if token is not None else ""
     return configured or secrets.token_hex(32)
 
 
