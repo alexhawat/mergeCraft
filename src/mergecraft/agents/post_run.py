@@ -215,11 +215,15 @@ def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None,
     failed gate or verifier confirm cannot leave a stale usable verdict. A
     submission whose ``attempt_id`` does not match the active attempt does not
     satisfy this attempt (V7).
+
+    Re-validation goes through the context builder, not the bare tool-state
+    one, so the repository's policy rows are part of the state this checks — the
+    same population the terminal submission and the packet saw.
     """
     from mergecraft.mcp.verdict import (
         recorded_submission_payload,
         validate_submission,
-        validation_state_from_tool_state,
+        validation_state_from_tool_context,
         verdict_satisfies_attempt,
     )
 
@@ -246,7 +250,7 @@ def _terminal_submission_fields(ctx: AgentRunContext) -> tuple[bool, str | None,
 
     validation = validate_submission(
         recorded_submission_payload(submission),
-        state=validation_state_from_tool_state(ctx.tool_state, tmpdir=ctx.tmpdir),
+        state=validation_state_from_tool_context(ctx),
     )
     if not validation.accepted:
         diagnostics = {

@@ -1,8 +1,10 @@
-"""The policy surface says what review actually does.
+"""The policy surface says what review actually does with the rules.
 
-Policy rules are linted, tested, explained and simulated; review does not
-enforce them. The module docstring must not claim the enforcement engine is
-mapped onto the approval gate, and the ``policy`` group help must say so.
+Review enforces the rules in ``.mergecraft/policy/rules.yaml``: a rule applies
+when a changed file matches its scope, and its enforcement mode decides what
+the approval verdict does. The ``policy`` group help must say that, and the
+enforcement module's docstring must name the mapping onto the approval gate.
+The authoring verbs the group really performs stay advertised.
 """
 
 from __future__ import annotations
@@ -11,33 +13,41 @@ from tests.support.cc_batch import invoke, plain
 
 from mergecraft.policy import enforcement
 
+_NEGATIONS = (
+    "not enforc",
+    "never enforc",
+    "no enforcement",
+    "does not enforce",
+    "is not enforced",
+)
 
-def test_policy_group_help_says_review_does_not_enforce_rules() -> None:
-    """The group help states the limits and still advertises the supported verbs."""
+
+def test_policy_group_help_says_review_enforces_the_rules_file() -> None:
+    """The group help states the wired behaviour and still advertises the verbs."""
     result = invoke("policy", "--help")
     assert result.exit_code == 0, plain(result.stdout + result.stderr)
     text = plain(result.stdout + result.stderr).casefold()
-    says_not_enforced = any(
-        phrase in text
-        for phrase in (
-            "not enforc",
-            "never enforc",
-            "no enforcement",
-            "does not enforce",
-            "is not enforced",
-        )
-    )
-    assert says_not_enforced, text
+
+    assert "enforce" in text
+    assert ".mergecraft/policy" in text
+    assert "rules.yaml" in text
+    assert "scope" in text
+    for phrase in _NEGATIONS:
+        assert phrase not in text, f"the stale non-enforcement claim survived: {phrase!r}"
     # Surviving surface: the verbs the group really performs stay advertised.
     for verb in ("lint", "test", "explain", "simulate"):
         assert verb in text
 
 
-def test_enforcement_module_docstring_does_not_claim_an_approval_gate_mapping() -> None:
-    """The module docstring names no approval-gate mapping; the engine still ships."""
-    doc = (enforcement.__doc__ or "").casefold()
-    assert "approval gate" not in doc
-    assert "approval" not in doc
+def test_enforcement_module_docstring_names_the_review_gate_mapping() -> None:
+    """The docstring describes the mapping the review now applies."""
+    doc = enforcement.__doc__ or ""
+    lowered = doc.casefold()
+
+    assert "approval gate" in lowered
+    assert "policy/review.py" in doc
+    assert "nothing in review consumes" not in lowered
+    assert "no review path calls this yet" not in lowered
     # Surviving surface: the evaluation engine stays and is described as enforcement.
     assert callable(enforcement.evaluate_enforcement)
-    assert "enforc" in doc
+    assert "enforc" in lowered

@@ -32,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `get_review_comments` and the findings sweep report `incomplete` when a pull
   request has more review threads or comments than the page cap, instead of
   silently dropping the rest (#902).
+- Review now enforces `.mergecraft/policy/rules.yaml`: a blocking rule on the
+  base ref becomes a policy finding that turns an `approve` into
+  `request_changes` and fails `mergecraft-approval`, and the same row appears in
+  the evidence packet. Rules are read only from a source the pull request cannot
+  write — the base commit, or the snapshot taken before checkout on a
+  `pull_request_target` run — so a pull request that edits, weakens, deletes or
+  waives a rule is judged by the base rules and gets an advisory row saying so.
+  An unreadable, oversized or unparseable rules file is a blocking row, and a
+  repository without the file reviews exactly as before.
 
 ### Changed
 
@@ -57,6 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counts. A repository that publishes as `github-actions[bot]` and configures no
   reviewer App sweeps nothing and the sweep says why. **Fix:** configure the
   reviewer App (`MERGECRAFT_REVIEWER_BOT_LOGIN` / `reviewerBotLogin`) (#905).
+- `mergecraft policy --help` and `mergecraft policy effective` now say that review
+  enforces the repository's rules file; `policy effective` also says when it is
+  showing the shipped example packs because the repository has no rules file.
 
 ### Fixed
 

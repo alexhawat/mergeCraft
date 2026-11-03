@@ -590,6 +590,11 @@ class ToolState:
     git_show_cache: dict[str, str] = field(default_factory=dict)
     confirmed_findings: list[dict[str, Any]] = field(default_factory=list)
     agent_findings: list[dict[str, Any]] = field(default_factory=list)
+    # The policy population this run computed, if any: a ``PolicyEvaluation``
+    # keyed by the diff it was computed from (``policy/review.py``). ``None``
+    # means policy has not been evaluated yet. Typed ``Any`` only to keep this
+    # module free of an import cycle back into ``policy.review``.
+    policy_evaluation: Any = None
     # Evidence normalised from the consumer's finished CI (#36). ``None`` until
     # a CI source is actually read, so a run that consulted no CI records
     # nothing rather than an empty section.

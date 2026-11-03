@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from mergecraft.config.settings import RepoSettings
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.policy.review import PolicySnapshot
 
 
 _CONFIG_REL = Path(".mergecraft") / "config.yaml"
@@ -51,6 +52,11 @@ class RepoSettingsSnapshot:
     config_hash: str
     repo_root: Path
     operator_owned: bool = False
+    # Policy-as-code documents pinned with the settings, so a run applies one
+    # copy of the rules: the operator-owned one this capture read, or — when a
+    # pull request controls the working tree — whatever ``policy/review.py``
+    # resolves from the base commit. ``None`` means policy was never captured.
+    policy: PolicySnapshot | None = None
 
 
 def config_yaml_hash(*, root: Path) -> str:
@@ -99,23 +105,35 @@ def capture_repo_settings_snapshot(
     settings: RepoSettings | None = None,
     load_learnings_files: bool = False,
     operator_owned: bool = False,
+    policy: PolicySnapshot | None = None,
 ) -> RepoSettingsSnapshot:
     """Resolve settings once and record the config hash for later fail-closed checks.
 
     ``operator_owned`` must be passed truthfully by the caller — see
     :class:`RepoSettingsSnapshot`. It defaults to ``False`` so a caller that
     doesn't reason about it gets the fail-closed answer.
+
+    The policy documents are captured in the same read as the settings, from the
+    same root and with the same ``operator_owned`` provenance. A caller that
+    already holds a snapshot's policy (a rebaseline after ``checkout_pr``) passes
+    it back, so the rules that judge a pull request are never re-read from a tree
+    the pull request just rewrote.
     """
     repo_root = root.resolve()
     resolved = settings or load_repo_settings(
         root=repo_root,
         load_learnings_files=load_learnings_files,
     )
+    if policy is None:
+        from mergecraft.policy.review import load_repo_policy
+
+        policy = load_repo_policy(repo_root, operator_owned=operator_owned)
     snapshot = RepoSettingsSnapshot(
         settings=resolved,
         config_hash=config_yaml_hash(root=repo_root),
         repo_root=repo_root,
         operator_owned=operator_owned,
+        policy=policy,
     )
     _RUN_SCOPE_SNAPSHOT.set(snapshot)
     return snapshot
@@ -152,11 +170,14 @@ def rebaseline_repo_settings_snapshot(ctx: ToolContext) -> RepoSettingsSnapshot:
     snapshot captured before ``checkout_pr`` ever runs), its ``settings``
     (and ``operator_owned`` provenance, D7) are carried forward unchanged;
     only ``config_hash``/``repo_root`` are re-derived from the now-checked-out
-    head. When there is no prior snapshot (a caller — e.g. local ``mcp serve``
-    — that never called :func:`capture_run_scope_snapshot` before invoking
-    ``checkout_pr``), this falls back to a live load off whatever is on disk
-    *after* checkout, which may be a fork's own HEAD. That result is never
-    operator-owned regardless of what it says, so ``operator_owned`` is
+    head. Its ``policy`` documents are carried forward for the same reason:
+    ``checkout_pr`` may have materialized a pull request that weakens or
+    deletes the rules, and the rules that judge it must not change under the
+    review. When there is no prior snapshot (a caller — e.g. local ``mcp
+    serve`` — that never called :func:`capture_run_scope_snapshot` before
+    invoking ``checkout_pr``), this falls back to a live load off whatever is
+    on disk *after* checkout, which may be a fork's own HEAD. That result is
+    never operator-owned regardless of what it says, so ``operator_owned`` is
     forced to ``False`` on this branch — fail closed, never inferred from
     content that could itself be fork-controlled.
     """
@@ -171,6 +192,7 @@ def rebaseline_repo_settings_snapshot(ctx: ToolContext) -> RepoSettingsSnapshot:
         settings=settings,
         load_learnings_files=False,
         operator_owned=operator_owned,
+        policy=prior.policy if prior is not None else None,
     )
     ctx.repo_settings_snapshot = snapshot
     return snapshot

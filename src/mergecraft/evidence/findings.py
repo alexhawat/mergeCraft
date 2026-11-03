@@ -49,7 +49,9 @@ def load_run_findings_with_drops(
     (fingerprint when present, otherwise tool/rule/path/line/message),
     keeping the more severe row on a collision. CI SARIF recorded on tool
     state is included so the approval check and the packet cannot diverge on
-    #464 evidence.
+    #464 evidence. The repository's policy rows join the same merged set, after
+    the drop filter and deduplicated on the fingerprint, so a rule the agent's
+    ``drop`` valve retired is still visible to ``decide_approval``.
     """
     state = ctx.tool_state
     raw: list[Any] = list(state.agent_findings)
@@ -70,10 +72,18 @@ def load_run_findings_with_drops(
     if run_state is not None:
         raw.extend(list(run_state.findings))
     typed, dropped = typed_findings_from_rows_with_drops(raw)
+    # Policy rows are computed from the repository's own rules, not asserted by
+    # the agent, so they join after the withdrawal filter and cannot be dropped
+    # by it. Imported lazily: ``policy.review`` reaches the MCP runner, which
+    # imports this module.
+    from mergecraft.policy.review import ensure_policy_evaluated
+
+    policy_findings = ensure_policy_evaluated(ctx)
     merged = merge_findings(
         typed,
         ci_evidence_findings(state),
         list(extra or []),
+        policy_findings,
     )
     return merged, dropped
 

@@ -1,9 +1,12 @@
 """Policy enforcement modes that score a rule violation's blocking intent.
 
-The evaluation engine stands alone: it turns a rule violation into a finding
-whose severity encodes the mode's intent, and nothing in review consumes that
-result yet, so a rule's enforcement mode changes how the rule is scored, never
-what a verdict decides.
+The evaluation engine turns a rule violation into a finding whose severity is
+the single authority on whether the violation blocks. Review applies that
+mapping through ``policy/review.py``: a rule triggered by a changed file in its
+scope becomes exactly one ``tool="policy"`` finding, and that finding reaches
+the approval gate the same way every other one does. There is no parallel
+approval path — the gate reads the severity this module derives, and nothing
+else.
 """
 
 from __future__ import annotations
@@ -150,8 +153,9 @@ def evaluate_enforcement(
     ``warning`` and ``advisory`` never block — ``advisory`` caps blocking
     severities to ``Trivial`` and ``warning`` to ``Minor``. The declared
     severity is kept on the finding's ``evidence`` list whenever the
-    gate-facing value differs. No review path calls this yet, so the outcome is
-    not applied to any approval gate.
+    gate-facing value differs. Review applies this mapping through
+    ``policy/review.py``, so the returned finding's severity is what the
+    approval gate reads.
     """
     finding = _violation_finding(mode=mode, violation=violation)
     contributes_blocker = _contributes_blocker(mode=mode, violation=violation)

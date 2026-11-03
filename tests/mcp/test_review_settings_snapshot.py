@@ -5,11 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.policy_fixtures import rule, write_policy
 
 from mergecraft.config.settings import load_repo_settings
 from mergecraft.config.settings_snapshot import (
     assert_config_unchanged,
     capture_repo_settings_snapshot,
+    rebaseline_repo_settings_snapshot,
     repo_settings_from_context,
 )
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
@@ -86,3 +88,69 @@ def test_invalid_config_mutation_keeps_terminal_behaviour_deterministic(
     assert snapshot.settings.gates.gate_action != second.gates.gate_action
     with pytest.raises(ValueError, match=r"config\.yaml changed"):
         assert_config_unchanged(snapshot)
+
+
+def test_the_snapshot_carries_the_repository_policy(tmp_path: Path) -> None:
+    """The rules a review will apply are pinned with the settings, not re-read later."""
+    _write_config(tmp_path, "enforce")
+    write_policy(tmp_path, rules=[rule("billing.no-secret", scope={"path": "src/billing/**"})])
+
+    snapshot = capture_repo_settings_snapshot(root=tmp_path, load_learnings_files=False)
+
+    assert snapshot.policy is not None
+    assert [item.id for item in snapshot.policy.rules] == ["billing.no-secret"]
+    assert snapshot.policy.source_path == ".mergecraft/policy/rules.yaml"
+    assert snapshot.policy.sha256
+    assert snapshot.policy.load_error is None
+
+
+def test_rebaseline_preserves_the_run_start_policy(tmp_path: Path) -> None:
+    """``checkout_pr`` rewrites the working tree; it must not rewrite the rules."""
+    _write_config(tmp_path, "enforce")
+    write_policy(
+        tmp_path,
+        rules=[
+            rule(
+                "billing.no-secret",
+                severity="Major",
+                enforcement="blocking",
+                scope={"path": "src/billing/**"},
+            )
+        ],
+    )
+    snapshot = capture_repo_settings_snapshot(root=tmp_path, load_learnings_files=False)
+    ctx = _tool_context(tmp_path, snapshot=snapshot)
+
+    # checkout_pr materializes a PR head that weakens the rule on disk.
+    write_policy(
+        tmp_path,
+        rules=[
+            rule(
+                "billing.no-secret",
+                severity="Minor",
+                enforcement="advisory",
+                scope={"path": "src/billing/**"},
+            )
+        ],
+    )
+    rebaselined = rebaseline_repo_settings_snapshot(ctx)
+
+    assert rebaselined.policy is not None
+    assert rebaselined.policy.rules[0].enforcement == "blocking"
+    assert rebaselined.policy == snapshot.policy
+
+
+def test_a_pull_request_target_capture_is_operator_owned(tmp_path: Path) -> None:
+    """The provenance that protects settings protects the policy the same way."""
+    _write_config(tmp_path, "enforce")
+    write_policy(tmp_path, rules=[rule("billing.no-secret", scope={"path": "src/billing/**"})])
+
+    snapshot = capture_repo_settings_snapshot(
+        root=tmp_path,
+        load_learnings_files=False,
+        operator_owned=True,
+    )
+
+    assert snapshot.operator_owned is True
+    assert snapshot.policy is not None
+    assert snapshot.policy.operator_owned is True

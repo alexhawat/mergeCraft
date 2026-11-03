@@ -706,6 +706,7 @@ A quick orientation before the lists:
 9. [Address-reviews checks](#9-address-reviews-checks)
 10. [Trajectory checks](#10-trajectory-checks)
 11. [Deterministic run record](#11-deterministic-run-record)
+12. [Policy rules](#policy-rules) — repository rules enforced at the approval gate
 
 ---
 
@@ -724,6 +725,11 @@ verdict; everything else is advisory. Concretely:
   authoritative structural input to `decide_approval()`. Only `scope="change"`
   findings can block; `scope="run"` rows are advisory and partition into the
   packet's `run_health` section at assembly time.
+- **Policy rows** — typed `Finding`s with `tool="policy"`, computed by
+  `src/mergecraft/policy/review.py` from the repository's own rules
+  ([Policy rules](#policy-rules)). They are mechanical evidence like any other
+  typed row, so they block through the same predicate — and the agent's `drop`
+  valve never retires one.
 - **`DeterministicCheck` rows** — one per declared `staticChecks` or
   discovered Makefile target. Status is one of five: `passed`, `failed`,
   `timed_out`, `unavailable`, `declared-but-cannot-run`. **Only
@@ -787,7 +793,9 @@ with zero findings, `approve` over a verifier-confirmed Critical/Major
 blocker, and `approve` while a required deterministic gate failed are all
 rejected with a typed `rejection_reason`. A rejected submission does not
 set `terminal_submission_received` — the attempt is fallback-eligible and
-maps to `RunOutcome.inconclusive`, same as no submission at all.
+maps to `RunOutcome.inconclusive`, same as no submission at all. A policy row
+is one of those blockers, and it is never withdrawable: `drop` retires agent
+claims, not a row the repository's own rules produced.
 
 **Why prose is not authoritative.** Text such as "LGTM" in `result.output`
 has never been an input to `decide_approval` and cannot approve a pull
@@ -1246,6 +1254,67 @@ left behind; whether reply and resolve happened together — both or neither, an
 fix is live on the remote; and whether a refuted finding was recorded as a withdrawn finding
 (group 7).
 
+## Policy rules
+
+A repository can ship versioned rules in `.mergecraft/policy/rules.yaml`, and
+review enforces them at the approval gate. This is **policy rules**
+(policy-as-code). It is not *gate policy* — what to do with a decision
+(`gates.gateAction`). The two share a word and nothing else.
+
+**What triggers a rule.** A rule applies when a changed file in the full pull
+request diff matches its `scope`. There is no content detector: the scope match
+*is* the trigger. A `blocking` rule scoped over `src/billing/**` therefore means
+"a pull request touching these paths needs a waiver or a policy change", not
+"the code contains a secret". Write scope tightly — a rule scoped `src/**` gates
+every source change.
+
+**What each enforcement mode does to the verdict.** The mode sets the
+gate-facing severity of the single finding a rule contributes, and
+`decide_approval` reads severity and nothing else:
+
+| Mode | Effect on the gate |
+| --- | --- |
+| `blocking` | a non-blocking declared severity is floored to `Major`, so the rule blocks |
+| `required` | `Major` until every key in `evidence.required` is available; `Trivial` after, when the declared severity was blocking |
+| `warning` | a blocking declared severity is capped to `Minor` — visible, never blocking |
+| `advisory` | a blocking declared severity is capped to `Trivial` — recorded, never blocking |
+
+Whenever the mode changes the declared severity, the declared value is kept on
+the finding's `evidence`, so a cap never hides what the rule asked for.
+
+**Missing evidence blocks and says what is missing.** No in-run producer exists
+yet for the evidence keys (`health_check`, `rollback_plan`, `contract_schema`,
+`requirements`, `xrepo`), so a `required` rule that names one sits at `Major`,
+and its row names every missing key. The way past it is a waiver.
+
+**Where the rules come from.** Never the pull request under review. On a
+`pull_request_target` run they come from the operator-owned snapshot captured
+before checkout; on every other run from the pull request's **base commit**. A
+pull request that edits, weakens, deletes or waives a rule therefore changes the
+rules for the *next* pull request, after it merges — and review adds an advisory
+row saying so. When no base commit can be read and the pull request touches
+`.mergecraft/policy/`, nothing from its own copy is evaluated, and a blocking
+row says the source could not be verified.
+
+**Who may waive.** A waiver in `.mergecraft/policy/exceptions.yaml` must name
+the rule (`rule_id`), still be unexpired at review time, and cover **every**
+matched path — a partial waiver leaves the rule triggered on the rest. A fully
+waived rule is still recorded, as a `Trivial` row naming the exception id,
+approver and expiry. A waiver set that the pull request controls waives nothing.
+
+**Unreadable files block.** A `rules.yaml` or `exceptions.yaml` that does not
+parse produces one `Major` row naming the file and the parse error; it never
+silently turns enforcement off. Dimensions a review cannot resolve — `language`,
+`symbol`, and `branch` when the base branch is unknown — are treated as
+matching, and the row's evidence names the dimension, so an unset context can
+never fail open.
+
+**No file, no rules.** A repository without `.mergecraft/policy/rules.yaml`
+reviews exactly as it did before this feature existed. The example packs that
+`mergecraft policy` lints, tests, explains and simulates against are authoring
+material; review never loads them, because they assume a detector that does not
+exist and would block every pull request touching `src/**`.
+
 ===== FILE: docs/ANALYZERS.md =====
 
 # Analyzer catalog
@@ -1596,6 +1665,10 @@ existing producers keep their meaning without silent reclassification.
 apply `apply_causality_policy`, then test `BLOCKING_SEVERITIES`. `_has_blocker`,
 `_packet_has_blockers`, `decide_approval`, and `mcp/verdict.py::_blocks_approve` all route
 through it — two predicates that disagree is a defect class, not a style question.
+
+Policy rules enter the gate as findings through that same predicate: a rule triggered by a
+changed file in its scope becomes one `tool="policy"` row, so policy can block a merge but
+never through a second, parallel approval path.
 
 Trajectory checks stamp `source="trajectory"`, `scope="run"`, and `introduced_by_pr="false"`.
 All three fields matter: `introduced_by_pr` drives causality, `scope` drives gating,

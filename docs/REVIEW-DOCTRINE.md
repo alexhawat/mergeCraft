@@ -35,6 +35,10 @@ apply `apply_causality_policy`, then test `BLOCKING_SEVERITIES`. `_has_blocker`,
 `_packet_has_blockers`, `decide_approval`, and `mcp/verdict.py::_blocks_approve` all route
 through it — two predicates that disagree is a defect class, not a style question.
 
+Policy rules enter the gate as findings through that same predicate: a rule triggered by a
+changed file in its scope becomes one `tool="policy"` row, so policy can block a merge but
+never through a second, parallel approval path.
+
 Trajectory checks stamp `source="trajectory"`, `scope="run"`, and `introduced_by_pr="false"`.
 All three fields matter: `introduced_by_pr` drives causality, `scope` drives gating,
 `source` drives rendering.

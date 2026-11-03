@@ -58,20 +58,42 @@ def _source_layer(scope: RuleScope | None) -> SourceLayer:
     return "global"
 
 
-def _scope_matches(scope: RuleScope | None, context: ScopeContext) -> bool:
+def _scope_matches(
+    scope: RuleScope | None,
+    context: ScopeContext,
+    *,
+    unresolved: frozenset[str] = frozenset(),
+) -> bool:
+    """Return whether ``scope`` matches ``context``.
+
+    A dimension named in ``unresolved`` is treated as matching: the caller could
+    not resolve it for this run and over-approximating keeps the rule from
+    silently failing open. The default resolves every dimension strictly, so
+    every existing caller keeps its behaviour.
+    """
     if scope is None:
         return True
-    if scope.org is not None and scope.org != context.org:
+    if scope.org is not None and "org" not in unresolved and scope.org != context.org:
         return False
-    if scope.repo is not None and scope.repo != context.repo:
+    if scope.repo is not None and "repo" not in unresolved and scope.repo != context.repo:
         return False
-    if scope.branch is not None and scope.branch != context.branch:
+    if scope.branch is not None and "branch" not in unresolved and scope.branch != context.branch:
         return False
-    if scope.language is not None and scope.language != context.language:
+    if (
+        scope.language is not None
+        and "language" not in unresolved
+        and scope.language != context.language
+    ):
         return False
-    if scope.path is not None and not fnmatch.fnmatch(context.path, scope.path):
+    if (
+        scope.path is not None
+        and "path" not in unresolved
+        and not fnmatch.fnmatch(context.path, scope.path)
+    ):
         return False
     if scope.symbol is None:
+        return True
+    if "symbol" in unresolved:
         return True
     if context.symbol is None:
         return False
@@ -82,16 +104,29 @@ def resolve_effective_rules(
     rules: list[PolicyRule],
     *,
     context: ScopeContext,
+    unresolved: frozenset[str] = frozenset(),
 ) -> list[EffectiveRule]:
     """Return rules whose scope matches ``context``, ordered by inheritance depth.
 
     When multiple rules share the same ``id``, the deepest matching scope wins
     (org → repo → path → symbol).
+
+    Args:
+        rules (list[PolicyRule]): Every declared rule.
+        context (ScopeContext): The dimension values this caller could resolve.
+        unresolved (frozenset[str], optional): Dimensions the caller could not
+            resolve. A rule that declares one of them matches, and the layer
+            depth still comes from what the rule declares, so a symbol-layer
+            rule stays deeper than a repo-layer rule. Defaults to an empty set,
+            which resolves every dimension strictly.
+
+    Returns:
+        list[EffectiveRule]: One entry per effective rule id, deepest first.
     """
     effective = [
         EffectiveRule(rule=rule, source_layer=_source_layer(rule.scope))
         for rule in rules
-        if _scope_matches(rule.scope, context)
+        if _scope_matches(rule.scope, context, unresolved=unresolved)
     ]
     by_id: dict[str, EffectiveRule] = {}
     for entry in effective:

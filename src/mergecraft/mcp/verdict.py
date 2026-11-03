@@ -33,6 +33,7 @@ from mergecraft.tracing.redaction import redact_attrs
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from mergecraft.agents.shared import AgentRunContext
     from mergecraft.analyzers.finding import Finding
     from mergecraft.mcp.context import ToolContext
 
@@ -560,6 +561,9 @@ class ValidationState:
         confirmed_findings: Findings the agent itself asserted — verifier
             confirms and agent-authored rows. Withdrawn rows are already gone.
         unverified_findings: Analyzer rows nobody verified or withdrew.
+        policy_findings: Rows the server computed from repository policy. This
+            population is a fourth lane on purpose: the agent's ``drop`` valve
+            retires its own claims, never a rule the repository wrote.
         ungradable_fingerprints: Rows no coercion could read. They block, since
             approving over a finding nobody could grade is the fail-open branch.
         static_checks: The last ``run_static_checks`` status rows.
@@ -570,6 +574,7 @@ class ValidationState:
     terminal_submission_conflict: bool = False
     confirmed_findings: tuple[Finding, ...] = ()
     unverified_findings: tuple[Finding, ...] = ()
+    policy_findings: tuple[Finding, ...] = ()
     ungradable_fingerprints: tuple[str, ...] = ()
     static_checks: tuple[dict[str, str], ...] = ()
     withdrawn_fingerprints: frozenset[str] = frozenset()
@@ -584,6 +589,7 @@ def build_validation_state(
     verified_fingerprints: Iterable[str] = (),
     static_checks: Iterable[Any] = (),
     withdrawn_fingerprints: Iterable[str] = (),
+    policy_findings: Iterable[Any] = (),
 ) -> ValidationState:
     """Grade every known finding once and return the partitioned state.
 
@@ -591,6 +597,11 @@ def build_validation_state(
     verified (confirmed), readable but unverified, or ungradable. ``asserted``
     rows are graded first so a fingerprint the agent confirmed is never also
     counted as unverified.
+
+    Policy rows are graded outside that walk: ``drop`` withdraws agent claims,
+    so it may not filter a row the repository's own rules produced. An
+    unreadable policy row still joins ``ungradable_fingerprints`` — approving
+    over a policy row nobody could grade would be the fail-open branch.
 
     Args:
         terminal_submission (TerminalSubmission | None): Recorded verdict.
@@ -600,6 +611,8 @@ def build_validation_state(
         verified_fingerprints (Iterable[str]): Fingerprints a verifier confirmed.
         static_checks (Iterable[Any]): ``run_static_checks`` status rows.
         withdrawn_fingerprints (Iterable[str]): Fingerprints a ``drop`` retired.
+        policy_findings (Iterable[Any]): Server-computed policy rows, never
+            subject to withdrawal.
 
     Returns:
         ValidationState: The graded populations, ready for the gate.
@@ -643,11 +656,20 @@ def build_validation_state(
     for item in analyzer_findings:
         _grade(item, asserted=False)
 
+    policy: list[Finding] = []
+    for item in policy_findings:
+        coerced = _coerce_confirmed_finding(item)
+        if coerced is None:
+            ungradable.append(_finding_fingerprint(item) or "<no fingerprint>")
+            continue
+        policy.append(coerced)
+
     return ValidationState(
         terminal_submission=terminal_submission,
         terminal_submission_conflict=terminal_submission_conflict,
         confirmed_findings=tuple(confirmed),
         unverified_findings=tuple(unverified),
+        policy_findings=tuple(policy),
         ungradable_fingerprints=tuple(ungradable),
         static_checks=tuple(dict(row) for row in static_checks if isinstance(row, dict)),
         withdrawn_fingerprints=withdrawn,
@@ -669,7 +691,9 @@ def _blocks_approve(state: ValidationState) -> bool:
 
     The agent's valves are ``drop`` (the fingerprint leaves the state) and
     ``downgrade`` (the stored severity is rewritten), both applied before this
-    runs — so approve stays reachable under a fail-closed gate.
+    runs — so approve stays reachable under a fail-closed gate. Neither valve
+    reaches ``policy_findings``: those rows are computed from the repository's
+    own rules and are not an agent claim to retire.
 
     Args:
         state (ValidationState): The graded populations for this run.
@@ -690,7 +714,15 @@ def _blocks_approve(state: ValidationState) -> bool:
             ", ".join(state.ungradable_fingerprints),
         )
         return True
-    return bool(blocking_findings([*state.confirmed_findings, *state.unverified_findings]))
+    return bool(
+        blocking_findings(
+            [
+                *state.confirmed_findings,
+                *state.unverified_findings,
+                *state.policy_findings,
+            ]
+        )
+    )
 
 
 def withdrawn_fingerprints_for_state(tool_state: ToolState, *, tmpdir: str | None) -> set[str]:
@@ -723,10 +755,28 @@ def withdrawn_fingerprints_for_state(tool_state: ToolState, *, tmpdir: str | Non
     return collected
 
 
+def _policy_rows_from_state(tool_state: ToolState) -> tuple[Any, ...]:
+    """Return the policy population this run computed, if it computed one."""
+    from mergecraft.policy.review import PolicyEvaluation
+
+    evaluation = tool_state.policy_evaluation
+    if isinstance(evaluation, PolicyEvaluation):
+        return evaluation.rows
+    return ()
+
+
 def validation_state_from_tool_state(
-    tool_state: ToolState, *, tmpdir: str | None = None
+    tool_state: ToolState,
+    *,
+    tmpdir: str | None = None,
+    policy_findings: Iterable[Any] | None = None,
 ) -> ValidationState:
-    """Grade a live ``ToolState`` into the state ``validate_submission`` reads."""
+    """Grade a live ``ToolState`` into the state ``validate_submission`` reads.
+
+    ``policy_findings`` defaults to the population cached on the state, so a
+    caller that already evaluated policy (or that has only a ``ToolState`` to
+    hand) reads the same rows the terminal submission saw.
+    """
     analyzer_run = tool_state.analyzer_run
     verified: set[str] = set(tool_state.verified_ids)
     if analyzer_run is not None:
@@ -739,12 +789,30 @@ def validation_state_from_tool_state(
         verified_fingerprints=verified,
         static_checks=tool_state.static_checks,
         withdrawn_fingerprints=withdrawn_fingerprints_for_state(tool_state, tmpdir=tmpdir),
+        policy_findings=(
+            _policy_rows_from_state(tool_state) if policy_findings is None else policy_findings
+        ),
     )
 
 
-def validation_state_from_tool_context(ctx: ToolContext) -> ValidationState:
-    """Build the consultation object from a live ``ToolContext``."""
-    return validation_state_from_tool_state(ctx.tool_state, tmpdir=ctx.tmpdir)
+def validation_state_from_tool_context(ctx: ToolContext | AgentRunContext) -> ValidationState:
+    """Build the consultation object from a live tool or agent-run context.
+
+    Policy is evaluated first, so every caller of the approve gate sees the one
+    population ``ensure_policy_evaluated`` cached — the terminal submission,
+    ``validate_submission`` and the packet cannot disagree about it.
+
+    The post-run revalidation holds an ``AgentRunContext`` rather than a
+    ``ToolContext``; both carry the run's ``ToolState`` and ``tmpdir``, which is
+    all this builder reads.
+    """
+    from mergecraft.policy.review import ensure_policy_evaluated
+
+    return validation_state_from_tool_state(
+        ctx.tool_state,
+        tmpdir=ctx.tmpdir,
+        policy_findings=ensure_policy_evaluated(ctx),
+    )
 
 
 def validate_submission(
@@ -908,6 +976,8 @@ def recorded_submission_payload(submission: Any) -> dict[str, Any]:
 def _backfill_agent_findings_from_terminal_submission(
     tool_state: ToolState,
     findings: Iterable[Any],
+    *,
+    skip_fingerprints: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Merge terminal-submission findings into ``agent_findings`` by fingerprint (#619).
 
@@ -928,10 +998,19 @@ def _backfill_agent_findings_from_terminal_submission(
     must win over a stale draft the terminal payload happens to repeat, and
     this merge must never duplicate a row that already exists.
 
+    A policy row is not an agent claim. It reaches the terminal payload as a
+    draft the server appended, so back-filling it here would store a copy in
+    ``agent_findings`` — where the agent's ``drop`` valve and the CI merge both
+    treat it as an agent claim. ``skip_fingerprints`` names the policy
+    population so the backfill leaves it alone.
+
     Args:
         tool_state (ToolState): The run's mutable tool state.
         findings (Iterable[Any]): Normalized terminal-submission findings —
             ``AgentFinding`` instances or dict rows.
+        skip_fingerprints (frozenset[str], optional): Fingerprints that are
+            server-computed and must not be stored as agent rows. Defaults to
+            an empty set.
 
     Returns:
         list[str]: Fingerprints that had to be back-filled, in submission
@@ -966,7 +1045,7 @@ def _backfill_agent_findings_from_terminal_submission(
             fingerprint = normalize_agent_supplied_fingerprint(fingerprint)
         except (TypeError, ValueError):
             continue
-        if fingerprint in existing:
+        if fingerprint in existing or fingerprint in skip_fingerprints:
             continue
         # Store the ``Finding``-shaped row ``load_run_findings`` can actually
         # parse — mirrors ``verify_agent_findings_tool``'s storage (VF1.mcp/
@@ -1061,6 +1140,8 @@ def submit_review_verdict_tool(ctx: ToolContext):
         from mergecraft.agents.registry import load_registry
         from mergecraft.agents.verifier import AgentFinding
         from mergecraft.config.settings_snapshot import repo_settings_from_context
+        from mergecraft.findings.agent_adapter import finding_to_agent_draft
+        from mergecraft.policy.review import ensure_policy_evaluated, policy_summary_block
         from mergecraft.review.terminal_submission import (
             append_degradation_to_summary,
             enforce_terminal_verdict_from_finalized_findings,
@@ -1107,25 +1188,60 @@ def submit_review_verdict_tool(ctx: ToolContext):
             repo_root=repo_root,
             trust_tier=trust,
         )
-        enforced_verdict = enforce_terminal_verdict_from_finalized_findings(
+        # Policy enters as findings, through the same predicate, after the
+        # pipeline: its rubric and causality steps judge agent claims, and a
+        # rule trigger is not a claim. One population serves this submission,
+        # ``validate_submission`` and the packet.
+        policy_findings = ensure_policy_evaluated(ctx)
+        # The agent's ``drop`` valve retires its own claims. It cannot retire a
+        # policy row from the gate — the validation population keeps every row —
+        # but a row it withdrew is not re-appended to its own payload, so the
+        # verdict it asked for is graded as it asked for it. The gate then
+        # refuses that verdict; nothing is recorded and nothing is published.
+        withdrawn = ctx.tool_state.withdrawn_fingerprints
+        appended_policy = [
+            finding for finding in policy_findings if finding.fingerprint not in withdrawn
+        ]
+        policy_drafts = [finding_to_agent_draft(finding) for finding in appended_policy]
+        verdict_inputs = [*normalized_findings, *policy_drafts]
+        # Policy never relaxes a verdict: take the stricter of the two answers
+        # so appending a server row cannot turn a ``request_changes`` into an
+        # ``approve``. With no policy rows the two answers are identical.
+        enforced_without_policy = enforce_terminal_verdict_from_finalized_findings(
             requested=requested_verdict,
             findings=normalized_findings,
         )
+        enforced_verdict = enforce_terminal_verdict_from_finalized_findings(
+            requested=requested_verdict,
+            findings=verdict_inputs,
+        )
+        if enforced_without_policy == "request_changes":
+            enforced_verdict = "request_changes"
         # Preserve the existing fail-closed all-reviewers-degraded path. A
         # normal finding set, including one fully removed by normalization,
         # derives its verdict exclusively from finalized typed findings.
         if not merged_raw and prepared_verdict == "request_changes":
             enforced_verdict = "request_changes"
+        policy_block = policy_summary_block(appended_policy)
+        submission_summary = validated.summary
+        if policy_block:
+            submission_summary = (
+                f"{submission_summary}\n\n{policy_block}"
+                if submission_summary.strip()
+                else policy_block
+            )
         submission_dict = {
             "verdict": enforced_verdict,
-            "summary": validated.summary,
+            "summary": submission_summary,
             "findings": [
                 item.model_dump() if hasattr(item, "model_dump") else item
-                for item in normalized_findings
+                for item in verdict_inputs
             ],
         }
         backfilled = _backfill_agent_findings_from_terminal_submission(
-            ctx.tool_state, normalized_findings
+            ctx.tool_state,
+            verdict_inputs,
+            skip_fingerprints=frozenset(finding.fingerprint for finding in policy_findings),
         )
         if backfilled:
             logger.warning(
@@ -1140,7 +1256,7 @@ def submit_review_verdict_tool(ctx: ToolContext):
         recorded = record_validated_terminal_submission(
             ctx,
             submission_dict,
-            findings=normalized_findings,
+            findings=verdict_inputs,
         )
         replayed = existing_id is not None and recorded.id == existing_id
         _adopt_review_mode_for_accepted_verdict(ctx)

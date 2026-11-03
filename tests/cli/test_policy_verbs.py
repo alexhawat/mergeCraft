@@ -132,3 +132,25 @@ def test_policy_lint_validates_exceptions_yaml(
 
     assert result.exit_code == 0, result.stdout + result.stderr
     assert "exception" in (result.stdout + result.stderr).lower()
+
+
+def test_policy_effective_says_review_evaluates_no_rules_without_rules_yaml(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """The pack fallback is authoring material, and the CLI says so."""
+    from tests.orchestrator.conftest import write_repo_config
+
+    write_repo_config(tmp_path)
+    (tmp_path / ".mergecraft" / "policy").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["policy", "effective", "--path", "src/app.py"])
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    output = (result.stdout + result.stderr).casefold()
+    assert "review" in output
+    assert "no rules" in output
+    assert "rules.yaml" in output
+    # The shipped packs are still listed for authoring.
+    assert "security.no-hardcoded-secrets" in output
