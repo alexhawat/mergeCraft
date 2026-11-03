@@ -20,7 +20,7 @@ def test_openapi_graphql_protobuf_and_exports_are_indexed(tmp_path: Path) -> Non
     commit_sha = write_contract_fixture_repo(repo_root)
 
     contract_mod = import_xrepo_module("contract_index")
-    index = contract_mod.index_contracts(repo_root=repo_root, commit_sha=commit_sha)
+    index = contract_mod.index_contracts_at_commit(repo_root=repo_root, commit_sha=commit_sha)
 
     openapi_paths = {item.path for item in index.openapi}
     graphql_paths = {item.path for item in index.graphql}
@@ -44,9 +44,7 @@ def test_index_at_commit_reads_git_object_not_worktree(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     contract_mod = import_xrepo_module("contract_index")
-    disk = contract_mod.index_contracts(repo_root=repo_root, commit_sha=commit_sha)
     pinned = contract_mod.index_contracts_at_commit(repo_root=repo_root, commit_sha=commit_sha)
-    assert "sneakyOp" in {item.symbol for item in disk.openapi}
     assert "sneakyOp" not in {item.symbol for item in pinned.openapi}
 
 

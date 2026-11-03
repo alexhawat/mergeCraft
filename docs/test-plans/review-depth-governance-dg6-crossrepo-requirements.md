@@ -47,7 +47,7 @@ One test passes pre-DG6.2 (fence regression pin).
 
 | Symbol | Contract |
 |--------|----------|
-| `index_contracts(repo_root, commit_sha)` | Index OpenAPI, GraphQL, protobuf, and export symbols |
+| `index_contracts_at_commit(repo_root, commit_sha)` | Index OpenAPI, GraphQL, protobuf, and export symbols |
 | `ContractIndex` | `openapi`, `graphql`, `protobuf`, `exports` collections with `path` / `symbol` |
 
 ### `src/mergecraft/xrepo/blast_radius.py` (new)
