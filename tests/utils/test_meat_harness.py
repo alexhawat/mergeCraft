@@ -761,8 +761,14 @@ def test_real_meat_invocation_smoke() -> None:
         # A missed network/credential/timeout is a *skip* in an
         # integration context — the operator fixes the env and re-runs.
         # Anything else is a contract failure.
-        if "install" in result.skip_reason.lower() or "timed out" in result.skip_reason.lower():
+        reason = result.skip_reason.lower()
+        if "install" in reason or "timed out" in reason:
             pytest.skip(f"real meat binary unavailable in this run: {result.skip_reason}")
+        # No OpenAI credentials (OPENAI_API_KEY / OPENAI_BASE_URL unset, not on
+        # an exe.dev VM): the binary cannot authenticate, which says nothing
+        # about the wire contract (#1016).
+        if "no openai credentials" in reason:
+            pytest.skip(f"real meat binary cannot authenticate in this run: {result.skip_reason}")
         pytest.fail(f"real meat -json failed: {result.skip_reason}")
     assert result.abridged_diff is not None
     assert result.summary is not None

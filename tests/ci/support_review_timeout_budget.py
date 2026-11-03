@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from tests.ci.workflow_support import job, load_workflow, read_text
+from tests.ci.workflow_support import SELF_REVIEW_JOBS, job, load_workflow, read_text
 
 _WORKFLOW = "mergecraft.yml"
 _WORKFLOW_PATH = f".github/workflows/{_WORKFLOW}"
@@ -24,10 +24,13 @@ DECLARED_ATTEMPT_TIMEOUT_ENV = "MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES"
 # per-attempt review time. D8: job > sum(attempts) + checkout slack.
 CHECKOUT_AND_SETUP_SLACK_MINUTES = 10
 
-# Worst-case sequential path: primary Nous attempt, Codex fallback on verdict
-# absence, then the Claude backstop on a retryable failure (#524). All three can
-# run in one job, so the job budget must cover 3x the per-attempt ceiling.
+# Worst-case sequential path: primary OpenCode Go attempt, Codex fallback on
+# verdict absence, then the Claude backstop on a retryable failure (#524).
 MAX_SEQUENTIAL_REVIEW_ATTEMPTS = 3
+
+# Since #1026 each rung runs in its own job (review -> review-codex ->
+# review-backstop), so each job's budget must cover one full attempt.
+ATTEMPTS_PER_JOB = 1
 
 _MERGECRAFT_USES = re.compile(r"^\s+uses:\s+alexhawat/mergeCraft@", re.MULTILINE)
 _DURATION = re.compile(r"^(\d+)\s*([mhs])$", re.IGNORECASE)
@@ -103,18 +106,36 @@ def parse_duration_minutes(value: str) -> int:
     raise ValueError(msg)
 
 
+def _is_mergecraft_step(step: Any) -> bool:
+    if not isinstance(step, dict):
+        return False
+    uses = step.get("uses")
+    return isinstance(uses, str) and uses.startswith("alexhawat/mergeCraft@")
+
+
 def mergecraft_review_steps(doc: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    """Return mergeCraft action steps in the review job (Nous + Codex)."""
-    steps = review_job(doc).get("steps")
-    assert isinstance(steps, list), "review job steps must be a list"
+    """Return mergeCraft action steps across the cascade jobs, in rung order."""
+    loaded = doc or load_workflow(_WORKFLOW)
     found: list[dict[str, Any]] = []
-    for step in steps:
-        if not isinstance(step, dict):
-            continue
-        uses = step.get("uses")
-        if isinstance(uses, str) and uses.startswith("alexhawat/mergeCraft@"):
-            found.append(step)
+    for name in SELF_REVIEW_JOBS:
+        steps = job(loaded, name).get("steps")
+        assert isinstance(steps, list), f"{name} job steps must be a list"
+        found.extend(step for step in steps if _is_mergecraft_step(step))
     return found
+
+
+def cascade_job_budgets(doc: dict[str, Any] | None = None) -> dict[str, tuple[int, int]]:
+    """Map each cascade job to ``(timeout-minutes, mergeCraft attempts it runs)``."""
+    loaded = doc or load_workflow(_WORKFLOW)
+    budgets: dict[str, tuple[int, int]] = {}
+    for name in SELF_REVIEW_JOBS:
+        cascade_job = job(loaded, name)
+        raw = cascade_job.get("timeout-minutes")
+        assert isinstance(raw, int), f"{name} job must declare timeout-minutes"
+        assert raw > 0, f"{name} job timeout-minutes must be positive"
+        attempts = sum(1 for step in cascade_job.get("steps") or [] if _is_mergecraft_step(step))
+        budgets[name] = (raw, attempts)
+    return budgets
 
 
 def step_attempt_timeout_minutes(step: dict[str, Any]) -> int:

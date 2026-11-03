@@ -5,7 +5,9 @@ untrusted analyzer payload must be a non-root process that can write its scratch
 and ``HOME``, cannot write a root-owned file outside the read-only checkout, and
 never reaches UID 0 on the userspace-egress path (or fails closed with a named
 reason). On any host without euid 0, Linux, ``unshare`` and ``setpriv`` the whole
-module skips with the precondition reason.
+module skips with the precondition reason — except in the privileged lane
+(``MERGECRAFT_PRIVILEGED_LANE=1``, ``make test-uid-drop-privileged``), where a
+missing precondition fails.
 """
 
 from __future__ import annotations
@@ -20,6 +22,8 @@ from typing import Any
 
 import pytest
 
+from tests.uid_drop_support import make_traversable_for_dropped_uid
+
 _ROOT_PRECONDITION_REASON = "requires euid 0, Linux, unshare and setpriv — runs in the action image"
 
 
@@ -29,40 +33,30 @@ def _preconditions_met() -> bool:
     return shutil.which("unshare") is not None and shutil.which("setpriv") is not None
 
 
-pytestmark = pytest.mark.skipif(not _preconditions_met(), reason=_ROOT_PRECONDITION_REASON)
+def _privileged_lane() -> bool:
+    """Inside the lane built for this module, a missing precondition fails, not skips."""
+    return os.environ.get("MERGECRAFT_PRIVILEGED_LANE") == "1"
 
 
-def _make_traversable_for_dropped_uid(path: Path) -> None:
-    """Add ``o+x`` to ``path`` and its ancestors so the dropped uid can traverse in.
+pytestmark = pytest.mark.skipif(
+    not _preconditions_met() and not _privileged_lane(), reason=_ROOT_PRECONDITION_REASON
+)
 
-    pytest's ``tmp_path`` lives under a root-owned ``0700`` base
-    (``/tmp/pytest-of-<user>/pytest-<n>``), while the production analyzer
-    workspace is traversable by the agent (``utils/privilege.prepare_workspace_for_agent``
-    chowns it before the run). The sandbox correctly drops the payload to the
-    agent uid; the fixture must then present a traversable parent chain or the
-    payload cannot reach the ``1777`` tmpfs mounted at the scratch leaf. Grant
-    traversal only — the leaf tmpfs stays world-writable and the real checkout
-    stays unreadable. Stop at ``tempfile.gettempdir()`` and any ancestor that is
-    already traversable by others.
-    """
-    stop = Path(tempfile.gettempdir()).resolve()
-    current = path.resolve()
-    while True:
-        mode = current.stat().st_mode
-        if mode & 0o001:
-            break
-        os.chmod(current, mode | 0o001)
-        parent = current.parent
-        if current == stop or parent == current:
-            break
-        current = parent
+
+@pytest.fixture(autouse=True)
+def _require_preconditions_in_the_privileged_lane() -> None:
+    if not _preconditions_met():
+        pytest.fail(
+            "MERGECRAFT_PRIVILEGED_LANE=1 but the lane cannot run this module: "
+            f"{_ROOT_PRECONDITION_REASON}"
+        )
 
 
 def _untrusted_context(tmp_path: Path) -> Any:
     from mergecraft.analyzers import sandbox as sandbox_mod
 
     scratch = tmp_path / "analyzer-scratch"
-    _make_traversable_for_dropped_uid(tmp_path)
+    make_traversable_for_dropped_uid(tmp_path)
     plan = sandbox_mod.plan_sandbox(
         repo_root=tmp_path,
         scratch_dir=scratch,

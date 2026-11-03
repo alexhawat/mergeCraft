@@ -471,6 +471,18 @@ test-sandbox-privileged: ## Sandbox write/network block, disposable root Linux l
 	@test "$$(id -u)" = 0 || { echo 'The sandbox lane must run as root'; exit 1; }
 	MERGECRAFT_PRIVILEGED_LANE=1 "$(CURDIR)/.venv-dev/bin/python" -m pytest tests/analyzers/test_sandbox_execution.py::test_sandboxed_execution_blocks_repo_write_and_network -v --tb=short --strict-markers -m "not integration" -p no:cacheprovider
 
+# The analyzer identity-drop proofs (trusted tier and untrusted sandbox) need
+# euid 0 on Linux with ``setpriv`` and ``unshare``, and self-skip everywhere
+# else, so no ordinary lane runs them (#1015). Same disposable root lane as
+# above; with the privileged-lane flag set a missing precondition fails rather
+# than skips.
+.PHONY: test-uid-drop-privileged
+test-uid-drop-privileged: ## Analyzer UID-drop proofs, disposable root Linux lane only
+	@test "$(MERGECRAFT_DISPOSABLE_LINUX)" = 1 || { echo 'Requires explicit MERGECRAFT_DISPOSABLE_LINUX=1 on a disposable Linux runner'; exit 1; }
+	@test "$$(uname -s)" = Linux || { echo 'The UID-drop proofs require Linux'; exit 1; }
+	@test "$$(id -u)" = 0 || { echo 'The UID-drop lane must run as root'; exit 1; }
+	MERGECRAFT_PRIVILEGED_LANE=1 "$(CURDIR)/.venv-dev/bin/python" -m pytest tests/analyzers/test_trusted_uid_drop.py::test_root_backend_trusted_analyzer_payload_runs_unprivileged_and_writes_scratch tests/security/test_analyzer_uid_drop.py -v --tb=short --strict-markers -m "not integration" -p no:cacheprovider
+
 .PHONY: test-wheel-corpus
 test-wheel-corpus: build ## Verify installed convergence corpus outside the checkout
 	UV="$(UV)" $(UV) run python scripts/check_wheel_corpus.py dist/mergecraft_action-*.whl

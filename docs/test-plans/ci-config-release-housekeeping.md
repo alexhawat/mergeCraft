@@ -17,7 +17,7 @@ token in a review workflow, no canary that burns the credential it watches.
 
 | # | Issue | Contract | Test module | Layer |
 | --- | --- | --- | --- | --- |
-| 1 | #882 | Every job that receives `CODEX_AUTH_JSON` joins the `codex-subscription-auth` group and never cancels a running consumer | `tests/ci/test_codex_credential_serialisation.py` | workflow shape, scanned across all workflows |
+| 1 | #882, #1026 | Every job that receives `CODEX_AUTH_JSON` joins the `codex-subscription-auth` group and never cancels a running consumer; in the self-review only `review-codex` (the Codex rung) holds it | `tests/ci/test_codex_credential_serialisation.py` | workflow shape, scanned across all workflows |
 | 2 | #922 | The "refresh token was already used" failure is named in the driver result, classified `infra_error`, and reaches the check summary and run result; other Codex failures are unchanged | `tests/agents/test_codex_credential_expired.py` | driver, classifier, `main()` harness |
 | 3 | #913 | No workflow declares the shared Actions bot as `MERGECRAFT_REVIEWER_BOT_LOGIN`; every declaration falls back to an empty string | `tests/ci/test_reviewer_bot_login_fallback.py` | workflow text, every workflow |
 | 4 | #885 (1) | Every `actions/checkout` sets `persist-credentials: false` unless the job pushes; each exemption is checked to push | `tests/ci/test_workflow_checkout_credentials.py` | workflow shape |
