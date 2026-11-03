@@ -127,7 +127,9 @@ def record_trajectory(
             tool=name,
             arguments=arguments,
             ok=ok,
-            outcome_ok=outcome_ok_from_result(result) if ok else None,
+            outcome_ok=(
+                outcome_ok_from_result(result, tool=name, arguments=arguments) if ok else None
+            ),
             error=error,
             duration_ms=duration_ms,
             failure_class=failure_class,

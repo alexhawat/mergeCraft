@@ -13,6 +13,8 @@ tool call it describes.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
@@ -20,7 +22,9 @@ import pytest
 from mergecraft.evidence import trajectory
 from mergecraft.evidence.trajectory import build_trajectory_record, record_tool_call
 from mergecraft.evidence.trajectory_audit import audit_trajectory
+from mergecraft.mcp.tool_call import record_trajectory
 from mergecraft.mcp.tool_state import init_tool_state
+from tests.support.tool_context import make_tool_context
 
 _CANARY = "sk-canary-driver-exec-0123456789abcdef0123456789"
 
@@ -336,3 +340,78 @@ def test_classify_failure_at_execute_prefers_typed_signals_over_prose() -> None:
     assert classify_failure_at_execute("") == "unknown"
     assert classify_failure_at_execute("bwrap: no") == "environment"
     assert classify_failure_at_execute("E501 line too long") == "unknown"
+
+
+def _mcp_shell_door(state: Any, tmp_path: Path, *, command: str, exit_code: int) -> None:
+    """Run one result through the MCP ``tools/call`` recorder, as ``rpc.py`` does."""
+    ctx = make_tool_context(tmp_path, trust_tier="trusted", tool_state=state)
+    record_trajectory(
+        ctx,
+        "shell",
+        {"command": command, "description": "probe"},
+        ok=True,
+        result={"output": "", "exit_code": exit_code, "timed_out": False},
+    )
+
+
+def _driver_door(state: Any, tmp_path: Path, *, command: str, exit_code: int) -> None:
+    del tmp_path
+    record_driver_exec(state, command=command, exit_code=exit_code, output="")
+
+
+_Door = Callable[..., None]
+
+
+@pytest.mark.parametrize("door", [_mcp_shell_door, _driver_door], ids=["mcp-shell", "driver"])
+def test_a_no_match_search_claims_nothing_through_either_door(door: _Door, tmp_path: Path) -> None:
+    """``rg`` with no match exits 1; neither door may call that a failure (#1027)."""
+    state = _state()
+
+    door(state, tmp_path, command="rg -n x src/", exit_code=1)
+
+    assert [row.outcome_ok for row in state.tool_calls] == [None]
+    assert "unresolved-failure" not in _rule_ids(state)
+
+
+@pytest.mark.parametrize("door", [_mcp_shell_door, _driver_door], ids=["mcp-shell", "driver"])
+def test_a_failing_verify_command_is_one_unresolved_failure_through_either_door(
+    door: _Door, tmp_path: Path
+) -> None:
+    """``pytest -q`` exiting 1 is a real failure through both doors (#1027)."""
+    state = _state()
+
+    door(state, tmp_path, command="pytest -q", exit_code=1)
+
+    assert [row.outcome_ok for row in state.tool_calls] == [False]
+    findings = audit_trajectory(build_trajectory_record(state))
+    assert [f.rule_id for f in findings].count("unresolved-failure") == 1
+
+
+@pytest.mark.parametrize(
+    ("command", "exit_code", "expected"),
+    [
+        ("rg -n x src/", 0, True),
+        ("rg -n x src/", 1, None),
+        ("rg -n x src/", 2, False),
+        ("pytest -q", 1, False),
+        ("bash -lc 'pytest -q'", 1, False),
+    ],
+)
+def test_the_mcp_shell_reading_matches_the_driver_rule(
+    command: str, exit_code: int, expected: bool | None
+) -> None:
+    """One rule, two doors: the MCP reading is the driver reading (#1027)."""
+    mcp = trajectory.outcome_ok_from_result(
+        {"exit_code": exit_code}, tool="shell", arguments={"command": command}
+    )
+    driver = record_driver_exec(_state(), command=command, exit_code=exit_code, output="")
+
+    assert driver is not None
+    assert mcp is expected
+    assert driver.outcome_ok is expected
+
+
+def test_a_gate_tool_exit_code_keeps_the_strict_reading() -> None:
+    """A tool with no command to classify still reads any non-zero exit as a failure."""
+    assert trajectory.outcome_ok_from_result({"exitCode": 1}, tool="run_static_checks") is False
+    assert trajectory.outcome_ok_from_result({"exitCode": 1}) is False
