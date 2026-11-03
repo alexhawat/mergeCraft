@@ -11,7 +11,7 @@ ARG SOURCE_DATE_EPOCH=1700000000
 
 # Build the upstream gh release with its remaining vulnerable Go module patched.
 # The archive, Go toolchain and dependency checksums are immutable inputs.
-FROM --platform=$BUILDPLATFORM golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 AS gh-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3-bookworm@sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9 AS gh-builder
 ARG TARGETARCH
 ENV GOTOOLCHAIN=local CGO_ENABLED=0
 ADD --checksum=sha256:e16749bc0d99dc0633a3d5ebadf48ffff1c24beb1ce83e8f6a71bb64ce477e9a \
