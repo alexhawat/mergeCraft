@@ -253,7 +253,10 @@ def _doctor_checks(
     else:
         checks.append(_check("harness", False, "no .mergecraft/config.yaml"))
 
-    jev_env = os.environ.get("TYPESAFE_API_KEY", "").strip() != ""
+    from mergecraft.config.env import LocalDotEnv
+
+    typesafe = LocalDotEnv.from_env(os.environ).TYPESAFE_API_KEY
+    jev_env = (typesafe.get_secret_value().strip() != "") if typesafe is not None else False
     jev_cfg = False
     if repo_config.is_file():
         jev_cfg = bool(load_config_dict(repo_config).get("jev"))
