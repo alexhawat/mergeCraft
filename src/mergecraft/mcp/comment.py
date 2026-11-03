@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.findings.ledger import (
+    _run_sticky_scope,
     fetch_sticky_progress_comment,
     hydrate_finding_ledger_from_progress_comment,
     merge_ledger_into_comment,
@@ -235,15 +236,22 @@ def report_progress_tool(ctx: ToolContext):
             # PR's trusted sticky so the first call reuses it instead of posting
             # a second comment (P6). A lookup failure falls back to create: the
             # tool must never raise for want of an issue-comment listing.
+            #
+            # The lookup runs under the run's sticky scope (HS1, #1011): the
+            # run-bound comment id, then the expected-publisher set, never a
+            # bare Bot-type match. This path *overwrites* what it selects, and
+            # on a job-token-only run ``github-actions[bot]`` is shared by every
+            # same-repo workflow, so an unscoped match could adopt theirs.
             existing_sticky: dict[str, Any] | None = None
             if not target_plan:
                 try:
-                    existing_sticky = await fetch_sticky_progress_comment(
-                        ctx.scm,
-                        ctx.repo.owner,
-                        ctx.repo.name,
-                        int(issue_number),
-                    )
+                    with _run_sticky_scope(ctx):
+                        existing_sticky = await fetch_sticky_progress_comment(
+                            ctx.scm,
+                            ctx.repo.owner,
+                            ctx.repo.name,
+                            int(issue_number),
+                        )
                 except Exception as err:
                     logger.warning(
                         "report_progress: could not read the existing progress "

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import textwrap
 from dataclasses import dataclass
@@ -84,6 +85,10 @@ def _gate_step(target: GateTarget) -> dict[str, Any]:
     raise AssertionError(f"{target.relative}: no {_GATE_STEP!r} step in {target.job_name}")
 
 
+# The self-workflow records the verdict in its last cascade job
+# (``review-backstop``, #1026); the consumer surfaces keep a single ``review`` job.
+_OWN_VERDICT_OUTPUT = re.compile(r"needs\.review(?:-backstop)?\.outputs\.approval_verdict")
+
 _PACKET_VERDICT_EXPRESSION = (
     "steps.mergecraft.outputs.evidence_packet != '' && "
     "fromJSON(steps.mergecraft.outputs.evidence_packet).decision.verdict || ''"
@@ -104,7 +109,7 @@ def _output_env(step: dict[str, Any]) -> tuple[str, bool]:
     for key, value in env_block.items():
         if not isinstance(value, str):
             continue
-        if "needs.review.outputs.approval_verdict" in value:
+        if _OWN_VERDICT_OUTPUT.search(value):
             return str(key), False
         if _PACKET_VERDICT_EXPRESSION in value:
             return str(key), False
@@ -277,16 +282,16 @@ def test_gate_queries_the_check_by_name_with_an_explicit_page(target: GateTarget
 
 def test_self_workflow_exposes_the_run_verdict_as_job_outputs() -> None:
     """Another run cannot write a job output, so binding to one is run binding."""
-    outputs = job(load_workflow("mergecraft.yml"), "review").get("outputs") or {}
+    outputs = job(load_workflow("mergecraft.yml"), "review-backstop").get("outputs") or {}
     assert isinstance(outputs, dict)
-    assert "approval_verdict" in outputs, "review job must expose approval_verdict"
-    assert "approval_rung" in outputs, "review job must expose which rung ran"
+    assert "approval_verdict" in outputs, "review-backstop job must expose approval_verdict"
+    assert "approval_rung" in outputs, "review-backstop job must expose which rung ran"
     env_block = _gate_step(_SELF).get("env") or {}
     assert isinstance(env_block, dict)
     assert any(
-        isinstance(value, str) and "needs.review.outputs.approval_verdict" in value
+        isinstance(value, str) and "needs.review-backstop.outputs.approval_verdict" in value
         for value in env_block.values()
-    ), "approval-gate must read needs.review.outputs.approval_verdict"
+    ), "approval-gate must read needs.review-backstop.outputs.approval_verdict"
 
 
 def test_shared_routing_lib_uses_the_same_name_filtered_query() -> None:

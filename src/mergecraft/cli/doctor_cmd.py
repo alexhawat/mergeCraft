@@ -22,6 +22,7 @@ from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
 )
 from mergecraft.config.compat import migrate_config
+from mergecraft.config.env import ConfigLocatorEnv
 from mergecraft.config.layered import merge_config_dicts, resolve_config_sources
 from mergecraft.config.settings import RepoSettings
 from mergecraft.evidence.run_manifest import runtime_tool_stamp
@@ -120,7 +121,7 @@ def _config_probe(cwd: Path) -> ProbeResult:
     sources = resolve_config_sources(cwd)
     env_note = ""
     if sources.env_config_missing:
-        env_path = os.environ.get("MERGECRAFT_CONFIG", "")
+        env_path = ConfigLocatorEnv().config_path or ""
         env_note = f"MERGECRAFT_CONFIG={env_path} does not exist"
     if not sources.files:
         if env_note:

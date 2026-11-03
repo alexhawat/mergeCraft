@@ -46,6 +46,8 @@ from typing import Any, Final
 
 from loguru import logger
 
+from mergecraft.config.env import AgentRuntimeEnv
+from mergecraft.config.env.agents import OTEL_PLUGIN_ENV
 from mergecraft.tracing import current_tracer
 from mergecraft.tracing.content import ContentCapture
 from mergecraft.tracing.exporters import review_conversation_id
@@ -63,7 +65,6 @@ __all__ = [
     "opencode_otel_plugin_wiring",
 ]
 
-OTEL_PLUGIN_ENV: Final[str] = "MERGECRAFT_OPENCODE_OTEL_PLUGIN"
 _HEADER_ENV_PREFIX: Final[str] = "MERGECRAFT_OPENCODE_OTLP_HEADER_"
 # Suffix of the env var holding a ``Scheme credential`` header's bare credential.
 _CREDENTIAL_ENV_SUFFIX: Final[str] = "_CREDENTIAL"
@@ -227,7 +228,7 @@ def opencode_otel_plugin_wiring(trust_tier: str | None) -> OtelPluginWiring | No
     Returns:
         OtelPluginWiring | None: The plugin entry and its header env vars.
     """
-    package = os.environ.get(OTEL_PLUGIN_ENV, "").strip()
+    package = AgentRuntimeEnv().opencode_otel_plugin
     if not package:
         return None
     tracer = current_tracer()

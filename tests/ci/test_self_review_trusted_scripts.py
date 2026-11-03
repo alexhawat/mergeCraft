@@ -25,10 +25,14 @@ from tests.ci.support_self_review_cascade import (
     step_by_id,
     write_gh_mock,
 )
-from tests.ci.workflow_support import REPO_ROOT, job, load_workflow
+from tests.ci.workflow_support import REPO_ROOT, SELF_REVIEW_JOBS, job, load_workflow
 
 _WORKFLOW = "mergecraft.yml"
 _REVIEW_JOB = "review"
+# Each cascade job that runs a decide script stages its own trusted copy: the
+# jobs run on separate runners, so a copy staged in one is not visible in the
+# next (#1026). The Codex job runs no decide script.
+_DECIDING_JOBS = {"review": "fallback", "review-backstop": "claude_fallback"}
 _MERGECRAFT_ACTION = "alexhawat/mergeCraft@"
 _TRUSTED_MARKER = "mergecraft-trusted-"
 
@@ -44,9 +48,9 @@ _WORKSPACE_RELATIVE = re.compile(
 _SCRIPT_REFERENCE = re.compile(r"scripts/(?:lib/)?[\w./-]+\.sh")
 
 
-def _review_steps() -> list[dict[str, object]]:
-    steps = job(load_workflow(_WORKFLOW), _REVIEW_JOB).get("steps")
-    assert isinstance(steps, list), "review job steps must be a list"
+def _review_steps(job_name: str = _REVIEW_JOB) -> list[dict[str, object]]:
+    steps = job(load_workflow(_WORKFLOW), job_name).get("steps")
+    assert isinstance(steps, list), f"{job_name} job steps must be a list"
     return [step for step in steps if isinstance(step, dict)]
 
 
@@ -71,9 +75,10 @@ def _trusted_copy_step(
     )
 
 
-def test_no_workspace_relative_script_runs_after_a_mergecraft_step() -> None:
+@pytest.mark.parametrize("job_name", SELF_REVIEW_JOBS)
+def test_no_workspace_relative_script_runs_after_a_mergecraft_step(job_name: str) -> None:
     """Once a rung has switched the workspace to the PR head, stop reading it."""
-    steps = _review_steps()
+    steps = _review_steps(job_name)
     start = _first_mergecraft_index(steps)
     offending = [
         str(step.get("name") or index)
@@ -86,9 +91,10 @@ def test_no_workspace_relative_script_runs_after_a_mergecraft_step() -> None:
     )
 
 
-def test_a_trusted_copy_is_staged_before_the_first_mergecraft_step() -> None:
+@pytest.mark.parametrize("job_name", sorted(_DECIDING_JOBS))
+def test_a_trusted_copy_is_staged_before_the_first_mergecraft_step(job_name: str) -> None:
     """Copy the three scripts out of the trusted checkout, hash them, hide them."""
-    steps = _review_steps()
+    steps = _review_steps(job_name)
     copy_index, copy_step = _trusted_copy_step(steps)
     assert copy_index < _first_mergecraft_index(steps), (
         "the trusted copy must be taken before the first mergeCraft step — that is "
@@ -130,24 +136,26 @@ def test_a_trusted_copy_is_staged_before_the_first_mergecraft_step() -> None:
     )
 
 
-def test_decide_steps_run_the_verified_copy() -> None:
-    steps = _review_steps()
-    _, copy_step = _trusted_copy_step(steps)
+@pytest.mark.parametrize(("job_name", "step_id"), sorted(_DECIDING_JOBS.items()))
+def test_decide_steps_run_the_verified_copy(job_name: str, step_id: str) -> None:
+    steps = _review_steps(job_name)
+    copy_index, copy_step = _trusted_copy_step(steps)
     copy_id = copy_step.get("id")
     assert isinstance(copy_id, str), "trusted-copy step is missing an id"
     assert copy_id, "trusted-copy step id must not be empty"
-    for step_id in ("fallback", "claude_fallback"):
-        step = step_by_id(step_id)
-        blob = yaml.safe_dump(step)
-        run = step.get("run")
-        assert isinstance(run, str), f"{step_id} has no run:"
-        assert f"steps.{copy_id}." in blob or _TRUSTED_MARKER in run, (
-            f"{step_id} does not run the staged copy; it still resolves the script "
-            "relative to the workspace"
-        )
-        assert "sha256sum" in run, (
-            f"{step_id} must re-verify the copied scripts' hashes before running them"
-        )
+    decide_index = next(i for i, step in enumerate(steps) if step.get("id") == step_id)
+    assert copy_index < decide_index, f"{job_name} decides before staging its trusted copy"
+    step = step_by_id(step_id)
+    blob = yaml.safe_dump(step)
+    run = step.get("run")
+    assert isinstance(run, str), f"{step_id} has no run:"
+    assert f"steps.{copy_id}." in blob or _TRUSTED_MARKER in run, (
+        f"{step_id} does not run the staged copy; it still resolves the script "
+        "relative to the workspace"
+    )
+    assert "sha256sum" in run, (
+        f"{step_id} must re-verify the copied scripts' hashes before running them"
+    )
 
 
 def test_no_workflow_comment_claims_the_job_never_checks_out() -> None:

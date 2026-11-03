@@ -29,9 +29,15 @@ from mergecraft.agents.codex_stream import (
     CODEX_MODEL_REASONING_EFFORT,
     codex_stream_event_handler,
 )
+
+# The two singleton names are re-exported for callers that read them from here.
 from mergecraft.agents.openai_compatible_gateways import (
-    CUSTOM_PROVIDER_API_KEY_ENV,
-    CUSTOM_PROVIDER_BASE_URL_ENV,
+    CUSTOM_PROVIDER_API_KEY_ENV as CUSTOM_PROVIDER_API_KEY_ENV,
+)
+from mergecraft.agents.openai_compatible_gateways import (
+    CUSTOM_PROVIDER_BASE_URL_ENV as CUSTOM_PROVIDER_BASE_URL_ENV,
+)
+from mergecraft.agents.openai_compatible_gateways import (
     INDEXED_CUSTOM_PROVIDER_API_KEY_RE,
     INDEXED_CUSTOM_PROVIDER_BASE_URL_RE,
     resolve_gateway_endpoints,
@@ -51,6 +57,7 @@ from mergecraft.agents.shared import (
     with_prompt,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
+from mergecraft.config.env import AgentRuntimeEnv, ProviderGatewayEnv
 from mergecraft.config.trust_policy import AgentSandboxDecision
 from mergecraft.mcp.endpoints import MCP_VERIFIER_ENDPOINT
 from mergecraft.security.broker import CodexBrokerPosture, subscription_auth_usable
@@ -157,8 +164,13 @@ def _safe_codex_home_parent(ctx: AgentRunContext) -> Path:
     tmp = Path(ctx.tmpdir)
     if not _is_under_forbidden_temp(tmp):
         return tmp
-    for key in ("MERGECRAFT_CODEX_HOME_PARENT", "RUNNER_TEMP", "GITHUB_WORKSPACE"):
-        raw = os.environ.get(key, "").strip()
+    candidates = (
+        AgentRuntimeEnv().codex_home_parent,
+        os.environ.get("RUNNER_TEMP", ""),
+        os.environ.get("GITHUB_WORKSPACE", ""),
+    )
+    for raw_candidate in candidates:
+        raw = (raw_candidate or "").strip()
         if not raw:
             continue
         candidate = Path(raw)
@@ -405,7 +417,9 @@ def _operator_sandbox_override() -> str | None:
     ignored with a warning rather than passed through to the CLI, so a typo
     cannot silently widen or narrow the sandbox.
     """
-    raw = os.environ.get(CODEX_SANDBOX_ENV, "").strip().lower()
+    from mergecraft.config.env import RuntimeOverridesEnv
+
+    raw = RuntimeOverridesEnv().codex_sandbox
     if not raw:
         return None
     if raw == CODEX_SANDBOX_UNSANDBOXED:
@@ -515,11 +529,6 @@ def _codex_use_permission_profiles(ctx: AgentRunContext) -> bool:
     return bool(ctx.mcp_server_url) and _sandbox_mode(ctx) == "read-only"
 
 
-def _has_env(name: str) -> bool:
-    val = os.environ.get(name)
-    return isinstance(val, str) and bool(val.strip())
-
-
 def _has_any_custom_provider_env() -> bool:
     """True when at least one ``MERGECRAFT_CUSTOM_PROVIDER_*`` env var is set.
 
@@ -527,16 +536,21 @@ def _has_any_custom_provider_env() -> bool:
     read it as a dict regardless of whether any pair was complete. The
     contract is that the table's *contents* reflect valid pairs only —
     partial pairs (only one of ``_KEY_<N>`` / ``_URL_<N>``) are dropped.
+
+    The singleton pair is read through :class:`ProviderGatewayEnv`; the indexed
+    slots are still enumerated from the environment names at runtime.
     """
-    for key in os.environ:
-        if INDEXED_CUSTOM_PROVIDER_BASE_URL_RE.match(key):
-            return True
-        if INDEXED_CUSTOM_PROVIDER_API_KEY_RE.match(key):
-            return True
-        if key in (CUSTOM_PROVIDER_BASE_URL_ENV, CUSTOM_PROVIDER_API_KEY_ENV):
-            if _has_env(key):
-                return True
-    return False
+    gateway = ProviderGatewayEnv()
+    key = gateway.custom_provider_api_key
+    if gateway.custom_provider_base_url is not None or (
+        key is not None and bool(key.get_secret_value().strip())
+    ):
+        return True
+    return any(
+        INDEXED_CUSTOM_PROVIDER_BASE_URL_RE.match(name) is not None
+        or INDEXED_CUSTOM_PROVIDER_API_KEY_RE.match(name) is not None
+        for name in os.environ
+    )
 
 
 def _add_custom_provider_tables(config: TomlTable) -> None:
@@ -846,7 +860,7 @@ def _run_codex_streaming(
                 )
                 returncode = wait_or_kill_process_group(
                     process,
-                    timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
+                    timeout=AgentRuntimeEnv().agent_timeout,
                 )
             except subprocess.TimeoutExpired:
                 return with_prompt(AgentResult(success=False, error="codex CLI timed out"), prompt)

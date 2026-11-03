@@ -22,6 +22,7 @@ from tests.ci.support_self_review_cascade import (
     step_by_id,
     write_gh_mock,
 )
+from tests.ci.workflow_support import job, load_workflow
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -112,10 +113,21 @@ def test_opencode_go_failover_flag_applies_when_codex_did_not_run(tmp_path: Path
 
 
 def test_the_workflow_wires_both_rungs_flags_into_the_decide_step() -> None:
+    """Each rung's flag crosses jobs as an output of the job that ran it."""
+    doc = load_workflow("mergecraft.yml")
     env = step_by_id("claude_fallback").get("env") or {}
 
-    assert "steps.mergecraft_codex.outputs.failover_eligible" in env["CODEX_FAILOVER_ELIGIBLE"]
+    assert "needs.review-codex.outputs.codex_failover_eligible" in env["CODEX_FAILOVER_ELIGIBLE"]
+    assert (
+        "needs.review.outputs.opencode_go_failover_eligible" in env["OPENCODE_GO_FAILOVER_ELIGIBLE"]
+    )
+    review_outputs = job(doc, "review")["outputs"]
+    codex_outputs = job(doc, "review-codex")["outputs"]
     assert (
         "steps.mergecraft_opencode_go.outputs.failover_eligible"
-        in env["OPENCODE_GO_FAILOVER_ELIGIBLE"]
+        in review_outputs["opencode_go_failover_eligible"]
+    )
+    assert (
+        "steps.mergecraft_codex.outputs.failover_eligible"
+        in codex_outputs["codex_failover_eligible"]
     )

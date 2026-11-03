@@ -5,7 +5,6 @@ Output-only: never writes into the reviewed tree.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path  # noqa: TC003 — used at runtime for manifest I/O
 from typing import Any
 
@@ -20,8 +19,6 @@ from mergecraft.xrepo.linked_repos import (
 )
 from mergecraft.xrepo.review import MANIFEST_REL, discover_linked_repo_roots, review_linked_repos
 
-_AUTHORIZED_LINKED_REPOS_ENV = "MERGECRAFT_AUTHORIZED_LINKED_REPOS"
-
 
 def operator_authorized_linked_repos() -> frozenset[str]:
     """Return the operator run grant from the environment (D9, TB-D10).
@@ -30,7 +27,9 @@ def operator_authorized_linked_repos() -> frozenset[str]:
     an exact lowercase ``owner/name`` slug; a bare-name entry matches nothing
     and is warned once per entry (TB0 fork 4).
     """
-    raw = os.environ.get(_AUTHORIZED_LINKED_REPOS_ENV, "")
+    from mergecraft.config.env import RuntimeOverridesEnv
+
+    raw = RuntimeOverridesEnv().authorized_linked_repos or ""
     grant: set[str] = set()
     warned: set[str] = set()
     for part in raw.split(","):

@@ -29,6 +29,7 @@ from mergecraft.agents.shared import (
     with_prompt,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
+from mergecraft.config.env import AgentRuntimeEnv
 from mergecraft.tracing._tool_attrs import (
     emit_verb_subevent,
     enrich_tool_request,
@@ -356,7 +357,7 @@ def _run_gemini_streaming(
                 )
                 returncode = wait_or_kill_process_group(
                     process,
-                    timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
+                    timeout=AgentRuntimeEnv().agent_timeout,
                 )
             except subprocess.TimeoutExpired:
                 return with_prompt(AgentResult(success=False, error="gemini CLI timed out"), prompt)

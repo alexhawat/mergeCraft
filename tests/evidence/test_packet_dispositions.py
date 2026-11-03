@@ -13,6 +13,11 @@ from mergecraft.evidence.run_packet import prepare_run_packet, resolve_prepared_
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import AnalyzerRunState, init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
+from mergecraft.run_outcome import (
+    RUN_OUTCOME_CONCLUSION,
+    RunOutcome,
+    outcome_with_disposition_ledger,
+)
 from mergecraft.utils.github import GitHubClient
 
 
@@ -226,6 +231,60 @@ def test_blockers_still_win_over_an_open_ledger(tmp_path: Path) -> None:
     assert packet is not None
     assert packet.decision is not None
     assert packet.decision.verdict == "failure"
+
+
+def test_an_open_ledger_makes_a_passed_run_outcome_inconclusive(tmp_path: Path) -> None:
+    """The completion check must agree with the packet's ``neutral`` approval (#1014)."""
+    ctx = _ctx(tmp_path)
+    kept = [_hit(line=3)]
+    lost = _hit(line=4, message="swallowed by a stage")
+    _record(ctx, kept, _closed_ledger(kept, lost=[lost]))
+    packet = prepare_run_packet(ctx, run_succeeded=True)
+    assert packet is not None
+    assert packet.decision is not None
+
+    outcome, reason = outcome_with_disposition_ledger(RunOutcome.passed, packet)
+
+    assert outcome is RunOutcome.inconclusive
+    assert reason is not None
+    assert "1 orphaned hit" in reason
+    assert RUN_OUTCOME_CONCLUSION[outcome] == packet.decision.verdict == "neutral"
+
+
+def test_a_closed_ledger_keeps_a_passed_run_outcome(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    kept = [_hit(line=3)]
+    _record(ctx, kept, _closed_ledger(kept))
+    packet = prepare_run_packet(ctx, run_succeeded=True)
+
+    assert outcome_with_disposition_ledger(RunOutcome.passed, packet) == (RunOutcome.passed, None)
+    assert outcome_with_disposition_ledger(RunOutcome.passed, None) == (RunOutcome.passed, None)
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        RunOutcome.failed,
+        RunOutcome.inconclusive,
+        RunOutcome.infra_error,
+        RunOutcome.timed_out,
+        RunOutcome.configuration_error,
+    ],
+)
+def test_an_open_ledger_never_rewrites_a_non_passed_outcome(
+    tmp_path: Path, outcome: RunOutcome
+) -> None:
+    """Monotone: blockers and failures win; the ledger only ever downgrades ``passed``."""
+    ctx = _ctx(tmp_path)
+    blocker = _hit(line=3, message="hard coded credential", severity="Major")
+    lost = _hit(line=4, message="swallowed by a stage")
+    _record(ctx, [blocker], _closed_ledger([blocker], lost=[lost]))
+    packet = prepare_run_packet(ctx, run_succeeded=False)
+    assert packet is not None
+    assert packet.decision is not None
+    assert packet.decision.verdict == "failure"
+
+    assert outcome_with_disposition_ledger(outcome, packet) == (outcome, None)
 
 
 def test_run_without_analyzers_has_no_analyzers_section(tmp_path: Path) -> None:

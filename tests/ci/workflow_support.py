@@ -100,3 +100,21 @@ def assert_third_party_uses_sha_pinned(workflow_name: str) -> None:
         if not _SHA_PIN.fullmatch(ref):
             unpinned.append(spec)
     assert not unpinned, f"{workflow_name}: unpinned third-party uses: {unpinned}"
+
+
+# The self-review cascade in ``mergecraft.yml`` runs as three jobs, in rung
+# order: OpenCode Go (plus prep and the Codex routing decision), the Codex rung
+# alone in the ``codex-subscription-auth`` group (#1026), then the Claude
+# backstop and the recorded verdict.
+SELF_REVIEW_JOBS = ("review", "review-codex", "review-backstop")
+
+
+def self_review_steps(doc: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Return every step of the self-review cascade jobs, in rung order."""
+    loaded = doc if doc is not None else load_workflow("mergecraft.yml")
+    found: list[dict[str, Any]] = []
+    for name in SELF_REVIEW_JOBS:
+        steps = job(loaded, name).get("steps")
+        assert isinstance(steps, list), f"{name} job steps must be a list"
+        found.extend(step for step in steps if isinstance(step, dict))
+    return found
