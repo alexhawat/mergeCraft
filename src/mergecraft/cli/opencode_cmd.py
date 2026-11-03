@@ -270,9 +270,13 @@ def _doctor_checks(
         )
     )
 
-    logfire_env = any(
-        os.environ.get(name, "").strip() for name in ("MERGECRAFT_LOGFIRE_TOKEN", "LOGFIRE_TOKEN")
+    from mergecraft.config.env import TracingEnv
+
+    logfire_token = TracingEnv().logfire_token
+    mergecraft_logfire = (
+        logfire_token.get_secret_value().strip() if logfire_token is not None else ""
     )
+    logfire_env = bool(mergecraft_logfire) or bool(os.environ.get("LOGFIRE_TOKEN", "").strip())
     env_file = project_root / ".env"
     logfire_dotenv = env_file.is_file() and "MERGECRAFT_LOGFIRE_TOKEN" in env_file.read_text(
         encoding="utf-8"

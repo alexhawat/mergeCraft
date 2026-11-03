@@ -81,9 +81,9 @@ class AgentRuntimeEnv(EnvSettings):
         env_ignore_empty=False,
     )
 
-    #: Seconds; today's drivers default to ``3600`` and a malformed value raises.
-    agent_timeout: Annotated[int, BeforeValidator(_validate_agent_timeout)] = Field(
-        default=3600, validation_alias="MERGECRAFT_AGENT_TIMEOUT"
+    #: Seconds; today's drivers default to ``3600`` and accept fractional values.
+    agent_timeout: Annotated[float, BeforeValidator(_validate_agent_timeout)] = Field(
+        default=3600.0, validation_alias="MERGECRAFT_AGENT_TIMEOUT"
     )
     codex_home_parent: _Stripped = Field(
         default=None, validation_alias="MERGECRAFT_CODEX_HOME_PARENT"

@@ -903,19 +903,20 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     but does not itself touch tokens or derive trust tier — that is the
     security boundary handled entirely by ``_resolve_credentials``.
     """
-    resolved_prompt = resolve_prompt_input()
-    ctx.resolved_prompt = resolved_prompt
     ctx.job_token = get_job_token()
     github_client = GitHubClient(ctx.job_token)
     ctx.scm = create_github_scm(ctx.job_token, client=github_client)
     run_context = await resolve_run_context_data(github_client)
     ctx.run_context = run_context
     try:
-        # Both the tracing Action-input model and the registered env models
-        # read malformed control-carrying settings here. Keeping the export
-        # inside the ``try`` maps an unparseable ``INPUT_TRACING`` to
-        # ``_ConfigurationError`` (→ ``configuration_error``) instead of
-        # letting it fall through to the generic ``infra_error`` bucket.
+        # Prompt resolution builds ``ActionInputEnv`` (the prompt fields share the
+        # model with the fail-closed tracing inputs), so it belongs inside this
+        # guard too: a malformed ``INPUT_TRACING`` must map to
+        # ``_ConfigurationError`` (→ ``configuration_error``), never fall through
+        # to the generic ``infra_error`` bucket. Plain prompt-validation errors
+        # are not ``EnvSettingsError`` and propagate exactly as before.
+        resolved_prompt = resolve_prompt_input()
+        ctx.resolved_prompt = resolved_prompt
         export_tracing_env_from_action_inputs()
         validate_env_settings()
     except EnvSettingsError as exc:

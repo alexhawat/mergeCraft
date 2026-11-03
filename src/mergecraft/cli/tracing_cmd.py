@@ -53,6 +53,28 @@ app = mergecraft_typer(
 _TOKEN_REDACTED_MARKER = "***"
 _REDACTION_INDICATORS = ("redact", "***")
 
+#: Display name -> :class:`TracingEnv` field. The model owns the reads; this
+#: table only keeps the variable names the two renderers print.
+_TRACE_ENV_FIELDS: tuple[tuple[str, str], ...] = (
+    ("MERGECRAFT_TRACING", "tracing_enabled"),
+    ("MERGECRAFT_TRACING_TO", "tracing_to"),
+    ("MERGECRAFT_LOGFIRE_TOKEN", "logfire_token"),
+    ("MERGECRAFT_TRACING_PROJECT", "tracing_project"),
+    ("MERGECRAFT_TRACING_REGION", "tracing_region"),
+    ("MERGECRAFT_OTEL_ENDPOINT", "otel_endpoint"),
+    ("MERGECRAFT_TRACE_DIR", "trace_dir"),
+)
+
+
+def _present_trace_env_vars() -> list[str]:
+    """Return the tracing variable names currently set, in display order.
+
+    The values are read through :class:`TracingEnv` — the one owner of the
+    family — so this listing never parses ``os.environ`` itself.
+    """
+    env = TracingEnv()
+    return [name for name, field in _TRACE_ENV_FIELDS if getattr(env, field) is not None]
+
 
 def _is_redacted(value: Any) -> bool:
     if not isinstance(value, str):
@@ -182,16 +204,7 @@ def config_tracing(
     # set (or which are currently present in the environment). sevn's
     # ``show_tracing_config`` lists the equivalent ``sevn.json`` fields; here
     # the canonical knobs are the ``MERGECRAFT_*`` env vars.
-    _TRACE_ENV_VARS = (
-        "MERGECRAFT_TRACING",
-        "MERGECRAFT_TRACING_TO",
-        "MERGECRAFT_LOGFIRE_TOKEN",
-        "MERGECRAFT_TRACING_PROJECT",
-        "MERGECRAFT_TRACING_REGION",
-        "MERGECRAFT_OTEL_ENDPOINT",
-        "MERGECRAFT_TRACE_DIR",
-    )
-    present = [v for v in _TRACE_ENV_VARS if v in os.environ]
+    present = _present_trace_env_vars()
     table.add_row(
         "trace env",
         ", ".join(present) if present else "[dim](none set)[/dim]",
@@ -338,16 +351,7 @@ def render_resolved(resolved: dict[str, Any], *, sources: ConfigSources | None =
         parts.append(f"  local sinks: {resolved['trace_dir']}")
     else:
         parts.append("  local sinks: none")
-    _TRACE_ENV_VARS = (
-        "MERGECRAFT_TRACING",
-        "MERGECRAFT_TRACING_TO",
-        "MERGECRAFT_LOGFIRE_TOKEN",
-        "MERGECRAFT_TRACING_PROJECT",
-        "MERGECRAFT_TRACING_REGION",
-        "MERGECRAFT_OTEL_ENDPOINT",
-        "MERGECRAFT_TRACE_DIR",
-    )
-    present = [v for v in _TRACE_ENV_VARS if os.environ.get(v)]
+    present = _present_trace_env_vars()
     parts.append("  trace env: " + (", ".join(present) if present else "(none set)"))
     if not resolved.get("enabled"):
         parts.append(
