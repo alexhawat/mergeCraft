@@ -81,7 +81,7 @@ A gate that reads `diff_stats` counts it as measured whenever the mapping is pre
 
 - `true`: the gate's inputs were all given and none of its reasons forces the lane above `low`. A reason lowered to `low` by an override or the carve-out passes its gate.
 - `false`: one of its reasons forces the lane above `low`. A failure measured from one input stays `false` even when the other input is missing.
-- `null`: not measured. Without `changed_paths` every gate except `inputs` is `null`. Without `diff_stats`, `migrations`, `secrets_config_deployment`, `irreversible_infra`, `tests` and `source` are `null` unless a path already failed them. `inputs` is `false` whenever either input is missing.
+- `null`: not measured. Without `changed_paths` every gate except `inputs` is `null` unless a reason already failed it. Without `diff_stats`, `migrations`, `secrets_config_deployment`, `irreversible_infra`, `tests` and `source` are `null` unless a path already failed them. `inputs` is `false` whenever either input is missing.
 
 `auto_merge_lane` is `eligible` exactly when every gate is `true`, which is exactly when the lane is `low`. A single `false` or `null` keeps the result out of `eligible`: unknown is never green.
 

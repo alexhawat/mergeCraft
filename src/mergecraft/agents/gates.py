@@ -690,7 +690,8 @@ def _is_clean_pass(packet: MergeEvidencePacket) -> bool:
       green (#1056) — it escalates too, as does a ``blast_radius`` that had no
       inputs (``_blast_radius_had_inputs``) or any checklist gate that was
       not measured (``None``). A ``False`` gate is a measured failure and is
-      accepted: every real ``medium`` lane carries one.
+      accepted on a ``medium`` lane: every real ``medium`` lane carries one.
+      A ``low`` lane with any gate not ``True`` is inconsistent and is refused.
 
     Ordering: after the finding-driven rules so ``has_blockers`` /
     ``changed-unread-file`` / ``tool_loop`` keep winning when their findings
@@ -704,6 +705,8 @@ def _is_clean_pass(packet: MergeEvidencePacket) -> bool:
     if not _blast_radius_had_inputs(packet):
         return False
     if not _checklist_all_measured(packet):
+        return False
+    if packet.blast_radius.lane == "low" and not _checklist_all_passed(packet):
         return False
     return _trusted_positive_decision(packet)
 

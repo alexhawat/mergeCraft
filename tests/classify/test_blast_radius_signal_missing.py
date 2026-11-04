@@ -520,6 +520,8 @@ def test_low_risk_passing_refuses_a_low_lane_with_any_gate_not_passed(
 
     assert _is_low_risk_passing(packet) is False
     assert select_rule_id(packet) != "low_risk_passing"
+    assert select_rule_id(packet) != "clean_pass"
+    assert decide_action(packet, policy=DEFAULT_GATE_POLICIES) is not GateAction.AUTO_MERGE
 
 
 @pytest.mark.parametrize("gate", _NON_INPUT_GATES)
@@ -533,8 +535,11 @@ def test_clean_pass_refuses_a_low_lane_with_an_unmeasured_gate(gate: str) -> Non
     assert decide_action(packet, policy=DEFAULT_GATE_POLICIES) is not GateAction.AUTO_MERGE
 
 
-def test_the_issue_example_low_lane_with_unmeasured_tests_never_auto_merges() -> None:
-    packet = _decided_packet(_low_with_gate("tests", None), files_changed=["docs/guide.md"])
+@pytest.mark.parametrize("passed", [None, False], ids=["unknown", "failed"])
+def test_the_issue_example_low_lane_with_nonpassing_tests_never_auto_merges(
+    passed: bool | None,
+) -> None:
+    packet = _decided_packet(_low_with_gate("tests", passed), files_changed=["docs/guide.md"])
 
     assert select_rule_id(packet) not in {"low_risk_passing", "clean_pass"}
     assert decide_action(packet, policy=DEFAULT_GATE_POLICIES) is not GateAction.AUTO_MERGE
