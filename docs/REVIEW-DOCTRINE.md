@@ -84,8 +84,8 @@ changed is what counts as read. Reads of the diff file itself count, via the
 `diff_read_path` / `diff_read` marker recorded from the raw command before the
 redactor can rewrite a run-temp path. Deletion-only and mode-only sections have
 no added lines but stay in scope until their path is read. Absent read evidence
-is still *unknown*, not zero: a run whose reads never cross MCP gets no nudge
-and no finding.
+is still *unknown*, not zero: a run whose reads never reach mergeCraft gets no
+nudge and no finding.
 
 **Batch independent reads.** The reviewer instruction is explicit: emit every
 independent read/grep/glob in one turn and keep dependent calls for the next
@@ -338,8 +338,15 @@ hunk, deleted-only hunks included) and counts a hunk as covered only through
 mediated evidence: it was in the diff the reviewer received, or an observed read
 covered part of it. Unknown is not a state — absence of read evidence is
 *uncovered*, the opposite of the trajectory auditor's silence rule, on purpose,
-because this check gates the verdict. The pre-submit nudge hands every unread
-range back once, before the verdict is accepted; there is no second turn.
+because this check gates the verdict. Receiving a diff only means being handed a
+path, so a run with no observed read at all has nothing vouching for it, and this
+rule is what keeps it off green: a run-health row is enough to attest a run. Reads
+are observed through MCP, a driver's recorded shell commands, and OpenCode's `read`
+tool. Claude's, Gemini's and Cursor's native reads are not, so a reviewer that reads
+only that way ends `not_observed`, a false negative the gate accepts. The pre-submit
+nudge hands every unread range back once, before the verdict is accepted, including
+every range of an unobserved run when the driver reports its reads (OpenCode's and
+Codex's CLI streams), where a read now would be seen; there is no second turn.
 
 When any hunk is still uncovered at finalize (policy exclusions such as
 generated files are listed but do not count), the run outcome is

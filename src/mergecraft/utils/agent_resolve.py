@@ -1016,6 +1016,7 @@ def _prepare_chain_attempt(tool_state: ToolState | None, fallback_index: int) ->
     tool_state.terminal_submission = None
     tool_state.terminal_submission_conflict = False
     tool_state.prepared_run_packet = None
+    tool_state.driver_reports_reads = False
 
 
 async def run_with_model_chain(

@@ -119,6 +119,10 @@ _BOOT_POLL_S: Final[float] = 0.1
 
 # The listening URL the server prints on stdout once it is ready.
 _URL_RE: Final[re.Pattern[str]] = re.compile(r"https?://[^\s]+")
+# The first line of a 2.x ``read`` result that returned text.
+_OPENCODE_READ_HEADER_RE: Final[re.Pattern[str]] = re.compile(
+    r"^Read file .*, lines (?P<start>\d+)-(?P<end>\d+)$", re.MULTILINE
+)
 
 
 def _opencode_provider_http_timeout_s() -> float:
@@ -978,6 +982,59 @@ def _record_opencode_bash(tool_state: ToolState | None, part: object) -> None:
     )
 
 
+def _opencode_read_span(state: Mapping[str, object]) -> tuple[int, int] | None:
+    """Return the lines a finished ``read`` part showed: see :func:`_record_opencode_read`."""
+    from mergecraft.evidence.trajectory import UNKNOWN_READ_SPAN
+
+    output = state.get("output")
+    header = _OPENCODE_READ_HEADER_RE.match(output) if isinstance(output, str) else None
+    if header is not None:
+        return int(header.group("start")), int(header.group("end"))
+    metadata = state.get("metadata")
+    # 2.x nests the tool's own metadata one level down.
+    nested = metadata.get("metadata") if isinstance(metadata, dict) else None
+    truncated = any(isinstance(m, dict) and m.get("truncated") for m in (metadata, nested))
+    tool_input = state.get("input")
+    ranged = isinstance(tool_input, dict) and (
+        tool_input.get("offset") is not None or tool_input.get("limit") is not None
+    )
+    return UNKNOWN_READ_SPAN if truncated or ranged else None
+
+
+def _record_opencode_read(tool_state: ToolState | None, part: object) -> None:
+    """Record one finished OpenCode ``read`` tool part on the run's trajectory.
+
+    The part shape is ``{"tool": "read", "state": {"status", "input", "output",
+    "metadata"}}`` — the same two places as ``bash``. ``input`` names the file as
+    ``path`` on 2.x and ``filePath`` on 1.x. A byte cap can cut a read short of the
+    ``limit`` it asked for, so the lines come from what it showed: 2.x opens its
+    output with ``Read file <path>, lines <a>-<b>``. Without that header a read that
+    was ranged or truncated showed lines nobody can name, and any other read showed
+    the whole file. A failed read showed nothing and is not recorded.
+    """
+    if tool_state is None or not isinstance(part, dict) or part.get("tool") != "read":
+        return
+    state = part.get("state")
+    if not isinstance(state, dict) or state.get("status") != "completed":
+        return
+    tool_input = state.get("input")
+    if not isinstance(tool_input, dict):
+        return
+    from mergecraft.evidence.trajectory import record_driver_read
+
+    record_driver_read(
+        tool_state,
+        path=tool_input.get("path") or tool_input.get("filePath"),
+        span=_opencode_read_span(state),
+    )
+
+
+def _record_opencode_part(tool_state: ToolState | None, part: object) -> None:
+    """Record one OpenCode tool part the trajectory has a door for."""
+    _record_opencode_bash(tool_state, part)
+    _record_opencode_read(tool_state, part)
+
+
 async def _prompt_session(
     *,
     base_url: str,
@@ -1126,7 +1183,7 @@ async def _prompt_session_http(
     output = ""
     if isinstance(data, dict):
         for part in data.get("parts") or []:
-            _record_opencode_bash(tool_state, part)
+            _record_opencode_part(tool_state, part)
         output = str(
             data.get("result") or data.get("text") or data.get("output") or json.dumps(data)[:2000]
         )
@@ -1486,6 +1543,9 @@ def _run_opencode_cli_streaming(
     )
     from mergecraft.tracing.sinks import claim_sink
 
+    # The ``run`` stream carries the session's tool parts as they finish, reads
+    # included. The HTTP path does not claim this: it sees what a response returns.
+    ctx.tool_state.driver_reports_reads = True
     accumulator = StreamSpanAccumulator(agent_name="opencode")
     # W4 H7 — the legacy code claimed a sink and built a Tracer but discarded it.
     # Opencode's stream handler is currently a no-op closure, so the tracer had
@@ -1665,12 +1725,12 @@ def _bash_only_handler(
     *,
     model: str | None = None,
 ) -> Callable[[StreamSpanAccumulator, dict[str, Any]], None]:
-    """Stream handler for a run with no session: record bash calls, touch nothing else."""
+    """Stream handler for a run with no session: record tool calls, touch nothing else."""
 
     def _handle(accumulator: StreamSpanAccumulator, event: dict[str, Any]) -> None:
         _absorb_step_usage(accumulator, event, model=model)
         if event.get("type") == "tool_use":
-            _record_opencode_bash(tool_state, event.get("part"))
+            _record_opencode_part(tool_state, event.get("part"))
 
     return _handle
 
@@ -1704,7 +1764,7 @@ def _session_event_handler(
         _absorb_step_usage(accumulator, event, model=model)
         part = event.get("part")
         if event.get("type") == "tool_use":
-            _record_opencode_bash(tool_state, part)
+            _record_opencode_part(tool_state, part)
         if event.get("type") == "text" and isinstance(part, dict):
             text = part.get("text")
             if isinstance(text, str) and text:

@@ -245,7 +245,9 @@ def diff_coverage_nudge_for_state(tool_state: ToolState) -> str | None:
             except Exception:  # a malformed audit row must not block a verdict
                 continue
         breakdown = compute_diff_coverage(diff_text, calls, diff_path=str(path))
-        nudge = coverage_nudge(breakdown, diff_path=str(path))
+        nudge = coverage_nudge(
+            breakdown, diff_path=str(path), driver_reports_reads=tool_state.driver_reports_reads
+        )
         if nudge is None:
             return None
         tool_state.diff_coverage_nudge_sent = True

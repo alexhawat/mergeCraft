@@ -16,6 +16,7 @@ import importlib
 import json
 from typing import TYPE_CHECKING, Any
 
+import pytest
 from tests.agents.conftest import make_agent_run_context
 
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator
@@ -23,8 +24,6 @@ from mergecraft.evidence.trajectory import build_trajectory_record
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
     from mergecraft.agents.shared import AgentRunContext
 
@@ -390,7 +389,7 @@ def test_opencode_cli_stream_records_a_tool_error_without_an_exit_code(
     assert row.outcome_ok is False
 
 
-def test_opencode_session_handler_ignores_non_bash_tools(tmp_path: Path) -> None:
+def test_opencode_session_handler_ignores_tools_with_no_trajectory_door(tmp_path: Path) -> None:
     from mergecraft.agents import opencode as oc
 
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
@@ -401,11 +400,255 @@ def test_opencode_session_handler_ignores_non_bash_tools(tmp_path: Path) -> None
         accumulator,
         {
             "type": "tool_use",
-            "part": {"tool": "read", "state": {"status": "completed", "input": {"filePath": "a"}}},
+            "part": {"tool": "glob", "state": {"status": "completed", "input": {"pattern": "a"}}},
         },
     )
 
-    assert _shell_rows(ctx) == []
+    assert ctx.tool_state.tool_calls == []
+
+
+def _opencode_read_part(
+    path: str,
+    *,
+    status: str = "completed",
+    key: str = "path",
+    output: str = "",
+    metadata: dict[str, Any] | None = None,
+    **tool_input: Any,
+) -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "status": status,
+        "input": {key: path, **tool_input},
+        "output": output,
+        "metadata": metadata or {},
+    }
+    return {"type": "tool", "tool": "read", "state": state}
+
+
+def _read_rows(ctx: AgentRunContext) -> list[Any]:
+    return [call for call in ctx.tool_state.tool_calls if call.tool == "read"]
+
+
+def _diff_ctx(tmp_path: Path) -> tuple[AgentRunContext, str]:
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    ctx = make_agent_run_context(tmp_path, resolved_model=None)
+    diff_path = str(tmp_path / "pr-7.diff")
+    primary_repo_state(ctx.tool_state).diff_path = diff_path
+    return ctx, diff_path
+
+
+def _record_read(ctx: AgentRunContext, part: dict[str, Any]) -> Any:
+    from mergecraft.agents import opencode as oc
+
+    oc._record_opencode_part(ctx.tool_state, part)
+    (row,) = _read_rows(ctx)
+    return row
+
+
+def test_opencode_read_of_the_diff_records_the_span_its_header_names(tmp_path: Path) -> None:
+    """A byte cap stops a read short of its ``limit``: what it showed is what counts."""
+    ctx, diff_path = _diff_ctx(tmp_path)
+
+    row = _record_read(
+        ctx,
+        _opencode_read_part(
+            diff_path,
+            output=f"Read file {diff_path}, lines 1-1137\n1: x\n"
+            "[Output truncated. Continue reading with offset: 1138]",
+            metadata={"metadata": {"truncated": True}},
+            limit=2000,
+        ),
+    )
+
+    assert row.intent == "read"
+    assert row.ok is True
+    assert row.diff_read_path == diff_path
+    assert row.diff_read == (1, 1137)
+    assert row.paths == []
+    assert row.command is None
+
+
+def test_opencode_read_of_the_diff_through_a_symlinked_path_still_names_the_diff(
+    tmp_path: Path,
+) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "pr-7.diff").write_text("x\n", encoding="utf-8")
+    (tmp_path / "link").symlink_to(real)
+    ctx, _ = _diff_ctx(tmp_path)
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    primary_repo_state(ctx.tool_state).diff_path = str(real / "pr-7.diff")
+
+    row = _record_read(ctx, _opencode_read_part(str(tmp_path / "link" / "pr-7.diff")))
+
+    assert row.diff_read_path == str(real / "pr-7.diff")
+    assert row.diff_read == (0, 0)
+
+
+def test_opencode_1x_read_uses_file_path_and_a_clean_read_is_the_whole_file(
+    tmp_path: Path,
+) -> None:
+    ctx, diff_path = _diff_ctx(tmp_path)
+
+    row = _record_read(
+        ctx,
+        _opencode_read_part(
+            diff_path, key="filePath", output="<content>", metadata={"truncated": False}
+        ),
+    )
+
+    assert row.diff_read_path == diff_path
+    assert row.diff_read == (0, 0)
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        pytest.param({"metadata": {"truncated": True}}, id="1.x-truncated"),
+        pytest.param({"metadata": {"metadata": {"truncated": True}}}, id="2.x-truncated"),
+        pytest.param({"offset": 10}, id="offset"),
+        pytest.param({"limit": 10}, id="limit"),
+    ],
+)
+def test_opencode_read_with_no_header_that_showed_part_of_the_diff_credits_no_line(
+    tmp_path: Path, shape: dict[str, Any]
+) -> None:
+    from mergecraft.evidence.trajectory import UNKNOWN_READ_SPAN
+
+    ctx, diff_path = _diff_ctx(tmp_path)
+
+    row = _record_read(ctx, _opencode_read_part(diff_path, output="<content>", **shape))
+
+    assert row.diff_read_path == diff_path
+    assert row.diff_read == UNKNOWN_READ_SPAN
+    assert build_trajectory_record(ctx.tool_state).read_coverage is False
+
+
+def test_opencode_read_of_a_checkout_file_records_its_repo_path_and_span(tmp_path: Path) -> None:
+    from mergecraft.evidence.diff_coverage import compute_diff_coverage
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    ctx, _ = _diff_ctx(tmp_path)
+    checkout = primary_repo_state(ctx.tool_state).dir
+
+    row = _record_read(
+        ctx,
+        _opencode_read_part(
+            f"{checkout}/src/app.py",
+            output=f"Read file {checkout}/src/app.py, lines 2-3\n2: x\n3: y",
+            offset=2,
+            limit=2,
+        ),
+    )
+
+    assert row.paths == ["src/app.py"]
+    assert row.diff_read_path is None
+    record = build_trajectory_record(ctx.tool_state)
+    assert record.files_read == ["src/app.py"]
+    assert record.read_coverage is True
+    diff = (
+        "diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n"
+        "@@ -1,0 +2,4 @@\n+a\n+b\n+c\n+d\n"
+    )
+    (file,) = compute_diff_coverage(diff, ctx.tool_state.tool_calls).files
+    assert [str(item) for item in file.covered] == ["2-3"]
+    assert [str(item) for item in file.unread] == ["4-5"]
+
+
+def test_opencode_read_outside_the_checkout_and_the_diff_is_not_read_evidence(
+    tmp_path: Path,
+) -> None:
+    from mergecraft.evidence.diff_coverage import compute_diff_coverage
+
+    ctx, _ = _diff_ctx(tmp_path)
+
+    row = _record_read(ctx, _opencode_read_part("/etc/hostname"))
+
+    assert row.paths == []
+    assert row.diff_read_path is None
+    diff = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,0 +1 @@\n+x\n"
+    assert compute_diff_coverage(diff, ctx.tool_state.tool_calls).observed is False
+
+
+@pytest.mark.parametrize(
+    "part",
+    [
+        pytest.param(_opencode_read_part("/x/pr.diff", status="error"), id="failed"),
+        pytest.param(_opencode_read_part("/x/pr.diff", status="running"), id="unfinished"),
+        pytest.param({"tool": "read", "state": {"status": "completed"}}, id="no-input"),
+        pytest.param({"tool": "read", "state": {"status": "completed", "input": {}}}, id="no-path"),
+        pytest.param({"tool": "read", "state": "completed"}, id="bad-state"),
+        pytest.param("read", id="bad-part"),
+    ],
+)
+def test_opencode_read_part_that_showed_nothing_records_nothing(
+    tmp_path: Path, part: object
+) -> None:
+    from mergecraft.agents import opencode as oc
+
+    ctx = make_agent_run_context(tmp_path, resolved_model=None)
+
+    oc._record_opencode_part(ctx.tool_state, part)
+
+    assert ctx.tool_state.tool_calls == []
+
+
+def test_opencode_read_recording_tolerates_a_run_with_no_state() -> None:
+    from mergecraft.agents import opencode as oc
+
+    oc._record_opencode_part(None, _opencode_read_part("/x/pr.diff"))
+
+
+def test_driver_read_recorder_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mergecraft.evidence import trajectory
+
+    def _explode(*_a: object, **_k: object) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(trajectory, "record_tool_call", _explode)
+
+    class _State:
+        tool_calls: list[Any] = []  # noqa: RUF012
+
+    assert trajectory.record_driver_read(_State(), path="a.py") is None
+    assert trajectory.record_driver_read(_State(), path=7) is None
+
+
+def test_opencode_read_of_the_diff_attests_read_coverage(tmp_path: Path) -> None:
+    """It has no repo path, and it is the read the reviewer is told to make."""
+    ctx, diff_path = _diff_ctx(tmp_path)
+
+    _record_read(
+        ctx,
+        _opencode_read_part(diff_path, output=f"Read file {diff_path}, lines 1-9\n1: x"),
+    )
+
+    record = build_trajectory_record(ctx.tool_state)
+    assert record.read_coverage is True
+    assert record.files_read == []
+
+
+def test_opencode_cli_stream_reports_its_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.agents import opencode as oc
+
+    ctx = make_agent_run_context(tmp_path, resolved_model=None)
+    stream = _lines(
+        {"type": "tool_use", "part": _opencode_read_part("/etc/hostname")},
+        {"type": "text", "sessionID": "ses_1", "part": {"text": "done"}},
+    )
+    monkeypatch.setattr(oc, "spawn_agent_cli", lambda *_a, **_k: _Proc(stream))
+    monkeypatch.setattr(oc, "track_process_group", _NoopGroup)
+    monkeypatch.setattr(oc, "wait_or_kill_process_group", lambda p, timeout: p.wait())
+    assert ctx.tool_state.driver_reports_reads is False
+
+    oc._run_opencode_cli_streaming(cmd=["opencode"], ctx=ctx, env={})
+
+    assert ctx.tool_state.driver_reports_reads is True
+    assert len(_read_rows(ctx)) == 1
 
 
 async def test_opencode_http_turn_records_the_bash_parts_of_the_response(
@@ -431,6 +674,7 @@ async def test_opencode_http_turn_records_the_bash_parts_of_the_response(
                     "metadata": {"exit": 2},
                 },
             },
+            _opencode_read_part("src/app.py", key="filePath"),
         ],
     }
 
@@ -469,3 +713,7 @@ async def test_opencode_http_turn_records_the_bash_parts_of_the_response(
     (row,) = _shell_rows(ctx)
     assert row.command == "make test"
     assert row.outcome_ok is False
+    (read,) = _read_rows(ctx)
+    assert read.paths == ["src/app.py"]
+    # This path sees what a response returns and does not claim to see every read.
+    assert ctx.tool_state.driver_reports_reads is False
