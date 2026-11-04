@@ -73,8 +73,10 @@ def _config(**kwargs: Any) -> FastPathSettings:
     return FastPathSettings.model_validate(_fast_path(**kwargs))
 
 
-def _settings(**kwargs: Any) -> RepoSettings:
-    return RepoSettings.model_validate({"review": {"fastPath": _fast_path(**kwargs)}})
+def _settings(*, extra: dict[str, Any] | None = None, **kwargs: Any) -> RepoSettings:
+    return RepoSettings.model_validate(
+        {"review": {"fastPath": _fast_path(**kwargs)}, **(extra or {})}
+    )
 
 
 def _outcome(**overrides: Any) -> Any:
@@ -343,13 +345,8 @@ def test_a_lite_run_with_a_success_decision_is_refused(
     assert "human" in lite.decision.reason
 
 
-def test_a_lite_run_with_a_blocking_finding_still_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Refusing ``success`` must never soften a ``failure``."""
-    from mergecraft.evidence.run_packet import build_run_packet
-
-    major = {
+def _compact_major_row() -> dict[str, Any]:
+    return {
         "tool": "lite",
         "rule_id": "lite-review",
         "severity": "Major",
@@ -357,7 +354,37 @@ def test_a_lite_run_with_a_blocking_finding_still_fails(
         "line": 3,
         "message": "real problem",
     }
-    ctx = _packet_ctx(tmp_path, monkeypatch, findings=[major])
+
+
+def _full_major_row() -> dict[str, Any]:
+    from mergecraft.analyzers.finding import make_finding
+
+    row = make_finding(
+        tool="review",
+        rule_id="agent:real-problem",
+        category="Functional Correctness",
+        severity="Major",
+        confidence="likely",
+        message="real problem",
+        path="src/app.py",
+        start_line=3,
+        end_line=3,
+        source="agent",
+    ).model_dump(mode="json")
+    assert isinstance(row, dict)
+    return row
+
+
+@pytest.mark.parametrize(
+    "make_row", [_compact_major_row, _full_major_row], ids=["compact-lite-row", "full-finding-row"]
+)
+def test_a_lite_run_with_a_blocking_finding_still_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, make_row: Any
+) -> None:
+    """Refusing ``success`` must never soften a ``failure``, whatever shape the finding has."""
+    from mergecraft.evidence.run_packet import build_run_packet
+
+    ctx = _packet_ctx(tmp_path, monkeypatch, findings=[make_row()])
     ctx.tool_state.triage = _lite_decision()
 
     packet = build_run_packet(ctx, run_succeeded=True)
@@ -544,11 +571,12 @@ async def _run_lite(
     *,
     event_name: str = "pull_request_target",
     agent: FakeAgent | None = None,
+    settings: RepoSettings | None = None,
 ) -> Any:
     return await run_main_for_test(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
-        settings=_settings(),
+        settings=settings if settings is not None else _settings(),
         event_name=event_name,
         event_payload=_EVENT,
         agent=agent,
@@ -603,7 +631,29 @@ async def test_a_lite_run_records_the_cap_and_the_usage_on_the_packet(
     assert packet.decision.verdict != "success"
 
 
-async def test_a_blocking_lite_finding_fails_the_check_through_the_roster_path(
+async def test_a_blocking_lite_finding_fails_the_check_through_the_packet_findings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    lite_driver: _LiteDriver,
+    triage_inputs: dict[str, Any],
+) -> None:
+    """The compact lite rows are expanded into packet findings, which the gate reads."""
+    lite_driver.outcome = _outcome(findings=[_major()])
+
+    rec = await _run_lite(monkeypatch, tmp_path)
+
+    assert rec.raised is None, rec.raised
+    packet = rec.report_status_calls[-1]["packet"]
+    lite_findings = [f for f in packet.findings if f.tool == "lite"]
+    assert [(f.severity, f.path, f.message) for f in lite_findings] == [
+        ("Major", _major()["path"], _major()["message"])
+    ]
+    checks = _checks(rec)
+    assert checks["mergecraft"]["conclusion"] == "failure"
+    assert checks["mergecraft-approval"]["conclusion"] == "failure"
+
+
+async def test_lite_findings_are_recorded_on_the_roster_under_agent_lite(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     lite_driver: _LiteDriver,
@@ -617,9 +667,6 @@ async def test_a_blocking_lite_finding_fails_the_check_through_the_roster_path(
     runs = [r for r in rec.tool_context.tool_state.reviewer_dispatch_runs if r.agent_id == "lite"]
     assert len(runs) == 1
     assert [f["message"] for f in runs[0].findings] == [_major()["message"]]
-    checks = _checks(rec)
-    assert checks["mergecraft"]["conclusion"] == "failure"
-    assert checks["mergecraft-approval"]["conclusion"] == "failure"
 
 
 async def test_a_lite_cap_hit_is_inconclusive(
@@ -698,3 +745,202 @@ async def test_head_side_config_cannot_select_the_lite_tier(
     assert rec.raised is None, rec.raised
     assert rec.agent_runs, "head-side config gets today's full review"
     assert lite_driver.calls == []
+
+
+# ── the lite record is published as a COMMENT review ──────────────────────────
+
+
+class _Publication:
+    """Spies on ``main.publish_deterministic_record`` and the review it creates."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.created: list[dict[str, Any]] = []
+        self.updated: list[str] = []
+
+
+@pytest.fixture
+def publication(monkeypatch: pytest.MonkeyPatch) -> _Publication:
+    from mergecraft.scm.github import GitHubScmAdapter
+
+    spy = _Publication()
+    real = main_mod.publish_deterministic_record
+
+    async def _publish(**kwargs: Any) -> Any:
+        spy.calls.append(kwargs)
+        return await real(**kwargs)
+
+    async def _create_review(
+        _self: Any, _owner: str, _repo: str, _pull: int, **fields: Any
+    ) -> dict[str, Any]:
+        spy.created.append(fields)
+        return {"id": 4242, "node_id": "PRR_lite"}
+
+    async def _update_review(
+        _self: Any, _owner: str, _repo: str, _pull: int, _review_id: int, body: str
+    ) -> dict[str, Any]:
+        spy.updated.append(body)
+        return {"id": _review_id}
+
+    monkeypatch.setattr(main_mod, "publish_deterministic_record", _publish)
+    monkeypatch.setattr(GitHubScmAdapter, "create_review", _create_review)
+    monkeypatch.setattr(GitHubScmAdapter, "update_review", _update_review)
+    return spy
+
+
+def _published_body(spy: _Publication) -> str:
+    assert len(spy.calls) == 1, "a lite run publishes exactly one deterministic record"
+    assert len(spy.created) == 1
+    assert spy.created[0].get("event") == "COMMENT"
+    body = spy.created[0].get("body")
+    assert isinstance(body, str)
+    return body
+
+
+async def test_a_clean_lite_run_publishes_its_summary_as_a_comment_review(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    lite_driver: _LiteDriver,
+    triage_inputs: dict[str, Any],
+    publication: _Publication,
+) -> None:
+    lite_driver.outcome = _outcome(summary="LITE-SUMMARY-0 nothing stands out in the pin")
+
+    rec = await _run_lite(monkeypatch, tmp_path)
+
+    assert rec.raised is None, rec.raised
+    body = _published_body(publication)
+    assert "LITE-SUMMARY-0 nothing stands out in the pin" in body
+    assert "lite" in body
+
+
+async def test_a_blocking_lite_run_publishes_each_finding_location_and_message(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    lite_driver: _LiteDriver,
+    triage_inputs: dict[str, Any],
+    publication: _Publication,
+) -> None:
+    major = _major()
+    lite_driver.outcome = _outcome(
+        findings=[major], summary="LITE-SUMMARY-1 one blocker in the workflow"
+    )
+
+    rec = await _run_lite(monkeypatch, tmp_path)
+
+    assert rec.raised is None, rec.raised
+    body = _published_body(publication)
+    assert "LITE-SUMMARY-1 one blocker in the workflow" in body
+    assert major["message"] in body
+    location = re.escape(major["path"]) + r"\D{0,12}" + str(major["line"]) + r"\b"
+    assert re.search(location, body), "the record names the finding's path and line"
+
+
+async def test_a_failed_completion_check_never_says_the_run_finished_successfully(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    lite_driver: _LiteDriver,
+    triage_inputs: dict[str, Any],
+) -> None:
+    lite_driver.outcome = _outcome(findings=[_major()])
+
+    rec = await _run_lite(monkeypatch, tmp_path)
+
+    assert rec.raised is None, rec.raised
+    completion = _checks(rec)["mergecraft"]
+    assert completion["conclusion"] == "failure"
+    assert _LITE_LINE in completion["output"]["summary"]
+    assert "finished successfully" not in completion["output"]["summary"]
+
+
+# ── trust, caps and blockers ──────────────────────────────────────────────────
+
+
+async def test_a_trusted_lite_run_with_a_minor_finding_never_approves(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    lite_driver: _LiteDriver,
+    triage_inputs: dict[str, Any],
+) -> None:
+    """``trust.selfReview: full`` reaches the trusted tier; lite still cannot approve."""
+    minor = {**_major(), "severity": "Minor", "message": "LITE-MINOR consider a comment"}
+    lite_driver.outcome = _outcome(findings=[minor])
+    settings = _settings(extra={"trust": {"selfReview": "full"}})
+
+    rec = await _run_lite(monkeypatch, tmp_path, settings=settings)
+
+    assert rec.raised is None, rec.raised
+    assert rec.tool_context.tool_state.authority_trust == "trusted", "premise: trusted tier"
+    checks = _checks(rec)
+    assert checks["mergecraft-approval"]["conclusion"] != "success"
+    assert checks["mergecraft"]["conclusion"] == "neutral"
+
+
+async def test_a_blocker_is_never_softened_by_a_cap_hit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    lite_driver: _LiteDriver,
+    triage_inputs: dict[str, Any],
+) -> None:
+    lite_driver.outcome = _outcome(findings=[_major()], tokens_used=_CAP + 10, cap_hit=True)
+
+    rec = await _run_lite(monkeypatch, tmp_path)
+
+    assert rec.raised is None, rec.raised
+    assert rec.result is not None
+    assert rec.result.outcome is RunOutcome.inconclusive
+    checks = _checks(rec)
+    assert checks["mergecraft"]["conclusion"] == "failure"
+    assert checks["mergecraft-approval"]["conclusion"] == "failure"
+
+
+# ── head text is read only when something can use it ──────────────────────────
+
+
+def _comment_files() -> list[dict[str, Any]]:
+    return [{"filename": "src/app.js", "additions": 1, "deletions": 1, "patch": _COMMENT_PATCH}]
+
+
+async def test_code_head_text_is_not_read_when_neither_comment_only_nor_lite_is_on() -> None:
+    scm = FakeScm(files=_comment_files(), contents={"src/app.js": _COMMENT_HEAD})
+
+    decision = await _decide(scm, config=_config(lite_enabled=False, skip_llm=["prose"]))
+
+    assert decision.tier == "full"
+    assert scm.requests, "premise: the files listing was read"
+    assert not any("/contents/src/app.js" in request for request in scm.requests)
+
+
+async def test_code_head_text_is_read_when_lite_is_enabled() -> None:
+    scm = FakeScm(files=_comment_files(), contents={"src/app.js": _COMMENT_HEAD})
+
+    decision = await _decide(scm, config=_config(lite_enabled=True, skip_llm=[]))
+
+    assert (decision.tier, decision.recognizer) == ("lite", "commentOnly")
+    assert any("/contents/src/app.js" in request for request in scm.requests)
+
+
+async def test_code_head_text_is_read_when_comment_only_is_opted_in_without_lite() -> None:
+    scm = FakeScm(files=_comment_files(), contents={"src/app.js": _COMMENT_HEAD})
+
+    decision = await _decide(scm, config=_config(lite_enabled=False, skip_llm=["commentOnly"]))
+
+    assert (decision.tier, decision.recognizer) == ("skip", "commentOnly")
+    assert any("/contents/src/app.js" in request for request in scm.requests)
+
+
+async def test_prose_head_text_is_still_read_without_comment_only_or_lite() -> None:
+    files = [
+        {
+            "filename": "README.md",
+            "additions": 1,
+            "deletions": 1,
+            "patch": "@@ -1,3 +1,3 @@\n # Title\n-Old words.\n+New words.\n More.\n",
+        }
+    ]
+    scm = FakeScm(files=files, contents={"README.md": "# Title\nNew words.\nMore.\n"})
+
+    decision = await _decide(scm, config=_config(lite_enabled=False, skip_llm=["prose"]))
+
+    assert (decision.tier, decision.recognizer) == ("skip", "prose")
+    assert any("/contents/README.md" in request for request in scm.requests)

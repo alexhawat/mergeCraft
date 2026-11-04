@@ -24,7 +24,23 @@ The rules under test:
   `inconclusive`. A malformed answer never quietly becomes a full review and is never
   read as a success.
 - `commentOnly` refuses whenever it is unsure. A `#`-comment language is never
-  recognised.
+  recognised. JSX and TSX are off the list (a JSX text child can start with `//`), and
+  `Package.swift` is refused by name. A file is refused when it contains a backtick, a
+  raw-string marker, a `/*` anywhere, a quote left open at the end of a line, `import
+  "C"` in Go, or any character outside printable ASCII plus tab and newline (so
+  `U+2028`, `U+2029`, a lone CR and NEL cannot end a line for the language but not for
+  the lexer). Lines are split on `\n` only. A changed line must be `//`, one space and
+  a purely alphabetic first word that is not a directive word (`fallthrough`, `Output`,
+  `Unordered`, `NOSONAR`, `nolint`, `revive`, `golangci`, `pragma`, `build`, and the
+  existing lint and type-checker words). A removal-only diff is refused because a
+  removed line cannot be checked against the head text.
+- A `lite` run publishes the deterministic run record as a `COMMENT` review that
+  carries the call's summary and each finding's path, line and message. A failed
+  completion check never says the run finished successfully. A blocker keeps the
+  `mergecraft` check at `failure` even when the call also overran its cap (the run is
+  still `inconclusive`).
+- Head-side text for code files is read only when something can use it: `commentOnly`
+  is in `skipLlm`, or `lite` is enabled.
 
 ## Test strategy
 
@@ -54,7 +70,6 @@ test and does not break collection.
 | `TriageDecision.record_line()` | For `lite`: `Tier: lite — single-call review, cap N tokens`, where `N` is the plain integer with no thousands separator. `skip` and `full` lines are unchanged. |
 | `triage_diff` | Signature unchanged (`diff_text, config, head_files, passed_checks`). A `lite` reason names the recognizer; an unverified pin bump's reason names the missing check. |
 | `recognize_comment_only(diff_text, *, head_files)` | Exported in `triage.__all__`; returns `bool`. |
-| `fast_path.load_triage_inputs` | Reads head-side text for comment-only-language files as well as prose files, so `commentOnly` can be proven. |
 | `mergecraft.agents.lite.run_lite_review` | Awaitable, called **with keyword arguments only**: `decision=`, `diff_text=`, `settings=` (a `RepoSettings`; the driver reads `review.fast_path.lite` and the `providers` registry), `http_client_factory=`. Any run-context parameter must be optional. `http_client_factory` is a callable returning an `httpx.AsyncClient`. It may be called with keyword arguments such as `timeout`, which test factories ignore. The driver must send its single request through that client. |
 | `mergecraft.agents.lite.LiteOutcome` | Constructible with keywords `status`, `reason`, `tokens_used`, `usage_estimated`, `cap_hit`, `findings`, `summary`, `prompt_version`. |
 | `mergecraft.agents.lite.LITE_PROMPT_VERSION` | Non-empty `str`; copied to `LiteOutcome.prompt_version`. |
@@ -65,6 +80,8 @@ test and does not break collection.
 | Findings | `lite` findings land on `tool_state.reviewer_dispatch_runs` as one `ReviewerRun` with `agent_id="lite"`. |
 | `TriageSection` | `tier: Literal["skip", "lite", "full"]`, plus `token_cap`, `tokens_used`, `usage_estimated`, `cap_hit` and `prompt_version` (defaults `None`/`False`). `_triage_section` copies `token_cap` from the decision and the usage fields from the lite outcome. |
 | `PACKET_SCHEMA_VERSION` | Strictly above `1.17.0`, and equal to the version in the `docs/evidence-packet.md` "The current version is" line. The test does not pin the exact number. |
+| `main.publish_deterministic_record` | Called exactly once on a `lite` run, through the real publish phase. With no existing review it creates one `COMMENT` review through `GitHubScmAdapter.create_review`; the body contains the lite summary and, for each finding, its path, its line within a few characters after the path, and its message. |
+| `fast_path.load_triage_inputs` (head text) | Code-suffix head files are fetched only when `commentOnly` is in `skipLlm` or `lite.enabled`; prose head files are fetched as before. Tested through `decide_fast_path`, so no new keyword is pinned. |
 | `utils.status_checks._triage_lines` / `findings.ledger.render_deterministic_review_block` | Render the `lite` line, plus "Approval is left to a human." in the check summary. Neither says "no LLM review ran" for `lite`. |
 
 ## Coverage map
@@ -97,9 +114,30 @@ test and does not break collection.
 | No subprocess, no file written | `test_lite_review.py::test_no_subprocess_is_spawned_and_no_file_is_written` | — | `test_a_lite_run_never_starts_the_agent_and_never_approves` |
 | `_triage_gate` returns `LiteAgentReview`, hands over the triaged diff | — | `test_fast_path_lite_gate.py` (`main._triage_gate` section) | — |
 | Lite never approves; a failure is never softened | — | `test_fast_path_lite_gate.py::test_a_lite_run_with_a_success_decision_is_refused`, `test_a_lite_run_with_a_blocking_finding_still_fails` | `test_a_lite_run_never_starts_the_agent_and_never_approves` |
-| Blocking finding → `failure` through the roster path | — | — | `test_fast_path_lite_gate.py::test_a_blocking_lite_finding_fails_the_check_through_the_roster_path` |
+| Blocking finding → `failure` through the packet findings; roster record kept | — | — | `test_fast_path_lite_gate.py::test_a_blocking_lite_finding_fails_the_check_through_the_packet_findings`, `test_lite_findings_are_recorded_on_the_roster_under_agent_lite` |
 | Packet: `TriageSection` fields, cap and usage recorded, schema version, doc rows | `test_fast_path_lite_gate.py` (packet section) | `test_the_packet_carries_the_cap_from_the_lite_decision` | `test_a_lite_run_records_the_cap_and_the_usage_on_the_packet` |
 | Check summary and review record render the lite line | `test_fast_path_lite_gate.py` (check-summary and review-record section) | — | `test_a_lite_run_never_starts_the_agent_and_never_approves` |
+
+### Hardening coverage
+
+| Contract | Tests |
+| --- | --- |
+| Every probe attack refused (seven verified false positives plus the earlier refusals), verbatim fixtures | `tests/classify/test_comment_only.py::test_every_probe_attack_is_refused` |
+| The probe's true positives still recognised | `test_comment_only.py::test_the_probe_true_positives_are_still_recognised`, `test_a_tab_indented_comment_is_still_recognised` |
+| Removal-only diffs refused | `test_comment_only.py::test_a_removal_only_comment_diff_is_refused` |
+| `\n`-only splitting and the printable-ASCII rule (U+2028, U+2029, lone CR, NEL, CRLF, non-ASCII comment or head text) | `test_comment_only.py` (`test_a_line_terminator_other_than_newline_*`, `test_the_unicode_line_separator_attack_file_is_refused`, `test_a_non_ascii_comment_is_refused`, `test_non_ascii_anywhere_in_the_head_text_refuses_the_file`, `test_a_crlf_file_is_refused`) |
+| JSX/TSX off the list; `Package.swift` refused | `test_a_language_off_the_list_is_never_comment_only[*App.jsx/App.tsx]`, `test_package_swift_is_refused_by_name` |
+| Any `/*` refuses; an open quote at end of line refuses; cgo refuses | `test_a_block_comment_opener_inside_a_string_still_refuses_the_file`, `test_a_closed_block_comment_anywhere_in_the_file_refuses_it`, `test_a_quote_left_open_at_the_end_of_a_line_refuses_the_file`, `test_a_cgo_file_is_refused` |
+| Shape rule (prefix class) and directive word list (word class) | `test_a_comment_whose_first_token_is_not_a_plain_word_is_refused`, `test_a_comment_whose_first_word_is_a_directive_word_is_refused` |
+| Unverifiable pin bump (no `requireChecks`, no trusted App, only `github-actions`) is `lite` | `tests/classify/test_triage_lite.py::test_an_unverifiable_opted_in_pin_bump_is_lite_when_enabled` |
+| The API key never appears in a loguru line (success, HTTP 401, connect error) | `tests/agents/test_lite_review.py::test_the_api_key_never_appears_in_a_log_line` |
+| Lite record published as a `COMMENT` review with summary and finding location/message | `tests/review/test_fast_path_lite_gate.py::test_a_clean_lite_run_publishes_its_summary_as_a_comment_review`, `test_a_blocking_lite_run_publishes_each_finding_location_and_message` |
+| A failed completion check never says "finished successfully" | `test_fast_path_lite_gate.py::test_a_failed_completion_check_never_says_the_run_finished_successfully` |
+| The check fails through the packet findings; the roster record is kept separately | `test_a_blocking_lite_finding_fails_the_check_through_the_packet_findings`, `test_lite_findings_are_recorded_on_the_roster_under_agent_lite` |
+| Never-soften with compact and full finding rows | `test_a_lite_run_with_a_blocking_finding_still_fails[compact-lite-row/full-finding-row]` |
+| Trusted tier (`trust.selfReview: full`) plus a Minor finding never approves | `test_a_trusted_lite_run_with_a_minor_finding_never_approves` |
+| A blocker plus a cap overrun is `failure`, run `inconclusive` | `test_a_blocker_is_never_softened_by_a_cap_hit` |
+| Code head text read only when `commentOnly` or `lite` can use it | `test_code_head_text_is_not_read_when_neither_comment_only_nor_lite_is_on`, `test_code_head_text_is_read_when_lite_is_enabled`, `test_code_head_text_is_read_when_comment_only_is_opted_in_without_lite`, `test_prose_head_text_is_still_read_without_comment_only_or_lite` |
 
 ## Live gate
 
@@ -108,4 +146,13 @@ provider is an operator step, not part of `make test`.
 
 ## Amendments
 
-None yet.
+- Verification found seven comment-only false positives (a legacy `// +build`
+  constraint, the Swift tools-version line, a JSX text child, a regex literal hiding a
+  block opener, a Go example `// Output:`, a GCC fallthrough marker, and a U+2028 line
+  terminator). The recognizer contract was tightened to refuse on shape rather than
+  enumerate directives. Three earlier positives now refuse by design: `/*` inside a
+  string, a closed block comment elsewhere in the file, and the `.jsx` / `.tsx` suffixes.
+  The removal-only comment edit, which an earlier probe counted as a positive, is now
+  refused.
+- The blocking-finding packet test now covers both the compact lite row and a full
+  finding row, so the never-soften rule does not depend on the compact-row expansion.

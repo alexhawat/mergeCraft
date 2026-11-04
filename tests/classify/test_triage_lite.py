@@ -371,3 +371,34 @@ def test_the_lite_cap_on_the_decision_follows_the_operator_config() -> None:
     assert decision.tier == "lite"
     assert decision.token_cap == 120_000
     assert decision.record_line() == "Tier: lite — single-call review, cap 120000 tokens"
+
+
+# ── a pin bump the operator cannot verify is lite, never skip ─────────────────
+
+
+@pytest.mark.parametrize(
+    ("pin_bump", "passed", "reason_fragment"),
+    [
+        ({"requireChecks": [], "trustedCheckApps": [_TRUSTED_APP]}, (), "requireChecks"),
+        ({"requireChecks": [_VERIFIER], "trustedCheckApps": []}, (_VERIFIER,), "trustedCheckApps"),
+        (
+            {"requireChecks": [_VERIFIER], "trustedCheckApps": ["github-actions"]},
+            (_VERIFIER,),
+            "trustedCheckApps",
+        ),
+    ],
+    ids=["no-require-checks", "no-trusted-app", "only-github-actions"],
+)
+def test_an_unverifiable_opted_in_pin_bump_is_lite_when_enabled(
+    pin_bump: dict[str, object], passed: tuple[str, ...], reason_fragment: str
+) -> None:
+    from mergecraft.classify.triage import triage_diff
+
+    config = _config(lite=_lite(), skipLlm=["pinBump"], pinBump=pin_bump)
+
+    decision = triage_diff(_PIN_DIFF, config=config, passed_checks=passed)
+
+    assert decision.tier == "lite"
+    assert decision.recognizer == "pinBump"
+    assert decision.token_cap == _CAP
+    assert reason_fragment in decision.reason

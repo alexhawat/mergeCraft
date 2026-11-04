@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
+from loguru import logger
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -616,3 +617,46 @@ def test_the_outcome_type_carries_the_contract_fields() -> None:
     assert outcome.status == "downgraded"
     assert outcome.prompt_version == api.LITE_PROMPT_VERSION
     assert outcome.tokens_used is None
+
+
+# ── the credential never reaches a log line ───────────────────────────────────
+
+
+@pytest.fixture
+def log_lines() -> Any:
+    """Every loguru record at any level, formatted with its extras and exception."""
+    lines: list[str] = []
+
+    def _sink(message: Any) -> None:
+        record = message.record
+        lines.append(f"{message}{record['extra']!r}{record['exception']!r}")
+
+    handler = logger.add(_sink, level=0, format="{level} {name}:{function} {message}")
+    try:
+        yield lines
+    finally:
+        logger.remove(handler)
+
+
+@pytest.mark.parametrize(
+    "gateway_kwargs",
+    [
+        {},
+        {"status": 401, "body": {"error": {"message": "invalid key"}}},
+        {"error": httpx.ConnectError("connection refused")},
+    ],
+    ids=["success", "http-401", "connect-error"],
+)
+async def test_the_api_key_never_appears_in_a_log_line(
+    credential: str, log_lines: list[str], gateway_kwargs: dict[str, Any]
+) -> None:
+    gateway = _Gateway(**gateway_kwargs)
+
+    outcome = await _run(gateway)
+
+    assert len(gateway.requests) == 1
+    assert gateway.requests[0].headers["authorization"] == f"Bearer {credential}"
+    assert outcome.status in {"reviewed", "failed"}
+    assert log_lines, "the driver logs its outcome; the capture must see it"
+    leaked = [line for line in log_lines if credential in line]
+    assert leaked == []
