@@ -409,6 +409,13 @@ def verify_agent_findings_tool(ctx: ToolContext):
             row["fingerprint"] = finding.identity()
             stored[str(row["fingerprint"])] = row
         ctx.tool_state.agent_findings = list(stored.values())
+        # File-group fan-out: remember which group raised these rows so its run
+        # claims them however concurrent groups finish.
+        from mergecraft.review.file_group_fanout import note_file_group_rows
+
+        note_file_group_rows(
+            ctx.tool_state, [str(finding.identity()) for finding in normalized_findings]
+        )
         _emit_finding_stage(
             ctx,
             [

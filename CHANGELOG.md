@@ -11,14 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `review.fileGroupFanout` splits a large pull request into bounded read-only
   file groups and has mergeCraft dispatch one reviewer per group, so one
-  reviewer does not have to read a 20-file or 800-line diff serially (#1031). It is off by default and pending live validation on a large
-  pull request. When enabled, a diff with at least `minFiles` changed files or
+  reviewer does not have to read a 20-file or 800-line diff serially (#1031).
+  It is off by default and pending live validation on a large pull request.
+  When enabled, a diff with at least `minFiles` changed files or
   `minDiffLines` added lines is split into at most `maxGroups` groups (default
-  6), run one after another unless `concurrency` is raised; each group's
-  findings carry `raised_by: file-group/<group-id>`. A failed group is one
-  run-scoped `Minor` note under `run_health`, never a failed review, and a
-  smaller diff keeps the single-reviewer path unchanged. Keys are documented in
-  `docs/agent-roster.md`.
+  6), run one after another unless `concurrency` is raised, each capped at
+  `perGroupTimeoutS` (1–900 seconds). The groups run after the primary
+  reviewer has published, so their findings reach the evidence packet and the
+  checks the way secondary roster findings do, not the posted review; each such
+  row's packet evidence names its group (`reviewer: file-group/<group-id>
+  (<model>)`). A failed group is one run-scoped `Minor` row under `run_health`,
+  never a failed review, and a smaller diff keeps the single-reviewer path
+  unchanged. Keys are documented in `docs/agent-roster.md`.
 
 - The self-review's Codex rung writes the refreshed ChatGPT-subscription login
   back to the `CODEX_AUTH_JSON` repository secret after each run, so the

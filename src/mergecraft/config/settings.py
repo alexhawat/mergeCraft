@@ -395,8 +395,9 @@ class FileGroupFanoutSettings(BaseModel):
             reuses the primary reviewer's binding.
         concurrency: Groups in flight at once, ``1``..``6``. Default ``1``
             (sequential).
-        per_group_timeout_s: Seconds one group may run, further capped by the
-            binding's ``timeoutS`` and the remaining run budget. Default ``600``.
+        per_group_timeout_s: Seconds one group may run, ``1``..``900``, further
+            capped by the binding's ``timeoutS`` and the remaining run budget; no
+            bound can turn the cap off. Default ``600``.
     """
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
@@ -407,7 +408,7 @@ class FileGroupFanoutSettings(BaseModel):
     min_files: int = Field(default=20, alias="minFiles")
     binding: str | None = None
     concurrency: int = Field(default=1, ge=1, le=6)
-    per_group_timeout_s: int = Field(default=600, alias="perGroupTimeoutS")
+    per_group_timeout_s: int = Field(default=600, alias="perGroupTimeoutS", ge=1, le=900)
 
 
 class ReviewSettings(BaseModel):

@@ -425,6 +425,10 @@ class ToolState:
     reviewer_dispatch_errors: dict[str, str] = field(default_factory=dict)
     # D7 / #574 — per-reviewer findings recorded before terminal submission.
     reviewer_dispatch_runs: list[Any] = field(default_factory=list)
+    # File-group fan-out: group agent ids dispatched right now, and which group
+    # recorded each finding row (fingerprint -> ``file-group/<group-id>``).
+    active_file_groups: list[str] = field(default_factory=list)
+    file_group_row_owners: dict[str, str] = field(default_factory=dict)
     approval: ApprovalRecord | None = None
     review_replies: dict[int, ReviewReplyRecord] = field(default_factory=dict)
     dependency_installation: DependencyInstallationState | None = None

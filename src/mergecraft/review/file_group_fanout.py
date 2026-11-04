@@ -28,6 +28,10 @@ Exports:
     FanoutSummary — Per-group outcomes and recorded failures.
     file_group_agent_id — The ``file-group/<group-id>`` agent id of a group.
     is_file_group_agent_id — Whether an agent id names a file-group run.
+    bind_active_file_group — Mark one group's dispatch as in flight.
+    active_file_groups — The groups that may be making the current tool call.
+    note_file_group_rows — Record which group raised newly stored finding rows.
+    file_group_row_owner — The group that raised one finding row, if known.
     plan_file_groups — Build a bounded plan from a unified diff.
     dispatch_file_groups — Run the dispatcher, degrading failures.
 """
@@ -35,6 +39,8 @@ Exports:
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final
 
@@ -43,7 +49,9 @@ from loguru import logger
 from mergecraft.evidence.diff_coverage import parse_diff_toc
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Iterable, Iterator
+
+    from mergecraft.mcp.tool_state import ToolState
 
 DEFAULT_MAX_GROUPS: Final[int] = 6
 DEFAULT_MIN_DIFF_LINES: Final[int] = 800
@@ -129,6 +137,92 @@ class FanoutSummary:
     def degraded(self) -> bool:
         """Return whether any group failed."""
         return bool(self.failures)
+
+
+_ACTIVE_FILE_GROUP: ContextVar[str | None] = ContextVar(
+    "mergecraft_active_file_group", default=None
+)
+"""The group whose dispatch task is running (set per task, so concurrent groups differ)."""
+
+
+@contextmanager
+def bind_active_file_group(tool_state: ToolState, agent_id: str) -> Iterator[None]:
+    """Mark ``agent_id`` as an in-flight file group for the duration of the block.
+
+    Two records are kept: a context variable, which reaches tool calls made
+    inside this dispatch task (in-process runtimes), and
+    ``ToolState.active_file_groups``, which a tool call arriving over the MCP
+    HTTP server can read. Both are cleared on exit, including on error.
+
+    Args:
+        tool_state: The run's tool state.
+        agent_id: The group's ``file-group/<group-id>`` agent id.
+
+    Yields:
+        Nothing; the group is active inside the ``with`` block.
+    """
+    token = _ACTIVE_FILE_GROUP.set(agent_id)
+    tool_state.active_file_groups.append(agent_id)
+    try:
+        yield
+    finally:
+        _ACTIVE_FILE_GROUP.reset(token)
+        if agent_id in tool_state.active_file_groups:
+            tool_state.active_file_groups.remove(agent_id)
+
+
+def active_file_groups(tool_state: ToolState) -> tuple[str, ...]:
+    """Return the file groups that may be making the current tool call.
+
+    Inside a group's own dispatch task this is exactly that group. Elsewhere
+    (an MCP HTTP request) it is every group in flight: one when groups run
+    sequentially, possibly several under ``concurrency`` above 1.
+
+    Args:
+        tool_state: The run's tool state.
+
+    Returns:
+        The candidate group agent ids; empty outside a fan-out.
+    """
+    bound = _ACTIVE_FILE_GROUP.get()
+    if bound is not None:
+        return (bound,)
+    return tuple(tool_state.active_file_groups)
+
+
+def note_file_group_rows(tool_state: ToolState, fingerprints: Iterable[str]) -> None:
+    """Record the group that raised newly stored finding rows.
+
+    Only an unambiguous caller is recorded; with several groups in flight and
+    no per-task binding, the rows stay unowned and are attributed in
+    recording order when a group's run is recorded. The first recorder of a
+    fingerprint keeps it.
+
+    Args:
+        tool_state: The run's tool state.
+        fingerprints: Fingerprints of the rows the current tool call stored.
+    """
+    candidates = active_file_groups(tool_state)
+    if len(candidates) != 1:
+        return
+    for fingerprint in fingerprints:
+        if fingerprint:
+            tool_state.file_group_row_owners.setdefault(fingerprint, candidates[0])
+
+
+def file_group_row_owner(tool_state: ToolState, fingerprint: object) -> str | None:
+    """Return the group agent id that raised a finding row, when it is known.
+
+    Args:
+        tool_state: The run's tool state.
+        fingerprint: The row's fingerprint.
+
+    Returns:
+        ``file-group/<group-id>``, or ``None`` for an unowned row.
+    """
+    if not isinstance(fingerprint, str) or not fingerprint:
+        return None
+    return tool_state.file_group_row_owners.get(fingerprint)
 
 
 def plan_file_groups(
@@ -258,8 +352,12 @@ __all__ = [
     "FanoutPlan",
     "FanoutSummary",
     "FileGroup",
+    "active_file_groups",
+    "bind_active_file_group",
     "dispatch_file_groups",
     "file_group_agent_id",
+    "file_group_row_owner",
     "is_file_group_agent_id",
+    "note_file_group_rows",
     "plan_file_groups",
 ]

@@ -28,8 +28,11 @@ from mergecraft.mcp.tool_state import (
 from mergecraft.review.file_group_fanout import (
     FanoutSummary,
     FileGroup,
+    bind_active_file_group,
     dispatch_file_groups,
     file_group_agent_id,
+    file_group_row_owner,
+    is_file_group_agent_id,
     plan_file_groups,
 )
 from mergecraft.review.roster_dispatch import reviewer_dispatch_batches
@@ -169,6 +172,40 @@ def _binding_already_recorded(tool_state: ToolState, agent_id: str) -> bool:
     return agent_id in tool_state.reviewer_dispatch_errors
 
 
+def _with_evidence_entry(row: dict[str, Any], entry: str) -> None:
+    evidence = row.get("evidence")
+    entries = [str(item) for item in evidence] if isinstance(evidence, list) else []
+    if entry not in entries:
+        entries.append(entry)
+    row["evidence"] = entries
+
+
+def _stamp_reviewer_evidence(
+    tool_state: ToolState,
+    findings: list[dict[str, Any]],
+    *,
+    entry: str,
+) -> list[dict[str, Any]]:
+    """Name the recording reviewer in the evidence of every claimed row.
+
+    The stored rows are the ones the evidence packet loads, so the entry is
+    written there (``agent_findings`` and ``confirmed_findings``) as well as on
+    the copies the run keeps. Idempotent: an entry already present is not
+    repeated.
+    """
+    claimed = {row.get("fingerprint") for row in findings if row.get("fingerprint")}
+    for lane in (tool_state.agent_findings, tool_state.confirmed_findings):
+        for stored in lane:
+            if isinstance(stored, dict) and stored.get("fingerprint") in claimed:
+                _with_evidence_entry(stored, entry)
+    stamped: list[dict[str, Any]] = []
+    for row in findings:
+        copy = dict(row)
+        _with_evidence_entry(copy, entry)
+        stamped.append(copy)
+    return stamped
+
+
 async def _dispatch_reviewer(
     *,
     binding: AgentBinding,
@@ -180,14 +217,15 @@ async def _dispatch_reviewer(
     payload: dict[str, Any],
     repo_root: Path,
     timeout_s: float | None,
-    extra_instructions: str = "",
+    submit_instructions: str = _ROSTER_SUBMIT_INSTRUCTIONS,
     owns_finding: Callable[[dict[str, Any]], bool] | None = None,
+    stamp_reviewer_evidence: bool = False,
 ) -> _SecondaryOutcome:
     """Run one reviewer binding server-side and record its outcome under ``record_as``.
 
     The shared core of the secondary roster and the file-group fan-out: resolve
     the binding's model, check its credential, render the reviewer instructions
-    plus :data:`_ROSTER_SUBMIT_INSTRUCTIONS` (and ``extra_instructions``), run
+    plus ``submit_instructions`` (the roster submit block by default), run
     the agent under ``timeout_s``, then record either the new findings
     (``record_reviewer_dispatch_run``) or the reason it produced none
     (``record_reviewer_dispatch_error``). An exception the agent runtime raises
@@ -203,9 +241,12 @@ async def _dispatch_reviewer(
         payload: The resolved run payload used to render instructions.
         repo_root: The checkout root.
         timeout_s: Seconds the agent may run; ``None`` or ``<= 0`` means no cap.
-        extra_instructions: Text appended after the roster submit instructions.
+        submit_instructions: The block appended to the reviewer instructions.
         owns_finding: When given, only new finding rows it accepts are
             attributed to this dispatch's run.
+        stamp_reviewer_evidence: Append ``reviewer: <record_as> (<model>)`` to
+            the evidence of every row the run claims, in the run's findings and
+            in the stored rows the evidence packet reads.
 
     Returns:
         The dispatch's hard error and infrastructure reason, both ``None`` on success.
@@ -259,9 +300,7 @@ async def _dispatch_reviewer(
         trust_tier=str(tool_state.trust_tier or "untrusted"),
         review_mcp_names=list(tool_state.review_mcp_names),
     )
-    tail = _ROSTER_SUBMIT_INSTRUCTIONS
-    if extra_instructions.strip():
-        tail = f"{tail}\n\n{extra_instructions.strip()}"
+    tail = submit_instructions.strip()
     system = (instructions.system or "").strip()
     instructions = replace(
         instructions,
@@ -306,7 +345,7 @@ async def _dispatch_reviewer(
         else:
             result = await _invoke()
     except TimeoutError:
-        reason = f"{label} {record_as!r} timed out after {timeout_s:.0f}s"
+        reason = f"{label} {record_as!r} timed out after {timeout_s:.1f}s"
         record_reviewer_dispatch_error(tool_state, agent_id=record_as, reason=reason)
         return _SecondaryOutcome(reason)
 
@@ -325,6 +364,10 @@ async def _dispatch_reviewer(
         findings = _findings_since(before_findings, tool_state)
         if owns_finding is not None:
             findings = [row for row in findings if owns_finding(row)]
+        if stamp_reviewer_evidence:
+            findings = _stamp_reviewer_evidence(
+                tool_state, findings, entry=f"reviewer: {record_as} ({slug})"
+            )
         record_reviewer_dispatch_run(
             tool_state,
             agent_id=record_as,
@@ -438,16 +481,21 @@ class _FileGroupDispatchError(RuntimeError):
 
 
 def _file_group_instructions(group: FileGroup, *, agent_id: str, diff_path: str) -> str:
-    """Render the *file group* block appended to a group reviewer's instructions."""
+    """Render the submit block of a file-group reviewer.
+
+    It replaces the roster submit block: a group is not a roster reviewer, it
+    records findings like any reviewer and mergeCraft records the group's
+    outcome when it finishes. It names no recording or verdict tool.
+    """
     paths = "\n".join(f"- `{path}`" for path in group.paths)
     return (
         f"## File group `{agent_id}`\n\n"
-        "This run splits a large diff into bounded read-only file groups. You review "
-        f"one group: read the shared diff at `{diff_path}` and review **only** the "
-        "files listed below; other reviewers cover every other file. Record each "
-        "finding for these files with the finding tools, as any reviewer does. "
-        "mergeCraft records this group's run under your agent id once you finish, "
-        "so do not call `record_reviewer_dispatch_run` yourself.\n\n"
+        "You are a read-only file-group reviewer on this run. The diff is split into "
+        "bounded file groups and you review one of them: read the shared diff at "
+        f"`{diff_path}` and review **only** the files listed below; other reviewers "
+        "cover every other file. Record each finding for these files the way any "
+        "reviewer does. mergeCraft records this group's outcome itself when you "
+        "finish, and the primary reviewer owns the verdict.\n\n"
         f"Files in this group ({len(group.paths)}):\n{paths}"
     )
 
@@ -481,6 +529,41 @@ def _file_group_health_row(agent_id: str, reason: str) -> dict[str, Any]:
         introduced_by_pr="false",
     )
     return finding.model_dump(mode="json")
+
+
+def _file_group_timeout_s(
+    *,
+    per_group_timeout_s: int,
+    binding_timeout_s: int,
+    remaining_timeout_s: Callable[[], float | None] | None,
+) -> float:
+    """Return the cap one group runs under; no bound can turn the cap off.
+
+    The cap is the smallest of ``perGroupTimeoutS`` (always at least 1), the
+    binding's ``timeoutS`` when it is positive, and the remaining run budget
+    (floored at one second, as for the secondary roster).
+    """
+    bounds = [float(max(1, per_group_timeout_s))]
+    if binding_timeout_s > 0:
+        bounds.append(float(binding_timeout_s))
+    if remaining_timeout_s is not None:
+        remaining = remaining_timeout_s()
+        if remaining is not None:
+            bounds.append(max(1.0, remaining))
+    return min(bounds)
+
+
+def _claimed_by_file_group_runs(tool_state: ToolState) -> set[str]:
+    """Fingerprints already claimed by a recorded file-group run."""
+    claimed: set[str] = set()
+    for run in tool_state.reviewer_dispatch_runs:
+        if not is_file_group_agent_id(run.agent_id):
+            continue
+        for row in run.findings:
+            fingerprint = row.get("fingerprint") if isinstance(row, dict) else None
+            if isinstance(fingerprint, str) and fingerprint:
+                claimed.add(fingerprint)
+    return claimed
 
 
 def _file_group_binding(
@@ -517,9 +600,17 @@ async def run_file_group_reviewers(
     primary checkout's materialised diff; with no diff path, an unreadable diff,
     or a diff below both size thresholds, nothing is dispatched and the summary
     is empty. Each group runs through the same dispatch core as a secondary
-    reviewer, under the agent id ``file-group/<group-id>``, with its own paths
-    and the shared diff path in the prompt. A successful group's new findings
-    are recorded with ``record_reviewer_dispatch_run``; a failed group (missing
+    reviewer, under the agent id ``file-group/<group-id>``, with its own paths,
+    the shared diff path and a file-group submit block (never the roster block)
+    in the prompt. While a group runs, the roster recording tools refuse it.
+
+    A successful group's run is recorded with ``record_reviewer_dispatch_run``
+    and claims the rows that group raised: the group a finding tool recorded the
+    row under (a per-task binding in process, or the only group in flight), or,
+    for a row recorded without one, recording order. Every claimed row's
+    evidence gains ``reviewer: file-group/<group-id> (<model>)``, which is what
+    the evidence packet shows — the fan-out runs after the primary's submit, so
+    the terminal ``raised_by`` stamp never sees a group. A failed group (missing
     binding or credential, timeout, failed result, raised exception) records a
     dispatch error plus one run-scoped ``Minor`` row in ``agent_findings``, and
     is never a hard error.
@@ -565,41 +656,44 @@ async def run_file_group_reviewers(
 
     registry = load_registry(settings=effective_settings, repo_root=repo_root)
     binding, binding_gap = _file_group_binding(registry, fanout.binding)
-    concurrent = fanout.concurrency > 1 and len(plan.groups) > 1
 
     async def _dispatch(group: FileGroup) -> str:
         agent_id = file_group_agent_id(group.group_id)
         if binding is None:
             record_reviewer_dispatch_error(tool_state, agent_id=agent_id, reason=binding_gap)
             raise _FileGroupDispatchError(binding_gap)
-        timeout = float(min(fanout.per_group_timeout_s, binding.timeout_s))
-        if remaining_timeout_s is not None:
-            remaining = remaining_timeout_s()
-            if remaining is not None:
-                timeout = min(timeout, max(1.0, remaining))
-        group_paths = frozenset(group.paths)
+        timeout = _file_group_timeout_s(
+            per_group_timeout_s=fanout.per_group_timeout_s,
+            binding_timeout_s=binding.timeout_s,
+            remaining_timeout_s=remaining_timeout_s,
+        )
 
         def _owns(row: dict[str, Any]) -> bool:
-            return row.get("path") in group_paths
+            owner = file_group_row_owner(tool_state, row.get("fingerprint"))
+            if owner is not None:
+                return owner == agent_id
+            # No recorded owner (a tool call that could not name its group):
+            # recording order — the first group run recorded after the row claims it.
+            return row.get("fingerprint") not in _claimed_by_file_group_runs(tool_state)
 
         try:
-            outcome = await _dispatch_reviewer(
-                binding=binding,
-                record_as=agent_id,
-                label="file-group reviewer",
-                base_ctx=base_run_ctx,
-                tool_context=tool_context,
-                settings=effective_settings,
-                payload=payload,
-                repo_root=repo_root,
-                timeout_s=timeout,
-                extra_instructions=_file_group_instructions(
-                    group, agent_id=agent_id, diff_path=str(diff_path)
-                ),
-                # Concurrent groups share one findings list, so a group can only
-                # claim rows on its own paths; a sequential group owns every new row.
-                owns_finding=_owns if concurrent else None,
-            )
+            with bind_active_file_group(tool_state, agent_id):
+                outcome = await _dispatch_reviewer(
+                    binding=binding,
+                    record_as=agent_id,
+                    label="file-group reviewer",
+                    base_ctx=base_run_ctx,
+                    tool_context=tool_context,
+                    settings=effective_settings,
+                    payload=payload,
+                    repo_root=repo_root,
+                    timeout_s=timeout,
+                    submit_instructions=_file_group_instructions(
+                        group, agent_id=agent_id, diff_path=str(diff_path)
+                    ),
+                    owns_finding=_owns,
+                    stamp_reviewer_evidence=True,
+                )
         except Exception as exc:
             reason = str(exc) or exc.__class__.__name__
             record_reviewer_dispatch_error(tool_state, agent_id=agent_id, reason=reason)
