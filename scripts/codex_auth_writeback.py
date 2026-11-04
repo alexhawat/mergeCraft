@@ -116,8 +116,11 @@ def decide(*, exported: str | None, original: str, infra_reason: str = "") -> De
 
     Returns:
         A :class:`Decision`; ``write`` is ``True`` only for a parsable body whose
-        refresh token is present, differs from the stored one, and belongs to
-        the same account.
+        refresh token is present and differs from the stored one, and whose
+        ``tokens.account_id`` is present and equal to the stored secret's. The
+        account check fails closed: a body on either side that names no account
+        is not written back, since the export is produced after the reviewer
+        has processed content the pull request controls.
     """
     if infra_reason == EXPIRED_KIND:
         return Decision(False, "the rung reported the login expired; nothing to write back")
@@ -138,7 +141,13 @@ def decide(*, exported: str | None, original: str, infra_reason: str = "") -> De
         return Decision(False, "the refresh token is unchanged; nothing to write back")
     stored_account = _account_id(original)
     exported_account = _account_id(exported)
-    if stored_account and exported_account and stored_account != exported_account:
+    if not stored_account or not exported_account:
+        return Decision(
+            False,
+            "the stored secret or the exported login names no tokens.account_id, so the "
+            "export cannot be matched to the stored account; not writing it back",
+        )
+    if stored_account != exported_account:
         return Decision(
             False, "the exported login belongs to a different account; not writing it back"
         )

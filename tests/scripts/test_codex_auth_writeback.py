@@ -125,10 +125,48 @@ class TestDecide:
         decision = _MOD.decide(exported=_REFRESHED, original=_ORIGINAL)
         assert decision.write is True
 
-    def test_flat_refresh_token_spelling_is_understood(self) -> None:
+    def test_flat_refresh_token_spelling_is_compared(self) -> None:
+        """The flat spelling is read for the token comparison, so an unchanged one is a no-op."""
         original = json.dumps({"refresh_token": _ORIGINAL_TOKEN})
-        exported = json.dumps({"refresh_token": _NEW_TOKEN})
-        assert _MOD.decide(exported=exported, original=original).write is True
+        decision = _MOD.decide(exported=original, original=original)
+        assert decision.write is False
+        assert "unchanged" in decision.reason
+
+    @pytest.mark.parametrize(
+        ("exported", "original"),
+        [
+            pytest.param(
+                json.dumps({"tokens": {"refresh_token": _NEW_TOKEN}}), _ORIGINAL, id="exported"
+            ),
+            pytest.param(
+                _REFRESHED,
+                json.dumps({"tokens": {"refresh_token": _ORIGINAL_TOKEN}}),
+                id="original",
+            ),
+            pytest.param(
+                json.dumps({"tokens": {"refresh_token": _NEW_TOKEN}}),
+                json.dumps({"tokens": {"refresh_token": _ORIGINAL_TOKEN}}),
+                id="both",
+            ),
+            pytest.param(
+                json.dumps({"refresh_token": _NEW_TOKEN}),
+                json.dumps({"refresh_token": _ORIGINAL_TOKEN}),
+                id="flat-both",
+            ),
+            pytest.param(
+                json.dumps({"tokens": {"refresh_token": _NEW_TOKEN, "account_id": "  "}}),
+                _ORIGINAL,
+                id="blank",
+            ),
+        ],
+    )
+    def test_missing_account_id_on_either_side_is_refused(
+        self, exported: str, original: str
+    ) -> None:
+        """Fail closed: a changed token is stored only when both bodies name one account."""
+        decision = _MOD.decide(exported=exported, original=original)
+        assert decision.write is False
+        assert "account_id" in decision.reason
 
     def test_reason_never_carries_token_material(self) -> None:
         for exported in (None, "{bad", _ORIGINAL, _REFRESHED):

@@ -364,7 +364,10 @@ def export_refreshed_codex_auth(
     reason is logged, naming paths and never token material — when the login
     was reported expired, the auth file is missing or unparsable, it carries no
     refresh token, the refresh token is the one the run started with, or the
-    file belongs to a different ChatGPT account than the stored secret.
+    file and the stored secret do not both name the same ``tokens.account_id``.
+    The account check fails closed: a body on either side that names no
+    account is not exported, since this runs after the reviewer has processed
+    content the pull request controls.
 
     Args:
         codex_home: The run's ``$CODEX_HOME``.
@@ -396,7 +399,15 @@ def export_refreshed_codex_auth(
         return False
     original_account = _subscription_account_id(original)
     current_account = _subscription_account_id(current)
-    if original_account and current_account and original_account != current_account:
+    if not original_account or not current_account:
+        logger.info(
+            "Codex auth.json at {} or {} names no tokens.account_id; cannot match the "
+            "refreshed login to the stored account, not exporting",
+            auth_path,
+            CODEX_AUTH_ENV,
+        )
+        return False
+    if original_account != current_account:
         logger.warning(
             "Codex auth.json at {} belongs to a different account than {}; not exporting",
             auth_path,

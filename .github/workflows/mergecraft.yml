@@ -1104,11 +1104,12 @@ jobs:
 
       # Compares the exported auth.json with the secret the run started with and
       # writes it back only when the refresh token changed; a missing, unparsable
-      # or token-less file, an unchanged token, a different account, or a rung
-      # that reported the login expired each end in a ::notice and no write. The
-      # credential travels env -> script -> gh stdin and is never printed; the
-      # exported file is removed afterwards. Runs the trusted copy of the script,
-      # never the workspace path the reviewed branch has since rewritten.
+      # or token-less file, an unchanged token, a different or unnamed account,
+      # or a rung that reported the login expired each end in a ::notice and no
+      # write. The credential travels env -> script -> gh stdin and is never
+      # printed; the exported file is removed afterwards. Runs the trusted copy
+      # of the script, never the workspace path the reviewed branch has since
+      # rewritten.
       - name: Write the refreshed Codex login back to CODEX_AUTH_JSON
         if: >-
           always() &&

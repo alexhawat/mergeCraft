@@ -84,6 +84,35 @@ class TestExportRefreshedCodexAuth:
         assert written is False
         assert not export.exists()
 
+    @pytest.mark.parametrize(
+        ("body", "original"),
+        [
+            pytest.param(
+                json.dumps({"tokens": {"refresh_token": "rt-new-bbbb"}}), _ORIGINAL, id="auth.json"
+            ),
+            pytest.param(
+                _REFRESHED,
+                json.dumps({"tokens": {"refresh_token": "rt-old-aaaa"}}),
+                id="stored-secret",
+            ),
+            pytest.param(
+                json.dumps({"refresh_token": "rt-new-bbbb"}),
+                json.dumps({"refresh_token": "rt-old-aaaa"}),
+                id="flat-both",
+            ),
+        ],
+    )
+    def test_missing_account_id_on_either_side_exports_nothing(
+        self, tmp_path: Path, body: str, original: str
+    ) -> None:
+        """Fail closed: without an account on both sides the login cannot be matched."""
+        export = tmp_path / "out" / "auth.json"
+        written = codex_module.export_refreshed_codex_auth(
+            codex_home=_home_with(tmp_path, body), original=original, export_path=export
+        )
+        assert written is False
+        assert not export.exists()
+
     def test_different_account_exports_nothing(self, tmp_path: Path) -> None:
         body = json.dumps({"tokens": {"refresh_token": "rt-new-bbbb", "account_id": "acct-9"}})
         export = tmp_path / "out" / "auth.json"
