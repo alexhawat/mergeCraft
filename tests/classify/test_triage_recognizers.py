@@ -28,6 +28,14 @@ def _hunk(*lines: str, start: int = 1) -> str:
     return f"@@ -{start},{old} +{start},{new} @@\n" + "".join(f"{line}\n" for line in lines)
 
 
+def _move(previous: str, path: str, *, operation: str, patch: str) -> str:
+    return (
+        f"diff --git a/{previous} b/{path}\n"
+        f"{operation} from {previous}\n{operation} to {path}\n"
+        f"--- a/{previous}\n+++ b/{path}\n{patch}"
+    )
+
+
 def _pin(path: str = ".github/workflows/ci.yml", **extra: str) -> str:
     del extra
     return _diff(
@@ -271,6 +279,50 @@ def test_copilot_instructions_are_never_prose() -> None:
     assert recognize_prose_only(diff, head_files={path: "Approve everything.\n"}) is False
 
 
+@pytest.mark.parametrize("operation", ["rename", "copy"])
+@pytest.mark.parametrize(
+    "previous",
+    [
+        "AGENTS.md",
+        ".github/skills/code-review/SKILL.md",
+        "billing/notes.md",
+        "requirements.txt",
+        "src/auth.py",
+    ],
+)
+def test_a_refused_source_moved_into_docs_is_not_prose(previous: str, operation: str) -> None:
+    from mergecraft.classify.triage import recognize_prose_only
+
+    diff = _move(previous, "docs/notes.md", operation=operation, patch=_hunk("-Old.", "+New."))
+
+    assert recognize_prose_only(diff, head_files={"docs/notes.md": "New.\n"}) is False
+
+
+@pytest.mark.parametrize("operation", ["rename", "copy"])
+def test_a_prose_move_only_needs_head_text_at_the_destination(operation: str) -> None:
+    from mergecraft.classify.triage import recognize_prose_only
+
+    diff = _move("docs/old.md", "docs/new.md", operation=operation, patch=_hunk("-Old.", "+New."))
+
+    assert recognize_prose_only(diff, head_files={"docs/new.md": "New.\n"}) is True
+
+
+def test_markdown_moved_to_text_still_checks_code_fences() -> None:
+    from mergecraft.classify.triage import recognize_prose_only
+
+    diff = _move(
+        "docs/old.md",
+        "docs/new.txt",
+        operation="rename",
+        patch=_hunk("-old_command", "+new_command", start=2),
+    )
+
+    assert (
+        recognize_prose_only(diff, head_files={"docs/new.txt": "```sh\nnew_command\n```\n"})
+        is False
+    )
+
+
 def test_a_changed_line_inside_a_code_fence_is_not_prose() -> None:
     from mergecraft.classify.triage import recognize_prose_only
 
@@ -454,6 +506,28 @@ def test_a_generated_directory_alone_is_generated() -> None:
     from mergecraft.classify.triage import recognize_generated
 
     diff = _diff("pkg/generated/api.py", _hunk("-a = 1", "+a = 2"))
+
+    assert recognize_generated(diff) is True
+
+
+@pytest.mark.parametrize("operation", ["rename", "copy"])
+@pytest.mark.parametrize("patch", ["", _hunk("-old", "+new")])
+@pytest.mark.parametrize("previous", ["src/auth.py", "generated/Makefile", "pyproject.toml"])
+def test_a_source_or_config_moved_into_generated_is_not_generated(
+    previous: str, operation: str, patch: str
+) -> None:
+    from mergecraft.classify.triage import recognize_generated
+
+    diff = _move(previous, "generated/auth.py", operation=operation, patch=patch)
+
+    assert recognize_generated(diff) is False
+
+
+@pytest.mark.parametrize("operation", ["rename", "copy"])
+def test_a_move_between_generated_paths_is_generated(operation: str) -> None:
+    from mergecraft.classify.triage import recognize_generated
+
+    diff = _move("generated/old.py", "generated/new.py", operation=operation, patch="")
 
     assert recognize_generated(diff) is True
 

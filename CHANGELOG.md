@@ -118,6 +118,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The fast-path triage diff writes a renamed or copied file the way `git diff`
+  does — `diff --git a/<old> b/<new>` with `rename from` / `rename to` (or
+  `copy from` / `copy to`) — and lists the source path with the changed paths. A
+  file renamed from code into prose is no longer read as a prose edit of its new
+  name. Prose and generated-file recognizers check both names, keeping agent
+  instructions and high-stakes prose moved into docs, and source or generator
+  configuration moved into generated paths, in full review. Triage evaluates
+  the complete diff without applying `ignore_paths` (#1137).
+
 - A reviewer that read the diff with OpenCode's native `read` tool no longer ends
   `inconclusive` with `Coverage: 0/N hunks`. OpenCode `read` parts are now recorded on
   the trajectory, so a read of `diffPath` or of a source file counts, and a read of the
