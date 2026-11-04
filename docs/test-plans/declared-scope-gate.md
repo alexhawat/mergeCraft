@@ -11,7 +11,7 @@ file and never appear outside the nonce fence or in a reason message.
 | Change set | `scope` gate | Reason |
 | --- | --- | --- |
 | no `scope` key (a library caller) | left out of `checklist` | none; nothing else changes |
-| `declared=False` | `null` | none |
+| `declared=False` (no block in the PR body or its closing issues) | `null` | `scope.unknown` (`medium`) |
 | `declared=True`, no globs | `false` | `scope.undeclared` (`medium`) |
 | `invalid=True` | `false` | `scope.invalid` (`medium`) |
 | every changed path (both rename images) matches a glob | `true` | `scope.within` (`low`) |
@@ -19,7 +19,9 @@ file and never appear outside the nonce fence or in a reason message.
 
 The run always supplies a signal: `build_run_packet` and the verification tool
 build it from `ToolState.scope_declaration` (`None` or no block → `declared=False`),
-so a run with no declaration has a `null` gate and is never `eligible`. The
+so a run with no declaration has a `null` gate, a `scope.unknown` reason at
+`medium`, and is never `eligible` — the same shape as `signal.missing.*`, which
+keeps `lane == max(reasons)` and `eligible` ⇔ every gate `true` ⇔ `low`. The
 approval rows (`low_risk_passing`, `clean_pass`) refuse a checklist that is
 missing any gate of `GATE_ORDER`. `scope` sits after the ten part-2 gates; later
 gates may follow it.
@@ -59,14 +61,15 @@ reason echoes the glob" sit beside a positive check on the emitted code.
 
 | Contract | What it proves | Tests |
 | --- | --- | --- |
-| Block forms | Bare, bold, `##`, `###`, any case, `-` and `*` bullets, fenced (with and without an info string), a blank line before the first item, indented items: globs in order, trimmed | `tests/requirements/test_scope_paths.py::test_each_block_form_declares_its_globs_in_order` |
+| Block forms | Bare, bold, `##`, `###`, any case, `-` and `*` bullets, fenced (with and without an info string), a blank line before the first item, backticked items, indented items: globs in order, trimmed, backticks removed | `tests/requirements/test_scope_paths.py::test_each_block_form_declares_its_globs_in_order` |
 | Declaration type | Frozen dataclass with exactly `declared`, `globs`, `source_ref`, `rejected` | `test_scope_paths.py::test_the_declaration_is_a_frozen_dataclass_with_the_locked_fields` |
 | CRLF | List and fenced bodies with `\r\n` parse, no `\r` in a glob | `test_scope_paths.py::test_a_crlf_body_parses_without_carriage_returns`, `::test_a_crlf_fenced_body_parses` |
 | Where the block stops | A blank line after the first item, the next heading, the closing fence; list items before the header are not collected | `test_scope_paths.py::test_the_block_stops_at_a_blank_line_after_the_first_item`, `::test_the_block_stops_at_the_next_heading`, `::test_a_fenced_block_stops_at_its_closing_fence`, `::test_list_items_before_the_block_are_not_collected` |
 | No block / empty block | No header → `declared=False`; a header with no items → `declared=True, globs=()` | `test_scope_paths.py::test_a_body_without_a_scope_block_declares_nothing`, `::test_a_header_with_no_items_is_declared_with_no_globs` |
-| Count bound | 64 globs accepted; 65 → `declared=True, globs=()`, `rejected` non-empty | `test_scope_paths.py::test_sixty_four_globs_is_within_the_bound`, `::test_sixty_five_globs_declares_nothing` |
+| Count bound | 64 globs accepted; 65 → `declared=True, globs=()`, every one of the 65 in `rejected` | `test_scope_paths.py::test_sixty_four_globs_is_within_the_bound`, `::test_sixty_five_globs_declares_nothing` |
 | Per-glob bounds | 200 characters accepted; 201, a `..` segment (middle, leading, trailing), a leading `/`, NUL, tab, ESC and DEL each fail the whole declaration with exactly the offender in `rejected` | `test_scope_paths.py::test_a_two_hundred_character_glob_is_within_the_bound`, `::test_a_bound_violation_declares_nothing_and_names_the_offender` |
 | Wildcard-only globs | `*`, `**`, `**/*`, `**/*.*` declare nothing (`rejected` names it) | `test_scope_paths.py::test_a_wildcard_only_glob_declares_nothing` |
+| Backticks | A glob wrapped in backticks is unwrapped before validation (`` `**` ``, `` `src/../etc` ``, `` `/etc/passwd` `` are rejected) and stored without them | `test_scope_paths.py::test_a_backticked_glob_is_unwrapped_before_it_is_validated`, `::test_a_backticked_glob_is_stored_without_its_backticks` |
 | Ordinary globs | Dots inside a name, unicode, `**/*.py`, `*.md`, a class, `?` are accepted | `test_scope_paths.py::test_ordinary_globs_are_accepted` |
 | Globs are data | Parsing never reads, opens, globs or stats a path (`Path.read_text`/`open`/`glob`/`exists`/`is_file`, `open`, `glob.glob` all refuse) | `test_scope_paths.py::test_parsing_never_opens_a_file` |
 | `IngestResult.scope` | Ingest carries the declaration; the scope globs are not mistaken for acceptance criteria; no block → `declared=False` | `test_scope_paths.py::test_ingest_result_carries_the_scope_declaration`, `::test_ingest_result_without_a_block_carries_an_undeclared_scope` |
@@ -75,14 +78,14 @@ reason echoes the glob" sit beside a positive check on the emitted code.
 | Gate listed when supplied | Within, drift, undeclared, invalid, not-declared and no-inputs signals all list `scope`, in `GATE_ORDER` order, beside every part-2 gate | `test_blast_radius_scope.py::test_a_supplied_signal_always_lists_the_scope_gate` |
 | No signal: library callers unchanged | Without a `scope` key the gate is left out, no `scope.*` reason, a complete docs change stays `low` and `eligible` | `test_blast_radius_scope.py::test_without_a_scope_key_the_gate_is_left_out_and_nothing_else_changes` |
 | Within | Every path inside → `scope.within` at `low`, gate `true`; a low change in scope is `eligible` with every gate `true`; a source change in scope still `medium` with gate `true` | `test_blast_radius_scope.py::test_a_change_inside_its_declared_globs_passes_the_scope_gate`, `::test_a_low_change_inside_its_scope_is_eligible_with_every_gate_true`, `::test_a_scope_gate_passes_beside_a_medium_source_reason` |
-| `**` crosses directories | `src/**` and `src/**/*.py` match `src/a/b/c.py`; `src/**` matches `src/c.py`; `docs/*.md`, an exact path and `**/conftest.py` match | `test_blast_radius_scope.py::test_globs_match_across_directories` |
+| `**` crosses directories | `src/**` and `src/**/*.py` match `src/a/b/c.py`; `src/**` and `src/**/*.py` match `src/c.py` (zero directories); `docs/*.md`, an exact path and `**/conftest.py` match | `test_blast_radius_scope.py::test_globs_match_across_directories` |
 | Drift | One out-of-scope path → `scope.drift` at `medium`, `assisted`, only the `scope` gate not `true`, message names the outside path and not the inside one; a rename source outside → drift; at most ten paths listed; three are all listed | `test_blast_radius_scope.py::test_one_out_of_scope_path_is_drift_even_when_everything_else_is_low`, `::test_a_rename_source_outside_the_globs_is_drift`, `::test_drift_lists_at_most_ten_out_of_scope_paths`, `::test_drift_lists_every_path_when_there_are_ten_or_fewer` |
 | Undeclared / invalid | No globs → `scope.undeclared`, never `eligible`, gate `false`; `invalid` → `scope.invalid` (not `undeclared`), gate `false`; `invalid` wins over matching globs; `Scope paths: **` end to end → `scope.invalid`, never `eligible` | `test_blast_radius_scope.py::test_a_declaration_without_globs_is_undeclared_and_never_eligible`, `::test_an_invalid_declaration_is_invalid_and_never_eligible`, `::test_an_invalid_flag_wins_over_globs_that_would_match`, `::test_a_declared_match_everything_glob_never_passes_the_gate` |
-| Not declared | `declared=False` → gate `null`, no `scope.*` reason, never `eligible`; a scope with no changed paths is not measured (no vacuous `within`) | `test_blast_radius_scope.py::test_an_undeclared_signal_keeps_the_gate_unknown_and_no_scope_reason_fires`, `::test_a_scope_without_changed_paths_is_not_measured` |
+| Not declared | `declared=False` → `scope.unknown` at `medium` (the only `scope.*` reason), gate `null`, lane `medium`, `assisted`; globs carried by such a signal are ignored; a scope with no changed paths is not measured (no vacuous `within`) | `test_blast_radius_scope.py::test_a_not_declared_signal_is_scope_unknown_at_medium_with_the_gate_null`, `::test_a_not_declared_signal_ignores_any_globs_it_carries`, `::test_a_scope_without_changed_paths_is_not_measured` |
 | A scope never widens | A `high` category inside its scope stays `high`/`forbidden` (migrations, deployment, terraform); `high` beats drift; a declared scope leaves a failing `dependencies` gate failing | `test_blast_radius_scope.py::test_a_high_category_still_wins_inside_its_scope`, `::test_a_high_category_still_wins_over_drift`, `::test_a_declared_scope_cannot_pass_a_failing_gate` |
 | No unfenced glob | No reason message and not the rendered `reason` contains a declared glob (within, drift, invalid) | `test_blast_radius_scope.py::test_no_reason_message_renders_a_declared_glob` |
-| Part-2 invariants with a scope | `lane == max(reasons)`, codes in the catalogue, `eligible` ⇔ every gate `true` ⇔ `low`, over within / drift / undeclared / invalid / high / source / carve-out / missing-input rows that all carry a declared scope; the table has both sides | `test_blast_radius_scope.py::test_the_lane_is_the_max_over_reasons_with_a_scope`, `::test_eligible_iff_every_gate_passed_iff_low_with_a_scope`, `::test_the_scoped_invariant_table_has_both_sides` |
-| Packet seam | `build_run_packet` classifies against `ToolState.scope_declaration`: within → `eligible`; drift names the path; a rename whose source is outside → drift naming the source; both images inside → `eligible`; rejected globs → `scope.invalid`; no declaration, or a body without a block → gate `null`, no `scope.*` reason, not `eligible`, not `low_risk_passing` | `test_blast_radius_scope.py::test_the_run_packet_classifies_against_the_recorded_declaration`, `::test_the_run_packet_reports_drift_from_the_recorded_declaration`, `::test_the_run_packet_counts_a_rename_source_against_the_scope`, `::test_the_run_packet_passes_a_rename_with_both_images_in_scope`, `::test_the_run_packet_marks_a_rejected_declaration_invalid`, `::test_the_run_packet_without_a_declaration_leaves_the_scope_gate_unknown`, `::test_the_run_packet_with_an_unparsed_body_leaves_the_scope_gate_unknown` |
+| Part-2 invariants with a scope | `lane == max(reasons)`, codes in the catalogue, `eligible` ⇔ every gate `true` ⇔ `low`, over within / drift / undeclared / invalid / not-declared (docs, migration, small isolated source) / high / source / carve-out / missing-input rows that all carry a scope signal; the table has both sides | `test_blast_radius_scope.py::test_the_lane_is_the_max_over_reasons_with_a_scope`, `::test_eligible_iff_every_gate_passed_iff_low_with_a_scope`, `::test_the_scoped_invariant_table_has_both_sides` |
+| Packet seam | `build_run_packet` classifies against `ToolState.scope_declaration`: within → `eligible`; drift names the path; a rename whose source is outside → drift naming the source; both images inside → `eligible`; rejected globs → `scope.invalid`; no declaration, or a body without a block → gate `null`, `scope.unknown`, `medium`, `assisted`, not `low_risk_passing` | `test_blast_radius_scope.py::test_the_run_packet_classifies_against_the_recorded_declaration`, `::test_the_run_packet_reports_drift_from_the_recorded_declaration`, `::test_the_run_packet_counts_a_rename_source_against_the_scope`, `::test_the_run_packet_passes_a_rename_with_both_images_in_scope`, `::test_the_run_packet_marks_a_rejected_declaration_invalid`, `::test_the_run_packet_without_a_declaration_leaves_the_scope_gate_unknown`, `::test_the_run_packet_with_an_unparsed_body_leaves_the_scope_gate_unknown` |
 | Verification tool seam | The judge's lane follows the recorded declaration: within → `low`, drift → `medium` | `test_blast_radius_scope.py::test_the_verification_tool_lane_reads_the_recorded_declaration` |
 | Approval rows need every gate | A hand-built `low` packet with every gate `true` but no `scope` row is neither `low_risk_passing` nor `clean_pass` (with the row it is `low_risk_passing`); a `medium` packet without the row is not `clean_pass` (with it, it is) | `test_blast_radius_scope.py::test_a_low_packet_whose_checklist_lacks_scope_never_selects_low_risk_passing`, `::test_a_medium_packet_whose_checklist_lacks_scope_never_selects_clean_pass` |
 | Source order | The PR body wins (`source_ref == "pr_description"`); otherwise the first closing issue with a block (`source_ref` starts `linked_issue`); no PR body → issues; an invalid or empty body declaration is not replaced by an issue's; no block anywhere → not declared; unread issues still honour the body; CRLF body | `tests/review/test_declared_scope_seam.py::test_the_pull_request_body_declaration_wins`, `::test_the_first_closing_issue_with_a_block_is_used_when_the_body_has_none`, `::test_a_run_without_a_pull_request_body_reads_the_closing_issues`, `::test_an_invalid_body_declaration_is_not_widened_by_a_closing_issue`, `::test_an_empty_body_declaration_is_not_replaced_by_a_closing_issue`, `::test_no_block_anywhere_records_an_undeclared_scope`, `::test_unread_closing_issues_still_honour_the_body`, `::test_a_crlf_body_is_read` |
@@ -90,7 +93,7 @@ reason echoes the glob" sit beside a positive check on the emitted code.
 | Wiring | `_run_review_after_analyze` has recorded the declaration when the fast-path gate runs | `test_declared_scope_seam.py::test_the_declaration_is_recorded_before_the_fast_path_gate` |
 | Plan mode | The Plan template has exactly one `Scope paths:` checklist line naming globs and the end of the plan body, inside the checklist; both providers render it; Plan is the only mode that asks | `tests/modes/test_plan_scope_paths.py` |
 | Plan template snapshot | The byte-identical snapshot test allows exactly that one added line in Plan and nothing else | `tests/test_modes.py::test_mode_prompt_text_is_byte_identical_after_split` |
-| Docs | `docs/blast-radius.md` *Declared scope* section states the block, the bounds (64, 200, `..`, leading `/`, control characters, `**`), renames, the four codes and `null`; the *Checklist* table has a `scope` row failed by `scope.drift`; `REVIEW-CHECKS.md` *Blast-radius merge lanes* names the block and `scope.drift`. The *Lane reasons* rows are enforced by the existing catalogue test, not duplicated | `test_blast_radius_scope.py::test_the_blast_radius_doc_has_a_declared_scope_section_stating_the_bounds`, `::test_the_checklist_section_says_what_fails_the_scope_gate`, `::test_review_checks_describes_the_scope_gate_under_blast_radius_lanes`; `tests/classify/test_lane_reason_catalogue.py` |
+| Docs | `docs/blast-radius.md` *Declared scope* section states the block, the bounds (64, 200, `..`, leading `/`, control characters, `**`), renames, the five codes and `null`; the *Checklist* table has a `scope` row failed by `scope.drift`; `REVIEW-CHECKS.md` *Blast-radius merge lanes* names the block and `scope.drift`. The *Lane reasons* rows are enforced by the existing catalogue test, not duplicated | `test_blast_radius_scope.py::test_the_blast_radius_doc_has_a_declared_scope_section_stating_the_bounds`, `::test_the_checklist_section_says_what_fails_the_scope_gate`, `::test_review_checks_describes_the_scope_gate_under_blast_radius_lanes`; `tests/classify/test_lane_reason_catalogue.py` |
 | Changelog | An `## [Unreleased]` / `### Changed` bullet says a pull request without a declared scope cannot reach `eligible` | `test_blast_radius_scope.py::test_the_changelog_says_an_undeclared_scope_cannot_reach_eligible` |
 
 ## Matrix
@@ -106,24 +109,8 @@ reason echoes the glob" sit beside a positive check on the emitted code.
 - The helper that turns `ToolState.scope_declaration` into a `ScopeSignal` (the
   packet and verification tests fix the outcome: `rejected` → `invalid`, `None`
   → `declared=False`), and the full signature of `classify_run_blast_radius`.
-- Which items `rejected` holds when the count bound (65) is broken: it is not
-  empty and `globs` is `()`.
-- Whether `src/**/*.py` matches `src/c.py` (zero directories).
 - The exact `source_ref` for a closing issue beyond its `linked_issue` prefix.
-- Whether a glob wrapped in backticks (`` - `src/**` ``) is unwrapped.
 - The wording of every reason message, beyond the paths a drift message names.
-
-## Open decision
-
-- **The lane when a supplied signal has `declared=False`.** The gate is `null`
-  with no reason, and the result must not be `eligible`. With no reason above
-  `low`, `lane == max(reasons)` gives `low`, while the part-2 equivalence
-  `eligible` ⇔ every gate `true` ⇔ `lane == "low"` needs the lane above `low`.
-  Either that case carries a `medium` reason, or the equivalence becomes
-  "`eligible` ⇔ every gate `true`, and `eligible` ⇒ `low`" for it. The tests
-  assert only what holds under both (gate `null`, no `scope.*` reason, not
-  `eligible`, not `low_risk_passing`); the invariant tables carry only declared
-  scopes or no `scope` key.
 
 ## Amendments to existing tests
 

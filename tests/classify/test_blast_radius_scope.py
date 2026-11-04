@@ -8,7 +8,7 @@ path — both images of a rename — must match a declared glob:
 - any path outside → ``scope.drift`` (``medium``) naming at most ten of them, gate ``false``;
 - a declaration with no globs → ``scope.undeclared`` (``medium``);
 - a declaration that broke a bound → ``scope.invalid`` (``medium``);
-- a signal with ``declared=False`` → gate ``null`` and no ``scope.*`` reason;
+- a signal with ``declared=False`` → ``scope.unknown`` (``medium``), gate ``null``;
 - a change set with no ``scope`` key at all (a library caller) → the ``scope`` gate
   is left out of the checklist and nothing else changes.
 
@@ -37,7 +37,7 @@ from mergecraft.classify.blast_radius import classify_blast_radius
 _RANK: dict[str, int] = {"low": 0, "medium": 1, "high": 2}
 _STATS: dict[str, object] = {"lines_added": 40, "lines_deleted": 10}
 _SCOPE_CODES: frozenset[str] = frozenset(
-    {"scope.within", "scope.drift", "scope.undeclared", "scope.invalid"}
+    {"scope.within", "scope.drift", "scope.undeclared", "scope.invalid", "scope.unknown"}
 )
 _PART_TWO_GATES: tuple[str, ...] = (
     "inputs",
@@ -132,6 +132,7 @@ def test_the_catalogue_carries_the_scope_codes_with_their_default_lanes(api: Any
         "scope.drift": "medium",
         "scope.invalid": "medium",
         "scope.undeclared": "medium",
+        "scope.unknown": "medium",
         "scope.within": "low",
     }
 
@@ -192,6 +193,7 @@ def test_a_low_change_inside_its_scope_is_eligible_with_every_gate_true() -> Non
         ("src/**", "src/a/b/c.py"),
         ("src/**/*.py", "src/a/b/c.py"),
         ("src/**", "src/c.py"),
+        ("src/**/*.py", "src/c.py"),
         ("docs/*.md", "docs/guide.md"),
         ("README.md", "README.md"),
         ("**/conftest.py", "tests/a/b/conftest.py"),
@@ -200,6 +202,7 @@ def test_a_low_change_inside_its_scope_is_eligible_with_every_gate_true() -> Non
         "double-star-deep",
         "double-star-suffix-deep",
         "double-star-shallow",
+        "double-star-suffix-zero-directories",
         "star",
         "exact",
         "leading-double-star",
@@ -357,14 +360,27 @@ def test_without_a_scope_key_the_gate_is_left_out_and_nothing_else_changes(api: 
     assert result.auto_merge_lane == "eligible"
 
 
-def test_an_undeclared_signal_keeps_the_gate_unknown_and_no_scope_reason_fires(
+def test_a_not_declared_signal_is_scope_unknown_at_medium_with_the_gate_null(
     api: Any,
 ) -> None:
     result = _classify(_c(["docs/guide.md"], _scope([], declared=False)))
 
+    reason = _reason(result, "scope.unknown")
     assert "scope" in api.GATE_ORDER
+    assert reason.lane == "medium"
+    assert reason.message
     assert _gates(result)["scope"] is None
-    assert not _SCOPE_CODES & set(_codes(result))
+    assert result.lane == "medium"
+    assert result.auto_merge_lane == "assisted"
+    assert set(_codes(result)) & _SCOPE_CODES == {"scope.unknown"}
+
+
+def test_a_not_declared_signal_ignores_any_globs_it_carries() -> None:
+    result = _classify(_c(["docs/guide.md"], _scope(["docs/**"], declared=False)))
+
+    assert "scope.unknown" in _codes(result)
+    assert "scope.within" not in _codes(result)
+    assert _gates(result)["scope"] is None
     assert result.auto_merge_lane != "eligible"
 
 
@@ -462,6 +478,12 @@ SCOPED_CASES: list[tuple[str, dict[str, Any]]] = [
     ("drift-docs", _c(["docs/guide.md", "README.md"], _scope(["docs/**"]))),
     ("undeclared", _c(["docs/guide.md"], _scope([]))),
     ("invalid", _c(["docs/guide.md"], _scope([], invalid=True))),
+    ("not-declared", _c(["docs/guide.md"], _scope([], declared=False))),
+    ("not-declared-migration", _c(["migrations/0001.sql"], _scope([], declared=False))),
+    (
+        "not-declared-small-isolated-source",
+        _c(["src/a.py"], _scope([], declared=False), {"lines_added": 1, "lines_deleted": 1}),
+    ),
     ("within-migration", _c(["migrations/0001.sql"], _scope(["migrations/**"]))),
     ("drift-migration", _c(["migrations/0001.sql", "x.txt"], _scope(["migrations/**"]))),
     (
@@ -610,8 +632,9 @@ def test_the_run_packet_without_a_declaration_leaves_the_scope_gate_unknown(
     packet = run_api.build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
 
     assert _packet_gates(packet)["scope"] is None
-    assert not _SCOPE_CODES & set(_codes(packet.blast_radius))
-    assert packet.blast_radius.auto_merge_lane != "eligible"
+    assert set(_codes(packet.blast_radius)) & _SCOPE_CODES == {"scope.unknown"}
+    assert packet.blast_radius.lane == "medium"
+    assert packet.blast_radius.auto_merge_lane == "assisted"
     assert select_rule_id(packet) != "low_risk_passing"
 
 
@@ -629,7 +652,8 @@ def test_the_run_packet_with_an_unparsed_body_leaves_the_scope_gate_unknown(
     packet = run_api.build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
 
     assert _packet_gates(packet)["scope"] is None
-    assert packet.blast_radius.auto_merge_lane != "eligible"
+    assert "scope.unknown" in _codes(packet.blast_radius)
+    assert packet.blast_radius.auto_merge_lane == "assisted"
 
 
 # ── the approval rows need every gate in ``GATE_ORDER`` ──────────────────────
@@ -754,6 +778,7 @@ def test_the_blast_radius_doc_has_a_declared_scope_section_stating_the_bounds() 
         "scope.undeclared",
         "scope.invalid",
         "scope.within",
+        "scope.unknown",
         "null",
     ):
         assert needle in section, needle

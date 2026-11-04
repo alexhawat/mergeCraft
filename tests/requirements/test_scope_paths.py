@@ -57,6 +57,8 @@ _FORMS: dict[str, str] = {
     "tests/requirements/*.py\n```\n",
     "blank-line-before-first-item": "Scope paths:\n\n- src/mergecraft/requirements/**\n"
     "- tests/requirements/*.py\n",
+    "backticked-items": "Scope paths:\n- `src/mergecraft/requirements/**`\n"
+    "- `tests/requirements/*.py`\n",
     "indented-items": "Scope paths:\n  - src/mergecraft/requirements/**  \n"
     "  - tests/requirements/*.py\n",
 }
@@ -191,7 +193,7 @@ def test_sixty_five_globs_declares_nothing(ingest: Any) -> None:
 
     assert declaration.declared is True
     assert declaration.globs == ()
-    assert declaration.rejected != ()
+    assert declaration.rejected == tuple(globs)
 
 
 def test_a_two_hundred_character_glob_is_within_the_bound(ingest: Any) -> None:
@@ -252,6 +254,27 @@ def test_a_wildcard_only_glob_declares_nothing(ingest: Any, wildcard: str) -> No
     assert declaration.declared is True
     assert declaration.globs == ()
     assert declaration.rejected == (wildcard,)
+
+
+@pytest.mark.parametrize(
+    ("item", "unwrapped"),
+    [("`**`", "**"), ("`src/../etc`", "src/../etc"), ("`/etc/passwd`", "/etc/passwd")],
+    ids=["wildcard", "dotdot", "absolute"],
+)
+def test_a_backticked_glob_is_unwrapped_before_it_is_validated(
+    ingest: Any, item: str, unwrapped: str
+) -> None:
+    declaration = _parse(ingest, f"Scope paths:\n- `docs/**`\n- {item}\n")
+
+    assert declaration.declared is True
+    assert declaration.globs == ()
+    assert [entry.strip("`") for entry in declaration.rejected] == [unwrapped]
+
+
+def test_a_backticked_glob_is_stored_without_its_backticks(ingest: Any) -> None:
+    declaration = _parse(ingest, "Scope paths:\n- `docs/**`\n- tests/**\n")
+
+    assert declaration.globs == ("docs/**", "tests/**")
 
 
 @pytest.mark.parametrize(
