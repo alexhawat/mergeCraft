@@ -30,6 +30,23 @@ DEFAULT_API_URL = "https://api.github.com"
 DEFAULT_SERVER_URL = "https://github.com"
 DEFAULT_ACCEPT = "application/vnd.github+json"
 DEFAULT_API_VERSION = "2022-11-28"
+
+# The bodies of the issues a pull request closes. One page only: a pull request
+# closing more issues than this is read as "not fully read" rather than as the
+# first page, so criteria in an unread issue can never be silently skipped.
+CLOSING_ISSUES_PAGE_SIZE = 25
+_CLOSING_ISSUE_BODIES_QUERY = """
+query($owner: String!, $repo: String!, $number: Int!, $first: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      closingIssuesReferences(first: $first) {
+        pageInfo { hasNextPage }
+        nodes { number body }
+      }
+    }
+  }
+}
+"""
 GITHUB_LIST_PAGE_SIZE: Final[int] = 100
 GITHUB_LIST_MAX_PAGES: Final[int] = 20
 
@@ -342,6 +359,49 @@ class GitHubClient:
             msg = f"GraphQL errors: {data['errors']}"
             raise RuntimeError(msg)
         return data.get("data") or {}
+
+    async def closing_issue_bodies(
+        self, owner: str, repo: str, number: int
+    ) -> tuple[str, ...] | None:
+        """Return the bodies of the issues pull request ``number`` closes.
+
+        Args:
+            owner (str): Repository owner.
+            repo (str): Repository name.
+            number (int): Pull request number.
+
+        Returns:
+            tuple[str, ...] | None: One body per closing issue, in GitHub's order
+            (an issue without a body contributes ``""``); ``()`` when the pull
+            request closes nothing; ``None`` when the answer is malformed or
+            longer than one page, so a partial read is never mistaken for all of it.
+
+        Raises:
+            RuntimeError: GraphQL reported errors or answered with a non-object.
+            httpx.HTTPError: The request itself failed.
+        """
+        data = await self.graphql(
+            _CLOSING_ISSUE_BODIES_QUERY,
+            {"owner": owner, "repo": repo, "number": number, "first": CLOSING_ISSUES_PAGE_SIZE},
+        )
+        level: Any = data
+        for key in ("repository", "pullRequest", "closingIssuesReferences"):
+            level = level.get(key) if isinstance(level, dict) else None
+        if not isinstance(level, dict):
+            return None
+        page_info = level.get("pageInfo")
+        if isinstance(page_info, dict) and page_info.get("hasNextPage"):
+            return None
+        nodes = level.get("nodes")
+        if not isinstance(nodes, list):
+            return None
+        bodies: list[str] = []
+        for node in nodes:
+            if not isinstance(node, dict):
+                return None
+            body = node.get("body")
+            bodies.append(body if isinstance(body, str) else "")
+        return tuple(bodies)
 
     # --- repos ---
 

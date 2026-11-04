@@ -1,0 +1,174 @@
+# Policy evidence
+
+A policy rule with `enforcement: required` names evidence keys under
+`evidence.required`. The rule's finding stays at `Major` until every key it names
+is present. Once they all are, the rule takes the engine's satisfied path: a
+blocking declared severity drops to `Trivial`, and a non-blocking one keeps its
+declared value. This page covers where each key comes from during a review, and
+why the pull request under review cannot produce its own evidence.
+
+**Nothing a pull request writes about itself counts as evidence.** That excludes
+the pull request body, a manifest or config key added on the head branch, and a
+check run that a head-branch workflow can post under any name it likes. Each
+producer reads from a source the author cannot write, and each key that stays
+absent carries a reason, which the policy row repeats.
+
+## Producers
+
+| Key | Where the evidence comes from | Who can write that source | Why the pull request cannot forge it |
+| --- | --- | --- | --- |
+| `requirements` | Acceptance criteria in the bodies of the issues the pull request closes (GitHub's closing references, read once at run start). mergeCraft maps each criterion against the diff. | Whoever can edit those issues. | The author can write criteria into an issue, but cannot claim the diff satisfies them, because mergeCraft does the mapping. The pull request body is never read for criteria. |
+| `xrepo` | The linked-repo manifest (`.mergecraft/linked-repos.yaml`) as read from the base commit, plus this run's review of the linked repositories. | Whoever can merge to the base branch. | A manifest the pull request adds or edits is never used for its own review. Every repository the base declares has to be reviewed in this run, with none omitted. |
+| `health_check`, `rollback_plan`, `contract_schema` | The proof declared for the key under `policy.evidence.<key>` in the operator-owned configuration: either a check run or a workflow artifact on the head commit. | The operator, for the declaration. A GitHub App the operator trusts, or a successful CI run on the head commit, for the proof. | The declaration lives in configuration the pull request cannot write. A check run counts only when an App named in `trustedApps` posted it, and `github-actions` is refused. An artifact document can only vouch for the key and commit it names, and the reviewed commit is fixed. |
+
+### `requirements`
+
+The key is present when the linked issues contain at least one acceptance
+criterion and the diff evidences every one of them: each maps to `satisfied` or
+`partially_satisfied`, with its evidence paths inside the diff. Any of the
+following keeps the key absent:
+
+- A criterion that is `contradicted`, `not_evidenced` or `out_of_scope`. The
+  reason names that criterion and its state.
+- A pull request that closes no issue, or closing issues that have no acceptance
+  criteria.
+- Linked issues that were never read. A pull request event is required, and if
+  the read fails or the pull request closes more issues than fit on one page,
+  the issues count as unread. They are never treated as closing nothing.
+
+### `xrepo`
+
+The key is present when the base declares at least one linked repository, every
+declared repository was reviewed in this run, and the review recorded no
+omission. It stays absent, with a reason, in these cases:
+
+- The base declares no linked repositories (`no linked repositories are declared
+  on the base`). This also applies when only the pull request's head has a
+  manifest.
+- The base manifest exists but could not be read, or was not read at all.
+- The review never ran, never saw one of the base's repositories, or omitted
+  one. An omission happens when a repository is not granted for the run, its
+  sibling checkout is missing, or its pin does not match. The reason names each
+  repository affected and why.
+
+### Declared proofs: `health_check`, `rollback_plan`, `contract_schema`
+
+With no declaration for a key, the key is absent with `no producer is declared
+for <key>; declare policy.evidence.<key> in the base configuration`, and
+mergeCraft reads nothing from GitHub for it.
+
+Declarations are honoured only from the **operator-owned settings snapshot**,
+which is the configuration a `pull_request_target` run captures from the base
+before it checks out the pull request. On other events the configuration on disk
+is the pull request's own, so no declaration counts there, and the key stays
+absent with the same reason. A `policy.evidence` block added in the pull
+request's own `.mergecraft/config.yaml` is never read for that pull request.
+
+**Check run** (`checkRun: {name, trustedApps}`). mergeCraft lists the check runs
+on the reviewed head commit. A run counts only when all of the following hold:
+
+- its name matches `name` exactly;
+- its own `head_sha` is the reviewed commit;
+- it was posted by a GitHub App whose slug is in `trustedApps`;
+- it has completed with conclusion `success`.
+
+If a trusted run with that name failed, was cancelled, came back neutral or is
+still in progress, the key stays absent, even when another run with the same
+name succeeded. A run on the base commit or on a branch ref says nothing about
+the head, so mergeCraft never queries for it. `github-actions` is refused in
+`trustedApps`, because a `pull_request` workflow takes its job names from the
+head ref, which the author controls. A workflow that is meant to vouch for a key
+has to publish its check run as its own App.
+
+**Artifact** (`artifact: {name}`). mergeCraft lists the workflow runs for the
+reviewed head commit and keeps only those that completed with `success` and are
+bound to that commit. It then downloads the artifact called `name` from one of
+those runs. Inside the zip it looks for exactly one member,
+`policy-evidence.json`, of at most 64 KiB uncompressed. The cap applies to the
+read itself: mergeCraft never decompresses more than 64 KiB plus one byte, and an
+archive larger than 1 MiB is refused before download.
+
+The member must be a JSON object of this shape:
+
+```json
+{
+  "schema": "mergecraft.policy-evidence/1",
+  "key": "rollback_plan",
+  "head_sha": "<the full head commit SHA the run checked out>",
+  "status": "ok",
+  "detail": "rollback rehearsed against staging"
+}
+```
+
+Any of the following keeps the key absent, with a reason naming the artifact:
+a different `schema`, a `key` other than the declared one, a `head_sha` other
+than the reviewed commit, a `status` other than `ok`, bytes that are not JSON,
+and a document over the cap. The record shows `detail` and stores the SHA-256 of
+the document bytes as its digest.
+
+A workflow that produces the document writes it after the work it proves has
+succeeded, then uploads it. For example:
+
+```yaml
+- run: ./scripts/rehearse-rollback.sh
+- run: |
+    printf '{"schema":"mergecraft.policy-evidence/1","key":"rollback_plan","head_sha":"%s","status":"ok","detail":"rollback rehearsed against staging"}' \
+      "$(git rev-parse HEAD)" > policy-evidence.json
+- uses: actions/upload-artifact@v4
+  with:
+    name: rollback-proof
+    path: policy-evidence.json
+```
+
+## Configuration
+
+`policy.evidence` maps a key to exactly one proof. It lives in
+`.mergecraft/config.yaml` on the base branch:
+
+```yaml
+policy:
+  evidence:
+    health_check:
+      checkRun:
+        name: "Deploy / health"
+        trustedApps: ["acme-ci"]
+    rollback_plan:
+      artifact:
+        name: rollback-proof
+```
+
+- Only `health_check`, `rollback_plan` and `contract_schema` take a declaration.
+  `requirements` and `xrepo` have their own producers, and any other key has no
+  producer, so it is always absent with `no producer exists for <key>`.
+- A declaration that names both `checkRun` and `artifact`, or neither, is a
+  configuration error.
+- `checkRun` needs a non-empty `name` and at least one App in `trustedApps`.
+  `github-actions`, in any letter case, is refused.
+- Unknown keys are refused at every level, so a misspelt `trustedApps` fails
+  loudly instead of silently trusting nobody.
+
+## When producers run
+
+Producers run only when a rule the change set triggers has `evidence.required`,
+and only for the keys those rules name. A repository with no such rule makes no
+extra GitHub call. The evidence is collected once per diff, alongside the policy
+rows, so every verdict seam reads the same population. A re-scoped diff collects
+again. No producer starts a process: they read state the run already holds and
+the GitHub API. A failed read leaves the key absent and names the error; it never
+fails the review.
+
+## What the row shows
+
+For each required key that is present, the policy row lists `evidence present:
+<key> (<source>: <detail>)`. The source is one of `linked-issue-criteria`,
+`operator-manifest`, `declared-check-run` or `declared-artifact`. If any required
+key is missing, the message and the evidence both carry `required evidence
+missing: <keys>`, naming only the absent keys, followed by one `why <key> is
+missing: <reason>` line for each of them.
+
+## See also
+
+- [`REVIEW-CHECKS.md`](../REVIEW-CHECKS.md), *Policy rules*: enforcement modes,
+  where the rules come from, and waivers.
+- [`docs/trust-policy.md`](trust-policy.md): which events check out operator-owned
+  configuration.

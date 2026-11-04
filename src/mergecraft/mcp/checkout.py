@@ -1490,21 +1490,26 @@ def checkout_pr_tool(ctx: ToolContext):
 
         try:
             from mergecraft.review.linked_repos import (
-                attach_linked_repo_review,
+                linked_repo_review_with_payload,
                 operator_authorized_linked_repos,
             )
 
             base_lookup = _base_linked_repo_manifest(
                 cwd=cwd, base_ref=base_ref, base_fetch_failure=base_fetch_failure
             )
-            linked = attach_linked_repo_review(
+            # Recorded for the ``xrepo`` policy evidence producer, which reads
+            # what this checkout computed instead of walking git a second time.
+            ctx.tool_state.linked_repo_base_manifest = base_lookup
+            ctx.tool_state.linked_repo_review = None
+            linked = linked_repo_review_with_payload(
                 Path(cwd),
                 authorized_repos=operator_authorized_linked_repos(),
                 base_manifest=base_lookup.manifest,
                 base_manifest_error=base_lookup.unreadable_reason,
             )
             if linked is not None:
-                result.update(linked)
+                ctx.tool_state.linked_repo_review = linked[0]
+                result.update(linked[1])
         except Exception as xrepo_err:
             logger.info("linked-repo review soft-failed: {}", xrepo_err)
 
