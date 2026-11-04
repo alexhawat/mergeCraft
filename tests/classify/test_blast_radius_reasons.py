@@ -42,6 +42,15 @@ _LOCKED_GATE_ORDER: tuple[str, ...] = (
     "tests",
     "review_config",
 )
+# The ten gates part 2 ships. Gates appended to ``GATE_ORDER`` after these belong
+# to optional signals: each is named after the ``ChangeSet`` key that supplies it
+# and is omitted from the checklist when the change does not carry that key.
+_PART2_GATES: tuple[str, ...] = (*_LOCKED_GATE_ORDER, "source")
+
+
+def _expected_gates(api: Any, change: dict[str, Any]) -> list[str]:
+    """``GATE_ORDER`` minus the optional gates whose signal ``change`` did not supply."""
+    return [gate for gate in api.GATE_ORDER if gate in _PART2_GATES or gate in change]
 
 
 @pytest.fixture
@@ -220,7 +229,8 @@ def test_gate_order_starts_with_the_locked_gates(api: Any) -> None:
 def test_the_checklist_lists_every_gate_in_gate_order(api: Any, change: dict[str, Any]) -> None:
     result = _classify(change)
 
-    assert [gate.gate for gate in result.checklist] == list(api.GATE_ORDER)
+    assert tuple(api.GATE_ORDER[: len(_PART2_GATES)]) == _PART2_GATES
+    assert [gate.gate for gate in result.checklist] == _expected_gates(api, change)
 
 
 @pytest.mark.parametrize(

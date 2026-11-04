@@ -178,7 +178,9 @@ def test_a_blast_radius_without_inputs_never_selects_low_risk_auto_merge(
 
 def test_a_measured_low_change_still_selects_low_risk_passing() -> None:
     """Control: the gate row is reachable when the classification had inputs."""
-    change: ChangeSet = {"changed_paths": ["docs/guide.md"], "diff_stats": {"lines_added": 3}}
+    change = _with_optional_signals(
+        {"changed_paths": ["docs/guide.md"], "diff_stats": {"lines_added": 3}}
+    )
     packet = _decided_packet(classify_blast_radius(change), files_changed=["docs/guide.md"])
 
     assert _is_low_risk_passing(packet) is True
@@ -269,7 +271,7 @@ def test_gate_order_starts_with_the_missing_signal_table_gates() -> None:
     from mergecraft.classify.blast_radius import GATE_ORDER
 
     assert tuple(GATE_ORDER[: len(_NO_PATHS)]) == tuple(_NO_PATHS)
-    assert [gate.gate for gate in classify_blast_radius({}).checklist] == list(GATE_ORDER)
+    assert [gate.gate for gate in classify_blast_radius({}).checklist] == _expected_gates({})
 
 
 @pytest.mark.parametrize(
@@ -339,6 +341,42 @@ def test_a_complete_low_change_passes_every_gate() -> None:
 _LOCKED_GATES = list(_NO_PATHS)
 
 
+def _gate_order() -> list[str]:
+    """Every gate in ``GATE_ORDER``, so a hand-built checklist is complete in every lane."""
+    from mergecraft.classify.blast_radius import GATE_ORDER
+
+    return list(GATE_ORDER)
+
+
+# The ten gates part 2 ships. Gates appended to ``GATE_ORDER`` after these belong
+# to optional signals: each is named after the ``ChangeSet`` key that supplies it
+# and is omitted from the checklist when the change does not carry that key.
+_PART2_GATES: tuple[str, ...] = tuple(_NO_PATHS)
+
+
+def _expected_gates(change: dict[str, Any]) -> list[str]:
+    """``GATE_ORDER`` minus the optional gates whose signal ``change`` did not supply."""
+    return [gate for gate in _gate_order() if gate in _PART2_GATES or gate in change]
+
+
+def _with_optional_signals(change: dict[str, Any]) -> Any:
+    """A change that also supplies every optional signal, so its checklist is complete.
+
+    Each key is a harmless extra key until the lane that reads it lands: the
+    classifier reads only the keys it knows.
+    """
+    paths = change.get("changed_paths")
+    return {
+        **change,
+        "fix_proof": {"required": False, "status": "not-declared"},
+        "scope": {
+            "declared": True,
+            "globs": list(paths) if isinstance(paths, list) else [],
+            "invalid": False,
+        },
+    }
+
+
 def _classification_with_checklist(
     *, lane: str, auto_merge_lane: str, inputs: bool | None, categories: list[str]
 ) -> BlastRadiusClassification:
@@ -353,7 +391,7 @@ def _classification_with_checklist(
             "reasons": [{"code": "baseline.clean", "lane": lane, "message": "forged"}],
             "checklist": [
                 {"gate": gate, "passed": inputs if gate == "inputs" else True}
-                for gate in _LOCKED_GATES
+                for gate in _gate_order()
             ],
         }
     )
@@ -505,7 +543,7 @@ def _low_with_gate(gate: str, passed: bool | None) -> BlastRadiusClassification:
             "categories": [],
             "reasons": [{"code": "baseline.clean", "lane": "low", "message": "forged"}],
             "checklist": [
-                {"gate": name, "passed": passed if name == gate else True} for name in _LOCKED_GATES
+                {"gate": name, "passed": passed if name == gate else True} for name in _gate_order()
             ],
         }
     )
@@ -548,7 +586,9 @@ def test_the_issue_example_low_lane_with_nonpassing_tests_never_auto_merges(
 def test_a_real_medium_classification_with_a_failed_gate_still_reaches_clean_pass() -> None:
     """Control: a measured ``medium`` lane always has a ``False`` gate; clean_pass keeps it."""
     classification = classify_blast_radius(
-        {"changed_paths": ["uv.lock"], "diff_stats": {"lines_added": 4, "lines_deleted": 1}}
+        _with_optional_signals(
+            {"changed_paths": ["uv.lock"], "diff_stats": {"lines_added": 4, "lines_deleted": 1}}
+        )
     )
     packet = _decided_packet(classification, files_changed=["uv.lock"])
 
