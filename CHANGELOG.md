@@ -16,10 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never the pull request body. `xrepo` needs every linked repository the base
   manifest declares to be reviewed, with none omitted. `health_check`,
   `rollback_plan` and `contract_schema` read a proof declared under the new
-  `policy.evidence.<key>` setting in the operator-owned configuration: either a
-  successful check run on the head commit from a trusted GitHub App
-  (`github-actions` is refused), or a `policy-evidence.json` of at most 64 KiB
-  that a successful workflow run uploaded for that commit. Producers run only
+  `policy.evidence.<key>` setting in the base-side configuration (the
+  operator-owned snapshot, or the base commit's `.mergecraft/config.yaml`; never
+  the pull request's own copy): either a successful check run on the head commit
+  from a trusted GitHub App (`github-actions` is refused), or a
+  `policy-evidence.json` of at most 64 KiB that a successful workflow run
+  uploaded for that commit. Producers run only
   when a triggered rule requires evidence. The row lists each present key with
   its source and gives the reason for each missing one. See
   `docs/policy-evidence.md`.

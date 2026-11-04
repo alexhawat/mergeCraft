@@ -638,10 +638,12 @@ review from a source the pull request cannot write:
 - `xrepo`: the linked-repo manifest on the base, with every repository in it
   reviewed and none omitted.
 - `health_check`, `rollback_plan` and `contract_schema`: a proof declared under
-  `policy.evidence.<key>` in the operator-owned configuration. The proof is
-  either a successful check run on the head commit from a trusted GitHub App
-  (`github-actions` is refused) or a bounded `policy-evidence.json` that a
-  successful workflow run uploaded for that commit.
+  `policy.evidence.<key>` in the base-side configuration (the operator-owned
+  snapshot, or the base commit's `.mergecraft/config.yaml`), never the pull
+  request's own copy. The proof is either a successful check run on the head
+  commit from a trusted GitHub App (`github-actions` is refused) or a bounded
+  `policy-evidence.json` that a successful workflow run uploaded for that
+  commit.
 
 Producers run only when a triggered rule requires evidence. The row lists each
 present key with its source and names every missing key with the reason it is

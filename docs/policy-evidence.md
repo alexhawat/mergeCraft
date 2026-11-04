@@ -19,7 +19,7 @@ absent carries a reason, which the policy row repeats.
 | --- | --- | --- | --- |
 | `requirements` | Acceptance criteria in the bodies of the issues the pull request closes (GitHub's closing references, read once at run start). mergeCraft maps each criterion against the diff. | Whoever can edit those issues. | The author can write criteria into an issue, but cannot claim the diff satisfies them, because mergeCraft does the mapping. The pull request body is never read for criteria. |
 | `xrepo` | The linked-repo manifest (`.mergecraft/linked-repos.yaml`) as read from the base commit, plus this run's review of the linked repositories. | Whoever can merge to the base branch. | A manifest the pull request adds or edits is never used for its own review. Every repository the base declares has to be reviewed in this run, with none omitted. |
-| `health_check`, `rollback_plan`, `contract_schema` | The proof declared for the key under `policy.evidence.<key>` in the operator-owned configuration: either a check run or a workflow artifact on the head commit. | The operator, for the declaration. A GitHub App the operator trusts, or a successful CI run on the head commit, for the proof. | The declaration lives in configuration the pull request cannot write. A check run counts only when an App named in `trustedApps` posted it, and `github-actions` is refused. An artifact document can only vouch for the key and commit it names, and the reviewed commit is fixed. |
+| `health_check`, `rollback_plan`, `contract_schema` | The proof declared for the key under `policy.evidence.<key>` in the base-side configuration (the operator-owned snapshot, or the base commit's `.mergecraft/config.yaml`; never the pull request's own copy): either a check run or a workflow artifact on the head commit. | Whoever can merge to the base branch, for the declaration. A GitHub App the operator trusts, or a successful CI run on the head commit, for the proof. | The declaration is read from the base side, which the pull request cannot write. A check run counts only when an App named in `trustedApps` posted it, and `github-actions` is refused. An artifact document can only vouch for the key and commit it names, and the reviewed commit is fixed. |
 
 ### `requirements`
 
@@ -57,12 +57,28 @@ With no declaration for a key, the key is absent with `no producer is declared
 for <key>; declare policy.evidence.<key> in the base configuration`, and
 mergeCraft reads nothing from GitHub for it.
 
-Declarations are honoured only from the **operator-owned settings snapshot**,
-which is the configuration a `pull_request_target` run captures from the base
-before it checks out the pull request. On other events the configuration on disk
-is the pull request's own, so no declaration counts there, and the key stays
-absent with the same reason. A `policy.evidence` block added in the pull
-request's own `.mergecraft/config.yaml` is never read for that pull request.
+Declarations come from the **base-side configuration, never the pull request's
+own copy**, and they resolve the same way the policy rules do:
+
+1. An **operator-owned settings snapshot** wins. This is the configuration a
+   `pull_request_target` run captures from the base before it checks out the
+   pull request; the base commit is then not consulted.
+2. Otherwise mergeCraft reads `.mergecraft/config.yaml` at the pull request's
+   **base commit**, the same commit the policy rules are read from, and parses it
+   through the settings model. This is a bounded `git` read and the only process
+   a producer ever starts.
+3. The pull request head's configuration, on disk or in a snapshot that is not
+   operator-owned, is never read. A head that removes the base's declaration
+   cannot drop it, a head that rewrites it to trust its own App cannot replace
+   it, and a `policy.evidence` block only the head adds counts for nothing (the
+   key stays absent with the declare-it reason).
+
+A base that cannot be read is unknown, not empty. If no base commit is known,
+the base commit is not in the checkout, the file cannot be read, or the settings
+model refuses the base config, the key stays absent and the reason names the
+base commit (and `.mergecraft/config.yaml` when the file did not parse) rather
+than saying nothing was declared. A base commit with no `.mergecraft/config.yaml`
+declares nothing.
 
 **Check run** (`checkRun: {name, trustedApps}`). mergeCraft lists the check runs
 on the reviewed head commit. A run counts only when all of the following hold:
@@ -153,8 +169,9 @@ Producers run only when a rule the change set triggers has `evidence.required`,
 and only for the keys those rules name. A repository with no such rule makes no
 extra GitHub call. The evidence is collected once per diff, alongside the policy
 rows, so every verdict seam reads the same population. A re-scoped diff collects
-again. No producer starts a process: they read state the run already holds and
-the GitHub API. A failed read leaves the key absent and names the error; it never
+again. Producers read state the run already holds and the GitHub API; the only
+process any of them starts is the `git` read of the base commit's config, and
+only when there is no operator-owned snapshot. A failed read leaves the key absent and names the error; it never
 fails the review.
 
 ## What the row shows
@@ -170,5 +187,5 @@ missing: <reason>` line for each of them.
 
 - [`REVIEW-CHECKS.md`](../REVIEW-CHECKS.md), *Policy rules*: enforcement modes,
   where the rules come from, and waivers.
-- [`docs/trust-policy.md`](trust-policy.md): which events check out operator-owned
-  configuration.
+- [`docs/trust-policy.md`](trust-policy.md): which events capture an operator-owned
+  snapshot, and when the base commit's configuration applies instead.

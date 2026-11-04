@@ -517,8 +517,9 @@ class PolicySettings(BaseModel):
     """``policy``: how a repository proves the evidence its policy rules require.
 
     ``evidence`` maps an evidence key (``health_check``, ``rollback_plan``,
-    ``contract_schema``) to the proof that satisfies it. Declarations are honoured
-    only from the operator-owned settings snapshot, never from a pull request's own
+    ``contract_schema``) to the proof that satisfies it. Declarations are read from
+    the base side, like the policy rules: the operator-owned settings snapshot, else
+    ``.mergecraft/config.yaml`` at the base commit, never the pull request's own
     configuration; see ``docs/policy-evidence.md``.
     """
 

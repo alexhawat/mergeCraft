@@ -11,14 +11,18 @@ could not have written it:
 * ``xrepo`` — the linked-repo manifest as the base declares it, every repository
   in it reviewed in this run with nothing omitted.
 * ``health_check`` / ``rollback_plan`` / ``contract_schema`` — a proof declared in
-  the operator-owned configuration (``policy.evidence.<key>``): a successful check
-  run on the head commit from a trusted GitHub App, or a bounded JSON document a
-  successful workflow run on the head commit uploaded and bound to that commit.
+  the base-side configuration (``policy.evidence.<key>``: the operator-owned
+  snapshot, else ``.mergecraft/config.yaml`` at the base commit, never the pull
+  request's own copy): a successful check run on the head commit from a trusted
+  GitHub App, or a bounded JSON document a successful workflow run on the head
+  commit uploaded and bound to that commit.
 
 Unknown is never present: a source the run did not read, a listing that failed or
 was truncated, a run that did not succeed and a document that is malformed,
 oversized or bound to another commit each keep the key absent with a reason. No
-producer raises on a transport failure and none runs a process.
+producer raises on a transport failure. The only process a producer starts is the
+``git`` read of the base commit's config, and only when no operator-owned snapshot
+exists.
 
 Module: mergecraft.policy.evidence_producers
 Depends: hashlib, json, zipfile, mergecraft.requirements, mergecraft.xrepo.review,
@@ -34,6 +38,7 @@ Exports:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import zipfile
 from dataclasses import dataclass
@@ -51,6 +56,8 @@ if TYPE_CHECKING:
     from mergecraft.utils.github import GitHubClient
     from mergecraft.xrepo.review import BaseManifestLookup, XrepoReview
 
+    _ProducerFn = Callable[[Any, str, "_Declarations"], Coroutine[Any, Any, "EvidenceRecord"]]
+
 EvidenceSource = Literal[
     "linked-issue-criteria",
     "operator-manifest",
@@ -64,6 +71,7 @@ DECLARED_KEYS: Final[frozenset[str]] = frozenset(
     {"health_check", "rollback_plan", "contract_schema"}
 )
 
+BASE_CONFIG_REL: Final = ".mergecraft/config.yaml"
 EVIDENCE_DOCUMENT_SCHEMA: Final = "mergecraft.policy-evidence/1"
 EVIDENCE_DOCUMENT_MEMBER: Final = "policy-evidence.json"
 # The proof document's uncompressed size cap. The read itself is bounded by it:
@@ -140,7 +148,7 @@ def _diff_changed_paths(ctx: Any) -> tuple[str, ...]:
     return tuple(changed_paths_from_diff(text))
 
 
-async def _produce_requirements(ctx: Any, key: str) -> EvidenceRecord:
+async def _produce_requirements(ctx: Any, key: str, _declarations: _Declarations) -> EvidenceRecord:
     from mergecraft.requirements.criteria import ChangeMap
     from mergecraft.requirements.ingest import ingest_requirements
 
@@ -197,7 +205,7 @@ async def _produce_requirements(ctx: Any, key: str) -> EvidenceRecord:
 # ---------------------------------------------------------------------------
 
 
-async def _produce_xrepo(ctx: Any, key: str) -> EvidenceRecord:
+async def _produce_xrepo(ctx: Any, key: str, _declarations: _Declarations) -> EvidenceRecord:
     base: BaseManifestLookup | None = getattr(ctx.tool_state, "linked_repo_base_manifest", None)
     review: XrepoReview | None = getattr(ctx.tool_state, "linked_repo_review", None)
     if base is None:
@@ -246,19 +254,80 @@ def _not_declared(key: str) -> str:
     )
 
 
-def _declaration(ctx: Any, key: str) -> EvidenceProducerSettings | None:
-    """Return the operator-owned declaration for ``key``, or ``None``.
+def _unreadable_base(key: str, why: str) -> str:
+    return f"policy.evidence.{key} could not be read from the base configuration: {why}"
 
-    Only the run-scope snapshot captured from a tree the pull request cannot write
-    counts. A snapshot read from the pull request's own checkout — or no snapshot
-    at all, which would mean reading whatever is on disk — declares nothing.
+
+def _read_base_declarations(ctx: Any) -> dict[str, EvidenceProducerSettings] | str:
+    """Read ``policy.evidence`` from the base commit's config, or say why it could not be.
+
+    The base commit is the one the policy rules are read from. A base with no
+    ``.mergecraft/config.yaml`` declares nothing (an empty map). A base that is
+    unknown, missing from the checkout, unreadable, or whose config the settings
+    model refuses is unknown, never empty: the result is then the reason (a
+    ``str``), with ``{key}`` left for the caller to name the key.
     """
-    from mergecraft.config.settings_snapshot import run_scope_settings_snapshot
+    import yaml
+    from pydantic import ValidationError
 
-    snapshot = getattr(ctx, "repo_settings_snapshot", None) or run_scope_settings_snapshot()
-    if snapshot is None or not snapshot.operator_owned:
-        return None
-    return snapshot.settings.policy.evidence.get(key)
+    from mergecraft.analyzers.settings_pin import repo_settings_from_text
+    from mergecraft.policy.review import (
+        _commit_exists,
+        _primary_repo_dir,
+        _resolve_base_sha,
+        _show_at_commit,
+    )
+
+    repo_root = _primary_repo_dir(ctx)
+    base = _resolve_base_sha(ctx, repo_root)
+    if not base:
+        return "no base commit is known for this review, so the base configuration was not read"
+    if not _commit_exists(repo_root, base):
+        return f"the base commit {base} is not available in the checkout"
+    raw, error = _show_at_commit(repo_root, base, BASE_CONFIG_REL)
+    if error is not None:
+        return error.message
+    if raw is None:
+        return {}
+    try:
+        settings = repo_settings_from_text(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValidationError, ValueError, yaml.YAMLError) as exc:
+        detail = " ".join(str(exc).split())
+        return f"{BASE_CONFIG_REL} at the base commit {base} does not parse: {detail}"
+    return dict(settings.policy.evidence)
+
+
+class _Declarations:
+    """Where ``policy.evidence`` declarations come from, resolved once per collection.
+
+    An operator-owned settings snapshot (a ``pull_request_target`` capture) wins.
+    Otherwise the declarations are read from ``.mergecraft/config.yaml`` at the base
+    commit, exactly like the policy rules. The pull request head's own config — on
+    disk or in a snapshot that is not operator-owned — is never read.
+    """
+
+    def __init__(self, ctx: Any) -> None:
+        self._ctx = ctx
+        self._resolved: dict[str, EvidenceProducerSettings] | str | None = None
+
+    async def get(self, key: str) -> EvidenceProducerSettings | None:
+        """Return the base-side declaration for ``key``; raise ``_Absent`` if unknown."""
+        if self._resolved is None:
+            self._resolved = await self._resolve()
+        if isinstance(self._resolved, str):
+            raise _Absent(_unreadable_base(key, self._resolved))
+        return self._resolved.get(key)
+
+    async def _resolve(self) -> dict[str, EvidenceProducerSettings] | str:
+        from mergecraft.config.settings_snapshot import run_scope_settings_snapshot
+
+        snapshot = (
+            getattr(self._ctx, "repo_settings_snapshot", None) or run_scope_settings_snapshot()
+        )
+        if snapshot is not None and snapshot.operator_owned:
+            return dict(snapshot.settings.policy.evidence)
+        # The git read blocks; keep it off the event loop.
+        return await asyncio.to_thread(_read_base_declarations, self._ctx)
 
 
 def _head_sha(ctx: Any) -> str:
@@ -518,8 +587,8 @@ async def _produce_artifact(ctx: Any, key: str, proof: ArtifactProof) -> Evidenc
     )
 
 
-async def _produce_declared(ctx: Any, key: str) -> EvidenceRecord:
-    declaration = _declaration(ctx, key)
+async def _produce_declared(ctx: Any, key: str, declarations: _Declarations) -> EvidenceRecord:
+    declaration = await declarations.get(key)
     if declaration is None:
         raise _Absent(_not_declared(key))
     if declaration.check_run is not None:
@@ -534,7 +603,7 @@ async def _produce_declared(ctx: Any, key: str) -> EvidenceRecord:
 # ---------------------------------------------------------------------------
 
 
-def _producer_for(key: str) -> Callable[[Any, str], Coroutine[Any, Any, EvidenceRecord]] | None:
+def _producer_for(key: str) -> _ProducerFn | None:
     if key == REQUIREMENTS_KEY:
         return _produce_requirements
     if key == XREPO_KEY:
@@ -572,13 +641,14 @@ async def collect_policy_evidence(ctx: Any, *, required_keys: Collection[str]) -
     """
     present: dict[str, EvidenceRecord] = {}
     absent: dict[str, str] = {}
+    declarations = _Declarations(ctx)
     for key in sorted({str(key) for key in required_keys}):
         producer = _producer_for(key)
         if producer is None:
             absent[key] = f"no producer exists for {key}"
             continue
         try:
-            present[key] = await producer(ctx, key)
+            present[key] = await producer(ctx, key, declarations)
         except _Absent as gap:
             absent[key] = gap.reason
         except Exception as exc:  # a producer bug keeps the key absent, never fails a review
