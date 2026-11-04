@@ -645,7 +645,7 @@ def _comment_to(path: str, comment: str) -> tuple[str, dict[str, str]]:
         ("src/a.go", "//go:generate stringer -type=Kind"),
         ("src/a.ts", "// $FlowFixMe"),
         ("src/a.ts", "// @ts-ignore"),
-        ("src/a_test.go", "// Output: 1"),
+        ("src/a.go", "// Output: 1"),
         ("src/Module.swift", "// swift-tools-version:5.9"),
         ("src/a.ts", "// eslint-disable"),
         ("src/A.kt", "// ktlint-disable"),
