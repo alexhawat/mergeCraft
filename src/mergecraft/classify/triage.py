@@ -23,8 +23,9 @@ matches and hides one real change matches nothing and gets a full review.
 * ``generated`` — only lockfiles or generated paths changed, and no dependency
   manifest or generator config changed with them.
 * ``commentOnly`` — only ``//`` comment lines changed, in a closed list of
-  ``//``-comment languages chosen by suffix (no JSX/TSX or Rust; ``Package.swift``
-  refused; a Java unicode escape or a C-family ``??`` refuses the file). Each
+  ``//``-comment languages chosen by suffix (no JavaScript, JSX/TSX or Rust;
+  ``Package.swift`` and Go ``_test.go`` / ``DO NOT EDIT`` files refused; a Java unicode
+  escape or a C-family ``??`` refuses the file). Each
   changed line is ``//``, one space and a plain alphabetic word that is not a directive
   word; a removal must be replaced by an added line. The diff and the head text must be
   printable ASCII (plus tab and newline) and are split on ``\n`` only. A file with a
@@ -411,10 +412,10 @@ def recognize_generated(diff_text: str) -> bool:
 
 # ── comment-only ──────────────────────────────────────────────────────────────
 
-# JSX and TSX are off the list: a JSX text child can start with ``//`` and render.
-# Rust is off the list: a lifetime's lone ``'`` makes the quote check unsound.
+# JavaScript (``.js``, which may hold JSX), JSX and TSX are off the list: a JSX text
+# child can start with ``//`` and render. Rust is off the list: a lifetime's lone ``'``
+# makes the quote check unsound.
 COMMENT_ONLY_SUFFIXES: Final[tuple[str, ...]] = (
-    ".js",
     ".ts",
     ".go",
     ".java",
@@ -447,6 +448,10 @@ _UNLEXABLE_MARKERS: Final[tuple[str, ...]] = (
 _JAVA_UNICODE_ESCAPE: Final[re.Pattern[str]] = re.compile(r"\\u+")
 _C_FAMILY_SUFFIXES: Final[tuple[str, ...]] = (".c", ".h", ".cc", ".cpp", ".hpp")
 _C_TRIGRAPH_MARKER: Final[str] = "??"
+# Go: a ``_test.go`` file's ``// Output:`` comments are test assertions, and a file
+# marked ``DO NOT EDIT`` is generated (its comments may be generator input or output).
+_GO_TEST_SUFFIX: Final[str] = "_test.go"
+_GO_GENERATED_MARKER: Final[re.Pattern[str]] = re.compile(r"do not edit", re.IGNORECASE)
 # Printable ASCII plus tab and newline. Anything else (U+2028, U+2029, a lone CR, NEL,
 # CRLF, any non-ASCII byte) could end a line for the language but not for this lexer.
 _COMMENT_ONLY_TEXT: Final[re.Pattern[str]] = re.compile(r"[\t\n\x20-\x7e]*")
@@ -468,6 +473,15 @@ _DIRECTIVE_WORDS: Final[frozenset[str]] = frozenset(
         "pragma",
         "build",
         "line",
+        "code",
+        "istanbul",
+        "nolintnextline",
+        "nolintbegin",
+        "nolintend",
+        "iwyu",
+        "jshint",
+        "noqa",
+        "coverage",
     }
 )
 
@@ -519,6 +533,10 @@ def _comment_file_ok(file: _File, head_text: str) -> bool:
     if lowered.endswith(".java") and _JAVA_UNICODE_ESCAPE.search(file_text):
         return False
     if lowered.endswith(_C_FAMILY_SUFFIXES) and _C_TRIGRAPH_MARKER in file_text:
+        return False
+    if lowered.endswith(_GO_TEST_SUFFIX):
+        return False
+    if lowered.endswith(".go") and _GO_GENERATED_MARKER.search(file_text):
         return False
     if lowered.endswith(".go") and '"C"' in head_text:
         return False  # a cgo preamble is C code written as a comment

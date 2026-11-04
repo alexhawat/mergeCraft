@@ -170,20 +170,25 @@ against the head-side text), `whitespace` (the same tokens before and after;
 indentation counts in whitespace-sensitive languages), `generated` (only
 lockfiles or generated paths, with no manifest or generator config beside
 them) and `commentOnly` (only `//` line comments changed, in a closed list of
-`//`-comment languages — `.js .ts .go .java .kt .c .h .cc .cpp .hpp .cs .swift`.
-JSX/TSX are excluded because a JSX text child can start with `//` and render,
-Rust because a lifetime's lone `'` defeats the quote check, and `Package.swift`
-because SwiftPM reads its first comment; a Java file with a `\u` unicode escape
+`//`-comment languages — `.ts .go .java .kt .c .h .cc .cpp .hpp .cs .swift`.
+JavaScript (`.js`, which can hold JSX) and `.jsx` / `.tsx` are excluded because a
+JSX text child can start with `//` and render; Rust because a lifetime's lone `'`
+defeats the quote check; `Package.swift` because SwiftPM reads its first comment;
+and Go `_test.go` files (an `// Output:` comment is a test assertion) and Go files
+marked `DO NOT EDIT` (generated). A Java file with a `\u` unicode escape
 (translated before lexing, even in comments) and a C-family file with `??` (a
-trigraph can splice the next line) are refused. Each changed line must be `//`, one
-space and a plain alphabetic first word that is not a directive word
-(`fallthrough`, `Output`, `nolint`, `pragma`, `build`, …), so `//go:build`,
-`// +build`, `///`, `// @ts-ignore` and lint pragmas never match; a removed line
-must be replaced by an added one. The diff and the head-side file must be
-printable ASCII and are split on newlines only, and a file with a backtick, a
-raw-string marker, any `/*` or a quote left open at the end of a line is refused,
-so the lexer over the head text proves every changed line is a comment; every
-`#`-comment language is refused). A mixed diff matches nothing and gets a
+trigraph can splice the next line) are refused. Each changed line must be `//`,
+one space and a plain alphabetic first word, so `//go:build`, `// +build`, `///`
+and `// @ts-ignore` never match; a removed line must be replaced by an added
+one. The diff and the head-side file must be printable ASCII and are split on
+newlines only, and a file with a backtick, a raw-string marker, any `/*` or a
+quote left open at the end of a line is refused, so the lexer over the head text
+proves every changed line is a comment; every `#`-comment language is refused.
+For the listed languages a recognised edit proves no runtime change, but a
+comment can still carry tool directives for linters, coverage or code
+generators; a directive-word list (`fallthrough`, `Output`, `nolint`,
+`NOLINTNEXTLINE`, `istanbul`, `IWYU`, `pragma`, `build`, `Code`, …) refuses the
+known ones on a best-effort basis). A mixed diff matches nothing and gets a
 full review. `skipLlm` opts each
 recognizer in; a pin bump also needs every `pinBump.requireChecks` check to have
 passed on the head SHA **from a GitHub App named in

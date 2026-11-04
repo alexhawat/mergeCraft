@@ -23,13 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   malformed answer is `inconclusive`. Off by default (#1010).
 
 - A `commentOnly` fast-path recognizer matches diffs that only edit `//` line
-  comments in `.js .ts .go .java .kt .c .h .cc .cpp .hpp .cs .swift` files
-  (never JSX/TSX, Rust or `Package.swift`; a Java unicode escape or a C-family `??`
-  refuses the file). Each changed line must be `//`, one space and
-  a plain word that is not a directive word, and the head-side text proves it is a
+  comments in `.ts .go .java .kt .c .h .cc .cpp .hpp .cs .swift` files. JavaScript
+  (`.js`, which can hold JSX), `.jsx` / `.tsx`, Rust, `Package.swift`, Go
+  `_test.go` files and Go files marked `DO NOT EDIT` are never recognised, and a
+  Java unicode escape or a C-family `??` refuses the file. Each changed line must
+  be `//`, one space and a plain word, and the head-side text proves it is a
   comment. Non-ASCII text, backticks, raw-string markers, block comments, a quote
   left open at the end of a line, a removal-only edit and every `#`-comment
-  language are refused. Opt in through `skipLlm` like the other recognizers
+  language are refused. A recognised edit proves no runtime change; comments that
+  carry tool directives (lint, coverage, generator pragmas) are refused on a
+  best-effort word list. Opt in through `skipLlm` like the other recognizers
   (#1010).
 
 - The self-review's Codex rung writes the refreshed ChatGPT-subscription login
