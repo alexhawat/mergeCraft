@@ -1165,6 +1165,39 @@ def reconcile_outcome(*, value: Any, not_an_approval: bool, positive: str | Sequ
     return rendered
 
 
+def _blast_radius_record_line(blast_radius: Any) -> str | None:
+    """One run-record line naming the blast-radius lane and its reason codes (#1056).
+
+    Total: a packet without a blast radius renders no line, a packet written
+    before ``reasons`` existed renders the lane alone, and gates that were not
+    measured are named so an unknown never reads as a pass.
+    """
+    if blast_radius is None:
+        return None
+    lane = str(getattr(blast_radius, "lane", "") or "").strip()
+    if not lane:
+        return None
+    auto_merge_lane = str(getattr(blast_radius, "auto_merge_lane", "") or "").strip()
+    line = f"- **Blast radius:** `{lane}`"
+    if auto_merge_lane:
+        line += f" ({auto_merge_lane})"
+    codes = [
+        code
+        for reason in list(getattr(blast_radius, "reasons", None) or [])
+        if (code := str(getattr(reason, "code", "") or "").strip())
+    ]
+    if codes:
+        line += " — " + ", ".join(f"`{code}`" for code in codes)
+    unmeasured = [
+        str(getattr(gate, "gate", ""))
+        for gate in list(getattr(blast_radius, "checklist", None) or [])
+        if getattr(gate, "passed", True) is None
+    ]
+    if unmeasured:
+        line += " · not measured: " + ", ".join(f"`{gate}`" for gate in unmeasured)
+    return line
+
+
 def _format_phase_elapsed(seconds: float) -> str:
     """Render one phase's elapsed seconds for the **Review cost** row (#1075).
 
@@ -1297,6 +1330,9 @@ def render_deterministic_review_block(
     triage = getattr(packet, "triage", None)
     if triage is not None and triage.tier == "skip":
         header_lines.append(f"- **Tier:** skip ({triage.recognizer}) — no LLM review ran")
+    blast_radius_line = _blast_radius_record_line(getattr(packet, "blast_radius", None))
+    if blast_radius_line is not None:
+        header_lines.append(blast_radius_line)
     coverage = getattr(packet, "coverage", None)
     if coverage is not None:
         from mergecraft.evidence.coverage import coverage_summary_line

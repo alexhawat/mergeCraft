@@ -112,6 +112,102 @@ def test_diagnostic_redacts_before_it_truncates_the_stderr_tail() -> None:
     assert "ghp_abcdef" not in rendered
 
 
+def _stalled_watchdog(accumulator: StreamSpanAccumulator, clock: _Clock) -> IdleWatchdog:
+    watchdog = IdleWatchdog(
+        label="opencode",
+        interval_s=30.0,
+        accumulator=accumulator,
+        clock=clock,
+        wall_clock=lambda: 1_793_788_400.0,  # 2026-11-04T10:33:20Z
+    )
+    watchdog.touch(event_type="tool_use")
+    clock.advance(31.0)
+    assert watchdog.check() is True
+    return watchdog
+
+
+def test_an_error_that_arrives_after_the_kill_is_not_the_likely_cause() -> None:
+    """Killing the process closes its socket; the error reporting that is an effect."""
+    accumulator = StreamSpanAccumulator(agent_name="opencode")
+    watchdog = _stalled_watchdog(accumulator, _Clock())
+
+    # 8ms after the kill line, the transport reports the connection the kill closed.
+    accumulator.set_stream_error("Transport: The socket connection was closed unexpectedly.")
+    diagnostic = watchdog.diagnostic()
+    rendered = diagnostic.render()
+
+    assert diagnostic.last_provider_error is None
+    assert "likely cause" not in rendered
+    assert "the cause is not known" in rendered
+    assert diagnostic.error_after_kill is not None
+    assert "socket connection" in diagnostic.error_after_kill
+    assert "after the kill" in rendered
+    assert diagnostic.as_metadata()["last_provider_error"] is None
+    assert "socket" in diagnostic.as_metadata()["error_after_kill"]
+
+
+def test_an_error_seen_before_the_stall_is_still_the_likely_cause() -> None:
+    accumulator = StreamSpanAccumulator(agent_name="opencode")
+    accumulator.set_stream_error("provider billing exhausted")
+    watchdog = _stalled_watchdog(accumulator, _Clock())
+
+    diagnostic = watchdog.diagnostic()
+
+    assert diagnostic.last_provider_error == "provider billing exhausted"
+    assert diagnostic.error_after_kill is None
+    assert "likely cause: `provider billing exhausted`" in diagnostic.render()
+    assert "the cause is not known" not in diagnostic.render()
+
+
+def test_the_diagnostic_names_the_last_event_before_the_silence() -> None:
+    watchdog = _stalled_watchdog(StreamSpanAccumulator(agent_name="opencode"), _Clock())
+
+    diagnostic = watchdog.diagnostic()
+
+    assert diagnostic.last_event_type == "tool_use"
+    assert diagnostic.last_event_at == "2026-11-04T10:33:20.000+00:00"
+    assert "Last event before the silence: `tool_use` at 2026-11-04T10:33:20" in (
+        diagnostic.render()
+    )
+    assert diagnostic.as_metadata()["last_event_type"] == "tool_use"
+
+
+def test_post_stall_event_preserves_the_last_event_before_the_silence() -> None:
+    clock = _Clock()
+    wall_clock = _Clock()
+    wall_clock.now = 1_793_788_400.0
+    accumulator = StreamSpanAccumulator(agent_name="opencode")
+    watchdog = IdleWatchdog(
+        label="opencode",
+        interval_s=30.0,
+        accumulator=accumulator,
+        clock=clock,
+        wall_clock=wall_clock,
+    )
+    watchdog.touch(event_type="tool_use")
+    clock.advance(31.0)
+    wall_clock.advance(31.0)
+    assert watchdog.check() is True
+
+    # Drivers touch the watchdog before handling the kill's transport error.
+    clock.advance(0.009)
+    wall_clock.advance(0.009)
+    watchdog.touch(event_type="error")
+    accumulator.set_stream_error("Transport: The socket connection was closed unexpectedly.")
+    diagnostic = watchdog.diagnostic()
+
+    assert diagnostic.last_event_type == "tool_use"
+    assert diagnostic.last_event_at == "2026-11-04T10:33:20.000+00:00"
+    assert diagnostic.as_metadata()["last_event_type"] == "tool_use"
+    assert diagnostic.as_metadata()["last_event_at"] == "2026-11-04T10:33:20.000+00:00"
+    assert "Last event before the silence: `tool_use` at 2026-11-04T10:33:20" in (
+        diagnostic.render()
+    )
+    assert diagnostic.last_provider_error is None
+    assert diagnostic.error_after_kill is not None
+    assert "socket connection" in diagnostic.error_after_kill
+
+
 def test_metadata_and_render_are_advisory_not_a_verdict() -> None:
     diagnostic = AgentDiagnostic(
         label="codex",

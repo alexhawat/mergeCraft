@@ -159,10 +159,17 @@ class TestExportForRun:
     def _codex_home_under_tmp_path(self, tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
         """Keep the run's Codex home under ``tmp_path``.
 
-        A run dir under ``/tmp`` sends ``_codex_home`` to the user cache, named
-        after the run dir's basename, which pytest reuses between runs; a second
-        run on the same machine would then find the previous run's home.
+        A run dir under ``/tmp`` relocates ``_codex_home`` to the first usable
+        of ``MERGECRAFT_CODEX_HOME_PARENT``, ``RUNNER_TEMP``, ``GITHUB_WORKSPACE``
+        or the user cache, named after the run dir's basename, which pytest
+        reuses between sessions. GitHub Actions sets ``RUNNER_TEMP``, so a
+        second session in the same job, such as the head run after an in-job
+        base-coverage measurement, found the previous session's home there.
+        Only the cache fallback accepts a parent under ``/tmp``, so clear the
+        three overrides and point the cache at this test's own ``tmp_path``.
         """
+        for name in ("MERGECRAFT_CODEX_HOME_PARENT", "RUNNER_TEMP", "GITHUB_WORKSPACE"):
+            monkeypatch.delenv(name, raising=False)
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
 
     def test_unset_env_does_nothing(self, tmp_path: Path, monkeypatch: MonkeyPatch) -> None:

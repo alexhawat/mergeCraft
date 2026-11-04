@@ -34,6 +34,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
@@ -61,6 +62,14 @@ class AgentDiagnostic:
     saw_model_output: bool
     last_provider_error: str | None = None
     stderr_tail: tuple[str, ...] = field(default_factory=tuple)
+    # The last stream event before the silence, so the report can say what the
+    # run was doing when it went quiet (#1138).
+    last_event_type: str | None = None
+    last_event_at: str | None = None
+    # A provider error that arrived only after the watchdog killed the attempt.
+    # Killing the process closes its transport, so this is an effect of the
+    # kill and is never offered as the cause.
+    error_after_kill: str | None = None
 
     def __post_init__(self) -> None:
         """Redact provider/stderr text before it can reach a packet or record.
@@ -76,6 +85,8 @@ class AgentDiagnostic:
             object.__setattr__(
                 self, "last_provider_error", redact_secrets(self.last_provider_error)
             )
+        if self.error_after_kill:
+            object.__setattr__(self, "error_after_kill", redact_secrets(self.error_after_kill))
         object.__setattr__(
             self,
             "stderr_tail",
@@ -93,6 +104,16 @@ class AgentDiagnostic:
                 f"({self.event_count} event(s) processed before the stall)."
             ),
         ]
+        if self.last_event_type:
+            when = f" at {self.last_event_at}" if self.last_event_at else ""
+            lines.append(f"Last event before the silence: `{self.last_event_type}`{when}.")
+        if not self.last_provider_error:
+            lines.append("No provider error was seen before the stall, so the cause is not known.")
+        if self.error_after_kill:
+            lines.append(
+                "A provider error arrived after the kill and is an effect of it, not the "
+                f"cause: `{self.error_after_kill}`"
+            )
         if not self.saw_model_output and not self.last_provider_error:
             lines.append(
                 "The model produced no output at all — the request was sent but nothing "
@@ -111,6 +132,9 @@ class AgentDiagnostic:
             "event_count": self.event_count,
             "saw_model_output": self.saw_model_output,
             "last_provider_error": self.last_provider_error,
+            "last_event_type": self.last_event_type,
+            "last_event_at": self.last_event_at,
+            "error_after_kill": self.error_after_kill,
             "stderr_tail": list(self.stderr_tail),
             "diagnostic": self.render(),
         }
@@ -133,6 +157,7 @@ class IdleWatchdog:
         accumulator: StreamSpanAccumulator | None = None,
         stderr_text: Callable[[], str] | None = None,
         clock: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], float] = time.time,
         kill: Callable[[int | None], None] | None = None,
         process: Any | None = None,
     ) -> None:
@@ -141,12 +166,18 @@ class IdleWatchdog:
         self._accumulator = accumulator
         self._stderr_text = stderr_text
         self._clock = clock
+        self._wall_clock = wall_clock
         self._kill = kill
         self._process = process
         self._last_activity = clock()
         self._event_count = 0
         self._saw_model_output = False
+        self._last_event_type: str | None = None
+        self._last_event_at: str | None = None
         self._stalled = False
+        # The provider error on the stream *when the stall was declared*. Anything
+        # the accumulator records after that point followed the kill (#1138).
+        self._error_at_stall: str | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -160,12 +191,20 @@ class IdleWatchdog:
         """Return the number of stream events observed."""
         return self._event_count
 
-    def touch(self, *, model_output: bool = False) -> None:
-        """Mark activity. ``model_output`` distinguishes a real model turn."""
+    def touch(self, *, model_output: bool = False, event_type: str | None = None) -> None:
+        """Mark activity. ``model_output`` distinguishes a real model turn.
+
+        ``event_type`` is the stream event's ``type``; the diagnostic names the
+        last one so a stall report says what the run was doing when it went quiet.
+        """
         self._last_activity = self._clock()
         self._event_count += 1
         if model_output:
             self._saw_model_output = True
+        # Events emitted during shutdown must not replace the pre-stall record.
+        if event_type and not self._stalled:
+            self._last_event_type = event_type
+            self._last_event_at = _iso_utc(self._wall_clock())
 
     def idle_seconds(self, *, now: float | None = None) -> float:
         """Return seconds since the last activity marker."""
@@ -181,6 +220,9 @@ class IdleWatchdog:
             return False
         self._stalled = True
         self._stalled_idle_seconds = self.idle_seconds(now=now)
+        # Snapshot before the monitor kills the process: the kill closes the
+        # transport, and the error that reports it must not become the cause.
+        self._error_at_stall = self._current_stream_error()
         logger.warning(
             "agent idle watchdog: {} produced no event for {:.0f}s ({} event(s)); killing attempt",
             self.label,
@@ -201,16 +243,24 @@ class IdleWatchdog:
         joined = "\n".join(stderr_lines)
         if len(joined) > _MAX_STDERR_CHARS:
             joined = f"... (older lines truncated)\n{joined[-_MAX_STDERR_CHARS:]}"
+        current_error = self._current_stream_error()
+        # Once stalled, only an error seen *before* the kill may be the cause.
+        before_kill = self._error_at_stall if self._stalled else current_error
+        after_kill = current_error if self._stalled and current_error != before_kill else None
         return AgentDiagnostic(
             label=self.label,
             event_count=self._event_count,
             idle_seconds=getattr(self, "_stalled_idle_seconds", self.idle_seconds()),
             saw_model_output=self._saw_model_output,
-            last_provider_error=(
-                self._accumulator.stream_error if self._accumulator is not None else None
-            ),
+            last_provider_error=before_kill,
             stderr_tail=tuple(joined.splitlines()) if joined else (),
+            last_event_type=self._last_event_type,
+            last_event_at=self._last_event_at,
+            error_after_kill=after_kill,
         )
+
+    def _current_stream_error(self) -> str | None:
+        return self._accumulator.stream_error if self._accumulator is not None else None
 
     def start(self) -> IdleWatchdog:
         """Start the monitor thread for a real attempt."""
@@ -238,6 +288,16 @@ class IdleWatchdog:
         thread = self._thread
         if thread is not None and thread.is_alive():
             thread.join(timeout=1.0)
+
+
+def _iso_utc(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp, tz=UTC).isoformat(timespec="milliseconds")
+
+
+def event_type_name(event: dict[str, Any]) -> str | None:
+    """Return the stream event's ``type`` for the watchdog's last-event record."""
+    event_type = str(event.get("type") or "").strip()
+    return event_type or None
 
 
 def event_has_model_output(event: dict[str, Any]) -> bool:
@@ -291,5 +351,6 @@ __all__ = [
     "AgentDiagnostic",
     "IdleWatchdog",
     "event_has_model_output",
+    "event_type_name",
     "watchdog_for_process",
 ]

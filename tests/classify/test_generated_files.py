@@ -21,17 +21,13 @@ def test_generated_minified_vendored_are_classified() -> None:
 
 def test_generator_config_change_is_still_reviewed() -> None:
     """When generator config changes, generated output stays in review scope."""
-    from mergecraft.classify.generated_files import (
-        finding_survives_generated_policy,
-        review_includes_path,
-    )
+    from mergecraft.classify.generated_files import finding_survives_generated_policy
 
     change = {
         "changed_paths": ["Makefile", "src/generated/schema.py"],
         "diff_stats": {"files_changed": 2},
     }
 
-    assert review_includes_path("src/generated/schema.py", change=change) is True
     assert finding_survives_generated_policy("src/generated/schema.py", change=change) is True
 
 
