@@ -111,6 +111,15 @@ dev = [
     "hypothesis==6.168.0",
 ]
 
+[tool.uv]
+# litellm (reached only through the `harbor` extra) caps filelock below 4.0,
+# which drags every Python 3.12+ environment, dev included, down to filelock
+# 3.32.7: thirteen OSV advisories (CVE-2026-112907..112940) that `make security`
+# rejects. 4.0 changed only `SoftReadWriteLock`; litellm uses `FileLock` and
+# harbor `AsyncFileLock`, both unchanged, so lift the cap and keep 4.x
+# everywhere. Drop this once litellm permits filelock 4 (1.109.0 per PyPI).
+override-dependencies = ["filelock>=4"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/mergecraft"]
 # Script-, Make- and test-only support modules. Every caller for the paths below
