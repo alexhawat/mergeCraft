@@ -112,6 +112,9 @@ def test_dump_by_alias_round_trips() -> None:
         pytest.param("maxGroups", 13, "less_than_equal", id="max-groups-above-12"),
         pytest.param("concurrency", 0, "greater_than_equal", id="concurrency-below-1"),
         pytest.param("concurrency", 7, "less_than_equal", id="concurrency-above-6"),
+        pytest.param("perGroupTimeoutS", 0, "greater_than_equal", id="per-group-timeout-zero"),
+        pytest.param("perGroupTimeoutS", -5, "greater_than_equal", id="per-group-timeout-negative"),
+        pytest.param("perGroupTimeoutS", 901, "less_than_equal", id="per-group-timeout-above-900"),
     ],
 )
 def test_out_of_range_bounds_are_rejected_naming_the_field(
@@ -131,6 +134,8 @@ def test_out_of_range_bounds_are_rejected_naming_the_field(
         pytest.param("maxGroups", 12, id="max-groups-12"),
         pytest.param("concurrency", 1, id="concurrency-1"),
         pytest.param("concurrency", 6, id="concurrency-6"),
+        pytest.param("perGroupTimeoutS", 1, id="per-group-timeout-1"),
+        pytest.param("perGroupTimeoutS", 900, id="per-group-timeout-900"),
     ],
 )
 def test_inclusive_bounds_are_accepted(key: str, value: int) -> None:

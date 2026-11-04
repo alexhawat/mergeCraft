@@ -37,7 +37,9 @@ from mergecraft.analyzers.finding import make_finding
 from mergecraft.config.settings import RepoSettings, load_repo_settings
 from mergecraft.evidence.build import _partition_findings
 from mergecraft.evidence.merge import typed_findings_from_rows_with_drops
+from mergecraft.evidence.run_packet import build_run_packet
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
+from mergecraft.mcp.reviewer_dispatch import record_reviewer_dispatch_run_tool
 from mergecraft.mcp.tool_state import (
     ToolState,
     init_tool_state,
@@ -45,6 +47,8 @@ from mergecraft.mcp.tool_state import (
     record_reviewer_dispatch_error,
     record_reviewer_dispatch_run,
 )
+from mergecraft.mcp.verdict import register_review_scope, submit_review_verdict_tool
+from mergecraft.mcp.verification import verify_agent_findings_tool
 from mergecraft.review import roster_execution
 from mergecraft.review.file_group_fanout import FanoutSummary, plan_file_groups
 from mergecraft.review.roster_execution import (
@@ -103,7 +107,7 @@ def _fanout_block(**fields: object) -> str:
 
 
 def _single_reviewer_config(*, reviewer_timeout_s: int | None = None, **fanout: object) -> str:
-    timeout_line = f"\n    timeoutS: {reviewer_timeout_s}" if reviewer_timeout_s else ""
+    timeout_line = f"\n    timeoutS: {reviewer_timeout_s}" if reviewer_timeout_s is not None else ""
     return (
         DEFAULT_MODELS_YAML
         + f"""
@@ -249,12 +253,12 @@ class _Env:
     settings: RepoSettings
     base_ctx: AgentRunContext
     diff_path: Path | None
-    agent: _RecordingAgent
+    agent: Any
 
 
 def _patch_dispatch_seams(
     monkeypatch: pytest.MonkeyPatch,
-    agent: _RecordingAgent,
+    agent: Any,
     *,
     credential_available: bool,
 ) -> None:
@@ -313,7 +317,7 @@ def _build_env(
     *,
     config: str,
     diff: str | None,
-    agent: _RecordingAgent,
+    agent: Any,
     credential_available: bool = True,
     write_diff: bool = True,
 ) -> _Env:
@@ -569,7 +573,7 @@ async def test_group_count_never_exceeds_max_groups(
     }
 
 
-async def test_each_group_prompt_names_only_its_own_paths_and_the_shared_diff(
+async def test_each_group_prompt_names_only_its_own_paths_and_never_the_roster_submit_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     groups = _group_paths(_LARGE_DIFF, max_groups=4)
@@ -596,7 +600,11 @@ async def test_each_group_prompt_names_only_its_own_paths_and_the_shared_diff(
         for path in groups[group_id]:
             assert path in prompt
         assert str(env.diff_path) in prompt
-        assert roster_execution._ROSTER_SUBMIT_INSTRUCTIONS in prompt
+        # A group is not a roster reviewer: the server records its outcome, so its
+        # prompt carries its own block and names no recording or verdict tool.
+        assert roster_execution._ROSTER_SUBMIT_INSTRUCTIONS not in prompt
+        assert "record_reviewer_dispatch_run" not in prompt
+        assert "submit_review_verdict" not in prompt
     assert seen == set(groups)
 
 
@@ -1062,3 +1070,384 @@ async def test_main_never_folds_a_degraded_fanout_into_the_roster_result(
     assert result.hard_error is None
     primary = AgentResult(success=True, output="review text")
     assert apply_roster_failure(primary, result) is primary
+
+
+# --------------------------------------------------------------------------- provenance in the packet
+#
+# In production the fan-out runs after the primary reviewer's
+# ``submit_review_verdict``, so the terminal ``raised_by`` stamp never sees a
+# group run. A group's findings reach the packet (and the checks) the way the
+# secondary roster's do: through ``agent_findings``. The server marks every row
+# a group run claims with one evidence entry ``reviewer: file-group/<id> (<model>)``
+# when it records the run.
+
+
+_CHANGE_ID = "local/demo#1"
+
+
+def _raised_body(group_id: str) -> str:
+    return f"raised by {group_id}"
+
+
+def _group_evidence(group_id: str, model: str) -> str:
+    return f"reviewer: {_group_agent_id(group_id)} ({model})"
+
+
+def _reviewer_evidence(finding: Any) -> list[str]:
+    return [entry for entry in finding.evidence if entry.startswith("reviewer: ")]
+
+
+class _ToolRecordingAgent:
+    """Fake reviewer runtime that records findings through the real MCP tool.
+
+    A group dispatch records one finding through ``verify_agent_findings`` (the
+    tool a reviewer's findings are stored by), on ``targets[group]`` (its own
+    first path by default), after ``timing[group][0]`` seconds, then waits
+    ``timing[group][1]``. With ``dispatch_tool_agent_id`` set, it also follows
+    the roster instruction and calls ``record_reviewer_dispatch_run`` under that
+    id. Any other dispatch acts as the secondary roster reviewer.
+    """
+
+    name = "opencode"
+
+    def __init__(
+        self,
+        groups: dict[str, tuple[str, ...]],
+        *,
+        targets: dict[str, str] | None = None,
+        timing: dict[str, tuple[float, float]] | None = None,
+        dispatch_tool_agent_id: str | None = None,
+    ) -> None:
+        self.groups = dict(groups)
+        self.targets = dict(targets or {})
+        self.timing = dict(timing or {})
+        self.dispatch_tool_agent_id = dispatch_tool_agent_id
+        self.tool_context: ToolContext | None = None
+        self.calls: list[tuple[str, str]] = []
+        self.dispatch_tool_results: dict[str, Any] = {}
+
+    async def install(self) -> None:
+        return None
+
+    def group_for(self, prompt: str) -> str | None:
+        for group_id, paths in self.groups.items():
+            if any(path in prompt for path in paths):
+                return group_id
+        return None
+
+    async def run(self, ctx: AgentRunContext) -> AgentResult:
+        assert self.tool_context is not None
+        prompt = _prompt_text(ctx.instructions)
+        self.calls.append((ctx.resolved_model or "", prompt))
+        group_id = self.group_for(prompt)
+        if group_id is None:
+            record_reviewer_dispatch_run(
+                ctx.tool_state,
+                agent_id="reviewer2",
+                findings=[
+                    {"path": "src/a.py", "body": "from secondary", "severity": "Minor", "line": 1}
+                ],
+                model_slug=ctx.resolved_model,
+            )
+            return AgentResult(success=True, output="ok")
+        before, after = self.timing.get(group_id, (0.0, 0.0))
+        if before:
+            await asyncio.sleep(before)
+        target = self.targets.get(group_id, self.groups[group_id][0])
+        recorded = await verify_agent_findings_tool(self.tool_context).execute(
+            {
+                "findings": [
+                    {"path": target, "body": _raised_body(group_id), "severity": "Minor", "line": 1}
+                ]
+            }
+        )
+        assert recorded.is_error is False
+        if self.dispatch_tool_agent_id is not None:
+            self.dispatch_tool_results[group_id] = await record_reviewer_dispatch_run_tool(
+                self.tool_context
+            ).execute(
+                {
+                    "agent_id": self.dispatch_tool_agent_id,
+                    "findings": [
+                        {"path": target, "body": "claimed", "severity": "Minor", "line": 1}
+                    ],
+                }
+            )
+        if after:
+            await asyncio.sleep(after)
+        return AgentResult(success=True, output="ok")
+
+
+def _tool_env(
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    config: str,
+    agent: _ToolRecordingAgent,
+) -> _Env:
+    env = _build_env(
+        root,
+        monkeypatch,
+        config=config,
+        diff=_LARGE_DIFF,
+        agent=agent,
+    )
+    agent.tool_context = env.tool_context
+    # ``verify_agent_findings`` only stores drafts once the deterministic checks ran.
+    env.tool_state.static_checks_ran = True
+    return env
+
+
+@pytest.mark.parametrize(
+    ("binding", "model"),
+    [
+        pytest.param({}, _PRIMARY_MODEL, id="primary-binding"),
+        pytest.param({"binding": "reviewer2"}, _SECONDARY_MODEL, id="reviewer2-binding"),
+    ],
+)
+async def test_group_findings_reach_the_packet_naming_their_group_in_production_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    binding: dict[str, object],
+    model: str,
+) -> None:
+    """Primary submit first, then the fan-out: the packet still names each group."""
+    groups = _group_paths(_LARGE_DIFF, max_groups=2)
+    agent = _ToolRecordingAgent(groups)
+    env = _tool_env(
+        tmp_path,
+        monkeypatch,
+        config=_two_reviewer_config(enabled=True, maxGroups=2, **binding),
+        agent=agent,
+    )
+    assert env.diff_path is not None
+    register_review_scope(env.tool_state, diff_path=str(env.diff_path), provenance="checkout")
+    submitted = await submit_review_verdict_tool(env.tool_context).execute(
+        {
+            "verdict": "approve",
+            "summary": "primary",
+            "findings": [
+                {
+                    "path": "src/pkg/mod_00.py",
+                    "body": "from primary",
+                    "severity": "Minor",
+                    "line": 1,
+                }
+            ],
+        }
+    )
+    assert submitted.is_error is False
+    assert env.tool_state.terminal_submission is not None
+
+    await _fan_out(env)
+    packet = build_run_packet(env.tool_context, change_id=_CHANGE_ID, run_succeeded=True)
+
+    by_message = {finding.message: finding for finding in packet.findings}
+    for group_id in groups:
+        row = by_message[_raised_body(group_id)]
+        assert _reviewer_evidence(row) == [_group_evidence(group_id, model)]
+    primary = by_message["from primary"]
+    assert not any("file-group/" in entry for entry in primary.evidence)
+
+
+@pytest.mark.parametrize(
+    "timing",
+    [
+        pytest.param({"group-1": (0.2, 0.2), "group-2": (0.0, 0.05)}, id="group-2-finishes-first"),
+        pytest.param({"group-1": (0.0, 0.05), "group-2": (0.2, 0.2)}, id="group-1-finishes-first"),
+        pytest.param({"group-1": (0.05, 0.2), "group-2": (0.1, 0.2)}, id="interleaved"),
+    ],
+)
+async def test_concurrent_groups_attribute_each_row_to_the_group_that_raised_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    timing: dict[str, tuple[float, float]],
+) -> None:
+    """Two in-flight groups, each raising a finding on the other's path."""
+    groups = _group_paths(_LARGE_DIFF, max_groups=2)
+    agent = _ToolRecordingAgent(
+        groups,
+        targets={"group-1": groups["group-2"][0], "group-2": groups["group-1"][0]},
+        timing=timing,
+    )
+    env = _tool_env(
+        tmp_path,
+        monkeypatch,
+        config=_single_reviewer_config(enabled=True, maxGroups=2, concurrency=2),
+        agent=agent,
+    )
+
+    await _fan_out(env)
+    packet = build_run_packet(env.tool_context, change_id=_CHANGE_ID, run_succeeded=True)
+
+    by_message = {finding.message: finding for finding in packet.findings}
+    runs = _group_runs(env.tool_state)
+    for group_id in groups:
+        # Nothing is lost from the packet ...
+        row = by_message[_raised_body(group_id)]
+        # ... and the row names the group whose dispatch raised it, not the path owner.
+        assert _reviewer_evidence(row) == [_group_evidence(group_id, _PRIMARY_MODEL)]
+        claimed = [
+            claim.get("message") or claim.get("body")
+            for claim in runs[_group_agent_id(group_id)].findings
+        ]
+        assert claimed == [_raised_body(group_id)]
+
+
+# --------------------------------------------------------------------------- roster bypass
+
+
+async def test_a_group_cannot_record_a_run_under_its_binding_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With ``binding: reviewer2`` a group recording as ``reviewer2`` is refused.
+
+    Otherwise the group's run would satisfy the roster and reviewer2's own
+    provider would never be dispatched.
+    """
+    groups = _group_paths(_LARGE_DIFF, max_groups=2)
+    agent = _ToolRecordingAgent(groups, dispatch_tool_agent_id="reviewer2")
+    env = _tool_env(
+        tmp_path,
+        monkeypatch,
+        config=_two_reviewer_config(enabled=True, maxGroups=2, binding="reviewer2"),
+        agent=agent,
+    )
+
+    await _fan_out(env)
+
+    assert set(agent.dispatch_tool_results) == set(groups)
+    for group_id, result in agent.dispatch_tool_results.items():
+        assert result.is_error is True
+        assert _group_agent_id(group_id) in result.content[0]["text"]
+    assert "reviewer2" not in {run.agent_id for run in env.tool_state.reviewer_dispatch_runs}
+
+    roster = await _run_roster(env)
+
+    assert roster.hard_error is None
+    assert roster.dispatched_agent_ids == ("reviewer2",)
+    secondary_prompts = [prompt for _model, prompt in agent.calls if not agent.group_for(prompt)]
+    assert len(secondary_prompts) == 1
+    assert roster_execution._ROSTER_SUBMIT_INSTRUCTIONS in secondary_prompts[0]
+
+    # Outside a fan-out the tool behaves as it always has.
+    outside = await record_reviewer_dispatch_run_tool(env.tool_context).execute(
+        {"agent_id": "reviewer2", "findings": []}
+    )
+    assert outside.is_error is False
+
+
+# --------------------------------------------------------------------------- timeout bounds
+
+
+@pytest.mark.parametrize(
+    ("config", "remaining"),
+    [
+        pytest.param(
+            _single_reviewer_config(reviewer_timeout_s=0, enabled=True, maxGroups=1),
+            lambda: 1.5,
+            id="zero-binding-timeout-with-remaining-budget",
+        ),
+        pytest.param(
+            _single_reviewer_config(
+                reviewer_timeout_s=0, enabled=True, maxGroups=1, perGroupTimeoutS=1
+            ),
+            None,
+            id="zero-binding-timeout-with-per-group-timeout",
+        ),
+        pytest.param(
+            _single_reviewer_config(enabled=True, maxGroups=1),
+            lambda: 0.0,
+            id="exhausted-remaining-budget",
+        ),
+    ],
+)
+async def test_no_bound_can_disable_the_group_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    config: str,
+    remaining: Any,
+) -> None:
+    """A zero or exhausted bound still caps the group; it never means "no timeout"."""
+    groups = _group_paths(_LARGE_DIFF, max_groups=1)
+    agent = _RecordingAgent(groups, hang_s=4.0)
+    env = _build_env(tmp_path, monkeypatch, config=config, diff=_LARGE_DIFF, agent=agent)
+
+    started = time.monotonic()
+    summary = await _fan_out(env, remaining_timeout_s=remaining)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 3.0
+    assert _failed_group_ids(summary) == {"group-1"}
+    assert "timed out" in env.tool_state.reviewer_dispatch_errors["file-group/group-1"]
+
+
+@pytest.mark.parametrize(
+    ("config", "remaining", "rendered"),
+    [
+        pytest.param(
+            _single_reviewer_config(enabled=True, maxGroups=1),
+            lambda: 1.5,
+            "timed out after 1.5s",
+            id="fractional-remaining-budget",
+        ),
+        pytest.param(
+            _single_reviewer_config(enabled=True, maxGroups=1, perGroupTimeoutS=1),
+            None,
+            "timed out after 1.0s",
+            id="whole-per-group-timeout",
+        ),
+    ],
+)
+async def test_group_timeout_reason_renders_one_decimal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    config: str,
+    remaining: Any,
+    rendered: str,
+) -> None:
+    groups = _group_paths(_LARGE_DIFF, max_groups=1)
+    agent = _RecordingAgent(groups, hang_s=4.0)
+    env = _build_env(tmp_path, monkeypatch, config=config, diff=_LARGE_DIFF, agent=agent)
+
+    summary = await _fan_out(env, remaining_timeout_s=remaining)
+
+    assert rendered in env.tool_state.reviewer_dispatch_errors["file-group/group-1"]
+    assert any(rendered in reason for _group_id, reason in summary.failures)
+
+
+# --------------------------------------------------------------------------- agent_id restore
+
+
+async def test_tool_context_agent_id_is_restored_after_a_group_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pinned with a sentinel distinct from the reviewer runtime's own name."""
+    groups = _group_paths(_LARGE_DIFF, max_groups=3)
+    agent = _RecordingAgent(groups, fail_group="group-2", fail_mode="raise")
+    env = _build_env(
+        tmp_path,
+        monkeypatch,
+        config=_single_reviewer_config(enabled=True, maxGroups=3),
+        diff=_LARGE_DIFF,
+        agent=agent,
+    )
+    denied_calls: list[str] = []
+
+    def _denied(tool_context: Any, *args: Any, **kwargs: Any) -> list[str]:
+        denied_calls.append(str(tool_context.agent_id))
+        if len(denied_calls) == 3:
+            raise RuntimeError("denied-tools boom")
+        return []
+
+    monkeypatch.setattr("mergecraft.review.roster_execution.subagent_denied_tool_names", _denied)
+    env.tool_context.agent_id = "primary-sentinel"
+    assert agent.name != "primary-sentinel"
+
+    summary = await _fan_out(env)
+
+    assert len(denied_calls) == 3
+    assert env.tool_context.agent_id == "primary-sentinel"
+    assert _failed_group_ids(summary) == {"group-2", "group-3"}
+    assert "denied-tools boom" in env.tool_state.reviewer_dispatch_errors["file-group/group-3"]
+    assert _FAILURE_REASON in env.tool_state.reviewer_dispatch_errors["file-group/group-2"]

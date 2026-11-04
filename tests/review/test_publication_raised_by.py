@@ -304,10 +304,11 @@ async def test_submit_review_verdict_pairs_models_on_deduped_finding(tmp_path: A
 
 # --------------------------------------------------------------------------- file-group provenance
 #
-# A file-group fan-out run is recorded server-side under ``file-group/<id>``;
-# its findings reach the terminal submission with that id as ``raised_by``,
-# like any roster reviewer, rather than collapsing into the primary or into
-# ``unknown``.
+# A file-group run recorded before the terminal submission keeps
+# ``file-group/<id>`` as ``raised_by`` rather than collapsing into the primary
+# or into ``unknown``. In production the fan-out runs after the primary's
+# submit; its provenance reaches the packet as finding evidence instead (see
+# ``test_file_group_fanout_wiring.py``).
 
 
 def _file_group_registry(*, reviewer_count: int) -> object:
@@ -332,9 +333,15 @@ def _file_group_registry(*, reviewer_count: int) -> object:
 
 
 @pytest.mark.parametrize("reviewer_count", [1, 2], ids=["single-reviewer", "two-reviewers"])
-def test_file_group_findings_keep_their_group_id_at_terminal_submission(
+def test_file_group_run_recorded_before_the_submit_keeps_its_group_id(
     reviewer_count: int,
 ) -> None:
+    """Isolated case only: a group run already on the tool state when the verdict merges.
+
+    Production runs the fan-out after the primary's submit, so this path covers a
+    run recorded before the submit; the packet-evidence test in
+    ``test_file_group_fanout_wiring.py`` covers the production order.
+    """
     from mergecraft.review.terminal_submission import (
         ReviewerRun,
         format_finding_provenance_line,
@@ -389,47 +396,3 @@ def test_a_foreign_reviewer_id_still_reads_as_unknown_beside_file_groups() -> No
     )
 
     assert [row["raised_by"] for row in merged] == ["unknown"]
-
-
-@pytest.mark.asyncio
-async def test_submit_review_verdict_stamps_raised_by_from_a_file_group_run(
-    tmp_path: Any,
-) -> None:
-    """End-to-end: a server-recorded group run reaches the terminal submission by its id."""
-    from mergecraft.mcp.tool_state import record_reviewer_dispatch_run
-    from mergecraft.mcp.verdict import submit_review_verdict_tool
-
-    write_config(tmp_path, two_reviewer_config())
-    ctx = publication_ctx(tmp_path)
-    register_review_scope(
-        ctx.tool_state,
-        diff_path=str(tmp_path / "diff.patch"),
-        provenance="checkout",
-    )
-    record_reviewer_dispatch_run(
-        ctx.tool_state,
-        agent_id="file-group/group-2",
-        findings=[_finding(path="src/b.py", body="from file group two", severity="Minor")],
-        model_slug="anthropic/claude-sonnet",
-    )
-
-    result = await submit_review_verdict_tool(ctx).execute(
-        {
-            "verdict": "approve",
-            "summary": "Fan-out run.",
-            "findings": [
-                _finding(path="src/a.py", body="from primary dispatch", severity="Minor"),
-            ],
-        }
-    )
-
-    assert result.is_error is False
-    submission = ctx.tool_state.terminal_submission
-    assert submission is not None
-    raised_by = {
-        getattr(row, "body", None): getattr(row, "raised_by", None) for row in submission.findings
-    }
-    assert raised_by == {
-        "from primary dispatch": "mergecraft-reviewer",
-        "from file group two": "file-group/group-2",
-    }
