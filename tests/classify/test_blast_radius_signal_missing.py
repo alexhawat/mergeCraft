@@ -204,6 +204,7 @@ _NO_PATHS: dict[str, bool | None] = {
     "dependencies": None,
     "tests": None,
     "review_config": None,
+    "source": None,
 }
 _PATHS_WITHOUT_STATS: dict[str, bool | None] = {
     "inputs": False,
@@ -215,6 +216,7 @@ _PATHS_WITHOUT_STATS: dict[str, bool | None] = {
     "dependencies": True,
     "tests": None,
     "review_config": True,
+    "source": None,
 }
 
 MISSING_SIGNAL_CHECKLIST: dict[str, dict[str, bool | None]] = {
@@ -227,8 +229,10 @@ MISSING_SIGNAL_CHECKLIST: dict[str, dict[str, bool | None]] = {
     "tests-without-stats": _PATHS_WITHOUT_STATS,
     "generated-without-stats": _PATHS_WITHOUT_STATS,
     "stats-not-a-dict": _PATHS_WITHOUT_STATS,
-    # Source without tests already fails from paths alone: it stays ``False``.
-    "small-source-without-stats": {**_PATHS_WITHOUT_STATS, "tests": False},
+    # Source without tests already fails from paths alone: ``tests`` stays ``False``.
+    # The source change is seen, but the carve-out needs line counts, so ``source``
+    # fails too.
+    "small-source-without-stats": {**_PATHS_WITHOUT_STATS, "tests": False, "source": False},
 }
 _MISSING_CODE: dict[str, str] = {
     "changed_paths": "signal.missing.paths",
@@ -254,10 +258,18 @@ def _checklist(result: Any) -> dict[str, bool | None]:
 def test_a_missing_signal_marks_its_unmeasured_gates_unknown(
     case_id: str, change: dict[str, Any]
 ) -> None:
-    result = _classify_any(change)
+    expected = MISSING_SIGNAL_CHECKLIST[case_id]
+    checklist = _checklist(_classify_any(change))
 
-    assert _checklist(result) == MISSING_SIGNAL_CHECKLIST[case_id]
-    assert [gate.gate for gate in result.checklist][: len(_NO_PATHS)] == list(_NO_PATHS)
+    # Later gates (appended after these) are not this table's concern.
+    assert {gate: checklist.get(gate, "absent") for gate in expected} == expected
+
+
+def test_gate_order_starts_with_the_missing_signal_table_gates() -> None:
+    from mergecraft.classify.blast_radius import GATE_ORDER
+
+    assert tuple(GATE_ORDER[: len(_NO_PATHS)]) == tuple(_NO_PATHS)
+    assert [gate.gate for gate in classify_blast_radius({}).checklist] == list(GATE_ORDER)
 
 
 @pytest.mark.parametrize(

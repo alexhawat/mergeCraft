@@ -44,7 +44,7 @@ the check is shown to trip in each direction.
 | Typed models | `LaneReason` holds code/lane/message, rejects an unknown lane, an extra field and a missing code (error location asserted); `ChecklistGate` accepts `true`/`false`/`null` and round-trips; an unmeasured gate dumps as JSON `null`; a classification round-trips | `test_blast_radius_reasons.py::test_lane_reason_*`, `::test_checklist_gate_accepts_true_false_and_unknown`, `::test_an_unmeasured_gate_serialises_as_json_null`, `::test_a_classification_round_trips_reasons_and_checklist` |
 | Run diff seam | `classify_run_blast_radius` on a migration diff emits `paths.migrations` with a measured checklist | `test_blast_radius_reasons.py::test_the_run_diff_classifier_emits_reasons_and_a_measured_checklist` |
 | Run record line | The deterministic run record prints the lane and the reason codes on one line, and the line follows the classification | `test_blast_radius_reasons.py::test_the_run_record_prints_the_lane_and_its_codes_on_one_line`, `::test_the_run_record_line_follows_the_classification` |
-| Missing inputs are unknown, not green | For every missing-signal case: the exact checklist (path gates `null` without paths; path-only gates measured without stats; a gate failed from paths stays `false`; `inputs` `false`), the matching `signal.missing.*` reason at `medium`, and the invariants | `tests/classify/test_blast_radius_signal_missing.py::test_a_missing_signal_marks_its_unmeasured_gates_unknown`, `::test_a_missing_signal_emits_its_coded_reason`, `::test_a_missing_signal_holds_the_lane_and_eligibility_invariants`, `::test_a_gate_failed_from_paths_stays_false_without_diff_stats`, `::test_a_path_only_gate_is_measured_without_diff_stats`, `::test_a_complete_low_change_passes_every_gate` |
+| Missing inputs are unknown, not green | For every missing-signal case: the exact checklist (path gates `null` without paths; path-only gates measured without stats; a gate failed from paths stays `false`; `inputs` `false`), the matching `signal.missing.*` reason at `medium`, and the invariants | `tests/classify/test_blast_radius_signal_missing.py::test_a_missing_signal_marks_its_unmeasured_gates_unknown`, `::test_a_missing_signal_emits_its_coded_reason`, `::test_a_missing_signal_holds_the_lane_and_eligibility_invariants`, `::test_a_gate_failed_from_paths_stays_false_without_diff_stats`, `::test_a_path_only_gate_is_measured_without_diff_stats`, `::test_a_complete_low_change_passes_every_gate`, `::test_gate_order_starts_with_the_missing_signal_table_gates` |
 | The gate reads `inputs` | `low_risk_passing` and `clean_pass` refuse a packet whose checklist `inputs` is `false` or `null` even when its categories look measured; a measured checklist still reaches both rows | `test_blast_radius_signal_missing.py::test_low_risk_passing_refuses_a_checklist_without_measured_inputs`, `::test_clean_pass_refuses_a_medium_checklist_without_measured_inputs`, `::test_a_checklist_with_measured_inputs_still_reaches_low_risk_passing`, `::test_a_checklist_with_measured_inputs_still_reaches_clean_pass` |
 | Older packets decide as before | A `1.17.0` packet whose blast radius has no `reasons`/`checklist` still validates and selects `low_risk_passing`, `clean_pass` or `needs_human_review` exactly as before | `test_blast_radius_signal_missing.py::test_a_packet_written_before_the_checklist_decides_as_before` |
 | Catalogue contents | Every locked code is present with its default lane; lanes are known; codes are dotted lowercase | `tests/classify/test_lane_reason_catalogue.py::test_the_catalogue_carries_every_locked_code_with_its_default_lane`, `::test_every_catalogue_lane_is_a_known_lane`, `::test_every_code_is_a_stable_dotted_lowercase_name` |
@@ -63,11 +63,13 @@ the check is shown to trip in each direction.
 
 ## Not pinned (left to the implementation)
 
-- Which gate a `source.changed` reason fails: the invariant only requires that
-  a `medium` lane leaves at least one gate not `true`.
 - The label and exact wording of the run-record line: the tests require one
   line carrying the lane and every code.
 - Whether a reason that the carve-out lowers (for example `tests.missing`) is
   still emitted at `low` or dropped: every reason in that case must be `low`.
 - With `changed_paths` missing but diff text present, whether a diff-only
   signal (destructive SQL) fails its gate or leaves it `null`.
+
+## Amendments
+
+- The `source` gate follows `review_config` in `GATE_ORDER`: `source.changed` fails it and `source.small_isolated` passes it. It reads paths and line counts, so it is `null` without either. The missing-signal checklist table now includes it, with `source` `false` for a lone source file without stats. The table compares only the gates it names, so gates appended later do not break it. A separate test pins the table's gates as the prefix of `GATE_ORDER`.
