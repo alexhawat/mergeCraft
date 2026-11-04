@@ -17,12 +17,21 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Ensure build toolchain (self-hosted)
+    - name: Ensure self-hosted runner tools
       shell: bash
       run: |
+        set -euo pipefail
         if ! command -v make >/dev/null 2>&1; then
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential make
+        fi
+        if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs npm
+        fi
+        if ! command -v gh >/dev/null 2>&1; then
+          TAG=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | sed -n 's/.*"tag_name": *"\(v[^"]*\)".*/\1/p' | head -1)
+          curl -fsSL "https://github.com/cli/cli/releases/download/${TAG}/gh_${TAG#v}_linux_amd64.tar.gz" | sudo tar -xz -C /usr/local --strip-components=1
+          gh --version | head -1
         fi
 
     - name: Install uv
