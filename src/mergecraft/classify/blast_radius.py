@@ -103,6 +103,16 @@ _DEPENDENCY_FILES = {
 }
 _DIFF_SIGNAL_KEYS = ("diff", "diff_text", "patch", "text")
 
+SIGNAL_MISSING_CATEGORY = "signal_missing"
+"""Category recorded when the classifier was not given the inputs it measures.
+
+Unknown is never green (#1056): a classification with no changed paths or no
+diff statistics cannot vouch for a ``low`` lane, so it is floored at
+:data:`_SIGNAL_MISSING_LANE` (``assisted``, never ``eligible``). It is not a
+:data:`Category` rule key on purpose, so no repository override can lower it.
+"""
+_SIGNAL_MISSING_LANE: Lane = "medium"
+
 
 def _contains_path_part(path: str, parts: tuple[str, ...]) -> bool:
     normalized = f"/{path.lower().strip('/')}"
@@ -207,12 +217,32 @@ def _is_small_isolated_source(paths: list[str], diff_stats: dict[str, object]) -
     return isinstance(added, int) and isinstance(deleted, int) and added + deleted <= 5
 
 
+def _missing_signals(change: ChangeSet) -> list[str]:
+    """Name each classifier input that is absent or empty (#1056)."""
+    missing: list[str] = []
+    paths = change.get("changed_paths")
+    if not isinstance(paths, list) or not paths:
+        missing.append("changed_paths")
+    diff_stats = change.get("diff_stats")
+    if not isinstance(diff_stats, dict):
+        missing.append("diff_stats")
+    return missing
+
+
 def classify_blast_radius(
     change: ChangeSet, *, rule_set: RuleSet | None = None
 ) -> BlastRadiusClassification:
-    """Classify typed change data without filesystem, network, or environment access."""
-    paths = change.get("changed_paths", [])
-    diff_stats = change.get("diff_stats", {})
+    """Classify typed change data without filesystem, network, or environment access.
+
+    Missing or empty ``changed_paths``, or missing ``diff_stats``, add the
+    :data:`SIGNAL_MISSING_CATEGORY` category and floor the lane at ``medium``:
+    a classification that measured nothing is never ``low`` / ``eligible``.
+    """
+    missing = _missing_signals(change)
+    raw_paths = change.get("changed_paths")
+    paths = raw_paths if isinstance(raw_paths, list) else []
+    raw_stats = change.get("diff_stats")
+    diff_stats = raw_stats if isinstance(raw_stats, dict) else {}
     categories, rule_categories = _detected_categories(paths, _diff_text(diff_stats))
     rules = _merged_rules(rule_set)
 
@@ -248,11 +278,19 @@ def classify_blast_radius(
     if "generated_files" in rule_categories and lane == "high":
         lane = "high"
 
+    # Applied last, after every downgrade, so nothing can lower it again.
+    if missing:
+        categories.append(SIGNAL_MISSING_CATEGORY)
+        if _LANE_RANK[lane] < _LANE_RANK[_SIGNAL_MISSING_LANE]:
+            lane = _SIGNAL_MISSING_LANE
+
     reason = (
         f"Detected blast-radius categories: {', '.join(categories)}."
         if categories
         else "No elevated blast-radius category was detected."
     )
+    if missing:
+        reason = f"{reason} Missing classifier input: {', '.join(missing)}."
     return BlastRadiusClassification(
         lane=lane,
         auto_merge_lane=_AUTO_MERGE_LANE[lane],
@@ -264,6 +302,7 @@ def classify_blast_radius(
 
 __all__ = [
     "DEFAULT_RULE_SET",
+    "SIGNAL_MISSING_CATEGORY",
     "AutoMergeLane",
     "BlastRadiusClassification",
     "ChangeSet",

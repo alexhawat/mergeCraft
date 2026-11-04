@@ -36,6 +36,17 @@ _TRUFFLEHOG_NAMED_FIXTURE_SUPPRESSIONS: dict[str, str] = {
         "API-key sample asserted by the HTTP span redaction tests"
     ),
 }
+# Finding-level allowlist (#1008): one detector in one file, keyed on
+# (repo-relative path, trufflehog DetectorName). Unlike the path-level table
+# above, the file stays scanned by every other detector. Keep it in step with
+# ``TRUFFLEHOG_ALLOWED_FINDINGS`` in ``scripts/ci_extended_sarif.py`` (a test
+# pins the two equal) so the review and the CI emitter allow the same pairs.
+_TRUFFLEHOG_ALLOWED_FINDINGS: dict[tuple[str, str], str] = {
+    ("src/mergecraft/tracing/redaction.py", "URI"): (
+        "The URL-redaction patterns and doctests spell scheme://user:pass@host on "
+        "purpose; the module exists to mask that shape"
+    ),
+}
 _TRUFFLEHOG_VENV_MARKERS = frozenset({".venv", ".venv-dev", "venv", "site-packages"})
 
 
@@ -70,12 +81,28 @@ def trufflehog_named_fixture_suppressions() -> Mapping[str, str]:
     return dict(_TRUFFLEHOG_NAMED_FIXTURE_SUPPRESSIONS)
 
 
+def trufflehog_allowed_findings() -> Mapping[tuple[str, str], str]:
+    """Return (path, detector) → reason for single-detector exemptions (#1008)."""
+    return dict(_TRUFFLEHOG_ALLOWED_FINDINGS)
+
+
 def _normalize_trufflehog_path(path: str) -> str:
     return path.replace("\\", "/").lstrip("./")
 
 
-def is_trufflehog_path_suppressed(path: str, *, repo_root: Path | None = None) -> bool:
-    """Return True for named fixtures or virtualenv trees; never a blanket tests/ skip."""
+def is_trufflehog_path_suppressed(
+    path: str,
+    *,
+    detector: str | None = None,
+    repo_root: Path | None = None,
+) -> bool:
+    """Return True when a trufflehog hit at ``path`` is not reported.
+
+    Suppressed: a named fixture (every detector), a virtualenv tree, or — when
+    ``detector`` is given — an exact (path, detector) pair on the finding-level
+    allowlist, so the same file is still reported for any other detector.
+    Never a blanket ``tests/`` skip.
+    """
     from mergecraft.analyzers.parsers._common import resolve_repo_relative_path
 
     if repo_root is not None:
@@ -87,6 +114,8 @@ def is_trufflehog_path_suppressed(path: str, *, repo_root: Path | None = None) -
     suppressions = trufflehog_named_fixture_suppressions()
     if normalized in suppressions:
         return True
+    if detector is not None and (normalized, detector) in _TRUFFLEHOG_ALLOWED_FINDINGS:
+        return True
     parts = [part for part in normalized.split("/") if part]
     return bool(_TRUFFLEHOG_VENV_MARKERS.intersection(parts))
 
@@ -94,6 +123,7 @@ def is_trufflehog_path_suppressed(path: str, *, repo_root: Path | None = None) -
 __all__ = [
     "is_trufflehog_path_suppressed",
     "raw_analyzers_block",
+    "trufflehog_allowed_findings",
     "trufflehog_named_fixture_suppressions",
     "trufflehog_verify_enabled",
 ]

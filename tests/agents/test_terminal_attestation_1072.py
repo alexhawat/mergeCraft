@@ -205,7 +205,9 @@ def test_attested_clean_review_routes_clean_pass_not_schema_failure() -> None:
             reason="Detected blast-radius categories: dependency_changes.",
             next_action="Use assisted review and verify the affected behavior.",
             categories=["dependency_changes"],
-        )
+        ),
+        # #1056: a lane only reaches auto_merge when it was measured from changed paths.
+        files_changed=["pyproject.toml"],
     )
     decision = decide_approval(packet, run_succeeded=True, tier="trusted")
     assert decision.verdict == "success"

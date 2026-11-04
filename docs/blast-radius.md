@@ -28,6 +28,22 @@ The result also names the detected categories, a human-readable reason, and the 
 
 Path matching is supplemented by small diff-text heuristics for destructive database or infrastructure operations and synthetic secret-assignment markers.
 
+## Missing inputs escalate
+
+Unknown is never green. A classification that was not given what it measures cannot vouch for a `low` lane:
+
+| Missing input | Category | Lane |
+|---|---|---|
+| `changed_paths` absent or empty | `signal_missing` | at least medium (`assisted`) |
+| `diff_stats` absent | `signal_missing` | at least medium (`assisted`) |
+
+`signal_missing` is applied after every other rule, including the small-isolated-source carve-out, and it is not a `RuleSet` key, so no repository override can lower it. The reason names the missing input, for example `Missing classifier input: changed_paths, diff_stats.` A higher lane from another category still wins.
+
+The approval gate and the risk-band ordering follow the same rule:
+
+- Both gate rows that map to `auto_merge` require evidence that the classification had inputs: a non-empty `files_changed` on the packet and no `signal_missing` category. `low_risk_passing` also requires a `low` lane. `clean_pass` covers every lane that is not `forbidden`, including `medium`, so without this check it would auto-merge a `signal_missing` packet. A packet that claims a lane with nothing measured falls through to `needs_human_review`.
+- `risk_at_or_above` ranks an unrecognised risk band above `critical`, so a misspelt or unknown band meets every threshold instead of reading as `low`.
+
 ## Per-repository overrides
 
 `classify_blast_radius(change, rule_set=...)` accepts an additive `RuleSet`. Each supplied category is merged over the shipped default, and the repository value wins for that category. Omitting `rule_set`, or passing an empty one, uses the defaults unchanged.

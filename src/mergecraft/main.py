@@ -19,7 +19,7 @@ from mergecraft.action.inputs import (
 )
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.post_run import finalize_agent_result
-from mergecraft.agents.shared import Agent, AgentResult, AgentRunContext
+from mergecraft.agents.shared import FAILOVER_ELIGIBLE_KEY, Agent, AgentResult, AgentRunContext
 from mergecraft.agents.verifier import verifier_denied_tool_names
 from mergecraft.analyzers.redact import install_loguru_redaction_filter, redact_secrets
 from mergecraft.analyzers.sarif_upload import resolve_sarif_upload_enabled
@@ -160,6 +160,11 @@ class MainResult:
     # path. ``None`` for early-exit paths that bypass ``_finalize``; the GHA
     # surface writes an empty string in that case (D10).
     verdict_diagnostic: VerdictDiagnostic | None = None
+    # #1009 — the failed agent result declared ``failover_eligible``: no retry of
+    # this rung's credential can succeed, but the next vendor's may. Surfaced as
+    # the action's ``failover_eligible`` output so the workflow cascade can hand
+    # the review on even though this rung's packet carries a ``neutral`` verdict.
+    failover_eligible: bool = False
 
 
 @dataclass
@@ -2675,6 +2680,10 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
             evidence_packet_path=packet_path,
             outcome=outcome,
             verdict_diagnostic=verdict_diagnostic_code,
+            failover_eligible=(
+                not agent_result.success
+                and (agent_result.metadata or {}).get(FAILOVER_ELIGIBLE_KEY) is True
+            ),
         )
 
     output = tool_state.output or agent_result.output

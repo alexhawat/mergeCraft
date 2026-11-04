@@ -92,7 +92,8 @@ def _low_risk_passing_packet() -> MergeEvidencePacket:
         next_action="Eligible for automatic merge after required checks pass.",
         categories=[],
     )
-    packet = _packet(findings=[], blast_radius=classification)
+    # #1056: a lane only reaches auto_merge when it was measured from changed paths.
+    packet = _packet(findings=[], blast_radius=classification, files_changed=["docs/guide.md"])
     decision = Decision(
         verdict="success",
         reason="low-risk passing: trusted structural success with no blockers",
@@ -156,7 +157,11 @@ def _clean_pass_packet() -> MergeEvidencePacket:
         next_action="Use assisted review and verify the affected behavior.",
         categories=["dependency_changes"],
     )
-    return _packet(blast_radius=classification, decision=_trusted_success_decision())
+    return _packet(
+        blast_radius=classification,
+        decision=_trusted_success_decision(),
+        files_changed=["pyproject.toml"],
+    )
 
 
 def _needs_human_review_packet() -> MergeEvidencePacket:
@@ -220,6 +225,7 @@ def test_clean_pass_covers_auto_merge_eligible_lanes() -> None:
             categories=["dependency_changes"],
         ),
         decision=_trusted_success_decision(),
+        files_changed=["pyproject.toml"],
     )
     assert select_rule_id(packet) == "clean_pass"
     assert decide_action(packet, policy=DEFAULT_GATE_POLICIES) is GateAction.AUTO_MERGE

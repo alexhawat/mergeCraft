@@ -374,6 +374,7 @@ jobs:
       prompt: ${{ steps.prompt.outputs.text }}
       baseline_id: ${{ steps.approval_baseline.outputs.id }}
       opencode_go_outcome: ${{ steps.mergecraft_opencode_go.outcome }}
+      opencode_go_failover_eligible: ${{ steps.mergecraft_opencode_go.outputs.failover_eligible }}
       codex_fallback_need: ${{ steps.fallback.outputs.need }}
       # The Codex rung's former step condition, evaluated here: Codex runs when
       # OpenCode Go is not configured, or when the decide step found that its
@@ -845,6 +846,7 @@ jobs:
       CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
     outputs:
       codex_outcome: ${{ steps.mergecraft_codex.outcome }}
+      codex_failover_eligible: ${{ steps.mergecraft_codex.outputs.failover_eligible }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1225,6 +1227,11 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           EVENT_NAME: ${{ github.event_name }}
           BASELINE_ID: ${{ needs.review.outputs.baseline_id }}
+          # #1009 — "hand the review on", distinct from retryable: an expired
+          # subscription login emits a neutral packet that is not a verdict.
+          # Each rung's flag crosses from the job that ran it as a job output.
+          OPENCODE_GO_FAILOVER_ELIGIBLE: ${{ needs.review.outputs.opencode_go_failover_eligible }}
+          CODEX_FAILOVER_ELIGIBLE: ${{ needs.review-codex.outputs.codex_failover_eligible }}
           OPENCODE_GO_PACKET_FILE: ${{ runner.temp }}/packet-opencode-go.json
           CODEX_PACKET_FILE: ${{ runner.temp }}/packet-codex.json
           TRUSTED_ROOT: ${{ steps.trusted_scripts.outputs.root }}

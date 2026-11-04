@@ -396,3 +396,48 @@ def test_action_entry_module_is_gone() -> None:
         if needle_dotted in text or needle_slashed in text:
             offenders.append(str(source.relative_to(_REPO_ROOT)))
     assert not offenders, f"stale references to the dead action-entry module: {offenders}"
+
+
+class TestFailoverEligibleOutput:
+    """#1009 — ``failover_eligible`` reaches the workflow cascade as a step output.
+
+    An expired Codex login is not ``retryable`` (no retry of that login can
+    succeed) but it is a reason to hand the review to the next vendor. The
+    rung still emits a ``neutral`` packet, which the cascade would otherwise
+    read as a posted verdict, so the signal has to travel separately.
+    """
+
+    @staticmethod
+    def _run_failed(monkeypatch: pytest.MonkeyPatch, out: Path, *, eligible: bool) -> str:
+        from mergecraft.main import MainResult
+
+        out.touch()
+        monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+        _patch_main(
+            monkeypatch,
+            MainResult(
+                success=False,
+                error="reviewer credential expired",
+                outcome=RunOutcome.infra_error,
+                failover_eligible=eligible,
+            ),
+        )
+        with pytest.raises(typer.Exit):
+            asyncio.run(_run_main())
+        return _read_output_file(out)["failover_eligible"]
+
+    def test_a_failover_eligible_failure_writes_true(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert self._run_failed(monkeypatch, tmp_path / "out", eligible=True) == "true"
+
+    def test_an_ordinary_failure_writes_false(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert self._run_failed(monkeypatch, tmp_path / "out", eligible=False) == "false"
+
+    def test_the_output_is_declared_in_action_yml(self) -> None:
+        import yaml
+
+        manifest = yaml.safe_load((_REPO_ROOT / "action.yml").read_text(encoding="utf-8"))
+        assert "failover_eligible" in manifest["outputs"]

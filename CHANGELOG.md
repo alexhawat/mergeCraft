@@ -107,6 +107,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The in-review trufflehog analyzer can now exempt one detector in one file,
+  keyed on (path, detector) like the CI SARIF emitter's allowlist, instead of
+  only exempting a whole file from every detector. The URI detector is allowed
+  in `src/mergecraft/tracing/redaction.py`, whose redaction patterns spell
+  `scheme://user:pass@host` on purpose, which ends the recurring "URI secret
+  detected" self-review finding there. Any other detector still reports that
+  file (#1008).
+
+- A blast-radius classification that was missing its inputs no longer reads as
+  safe. No changed paths, or no diff statistics, now adds a `signal_missing`
+  category and puts the lane at `medium` (`assisted`) or higher instead of
+  `low` / `eligible`, and no repository override can lower it. An
+  unrecognised risk band ranks above `critical` in `risk_at_or_above` instead
+  of as `low`. The approval gate's `low_risk_passing` and `clean_pass` rows
+  (both map to `auto_merge`) also require the classification to have had
+  inputs: changed paths on the packet and no `signal_missing` category
+  (#1056, part 1).
+
+- An expired Codex subscription login now hands the review to the next vendor
+  instead of ending it. The Codex driver marks that failure
+  `failover_eligible` (move on to the next vendor) while keeping it not
+  `retryable` (no retry of the same login), the model chain advances on it but
+  never re-runs the dead login at the tail, and the action exposes a
+  `failover_eligible` output. The self-review cascade reads that output, so a
+  `neutral` packet from the dead login no longer holds the Claude backstop back
+  when OpenCode Go also failed without a verdict (#1009).
+
 - The nightly live GitHub leg polls the commit-status list for up to 30 seconds
   before asserting a just-created status is visible, instead of failing on GitHub's
   eventually consistent read (#1018).
