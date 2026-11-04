@@ -34,6 +34,38 @@ GITHUB_LIST_PAGE_SIZE: Final[int] = 100
 GITHUB_LIST_MAX_PAGES: Final[int] = 20
 
 
+# The review-comment fields GitHub's create-review endpoint accepts. It maps
+# ``comments[]`` onto the GraphQL ``DraftPullRequestReviewThread`` input and
+# rejects the whole review with a 422 on any other key — the internal
+# ``fingerprint`` sank every inline comment that way. The fingerprint still
+# reaches GitHub as the hidden marker ``stamp_finding_fingerprint`` writes into
+# the body, which is what dedup, carryover and thread resolution read back.
+# REST also accepts the legacy diff-position anchor.
+# https://docs.github.com/en/rest/pulls/reviews#create-a-review-for-a-pull-request
+_GITHUB_REVIEW_COMMENT_FIELDS = (
+    "path",
+    "body",
+    "line",
+    "side",
+    "start_line",
+    "start_side",
+    "position",
+)
+
+
+def github_review_request(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return ``payload`` with each inline comment cut down to the fields GitHub accepts."""
+    comments = payload.get("comments")
+    if not comments:
+        return payload
+    request = dict(payload)
+    request["comments"] = [
+        {key: comment[key] for key in _GITHUB_REVIEW_COMMENT_FIELDS if key in comment}
+        for comment in comments
+    ]
+    return request
+
+
 def _as_dict(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
         msg = f"expected JSON object, got {type(data).__name__}"
@@ -537,7 +569,7 @@ class GitHubClient:
         return _as_dict(
             await self.post(
                 f"/repos/{owner}/{repo}/pulls/{pull_number}/reviews",
-                json=fields,
+                json=github_review_request(fields),
             )
         )
 
