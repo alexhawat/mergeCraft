@@ -141,6 +141,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configuration moved into generated paths, in full review. Triage evaluates
   the complete diff without applying `ignore_paths` (#1137).
 
+- A stall diagnostic names as the likely cause only a provider error seen before
+  the no-output watchdog killed the attempt. An error that arrives after the kill,
+  such as the closed-socket report the kill itself produces, is shown as an effect
+  of the kill, and with no earlier error the report says the cause is not known
+  instead of naming one. The report also names the last stream event and when it
+  arrived, so a silent reviewer leaves a trace of what it was doing (#1138).
+
 - A reviewer that read the diff with OpenCode's native `read` tool no longer ends
   `inconclusive` with `Coverage: 0/N hunks`. OpenCode `read` parts are now recorded on
   the trajectory, so a read of `diffPath` or of a source file counts, and a read of the
