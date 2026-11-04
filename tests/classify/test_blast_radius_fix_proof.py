@@ -59,6 +59,7 @@ FIX_CODES: dict[str, str] = {
 # A fix PR's receipt status → the reason code it must emit.
 FAILING_STATUS_CODES: dict[str, str] = {
     "not-proven": "fix.not-proven",
+    "no-tests": "fix.not-proven",
     "no-receipt": "fix.no-receipt",
     "invalid": "fix.receipt.invalid",
     "mismatch": "fix.receipt.mismatch",
@@ -101,6 +102,13 @@ def _codes(result: Any) -> dict[str, Any]:
 
 def _gates(result: Any) -> dict[str, bool | None]:
     return {gate.gate: gate.passed for gate in result.checklist}
+
+
+def _listed_in_gate_order(result: Any) -> bool:
+    """The checklist is a subsequence of ``GATE_ORDER``: unsupplied signals are omitted."""
+    order = list(_api().GATE_ORDER)
+    listed = [gate.gate for gate in result.checklist]
+    return listed == [gate for gate in order if gate in set(listed)]
 
 
 def _fix_reasons(result: Any) -> list[Any]:
@@ -192,18 +200,6 @@ def test_a_fix_without_a_proven_receipt_is_medium_with_its_code(status: str, cod
     assert [reason.code for reason in _fix_reasons(result)] == [code]
 
 
-def test_a_fix_whose_receipt_lists_no_tests_never_passes() -> None:
-    result = _classify(_change("no-tests"))
-    fix_reasons = _fix_reasons(result)
-
-    assert result.lane == "medium"
-    assert result.auto_merge_lane != "eligible"
-    assert len(fix_reasons) == 1
-    assert fix_reasons[0].code in set(FIX_CODES) - {"fix.proven", "fix.not-required"}
-    assert fix_reasons[0].lane == "medium"
-    assert _gates(result)["fix_proof"] is False
-
-
 def test_an_undeclared_receipt_on_a_fix_names_the_setting() -> None:
     reason = _codes(_classify(_change("not-declared")))["fix.no-receipt"]
 
@@ -278,24 +274,58 @@ def test_a_proven_fix_with_missing_inputs_stays_medium() -> None:
     assert _gates(result)["fix_proof"] is True
 
 
-# ── no signal supplied ───────────────────────────────────────────────────────
+# ── no signal supplied: the gate is omitted, not unknown ─────────────────────
 
 
-def test_no_signal_leaves_the_part2_classification_unchanged() -> None:
-    """No ``fix_proof`` key (the verification tool's diff-only call): no ``fix.*`` reason.
+def test_no_signal_omits_the_fix_proof_gate_and_emits_no_fix_reason() -> None:
+    """No ``fix_proof`` key: the signal is not part of this classification.
 
-    The part-2 tests require a complete low change without the signal to pass
-    every gate and stay ``eligible``; this pins the same for the docs change, and
-    that a supplied signal is what adds the ``fix.*`` reason.
+    The ``fix_proof`` gate is left out of the checklist (not ``null``), no
+    ``fix.*`` reason is emitted, and a complete low change still passes every
+    listed gate and stays ``eligible``. Supplying the signal is what adds the gate.
     """
     without = _classify(dict(_DOCS))
     with_signal = _classify(_change("not-proven"))
 
+    assert "fix_proof" in _api().GATE_ORDER
+    assert "fix_proof" not in _gates(without)
+    assert _fix_reasons(without) == []
     assert [reason.code for reason in without.reasons] == ["baseline.clean"]
     assert without.lane == "low"
     assert without.auto_merge_lane == "eligible"
-    assert [gate.gate for gate in without.checklist] == list(_api().GATE_ORDER)
+    assert all(passed is True for passed in _gates(without).values())
+    assert set(_PART2_GATES) <= set(_gates(without))
+    assert _listed_in_gate_order(without)
+    assert _gates(with_signal)["fix_proof"] is False
     assert "fix.not-proven" in _codes(with_signal)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"diff_stats": dict(_STATS)},
+        {"changed_paths": ["docs/a.md"]},
+        dict(_MIGRATION),
+    ],
+    ids=["missing-paths", "missing-diff", "migration"],
+)
+def test_no_signal_omits_the_gate_whatever_else_the_change_holds(change: dict[str, Any]) -> None:
+    result = _classify(change)
+
+    assert "fix_proof" in _api().GATE_ORDER
+    assert "fix_proof" not in _gates(result)
+    assert _fix_reasons(result) == []
+    assert _listed_in_gate_order(result)
+
+
+@pytest.mark.parametrize("status", ALL_STATUSES)
+@pytest.mark.parametrize("required", [True, False], ids=["fix", "non-fix"])
+def test_a_supplied_signal_always_measures_the_gate(required: bool, status: str) -> None:
+    """A supplied signal is never ``null``: every fix-proof status is a measurement."""
+    passed = _gates(_classify(_change(status, required=required)))["fix_proof"]
+
+    assert isinstance(passed, bool)
+    assert passed is (not required or status == "proven")
 
 
 # ── invariants over a table ──────────────────────────────────────────────────
@@ -350,7 +380,9 @@ def test_every_code_with_a_fix_signal_is_in_the_catalogue(change: dict[str, Any]
     codes = {reason.code for reason in result.reasons}
     assert codes <= set(_api().LANE_REASON_CATALOGUE)
     assert codes & set(FIX_CODES)
-    assert [gate.gate for gate in result.checklist] == list(_api().GATE_ORDER)
+    assert "fix_proof" in _gates(result)
+    assert _listed_in_gate_order(result)
+    assert set(_PART2_GATES) <= set(_gates(result))
 
 
 def test_the_invariant_table_has_both_eligible_and_non_eligible_rows() -> None:
@@ -380,39 +412,104 @@ diff --git a/docs/guide.md b/docs/guide.md
 """
 
 
-def test_the_run_diff_classifier_passes_the_signal_through() -> None:
-    from mergecraft.evidence.run_packet import classify_run_blast_radius
+def _state(red_green: Any = None) -> Any:
+    from mergecraft.mcp.tool_state import init_tool_state
 
-    proven = classify_run_blast_radius(_DOCS_DIFF, fix_proof={"required": True, "status": "proven"})
-    unproven = classify_run_blast_radius(
-        _DOCS_DIFF, fix_proof={"required": True, "status": "not-proven"}
+    state = init_tool_state(owner="acme", name="demo", dir="/nonexistent")
+    if red_green is not None:
+        state.red_green = red_green
+    return state
+
+
+def _signal(state: Any, *, title: str, labels: list[str], fix_labels: list[str]) -> Any:
+    from mergecraft.evidence.run_packet import fix_proof_signal_for_state
+
+    return fix_proof_signal_for_state(state, title=title, labels=labels, fix_labels=fix_labels)
+
+
+_DEFAULT_FIX_LABELS = ["bug", "fix"]
+
+
+def test_the_shared_helper_builds_a_proven_signal_from_tool_state() -> None:
+    signal = _signal(
+        _state(_evidence("proven")), title="fix(ci): x", labels=[], fix_labels=_DEFAULT_FIX_LABELS
     )
 
-    assert proven is not None
-    assert unproven is not None
-    assert proven.lane == "low"
-    assert "fix.proven" in _codes(proven)
-    assert unproven.lane == "medium"
-    assert "fix.not-proven" in _codes(unproven)
+    assert signal == {"required": True, "status": "proven"}
+    result = _classify({**_DOCS, "fix_proof": signal})
+    assert "fix.proven" in _codes(result)
+    assert result.lane == "low"
 
 
-def test_the_run_diff_classifier_takes_the_signal_by_keyword_only() -> None:
-    from mergecraft.evidence.run_packet import classify_run_blast_radius
+@pytest.mark.parametrize("status", sorted(FAILING_STATUS_CODES), ids=sorted(FAILING_STATUS_CODES))
+def test_the_shared_helper_carries_the_recorded_status(status: str) -> None:
+    signal = _signal(
+        _state(_evidence(status)), title="fix: x", labels=[], fix_labels=_DEFAULT_FIX_LABELS
+    )
 
-    signal = {"required": True, "status": "proven"}
-
-    with pytest.raises(TypeError):
-        classify_run_blast_radius(_DOCS_DIFF, signal)
-    assert classify_run_blast_radius(_DOCS_DIFF, fix_proof=signal) is not None
+    assert signal == {"required": True, "status": status}
+    assert FAILING_STATUS_CODES[status] in _codes(_classify({**_DOCS, "fix_proof": signal}))
 
 
-def test_the_run_diff_classifier_without_a_signal_adds_no_fix_reason() -> None:
-    from mergecraft.evidence.run_packet import classify_run_blast_radius
+def test_the_shared_helper_without_evidence_on_a_fix_is_a_missing_receipt() -> None:
+    signal = _signal(_state(), title="fix: x", labels=[], fix_labels=_DEFAULT_FIX_LABELS)
 
-    result = classify_run_blast_radius(_DOCS_DIFF, fix_proof=None)
+    assert signal["required"] is True
+    assert signal["status"] in {"no-receipt", "not-declared"}
+    result = _classify({**_DOCS, "fix_proof": signal})
+    assert "fix.no-receipt" in _codes(result)
+    assert result.lane == "medium"
 
-    assert result is not None
-    assert [reason.code for reason in result.reasons] == ["baseline.clean"]
+
+@pytest.mark.parametrize(
+    ("title", "labels", "fix_labels", "required"),
+    [
+        ("feat: x", [], _DEFAULT_FIX_LABELS, False),
+        ("feat: x", ["Bug"], _DEFAULT_FIX_LABELS, True),
+        ("feat: x", ["regression"], ["regression"], True),
+        ("feat: x", ["bug"], ["regression"], False),
+        ("Fix: x", [], _DEFAULT_FIX_LABELS, True),
+        ("  fix(ci): x", [], [], True),
+    ],
+    ids=[
+        "feature",
+        "default-label",
+        "configured-label",
+        "configured-list-replaces-default",
+        "capitalised-type",
+        "leading-whitespace",
+    ],
+)
+def test_the_shared_helper_decides_whether_proof_is_required(
+    title: str, labels: list[str], fix_labels: list[str], required: bool
+) -> None:
+    signal = _signal(_state(_evidence("proven")), title=title, labels=labels, fix_labels=fix_labels)
+
+    assert signal["required"] is required
+    expected = "fix.proven" if required else "fix.not-required"
+    assert expected in _codes(_classify({**_DOCS, "fix_proof": signal}))
+
+
+def test_the_verification_tool_lane_matches_the_packet_lane(tmp_path: Path) -> None:
+    """``mcp/verification.py`` builds the signal through the same helper as the packet."""
+    from mergecraft.mcp.verification import _run_lane
+
+    ctx = _packet_ctx(tmp_path, title="fix: handle x")
+    packet = _packet(tmp_path, title="fix: handle x")
+
+    assert packet.blast_radius is not None
+    assert packet.blast_radius.lane == "medium"
+    assert _run_lane(ctx) == packet.blast_radius.lane
+
+
+def test_the_verification_tool_lane_is_low_for_a_proven_fix(tmp_path: Path) -> None:
+    from mergecraft.mcp.verification import _run_lane
+
+    ctx = _packet_ctx(tmp_path, title="fix: handle x", red_green=_evidence("proven"))
+    no_receipt = _packet_ctx(tmp_path, title="fix: handle x")
+
+    assert _run_lane(ctx) == "low"
+    assert _run_lane(no_receipt) == "medium"
 
 
 # ── run packet: the signal comes from ToolState.red_green + title/labels ─────
@@ -575,6 +672,138 @@ def test_the_run_record_names_the_fix_code(tmp_path: Path) -> None:
 
     assert lines
     assert any(line.startswith("- **") for line in lines)
+
+
+# ── approval gate: a checklist missing a GATE_ORDER gate was not fully measured ─
+
+
+def _decided_packet(blast_radius: Any, *, files_changed: list[str]) -> Any:
+    from mergecraft.agents.gates import TRUSTED_PACKET_DECIDED_BY
+    from mergecraft.evidence.packet import (
+        PACKET_SCHEMA_VERSION,
+        AgentMetadata,
+        Decision,
+        MergeEvidencePacket,
+    )
+
+    return MergeEvidencePacket(
+        schema_version=PACKET_SCHEMA_VERSION,
+        change_id="acme/demo#42",
+        agent=AgentMetadata(id="claude", version="0.0.0", model="claude-sonnet-4-5"),
+        files_changed=files_changed,
+        findings=[],
+        deterministic_checks=[],
+        blast_radius=blast_radius,
+        decision=Decision(verdict="success", reason="clean", decided_by=TRUSTED_PACKET_DECIDED_BY),
+    )
+
+
+def _hand_built(
+    *, lane: str, gates: dict[str, bool], categories: list[str], code: str = "baseline.clean"
+) -> Any:
+    from mergecraft.classify.blast_radius import BlastRadiusClassification
+
+    return BlastRadiusClassification.model_validate(
+        {
+            "lane": lane,
+            "auto_merge_lane": {"low": "eligible", "medium": "assisted"}[lane],
+            "reason": "hand-built",
+            "next_action": "hand-built",
+            "categories": categories,
+            "reasons": [{"code": code, "lane": lane, "message": "hand-built"}],
+            "checklist": [{"gate": gate, "passed": passed} for gate, passed in gates.items()],
+        }
+    )
+
+
+def _all_gates_true(*, without: str | None = None) -> dict[str, bool]:
+    return {gate: True for gate in _api().GATE_ORDER if gate != without}
+
+
+def test_a_low_packet_whose_checklist_lacks_fix_proof_is_refused() -> None:
+    from mergecraft.agents.gates import _is_clean_pass, _is_low_risk_passing, select_rule_id
+
+    gates = _all_gates_true(without="fix_proof")
+    packet = _decided_packet(
+        _hand_built(lane="low", gates=gates, categories=[]), files_changed=["docs/guide.md"]
+    )
+
+    assert "fix_proof" in _api().GATE_ORDER
+    assert all(gates.values())
+    assert _is_low_risk_passing(packet) is False
+    assert _is_clean_pass(packet) is False
+    assert select_rule_id(packet) not in {"low_risk_passing", "clean_pass"}
+
+
+def test_a_low_packet_with_every_gate_true_selects_low_risk_passing() -> None:
+    """Control: the completeness rule is not a blanket refusal."""
+    from mergecraft.agents.gates import _is_low_risk_passing, select_rule_id
+
+    gates = _all_gates_true()
+    packet = _decided_packet(
+        _hand_built(lane="low", gates=gates, categories=[]), files_changed=["docs/guide.md"]
+    )
+
+    assert "fix_proof" in gates
+    assert _is_low_risk_passing(packet) is True
+    assert select_rule_id(packet) == "low_risk_passing"
+
+
+def test_a_medium_packet_whose_checklist_lacks_fix_proof_never_reaches_clean_pass() -> None:
+    from mergecraft.agents.gates import _is_clean_pass, select_rule_id
+
+    gates = _all_gates_true(without="fix_proof")
+    gates["dependencies"] = False
+    packet = _decided_packet(
+        _hand_built(
+            lane="medium", gates=gates, categories=["dependency_changes"], code="deps.changed"
+        ),
+        files_changed=["uv.lock"],
+    )
+
+    assert "fix_proof" in _api().GATE_ORDER
+    assert _is_clean_pass(packet) is False
+    assert select_rule_id(packet) != "clean_pass"
+
+
+def test_a_medium_packet_with_every_gate_listed_reaches_clean_pass() -> None:
+    from mergecraft.agents.gates import select_rule_id
+
+    gates = _all_gates_true()
+    gates["dependencies"] = False
+    packet = _decided_packet(
+        _hand_built(
+            lane="medium", gates=gates, categories=["dependency_changes"], code="deps.changed"
+        ),
+        files_changed=["uv.lock"],
+    )
+
+    assert "fix_proof" in gates
+    assert select_rule_id(packet) == "clean_pass"
+
+
+def test_a_feature_run_packet_reaches_low_risk_passing(tmp_path: Path) -> None:
+    """The production packet supplies the signal, so a clean feature run stays mergeable."""
+    from mergecraft.agents.gates import _is_low_risk_passing
+
+    packet = _packet(tmp_path, title="docs: tidy the guide")
+
+    assert packet.blast_radius is not None
+    assert _gates(packet.blast_radius)["fix_proof"] is True
+    assert _is_low_risk_passing(packet) is True
+
+
+def test_a_fix_run_packet_without_a_receipt_never_reaches_low_risk_passing(
+    tmp_path: Path,
+) -> None:
+    from mergecraft.agents.gates import _is_low_risk_passing, select_rule_id
+
+    packet = _packet(tmp_path, title="fix: handle x")
+
+    assert packet.blast_radius is not None
+    assert _gates(packet.blast_radius)["fix_proof"] is False
+    assert _is_low_risk_passing(packet) is False
+    assert select_rule_id(packet) != "low_risk_passing"
 
 
 # ── docs ─────────────────────────────────────────────────────────────────────
