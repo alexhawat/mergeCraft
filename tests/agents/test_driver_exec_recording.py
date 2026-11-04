@@ -610,7 +610,8 @@ def test_driver_read_recorder_never_raises(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(trajectory, "record_tool_call", _explode)
 
     class _State:
-        tool_calls: list[Any] = []  # noqa: RUF012
+        def __init__(self) -> None:
+            self.tool_calls: list[Any] = []
 
     assert trajectory.record_driver_read(_State(), path="a.py") is None
     assert trajectory.record_driver_read(_State(), path=7) is None
