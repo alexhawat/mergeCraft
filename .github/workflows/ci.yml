@@ -24,7 +24,7 @@ concurrency:
 jobs:
   changes:
     name: Classify PR diff
-    runs-on: ubuntu-latest
+    runs-on: omarchy
     timeout-minutes: 5
     outputs:
       code: ${{ steps.classify.outputs.code }}
@@ -44,8 +44,9 @@ jobs:
             --base "${BASE_REF:-main}"
 
   deployment-candidate:
+    if: ${{ false }}  # disabled for self-hosted run
     name: Verify changed deployment candidates
-    runs-on: ubuntu-latest
+    runs-on: omarchy
     timeout-minutes: 15
     permissions:
       contents: read
@@ -59,7 +60,7 @@ jobs:
       - uses: ./.github/actions/bootstrap
       - name: Install cosign
         uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
-      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -73,7 +74,7 @@ jobs:
 
   toolchain:
     name: Verify (toolchain py${{ matrix.python }})
-    runs-on: ubuntu-latest
+    runs-on: omarchy
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -97,7 +98,7 @@ jobs:
   test:
     name: Verify (tests py${{ matrix.python }} ${{ matrix.group }}/2)
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: omarchy
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -135,7 +136,7 @@ jobs:
   coverage-gate:
     name: Verify (coverage gate py3.14)
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: omarchy
     timeout-minutes: 45
     steps:
       - name: Docs-only skip
@@ -176,7 +177,7 @@ jobs:
   static:
     name: Verify (static + build py${{ matrix.python }})
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: omarchy
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -300,7 +301,7 @@ jobs:
   security:
     name: Verify (security audit py${{ matrix.python }})
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: omarchy
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -387,7 +388,7 @@ jobs:
   privilege-root:
     name: Verify (root container privilege py3.14)
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: omarchy
     timeout-minutes: 30
     steps:
       - name: Docs-only skip
@@ -420,7 +421,7 @@ jobs:
   mutation-advisory:
     name: Verify (mutation advisory py3.14)
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: omarchy
     timeout-minutes: 45
     continue-on-error: true
     steps:
@@ -441,7 +442,7 @@ jobs:
   # that this proves structural replay, not live detection quality.
   eval-gate:
     name: Eval gate (structural replay, not live detection)
-    runs-on: ubuntu-latest
+    runs-on: omarchy
     timeout-minutes: 15
     permissions:
       contents: read
@@ -488,7 +489,7 @@ jobs:
   # continue-on-error keeps it advisory, and it reads no provider secret.
   shadow-comparison:
     name: Shadow fixture replay (advisory, keyless)
-    runs-on: ubuntu-latest
+    runs-on: omarchy
     timeout-minutes: 10
     continue-on-error: true
     steps:
