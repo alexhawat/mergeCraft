@@ -183,3 +183,295 @@ def test_a_measured_low_change_still_selects_low_risk_passing() -> None:
 
     assert _is_low_risk_passing(packet) is True
     assert select_rule_id(packet) == "low_risk_passing"
+
+
+# ── #1056 part 2 — the checklist marks what was never measured ───────────────
+#
+# ``None`` means "not measured". With ``changed_paths`` missing every path gate is
+# unknown. With ``diff_stats`` missing but paths present, the gates that read
+# only paths are still measured; a gate that already failed from paths stays
+# ``False``; ``migrations``, ``secrets_config_deployment``, ``irreversible_infra``
+# and ``tests`` (which also read diff text or line counts) are otherwise ``None``.
+# ``inputs`` is ``False`` whenever either input is missing.
+
+_NO_PATHS: dict[str, bool | None] = {
+    "inputs": False,
+    "migrations": None,
+    "auth_security_payment": None,
+    "secrets_config_deployment": None,
+    "irreversible_infra": None,
+    "public_api": None,
+    "dependencies": None,
+    "tests": None,
+    "review_config": None,
+}
+_PATHS_WITHOUT_STATS: dict[str, bool | None] = {
+    "inputs": False,
+    "migrations": None,
+    "auth_security_payment": True,
+    "secrets_config_deployment": None,
+    "irreversible_infra": None,
+    "public_api": True,
+    "dependencies": True,
+    "tests": None,
+    "review_config": True,
+}
+
+MISSING_SIGNAL_CHECKLIST: dict[str, dict[str, bool | None]] = {
+    "empty-change": _NO_PATHS,
+    "empty-paths": _NO_PATHS,
+    "empty-paths-no-stats": _NO_PATHS,
+    "stats-only": _NO_PATHS,
+    "paths-not-a-list": _NO_PATHS,
+    "docs-without-stats": _PATHS_WITHOUT_STATS,
+    "tests-without-stats": _PATHS_WITHOUT_STATS,
+    "generated-without-stats": _PATHS_WITHOUT_STATS,
+    "stats-not-a-dict": _PATHS_WITHOUT_STATS,
+    # Source without tests already fails from paths alone: it stays ``False``.
+    "small-source-without-stats": {**_PATHS_WITHOUT_STATS, "tests": False},
+}
+_MISSING_CODE: dict[str, str] = {
+    "changed_paths": "signal.missing.paths",
+    "diff_stats": "signal.missing.diff",
+}
+_RANK: dict[str, int] = {"low": 0, "medium": 1, "high": 2}
+
+
+def _classify_any(change: Any, rule_set: Any = None) -> Any:
+    """Classify a possibly malformed table row (non-list paths, non-dict stats)."""
+    return classify_blast_radius(change, rule_set=rule_set)
+
+
+def _checklist(result: Any) -> dict[str, bool | None]:
+    return {gate.gate: gate.passed for gate in result.checklist}
+
+
+@pytest.mark.parametrize(
+    ("case_id", "change"),
+    [(case_id, change) for case_id, change, _missing in MISSING_SIGNAL_CASES],
+    ids=[case_id for case_id, _change, _missing in MISSING_SIGNAL_CASES],
+)
+def test_a_missing_signal_marks_its_unmeasured_gates_unknown(
+    case_id: str, change: dict[str, Any]
+) -> None:
+    result = _classify_any(change)
+
+    assert _checklist(result) == MISSING_SIGNAL_CHECKLIST[case_id]
+    assert [gate.gate for gate in result.checklist][: len(_NO_PATHS)] == list(_NO_PATHS)
+
+
+@pytest.mark.parametrize(
+    ("change", "missing"),
+    [(change, missing) for _id, change, missing in MISSING_SIGNAL_CASES],
+    ids=[case_id for case_id, _change, _missing in MISSING_SIGNAL_CASES],
+)
+def test_a_missing_signal_emits_its_coded_reason(
+    change: dict[str, Any], missing: tuple[str, ...]
+) -> None:
+    result = _classify_any(change)
+    reasons = {reason.code: reason for reason in result.reasons}
+
+    for name in missing:
+        assert reasons[_MISSING_CODE[name]].lane == "medium"
+    for name in set(_MISSING_CODE) - set(missing):
+        assert _MISSING_CODE[name] not in reasons
+    assert set(reasons) & set(_MISSING_CODE.values())
+
+
+@pytest.mark.parametrize(
+    "change",
+    [change for _id, change, _missing in MISSING_SIGNAL_CASES],
+    ids=[case_id for case_id, _change, _missing in MISSING_SIGNAL_CASES],
+)
+def test_a_missing_signal_holds_the_lane_and_eligibility_invariants(
+    change: dict[str, Any],
+) -> None:
+    result = _classify_any(change)
+    passed = [gate.passed for gate in result.checklist]
+
+    assert result.lane == max((r.lane for r in result.reasons), key=_RANK.__getitem__)
+    assert any(value is not True for value in passed)
+    assert result.auto_merge_lane != "eligible"
+    assert _checklist(result)["inputs"] is False
+
+
+def test_a_gate_failed_from_paths_stays_false_without_diff_stats() -> None:
+    result = classify_blast_radius({"changed_paths": ["migrations/0001_init.sql"]})
+    gates = _checklist(result)
+
+    assert gates["migrations"] is False
+    assert gates["secrets_config_deployment"] is None
+    assert gates["inputs"] is False
+    assert result.lane == "high"
+
+
+def test_a_path_only_gate_is_measured_without_diff_stats() -> None:
+    result = classify_blast_radius({"changed_paths": ["ruff.toml"]})
+    gates = _checklist(result)
+
+    assert gates["review_config"] is False
+    assert gates["dependencies"] is True
+    assert gates["tests"] is None
+
+
+def test_a_complete_low_change_passes_every_gate() -> None:
+    change: ChangeSet = {"changed_paths": ["docs/guide.md"], "diff_stats": {"lines_added": 3}}
+    result = classify_blast_radius(change)
+
+    assert result.auto_merge_lane == "eligible"
+    assert all(value is True for value in _checklist(result).values())
+
+
+# ── the gate reads the checklist's ``inputs`` row when the packet carries one ─
+
+_LOCKED_GATES = list(_NO_PATHS)
+
+
+def _classification_with_checklist(
+    *, lane: str, auto_merge_lane: str, inputs: bool | None, categories: list[str]
+) -> BlastRadiusClassification:
+    """A classification whose categories look measured but whose checklist says otherwise."""
+    return BlastRadiusClassification.model_validate(
+        {
+            "lane": lane,
+            "auto_merge_lane": auto_merge_lane,
+            "reason": "forged",
+            "next_action": "forged",
+            "categories": categories,
+            "reasons": [{"code": "baseline.clean", "lane": lane, "message": "forged"}],
+            "checklist": [
+                {"gate": gate, "passed": inputs if gate == "inputs" else True}
+                for gate in _LOCKED_GATES
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize("inputs", [False, None], ids=["inputs-false", "inputs-unknown"])
+def test_low_risk_passing_refuses_a_checklist_without_measured_inputs(
+    inputs: bool | None,
+) -> None:
+    from mergecraft.agents.gates import _is_clean_pass
+
+    blast_radius = _classification_with_checklist(
+        lane="low", auto_merge_lane="eligible", inputs=inputs, categories=[]
+    )
+    packet = _decided_packet(blast_radius, files_changed=["docs/guide.md"])
+
+    assert _is_low_risk_passing(packet) is False
+    assert _is_clean_pass(packet) is False
+    assert select_rule_id(packet) not in {"low_risk_passing", "clean_pass"}
+    assert decide_action(packet, policy=DEFAULT_GATE_POLICIES) is not GateAction.AUTO_MERGE
+
+
+@pytest.mark.parametrize("inputs", [False, None], ids=["inputs-false", "inputs-unknown"])
+def test_clean_pass_refuses_a_medium_checklist_without_measured_inputs(
+    inputs: bool | None,
+) -> None:
+    from mergecraft.agents.gates import _is_clean_pass
+
+    blast_radius = _classification_with_checklist(
+        lane="medium",
+        auto_merge_lane="assisted",
+        inputs=inputs,
+        categories=["dependency_changes"],
+    )
+    packet = _decided_packet(blast_radius, files_changed=["uv.lock"])
+
+    assert _is_clean_pass(packet) is False
+    assert select_rule_id(packet) != "clean_pass"
+    assert decide_action(packet, policy=DEFAULT_GATE_POLICIES) is not GateAction.AUTO_MERGE
+
+
+def test_a_checklist_with_measured_inputs_still_reaches_low_risk_passing() -> None:
+    """Control: the checklist check is not a blanket refusal."""
+    blast_radius = _classification_with_checklist(
+        lane="low", auto_merge_lane="eligible", inputs=True, categories=[]
+    )
+    packet = _decided_packet(blast_radius, files_changed=["docs/guide.md"])
+
+    assert _is_low_risk_passing(packet) is True
+    assert select_rule_id(packet) == "low_risk_passing"
+
+
+def test_a_checklist_with_measured_inputs_still_reaches_clean_pass() -> None:
+    """Control: a measured medium lane keeps its merge-shaped route."""
+    blast_radius = _classification_with_checklist(
+        lane="medium",
+        auto_merge_lane="assisted",
+        inputs=True,
+        categories=["dependency_changes"],
+    )
+    packet = _decided_packet(blast_radius, files_changed=["uv.lock"])
+
+    assert select_rule_id(packet) == "clean_pass"
+
+
+def _pre_checklist_packet(blast_radius: dict[str, Any], files_changed: list[str]) -> Any:
+    """A packet as written before ``reasons``/``checklist`` existed (schema 1.17.0)."""
+    from mergecraft.agents.gates import TRUSTED_PACKET_DECIDED_BY
+
+    return MergeEvidencePacket.model_validate(
+        {
+            "schema_version": "1.17.0",
+            "change_id": "acme/demo#42",
+            "agent": {"id": "claude", "version": "0.0.0", "model": "claude-sonnet-4-5"},
+            "files_changed": files_changed,
+            "findings": [],
+            "deterministic_checks": [],
+            "blast_radius": blast_radius,
+            "decision": {
+                "verdict": "success",
+                "reason": "clean",
+                "decided_by": TRUSTED_PACKET_DECIDED_BY,
+            },
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("blast_radius", "files_changed", "rule_id"),
+    [
+        (
+            {
+                "lane": "low",
+                "auto_merge_lane": "eligible",
+                "reason": "No elevated blast-radius category was detected.",
+                "next_action": "Eligible for automatic merge after required checks pass.",
+                "categories": [],
+            },
+            ["docs/guide.md"],
+            "low_risk_passing",
+        ),
+        (
+            {
+                "lane": "medium",
+                "auto_merge_lane": "assisted",
+                "reason": "Detected blast-radius categories: dependency_changes.",
+                "next_action": "Use assisted review and verify the affected behavior.",
+                "categories": ["dependency_changes"],
+            },
+            ["uv.lock"],
+            "clean_pass",
+        ),
+        (
+            {
+                "lane": "medium",
+                "auto_merge_lane": "assisted",
+                "reason": "Missing classifier input: diff_stats.",
+                "next_action": "Use assisted review and verify the affected behavior.",
+                "categories": [SIGNAL_MISSING_CATEGORY],
+            },
+            ["docs/guide.md"],
+            "needs_human_review",
+        ),
+    ],
+    ids=["low", "medium", "signal-missing"],
+)
+def test_a_packet_written_before_the_checklist_decides_as_before(
+    blast_radius: dict[str, Any], files_changed: list[str], rule_id: str
+) -> None:
+    packet = _pre_checklist_packet(blast_radius, files_changed)
+
+    assert packet.blast_radius is not None
+    assert select_rule_id(packet) == rule_id
