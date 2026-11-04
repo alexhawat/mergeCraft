@@ -79,6 +79,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A blast-radius classification now says which signal set its lane and which
+  checks it never measured, so an unknown can no longer read as a pass (#1056).
+  The packet's `blast_radius` section gains `reasons` (a stable dotted code such
+  as `deps.changed` or `signal.missing.diff`, the lane it forces, and a message
+  that names any repository override or the small isolated-source carve-out) and
+  a `checklist` of fixed gates whose `passed` is `true`, `false` or `null`. A
+  result is `eligible` only when every gate is `true`; a `null` gate keeps it
+  out. The run record prints the lane and its codes on one line. A repository
+  override can no longer lower the `review_config` floor below `medium`, and the
+  carve-out now lowers only the source and tests reasons, so a tiny edit to a
+  package `__init__.py` stays `medium`. A generated sibling no longer hides an
+  untested source change. The merge evidence packet schema moves to
+  `1.18.0`; older packets without the fields still validate and decide as before.
+
 - The self-review's Codex rung runs in its own job, the only one holding the
   `codex-subscription-auth` concurrency group; OpenCode Go and the Claude backstop run
   in jobs outside it. A busy PR no longer has a third queued review cancel a pending
@@ -117,6 +131,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read from the environment stay masked in diagnostics.
 
 ### Fixed
+
+- The fast-path triage diff writes a renamed or copied file the way `git diff`
+  does — `diff --git a/<old> b/<new>` with `rename from` / `rename to` (or
+  `copy from` / `copy to`) — and lists the source path with the changed paths. A
+  file renamed from code into prose is no longer read as a prose edit of its new
+  name. Prose and generated-file recognizers check both names, keeping agent
+  instructions and high-stakes prose moved into docs, and source or generator
+  configuration moved into generated paths, in full review. Triage evaluates
+  the complete diff without applying `ignore_paths` (#1137).
 
 - A stall diagnostic names as the likely cause only a provider error seen before
   the no-output watchdog killed the attempt. An error that arrives after the kill,

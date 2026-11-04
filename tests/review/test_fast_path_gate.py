@@ -12,14 +12,15 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+
+import pytest
 
 from mergecraft.scm.types import ListedItems
 
 if TYPE_CHECKING:
-    import pytest
-
     from mergecraft.config.settings import FastPathSettings
+    from mergecraft.scm.protocol import ScmProvider
 
 
 _FIXTURES = Path(__file__).resolve().parent.parent / "classify" / "fixtures"
@@ -312,3 +313,113 @@ async def test_a_prose_edit_whose_head_text_cannot_be_read_is_full() -> None:
     ]
 
     assert (await _decide(FakeScm(files=files, contents={}))).tier == "full"
+
+
+# ── renames and copies name their source ──────────────────────────────────────
+#
+# GitHub reports a rename as ``previous_filename`` on the files-API entry, not in the
+# patch. A diff rebuilt from ``filename`` alone shows a rename as an in-place edit of
+# the new name, so path recognizers and the prose gate's suffix check miss the source.
+
+_PROSE_PATCH = "@@ -1,3 +1,3 @@\n # Title\n-Old words.\n+New words.\n More.\n"
+
+
+def _renamed(previous: str, name: str, *, status: str = "renamed") -> dict[str, Any]:
+    return {
+        "filename": name,
+        "previous_filename": previous,
+        "status": status,
+        "additions": 1,
+        "deletions": 1,
+        "patch": _PROSE_PATCH,
+    }
+
+
+async def _read(scm: FakeScm) -> tuple[str, list[str]]:
+    from mergecraft.fast_path import _read_diff
+
+    # This fake supplies the get method used by _read_diff, not the full SCM API.
+    return await _read_diff(cast("ScmProvider", scm), "acme", "demo", 7)
+
+
+async def test_a_rename_is_written_the_way_git_writes_it() -> None:
+    from mergecraft.review_policy.ignore_paths import rename_sources
+
+    diff, paths = await _read(FakeScm(files=[_renamed("src/auth.py", "docs/notes.md")]))
+
+    assert diff.startswith(
+        "diff --git a/src/auth.py b/docs/notes.md\n"
+        "rename from src/auth.py\n"
+        "rename to docs/notes.md\n"
+        "@@ -1,3 +1,3 @@\n"
+    )
+    assert paths == ["docs/notes.md", "src/auth.py"]
+    # The rebuilt header is compatible with the shared rename reader.
+    assert rename_sources(diff) == {"docs/notes.md": "src/auth.py"}
+
+
+async def test_a_copy_is_labelled_a_copy() -> None:
+    diff, paths = await _read(FakeScm(files=[_renamed("docs/a.md", "docs/b.md", status="copied")]))
+
+    assert "diff --git a/docs/a.md b/docs/b.md\ncopy from docs/a.md\ncopy to docs/b.md\n" in diff
+    assert paths == ["docs/b.md", "docs/a.md"]
+
+
+async def test_an_in_place_edit_keeps_the_plain_header() -> None:
+    files = [{"filename": "README.md", "additions": 1, "deletions": 1, "patch": _PROSE_PATCH}]
+
+    diff, paths = await _read(FakeScm(files=files))
+
+    assert diff.startswith("diff --git a/README.md b/README.md\n@@ ")
+    assert "rename" not in diff
+    assert paths == ["README.md"]
+
+
+async def test_a_code_file_renamed_into_prose_is_never_a_prose_skip() -> None:
+    """The pre-image was code; a rename into ``docs/`` does not make it a prose edit."""
+    scm = FakeScm(
+        files=[_renamed("src/auth.py", "docs/notes.md")],
+        contents={"docs/notes.md": "# Title\nNew words.\nMore.\n"},
+    )
+
+    decision = await _decide(scm)
+
+    assert decision.tier == "full"
+    assert decision.recognizer is None
+
+
+@pytest.mark.parametrize("status", ["renamed", "copied"])
+@pytest.mark.parametrize(
+    ("previous", "name", "recognizer"),
+    [
+        ("AGENTS.md", "docs/notes.md", "prose"),
+        (".github/skills/code-review/SKILL.md", "docs/notes.md", "prose"),
+        ("billing/notes.md", "docs/notes.md", "prose"),
+        ("src/auth.py", "generated/auth.py", "generated"),
+    ],
+)
+async def test_a_refused_source_cannot_skip_by_changing_its_name(
+    previous: str, name: str, recognizer: str, status: str
+) -> None:
+    scm = FakeScm(
+        files=[_renamed(previous, name, status=status)],
+        contents={name: "# Title\nNew words.\nMore.\n"},
+    )
+
+    decision = await _decide(scm, config=_config(skipLlm=[recognizer]))
+
+    assert decision.tier == "full"
+    assert decision.recognizer is None
+
+
+@pytest.mark.parametrize("status", ["renamed", "copied"])
+async def test_a_safe_prose_move_still_skips(status: str) -> None:
+    scm = FakeScm(
+        files=[_renamed("docs/old.md", "docs/new.md", status=status)],
+        contents={"docs/new.md": "# Title\nNew words.\nMore.\n"},
+    )
+
+    decision = await _decide(scm, config=_config(skipLlm=["prose"]))
+
+    assert decision.tier == "skip"
+    assert decision.recognizer == "prose"
