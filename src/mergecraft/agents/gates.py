@@ -591,10 +591,20 @@ def _blast_radius_had_inputs(packet: MergeEvidencePacket) -> bool:
     classification had inputs — changed paths on the packet and no
     ``signal_missing`` category. A hand-built or stale packet that claims a
     lane with nothing measured never reaches a merge-shaped rule.
+
+    A packet that carries a checklist (schema ``1.18.0`` and later) must also
+    have its ``inputs`` gate ``True``: ``False`` or ``None`` (not measured) is
+    refused. An empty checklist is a packet written before the field existed,
+    and keeps the category check alone.
     """
-    if packet.blast_radius is None or not packet.files_changed:
+    blast_radius = packet.blast_radius
+    if blast_radius is None or not packet.files_changed:
         return False
-    return SIGNAL_MISSING_CATEGORY not in packet.blast_radius.categories
+    if SIGNAL_MISSING_CATEGORY in blast_radius.categories:
+        return False
+    if not blast_radius.checklist:
+        return True
+    return any(gate.gate == "inputs" and gate.passed is True for gate in blast_radius.checklist)
 
 
 def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:

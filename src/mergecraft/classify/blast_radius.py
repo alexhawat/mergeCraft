@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal, cast
+from typing import Literal, NamedTuple, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import TypedDict
 
 from mergecraft.classify.review_config import is_review_config_path
@@ -51,8 +51,38 @@ class RuleSet(TypedDict, total=False):
     review_config: RuleOverride
 
 
+class LaneReason(BaseModel):
+    """One coded reason behind a lane (#1056).
+
+    ``code`` is a key of :data:`LANE_REASON_CATALOGUE`. ``lane`` is the lane this
+    reason forces **after** repository overrides and the small isolated-source
+    carve-out, so it can differ from the catalogue default; ``message`` says why
+    when it does.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    lane: Lane
+    message: str
+
+
+class ChecklistGate(BaseModel):
+    """One checklist gate: ``True`` passed, ``False`` failed, ``None`` not measured."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    gate: str
+    passed: bool | None
+
+
 class BlastRadiusClassification(BaseModel):
-    """Deterministic lane decision and the signals that produced it."""
+    """Deterministic lane decision and the signals that produced it.
+
+    ``reasons`` and ``checklist`` default to empty so a packet written before
+    they existed (schema ``1.17.0``) still validates; :func:`classify_blast_radius`
+    always emits at least one reason and every gate in :data:`GATE_ORDER`.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -61,6 +91,8 @@ class BlastRadiusClassification(BaseModel):
     reason: str
     next_action: str
     categories: list[str]
+    reasons: list[LaneReason] = Field(default_factory=list)
+    checklist: list[ChecklistGate] = Field(default_factory=list)
 
 
 DEFAULT_RULE_SET: dict[Category, RuleOverride] = {
@@ -107,11 +139,11 @@ SIGNAL_MISSING_CATEGORY = "signal_missing"
 """Category recorded when the classifier was not given the inputs it measures.
 
 Unknown is never green (#1056): a classification with no changed paths or no
-diff statistics cannot vouch for a ``low`` lane, so it is floored at
-:data:`_SIGNAL_MISSING_LANE` (``assisted``, never ``eligible``). It is not a
-:data:`Category` rule key on purpose, so no repository override can lower it.
+diff statistics cannot vouch for a ``low`` lane, so it carries a
+``signal.missing.*`` reason at ``medium`` (``assisted``, never ``eligible``). It
+is not a :data:`Category` rule key on purpose, so no repository override can
+lower it.
 """
-_SIGNAL_MISSING_LANE: Lane = "medium"
 
 
 def _contains_path_part(path: str, parts: tuple[str, ...]) -> bool:
@@ -125,88 +157,247 @@ def _diff_text(diff_stats: dict[str, object]) -> str:
     ).lower()
 
 
-def _detected_categories(paths: list[str], diff_text: str) -> tuple[list[str], set[Category]]:
-    categories: list[str] = []
-    rule_categories: set[Category] = set()
+LANE_REASON_CATALOGUE: dict[str, Lane] = {
+    "signal.missing.paths": "medium",
+    "signal.missing.diff": "medium",
+    "paths.migrations": "high",
+    "paths.auth": "high",
+    "paths.security": "high",
+    "paths.payment": "high",
+    "paths.permissions": "high",
+    "paths.secrets_config": "high",
+    "paths.deployment": "high",
+    "paths.irreversible_infra": "high",
+    "diff.destructive_sql": "high",
+    "diff.secret_assignment": "high",
+    "diff.irreversible_command": "high",
+    "paths.public_api": "medium",
+    "deps.changed": "medium",
+    "tests.missing": "medium",
+    "paths.review_config": "medium",
+    "source.changed": "medium",
+    "paths.generated": "low",
+    "source.small_isolated": "low",
+    "baseline.clean": "low",
+}
+"""The closed catalogue of lane-reason codes and their **default** lanes (#1056).
 
-    def add(rule_category: Category, *labels: str) -> None:
-        rule_categories.add(rule_category)
-        for label in labels or (rule_category,):
+An emitted :class:`LaneReason` carries the lane it forces after repository
+overrides and the small isolated-source carve-out; the default here never
+changes. ``docs/blast-radius.md`` lists every code (the *Lane reasons* table).
+"""
+
+GATE_ORDER: tuple[str, ...] = (
+    "inputs",
+    "migrations",
+    "auth_security_payment",
+    "secrets_config_deployment",
+    "irreversible_infra",
+    "public_api",
+    "dependencies",
+    "tests",
+    "review_config",
+    "source",
+)
+"""The fixed order of :attr:`BlastRadiusClassification.checklist` gates."""
+
+_Input = Literal["paths", "diff"]
+
+# What each gate reads. A gate whose inputs were not all given is ``None`` (not
+# measured) unless a reason already failed it: unknown is never green, and a
+# measured failure is never hidden behind ``None``. ``inputs`` is special-cased.
+_GATE_INPUTS: dict[str, tuple[_Input, ...]] = {
+    "migrations": ("paths", "diff"),
+    "auth_security_payment": ("paths",),
+    "secrets_config_deployment": ("paths", "diff"),
+    "irreversible_infra": ("paths", "diff"),
+    "public_api": ("paths",),
+    "dependencies": ("paths",),
+    "tests": ("paths", "diff"),
+    "review_config": ("paths",),
+    "source": ("paths", "diff"),
+}
+
+
+class _ReasonSpec(NamedTuple):
+    """Which ``RuleSet`` key may override a code, and which gate it fails above ``low``."""
+
+    rule: Category | None
+    gate: str | None
+
+
+_REASON_SPECS: dict[str, _ReasonSpec] = {
+    "signal.missing.paths": _ReasonSpec(None, "inputs"),
+    "signal.missing.diff": _ReasonSpec(None, "inputs"),
+    "paths.migrations": _ReasonSpec("migrations", "migrations"),
+    "diff.destructive_sql": _ReasonSpec("migrations", "migrations"),
+    "paths.auth": _ReasonSpec("auth_security_payment", "auth_security_payment"),
+    "paths.security": _ReasonSpec("auth_security_payment", "auth_security_payment"),
+    "paths.payment": _ReasonSpec("auth_security_payment", "auth_security_payment"),
+    "paths.permissions": _ReasonSpec("auth_security_payment", "auth_security_payment"),
+    "paths.secrets_config": _ReasonSpec("secrets_config_deployment", "secrets_config_deployment"),
+    "paths.deployment": _ReasonSpec("secrets_config_deployment", "secrets_config_deployment"),
+    "diff.secret_assignment": _ReasonSpec("secrets_config_deployment", "secrets_config_deployment"),
+    "paths.irreversible_infra": _ReasonSpec("irreversible_infra", "irreversible_infra"),
+    "diff.irreversible_command": _ReasonSpec("irreversible_infra", "irreversible_infra"),
+    "paths.public_api": _ReasonSpec("public_api_changes", "public_api"),
+    "deps.changed": _ReasonSpec("dependency_changes", "dependencies"),
+    "tests.missing": _ReasonSpec("source_without_tests", "tests"),
+    "paths.review_config": _ReasonSpec("review_config", "review_config"),
+    "source.changed": _ReasonSpec(None, "source"),
+    # Generated output is ``low`` by default; an override that raises it fails ``source``.
+    "paths.generated": _ReasonSpec("generated_files", "source"),
+    "source.small_isolated": _ReasonSpec(None, None),
+    "baseline.clean": _ReasonSpec(None, None),
+}
+
+# Floors a repository override may raise but never lower: the review-config
+# floor (#942) — a PR that edits its own review config is never ``eligible``.
+# ``signal.*`` has no ``RuleSet`` key at all, so nothing can override it.
+_OVERRIDE_FLOORS: frozenset[str] = frozenset({"paths.review_config"})
+
+_SMALL_SOURCE_MAX_LINES = 5
+
+
+def _detect(paths: list[str], diff_text: str) -> tuple[list[str], dict[str, str]]:
+    """Return the legacy category labels and the detected codes with their messages."""
+    categories: list[str] = []
+    hits: dict[str, str] = {}
+
+    def add(code: str, message: str, *labels: str) -> None:
+        hits.setdefault(code, message)
+        for label in labels:
             if label not in categories:
                 categories.append(label)
 
     lowered = [path.lower().strip("/") for path in paths]
-    if any(_contains_path_part(path, ("migration", "migrations")) for path in lowered) or any(
-        token in diff_text for token in ("drop table", "alter table", "create table")
-    ):
-        add("migrations")
+    if any(_contains_path_part(path, ("migration", "migrations")) for path in lowered):
+        add("paths.migrations", "a changed path is under a migrations directory", "migrations")
+    if any(token in diff_text for token in ("drop table", "alter table", "create table")):
+        add(
+            "diff.destructive_sql",
+            "the diff text contains a schema-changing SQL statement",
+            "migrations",
+        )
 
     for path in lowered:
         if _contains_path_part(path, ("auth",)):
-            add("auth_security_payment", "auth_security_payment", "auth")
+            add(
+                "paths.auth",
+                "a changed path is under an auth directory",
+                "auth_security_payment",
+                "auth",
+            )
         if _contains_path_part(path, ("security",)):
-            add("auth_security_payment", "auth_security_payment", "security")
+            add(
+                "paths.security",
+                "a changed path is under a security directory",
+                "auth_security_payment",
+                "security",
+            )
         if _contains_path_part(path, ("payment", "payments", "billing")):
-            add("auth_security_payment", "auth_security_payment", "payment")
+            add(
+                "paths.payment",
+                "a changed path is under a payment or billing directory",
+                "auth_security_payment",
+                "payment",
+            )
         if _contains_path_part(path, ("permission", "permissions")):
-            add("auth_security_payment", "auth_security_payment", "permissions")
+            add(
+                "paths.permissions",
+                "a changed path is under a permissions directory",
+                "auth_security_payment",
+                "permissions",
+            )
 
     secret_diff = any(
         token in diff_text
         for token in ("password =", "aws_secret_access_key", "secret_key =", "private_key =")
     )
-    config_path = any(
-        path == ".env.example" or path.startswith(("config/", ".github/workflows/"))
-        for path in lowered
+    workflow_path = any(path.startswith(".github/workflows/") for path in lowered)
+    secrets_config_path = any(
+        path.startswith("config/") or path == ".env.example" for path in lowered
     )
-    if secret_diff or config_path:
+    if secret_diff or workflow_path or secrets_config_path:
         labels = ["secrets_config_deployment"]
-        if any(path.startswith(".github/workflows/") for path in lowered):
+        if workflow_path:
             labels.append("deployment")
-        if any(path.startswith("config/") or path == ".env.example" for path in lowered):
+        if secrets_config_path:
             labels.append("secrets_config")
-        add("secrets_config_deployment", *labels)
+        if workflow_path:
+            add("paths.deployment", "a GitHub Actions workflow changed", *labels)
+        if secrets_config_path:
+            add(
+                "paths.secrets_config",
+                "a path under config/ or .env.example changed",
+                *labels,
+            )
+        if secret_diff:
+            add(
+                "diff.secret_assignment",
+                "the diff text contains a secret-assignment marker",
+                *labels,
+            )
 
     if any(_contains_path_part(path, ("generated",)) for path in lowered):
-        add("generated_files")
+        add("paths.generated", "a changed path is generated output", "generated_files")
 
     if any(path.endswith("/__init__.py") for path in lowered):
-        add("public_api_changes")
+        add("paths.public_api", "a package __init__.py changed", "public_api_changes")
 
     if any(path.rsplit("/", 1)[-1] in _DEPENDENCY_FILES for path in lowered):
-        add("dependency_changes")
+        add("deps.changed", "a dependency manifest or lockfile changed", "dependency_changes")
 
     source_paths = [path for path in lowered if path.startswith("src/")]
     test_paths = [path for path in lowered if path.startswith("tests/") or "/test_" in path]
     generated_source = any(_contains_path_part(path, ("generated",)) for path in source_paths)
     if source_paths and not test_paths and not generated_source:
-        add("source_without_tests")
+        add(
+            "tests.missing",
+            "source under src/ changed without a test change",
+            "source_without_tests",
+        )
 
     if any(is_review_config_path(path) for path in paths):
-        add("review_config")
-
-    irreversible_diff = any(token in diff_text for token in ("rm -rf", "terraform destroy"))
-    if any(path.startswith("infra/terraform/") for path in lowered) or irreversible_diff:
-        add("irreversible_infra")
-
-    return categories, rule_categories
-
-
-def _merged_rules(rule_set: RuleSet | None) -> dict[Category, dict[str, object]]:
-    merged: dict[Category, dict[str, object]] = {
-        category: dict(values) for category, values in DEFAULT_RULE_SET.items()
-    }
-    if rule_set:
-        overrides = cast(  # rule_set is RuleSet = dict[str, RuleOverride] | None; None excluded by enclosing if
-            "dict[str, RuleOverride]", rule_set
+        add(
+            "paths.review_config",
+            "config that governs how this pull request is reviewed changed",
+            "review_config",
         )
-        for raw_category, override in overrides.items():
-            if raw_category not in DEFAULT_RULE_SET:
-                continue
-            category = raw_category
-            current = merged[category]
-            current.update(override)
-    return merged
+
+    if any(path.startswith("infra/terraform/") for path in lowered):
+        add(
+            "paths.irreversible_infra",
+            "a path under infra/terraform/ changed",
+            "irreversible_infra",
+        )
+    if any(token in diff_text for token in ("rm -rf", "terraform destroy")):
+        add(
+            "diff.irreversible_command",
+            "the diff text contains an irreversible command",
+            "irreversible_infra",
+        )
+
+    return categories, hits
+
+
+def _override_lanes(rule_set: RuleSet | None) -> dict[Category, Lane]:
+    """The valid per-category lane overrides a repository supplied (unknown keys ignored)."""
+    if not rule_set:
+        return {}
+    overrides = cast(  # RuleSet is a TypedDict; iterate it as the plain mapping it is at runtime
+        "dict[str, object]", rule_set
+    )
+    lanes: dict[Category, Lane] = {}
+    for raw_category, override in overrides.items():
+        if raw_category not in DEFAULT_RULE_SET or not isinstance(override, dict):
+            continue
+        lane = override.get("lane")
+        if lane in _LANE_RANK:
+            lanes[raw_category] = cast(  # membership in _LANE_RANK proves a Lane literal
+                "Lane", lane
+            )
+    return lanes
 
 
 def _is_small_isolated_source(paths: list[str], diff_stats: dict[str, object]) -> bool:
@@ -214,7 +405,11 @@ def _is_small_isolated_source(paths: list[str], diff_stats: dict[str, object]) -
         return False
     added = diff_stats.get("lines_added")
     deleted = diff_stats.get("lines_deleted")
-    return isinstance(added, int) and isinstance(deleted, int) and added + deleted <= 5
+    return (
+        isinstance(added, int)
+        and isinstance(deleted, int)
+        and added + deleted <= _SMALL_SOURCE_MAX_LINES
+    )
 
 
 def _missing_signals(change: ChangeSet) -> list[str]:
@@ -229,84 +424,216 @@ def _missing_signals(change: ChangeSet) -> list[str]:
     return missing
 
 
+def _max_lane(lanes: list[Lane]) -> Lane:
+    lane: Lane = "low"
+    for candidate in lanes:
+        if _LANE_RANK[candidate] > _LANE_RANK[lane]:
+            lane = candidate
+    return lane
+
+
+def _apply_override(code: str, message: str, overrides: dict[Category, Lane]) -> LaneReason:
+    """The reason for ``code`` at its catalogue default, or at the repository override."""
+    default = LANE_REASON_CATALOGUE[code]
+    rule = _REASON_SPECS[code].rule
+    override = overrides.get(rule) if rule is not None else None
+    if override is None or override == default:
+        return LaneReason(code=code, lane=default, message=message)
+    if code in _OVERRIDE_FLOORS and _LANE_RANK[override] < _LANE_RANK[default]:
+        return LaneReason(
+            code=code,
+            lane=default,
+            message=(
+                f"{message}; the repository override to {override} is ignored: "
+                f"this reason is never below {default}"
+            ),
+        )
+    return LaneReason(
+        code=code,
+        lane=override,
+        message=f"{message} (lane {default} → {override} by repository override)",
+    )
+
+
+def _lane_reasons(
+    *,
+    missing: list[str],
+    hits: dict[str, str],
+    paths: list[str],
+    diff_stats: dict[str, object],
+    rule_set: RuleSet | None,
+) -> list[LaneReason]:
+    """Every coded reason, each at the lane it forces after overrides and the carve-out."""
+    overrides = _override_lanes(rule_set)
+    reasons: list[LaneReason] = []
+    if "changed_paths" in missing:
+        reasons.append(
+            LaneReason(
+                code="signal.missing.paths",
+                lane=LANE_REASON_CATALOGUE["signal.missing.paths"],
+                message="no changed paths were given, so no path gate was measured",
+            )
+        )
+    if "diff_stats" in missing:
+        reasons.append(
+            LaneReason(
+                code="signal.missing.diff",
+                lane=LANE_REASON_CATALOGUE["signal.missing.diff"],
+                message=(
+                    "no diff statistics were given, so the diff-text and line-count "
+                    "checks were not measured"
+                ),
+            )
+        )
+    measured = [_apply_override(code, message, overrides) for code, message in hits.items()]
+
+    rule_categories = {spec.rule for code in hits if (spec := _REASON_SPECS[code]).rule}
+    has_source = any(path.lower().startswith("src/") for path in paths)
+    if has_source and "generated_files" not in rule_categories:
+        measured.append(
+            LaneReason(
+                code="source.changed",
+                lane=LANE_REASON_CATALOGUE["source.changed"],
+                message="source under src/ changed",
+            )
+        )
+
+    # The carve-out exists for a tiny isolated source edit — not for a tiny edit
+    # to the config that governs how this PR is reviewed (#942), not when the
+    # repository overrides ``source_without_tests``, and not beside a ``high``
+    # reason. It lowers only the source and tests reasons, and says so.
+    carvable = {"source.changed", "tests.missing"}
+    others_high = any(r.lane == "high" for r in measured if r.code not in carvable)
+    if (
+        any(r.code in carvable for r in measured)
+        and not others_high
+        and "review_config" not in rule_categories
+        and not (rule_set is not None and "source_without_tests" in rule_set)
+        and _is_small_isolated_source(paths, diff_stats)
+    ):
+        carved: list[LaneReason] = []
+        for reason in measured:
+            if reason.code == "tests.missing":
+                carved.append(
+                    LaneReason(
+                        code="tests.missing",
+                        lane="low",
+                        message=(
+                            f"{reason.message} (lane {reason.lane} → low by the small "
+                            "isolated-source carve-out)"
+                        ),
+                    )
+                )
+            elif reason.code != "source.changed":
+                carved.append(reason)
+        carved.append(
+            LaneReason(
+                code="source.small_isolated",
+                lane=LANE_REASON_CATALOGUE["source.small_isolated"],
+                message=(
+                    "one src/ file with at most "
+                    f"{_SMALL_SOURCE_MAX_LINES} changed lines: the small isolated-source "
+                    "carve-out applies"
+                ),
+            )
+        )
+        measured = carved
+
+    reasons.extend(measured)
+    if not reasons:
+        reasons.append(
+            LaneReason(
+                code="baseline.clean",
+                lane=LANE_REASON_CATALOGUE["baseline.clean"],
+                message="no elevated blast-radius signal was detected",
+            )
+        )
+    return reasons
+
+
+def _checklist(reasons: list[LaneReason], missing: list[str]) -> list[ChecklistGate]:
+    """Every gate in :data:`GATE_ORDER`: ``False`` when a reason forces it above ``low``,
+    ``True`` when measured and clean, ``None`` when its inputs were not given."""
+    failed = {
+        gate
+        for reason in reasons
+        if reason.lane != "low" and (gate := _REASON_SPECS[reason.code].gate) is not None
+    }
+    given: set[_Input] = set()
+    if "changed_paths" not in missing:
+        given.add("paths")
+    if "diff_stats" not in missing:
+        given.add("diff")
+    gates: list[ChecklistGate] = []
+    for gate in GATE_ORDER:
+        passed: bool | None
+        if gate == "inputs":
+            passed = not missing
+        elif gate in failed:
+            passed = False
+        elif set(_GATE_INPUTS[gate]) <= given:
+            passed = True
+        else:
+            passed = None
+        gates.append(ChecklistGate(gate=gate, passed=passed))
+    return gates
+
+
 def classify_blast_radius(
     change: ChangeSet, *, rule_set: RuleSet | None = None
 ) -> BlastRadiusClassification:
     """Classify typed change data without filesystem, network, or environment access.
 
-    Missing or empty ``changed_paths``, or missing ``diff_stats``, add the
-    :data:`SIGNAL_MISSING_CATEGORY` category and floor the lane at ``medium``:
-    a classification that measured nothing is never ``low`` / ``eligible``.
+    The lane is the highest lane over the coded ``reasons``; ``auto_merge_lane``
+    is ``eligible`` exactly when every ``checklist`` gate passed, which is exactly
+    when the lane is ``low``. Missing or empty ``changed_paths``, or missing
+    ``diff_stats``, add the :data:`SIGNAL_MISSING_CATEGORY` category, a
+    ``signal.missing.*`` reason at ``medium`` that no override can lower, and
+    ``None`` (not measured) for every gate that reads the missing input.
     """
     missing = _missing_signals(change)
     raw_paths = change.get("changed_paths")
     paths = raw_paths if isinstance(raw_paths, list) else []
     raw_stats = change.get("diff_stats")
     diff_stats = raw_stats if isinstance(raw_stats, dict) else {}
-    categories, rule_categories = _detected_categories(paths, _diff_text(diff_stats))
-    rules = _merged_rules(rule_set)
-
-    lanes: list[Lane] = [
-        cast(  # rules values are Lane literals set by DEFAULT_RULE_SET; dict access returns object
-            "Lane", rules[category]["lane"]
-        )
-        for category in rule_categories
-        if "lane" in rules[category]
-    ]
-    lane: Lane = "low"
-    for candidate in lanes:
-        if _LANE_RANK[candidate] > _LANE_RANK[lane]:
-            lane = candidate
-    has_source = any(path.lower().startswith("src/") for path in paths)
-    if lane == "low" and has_source and "generated_files" not in rule_categories:
-        lane = "medium"
-
-    source_override = rule_set is not None and "source_without_tests" in rule_set
-    # The carve-out exists for a tiny isolated source edit — not for a tiny edit
-    # to the config that governs how this PR is reviewed. `review_config` is
-    # "never auto-merge eligible": a ≤5-line `src/**/{ruff,pyproject,...}.toml`
-    # change is otherwise detected as both `source_without_tests` *and*
-    # `review_config`, and the downgrade made it `eligible` (#942).
-    if (
-        lane == "medium"
-        and "review_config" not in rule_categories
-        and _is_small_isolated_source(paths, diff_stats)
-        and not source_override
-    ):
-        lane = "low"
-
-    if "generated_files" in rule_categories and lane == "high":
-        lane = "high"
-
-    # Applied last, after every downgrade, so nothing can lower it again.
+    categories, hits = _detect(paths, _diff_text(diff_stats))
+    reasons = _lane_reasons(
+        missing=missing, hits=hits, paths=paths, diff_stats=diff_stats, rule_set=rule_set
+    )
+    lane = _max_lane([reason.lane for reason in reasons])
     if missing:
         categories.append(SIGNAL_MISSING_CATEGORY)
-        if _LANE_RANK[lane] < _LANE_RANK[_SIGNAL_MISSING_LANE]:
-            lane = _SIGNAL_MISSING_LANE
 
-    reason = (
+    sentence = (
         f"Detected blast-radius categories: {', '.join(categories)}."
         if categories
         else "No elevated blast-radius category was detected."
     )
     if missing:
-        reason = f"{reason} Missing classifier input: {', '.join(missing)}."
+        sentence = f"{sentence} Missing classifier input: {', '.join(missing)}."
+    codes = ", ".join(reason.code for reason in reasons)
     return BlastRadiusClassification(
         lane=lane,
         auto_merge_lane=_AUTO_MERGE_LANE[lane],
-        reason=reason,
+        reason=f"Lane reasons: {codes}. {sentence}",
         next_action=_NEXT_ACTION[lane],
         categories=categories,
+        reasons=reasons,
+        checklist=_checklist(reasons, missing),
     )
 
 
 __all__ = [
     "DEFAULT_RULE_SET",
+    "GATE_ORDER",
+    "LANE_REASON_CATALOGUE",
     "SIGNAL_MISSING_CATEGORY",
     "AutoMergeLane",
     "BlastRadiusClassification",
     "ChangeSet",
+    "ChecklistGate",
     "Lane",
+    "LaneReason",
     "RuleSet",
     "classify_blast_radius",
 ]

@@ -74,14 +74,31 @@ class RuleSet(TypedDict, total=False):
     source_without_tests: dict[str, object]
 
 
+class LaneReason(BaseModel):
+    """One coded reason: a catalogue code and the lane it forces."""
+
+    code: str  # a key of LANE_REASON_CATALOGUE
+    lane: Lane
+    message: str
+
+
+class ChecklistGate(BaseModel):
+    """One gate in GATE_ORDER; `passed` is None when not measured."""
+
+    gate: str
+    passed: bool | None
+
+
 class BlastRadiusClassification(BaseModel):
     """Decision output of `classify_blast_radius`."""
 
-    lane: Lane
-    auto_merge_lane: AutoMergeLane
+    lane: Lane  # == max(reason.lane for reason in reasons)
+    auto_merge_lane: AutoMergeLane  # "eligible" iff every checklist gate passed
     reason: str
     next_action: str
     categories: list[str]
+    reasons: list[LaneReason] = []  # always >= 1 from the classifier
+    checklist: list[ChecklistGate] = []  # every gate in GATE_ORDER
 
 
 def classify_blast_radius(
