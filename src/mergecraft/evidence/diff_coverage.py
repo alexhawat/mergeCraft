@@ -22,8 +22,10 @@ Two inputs are deliberately separate:
   read" and matches the old file-level semantics at their best case.
 
 Absent evidence stays absent: with no observed reads, coverage is *unknown*,
-not zero, and callers must not nudge. :attr:`DiffCoverageBreakdown.observed`
-carries that distinction, mirroring ``TrajectoryRecord.read_coverage``.
+not zero. :attr:`DiffCoverageBreakdown.observed` carries that distinction,
+mirroring ``TrajectoryRecord.read_coverage``. Only when the driver reports its
+reads can reading now change that, so only then does :func:`coverage_nudge`
+speak up on an unobserved run.
 
 Module: mergecraft.evidence.diff_coverage
 Depends: mergecraft.evidence.trajectory (ToolCallRecord)
@@ -36,7 +38,6 @@ Exports:
     parse_diff_toc — Parse a unified diff into TOC entries.
     compute_diff_coverage — Map observed reads onto the TOC.
     coverage_nudge — One-time actionable nudge text naming unread ranges.
-    unread_ranges_for_findings — `(path, [ranges])` rows for the auditor.
 """
 
 from __future__ import annotations
@@ -179,8 +180,8 @@ class DiffCoverageBreakdown:
     observed: bool
     """True when at least one read in scope was observed.
 
-    ``False`` means coverage is *unknown*; callers must not nudge or report an
-    unread finding from it.
+    ``False`` means coverage is *unknown*; callers must not report an unread
+    finding from it, or nudge unless the driver reports its reads.
     """
 
     @property
@@ -413,20 +414,6 @@ def command_line_span(command: str | None) -> tuple[int, int] | None:
     return None
 
 
-def command_line_range(command: str | None) -> LineRange | None:
-    """Return the line span a simple read command asked for, if it named one.
-
-    Public wrapper over the internal parser so the trajectory recorder can
-    capture a diff read before redaction rewrites the path. An invalid explicit
-    span returns ``None`` here; callers that need to distinguish it use
-    :func:`command_line_span`.
-    """
-    span = command_line_span(command)
-    if span is None or span[0] <= 0:
-        return None
-    return LineRange(*span)
-
-
 def _read_paths(command: str | None) -> list[str]:
     """Return the path operands of one simple read command."""
     if not command:
@@ -510,16 +497,22 @@ def _diff_read_range(
     return LineRange(start, min(end, max(total_diff_lines, 1)))
 
 
+def _source_read_span(call: ToolCallRecord) -> tuple[int, int] | None:
+    """Return the span a call read of its ``paths``: a native read's own, else its command's."""
+    if call.diff_read_path is None and call.diff_read is not None:
+        return call.diff_read
+    return command_line_span(call.command)
+
+
 def _source_ranges(
     path: str,
-    command: str | None,
+    span: tuple[int, int] | None,
     entries: Sequence[DiffTocEntry],
 ) -> tuple[LineRange, ...]:
     """Return the added-line ranges of ``path`` a read covered."""
     entry = next((item for item in entries if item.path == path), None)
     if entry is None:
         return ()
-    span = command_line_span(command)
     if span is None:
         return entry.ranges
     start, end = span
@@ -606,7 +599,7 @@ def compute_diff_coverage(
             if matched_entry is None:
                 continue
             read_files.add(path)
-            covered_by_file[path].extend(_source_ranges(path, call.command, entries))
+            covered_by_file[path].extend(_source_ranges(path, _source_read_span(call), entries))
 
     files: list[FileDiffCoverage] = []
     for entry in entries:
@@ -624,13 +617,6 @@ def compute_diff_coverage(
     return DiffCoverageBreakdown(files=tuple(files), observed=observed)
 
 
-def unread_ranges_for_findings(
-    breakdown: DiffCoverageBreakdown,
-) -> tuple[tuple[str, tuple[LineRange, ...]], ...]:
-    """Return ``(path, unread ranges)`` rows for the trajectory auditor."""
-    return tuple((item.path, item.unread) for item in breakdown.files if item.unread)
-
-
 def _is_generated(path: str) -> bool:
     """Return whether ``path`` is a generated artifact the nudge may exempt."""
     lowered = path.casefold()
@@ -641,14 +627,20 @@ def _is_generated(path: str) -> bool:
     return any(marker in lowered for marker in _GENERATED_DIRS)
 
 
-def coverage_nudge(breakdown: DiffCoverageBreakdown, *, diff_path: str) -> str | None:
+def coverage_nudge(
+    breakdown: DiffCoverageBreakdown, *, diff_path: str, driver_reports_reads: bool = False
+) -> str | None:
     """Return a one-time nudge naming every unread range, or ``None``.
 
     A run with nothing unread gets ``None``. Unread ranges in generated
     artifacts are named but marked skippable, so the agent can choose to skip
     them explicitly rather than have the reviewer silently ignore them.
+
+    An unobserved run gets ``None`` too, unless ``driver_reports_reads``: the
+    coverage gate will hold its verdict, and on such a driver a read now would be
+    seen, so this nudge is its one chance to clear that. Elsewhere it could not be.
     """
-    if not breakdown.observed or not breakdown.unread_files():
+    if not (breakdown.observed or driver_reports_reads) or not breakdown.unread_files():
         return None
     rows: list[str] = []
     generated_only = True
@@ -684,10 +676,8 @@ __all__ = [
     "DiffTocEntry",
     "FileDiffCoverage",
     "LineRange",
-    "command_line_range",
     "command_line_span",
     "compute_diff_coverage",
     "coverage_nudge",
     "parse_diff_toc",
-    "unread_ranges_for_findings",
 ]

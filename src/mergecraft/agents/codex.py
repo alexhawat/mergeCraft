@@ -981,6 +981,8 @@ def _run_codex_streaming(
     )
     from mergecraft.tracing import resolve_driver_tracer
 
+    # Codex reads through ``command_execution`` items, and every one is recorded.
+    ctx.tool_state.driver_reports_reads = True
     accumulator = StreamSpanAccumulator(agent_name="codex")
     tracer: Tracer | None = None
     try:
