@@ -155,7 +155,9 @@ even though a verdict was submitted; a Critical or Major finding still makes
 it (`Coverage: 41/44 hunks, 3 uncovered → inconclusive`) and the packet's
 `coverage` section carries the detail. Set `review.coverage.onIncomplete: warn`
 to keep the verdict and only report the gap. This proves delivery, not
-comprehension: a driver's native file reads never cross mergeCraft's wire.
+comprehension: given one observed read, a delivered hunk is covered however closely it
+was read. Claude's, Gemini's and Cursor's native reads are not observed, so a reviewer
+that reads only that way ends `not_observed` and `inconclusive`.
 
 **Deterministic triage before dispatch (`review.fastPath`).** Off by default.
 When enabled in the operator's base-side config (a `pull_request_target`
@@ -594,7 +596,10 @@ The block always contains, in order:
 
 1. **Run header** — outcome, verdict diagnostic, decision verdict and reason,
    model actually used, attempt count, token summary, run URL, reviewed SHA,
-   publication path, and whether 422 recovery demoted inline comments into the body.
+   publication path, whether 422 recovery demoted inline comments into the body,
+   and a **Blast radius** line: the lane, its auto-merge lane, the lane-reason
+   codes, and a `not measured:` suffix naming each checklist gate that was not
+   measured (no suffix when every gate was).
 2. **Pre-merge checks** — analyzers (dispatched lenses or packet summary),
    static checks from `deterministic_checks`, CI intelligence pointer, trust
    tier.

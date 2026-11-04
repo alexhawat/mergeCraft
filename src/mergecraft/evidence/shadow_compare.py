@@ -301,22 +301,22 @@ def _runtime_packets() -> list[MergeEvidencePacket]:
     ``#102`` is a low-risk pass, where the two policies agree. This replay
     leaves #737 open.
     """
-    from mergecraft.classify.blast_radius import BlastRadiusClassification
+    from mergecraft.classify.blast_radius import classify_blast_radius
     from mergecraft.evidence.packet import Decision
 
-    high = BlastRadiusClassification(
-        lane="high",
-        auto_merge_lane="forbidden",
-        reason="migration files changed",
-        next_action="Require human review; automatic merge is forbidden.",
-        categories=["migrations"],
+    # Classified from representative changes, so each carries real reasons and a
+    # full checklist rather than reading as a packet written before they existed.
+    high = classify_blast_radius(
+        {
+            "changed_paths": ["migrations/0001_init.sql"],
+            "diff_stats": {"lines_added": 12, "lines_deleted": 0},
+        }
     )
-    low = BlastRadiusClassification(
-        lane="low",
-        auto_merge_lane="eligible",
-        reason="generated files only",
-        next_action="Eligible for automatic merge after required checks pass.",
-        categories=["generated_files"],
+    low = classify_blast_radius(
+        {
+            "changed_paths": ["src/generated/models.py"],
+            "diff_stats": {"lines_added": 40, "lines_deleted": 8},
+        }
     )
     trusted = Decision(
         verdict="success",

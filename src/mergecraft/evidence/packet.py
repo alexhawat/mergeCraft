@@ -120,6 +120,12 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 #   tier (``skip`` / ``full``) the pre-dispatch gate chose, the recognizer behind
 #   a skip, why, and the checks a skip relied on. Both default to ``None``, so a
 #   packet built before this version still validates.
+# - 1.18.0 — #1056 adds ``reasons`` and ``checklist`` to ``blast_radius``: coded
+#   lane reasons (a stable dotted ``code``, the ``lane`` it forces after overrides
+#   and the small isolated-source carve-out, a ``message``) and the fixed-order
+#   gates whose ``passed`` is ``true`` / ``false`` / ``null`` (not measured).
+#   Both default to an empty list, so a packet built before this version still
+#   validates.
 # - 1.19.0 — the ``triage`` section gains the ``lite`` tier (one capped LLM call)
 #   and its accounting: ``token_cap`` (the configured cap), ``tokens_used`` (the
 #   provider's reported usage, or an estimate), ``usage_estimated``, ``cap_hit``

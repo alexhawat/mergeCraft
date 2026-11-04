@@ -174,7 +174,9 @@ def _classify_outcome(
     Returns ``(outcome, failure_reason)``. The branches are:
     ``result.success is False`` -> ``RunOutcome.infra_error`` when the driver
     named an infrastructure reason (``INFRA_REASON_KEY`` in its metadata, e.g.
-    an expired reviewer credential), else ``RunOutcome.failed``; trusted-tier
+    an expired reviewer credential), else ``RunOutcome.failed`` — unless the run
+    accepted a terminal submission (``terminal_submission_received``), in which
+    case the driver's exit is logged and the verdict classifies the run; trusted-tier
     ``setup_script`` failure under ``setup_failure_policy == "fail"`` ->
     ``RunOutcome.configuration_error``; same under
     ``setup_failure_policy == "inconclusive"`` -> ``RunOutcome.inconclusive``;
@@ -200,7 +202,16 @@ def _classify_outcome(
     value ``"warn"`` or no failure surface) -> ``RunOutcome.passed``. Each
     non-pass branch logs a warning here so the call site only needs the tuple.
     """
-    if not result.success:
+    if not result.success and result.terminal_submission_received:
+        # #1132 — the reviewer's verdict was accepted and then its CLI exited
+        # non-zero (a rejected earlier submission, a kill after the verdict).
+        # The verdict is the review's result; the exit is noted, never promoted
+        # over it. Publication is still proven by the branches below.
+        logger.warning(
+            "» agent exited unsuccessfully after an accepted verdict; the verdict stands: {}",
+            result.error or "unknown error",
+        )
+    elif not result.success:
         # A driver that knows the failure is the reviewer's infrastructure (an
         # expired credential) says so; it reads as ``infra_error`` with its named
         # reason, not as a review that failed. Anything else is the old ``failed``.

@@ -185,6 +185,7 @@ class _Hunk:
 @dataclass(slots=True)
 class _File:
     path: str
+    previous_path: str
     binary: bool = False
     hunks: list[_Hunk] = field(default_factory=list)
 
@@ -197,8 +198,8 @@ def _parse(diff_text: str, *, newline_only: bool = False) -> list[_File]:
     raws = diff_text.split("\n") if newline_only else diff_text.splitlines()
     for raw in raws:
         if raw.startswith("diff --git "):
-            path = raw.rpartition(" b/")[2].strip()
-            current = _File(path=path)
+            previous, _, path = raw.removeprefix("diff --git a/").rpartition(" b/")
+            current = _File(path=path.strip(), previous_path=previous.strip())
             files.append(current)
             hunk = None
             continue
@@ -207,6 +208,8 @@ def _parse(diff_text: str, *, newline_only: bool = False) -> list[_File]:
         if hunk is None:
             if raw.startswith("+++ b/"):
                 current.path = raw[6:].strip()
+            elif raw.startswith(("rename from ", "copy from ")):
+                current.previous_path = raw.split(" from ", 1)[1].strip()
             elif raw.startswith(("Binary files ", "GIT binary patch")):
                 current.binary = True
             elif raw.startswith("@@"):
@@ -301,7 +304,9 @@ def _front_matter_end(lines: list[str]) -> int:
 
 
 def _prose_file_ok(file: _File, head_text: str) -> bool:
-    if not file.path.lower().endswith(_MARKDOWN_SUFFIXES):
+    if not any(
+        path.lower().endswith(_MARKDOWN_SUFFIXES) for path in (file.previous_path, file.path)
+    ):
         return True  # plain text: no fences, no front matter
     head_lines = head_text.splitlines()
     inside = _inside_code_before(head_lines)
@@ -328,15 +333,16 @@ def recognize_prose_only(diff_text: str, *, head_files: Mapping[str, str]) -> bo
     if not _changeable(files):
         return False
     for file in files:
-        lowered = file.path.lower()
-        if not lowered.endswith(_PROSE_SUFFIXES):
-            return False
-        if any(part in lowered for part in _HIGH_STAKES_PATH_PARTS):
-            return False
-        if PurePosixPath(lowered).name in _PROSE_REFUSED_BASENAMES:
-            return False
-        if any(part in lowered for part in _PROSE_REFUSED_PATH_PARTS):
-            return False
+        for path in (file.previous_path, file.path):
+            lowered = path.lower()
+            if not lowered.endswith(_PROSE_SUFFIXES):
+                return False
+            if any(part in lowered for part in _HIGH_STAKES_PATH_PARTS):
+                return False
+            if PurePosixPath(lowered).name in _PROSE_REFUSED_BASENAMES:
+                return False
+            if any(part in lowered for part in _PROSE_REFUSED_PATH_PARTS):
+                return False
         head_text = head_files.get(file.path)
         if head_text is None:
             return False
@@ -400,7 +406,8 @@ def recognize_generated(diff_text: str) -> bool:
     files = _parse(diff_text)
     if not files:
         return False
-    paths = {f.path for f in files} | set(changed_paths_from_scope(parse_diff_scope(diff_text)))
+    paths = {path for f in files for path in (f.previous_path, f.path)}
+    paths.update(changed_paths_from_scope(parse_diff_scope(diff_text)))
     names = {_basename(p) for p in paths}
     if names & DEPENDENCY_MANIFEST_NAMES or names & GENERATOR_CONFIG_NAMES:
         return False

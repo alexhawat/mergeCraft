@@ -153,6 +153,11 @@ not move.
   and defaulting to `null`) and `triage` (the tier the deterministic
   pre-dispatch triage chose, defaulting to `null` when the fast path is off).
   Both are additive.
+- `1.18.0` — adds `reasons` and `checklist` to `blast_radius` (#1056): coded
+  lane reasons (a stable dotted `code`, the `lane` it forces, a `message`) and
+  the fixed-order gates whose `passed` is `true`, `false` or `null` (not
+  measured). Both default to an empty list, so a packet written before this
+  version still validates.
 - `1.19.0` — the `triage` section gains the `lite` tier (one capped LLM call)
   and its accounting: `token_cap`, `tokens_used`, `usage_estimated`, `cap_hit`
   and `prompt_version`. Additive; every new field has a default.
@@ -364,11 +369,26 @@ the only positive signal, the verdict is `neutral`, never `auto_merge`.
 | `approved` | `bool` | The agent's `approved` boolean from `create_pull_request_review`. |
 | `sha` | `str \| None` | The reviewed commit SHA. |
 
-### `blast_radius` — `dict[str, Any] | None` (nullable until Batch B)
+### `blast_radius` — `BlastRadiusClassification | None`
 
-Placeholder; populated by Batch B's lane classifier. The field is
-typed `| None` from the first schema so the wire schema is fixed even though
-the implementation lands later.
+The deterministic merge lane from the blast-radius classifier
+([`blast-radius.md`](blast-radius.md)), computed from the run's diff. `null`
+when the run had no diff to classify.
+
+| Field | Type | Notes |
+|------|------|-------|
+| `lane` | `"low" \| "medium" \| "high"` | The highest lane over `reasons`. |
+| `auto_merge_lane` | `"eligible" \| "assisted" \| "human_review" \| "forbidden"` | `eligible` exactly when every `checklist` gate is `true`, which is exactly when `lane` is `low`. |
+| `reason` | `str` | Rendered summary: the reason codes, then the detected-category sentence. |
+| `next_action` | `str` | What the lane requires next. |
+| `categories` | `list[str]` | Detected category labels, including `signal_missing` when an input was absent. |
+| `reasons` | `list[LaneReason]` | Added in 1.18.0. One row per signal: `code` (a stable dotted name from the *Lane reasons* table in `blast-radius.md`), `lane` (the lane the reason forces after repository overrides and the small-isolated-source carve-out), `message`. The classifier always emits at least one. |
+| `checklist` | `list[ChecklistGate]` | Added in 1.18.0. Every gate in the fixed order, each `{"gate", "passed"}` with `passed` `true`, `false` or `null` (not measured). Any `false` or `null` keeps the result out of `eligible`. |
+
+A packet written before 1.18.0 carries no `reasons` or `checklist`; both read
+back as empty lists. The approval gate requires the `inputs` gate to be `true`
+when a checklist is present, and falls back to the category check when it is
+not.
 
 ### `trajectory` — `dict[str, Any] | None` (nullable until Batch C)
 

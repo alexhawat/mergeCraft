@@ -591,10 +591,44 @@ def _blast_radius_had_inputs(packet: MergeEvidencePacket) -> bool:
     classification had inputs — changed paths on the packet and no
     ``signal_missing`` category. A hand-built or stale packet that claims a
     lane with nothing measured never reaches a merge-shaped rule.
+
+    A packet that carries a checklist (schema ``1.18.0`` and later) must also
+    have its ``inputs`` gate ``True``: ``False`` or ``None`` (not measured) is
+    refused. An empty checklist is a packet written before the field existed,
+    and keeps the category check alone.
     """
-    if packet.blast_radius is None or not packet.files_changed:
+    blast_radius = packet.blast_radius
+    if blast_radius is None or not packet.files_changed:
         return False
-    return SIGNAL_MISSING_CATEGORY not in packet.blast_radius.categories
+    if SIGNAL_MISSING_CATEGORY in blast_radius.categories:
+        return False
+    if not blast_radius.checklist:
+        return True
+    return any(gate.gate == "inputs" and gate.passed is True for gate in blast_radius.checklist)
+
+
+def _checklist_all_passed(packet: MergeEvidencePacket) -> bool:
+    """Whether every checklist gate passed (``True``); vacuously true for no checklist.
+
+    An empty checklist is a packet written before the field existed (schema
+    ``1.17.0``) and keeps the legacy route.
+    """
+    blast_radius = packet.blast_radius
+    if blast_radius is None:
+        return False
+    return all(gate.passed is True for gate in blast_radius.checklist)
+
+
+def _checklist_all_measured(packet: MergeEvidencePacket) -> bool:
+    """Whether no checklist gate is ``None`` (not measured); a ``False`` gate is measured.
+
+    Unknown is never green (#1056): ``clean_pass`` accepts a measured failure
+    (every real ``medium`` lane has one) but never an unmeasured gate.
+    """
+    blast_radius = packet.blast_radius
+    if blast_radius is None:
+        return False
+    return all(gate.passed is not None for gate in blast_radius.checklist)
 
 
 def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
@@ -619,6 +653,10 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
     was meant: two ``Minor`` findings on a low-risk diff are still a clean
     low-risk PR, and ``_trusted_positive_decision`` already re-checks
     blockers, so this cannot widen past the gate's own verdict.
+
+    When the packet carries a checklist, every gate must be ``True``: a
+    ``low`` lane beside a gate that failed or was not measured is
+    inconsistent, so it never takes the auto-merge route (#1056).
     """
     if _packet_has_blockers(packet):
         return False
@@ -627,6 +665,8 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
     if packet.blast_radius.lane != "low":
         return False
     if not _blast_radius_had_inputs(packet):
+        return False
+    if not _checklist_all_passed(packet):
         return False
     return _trusted_positive_decision(packet)
 
@@ -648,7 +688,10 @@ def _is_clean_pass(packet: MergeEvidencePacket) -> bool:
       high-lane packet escalates for a human instead of merging;
     - a missing ``blast_radius`` is an *unknown* lane, and unknown is never
       green (#1056) — it escalates too, as does a ``blast_radius`` that had no
-      inputs (``_blast_radius_had_inputs``).
+      inputs (``_blast_radius_had_inputs``) or any checklist gate that was
+      not measured (``None``). A ``False`` gate is a measured failure and is
+      accepted on a ``medium`` lane: every real ``medium`` lane carries one.
+      A ``low`` lane with any gate not ``True`` is inconsistent and is refused.
 
     Ordering: after the finding-driven rules so ``has_blockers`` /
     ``changed-unread-file`` / ``tool_loop`` keep winning when their findings
@@ -660,6 +703,10 @@ def _is_clean_pass(packet: MergeEvidencePacket) -> bool:
     if packet.blast_radius.auto_merge_lane == "forbidden":
         return False
     if not _blast_radius_had_inputs(packet):
+        return False
+    if not _checklist_all_measured(packet):
+        return False
+    if packet.blast_radius.lane == "low" and not _checklist_all_passed(packet):
         return False
     return _trusted_positive_decision(packet)
 
