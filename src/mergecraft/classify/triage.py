@@ -441,6 +441,7 @@ _UNLEXABLE_MARKERS: Final[tuple[str, ...]] = (
     '#"',
     '"""',
     "/*",
+    "#/",  # Swift extended regex literals (``#/…/#``) can span lines
 )
 # Java translates ``\uXXXX`` (any number of ``u``) before lexing, even inside comments,
 # so ``// note \u000a doEvil();`` is a call. C trigraphs (``??/`` is a backslash) can
@@ -482,6 +483,13 @@ _DIRECTIVE_WORDS: Final[frozenset[str]] = frozenset(
         "jshint",
         "noqa",
         "coverage",
+        "fall",
+        "falls",
+        "fallthru",
+        "resharper",
+        "noinspection",
+        "tslint",
+        "detekt",
     }
 )
 
@@ -527,9 +535,9 @@ def _comment_file_ok(file: _File, head_text: str) -> bool:
         return False
     if _COMMENT_ONLY_TEXT.fullmatch(head_text) is None:
         return False
-    if any(marker in head_text for marker in _UNLEXABLE_MARKERS):
-        return False
     file_text = "\n".join([head_text, *(line[1:] for hunk in file.hunks for line in hunk.lines)])
+    if any(marker in file_text for marker in _UNLEXABLE_MARKERS):
+        return False
     if lowered.endswith(".java") and _JAVA_UNICODE_ESCAPE.search(file_text):
         return False
     if lowered.endswith(_C_FAMILY_SUFFIXES) and _C_TRIGRAPH_MARKER in file_text:

@@ -28,11 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `_test.go` files and Go files marked `DO NOT EDIT` are never recognised, and a
   Java unicode escape or a C-family `??` refuses the file. Each changed line must
   be `//`, one space and a plain word, and the head-side text proves it is a
-  comment. Non-ASCII text, backticks, raw-string markers, block comments, a quote
-  left open at the end of a line, a removal-only edit and every `#`-comment
+  comment. Non-ASCII text, backticks, raw-string markers, block comments, Swift
+  `#/` regex literals, a quote left open at the end of a line, a removal-only edit and every `#`-comment
   language are refused. A recognised edit proves no runtime change; comments that
-  carry tool directives (lint, coverage, generator pragmas) are refused on a
-  best-effort word list. Opt in through `skipLlm` like the other recognizers
+  carry tool directives (lint, coverage, fallthrough, generator pragmas) are
+  refused on a best-effort word list. Opt in through `skipLlm` like the other recognizers
   (#1010).
 
 - The self-review's Codex rung writes the refreshed ChatGPT-subscription login

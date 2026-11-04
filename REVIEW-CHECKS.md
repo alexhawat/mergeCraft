@@ -181,13 +181,14 @@ trigraph can splice the next line) are refused. Each changed line must be `//`,
 one space and a plain alphabetic first word, so `//go:build`, `// +build`, `///`
 and `// @ts-ignore` never match; a removed line must be replaced by an added
 one. The diff and the head-side file must be printable ASCII and are split on
-newlines only, and a file with a backtick, a raw-string marker, any `/*` or a
-quote left open at the end of a line is refused, so the lexer over the head text
+newlines only, and a file with a backtick, a raw-string marker, any `/*`, a
+Swift `#/` regex literal (it can span lines) or a quote left open at the end of a line is refused, so the lexer over the head text
 proves every changed line is a comment; every `#`-comment language is refused.
 For the listed languages a recognised edit proves no runtime change, but a
 comment can still carry tool directives for linters, coverage or code
-generators; a directive-word list (`fallthrough`, `Output`, `nolint`,
-`NOLINTNEXTLINE`, `istanbul`, `IWYU`, `pragma`, `build`, `Code`, …) refuses the
+generators; a directive-word list (`fallthrough`, `fall`, `Output`, `nolint`,
+`NOLINTNEXTLINE`, `istanbul`, `IWYU`, `noinspection`, `ReSharper`, `detekt`,
+`pragma`, `build`, `Code`, …) refuses the
 known ones on a best-effort basis). A mixed diff matches nothing and gets a
 full review. `skipLlm` opts each
 recognizer in; a pin bump also needs every `pinBump.requireChecks` check to have
