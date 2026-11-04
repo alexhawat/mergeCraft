@@ -39,6 +39,10 @@ TRUSTED_APP = "acme-ci"
 CHECK_NAME = "Deploy / health"
 CHECK_URL = "https://github.com/acme/demo/runs/4242"
 ARTIFACT_NAME = "rollback-proof"
+# The workflow file the operator declares as the only uploader of the proof.
+DECLARED_WORKFLOW = ".github/workflows/deploy-proof.yml"
+REVIEWED_REPO = "acme/demo"
+ISSUE_AUTHOR = "octo-author"
 EVIDENCE_SCHEMA = "mergecraft.policy-evidence/1"
 # The artifact document cap the contract names: 64 KiB.
 ARTIFACT_CAP_BYTES = 64 * 1024
@@ -194,15 +198,30 @@ def workflow_run(
     conclusion: str | None = "success",
     status: str = "completed",
     head_sha: str = HEAD_SHA,
+    path: str | None = DECLARED_WORKFLOW,
+    head_repository: str | None = REVIEWED_REPO,
+    fork: bool = False,
 ) -> dict[str, Any]:
-    """Return one GitHub workflow-run object."""
-    return {
+    """Return one GitHub workflow-run object.
+
+    ``path`` is the workflow file the run executed and ``head_repository`` the
+    repository its head commit came from (a fork for a fork's pull request).
+    ``None`` leaves the field out, the shape of a run whose provenance is unknown.
+    """
+    run: dict[str, Any] = {
         "id": run_id,
         "status": status,
         "conclusion": conclusion,
         "head_sha": head_sha,
         "name": "Rollback rehearsal",
+        "event": "push",
+        "repository": {"full_name": REVIEWED_REPO, "fork": False},
     }
+    if path is not None:
+        run["path"] = path
+    if head_repository is not None:
+        run["head_repository"] = {"full_name": head_repository, "fork": fork}
+    return run
 
 
 def evidence_document(
@@ -279,9 +298,25 @@ def check_run_declaration(
     return {"checkRun": {"name": name, "trustedApps": list(trusted_apps)}}
 
 
-def artifact_declaration(*, name: str = ARTIFACT_NAME) -> dict[str, Any]:
-    """``policy.evidence.<key>`` declaring an artifact, in config spelling."""
-    return {"artifact": {"name": name}}
+def artifact_declaration(
+    *, name: str = ARTIFACT_NAME, workflow: str = DECLARED_WORKFLOW
+) -> dict[str, Any]:
+    """``policy.evidence.<key>`` declaring an artifact and its one uploading workflow."""
+    return {"artifact": {"name": name, "workflow": workflow}}
+
+
+def linked_issue(body: str, *, number: int = 12, author: str = ISSUE_AUTHOR) -> Any:
+    """Return one ``LinkedIssue`` the pull request closes (imported lazily)."""
+    from mergecraft.scm.types import LinkedIssue
+
+    return LinkedIssue(number=number, author_login=author, body=body)
+
+
+def linked_issues(*bodies: str, author: str = ISSUE_AUTHOR) -> tuple[Any, ...]:
+    """Return one ``LinkedIssue`` per body, numbered from 12, all by ``author``."""
+    return tuple(
+        linked_issue(body, number=12 + index, author=author) for index, body in enumerate(bodies)
+    )
 
 
 def evidence_settings(declarations: Mapping[str, dict[str, Any]] | None = None) -> Any:
@@ -327,7 +362,7 @@ def evidence_ctx(
     before_sha: str | None = None,
     diff_paths: Sequence[str] = DIFF_PATHS,
     pr_body: str | None = None,
-    linked_issue_bodies: Any = _UNSET,
+    linked_issues: Any = _UNSET,
     linked_repo_base_manifest: Any = _UNSET,
     linked_repo_review: Any = _UNSET,
 ) -> ToolContext:
@@ -346,8 +381,8 @@ def evidence_ctx(
     primary.before_sha = before_sha
     primary.diff_path = str(write_diff(root, *diff_paths))
     fields: dict[str, Any] = {}
-    if linked_issue_bodies is not _UNSET:
-        fields["linked_issue_bodies"] = linked_issue_bodies
+    if linked_issues is not _UNSET:
+        fields["linked_issues"] = linked_issues
     if linked_repo_base_manifest is not _UNSET:
         fields["linked_repo_base_manifest"] = linked_repo_base_manifest
     if linked_repo_review is not _UNSET:
@@ -379,13 +414,16 @@ __all__ = [
     "CHECK_NAME",
     "CHECK_URL",
     "CONTRADICTED_CRITERION",
+    "DECLARED_WORKFLOW",
     "DIFF_PATHS",
     "EVIDENCE_SCHEMA",
     "HEAD_SHA",
+    "ISSUE_AUTHOR",
     "NOT_EVIDENCED_CRITERION",
     "OTHER_SHA",
     "OUT_OF_SCOPE_CRITERION",
     "PARTIAL_CRITERION",
+    "REVIEWED_REPO",
     "SATISFIED_CRITERION",
     "TRUSTED_APP",
     "EvidenceGitHub",
@@ -399,6 +437,8 @@ __all__ = [
     "evidence_document",
     "evidence_settings",
     "issue_body",
+    "linked_issue",
+    "linked_issues",
     "padded_document_bytes",
     "set_state_fields",
     "settings_snapshot",

@@ -33,11 +33,16 @@ from mergecraft.mcp.tool_state import primary_repo_state
 from tests.support.policy_evidence_fixtures import (
     CHECK_NAME,
     HEAD_SHA,
+    ISSUE_AUTHOR,
+    SATISFIED_CRITERION,
     EvidenceGitHub,
     check_run,
     check_run_declaration,
     evidence_ctx,
     evidence_settings,
+    issue_body,
+    linked_issues,
+    set_state_fields,
     settings_snapshot,
 )
 from tests.support.policy_fixtures import row_text, rule, write_diff, write_policy
@@ -431,3 +436,43 @@ def test_a_declaration_the_operator_did_not_make_keeps_the_rule_blocking(
         "base configuration"
     ) in row_text(row)
     assert "list_check_runs_for_ref" not in github.call_names()
+
+
+def test_a_requirements_row_says_the_criteria_were_keyword_matched(tmp_path: Path) -> None:
+    """The row a reader sees names the issue author and how the criteria were matched."""
+    document = _required_rule(["requirements"])
+    ctx = _run_ctx(tmp_path, rules=[document], github=EvidenceGitHub(fail_on_call=True))
+    set_state_fields(ctx.tool_state, linked_issues=linked_issues(issue_body(SATISFIED_CRITERION)))
+
+    row = _row(_ensure(ctx))
+
+    assert row.severity == _engine_severity(document, available={"requirements": "mapped"})
+    text = row_text(row)
+    assert "evidence present: requirements (linked-issue-criteria: " in text
+    assert ISSUE_AUTHOR in text
+    assert "keyword-matched" in text
+
+
+async def test_the_run_scope_snapshot_reaches_the_producers_inside_a_running_loop(
+    tmp_path: Path,
+) -> None:
+    """Only the run-scope ContextVar holds the operator snapshot; the worker must see it."""
+    from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
+    from mergecraft.policy.review import load_repo_policy
+
+    document = _required_rule(["health_check"])
+    write_policy(tmp_path, rules=[document])
+    capture_repo_settings_snapshot(
+        root=tmp_path,
+        settings=evidence_settings({"health_check": check_run_declaration()}),
+        operator_owned=True,
+        policy=load_repo_policy(tmp_path, operator_owned=True),
+    )
+    github = EvidenceGitHub(check_runs_by_ref={HEAD_SHA: [check_run()]})
+    ctx = evidence_ctx(tmp_path, github=github, diff_paths=("src/billing/x.py",))
+    ctx.repo_settings_snapshot = None
+
+    row = _row(_ensure(ctx))
+
+    assert row.severity == _engine_severity(document, available={"health_check": "proved"})
+    assert "list_check_runs_for_ref" in github.call_names()

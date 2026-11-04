@@ -47,7 +47,7 @@ from tests.support.policy_evidence_fixtures import (
     write_config,
     zip_member,
 )
-from tests.support.policy_fixtures import commit_all, init_git_repo
+from tests.support.policy_fixtures import commit_all, git, init_git_repo
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -291,6 +291,61 @@ async def test_a_base_config_that_does_not_parse_keeps_the_key_absent(tmp_path: 
     reason = _reason(evidence, "health_check")
     assert _CONFIG_REL in reason, reason
     assert base_sha in reason, reason
+
+
+def _config_blob_path(repo: Path, commit: str) -> Path:
+    """The loose object file holding ``.mergecraft/config.yaml`` at ``commit``."""
+    blob = git(repo, "rev-parse", f"{commit}:{_CONFIG_REL}")
+    return repo / ".git" / "objects" / blob[:2] / blob[2:]
+
+
+async def test_a_base_config_git_cannot_read_keeps_the_key_absent_without_a_scm_call(
+    tmp_path: Path,
+) -> None:
+    """The base tree lists the config but its blob is gone: the read failure is named."""
+    head = {"health_check": check_run_declaration()}
+    repo, base_sha, head_sha = _base_and_head(tmp_path, base=head, head=None)
+    blob = _config_blob_path(repo, base_sha)
+    assert blob.is_file(), "the fixture must hold the base config as a loose object"
+    blob.chmod(0o644)
+    blob.unlink()
+    github = EvidenceGitHub(check_runs_by_ref={head_sha: [check_run(head_sha=head_sha)]})
+    ctx = _pr_ctx(repo, github=github, head_sha=head_sha, before_sha=base_sha, head=None)
+
+    evidence = await _collect(ctx, ["health_check"])
+
+    reason = _reason(evidence, "health_check")
+    assert _CONFIG_REL in reason, reason
+    assert base_sha in reason, reason
+    assert "could not be read" in reason, reason
+    assert github.calls == [], "no proof is looked up when the declaration is unknown"
+
+
+async def test_an_oversized_base_config_keeps_the_key_absent_without_a_scm_call(
+    tmp_path: Path,
+) -> None:
+    """A base config one byte past the 1 000 000-byte read cap is refused, not parsed."""
+    repo = init_git_repo(tmp_path / "repo")
+    (repo / "src").mkdir()
+    (repo / "src" / "app.py").write_text("VALUE = 1\n", encoding="utf-8")
+    config = write_config(repo, _config({"health_check": check_run_declaration()}))
+    prefix = config.read_bytes()
+    padding = 1_000_001 - len(prefix) - 3
+    config.write_bytes(prefix + b"# " + b"x" * padding + b"\n")
+    assert config.stat().st_size == 1_000_001
+    base_sha = commit_all(repo, "base: an oversized configuration")
+    write_config(repo, _config(None))
+    (repo / "src" / "app.py").write_text("VALUE = 2\n", encoding="utf-8")
+    head_sha = commit_all(repo, "pr: a small configuration")
+    github = EvidenceGitHub(check_runs_by_ref={head_sha: [check_run(head_sha=head_sha)]})
+    ctx = _pr_ctx(repo, github=github, head_sha=head_sha, before_sha=base_sha, head=None)
+
+    evidence = await _collect(ctx, ["health_check"])
+
+    reason = _reason(evidence, "health_check")
+    assert _CONFIG_REL in reason, reason
+    assert "1000000" in reason.replace(",", "").replace(" ", ""), "the reason names the cap"
+    assert github.calls == [], "no proof is looked up when the declaration is unknown"
 
 
 # ---------------------------------------------------------------------------

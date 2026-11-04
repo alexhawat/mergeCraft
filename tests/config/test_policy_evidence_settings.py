@@ -6,7 +6,8 @@ key to an ``EvidenceProducerSettings``. Each declaration names exactly one proof
 * ``checkRun: {name, trustedApps}`` — a check run of that name posted by one of the
   named GitHub Apps. ``github-actions`` is refused: the job names in a
   ``pull_request`` workflow come from the head ref, which the author controls.
-* ``artifact: {name}`` — a workflow artifact holding a policy-evidence document.
+* ``artifact: {name, workflow}`` — a workflow artifact holding a policy-evidence
+  document, and the one workflow file allowed to upload it.
 
 The suite is written before the settings exist, so it is red until they land.
 """
@@ -22,6 +23,9 @@ from tests.support.policy_evidence_fixtures import write_config
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+_WORKFLOW = ".github/workflows/deploy-proof.yml"
 
 
 def _settings(evidence: dict[str, Any]) -> Any:
@@ -64,11 +68,14 @@ def test_a_check_run_declaration_parses(declaration: dict[str, Any]) -> None:
 
 def test_an_artifact_declaration_parses() -> None:
     """``artifact`` carries the name of the workflow artifact holding the document."""
-    settings = _settings({"rollback_plan": {"artifact": {"name": "rollback-proof"}}})
+    settings = _settings(
+        {"rollback_plan": {"artifact": {"name": "rollback-proof", "workflow": _WORKFLOW}}}
+    )
 
     producer = settings.policy.evidence["rollback_plan"]
     assert producer.artifact is not None
     assert producer.artifact.name == "rollback-proof"
+    assert producer.artifact.workflow == _WORKFLOW
     assert producer.check_run is None
 
 
@@ -88,7 +95,7 @@ _UNDER_DECLARATION = ("policy", "evidence", "health_check")
     [
         {
             "checkRun": {"name": "Deploy / health", "trustedApps": ["acme-ci"]},
-            "artifact": {"name": "rollback-proof"},
+            "artifact": {"name": "rollback-proof", "workflow": _WORKFLOW},
         },
         {},
     ],
@@ -128,6 +135,20 @@ def test_github_actions_is_refused_as_a_trusted_app(app: str) -> None:
         if _loc(error)[:3] == _UNDER_DECLARATION and "github-actions" in error["msg"].casefold()
     ]
     assert refusals, f"the refusal must say github-actions cannot be trusted: {errors}"
+
+
+def test_an_artifact_declaration_needs_its_uploading_workflow() -> None:
+    """Without the workflow file, any run that uploads the name would count."""
+    with pytest.raises(ValidationError) as excinfo:
+        _settings({"rollback_plan": {"artifact": {"name": "rollback-proof"}}})
+
+    errors = _errors(excinfo)
+    assert any(
+        error["type"] == "missing"
+        and _loc(error)[:3] == ("policy", "evidence", "rollback_plan")
+        and _loc(error)[-1] == "workflow"
+        for error in errors
+    ), errors
 
 
 def test_a_check_run_declaration_needs_a_name() -> None:
@@ -172,7 +193,9 @@ def test_policy_evidence_loads_from_the_repository_config(tmp_path: Path) -> Non
                     "health_check": {
                         "checkRun": {"name": "Deploy / health", "trustedApps": ["acme-ci"]}
                     },
-                    "contract_schema": {"artifact": {"name": "schema-proof"}},
+                    "contract_schema": {
+                        "artifact": {"name": "schema-proof", "workflow": _WORKFLOW}
+                    },
                 }
             }
         },
@@ -184,3 +207,4 @@ def test_policy_evidence_loads_from_the_repository_config(tmp_path: Path) -> Non
     assert set(evidence) == {"health_check", "contract_schema"}
     assert evidence["health_check"].check_run.trusted_apps == ["acme-ci"]
     assert evidence["contract_schema"].artifact.name == "schema-proof"
+    assert evidence["contract_schema"].artifact.workflow == _WORKFLOW

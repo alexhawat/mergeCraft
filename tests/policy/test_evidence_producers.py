@@ -25,8 +25,10 @@ Pinned shapes (the implementation target):
   ``absent: dict[str, str]`` (the reason per missing key).
 * ``async collect_policy_evidence(ctx, *, required_keys) -> PolicyEvidence`` —
   produces exactly the requested keys and reads nothing else.
-* Tool-state seams the producers read: ``ToolState.linked_issue_bodies``
-  (``tuple[str, ...] | None``; ``None`` means the closing issues were not read),
+* Tool-state seams the producers read: ``ToolState.linked_issues``
+  (``tuple[LinkedIssue, ...] | None`` with ``mergecraft.scm.types.LinkedIssue``
+  carrying ``number``, ``author_login`` and ``body``; ``None`` means the closing
+  issues were not read),
   ``ToolState.linked_repo_base_manifest`` (``BaseManifestLookup | None``) and
   ``ToolState.linked_repo_review`` (``XrepoReview | None``).
 * The head commit a proof must be bound to is the review's ``checkout_sha``.
@@ -40,6 +42,7 @@ import os
 import subprocess
 import zipfile
 from hashlib import sha256
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -53,6 +56,7 @@ from tests.support.policy_evidence_fixtures import (
     CHECK_URL,
     CONTRADICTED_CRITERION,
     HEAD_SHA,
+    ISSUE_AUTHOR,
     NOT_EVIDENCED_CRITERION,
     OTHER_SHA,
     OUT_OF_SCOPE_CRITERION,
@@ -70,6 +74,8 @@ from tests.support.policy_evidence_fixtures import (
     evidence_document,
     evidence_settings,
     issue_body,
+    linked_issue,
+    linked_issues,
     padded_document_bytes,
     settings_snapshot,
     workflow_run,
@@ -78,8 +84,6 @@ from tests.support.policy_evidence_fixtures import (
 from tests.support.policy_fixtures import commit_all, git, init_git_repo
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from mergecraft.mcp.context import ToolContext
 
 _DECLARED_KEYS = ("health_check", "rollback_plan", "contract_schema")
@@ -187,7 +191,7 @@ async def test_only_the_requested_keys_are_produced_and_nothing_else_is_read(
         tmp_path,
         github=github,
         declarations={"health_check": check_run_declaration()},
-        linked_issue_bodies=(issue_body(SATISFIED_CRITERION),),
+        linked_issues=linked_issues(issue_body(SATISFIED_CRITERION)),
     )
 
     evidence = await _collect(ctx, ["requirements"])
@@ -202,7 +206,7 @@ async def test_an_unknown_key_is_absent_because_no_producer_exists(tmp_path: Pat
     ctx = _operator_ctx(
         tmp_path,
         github=EvidenceGitHub(fail_on_call=True),
-        linked_issue_bodies=(issue_body(SATISFIED_CRITERION),),
+        linked_issues=linked_issues(issue_body(SATISFIED_CRITERION)),
     )
 
     evidence = await _collect(ctx, ["deploy_window", "requirements"])
@@ -218,7 +222,7 @@ async def test_present_and_absent_partition_the_requested_keys(tmp_path: Path) -
         tmp_path,
         github=github,
         declarations={"health_check": check_run_declaration()},
-        linked_issue_bodies=(issue_body(CONTRADICTED_CRITERION),),
+        linked_issues=linked_issues(issue_body(CONTRADICTED_CRITERION)),
         linked_repo_base_manifest=BaseManifestLookup(manifest=_manifest("acme/contracts")),
         linked_repo_review=_review("acme/contracts"),
     )
@@ -254,7 +258,7 @@ async def test_requirements_present_when_every_linked_criterion_is_evidenced(
     assert criterion_state(SATISFIED_CRITERION) == "satisfied"
     assert criterion_state(PARTIAL_CRITERION) == "partially_satisfied"
     ctx = evidence_ctx(
-        tmp_path, github=EvidenceGitHub(fail_on_call=True), linked_issue_bodies=bodies
+        tmp_path, github=EvidenceGitHub(fail_on_call=True), linked_issues=linked_issues(*bodies)
     )
 
     evidence = await _collect(ctx, ["requirements"])
@@ -280,7 +284,7 @@ async def test_one_unevidenced_criterion_keeps_requirements_absent_and_is_named(
     ctx = evidence_ctx(
         tmp_path,
         github=EvidenceGitHub(fail_on_call=True),
-        linked_issue_bodies=(issue_body(SATISFIED_CRITERION, criterion),),
+        linked_issues=linked_issues(issue_body(SATISFIED_CRITERION, criterion)),
     )
 
     evidence = await _collect(ctx, ["requirements"])
@@ -305,7 +309,7 @@ async def test_the_pull_request_body_is_never_a_requirements_source(
         tmp_path,
         github=EvidenceGitHub(fail_on_call=True),
         pr_body=body,
-        linked_issue_bodies=(body,) if where == "closing-issue" else (),
+        linked_issues=linked_issues(body) if where == "closing-issue" else (),
     )
 
     evidence = await _collect(ctx, ["requirements"])
@@ -324,7 +328,7 @@ async def test_unread_closing_issues_keep_requirements_absent(tmp_path: Path) ->
         tmp_path,
         github=EvidenceGitHub(fail_on_call=True),
         pr_body=issue_body(SATISFIED_CRITERION),
-        linked_issue_bodies=None,
+        linked_issues=None,
     )
 
     evidence = await _collect(ctx, ["requirements"])
@@ -337,7 +341,7 @@ async def test_linked_issues_without_criteria_keep_requirements_absent(tmp_path:
     ctx = evidence_ctx(
         tmp_path,
         github=EvidenceGitHub(fail_on_call=True),
-        linked_issue_bodies=("Fixes the typo in the billing page title.",),
+        linked_issues=linked_issues("Fixes the typo in the billing page title."),
     )
 
     evidence = await _collect(ctx, ["requirements"])
@@ -349,9 +353,47 @@ async def test_the_default_run_state_has_not_read_the_closing_issues(tmp_path: P
     """A fresh run starts with the closing issues unread, so requirements are absent."""
     ctx = evidence_ctx(tmp_path, github=EvidenceGitHub(fail_on_call=True))
 
-    assert ctx.tool_state.linked_issue_bodies is None
+    assert ctx.tool_state.linked_issues is None
     evidence = await _collect(ctx, ["requirements"])
     assert "linked issues were not read" in _absent_reason(evidence, "requirements")
+
+
+async def test_a_requirements_record_names_the_issue_authors_and_the_matching(
+    tmp_path: Path,
+) -> None:
+    """The record says whose issues the criteria came from and how they were matched.
+
+    An issue the pull request author wrote is author-controlled text: the record
+    must let a reader see that, and that the criteria were keyword-matched against
+    the diff rather than reviewed by anyone.
+    """
+    ctx = evidence_ctx(
+        tmp_path,
+        github=EvidenceGitHub(fail_on_call=True),
+        linked_issues=(
+            linked_issue(issue_body(SATISFIED_CRITERION), number=12, author=ISSUE_AUTHOR),
+            linked_issue(issue_body(PARTIAL_CRITERION), number=13, author="second-author"),
+        ),
+    )
+
+    evidence = await _collect(ctx, ["requirements"])
+
+    record = _assert_record(evidence, "requirements", source="linked-issue-criteria")
+    assert ISSUE_AUTHOR in record.detail
+    assert "second-author" in record.detail
+    assert "keyword-matched" in record.detail
+
+
+def test_the_policy_evidence_doc_says_requirements_proves_traceability() -> None:
+    """The consumer doc must not oversell ``requirements`` as independent review."""
+    doc = (Path(__file__).resolve().parents[2] / "docs" / "policy-evidence.md").read_text(
+        encoding="utf-8"
+    )
+    lowered = " ".join(doc.casefold().split())
+
+    assert "author-controlled" in lowered
+    assert "traceability" in lowered
+    assert "not independent review" in lowered
 
 
 # ---------------------------------------------------------------------------
@@ -856,7 +898,7 @@ async def test_no_producer_ever_runs_a_subprocess(
             "health_check": check_run_declaration(),
             "rollback_plan": artifact_declaration(),
         },
-        linked_issue_bodies=(issue_body(SATISFIED_CRITERION),),
+        linked_issues=linked_issues(issue_body(SATISFIED_CRITERION)),
         linked_repo_base_manifest=BaseManifestLookup(manifest=_manifest("acme/contracts")),
         linked_repo_review=_review("acme/contracts"),
     )

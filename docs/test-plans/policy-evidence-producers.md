@@ -44,12 +44,15 @@ UV_PROJECT_ENVIRONMENT=$PWD/.venv-dev MERGECRAFT_PYTEST_JOBS=0 uv run pytest \
 | Collector | `async mergecraft.policy.evidence_producers.collect_policy_evidence(ctx, *, required_keys: Collection[str]) -> PolicyEvidence` | produces exactly `required_keys`; never raises on a transport failure (the key is absent and the reason names the error) |
 | Evaluator | `mergecraft.policy.review.evaluate_review_policy(..., evidence: PolicyEvidence \| None = None)` | `None` keeps today's behaviour (every key missing); otherwise the present keys feed both engine seams |
 | Run path | `mergecraft.policy.review.ensure_policy_evaluated(ctx)` | unchanged signature, still returns `list[Finding]` synchronously; collects through `collect_policy_evidence` when a triggered rule requires keys, and must work from inside a running event loop |
-| Tool state | `ToolState.linked_issue_bodies: tuple[str, ...] \| None = None` | bodies of the issues the pull request closes, read once at run start; `None` means not read |
+| Tool state | `ToolState.linked_issues: tuple[LinkedIssue, ...] \| None = None` | the issues the pull request closes, read once at run start; `()` means it closes none, `None` means not (fully) read. Replaces the earlier `linked_issue_bodies` |
+| Linked issue | `mergecraft.scm.types.LinkedIssue` | frozen; `number: int`, `author_login: str`, `body: str` (a missing body is `""`). The declared-scope work reads the same field |
+| Run-start writer | `mergecraft.main._read_linked_issues(ctx)` | fills `ToolState.linked_issues`; no pull request ⇒ no call and `None`; a failed, partial or malformed read ⇒ `None` (written, never left at an earlier value) |
+| Client read | `GitHubClient.closing_issues(owner, repo, number) -> tuple[LinkedIssue, ...] \| None` | one GraphQL `closingIssuesReferences(first: 25)` page with `pageInfo { hasNextPage }` and each issue's `number`, `body`, `author { login }`; `hasNextPage` ⇒ `None`. Replaces `closing_issue_bodies` |
 | Tool state | `ToolState.linked_repo_base_manifest: BaseManifestLookup \| None = None` | the linked-repo manifest as read from the base (the lookup the checkout already performs); `None` means not read |
 | Tool state | `ToolState.linked_repo_review: XrepoReview \| None = None` | the `review_linked_repos` result this run recorded; `None` means linked repositories were not reviewed |
 | Head commit | `primary_repo_state(ctx.tool_state).checkout_sha` | the commit a check run or artifact must be bound to |
 | Settings | `RepoSettings.policy: PolicySettings`; `PolicySettings.evidence: dict[str, EvidenceProducerSettings]` | default empty |
-| Settings | `EvidenceProducerSettings` | exactly one of `check_run` (alias `checkRun`: `name: str`, `trusted_apps: list[str]` alias `trustedApps`) or `artifact` (`name: str`); `extra="forbid"`; `populate_by_name=True` |
+| Settings | `EvidenceProducerSettings` | exactly one of `check_run` (alias `checkRun`: `name: str`, `trusted_apps: list[str]` alias `trustedApps`) or `artifact` (`name: str`, `workflow: str` — the repo-relative workflow file allowed to upload it, required); `extra="forbid"`; `populate_by_name=True` |
 
 ### Row wording
 
@@ -64,11 +67,14 @@ UV_PROJECT_ENVIRONMENT=$PWD/.venv-dev MERGECRAFT_PYTEST_JOBS=0 uv run pytest \
 
 ### Seams the suite chose (and why)
 
-* **Closing-issue bodies live on `ToolState`.** The `requirements` producer is pure over
-  `linked_issue_bodies` and the diff, so tests set the field directly. The read itself (the
-  `closingIssuesReferences` GraphQL query `mcp/pr_info.py` already makes) happens once at run
-  start; the declared-scope work reads the same issues, and whichever change lands second
-  rebases onto the shared field.
+* **Closing issues live on `ToolState` as `linked_issues`.** The `requirements` producer is
+  pure over `ToolState.linked_issues` (each a `LinkedIssue` with `number`, `author_login`
+  and `body`) and the diff, so tests set the field directly. The read itself happens once at
+  run start (`main._read_linked_issues` over `GitHubClient.closing_issues`), and the writers
+  are driven for real in `tests/policy/test_evidence_writer_seams.py`. The declared-scope
+  work reads the same field under the same name; whichever change lands second rebases onto
+  it. The earlier `linked_issue_bodies` / `closing_issue_bodies` names are replaced, because
+  the record must name the issue authors.
 * **The `xrepo` producer reads what the checkout already computed.** The checkout reads the
   base manifest (`BaseManifestLookup`) and runs `review_linked_repos`; recording both on
   `ToolState` keeps the producer pure, process-free and free of a second git walk.
@@ -100,17 +106,28 @@ UV_PROJECT_ENVIRONMENT=$PWD/.venv-dev MERGECRAFT_PYTEST_JOBS=0 uv run pytest \
 ### `requirements` — linked-issue criteria mapped against the diff
 
 Trust story: the criteria come from the issues the pull request closes, and mergeCraft maps
-them against the diff itself. The author can write criteria into an issue but cannot assert
-that the diff satisfies them, and the pull request body is never read for them.
+them against the diff itself, by keyword. The pull request body is never read for them. An
+issue the pull request author wrote is author-controlled text, so `requirements` proves
+traceability from issue to diff, not independent review: the record names each issue's
+author and says the criteria were keyword-matched, and `docs/policy-evidence.md` says so.
 
 | Behaviour | Layer | Test |
 | --- | --- | --- |
 | Every criterion `satisfied` / `partially_satisfied` (one issue or two) ⇒ present, source `linked-issue-criteria`, detail names the count | unit | `…::test_requirements_present_when_every_linked_criterion_is_evidenced[one-issue-two-criteria]`, `…[two-issues]` |
 | One `contradicted` / `not_evidenced` / `out_of_scope` criterion ⇒ absent; the reason names that criterion and its state, not the satisfied one | unit | `…::test_one_unevidenced_criterion_keeps_requirements_absent_and_is_named[contradicted]`, `…[not-evidenced]`, `…[out-of-scope]` |
 | The same criteria in the pull request body alone ⇒ absent; in a closing issue ⇒ present | unit | `…::test_the_pull_request_body_is_never_a_requirements_source[closing-issue]`, `…[pull-request-body-only]` |
-| `linked_issue_bodies is None` ⇒ absent, `linked issues were not read` | unit | `…::test_unread_closing_issues_keep_requirements_absent` |
+| `linked_issues is None` ⇒ absent, `linked issues were not read` | unit | `…::test_unread_closing_issues_keep_requirements_absent` |
 | A closing issue with no acceptance criteria ⇒ absent | unit | `…::test_linked_issues_without_criteria_keep_requirements_absent` |
 | A fresh run state has not read the closing issues | unit | `…::test_the_default_run_state_has_not_read_the_closing_issues` |
+| The record names every issue author and says `keyword-matched` | unit | `…::test_a_requirements_record_names_the_issue_authors_and_the_matching` |
+| The row a reader sees carries the author and `keyword-matched` | functional | `tests/policy/test_review_evaluation_evidence.py::test_a_requirements_row_says_the_criteria_were_keyword_matched` |
+| `docs/policy-evidence.md` says `author-controlled`, `traceability` and `not independent review` | doc | `tests/policy/test_evidence_producers.py::test_the_policy_evidence_doc_says_requirements_proves_traceability` |
+| Run start: two closing issues ⇒ two `LinkedIssue` rows in order; the read names the repository and pull request | integration | `tests/policy/test_evidence_writer_seams.py::test_run_start_records_each_closing_issue_with_its_author` |
+| Run start: closes none ⇒ `()` | integration | `…::test_run_start_records_an_empty_tuple_when_nothing_is_closed` |
+| Run start: GraphQL failure, `hasNextPage`, no pull request object, a malformed node ⇒ `None` | error | `…::test_run_start_leaves_linked_issues_unread_on_any_doubt[…]` |
+| Run start without a pull request ⇒ no call, `None` | integration | `…::test_run_start_without_a_pull_request_reads_nothing` |
+| `closing_issues` over a mock transport: `POST /graphql`, `first: 25`, the fields above | integration | `…::test_closing_issues_asks_for_one_bounded_page_with_authors` |
+| `closing_issues` with `hasNextPage` ⇒ `None` | error | `…::test_closing_issues_refuses_a_second_page` |
 
 Each criterion's state is asserted against the real mapper first, so a fixture that stops
 producing the state it names fails loudly instead of testing nothing.
@@ -130,6 +147,7 @@ base declares must have been reviewed with nothing omitted.
 | A base-declared repository the review never saw ⇒ absent, named | unit | `…::test_a_base_linked_repo_the_review_never_saw_keeps_xrepo_absent` |
 | A base manifest that exists but is unreadable ⇒ absent with that reason | unit | `…::test_an_unreadable_base_manifest_keeps_xrepo_absent` |
 | Base manifest never read, or linked repositories never reviewed ⇒ absent | unit | `…::test_an_xrepo_input_the_run_never_produced_keeps_xrepo_absent[base-manifest-not-read]`, `…[linked-repos-not-reviewed]` |
+| A real `checkout_pr` of a repository whose base declares a linked repository records `linked_repo_base_manifest` and `linked_repo_review`, and the producer reads them (the ungranted repository is an omission, so `xrepo` stays absent naming it) | functional | `tests/policy/test_evidence_writer_seams.py::test_checkout_records_the_base_manifest_and_the_linked_repo_review` |
 
 ### `health_check` / `rollback_plan` / `contract_schema` — declared check runs
 
@@ -149,8 +167,13 @@ names its own jobs.
 ### Declared artifacts
 
 Trust story: the proof is produced by CI on the head commit and can only say `ok` for the
-key and the commit it ran on; it must come from a workflow run that succeeded on that commit,
-and it is read with a hard size bound.
+key and the commit it ran on. It counts only when the run executed exactly the workflow file
+the base declares (`artifact.workflow`, matched against the run's `path`), the pull request
+does not change that file, the run's `head_repository` is the reviewed repository (never a
+fork), and the run completed with `success` on the head commit. A pull request that adds its
+own workflow, or a fork's run, can upload the right name with a perfect document; neither
+proves anything. The archive's reported size must be known before it is downloaded, and the
+document is read with a hard size bound.
 
 | Behaviour | Layer | Test |
 | --- | --- | --- |
@@ -162,6 +185,12 @@ and it is read with a hard size bound.
 | A successful run without the declared artifact ⇒ absent, named | unit | `…::test_a_missing_declared_artifact_is_absent_and_named` |
 | Exactly 64 KiB ⇒ present; 64 KiB + 1 ⇒ absent naming the limit | edge | `…::test_an_artifact_document_is_bounded_at_64_kib[at-the-cap]`, `…[one-byte-past-the-cap]` |
 | A 256 KiB document is never decompressed past cap + 1 bytes (zip reads metered) | edge | `…::test_an_oversized_artifact_is_never_read_past_the_cap` |
+| The declared, untouched, same-repo workflow ⇒ present; the record names the workflow file | unit | `tests/policy/test_evidence_artifact_provenance.py::test_the_declared_untouched_same_repo_workflow_is_evidence` |
+| A fork's own workflow the diff adds (`.github/workflows/forged.yml`) uploading a perfect proof ⇒ absent, naming the declared workflow | unit | `…::test_a_forked_workflow_the_pull_request_adds_is_not_evidence` |
+| A fork run of the declared workflow, another same-repo workflow, a run with no `path`, a run with no `head_repository` ⇒ absent, named | unit | `…::test_an_artifact_from_any_other_run_is_not_evidence[…]` |
+| A diff that edits the declared workflow ⇒ absent, naming the file | unit | `…::test_a_diff_that_edits_the_declared_workflow_voids_its_artifact` |
+| A newer forged run listed beside the operator's run never shadows it | unit | `…::test_the_declared_run_is_chosen_over_a_newer_forged_one` |
+| `size_in_bytes` null, a string or missing ⇒ absent, the reason says the size is unknown, and the archive is never downloaded | edge | `…::test_an_artifact_of_unknown_size_is_never_downloaded[…]` |
 
 ### Declarations come from the operator-owned snapshot, else the base commit
 
@@ -177,6 +206,8 @@ and it is read with a hard size bound.
 | No base commit, or a base commit the checkout cannot resolve ⇒ absent; the reason names the base commit (or its id) and is not the declare-it reason | error | `…::test_an_unreadable_base_keeps_the_key_absent_and_names_the_base[no-base-commit]`, `…[base-commit-not-in-the-checkout]` |
 | A base config the settings model refuses ⇒ absent; the reason names `.mergecraft/config.yaml` and the base commit | error | `…::test_a_base_config_that_does_not_parse_keeps_the_key_absent` |
 | An operator-owned snapshot wins over the base commit in both directions (guard: green before and after) | integration | `…::test_an_operator_owned_snapshot_wins_over_the_base_commit[snapshot-declares-base-does-not]`, `…[base-declares-snapshot-does-not]` |
+| A base config whose blob git cannot read (the loose object is gone) ⇒ absent; the reason names `.mergecraft/config.yaml`, the base commit and `could not be read`; no SCM call | error | `tests/policy/test_evidence_base_declarations.py::test_a_base_config_git_cannot_read_keeps_the_key_absent_without_a_scm_call` |
+| A base config of 1 000 001 bytes ⇒ absent; the reason names the config and the 1000000-byte cap; no SCM call | edge | `…::test_an_oversized_base_config_keeps_the_key_absent_without_a_scm_call` |
 | Base path: every process started is `git`, at least one names `.mergecraft/config.yaml` and the base commit, and the key is produced | integration | `…::test_the_base_commit_read_is_the_only_process_a_producer_starts` |
 
 ### Settings
@@ -185,7 +216,8 @@ and it is read with a hard size bound.
 | --- | --- | --- |
 | `policy.evidence` defaults to an empty map on a `PolicySettings` | unit | `tests/config/test_policy_evidence_settings.py::test_policy_evidence_defaults_to_no_declarations` |
 | `checkRun` parses in config spelling and by field name | unit | `…::test_a_check_run_declaration_parses[config-spelling]`, `…[field-names]` |
-| `artifact` parses | unit | `…::test_an_artifact_declaration_parses` |
+| `artifact` parses with its `workflow` | unit | `…::test_an_artifact_declaration_parses` |
+| `artifact` without `workflow` ⇒ `missing` error at `policy.evidence.<key>…workflow` | error | `…::test_an_artifact_declaration_needs_its_uploading_workflow` |
 | Both or neither proof ⇒ one validation error under the declaration naming `checkRun` and `artifact` | error | `…::test_a_declaration_names_exactly_one_proof[both]`, `…[neither]` |
 | `github-actions` (any case) in `trustedApps` ⇒ validation error saying so; a trusted App is accepted | error | `…::test_github_actions_is_refused_as_a_trusted_app[github-actions]`, `…[GitHub-Actions]` |
 | A `checkRun` without `name` ⇒ `missing` error at `name` | error | `…::test_a_check_run_declaration_needs_a_name` |
@@ -210,6 +242,7 @@ and it is read with a hard size bound.
 | The same, called synchronously from inside a running event loop | functional | `…::test_the_run_path_collects_evidence_from_inside_a_running_event_loop` |
 | The collector is asked only for the triggered rules' keys | integration | `…::test_the_producers_are_asked_only_for_the_triggered_rules_keys` |
 | Two calls on one diff ⇒ one collection and no extra reads; a re-scoped diff collects again | integration | `…::test_evidence_is_collected_once_per_diff_path` |
+| Inside a running event loop, with the operator snapshot only in the run-scope ContextVar (not on the context), the producers still see it (the worker hop copies the context) | functional | `…::test_the_run_scope_snapshot_reaches_the_producers_inside_a_running_loop` |
 | No base-side declaration ⇒ the rule stays at the outstanding severity, the row carries the declare-it reason, and no check run is read | functional | `…::test_a_declaration_the_operator_did_not_make_keeps_the_rule_blocking` |
 
 ## Shared fixtures
@@ -217,8 +250,10 @@ and it is read with a hard size bound.
 `tests/support/policy_evidence_fixtures.py` holds the `EvidenceGitHub` client (answers only
 check-run, workflow-run, artifact-list and artifact-download reads, records every call, and
 fails any raw HTTP or GraphQL call), builders for check runs, workflow runs, evidence
-documents and artifact zips, the settings and snapshot builders, and `evidence_ctx`, which
-sets the tool-state seams only when a test passes them.
+documents and artifact zips, the settings and snapshot builders, `linked_issue(s)`, and
+`evidence_ctx`, which sets the tool-state seams only when a test passes them. A built
+workflow run defaults to the declared workflow (`.github/workflows/deploy-proof.yml`) with
+`head_repository` `acme/demo`; `artifact_declaration()` declares that workflow.
 
 ## Open questions left to the implementation
 
