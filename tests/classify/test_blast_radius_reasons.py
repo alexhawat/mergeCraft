@@ -593,15 +593,30 @@ def test_a_change_of_only_generated_paths_stays_low(paths: list[str]) -> None:
 # ── the carve-out does not apply beside a high reason ────────────────────────
 
 
-def test_the_carve_out_is_not_emitted_beside_a_high_reason() -> None:
-    result = _classify(_c(["src/pkg/mod.py", "migrations/0001.sql"], _SMALL))
+@pytest.mark.parametrize(
+    ("paths", "high_code"),
+    [
+        # One path, so the single-file size check passes and only the high-reason
+        # guard keeps the carve-out away.
+        (["src/auth/x.py"], "paths.auth"),
+        (["src/pkg/mod.py", "migrations/0001.sql"], "paths.migrations"),
+    ],
+    ids=["single-high-risk-source", "source-beside-migration"],
+)
+def test_the_carve_out_is_not_emitted_beside_a_high_reason(
+    paths: list[str], high_code: str
+) -> None:
+    result = _classify(_c(paths, _SMALL))
     reasons = _reasons_by_code(result)
+    gates = _gates(result)
 
     assert result.lane == "high"
-    assert reasons["paths.migrations"].lane == "high"
+    assert reasons[high_code].lane == "high"
     assert reasons["tests.missing"].lane == "medium"
+    assert "source.small_isolated" in set(_CODE_IDS)
     assert "source.small_isolated" not in reasons
-    assert _gates(result)["tests"] is False
+    assert gates["tests"] is False
+    assert gates["source"] is False
 
 
 # ── the run-record line names the gates that were not measured ───────────────
