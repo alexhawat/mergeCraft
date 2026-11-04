@@ -16,7 +16,9 @@ from datetime import datetime
 from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from unittest.mock import Mock
 
+import httpx
 import pytest
 from tests.agents.conftest import make_agent_run_context
 
@@ -337,6 +339,78 @@ async def test_failed_cli_finalizes_the_recorded_verdict(
             FallbackReason.stale_attempt
             if submission_state == "stale"
             else FallbackReason.provider_error
+        )
+        assert _classify_skip_reason(result, chain_index=1) is expected_reason
+
+
+@pytest.mark.parametrize("submission_state", ["accepted", "missing", "stale", "tampered"])
+async def test_http_timeout_finalizes_the_recorded_verdict(
+    tmp_path: Path, monkeypatch: MonkeyPatch, submission_state: str
+) -> None:
+    """A timeout after submission preserves the verdict unless integrity fails."""
+    ctx = make_agent_run_context(tmp_path, resolved_model=None)
+    ctx.tool_state.selected_mode = "Review"
+    ctx.tool_state.attempt_id = 1
+    tracked = tmp_path / "README.md"
+    tracked.write_text("clean\n", encoding="utf-8")
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/opencode")
+    monkeypatch.setattr(oc, "_opencode_major_version", lambda _cli: 1)
+    handle = Mock(spec=oc._ServerHandle, base_url="http://127.0.0.1:9999")
+    handle.recent_output.return_value = "provider response stalled"
+    monkeypatch.setattr(oc, "_boot_opencode_server", lambda **kwargs: handle)
+    requests: list[str] = []
+
+    def _respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        if request.url.path == "/session":
+            return httpx.Response(200, json={"id": "ses_timeout"})
+        assert request.url.path == "/session/ses_timeout/message"
+        if submission_state != "missing":
+            ctx.tool_state.terminal_submission = TerminalSubmission(
+                id="sub-before-timeout",
+                verdict="request_changes",
+                summary="The changed path has a blocker.",
+                findings=[{"body": "A blocker"}],
+                payload_hash="abc",
+                submitted_at="2026-11-04T00:00:00+00:00",
+                attempt_id=0 if submission_state == "stale" else 1,
+            )
+        if submission_state == "tampered":
+            tracked.write_text("changed during review\n", encoding="utf-8")
+        raise httpx.ReadTimeout("timed out reading response", request=request)
+
+    client_type = httpx.AsyncClient
+    transport = httpx.MockTransport(_respond)
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda **kwargs: client_type(transport=transport, **kwargs)
+    )
+
+    result = await oc._run(ctx)
+
+    assert requests == ["/session", "/session/ses_timeout/message"]
+    handle.close.assert_called_once_with()
+    assert result.success is False
+    if submission_state == "tampered":
+        assert "checkout integrity failure" in (result.error or "")
+        assert result.terminal_submission_received is False
+        assert result.terminal_submission_id is None
+        assert _classify_skip_reason(result, chain_index=1) is not None
+        return
+    assert result.error == (
+        "opencode provider request timed out: timed out reading response\n\n"
+        "recent opencode serve output:\nprovider response stalled"
+    )
+    assert result.metadata["retryable"] is True
+    if submission_state == "accepted":
+        assert result.terminal_submission_received is True
+        assert result.terminal_submission_id == "sub-before-timeout"
+        assert result.diagnostics["attempt_id"] == 1
+        assert _classify_skip_reason(result, chain_index=1) is None
+    else:
+        assert result.terminal_submission_received is False
+        assert result.terminal_submission_id is None
+        expected_reason = (
+            FallbackReason.stale_attempt if submission_state == "stale" else FallbackReason.timeout
         )
         assert _classify_skip_reason(result, chain_index=1) is expected_reason
 

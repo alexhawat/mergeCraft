@@ -1423,18 +1423,21 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         except ProviderTimeoutError as exc:
             # Controlled domain error: surface as a clean failed attempt
             # rather than letting a raw httpx traceback abort the review.
-            # ``retryable`` is what lets the model chain advance (#444): the
-            # chain gates on this flag alone, so omitting it reads as a
-            # permanent failure and terminates the run at attempt 1.
+            # Without an accepted verdict, ``retryable`` lets the model chain
+            # advance (#444). Finalize first so a verdict accepted before the
+            # timeout remains the winner, subject to the integrity gate.
             # httpx.ReadTimeout stringifies to nothing, so without the server's
             # own tail the operator gets a bare "timed out:" and no lead (#449).
             tail = handle.recent_output()
             detail = f"{exc}\n\nrecent opencode serve output:\n{tail}" if tail else str(exc)
             return _apply_integrity_gate(
-                AgentResult(
-                    success=False,
-                    error=detail,
-                    metadata={"retryable": True},
+                await finalize_agent_result(
+                    ctx,
+                    AgentResult(
+                        success=False,
+                        error=detail,
+                        metadata={"retryable": True},
+                    ),
                 ),
                 baseline,
             )
