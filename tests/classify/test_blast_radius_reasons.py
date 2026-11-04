@@ -19,6 +19,7 @@ Invariants pinned here:
 
 from __future__ import annotations
 
+import inspect
 import re
 from importlib import import_module
 from typing import Any
@@ -42,15 +43,6 @@ _LOCKED_GATE_ORDER: tuple[str, ...] = (
     "tests",
     "review_config",
 )
-# The ten gates part 2 ships. Gates appended to ``GATE_ORDER`` after these belong
-# to optional signals: each is named after the ``ChangeSet`` key that supplies it
-# and is omitted from the checklist when the change does not carry that key.
-_PART2_GATES: tuple[str, ...] = (*_LOCKED_GATE_ORDER, "source")
-
-
-def _expected_gates(api: Any, change: dict[str, Any]) -> list[str]:
-    """``GATE_ORDER`` minus the optional gates whose signal ``change`` did not supply."""
-    return [gate for gate in api.GATE_ORDER if gate in _PART2_GATES or gate in change]
 
 
 @pytest.fixture
@@ -75,6 +67,14 @@ def _reasons_by_code(result: Any) -> dict[str, Any]:
 
 def _gates(result: Any) -> dict[str, bool | None]:
     return {gate.gate: gate.passed for gate in result.checklist}
+
+
+def _fix_proof_case(*, status: str, required: bool = True) -> dict[str, Any]:
+    """A clean docs change carrying a ``fix_proof`` signal (#1056 part 5)."""
+    return {
+        **_c(["docs/guide.md"], {"lines_added": 3, "lines_deleted": 0}),
+        "fix_proof": {"required": required, "status": status},
+    }
 
 
 # (code, change, default lane, gate the code must fail — None when the code is low
@@ -145,6 +145,13 @@ CODE_CASES: list[tuple[str, dict[str, Any], str, str | None]] = [
     ("paths.generated", _c(["generated/client.py"]), "low", None),
     ("source.small_isolated", _c(["src/pkg/time.py"], _SMALL), "low", None),
     ("baseline.clean", _c(["docs/guide.md"], {"lines_added": 3, "lines_deleted": 0}), "low", None),
+    # fix proof (part 5)
+    ("fix.not-required", _fix_proof_case(required=False, status="not-required"), "low", None),
+    ("fix.proven", _fix_proof_case(status="proven"), "low", None),
+    ("fix.not-proven", _fix_proof_case(status="not-proven"), "medium", "fix_proof"),
+    ("fix.no-receipt", _fix_proof_case(status="no-receipt"), "medium", "fix_proof"),
+    ("fix.receipt.invalid", _fix_proof_case(status="invalid"), "medium", "fix_proof"),
+    ("fix.receipt.mismatch", _fix_proof_case(status="mismatch"), "medium", "fix_proof"),
 ]
 _CODE_IDS = [code for code, _change, _lane, _gate in CODE_CASES]
 
@@ -228,9 +235,13 @@ def test_gate_order_starts_with_the_locked_gates(api: Any) -> None:
 )
 def test_the_checklist_lists_every_gate_in_gate_order(api: Any, change: dict[str, Any]) -> None:
     result = _classify(change)
+    names = [gate.gate for gate in result.checklist]
 
-    assert tuple(api.GATE_ORDER[: len(_PART2_GATES)]) == _PART2_GATES
-    assert [gate.gate for gate in result.checklist] == _expected_gates(api, change)
+    # Gates fed by an optional signal (``scope``, #1056 part 3) are listed only when
+    # the change set supplies that signal; every gate here is always listed, in order.
+    assert names == [gate for gate in api.GATE_ORDER if gate in names]
+    assert set(_LOCKED_GATE_ORDER) | {"source"} <= set(names)
+    assert "scope" not in names
 
 
 @pytest.mark.parametrize(
@@ -496,10 +507,35 @@ new file mode 100644
 """
 
 
-def test_the_run_diff_classifier_emits_reasons_and_a_measured_checklist() -> None:
+def _fix_proof_kwargs(classifier: Any) -> dict[str, Any]:
+    """A non-fix ``fix_proof`` signal once the run classifier requires one.
+
+    #1056 part 5 makes ``fix_proof`` a required keyword on ``classify_run_blast_radius``;
+    a pull request that is not a fix leaves every part-2 gate exactly as before.
+    """
+    if "fix_proof" in inspect.signature(classifier).parameters:
+        return {"fix_proof": {"required": False, "status": "not-required"}}
+    return {}
+
+
+def _classify_run(diff_text: str) -> Any:
+    """Call the run's diff classifier with an undeclared scope once it requires one.
+
+    #1056 part 3 makes ``scope`` a required keyword on ``classify_run_blast_radius``;
+    an undeclared signal leaves every part-2 gate exactly as before.
+    """
     from mergecraft.evidence.run_packet import classify_run_blast_radius
 
-    result: Any = classify_run_blast_radius(_MIGRATION_DIFF)
+    if "scope" in inspect.signature(classify_run_blast_radius).parameters:
+        undeclared = {"declared": False, "globs": [], "invalid": False}
+        return classify_run_blast_radius(
+            diff_text, scope=undeclared, **_fix_proof_kwargs(classify_run_blast_radius)
+        )
+    return classify_run_blast_radius(diff_text, **_fix_proof_kwargs(classify_run_blast_radius))
+
+
+def test_the_run_diff_classifier_emits_reasons_and_a_measured_checklist() -> None:
+    result: Any = _classify_run(_MIGRATION_DIFF)
 
     assert result is not None
     assert _reasons_by_code(result)["paths.migrations"].lane == "high"

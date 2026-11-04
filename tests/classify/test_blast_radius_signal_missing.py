@@ -15,6 +15,7 @@ import pytest
 
 from mergecraft.agents.gates import _is_low_risk_passing, decide_action, select_rule_id
 from mergecraft.classify.blast_radius import (
+    GATE_ORDER,
     SIGNAL_MISSING_CATEGORY,
     BlastRadiusClassification,
     ChangeSet,
@@ -121,6 +122,19 @@ def test_known_risk_bands_keep_their_order() -> None:
     assert risk_at_or_above("Critical", "high") is True
 
 
+# Declared scopes for the approval-route controls (#1056 part 3): a change classified
+# without one has no ``scope`` gate, and the approval rows need every gate.
+_IN_SCOPE_DOCS: dict[str, Any] = {
+    "scope": {"declared": True, "globs": ["docs/guide.md"], "invalid": False}
+}
+_IN_SCOPE_LOCK: dict[str, Any] = {
+    "scope": {"declared": True, "globs": ["uv.lock"], "invalid": False}
+}
+# A non-fix signal for the same controls (#1056 part 5): a change classified without
+# one has no ``fix_proof`` gate either.
+_NOT_A_FIX: dict[str, Any] = {"fix_proof": {"required": False, "status": "not-required"}}
+
+
 def _decided_packet(
     blast_radius: BlastRadiusClassification, *, files_changed: list[str]
 ) -> MergeEvidencePacket:
@@ -178,9 +192,14 @@ def test_a_blast_radius_without_inputs_never_selects_low_risk_auto_merge(
 
 def test_a_measured_low_change_still_selects_low_risk_passing() -> None:
     """Control: the gate row is reachable when the classification had inputs."""
-    change = _with_optional_signals(
-        {"changed_paths": ["docs/guide.md"], "diff_stats": {"lines_added": 3}}
-    )
+    change: ChangeSet = {
+        "changed_paths": ["docs/guide.md"],
+        "diff_stats": {"lines_added": 3},
+        # A declared scope the change is inside: without one the ``scope`` gate is
+        # missing from the checklist and no approval row is reachable (#1056 part 3).
+        **_IN_SCOPE_DOCS,  # type: ignore[typeddict-item]
+        **_NOT_A_FIX,  # type: ignore[typeddict-item]
+    }
     packet = _decided_packet(classify_blast_radius(change), files_changed=["docs/guide.md"])
 
     assert _is_low_risk_passing(packet) is True
@@ -268,10 +287,12 @@ def test_a_missing_signal_marks_its_unmeasured_gates_unknown(
 
 
 def test_gate_order_starts_with_the_missing_signal_table_gates() -> None:
-    from mergecraft.classify.blast_radius import GATE_ORDER
+    names = [gate.gate for gate in classify_blast_radius({}).checklist]
 
     assert tuple(GATE_ORDER[: len(_NO_PATHS)]) == tuple(_NO_PATHS)
-    assert [gate.gate for gate in classify_blast_radius({}).checklist] == _expected_gates({})
+    # A gate fed by an optional signal (``scope``) is listed only when it is supplied.
+    assert names == [gate for gate in GATE_ORDER if gate in names]
+    assert names[: len(_NO_PATHS)] == list(_NO_PATHS)
 
 
 @pytest.mark.parametrize(
@@ -341,42 +362,6 @@ def test_a_complete_low_change_passes_every_gate() -> None:
 _LOCKED_GATES = list(_NO_PATHS)
 
 
-def _gate_order() -> list[str]:
-    """Every gate in ``GATE_ORDER``, so a hand-built checklist is complete in every lane."""
-    from mergecraft.classify.blast_radius import GATE_ORDER
-
-    return list(GATE_ORDER)
-
-
-# The ten gates part 2 ships. Gates appended to ``GATE_ORDER`` after these belong
-# to optional signals: each is named after the ``ChangeSet`` key that supplies it
-# and is omitted from the checklist when the change does not carry that key.
-_PART2_GATES: tuple[str, ...] = tuple(_NO_PATHS)
-
-
-def _expected_gates(change: dict[str, Any]) -> list[str]:
-    """``GATE_ORDER`` minus the optional gates whose signal ``change`` did not supply."""
-    return [gate for gate in _gate_order() if gate in _PART2_GATES or gate in change]
-
-
-def _with_optional_signals(change: dict[str, Any]) -> Any:
-    """A change that also supplies every optional signal, so its checklist is complete.
-
-    Each key is a harmless extra key until the lane that reads it lands: the
-    classifier reads only the keys it knows.
-    """
-    paths = change.get("changed_paths")
-    return {
-        **change,
-        "fix_proof": {"required": False, "status": "not-declared"},
-        "scope": {
-            "declared": True,
-            "globs": list(paths) if isinstance(paths, list) else [],
-            "invalid": False,
-        },
-    }
-
-
 def _classification_with_checklist(
     *, lane: str, auto_merge_lane: str, inputs: bool | None, categories: list[str]
 ) -> BlastRadiusClassification:
@@ -389,9 +374,10 @@ def _classification_with_checklist(
             "next_action": "forged",
             "categories": categories,
             "reasons": [{"code": "baseline.clean", "lane": lane, "message": "forged"}],
+            # Every gate in ``GATE_ORDER``: the approval rows require the full list (#1056).
             "checklist": [
                 {"gate": gate, "passed": inputs if gate == "inputs" else True}
-                for gate in _gate_order()
+                for gate in GATE_ORDER
             ],
         }
     )
@@ -543,7 +529,7 @@ def _low_with_gate(gate: str, passed: bool | None) -> BlastRadiusClassification:
             "categories": [],
             "reasons": [{"code": "baseline.clean", "lane": "low", "message": "forged"}],
             "checklist": [
-                {"gate": name, "passed": passed if name == gate else True} for name in _gate_order()
+                {"gate": name, "passed": passed if name == gate else True} for name in _LOCKED_GATES
             ],
         }
     )
@@ -586,9 +572,12 @@ def test_the_issue_example_low_lane_with_nonpassing_tests_never_auto_merges(
 def test_a_real_medium_classification_with_a_failed_gate_still_reaches_clean_pass() -> None:
     """Control: a measured ``medium`` lane always has a ``False`` gate; clean_pass keeps it."""
     classification = classify_blast_radius(
-        _with_optional_signals(
-            {"changed_paths": ["uv.lock"], "diff_stats": {"lines_added": 4, "lines_deleted": 1}}
-        )
+        {
+            "changed_paths": ["uv.lock"],
+            "diff_stats": {"lines_added": 4, "lines_deleted": 1},
+            **_IN_SCOPE_LOCK,  # type: ignore[typeddict-item]
+            **_NOT_A_FIX,  # type: ignore[typeddict-item]
+        }
     )
     packet = _decided_packet(classification, files_changed=["uv.lock"])
 
