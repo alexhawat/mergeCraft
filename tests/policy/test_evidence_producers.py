@@ -830,7 +830,12 @@ async def test_the_working_tree_config_cannot_add_to_the_operator_snapshot(
 async def test_no_producer_ever_runs_a_subprocess(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Every producer reads data the run already holds or the API serves — no process."""
+    """Operator-owned path: every producer reads run data or the API — no process at all.
+
+    The base-commit declaration read is a ``git`` read and is pinned separately in
+    ``test_evidence_base_declarations.py``; this test keeps the operator-owned path
+    process-free.
+    """
     spawned: list[str] = []
 
     def _refuse(*args: Any, **kwargs: Any) -> Any:

@@ -22,7 +22,9 @@ Three rules the suite enforces throughout:
   failed, a run that did not succeed, a document that is malformed, oversized or bound to
   another commit — each keeps the key absent.
 * **No cost without a need.** Producers run only when a triggered rule requires evidence,
-  only for the keys those rules name, and once per diff path. No producer runs a process.
+  only for the keys those rules name, and once per diff path. No producer runs a process,
+  with one exception: reading a declaration from the base commit is a `git` read of the base
+  config, and nothing else may run on that path.
 
 Verification commands:
 
@@ -70,12 +72,14 @@ UV_PROJECT_ENVIRONMENT=$PWD/.venv-dev MERGECRAFT_PYTEST_JOBS=0 uv run pytest \
 * **The `xrepo` producer reads what the checkout already computed.** The checkout reads the
   base manifest (`BaseManifestLookup`) and runs `review_linked_repos`; recording both on
   `ToolState` keeps the producer pure, process-free and free of a second git walk.
-* **A declaration counts only from the operator-owned configuration.** The tests use an
-  operator-owned settings snapshot for the honoured case, and two shapes for the ignored
-  case: a non-operator-owned snapshot whose settings carry the declaration while the base
-  commit's config does not, and an operator-owned snapshot without the declaration beside a
-  working-tree config that has one. An implementation may honour either the operator
-  snapshot alone or also the base commit's config; both pass.
+* **A declaration resolves exactly like the policy rules.** An operator-owned settings
+  snapshot wins. Otherwise the declaration is read from `.mergecraft/config.yaml` at the base
+  commit the policy rules are read from (`before_sha`, the same source `load_review_policy`
+  uses), parsed through the settings model. The pull request head's config — on disk or in a
+  non-operator snapshot — is never read. A base that is unknown, missing from the checkout,
+  or whose config does not parse keeps the key absent, and the reason names the base (not
+  the declare-it reason, because the base was never read). The ambient `GITHUB_BASE_REF`
+  is cleared in these tests, so the base comes from the run state.
 * **The artifact document is one JSON member of the artifact zip.** The suite uploads a
   single `policy-evidence.json` member. The 64 KiB bound is on the document's uncompressed
   bytes, and it bounds the read: the producer may decompress at most cap + 1 bytes.
@@ -159,13 +163,21 @@ and it is read with a hard size bound.
 | Exactly 64 KiB ⇒ present; 64 KiB + 1 ⇒ absent naming the limit | edge | `…::test_an_artifact_document_is_bounded_at_64_kib[at-the-cap]`, `…[one-byte-past-the-cap]` |
 | A 256 KiB document is never decompressed past cap + 1 bytes (zip reads metered) | edge | `…::test_an_oversized_artifact_is_never_read_past_the_cap` |
 
-### Declarations come from the operator-owned configuration
+### Declarations come from the operator-owned snapshot, else the base commit
 
 | Behaviour | Layer | Test |
 | --- | --- | --- |
-| A declaration added only in the pull request's own config (non-operator snapshot, base commit without it) ⇒ absent with the declare-it reason | integration | `…::test_a_declaration_only_in_the_pull_request_head_config_is_ignored` |
+| A declaration added only in the pull request's own config (non-operator snapshot, base commit without it) ⇒ absent with the declare-it reason | integration | `tests/policy/test_evidence_producers.py::test_a_declaration_only_in_the_pull_request_head_config_is_ignored` |
 | An operator snapshot without the declaration beside a working-tree config with one ⇒ absent | integration | `…::test_the_working_tree_config_cannot_add_to_the_operator_snapshot` |
-| No producer spawns a process (`subprocess.*`, `os.system`, asyncio subprocesses patched to fail) while four keys are produced | integration | `…::test_no_producer_ever_runs_a_subprocess` |
+| Operator-owned path: no producer spawns any process (`subprocess.*`, `os.system`, asyncio subprocesses patched to fail) while four keys are produced | integration | `…::test_no_producer_ever_runs_a_subprocess` |
+| Not operator-owned: the base commit's `checkRun` is honoured whether the head removes it or rewrites it to trust its own App; the record names the base's run and App, never the head's | integration | `tests/policy/test_evidence_base_declarations.py::test_the_base_commit_declaration_is_honoured_on_a_pull_request_run[head-removes-the-declaration]`, `…[head-rewrites-the-declaration]` |
+| A head that rewrites the declaration and posts only its own run ⇒ absent, naming the base's declared run | integration | `…::test_a_rewritten_head_declaration_cannot_clear_the_key_on_its_own` |
+| The base's `artifact` declaration is honoured while a key only the head declares stays absent with the declare-it reason | integration | `…::test_a_base_artifact_declaration_is_honoured_beside_an_undeclared_key` |
+| A base config without the key, or no base config at all, while the head declares it ⇒ absent with the declare-it reason (guard: green before and after) | integration | `…::test_a_declaration_only_the_head_adds_is_absent[config-without-key]`, `…[no-config]` |
+| No base commit, or a base commit the checkout cannot resolve ⇒ absent; the reason names the base commit (or its id) and is not the declare-it reason | error | `…::test_an_unreadable_base_keeps_the_key_absent_and_names_the_base[no-base-commit]`, `…[base-commit-not-in-the-checkout]` |
+| A base config the settings model refuses ⇒ absent; the reason names `.mergecraft/config.yaml` and the base commit | error | `…::test_a_base_config_that_does_not_parse_keeps_the_key_absent` |
+| An operator-owned snapshot wins over the base commit in both directions (guard: green before and after) | integration | `…::test_an_operator_owned_snapshot_wins_over_the_base_commit[snapshot-declares-base-does-not]`, `…[base-declares-snapshot-does-not]` |
+| Base path: every process started is `git`, at least one names `.mergecraft/config.yaml` and the base commit, and the key is produced | integration | `…::test_the_base_commit_read_is_the_only_process_a_producer_starts` |
 
 ### Settings
 
