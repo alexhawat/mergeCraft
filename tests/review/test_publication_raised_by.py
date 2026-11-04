@@ -300,3 +300,136 @@ async def test_submit_review_verdict_pairs_models_on_deduped_finding(tmp_path: A
         "reviewer2": "openai/gpt-5.3-codex",
     }
     assert validated.raised_by_model is None
+
+
+# --------------------------------------------------------------------------- file-group provenance
+#
+# A file-group fan-out run is recorded server-side under ``file-group/<id>``;
+# its findings reach the terminal submission with that id as ``raised_by``,
+# like any roster reviewer, rather than collapsing into the primary or into
+# ``unknown``.
+
+
+def _file_group_registry(*, reviewer_count: int) -> object:
+    from mergecraft.agents.registry import AgentBinding, Registry
+
+    def _binding(agent_id: str, model: str) -> AgentBinding:
+        return AgentBinding(
+            agent_id=agent_id,
+            role=AgentRole.reviewer,
+            model_chain=(model,),
+            prompt_id="mergecraft.reviewer",
+            prompt_version="1.0.0",
+            tool_classes=frozenset(),
+            budget=8,
+            timeout_s=600,
+        )
+
+    bindings = {"reviewer": _binding("mergecraft-reviewer", "anthropic/claude-sonnet")}
+    if reviewer_count > 1:
+        bindings["reviewer2"] = _binding("reviewer2", "openai/gpt-5.3-codex")
+    return Registry(bindings)
+
+
+@pytest.mark.parametrize("reviewer_count", [1, 2], ids=["single-reviewer", "two-reviewers"])
+def test_file_group_findings_keep_their_group_id_at_terminal_submission(
+    reviewer_count: int,
+) -> None:
+    from mergecraft.review.terminal_submission import (
+        ReviewerRun,
+        format_finding_provenance_line,
+        should_render_finding_provenance,
+        stamped_findings_for_terminal_submission,
+    )
+
+    registry = _file_group_registry(reviewer_count=reviewer_count)
+    group_row = _finding(path="src/pkg/mod_07.py", body="from file group one", severity="Minor")
+    primary_row = _finding(path="src/a.py", body="from primary", severity="Minor")
+    stamped = stamped_findings_for_terminal_submission(
+        registry=registry,  # type: ignore[arg-type]
+        terminal_findings=[primary_row],
+        dispatch_runs=[
+            ReviewerRun(
+                agent_id="file-group/group-1",
+                findings=[group_row],
+                model_slug="anthropic/claude-sonnet",
+            )
+        ],
+    )
+
+    merged, _verdict = prepare_terminal_submission(
+        registry=registry,  # type: ignore[arg-type]
+        findings=stamped,
+        verdict="approve",
+    )
+
+    by_body = {row["body"]: row for row in merged}
+    group_merged = by_body["from file group one"]
+    assert group_merged["raised_by"] == "file-group/group-1"
+    assert group_merged.get("raised_by_model") == "anthropic/claude-sonnet"
+    assert by_body["from primary"]["raised_by"] == "mergecraft-reviewer"
+    assert should_render_finding_provenance(merged) is True
+    assert (
+        format_finding_provenance_line(
+            group_merged["raised_by"],
+            raised_by_model=group_merged.get("raised_by_model"),
+        )
+        == "_Raised by: `file-group/group-1` (`anthropic/claude-sonnet`)_"
+    )
+
+
+def test_a_foreign_reviewer_id_still_reads_as_unknown_beside_file_groups() -> None:
+    """Guard: only recorded group ids are trusted; any other stray id stays ``unknown``."""
+    registry = _file_group_registry(reviewer_count=2)
+
+    merged, _verdict = prepare_terminal_submission(
+        registry=registry,  # type: ignore[arg-type]
+        findings=[_finding(body="stray", severity="Minor", raised_by="ghost-reviewer")],
+        verdict="approve",
+    )
+
+    assert [row["raised_by"] for row in merged] == ["unknown"]
+
+
+@pytest.mark.asyncio
+async def test_submit_review_verdict_stamps_raised_by_from_a_file_group_run(
+    tmp_path: Any,
+) -> None:
+    """End-to-end: a server-recorded group run reaches the terminal submission by its id."""
+    from mergecraft.mcp.tool_state import record_reviewer_dispatch_run
+    from mergecraft.mcp.verdict import submit_review_verdict_tool
+
+    write_config(tmp_path, two_reviewer_config())
+    ctx = publication_ctx(tmp_path)
+    register_review_scope(
+        ctx.tool_state,
+        diff_path=str(tmp_path / "diff.patch"),
+        provenance="checkout",
+    )
+    record_reviewer_dispatch_run(
+        ctx.tool_state,
+        agent_id="file-group/group-2",
+        findings=[_finding(path="src/b.py", body="from file group two", severity="Minor")],
+        model_slug="anthropic/claude-sonnet",
+    )
+
+    result = await submit_review_verdict_tool(ctx).execute(
+        {
+            "verdict": "approve",
+            "summary": "Fan-out run.",
+            "findings": [
+                _finding(path="src/a.py", body="from primary dispatch", severity="Minor"),
+            ],
+        }
+    )
+
+    assert result.is_error is False
+    submission = ctx.tool_state.terminal_submission
+    assert submission is not None
+    raised_by = {
+        getattr(row, "body", None): getattr(row, "raised_by", None) for row in submission.findings
+    }
+    assert raised_by == {
+        "from primary dispatch": "mergecraft-reviewer",
+        "from file group two": "file-group/group-2",
+    }
