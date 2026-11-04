@@ -24,7 +24,8 @@ from tests.support.publication import (
     submit_verdict,
 )
 
-from mergecraft.mcp.review import _github_review_request, publish_pull_request_review
+from mergecraft.mcp.review import publish_pull_request_review
+from mergecraft.utils.github import github_review_request
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -86,7 +87,7 @@ def test_wire_request_keeps_only_github_comment_fields() -> None:
         ],
     }
 
-    request = _github_review_request(payload)
+    request = github_review_request(payload)
 
     assert request["comments"] == [
         {
@@ -110,7 +111,7 @@ def test_wire_request_keeps_only_github_comment_fields() -> None:
 def test_wire_request_without_comments_is_unchanged() -> None:
     payload: dict[str, Any] = {"event": "COMMENT", "body": "Body"}
 
-    assert _github_review_request(payload) == payload
+    assert github_review_request(payload) == payload
 
 
 @pytest.mark.asyncio
