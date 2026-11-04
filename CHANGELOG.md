@@ -122,8 +122,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does — `diff --git a/<old> b/<new>` with `rename from` / `rename to` (or
   `copy from` / `copy to`) — and lists the source path with the changed paths. A
   file renamed from code into prose is no longer read as a prose edit of its new
-  name, and the `ignore_paths` rule that keeps a rename into an ignored name in
-  review now holds for the triage diff too (#1137).
+  name. Prose and generated-file recognizers check both names, keeping agent
+  instructions and high-stakes prose moved into docs, and source or generator
+  configuration moved into generated paths, in full review. Triage evaluates
+  the complete diff without applying `ignore_paths` (#1137).
 
 - The in-review trufflehog analyzer can now exempt one detector in one file,
   keyed on (path, detector) like the CI SARIF emitter's allowlist, instead of

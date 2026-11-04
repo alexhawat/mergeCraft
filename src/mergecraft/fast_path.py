@@ -103,8 +103,8 @@ async def _read_diff(
             parts.append(_section_header(entry, name))
             if patch:
                 parts.append(f"{patch}\n")
-            # A rename or copy names its source too, so path-keyed triage and the
-            # ignore gate's rename rule reason about the pre-image as well.
+            # Include the source in _read_head_files' all-prose suffix gate.
+            # Recognizers read both names from the rebuilt diff header above.
             previous = _previous_filename(entry, name)
             if previous:
                 paths.append(previous)
