@@ -8,11 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mergecraft.context.repo_paths import git_ls_tree_paths, git_show_text
-from mergecraft.utils.bounded_text import (
-    MAX_INDEX_TEXT_BYTES,
-    iter_indexable_files,
-    read_bounded_text,
-)
+from mergecraft.utils.bounded_text import MAX_INDEX_TEXT_BYTES
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,14 +40,6 @@ _EXPORT_INIT_GLOB = "__init__.py"
 _OPERATION_ID_RE = re.compile(r"operationId:\s*(\S+)")
 _GRAPHQL_TYPE_RE = re.compile(r"^type\s+(\w+)", re.MULTILINE)
 _PROTO_SERVICE_RE = re.compile(r"service\s+(\w+)")
-
-
-def _rel(path: Path, root: Path) -> str:
-    return path.relative_to(root).as_posix()
-
-
-def _read_contract_text(path: Path) -> str | None:
-    return read_bounded_text(path)
 
 
 def _index_openapi_text(rel: str, text: str, commit_sha: str) -> list[ContractSurface]:
@@ -135,19 +123,6 @@ def _collect_index(commit_sha: str, surfaces: list[ContractSurface]) -> Contract
     )
 
 
-def index_contracts(*, repo_root: Path, commit_sha: str) -> ContractIndex:
-    """Index OpenAPI, GraphQL, protobuf, and Python export surfaces on disk."""
-    surfaces: list[ContractSurface] = []
-    for path in iter_indexable_files(repo_root):
-        text = _read_contract_text(path)
-        if text is None:
-            continue
-        surfaces.extend(
-            _surfaces_for_text(rel=_rel(path, repo_root), text=text, commit_sha=commit_sha)
-        )
-    return _collect_index(commit_sha, surfaces)
-
-
 def index_contracts_at_commit(*, repo_root: Path, commit_sha: str) -> ContractIndex:
     """Index contract surfaces from the pinned git object, not the working tree."""
     surfaces: list[ContractSurface] = []
@@ -162,6 +137,5 @@ def index_contracts_at_commit(*, repo_root: Path, commit_sha: str) -> ContractIn
 __all__ = [
     "ContractIndex",
     "ContractSurface",
-    "index_contracts",
     "index_contracts_at_commit",
 ]
