@@ -127,6 +127,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accepted. A verdict that was accepted but never reached GitHub still ends
   `inconclusive` (#1132).
 
+- A reviewer that read the diff with OpenCode's native `read` tool no longer ends
+  `inconclusive` with `Coverage: 0/N hunks`. OpenCode `read` parts are now recorded on
+  the trajectory, so a read of `diffPath` or of a source file counts, and a read of the
+  diff attests a clean approve. On a driver that reports its reads (OpenCode's and
+  Codex's CLI streams), a run with no observed read now gets the one-time pre-submit
+  nudge naming every range, so the reviewer can read them instead of ending
+  `inconclusive`. A run with no observed read still gates, and Claude's, Gemini's and
+  Cursor's native reads are still not observed.
+
 - The in-review trufflehog analyzer can now exempt one detector in one file,
   keyed on (path, detector) like the CI SARIF emitter's allowlist, instead of
   only exempting a whole file from every detector. The URI detector is allowed
