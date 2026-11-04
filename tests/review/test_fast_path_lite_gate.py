@@ -812,6 +812,9 @@ async def test_a_clean_lite_run_publishes_its_summary_as_a_comment_review(
     body = _published_body(publication)
     assert "LITE-SUMMARY-0 nothing stands out in the pin" in body
     assert "lite" in body
+    assert "cheapo/tiny-1" in body, "the record names the lite provider/model slug"
+    assert "**Provider:** `claude`" not in body
+    assert "(unresolved)" not in body
 
 
 async def test_a_blocking_lite_run_publishes_each_finding_location_and_message(
@@ -944,3 +947,39 @@ async def test_prose_head_text_is_still_read_without_comment_only_or_lite() -> N
 
     assert (decision.tier, decision.recognizer) == ("skip", "prose")
     assert any("/contents/README.md" in request for request in scm.requests)
+
+
+# ── operator docs name the closed list and the record format ──────────────────
+
+
+def test_review_checks_lists_exactly_the_recognised_comment_only_suffixes() -> None:
+    from mergecraft.classify.triage import COMMENT_ONLY_SUFFIXES
+
+    text = (_REPO_ROOT / "REVIEW-CHECKS.md").read_text(encoding="utf-8")
+    match = re.search(r"`//`-comment languages — `([^`]+)`", text)
+
+    assert match is not None
+    listed = match.group(1).split()
+    assert sorted(listed) == sorted(COMMENT_ONLY_SUFFIXES)
+    assert set(listed) == {
+        ".js",
+        ".ts",
+        ".go",
+        ".java",
+        ".kt",
+        ".c",
+        ".h",
+        ".cc",
+        ".cpp",
+        ".hpp",
+        ".cs",
+        ".swift",
+    }
+
+
+def test_the_changelog_records_the_finding_line_format_under_changed() -> None:
+    text = (_REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    unreleased = text.split("## [Unreleased]", 1)[1].split("\n## [", 1)[0]
+    changed = unreleased.split("### Changed", 1)[1].split("\n### ", 1)[0]
+
+    assert "path:line" in changed

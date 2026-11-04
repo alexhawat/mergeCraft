@@ -24,8 +24,13 @@ The rules under test:
   `inconclusive`. A malformed answer never quietly becomes a full review and is never
   read as a success.
 - `commentOnly` refuses whenever it is unsure. A `#`-comment language is never
-  recognised. JSX and TSX are off the list (a JSX text child can start with `//`), and
-  `Package.swift` is refused by name. A file is refused when it contains a backtick, a
+  recognised. JSX and TSX are off the list (a JSX text child can start with `//`),
+  Rust is off the list (a lifetime's lone quote makes the quote check unsound), and
+  `Package.swift` is refused by name. The recognised list is exactly `.js .ts .go
+  .java .kt .c .h .cc .cpp .hpp .cs .swift`. A Java file whose diff or head text holds
+  a backslash followed by `u` (a unicode escape, translated before lexing) is refused,
+  and so is a C-family file (`.c .h .cc .cpp .hpp`) holding `??` anywhere (a trigraph
+  can splice the next line into a comment). A file is refused when it contains a backtick, a
   raw-string marker, a `/*` anywhere, a quote left open at the end of a line, `import
   "C"` in Go, or any character outside printable ASCII plus tab and newline (so
   `U+2028`, `U+2029`, a lone CR and NEL cannot end a line for the language but not for
@@ -35,7 +40,8 @@ The rules under test:
   existing lint and type-checker words). A removal-only diff is refused because a
   removed line cannot be checked against the head text.
 - A `lite` run publishes the deterministic run record as a `COMMENT` review that
-  carries the call's summary and each finding's path, line and message. A failed
+  carries the call's summary and each finding's path, line and message. The record names
+  the lite provider/model slug (for example `cheapo/tiny-1`), not the agent's provider. A failed
   completion check never says the run finished successfully. A blocker keeps the
   `mergecraft` check at `failure` even when the call also overran its cap (the run is
   still `inconclusive`).
@@ -130,6 +136,13 @@ test and does not break collection.
 | Any `/*` refuses; an open quote at end of line refuses; cgo refuses | `test_a_block_comment_opener_inside_a_string_still_refuses_the_file`, `test_a_closed_block_comment_anywhere_in_the_file_refuses_it`, `test_a_quote_left_open_at_the_end_of_a_line_refuses_the_file`, `test_a_cgo_file_is_refused` |
 | Shape rule (prefix class) and directive word list (word class) | `test_a_comment_whose_first_token_is_not_a_plain_word_is_refused`, `test_a_comment_whose_first_word_is_a_directive_word_is_refused` |
 | Unverifiable pin bump (no `requireChecks`, no trusted App, only `github-actions`) is `lite` | `tests/classify/test_triage_lite.py::test_an_unverifiable_opted_in_pin_bump_is_lite_when_enabled` |
+| Java unicode escapes (`\u`, `\uu`) on any side, Rust off the list, C-family `??` refused; re-gate attacks verbatim | `test_comment_only.py::test_every_regate_attack_is_refused`, `test_a_java_unicode_escape_*`, `test_the_compiled_java_unicode_escape_fixture_is_refused`, `test_rust_is_not_on_the_recognised_suffix_list`, `test_a_c_family_file_containing_a_trigraph_marker_is_refused`, `test_the_compiled_trigraph_fixture_is_refused`, `test_a_trigraph_marker_only_on_the_removed_side_refuses_the_edit` |
+| The trigraph rule is scoped to the C family (`??` in JavaScript still recognised) | `test_comment_only.py::test_nullish_coalescing_does_not_refuse_a_javascript_file` |
+| The re-gate true positives stay recognised | `test_comment_only.py::test_the_regate_true_positives_are_still_recognised` |
+| Diff-side ASCII check on a paired edit (removed line hides code behind U+2028, U+2029, lone CR or NEL) | `test_comment_only.py::test_a_paired_edit_whose_removed_line_hides_code_is_refused` |
+| The suffix constant is exactly the closed list; REVIEW-CHECKS.md lists it exactly | `test_comment_only.py::test_the_recognised_suffix_list_is_exactly_the_closed_list`, `test_fast_path_lite_gate.py::test_review_checks_lists_exactly_the_recognised_comment_only_suffixes` |
+| CHANGELOG `### Changed` mentions the record's `path:line` finding format | `test_fast_path_lite_gate.py::test_the_changelog_records_the_finding_line_format_under_changed` |
+| The lite record names the provider/model slug | `test_fast_path_lite_gate.py::test_a_clean_lite_run_publishes_its_summary_as_a_comment_review` |
 | The API key never appears in a loguru line (success, HTTP 401, connect error) | `tests/agents/test_lite_review.py::test_the_api_key_never_appears_in_a_log_line` |
 | Lite record published as a `COMMENT` review with summary and finding location/message | `tests/review/test_fast_path_lite_gate.py::test_a_clean_lite_run_publishes_its_summary_as_a_comment_review`, `test_a_blocking_lite_run_publishes_each_finding_location_and_message` |
 | A failed completion check never says "finished successfully" | `test_fast_path_lite_gate.py::test_a_failed_completion_check_never_says_the_run_finished_successfully` |
@@ -156,3 +169,8 @@ provider is an operator step, not part of `make test`.
   refused.
 - The blocking-finding packet test now covers both the compact lite row and a full
   finding row, so the never-soften rule does not depend on the compact-row expansion.
+- A second verification round found three more comment-only bypasses: Java unicode
+  escapes (`// note \u000a doEvil();` compiles to a call), a Rust lifetime that
+  mis-pairs the quote check, and a C trigraph `??/` that splices the next code line.
+  Rust left the recognised list, so the earlier Rust char-literal positive is now a
+  refusal and the Rust raw-string row was dropped from the marker table.

@@ -3,7 +3,10 @@
 "Only comment lines changed" needs each language's string rules, so the recognizer is
 deliberately narrow and refuses whenever it is unsure. It only considers ``//``-comment
 languages, chosen by suffix (JSX and TSX are off the list: a JSX text child can start
-with ``//`` and render); ``Package.swift`` is refused by name. A changed line counts only
+with ``//`` and render; Rust is off the list: a lifetime's lone quote makes the quote
+check unsound); ``Package.swift`` is refused by name. A Java file holding a unicode
+escape (``\\u``) and a C-family file holding ``??`` (a trigraph can splice lines) are
+refused. A changed line counts only
 when it is ``//``, one space, and a purely alphabetic first word that is not a known
 directive word, **and** a small lexer over the head-side file confirms the line is
 reached outside a string literal. A file is refused outright when it contains a
@@ -27,7 +30,6 @@ _RECOGNISED_SUFFIXES = (
     ".js",
     ".ts",
     ".go",
-    ".rs",
     ".java",
     ".kt",
     ".c",
@@ -188,7 +190,6 @@ def test_a_block_comment_the_lexer_cannot_close_is_refused() -> None:
         ("src/app.js", "const t = `template`;"),
         ("src/app.ts", "const t = `${a}`;"),
         ("src/lib.go", "var raw = `raw string`"),
-        ("src/lib.rs", 'let raw = r#"raw"#;'),
         ("src/main.cpp", 'auto raw = R"(raw)";'),
         ("src/Program.cs", 'var path = @"C:\\tmp";'),
     ],
@@ -273,6 +274,7 @@ def test_a_binary_entry_is_not_comment_only() -> None:
         "src/app.php",
         "src/App.jsx",
         "src/App.tsx",
+        "src/lib.rs",
     ],
 )
 @pytest.mark.parametrize("marker", ["//", "#"])
@@ -693,3 +695,247 @@ def test_a_comment_whose_first_word_is_a_directive_word_is_refused(path: str, co
     diff, heads = _comment_to(path, comment)
 
     assert _recognize(diff, heads) is False
+
+
+# ── re-gate: Java unicode escapes, Rust, C trigraphs ──────────────────────────
+
+
+def _regate(path: str, base: str, head: str) -> bool:
+    """The re-gate probe's diff shape: split on newline, keep the trailing empty line."""
+    import difflib
+
+    lines = list(
+        difflib.unified_diff(
+            base.split("\n"), head.split("\n"), f"a/{path}", f"b/{path}", lineterm="", n=3
+        )
+    )
+    diff = f"diff --git a/{path} b/{path}\n" + "\n".join(lines) + "\n"
+    return bool(_recognize(diff, {path: head}))
+
+
+_REGATE_REFUSED: list[tuple[str, str, str, str]] = [
+    (
+        "A2-java-unicode-escape-newline",
+        "src/A.java",
+        "class A {\n  // old\n  void f() {}\n}\n",
+        "class A {\n  // note \\u000a doEvil();\n  void f() {}\n}\n",
+    ),
+    (
+        "A3-java-unicode-escape-cr",
+        "src/A.java",
+        "class A {\n  // old\n}\n",
+        "class A {\n  // note \\u000d doEvil();\n}\n",
+    ),
+    (
+        "A14-java-unicode-escape-uu",
+        "src/B.java",
+        "class B {\n  // old\n}\n",
+        "class B {\n  // note \\uu000a doEvil();\n}\n",
+    ),
+    (
+        "A4-rust-lifetime-mis-pairs-quotes",
+        "src/a.rs",
+        "fn f<'a>(y: &'a u8) { let x: &'a u8 = y; let s = \"start '\n// old\"; }\n",
+        "fn f<'a>(y: &'a u8) { let x: &'a u8 = y; let s = \"start '\n// edit\"; do_evil(); }\n",
+    ),
+    (
+        "A12-rust-is-off-the-list",
+        "src/a.rs",
+        "fn f() { let c = '\\''; let s = \"x\"; }\n// old\n",
+        "fn f() { let c = '\\''; let s = \"x\"; }\n// new\n",
+    ),
+    (
+        "A13-rust-lifetime-only",
+        "src/b.rs",
+        "fn f<'a>(x: &'a str) -> &'a str { x }\n// old\n",
+        "fn f<'a>(x: &'a str) -> &'a str { x }\n// new\n",
+    ),
+    (
+        "A5-c-trigraph-splice",
+        "src/a.c",
+        "int a;\n// old\nint b = check();\n",
+        "int a;\n// note ??/\nint b = check();\n",
+    ),
+    (
+        "A7-swift-multiline-string",
+        "src/a.swift",
+        'let s = """\n// old\n"""\n',
+        'let s = """\n// new\n"""\n',
+    ),
+    (
+        "A8-kotlin-multiline-string",
+        "src/A.kt",
+        'val s = """\n// old\n"""\n',
+        'val s = """\n// new\n"""\n',
+    ),
+    ("A9-crlf-file", "src/a.js", "let a;\r\n// old\r\n", "let a;\r\n// new\r\n"),
+]
+
+
+@pytest.mark.parametrize(
+    ("path", "base", "head"),
+    [case[1:] for case in _REGATE_REFUSED],
+    ids=[case[0] for case in _REGATE_REFUSED],
+)
+def test_every_regate_attack_is_refused(path: str, base: str, head: str) -> None:
+    assert _regate(path, base, head) is False
+
+
+@pytest.mark.parametrize(
+    ("path", "base", "head"),
+    [
+        (
+            "src/a.go",
+            "package a\n\nfunc F() {\n\t// old note\n}\n",
+            "package a\n\nfunc F() {\n\t// new note\n}\n",
+        ),
+        (
+            "src/a.go",
+            "package a\n\n// F does x\nfunc F() {}\n",
+            "package a\n\n// F does y\nfunc F() {}\n",
+        ),
+        ("src/a.cs", "class A {}\n// old\n", "class A {}\n// region things\n"),
+    ],
+    ids=["A10-tab-indented", "A11-go-doc-edit", "A15-csharp-region-word"],
+)
+def test_the_regate_true_positives_are_still_recognised(path: str, base: str, head: str) -> None:
+    assert _regate(path, base, head) is True
+
+
+def test_rust_is_not_on_the_recognised_suffix_list() -> None:
+    from mergecraft.classify import triage
+
+    diff, heads = _comment_edit("src/lib.rs")
+
+    assert ".rs" not in triage.COMMENT_ONLY_SUFFIXES
+    assert _recognize(diff, heads) is False
+
+
+def test_the_recognised_suffix_list_is_exactly_the_closed_list() -> None:
+    from mergecraft.classify import triage
+
+    assert set(triage.COMMENT_ONLY_SUFFIXES) == set(_RECOGNISED_SUFFIXES)
+    assert set(_RECOGNISED_SUFFIXES) == {
+        ".js",
+        ".ts",
+        ".go",
+        ".java",
+        ".kt",
+        ".c",
+        ".h",
+        ".cc",
+        ".cpp",
+        ".hpp",
+        ".cs",
+        ".swift",
+    }
+
+
+def test_a_java_unicode_escape_on_an_unchanged_head_line_refuses_the_file() -> None:
+    """Java translates ``\\uXXXX`` before lexing, so no line of the file can be trusted."""
+    path = "src/A.java"
+    diff = _file(path, ' String s = "caf\\u00e9";', "-// old note", "+// new note")
+    heads = {path: 'String s = "caf\\u00e9";\n// new note\n'}
+    plain_diff, plain_heads = _comment_edit(path)
+
+    assert _recognize(diff, heads) is False
+    assert _recognize(plain_diff, plain_heads) is True
+
+
+def test_a_java_unicode_escape_only_on_the_removed_side_refuses_the_edit() -> None:
+    path = "src/A.java"
+    diff = _file(path, " int a = 1;", "-// old \\u000a doEvil();", "+// new note", " int b = 2;")
+    heads = {path: "int a = 1;\n// new note\nint b = 2;\n"}
+
+    assert _recognize(diff, heads) is False
+
+
+def test_the_compiled_java_unicode_escape_fixture_is_refused() -> None:
+    """The verifier compiled this file: ``javac`` runs ``doEvil()`` from the comment."""
+    path = "src/A.java"
+    head = (
+        "class A {\n"
+        '  static void doEvil() { System.out.println("EVIL RAN (java \\\\u000a)"); }\n'
+        "  public static void main(String[] a) {\n"
+        "    // note \\u000a doEvil();\n"
+        "  }\n"
+        "}\n"
+    )
+    diff = _file(
+        path,
+        "   public static void main(String[] a) {",
+        "-    // old note",
+        "+    // note \\u000a doEvil();",
+        "   }",
+        start=3,
+    )
+
+    assert _recognize(diff, {path: head}) is False
+
+
+@pytest.mark.parametrize("suffix", [".c", ".h", ".cc", ".cpp", ".hpp"])
+def test_a_c_family_file_containing_a_trigraph_marker_is_refused(suffix: str) -> None:
+    path = f"src/module{suffix}"
+    diff = _file(path, ' const char *q = "what??";', "-// old note", "+// new note")
+    heads = {path: 'const char *q = "what??";\n// new note\n'}
+    plain_diff, plain_heads = _comment_edit(path)
+
+    assert _recognize(diff, heads) is False
+    assert _recognize(plain_diff, plain_heads) is True
+
+
+def test_the_compiled_trigraph_fixture_is_refused() -> None:
+    """The verifier compiled this file with ``-trigraphs``: ``??/`` splices ``check()`` in."""
+    path = "src/t.c"
+    head = (
+        "#include <stdio.h>\n"
+        'int check(void) { puts("check ran"); return 1; }\n'
+        "int main(void) {\n"
+        "  int b = 0;\n"
+        "  // note ??/\n"
+        "  b = check();\n"
+        '  printf("b=%d\\n", b);\n'
+        "  return 0;\n"
+        "}\n"
+    )
+    diff = _file(
+        path, "   int b = 0;", "-  // old note", "+  // note ??/", "   b = check();", start=4
+    )
+
+    assert _recognize(diff, {path: head}) is False
+
+
+def test_a_trigraph_marker_only_on_the_removed_side_refuses_the_edit() -> None:
+    path = "src/a.c"
+    diff = _file(path, " int a = 1;", "-// old ??/", "+// new note", " int b = 2;")
+    heads = {path: "int a = 1;\n// new note\nint b = 2;\n"}
+
+    assert _recognize(diff, heads) is False
+
+
+def test_nullish_coalescing_does_not_refuse_a_javascript_file() -> None:
+    """The trigraph rule is for the C family; ``??`` is an ordinary JavaScript operator."""
+    path = "src/app.js"
+    diff = _file(path, " const v = a ?? b;", "-// old note", "+// new note")
+    heads = {path: "const v = a ?? b;\n// new note\n"}
+
+    assert _recognize(diff, heads) is True
+
+
+@pytest.mark.parametrize(
+    "separator",
+    ["\u2028", "\u2029", "\r", "\x85"],
+    ids=["U+2028", "U+2029", "lone-CR", "NEL"],
+)
+@pytest.mark.parametrize("path", ["src/a.js", "src/a.c"])
+def test_a_paired_edit_whose_removed_line_hides_code_is_refused(separator: str, path: str) -> None:
+    """The diff-side ASCII check, not the removal-only rule, must refuse this edit."""
+    head = "let a = 1;\n// note here\nlet b = 2;\n"
+    diff = (
+        f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n"
+        f"@@ -1,3 +1,3 @@\n let a = 1;\n-// note x{separator}doEvil();\n+// note here\n let b = 2;\n"
+    )
+    clean = diff.replace(f"x{separator}doEvil();", "x")
+
+    assert _recognize(diff, {path: head}) is False
+    assert _recognize(clean, {path: head}) is True
