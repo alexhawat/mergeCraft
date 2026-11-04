@@ -2,8 +2,10 @@
 
 "Only comment lines changed" needs each language's string rules, so the recognizer is
 deliberately narrow and refuses whenever it is unsure. It only considers ``//``-comment
-languages, chosen by suffix (JSX and TSX are off the list: a JSX text child can start
-with ``//`` and render; Rust is off the list: a lifetime's lone quote makes the quote
+languages, chosen by suffix (``.js``, ``.jsx`` and ``.tsx`` are off the list: JSX, which
+plain ``.js`` files may hold, renders a ``//`` text child as page text; Go test files
+are off the list because an example's ``// Output:`` body is a test input, and a Go
+file marked ``DO NOT EDIT`` is generated; Rust is off the list: a lifetime's lone quote makes the quote
 check unsound); ``Package.swift`` is refused by name. A Java file holding a unicode
 escape (``\\u``) and a C-family file holding ``??`` (a trigraph can splice lines) are
 refused. A changed line counts only
@@ -27,7 +29,6 @@ from typing import Any
 import pytest
 
 _RECOGNISED_SUFFIXES = (
-    ".js",
     ".ts",
     ".go",
     ".java",
@@ -68,7 +69,7 @@ def _comment_edit(path: str) -> tuple[str, dict[str, str]]:
 
 
 def test_a_javascript_comment_edit_is_recognised() -> None:
-    diff, heads = _comment_edit("src/app.js")
+    diff, heads = _comment_edit("src/app.ts")
 
     assert _recognize(diff, heads) is True
 
@@ -103,7 +104,7 @@ def test_adding_comment_lines_is_recognised() -> None:
 
 
 def test_a_comment_edit_in_a_later_hunk_is_located_by_its_new_side_position() -> None:
-    path = "src/app.js"
+    path = "src/app.ts"
     head = "".join(f"let v{n} = {n};\n" for n in range(1, 10)) + "// after\n"
     diff = _file(path, " let v9 = 9;", "-// before", "+// after", start=9)
 
@@ -112,7 +113,7 @@ def test_a_comment_edit_in_a_later_hunk_is_located_by_its_new_side_position() ->
 
 def test_an_escaped_quote_does_not_leave_the_lexer_inside_a_string() -> None:
     """Without escape handling the string never closes and the comment reads as content."""
-    path = "src/app.js"
+    path = "src/app.ts"
     head = 'const s = "say \\"hi\\"";\n// new note\n'
     diff = _file(path, ' const s = "say \\"hi\\"";', "-// old note", "+// new note")
 
@@ -153,7 +154,7 @@ def test_a_closed_block_comment_anywhere_in_the_file_refuses_it() -> None:
 
 def test_a_slash_slash_line_inside_a_continued_string_literal_is_refused() -> None:
     """A backslash line continuation keeps the string open; the ``//`` line is content."""
-    path = "src/app.js"
+    path = "src/app.ts"
     head = 'const s = "first \\\n// new text \\\nend";\n'
     diff = _file(path, ' const s = "first \\', "-// old text \\", "+// new text \\", ' end";')
 
@@ -169,7 +170,7 @@ def test_a_slash_slash_line_inside_a_c_string_continuation_is_refused() -> None:
 
 
 def test_a_slash_slash_line_inside_a_block_comment_is_refused() -> None:
-    path = "src/app.js"
+    path = "src/app.ts"
     head = "/*\n// new note\n*/\nlet a = 1;\n"
     diff = _file(path, " /*", "-// old note", "+// new note", " */")
 
@@ -177,7 +178,7 @@ def test_a_slash_slash_line_inside_a_block_comment_is_refused() -> None:
 
 
 def test_a_block_comment_the_lexer_cannot_close_is_refused() -> None:
-    path = "src/app.js"
+    path = "src/app.ts"
     head = "/* never closed\nlet a = 1;\n// new note\n"
     diff = _file(path, " let a = 1;", "-// old note", "+// new note", start=2)
 
@@ -187,7 +188,7 @@ def test_a_block_comment_the_lexer_cannot_close_is_refused() -> None:
 @pytest.mark.parametrize(
     ("path", "marker_line"),
     [
-        ("src/app.js", "const t = `template`;"),
+        ("src/app.ts", "const t = `template`;"),
         ("src/app.ts", "const t = `${a}`;"),
         ("src/lib.go", "var raw = `raw string`"),
         ("src/main.cpp", 'auto raw = R"(raw)";'),
@@ -208,7 +209,7 @@ def test_a_file_with_a_backtick_or_raw_string_marker_is_refused(
 
 
 def test_a_code_line_changed_beside_a_comment_is_refused() -> None:
-    path = "src/app.js"
+    path = "src/app.ts"
     head = "let a = 2;\n// new note\n"
     diff = _file(path, "-let a = 1;", "+let a = 2;", "-// old note", "+// new note")
 
@@ -216,7 +217,7 @@ def test_a_code_line_changed_beside_a_comment_is_refused() -> None:
 
 
 def test_a_trailing_comment_on_a_code_line_is_refused() -> None:
-    path = "src/app.js"
+    path = "src/app.ts"
     head = "let a = 1; // new note\n"
     diff = _file(path, "-let a = 1; // old note", "+let a = 1; // new note")
 
@@ -224,7 +225,7 @@ def test_a_trailing_comment_on_a_code_line_is_refused() -> None:
 
 
 def test_turning_a_comment_into_code_is_refused() -> None:
-    path = "src/app.js"
+    path = "src/app.ts"
     head = "deleteEverything();\n"
     diff = _file(path, "-// deleteEverything();", "+deleteEverything();")
 
@@ -232,14 +233,14 @@ def test_turning_a_comment_into_code_is_refused() -> None:
 
 
 def test_an_edit_without_head_text_is_refused() -> None:
-    diff, _heads = _comment_edit("src/app.js")
+    diff, _heads = _comment_edit("src/app.ts")
 
     assert _recognize(diff, {}) is False
 
 
 def test_head_text_that_does_not_carry_the_added_line_is_refused() -> None:
     """The lexer proves the head file; a head that disagrees with the diff proves nothing."""
-    path = "src/app.js"
+    path = "src/app.ts"
     diff = _file(path, " int a = 1;", "-// old note", "+// new note", " int b = 2;")
     heads = {path: "int a = 1;\nlaunch();\nint b = 2;\n"}
 
@@ -272,6 +273,7 @@ def test_a_binary_entry_is_not_comment_only() -> None:
         "config/app.ini",
         "src/style.css",
         "src/app.php",
+        "src/App.js",
         "src/App.jsx",
         "src/App.tsx",
         "src/lib.rs",
@@ -287,7 +289,7 @@ def test_a_language_off_the_list_is_never_comment_only(path: str, marker: str) -
 
 
 def test_a_diff_mixing_a_recognised_file_with_an_unlisted_one_is_refused() -> None:
-    js_diff, js_heads = _comment_edit("src/app.js")
+    js_diff, js_heads = _comment_edit("src/app.ts")
     py_diff = _file("src/mode.py", " keep", "-# old", "+# new")
     heads = {**js_heads, "src/mode.py": "keep\n# new\n"}
 
@@ -296,15 +298,15 @@ def test_a_diff_mixing_a_recognised_file_with_an_unlisted_one_is_refused() -> No
 
 
 def test_a_diff_mixing_a_comment_edit_with_a_code_edit_elsewhere_is_refused() -> None:
-    js_diff, js_heads = _comment_edit("src/app.js")
-    code_diff = _file("src/other.js", "-let a = 1;", "+let a = 2;")
-    heads = {**js_heads, "src/other.js": "let a = 2;\n"}
+    js_diff, js_heads = _comment_edit("src/app.ts")
+    code_diff = _file("src/other.ts", "-let a = 1;", "+let a = 2;")
+    heads = {**js_heads, "src/other.ts": "let a = 2;\n"}
 
     assert _recognize(js_diff + code_diff, heads) is False
 
 
 def test_two_recognised_files_together_are_recognised() -> None:
-    js_diff, js_heads = _comment_edit("src/app.js")
+    js_diff, js_heads = _comment_edit("src/app.ts")
     go_diff, go_heads = _comment_edit("src/lib.go")
 
     assert _recognize(js_diff + go_diff, {**js_heads, **go_heads}) is True
@@ -318,7 +320,7 @@ def test_triage_matches_comment_only_and_whitespace_still_does_not() -> None:
     from mergecraft.classify.triage import recognize_whitespace_only, triage_diff
     from mergecraft.config.settings import FastPathSettings
 
-    diff, heads = _comment_edit("src/app.js")
+    diff, heads = _comment_edit("src/app.ts")
     config = FastPathSettings.model_validate({"enabled": True, "skipLlm": ["commentOnly"]})
 
     decision = triage_diff(diff, config=config, head_files=heads, passed_checks=[])
@@ -331,7 +333,7 @@ def test_triage_refuses_a_comment_only_skip_without_head_text() -> None:
     from mergecraft.classify.triage import triage_diff
     from mergecraft.config.settings import FastPathSettings
 
-    diff, _heads = _comment_edit("src/app.js")
+    diff, _heads = _comment_edit("src/app.ts")
     config = FastPathSettings.model_validate({"enabled": True, "skipLlm": ["commentOnly"]})
 
     decision = triage_diff(diff, config=config, head_files={}, passed_checks=[])
@@ -466,6 +468,19 @@ _PROBE_REFUSED: list[tuple[str, str, str, str]] = [
 ]
 
 
+def _with_ts_twins(cases: list[tuple[str, str, str, str]]) -> list[tuple[str, str, str, str]]:
+    """Each ``.js`` attack also runs as ``.ts``, so its own rule refuses it, not the suffix."""
+    twins = [
+        (f"{name}-as-ts", path[: -len(".js")] + ".ts", base, head)
+        for name, path, base, head in cases
+        if path.endswith(".js")
+    ]
+    return [*cases, *twins]
+
+
+_PROBE_REFUSED = _with_ts_twins(_PROBE_REFUSED)
+
+
 @pytest.mark.parametrize(
     ("path", "base", "head"),
     [case[1:] for case in _PROBE_REFUSED],
@@ -479,7 +494,7 @@ def test_every_probe_attack_is_refused(path: str, base: str, head: str) -> None:
     ("path", "base", "head"),
     [
         (
-            "src/a.js",
+            "src/a.ts",
             "let a = 1;\n// old\nlet b = 2;\n",
             "let a = 1;\n// new\nlet b = 2;\n",
         ),
@@ -489,7 +504,7 @@ def test_every_probe_attack_is_refused(path: str, base: str, head: str) -> None:
             'const u = "http://example.com/x";\n// new note\nexport const v = 1;\n',
         ),
     ],
-    ids=["js-plain-edit", "url-in-a-string-on-an-unchanged-line"],
+    ids=["plain-edit-now-in-ts", "url-in-a-string-on-an-unchanged-line"],
 )
 def test_the_probe_true_positives_are_still_recognised(path: str, base: str, head: str) -> None:
     assert _probe(path, base, head) is True
@@ -510,7 +525,7 @@ def test_a_removal_only_comment_diff_is_refused() -> None:
     [" ", " ", "\r", "\x85"],
     ids=["U+2028", "U+2029", "lone-CR", "NEL"],
 )
-@pytest.mark.parametrize("path", ["src/a.js", "src/a.c"])
+@pytest.mark.parametrize("path", ["src/a.ts", "src/a.c"])
 def test_a_line_terminator_other_than_newline_refuses_an_added_line(
     separator: str, path: str
 ) -> None:
@@ -530,7 +545,7 @@ def test_a_line_terminator_other_than_newline_refuses_an_added_line(
     [" ", " ", "\r", "\x85"],
     ids=["U+2028", "U+2029", "lone-CR", "NEL"],
 )
-@pytest.mark.parametrize("path", ["src/a.js", "src/a.c"])
+@pytest.mark.parametrize("path", ["src/a.ts", "src/a.c"])
 def test_a_line_terminator_other_than_newline_refuses_a_removed_line(
     separator: str, path: str
 ) -> None:
@@ -543,9 +558,9 @@ def test_a_line_terminator_other_than_newline_refuses_a_removed_line(
     assert _recognize(diff, {path: "let a = 1;\nlet b = 2;\n"}) is False
 
 
-def test_the_unicode_line_separator_attack_file_is_refused() -> None:
+@pytest.mark.parametrize("path", ["src/a.js", "src/a.ts"])
+def test_the_unicode_line_separator_attack_file_is_refused(path: str) -> None:
     """The verifier's runnable fixture: node runs ``doEvil()`` after the U+2028."""
-    path = "src/a.js"
     head = (
         "function doEvil(){console.log('EVIL RAN (U+2028)')}\n"
         "let a = 1;\n// note doEvil();\nlet b = 2;\n"
@@ -556,7 +571,7 @@ def test_the_unicode_line_separator_attack_file_is_refused() -> None:
 
 
 def test_a_non_ascii_comment_is_refused() -> None:
-    path = "src/app.js"
+    path = "src/app.ts"
     diff = _file(path, " int a = 1;", "-// old note", "+// new café note", " int b = 2;")
     heads = {path: "int a = 1;\n// new café note\nint b = 2;\n"}
 
@@ -564,7 +579,7 @@ def test_a_non_ascii_comment_is_refused() -> None:
 
 
 def test_non_ascii_anywhere_in_the_head_text_refuses_the_file() -> None:
-    path = "src/app.js"
+    path = "src/app.ts"
     diff = _file(path, ' const s = "naïve";', "-// old note", "+// new note")
     heads = {path: 'const s = "naïve";\n// new note\n'}
 
@@ -572,7 +587,7 @@ def test_non_ascii_anywhere_in_the_head_text_refuses_the_file() -> None:
 
 
 def test_a_crlf_file_is_refused() -> None:
-    path = "src/app.js"
+    path = "src/app.ts"
     diff = _file(path, " int a = 1;\r", "-// old note\r", "+// new note\r", " int b = 2;\r")
     heads = {path: "int a = 1;\r\n// new note\r\nint b = 2;\r\n"}
 
@@ -598,7 +613,7 @@ def test_package_swift_is_refused_by_name() -> None:
 
 def test_a_quote_left_open_at_the_end_of_a_line_refuses_the_file() -> None:
     """A regex literal holding a quote is not modelled; the open quote proves nothing."""
-    path = "src/app.js"
+    path = "src/app.ts"
     diff = _file(path, " const r = /'/;", "-// old note", "+// new note")
     heads = {path: "const r = /'/;\n// new note\n"}
     plain_diff, plain_heads = _comment_edit(path)
@@ -628,16 +643,16 @@ def _comment_to(path: str, comment: str) -> tuple[str, dict[str, str]]:
         ("src/Main.java", "//noinspection SpellCheckingInspection"),
         ("src/a.go", "// +build linux"),
         ("src/a.go", "//go:generate stringer -type=Kind"),
-        ("src/a.js", "// $FlowFixMe"),
+        ("src/a.ts", "// $FlowFixMe"),
         ("src/a.ts", "// @ts-ignore"),
         ("src/a_test.go", "// Output: 1"),
         ("src/Module.swift", "// swift-tools-version:5.9"),
         ("src/a.ts", "// eslint-disable"),
         ("src/A.kt", "// ktlint-disable"),
         ("src/Main.java", "// CHECKSTYLE:OFF"),
-        ("src/a.js", "//no space after the slashes"),
-        ("src/a.js", "//  two spaces before the word"),
-        ("src/a.js", "// 2 is not a word"),
+        ("src/a.ts", "//no space after the slashes"),
+        ("src/a.ts", "//  two spaces before the word"),
+        ("src/a.ts", "// 2 is not a word"),
     ],
     ids=[
         "prefix-noinspection",
@@ -772,6 +787,9 @@ _REGATE_REFUSED: list[tuple[str, str, str, str]] = [
 ]
 
 
+_REGATE_REFUSED = _with_ts_twins(_REGATE_REFUSED)
+
+
 @pytest.mark.parametrize(
     ("path", "base", "head"),
     [case[1:] for case in _REGATE_REFUSED],
@@ -816,7 +834,6 @@ def test_the_recognised_suffix_list_is_exactly_the_closed_list() -> None:
 
     assert set(triage.COMMENT_ONLY_SUFFIXES) == set(_RECOGNISED_SUFFIXES)
     assert set(_RECOGNISED_SUFFIXES) == {
-        ".js",
         ".ts",
         ".go",
         ".java",
@@ -915,7 +932,7 @@ def test_a_trigraph_marker_only_on_the_removed_side_refuses_the_edit() -> None:
 
 def test_nullish_coalescing_does_not_refuse_a_javascript_file() -> None:
     """The trigraph rule is for the C family; ``??`` is an ordinary JavaScript operator."""
-    path = "src/app.js"
+    path = "src/app.ts"
     diff = _file(path, " const v = a ?? b;", "-// old note", "+// new note")
     heads = {path: "const v = a ?? b;\n// new note\n"}
 
@@ -927,7 +944,7 @@ def test_nullish_coalescing_does_not_refuse_a_javascript_file() -> None:
     ["\u2028", "\u2029", "\r", "\x85"],
     ids=["U+2028", "U+2029", "lone-CR", "NEL"],
 )
-@pytest.mark.parametrize("path", ["src/a.js", "src/a.c"])
+@pytest.mark.parametrize("path", ["src/a.ts", "src/a.c"])
 def test_a_paired_edit_whose_removed_line_hides_code_is_refused(separator: str, path: str) -> None:
     """The diff-side ASCII check, not the removal-only rule, must refuse this edit."""
     head = "let a = 1;\n// note here\nlet b = 2;\n"
@@ -939,3 +956,245 @@ def test_a_paired_edit_whose_removed_line_hides_code_is_refused(separator: str, 
 
     assert _recognize(diff, {path: head}) is False
     assert _recognize(clean, {path: head}) is True
+
+
+# ── third gate: JSX in .js, Go tests and generated files, more pragmas ───────
+
+_JSX_BASE = (
+    "export function App() {\n  return (\n    <p>\n      // old rendered text\n    </p>\n  );\n}\n"
+)
+_GO_EX = (
+    'package a\n\nimport "fmt"\n\nfunc ExampleHello() {\n\tfmt.Println("hello")\n'
+    "\t// Output:\n\t// hello\n}\n"
+)
+_GO_GEN = "package a\n\n// Package a does things.\nfunc F() {}\n"
+_TS_ISTANBUL = "export const a = 1;\n// keep\nexport function f() { return 2; }\n"
+_CPP_NOLINT = "int a;\n// keep\nint b;\n"
+
+_REGATE3_REFUSED: list[tuple[str, str, str, str]] = [
+    (
+        "B1-jsx-text-child-in-js",
+        "src/App.js",
+        _JSX_BASE,
+        _JSX_BASE.replace("old rendered text", "new rendered text"),
+    ),
+    (
+        "B2-go-example-output-body",
+        "a/a_test.go",
+        _GO_EX,
+        _GO_EX.replace("\t// hello\n", "\t// goodbye\n"),
+    ),
+    (
+        "B3-go-do-not-edit-header",
+        "a/a.go",
+        _GO_GEN,
+        _GO_GEN.replace("// Package a does things.", "// Code generated by hand. DO NOT EDIT."),
+    ),
+    (
+        "B7-csharp-verbatim-string",
+        "src/B.cs",
+        'class A {\n  string s = @"line one\n// old\nline three";\n}\n',
+        'class A {\n  string s = @"line one\n// new\nline three";\n}\n',
+    ),
+    (
+        "B8-swift-raw-string",
+        "src/b.swift",
+        'let s = #"line one\n// old\n"#\n',
+        'let s = #"line one\n// new\n"#\n',
+    ),
+    (
+        "B9-swift-double-hash-raw-string",
+        "src/c.swift",
+        'let s = ##"x"##\n// old\nlet t = 1\n',
+        'let s = ##"x"##\n// new\nlet t = 1\n',
+    ),
+    (
+        "B12-js-html-like-comment",
+        "src/f.js",
+        "x = 1;\n<!-- old\n// old\nlet y = 2;\n",
+        "x = 1;\n<!-- old\n// new\nlet y = 2;\n",
+    ),
+    (
+        "B13-istanbul-pragma",
+        "src/g.ts",
+        _TS_ISTANBUL,
+        _TS_ISTANBUL.replace("// keep", "// istanbul ignore next"),
+    ),
+    (
+        "B14-nolintnextline",
+        "src/h.cpp",
+        _CPP_NOLINT,
+        _CPP_NOLINT.replace("// keep", "// NOLINTNEXTLINE"),
+    ),
+    (
+        "B15-iwyu-pragma",
+        "src/i.h",
+        _CPP_NOLINT,
+        _CPP_NOLINT.replace("// keep", "// IWYU pragma: keep"),
+    ),
+    (
+        "B17-java-escaped-backslash-before-u",
+        "src/C.java",
+        'class A {\n  String s = "\\\\u0041";\n  // old\n}\n',
+        'class A {\n  String s = "\\\\u0041";\n  // new\n}\n',
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("path", "base", "head"),
+    [case[1:] for case in _REGATE3_REFUSED],
+    ids=[case[0] for case in _REGATE3_REFUSED],
+)
+def test_every_third_gate_attack_is_refused(path: str, base: str, head: str) -> None:
+    assert _regate(path, base, head) is False
+
+
+_KT = 'fun f(x: Int): String {\n    val s = "a ${ "b" } c"\n    // old\n    return s\n}\n'
+_SW = 'func f() -> String {\n    let s = "a \\("b") c"\n    // old\n    return s\n}\n'
+_CS = 'class A {\n  string s = $"a {"b"} c";\n  // old\n}\n'
+_C_DI = "int a<:2:> = {1, 2};\n// old\nint main(void) <% return a<:0:>; %>\n"
+_C_DEF = '#define MSG "a" \\\n  "b"\n// old\nint x;\n'
+_GO_EMBED = 'package a\n\nimport _ "embed"\n\n// old\nvar s string\n'
+_KT_ESC = "fun f() {\n  // old\n}\n"
+
+
+@pytest.mark.parametrize(
+    ("path", "base", "head"),
+    [
+        ("src/A.kt", _KT, _KT.replace("// old", "// new")),
+        ("src/a.swift", _SW, _SW.replace("// old", "// new")),
+        ("src/A.cs", _CS, _CS.replace("// old", "// new")),
+        ("src/d.c", _C_DI, _C_DI.replace("// old", "// new")),
+        ("src/e.c", _C_DEF, _C_DEF.replace("// old", "// new")),
+        ("a/b.go", _GO_EMBED, _GO_EMBED.replace("// old", "// new")),
+        ("src/D.kt", _KT_ESC, _KT_ESC.replace("// old", "// note \\u000a doEvil()")),
+    ],
+    ids=[
+        "B4-kotlin-template",
+        "B5-swift-interpolation",
+        "B6-csharp-interpolation",
+        "B10-c-digraphs",
+        "B11-c-macro-continuation-above",
+        "B16-go-embed-plain-edit",
+        "B18-kotlin-has-no-unicode-pretranslation",
+    ],
+)
+def test_the_third_gate_true_positives_are_still_recognised(
+    path: str, base: str, head: str
+) -> None:
+    assert _regate(path, base, head) is True
+
+
+def test_the_compiled_jsx_fixture_in_a_js_file_is_refused() -> None:
+    """The verifier rendered this ``App.js``: the ``//`` line is page text, not a comment."""
+    path = "src/App.js"
+    head = (
+        "export function App() {\n  return (\n    <p>\n      // new rendered text\n"
+        "    </p>\n  );\n}\n"
+    )
+    diff = _file(
+        path,
+        "     <p>",
+        "-      // old rendered text",
+        "+      // new rendered text",
+        "     </p>",
+        start=3,
+    )
+
+    assert _recognize(diff, {path: head}) is False
+
+
+def test_a_plain_js_comment_edit_is_refused_while_ts_is_recognised() -> None:
+    js_diff, js_heads = _comment_edit("src/app.js")
+    ts_diff, ts_heads = _comment_edit("src/app.ts")
+
+    assert _recognize(js_diff, js_heads) is False
+    assert _recognize(ts_diff, ts_heads) is True
+
+
+def test_js_is_not_on_the_recognised_suffix_list() -> None:
+    from mergecraft.classify import triage
+
+    assert ".js" not in triage.COMMENT_ONLY_SUFFIXES
+    assert ".ts" in triage.COMMENT_ONLY_SUFFIXES
+
+
+@pytest.mark.parametrize("path", ["pkg/a_test.go", "a_test.go", "pkg/sub/Thing_test.go"])
+def test_a_go_test_file_is_refused_by_name(path: str) -> None:
+    diff, heads = _comment_edit(path)
+    plain_diff, plain_heads = _comment_edit(path.replace("_test.go", ".go"))
+
+    assert _recognize(diff, heads) is False
+    assert _recognize(plain_diff, plain_heads) is True
+
+
+def test_the_compiled_go_example_fixture_is_refused() -> None:
+    """``go test`` compares the ``// Output:`` body; editing it changes the test."""
+    path = "goex/a_test.go"
+    head = (
+        'package a\n\nimport "fmt"\n\nfunc Example() {\n\tfmt.Println("hello")\n'
+        "\t// Output:\n\t// goodbye\n}\n"
+    )
+    diff = _file(path, " \t// Output:", "-\t// hello", "+\t// goodbye", " }", start=7)
+
+    assert _recognize(diff, {path: head}) is False
+
+
+def test_the_compiled_go_generated_header_fixture_is_refused() -> None:
+    """``ast.IsGenerated`` turns true for the head file; linters then skip it."""
+    path = "gogen/a.go"
+    base = "// Package a does things.\npackage a\n\nfunc F() {}\n"
+    head = "// Code generated by hand. DO NOT EDIT.\npackage a\n\nfunc F() {}\n"
+
+    assert _regate(path, base, head) is False
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "// Code generated by tool. DO NOT EDIT.",
+        "// Generated file, do not edit.",
+        "// Do Not Edit",
+    ],
+)
+def test_a_go_file_whose_head_text_says_do_not_edit_is_refused(marker: str) -> None:
+    path = "pkg/a.go"
+    diff = _file(path, f" {marker}", " package a", "-// old note", "+// new note")
+    heads = {path: f"{marker}\npackage a\n// new note\n"}
+    plain_diff, plain_heads = _comment_edit(path)
+
+    assert _recognize(diff, heads) is False
+    assert _recognize(plain_diff, plain_heads) is True
+
+
+def test_a_go_diff_whose_removed_line_says_do_not_edit_is_refused() -> None:
+    path = "pkg/a.go"
+    diff = _file(path, " int a = 1;", "-// old note, do not edit", "+// new note", " int b = 2;")
+    heads = {path: "int a = 1;\n// new note\nint b = 2;\n"}
+
+    assert _recognize(diff, heads) is False
+
+
+@pytest.mark.parametrize(
+    "word",
+    [
+        "code",
+        "istanbul",
+        "nolintnextline",
+        "nolintbegin",
+        "nolintend",
+        "iwyu",
+        "jshint",
+        "noqa",
+        "coverage",
+    ],
+)
+@pytest.mark.parametrize("casing", ["lower", "upper", "title"])
+def test_the_new_directive_words_are_refused_in_any_case(word: str, casing: str) -> None:
+    spelled = {"lower": word.lower(), "upper": word.upper(), "title": word.title()}[casing]
+    diff, heads = _comment_to("src/a.ts", f"// {spelled} ignore next")
+    plain_diff, plain_heads = _comment_to("src/a.ts", "// Plain words here")
+
+    assert _recognize(diff, heads) is False
+    assert _recognize(plain_diff, plain_heads) is True

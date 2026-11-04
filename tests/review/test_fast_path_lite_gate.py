@@ -167,23 +167,23 @@ async def test_a_disabled_lite_block_keeps_todays_full_review() -> None:
 
 
 async def test_a_comment_only_edit_reads_the_head_text_and_skips_when_opted_in() -> None:
-    files = [{"filename": "src/app.js", "additions": 1, "deletions": 1, "patch": _COMMENT_PATCH}]
-    scm = FakeScm(files=files, contents={"src/app.js": _COMMENT_HEAD})
+    files = [{"filename": "src/app.ts", "additions": 1, "deletions": 1, "patch": _COMMENT_PATCH}]
+    scm = FakeScm(files=files, contents={"src/app.ts": _COMMENT_HEAD})
 
     decision = await _decide(scm, config=_config(skip_llm=["commentOnly"]))
 
     assert (decision.tier, decision.recognizer) == ("skip", "commentOnly")
-    assert any("/contents/src/app.js" in request for request in scm.requests)
+    assert any("/contents/src/app.ts" in request for request in scm.requests)
 
 
 async def test_a_comment_only_edit_whose_head_text_is_unreadable_is_full() -> None:
-    files = [{"filename": "src/app.js", "additions": 1, "deletions": 1, "patch": _COMMENT_PATCH}]
+    files = [{"filename": "src/app.ts", "additions": 1, "deletions": 1, "patch": _COMMENT_PATCH}]
     scm = FakeScm(files=files, contents={})
 
     decision = await _decide(scm, config=_config(skip_llm=["commentOnly"]))
 
     assert decision.tier == "full"
-    assert any("/contents/src/app.js" in request for request in scm.requests)
+    assert any("/contents/src/app.ts" in request for request in scm.requests)
 
 
 # ── main._triage_gate ─────────────────────────────────────────────────────────
@@ -901,35 +901,35 @@ async def test_a_blocker_is_never_softened_by_a_cap_hit(
 
 
 def _comment_files() -> list[dict[str, Any]]:
-    return [{"filename": "src/app.js", "additions": 1, "deletions": 1, "patch": _COMMENT_PATCH}]
+    return [{"filename": "src/app.ts", "additions": 1, "deletions": 1, "patch": _COMMENT_PATCH}]
 
 
 async def test_code_head_text_is_not_read_when_neither_comment_only_nor_lite_is_on() -> None:
-    scm = FakeScm(files=_comment_files(), contents={"src/app.js": _COMMENT_HEAD})
+    scm = FakeScm(files=_comment_files(), contents={"src/app.ts": _COMMENT_HEAD})
 
     decision = await _decide(scm, config=_config(lite_enabled=False, skip_llm=["prose"]))
 
     assert decision.tier == "full"
     assert scm.requests, "premise: the files listing was read"
-    assert not any("/contents/src/app.js" in request for request in scm.requests)
+    assert not any("/contents/src/app.ts" in request for request in scm.requests)
 
 
 async def test_code_head_text_is_read_when_lite_is_enabled() -> None:
-    scm = FakeScm(files=_comment_files(), contents={"src/app.js": _COMMENT_HEAD})
+    scm = FakeScm(files=_comment_files(), contents={"src/app.ts": _COMMENT_HEAD})
 
     decision = await _decide(scm, config=_config(lite_enabled=True, skip_llm=[]))
 
     assert (decision.tier, decision.recognizer) == ("lite", "commentOnly")
-    assert any("/contents/src/app.js" in request for request in scm.requests)
+    assert any("/contents/src/app.ts" in request for request in scm.requests)
 
 
 async def test_code_head_text_is_read_when_comment_only_is_opted_in_without_lite() -> None:
-    scm = FakeScm(files=_comment_files(), contents={"src/app.js": _COMMENT_HEAD})
+    scm = FakeScm(files=_comment_files(), contents={"src/app.ts": _COMMENT_HEAD})
 
     decision = await _decide(scm, config=_config(lite_enabled=False, skip_llm=["commentOnly"]))
 
     assert (decision.tier, decision.recognizer) == ("skip", "commentOnly")
-    assert any("/contents/src/app.js" in request for request in scm.requests)
+    assert any("/contents/src/app.ts" in request for request in scm.requests)
 
 
 async def test_prose_head_text_is_still_read_without_comment_only_or_lite() -> None:
@@ -962,7 +962,6 @@ def test_review_checks_lists_exactly_the_recognised_comment_only_suffixes() -> N
     listed = match.group(1).split()
     assert sorted(listed) == sorted(COMMENT_ONLY_SUFFIXES)
     assert set(listed) == {
-        ".js",
         ".ts",
         ".go",
         ".java",
@@ -983,3 +982,29 @@ def test_the_changelog_records_the_finding_line_format_under_changed() -> None:
     changed = unreleased.split("### Changed", 1)[1].split("\n### ", 1)[0]
 
     assert "path:line" in changed
+
+
+def _comment_only_paragraph() -> str:
+    text = (_REPO_ROOT / "REVIEW-CHECKS.md").read_text(encoding="utf-8")
+    start = text.index("`commentOnly` (")
+    end = text.index("A mixed diff matches nothing", start)
+    return text[start:end]
+
+
+def test_review_checks_names_the_excluded_languages_and_why() -> None:
+    paragraph = _comment_only_paragraph()
+    listed = re.search(r"`//`-comment languages — `([^`]+)`", paragraph)
+    assert listed is not None
+    outside_list = paragraph.replace(listed.group(0), "")
+
+    for excluded in ("`.js`", "`.jsx`", "`.tsx`", "Rust", "_test.go"):
+        assert excluded in outside_list, excluded
+    assert "JSX" in outside_list
+
+
+def test_review_checks_says_comments_can_still_carry_tool_directives() -> None:
+    paragraph = " ".join(_comment_only_paragraph().split())
+
+    assert "tool directives" in paragraph
+    assert "runtime" in paragraph
+    assert "best-effort" in paragraph or "best effort" in paragraph

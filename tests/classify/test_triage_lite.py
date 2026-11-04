@@ -42,8 +42,8 @@ _PROSE = _diff("README.md", "-Old words.", "+New words.")
 _PROSE_HEAD = {"README.md": "New words.\n"}
 _WHITESPACE = _diff("src/a.js", "-let a = 1;  ", "+let a = 1;")
 _GENERATED = _diff("uv.lock", "-a = 1", "+a = 2")
-_COMMENT = _diff("src/a.js", " let a = 1;", "-// old note", "+// new note", " let b = 2;")
-_COMMENT_HEAD = {"src/a.js": "let a = 1;\n// new note\nlet b = 2;\n"}
+_COMMENT = _diff("src/a.ts", " let a = 1;", "-// old note", "+// new note", " let b = 2;")
+_COMMENT_HEAD = {"src/a.ts": "let a = 1;\n// new note\nlet b = 2;\n"}
 _CODE = _diff("src/app.py", "-x = 1", "+x = 2")
 
 # recognizer name -> (diff, head files)

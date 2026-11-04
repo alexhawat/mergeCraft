@@ -24,10 +24,17 @@ The rules under test:
   `inconclusive`. A malformed answer never quietly becomes a full review and is never
   read as a success.
 - `commentOnly` refuses whenever it is unsure. A `#`-comment language is never
-  recognised. JSX and TSX are off the list (a JSX text child can start with `//`),
-  Rust is off the list (a lifetime's lone quote makes the quote check unsound), and
-  `Package.swift` is refused by name. The recognised list is exactly `.js .ts .go
-  .java .kt .c .h .cc .cpp .hpp .cs .swift`. A Java file whose diff or head text holds
+  recognised. `.js`, `.jsx` and `.tsx` are off the list (JSX, which plain `.js` files
+  may hold, renders a `//` text child as page text), Rust is off the list (a
+  lifetime's lone quote makes the quote check unsound), Go test files (`*_test.go`)
+  are refused because an example's `// Output:` body is a test input, a Go file
+  whose diff or head text says `DO NOT EDIT` (any case) is refused as generated, and
+  `Package.swift` is refused by name. The recognised list is exactly `.ts .go .java
+  .kt .c .h .cc .cpp .hpp .cs .swift`. Comment-only recognition proves no runtime
+  change for these languages; comments can still carry tool directives, which the
+  directive word list refuses on a best-effort basis (it now also holds `code`,
+  `istanbul`, `nolintnextline`, `nolintbegin`, `nolintend`, `iwyu`, `jshint`, `noqa`
+  and `coverage`, matched in any case). A Java file whose diff or head text holds
   a backslash followed by `u` (a unicode escape, translated before lexing) is refused,
   and so is a C-family file (`.c .h .cc .cpp .hpp`) holding `??` anywhere (a trigraph
   can splice the next line into a comment). A file is refused when it contains a backtick, a
@@ -143,6 +150,13 @@ test and does not break collection.
 | The suffix constant is exactly the closed list; REVIEW-CHECKS.md lists it exactly | `test_comment_only.py::test_the_recognised_suffix_list_is_exactly_the_closed_list`, `test_fast_path_lite_gate.py::test_review_checks_lists_exactly_the_recognised_comment_only_suffixes` |
 | CHANGELOG `### Changed` mentions the record's `path:line` finding format | `test_fast_path_lite_gate.py::test_the_changelog_records_the_finding_line_format_under_changed` |
 | The lite record names the provider/model slug | `test_fast_path_lite_gate.py::test_a_clean_lite_run_publishes_its_summary_as_a_comment_review` |
+| Third-gate attacks refused verbatim (JSX in `.js`, Go example output, Go `DO NOT EDIT`, C# verbatim and Swift raw strings, JS HTML-like comment, `istanbul` / `NOLINTNEXTLINE` / `IWYU` pragmas, Java escaped backslash) | `test_comment_only.py::test_every_third_gate_attack_is_refused`, `test_the_compiled_jsx_fixture_in_a_js_file_is_refused`, `test_the_compiled_go_example_fixture_is_refused`, `test_the_compiled_go_generated_header_fixture_is_refused` |
+| Third-gate true positives (Kotlin, Swift and C# interpolation, C digraphs, C macro continuation, Go embed, Kotlin `\u000a`) | `test_comment_only.py::test_the_third_gate_true_positives_are_still_recognised` |
+| `.js` off the list, `.ts` on it | `test_a_plain_js_comment_edit_is_refused_while_ts_is_recognised`, `test_js_is_not_on_the_recognised_suffix_list` |
+| `*_test.go` refused by name; `DO NOT EDIT` in Go head text or diff refused (any case) | `test_a_go_test_file_is_refused_by_name`, `test_a_go_file_whose_head_text_says_do_not_edit_is_refused`, `test_a_go_diff_whose_removed_line_says_do_not_edit_is_refused` |
+| New directive words refused in lower, upper and title case | `test_the_new_directive_words_are_refused_in_any_case` |
+| Each `.js` attack also runs as `.ts`, so its own rule (not the suffix) refuses it | `_with_ts_twins` rows (`*-as-ts`) in `test_every_probe_attack_is_refused` and `test_every_regate_attack_is_refused` |
+| REVIEW-CHECKS.md names the excluded languages and why, and says comments can still carry tool directives | `test_fast_path_lite_gate.py::test_review_checks_names_the_excluded_languages_and_why`, `test_review_checks_says_comments_can_still_carry_tool_directives` |
 | The API key never appears in a loguru line (success, HTTP 401, connect error) | `tests/agents/test_lite_review.py::test_the_api_key_never_appears_in_a_log_line` |
 | Lite record published as a `COMMENT` review with summary and finding location/message | `tests/review/test_fast_path_lite_gate.py::test_a_clean_lite_run_publishes_its_summary_as_a_comment_review`, `test_a_blocking_lite_run_publishes_each_finding_location_and_message` |
 | A failed completion check never says "finished successfully" | `test_fast_path_lite_gate.py::test_a_failed_completion_check_never_says_the_run_finished_successfully` |
@@ -174,3 +188,13 @@ provider is an operator step, not part of `make test`.
   mis-pairs the quote check, and a C trigraph `??/` that splices the next code line.
   Rust left the recognised list, so the earlier Rust char-literal positive is now a
   refusal and the Rust raw-string row was dropped from the marker table.
+- A third verification round found JSX text in plain `.js` files, multi-line Go
+  example `// Output:` bodies, Go generated-file headers and three more pragma words.
+  `.js` left the recognised list, so tests that used a `.js` fixture as a true
+  positive now use `.ts`. They are: `_comment_edit("src/app.js")` and every
+  `src/app.js` / `src/other.js` positive and control in `test_comment_only.py`, the
+  probe positive (now `plain-edit-now-in-ts`), the shape-rule controls, the
+  line-terminator and paired-edit paths, the nullish-coalescing guard, the lite tier's
+  comment fixture in `test_triage_lite.py`, and the comment-only gate fixtures in
+  `test_fast_path_lite_gate.py`. Attack rows on `.js` stay verbatim and gain `.ts`
+  twins.
