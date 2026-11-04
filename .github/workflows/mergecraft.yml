@@ -53,6 +53,8 @@
 # Auth (same-repo only — forks skip):
 # - OPENCODE_GO_API_KEY — OpenCode Go API key — primary (opencode-go/deepseek-v4.1-flash)
 # - CODEX_AUTH_JSON — ChatGPT/Codex subscription (`mergecraft auth codex`) — fallback
+#   The Codex rung writes the login back to this secret after Codex rotates its
+#   refresh token (needs the reviewer App's "Secrets: Read and write" permission).
 # - OPENAI_API_KEY — OpenAI API key (same Codex harness as CODEX_AUTH_JSON)
 # - CLAUDE_CODE_OAUTH_TOKEN — Claude Pro/Max subscription (`mergecraft auth claude`) — backstop
 # - ANTHROPIC_API_KEY — Anthropic API key (same claude harness as CLAUDE_CODE_OAUTH_TOKEN)
@@ -425,6 +427,7 @@ jobs:
             scripts/decide_codex_fallback.sh
             scripts/decide_claude_fallback.sh
             scripts/lib/provider_verdict_guard.sh
+            scripts/codex_auth_writeback.py
           )
           for rel in "${scripts[@]}"; do
             cp -p "${rel}" "${root}/${rel}"
@@ -839,6 +842,7 @@ jobs:
     timeout-minutes: 40
     env:
       HAS_APP: ${{ secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APP_PRIVATE_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      IS_SAME_REPO: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
       HAS_CODEX: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
       MERGECRAFT_CI_WAIT_STATE: ${{ needs.wait-for-ci.outputs.state }}
       MERGECRAFT_CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
@@ -867,6 +871,45 @@ jobs:
           # passes `env=_git_env(ctx.git_token)`, so the action authenticates
           # from its `token:` input and needs nothing in .git/config.
           persist-credentials: false
+
+      # This is the last point at which the workspace is provably the trusted
+      # default-branch checkout: the Codex rung below checks the PR head out
+      # into it. The login write-back after the rung runs a script on the
+      # runner host, so stage the trusted scripts out of the workspace now, in
+      # the runner home the container never mounts, and publish their content
+      # hash so the write-back step can re-verify the copy it is about to run.
+      # Each cascade job stages its own copy: the jobs run on separate runners,
+      # so a copy staged in the review job is not visible here (#1026).
+      - name: Stage the trusted scripts outside the workspace
+        id: trusted_scripts
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "${head}" != "${GITHUB_SHA}" ]; then
+            echo "::error title=mergecraft trusted scripts::checked-out HEAD ${head} does not match GITHUB_SHA ${GITHUB_SHA}; refusing to stage the trusted scripts from an unverified tree."
+            exit 1
+          fi
+          root="${HOME}/mergecraft-trusted-${GITHUB_RUN_ID}"
+          rm -rf "${root}"
+          mkdir -p "${root}/scripts/lib"
+          scripts=(
+            scripts/decide_codex_fallback.sh
+            scripts/decide_claude_fallback.sh
+            scripts/lib/provider_verdict_guard.sh
+            scripts/codex_auth_writeback.py
+          )
+          for rel in "${scripts[@]}"; do
+            cp -p "${rel}" "${root}/${rel}"
+            echo "staged ${rel} -> ${root}/${rel}"
+          done
+          {
+            echo "root=${root}"
+            echo "sha256<<MERGECRAFT_TRUSTED_EOF"
+            for rel in "${scripts[@]}"; do
+              printf '%s %s\n' "$(sha256sum "${root}/${rel}" | awk '{print $1}')" "${rel}"
+            done
+            echo "MERGECRAFT_TRUSTED_EOF"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Ensure PR base ref exists locally
         if: github.event_name == 'pull_request_target'
@@ -982,6 +1025,15 @@ jobs:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: mergecraft-dev
           MERGECRAFT_TRACING_REGION: eu
+          # Codex rotates the subscription's refresh token on use and rewrites
+          # its auth.json; the run temp dir holding it is removed at exit. The
+          # driver copies the refreshed file here — only when the refresh token
+          # changed — for the write-back step below. This is a Docker action, so
+          # the runner rewrites a step env value under the host temp dir to the
+          # container's mount of it, the same way the evidence packet under
+          # $RUNNER_TEMP/mergecraft reaches the persist step; the host steps
+          # below read the file at the host path.
+          MERGECRAFT_CODEX_AUTH_EXPORT: ${{ runner.temp }}/mergecraft-codex-auth/auth.json
 
       - name: Persist evidence packet (Codex)
         if: always()
@@ -1025,6 +1077,78 @@ jobs:
             ${{ runner.temp }}/mergecraft/judge-verdicts.jsonl
           retention-days: 30
           if-no-files-found: ignore
+
+      # The Codex rung spent the stored refresh token if it refreshed the login
+      # (#970). Store the rotated login so the next consumer does not fail with
+      # "refresh token was already used". Same-repo only, and only on a run that
+      # actually ran Codex. A dedicated token with one permission: writing
+      # repository secrets is not something the review token may do. The App
+      # needs the "Secrets: Read and write" repository permission for this mint
+      # to succeed; without it the mint fails and the step below is skipped.
+      - name: Mint App token for the Codex login write-back
+        if: >-
+          always() &&
+          env.IS_SAME_REPO == 'true' &&
+          env.HAS_APP == 'true' &&
+          env.HAS_CODEX == 'true' &&
+          steps.mergecraft_codex.outcome != 'skipped'
+        id: app_token_codex_writeback
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.MERGECRAFT_APP_ID }}
+          private-key: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-secrets: write
+
+      # Compares the exported auth.json with the secret the run started with and
+      # writes it back only when the refresh token changed; a missing, unparsable
+      # or token-less file, an unchanged token, a different or unnamed account,
+      # or a rung that reported the login expired each end in a ::notice and no
+      # write. The credential travels env -> script -> gh stdin and is never
+      # printed; the exported file is removed afterwards. Runs the trusted copy
+      # of the script, never the workspace path the reviewed branch has since
+      # rewritten.
+      - name: Write the refreshed Codex login back to CODEX_AUTH_JSON
+        if: >-
+          always() &&
+          env.IS_SAME_REPO == 'true' &&
+          env.HAS_CODEX == 'true' &&
+          steps.mergecraft_codex.outcome != 'skipped' &&
+          steps.app_token_codex_writeback.outputs.token != ''
+        id: codex_auth_writeback
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.app_token_codex_writeback.outputs.token }}
+          CODEX_AUTH_JSON_ORIGINAL: ${{ secrets.CODEX_AUTH_JSON }}
+          CODEX_AUTH_EXPORT: ${{ runner.temp }}/mergecraft-codex-auth/auth.json
+          REPO: ${{ github.repository }}
+          TRUSTED_ROOT: ${{ steps.trusted_scripts.outputs.root }}
+          TRUSTED_HASHES: ${{ steps.trusted_scripts.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          while read -r hash rel; do
+            [ -z "${hash}" ] && continue
+            actual="$(sha256sum "${TRUSTED_ROOT}/${rel}" | awk '{print $1}')"
+            if [ "${actual}" != "${hash}" ]; then
+              echo "::error title=mergecraft trusted scripts::hash mismatch for ${rel} (recorded ${hash}, found ${actual}) — refusing to run a copy that is not the reviewed one."
+              exit 1
+            fi
+          done <<< "${TRUSTED_HASHES}"
+          python3 "${TRUSTED_ROOT}/scripts/codex_auth_writeback.py" \
+            --exported "${CODEX_AUTH_EXPORT}" \
+            --original-env CODEX_AUTH_JSON_ORIGINAL \
+            --secret-name CODEX_AUTH_JSON \
+            --repo "${REPO}"
+
+      # The export is a credential on the runner disk; the write-back step
+      # removes it, but that step is skipped without an App token.
+      - name: Discard the exported Codex login
+        if: always()
+        env:
+          CODEX_AUTH_EXPORT: ${{ runner.temp }}/mergecraft-codex-auth/auth.json
+        run: rm -f "${CODEX_AUTH_EXPORT}"
 
   # The Claude backstop and the recorded verdict. Runs after both earlier rungs
   # so the rung order, and the rung the verdict is taken from, are unchanged.
@@ -1124,6 +1248,7 @@ jobs:
             scripts/decide_codex_fallback.sh
             scripts/decide_claude_fallback.sh
             scripts/lib/provider_verdict_guard.sh
+            scripts/codex_auth_writeback.py
           )
           for rel in "${scripts[@]}"; do
             cp -p "${rel}" "${root}/${rel}"

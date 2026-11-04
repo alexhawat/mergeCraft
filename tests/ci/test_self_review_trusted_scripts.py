@@ -45,7 +45,7 @@ _WORKSPACE_RELATIVE = re.compile(
     r"|(?<![\w/$.~-])\./[\w./-]+"
     r"|(?<![\w/$.~-])scripts/[\w./-]+"
 )
-_SCRIPT_REFERENCE = re.compile(r"scripts/(?:lib/)?[\w./-]+\.sh")
+_SCRIPT_REFERENCE = re.compile(r"scripts/(?:lib/)?[\w./-]+\.(?:sh|py)")
 
 
 def _review_steps(job_name: str = _REVIEW_JOB) -> list[dict[str, object]]:

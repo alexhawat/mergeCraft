@@ -537,6 +537,15 @@ in `.mergecraft/config.yaml` to log diagnostics only.
 | [LiteLLM](https://docs.litellm.ai/) proxy | — | same custom-provider env pair — [`examples/config-litellm.yaml`](examples/config-litellm.yaml) | `default/<model>` or `<label>/<model>` |
 | Logfire tracing | `mergecraft auth logfire` | see [`docs/TRACING.md`](docs/TRACING.md) | — |
 
+A ChatGPT-subscription login (`CODEX_AUTH_JSON`) rotates its refresh token on
+use: each run that refreshes it spends the stored token, and a secret nobody
+writes back fails a few days later with "refresh token was already used". This
+repository's self-review writes the refreshed login back to `CODEX_AUTH_JSON`
+after every Codex run, from a dedicated App token whose only permission is
+repository secrets — the reviewer App needs **Secrets: Read and write** for the
+write-back to run; see [`docs/authentication.md`](docs/authentication.md#repository-self-review-app-identity).
+`OPENAI_API_KEY` remains the alternative that never expires.
+
 Custom OpenAI-compatible endpoints (including [LiteLLM](https://docs.litellm.ai/)
 proxies — no native `litellm` provider id), multi-provider indexed env vars, and
 `model:` chain semantics: [`docs/authentication.md`](docs/authentication.md).

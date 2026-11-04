@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import shutil
@@ -57,7 +58,7 @@ from mergecraft.agents.shared import (
     with_prompt,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
-from mergecraft.config.env import AgentRuntimeEnv, ProviderGatewayEnv
+from mergecraft.config.env import CODEX_AUTH_EXPORT_ENV, AgentRuntimeEnv, ProviderGatewayEnv
 from mergecraft.config.trust_policy import AgentSandboxDecision
 from mergecraft.mcp.endpoints import MCP_VERIFIER_ENDPOINT
 from mergecraft.security.broker import CodexBrokerPosture, subscription_auth_usable
@@ -89,6 +90,16 @@ CODEX_CREDENTIAL_EXPIRED_REASON = (
     f"(mergecraft auth codex, then gh secret set {CODEX_AUTH_ENV})"
 )
 CODEX_CREDENTIAL_EXPIRED_KIND = "reviewer_credential_expired"
+# Where the run copies the ChatGPT-subscription login after Codex refreshed it.
+# Codex rotates the refresh token on use and rewrites ``$CODEX_HOME/auth.json``
+# with the new one (codex-rs ``login/src/auth/storage.rs`` ``save``), but the
+# run temp dir that holds ``$CODEX_HOME`` is removed at exit, so a stored
+# ``CODEX_AUTH_JSON`` that was refreshed in CI is left spent (#970). When this
+# names a path, the refreshed ``auth.json`` is copied there — only when its
+# refresh token differs from the one the run started with — for the workflow's
+# write-back step to store. Unset outside the self-review workflow. The name
+# is declared beside the model that parses it (``AgentRuntimeEnv``) and
+# re-exported here: :data:`CODEX_AUTH_EXPORT_ENV`.
 # A Codex ``config.toml`` is built as a nested mapping and rendered once; a
 # nested value is a table, a scalar is a key in the table that holds it.
 TomlTable: TypeAlias = dict[str, "str | bool | TomlTable"]
@@ -286,6 +297,168 @@ def _setup_codex_auth(
         )
     if _has_openai_api_key():
         logger.info("using {} for Codex CLI authentication", OPENAI_API_KEY_ENV)
+
+
+def _subscription_refresh_token(raw: str) -> str | None:
+    """Return the refresh token carried by a ``CODEX_AUTH_JSON`` body, or ``None``."""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    tokens = data.get("tokens")
+    source = tokens if isinstance(tokens, dict) else data
+    for key in ("refresh_token", "refresh"):
+        value = source.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _subscription_account_id(raw: str) -> str | None:
+    """Return ``tokens.account_id`` from a ``CODEX_AUTH_JSON`` body, or ``None``."""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    tokens = data.get("tokens")
+    if not isinstance(tokens, dict):
+        return None
+    value = tokens.get("account_id")
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _chown_to_parent_owner(path: Path) -> None:
+    """Hand ``path`` to whoever owns its nearest existing ancestor.
+
+    Inside the Action container this process is root while ``$RUNNER_TEMP`` is
+    owned by the host runner user, which is the reader of the exported file.
+    Best effort: a failure leaves a root-owned ``0600`` file the workflow step
+    reports as unreadable, never a wider mode.
+    """
+    if os.getuid() != 0:
+        return
+    for ancestor in path.parents:
+        if ancestor.exists():
+            try:
+                stat = ancestor.stat()
+                os.chown(path, stat.st_uid, stat.st_gid)
+            except OSError as exc:
+                logger.warning("could not chown exported Codex login {}: {}", path, exc)
+            return
+
+
+def export_refreshed_codex_auth(
+    *,
+    codex_home: Path,
+    original: str,
+    export_path: Path,
+    credential_expired: bool = False,
+) -> bool:
+    """Copy ``$CODEX_HOME/auth.json`` to ``export_path`` when Codex refreshed the login.
+
+    Returns ``True`` only when a file was written. Nothing is written — and a
+    reason is logged, naming paths and never token material — when the login
+    was reported expired, the auth file is missing or unparsable, it carries no
+    refresh token, the refresh token is the one the run started with, or the
+    file and the stored secret do not both name the same ``tokens.account_id``.
+    The account check fails closed: a body on either side that names no
+    account is not exported, since this runs after the reviewer has processed
+    content the pull request controls.
+
+    Args:
+        codex_home: The run's ``$CODEX_HOME``.
+        original: The ``CODEX_AUTH_JSON`` body the run started with.
+        export_path: Destination; its parent is created ``0700`` and the file
+            is written ``0600``, then handed to the owner of the nearest
+            existing ancestor (the host runner user under ``$RUNNER_TEMP``).
+        credential_expired: The run reported ``reviewer_credential_expired``;
+            a login that failed to refresh must not be written back.
+    """
+    if credential_expired:
+        logger.info("Codex login reported expired; not exporting auth.json for write-back")
+        return False
+    auth_path = codex_home / "auth.json"
+    if not auth_path.is_file():
+        logger.debug("no Codex auth.json at {}; nothing to export", auth_path)
+        return False
+    try:
+        current = auth_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning("could not read Codex auth.json {}: {}", auth_path, exc)
+        return False
+    current_token = _subscription_refresh_token(current)
+    if current_token is None:
+        logger.info("Codex auth.json at {} carries no refresh token; nothing to export", auth_path)
+        return False
+    if current_token == _subscription_refresh_token(original):
+        logger.debug("Codex refresh token unchanged; nothing to export")
+        return False
+    original_account = _subscription_account_id(original)
+    current_account = _subscription_account_id(current)
+    if not original_account or not current_account:
+        logger.info(
+            "Codex auth.json at {} or {} names no tokens.account_id; cannot match the "
+            "refreshed login to the stored account, not exporting",
+            auth_path,
+            CODEX_AUTH_ENV,
+        )
+        return False
+    if original_account != current_account:
+        logger.warning(
+            "Codex auth.json at {} belongs to a different account than {}; not exporting",
+            auth_path,
+            CODEX_AUTH_ENV,
+        )
+        return False
+    try:
+        export_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        _chown_to_parent_owner(export_path.parent)
+        fd = os.open(export_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(current)
+        os.chmod(export_path, 0o600)
+        _chown_to_parent_owner(export_path)
+    except OSError as exc:
+        logger.warning("could not export refreshed Codex login to {}: {}", export_path, exc)
+        return False
+    logger.info("exported refreshed Codex login to {} for write-back", export_path)
+    return True
+
+
+def _export_refreshed_login_for_run(
+    ctx: AgentRunContext,
+    *,
+    original: str,
+    result: AgentResult | None,
+) -> None:
+    """Run :func:`export_refreshed_codex_auth` for this run when the env asks for it.
+
+    Never raises: the review's outcome does not depend on the write-back.
+    """
+    raw = AgentRuntimeEnv().codex_auth_export
+    if not raw:
+        logger.debug("{} unset; not exporting the Codex login", CODEX_AUTH_EXPORT_ENV)
+        return
+    if not original.strip():
+        return
+    expired = bool(
+        result is not None
+        and result.metadata
+        and result.metadata.get(INFRA_REASON_KEY) == CODEX_CREDENTIAL_EXPIRED_KIND
+    )
+    try:
+        export_refreshed_codex_auth(
+            codex_home=_codex_home(ctx),
+            original=original,
+            export_path=Path(raw),
+            credential_expired=expired,
+        )
+    except Exception as exc:  # the review outcome must not depend on this
+        logger.warning("exporting the refreshed Codex login failed: {}", exc)
 
 
 def _with_flat_codex_auth(env: dict[str, str], *, model: str | None) -> dict[str, str]:
@@ -1007,6 +1180,7 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
             metadata=broker_run_record_fields(broker_session.posture),
         )
     set_broker_session(broker_session)
+    outcome: AgentResult | None = None
     try:
         render_result = render_for_run(ctx, "codex")
         subagent_block = render_result.payload if isinstance(render_result.payload, str) else None
@@ -1032,6 +1206,7 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
             )
 
         result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
+        outcome = result
         finalized = await finalize_agent_result(ctx, result)
         broker_metadata = broker_run_record_fields(broker_session.posture)
         if finalized.metadata:
@@ -1042,6 +1217,14 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     finally:
         stop_broker_session(broker_session)
         set_broker_session(None)
+        # After the broker is down and whatever Codex did to auth.json has
+        # landed — including when the run was cancelled on its budget, since
+        # a refresh that already happened is still the live login.
+        _export_refreshed_login_for_run(
+            ctx,
+            original=credential_env.get(CODEX_AUTH_ENV, ""),
+            result=outcome,
+        )
 
 
 codex = agent(name="codex", install=_install, run=_run, build_env=_build_env)
