@@ -78,7 +78,6 @@ def retry_after_ms(error: BaseException) -> float | None:
 class OpOptions:
     name: str | None = None
     ttl: float | None = None
-    max_items: int = 1000
     retries: list[float] | None = None
     retry_after: bool | RetryAfterFn | None = None
     retry_after_cap: float = DEFAULT_RETRY_AFTER_CAP_MS
@@ -267,15 +266,10 @@ def op(
     return _build(fn, opts)
 
 
-def range_n(n: int) -> list[int]:
-    return list(range(n))
-
-
 __all__ = [
     "DEFAULT_RETRY_AFTER_CAP_MS",
     "OpFunction",
     "OpOptions",
     "op",
-    "range_n",
     "retry_after_ms",
 ]
