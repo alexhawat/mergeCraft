@@ -155,7 +155,9 @@ even though a verdict was submitted; a Critical or Major finding still makes
 it (`Coverage: 41/44 hunks, 3 uncovered → inconclusive`) and the packet's
 `coverage` section carries the detail. Set `review.coverage.onIncomplete: warn`
 to keep the verdict and only report the gap. This proves delivery, not
-comprehension: a driver's native file reads never cross mergeCraft's wire.
+comprehension: given one observed read, a delivered hunk is covered however closely it
+was read. Claude's, Gemini's and Cursor's native reads are not observed, so a reviewer
+that reads only that way ends `not_observed` and `inconclusive`.
 
 **Deterministic triage before dispatch (`review.fastPath`).** Off by default.
 When enabled in the operator's base-side config (a `pull_request_target`

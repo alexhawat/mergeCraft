@@ -7,18 +7,25 @@ nothing recorded that. This module accounts for it, as structural evidence.
   :func:`mergecraft.analyzers.scope.parse_diff_scope` (deleted-only hunks included,
   binary headers excluded).
 * **Covered** means mediated evidence only: the hunk was in the diff the reviewer was
-  handed, or an observed mediated read covered part of it. Absence of evidence is
-  *uncovered*, never *unknown* — the opposite of the trajectory auditor's silence
-  rule, on purpose, because this check gates the verdict.
+  handed, or an observed read covered part of it. A hunk with neither is *uncovered*,
+  never *unknown* — the opposite of the trajectory auditor's silence rule, on purpose,
+  because this check gates the verdict.
+* **No observed read at all** withdraws delivery as evidence, because handing over a
+  diff only means writing a file and naming its path. Every delivered hunk of such a run
+  is ``not_observed``. This is what keeps a reviewer that never opened the diff off a
+  green check: a run-health row is enough to attest a run, so nothing else stops it.
 * **Unknown ranges** are never coverable: a file GitHub sent line counts for but no
   ``patch``, and the files beyond the files-API page cap, are listed by path and stay
   uncovered, because no lines exist to read.
 * **Policy exclusions** (generated, minified and vendored files) are listed as
   ``excluded_generated`` and do not count against completeness.
 
-What this proves is delivery, not comprehension: a driver's native file reads never
-cross mergeCraft's wire, so a hunk inside the delivered diff is covered whether or not
-the reviewer read it closely.
+What this proves is delivery, not comprehension: given one observed read, a hunk inside
+the delivered diff is covered however closely the reviewer read it. Reads reach the
+trajectory through MCP, a driver's recorded shell commands, and OpenCode's ``read`` tool.
+Claude's, Gemini's and Cursor's native reads do not, so a reviewer that reads only that
+way ends ``not_observed``: a false negative this gate accepts, because unknown is never
+green.
 
 Exports:
     Hunk: One changed hunk (path and new-side line range).
@@ -102,11 +109,10 @@ def _uncovered_known(
     """Return the hunks nothing vouches for.
 
     A hunk is covered when it reached the reviewer in the delivered diff, or when
-    an observed read covered lines inside it. ``reads_observed`` is the extra
-    condition this rebuild adds: a run whose read tracking produced nothing at
-    all cannot claim completeness, whatever was delivered. The read evidence is
-    :mod:`mergecraft.evidence.diff_coverage`'s line ranges — the same layer the
-    auditor and the pre-submit nudge use.
+    an observed read covered lines inside it. ``reads_observed=False`` withdraws
+    delivery as evidence: nothing shows the reviewer opened what it was handed. The
+    read evidence is :mod:`mergecraft.evidence.diff_coverage`'s line ranges — the
+    same layer the auditor and the pre-submit nudge use.
     """
     if not reads_observed:
         return list(universe)
@@ -135,9 +141,9 @@ def account_coverage(
         unreviewable_paths: Files with line changes but no inline patch.
         diff_truncated: The files listing hit its page cap, so later files were never seen.
         reads_observed: Whether any read in scope was observed at all. ``False``
-            means the run's read tracking produced nothing to vouch for the
-            delivered hunks; absence of evidence is uncovered, not unknown,
-            because this check gates the verdict.
+            means nothing shows the reviewer opened the delivered diff, so its
+            hunks are ``not_observed``; absence of evidence is uncovered, not
+            unknown, because this check gates the verdict.
     """
     universe = coverage_universe(authoritative_diff)
     delivered = set(universe if delivered_diff is None else coverage_universe(delivered_diff))
@@ -166,7 +172,7 @@ def account_coverage(
         if _excluded_by_policy(hunk, change):
             cause = "excluded_generated"
         elif hunk in delivered:
-            # Delivered, but the run's reads were never observed.
+            # Delivered, but nothing shows the reviewer opened it.
             cause = "not_observed"
         else:
             cause = "not_delivered"

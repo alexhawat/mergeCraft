@@ -93,6 +93,47 @@ def test_pre_submit_nudge_stays_silent_without_read_evidence(tmp_path: Path) -> 
     assert diff_coverage_nudge_for_state(state) is None
 
 
+def test_pre_submit_nudge_names_everything_when_the_driver_reports_no_read(
+    tmp_path: Path,
+) -> None:
+    state, _diff_path = _state_with_diff(tmp_path)
+    state.driver_reports_reads = True
+
+    nudge = diff_coverage_nudge_for_state(state)
+
+    assert nudge is not None
+    assert "`src/app.py:2-2`" in nudge
+    assert "`src/other.py:11-11`" in nudge
+    assert diff_coverage_nudge_for_state(state) is None
+
+
+def test_pre_submit_nudge_stays_silent_on_a_generated_only_diff_with_no_read(
+    tmp_path: Path,
+) -> None:
+    generated = (
+        "diff --git a/uv.lock b/uv.lock\n--- a/uv.lock\n+++ b/uv.lock\n"
+        "@@ -1,2 +1,3 @@\n one\n+added\n two\n"
+    )
+    state, _diff_path = _state_with_diff(tmp_path, generated)
+    state.driver_reports_reads = True
+
+    assert diff_coverage_nudge_for_state(state) is None
+
+
+def test_a_paged_native_read_of_the_diff_silences_the_nudge(tmp_path: Path) -> None:
+    from mergecraft.evidence.trajectory import record_driver_read
+
+    state, diff_path = _state_with_diff(tmp_path)
+    state.driver_reports_reads = True
+    record_driver_read(state, path=str(diff_path), span=(1, 7))
+    assert "src/other.py:11-11" in (diff_coverage_nudge_for_state(state) or "")
+
+    state.diff_coverage_nudge_sent = False
+    record_driver_read(state, path=str(diff_path), span=(8, 14))
+
+    assert diff_coverage_nudge_for_state(state) is None
+
+
 def test_nudge_accepts_already_built_tool_call_rows(tmp_path: Path) -> None:
     state, diff_path = _state_with_diff(tmp_path)
     state.tool_calls.append(
