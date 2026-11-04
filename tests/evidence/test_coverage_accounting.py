@@ -3,10 +3,10 @@
 A review can reach a verdict without every changed hunk ever reaching the reviewer, and
 nothing recorded that. The invariant: every changed hunk of the authoritative PR diff
 (``parse_diff_scope``) is **covered** only through mediated evidence — it was in the
-delivered diff (net of truncation and files with no inline patch), a mediated read of its
-file returned the lines, or an explicit follow-up turn handed it back. Absence of evidence
-is *uncovered*, not *unknown*. Policy exclusions (generated files) are listed but do not
-count against completeness.
+delivered diff (net of truncation and files with no inline patch), or an observed read of
+its file returned the lines. A hunk with neither is *uncovered*, not *unknown*, and so is
+every hunk of a run with no observed read at all. Policy exclusions (generated files) are
+listed but do not count against completeness.
 """
 
 from __future__ import annotations
@@ -145,7 +145,7 @@ def test_a_hunk_missing_from_the_delivered_diff_is_uncovered_not_unknown() -> No
 
 
 def test_an_unobserved_run_cannot_claim_completeness() -> None:
-    """Absence of read evidence is uncovered, not unknown: this gates the verdict."""
+    """Delivery only writes a file: with no observed read nothing vouches it was opened."""
     from mergecraft.evidence.coverage import account_coverage
 
     section = account_coverage(
@@ -157,6 +157,21 @@ def test_an_unobserved_run_cannot_claim_completeness() -> None:
     assert section.complete is False
     assert {row.cause for row in section.uncovered} == {"not_observed"}
     assert section.hunks_covered == 0
+
+
+def test_not_observed_does_not_hide_a_hunk_that_was_never_delivered() -> None:
+    from mergecraft.evidence.coverage import account_coverage
+
+    section = account_coverage(
+        authoritative_diff=_TWO_FILES,
+        delivered_diff=_only(_TWO_FILES, "src/a.py"),
+        reads_observed=False,
+    )
+
+    assert {(row.path, row.cause) for row in section.uncovered} == {
+        ("src/a.py", "not_observed"),
+        ("src/b.py", "not_delivered"),
+    }
 
 
 def test_an_observed_run_is_complete_when_every_hunk_was_delivered() -> None:

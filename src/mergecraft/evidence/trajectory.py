@@ -59,12 +59,14 @@ Exports:
     classify_failure_class: Derive a failure class from recorded error text.
     classify_failure_at_execute: Derive it from the signals a driver has at execute.
     record_driver_exec: Append one driver-native exec call to the run's state.
+    record_driver_read: Append one driver-native file read to the run's state.
     record_tool_call: Append one mediated call to the run's state.
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
 import posixpath
 import re
 import shlex
@@ -155,12 +157,18 @@ _TRANSIENT_FAILURE_MARKERS: Final[tuple[str, ...]] = (
     "rate limit",
 )
 
+# The row name of a read a driver made with its own file tool (:func:`record_driver_read`).
+DRIVER_READ_TOOL: Final[str] = "read"
+# An explicit span whose lines are not known: observed, but it credits no line.
+UNKNOWN_READ_SPAN: Final[tuple[int, int]] = (0, -1)
+
 # Intent by MCP tool name. `shell` and `git` are absent on purpose: both are
 # general-purpose, so their intent is derived from the command (see
 # `_command_intent`). A tool missing from this table lands on "other" — an
 # unknown tool must never be silently counted as verification or completion.
 _TOOL_INTENTS: Final[dict[str, Intent]] = {
     # read
+    DRIVER_READ_TOOL: "read",
     "checkout_pr": "read",
     "establish_review_scope": "read",
     "checkout_repo": "read",
@@ -485,7 +493,9 @@ class ToolCallRecord(BaseModel):
     # is therefore invisible to ``paths`` after sanitisation. ``(0, 0)`` means
     # the whole diff; a positive pair is the 1-based line span the call read.
     # Recorded from the raw command before redaction, because a run-temp path
-    # can look like a secret to the redactor.
+    # can look like a secret to the redactor. A driver-native read has no command
+    # to parse a span from, so on a row with ``paths`` and no ``diff_read_path``
+    # this is the span of that source file instead.
     diff_read_path: str | None = Field(default=None, exclude_if=lambda value: value is None)
     diff_read: tuple[int, int] | None = Field(default=None, exclude_if=lambda value: value is None)
     duration_ms: int | None = Field(default=None, exclude_if=lambda value: value is None)
@@ -1106,6 +1116,8 @@ def _diff_read_marker(
     """
     from mergecraft.mcp.tool_state import primary_repo_state
 
+    if tool == DRIVER_READ_TOOL:
+        return _driver_read_marker(state, arguments)
     if tool not in {"shell", "git"}:
         return "", None
     command = str((arguments or {}).get("command") or "")
@@ -1130,6 +1142,48 @@ def _diff_read_marker(
         tool = argv[0].rsplit("/", maxsplit=1)[-1] if argv else ""
         return raw, (0, 0) if tool in _FULL_FILE_READ_COMMANDS else (0, -1)
     return "", None
+
+
+def _diff_paths(state: ToolState) -> list[str]:
+    """Return the diff files checkout materialised for the primary repo."""
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    repo = primary_repo_state(state)
+    return [raw for raw in (repo.incremental_diff_path, repo.diff_path) if raw]
+
+
+def _driver_read_marker(
+    state: ToolState, arguments: dict[str, Any] | None
+) -> tuple[str, tuple[int, int] | None]:
+    """Return the marker of one driver-native read, named by :func:`_driver_read_operand`."""
+    values = arguments or {}
+    span = values.get("span")
+    if values.get("path") in _diff_paths(state):
+        return str(values["path"]), span or (0, 0)
+    return "", span
+
+
+def _driver_read_operand(state: ToolState, path: str) -> str:
+    """Return what a driver's read path names: a diff file, or a path in the checkout.
+
+    A driver may name either spelling of a path (``/var`` and ``/private/var`` on
+    macOS), so both the literal and the resolved form are compared. Anything else
+    comes back absolute, which :func:`_sanitize_path` drops: it is neither.
+    """
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    resolved = os.path.realpath(path)
+    for raw in _diff_paths(state):
+        if path == raw or resolved == os.path.realpath(raw):
+            return raw
+    if not posixpath.isabs(path):
+        return path
+    root = primary_repo_state(state).dir
+    for candidate, base in ((path, root), (resolved, os.path.realpath(root))):
+        base = posixpath.normpath(base)
+        if posixpath.commonpath((base, posixpath.normpath(candidate))) == base:
+            return posixpath.relpath(candidate, base)
+    return path
 
 
 def record_tool_call(
@@ -1199,6 +1253,37 @@ def record_tool_call(
     )
     state.tool_calls.append(row)
     return row
+
+
+def record_driver_read(
+    state: Any,
+    *,
+    path: object,
+    span: tuple[int, int] | None = None,
+) -> ToolCallRecord | None:
+    """Record one driver-native file read on the run's trajectory.
+
+    A driver's own read tool never crosses the MCP door, and it has no command for
+    :func:`_diff_read_marker` to parse, so the driver hands over the path and what
+    it showed. ``span`` is the 1-based line span shown, ``None`` the whole file, and
+    :data:`UNKNOWN_READ_SPAN` a read that showed some lines the driver cannot name.
+    Only a read that returned something belongs here: a failed one is not evidence.
+
+    **Total**, like :func:`record_driver_exec`: evidence, not control flow.
+    """
+    try:
+        if not isinstance(path, str) or not path.strip() or not hasattr(state, "tool_calls"):
+            return None
+        return record_tool_call(
+            state,
+            tool=DRIVER_READ_TOOL,
+            arguments={"path": _driver_read_operand(state, path), "span": span},
+            ok=True,
+            outcome_ok=True,
+        )
+    except Exception as exc:  # an audit trail never breaks a tool call
+        logger.debug("trajectory: failed to record driver read — {}", exc)
+        return None
 
 
 # Markers that mean "the network or a remote hiccuped", for the output of a command
@@ -1493,9 +1578,14 @@ def build_trajectory_record(
     for call in calls:
         if call.command:
             commands.append(call.command)
-        if call.intent == "read" and call.ok and call.outcome_ok is not False and call.paths:
-            observed_read = True
-            read_paths.extend(call.paths)
+        if call.intent == "read" and call.ok and call.outcome_ok is not False:
+            # A read of the materialised diff has no repo path, and it is the read
+            # the reviewer is told to make. A partial match such as a grep is not one.
+            if call.diff_read_path is not None and call.diff_read != UNKNOWN_READ_SPAN:
+                observed_read = True
+            if call.paths:
+                observed_read = True
+                read_paths.extend(call.paths)
         elif call.intent == "verify":
             if call.command:
                 tests.append(call.command)
@@ -1534,10 +1624,12 @@ def build_trajectory_record(
 
 
 __all__ = [
+    "DRIVER_READ_TOOL",
     "SOURCE_EXTERNAL_TRACE",
     "SOURCE_MCP",
     "SOURCE_RUN_DIFF",
     "TRAJECTORY_SCHEMA_VERSION",
+    "UNKNOWN_READ_SPAN",
     "ExternalTraceRef",
     "FailureClass",
     "Intent",
@@ -1547,5 +1639,6 @@ __all__ = [
     "classify_failure_class",
     "classify_tool_intent",
     "outcome_ok_from_result",
+    "record_driver_read",
     "record_tool_call",
 ]
