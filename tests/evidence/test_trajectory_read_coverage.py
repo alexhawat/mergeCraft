@@ -482,3 +482,45 @@ def test_rev_path_reads_are_preserved_as_read_evidence() -> None:
     assert "HEAD:src/base.py" not in record.files_read
     assert "origin/main..HEAD" not in record.files_read
     assert _changed_unread_paths(record) == ["src/unread.py"]
+
+
+# Built at runtime so the literal never sits in the tree for a secret scanner.
+_AWS_KEY_SHAPED = "AKIA" + "IOSFODNN7" + "EXAMPLE"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "src/mergecraft/evidence/trajectory_audit.py",
+        "tests/agents/test_codex_credential_expired.py",
+        "src/mergecraft/agents/codex.py",
+    ],
+)
+def test_ordinary_long_repo_paths_are_kept_as_read_evidence(path: str) -> None:
+    """The entropy pass read a whole slash-joined path as one dense token (#1007)."""
+    state = init_tool_state(owner="acme", name="demo", dir="/tmp/demo")
+    record_tool_call(
+        state, tool="shell", arguments={"command": f"cat {path}"}, ok=True, outcome_ok=True
+    )
+
+    assert build_trajectory_record(state).files_read == [path]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"config/{_AWS_KEY_SHAPED}.py",
+        f"src/{_AWS_KEY_SHAPED}/settings.py",
+        "tmp/Zx8KqP3vR7tY2wL9mN4bH6jF.txt",
+    ],
+    ids=["aws-key-stem", "aws-key-directory", "high-entropy-stem"],
+)
+def test_a_path_carrying_a_secret_shaped_token_is_still_dropped(path: str) -> None:
+    state = init_tool_state(owner="acme", name="demo", dir="/tmp/demo")
+    record_tool_call(
+        state, tool="shell", arguments={"command": f"cat {path}"}, ok=True, outcome_ok=True
+    )
+
+    record = build_trajectory_record(state)
+    assert record.files_read == []
+    assert _AWS_KEY_SHAPED not in record.model_dump_json()

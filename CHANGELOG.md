@@ -20,6 +20,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   end in a notice and no write. Operators grant the reviewer App *Secrets:
   Read and write*; `OPENAI_API_KEY` remains the alternative that never expires.
 
+- The `ignore_paths` Action input and `review.ignorePaths` keep changed files
+  matching a glob (newline- or comma-separated, `**` crosses directories) out of
+  the diff the reviewer reads, so eval data, changelogs and lockfiles no longer
+  cost review time on a mixed pull request. The review lists them under "Not
+  reviewed (ignored by config)" and the changed-line coverage gate treats them as
+  out of scope. `**/CHANGELOG.md`, `**/*.lock`, `**/package-lock.json` and
+  generated or minified files are ignored by default; set
+  `review.ignorePathDefaults: false` to review them. A pull request whose every
+  changed file is ignored passes with "nothing to review" and approval left to a
+  human, including a comment-driven review or one whose file listing failed; an
+  all-ignored scope is never approved. The repo config is read from the base side only, so a pull request
+  cannot ignore its own files (#1109).
+
+- A daily security sweep (`security-sweep.yml`, also on `workflow_dispatch`) runs
+  `make lockcheck`, `make security` and a Trivy scan of the published `:latest` and
+  `:analyzers` images on `main`, and keeps one tracking issue listing each package,
+  installed version, fixed version and advisory ID. A run with the same findings
+  updates that issue and a clean run closes it, so an advisory is seen between
+  releases instead of on the next PR; no PR check is added (#1069).
+
+- The integration workflow's privileged lane runs the analyzer UID-drop proofs
+  (`make test-uid-drop-privileged`), which need root on Linux and self-skip
+  everywhere else; in that lane a missing precondition fails rather than skips (#1015).
+
 - A deterministic triage tier, off by default (`review.fastPath.enabled`), decides
   before the agent exists whether a diff needs an LLM review. Recognizers for a
   verified pin substitution, prose, whitespace-only changes and regenerated
@@ -55,6 +79,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The self-review's Codex rung runs in its own job, the only one holding the
+  `codex-subscription-auth` concurrency group; OpenCode Go and the Claude backstop run
+  in jobs outside it. A busy PR no longer has a third queued review cancel a pending
+  one unless both actually fall back to Codex. Rung order and the recorded verdict
+  are unchanged (#1026).
+
 - The install line is `uv tool install mergecraft-action==0.1.0a4`. PyPI carries
   the pre-release distribution `mergecraft-action`; the git install stays
   documented for an unreleased commit.
@@ -80,8 +110,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `mergecraft policy --help` and `mergecraft policy effective` now say that review
   enforces the repository's rules file; `policy effective` also says when it is
   showing the shipped example packs because the repository has no rules file.
+- Environment settings for run budgets, timeouts, Action inputs and the
+  operational knobs are read through one validated model: a malformed numeric
+  value names the variable instead of failing with a bare parse error, an empty
+  `MERGECRAFT_AGENT_TIMEOUT` fails instead of silently defaulting, and secrets
+  read from the environment stay masked in diagnostics.
 
 ### Fixed
+
+- The in-review trufflehog analyzer can now exempt one detector in one file,
+  keyed on (path, detector) like the CI SARIF emitter's allowlist, instead of
+  only exempting a whole file from every detector. The URI detector is allowed
+  in `src/mergecraft/tracing/redaction.py`, whose redaction patterns spell
+  `scheme://user:pass@host` on purpose, which ends the recurring "URI secret
+  detected" self-review finding there. Any other detector still reports that
+  file (#1008).
+
+- A blast-radius classification that was missing its inputs no longer reads as
+  safe. No changed paths, or no diff statistics, now adds a `signal_missing`
+  category and puts the lane at `medium` (`assisted`) or higher instead of
+  `low` / `eligible`, and no repository override can lower it. An
+  unrecognised risk band ranks above `critical` in `risk_at_or_above` instead
+  of as `low`. The approval gate's `low_risk_passing` and `clean_pass` rows
+  (both map to `auto_merge`) also require the classification to have had
+  inputs: changed paths on the packet and no `signal_missing` category
+  (#1056, part 1).
+
+- An expired Codex subscription login now hands the review to the next vendor
+  instead of ending it. The Codex driver marks that failure
+  `failover_eligible` (move on to the next vendor) while keeping it not
+  `retryable` (no retry of the same login), the model chain advances on it but
+  never re-runs the dead login at the tail, and the action exposes a
+  `failover_eligible` output. The self-review cascade reads that output, so a
+  `neutral` packet from the dead login no longer holds the Claude backstop back
+  when OpenCode Go also failed without a verdict (#1009).
+
+- The nightly live GitHub leg polls the commit-status list for up to 30 seconds
+  before asserting a just-created status is visible, instead of failing on GitHub's
+  eventually consistent read (#1018).
+
+- `test_real_meat_invocation_smoke` skips when the `meat` binary has no OpenAI
+  credentials, as it already did for a missing binary (#1016).
 
 - OpenCode Go steps with missing or zero cost use published DeepSeek V4.1
   Flash / V4 Pro token rates when their timestamps are available, including

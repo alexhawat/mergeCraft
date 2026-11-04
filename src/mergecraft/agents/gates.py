@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Final, Union, overload
 from loguru import logger
 
 from mergecraft.analyzers.run import REQUIRED_CHECK_SATISFIED_STATUSES
+from mergecraft.classify.blast_radius import SIGNAL_MISSING_CATEGORY
 from mergecraft.evidence.gate_policy import (
     DEFAULT_GATE_POLICIES,
     NAMED_GATE_POLICY_ROWS,
@@ -583,11 +584,25 @@ def _is_high_risk_migration(packet: MergeEvidencePacket) -> bool:
     return lane == "high" and "migrations" in categories
 
 
+def _blast_radius_had_inputs(packet: MergeEvidencePacket) -> bool:
+    """Whether the packet's blast-radius lane was measured from real inputs (#1056).
+
+    Unknown is never green: a lane only counts toward ``auto_merge`` when the
+    classification had inputs — changed paths on the packet and no
+    ``signal_missing`` category. A hand-built or stale packet that claims a
+    lane with nothing measured never reaches a merge-shaped rule.
+    """
+    if packet.blast_radius is None or not packet.files_changed:
+        return False
+    return SIGNAL_MISSING_CATEGORY not in packet.blast_radius.categories
+
+
 def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
     """True only for a blocker-free low-risk PR with an explicit positive verdict.
 
-    Requires no *blocking* finding, a ``blast_radius.lane`` of ``low``, and a
-    trusted ``Decision`` row whose ``verdict`` is ``success``. A missing
+    Requires no *blocking* finding, a ``blast_radius.lane`` of ``low`` measured from
+    real inputs (``_blast_radius_had_inputs``, #1056), and a trusted ``Decision`` row
+    whose ``verdict`` is ``success``. A missing
     decision, forged ``decided_by``, ``neutral``, or ``failure`` verdict never
     satisfies this predicate — the structural approval gate must have attested
     success before ``auto_merge`` is eligible (D7 / MCB-15).
@@ -611,6 +626,8 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
         return False
     if packet.blast_radius.lane != "low":
         return False
+    if not _blast_radius_had_inputs(packet):
+        return False
     return _trusted_positive_decision(packet)
 
 
@@ -630,7 +647,8 @@ def _is_clean_pass(packet: MergeEvidencePacket) -> bool:
       ``high`` lane, per ``docs/blast-radius.md``) is respected — a clean
       high-lane packet escalates for a human instead of merging;
     - a missing ``blast_radius`` is an *unknown* lane, and unknown is never
-      green (#1056) — it escalates too.
+      green (#1056) — it escalates too, as does a ``blast_radius`` that had no
+      inputs (``_blast_radius_had_inputs``).
 
     Ordering: after the finding-driven rules so ``has_blockers`` /
     ``changed-unread-file`` / ``tool_loop`` keep winning when their findings
@@ -640,6 +658,8 @@ def _is_clean_pass(packet: MergeEvidencePacket) -> bool:
     if packet.blast_radius is None:
         return False
     if packet.blast_radius.auto_merge_lane == "forbidden":
+        return False
+    if not _blast_radius_had_inputs(packet):
         return False
     return _trusted_positive_decision(packet)
 

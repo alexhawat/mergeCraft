@@ -19,7 +19,7 @@ from mergecraft.action.inputs import (
 )
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.post_run import finalize_agent_result
-from mergecraft.agents.shared import Agent, AgentResult, AgentRunContext
+from mergecraft.agents.shared import FAILOVER_ELIGIBLE_KEY, Agent, AgentResult, AgentRunContext
 from mergecraft.agents.verifier import verifier_denied_tool_names
 from mergecraft.analyzers.redact import install_loguru_redaction_filter, redact_secrets
 from mergecraft.analyzers.sarif_upload import resolve_sarif_upload_enabled
@@ -29,7 +29,8 @@ from mergecraft.analyzers.trust import (
     resolve_analyzers_mode,
 )
 from mergecraft.ci.sarif_ingest import ingest_ci_sarif_from_action_env
-from mergecraft.config.env import EnvSettingsError, validate_env_settings
+from mergecraft.classify.triage import TriageDecision
+from mergecraft.config.env import ActionInputEnv, EnvSettingsError, validate_env_settings
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.fast_path import decide_fast_path, load_triage_inputs
 from mergecraft.main_outcome import (
@@ -56,7 +57,14 @@ from mergecraft.review.engine import ReviewEngine
 from mergecraft.review.roster_execution import RosterExecutionSummary, apply_roster_failure
 from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.review_checks import StaticCheckConfig
-from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION, RunOutcome, run_succeeded_for_outcome
+from mergecraft.review_policy.ignore_paths import INPUT_ENV as IGNORE_PATHS_INPUT_ENV
+from mergecraft.review_policy.ignore_paths import list_pull_request_paths, resolve_review_ignore
+from mergecraft.run_outcome import (
+    RUN_OUTCOME_CONCLUSION,
+    RunOutcome,
+    outcome_with_disposition_ledger,
+    run_succeeded_for_outcome,
+)
 from mergecraft.scm.github import (
     create_github_scm,
     github_client_from_scm,
@@ -152,6 +160,11 @@ class MainResult:
     # path. ``None`` for early-exit paths that bypass ``_finalize``; the GHA
     # surface writes an empty string in that case (D10).
     verdict_diagnostic: VerdictDiagnostic | None = None
+    # #1009 — the failed agent result declared ``failover_eligible``: no retry of
+    # this rung's credential can succeed, but the next vendor's may. Surfaced as
+    # the action's ``failover_eligible`` output so the workflow cascade can hand
+    # the review on even though this rung's packet carries a ``neutral`` verdict.
+    failover_eligible: bool = False
 
 
 @dataclass
@@ -725,9 +738,12 @@ async def _publish(
 
     # Effective values the status report uses. The pre-emission scan may already
     # have failed the run; the post-emission scan (emit path) can update these
-    # before the report is posted.
-    effective_outcome = outcome
-    effective_failure_reason = failure_reason
+    # before the report is posted. An open analyzer disposition ledger makes a
+    # passed run inconclusive so the completion check agrees with the packet's
+    # ``neutral`` approval conclusion (#1014); ``_finalize`` applies the same
+    # rule to the run's own result.
+    effective_outcome, ledger_reason = outcome_with_disposition_ledger(outcome, prepared)
+    effective_failure_reason = ledger_reason or failure_reason
     effective_sink_error = sink_scan_error
 
     async def _learnings_and_status() -> None:
@@ -903,19 +919,20 @@ async def _setup_run(ctx: RunContext) -> RunContext:
     but does not itself touch tokens or derive trust tier — that is the
     security boundary handled entirely by ``_resolve_credentials``.
     """
-    resolved_prompt = resolve_prompt_input()
-    ctx.resolved_prompt = resolved_prompt
     ctx.job_token = get_job_token()
     github_client = GitHubClient(ctx.job_token)
     ctx.scm = create_github_scm(ctx.job_token, client=github_client)
     run_context = await resolve_run_context_data(github_client)
     ctx.run_context = run_context
     try:
-        # Both the tracing Action-input model and the registered env models
-        # read malformed control-carrying settings here. Keeping the export
-        # inside the ``try`` maps an unparseable ``INPUT_TRACING`` to
-        # ``_ConfigurationError`` (→ ``configuration_error``) instead of
-        # letting it fall through to the generic ``infra_error`` bucket.
+        # Prompt resolution builds ``ActionInputEnv`` (the prompt fields share the
+        # model with the fail-closed tracing inputs), so it belongs inside this
+        # guard too: a malformed ``INPUT_TRACING`` must map to
+        # ``_ConfigurationError`` (→ ``configuration_error``), never fall through
+        # to the generic ``infra_error`` bucket. Plain prompt-validation errors
+        # are not ``EnvSettingsError`` and propagate exactly as before.
+        resolved_prompt = resolve_prompt_input()
+        ctx.resolved_prompt = resolved_prompt
         export_tracing_env_from_action_inputs()
         validate_env_settings()
     except EnvSettingsError as exc:
@@ -1060,7 +1077,7 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
         ForkCredentialInvariantError,
         validate_fork_credential_invariant,
     )
-    from mergecraft.agents.codex import CODEX_SANDBOX_ENV, CODEX_SANDBOX_UNSANDBOXED
+    from mergecraft.agents.codex import CODEX_SANDBOX_UNSANDBOXED
     from mergecraft.config.settings_snapshot import capture_repo_settings_snapshot
     from mergecraft.config.trust_policy import (
         agent_sandbox_manifest_fields,
@@ -1148,9 +1165,9 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     )
     log_trust_policy_at_run_start(policy)
 
-    operator_override_requested = (
-        os.environ.get(CODEX_SANDBOX_ENV, "").strip().lower() == CODEX_SANDBOX_UNSANDBOXED
-    )
+    from mergecraft.config.env import RuntimeOverridesEnv
+
+    operator_override_requested = RuntimeOverridesEnv().codex_sandbox == CODEX_SANDBOX_UNSANDBOXED
     sandbox_decision = resolve_agent_sandbox_decision(
         event=gh_event,
         event_name=event_name,
@@ -1204,7 +1221,7 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     # is carried into ToolContext later; it must not be reinterpreted after the
     # App tokens have already been minted.
     sarif_upload_enabled = resolve_sarif_upload_enabled(
-        action_input=os.environ.get("INPUT_SARIF_UPLOAD"),
+        action_input=ActionInputEnv().sarif_upload,
         repo_setting=settings.analyzers.sarif_upload,
     )
     ctx.sarif_upload_enabled = sarif_upload_enabled
@@ -1398,7 +1415,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
 
     ctx_payload = _payload_to_ctx(payload)
     ctx.ctx_payload = ctx_payload
-    analyzers_mode = resolve_analyzers_mode(os.environ.get("INPUT_ANALYZERS"))
+    analyzers_mode = resolve_analyzers_mode(ActionInputEnv().analyzers)
     ctx.analyzers_mode = analyzers_mode
     sarif_upload_enabled = ctx.sarif_upload_enabled
     from mergecraft.mcp.tool_state import primary_repo_state
@@ -2049,6 +2066,65 @@ async def _triage_gate(ctx: RunContext) -> SkipAgentReview | None:
     return SkipAgentReview(reason=decision.reason)
 
 
+_IGNORE_SKIP_EVENTS: frozenset[str] = frozenset({"pull_request", "pull_request_target"})
+
+
+async def _ignore_paths_gate(ctx: RunContext) -> SkipAgentReview | None:
+    """Resolve review path ignoring (#1109); skip the agent when every changed file is ignored.
+
+    The matcher is built from the ``ignore_paths`` Action input, the built-in defaults
+    and ``review.ignorePaths`` read from the operator's side of the pull request only,
+    and is recorded on the tool state so ``checkout_pr`` trims the reviewer's diff.
+    Only a ``pull_request`` / ``pull_request_target`` run whose complete file listing is
+    ignored skips the agent; it then records a ``skip`` triage tier, so the run passes
+    with "nothing to review" and approval is left to a human. Any doubt reviews.
+    """
+    assert ctx.settings is not None
+    assert ctx.tool_state is not None
+    assert ctx.tool_context is not None
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    repo = ctx.tool_context.repo
+    try:
+        ignore = await resolve_review_ignore(
+            ctx.tool_context.scm,
+            repo.owner,
+            repo.name,
+            event=event,
+            run_start_review=ctx.settings.review,
+            operator_owned=ctx.settings_snapshot_operator_owned,
+            input_value=os.environ.get(IGNORE_PATHS_INPUT_ENV),
+        )
+    except Exception as err:  # path ignoring is an optimisation; failing it reviews everything
+        logger.warning("ignore_paths: could not resolve the matcher, reviewing every file: {}", err)
+        return None
+    ctx.tool_state.review_ignore = ignore
+    logger.info(
+        "ignore_paths: {} glob(s), generated defaults {}, config from {}",
+        len(ignore.patterns),
+        "on" if ignore.generated_defaults else "off",
+        ignore.source,
+    )
+    pull = event.get("pull_request")
+    if not ignore.active or not isinstance(pull, dict) or not isinstance(pull.get("number"), int):
+        return None
+    if os.environ.get("GITHUB_EVENT_NAME", "") not in _IGNORE_SKIP_EVENTS:
+        return None
+    paths = await list_pull_request_paths(
+        ctx.tool_context.scm, repo.owner, repo.name, int(pull["number"])
+    )
+    if not paths:
+        return None
+    kept, ignored = ignore.partition(paths)
+    if kept:
+        return None
+    reason = f"nothing to review: all {len(ignored)} changed file(s) are ignored by config"
+    ctx.tool_state.ignored_review_paths = ignored
+    ctx.tool_state.triage = TriageDecision(tier="skip", recognizer="ignorePaths", reason=reason)
+    logger.warning("» {} — {}", ctx.tool_state.triage.record_line(), reason)
+    gha_log.notice(f"mergeCraft: {reason}")
+    return SkipAgentReview(reason=reason)
+
+
 async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecutionSummary | None:
     """Dispatch secondary reviewers server-side; return the dispatch summary."""
     assert ctx.tool_context is not None
@@ -2123,6 +2199,9 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
     triage_skip = await _triage_gate(ctx)
     if triage_skip is not None:
         return triage_skip
+    ignore_skip = await _ignore_paths_gate(ctx)
+    if ignore_skip is not None:
+        return ignore_skip
 
     with gha_log.group("agent-dispatch"):
         await _prepare_agent_dispatch(ctx)
@@ -2562,6 +2641,12 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
         # completion and approval checks were already forced to ``failure``.
         outcome = RunOutcome.failed
         failure_reason = post_emission_sink[0]
+    # #1014 — the same open-ledger rule ``_publish`` applied to the checks, so
+    # this run's own result agrees with the completion check it posted.
+    outcome, ledger_reason = outcome_with_disposition_ledger(
+        outcome, tool_state.prepared_run_packet
+    )
+    failure_reason = ledger_reason or failure_reason
 
     # O9 (OB4) — the verdict span at the publish convergence point. Emitted
     # only when the agent actually submitted a terminal verdict: a run that
@@ -2595,6 +2680,10 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
             evidence_packet_path=packet_path,
             outcome=outcome,
             verdict_diagnostic=verdict_diagnostic_code,
+            failover_eligible=(
+                not agent_result.success
+                and (agent_result.metadata or {}).get(FAILOVER_ELIGIBLE_KEY) is True
+            ),
         )
 
     output = tool_state.output or agent_result.output

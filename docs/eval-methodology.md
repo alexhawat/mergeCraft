@@ -185,7 +185,9 @@ committed yet.
 runs convergence outside the source checkout. This verifies packaging only.
 The E2E workflow's optional real-harness smoke requires the trusted repository
 variable `MERGECRAFT_E2E_LIVE_MODEL` and that model's credential. It permits one
-180-second review with a 12,000-token, 30-tool-call and $1 reported-cost budget.
+180-second review with a 400,000-token (`LIVE_SMOKE_TOKEN_BUDGET` in
+`scripts/live_image_smoke.py`, the authoritative value), 30-tool-call and $1
+reported-cost budget.
 It runs the actual installed image harness and requires a terminal verdict;
 it is not a quality score or a substitute for the two-provider campaign.
 

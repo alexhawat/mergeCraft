@@ -9,6 +9,11 @@ one group the live slice already named.
 
 A job that only checks whether the secret is configured (``!= ''``) never
 refreshes the login and is not a consumer.
+
+The group holds only the job running the Codex step (#1026). GitHub keeps one
+running and one pending job per group, so a group spanning the whole review
+job made a third queued review cancel a pending one, although only the Codex
+rung touches the credential.
 """
 
 from __future__ import annotations
@@ -45,13 +50,74 @@ def _consumer_jobs() -> list[tuple[str, str, dict[str, Any]]]:
     return found
 
 
-def test_the_self_review_job_is_a_consumer_of_the_credential() -> None:
+def _codex_step_jobs() -> set[tuple[str, str]]:
+    """Return ``(workflow, job id)`` for every job with a step that receives the secret."""
+    found: set[tuple[str, str]] = set()
+    for name in _workflow_paths():
+        doc = yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
+        for job_id, job in (doc.get("jobs") or {}).items():
+            if not isinstance(job, dict):
+                continue
+            for step in job.get("steps") or []:
+                if isinstance(step, dict) and _CONSUMES.search(json.dumps(step, default=str)):
+                    found.add((name, job_id))
+    return found
+
+
+def _group_holders() -> list[tuple[str, str]]:
+    """Return ``(workflow, scope)`` for every workflow or job holding the group."""
+    holders: list[tuple[str, str]] = []
+    for name in _workflow_paths():
+        doc = yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
+        concurrency = doc.get("concurrency")
+        if isinstance(concurrency, dict) and concurrency.get("group") == _GROUP:
+            holders.append((name, "<workflow>"))
+        for job_id, job in (doc.get("jobs") or {}).items():
+            if not isinstance(job, dict):
+                continue
+            concurrency = job.get("concurrency")
+            if isinstance(concurrency, dict) and concurrency.get("group") == _GROUP:
+                holders.append((name, str(job_id)))
+    return holders
+
+
+def test_the_codex_rung_job_is_the_only_self_review_consumer() -> None:
     """Guard — the scan below would pass vacuously if it found no consumer at all."""
     consumers = {(workflow, job_id) for workflow, job_id, _ in _consumer_jobs()}
-    assert ("mergecraft.yml", "review") in consumers, (
-        "the review job passes CODEX_AUTH_JSON to the Codex rung; if that moved, "
+    assert ("mergecraft.yml", "review-codex") in consumers, (
+        "the review-codex job passes CODEX_AUTH_JSON to the Codex rung; if that moved, "
         "update this scan rather than letting it go vacuous"
     )
+    self_review = {job_id for workflow, job_id in consumers if workflow == "mergecraft.yml"}
+    assert self_review == {"review-codex"}, (
+        f"only the Codex rung's job may receive CODEX_AUTH_JSON in mergecraft.yml: {self_review}"
+    )
+    steps = yaml.safe_load((WORKFLOWS / "mergecraft.yml").read_text(encoding="utf-8"))["jobs"][
+        "review-codex"
+    ]["steps"]
+    assert any(step.get("id") == "mergecraft_codex" for step in steps), (
+        "review-codex must hold the Codex review step"
+    )
+
+
+def test_the_group_is_held_only_by_the_jobs_running_the_codex_step() -> None:
+    """A group wider than the consuming step queues reviews that never touch the login."""
+    holders = _group_holders()
+    assert holders, f"no job holds concurrency group {_GROUP!r}"
+    assert set(holders) == _codex_step_jobs(), (
+        f"concurrency group {_GROUP!r} must sit on exactly the jobs whose steps receive "
+        f"CODEX_AUTH_JSON: holders={sorted(holders)} consumers={sorted(_codex_step_jobs())}"
+    )
+
+
+def test_the_review_job_no_longer_serialises_on_the_credential() -> None:
+    """#1026 — the OpenCode Go job and the backstop job must not queue on the group."""
+    jobs = yaml.safe_load((WORKFLOWS / "mergecraft.yml").read_text(encoding="utf-8"))["jobs"]
+    for job_id in ("review", "review-backstop", "approval-gate"):
+        concurrency = jobs[job_id].get("concurrency")
+        assert not (isinstance(concurrency, dict) and concurrency.get("group") == _GROUP), (
+            f"mergecraft.yml:{job_id} must not join {_GROUP!r}"
+        )
 
 
 def test_every_consumer_joins_the_codex_subscription_auth_group() -> None:

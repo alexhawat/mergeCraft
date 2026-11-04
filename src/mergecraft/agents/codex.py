@@ -30,9 +30,15 @@ from mergecraft.agents.codex_stream import (
     CODEX_MODEL_REASONING_EFFORT,
     codex_stream_event_handler,
 )
+
+# The two singleton names are re-exported for callers that read them from here.
 from mergecraft.agents.openai_compatible_gateways import (
-    CUSTOM_PROVIDER_API_KEY_ENV,
-    CUSTOM_PROVIDER_BASE_URL_ENV,
+    CUSTOM_PROVIDER_API_KEY_ENV as CUSTOM_PROVIDER_API_KEY_ENV,
+)
+from mergecraft.agents.openai_compatible_gateways import (
+    CUSTOM_PROVIDER_BASE_URL_ENV as CUSTOM_PROVIDER_BASE_URL_ENV,
+)
+from mergecraft.agents.openai_compatible_gateways import (
     INDEXED_CUSTOM_PROVIDER_API_KEY_RE,
     INDEXED_CUSTOM_PROVIDER_BASE_URL_RE,
     resolve_gateway_endpoints,
@@ -40,6 +46,7 @@ from mergecraft.agents.openai_compatible_gateways import (
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
+    FAILOVER_ELIGIBLE_KEY,
     INFRA_REASON_KEY,
     STDERR_DRAIN_JOIN_TIMEOUT_S,
     AgentResult,
@@ -51,6 +58,7 @@ from mergecraft.agents.shared import (
     with_prompt,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
+from mergecraft.config.env import AgentRuntimeEnv, ProviderGatewayEnv
 from mergecraft.config.trust_policy import AgentSandboxDecision
 from mergecraft.mcp.endpoints import MCP_VERIFIER_ENDPOINT
 from mergecraft.security.broker import CodexBrokerPosture, subscription_auth_usable
@@ -166,8 +174,13 @@ def _safe_codex_home_parent(ctx: AgentRunContext) -> Path:
     tmp = Path(ctx.tmpdir)
     if not _is_under_forbidden_temp(tmp):
         return tmp
-    for key in ("MERGECRAFT_CODEX_HOME_PARENT", "RUNNER_TEMP", "GITHUB_WORKSPACE"):
-        raw = os.environ.get(key, "").strip()
+    candidates = (
+        AgentRuntimeEnv().codex_home_parent,
+        os.environ.get("RUNNER_TEMP", ""),
+        os.environ.get("GITHUB_WORKSPACE", ""),
+    )
+    for raw_candidate in candidates:
+        raw = (raw_candidate or "").strip()
         if not raw:
             continue
         candidate = Path(raw)
@@ -562,7 +575,9 @@ def _operator_sandbox_override() -> str | None:
     ignored with a warning rather than passed through to the CLI, so a typo
     cannot silently widen or narrow the sandbox.
     """
-    raw = os.environ.get(CODEX_SANDBOX_ENV, "").strip().lower()
+    from mergecraft.config.env import RuntimeOverridesEnv
+
+    raw = RuntimeOverridesEnv().codex_sandbox
     if not raw:
         return None
     if raw == CODEX_SANDBOX_UNSANDBOXED:
@@ -672,11 +687,6 @@ def _codex_use_permission_profiles(ctx: AgentRunContext) -> bool:
     return bool(ctx.mcp_server_url) and _sandbox_mode(ctx) == "read-only"
 
 
-def _has_env(name: str) -> bool:
-    val = os.environ.get(name)
-    return isinstance(val, str) and bool(val.strip())
-
-
 def _has_any_custom_provider_env() -> bool:
     """True when at least one ``MERGECRAFT_CUSTOM_PROVIDER_*`` env var is set.
 
@@ -684,16 +694,21 @@ def _has_any_custom_provider_env() -> bool:
     read it as a dict regardless of whether any pair was complete. The
     contract is that the table's *contents* reflect valid pairs only —
     partial pairs (only one of ``_KEY_<N>`` / ``_URL_<N>``) are dropped.
+
+    The singleton pair is read through :class:`ProviderGatewayEnv`; the indexed
+    slots are still enumerated from the environment names at runtime.
     """
-    for key in os.environ:
-        if INDEXED_CUSTOM_PROVIDER_BASE_URL_RE.match(key):
-            return True
-        if INDEXED_CUSTOM_PROVIDER_API_KEY_RE.match(key):
-            return True
-        if key in (CUSTOM_PROVIDER_BASE_URL_ENV, CUSTOM_PROVIDER_API_KEY_ENV):
-            if _has_env(key):
-                return True
-    return False
+    gateway = ProviderGatewayEnv()
+    key = gateway.custom_provider_api_key
+    if gateway.custom_provider_base_url is not None or (
+        key is not None and bool(key.get_secret_value().strip())
+    ):
+        return True
+    return any(
+        INDEXED_CUSTOM_PROVIDER_BASE_URL_RE.match(name) is not None
+        or INDEXED_CUSTOM_PROVIDER_API_KEY_RE.match(name) is not None
+        for name in os.environ
+    )
 
 
 def _add_custom_provider_tables(config: TomlTable) -> None:
@@ -1003,7 +1018,7 @@ def _run_codex_streaming(
                 )
                 returncode = wait_or_kill_process_group(
                     process,
-                    timeout=int(os.environ.get("MERGECRAFT_AGENT_TIMEOUT", "3600")),
+                    timeout=AgentRuntimeEnv().agent_timeout,
                 )
             except subprocess.TimeoutExpired:
                 return with_prompt(AgentResult(success=False, error="codex CLI timed out"), prompt)
@@ -1067,7 +1082,10 @@ def _run_codex_streaming(
                 f"before any review could start.\n\ncodex stderr:\n{error}"
             )
         # A retired subscription login is infrastructure, not a review failure,
-        # and no retry against the same login can succeed (#922). Only a run
+        # and no retry against the same login can succeed (#922), so it is
+        # explicitly not ``retryable``. It is ``failover_eligible`` though: the
+        # next vendor's credential is independent of this one, so the cascade
+        # must still hand the review on (#1009). Only a run
         # actually using that login can see this: an API-key run that merely
         # quotes the phrase (a review of this very code does) must fall through
         # to the ordinary classification below.
@@ -1085,7 +1103,11 @@ def _run_codex_streaming(
                     output=output or None,
                     error=f"{CODEX_CREDENTIAL_EXPIRED_REASON}\n\ncodex reported: {error}",
                     usage=usage,
-                    metadata={INFRA_REASON_KEY: CODEX_CREDENTIAL_EXPIRED_KIND},
+                    metadata={
+                        INFRA_REASON_KEY: CODEX_CREDENTIAL_EXPIRED_KIND,
+                        "retryable": False,
+                        FAILOVER_ELIGIBLE_KEY: True,
+                    },
                 ),
                 prompt,
             )

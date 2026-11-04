@@ -44,7 +44,10 @@ def _low_blast_packet(**overrides: Any) -> MergeEvidencePacket:
         next_action="eligible",
         categories=[],
     )
-    return _packet(findings=[], blast_radius=blast, **overrides)
+    # #1056: a lane only reaches auto_merge when it was measured from changed paths.
+    base: dict[str, Any] = {"files_changed": ["docs/guide.md"]}
+    base.update(overrides)
+    return _packet(findings=[], blast_radius=blast, **base)
 
 
 def _auto_merge_action(packet: MergeEvidencePacket) -> GateAction:
@@ -148,7 +151,11 @@ def test_minor_findings_are_auto_merge_eligible_on_a_low_risk_change() -> None:
         end_line=1,
         source="analyzer",
     )
-    packet = _packet(findings=[minor], blast_radius=_low_blast_packet().blast_radius)
+    packet = _packet(
+        findings=[minor],
+        blast_radius=_low_blast_packet().blast_radius,
+        files_changed=["src/x.py"],
+    )
     decision = decide_approval(packet, run_succeeded=True, tier="trusted")
     decided = packet.model_copy(update={"decision": decision})
 

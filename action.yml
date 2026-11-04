@@ -206,6 +206,20 @@ inputs:
       text.
     required: false
     default: ""
+  ignore_paths:
+    description: >-
+      Globs (newline- or comma-separated, `**` crosses directories) whose changed
+      files are left out of the diff the reviewer sees. The review lists them as
+      "not reviewed (ignored by config)", and a pull request whose every changed
+      file is ignored finishes with a passing "nothing to review" result, approval
+      left to a human. Matched against the whole repo-relative path, like a
+      workflow `paths` filter. Added to the built-in defaults (`**/CHANGELOG.md`,
+      `**/*.lock`, `**/package-lock.json`, generated and minified files) and to
+      `review.ignorePaths` from the base branch's `.mergecraft/config.yaml`; set
+      `review.ignorePathDefaults: false` there to review the defaults. Example:
+      `host/evals/**/*.jsonl`. Default: empty (defaults only).
+    required: false
+    default: ""
 
 outputs:
   result:
@@ -223,6 +237,13 @@ outputs:
     description: |
       Closed VerdictDiagnostic code from the terminal-verdict policy path for
       this run. Empty when the run did not evaluate terminal protocol policy.
+  failover_eligible:
+    description: |
+      `true` when the run failed in a way the next reviewer vendor may not
+      share (an expired subscription login, for example), so a cascade should
+      hand the review to its next rung even though this rung emitted a
+      `neutral` evidence packet. This is not `retryable`: re-running the same
+      rung with the same credential cannot succeed. `false` otherwise.
 
 runs:
   using: "docker"
@@ -258,6 +279,7 @@ runs:
     INPUT_OTEL_ENDPOINT: ${{ inputs.otel-endpoint }}
     INPUT_TRACING_CONTENT: ${{ inputs.tracing-content }}
     INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT: ${{ inputs.tracing-export-untrusted-content }}
+    INPUT_IGNORE_PATHS: ${{ inputs.ignore_paths }}
     INPUT_SETUP_FAILURE_POLICY: ${{ inputs.setup_failure_policy }}
     INPUT_SETUP_TIMEOUT: ${{ inputs.setup_timeout }}
 

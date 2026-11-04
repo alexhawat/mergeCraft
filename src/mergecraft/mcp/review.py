@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -54,6 +53,7 @@ from mergecraft.mcp.verdict import (
     validate_submission,
     validation_state_from_tool_context,
 )
+from mergecraft.review_policy.ignore_paths import merge_ignored_paths_into_review_body
 from mergecraft.review_resolution import finding_fingerprints_in, resolvable_thread_ids
 from mergecraft.review_taxonomy import (
     finding_fingerprint,
@@ -1388,7 +1388,9 @@ def should_publish_sticky_only(packet: Any) -> bool:
     non-neutral decision always publishes normally: ``failure`` needs a
     blocking formal review, and ``success`` is terminal.
     """
-    enabled = os.environ.get("MERGECRAFT_STICKY_ONLY_NEUTRAL", "").strip().lower()
+    from mergecraft.config.env import ReviewEnv
+
+    enabled = (ReviewEnv().sticky_only_neutral or "").strip().lower()
     if enabled not in {"1", "true", "yes", "on"}:
         return False
     decision = getattr(packet, "decision", None)
@@ -1440,7 +1442,13 @@ async def _publish_github_review(
     primary.issue_number = pull_number
 
     event = "COMMENT"
-    if approved and ctx.pr_approve_enabled and ctx.authority_trust == "trusted":
+    triage_skipped = getattr(ctx.tool_state.triage, "tier", None) == "skip"
+    if (
+        approved
+        and ctx.pr_approve_enabled
+        and ctx.authority_trust == "trusted"
+        and not triage_skipped  # nothing was in review scope; a human approves (#1109)
+    ):
         event = "APPROVE"
     elif request_changes:
         event = "REQUEST_CHANGES"
@@ -1497,6 +1505,9 @@ async def _publish_github_review(
     await ensure_learnings_review_delta(ctx.tool_state)
     body_with_delta = merge_learnings_delta_into_review_body(ctx.tool_state, str(body or ""))
     agent_body = merge_analyzer_sections_into_review_body(ctx, body_with_delta)
+    agent_body = merge_ignored_paths_into_review_body(
+        agent_body, ctx.tool_state.ignored_review_paths
+    )
     if ctx.tool_state.dispatched_lens_ids:
         from mergecraft.modes._pr_summary_format import (
             merge_dispatched_lenses_into_review_metadata,

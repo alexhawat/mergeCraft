@@ -117,7 +117,8 @@ def test_hypothesis_auto_merge_implies_positive_decision(
         next_action="eligible",
         categories=[],
     )
-    packet = _packet(findings=[], blast_radius=blast)
+    # #1056: a lane only reaches auto_merge when it was measured from changed paths.
+    packet = _packet(findings=[], blast_radius=blast, files_changed=["docs/guide.md"])
     run_ok = label != "failed_run"
     if label == "trusted_explicit_success":
         from mergecraft.agents.gates import TRUSTED_PACKET_DECIDED_BY

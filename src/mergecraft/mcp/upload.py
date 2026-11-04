@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import mimetypes
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin
@@ -54,7 +53,9 @@ def upload_file_tool(ctx: ToolContext):
             raise ValueError(msg)
         filename = path.name
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-        api_base = os.environ.get("MERGECRAFT_API_URL", "").rstrip("/")
+        from mergecraft.config.env import McpEnv
+
+        api_base = (McpEnv().api_url or "").rstrip("/")
         api_token = (ctx.api_token or "").strip()
         if api_base and not api_token:
             msg = "upload_file: missing API token"

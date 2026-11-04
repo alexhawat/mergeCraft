@@ -10,7 +10,7 @@ consumer gets it — not only this repository's workflow.
 
 The instruction is untrusted-input-adjacent: it tells the agent what to read,
 never what to conclude, and cannot change a gate. It contains no interpolation
-except the mode renderer's normal `${t("...")}` tool reference.
+except the mode renderer's normal `${t("...")}` tool references.
 
 Module: mergecraft.modes._diff_first
 Depends: mergecraft.modes (rendering only)
@@ -29,7 +29,10 @@ DIFF_FIRST_INSTRUCTION: str = (
     "scope; use the full `diffPath` only to anchor line numbers — do not re-read the "
     "whole PR. Do **not** run `git diff`, `git grep`, or `git log` to reconstruct the "
     "change set: those re-derive a scope the diff already defines, pull in base-branch "
-    "noise, and fail on shallow checkouts. Only after the diff is read, read the "
+    "noise, and fail on shallow checkouts. "
+    'When `${t("checkout_pr")}` also returns `ignoredPaths`, the operator\'s config keeps '
+    "those files out of review: do not read them or report findings on them. "
+    "Only after the diff is read, read the "
     "surrounding files a candidate finding actually needs. Batch every independent "
     "read/grep/glob into a single turn; keep dependent calls for the next turn after "
     "their inputs are available."

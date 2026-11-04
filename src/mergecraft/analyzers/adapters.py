@@ -190,7 +190,9 @@ def _finalize_trufflehog_findings(findings: list[Finding], *, repo_root: Path) -
 
     normalized: list[Finding] = []
     for finding in findings:
-        if is_trufflehog_path_suppressed(finding.path, repo_root=repo_root):
+        if is_trufflehog_path_suppressed(
+            finding.path, detector=finding.rule_id, repo_root=repo_root
+        ):
             continue
         remediation = finding.remediation or _ROTATION_FIRST_REMEDIATION
         if "rotate" not in remediation.casefold():

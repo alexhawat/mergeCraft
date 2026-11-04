@@ -1,0 +1,238 @@
+# SPDX-License-Identifier: MIT
+# Daily advisory sweep of `main` and of the images `main` promotes (#1069).
+#
+# Dependency advisories used to be discovered by the required PR gate
+# (`Verify (security audit …)`, `Image scan`) — so each one blocked every open
+# pull request at once and tended to land in the middle of a release. This
+# workflow changes *when the team learns*, not what gates a merge: those PR
+# checks stay required and unchanged, and nothing here runs on a pull request.
+#
+# What it checks, daily and on demand:
+# - `make lockcheck` and `make security` (bandit + pip-audit against OSV) on the
+#   default branch;
+# - a Trivy scan of the published `:latest` and `:analyzers` tags of
+#   ghcr.io/alexhawat/mergecraft, with the same Trivy pin, severity, unfixed
+#   policy and `.trivyignore` (plus its expiry check) as image-security.yml.
+#
+# What it does with the result: one tracking issue, never one per advisory per
+# day. The body carries a `security-sweep:<sha256>` marker over the sorted
+# advisory IDs; a later run with the same findings updates that issue, a run
+# with different findings updates it and says so in a comment, and a clean run
+# comments and closes it. A sweep that could not produce a report is
+# `incomplete`: it fails the run and leaves the issue alone, because a sweep
+# that did not look must not close a live alert.
+#
+# Safety: no PR code is checked out or executed. Reachable from `schedule` and
+# `workflow_dispatch` only; dispatch accepts any branch, so every job is
+# guarded to `main` — run from a fix branch it would otherwise close the issue
+# while `main` is still affected. The only write scope is `issues`, on the
+# reporting job.
+name: Security sweep
+
+on:
+  schedule:
+    # Daily, off the hour. GitHub's cron is best-effort; a missed day is caught
+    # by the next run, and `workflow_dispatch` runs it on demand.
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-sweep
+  cancel-in-progress: false
+
+env:
+  # One tracking issue, matched by exact title and by the body marker.
+  ISSUE_TITLE: "Security sweep: advisories on main"
+  IMAGE: ghcr.io/alexhawat/mergecraft
+
+jobs:
+  python-audit:
+    name: Python audit (lockcheck, bandit, pip-audit)
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: "3.14"
+
+      - name: Lockfile freshness (make lockcheck)
+        run: |
+          set -uo pipefail
+          mkdir -p sweep
+          if make lockcheck; then
+            echo pass > sweep/lockcheck.txt
+          else
+            echo fail > sweep/lockcheck.txt
+          fi
+
+      - name: Security audit (make security)
+        run: |
+          set -uo pipefail
+          rm -f sweep/bandit.json sweep/pip-audit.json
+          uv_bin="$(command -v uv)"
+          # Both tools write JSON reports the reporting job reads. bandit runs
+          # with --exit-zero so a code finding cannot stop the recipe before
+          # pip-audit runs; its findings are still read from the report.
+          if make security \
+            BANDIT="${uv_bin} run bandit --exit-zero" \
+            BANDIT_JSON=sweep/bandit.json \
+            PIP_AUDIT="${uv_bin} run pip-audit --format json --output sweep/pip-audit.json"; then
+            echo "make security passed"
+          else
+            echo "make security reported findings or failed; the reporting job reads its reports"
+          fi
+
+      - name: Upload the Python reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: security-sweep-python
+          path: sweep/
+          retention-days: 30
+          if-no-files-found: warn
+
+  image-scan:
+    name: Image scan (${{ matrix.tag }})
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: [latest, analyzers]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Reject expired scan waivers
+        run: python3 scripts/check_trivyignore_expiry.py
+
+      # Same pin and policy as image-security.yml, against the published tag
+      # (the digest `main` currently promotes) instead of a fresh build. The
+      # exit code stays 0: findings are reported through the tracking issue.
+      - name: Scan the published image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          image-ref: ${{ env.IMAGE }}:${{ matrix.tag }}
+          format: json
+          output: trivy-${{ matrix.tag }}.json
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+
+      - name: Upload the scan report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: security-sweep-image-${{ matrix.tag }}
+          path: trivy-${{ matrix.tag }}.json
+          retention-days: 30
+          if-no-files-found: warn
+
+  report:
+    name: File, refresh or close the tracking issue
+    needs: [python-audit, image-scan]
+    # `always()` so a failed audit job still reaches the incomplete branch
+    # below rather than skipping silently.
+    if: always() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the sweep reports
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: security-sweep-*
+          path: sweep-in
+
+      - name: Summarise the findings
+        id: summary
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          lockcheck="$(cat sweep-in/security-sweep-python/lockcheck.txt 2>/dev/null || echo missing)"
+          python3 scripts/security_sweep_report.py \
+            --pip-audit sweep-in/security-sweep-python/pip-audit.json \
+            --bandit sweep-in/security-sweep-python/bandit.json \
+            --lockcheck "${lockcheck}" \
+            --image ":latest=sweep-in/security-sweep-image-latest/trivy-latest.json" \
+            --image ":analyzers=sweep-in/security-sweep-image-analyzers/trivy-analyzers.json" \
+            --run-url "${RUN_URL}" \
+            --body-out sweep-body.md
+
+      - name: Open or update the tracking issue
+        if: steps.summary.outputs.status == 'findings'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          FINGERPRINT: ${{ steps.summary.outputs.fingerprint }}
+          COUNT: ${{ steps.summary.outputs.count }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          existing="$(gh issue list --state open --search "\"${ISSUE_TITLE}\" in:title" \
+            --json number,title,body \
+            --jq 'map(select(.title == env.ISSUE_TITLE and (.body | contains("<!-- security-sweep:")))) | .[0] // empty')"
+          if [ -z "${existing}" ]; then
+            gh issue create --title "${ISSUE_TITLE}" --body-file sweep-body.md
+            exit 0
+          fi
+          number="$(jq -r '.number' <<< "${existing}")"
+          previous="$(jq -r '.body' <<< "${existing}" \
+            | sed -n 's/^<!-- security-sweep:\([0-9a-f]*\) -->.*/\1/p' | head -n 1)"
+          gh issue edit "${number}" --body-file sweep-body.md
+          if [ "${previous}" = "${FINGERPRINT}" ]; then
+            echo "refreshed issue #${number}; findings unchanged"
+          else
+            gh issue comment "${number}" \
+              --body "The findings changed: ${COUNT} finding(s) now ([run](${RUN_URL})). The issue body is current."
+            echo "refreshed issue #${number}; findings changed"
+          fi
+
+      - name: Close the tracking issue once the sweep is clean
+        if: steps.summary.outputs.status == 'clear'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          existing="$(gh issue list --state open --search "\"${ISSUE_TITLE}\" in:title" \
+            --json number,title,body \
+            --jq 'map(select(.title == env.ISSUE_TITLE and (.body | contains("<!-- security-sweep:")))) | .[0].number // empty')"
+          if [ -n "${existing}" ]; then
+            gh issue close "${existing}" \
+              --comment "The security sweep is clean: no advisories, lockfile current, no bandit findings ([run](${RUN_URL}))."
+            echo "closed issue #${existing}"
+          else
+            echo "sweep is clean and no tracking issue is open; nothing to do"
+          fi
+
+      - name: Fail an incomplete sweep
+        if: steps.summary.outputs.status != 'findings' && steps.summary.outputs.status != 'clear'
+        run: |
+          echo "::error title=security sweep incomplete::A report was missing or unreadable; the tracking issue was left as it is. See the summary step."
+          exit 1

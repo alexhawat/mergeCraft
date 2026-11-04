@@ -118,6 +118,23 @@ as the nightly E2E live slice on the provider named by
 no longer consumes the ChatGPT/Codex subscription, so it cannot retire the
 self-review's session.
 
+### Scheduled security sweep (#1069)
+
+`security-sweep.yml` runs daily (and on `workflow_dispatch`) on `main`:
+`make lockcheck`, `make security` (bandit + pip-audit against OSV) and a Trivy
+scan of the published `:latest` and `:analyzers` images, with the same Trivy
+pin, policy and `.trivyignore` as the PR image scan. Findings go to one
+tracking issue, *Security sweep: advisories on main*, which a later run with
+the same findings updates and a clean run closes. It adds no PR check; the
+required `Verify (security audit …)` and image-scan gates are unchanged.
+
+**Runbook:** when the sweep files that issue, the fix is a lockfile bump PR
+(`uv lock --upgrade-package <package>` for each package the issue lists),
+with `make lockcheck` and `make security` green before you push. An image-only
+OS-package advisory clears once a rebuilt image is promoted. Where the issue
+says no fixed version is published, record that on the issue rather than
+waiving the finding.
+
 ### Decision record: the Codex subscription credential (#970)
 
 `CODEX_AUTH_JSON` holds a ChatGPT-subscription login. Codex refreshes it while it
@@ -134,8 +151,12 @@ What is decided and shipped:
   is a fallback, not the primary reviewer.
 - Every job that receives `CODEX_AUTH_JSON` joins the `codex-subscription-auth`
   concurrency group with `cancel-in-progress: false`, so two consumers never
-  refresh the same login at once (#882). GitHub keeps one running and one pending
-  job per group; a third queued review replaces the pending one and needs a re-run.
+  refresh the same login at once (#882). In the self-review that is only the
+  `review-codex` job, which runs the Codex rung alone (#1026): the OpenCode Go
+  rung and the Claude backstop run in their own jobs outside the group. GitHub
+  keeps one running and one pending job per group, so a third queued *Codex*
+  fallback still replaces the pending one, but reviews that never reach Codex
+  no longer queue on it.
 - An expired credential is named instead of buried in a log: the run ends as
   `infra_error` with *reviewer credential expired — re-authenticate*, in the check
   summary and the run record (#922).

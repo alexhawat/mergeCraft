@@ -33,6 +33,13 @@ _LANE_SET: Final = re.compile(rf"{_LANE_ENV}\s*[:=]\s*['\"]?1\b")
 _GUARDED_TESTS: Final = (
     "tests/analyzers/test_sandbox_execution.py",
     "tests/utils/test_privilege_chown.py",
+    "tests/analyzers/test_trusted_uid_drop.py",
+    "tests/security/test_analyzer_uid_drop.py",
+)
+# Root-gated identity-drop proofs the disposable host lane must run (#1015).
+_UID_DROP_TESTS: Final = (
+    "tests/analyzers/test_trusted_uid_drop.py",
+    "tests/security/test_analyzer_uid_drop.py",
 )
 
 
@@ -105,6 +112,21 @@ def test_disposable_host_lane_runs_the_sandbox_test_in_the_privileged_lane() -> 
     assert hits, (
         "no integration.yml step (or Make target it calls) runs "
         f"tests/analyzers/test_sandbox_execution.py with {_LANE_ENV}=1"
+    )
+
+
+@pytest.mark.parametrize("relative", _UID_DROP_TESTS)
+def test_disposable_host_lane_runs_the_uid_drop_proofs_in_the_privileged_lane(
+    relative: str,
+) -> None:
+    hits = [
+        text
+        for text in _privileged_lane_texts()
+        if relative in text and _LANE_SET.search(text) and "sudo" in text
+    ]
+    assert hits, (
+        f"no integration.yml step (or Make target it calls) runs {relative} "
+        f"under sudo with {_LANE_ENV}=1 (#1015)"
     )
 
 

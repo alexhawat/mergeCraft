@@ -129,6 +129,9 @@ async def _run_main() -> None:
     # is what every other consumer reads.
     diagnostic = result.verdict_diagnostic
     _set_output("verdict_diagnostic", diagnostic.value if diagnostic is not None else "")
+    # #1009 — "move to the next vendor", distinct from the failure itself: the
+    # workflow cascade reads it to spend its backstop on a dead credential.
+    _set_output("failover_eligible", "true" if result.failover_eligible else "false")
     if not result.success:
         outcome = result.outcome or RunOutcome.infra_error
         error_message = result.error or "agent execution failed"

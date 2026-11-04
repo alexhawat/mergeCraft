@@ -26,6 +26,7 @@ from tests.support.run_main_harness import FakeAgent, run_main_for_test
 from mergecraft.agents.shared import AgentResult
 from mergecraft.main_outcome import _classify_outcome
 from mergecraft.run_outcome import RunOutcome
+from mergecraft.utils.agent_resolve import _is_retryable_failure
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -90,6 +91,9 @@ def test_driver_names_the_expired_credential(
     assert result.error is not None
     assert result.error.startswith(NAMED_REASON)
     assert result.metadata.get("infra_reason") == "reviewer_credential_expired"
+    # No retry of the same login can succeed, but the next vendor may (#1009).
+    assert result.metadata.get("retryable") is False
+    assert result.metadata.get("failover_eligible") is True
 
 
 def test_driver_keeps_the_providers_own_message_after_the_named_reason(
@@ -119,7 +123,10 @@ def test_an_expired_credential_is_not_retried_against_the_same_login(
         _FakeProcess(stdout=_error_event(_REFRESH_USED), returncode=1),
     )
 
-    assert "retryable" not in result.metadata
+    # Stated explicitly (#1009) so no error-text inference can turn it into a
+    # same-login retry now that the failure is failover-eligible.
+    assert result.metadata.get("retryable") is False
+    assert _is_retryable_failure(result) is False
 
 
 @pytest.mark.parametrize(
@@ -150,6 +157,7 @@ def test_other_codex_failures_are_unchanged(
     assert result.error is not None
     assert NAMED_REASON not in result.error
     assert "infra_reason" not in result.metadata
+    assert "failover_eligible" not in result.metadata
     assert result.metadata.get("retryable", False) is retryable
 
 
@@ -268,3 +276,37 @@ async def test_the_named_reason_reaches_the_check_summary_and_the_run_result(
     for run in completion:
         assert NAMED_REASON in run["output"]["summary"], run
         assert run["conclusion"] == "neutral", run
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        (
+            {
+                "infra_reason": "reviewer_credential_expired",
+                "retryable": False,
+                "failover_eligible": True,
+            },
+            True,
+        ),
+        ({"infra_reason": "reviewer_credential_expired"}, False),
+    ],
+)
+async def test_the_failover_signal_reaches_the_run_result(
+    metadata: dict[str, Any],
+    expected: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """#1009 — the cascade reads ``failover_eligible`` off the run, not the packet."""
+    rec = await run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        agent=FakeAgent(result=_failed(metadata)),
+        event_name="workflow_dispatch",
+        event_payload={"action": "workflow_dispatch"},
+    )
+
+    assert rec.result is not None, f"main() raised: {rec.raised!r}"
+    assert rec.result.outcome is RunOutcome.infra_error
+    assert rec.result.failover_eligible is expected

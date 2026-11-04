@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from functools import lru_cache
 from pathlib import Path
@@ -13,7 +12,9 @@ from mergecraft.utils.git_hardening import git_argv
 
 def resolve_action_pin_sha() -> str | None:
     """Return the consumer Action pin (manifest commit C), when the Action set it."""
-    pin = os.environ.get("MERGECRAFT_ACTION_SHA", "").strip()
+    from mergecraft.config.env import RunInputsEnv
+
+    pin = RunInputsEnv().action_sha or ""
     return pin or None
 
 
@@ -25,7 +26,9 @@ def resolve_action_deployment_identity() -> tuple[str | None, str | None]:
 @lru_cache(maxsize=1)
 def resolve_build_commit() -> str | None:
     """Return the full git SHA baked at build time, or from a source checkout."""
-    env_commit = os.environ.get("MERGECRAFT_BUILD_COMMIT", "").strip()
+    from mergecraft.config.env import RunInputsEnv
+
+    env_commit = RunInputsEnv().build_commit or ""
     if env_commit:
         return env_commit
     if _baked_commit:

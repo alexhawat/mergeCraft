@@ -23,6 +23,7 @@ from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
 from mergecraft.mcp.tool_call import normalize_pull_number_aliases
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
 from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, degraded_checkout_reason
+from mergecraft.review_policy.ignore_paths import ReviewIgnore, filter_diff, rename_sources
 from mergecraft.utils.gha_log import warning
 from mergecraft.utils.git_hardening import read_remote_origin_url
 from mergecraft.utils.github import GitHubClient
@@ -747,7 +748,7 @@ _PULL_FILES_MAX_PAGES = 30
 
 
 async def pull_request_path_expectations(
-    ctx: ToolContext, *, pull_number: int
+    ctx: ToolContext, *, pull_number: int, renames: dict[str, str] | None = None
 ) -> tuple[set[str], set[str]]:
     """Return ``(required, allowed)`` paths for the PR as GitHub reports them.
 
@@ -756,7 +757,8 @@ async def pull_request_path_expectations(
     file — a diff omitting one does not describe this PR. ``allowed`` adds
     rename pre-image names, because ``git diff`` writes a rename as
     ``a/<old> b/<new>`` and only ``<new>`` is the post-image path; counting
-    ``<old>`` as required would reject an honest rename.
+    ``<old>`` as required would reject an honest rename. ``renames``, when given,
+    is filled with each renamed post-image path's source.
     """
     endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/files"
     required: set[str] = set()
@@ -774,6 +776,8 @@ async def pull_request_path_expectations(
             previous = str(f.get("previous_filename") or "").strip()
             if previous:
                 allowed.add(previous)
+                if renames is not None and filename:
+                    renames[filename] = previous
         if len(batch) < _PULL_FILES_PAGE_SIZE:
             break
     return required, allowed
@@ -831,7 +835,10 @@ async def _diff_from_pull_files(ctx: ToolContext, *, pull_number: int) -> _Files
         batch = list(files or [])
         for f in batch:
             filename = str(f.get("filename") or "").strip()
-            parts.append(f"diff --git a/{filename} b/{filename}\n")
+            # A rename keeps its source on the ``a/`` side, as ``git diff`` writes it, so
+            # the pre-image is never lost to readers of the header.
+            previous = str(f.get("previous_filename") or "").strip() or filename
+            parts.append(f"diff --git a/{previous} b/{filename}\n")
             if f.get("patch"):
                 parts.append(f.get("patch") + "\n")
             elif filename and _line_change_count(f) > 0:
@@ -933,7 +940,14 @@ def _fetch_head_with_retry(
 
 
 def _write_incremental_diff(
-    *, cwd: str, temp: str, pull_number: int, prior_sha: str, git_token: str
+    *,
+    cwd: str,
+    temp: str,
+    pull_number: int,
+    prior_sha: str,
+    git_token: str,
+    ignore: ReviewIgnore | None = None,
+    pr_changed_paths: list[str] | None = None,
 ) -> IncrementalDiffResult:
     """Write the diff since ``prior_sha`` and report an explicit status.
 
@@ -981,6 +995,19 @@ def _write_incremental_diff(
             prior_sha=prior_sha,
             reason=f"no changes since the last reviewed commit {prior_sha[:12]}",
         )
+    if ignore is not None and ignore.active:
+        # Judge against the whole PR, not just this range: a generator config reviewed
+        # in an earlier round still keeps its generated output in scope now.
+        diff = filter_diff(diff, ignore, changed_paths=pr_changed_paths).text
+        if not diff.strip():
+            return IncrementalDiffResult(
+                status="empty",
+                prior_sha=prior_sha,
+                reason=(
+                    f"every change since the last reviewed commit {prior_sha[:12]} is in "
+                    "files ignored by config"
+                ),
+            )
     path = str(Path(temp) / f"pr-{pull_number}-incremental.diff")
     Path(path).write_text(diff, encoding="utf-8")
     return IncrementalDiffResult(
@@ -1004,6 +1031,83 @@ def _record_delivered_diff(
     record.authoritative_diff = str(diff_text)
     record.unreviewable_paths = list(unreviewable)
     record.diff_truncated = truncated
+
+
+def _apply_review_ignore(
+    ctx: ToolContext, diff_text: str, *, unreviewable: list[str], truncated: bool
+) -> tuple[str, list[str], list[str]]:
+    """Drop files ignored by config from the reviewer's diff (#1109).
+
+    Returns ``(diff, unreviewable, ignored)``: the diff without the ignored file
+    sections, the unreviewable paths that are still in scope, and the ignored paths.
+    The filtered diff is what the coverage gate accounts against, so an ignored file
+    is out of scope rather than unread. The ignored paths are recorded on the tool
+    state for the review body.
+
+    A filter that would leave nothing in scope never yields an empty review that can
+    approve. When the diff is complete, every changed file is provably ignored: the
+    run records the ``skip (ignorePaths)`` triage tier, which keeps
+    ``mergecraft-approval`` neutral whatever the agent submits. When the files-API
+    listing was truncated, the change set is unknown, so nothing is filtered.
+    """
+    ignore = ctx.tool_state.review_ignore
+    if not isinstance(ignore, ReviewIgnore) or not ignore.active:
+        return str(diff_text), list(unreviewable), []
+    filtered = filter_diff(str(diff_text), ignore, changed_paths=unreviewable)
+    changed = [*filtered.changed_paths, *unreviewable]
+    sources = rename_sources(str(diff_text))
+    ignored = list(filtered.ignored_paths)
+    kept_unreviewable: list[str] = []
+    for path in unreviewable:
+        named = [path, sources[path]] if path in sources else [path]
+        if ignore.all_ignored(named, changed_paths=changed):
+            ignored.append(path)
+        else:
+            kept_unreviewable.append(path)
+    ignored = list(dict.fromkeys(ignored))
+    if ignored and not filtered.text.strip() and not kept_unreviewable:
+        if truncated:
+            logger.warning(
+                "ignore_paths: every listed file is ignored but the listing was truncated; "
+                "reviewing the unfiltered diff"
+            )
+            return str(diff_text), list(unreviewable), []
+        _record_all_ignored_skip(ctx, ignored)
+    if ignored:
+        ctx.tool_state.ignored_review_paths = list(
+            dict.fromkeys([*ctx.tool_state.ignored_review_paths, *ignored])
+        )
+        logger.info(
+            "ignore_paths: {} changed file(s) left out of the review diff: {}",
+            len(ignored),
+            ", ".join(ignored[:10]),
+        )
+    return filtered.text, kept_unreviewable, ignored
+
+
+def _record_all_ignored_skip(ctx: ToolContext, ignored: list[str]) -> None:
+    """Record the ``skip (ignorePaths)`` tier: nothing in scope, so approval stays neutral."""
+    from mergecraft.classify.triage import TriageDecision
+
+    current = ctx.tool_state.triage
+    if getattr(current, "tier", None) == "skip":
+        return
+    reason = f"nothing to review: all {len(ignored)} changed file(s) are ignored by config"
+    ctx.tool_state.triage = TriageDecision(tier="skip", recognizer="ignorePaths", reason=reason)
+    logger.warning("» Tier: skip (ignorePaths) — {}", reason)
+
+
+_IGNORED_PATHS_NOTE = (
+    "These changed files match the operator's ignore_paths / review.ignorePaths and were "
+    "left out of diffPath. They are not reviewed (ignored by config): do not read them or "
+    "report findings on them."
+)
+
+
+def _annotate_ignored(result: dict[str, Any], ignored: list[str]) -> None:
+    if ignored:
+        result["ignoredPaths"] = ignored
+        result["ignoredPathsNote"] = _IGNORED_PATHS_NOTE
 
 
 def get_git_status(cwd: str) -> str:
@@ -1099,9 +1203,14 @@ def checkout_pr_tool(ctx: ToolContext):
             fetch_degraded = degraded_checkout_reason(
                 detail=(fetch_err or "git fetch failed").splitlines()[0]
             )
-            fetch_diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
-            fetch_unreviewable = fetch_diff.unreviewable_paths
-            fetch_truncated = fetch_diff.truncated
+            fetch_files_diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
+            fetch_truncated = fetch_files_diff.truncated
+            fetch_diff, fetch_unreviewable, fetch_ignored = _apply_review_ignore(
+                ctx,
+                fetch_files_diff,
+                unreviewable=fetch_files_diff.unreviewable_paths,
+                truncated=fetch_truncated,
+            )
             fetch_degraded = _append_diff_degradations(
                 fetch_degraded, truncated=fetch_truncated, unreviewable=fetch_unreviewable
             )
@@ -1149,6 +1258,7 @@ def checkout_pr_tool(ctx: ToolContext):
                 result["unreviewablePaths"] = fetch_unreviewable
             if fetch_truncated:
                 result["diffTruncated"] = True
+            _annotate_ignored(result, fetch_ignored)
 
             await hydrate_review_context(
                 ctx,
@@ -1221,6 +1331,12 @@ def checkout_pr_tool(ctx: ToolContext):
             diff = files_diff
             unreviewable = files_diff.unreviewable_paths
             diff_truncated = files_diff.truncated
+        pr_changed_paths = list(
+            dict.fromkeys([*filter_diff(diff, None).changed_paths, *unreviewable])
+        )
+        diff, unreviewable, ignored_paths = _apply_review_ignore(
+            ctx, diff, unreviewable=unreviewable, truncated=diff_truncated
+        )
         Path(diff_path).write_text(diff, encoding="utf-8")
         _record_delivered_diff(ctx, diff, unreviewable=unreviewable, truncated=diff_truncated)
         from mergecraft.mcp.verdict import register_review_scope
@@ -1261,6 +1377,7 @@ def checkout_pr_tool(ctx: ToolContext):
             result["unreviewablePaths"] = unreviewable
         if diff_truncated:
             result["diffTruncated"] = True
+        _annotate_ignored(result, ignored_paths)
 
         prior_reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
         publishers = expected_publisher_logins(ctx) if prior_reviews else frozenset()
@@ -1288,6 +1405,12 @@ def checkout_pr_tool(ctx: ToolContext):
                 pull_number=pull_number,
                 prior_sha=prior_sha,
                 git_token=ctx.git_token,
+                ignore=(
+                    ctx.tool_state.review_ignore
+                    if isinstance(ctx.tool_state.review_ignore, ReviewIgnore)
+                    else None
+                ),
+                pr_changed_paths=pr_changed_paths,
             )
             result["lastReviewedSha"] = prior_sha
             result["incrementalDiffStatus"] = incremental.status

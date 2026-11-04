@@ -239,6 +239,13 @@ INFRA_REASON_KEY: Final[str] = "infra_reason"
 infrastructure rather than the review (an expired credential, say). The run
 classifies such a failure as ``RunOutcome.infra_error`` instead of ``failed``."""
 
+FAILOVER_ELIGIBLE_KEY: Final[str] = "failover_eligible"
+"""``AgentResult.metadata`` key a driver sets (``True``) when a failure means
+*move to the next vendor*, as distinct from ``retryable`` (*re-issue the call
+against the same login*). An expired subscription login is the case it exists
+for (#1009): no retry of that login can succeed, but the next vendor's
+credential is independent of it, so the cascade must still fail over."""
+
 
 @dataclass(slots=True)
 class AgentResult:

@@ -15,9 +15,11 @@ from __future__ import annotations
 import pytest
 
 from tests.ci.support_review_timeout_budget import (
+    ATTEMPTS_PER_JOB,
     CHECKOUT_AND_SETUP_SLACK_MINUTES,
     DECLARED_ATTEMPT_TIMEOUT_ENV,
     MAX_SEQUENTIAL_REVIEW_ATTEMPTS,
+    cascade_job_budgets,
     declared_attempt_timeout_minutes,
     job_timeout_composes,
     mergecraft_review_steps,
@@ -75,16 +77,24 @@ def test_mergecraft_review_steps_reference_declared_attempt_timeout(
 def test_review_job_timeout_composes_from_attempt_budget(
     workflow_doc: dict[str, object],
 ) -> None:
-    """Functional — job budget exceeds 2x attempt + checkout slack (D8)."""
+    """Functional — each cascade job's budget exceeds its attempts + checkout slack (D8).
+
+    The rungs run one per job since #1026, so each job must outlast exactly the
+    attempts it runs; GitHub would otherwise kill it before the action posts.
+    """
     attempt = declared_attempt_timeout_minutes(workflow_doc)
-    job_minutes = review_job_timeout_minutes(workflow_doc)
-    floor = minimum_composed_job_minutes(attempt)
-    assert job_timeout_composes(job_minutes, attempt), (
-        f"review job timeout-minutes={job_minutes} must be > "
-        f"{MAX_SEQUENTIAL_REVIEW_ATTEMPTS}×{attempt} + "
-        f"{CHECKOUT_AND_SETUP_SLACK_MINUTES} slack (>{floor}); "
-        "otherwise GitHub kills the job before Codex fallback can finish"
+    budgets = cascade_job_budgets(workflow_doc)
+    assert [attempts for _, attempts in budgets.values()] == [ATTEMPTS_PER_JOB] * len(budgets), (
+        f"expected one mergeCraft attempt per cascade job, got {budgets!r}"
     )
+    assert review_job_timeout_minutes(workflow_doc) == budgets["review"][0]
+    for name, (job_minutes, attempts) in budgets.items():
+        floor = minimum_composed_job_minutes(attempt, sequential_attempts=attempts)
+        assert job_timeout_composes(job_minutes, attempt, sequential_attempts=attempts), (
+            f"{name} job timeout-minutes={job_minutes} must be > "
+            f"{attempts}×{attempt} + {CHECKOUT_AND_SETUP_SLACK_MINUTES} slack (>{floor}); "
+            "otherwise GitHub kills the job before its rung can finish"
+        )
 
 
 def test_per_attempt_timeout_not_shortened_below_declared_budget(

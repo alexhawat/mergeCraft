@@ -10,10 +10,8 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
-from tests.ci.workflow_support import REPO_ROOT, job, load_workflow
+from tests.ci.workflow_support import REPO_ROOT, self_review_steps
 
-_WORKFLOW = "mergecraft.yml"
-_REVIEW_JOB = "review"
 _SCRIPT_BY_STEP_ID = {
     "fallback": "scripts/decide_codex_fallback.sh",
     "claude_fallback": "scripts/decide_claude_fallback.sh",
@@ -37,13 +35,11 @@ RUN_ATTEMPT = "2"
 
 
 def step_by_id(step_id: str) -> dict[str, Any]:
-    """Return the review-job step whose ``id`` matches ``step_id``."""
-    steps = job(load_workflow(_WORKFLOW), _REVIEW_JOB).get("steps")
-    assert isinstance(steps, list), "review job steps must be a list"
-    for step in steps:
-        if isinstance(step, dict) and step.get("id") == step_id:
+    """Return the self-review cascade step whose ``id`` matches ``step_id``."""
+    for step in self_review_steps():
+        if step.get("id") == step_id:
             return step
-    raise AssertionError(f"review job missing step id={step_id!r}")
+    raise AssertionError(f"self-review cascade missing step id={step_id!r}")
 
 
 def decide_script(step_id: str) -> Path:
@@ -225,10 +221,8 @@ def claude_step_if_expression() -> str:
 
 def claude_review_if_expression() -> str:
     """Return the ``if:`` expression for the Claude review step."""
-    steps = job(load_workflow(_WORKFLOW), _REVIEW_JOB).get("steps")
-    assert isinstance(steps, list)
-    for step in steps:
-        if isinstance(step, dict) and step.get("id") == "mergecraft_claude":
+    for step in self_review_steps():
+        if step.get("id") == "mergecraft_claude":
             expr = step.get("if")
             assert isinstance(expr, str), "mergecraft_claude missing if:"
             assert expr.strip(), "mergecraft_claude if: is empty"

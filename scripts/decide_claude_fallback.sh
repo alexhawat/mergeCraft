@@ -7,6 +7,27 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "${ROOT}/scripts/lib/provider_verdict_guard.sh"
 
 need="true"
+# #1009 — a rung that failed failover-eligibly (an expired subscription login,
+# say) ran no review: its ``neutral`` packet or check-run is the infra failure
+# itself, not a posted verdict, so only failure|success may hold the backstop
+# back. ``failover_eligible`` is that rung's action output; it is never
+# ``retryable`` — the dead login is not retried, the next vendor is tried.
+failover="false"
+if [ "${CODEX_OUTCOME:-}" = "failure" ]; then
+  [ "${CODEX_FAILOVER_ELIGIBLE:-}" = "true" ] && failover="true"
+elif [ "${OPENCODE_GO_OUTCOME:-}" = "failure" ]; then
+  [ "${OPENCODE_GO_FAILOVER_ELIGIBLE:-}" = "true" ] && failover="true"
+fi
+blocks_backstop() {
+  if [ "${failover}" = "true" ]; then
+    verdict_blocks_codex_fallback "$1"
+  else
+    verdict_blocks_claude_backstop "$1"
+  fi
+}
+if [ "${failover}" = "true" ]; then
+  echo "the failed rung is failover-eligible (no retry of its credential can succeed) — a neutral verdict does not hold the Claude backstop back."
+fi
 # The workflow ``if:`` already excludes Codex ``outcome == success``; this script
 # re-checks so a rung that failed after posting a verdict does not spend Claude.
 if [ "${CODEX_OUTCOME:-}" = "success" ]; then
@@ -19,7 +40,7 @@ else
   fi
   if [ -n "${packet}" ]; then
     verdict="$(verdict_from_packet "${packet}")"
-    if verdict_blocks_claude_backstop "${verdict}"; then
+    if blocks_backstop "${verdict}"; then
       need="false"
       echo "packet decision.verdict=${verdict} — a rung posted a verdict despite failing later; not spending the Claude backstop."
     fi
@@ -27,7 +48,7 @@ else
   if [ "${need}" = "true" ] && [ "${EVENT_NAME}" = "pull_request_target" ]; then
     latest="$(latest_mergecraft_approval)"
     conclusion="$(discard_baseline_verdict "${latest}")"
-    if verdict_blocks_claude_backstop "${conclusion}"; then
+    if blocks_backstop "${conclusion}"; then
       need="false"
       echo "mergecraft-approval=${conclusion} — a rung posted a verdict despite failing later; not spending the Claude backstop."
     fi

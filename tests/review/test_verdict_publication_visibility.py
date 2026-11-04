@@ -277,17 +277,17 @@ async def test_a_sticky_only_rung_records_a_declined_publication(tmp_path: Path)
     assert _ignored_tool_errors(ctx) == []
 
 
-def test_a_sticky_only_rung_owes_no_publication_receipt() -> None:
+def test_a_sticky_only_rung_owes_no_publication_receipt(tmp_path: Path) -> None:
     """The run that deliberately deferred must not read as an unpublished verdict."""
     from mergecraft.main_outcome import _publication_outcome_inputs
+    from mergecraft.mcp.tool_state import init_tool_state
 
-    class _State:
-        selected_mode = "Review"
-        review_publication_sticky_only = True
-        terminal_submission = object()
+    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+    state.selected_mode = "Review"
+    state.review_publication_sticky_only = True
 
     receipt, mismatch = _publication_outcome_inputs(
-        _State(),  # type: ignore[arg-type]
+        state,
         result=AgentResult(success=True, terminal_submission_received=True),
         verdict_protocol="enforce",
     )

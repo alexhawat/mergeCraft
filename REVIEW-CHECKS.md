@@ -181,6 +181,30 @@ packet and the shadow log. Any read
 failure, truncated listing or file without a patch is a full review. The PR
 title, body and labels are never inputs.
 
+**Ignored paths (`ignore_paths`, `review.ignorePaths`).** Changed files whose
+repo-relative path matches an ignore glob are cut from the diff the reviewer
+reads (`diffPath`, `incrementalDiffPath`) and from the changed-line coverage
+universe, so they are out of scope rather than unread. A rename or copy is matched on both
+its source and its new name and leaves review only when both are ignored, so
+`git mv src/auth.py CHANGELOG.md` is still reviewed. `checkout_pr` names them
+in `ignoredPaths`, and the review body lists them under "Not reviewed (ignored
+by config)". The globs are the `ignore_paths` Action input, `review.ignorePaths`
+and, unless `review.ignorePathDefaults: false`, the defaults: `**/CHANGELOG.md`,
+`**/*.lock`, `**/package-lock.json`, and generated or minified files (a
+generated file stays in scope when its generator config changed too). The YAML
+half is read from the operator's side only — the base snapshot of a
+`pull_request_target` run, the base commit's config on any other pull request —
+so a pull request cannot ignore its own files. When the complete file listing of
+a `pull_request` / `pull_request_target` run is ignored, the agent never starts:
+the run passes with `Tier: skip (ignorePaths) — no LLM review ran`, "nothing to
+review", and `mergecraft-approval` is left to a human. A run the gate does not
+skip — a comment-driven review, or a failed or truncated listing — is never
+handed an empty scope it could approve: when the checkout's complete diff holds
+only ignored files, it records the same skip tier, so `mergecraft-approval` stays
+neutral and no GitHub approval is posted whatever the agent submits; when the
+files-API listing was truncated, nothing is filtered and the whole diff is
+reviewed. The coverage gate likewise never filters down to an empty scope.
+
 **Fallback interaction.** Semantic fallback advances when
 `terminal_submission_received` is false — whether because no submission
 was recorded or because the validator rejected one. A valid

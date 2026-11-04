@@ -15,6 +15,7 @@ from loguru import logger
 
 from mergecraft.agents import agents, resolve_agent
 from mergecraft.agents.shared import AgentResult
+from mergecraft.config.env import AgentRuntimeEnv
 from mergecraft.models import (
     _MAX_FALLBACK_DEPTH,
     BEDROCK_MODEL_ID_ENV,
@@ -483,7 +484,7 @@ def _configured_model_slugs(settings: RepoSettings) -> list[str]:
 def effective_model_slugs(settings: RepoSettings) -> list[str]:
     """Config order with ``MERGECRAFT_MODEL`` promoted to the front when set."""
     base = _configured_model_slugs(settings)
-    env_model = os.environ.get("MERGECRAFT_MODEL", "").strip()
+    env_model = AgentRuntimeEnv().model or ""
     if not env_model:
         return base
     rest = [slug for slug in base if slug != env_model]
@@ -507,7 +508,7 @@ def resolve_effective_model_slug(settings: RepoSettings) -> str | None:
     slug regardless, else ``settings.model`` resolved through the alias
     catalog.
     """
-    env_model = os.environ.get("MERGECRAFT_MODEL", "").strip()
+    env_model = AgentRuntimeEnv().model or ""
     if env_model:
         return env_model
 
@@ -595,7 +596,7 @@ def effective_model_chain(
             if entry not in chain:
                 chain.append(entry)
 
-    env_model = os.environ.get("MERGECRAFT_MODEL", "").strip()
+    env_model = AgentRuntimeEnv().model or ""
     if env_model:
         if explicit_chain:
             expanded = [env_model]
@@ -801,6 +802,30 @@ def _is_retryable_failure(result: AgentResult) -> bool:
     return _inferred_retryable(result)
 
 
+def _is_failover_eligible(result: AgentResult) -> bool:
+    """Whether a driver declared this failure a reason to move to the next vendor (#1009).
+
+    ``metadata["failover_eligible"] is True`` is distinct from ``retryable``: it
+    says the *next* chain entry may succeed even though re-issuing the call
+    against this one cannot (an expired subscription login). Only the literal
+    ``True`` counts, as with ``retryable``.
+    """
+    from mergecraft.agents.shared import FAILOVER_ELIGIBLE_KEY
+
+    return (result.metadata or {}).get(FAILOVER_ELIGIBLE_KEY) is True
+
+
+def _may_advance_chain(result: AgentResult) -> bool:
+    """Whether a failed attempt may hand the review to the next chain entry.
+
+    A retryable failure may (the next entry can only do better than a retry of
+    this one), and so may a failover-eligible one that is not retryable. Only
+    :func:`_is_retryable_failure` licenses an in-place retry at the chain tail,
+    so a failover-eligible failure there is the run's answer, not a retry.
+    """
+    return _is_retryable_failure(result) or _is_failover_eligible(result)
+
+
 def _retryable_failure_reason(result: AgentResult) -> FallbackReason:
     """Label a failure for tracing. Never decides — see ``_is_retryable_failure``."""
     error = (result.error or "").lower()
@@ -1003,7 +1028,7 @@ async def run_with_model_chain(
     pin: bool = False,
     tool_state: ToolState | None = None,
 ) -> tuple[str, AgentResult]:
-    """Walk the model chain, advancing on retryable failures.
+    """Walk the model chain, advancing on retryable or failover-eligible failures.
 
     The chain visits every configured entry in order, calling ``run_once`` on each.
     ``run_once`` is responsible for surfacing credential or availability errors as
@@ -1192,7 +1217,7 @@ async def run_with_model_chain(
                     attempt_span.set_status("ok")
                     terminal_status = "ok"
                     logger.info("» model chain succeeded slug={}", slug)
-                elif not result.success and not _is_retryable_failure(result):
+                elif not result.success and not _may_advance_chain(result):
                     attempt_span.set_status("error", result.error or "unknown error")
                     terminal_status = "error"
                     logger.warning(
@@ -1248,6 +1273,18 @@ async def run_with_model_chain(
                             attempts,
                             max_attempts,
                         )
+                elif not result.success:
+                    # Failover-eligible but not retryable, with nothing left to
+                    # fail over to: re-running this entry against the same
+                    # credential cannot succeed (#1009), so it is the answer.
+                    attempt_span.set_status("error", result.error or "unknown error")
+                    terminal_status = "error"
+                    logger.warning(
+                        "» model chain slug={} failed (failover-eligible, not retryable) "
+                        "at the chain tail: {}",
+                        slug,
+                        result.error or "unknown error",
+                    )
                 else:
                     attempt_span.set_status("error", skip_reason.value)
                     terminal_status = "error"
@@ -1632,7 +1669,7 @@ def resolve_model(*, slug: str | None = None, respect_env_override: bool = True)
     reported.
     """
     cleaned = (slug or "").strip()
-    env_model = os.environ.get("MERGECRAFT_MODEL", "").strip() if respect_env_override else ""
+    env_model = (AgentRuntimeEnv().model or "") if respect_env_override else ""
 
     if cleaned:
         _enforce_resolved_model_residency(cleaned)
@@ -1673,7 +1710,7 @@ def resolve_runtime_agent(
     instead of Codex. When unset, today's provider/credential inference
     applies, including fail-loud for missing native-harness credentials.
     """
-    env_agent = os.environ.get("MERGECRAFT_AGENT", "").strip()
+    env_agent = AgentRuntimeEnv().agent or ""
     if env_agent:
         if env_agent in agents:
             return resolve_agent(env_agent)

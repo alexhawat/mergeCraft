@@ -132,10 +132,12 @@ def test_app_approval_missing_provenance_fails_closed(key: str) -> None:
 def test_app_tokens_are_refreshed_per_attempt_and_fallback_is_preserved() -> None:
     root = Path(__file__).resolve().parents[2]
     workflow = yaml.safe_load((root / ".github/workflows/mergecraft.yml").read_text())
-    job = workflow["jobs"]["review"]
-    assert "head.repo.full_name == github.repository" in job["env"]["HAS_APP"]
-    steps = job["steps"]
-    for provider in ("opencode_go", "codex", "claude"):
+    # One rung per job since #1026; each job mints its own token.
+    rung_jobs = {"opencode_go": "review", "codex": "review-codex", "claude": "review-backstop"}
+    for provider, job_name in rung_jobs.items():
+        job = workflow["jobs"][job_name]
+        assert "head.repo.full_name == github.repository" in job["env"]["HAS_APP"]
+        steps = job["steps"]
         mint = next(step for step in steps if step.get("id") == f"app_token_{provider}")
         review = next(step for step in steps if step.get("id") == f"mergecraft_{provider}")
         assert steps.index(mint) + 1 == steps.index(review)

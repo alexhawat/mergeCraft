@@ -19,8 +19,8 @@
 # The `approval-gate` job fails unless `mergecraft-approval` is a confirmed
 # "success" (outstanding feedback, no check posted at all, and an unreachable
 # check-runs API after retries all fail closed — see that job's step). It
-# `needs:` the review-attempts job so Codex fallback can finish before the gate
-# samples check-runs (#433).
+# `needs:` every review-attempts job so the Codex fallback and the Claude backstop
+# can finish before the gate samples check-runs (#433).
 #
 # Provider priority: DeepSeek V4.1 Flash on OpenCode Go is primary; OpenAI
 # (Codex) is the one-shot fallback when OpenCode Go is absent or its review posts no
@@ -116,7 +116,9 @@
 # Merge gate: ruleset `require-mergecraft-review` requires the **mergeCraft
 # review** job check only — not the raw `mergecraft` completion check (which goes
 # red on agent infra failures). That name is on the `approval-gate` job (which
-# `needs:` review attempts); the attempts job is `mergecraft review attempts`.
+# `needs:` review attempts); the attempts jobs are `mergecraft review attempts`
+# (OpenCode Go), `mergecraft review attempts (Codex)` and
+# `mergecraft review attempts (Claude backstop)`.
 # The gate fails closed on every non-success `mergecraft-approval` outcome (no
 # fail-open path remains).
 #
@@ -286,20 +288,14 @@ jobs:
   review:
     name: mergecraft review attempts
     needs: wait-for-ci
-    # The Codex rung consumes the ChatGPT-subscription login in CODEX_AUTH_JSON,
-    # whose refresh token rotates while it is in use and retires the previous one
-    # (#882, #970). Two jobs refreshing the same login retire each other's
-    # session, and the later one fails with "refresh token was already used"
-    # instead of reviewing. A job-level group serialises every consumer of the
-    # credential: this job (all three rungs run inside it, so they are already
-    # serial with each other) and any other job that receives the secret.
-    # cancel-in-progress stays false: cancelling a running consumer mid-refresh
-    # would spend the stored token. GitHub keeps one running and one pending job
-    # per group, so a third queued review replaces the pending one; re-run it.
-    concurrency:
-      group: codex-subscription-auth
-      cancel-in-progress: false
-    # Write scopes stay on the review job only (zizmor excessive-permissions).
+    # The rungs run as three jobs: this one (prep + OpenCode Go + the Codex
+    # routing decision), `review-codex` (the Codex rung, alone in the
+    # codex-subscription-auth concurrency group) and `review-backstop` (the
+    # Claude backstop + the recorded verdict). Only the Codex rung refreshes the
+    # shared ChatGPT-subscription login, so only that job queues on the group;
+    # serialising this whole job made a third queued review cancel a pending
+    # one (#1026).
+    # Write scopes stay on the review-attempt jobs only (zizmor excessive-permissions).
     permissions:
       contents: read
       # Download SARIF artifacts uploaded by ci.yml workflow runs (D10 / #600).
@@ -343,12 +339,10 @@ jobs:
       (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
       github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
-    # > 3× MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES + checkout/setup slack (D8).
-    # Three rungs now (OpenCode Go -> Codex -> Claude). This is a worst-case ceiling,
-    # not an expected cost: the Claude rung only runs when an earlier rung
-    # failed retryably, and a rung that dies on a quota ceiling returns in
-    # seconds rather than consuming its budget.
-    timeout-minutes: 95
+    # > 1× MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES + checkout/setup slack (D8).
+    # Each rung now runs in its own job (OpenCode Go here, then `review-codex`,
+    # then `review-backstop`), so each job budgets for exactly one attempt.
+    timeout-minutes: 40
     env:
       HAS_APP: ${{ secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APP_PRIVATE_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
       IS_SAME_REPO: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
@@ -375,13 +369,20 @@ jobs:
       MERGECRAFT_CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
       CI_STATE: ${{ needs.wait-for-ci.outputs.state }}
       CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
-    # The verdict the approval gate enforces is taken from this job's own rung
-    # outputs, not from a check-run another workflow could post. A job output
-    # can only be written by the run that declares it, so binding the gate to
-    # one is binding it to this run.
+    # Handed to the later rungs so they run in the same order on the same
+    # inputs as when all three shared this job. A job output can only be
+    # written by the run that declares it.
     outputs:
-      approval_verdict: ${{ steps.approval_verdict.outputs.approval_verdict }}
-      approval_rung: ${{ steps.approval_verdict.outputs.approval_rung }}
+      prompt: ${{ steps.prompt.outputs.text }}
+      baseline_id: ${{ steps.approval_baseline.outputs.id }}
+      opencode_go_outcome: ${{ steps.mergecraft_opencode_go.outcome }}
+      opencode_go_failover_eligible: ${{ steps.mergecraft_opencode_go.outputs.failover_eligible }}
+      codex_fallback_need: ${{ steps.fallback.outputs.need }}
+      # The Codex rung's former step condition, evaluated here: Codex runs when
+      # OpenCode Go is not configured, or when the decide step found that its
+      # review posted no verdict. That is not the same as a non-success
+      # outcome: OpenCode Go can exit 0 having posted no usable verdict.
+      codex_needed: ${{ env.HAS_CODEX == 'true' && (env.HAS_OPENCODE_GO != 'true' || steps.fallback.outputs.need == 'true') }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -797,15 +798,139 @@ jobs:
           done <<< "${TRUSTED_HASHES}"
           "${TRUSTED_ROOT}/scripts/decide_codex_fallback.sh"
 
+
+  # The Codex rung, alone in its job so that only the step consuming the shared
+  # ChatGPT-subscription login holds the credential's concurrency group (#1026).
+  review-codex:
+    name: mergecraft review attempts (Codex)
+    needs: [wait-for-ci, review]
+    # The Codex rung consumes the ChatGPT-subscription login in CODEX_AUTH_JSON,
+    # whose refresh token rotates while it is in use and retires the previous one
+    # (#882, #970). Two jobs refreshing the same login retire each other's
+    # session, and the later one fails with "refresh token was already used"
+    # instead of reviewing. A job-level group serialises every consumer of the
+    # credential, and this job is the only one in this workflow that receives
+    # it. cancel-in-progress stays false: cancelling a running consumer
+    # mid-refresh would spend the stored token. GitHub keeps one running and
+    # one pending job per group, so the queue now forms only behind reviews
+    # that actually fall back to Codex.
+    concurrency:
+      group: codex-subscription-auth
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      # Download SARIF artifacts uploaded by ci.yml workflow runs (D10 / #600).
+      actions: read
+      # Post inline PR review + comments.
+      pull-requests: write
+      issues: write
+      # Post mergecraft / mergecraft-approval check-runs.
+      checks: write
+      statuses: write
+      # mergeCraft can mint short-lived tokens via OIDC when configured.
+      id-token: write
+    # Runs only where the Codex step used to: the review job finished cleanly
+    # (a failed step there skipped every later rung) and its routing output
+    # says Codex is needed. That output already folds in the same-repo guard,
+    # so fork PRs never reach this job.
+    if: >-
+      !cancelled() &&
+      needs.review.result == 'success' &&
+      needs.review.outputs.codex_needed == 'true'
+    runs-on: ubuntu-latest
+    # > 1× MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES + checkout/setup slack (D8).
+    timeout-minutes: 40
+    env:
+      HAS_APP: ${{ secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APP_PRIVATE_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      IS_SAME_REPO: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+      HAS_CODEX: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      MERGECRAFT_CI_WAIT_STATE: ${{ needs.wait-for-ci.outputs.state }}
+      MERGECRAFT_CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
+      CI_STATE: ${{ needs.wait-for-ci.outputs.state }}
+      CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
+    outputs:
+      codex_outcome: ${{ steps.mergecraft_codex.outcome }}
+      codex_failover_eligible: ${{ steps.mergecraft_codex.outputs.failover_eligible }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # MUST stay false. actions/checkout persists its token as
+          # `http.https://github.com/.extraheader = AUTHORIZATION: basic ...` in
+          # .git/config, and mergeCraft's git layer adds its own
+          # `Authorization` header (utils/git_setup.py, lane A D5).
+          # `extraHeader` is multi-valued in git, so the second does not replace
+          # the first — both go on the same request and GitHub answers
+          # 400 "Duplicate header: Authorization". checkout_pr then fails, review
+          # scope is never established, and every terminal verdict is rejected.
+          #
+          # The old comment here claimed persistence was required for
+          # checkout_pr / git_fetch to authenticate. That stopped being true when
+          # lane A gave those tools header-based auth of their own: checkout.py
+          # passes `env=_git_env(ctx.git_token)`, so the action authenticates
+          # from its `token:` input and needs nothing in .git/config.
+          persist-credentials: false
+
+      # This is the last point at which the workspace is provably the trusted
+      # default-branch checkout: the Codex rung below checks the PR head out
+      # into it. The login write-back after the rung runs a script on the
+      # runner host, so stage the trusted scripts out of the workspace now, in
+      # the runner home the container never mounts, and publish their content
+      # hash so the write-back step can re-verify the copy it is about to run.
+      # Each cascade job stages its own copy: the jobs run on separate runners,
+      # so a copy staged in the review job is not visible here (#1026).
+      - name: Stage the trusted scripts outside the workspace
+        id: trusted_scripts
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "${head}" != "${GITHUB_SHA}" ]; then
+            echo "::error title=mergecraft trusted scripts::checked-out HEAD ${head} does not match GITHUB_SHA ${GITHUB_SHA}; refusing to stage the trusted scripts from an unverified tree."
+            exit 1
+          fi
+          root="${HOME}/mergecraft-trusted-${GITHUB_RUN_ID}"
+          rm -rf "${root}"
+          mkdir -p "${root}/scripts/lib"
+          scripts=(
+            scripts/decide_codex_fallback.sh
+            scripts/decide_claude_fallback.sh
+            scripts/lib/provider_verdict_guard.sh
+            scripts/codex_auth_writeback.py
+          )
+          for rel in "${scripts[@]}"; do
+            cp -p "${rel}" "${root}/${rel}"
+            echo "staged ${rel} -> ${root}/${rel}"
+          done
+          {
+            echo "root=${root}"
+            echo "sha256<<MERGECRAFT_TRUSTED_EOF"
+            for rel in "${scripts[@]}"; do
+              printf '%s %s\n' "$(sha256sum "${root}/${rel}" | awk '{print $1}')" "${rel}"
+            done
+            echo "MERGECRAFT_TRUSTED_EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Ensure PR base ref exists locally
+        if: github.event_name == 'pull_request_target'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          base="${BASE_REF}"
+          git fetch --no-tags origin "${base}:refs/remotes/origin/${base}"
+          # pull_request_target checks out the default branch (`main`). When the
+          # PR targets `main`, `git branch -f main …` fails because that branch
+          # is the active worktree — origin/main is already fetched above.
+          if [ "$(git rev-parse --abbrev-ref HEAD)" != "${base}" ]; then
+            git branch -f "${base}" "origin/${base}"
+          fi
+
       # Mint per attempt: the full cascade can outlive a one-hour token.
       - name: Mint App token for Codex
-        if: >-
-          env.HAS_APP == 'true' &&
-          env.HAS_CODEX == 'true' &&
-          (
-            env.HAS_OPENCODE_GO != 'true' ||
-            steps.fallback.outputs.need == 'true'
-          )
+        # The job itself only runs when the Codex rung is needed
+        # (needs.review.outputs.codex_needed).
+        if: env.HAS_APP == 'true' && env.HAS_CODEX == 'true'
         id: app_token_codex
         continue-on-error: true
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
@@ -821,12 +946,7 @@ jobs:
           permission-issues: write
 
       - name: mergeCraft PR review (Codex)
-        if: >-
-          env.HAS_CODEX == 'true' &&
-          (
-            env.HAS_OPENCODE_GO != 'true' ||
-            steps.fallback.outputs.need == 'true'
-          )
+        if: env.HAS_CODEX == 'true'
         id: mergecraft_codex
         continue-on-error: true
         # mergeCraft — full SHA pinned to the alexhawat/mergeCraft `pre-0.0.1` head.
@@ -879,7 +999,7 @@ jobs:
         # main. pull_request_target still resolves from main until then.
         uses: alexhawat/mergeCraft@9e4318a81c47ad20313966105e9d0038e415198f # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
-          prompt: ${{ steps.prompt.outputs.text }}
+          prompt: ${{ needs.review.outputs.prompt }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
           # first, the action never posts its `mergecraft` completion check and the
           # only diagnostic is lost. Job timeout-minutes is composed from the same
@@ -908,8 +1028,11 @@ jobs:
           # Codex rotates the subscription's refresh token on use and rewrites
           # its auth.json; the run temp dir holding it is removed at exit. The
           # driver copies the refreshed file here — only when the refresh token
-          # changed — for the write-back step below. $RUNNER_TEMP is the same
-          # path inside the container and on the runner.
+          # changed — for the write-back step below. This is a Docker action, so
+          # the runner rewrites a step env value under the host temp dir to the
+          # container's mount of it, the same way the evidence packet under
+          # $RUNNER_TEMP/mergecraft reaches the persist step; the host steps
+          # below read the file at the host path.
           MERGECRAFT_CODEX_AUTH_EXPORT: ${{ runner.temp }}/mergecraft-codex-auth/auth.json
 
       - name: Persist evidence packet (Codex)
@@ -1026,6 +1149,174 @@ jobs:
           CODEX_AUTH_EXPORT: ${{ runner.temp }}/mergecraft-codex-auth/auth.json
         run: rm -f "${CODEX_AUTH_EXPORT}"
 
+  # The Claude backstop and the recorded verdict. Runs after both earlier rungs
+  # so the rung order, and the rung the verdict is taken from, are unchanged.
+  review-backstop:
+    name: mergecraft review attempts (Claude backstop)
+    needs: [wait-for-ci, review, review-codex]
+    permissions:
+      contents: read
+      # Download SARIF artifacts uploaded by ci.yml workflow runs (D10 / #600).
+      actions: read
+      # Post inline PR review + comments.
+      pull-requests: write
+      issues: write
+      # Post mergecraft / mergecraft-approval check-runs.
+      checks: write
+      statuses: write
+      # mergeCraft can mint short-lived tokens via OIDC when configured.
+      id-token: write
+    # `always()` so the verdict is recorded (and the gate has an output to read)
+    # whether or not the Codex job ran; a skipped review job still skips this
+    # one, with the same draft/dispatch/dependabot guard as the review job.
+    if: >-
+      always() &&
+      needs.review.result != 'skipped' &&
+      (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    # > 1× MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES + checkout/setup slack (D8).
+    timeout-minutes: 40
+    env:
+      HAS_APP: ${{ secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APP_PRIVATE_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      HAS_CODEX: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      HAS_OPENCODE_GO: ${{ secrets.OPENCODE_GO_API_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      HAS_CLAUDE: ${{ (secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      # Same predicate as the review job's HAS_AUTH and approval-gate's copy.
+      HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.OPENCODE_GO_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      MERGECRAFT_CI_WAIT_STATE: ${{ needs.wait-for-ci.outputs.state }}
+      MERGECRAFT_CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
+      CI_STATE: ${{ needs.wait-for-ci.outputs.state }}
+      CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
+      # The earlier rungs' results, as the single-job cascade saw them in
+      # `steps.<rung>.outcome`. A step that failed outright in the review or
+      # Codex job skipped every later rung there; EARLIER_RUNGS_FINISHED keeps
+      # that. A skipped Codex job reads as a skipped Codex step.
+      EARLIER_RUNGS_FINISHED: ${{ needs.review.result == 'success' && (needs.review-codex.result == 'success' || needs.review-codex.result == 'skipped') }}
+      OPENCODE_GO_OUTCOME: ${{ needs.review.outputs.opencode_go_outcome }}
+      CODEX_FALLBACK_NEED: ${{ needs.review.outputs.codex_fallback_need }}
+      CODEX_OUTCOME: ${{ needs.review-codex.outputs.codex_outcome || 'skipped' }}
+    # The verdict the approval gate enforces is taken from this job's own
+    # outputs, not from a check-run another workflow could post. A job output
+    # can only be written by the run that declares it, so binding the gate to
+    # one is binding it to this run.
+    outputs:
+      approval_verdict: ${{ steps.approval_verdict.outputs.approval_verdict }}
+      approval_rung: ${{ steps.approval_verdict.outputs.approval_rung }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # MUST stay false. actions/checkout persists its token as
+          # `http.https://github.com/.extraheader = AUTHORIZATION: basic ...` in
+          # .git/config, and mergeCraft's git layer adds its own
+          # `Authorization` header (utils/git_setup.py, lane A D5).
+          # `extraHeader` is multi-valued in git, so the second does not replace
+          # the first — both go on the same request and GitHub answers
+          # 400 "Duplicate header: Authorization". checkout_pr then fails, review
+          # scope is never established, and every terminal verdict is rejected.
+          #
+          # The old comment here claimed persistence was required for
+          # checkout_pr / git_fetch to authenticate. That stopped being true when
+          # lane A gave those tools header-based auth of their own: checkout.py
+          # passes `env=_git_env(ctx.git_token)`, so the action authenticates
+          # from its `token:` input and needs nothing in .git/config.
+          persist-credentials: false
+
+      # This is the last point at which the workspace is provably the trusted
+      # default-branch checkout. The mergeCraft steps below mount the workspace
+      # into a container that checks the PR head out into it, so everything the
+      # job reads from the workspace afterwards belongs to the branch under
+      # review. Stage the fallback decision scripts out of the workspace now, in
+      # the runner home the container never mounts, and publish their content
+      # hash so each decide step can re-verify the copy it is about to run.
+      - name: Stage the fallback scripts outside the workspace
+        id: trusted_scripts
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "${head}" != "${GITHUB_SHA}" ]; then
+            echo "::error title=mergecraft trusted scripts::checked-out HEAD ${head} does not match GITHUB_SHA ${GITHUB_SHA}; refusing to stage the fallback scripts from an unverified tree."
+            exit 1
+          fi
+          root="${HOME}/mergecraft-trusted-${GITHUB_RUN_ID}"
+          rm -rf "${root}"
+          mkdir -p "${root}/scripts/lib"
+          scripts=(
+            scripts/decide_codex_fallback.sh
+            scripts/decide_claude_fallback.sh
+            scripts/lib/provider_verdict_guard.sh
+            scripts/codex_auth_writeback.py
+          )
+          for rel in "${scripts[@]}"; do
+            cp -p "${rel}" "${root}/${rel}"
+            echo "staged ${rel} -> ${root}/${rel}"
+          done
+          {
+            echo "root=${root}"
+            echo "sha256<<MERGECRAFT_TRUSTED_EOF"
+            for rel in "${scripts[@]}"; do
+              printf '%s %s\n' "$(sha256sum "${root}/${rel}" | awk '{print $1}')" "${rel}"
+            done
+            echo "MERGECRAFT_TRUSTED_EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Ensure PR base ref exists locally
+        if: github.event_name == 'pull_request_target'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          base="${BASE_REF}"
+          git fetch --no-tags origin "${base}:refs/remotes/origin/${base}"
+          # pull_request_target checks out the default branch (`main`). When the
+          # PR targets `main`, `git branch -f main …` fails because that branch
+          # is the active worktree — origin/main is already fetched above.
+          if [ "$(git rev-parse --abbrev-ref HEAD)" != "${base}" ]; then
+            git branch -f "${base}" "origin/${base}"
+          fi
+
+      # The earlier rungs ran in other jobs, on other runners, so their packets
+      # arrive as the artifacts those jobs uploaded. Placing them at the same
+      # $RUNNER_TEMP paths the single-job cascade used keeps the Claude decide
+      # step and the verdict recorder reading exactly what they read before.
+      # An absent artifact (that rung did not run or emitted nothing) is the
+      # same as an absent packet file.
+      - name: Download earlier rungs' evidence packets
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: mergecraft-evidence-*
+          path: ${{ runner.temp }}/earlier-rungs
+
+      - name: Place earlier rungs' evidence packets
+        run: |
+          set -euo pipefail
+          # Only the two earlier rungs: a Claude packet from a previous attempt of
+          # this job must never be taken for this attempt's.
+          #
+          # download-artifact nests each artifact under its name only when the
+          # pattern matched more than one; a lone artifact (OpenCode Go posted
+          # the verdict, so Codex never ran) lands flat in the download path.
+          for rung in opencode-go codex; do
+            placed=""
+            for src in \
+              "${RUNNER_TEMP}/earlier-rungs/mergecraft-evidence-${rung}/packet-${rung}.json" \
+              "${RUNNER_TEMP}/earlier-rungs/packet-${rung}.json"; do
+              if [ -s "${src}" ]; then
+                cp "${src}" "${RUNNER_TEMP}/packet-${rung}.json"
+                placed="${src}"
+                break
+              fi
+            done
+            if [ -n "${placed}" ]; then
+              echo "placed the ${rung} packet from ${placed}"
+            else
+              echo "no ${rung} packet"
+            fi
+          done
+
       - name: Decide Claude backstop after the provider cascade
         id: claude_fallback
         # Gated on a RETRYABLE provider failure while Codex did not succeed.
@@ -1037,9 +1328,9 @@ jobs:
         # continue-on-error.
         #
         # OpenCode Go may fail after Codex already succeeded; the trigger excludes that
-        # case (`mergecraft_codex.outcome != 'success'`). When Codex is absent
-        # its outcome is `skipped`, so Claude-only and OpenCode Go-only rosters are
-        # unchanged.
+        # case (`CODEX_OUTCOME != 'success'`). When Codex is absent or not needed
+        # the review-codex job is skipped and CODEX_OUTCOME reads `skipped`, so
+        # Claude-only and OpenCode Go-only rosters are unchanged.
         #
         # The script defaults `need=true` and clears it when Codex succeeded,
         # when a packet carries `decision.verdict` in {success,failure,neutral},
@@ -1047,20 +1338,24 @@ jobs:
         # conclusions. That re-check is a safety net: a rung can fail after
         # posting a good verdict and must not be overwritten by Claude.
         if: >-
+          env.EARLIER_RUNGS_FINISHED == 'true' &&
           env.HAS_CLAUDE == 'true' &&
           (
-            steps.mergecraft_opencode_go.outcome == 'failure' ||
-            steps.mergecraft_codex.outcome == 'failure'
+            env.OPENCODE_GO_OUTCOME == 'failure' ||
+            env.CODEX_OUTCOME == 'failure'
           ) &&
-          steps.mergecraft_codex.outcome != 'success'
+          env.CODEX_OUTCOME != 'success'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           EVENT_NAME: ${{ github.event_name }}
-          BASELINE_ID: ${{ steps.approval_baseline.outputs.id }}
-          OPENCODE_GO_OUTCOME: ${{ steps.mergecraft_opencode_go.outcome }}
-          CODEX_OUTCOME: ${{ steps.mergecraft_codex.outcome }}
+          BASELINE_ID: ${{ needs.review.outputs.baseline_id }}
+          # #1009 — "hand the review on", distinct from retryable: an expired
+          # subscription login emits a neutral packet that is not a verdict.
+          # Each rung's flag crosses from the job that ran it as a job output.
+          OPENCODE_GO_FAILOVER_ELIGIBLE: ${{ needs.review.outputs.opencode_go_failover_eligible }}
+          CODEX_FAILOVER_ELIGIBLE: ${{ needs.review-codex.outputs.codex_failover_eligible }}
           OPENCODE_GO_PACKET_FILE: ${{ runner.temp }}/packet-opencode-go.json
           CODEX_PACKET_FILE: ${{ runner.temp }}/packet-codex.json
           TRUSTED_ROOT: ${{ steps.trusted_scripts.outputs.root }}
@@ -1068,7 +1363,7 @@ jobs:
         run: |
           set -euo pipefail
           # Same re-verification as the OpenCode Go -> Codex decide step: run the
-          # trusted copy, not the workspace path a rung has since rewritten.
+          # trusted copy staged before this job's rung mounts the workspace.
           while read -r hash rel; do
             [ -z "${hash}" ] && continue
             actual="$(sha256sum "${TRUSTED_ROOT}/${rel}" | awk '{print $1}')"
@@ -1083,6 +1378,7 @@ jobs:
       - name: Mint App token for Claude
         if: >-
           env.HAS_APP == 'true' &&
+          env.EARLIER_RUNGS_FINISHED == 'true' &&
           env.HAS_CLAUDE == 'true' &&
           (
             steps.claude_fallback.outputs.need == 'true' ||
@@ -1109,6 +1405,7 @@ jobs:
         # skip the "not configured" notice, run no review at all, and fail the
         # gate closed with no diagnostic.
         if: >-
+          env.EARLIER_RUNGS_FINISHED == 'true' &&
           env.HAS_CLAUDE == 'true' &&
           (
             steps.claude_fallback.outputs.need == 'true' ||
@@ -1122,7 +1419,7 @@ jobs:
         # all three rungs run the same product code (#532). Now 3ed2c798 (#582).
         uses: alexhawat/mergeCraft@9e4318a81c47ad20313966105e9d0038e415198f # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
-          prompt: ${{ steps.prompt.outputs.text }}
+          prompt: ${{ needs.review.outputs.prompt }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
           model: anthropic/claude-sonnet
           # Run exactly the model named above; this rung carries only Anthropic
@@ -1194,17 +1491,17 @@ jobs:
           (
             (
               env.HAS_OPENCODE_GO == 'true' &&
-              steps.mergecraft_opencode_go.outcome != 'success' &&
-              steps.fallback.outputs.need != 'true'
+              env.OPENCODE_GO_OUTCOME != 'success' &&
+              env.CODEX_FALLBACK_NEED != 'true'
             ) ||
             (
               env.HAS_OPENCODE_GO == 'true' &&
-              steps.fallback.outputs.need == 'true' &&
-              steps.mergecraft_codex.outcome != 'success'
+              env.CODEX_FALLBACK_NEED == 'true' &&
+              env.CODEX_OUTCOME != 'success'
             ) ||
             (
               env.HAS_OPENCODE_GO != 'true' &&
-              steps.mergecraft_codex.outcome != 'success'
+              env.CODEX_OUTCOME != 'success'
             )
           ) &&
           steps.mergecraft_claude.outcome != 'success'
@@ -1247,15 +1544,16 @@ jobs:
             echo "approval_rung=${rung}"
           } >> "${GITHUB_OUTPUT}"
 
+
   approval-gate:
     name: mergecraft review
-    needs: review
+    needs: [review, review-codex, review-backstop]
     # Same draft/dispatch/dependabot guard as the attempts job. `always()` keeps
     # the required check reporting when the attempts job errors on a runner fault;
     # a skipped attempts job still skips the gate.
     if: >-
       always() &&
-      needs.review.result != 'skipped' &&
+      needs.review-backstop.result != 'skipped' &&
       (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
       github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
@@ -1293,8 +1591,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          APPROVAL_VERDICT: ${{ needs.review.outputs.approval_verdict }}
-          APPROVAL_RUNG: ${{ needs.review.outputs.approval_rung }}
+          APPROVAL_VERDICT: ${{ needs.review-backstop.outputs.approval_verdict }}
+          APPROVAL_RUNG: ${{ needs.review-backstop.outputs.approval_rung }}
           EXPECTED_APP_ID: ${{ secrets.MERGECRAFT_APP_ID }}
         run: |
           set -euo pipefail

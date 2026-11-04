@@ -30,7 +30,9 @@ _MESSAGE_REDACTOR: MessageRedactor | None = None
 
 def is_debug_enabled() -> bool:
     """True when ``LOG_LEVEL=debug`` or ``ACTIONS_STEP_DEBUG=true``."""
-    level = (os.environ.get("LOG_LEVEL") or "").lower()
+    from mergecraft.config.env import LoggingEnv
+
+    level = (LoggingEnv().log_level or "").lower()
     if level == "debug":
         return True
     return os.environ.get("ACTIONS_STEP_DEBUG", "").lower() == "true"
@@ -40,7 +42,9 @@ def resolve_log_level() -> str:
     """Resolve the effective loguru level name from the environment."""
     if is_debug_enabled():
         return "DEBUG"
-    raw = (os.environ.get("LOG_LEVEL") or "INFO").upper()
+    from mergecraft.config.env import LoggingEnv
+
+    raw = (LoggingEnv().log_level or "INFO").upper()
     allowed = {"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"}
     return raw if raw in allowed else "INFO"
 
@@ -51,11 +55,9 @@ def resolve_log_format() -> str:
     Honours ``MERGECRAFT_LOG_FORMAT`` then ``LOG_FORMAT``. Any value other than
     ``json`` (case-insensitive) keeps the human-readable text sink.
     """
-    raw = (
-        (os.environ.get("MERGECRAFT_LOG_FORMAT") or os.environ.get("LOG_FORMAT") or "text")
-        .strip()
-        .lower()
-    )
+    from mergecraft.config.env import LoggingEnv
+
+    raw = (LoggingEnv().log_format or "text").strip().lower()
     return "json" if raw == "json" else "text"
 
 
