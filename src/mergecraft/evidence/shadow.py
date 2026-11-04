@@ -269,7 +269,9 @@ def predict_verdict_protocol(
     """
     from mergecraft.mcp.verdict import VerdictDiagnostic
 
-    if not result.success:
+    # #1132 — a driver that exited non-zero *after* the run accepted its verdict
+    # is classified by that verdict, as ``_classify_outcome`` does.
+    if not result.success and not result.terminal_submission_received:
         return VerdictProtocolPrediction(
             outcome=RunOutcome.failed,
             diagnostic=VerdictDiagnostic.provider_failure.value,

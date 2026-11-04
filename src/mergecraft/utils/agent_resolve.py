@@ -844,7 +844,16 @@ def _classify_skip_reason(result: AgentResult, chain_index: int) -> FallbackReas
     if attempt_id is not None and attempt_id != chain_index:
         return FallbackReason.stale_attempt
 
-    if result.success and result.terminal_submission_received:
+    if result.terminal_submission_received:
+        # #1132 — an accepted verdict from this attempt is the answer even when
+        # the CLI then exited non-zero; advancing the chain would spend another
+        # rung re-reviewing a PR that already has its verdict.
+        if not result.success:
+            logger.warning(
+                "» model chain attempt exited unsuccessfully after an accepted verdict; "
+                "keeping its verdict: {}",
+                result.error or "unknown error",
+            )
         return None
 
     if not result.success:
