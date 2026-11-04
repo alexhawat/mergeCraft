@@ -172,6 +172,42 @@ def test_the_diagnostic_names_the_last_event_before_the_silence() -> None:
     assert diagnostic.as_metadata()["last_event_type"] == "tool_use"
 
 
+def test_post_stall_event_preserves_the_last_event_before_the_silence() -> None:
+    clock = _Clock()
+    wall_clock = _Clock()
+    wall_clock.now = 1_793_788_400.0
+    accumulator = StreamSpanAccumulator(agent_name="opencode")
+    watchdog = IdleWatchdog(
+        label="opencode",
+        interval_s=30.0,
+        accumulator=accumulator,
+        clock=clock,
+        wall_clock=wall_clock,
+    )
+    watchdog.touch(event_type="tool_use")
+    clock.advance(31.0)
+    wall_clock.advance(31.0)
+    assert watchdog.check() is True
+
+    # Drivers touch the watchdog before handling the kill's transport error.
+    clock.advance(0.009)
+    wall_clock.advance(0.009)
+    watchdog.touch(event_type="error")
+    accumulator.set_stream_error("Transport: The socket connection was closed unexpectedly.")
+    diagnostic = watchdog.diagnostic()
+
+    assert diagnostic.last_event_type == "tool_use"
+    assert diagnostic.last_event_at == "2026-11-04T10:33:20.000+00:00"
+    assert diagnostic.as_metadata()["last_event_type"] == "tool_use"
+    assert diagnostic.as_metadata()["last_event_at"] == "2026-11-04T10:33:20.000+00:00"
+    assert "Last event before the silence: `tool_use` at 2026-11-04T10:33:20" in (
+        diagnostic.render()
+    )
+    assert diagnostic.last_provider_error is None
+    assert diagnostic.error_after_kill is not None
+    assert "socket connection" in diagnostic.error_after_kill
+
+
 def test_metadata_and_render_are_advisory_not_a_verdict() -> None:
     diagnostic = AgentDiagnostic(
         label="codex",

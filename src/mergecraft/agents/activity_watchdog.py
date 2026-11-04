@@ -201,7 +201,8 @@ class IdleWatchdog:
         self._event_count += 1
         if model_output:
             self._saw_model_output = True
-        if event_type:
+        # Events emitted during shutdown must not replace the pre-stall record.
+        if event_type and not self._stalled:
             self._last_event_type = event_type
             self._last_event_at = _iso_utc(self._wall_clock())
 
