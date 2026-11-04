@@ -19,7 +19,11 @@ from typing import TYPE_CHECKING, Final
 import httpx
 from loguru import logger
 
-from mergecraft.agents.activity_watchdog import event_has_model_output, watchdog_for_process
+from mergecraft.agents.activity_watchdog import (
+    event_has_model_output,
+    event_type_name,
+    watchdog_for_process,
+)
 from mergecraft.agents.gates import GIT_NATIVE_READ_DENY_OPENCODE
 from mergecraft.agents.openai_compatible_gateways import (
     SINGLETON_PROVIDER_ID,
@@ -1528,7 +1532,9 @@ def _run_opencode_cli_streaming(
     )
 
     def _watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
-        watchdog.touch(model_output=event_has_model_output(event))
+        watchdog.touch(
+            model_output=event_has_model_output(event), event_type=event_type_name(event)
+        )
         base_handler(acc, event)
 
     try:

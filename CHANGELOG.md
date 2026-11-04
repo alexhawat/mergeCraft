@@ -118,6 +118,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A stall diagnostic names as the likely cause only a provider error seen before
+  the no-output watchdog killed the attempt. An error that arrives after the kill,
+  such as the closed-socket report the kill itself produces, is shown as an effect
+  of the kill, and with no earlier error the report says the cause is not known
+  instead of naming one. The report also names the last stream event and when it
+  arrived, so a silent reviewer leaves a trace of what it was doing (#1138).
+
 - The in-review trufflehog analyzer can now exempt one detector in one file,
   keyed on (path, detector) like the CI SARIF emitter's allowlist, instead of
   only exempting a whole file from every detector. The URI detector is allowed
