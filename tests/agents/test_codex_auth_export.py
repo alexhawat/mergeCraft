@@ -126,6 +126,16 @@ class TestExportRefreshedCodexAuth:
 
 
 class TestExportForRun:
+    @pytest.fixture(autouse=True)
+    def _codex_home_under_tmp_path(self, tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+        """Keep the run's Codex home under ``tmp_path``.
+
+        A run dir under ``/tmp`` sends ``_codex_home`` to the user cache, named
+        after the run dir's basename, which pytest reuses between runs; a second
+        run on the same machine would then find the previous run's home.
+        """
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+
     def test_unset_env_does_nothing(self, tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
         monkeypatch.delenv(codex_module.CODEX_AUTH_EXPORT_ENV, raising=False)
         ctx = make_agent_run_context(tmp_path, resolved_model=None)

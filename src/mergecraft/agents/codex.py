@@ -58,7 +58,7 @@ from mergecraft.agents.shared import (
     with_prompt,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
-from mergecraft.config.env import AgentRuntimeEnv, ProviderGatewayEnv
+from mergecraft.config.env import CODEX_AUTH_EXPORT_ENV, AgentRuntimeEnv, ProviderGatewayEnv
 from mergecraft.config.trust_policy import AgentSandboxDecision
 from mergecraft.mcp.endpoints import MCP_VERIFIER_ENDPOINT
 from mergecraft.security.broker import CodexBrokerPosture, subscription_auth_usable
@@ -97,8 +97,9 @@ CODEX_CREDENTIAL_EXPIRED_KIND = "reviewer_credential_expired"
 # ``CODEX_AUTH_JSON`` that was refreshed in CI is left spent (#970). When this
 # names a path, the refreshed ``auth.json`` is copied there — only when its
 # refresh token differs from the one the run started with — for the workflow's
-# write-back step to store. Unset outside the self-review workflow.
-CODEX_AUTH_EXPORT_ENV = "MERGECRAFT_CODEX_AUTH_EXPORT"
+# write-back step to store. Unset outside the self-review workflow. The name
+# is declared beside the model that parses it (``AgentRuntimeEnv``) and
+# re-exported here: :data:`CODEX_AUTH_EXPORT_ENV`.
 # A Codex ``config.toml`` is built as a nested mapping and rendered once; a
 # nested value is a table, a scalar is a key in the table that holds it.
 TomlTable: TypeAlias = dict[str, "str | bool | TomlTable"]
@@ -427,8 +428,11 @@ def _export_refreshed_login_for_run(
 
     Never raises: the review's outcome does not depend on the write-back.
     """
-    raw = os.environ.get(CODEX_AUTH_EXPORT_ENV, "").strip()
-    if not raw or not original.strip():
+    raw = AgentRuntimeEnv().codex_auth_export
+    if not raw:
+        logger.debug("{} unset; not exporting the Codex login", CODEX_AUTH_EXPORT_ENV)
+        return
+    if not original.strip():
         return
     expired = bool(
         result is not None

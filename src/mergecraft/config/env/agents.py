@@ -25,6 +25,7 @@ from pydantic_settings import SettingsConfigDict
 from mergecraft.config.env._base import EnvSettings, EnvSettingsError
 
 __all__ = [
+    "CODEX_AUTH_EXPORT_ENV",
     "CUSTOM_PROVIDER_API_KEY_ENV",
     "CUSTOM_PROVIDER_BASE_URL_ENV",
     "OTEL_PLUGIN_ENV",
@@ -36,6 +37,12 @@ __all__ = [
 #: that parses it; ``mergecraft.agents.opencode_otel`` re-exports it so callers
 #: keep naming the variable symbolically.
 OTEL_PLUGIN_ENV: Final[str] = "MERGECRAFT_OPENCODE_OTEL_PLUGIN"
+
+#: Where the Codex driver copies the ChatGPT-subscription login after Codex
+#: refreshed it, for the self-review workflow's write-back step (#970). The name
+#: lives beside the model that parses it; ``mergecraft.agents.codex`` re-exports
+#: it so the driver and its tests name the variable symbolically.
+CODEX_AUTH_EXPORT_ENV: Final[str] = "MERGECRAFT_CODEX_AUTH_EXPORT"
 
 #: The singleton custom-provider pair's variable names. They live beside the
 #: model that parses them so a module that only *labels* the pair imports the
@@ -87,6 +94,11 @@ class AgentRuntimeEnv(EnvSettings):
     )
     codex_home_parent: _Stripped = Field(
         default=None, validation_alias="MERGECRAFT_CODEX_HOME_PARENT"
+    )
+    #: Set by the self-review workflow only: the path the refreshed Codex
+    #: ``auth.json`` is exported to when its refresh token changed (#970).
+    codex_auth_export: _Stripped = Field(
+        default=None, validation_alias="MERGECRAFT_CODEX_AUTH_EXPORT"
     )
     model: _Stripped = Field(default=None, validation_alias="MERGECRAFT_MODEL")
     agent: _Stripped = Field(default=None, validation_alias="MERGECRAFT_AGENT")

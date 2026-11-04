@@ -137,6 +137,29 @@ class TestDecide:
             assert _NEW_TOKEN not in reason
 
 
+class TestClassifyGhFailure:
+    @pytest.mark.parametrize(
+        ("stderr", "fragment"),
+        [
+            ("HTTP 403: Resource not accessible by integration", "Secrets: Read and write"),
+            ("HTTP 401: Bad credentials", "rejected the token"),
+            ("HTTP 404: Not Found (https://api.github.com/repos/acme/demo)", "did not find"),
+            ("API rate limit exceeded", "rate-limited"),
+            ("dial tcp: i/o timeout", "unreachable"),
+            ("", "not echoed"),
+        ],
+    )
+    def test_stderr_maps_to_a_fixed_hint(self, stderr: str, fragment: str) -> None:
+        assert fragment in _MOD.classify_gh_failure(stderr)
+
+    def test_hint_never_carries_the_stderr_text(self) -> None:
+        """The credential-holding process's output must not reach the log."""
+        leak = f"token {_NEW_TOKEN} rejected with HTTP 403"
+        hint = _MOD.classify_gh_failure(leak)
+        assert _NEW_TOKEN not in hint
+        assert hint in {h for _, h in _MOD._GH_FAILURE_HINTS} | {_MOD._GH_FAILURE_DEFAULT}
+
+
 class TestMain:
     def test_changed_token_is_sent_to_gh_on_stdin_and_export_removed(
         self, tmp_path: Path, monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
@@ -149,7 +172,7 @@ class TestMain:
         assert not export.exists(), "the exported credential must be removed afterwards"
         out = capsys.readouterr()
         assert "::notice title=mergecraft codex login::" in out.out
-        assert "CODEX_AUTH_JSON updated in acme/demo" in out.out
+        assert "the stored secret was updated" in out.out
         assert _NEW_TOKEN not in out.out + out.err
         assert _ORIGINAL_TOKEN not in out.out + out.err
 
@@ -200,7 +223,8 @@ class TestMain:
         assert record.exists()
         assert not export.exists(), "the export is removed even when gh fails"
         out = capsys.readouterr().out
-        assert "::warning title=mergecraft codex login::gh secret set CODEX_AUTH_JSON failed" in out
+        assert "::warning title=mergecraft codex login::gh secret set failed (exit 3)" in out
+        assert "boom" not in out, "gh's stderr is classified, never echoed"
         assert _NEW_TOKEN not in out
 
     def test_unreadable_export_is_a_warning(

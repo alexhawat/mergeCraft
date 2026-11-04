@@ -27,6 +27,7 @@ from mergecraft.config.env._base import (
 )
 from mergecraft.config.env.action_inputs import ActionInputEnv
 from mergecraft.config.env.agents import (
+    CODEX_AUTH_EXPORT_ENV,
     CUSTOM_PROVIDER_API_KEY_ENV,
     CUSTOM_PROVIDER_BASE_URL_ENV,
     AgentRuntimeEnv,
@@ -55,6 +56,7 @@ from mergecraft.config.env.tracing import TracingEnv
 
 __all__ = [
     "ALLOW_UNSANDBOXED_SHELL_ENV",
+    "CODEX_AUTH_EXPORT_ENV",
     "CUSTOM_PROVIDER_API_KEY_ENV",
     "CUSTOM_PROVIDER_BASE_URL_ENV",
     "ENV_SETTINGS_CONFIG",

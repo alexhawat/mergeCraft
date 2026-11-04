@@ -14,8 +14,10 @@ mergeCraft step ran (the workspace holds the branch under review by then).
 Standard library only: the runner's ``python3`` is all it has.
 
 The credential is never printed. Every outcome is reported as a workflow
-``::notice`` / ``::warning`` that names paths and reasons only. The exported
-file is removed on every path once it has been read.
+``::notice`` / ``::warning`` built from fixed text only: no file content, no
+``gh`` output and no exception text reaches the log, so nothing that could
+carry a token does either. The exported file is removed on every path once it
+has been read.
 
 Module: scripts.codex_auth_writeback
 Depends: argparse, json, os, pathlib, subprocess, sys
@@ -47,6 +49,22 @@ EXPIRED_KIND = "reviewer_credential_expired"
 """The infra reason the Codex driver records for a dead login; nothing to store then."""
 
 _TITLE = "mergecraft codex login"
+
+# ``gh`` is the only process that sees the credential, so its stderr is never
+# echoed; it is classified into one of these fixed hints instead. Order matters:
+# the first matching marker wins.
+_GH_FAILURE_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("403", "resource not accessible", "forbidden", "must have admin rights"),
+        "the token cannot write repository secrets; grant the reviewer App the "
+        "Secrets: Read and write permission and accept it on the installation",
+    ),
+    (("401", "bad credentials", "not logged in", "authentication"), "GitHub rejected the token"),
+    (("404", "not found", "could not resolve"), "GitHub did not find the repository"),
+    (("429", "rate limit", "abuse"), "GitHub rate-limited the request"),
+    (("timeout", "timed out", "connection", "network", "dial tcp"), "GitHub was unreachable"),
+)
+_GH_FAILURE_DEFAULT = "see the gh exit status; its output is not echoed here"
 
 
 class Decision(NamedTuple):
@@ -127,11 +145,24 @@ def decide(*, exported: str | None, original: str, infra_reason: str = "") -> De
     return Decision(True, "Codex refreshed the login; storing the new refresh token")
 
 
+def classify_gh_failure(stderr: str) -> str:
+    """Map ``gh``'s stderr onto one of the fixed hints in :data:`_GH_FAILURE_HINTS`.
+
+    The text itself is never returned: only a literal chosen by matching it.
+    """
+    lowered = stderr.lower()
+    for markers, hint in _GH_FAILURE_HINTS:
+        if any(marker in lowered for marker in markers):
+            return hint
+    return _GH_FAILURE_DEFAULT
+
+
 def write_back(*, exported_path: Path, secret_name: str, repo: str, gh: str = "gh") -> int:
     """Store the exported file as ``secret_name`` with ``gh secret set``.
 
-    The body goes to ``gh`` on stdin, so it never appears in argv or logs.
-    Returns the ``gh`` exit status.
+    The body goes to ``gh`` on stdin, so it never appears in argv or logs, and
+    ``gh``'s own output is classified rather than echoed. Returns the ``gh``
+    exit status.
     """
     with exported_path.open("rb") as handle:
         completed = subprocess.run(  # fixed argv, credential on stdin only
@@ -142,15 +173,13 @@ def write_back(*, exported_path: Path, secret_name: str, repo: str, gh: str = "g
             check=False,
         )
     if completed.returncode != 0:
-        detail = completed.stderr.decode("utf-8", "replace").strip().splitlines()
-        tail = detail[-1] if detail else "no stderr"
-        _emit(
-            "warning", f"gh secret set {secret_name} failed (exit {completed.returncode}): {tail}"
-        )
+        hint = classify_gh_failure(completed.stderr.decode("utf-8", "replace"))
+        _emit("warning", f"gh secret set failed (exit {int(completed.returncode)}): {hint}")
     return completed.returncode
 
 
 def _emit(level: str, message: str) -> None:
+    """Print a workflow command. Callers pass fixed text only; see the module docstring."""
     print(f"::{level} title={_TITLE}::{message}")
 
 
@@ -164,8 +193,11 @@ def _discard(path: Path) -> None:
                 handle.flush()
                 os.fsync(handle.fileno())
             path.unlink()
-    except OSError as exc:
-        _emit("warning", f"could not remove the exported login at {path}: {exc}")
+    except OSError:
+        _emit(
+            "warning",
+            "could not remove the exported login; the workflow's discard step removes it",
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -186,8 +218,8 @@ def main(argv: list[str] | None = None) -> int:
     exported: str | None
     try:
         exported = exported_path.read_text(encoding="utf-8") if exported_path.is_file() else None
-    except OSError as exc:
-        _emit("warning", f"cannot read the exported login at {exported_path}: {exc}")
+    except OSError:
+        _emit("warning", "cannot read the exported login; not writing anything back")
         _discard(exported_path)
         return 1
 
@@ -204,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
             exported_path=exported_path, secret_name=args.secret_name, repo=args.repo, gh=args.gh
         )
         if status == 0:
-            _emit("notice", f"{decision.reason}; {args.secret_name} updated in {args.repo}")
+            _emit("notice", f"{decision.reason}; the stored secret was updated")
             return 0
         return 1
     finally:

@@ -173,12 +173,9 @@ class TestWriteBackSerialisation:
     ) -> None:
         """Two consumers refreshing one login retire each other's session (#882)."""
         concurrency = codex_job.get("concurrency")
-        if concurrency is None:
-            pytest.skip(
-                "the Codex rung still shares the review job; the job-level "
-                f"{_SERIALISATION_GROUP!r} group lands with the review-codex split (#1126)"
-            )
-        assert isinstance(concurrency, dict)
+        assert isinstance(concurrency, dict), (
+            f"the job holding the Codex rung must carry the {_SERIALISATION_GROUP!r} group (#1126)"
+        )
         assert concurrency.get("group") == _SERIALISATION_GROUP
         assert concurrency.get("cancel-in-progress") is False
 
