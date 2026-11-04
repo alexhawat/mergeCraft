@@ -58,6 +58,28 @@ def _line_changes(entry: dict[str, Any]) -> int:
     return total
 
 
+def _previous_filename(entry: dict[str, Any], name: str) -> str:
+    """The pre-image path of a renamed or copied entry, or ``""`` for an in-place edit."""
+    previous = str(entry.get("previous_filename") or "").strip()
+    return previous if previous and previous != name else ""
+
+
+def _section_header(entry: dict[str, Any], name: str) -> str:
+    """The ``diff --git`` header for one files-API entry.
+
+    GitHub reports a rename or copy as ``previous_filename`` on the entry rather
+    than in the patch, so the header is rebuilt the way ``git diff`` writes it:
+    ``a/<previous> b/<name>`` plus the ``rename from`` / ``rename to`` (or
+    ``copy from`` / ``copy to``) lines. Without them the pre-image is invisible to
+    every reader of this diff and a rename looks like an in-place edit.
+    """
+    previous = _previous_filename(entry, name)
+    if not previous:
+        return f"diff --git a/{name} b/{name}\n"
+    verb = "copy" if str(entry.get("status") or "").strip().lower() == "copied" else "rename"
+    return f"diff --git a/{previous} b/{name}\n{verb} from {previous}\n{verb} to {name}\n"
+
+
 async def _read_diff(
     scm: ScmProvider, owner: str, repo: str, pull_number: int
 ) -> tuple[str, list[str]]:
@@ -78,11 +100,16 @@ async def _read_diff(
                 msg = f"{name} has line changes but GitHub sent no patch for it"
                 raise TriageUnavailableError(msg)
             paths.append(name)
-            parts.append(f"diff --git a/{name} b/{name}\n")
+            parts.append(_section_header(entry, name))
             if patch:
                 parts.append(f"{patch}\n")
+            # A rename or copy names its source too, so path-keyed triage and the
+            # ignore gate's rename rule reason about the pre-image as well.
+            previous = _previous_filename(entry, name)
+            if previous:
+                paths.append(previous)
         if len(batch) < _FILES_PAGE_SIZE:
-            return "".join(parts), paths
+            return "".join(parts), list(dict.fromkeys(paths))
     msg = f"the files listing was truncated at the {_FILES_MAX_PAGES}-page cap"
     raise TriageUnavailableError(msg)
 

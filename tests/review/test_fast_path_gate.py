@@ -312,3 +312,76 @@ async def test_a_prose_edit_whose_head_text_cannot_be_read_is_full() -> None:
     ]
 
     assert (await _decide(FakeScm(files=files, contents={}))).tier == "full"
+
+
+# ── renames and copies name their source ──────────────────────────────────────
+#
+# GitHub reports a rename as ``previous_filename`` on the files-API entry, not in the
+# patch. A diff rebuilt from ``filename`` alone shows a rename as an in-place edit of
+# the new name, so nothing keyed on the pre-image — the ignore gate's rename rule, a
+# path recognizer, the prose gate's suffix check — can see it.
+
+_PROSE_PATCH = "@@ -1,3 +1,3 @@\n # Title\n-Old words.\n+New words.\n More.\n"
+
+
+def _renamed(previous: str, name: str, *, status: str = "renamed") -> dict[str, Any]:
+    return {
+        "filename": name,
+        "previous_filename": previous,
+        "status": status,
+        "additions": 1,
+        "deletions": 1,
+        "patch": _PROSE_PATCH,
+    }
+
+
+async def _read(scm: FakeScm) -> tuple[str, list[str]]:
+    from mergecraft.fast_path import _read_diff
+
+    return await _read_diff(scm, "acme", "demo", 7)  # type: ignore[arg-type]
+
+
+async def test_a_rename_is_written_the_way_git_writes_it() -> None:
+    from mergecraft.review_policy.ignore_paths import rename_sources
+
+    diff, paths = await _read(FakeScm(files=[_renamed("src/auth.py", "docs/notes.md")]))
+
+    assert diff.startswith(
+        "diff --git a/src/auth.py b/docs/notes.md\n"
+        "rename from src/auth.py\n"
+        "rename to docs/notes.md\n"
+        "@@ -1,3 +1,3 @@\n"
+    )
+    assert paths == ["docs/notes.md", "src/auth.py"]
+    # The ignore gate reads renames from this header; it must see the same one.
+    assert rename_sources(diff) == {"docs/notes.md": "src/auth.py"}
+
+
+async def test_a_copy_is_labelled_a_copy() -> None:
+    diff, paths = await _read(FakeScm(files=[_renamed("docs/a.md", "docs/b.md", status="copied")]))
+
+    assert "diff --git a/docs/a.md b/docs/b.md\ncopy from docs/a.md\ncopy to docs/b.md\n" in diff
+    assert paths == ["docs/b.md", "docs/a.md"]
+
+
+async def test_an_in_place_edit_keeps_the_plain_header() -> None:
+    files = [{"filename": "README.md", "additions": 1, "deletions": 1, "patch": _PROSE_PATCH}]
+
+    diff, paths = await _read(FakeScm(files=files))
+
+    assert diff.startswith("diff --git a/README.md b/README.md\n@@ ")
+    assert "rename" not in diff
+    assert paths == ["README.md"]
+
+
+async def test_a_code_file_renamed_into_prose_is_never_a_prose_skip() -> None:
+    """The pre-image was code; a rename into ``docs/`` does not make it a prose edit."""
+    scm = FakeScm(
+        files=[_renamed("src/auth.py", "docs/notes.md")],
+        contents={"docs/notes.md": "# Title\nNew words.\nMore.\n"},
+    )
+
+    decision = await _decide(scm)
+
+    assert decision.tier == "full"
+    assert decision.recognizer is None
