@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from mergecraft.modes import Mode
     from mergecraft.prep.types import PrepResult
     from mergecraft.review.lens_routing import LensRoutingDecision
+    from mergecraft.scm.types import LinkedIssue
     from mergecraft.xrepo.review import BaseManifestLookup, XrepoReview
 
 RepoAccess = Literal["primary", "write", "read"]
@@ -596,11 +597,11 @@ class ToolState:
     # means policy has not been evaluated yet. Typed ``Any`` only to keep this
     # module free of an import cycle back into ``policy.review``.
     policy_evaluation: Any = None
-    # Bodies of the issues this pull request closes (GraphQL
-    # ``closingIssuesReferences``), read once at run start. ``None`` means they
-    # were not read — no pull request, or the read failed — which is never the
-    # same as "closes no issue" (an empty tuple).
-    linked_issue_bodies: tuple[str, ...] | None = None
+    # The issues this pull request closes (GraphQL ``closingIssuesReferences``),
+    # read once at run start. ``()`` means it closes none; ``None`` means they
+    # were not (fully) read — no pull request, a failed, partial or malformed
+    # read — which is never the same as "closes no issue".
+    linked_issues: tuple[LinkedIssue, ...] | None = None
     # The linked-repo manifest as ``checkout_pr`` read it from the base, and the
     # ``review_linked_repos`` result it recorded. ``None`` means not read / not
     # reviewed in this run. The policy evidence producers read these instead of

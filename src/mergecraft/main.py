@@ -1238,18 +1238,19 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     # and the MCP-token client is installed regardless.
     await _close_superseded_scm(ctx.scm)
     ctx.scm = create_github_scm(token_ref.mcp_token, client=GitHubClient(token_ref.mcp_token))
-    await _read_linked_issue_bodies(ctx)
+    await _read_linked_issues(ctx)
 
     return ctx
 
 
-async def _read_linked_issue_bodies(ctx: RunContext) -> None:
-    """Record the bodies of the issues this pull request closes, once, at run start.
+async def _read_linked_issues(ctx: RunContext) -> None:
+    """Record the issues this pull request closes, with their authors, once, at run start.
 
     The ``requirements`` policy evidence producer maps their acceptance criteria
-    against the diff. A run without a pull request, or a read that fails, leaves
-    ``ToolState.linked_issue_bodies`` at ``None`` ("not read"), which keeps that
-    evidence absent rather than treating the pull request as closing nothing.
+    against the diff and names their authors. A run without a pull request reads
+    nothing and leaves ``ToolState.linked_issues`` at ``None``. A read that fails,
+    is malformed or spans more than one page *writes* ``None`` ("not read"), so the
+    evidence stays absent rather than treating the pull request as closing nothing.
     """
     tool_state = ctx.tool_state
     run_context = ctx.run_context
@@ -1257,9 +1258,10 @@ async def _read_linked_issue_bodies(ctx: RunContext) -> None:
         return
     client = github_client_from_scm(ctx.scm)
     if client is None:
+        tool_state.linked_issues = None
         return
     try:
-        bodies = await client.closing_issue_bodies(
+        issues = await client.closing_issues(
             run_context.repo.owner, run_context.repo.name, int(ctx.pr_number)
         )
     except Exception as exc:  # an advisory read: a failure must never fail the run
@@ -1268,13 +1270,14 @@ async def _read_linked_issue_bodies(ctx: RunContext) -> None:
             ctx.pr_number,
             exc,
         )
+        tool_state.linked_issues = None
         return
-    if bodies is None:
+    if issues is None:
         logger.warning(
             "linked issues of PR #{} were not fully read; requirements evidence stays absent",
             ctx.pr_number,
         )
-    tool_state.linked_issue_bodies = bodies
+    tool_state.linked_issues = issues
 
 
 def _stamp_requested_model(ctx: RunContext, payload_model: object) -> None:

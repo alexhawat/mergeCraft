@@ -16,7 +16,7 @@ from mergecraft.config.settings import (
     RunContextData,
     load_repo_settings,
 )
-from mergecraft.scm.types import ListedItems
+from mergecraft.scm.types import LinkedIssue, ListedItems
 from mergecraft.utils.retry_policy import (
     DEFAULT_STOP,
     DEFAULT_WAIT,
@@ -31,17 +31,17 @@ DEFAULT_SERVER_URL = "https://github.com"
 DEFAULT_ACCEPT = "application/vnd.github+json"
 DEFAULT_API_VERSION = "2022-11-28"
 
-# The bodies of the issues a pull request closes. One page only: a pull request
+# The issues a pull request closes. One page only: a pull request
 # closing more issues than this is read as "not fully read" rather than as the
 # first page, so criteria in an unread issue can never be silently skipped.
 CLOSING_ISSUES_PAGE_SIZE = 25
-_CLOSING_ISSUE_BODIES_QUERY = """
+_CLOSING_ISSUES_QUERY = """
 query($owner: String!, $repo: String!, $number: Int!, $first: Int!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       closingIssuesReferences(first: $first) {
         pageInfo { hasNextPage }
-        nodes { number body }
+        nodes { number body author { login } }
       }
     }
   }
@@ -268,6 +268,23 @@ class GitHubClient:
                     await transport.aclose()
         self._clients.clear()
 
+    async def aclose_loop_transport(self) -> None:
+        """Close and forget the transport bound to the running loop, if any.
+
+        For callers that drive this client on a short-lived loop of their own
+        (a worker thread's ``asyncio.run``): the transport must be closed inside
+        that loop, before it ends, while the other loops' transports stay open.
+        """
+        if not self._owns_client:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        transport = self._clients.pop(loop, None)
+        if transport is not None:
+            await transport.aclose()
+
     async def __aenter__(self) -> GitHubClient:
         return self
 
@@ -360,10 +377,10 @@ class GitHubClient:
             raise RuntimeError(msg)
         return data.get("data") or {}
 
-    async def closing_issue_bodies(
+    async def closing_issues(
         self, owner: str, repo: str, number: int
-    ) -> tuple[str, ...] | None:
-        """Return the bodies of the issues pull request ``number`` closes.
+    ) -> tuple[LinkedIssue, ...] | None:
+        """Return the issues pull request ``number`` closes, with their authors.
 
         Args:
             owner (str): Repository owner.
@@ -371,17 +388,18 @@ class GitHubClient:
             number (int): Pull request number.
 
         Returns:
-            tuple[str, ...] | None: One body per closing issue, in GitHub's order
-            (an issue without a body contributes ``""``); ``()`` when the pull
-            request closes nothing; ``None`` when the answer is malformed or
-            longer than one page, so a partial read is never mistaken for all of it.
+            tuple[LinkedIssue, ...] | None: One row per closing issue, in GitHub's
+            order (a missing body is ``""``, a missing author ``""``); ``()`` when
+            the pull request closes nothing; ``None`` when the answer is malformed
+            or longer than one page, so a partial read is never mistaken for all
+            of it.
 
         Raises:
             RuntimeError: GraphQL reported errors or answered with a non-object.
             httpx.HTTPError: The request itself failed.
         """
         data = await self.graphql(
-            _CLOSING_ISSUE_BODIES_QUERY,
+            _CLOSING_ISSUES_QUERY,
             {"owner": owner, "repo": repo, "number": number, "first": CLOSING_ISSUES_PAGE_SIZE},
         )
         level: Any = data
@@ -390,18 +408,29 @@ class GitHubClient:
         if not isinstance(level, dict):
             return None
         page_info = level.get("pageInfo")
-        if isinstance(page_info, dict) and page_info.get("hasNextPage"):
+        if not isinstance(page_info, dict) or page_info.get("hasNextPage") is not False:
             return None
         nodes = level.get("nodes")
         if not isinstance(nodes, list):
             return None
-        bodies: list[str] = []
+        issues: list[LinkedIssue] = []
         for node in nodes:
             if not isinstance(node, dict):
                 return None
+            issue_number = node.get("number")
+            if not isinstance(issue_number, int) or isinstance(issue_number, bool):
+                return None
             body = node.get("body")
-            bodies.append(body if isinstance(body, str) else "")
-        return tuple(bodies)
+            author = node.get("author")
+            login = author.get("login") if isinstance(author, dict) else None
+            issues.append(
+                LinkedIssue(
+                    number=issue_number,
+                    author_login=login if isinstance(login, str) else "",
+                    body=body if isinstance(body, str) else "",
+                )
+            )
+        return tuple(issues)
 
     # --- repos ---
 

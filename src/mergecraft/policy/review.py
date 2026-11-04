@@ -36,6 +36,7 @@ Exports:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
@@ -1184,19 +1185,39 @@ def _run_sync(awaitable: Coroutine[Any, Any, PolicyEvidence]) -> PolicyEvidence:
     The terminal tools reach the policy seam from async handlers, so a loop may
     already be running: the collection then gets its own loop on a worker thread,
     which keeps this seam synchronous without blocking re-entry into that loop.
+    The worker runs in a copy of the caller's context, so run-scope ContextVars
+    (the pinned settings snapshot among them) stay visible to the producers.
     """
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(awaitable)
+    context = contextvars.copy_context()
     with ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, awaitable).result()
+        return pool.submit(context.run, asyncio.run, awaitable).result()
+
+
+async def _collect_on_own_loop(ctx: Any, keys: tuple[str, ...]) -> PolicyEvidence:
+    """Collect on the loop ``_run_sync`` created, closing its GitHub transport after.
+
+    The GitHub client keeps one transport per event loop; the loop this runs on is
+    closed when collection ends, so its transport is closed here, inside it.
+    """
+    from mergecraft.scm.github import github_client_from_scm
+
+    try:
+        return await collect_policy_evidence(ctx, required_keys=keys)
+    finally:
+        scm = getattr(ctx, "scm", None)
+        client = github_client_from_scm(scm) if scm is not None else None
+        if client is not None:
+            await client.aclose_loop_transport()
 
 
 def _collect_run_evidence(ctx: Any, keys: Collection[str]) -> PolicyEvidence:
     """Collect ``keys`` through the producers; a failure leaves every key absent."""
     try:
-        return _run_sync(collect_policy_evidence(ctx, required_keys=tuple(keys)))
+        return _run_sync(_collect_on_own_loop(ctx, tuple(keys)))
     except Exception as exc:  # evidence collection must never fail a review
         logger.warning("policy: evidence collection failed, every key stays absent: {}", exc)
         reason = f"evidence could not be collected: {type(exc).__name__}: {exc}"

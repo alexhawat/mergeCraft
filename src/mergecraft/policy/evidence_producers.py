@@ -6,16 +6,19 @@ producer says where its evidence came from and why the pull request under review
 could not have written it:
 
 * ``requirements`` — acceptance criteria in the bodies of the issues the pull
-  request closes, mapped by mergeCraft against the diff. The pull request body is
-  the author's own text and is never a source.
+  request closes, keyword-matched by mergeCraft against the diff. The pull request
+  body is the author's own text and is never a source; an issue the author wrote is
+  still author-controlled, so the record names each issue's author and the key
+  proves traceability, not independent review.
 * ``xrepo`` — the linked-repo manifest as the base declares it, every repository
   in it reviewed in this run with nothing omitted.
 * ``health_check`` / ``rollback_plan`` / ``contract_schema`` — a proof declared in
   the base-side configuration (``policy.evidence.<key>``: the operator-owned
   snapshot, else ``.mergecraft/config.yaml`` at the base commit, never the pull
   request's own copy): a successful check run on the head commit from a trusted
-  GitHub App, or a bounded JSON document a successful workflow run on the head
-  commit uploaded and bound to that commit.
+  GitHub App, or a bounded JSON document bound to that commit and uploaded by a
+  successful run of the declared workflow file, from this repository, when the
+  pull request does not change that file.
 
 Unknown is never present: a source the run did not read, a listing that failed or
 was truncated, a run that did not succeed and a document that is malformed,
@@ -53,6 +56,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Coroutine, Mapping
 
     from mergecraft.config.settings import ArtifactProof, CheckRunProof, EvidenceProducerSettings
+    from mergecraft.scm.types import LinkedIssue
     from mergecraft.utils.github import GitHubClient
     from mergecraft.xrepo.review import BaseManifestLookup, XrepoReview
 
@@ -152,11 +156,11 @@ async def _produce_requirements(ctx: Any, key: str, _declarations: _Declarations
     from mergecraft.requirements.criteria import ChangeMap
     from mergecraft.requirements.ingest import ingest_requirements
 
-    bodies = getattr(ctx.tool_state, "linked_issue_bodies", None)
-    if bodies is None:
+    linked: tuple[LinkedIssue, ...] | None = getattr(ctx.tool_state, "linked_issues", None)
+    if linked is None:
         msg = "linked issues were not read, so no acceptance criteria are known"
         raise _Absent(msg)
-    if not bodies:
+    if not linked:
         msg = (
             "this pull request closes no linked issue, so there are no acceptance criteria "
             "to map against the diff (the pull request body is never a source)"
@@ -166,12 +170,12 @@ async def _produce_requirements(ctx: Any, key: str, _declarations: _Declarations
     change_map = ChangeMap(changed_paths=changed, touched_symbols=())
     changed_set = frozenset(changed)
     mapped = 0
-    issues_with_criteria = 0
+    sources: list[LinkedIssue] = []
     unevidenced: list[str] = []
-    for body in bodies:
-        result = ingest_requirements(source="linked_issue", text=body, change_map=change_map)
+    for issue in linked:
+        result = ingest_requirements(source="linked_issue", text=issue.body, change_map=change_map)
         if result.requirements:
-            issues_with_criteria += 1
+            sources.append(issue)
         for requirement in result.requirements:
             mapped += 1
             state = str(requirement.state.value)
@@ -189,13 +193,19 @@ async def _produce_requirements(ctx: Any, key: str, _declarations: _Declarations
         )
         raise _Absent(msg)
     noun = "criterion" if mapped == 1 else "criteria"
-    issues = "issue" if issues_with_criteria == 1 else "issues"
+    cited = ", ".join(
+        f"#{issue.number} by @{issue.author_login}"
+        if issue.author_login
+        else f"#{issue.number} by an unknown author"
+        for issue in sources
+    )
+    issues = "issue" if len(sources) == 1 else "issues"
     return EvidenceRecord(
         key=key,
         source="linked-issue-criteria",
         detail=(
-            f"{mapped} acceptance {noun} from {issues_with_criteria} linked {issues} "
-            "evidenced by the diff"
+            f"{mapped} acceptance {noun} from linked {issues} {cited}, keyword-matched "
+            "against the diff (traceability, not independent review)"
         ),
     )
 
@@ -524,7 +534,13 @@ async def _artifact_archive(
                 msg = f"{label} from workflow run {run_id} has expired"
                 raise _Absent(msg)
             size = artifact.get("size_in_bytes")
-            if isinstance(size, int) and size > EVIDENCE_ARCHIVE_MAX_BYTES:
+            if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+                msg = (
+                    f"{label} from workflow run {run_id} reports an unknown size, so it was "
+                    "not downloaded"
+                )
+                raise _Absent(msg)
+            if size > EVIDENCE_ARCHIVE_MAX_BYTES:
                 msg = f"{label} is a {size}-byte archive, past the {EVIDENCE_ARCHIVE_MAX_BYTES}-byte limit"
                 raise _Absent(msg)
             artifact_id = int(artifact.get("id") or 0)
@@ -541,8 +557,76 @@ async def _artifact_archive(
     raise _Absent(msg)
 
 
+def _workflow_path(value: object) -> str:
+    return value.strip().removeprefix("./") if isinstance(value, str) else ""
+
+
+def _head_repository(run: Mapping[str, Any]) -> str:
+    repository = run.get("head_repository")
+    name = repository.get("full_name") if isinstance(repository, dict) else None
+    return name.strip() if isinstance(name, str) else ""
+
+
+def _provenanced_runs(
+    runs: list[dict[str, Any]], *, head: str, workflow: str, repo: str, label: str
+) -> list[dict[str, Any]]:
+    """Return the runs whose upload may count: the declared workflow, this repo, success.
+
+    A run counts only when it executed exactly the declared workflow file, its head
+    repository is the reviewed repository (never a fork, never unknown), and it
+    completed with ``success`` on the head commit. Every other run is ignored, so a
+    forged run listed beside the operator's can never shadow it.
+    """
+    on_head = [run for run in runs if _same_sha(run.get("head_sha"), head)]
+    if not on_head:
+        msg = f"no workflow run on the head commit {_short(head)} could have uploaded {label}"
+        raise _Absent(msg)
+    declared = [run for run in on_head if _workflow_path(run.get("path")) == workflow]
+    if not declared:
+        seen = sorted({_workflow_path(run.get("path")) or "no workflow path" for run in on_head})
+        msg = (
+            f"no run of the declared workflow {workflow} on the head commit {_short(head)} "
+            f"could have uploaded {label} (runs seen: {', '.join(seen)})"
+        )
+        raise _Absent(msg)
+    same_repo: list[dict[str, Any]] = []
+    foreign: list[str] = []
+    for run in declared:
+        origin = _head_repository(run)
+        if origin.lower() == repo.lower():
+            same_repo.append(run)
+        elif origin:
+            foreign.append(f"run {run.get('id')} came from {origin}")
+        else:
+            foreign.append(f"run {run.get('id')} has no head repository")
+    if not same_repo:
+        msg = (
+            f"no run of {workflow} on the head commit came from the reviewed repository "
+            f"{repo}, so {label} cannot count ({'; '.join(foreign)})"
+        )
+        raise _Absent(msg)
+    succeeded = [
+        run
+        for run in same_repo
+        if run.get("status") == "completed" and run.get("conclusion") == "success"
+    ]
+    if not succeeded:
+        msg = (
+            f"no run of {workflow} on the head commit {_short(head)} that uploads {label} succeeded"
+        )
+        raise _Absent(msg)
+    return succeeded
+
+
 async def _produce_artifact(ctx: Any, key: str, proof: ArtifactProof) -> EvidenceRecord:
     label = f"artifact '{proof.name}'"
+    workflow = _workflow_path(proof.workflow)
+    if workflow in frozenset(_workflow_path(path) for path in _diff_changed_paths(ctx)):
+        msg = (
+            f"this pull request changes the declared workflow {workflow}, so nothing it "
+            f"uploads counts as {label}"
+        )
+        raise _Absent(msg)
     head = _head_sha(ctx)
     client = _client(ctx, label)
     owner, repo = _repo_slug(ctx)
@@ -557,26 +641,15 @@ async def _produce_artifact(ctx: Any, key: str, proof: ArtifactProof) -> Evidenc
         )
         raise _Absent(msg)
     runs = [run for run in listed.items if isinstance(run, dict)]
-    on_head = [run for run in runs if _same_sha(run.get("head_sha"), head)]
-    succeeded = [
-        run
-        for run in on_head
-        if run.get("status") == "completed" and run.get("conclusion") == "success"
-    ]
-    if not succeeded:
-        if not on_head:
-            msg = f"no workflow run on the head commit {_short(head)} could have uploaded {label}"
-        else:
-            msg = (
-                f"no workflow run on the head commit {_short(head)} that uploads {label} succeeded"
-            )
-        raise _Absent(msg)
+    succeeded = _provenanced_runs(
+        runs, head=head, workflow=workflow, repo=f"{owner}/{repo}", label=label
+    )
     run_id, archive = await _artifact_archive(
         client, owner=owner, repo=repo, runs=succeeded, proof=proof, label=label
     )
     raw = _read_document(archive, label=label)
     detail = _vouch(raw, key=key, head=head, label=label)
-    shown = f"{proof.name} from workflow run {run_id}"
+    shown = f"{proof.name} from workflow run {run_id} of {workflow}"
     if detail.strip():
         shown = f"{shown}: {_bounded_detail(detail)}"
     return EvidenceRecord(

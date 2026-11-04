@@ -634,7 +634,9 @@ at `Major` until every key it names is present. Each key is produced during the
 review from a source the pull request cannot write:
 
 - `requirements`: acceptance criteria from the issues the pull request closes,
-  mapped against the diff. The pull request body is never a source.
+  keyword-matched against the diff. The pull request body is never a source. An
+  issue the author wrote is author-controlled, so this proves traceability, not
+  independent review; the row names each issue's author.
 - `xrepo`: the linked-repo manifest on the base, with every repository in it
   reviewed and none omitted.
 - `health_check`, `rollback_plan` and `contract_schema`: a proof declared under
@@ -642,8 +644,9 @@ review from a source the pull request cannot write:
   snapshot, or the base commit's `.mergecraft/config.yaml`), never the pull
   request's own copy. The proof is either a successful check run on the head
   commit from a trusted GitHub App (`github-actions` is refused) or a bounded
-  `policy-evidence.json` that a successful workflow run uploaded for that
-  commit.
+  `policy-evidence.json` uploaded for that commit by a successful run of the
+  declared workflow file, from this repository (never a fork), when the pull
+  request does not change that file.
 
 Producers run only when a triggered rule requires evidence. The row lists each
 present key with its source and names every missing key with the reason it is

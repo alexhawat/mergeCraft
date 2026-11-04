@@ -17,9 +17,9 @@ absent carries a reason, which the policy row repeats.
 
 | Key | Where the evidence comes from | Who can write that source | Why the pull request cannot forge it |
 | --- | --- | --- | --- |
-| `requirements` | Acceptance criteria in the bodies of the issues the pull request closes (GitHub's closing references, read once at run start). mergeCraft maps each criterion against the diff. | Whoever can edit those issues. | The author can write criteria into an issue, but cannot claim the diff satisfies them, because mergeCraft does the mapping. The pull request body is never read for criteria. |
+| `requirements` | Acceptance criteria in the bodies of the issues the pull request closes (GitHub's closing references, read once at run start). mergeCraft keyword-matches each criterion against the diff. | Whoever can edit those issues, which may be the pull request author. | The author cannot claim the diff satisfies the criteria, because mergeCraft does the matching, and the pull request body is never read for criteria. An issue the author wrote is still author-controlled, so this key proves traceability, not independent review. |
 | `xrepo` | The linked-repo manifest (`.mergecraft/linked-repos.yaml`) as read from the base commit, plus this run's review of the linked repositories. | Whoever can merge to the base branch. | A manifest the pull request adds or edits is never used for its own review. Every repository the base declares has to be reviewed in this run, with none omitted. |
-| `health_check`, `rollback_plan`, `contract_schema` | The proof declared for the key under `policy.evidence.<key>` in the base-side configuration (the operator-owned snapshot, or the base commit's `.mergecraft/config.yaml`; never the pull request's own copy): either a check run or a workflow artifact on the head commit. | Whoever can merge to the base branch, for the declaration. A GitHub App the operator trusts, or a successful CI run on the head commit, for the proof. | The declaration is read from the base side, which the pull request cannot write. A check run counts only when an App named in `trustedApps` posted it, and `github-actions` is refused. An artifact document can only vouch for the key and commit it names, and the reviewed commit is fixed. |
+| `health_check`, `rollback_plan`, `contract_schema` | The proof declared for the key under `policy.evidence.<key>` in the base-side configuration (the operator-owned snapshot, or the base commit's `.mergecraft/config.yaml`; never the pull request's own copy): either a check run or a workflow artifact on the head commit. | Whoever can merge to the base branch, for the declaration. A GitHub App the operator trusts, or a successful CI run on the head commit, for the proof. | The declaration is read from the base side, which the pull request cannot write. A check run counts only when an App named in `trustedApps` posted it, and `github-actions` is refused. An artifact counts only when a run of the declared workflow file uploaded it, the pull request does not change that file, and the run came from this repository rather than a fork; its document can only vouch for the key and commit it names. |
 
 ### `requirements`
 
@@ -35,6 +35,16 @@ following keeps the key absent:
 - Linked issues that were never read. A pull request event is required, and if
   the read fails or the pull request closes more issues than fit on one page,
   the issues count as unread. They are never treated as closing nothing.
+
+**What this key does and does not prove.** The criteria are keyword-matched
+against the changed paths; nobody reads the code against them. An issue the
+pull request author opened is author-controlled text: they choose the criteria
+the diff is then matched against. `requirements` therefore proves traceability
+from issue to diff, not independent review. The record names each linked issue
+and its author's login and says the criteria were keyword-matched, so a reader
+can see whose words the rule was cleared on. Pair `requirements` with a key a
+pull request cannot shape, such as a declared check run, when a rule needs more
+than traceability.
 
 ### `xrepo`
 
@@ -96,13 +106,31 @@ the head, so mergeCraft never queries for it. `github-actions` is refused in
 head ref, which the author controls. A workflow that is meant to vouch for a key
 has to publish its check run as its own App.
 
-**Artifact** (`artifact: {name}`). mergeCraft lists the workflow runs for the
-reviewed head commit and keeps only those that completed with `success` and are
-bound to that commit. It then downloads the artifact called `name` from one of
-those runs. Inside the zip it looks for exactly one member,
+**Artifact** (`artifact: {name, workflow}`). A JSON document that says `ok` is
+easy to write; what makes it evidence is which code uploaded it. `workflow` names
+the one repo-relative workflow file (for example
+`.github/workflows/deploy-proof.yml`) allowed to upload the proof. mergeCraft
+lists the workflow runs for the reviewed head commit, and a run's artifact counts
+only when all of the following hold:
+
+- the run executed exactly the declared workflow file (the run's `path`). A run
+  of any other workflow, including one the pull request adds, and a run with no
+  `path` are ignored;
+- the pull request does not change that workflow file. A `pull_request` run
+  executes the pull request's own copy of the workflow, so a diff that edits it
+  could make it upload anything; such a diff voids the artifact;
+- the run's `head_repository` is the reviewed repository. A fork's run, and a run
+  whose head repository is not reported, never count;
+- the run completed with `success` and is bound to the head commit.
+
+Runs that fail any of these are skipped, so a forged run listed beside the
+operator's never shadows it. From a run that passes, mergeCraft downloads the
+artifact called `name`. Its reported size must be known: an archive of unknown
+size (GitHub reported none, or not a number) or larger than 1 MiB is refused
+before download. Inside the zip mergeCraft looks for exactly one member,
 `policy-evidence.json`, of at most 64 KiB uncompressed. The cap applies to the
-read itself: mergeCraft never decompresses more than 64 KiB plus one byte, and an
-archive larger than 1 MiB is refused before download.
+read itself: mergeCraft never decompresses more than 64 KiB plus one byte. The
+record names the artifact, the workflow run and the workflow file.
 
 The member must be a JSON object of this shape:
 
@@ -151,6 +179,7 @@ policy:
     rollback_plan:
       artifact:
         name: rollback-proof
+        workflow: .github/workflows/deploy-proof.yml
 ```
 
 - Only `health_check`, `rollback_plan` and `contract_schema` take a declaration.
@@ -160,6 +189,8 @@ policy:
   configuration error.
 - `checkRun` needs a non-empty `name` and at least one App in `trustedApps`.
   `github-actions`, in any letter case, is refused.
+- `artifact` needs a non-empty `name` and the repo-relative `workflow` file that
+  uploads it; an absolute path or one containing `..` is refused.
 - Unknown keys are refused at every level, so a misspelt `trustedApps` fails
   loudly instead of silently trusting nobody.
 

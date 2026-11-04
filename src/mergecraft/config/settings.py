@@ -487,14 +487,27 @@ class CheckRunProof(BaseModel):
 class ArtifactProof(BaseModel):
     """``policy.evidence.<key>.artifact``: a workflow artifact holding a proof document.
 
-    The artifact must come from a successful workflow run on the reviewed head
-    commit and hold one ``policy-evidence.json`` member of at most 64 KiB that
-    names this key and that commit with ``status: ok``.
+    ``workflow`` is the repo-relative workflow file (``.github/workflows/…``) that is
+    the only allowed uploader. The artifact counts only when a run of exactly that
+    file, from this repository (never a fork), completed with ``success`` on the
+    reviewed head commit, the pull request does not change that file, and the
+    artifact holds one ``policy-evidence.json`` member of at most 64 KiB that names
+    this key and that commit with ``status: ok``.
     """
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
     name: str = Field(min_length=1)
+    workflow: str = Field(min_length=1)
+
+    @field_validator("workflow")
+    @classmethod
+    def _repo_relative(cls, value: str) -> str:
+        path = value.strip().removeprefix("./")
+        if not path or path.startswith("/") or ".." in path.split("/"):
+            msg = f"workflow must be a repo-relative workflow file path, got {value!r}"
+            raise ValueError(msg)
+        return path
 
 
 class EvidenceProducerSettings(BaseModel):
