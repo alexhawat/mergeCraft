@@ -114,6 +114,7 @@ class LiteOutcome:
         findings: The validated findings (empty unless ``reviewed``).
         summary: The provider's one-sentence summary, when it gave one.
         prompt_version: The system prompt version (:data:`LITE_PROMPT_VERSION`).
+        model_slug: The ``label/model`` the call targeted, when it was resolved.
     """
 
     status: LiteStatus
@@ -124,6 +125,7 @@ class LiteOutcome:
     findings: list[LiteFinding] = field(default_factory=list)
     summary: str | None = None
     prompt_version: str = LITE_PROMPT_VERSION
+    model_slug: str | None = None
 
 
 class _AnswerError(ValueError):
@@ -162,6 +164,7 @@ def _downgraded(reason: str) -> LiteOutcome:
 def _failed(
     reason: str,
     *,
+    model_slug: str | None = None,
     tokens_used: int | None = None,
     usage_estimated: bool = False,
     cap_hit: bool = False,
@@ -170,6 +173,7 @@ def _failed(
     return LiteOutcome(
         status="failed",
         reason=reason,
+        model_slug=model_slug,
         tokens_used=tokens_used,
         usage_estimated=usage_estimated,
         cap_hit=cap_hit,
@@ -310,6 +314,7 @@ async def run_lite_review(
             {"role": "user", "content": user_prompt},
         ],
     }
+    slug = f"{label}/{model}"
     factory = http_client_factory or _default_client_factory
     url = f"{base_url.rstrip('/')}/chat/completions"
     try:
@@ -318,13 +323,13 @@ async def run_lite_review(
                 url, json=payload, headers={"Authorization": f"Bearer {api_key}"}
             )
     except httpx.HTTPError as err:
-        return _failed(f"the lite provider request failed ({type(err).__name__})")
+        return _failed(f"the lite provider request failed ({type(err).__name__})", model_slug=slug)
     if response.status_code >= 400:
-        return _failed(f"the lite provider answered HTTP {response.status_code}")
+        return _failed(f"the lite provider answered HTTP {response.status_code}", model_slug=slug)
     try:
         body = response.json()
     except ValueError:
-        return _failed("the lite provider's response body was not JSON")
+        return _failed("the lite provider's response body was not JSON", model_slug=slug)
     content = _message_content(body)
     reported = _reported_usage(body)
     if reported is not None:
@@ -336,6 +341,7 @@ async def run_lite_review(
     if content is None:
         return _failed(
             "the lite provider's response had no choices[0].message.content",
+            model_slug=slug,
             tokens_used=tokens_used,
             usage_estimated=usage_estimated,
             cap_hit=cap_hit,
@@ -344,7 +350,11 @@ async def run_lite_review(
         findings, summary = _parse_answer(content)
     except _AnswerError as err:
         return _failed(
-            str(err), tokens_used=tokens_used, usage_estimated=usage_estimated, cap_hit=cap_hit
+            str(err),
+            model_slug=slug,
+            tokens_used=tokens_used,
+            usage_estimated=usage_estimated,
+            cap_hit=cap_hit,
         )
     reason = f"single-call review completed with {len(findings)} finding(s)"
     if cap_hit:
@@ -363,6 +373,7 @@ async def run_lite_review(
         cap_hit=cap_hit,
         findings=findings,
         summary=summary,
+        model_slug=slug,
     )
 
 

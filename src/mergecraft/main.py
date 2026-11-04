@@ -2153,8 +2153,10 @@ async def _run_lite_tier(
         tool_state.triage = TriageDecision(tier="full", recognizer=None, reason=outcome.reason)
         logger.warning("» Tier: full — lite downgraded: {}", outcome.reason)
         return None
+    model_slug = outcome.model_slug or lite_model_slug(ctx.settings)
+    if outcome.model_slug is None and model_slug is not None:
+        outcome = replace(outcome, model_slug=model_slug)
     tool_state.lite_review = outcome
-    model_slug = lite_model_slug(ctx.settings)
     if outcome.findings:
         from mergecraft.mcp.tool_state import record_reviewer_dispatch_run
 

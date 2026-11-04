@@ -23,8 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   malformed answer is `inconclusive`. Off by default (#1010).
 
 - A `commentOnly` fast-path recognizer matches diffs that only edit `//` line
-  comments in `.js .ts .go .rs .java .kt .c .h .cc .cpp .hpp .cs .swift` files
-  (never JSX/TSX or `Package.swift`). Each changed line must be `//`, one space and
+  comments in `.js .ts .go .java .kt .c .h .cc .cpp .hpp .cs .swift` files
+  (never JSX/TSX, Rust or `Package.swift`; a Java unicode escape or a C-family `??`
+  refuses the file). Each changed line must be `//`, one space and
   a plain word that is not a directive word, and the head-side text proves it is a
   comment. Non-ASCII text, backticks, raw-string markers, block comments, a quote
   left open at the end of a line, a removal-only edit and every `#`-comment
@@ -100,6 +101,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repository without the file reviews exactly as before.
 
 ### Changed
+
+- Change-scoped findings in the deterministic review record now read
+  `` `path:line` — message `` (they named only the path), so each finding in the
+  record points at the line it is about (#1010).
 
 - The self-review's Codex rung runs in its own job, the only one holding the
   `codex-subscription-auth` concurrency group; OpenCode Go and the Claude backstop run

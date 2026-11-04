@@ -558,6 +558,12 @@ def _assemble_packet_core(
         requested_model=requested_model,
         agent_id=ctx.agent_id,
     )
+    lite_slug = _lite_model_slug(state)
+    if lite_slug is not None:
+        # A lite run made one call to the operator's registered provider; the agent's
+        # model never ran, so the evidence names the lite provider/model instead.
+        executed_model = requested_model = lite_slug
+        provider = lite_slug.split("/", 1)[0]
     packet = build_packet(
         change_id=change_id,
         agent_id=ctx.agent_id,
@@ -732,6 +738,14 @@ def _agent_version() -> str:
     from mergecraft import __version__
 
     return __version__
+
+
+def _lite_model_slug(state: ToolState) -> str | None:
+    """The ``label/model`` a ``lite`` run's single call targeted, or ``None``."""
+    if getattr(getattr(state, "triage", None), "tier", None) != "lite":
+        return None
+    slug = getattr(getattr(state, "lite_review", None), "model_slug", None)
+    return slug if isinstance(slug, str) and slug.strip() else None
 
 
 def _provider_for_model_evidence(

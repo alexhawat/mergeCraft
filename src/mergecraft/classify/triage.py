@@ -23,7 +23,8 @@ matches and hides one real change matches nothing and gets a full review.
 * ``generated`` — only lockfiles or generated paths changed, and no dependency
   manifest or generator config changed with them.
 * ``commentOnly`` — only ``//`` comment lines changed, in a closed list of
-  ``//``-comment languages chosen by suffix (no JSX/TSX; ``Package.swift`` refused). Each
+  ``//``-comment languages chosen by suffix (no JSX/TSX or Rust; ``Package.swift``
+  refused; a Java unicode escape or a C-family ``??`` refuses the file). Each
   changed line is ``//``, one space and a plain alphabetic word that is not a directive
   word; a removal must be replaced by an added line. The diff and the head text must be
   printable ASCII (plus tab and newline) and are split on ``\n`` only. A file with a
@@ -411,11 +412,11 @@ def recognize_generated(diff_text: str) -> bool:
 # ── comment-only ──────────────────────────────────────────────────────────────
 
 # JSX and TSX are off the list: a JSX text child can start with ``//`` and render.
+# Rust is off the list: a lifetime's lone ``'`` makes the quote check unsound.
 COMMENT_ONLY_SUFFIXES: Final[tuple[str, ...]] = (
     ".js",
     ".ts",
     ".go",
-    ".rs",
     ".java",
     ".kt",
     ".c",
@@ -440,7 +441,12 @@ _UNLEXABLE_MARKERS: Final[tuple[str, ...]] = (
     '"""',
     "/*",
 )
-_RUST_RAW_STRING: Final[re.Pattern[str]] = re.compile(r'(?<![A-Za-z0-9_])b?r"')
+# Java translates ``\uXXXX`` (any number of ``u``) before lexing, even inside comments,
+# so ``// note \u000a doEvil();`` is a call. C trigraphs (``??/`` is a backslash) can
+# splice the next line into a comment.
+_JAVA_UNICODE_ESCAPE: Final[re.Pattern[str]] = re.compile(r"\\u+")
+_C_FAMILY_SUFFIXES: Final[tuple[str, ...]] = (".c", ".h", ".cc", ".cpp", ".hpp")
+_C_TRIGRAPH_MARKER: Final[str] = "??"
 # Printable ASCII plus tab and newline. Anything else (U+2028, U+2029, a lone CR, NEL,
 # CRLF, any non-ASCII byte) could end a line for the language but not for this lexer.
 _COMMENT_ONLY_TEXT: Final[re.Pattern[str]] = re.compile(r"[\t\n\x20-\x7e]*")
@@ -461,6 +467,7 @@ _DIRECTIVE_WORDS: Final[frozenset[str]] = frozenset(
         "golangci",
         "pragma",
         "build",
+        "line",
     }
 )
 
@@ -508,7 +515,10 @@ def _comment_file_ok(file: _File, head_text: str) -> bool:
         return False
     if any(marker in head_text for marker in _UNLEXABLE_MARKERS):
         return False
-    if lowered.endswith(".rs") and _RUST_RAW_STRING.search(head_text):
+    file_text = "\n".join([head_text, *(line[1:] for hunk in file.hunks for line in hunk.lines)])
+    if lowered.endswith(".java") and _JAVA_UNICODE_ESCAPE.search(file_text):
+        return False
+    if lowered.endswith(_C_FAMILY_SUFFIXES) and _C_TRIGRAPH_MARKER in file_text:
         return False
     if lowered.endswith(".go") and '"C"' in head_text:
         return False  # a cgo preamble is C code written as a comment

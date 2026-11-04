@@ -170,8 +170,12 @@ against the head-side text), `whitespace` (the same tokens before and after;
 indentation counts in whitespace-sensitive languages), `generated` (only
 lockfiles or generated paths, with no manifest or generator config beside
 them) and `commentOnly` (only `//` line comments changed, in a closed list of
-`//`-comment languages — `.js .ts .go .rs .java .kt .c .h .cc .cpp .hpp .cs
-.swift`, never JSX/TSX or `Package.swift`. Each changed line must be `//`, one
+`//`-comment languages — `.js .ts .go .java .kt .c .h .cc .cpp .hpp .cs .swift`.
+JSX/TSX are excluded because a JSX text child can start with `//` and render,
+Rust because a lifetime's lone `'` defeats the quote check, and `Package.swift`
+because SwiftPM reads its first comment; a Java file with a `\u` unicode escape
+(translated before lexing, even in comments) and a C-family file with `??` (a
+trigraph can splice the next line) are refused. Each changed line must be `//`, one
 space and a plain alphabetic first word that is not a directive word
 (`fallthrough`, `Output`, `nolint`, `pragma`, `build`, …), so `//go:build`,
 `// +build`, `///`, `// @ts-ignore` and lint pragmas never match; a removed line
