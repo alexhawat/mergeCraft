@@ -19,7 +19,6 @@ except PackageNotFoundError:  # pragma: no cover — source tree with nothing in
 
 from mergecraft.version_info import (
     format_version_display,
-    short_commit,
     version_json_payload,
 )
 
@@ -27,7 +26,6 @@ __all__ = [
     "__commit__",
     "__version__",
     "format_version_display",
-    "short_commit",
     "version_json_payload",
 ]
 
