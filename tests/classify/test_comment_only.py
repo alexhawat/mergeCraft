@@ -1198,3 +1198,93 @@ def test_the_new_directive_words_are_refused_in_any_case(word: str, casing: str)
 
     assert _recognize(diff, heads) is False
     assert _recognize(plain_diff, plain_heads) is True
+
+
+# ── fourth gate: Swift extended regex literals and more pragmas ───────────────
+
+# Verbatim from the compiled fixture: swift prints MATCH for the base, NO MATCH for the head.
+_SWIFT_REGEX_BASE = (
+    "let r = #/\n"
+    "  (?<x> a+ )\n"
+    "// abc\n"
+    "  /#\n"
+    'let s = "aaa//abc"\n'
+    'print(s.contains(r) ? "MATCH" : "NO MATCH")\n'
+)
+_SWIFT_REGEX2 = "let r = ##/\n  a+\n// abc\n  /##\n"
+
+
+@pytest.mark.parametrize(
+    ("path", "base", "head"),
+    [
+        (
+            "Sources/App/r.swift",
+            _SWIFT_REGEX_BASE,
+            _SWIFT_REGEX_BASE.replace("// abc", "// xyz"),
+        ),
+        ("Sources/App/q.swift", _SWIFT_REGEX2, _SWIFT_REGEX2.replace("// abc", "// xyz")),
+    ],
+    ids=["C1-extended-regex-literal", "C2-double-hash-regex-literal"],
+)
+def test_a_swift_extended_regex_literal_is_refused(path: str, base: str, head: str) -> None:
+    """A ``// word`` line inside ``#/ … /#`` is regex text: editing it changes the match."""
+    assert _regate(path, base, head) is False
+
+
+def test_a_regex_literal_marker_only_on_the_removed_side_refuses_the_edit() -> None:
+    path = "Sources/App/r.swift"
+    diff = _file(path, " let a = 1", "-// old note #/", "+// new note", " let b = 2")
+    heads = {path: "let a = 1\n// new note\nlet b = 2\n"}
+
+    assert _recognize(diff, heads) is False
+
+
+def test_a_plain_swift_comment_edit_is_still_recognised() -> None:
+    base = "let a = 1\n// old note\nlet b = 2\n"
+
+    assert _regate("Sources/App/plain.swift", base, base.replace("old note", "new note")) is True
+
+
+_C_SWITCH = "switch (x) {\ncase 1:\n  f();\n  // note\ncase 2:\n  g();\n}\n"
+_CS_CLASS = "class A {\n  // note\n  int x;\n}\n"
+_JV_CLASS = "class A {\n  // note\n  int x;\n}\n"
+_TS_CONSTS = "export const a = 1;\n// note\nexport const b = 2;\n"
+_KT_FUN = "fun f() {\n  // note\n}\n"
+
+
+@pytest.mark.parametrize(
+    ("path", "base", "head"),
+    [
+        ("src/a.c", _C_SWITCH, _C_SWITCH.replace("// note", "// fall through")),
+        ("src/b.c", _C_SWITCH, _C_SWITCH.replace("// note", "// falls through")),
+        ("src/A.cs", _CS_CLASS, _CS_CLASS.replace("// note", "// ReSharper disable All")),
+        ("src/A.java", _JV_CLASS, _JV_CLASS.replace("// note", "// NOSONAR")),
+        ("src/B.java", _JV_CLASS, _JV_CLASS.replace("// note", "// noinspection unchecked")),
+        ("src/a.ts", _TS_CONSTS, _TS_CONSTS.replace("// note", "// tslint disable")),
+        ("src/A.kt", _KT_FUN, _KT_FUN.replace("// note", "// detekt suppress")),
+    ],
+    ids=[
+        "C3-gcc-fall-through",
+        "C4-gcc-falls-through",
+        "C5-resharper-disable",
+        "C6-nosonar",
+        "C7-noinspection-spaced",
+        "C8-tslint-plain-word",
+        "C9-detekt-plain-word",
+    ],
+)
+def test_every_fourth_gate_pragma_is_refused(path: str, base: str, head: str) -> None:
+    assert _regate(path, base, head) is False
+
+
+@pytest.mark.parametrize(
+    "word", ["fall", "falls", "fallthru", "resharper", "noinspection", "tslint", "detekt"]
+)
+@pytest.mark.parametrize("casing", ["lower", "upper", "title"])
+def test_the_fourth_gate_directive_words_are_refused_in_any_case(word: str, casing: str) -> None:
+    spelled = {"lower": word.lower(), "upper": word.upper(), "title": word.title()}[casing]
+    diff, heads = _comment_to("src/a.ts", f"// {spelled} through here")
+    plain_diff, plain_heads = _comment_to("src/a.ts", "// Plain words here")
+
+    assert _recognize(diff, heads) is False
+    assert _recognize(plain_diff, plain_heads) is True

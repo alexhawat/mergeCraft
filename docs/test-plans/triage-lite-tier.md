@@ -33,8 +33,10 @@ The rules under test:
   .kt .c .h .cc .cpp .hpp .cs .swift`. Comment-only recognition proves no runtime
   change for these languages; comments can still carry tool directives, which the
   directive word list refuses on a best-effort basis (it now also holds `code`,
-  `istanbul`, `nolintnextline`, `nolintbegin`, `nolintend`, `iwyu`, `jshint`, `noqa`
-  and `coverage`, matched in any case). A Java file whose diff or head text holds
+  `istanbul`, `nolintnextline`, `nolintbegin`, `nolintend`, `iwyu`, `jshint`, `noqa`,
+  `coverage`, `fall`, `falls`, `fallthru`, `resharper`, `noinspection`, `tslint` and
+  `detekt`, matched in any case). A file holding `#/` (a Swift extended regex
+  literal, which spans lines) is refused. A Java file whose diff or head text holds
   a backslash followed by `u` (a unicode escape, translated before lexing) is refused,
   and so is a C-family file (`.c .h .cc .cpp .hpp`) holding `??` anywhere (a trigraph
   can splice the next line into a comment). A file is refused when it contains a backtick, a
@@ -157,6 +159,8 @@ test and does not break collection.
 | New directive words refused in lower, upper and title case | `test_the_new_directive_words_are_refused_in_any_case` |
 | Each `.js` attack also runs as `.ts`, so its own rule (not the suffix) refuses it | `_with_ts_twins` rows (`*-as-ts`) in `test_every_probe_attack_is_refused` and `test_every_regate_attack_is_refused` |
 | REVIEW-CHECKS.md names the excluded languages and why, and says comments can still carry tool directives | `test_fast_path_lite_gate.py::test_review_checks_names_the_excluded_languages_and_why`, `test_review_checks_says_comments_can_still_carry_tool_directives` |
+| Swift extended regex literals (`#/ … /#`, `##/ … /##`) refused: any `#/` in head text or diff lines; a plain Swift edit stays recognised | `test_comment_only.py::test_a_swift_extended_regex_literal_is_refused`, `test_a_regex_literal_marker_only_on_the_removed_side_refuses_the_edit`, `test_a_plain_swift_comment_edit_is_still_recognised` |
+| Fourth-gate pragmas refused verbatim (`fall through`, `falls through`, `ReSharper`, `NOSONAR`, `noinspection`, `tslint`, `detekt`) and the new words in any case | `test_comment_only.py::test_every_fourth_gate_pragma_is_refused`, `test_the_fourth_gate_directive_words_are_refused_in_any_case` |
 | The API key never appears in a loguru line (success, HTTP 401, connect error) | `tests/agents/test_lite_review.py::test_the_api_key_never_appears_in_a_log_line` |
 | Lite record published as a `COMMENT` review with summary and finding location/message | `tests/review/test_fast_path_lite_gate.py::test_a_clean_lite_run_publishes_its_summary_as_a_comment_review`, `test_a_blocking_lite_run_publishes_each_finding_location_and_message` |
 | A failed completion check never says "finished successfully" | `test_fast_path_lite_gate.py::test_a_failed_completion_check_never_says_the_run_finished_successfully` |
@@ -198,3 +202,7 @@ provider is an operator step, not part of `make test`.
   comment fixture in `test_triage_lite.py`, and the comment-only gate fixtures in
   `test_fast_path_lite_gate.py`. Attack rows on `.js` stay verbatim and gain `.ts`
   twins.
+- A fourth verification round showed that a Swift extended regex literal (`#/ … /#`)
+  can span lines, so a `// word` line inside one is regex text; the compiled fixture
+  goes from MATCH to NO MATCH. Any `#/` now refuses the file. Seven more pragma first
+  words joined the directive list.
