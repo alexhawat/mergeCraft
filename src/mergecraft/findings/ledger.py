@@ -1297,6 +1297,15 @@ def render_deterministic_review_block(
     triage = getattr(packet, "triage", None)
     if triage is not None and triage.tier == "skip":
         header_lines.append(f"- **Tier:** skip ({triage.recognizer}) — no LLM review ran")
+    elif triage is not None and triage.tier == "lite":
+        used = getattr(triage, "tokens_used", None)
+        usage = "" if used is None else f"; {used} tokens used"
+        if used is not None and getattr(triage, "usage_estimated", False):
+            usage += " (estimated)"
+        header_lines.append(
+            f"- **Tier:** lite ({triage.recognizer}) — single-call review, "
+            f"cap {triage.token_cap} tokens{usage}; approval is left to a human"
+        )
     coverage = getattr(packet, "coverage", None)
     if coverage is not None:
         from mergecraft.evidence.coverage import coverage_summary_line

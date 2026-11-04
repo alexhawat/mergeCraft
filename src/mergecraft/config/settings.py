@@ -337,7 +337,7 @@ class ReviewCoverageSettings(BaseModel):
     )
 
 
-FastPathRecognizer = Literal["pinBump", "prose", "whitespace", "generated"]
+FastPathRecognizer = Literal["pinBump", "prose", "whitespace", "generated", "commentOnly"]
 
 
 class FastPathPinBumpSettings(BaseModel):
@@ -357,6 +357,29 @@ class FastPathPinBumpSettings(BaseModel):
     trusted_check_apps: list[str] = Field(default_factory=list, alias="trustedCheckApps")
 
 
+class FastPathLiteSettings(BaseModel):
+    """``review.fastPath.lite``: one capped LLM call for a matched-but-not-skipped diff.
+
+    Off by default. When ``enabled`` (in the operator's base-side config), a diff a
+    recognizer matched but that is not in ``skipLlm``, or a pin bump whose verifying
+    checks have not passed from a trusted App, gets a single non-streaming
+    ``chat/completions`` call to the operator-registered OpenAI-compatible
+    ``provider`` instead of the full review. ``provider`` is a registry label (or a
+    ``label/model`` slug; ``model`` wins for the model). The cap is checked before
+    the call: an upper-bound prompt estimate plus ``maxOutputTokens`` over
+    ``tokenCap`` downgrades the run to a full review. A ``lite`` run never grants
+    approval.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    enabled: bool = False
+    provider: str = ""
+    model: str = ""
+    token_cap: int = Field(default=50_000, ge=4_000, le=200_000, alias="tokenCap")
+    max_output_tokens: int = Field(default=4_000, ge=1, alias="maxOutputTokens")
+
+
 class FastPathSettings(BaseModel):
     """Deterministic pre-dispatch triage (``review.fastPath``), off by default.
 
@@ -365,7 +388,9 @@ class FastPathSettings(BaseModel):
     run posts the ``mergecraft`` check with the tier stated and leaves approval to a
     human. Anything else, and any doubt, is a full review. A pin bump additionally
     needs every ``pinBump.requireChecks`` check to have passed on the head SHA from a
-    ``pinBump.trustedCheckApps`` GitHub App.
+    ``pinBump.trustedCheckApps`` GitHub App. With ``lite.enabled``, a matched diff that
+    is not opted in (or an unverified pin bump) gets one capped LLM call instead of the
+    full review; see :class:`FastPathLiteSettings`.
     """
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
@@ -375,6 +400,7 @@ class FastPathSettings(BaseModel):
     pin_bump: FastPathPinBumpSettings = Field(
         default_factory=FastPathPinBumpSettings, alias="pinBump"
     )
+    lite: FastPathLiteSettings = Field(default_factory=FastPathLiteSettings)
 
 
 class ReviewSettings(BaseModel):

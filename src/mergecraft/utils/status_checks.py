@@ -132,9 +132,19 @@ def _coverage_line(ctx: ToolContext, packet: MergeEvidencePacket | None) -> str 
 
 
 def _triage_lines(packet: MergeEvidencePacket | None) -> list[str]:
-    """Return the lines that state a ``skip`` tier, so it never reads like a clean review."""
+    """Return the lines that state a ``skip`` or ``lite`` tier, so neither reads as a review."""
     triage = packet.triage if packet is not None else None
-    if triage is None or triage.tier != "skip":
+    if triage is None:
+        return []
+    if triage.tier == "lite":
+        lines = [f"Tier: lite — single-call review, cap {triage.token_cap} tokens"]
+        if triage.tokens_used is not None:
+            estimated = " (estimated)" if triage.usage_estimated else ""
+            over = " — over the cap" if triage.cap_hit else ""
+            lines.append(f"Tokens used: {triage.tokens_used}{estimated}{over}")
+        lines.append("Approval is left to a human.")
+        return lines
+    if triage.tier != "skip":
         return []
     lines = [f"Tier: skip ({triage.recognizer}) — no LLM review ran"]
     if triage.relied_on_checks:

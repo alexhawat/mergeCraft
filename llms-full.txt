@@ -883,15 +883,21 @@ comprehension: a driver's native file reads never cross mergeCraft's wire.
 When enabled in the operator's base-side config (a `pull_request_target`
 run — head-side config is never honoured), mergeCraft decides from the diff
 alone, before the MCP server and the agent exist, whether an LLM review is
-worth running. Four recognizers answer "is *every* change in this diff of this
+worth running. Five recognizers answer "is *every* change in this diff of this
 kind?": `pinBump` (each changed line pair differs only in a 40-hex SHA or
 `sha256:` digest, always the same single old → new pair), `prose` (only
 `.md` / `.txt` edits outside code fences, front matter and high-stakes
 paths, never a dependency manifest, lockfile or agent-instruction file, proved
 against the head-side text), `whitespace` (the same tokens before and after;
-indentation counts in whitespace-sensitive languages) and `generated` (only
+indentation counts in whitespace-sensitive languages), `generated` (only
 lockfiles or generated paths, with no manifest or generator config beside
-them). A mixed diff matches nothing and gets a full review. `skipLlm` opts each
+them) and `commentOnly` (only `//` line comments changed, in a closed list of
+`//`-comment languages — `.js .jsx .ts .tsx .go .rs .java .kt .c .h .cc .cpp
+.hpp .cs .swift` — each line proved outside a string literal or block comment by
+a lexer over the head-side text; a file with a backtick or raw-string marker, a
+directive-looking comment such as `//go:build`, `///` or `// @ts-ignore`, and
+every `#`-comment language are refused). A mixed diff matches nothing and gets a
+full review. `skipLlm` opts each
 recognizer in; a pin bump also needs every `pinBump.requireChecks` check to have
 passed on the head SHA **from a GitHub App named in
 `pinBump.trustedCheckApps`** — a check-run name is chosen by its creator, and
@@ -899,7 +905,20 @@ the `github-actions` runs of a `pull_request` workflow come from the head ref, s
 neither can vouch. A skipped run posts the `mergecraft` check stating
 `Tier: skip (pinBump) — no LLM review ran`, names the checks it relied on,
 **never grants `mergecraft-approval`**, and records the tier in the evidence
-packet and the shadow log. Any read
+packet and the shadow log. With `review.fastPath.lite.enabled`, the two cases a
+skip leaves out — a recognizer that matched but is not in `skipLlm`, and a pin
+bump whose verifying checks have not passed — get a `lite` review instead: one
+non-streaming call to an operator-registered OpenAI-compatible provider
+(`lite.provider`, `lite.model`), with the diff inlined and no checkout, MCP
+server, specialists or verifier. The `lite.tokenCap` (default 50,000) is checked
+before the call: an upper-bound prompt estimate plus `maxOutputTokens` over the
+cap, a missing credential or an unregistered provider downgrades the run to the
+full review, and a diff is never truncated. A `lite` run posts its findings as a
+review comment, states `Tier: lite — single-call review, cap N tokens`, records
+the cap and the tokens used in the evidence packet, and **never grants
+`mergecraft-approval`**: the `mergecraft` check is `neutral`, or `failure` on a
+Critical or Major finding, and usage over the cap or a malformed answer is
+`inconclusive`. Any read
 failure, truncated listing or file without a patch is a full review. The PR
 title, body and labels are never inputs.
 

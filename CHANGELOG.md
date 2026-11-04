@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `review.fastPath.lite` adds a `lite` triage tier for the two cases a skip
+  leaves out: a recognizer that matched but is not in `skipLlm`, and a pin bump
+  whose verifying checks have not passed from a trusted App. Instead of the full
+  agent review, the run makes one non-streaming call to an operator-registered
+  OpenAI-compatible provider with the diff inlined, and posts the findings as a
+  review comment. The `tokenCap` (default 50,000) is checked before the call; a
+  diff over it, a missing credential or an unregistered provider gets the full
+  review, and no diff is truncated. The packet's `triage` section records the
+  cap, the tokens used and the prompt version (schema `1.19.0`). A `lite` run
+  never grants `mergecraft-approval`: the `mergecraft` check is `neutral`, or
+  `failure` on a Critical or Major finding, and usage over the cap or a
+  malformed answer is `inconclusive`. Off by default (#1010).
+
+- A `commentOnly` fast-path recognizer matches diffs that only change `//` line
+  comments in `.js .jsx .ts .tsx .go .rs .java .kt .c .h .cc .cpp .hpp .cs
+  .swift` files, each line proved outside a string or block comment against the
+  head-side text. Files with backticks or raw-string markers, directive comments
+  such as `//go:build`, `///` or `// @ts-ignore`, and every `#`-comment language
+  are never recognised. Opt in through `skipLlm` like the other recognizers
+  (#1010).
+
 - The self-review's Codex rung writes the refreshed ChatGPT-subscription login
   back to the `CODEX_AUTH_JSON` repository secret after each run, so the
   rotated refresh token is never left spent (#970). The Codex driver exports

@@ -18,6 +18,7 @@ from mergecraft.action.inputs import (
     export_tracing_env_from_action_inputs,
 )
 from mergecraft.agents.gates import subagent_denied_tool_names
+from mergecraft.agents.lite import LiteOutcome, lite_model_slug, run_lite_review
 from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import FAILOVER_ELIGIBLE_KEY, Agent, AgentResult, AgentRunContext
 from mergecraft.agents.verifier import verifier_denied_tool_names
@@ -32,7 +33,7 @@ from mergecraft.ci.sarif_ingest import ingest_ci_sarif_from_action_env
 from mergecraft.classify.triage import TriageDecision
 from mergecraft.config.env import ActionInputEnv, EnvSettingsError, validate_env_settings
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
-from mergecraft.fast_path import decide_fast_path, load_triage_inputs
+from mergecraft.fast_path import load_triage_inputs, triage_pull_request
 from mergecraft.main_outcome import (
     _classify_outcome,
     _is_review_mode,
@@ -61,6 +62,7 @@ from mergecraft.review_policy.ignore_paths import INPUT_ENV as IGNORE_PATHS_INPU
 from mergecraft.review_policy.ignore_paths import list_pull_request_paths, resolve_review_ignore
 from mergecraft.run_outcome import (
     RUN_OUTCOME_CONCLUSION,
+    CompletionConclusion,
     RunOutcome,
     outcome_with_disposition_ledger,
     run_succeeded_for_outcome,
@@ -251,10 +253,12 @@ class RunContext:
             await _assemble_model_chain(self)
             await _build_run_tool_context(self)
 
-    async def review(self) -> AgentResult | SkipAgentReview:
+    async def review(self) -> AgentResult | SkipAgentReview | LiteAgentReview:
         return await _run_review_after_analyze(self)
 
-    async def publish(self, review_out: AgentResult | SkipAgentReview) -> MainResult:
+    async def publish(
+        self, review_out: AgentResult | SkipAgentReview | LiteAgentReview
+    ) -> MainResult:
         with gha_log.group("publish"):
             return await _finalize(self, review_out)
 
@@ -264,6 +268,19 @@ class SkipAgentReview:
     """Review-stage outcome when setup-script policy or the triage fast path skips the agent."""
 
     reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class LiteAgentReview:
+    """Review-stage outcome when the triage ``lite`` tier replaced the agent with one call.
+
+    ``outcome`` is ``reviewed`` or ``failed``; a ``downgraded`` call never becomes a
+    ``LiteAgentReview`` (the run takes the full review instead). The agent, its MCP
+    server and the roster never start for it, and it never grants approval.
+    """
+
+    decision: TriageDecision
+    outcome: LiteOutcome
 
 
 def _first_runnable_in_chain(chain: list[str]) -> str:
@@ -504,8 +521,9 @@ async def publish_deterministic_record(
         run_outcome=run_outcome,
         verdict_diagnostic=verdict_diagnostic,
         analyzer_summary=analyzer_run.pre_merge_summary if analyzer_run is not None else None,
-        # The accepted summary already lives in the formal review body.
-        agent_summary=None,
+        # The accepted summary already lives in the formal review body; a lite run
+        # has no formal review body, so its single call's summary is the record's.
+        agent_summary=getattr(tool_state.lite_review, "summary", None),
         trust_tier=resolved_ctx.trust_tier,
         attempt_count=len(tool_state.usage_entries) if tool_state.usage_entries else None,
         token_summary=_token_summary(
@@ -763,12 +781,17 @@ async def _publish(
         review_run = tool_context.tool_state.selected_mode in {"Review", "IncrementalReview"}
         if rejection_reason is None and tool_context.tool_state.terminal_publication_failed:
             rejection_reason = "terminal_publication_failed"
+        lite_run = tool_context.tool_state.lite_review is not None
         if (
             rejection_reason is None
             and review_run
             and tool_context.tool_state.terminal_submission is None
         ):
-            rejection_reason = effective_failure_reason or "no_accepted_model_verdict"
+            # A lite run records no terminal verdict by design (one capped call, no
+            # agent); only a real failure reason belongs in its record.
+            rejection_reason = effective_failure_reason or (
+                None if lite_run else "no_accepted_model_verdict"
+            )
         if (
             pull_number is not None
             and prepared is not None
@@ -795,11 +818,16 @@ async def _publish(
                 )
                 raise
         run_ok = run_succeeded_for_outcome(effective_outcome)
+        completion: CompletionConclusion = RUN_OUTCOME_CONCLUSION[effective_outcome]
+        if completion == "success":
+            completion = (
+                _lite_completion_conclusion(tool_context.tool_state, prepared) or completion
+            )
         await report_status_checks(
             tool_context,
             run_succeeded=run_ok,
             failure_reason=effective_failure_reason,
-            conclusion=RUN_OUTCOME_CONCLUSION[effective_outcome],
+            conclusion=completion,
             packet=prepared,
             approval_failure_reason=effective_sink_error,
         )
@@ -2026,14 +2054,19 @@ async def _dispatch_agent_with_deadline(ctx: RunContext) -> AgentResult:
     return _promote_and_finalize_agent_result(ctx, winning_slug, result)
 
 
-async def _triage_gate(ctx: RunContext) -> SkipAgentReview | None:
+async def _triage_gate(ctx: RunContext) -> SkipAgentReview | LiteAgentReview | None:
     """Deterministic pre-dispatch triage (``review.fastPath``): skip the agent when certain.
 
-    Returns ``SkipAgentReview`` only for a ``skip`` tier. Off by default; the config is
-    honoured only when it is the operator's base-side config. The decision is recorded
-    on the run (packet, check summaries, shadow log) whenever the gate was evaluated,
-    and any doubt is ``full``. The PR's title, body, labels and head-side config are
-    never read.
+    Returns ``SkipAgentReview`` for a ``skip`` tier and ``LiteAgentReview`` for a
+    ``lite`` tier whose single capped call ran (``reviewed`` or ``failed``). A ``lite``
+    call the driver ``downgraded`` (over the cap, no credential) returns ``None`` and
+    records a ``full`` decision carrying the downgrade reason, so the run gets the
+    normal review. Off by default; the config is honoured only when it is the
+    operator's base-side config. The pull request is read once, and the ``lite``
+    driver gets exactly the diff the decision was made from. The decision is
+    recorded on the run (packet, check summaries, shadow log) whenever the gate was
+    evaluated, and any doubt is ``full``. The PR's title, body, labels and head-side
+    config are never read.
     """
     assert ctx.settings is not None
     assert ctx.tool_state is not None
@@ -2048,7 +2081,7 @@ async def _triage_gate(ctx: RunContext) -> SkipAgentReview | None:
     head_sha = str(head.get("sha") or "") if isinstance(head, dict) else ""
     assert ctx.tool_context is not None
     repo = ctx.tool_context.repo
-    decision = await decide_fast_path(
+    decision, inputs = await triage_pull_request(
         ctx.tool_context.scm,
         repo.owner,
         repo.name,
@@ -2059,11 +2092,104 @@ async def _triage_gate(ctx: RunContext) -> SkipAgentReview | None:
         loader=load_triage_inputs,
     )
     ctx.tool_state.triage = decision
+    if decision.tier == "lite" and inputs is not None:
+        return await _run_lite_tier(ctx, decision, diff_text=inputs.diff_text)
     if decision.tier != "skip":
         return None
     logger.warning("» {} — {}", decision.record_line(), decision.reason)
     gha_log.warning(decision.record_line())
     return SkipAgentReview(reason=decision.reason)
+
+
+async def _run_lite_tier(
+    ctx: RunContext, decision: TriageDecision, *, diff_text: str
+) -> LiteAgentReview | None:
+    """Run the ``lite`` tier's single call; ``None`` (a full review) when it downgraded.
+
+    Findings are recorded on the reviewer roster's server-side path
+    (``record_reviewer_dispatch_run(agent_id="lite")``) and as packet findings, so a
+    Critical or Major one fails the checks like any review finding. The driver is
+    reached through this module's ``run_lite_review`` binding.
+    """
+    assert ctx.settings is not None
+    assert ctx.tool_state is not None
+    tool_state = ctx.tool_state
+    try:
+        outcome = await run_lite_review(
+            decision=decision, diff_text=diff_text, settings=ctx.settings
+        )
+    except Exception as err:  # the driver is total; a bug in it must not crash the run
+        logger.warning("» lite review raised {}: the run is inconclusive", type(err).__name__)
+        outcome = LiteOutcome(
+            status="failed", reason=f"the lite review raised {type(err).__name__}"
+        )
+    if outcome.status == "downgraded":
+        tool_state.triage = TriageDecision(tier="full", recognizer=None, reason=outcome.reason)
+        logger.warning("» Tier: full — lite downgraded: {}", outcome.reason)
+        return None
+    tool_state.lite_review = outcome
+    model_slug = lite_model_slug(ctx.settings)
+    if outcome.findings:
+        from mergecraft.mcp.tool_state import record_reviewer_dispatch_run
+
+        rows = [dict(finding) for finding in outcome.findings]
+        record_reviewer_dispatch_run(
+            tool_state, agent_id="lite", findings=rows, model_slug=model_slug
+        )
+        tool_state.agent_findings.extend(_lite_finding_rows(outcome))
+    logger.warning("» {} — {} ({})", decision.record_line(), outcome.reason, outcome.status)
+    gha_log.warning(decision.record_line())
+    return LiteAgentReview(decision=decision, outcome=outcome)
+
+
+def _lite_finding_rows(outcome: LiteOutcome) -> list[dict[str, Any]]:
+    """Compact ``lite`` rows for the packet, so a lite blocker reaches the gate.
+
+    :func:`mergecraft.evidence.merge.lite_row_finding` expands them into findings.
+    """
+    from mergecraft.evidence.merge import LITE_FINDING_TOOL
+
+    return [
+        {
+            "tool": LITE_FINDING_TOOL,
+            "rule_id": "lite-review",
+            "severity": item["severity"],
+            "path": item["path"],
+            "line": item["line"],
+            "message": item["message"],
+        }
+        for item in outcome.findings
+    ]
+
+
+def _lite_completion_conclusion(
+    tool_state: ToolState, prepared: Any
+) -> CompletionConclusion | None:
+    """The ``mergecraft`` check for a completed ``lite`` run: ``neutral``, or ``failure``.
+
+    ``None`` when the run was not a ``lite`` run. A lite call is triage, not a review,
+    so its clean completion never posts ``success``; a Critical or Major finding fails
+    the check.
+    """
+    triage = tool_state.triage
+    if tool_state.lite_review is None or getattr(triage, "tier", None) != "lite":
+        return None
+    from mergecraft.agents.gates import blocking_findings
+
+    findings = list(getattr(prepared, "findings", None) or [])
+    return "failure" if blocking_findings(findings) else "neutral"
+
+
+def _lite_inconclusive_reason(outcome: LiteOutcome) -> str | None:
+    """Why a ``lite`` run is ``inconclusive``: a failed call, or usage over the cap."""
+    if outcome.status == "failed":
+        return f"the lite review failed: {outcome.reason}"
+    if outcome.cap_hit:
+        return (
+            f"the lite review used {outcome.tokens_used} tokens, over its cap; "
+            "its result is not trusted"
+        )
+    return None
 
 
 _IGNORE_SKIP_EVENTS: frozenset[str] = frozenset({"pull_request", "pull_request_target"})
@@ -2149,7 +2275,9 @@ async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecu
     )
 
 
-async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentReview:
+async def _run_review_after_analyze(
+    ctx: RunContext,
+) -> AgentResult | SkipAgentReview | LiteAgentReview:
     """Setup script, MCP start, and payload-timed agent dispatch (review stage)."""
     await _apply_overrides_and_setup_git(ctx)
     assert ctx.tool_context is not None
@@ -2196,9 +2324,9 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
         # Engine publish (``_finalize``) owns completion; do not publish here.
         return SkipAgentReview(reason=skip_reason)
 
-    triage_skip = await _triage_gate(ctx)
-    if triage_skip is not None:
-        return triage_skip
+    triage_out = await _triage_gate(ctx)
+    if triage_out is not None:
+        return triage_out
     ignore_skip = await _ignore_paths_gate(ctx)
     if ignore_skip is not None:
         return ignore_skip
@@ -2475,7 +2603,9 @@ def _coverage_gate_reason(tool_context: ToolContext, settings: RepoSettings) -> 
         return None
 
 
-async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> MainResult:
+async def _finalize(
+    ctx: RunContext, result: AgentResult | SkipAgentReview | LiteAgentReview
+) -> MainResult:
     """Phase 4 — post-run, publish, outcome mapping (G4.2)."""
     assert ctx.tool_context is not None
     assert ctx.tool_state is not None
@@ -2486,7 +2616,8 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
     settings = ctx.settings
 
     finalize_failure: str | None = None
-    if isinstance(result, SkipAgentReview):
+    lite = result if isinstance(result, LiteAgentReview) else None
+    if isinstance(result, (SkipAgentReview, LiteAgentReview)):
         agent_result = AgentResult(success=True)
     else:
         agent_result = result
@@ -2570,7 +2701,9 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
             setup_reason=setup_reason,
             setup_policy=settings.setup_failure_policy,
             prep_reason=prep_reason,
-            mode=tool_state.selected_mode,
+            # A lite run owes no terminal verdict and delivers no checkout coverage:
+            # it is classified on its own call below, not as a review-mode run.
+            mode=None if lite is not None else tool_state.selected_mode,
             verdict_protocol=settings.gates.terminal_verdict,
             final_summary_written=tool_state.final_summary_written,
             terminal_publication_failed=tool_state.terminal_publication_failed,
@@ -2584,6 +2717,10 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
                 f"{finalize_failure} — the post-run finalize step raised, so the terminal "
                 "verdict could not be confirmed"
             )
+        lite_reason = _lite_inconclusive_reason(lite.outcome) if lite is not None else None
+        if lite_reason is not None and outcome is RunOutcome.passed:
+            logger.warning("» {}", lite_reason)
+            outcome, failure_reason = RunOutcome.inconclusive, lite_reason
     if sink_scan_error is not None:
         # A sink hit outranks the published verdict: the run failed, whatever
         # the review said, and ``failure_reason`` names the sink path so the
