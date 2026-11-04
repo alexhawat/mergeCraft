@@ -90,7 +90,10 @@ def _record(ctx: ToolContext, kept: list[Finding], ledger: Any, **extra: Any) ->
 
 
 def test_schema_version_is_bumped_for_the_analyzers_section() -> None:
-    assert PACKET_SCHEMA_VERSION == "1.17.0"
+    # The analyzers section arrived in 1.14.0; the exact current version is pinned
+    # in tests/evidence/test_packet_schema_version.py.
+    major, minor, _patch = (int(part) for part in PACKET_SCHEMA_VERSION.split("."))
+    assert (major, minor) >= (1, 14)
 
 
 def test_packet_persists_the_ledger_counts_entries_and_audit_rows(tmp_path: Path) -> None:
