@@ -6,25 +6,28 @@ slice of the changed files plus the same materialised diff path, with findings
 aggregated afterwards. This module is the *planning and degradation* half:
 
 * :func:`plan_file_groups` turns a diff TOC into at most ``max_groups`` balanced
-  groups, and returns no groups below the size threshold.
+  groups, and returns no groups when the diff is below **both** size
+  thresholds (either one being met triggers the fan-out).
 * :func:`dispatch_file_groups` runs a caller-supplied async dispatcher with
-  ``return_exceptions`` semantics, so one failed group becomes a recorded
-  finding instead of a failed review.
+  ``return_exceptions`` semantics and at most ``concurrency`` groups in flight,
+  so one failed group becomes a recorded finding instead of a failed review.
 
-The server-side roster dispatch (``review/roster_execution.py``) remains the
-only path that actually spawns reviewer agents today. Wiring this planner into
-that path is deliberately not part of slice 5: it needs live-provider
-validation of group prompts and aggregation, so it is filed as a follow-up
-rather than switched on unverified. Nothing here can fail a run: it returns a
+The server-side roster dispatch
+(``review/roster_execution.py::run_file_group_reviewers``) is the only caller
+that spawns reviewer agents for these groups, and only when the operator turns
+``review.fileGroupFanout`` on. Nothing here can fail a run: it returns a
 summary.
 
 Module: mergecraft.review.file_group_fanout
 Depends: mergecraft.evidence.diff_coverage, loguru
 
 Exports:
+    FILE_GROUP_AGENT_PREFIX — Agent-id prefix of a file-group reviewer run.
     FileGroup — One read-only reviewer's file slice.
     FanoutPlan — Bounded groups plus why the plan has that shape.
     FanoutSummary — Per-group outcomes and recorded failures.
+    file_group_agent_id — The ``file-group/<group-id>`` agent id of a group.
+    is_file_group_agent_id — Whether an agent id names a file-group run.
     plan_file_groups — Build a bounded plan from a unified diff.
     dispatch_file_groups — Run the dispatcher, degrading failures.
 """
@@ -46,6 +49,47 @@ DEFAULT_MAX_GROUPS: Final[int] = 6
 DEFAULT_MIN_DIFF_LINES: Final[int] = 800
 DEFAULT_MIN_FILES: Final[int] = 20
 """Fan-out is for genuinely large PRs, not for every multi-file change."""
+
+FILE_GROUP_AGENT_PREFIX: Final[str] = "file-group/"
+"""Agent ids of file-group reviewer runs are ``file-group/<group-id>``."""
+
+
+def file_group_agent_id(group_id: str) -> str:
+    """Return the reviewer agent id recorded for one file group.
+
+    Args:
+        group_id: The plan's group id, for example ``group-1``.
+
+    Returns:
+        The ``file-group/<group-id>`` agent id.
+
+    Examples:
+        >>> file_group_agent_id("group-2")
+        'file-group/group-2'
+    """
+    return f"{FILE_GROUP_AGENT_PREFIX}{group_id}"
+
+
+def is_file_group_agent_id(agent_id: object) -> bool:
+    """Return whether ``agent_id`` names a file-group reviewer run.
+
+    Args:
+        agent_id: Any value read from a finding's ``raised_by`` or a run record.
+
+    Returns:
+        ``True`` for a string ``file-group/<group-id>`` with a non-empty group id.
+
+    Examples:
+        >>> is_file_group_agent_id("file-group/group-1")
+        True
+        >>> is_file_group_agent_id("reviewer2")
+        False
+    """
+    return (
+        isinstance(agent_id, str)
+        and agent_id.startswith(FILE_GROUP_AGENT_PREFIX)
+        and len(agent_id) > len(FILE_GROUP_AGENT_PREFIX)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,11 +140,22 @@ def plan_file_groups(
 ) -> FanoutPlan:
     """Plan bounded read-only groups from the diff's added-line TOC.
 
-    Below the threshold the single-agent path is cheaper and better: the
-    primary reviewer already holds the whole scope, and extra dispatches add
-    round-trips without dividing real work. Above it, files are packed
-    largest-first into the emptiest group so each reviewer gets a comparable
-    slice and the group count never exceeds ``max_groups``.
+    The diff fans out when **either** threshold is met: at least ``min_files``
+    changed files, or at least ``min_diff_lines`` added lines. Below both, the
+    single-agent path is cheaper and better: the primary reviewer already holds
+    the whole scope, and extra dispatches add round-trips without dividing real
+    work. Otherwise files are packed largest-first into the emptiest group so
+    each reviewer gets a comparable slice and the group count never exceeds
+    ``max_groups``.
+
+    Args:
+        diff_text: The unified diff to plan from.
+        max_groups: Upper bound on the number of groups.
+        min_diff_lines: Added-line count that triggers the fan-out on its own.
+        min_files: Changed-file count that triggers the fan-out on its own.
+
+    Returns:
+        A :class:`FanoutPlan`; its ``groups`` are empty below both thresholds.
     """
     entries = parse_diff_toc(diff_text)
     if not entries:
@@ -144,14 +199,19 @@ async def dispatch_file_groups(
     dispatch: Callable[[FileGroup], Awaitable[Any]],
     *,
     on_failure: Callable[[str, str], None] | None = None,
+    concurrency: int = 1,
 ) -> FanoutSummary:
     """Dispatch every group; a failed group is recorded, never re-raised.
 
     Args:
         plan: The bounded plan from :func:`plan_file_groups`.
         dispatch: Async callable that runs one read-only reviewer for a group.
-        on_failure: Optional recorder for ``(group_id, reason)`` rows. The
-            summary carries the same rows either way.
+        on_failure: Optional recorder for ``(group_id, reason)`` rows, called
+            after every group has finished. The summary carries the same rows
+            either way.
+        concurrency: Most groups in flight at once (values below ``1`` count as
+            ``1``). The default ``1`` finishes each group before starting the
+            next, in plan order.
 
     Returns:
         A :class:`FanoutSummary`. A run with no groups returns an empty summary
@@ -161,8 +221,14 @@ async def dispatch_file_groups(
         return FanoutSummary()
     outcomes: list[Any] = []
     failures: list[tuple[str, str]] = []
+    limit = asyncio.Semaphore(max(1, int(concurrency)))
+
+    async def _bounded(group: FileGroup) -> Any:
+        async with limit:
+            return await dispatch(group)
+
     results = await asyncio.gather(
-        *(dispatch(group) for group in plan.groups),
+        *(_bounded(group) for group in plan.groups),
         return_exceptions=True,
     )
     for group, result in zip(plan.groups, results, strict=True):
@@ -188,9 +254,12 @@ __all__ = [
     "DEFAULT_MAX_GROUPS",
     "DEFAULT_MIN_DIFF_LINES",
     "DEFAULT_MIN_FILES",
+    "FILE_GROUP_AGENT_PREFIX",
     "FanoutPlan",
     "FanoutSummary",
     "FileGroup",
     "dispatch_file_groups",
+    "file_group_agent_id",
+    "is_file_group_agent_id",
     "plan_file_groups",
 ]

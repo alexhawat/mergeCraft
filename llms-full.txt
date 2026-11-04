@@ -1228,6 +1228,16 @@ Formatting rules that are enforced by the prompt:
   reviewer. `raised_by` is display and record only: it does not affect verdict,
   severity, dedup identity (`finding_key` stays `(path, body, line)`), or inline
   placement.
+- **File-group fan-out (`review.fileGroupFanout`).** Off by default. When an
+  operator enables it, a diff with at least `minFiles` changed files or at least
+  `minDiffLines` added lines is split into at most `maxGroups` balanced
+  read-only file groups, and mergeCraft dispatches one reviewer per group after
+  the primary reviewer and before the secondary roster, sequentially unless
+  `concurrency` says otherwise. Each group's findings carry
+  `raised_by: file-group/<group-id>`. A group that fails (missing binding or
+  credential, timeout, provider error) is one run-scoped `Minor` note under the
+  packet's `run_health`, never a failed review; a smaller diff keeps the
+  single-agent path unchanged.
 
 ## 10. Trajectory checks
 

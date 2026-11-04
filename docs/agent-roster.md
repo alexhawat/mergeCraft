@@ -113,6 +113,44 @@ published review and run record; it does not change verdict, severity, or dedup.
 cardinality is unchanged: `mergecraft-approval` stays a single hardcoded check
 name because there is only ever one submission.
 
+### File-group fan-out (`review.fileGroupFanout`)
+
+Off by default. On a large diff, mergeCraft can split the changed files into
+bounded read-only groups and dispatch one reviewer per group server-side, after
+the primary reviewer and before the secondary roster. Each group's prompt names
+its own files and the shared diff path; its findings are recorded under the
+agent id `file-group/<group-id>` (`group-1`, `group-2`, …) and carry that id as
+`raised_by`. A group that fails — missing binding or credential, timeout,
+provider error — is recorded as a reviewer dispatch error plus one run-scoped
+`Minor` row under the packet's `run_health`; it never fails the review, and the
+other groups' findings stand. A diff below both thresholds dispatches nothing.
+
+```yaml
+review:
+  fileGroupFanout:
+    enabled: true          # default false
+    maxGroups: 6           # 1..12
+    minFiles: 20           # fan out at >= 20 changed files ...
+    minDiffLines: 800      # ... or at >= 800 added lines
+    binding: reviewer2     # registry agent id; omit to reuse the primary reviewer
+    concurrency: 1         # groups in flight, 1..6; 1 runs them one after another
+    perGroupTimeoutS: 600  # also capped by the binding's timeoutS and the run budget
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Turn the fan-out on. |
+| `maxGroups` | `6` | Most groups per run (`1`–`12`). |
+| `minFiles` | `20` | Changed-file count that triggers the fan-out on its own. |
+| `minDiffLines` | `800` | Added-line count that triggers the fan-out on its own. |
+| `binding` | _(primary reviewer)_ | Registry agent id whose model reviews every group. |
+| `concurrency` | `1` | Groups in flight at once (`1`–`6`). |
+| `perGroupTimeoutS` | `600` | Seconds per group, further capped by the binding's `timeoutS` and the remaining run budget. |
+
+Unknown keys under `fileGroupFanout` are rejected. Each group is a full
+provider dispatch, so a fan-out of six groups costs roughly six extra reviewer
+runs.
+
 ## Trust boundary
 
 `.mergecraft/config.yaml` is PR-controlled after `checkout_pr`. The roster is

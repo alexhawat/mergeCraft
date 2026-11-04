@@ -377,6 +377,39 @@ class FastPathSettings(BaseModel):
     )
 
 
+class FileGroupFanoutSettings(BaseModel):
+    """Bounded read-only file-group fan-out on large diffs (``review.fileGroupFanout``).
+
+    Off by default. When ``enabled``, a diff with at least ``min_files`` changed
+    files **or** at least ``min_diff_lines`` added lines is split into at most
+    ``max_groups`` balanced file groups, and mergeCraft dispatches one read-only
+    reviewer per group server-side, after the primary reviewer and before the
+    secondary roster. A failed group is a run-health note, never a failed review.
+
+    Args:
+        enabled: Turn the fan-out on. Default ``False``.
+        max_groups: Upper bound on the group count, ``1``..``12``. Default ``6``.
+        min_diff_lines: Added-line threshold that triggers the fan-out. Default ``800``.
+        min_files: Changed-file threshold that triggers the fan-out. Default ``20``.
+        binding: Registry agent id whose binding reviews each group; ``None``
+            reuses the primary reviewer's binding.
+        concurrency: Groups in flight at once, ``1``..``6``. Default ``1``
+            (sequential).
+        per_group_timeout_s: Seconds one group may run, further capped by the
+            binding's ``timeoutS`` and the remaining run budget. Default ``600``.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    enabled: bool = False
+    max_groups: int = Field(default=6, alias="maxGroups", ge=1, le=12)
+    min_diff_lines: int = Field(default=800, alias="minDiffLines")
+    min_files: int = Field(default=20, alias="minFiles")
+    binding: str | None = None
+    concurrency: int = Field(default=1, ge=1, le=6)
+    per_group_timeout_s: int = Field(default=600, alias="perGroupTimeoutS")
+
+
 class ReviewSettings(BaseModel):
     """Review-depth knobs that are separate from analyzer placement (RC3, D2)."""
 
@@ -391,6 +424,10 @@ class ReviewSettings(BaseModel):
     coverage: ReviewCoverageSettings = Field(default_factory=ReviewCoverageSettings)
     # Deterministic triage before dispatch (default off; base-side config only).
     fast_path: FastPathSettings = Field(default_factory=FastPathSettings, alias="fastPath")
+    # Bounded read-only file-group fan-out on large diffs (default off).
+    file_group_fanout: FileGroupFanoutSettings = Field(
+        default_factory=FileGroupFanoutSettings, alias="fileGroupFanout"
+    )
     # Globs whose changed files are kept out of the reviewer's diff (#1109). Read only
     # from the operator's side of a pull request (``mergecraft.review.ignore_paths``),
     # and merged with the ``ignore_paths`` Action input.
