@@ -171,7 +171,7 @@ def test_a_non_fix_pull_request_is_not_required_and_passes_the_gate() -> None:
     assert _gates(result)["fix_proof"] is True
 
 
-@pytest.mark.parametrize("status", ALL_STATUSES)
+@pytest.mark.parametrize("status", [*ALL_STATUSES, "not-required"])
 def test_a_non_fix_pull_request_is_not_required_whatever_the_status(status: str) -> None:
     result = _classify(_change(status, required=False))
 
@@ -545,6 +545,13 @@ def _packet_ctx(
     tool_state.approval = ApprovalRecord(would_approve=True, sha="deadbeef")
     if red_green is not None:
         tool_state.red_green = red_green
+    if hasattr(tool_state, "scope_declaration"):
+        # Once declared scope lands (#1056 part 3) a run without one is ``scope.unknown``
+        # at ``medium``; declare the diff's one path so only the fix proof moves the lane.
+        ingest = import_module("mergecraft.requirements.ingest")
+        tool_state.scope_declaration = ingest.ScopeDeclaration(
+            declared=True, globs=("docs/guide.md",), source_ref="pr_description", rejected=()
+        )
     snapshot = None
     if fix_labels is not None:
         from mergecraft.config.settings import default_settings

@@ -113,29 +113,61 @@ member of the artifact zip (`red-green.json` in the tests).
   `red-green.json` being read.
 - Several successful runs that each upload a receipt.
 
-## Part-2 tests that conflict with the omitted-gate rule
+## Shared part-2 test amendments
 
-The coordinator ruled that an unsupplied signal omits its gate, and that the
-approval gate refuses a checklist missing any `GATE_ORDER` gate. Six part-2
-tests on `main` classify without any `fix_proof` and assume the opposite, so
-they will go red once the implementation lands. They are not amended here,
-because this sub-wave was scoped to the files above and the `scope` lane needs
-the same edits. Whoever amends them should make all of these changes together:
+The omitted-gate rule and the complete-checklist approval rule would have broken
+part-2 tests that classify without any optional signal. Both lanes carry the
+same amendment. The declared-scope lane's hunks are applied verbatim, and this
+lane adds `fix_proof` on top:
 
-- `tests/classify/test_blast_radius_reasons.py::test_the_checklist_lists_every_gate_in_gate_order`,
-  `tests/classify/test_blast_radius_signal_missing.py::test_gate_order_starts_with_the_missing_signal_table_gates`
-  (its `classify_blast_radius({})` line): compare the checklist with
-  `GATE_ORDER` minus the optional gates (`fix_proof`, `scope`) the change did
-  not supply.
-- `tests/classify/test_blast_radius_signal_missing.py::test_a_measured_low_change_still_selects_low_risk_passing`
-  and `::test_a_real_medium_classification_with_a_failed_gate_still_reaches_clean_pass`:
-  supply the optional signals (`fix_proof={"required": False, ...}`, and
-  `scope` once it exists) so the checklist is complete.
-- `tests/classify/test_blast_radius_signal_missing.py::test_a_checklist_with_measured_inputs_still_reaches_low_risk_passing`
-  and `::test_a_checklist_with_measured_inputs_still_reaches_clean_pass`: build
-  the hand-made checklist from `GATE_ORDER` rather than the fixed part-2 list.
+- Checklist comparisons expect an ordered subsequence of `GATE_ORDER` holding
+  every part-2 gate (`test_blast_radius_reasons.py::test_the_checklist_lists_every_gate_in_gate_order`,
+  `test_blast_radius_signal_missing.py::test_gate_order_starts_with_the_missing_signal_table_gates`,
+  `tests/evidence/test_shadow_compare_fixture_classifications.py`).
+- The approval-route controls classify with a scope covering the change and a
+  non-fix signal `{"required": False, "status": "not-required"}`
+  (`test_blast_radius_signal_missing.py::test_a_measured_low_change_still_selects_low_risk_passing`,
+  `::test_a_real_medium_classification_with_a_failed_gate_still_reaches_clean_pass`).
+  Hand-built checklists come from `GATE_ORDER`.
+- Direct callers of `classify_run_blast_radius` pass `scope` and `fix_proof`
+  only when `inspect.signature` shows the keyword
+  (`test_blast_radius_reasons.py`, `tests/evidence/test_run_packet.py`,
+  `tests/mcp/test_commit_info_scope.py`).
+- `tests/agents/test_gate_regressions_lane_c.py` records a declared scope when
+  `ToolState` carries one. Its fix-proof signal comes from the packet itself,
+  because the run title is not a fix.
 
-`tests/evidence/test_shadow_compare_fixture_classifications.py` also requires a
-full `GATE_ORDER` checklist, but its classifications come from
-`evidence/shadow_compare.py::_runtime_packets` in `src/`, so the implementation
-keeps it green by supplying the signal there; no test change is needed.
+- `test_blast_radius_reasons.py::CODE_CASES` ends with a `# fix proof (part 5)`
+  block: one clean docs change per `fix.*` code, each carrying a `fix_proof`
+  signal. `fix.not-required` and `fix.proven` are `low` and pass every gate; the
+  four `medium` codes fail `fix_proof`. The catalogue-equality test keeps its
+  assertion, so these rows are red until this lane's implementation. The
+  declared-scope lane's `# declared scope (part 3)` block goes immediately
+  before this one.
+
+The shared hunks hold on `main`, with either lane alone, and after both merge.
+The packet-level tests in `test_blast_radius_fix_proof.py` also declare a
+covering scope when `ToolState` has `scope_declaration`, so a run's lane moves
+only with the fix proof.
+
+## Amendments
+
+- An unsupplied `fix_proof` signal omits the gate from the checklist (not
+  `null`) and emits no `fix.*` reason; a supplied signal is always a boolean
+  gate. Tests: `test_no_signal_omits_the_fix_proof_gate_and_emits_no_fix_reason`,
+  `::test_no_signal_omits_the_gate_whatever_else_the_change_holds`,
+  `::test_a_supplied_signal_always_measures_the_gate`. Checklist-shape
+  assertions now compare an ordered subsequence of `GATE_ORDER`.
+- `classify_run_blast_radius` takes required keyword-only `scope` and
+  `fix_proof`. Its direct tests were replaced by tests of the shared helper
+  `fix_proof_signal_for_state` plus `classify_blast_radius`, and by the
+  `build_run_packet` and verification-tool seams.
+- `low_risk_passing` and `clean_pass` refuse a checklist that lacks any
+  `GATE_ORDER` gate. Tests: the *Approval gate completeness* rows.
+- `no-tests` on a fix maps to `fix.not-proven`. A capitalised type (`Fix:`)
+  counts as a fix, and leading whitespace in a title is stripped.
+- A non-fix signal may carry the status `not-required`, which the shared
+  part-2 controls use. `test_a_non_fix_pull_request_is_not_required_whatever_the_status`
+  covers it.
+- The packet-level tests declare a covering scope once `ToolState` has
+  `scope_declaration`, so they hold after the declared-scope lane merges.
