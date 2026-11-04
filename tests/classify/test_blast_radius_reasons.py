@@ -19,6 +19,7 @@ Invariants pinned here:
 
 from __future__ import annotations
 
+import re
 from importlib import import_module
 from typing import Any
 
@@ -529,3 +530,120 @@ def test_the_run_record_line_follows_the_classification() -> None:
     assert len(lines) == 1
     assert "medium" in lines[0]
     assert "paths.migrations" not in block
+
+
+# ── a generated path exempts only itself ─────────────────────────────────────
+
+_BIG: dict[str, object] = {"lines_added": 400, "lines_deleted": 50}
+
+# (id, changed paths, whether a test changed)
+GENERATED_SIBLING_CASES: list[tuple[str, list[str], bool]] = [
+    (
+        "docs-generated-with-tests",
+        ["src/big.py", "tests/test_big.py", "docs/generated/api.md"],
+        True,
+    ),
+    ("docs-generated-without-tests", ["src/big.py", "docs/generated/api.md"], False),
+    ("src-generated-without-tests", ["src/big.py", "src/generated/pb.py"], False),
+    ("src-generated-with-tests", ["src/big.py", "tests/test_big.py", "src/generated/pb.py"], True),
+]
+
+
+@pytest.mark.parametrize(
+    ("paths", "has_tests"),
+    [(paths, has_tests) for _id, paths, has_tests in GENERATED_SIBLING_CASES],
+    ids=[case_id for case_id, _paths, _has_tests in GENERATED_SIBLING_CASES],
+)
+def test_a_generated_sibling_does_not_mask_a_source_change(
+    paths: list[str], has_tests: bool
+) -> None:
+    result = _classify(_c(paths, _BIG))
+    reasons = _reasons_by_code(result)
+
+    assert result.lane == "medium"
+    assert result.auto_merge_lane == "assisted"
+    assert reasons["source.changed"].lane == "medium"
+    assert _gates(result)["source"] is False
+    if has_tests:
+        assert _gates(result)["tests"] is True
+    else:
+        assert reasons["tests.missing"].lane == "medium"
+        assert _gates(result)["tests"] is False
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ["src/generated/pb.py", "docs/generated/api.md"],
+        ["src/generated/pb.py"],
+        ["generated/client.py", "src/generated/models.py"],
+    ],
+    ids=["src-and-docs-generated", "src-generated-only", "two-generated-trees"],
+)
+def test_a_change_of_only_generated_paths_stays_low(paths: list[str]) -> None:
+    result = _classify(_c(paths, _BIG))
+    reasons = _reasons_by_code(result)
+
+    assert result.lane == "low"
+    assert result.auto_merge_lane == "eligible"
+    assert reasons["paths.generated"].lane == "low"
+    assert all(reason.lane == "low" for reason in result.reasons)
+
+
+# ── the carve-out does not apply beside a high reason ────────────────────────
+
+
+def test_the_carve_out_is_not_emitted_beside_a_high_reason() -> None:
+    result = _classify(_c(["src/pkg/mod.py", "migrations/0001.sql"], _SMALL))
+    reasons = _reasons_by_code(result)
+
+    assert result.lane == "high"
+    assert reasons["paths.migrations"].lane == "high"
+    assert reasons["tests.missing"].lane == "medium"
+    assert "source.small_isolated" not in reasons
+    assert _gates(result)["tests"] is False
+
+
+# ── the run-record line names the gates that were not measured ───────────────
+
+
+def _record_for_change(change: dict[str, Any]) -> tuple[str, Any]:
+    from mergecraft.evidence.build import build_packet
+    from mergecraft.findings.ledger import render_deterministic_review_block
+
+    classification = _classify(change)
+    raw_paths = change.get("changed_paths")
+    packet = build_packet(
+        change_id="acme/demo#1056",
+        agent_id="claude",
+        agent_version="0.0.1",
+        model="claude-sonnet-4-5",
+        files_changed=list(raw_paths) if isinstance(raw_paths, list) else [],
+        findings=[],
+        deterministic_checks=[],
+        blast_radius=classification,
+    )
+    return render_deterministic_review_block(packet=packet, trust_tier="trusted"), classification
+
+
+def test_the_run_record_line_lists_the_unmeasured_gates() -> None:
+    block, classification = _record_for_change({"changed_paths": ["docs/guide.md"]})
+    lines = [line for line in block.splitlines() if "signal.missing.diff" in line]
+    unmeasured = [gate.gate for gate in classification.checklist if gate.passed is None]
+
+    assert len(lines) == 1
+    assert "not measured:" in lines[0]
+    suffix = lines[0].split("not measured:", 1)[1]
+    assert unmeasured
+    assert "tests" in unmeasured
+    assert re.findall(r"`([^`]+)`", suffix) == unmeasured
+
+
+def test_the_run_record_line_has_no_suffix_when_every_gate_is_measured() -> None:
+    block, classification = _record_for_change(_c(["migrations/0001_init.sql"]))
+    lines = [line for line in block.splitlines() if "paths.migrations" in line]
+
+    assert all(gate.passed is not None for gate in classification.checklist)
+    assert len(lines) == 1
+    assert "high" in lines[0]
+    assert "not measured" not in lines[0]

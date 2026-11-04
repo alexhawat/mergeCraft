@@ -487,3 +487,82 @@ def test_a_packet_written_before_the_checklist_decides_as_before(
 
     assert packet.blast_radius is not None
     assert select_rule_id(packet) == rule_id
+
+
+# ── low_risk_passing needs every gate measured and passing ───────────────────
+
+_NON_INPUT_GATES = [gate for gate in _LOCKED_GATES if gate != "inputs"]
+
+
+def _low_with_gate(gate: str, passed: bool | None) -> BlastRadiusClassification:
+    """A ``low`` classification with measured inputs and one other gate not ``True``."""
+    return BlastRadiusClassification.model_validate(
+        {
+            "lane": "low",
+            "auto_merge_lane": "eligible",
+            "reason": "forged",
+            "next_action": "forged",
+            "categories": [],
+            "reasons": [{"code": "baseline.clean", "lane": "low", "message": "forged"}],
+            "checklist": [
+                {"gate": name, "passed": passed if name == gate else True} for name in _LOCKED_GATES
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize("passed", [None, False], ids=["unknown", "failed"])
+@pytest.mark.parametrize("gate", _NON_INPUT_GATES)
+def test_low_risk_passing_refuses_a_low_lane_with_any_gate_not_passed(
+    gate: str, passed: bool | None
+) -> None:
+    packet = _decided_packet(_low_with_gate(gate, passed), files_changed=["docs/guide.md"])
+
+    assert _is_low_risk_passing(packet) is False
+    assert select_rule_id(packet) != "low_risk_passing"
+
+
+@pytest.mark.parametrize("gate", _NON_INPUT_GATES)
+def test_clean_pass_refuses_a_low_lane_with_an_unmeasured_gate(gate: str) -> None:
+    from mergecraft.agents.gates import _is_clean_pass
+
+    packet = _decided_packet(_low_with_gate(gate, None), files_changed=["docs/guide.md"])
+
+    assert _is_clean_pass(packet) is False
+    assert select_rule_id(packet) not in {"low_risk_passing", "clean_pass"}
+    assert decide_action(packet, policy=DEFAULT_GATE_POLICIES) is not GateAction.AUTO_MERGE
+
+
+def test_the_issue_example_low_lane_with_unmeasured_tests_never_auto_merges() -> None:
+    packet = _decided_packet(_low_with_gate("tests", None), files_changed=["docs/guide.md"])
+
+    assert select_rule_id(packet) not in {"low_risk_passing", "clean_pass"}
+    assert decide_action(packet, policy=DEFAULT_GATE_POLICIES) is not GateAction.AUTO_MERGE
+
+
+def test_a_real_medium_classification_with_a_failed_gate_still_reaches_clean_pass() -> None:
+    """Control: a measured ``medium`` lane always has a ``False`` gate; clean_pass keeps it."""
+    classification = classify_blast_radius(
+        {"changed_paths": ["uv.lock"], "diff_stats": {"lines_added": 4, "lines_deleted": 1}}
+    )
+    packet = _decided_packet(classification, files_changed=["uv.lock"])
+
+    assert classification.lane == "medium"
+    assert any(gate.passed is False for gate in classification.checklist)
+    assert select_rule_id(packet) == "clean_pass"
+
+
+def test_a_pre_checklist_low_packet_keeps_the_legacy_route() -> None:
+    """Control: an empty checklist (written before 1.18.0) is not read as unmeasured."""
+    blast_radius = BlastRadiusClassification(
+        lane="low",
+        auto_merge_lane="eligible",
+        reason="No elevated blast-radius category was detected.",
+        next_action="Eligible for automatic merge after required checks pass.",
+        categories=[],
+    )
+    packet = _decided_packet(blast_radius, files_changed=["docs/guide.md"])
+
+    assert blast_radius.checklist == []
+    assert _is_low_risk_passing(packet) is True
+    assert select_rule_id(packet) == "low_risk_passing"
