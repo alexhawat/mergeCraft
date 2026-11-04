@@ -1427,18 +1427,21 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         except ProviderTimeoutError as exc:
             # Controlled domain error: surface as a clean failed attempt
             # rather than letting a raw httpx traceback abort the review.
-            # ``retryable`` is what lets the model chain advance (#444): the
-            # chain gates on this flag alone, so omitting it reads as a
-            # permanent failure and terminates the run at attempt 1.
+            # Without an accepted verdict, ``retryable`` lets the model chain
+            # advance (#444). Finalize first so a verdict accepted before the
+            # timeout remains the winner, subject to the integrity gate.
             # httpx.ReadTimeout stringifies to nothing, so without the server's
             # own tail the operator gets a bare "timed out:" and no lead (#449).
             tail = handle.recent_output()
             detail = f"{exc}\n\nrecent opencode serve output:\n{tail}" if tail else str(exc)
             return _apply_integrity_gate(
-                AgentResult(
-                    success=False,
-                    error=detail,
-                    metadata={"retryable": True},
+                await finalize_agent_result(
+                    ctx,
+                    AgentResult(
+                        success=False,
+                        error=detail,
+                        metadata={"retryable": True},
+                    ),
                 ),
                 baseline,
             )
@@ -1492,7 +1495,9 @@ async def _run_v2(
 
     initial = await _turn(prompt)
     if not initial.success:
-        return initial
+        # The CLI may fail after accepting a verdict; carry it to the chain
+        # classifier without resuming the failed turn.
+        return await finalize_agent_result(ctx, initial)
 
     async def resume(followup: str) -> AgentResult:
         session_id = session.get("id")
@@ -1519,12 +1524,13 @@ async def _run_cli_fallback(*, cli: str, ctx: AgentRunContext, env: dict[str, st
     # legacy last-line parse if the events are not granular enough (D12).
     # Run-level spans are emitted through the W4 tracer regardless.
     # Blocking Popen/wait runs in a worker thread so outer wait_for can preempt.
-    return await asyncio.to_thread(
+    result = await asyncio.to_thread(
         _run_opencode_cli_streaming,
         cmd=cmd,
         ctx=ctx,
         env=env,
     )
+    return await finalize_agent_result(ctx, result)
 
 
 def _run_opencode_cli_streaming(

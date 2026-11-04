@@ -442,6 +442,56 @@ def test_idle_watchdog_stall_maps_to_infra_error_not_failed() -> None:
     assert "stalled" in reason
 
 
+@pytest.mark.parametrize(
+    "metadata",
+    [{}, {"idle_timeout": True}, {"retryable": True}],
+    ids=["plain exit", "watchdog kill after the verdict", "retryable exit"],
+)
+def test_an_accepted_verdict_outranks_the_drivers_exit_status(metadata: dict[str, Any]) -> None:
+    """#1132 — a verdict this run accepted is the result; a later non-zero exit is noise."""
+    from mergecraft.main_outcome import _classify_outcome
+
+    outcome, reason = _classify_outcome(
+        result=AgentResult(
+            success=False,
+            error="opencode failed (exit 1)",
+            metadata=metadata,
+            terminal_submission_received=True,
+            terminal_submission_id="review-5757058145",
+        ),
+        setup_reason="",
+        setup_policy="warn",
+        prep_reason=None,
+        mode="Review",
+        verdict_protocol="enforce",
+        terminal_publication_receipt=True,
+    )
+
+    assert outcome is RunOutcome.passed
+    assert reason is None
+
+
+def test_an_accepted_but_unpublished_verdict_after_a_driver_exit_is_inconclusive() -> None:
+    """The exit does not hide a verdict GitHub never received either."""
+    from mergecraft.main_outcome import _classify_outcome
+
+    outcome, reason = _classify_outcome(
+        result=AgentResult(
+            success=False, error="opencode failed (exit 1)", terminal_submission_received=True
+        ),
+        setup_reason="",
+        setup_policy="warn",
+        prep_reason=None,
+        mode="Review",
+        verdict_protocol="enforce",
+        terminal_publication_receipt=False,
+    )
+
+    assert outcome is RunOutcome.inconclusive
+    assert reason is not None
+    assert "opencode failed" not in reason
+
+
 async def test_recorded_verdict_the_run_could_not_publish_is_not_passed(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

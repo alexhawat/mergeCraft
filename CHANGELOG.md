@@ -132,6 +132,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A review whose verdict was accepted no longer ends `failed` with
+  `provider_failure` and `action failed: opencode failed` when the agent CLI then
+  exits non-zero — for example after the one-time diff-coverage nudge rejected
+  its first submission. The run outcome follows the accepted verdict, the model
+  chain keeps that attempt instead of spending another rung on a PR that has its
+  verdict, and the action fails with the driver's error only when no verdict was
+  accepted. A verdict that was accepted but never reached GitHub still ends
+  `inconclusive` (#1132).
+
 - The fast-path triage diff writes a renamed or copied file the way `git diff`
   does — `diff --git a/<old> b/<new>` with `rename from` / `rename to` (or
   `copy from` / `copy to`) — and lists the source path with the changed paths. A

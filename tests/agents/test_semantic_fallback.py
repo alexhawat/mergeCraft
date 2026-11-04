@@ -266,6 +266,17 @@ async def test_fallback_reason_is_recorded_and_distinct() -> None:
         diagnostics={"verdict": "request_changes"},
     )
     assert _classify_skip_reason(usable, 0) is None
+    # #1132 — an accepted verdict is the chain's answer even when the CLI then
+    # exited non-zero; the chain must not re-review a PR that has its verdict.
+    exited_after_verdict = AgentResult(
+        success=False,
+        error="opencode failed (exit 1)",
+        terminal_submission_received=True,
+        terminal_submission_id="ok",
+        diagnostics={"attempt_id": 0},
+    )
+    assert _classify_skip_reason(exited_after_verdict, 0) is None
+    assert _classify_skip_reason(exited_after_verdict, 1) == FallbackReason.stale_attempt
     assert (
         _classify_skip_reason(
             AgentResult(success=True, output="prose", terminal_submission_received=False),
