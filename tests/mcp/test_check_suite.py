@@ -12,7 +12,8 @@ import httpx
 import pytest
 from tests.support.tool_context import bind_github_client
 
-from mergecraft.mcp.check_suite import _analyze_log, get_check_suite_logs_tool
+from mergecraft.ci.log_excerpt import analyze_log
+from mergecraft.mcp.check_suite import get_check_suite_logs_tool
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
@@ -80,7 +81,7 @@ def test_analyze_log_indexes_error_and_builds_excerpt() -> None:
         "##[error]Process completed with exit code 2.\n"
         "FAILED tests/ci/test_pipeline.py::test_normalize - AssertionError"
     )
-    analysis = _analyze_log(logs)
+    analysis = analyze_log(logs)
     assert analysis["totalLines"] == 3
     assert analysis["index"]
     assert analysis["index"][0]["type"] in {"error", "failure"}
@@ -89,7 +90,7 @@ def test_analyze_log_indexes_error_and_builds_excerpt() -> None:
 
 def test_analyze_log_tail_excerpt_when_no_error_marker() -> None:
     logs = "\n".join(f"line {index}" for index in range(1, 120))
-    analysis = _analyze_log(logs, excerpt_lines=80)
+    analysis = analyze_log(logs, excerpt_lines=80)
     assert analysis["excerpt"]["startLine"] == 40
     assert analysis["excerpt"]["endLine"] == 119
 
