@@ -23,11 +23,13 @@ matches and hides one real change matches nothing and gets a full review.
 * ``generated`` — only lockfiles or generated paths changed, and no dependency
   manifest or generator config changed with them.
 * ``commentOnly`` — only ``//`` comment lines changed, in a closed list of
-  ``//``-comment languages chosen by suffix. A small lexer over the head-side file
-  proves each changed line starts outside a string literal or ``/* */`` block; a file
-  with a backtick, a raw-string marker or a ``/*`` the lexer cannot close is refused,
-  and so is a directive-looking comment (``//go:``, ``///``, ``// @ts-…``, lint
-  pragmas). ``#``-comment languages are never recognised: a ``#`` line can be content.
+  ``//``-comment languages chosen by suffix (no JSX/TSX; ``Package.swift`` refused). Each
+  changed line is ``//``, one space and a plain alphabetic word that is not a directive
+  word; a removal must be replaced by an added line. The diff and the head text must be
+  printable ASCII (plus tab and newline) and are split on ``\n`` only. A file with a
+  backtick, a raw-string marker, any ``/*``, or a quote left open at the end of a line
+  is refused, so every head line provably starts outside a string or comment.
+  ``#``-comment languages are never recognised: a ``#`` line can be content.
 
 Three tiers ship: ``skip`` (no LLM review), ``lite`` (one capped LLM call, see
 :mod:`mergecraft.agents.lite`) and ``full`` (today's review). ``lite`` is chosen only
@@ -185,11 +187,13 @@ class _File:
     hunks: list[_Hunk] = field(default_factory=list)
 
 
-def _parse(diff_text: str) -> list[_File]:
+def _parse(diff_text: str, *, newline_only: bool = False) -> list[_File]:
+    """Parse a unified diff; ``newline_only`` splits on ``\n`` alone, never ``splitlines``."""
     files: list[_File] = []
     current: _File | None = None
     hunk: _Hunk | None = None
-    for raw in diff_text.splitlines():
+    raws = diff_text.split("\n") if newline_only else diff_text.splitlines()
+    for raw in raws:
         if raw.startswith("diff --git "):
             path = raw.rpartition(" b/")[2].strip()
             current = _File(path=path)
@@ -406,11 +410,10 @@ def recognize_generated(diff_text: str) -> bool:
 
 # ── comment-only ──────────────────────────────────────────────────────────────
 
+# JSX and TSX are off the list: a JSX text child can start with ``//`` and render.
 COMMENT_ONLY_SUFFIXES: Final[tuple[str, ...]] = (
     ".js",
-    ".jsx",
     ".ts",
-    ".tsx",
     ".go",
     ".rs",
     ".java",
@@ -423,119 +426,95 @@ COMMENT_ONLY_SUFFIXES: Final[tuple[str, ...]] = (
     ".cs",
     ".swift",
 )
-# Strings the lexer does not model: template literals and raw / verbatim / multi-line
-# strings span lines with their own escape rules, so a file holding one is refused.
-_UNLEXABLE_MARKERS: Final[tuple[str, ...]] = ("`", 'r#"', 'R"', '@"', '@$"', '#"', '"""')
+# Manifests whose comments a tool reads (SwiftPM reads the tools-version line).
+_COMMENT_ONLY_REFUSED_BASENAMES: Final[frozenset[str]] = frozenset({"package.swift"})
+# Strings the lexer does not model (template literals; raw, verbatim and multi-line
+# strings) and any block comment: a file holding one is refused outright.
+_UNLEXABLE_MARKERS: Final[tuple[str, ...]] = (
+    "`",
+    'r#"',
+    'R"',
+    '@"',
+    '@$"',
+    '#"',
+    '"""',
+    "/*",
+)
 _RUST_RAW_STRING: Final[re.Pattern[str]] = re.compile(r'(?<![A-Za-z0-9_])b?r"')
-# A comment that steers a compiler, a type checker or a linter is not "only a comment":
-# build constraints, cgo, doc tests (``///`` / ``//!``), ``// @ts-ignore``, lint pragmas.
-_DIRECTIVE_BODY_PREFIXES: Final[tuple[str, ...]] = ("/", "!", "#", "@", "+build", "go:", "line ")
-_DIRECTIVE_WORDS: Final[tuple[str, ...]] = (
-    "@",
-    "#",
-    "eslint",
-    "tslint",
-    "jshint",
-    "prettier",
-    "biome-",
-    "deno-",
-    "ts-",
-    "flow",
-    "istanbul",
-    "c8 ",
-    "nolint",
-    "lint:",
-    "noqa",
-    "swiftlint",
-    "swiftformat",
-    "export ",
-    "extern ",
-    "pragma",
-    "clang-format",
+# Printable ASCII plus tab and newline. Anything else (U+2028, U+2029, a lone CR, NEL,
+# CRLF, any non-ASCII byte) could end a line for the language but not for this lexer.
+_COMMENT_ONLY_TEXT: Final[re.Pattern[str]] = re.compile(r"[\t\n\x20-\x7e]*")
+# The comment shape: optional indentation, ``//``, exactly one space, then a purely
+# alphabetic first word followed by a space or the end of the line. Directive and
+# pragma comments (``//go:``, ``// +build``, ``///``, ``// @ts-ignore``,
+# ``// eslint-disable``, ``// Output:``) all fail this shape.
+_PLAIN_COMMENT: Final[re.Pattern[str]] = re.compile(r"[ \t]*// ([A-Za-z]+)(?: .*)?")
+# Plain words that still steer a compiler, a test runner or a linter.
+_DIRECTIVE_WORDS: Final[frozenset[str]] = frozenset(
+    {
+        "fallthrough",
+        "output",
+        "unordered",
+        "nosonar",
+        "nolint",
+        "revive",
+        "golangci",
+        "pragma",
+        "build",
+    }
 )
 
-_LineState = Literal["code", "block", "string"]
 
+def _strings_close_on_every_line(lines: list[str]) -> bool:
+    """Every ``"`` or ``'`` string opened outside a ``//`` comment closes on its line.
 
-def _line_start_states(text: str) -> list[_LineState] | None:
-    """``states[n]`` — the lexer state at the start of 1-based line ``n`` of ``text``.
-
-    ``None`` when the file cannot be lexed with certainty: a string that reaches the
-    end of a line without a backslash continuation, a ``//`` comment that a trailing
-    backslash splices onto the next line, a nested ``/*`` inside a block comment
-    (Rust, Swift and Kotlin nest them; C does not), or a block comment still open at
-    the end of the file. The entry after the last line is the end state.
+    With no block comment in the file and no string allowed to run past the end of a
+    line, every line starts outside a string or comment, so a ``//`` line is a comment.
     """
-    states: list[_LineState] = ["code", "code"]
-    state: _LineState = "code"
-    quote = ""
-    for line in text.splitlines():
+    for line in lines:
+        quote = ""
         index = 0
-        length = len(line)
-        continued = False
-        while index < length:
+        while index < len(line):
             char = line[index]
-            pair = line[index : index + 2]
-            if state == "block":
-                if pair == "/*":
-                    return None
-                if pair == "*/":
-                    state = "code"
-                    index += 2
-                    continue
-                index += 1
-            elif state == "string":
+            if quote:
                 if char == "\\":
-                    continued = index + 1 >= length
                     index += 2
                     continue
                 if char == quote:
-                    state = "code"
-                index += 1
-            elif pair == "//":
-                if line.rstrip().endswith("\\"):
-                    return None
+                    quote = ""
+            elif line.startswith("//", index):
                 break
-            elif pair == "/*":
-                state = "block"
-                index += 2
             elif char in {'"', "'"}:
-                state, quote = "string", char
-                index += 1
-            else:
-                index += 1
-        if state == "string" and not continued:
-            return None  # only an escaped newline keeps a string open across lines
-        states.append(state)
-    if state != "code":
-        return None
-    return states
+                quote = char
+            index += 1
+        if quote:
+            return False
+    return True
 
 
 def _is_plain_comment(text: str) -> bool:
-    """A whole ``//`` line comment that cannot splice, steer a tool or be doc-tested."""
-    stripped = text.strip()
-    if not stripped.startswith("//") or stripped.endswith("\\"):
+    """A whole ``//`` line comment of plain words that cannot splice or steer a tool."""
+    match = _PLAIN_COMMENT.fullmatch(text)
+    if match is None or text.rstrip().endswith("\\"):
         return False
-    body = stripped[2:]
-    if body.startswith(_DIRECTIVE_BODY_PREFIXES):
-        return False
-    word = body.lstrip().lower()
-    return not word.startswith(_DIRECTIVE_WORDS)
+    return match.group(1).lower() not in _DIRECTIVE_WORDS
 
 
 def _comment_file_ok(file: _File, head_text: str) -> bool:
     lowered = file.path.lower()
+    if PurePosixPath(lowered).name in _COMMENT_ONLY_REFUSED_BASENAMES:
+        return False
+    if _COMMENT_ONLY_TEXT.fullmatch(head_text) is None:
+        return False
     if any(marker in head_text for marker in _UNLEXABLE_MARKERS):
         return False
     if lowered.endswith(".rs") and _RUST_RAW_STRING.search(head_text):
         return False
     if lowered.endswith(".go") and '"C"' in head_text:
         return False  # a cgo preamble is C code written as a comment
-    states = _line_start_states(head_text)
-    if states is None:
+    head_lines = head_text.split("\n")
+    if not _strings_close_on_every_line(head_lines):
         return False
-    head_lines = head_text.splitlines()
 
     def head_line(number: int) -> str | None:
         return head_lines[number - 1] if 1 <= number <= len(head_lines) else None
@@ -545,6 +524,9 @@ def _comment_file_ok(file: _File, head_text: str) -> bool:
         return previous is not None and previous.rstrip().endswith("\\")
 
     for hunk in file.hunks:
+        for _removed, added in _blocks(hunk):
+            if not added:
+                return False  # a removal exists only on the base side; nothing proves it
         position = hunk.new_start
         for line in hunk.lines:
             kind, text = line[0], line[1:]
@@ -552,9 +534,6 @@ def _comment_file_ok(file: _File, head_text: str) -> bool:
                 position += 1
                 continue
             if not _is_plain_comment(text) or spliced(position):
-                return False
-            at = min(position, len(states) - 1)
-            if states[at] != "code":
                 return False
             if kind == "+":
                 if head_line(position) != text:
@@ -564,8 +543,14 @@ def _comment_file_ok(file: _File, head_text: str) -> bool:
 
 
 def recognize_comment_only(diff_text: str, *, head_files: Mapping[str, str]) -> bool:
-    """Only ``//`` comment lines changed, each proven outside a string by the head text."""
-    files = _parse(diff_text)
+    """Only plain ``//`` comment lines changed, each proven a comment by the head text.
+
+    The diff and the head text are split on ``\\n`` only, and either one holding a
+    character outside printable ASCII plus tab and newline refuses the diff.
+    """
+    if _COMMENT_ONLY_TEXT.fullmatch(diff_text) is None:
+        return False
+    files = _parse(diff_text, newline_only=True)
     if not _changeable(files):
         return False
     for file in files:

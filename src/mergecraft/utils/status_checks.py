@@ -163,9 +163,14 @@ def _build_completion_summary(
     reviewed_sha: str | None,
     coverage_line: str | None = None,
     triage_lines: list[str] | None = None,
+    conclusion: str | None = None,
 ) -> str:
-    if run_succeeded:
+    if run_succeeded and conclusion in {None, "success"}:
         lead = "The mergeCraft run finished successfully."
+    elif run_succeeded:
+        # The run completed but its check did not pass (a lite run is never a success);
+        # the lead must not claim a success the conclusion denies.
+        lead = failure_reason or "The mergeCraft run finished, but its check did not pass."
     else:
         lead = (
             failure_reason
@@ -353,6 +358,7 @@ async def report_status_checks(
         reviewed_sha=reviewed_sha,
         coverage_line=coverage_line,
         triage_lines=_triage_lines(packet),
+        conclusion=completion_conclusion,
     )
     try:
         await _create_check_run(
@@ -360,7 +366,11 @@ async def report_status_checks(
             name=COMPLETION_CHECK,
             head_sha=completion_sha,
             conclusion=completion_conclusion,
-            title="mergeCraft run completed" if run_succeeded else "mergeCraft run failed",
+            title=(
+                "mergeCraft run completed"
+                if run_succeeded and completion_conclusion != "failure"
+                else "mergeCraft run failed"
+            ),
             summary=completion_summary,
         )
     except Exception as err:

@@ -1462,7 +1462,8 @@ def render_deterministic_review_block(
     finding_lines = ["", "<details>", "<summary>Change-scoped findings</summary>", ""]
     if change_findings:
         for finding in change_findings:
-            location = f"`{finding.path}` — " if finding.path else ""
+            line = f":{finding.start_line}" if finding.path and finding.start_line else ""
+            location = f"`{finding.path}{line}` — " if finding.path else ""
             finding_lines.append(f"- **{finding.severity}** · {location}{finding.message}")
     else:
         finding_lines.append("_No change-scoped findings recorded._")

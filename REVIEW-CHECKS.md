@@ -170,11 +170,16 @@ against the head-side text), `whitespace` (the same tokens before and after;
 indentation counts in whitespace-sensitive languages), `generated` (only
 lockfiles or generated paths, with no manifest or generator config beside
 them) and `commentOnly` (only `//` line comments changed, in a closed list of
-`//`-comment languages — `.js .jsx .ts .tsx .go .rs .java .kt .c .h .cc .cpp
-.hpp .cs .swift` — each line proved outside a string literal or block comment by
-a lexer over the head-side text; a file with a backtick or raw-string marker, a
-directive-looking comment such as `//go:build`, `///` or `// @ts-ignore`, and
-every `#`-comment language are refused). A mixed diff matches nothing and gets a
+`//`-comment languages — `.js .ts .go .rs .java .kt .c .h .cc .cpp .hpp .cs
+.swift`, never JSX/TSX or `Package.swift`. Each changed line must be `//`, one
+space and a plain alphabetic first word that is not a directive word
+(`fallthrough`, `Output`, `nolint`, `pragma`, `build`, …), so `//go:build`,
+`// +build`, `///`, `// @ts-ignore` and lint pragmas never match; a removed line
+must be replaced by an added one. The diff and the head-side file must be
+printable ASCII and are split on newlines only, and a file with a backtick, a
+raw-string marker, any `/*` or a quote left open at the end of a line is refused,
+so the lexer over the head text proves every changed line is a comment; every
+`#`-comment language is refused). A mixed diff matches nothing and gets a
 full review. `skipLlm` opts each
 recognizer in; a pin bump also needs every `pinBump.requireChecks` check to have
 passed on the head SHA **from a GitHub App named in

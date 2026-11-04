@@ -22,12 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `failure` on a Critical or Major finding, and usage over the cap or a
   malformed answer is `inconclusive`. Off by default (#1010).
 
-- A `commentOnly` fast-path recognizer matches diffs that only change `//` line
-  comments in `.js .jsx .ts .tsx .go .rs .java .kt .c .h .cc .cpp .hpp .cs
-  .swift` files, each line proved outside a string or block comment against the
-  head-side text. Files with backticks or raw-string markers, directive comments
-  such as `//go:build`, `///` or `// @ts-ignore`, and every `#`-comment language
-  are never recognised. Opt in through `skipLlm` like the other recognizers
+- A `commentOnly` fast-path recognizer matches diffs that only edit `//` line
+  comments in `.js .ts .go .rs .java .kt .c .h .cc .cpp .hpp .cs .swift` files
+  (never JSX/TSX or `Package.swift`). Each changed line must be `//`, one space and
+  a plain word that is not a directive word, and the head-side text proves it is a
+  comment. Non-ASCII text, backticks, raw-string markers, block comments, a quote
+  left open at the end of a line, a removal-only edit and every `#`-comment
+  language are refused. Opt in through `skipLlm` like the other recognizers
   (#1010).
 
 - The self-review's Codex rung writes the refreshed ChatGPT-subscription login

@@ -93,11 +93,18 @@ async def _read_diff(
 
 
 async def _read_head_files(
-    scm: ScmProvider, owner: str, repo: str, head_sha: str, paths: list[str]
+    scm: ScmProvider,
+    owner: str,
+    repo: str,
+    head_sha: str,
+    paths: list[str],
+    *,
+    read_code_head: bool = False,
 ) -> dict[str, str]:
     if not paths or len(paths) > _MAX_PROSE_FILES:
         return {}
-    if not all(path.lower().endswith(_HEAD_TEXT_SUFFIXES) for path in paths):
+    suffixes = _HEAD_TEXT_SUFFIXES if read_code_head else _PROSE_SUFFIXES
+    if not all(path.lower().endswith(suffixes) for path in paths):
         return {}
     texts: dict[str, str] = {}
     for path in paths:
@@ -167,18 +174,23 @@ async def load_triage_inputs(
     head_sha: str,
     *,
     trusted_apps: Collection[str] = (),
+    read_code_head: bool = False,
 ) -> TriageInputs:
     """Read the diff, the head-side prose/comment text and the trusted Apps' passed checks.
 
     ``trusted_apps`` is the operator's ``pinBump.trustedCheckApps``: a check run
-    only counts when its ``app.slug`` is in it.
+    only counts when its ``app.slug`` is in it. ``read_code_head`` also reads the head
+    text of comment-only-language files; the caller sets it only when ``commentOnly``
+    is opted in or ``lite`` is enabled, the only consumers of that text.
 
     Raises:
         TriageUnavailableError: The diff could not be read completely.
         Exception: Any transport error; :func:`decide_fast_path` turns it into ``full``.
     """
     diff_text, paths = await _read_diff(scm, owner, repo, pull_number)
-    head_files = await _read_head_files(scm, owner, repo, head_sha, paths)
+    head_files = await _read_head_files(
+        scm, owner, repo, head_sha, paths, read_code_head=read_code_head
+    )
     passed = await _passed_checks(scm, owner, repo, head_sha, trusted_apps=trusted_apps)
     return TriageInputs(diff_text=diff_text, head_files=head_files, passed_checks=passed)
 
@@ -231,6 +243,7 @@ async def triage_pull_request(
             pull_number,
             head_sha,
             trusted_apps=config.pin_bump.trusted_check_apps,
+            read_code_head="commentOnly" in config.skip_llm or config.lite.enabled,
         )
     except Exception as err:  # any read failure is a reason to review, never to skip
         logger.warning(

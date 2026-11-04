@@ -715,6 +715,20 @@ def _cost_summary(
     return cost_summary_from_usage_entries(usage_entries, budget_tracker=budget_tracker)
 
 
+async def _report_record_publication_failure(
+    tool_context: ToolContext, prepared: Any, sink_error: str | None
+) -> None:
+    """Post the checks for a run whose formal review record failed to publish."""
+    await report_status_checks(
+        tool_context,
+        run_succeeded=False,
+        failure_reason="formal review record publication failed",
+        conclusion="neutral",
+        packet=prepared,
+        approval_failure_reason=sink_error,
+    )
+
+
 async def _publish(
     ctx: RunContext,
     *,
@@ -795,7 +809,7 @@ async def _publish(
         if (
             pull_number is not None
             and prepared is not None
-            and (review_run or tool_context.tool_state.review is not None)
+            and (review_run or lite_run or tool_context.tool_state.review is not None)
         ):
             try:
                 await publish_deterministic_record(
@@ -807,26 +821,35 @@ async def _publish(
                     run_outcome=effective_outcome,
                     verdict_diagnostic=verdict_diagnostic,
                 )
-            except Exception:
-                await report_status_checks(
-                    tool_context,
-                    run_succeeded=False,
-                    failure_reason="formal review record publication failed",
-                    conclusion="neutral",
-                    packet=prepared,
-                    approval_failure_reason=effective_sink_error,
-                )
-                raise
+            except Exception as err:
+                if lite_run:
+                    # The lite comment is the record a human reads, but the checks carry
+                    # the same findings and the never-approve rule; a failed post is
+                    # reported, and the checks below still post.
+                    logger.warning(
+                        "» the lite review comment could not be published ({}); the checks "
+                        "still carry its findings",
+                        type(err).__name__,
+                    )
+                    gha_log.warning("mergeCraft: the lite review comment could not be published")
+                else:
+                    await _report_record_publication_failure(
+                        tool_context, prepared, effective_sink_error
+                    )
+                    raise
         run_ok = run_succeeded_for_outcome(effective_outcome)
         completion: CompletionConclusion = RUN_OUTCOME_CONCLUSION[effective_outcome]
-        if completion == "success":
-            completion = (
-                _lite_completion_conclusion(tool_context.tool_state, prepared) or completion
-            )
+        completion_reason = effective_failure_reason
+        lite_completion = _lite_completion_conclusion(
+            tool_context.tool_state, prepared, outcome_conclusion=completion
+        )
+        if lite_completion is not None:
+            completion, lite_reason = lite_completion
+            completion_reason = completion_reason or lite_reason
         await report_status_checks(
             tool_context,
             run_succeeded=run_ok,
-            failure_reason=effective_failure_reason,
+            failure_reason=completion_reason,
             conclusion=completion,
             packet=prepared,
             approval_failure_reason=effective_sink_error,
@@ -2106,10 +2129,13 @@ async def _run_lite_tier(
 ) -> LiteAgentReview | None:
     """Run the ``lite`` tier's single call; ``None`` (a full review) when it downgraded.
 
-    Findings are recorded on the reviewer roster's server-side path
-    (``record_reviewer_dispatch_run(agent_id="lite")``) and as packet findings, so a
-    Critical or Major one fails the checks like any review finding. The driver is
-    reached through this module's ``run_lite_review`` binding.
+    Findings are recorded twice. The checks fail through the packet findings: compact
+    ``tool="lite"`` rows on ``agent_findings``, which
+    :func:`mergecraft.evidence.merge.lite_row_finding` expands, so a Critical or Major
+    one fails the checks like any review finding. The roster record
+    (``record_reviewer_dispatch_run(agent_id="lite")``) is kept separately as the
+    provenance of who raised them. The driver is reached through this module's
+    ``run_lite_review`` binding.
     """
     assert ctx.settings is not None
     assert ctx.tool_state is not None
@@ -2163,21 +2189,28 @@ def _lite_finding_rows(outcome: LiteOutcome) -> list[dict[str, Any]]:
 
 
 def _lite_completion_conclusion(
-    tool_state: ToolState, prepared: Any
-) -> CompletionConclusion | None:
-    """The ``mergecraft`` check for a completed ``lite`` run: ``neutral``, or ``failure``.
+    tool_state: ToolState, prepared: Any, *, outcome_conclusion: CompletionConclusion
+) -> tuple[CompletionConclusion, str | None] | None:
+    """The ``mergecraft`` check for a ``lite`` run, and the lead its summary states.
 
-    ``None`` when the run was not a ``lite`` run. A lite call is triage, not a review,
-    so its clean completion never posts ``success``; a Critical or Major finding fails
-    the check.
+    ``None`` when the run was not a ``lite`` run. A Critical or Major finding fails the
+    check whatever else happened (a cap overrun never softens a blocker); otherwise a
+    clean completion is ``neutral``, never ``success``, because a lite call is triage,
+    not a review. Any other outcome conclusion (``neutral`` for ``inconclusive``,
+    ``failure``) is kept.
     """
     triage = tool_state.triage
     if tool_state.lite_review is None or getattr(triage, "tier", None) != "lite":
         return None
     from mergecraft.agents.gates import blocking_findings
 
-    findings = list(getattr(prepared, "findings", None) or [])
-    return "failure" if blocking_findings(findings) else "neutral"
+    blockers = blocking_findings(list(getattr(prepared, "findings", None) or []))
+    if blockers and outcome_conclusion in {"success", "neutral"}:
+        noun = "finding" if len(blockers) == 1 else "findings"
+        return "failure", f"The lite review raised {len(blockers)} blocking {noun}."
+    if outcome_conclusion == "success":
+        return "neutral", "The lite review finished; approval is left to a human."
+    return outcome_conclusion, None
 
 
 def _lite_inconclusive_reason(outcome: LiteOutcome) -> str | None:
