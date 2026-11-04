@@ -607,6 +607,30 @@ def _blast_radius_had_inputs(packet: MergeEvidencePacket) -> bool:
     return any(gate.gate == "inputs" and gate.passed is True for gate in blast_radius.checklist)
 
 
+def _checklist_all_passed(packet: MergeEvidencePacket) -> bool:
+    """Whether every checklist gate passed (``True``); vacuously true for no checklist.
+
+    An empty checklist is a packet written before the field existed (schema
+    ``1.17.0``) and keeps the legacy route.
+    """
+    blast_radius = packet.blast_radius
+    if blast_radius is None:
+        return False
+    return all(gate.passed is True for gate in blast_radius.checklist)
+
+
+def _checklist_all_measured(packet: MergeEvidencePacket) -> bool:
+    """Whether no checklist gate is ``None`` (not measured); a ``False`` gate is measured.
+
+    Unknown is never green (#1056): ``clean_pass`` accepts a measured failure
+    (every real ``medium`` lane has one) but never an unmeasured gate.
+    """
+    blast_radius = packet.blast_radius
+    if blast_radius is None:
+        return False
+    return all(gate.passed is not None for gate in blast_radius.checklist)
+
+
 def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
     """True only for a blocker-free low-risk PR with an explicit positive verdict.
 
@@ -629,6 +653,10 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
     was meant: two ``Minor`` findings on a low-risk diff are still a clean
     low-risk PR, and ``_trusted_positive_decision`` already re-checks
     blockers, so this cannot widen past the gate's own verdict.
+
+    When the packet carries a checklist, every gate must be ``True``: a
+    ``low`` lane beside a gate that failed or was not measured is
+    inconsistent, so it never takes the auto-merge route (#1056).
     """
     if _packet_has_blockers(packet):
         return False
@@ -637,6 +665,8 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
     if packet.blast_radius.lane != "low":
         return False
     if not _blast_radius_had_inputs(packet):
+        return False
+    if not _checklist_all_passed(packet):
         return False
     return _trusted_positive_decision(packet)
 
@@ -658,7 +688,9 @@ def _is_clean_pass(packet: MergeEvidencePacket) -> bool:
       high-lane packet escalates for a human instead of merging;
     - a missing ``blast_radius`` is an *unknown* lane, and unknown is never
       green (#1056) — it escalates too, as does a ``blast_radius`` that had no
-      inputs (``_blast_radius_had_inputs``).
+      inputs (``_blast_radius_had_inputs``) or any checklist gate that was
+      not measured (``None``). A ``False`` gate is a measured failure and is
+      accepted: every real ``medium`` lane carries one.
 
     Ordering: after the finding-driven rules so ``has_blockers`` /
     ``changed-unread-file`` / ``tool_loop`` keep winning when their findings
@@ -670,6 +702,8 @@ def _is_clean_pass(packet: MergeEvidencePacket) -> bool:
     if packet.blast_radius.auto_merge_lane == "forbidden":
         return False
     if not _blast_radius_had_inputs(packet):
+        return False
+    if not _checklist_all_measured(packet):
         return False
     return _trusted_positive_decision(packet)
 

@@ -151,6 +151,17 @@ def _contains_path_part(path: str, parts: tuple[str, ...]) -> bool:
     return any(f"/{part}/" in f"{normalized}/" for part in parts)
 
 
+def _is_generated(path: str) -> bool:
+    return _contains_path_part(path, ("generated",))
+
+
+def _has_hand_written_source(paths: list[str]) -> bool:
+    """Whether any changed path is under ``src/`` and is not generated output."""
+    return any(
+        path.lower().strip("/").startswith("src/") and not _is_generated(path) for path in paths
+    )
+
+
 def _diff_text(diff_stats: dict[str, object]) -> str:
     return "\n".join(
         value for key in _DIFF_SIGNAL_KEYS if isinstance((value := diff_stats.get(key)), str)
@@ -339,7 +350,7 @@ def _detect(paths: list[str], diff_text: str) -> tuple[list[str], dict[str, str]
                 *labels,
             )
 
-    if any(_contains_path_part(path, ("generated",)) for path in lowered):
+    if any(_is_generated(path) for path in lowered):
         add("paths.generated", "a changed path is generated output", "generated_files")
 
     if any(path.endswith("/__init__.py") for path in lowered):
@@ -348,10 +359,10 @@ def _detect(paths: list[str], diff_text: str) -> tuple[list[str], dict[str, str]
     if any(path.rsplit("/", 1)[-1] in _DEPENDENCY_FILES for path in lowered):
         add("deps.changed", "a dependency manifest or lockfile changed", "dependency_changes")
 
-    source_paths = [path for path in lowered if path.startswith("src/")]
+    # A generated path exempts only itself: a non-generated src/ path beside it
+    # still needs a test change.
     test_paths = [path for path in lowered if path.startswith("tests/") or "/test_" in path]
-    generated_source = any(_contains_path_part(path, ("generated",)) for path in source_paths)
-    if source_paths and not test_paths and not generated_source:
+    if _has_hand_written_source(lowered) and not test_paths:
         add(
             "tests.missing",
             "source under src/ changed without a test change",
@@ -488,8 +499,8 @@ def _lane_reasons(
     measured = [_apply_override(code, message, overrides) for code, message in hits.items()]
 
     rule_categories = {spec.rule for code in hits if (spec := _REASON_SPECS[code]).rule}
-    has_source = any(path.lower().startswith("src/") for path in paths)
-    if has_source and "generated_files" not in rule_categories:
+    # A generated path exempts only itself; any hand-written src/ path is a source change.
+    if _has_hand_written_source(paths):
         measured.append(
             LaneReason(
                 code="source.changed",

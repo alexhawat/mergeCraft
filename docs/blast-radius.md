@@ -49,9 +49,9 @@ Every classification carries `reasons`: one row per signal, each with a stable d
 | `diff.irreversible_command` | high | the diff text contains `rm -rf` or `terraform destroy` |
 | `paths.public_api` | medium | a package `__init__.py` changed |
 | `deps.changed` | medium | a dependency manifest or lockfile changed (`pyproject.toml`, `uv.lock`, `package.json`, `go.mod` and similar) |
-| `tests.missing` | medium | source under `src/` changed with no test change; emitted at low, with the carve-out named, when the carve-out applies |
+| `tests.missing` | medium | a `src/` path that is not generated output changed and no test path changed, whatever generated paths sit beside it; emitted at low, with the carve-out named, when the carve-out applies |
 | `paths.review_config` | medium | config that governs how the PR is reviewed changed; an override cannot lower it |
-| `source.changed` | medium | source under `src/` changed (not generated output) |
+| `source.changed` | medium | a `src/` path that is not generated output changed, whatever generated paths sit beside it; a change made only of generated paths emits `paths.generated` instead |
 | `paths.generated` | low | a changed path is under a `generated` directory |
 | `source.small_isolated` | low | the carve-out applies: one `src/` file, at most 5 changed lines, no review config, no `source_without_tests` override, no high reason |
 | `baseline.clean` | low | no other reason was emitted |
@@ -67,15 +67,17 @@ Every classification also carries `checklist`: one row per gate, always in this 
 | Gate | Reasons that fail it | Reads |
 |---|---|---|
 | `inputs` | `signal.missing.paths`, `signal.missing.diff` | both inputs |
-| `migrations` | `paths.migrations`, `diff.destructive_sql` | paths and diff text |
+| `migrations` | `paths.migrations`, `diff.destructive_sql` | paths and `diff_stats` |
 | `auth_security_payment` | `paths.auth`, `paths.security`, `paths.payment`, `paths.permissions` | paths |
-| `secrets_config_deployment` | `paths.secrets_config`, `paths.deployment`, `diff.secret_assignment` | paths and diff text |
-| `irreversible_infra` | `paths.irreversible_infra`, `diff.irreversible_command` | paths and diff text |
+| `secrets_config_deployment` | `paths.secrets_config`, `paths.deployment`, `diff.secret_assignment` | paths and `diff_stats` |
+| `irreversible_infra` | `paths.irreversible_infra`, `diff.irreversible_command` | paths and `diff_stats` |
 | `public_api` | `paths.public_api` | paths |
 | `dependencies` | `deps.changed` | paths |
-| `tests` | `tests.missing` | paths and line counts |
+| `tests` | `tests.missing` | paths and `diff_stats` |
 | `review_config` | `paths.review_config` | paths |
-| `source` | `source.changed`, and `paths.generated` when an override raises it | paths and line counts |
+| `source` | `source.changed`, and `paths.generated` when an override raises it | paths and `diff_stats` |
+
+A gate that reads `diff_stats` counts it as measured whenever the mapping is present, even when it carries no diff-text key. The production packet always puts the diff text in it, beside the line counts.
 
 - `true`: the gate's inputs were all given and none of its reasons forces the lane above `low`. A reason lowered to `low` by an override or the carve-out passes its gate.
 - `false`: one of its reasons forces the lane above `low`. A failure measured from one input stays `false` even when the other input is missing.

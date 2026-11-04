@@ -89,7 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   out. The run record prints the lane and its codes on one line. A repository
   override can no longer lower the `review_config` floor below `medium`, and the
   carve-out now lowers only the source and tests reasons, so a tiny edit to a
-  package `__init__.py` stays `medium`. The merge evidence packet schema moves to
+  package `__init__.py` stays `medium`. A generated sibling no longer hides an
+  untested source change. The merge evidence packet schema moves to
   `1.18.0`; older packets without the fields still validate and decide as before.
 
 - The self-review's Codex rung runs in its own job, the only one holding the
