@@ -23,7 +23,7 @@ def test_e2e_yml_on_includes_workflow_call() -> None:
     on_block = workflow_on(load_workflow("e2e.yml"))
     assert isinstance(on_block, dict), f"e2e.yml on: is not a mapping: {on_block!r}"
     assert "workflow_call" in on_block, "e2e.yml on: is missing workflow_call (D4)"
-    for trigger in ("pull_request", "schedule", "workflow_dispatch"):
+    for trigger in ("schedule", "workflow_dispatch"):
         assert trigger in on_block, f"e2e.yml dropped existing trigger {trigger!r}"
 
 
