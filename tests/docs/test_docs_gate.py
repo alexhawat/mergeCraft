@@ -35,9 +35,7 @@ MANIFEST = REPO_ROOT / "docs" / "manifest.yaml"
 GEN_LLMS_FULL = REPO_ROOT / "scripts" / "gen_llms_full.py"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 
-_UNPINNED_INSTALL = (
-    'uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"'
-)
+_RELEASE_INSTALL = "uv tool install mergecraft-action==0.1.0a4"
 _PIN_SCAN_PATHS = (README, AGENTS_MD, SKILL_MD, INSTALL_DOC, LLMS_TXT)
 _LINK_SURFACE_PATHS = (README, AGENTS_MD, SKILL_MD, LLMS_TXT)
 
@@ -180,16 +178,16 @@ def test_install_pin_is_consistent_when_present() -> None:
         )
 
 
-def test_unpinned_install_line_is_the_documented_form() -> None:
-    """D11: consumer install stays unpinned; no ``git+…@v…`` variant in agent surfaces."""
+def test_released_install_line_is_the_documented_form() -> None:
+    """Consumer setup leads with the published release rather than moving source."""
     surfaces = (
         ("README.md", _read(README)),
         ("AGENTS-mergecraft.md", _read(AGENTS_MD)),
         ("skills/mergecraft/SKILL.md", _read(SKILL_MD)),
     )
-    missing_unpinned = [label for label, text in surfaces if _UNPINNED_INSTALL not in text]
-    assert not missing_unpinned, (
-        f"consumer surfaces must teach the unpinned uv tool install form (D11): {missing_unpinned}"
+    missing_release = [label for label, text in surfaces if _RELEASE_INSTALL not in text]
+    assert not missing_release, (
+        f"consumer surfaces must teach the published pinned CLI install: {missing_release}"
     )
 
     pinned_installs = [
