@@ -133,3 +133,26 @@ def test_double_star_does_not_match_outside_its_tree(pattern: str, path: str) ->
 def test_the_scope_matcher_is_anchored_at_the_root(pattern: str, inside: str, outside: str) -> None:
     assert path_full_matches_glob(pattern, inside) is True
     assert path_full_matches_glob(pattern, outside) is False
+
+
+# ── character-class negation and a trailing ``**`` ───────────────────────────
+
+
+@pytest.mark.parametrize("matcher", [path_full_matches_glob, path_matches_glob])
+@pytest.mark.parametrize(
+    ("pattern", "hit", "miss"),
+    [("[!a]*", "b.py", "a.py"), ("[!a-c]x", "dx", "bx")],
+    ids=["negated-char", "negated-range"],
+)
+def test_a_negated_class_excludes_its_members(
+    matcher: Any, pattern: str, hit: str, miss: str
+) -> None:
+    assert matcher(pattern, hit) is True
+    assert matcher(pattern, miss) is False
+
+
+@pytest.mark.parametrize("matcher", [path_full_matches_glob, path_matches_glob])
+def test_a_trailing_double_star_matches_zero_segments(matcher: Any) -> None:
+    assert matcher("docs/**", "docs") is True
+    assert matcher("docs/**", "docs/a/b.md") is True
+    assert matcher("docs/**", "documents") is False
