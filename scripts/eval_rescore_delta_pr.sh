@@ -4,17 +4,19 @@ set -euo pipefail
 
 BASE_REF="${1:-${GITHUB_BASE_REF:-main}}"
 HEAD_REF="${2:-${GITHUB_SHA:-HEAD}}"
-RESULTS_DIR="${RESULTS_DIR:-evals/results}"
+RESULTS_DIR="${RESULTS_DIR:-${RUNNER_TEMP:-/tmp}/mergecraft-eval-rescore}"
 mkdir -p "$RESULTS_DIR"
 
 merge_base="$(git merge-base "origin/${BASE_REF}" "$HEAD_REF")"
 head_commit="$(git rev-parse "$HEAD_REF")"
 
 git checkout --quiet "$merge_base"
-uv run mergecraft eval replay-bank --json > "${RESULTS_DIR}/rescore-base.json"
+uv run mergecraft eval replay-bank --json --no-update-latest --results-dir "$RESULTS_DIR" \
+  > "${RESULTS_DIR}/rescore-base.json"
 
 git checkout --quiet "$head_commit"
-uv run mergecraft eval replay-bank --json > "${RESULTS_DIR}/rescore-head.json"
+uv run mergecraft eval replay-bank --json --no-update-latest --results-dir "$RESULTS_DIR" \
+  > "${RESULTS_DIR}/rescore-head.json"
 
 uv run mergecraft eval rescore-delta \
   --baseline "${RESULTS_DIR}/rescore-base.json" \

@@ -547,6 +547,11 @@ def replay_bank_cmd(
         "--json",
         help="Emit the result set as JSON on stdout.",
     ),
+    no_update_latest: bool = typer.Option(
+        False,
+        "--no-update-latest",
+        help="Do not overwrite evals/results/latest.json (advisory rescoring, partial runs).",
+    ),
     gate: bool = typer.Option(
         False,
         "--gate",
@@ -563,7 +568,12 @@ def replay_bank_cmd(
     bank_dir = _bank_dir(bank)
     out_dir = results_dir if results_dir is not None else DEFAULT_RESULTS_DIR
     providers = tuple(provider) if provider else DEFAULT_BENCHMARK_PROVIDERS
-    result, path = replay_bank(bank_dir, results_dir=out_dir, providers=providers)
+    result, path = replay_bank(
+        bank_dir,
+        results_dir=out_dir,
+        providers=providers,
+        update_latest=not no_update_latest,
+    )
     if wants_json_output(ctx, json_flag=json_output):
         emit_cli_json(result.model_dump(mode="json"))
         return
@@ -1341,8 +1351,8 @@ def rescore_delta_cmd(
     if wants_json_output(ctx, json_flag=json_output):
         emit_cli_json(report.model_dump(mode="json"))
     else:
-        console.print(format_rescore_summary(report))
-        console.print(f"report: {output}")
+        typer.echo(format_rescore_summary(report))
+        typer.echo(f"report: {output}")
 
 
 __all__ = ["CATEGORY_REJECTED", "CATEGORY_REVERTED", "FAILURE_CATEGORIES", "app"]

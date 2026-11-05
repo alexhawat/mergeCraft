@@ -23,12 +23,15 @@ if TYPE_CHECKING:
 
 FindingOutcomeKind = Literal["fixed", "rejected", "intentional", "ignored", "unknown"]
 
-_WONT_FIX_RE: Final[re.Pattern[str]] = re.compile(
-    r"\b(won'?t fix|wontfix|by design|intentional|not a bug|false positive|false-positive)\b",
+_INTENTIONAL_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(won'?t fix|wontfix|by design|intentional)\b",
     re.IGNORECASE,
 )
 _REJECT_RE: Final[re.Pattern[str]] = re.compile(
-    r"\b(wrong|incorrect|not valid|disagree|invalid finding|not an issue)\b",
+    r"\b("
+    r"wrong|incorrect|not valid|disagree|invalid finding|not an issue|"
+    r"false positive|false-positive|not a bug"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -107,13 +110,13 @@ def classify_thread_outcome(
         return "fixed", "thread outdated"
     human = _human_replies(comments, publishers)
     combined = "\n".join(human)
-    if combined and _WONT_FIX_RE.search(combined):
-        return "intentional", "human marked won't-fix / by design"
     if combined and _REJECT_RE.search(combined):
         return "rejected", "human rejected the finding"
+    if combined and _INTENTIONAL_RE.search(combined):
+        return "intentional", "human marked won't-fix / by design"
     if merged:
         return "ignored", "merged with thread still open"
-    return "ignored", "open thread, PR not merged yet"
+    return "unknown", "open thread, PR not merged yet"
 
 
 def classify_pull_request_outcomes(
@@ -142,7 +145,9 @@ def classify_pull_request_outcomes(
         rows.append(
             FindingOutcomeRow(
                 fingerprint=fp,
-                thread_id=str(thread.get("id") or thread.get("graphqlId") or ""),
+                thread_id=str(
+                    thread.get("threadId") or thread.get("id") or thread.get("graphqlId") or ""
+                ),
                 path=str(root.get("path") or ""),
                 line=root.get("line") if isinstance(root.get("line"), int) else None,
                 outcome=outcome,

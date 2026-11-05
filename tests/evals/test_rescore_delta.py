@@ -91,3 +91,15 @@ def test_compare_result_sets_classifies_lost_pass() -> None:
 def test_touches_reviewer_surface_detects_mode_changes() -> None:
     assert touches_reviewer_surface(["src/mergecraft/modes/Review.py"])
     assert not touches_reviewer_surface(["README.md"])
+
+
+def test_rescore_delta_summary_includes_metric_lines() -> None:
+    from mergecraft.evals.rescore_delta import format_rescore_summary
+
+    base = _minimal_result(commit="base", rows=[])
+    head = _minimal_result(commit="head", rows=[])
+    report = compare_result_sets(base, head)
+    text = format_rescore_summary(report)
+    assert "Pass-rate" in text
+    assert "Gained pass" in text
+    assert "base" in text.lower() or "Base commit" in text
