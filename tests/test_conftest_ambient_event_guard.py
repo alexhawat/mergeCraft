@@ -23,7 +23,9 @@ if TYPE_CHECKING:
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _PROBE = _REPO_ROOT / "tests" / "probe" / "test_ambient_event_probe.py"
-_SAME_REPO_EVENT = {"pull_request": {"head": {"repo": {"fork": False}}}}
+_SAME_REPO_EVENT = {
+    "pull_request": {"head": {"repo": {"id": 42, "fork": False}}, "base": {"repo": {"id": 42}}}
+}
 
 
 def test_autouse_guard_clears_ambient_github_event_in_a_child_process(tmp_path: Path) -> None:

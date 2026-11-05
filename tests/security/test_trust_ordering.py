@@ -30,11 +30,17 @@ FORK_PR_PAYLOAD: dict[str, Any] = {
 }
 SAME_REPO_PR_PAYLOAD: dict[str, Any] = {
     "action": "opened",
-    "pull_request": {"head": {"sha": "deadbeef", "repo": {"fork": False}}},
+    "pull_request": {
+        "head": {"sha": "deadbeef", "repo": {"id": 42, "fork": False}},
+        "base": {"repo": {"id": 42}},
+    },
 }
 PR_TARGET_PAYLOAD: dict[str, Any] = {
     "action": "opened",
-    "pull_request": {"head": {"sha": "deadbeef", "repo": {"fork": False}}},
+    "pull_request": {
+        "head": {"sha": "deadbeef", "repo": {"id": 42, "fork": False}},
+        "base": {"repo": {"id": 42}},
+    },
 }
 DISPATCH_PAYLOAD: dict[str, Any] = {"action": "workflow_dispatch"}
 

@@ -394,7 +394,10 @@ async def test_resolve_credentials_matches_current_precedence(
     }
     same_repo_pr_event = {
         "action": "opened",
-        "pull_request": {"head": {"sha": "deadbeef", "repo": {"fork": False}}},
+        "pull_request": {
+            "head": {"sha": "deadbeef", "repo": {"id": 42, "fork": False}},
+            "base": {"repo": {"id": 42}},
+        },
     }
     trust_cases: list[tuple[str, str | None, dict[str, Any] | None, bool, str]] = [
         ("offline_flag_forces_trusted_regardless_of_event", None, None, True, "trusted"),

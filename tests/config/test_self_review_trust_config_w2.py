@@ -11,7 +11,10 @@ from tests.ci.workflow_support import REPO_ROOT
 _COMMITTED_CONFIG = REPO_ROOT / ".mergecraft" / "config.yaml"
 _FORK_EVENT: dict = {"pull_request": {"head": {"repo": {"fork": True, "full_name": "fork/demo"}}}}
 _SAME_REPO_EVENT: dict = {
-    "pull_request": {"head": {"repo": {"fork": False, "full_name": "acme/demo"}}}
+    "pull_request": {
+        "head": {"repo": {"fork": False, "full_name": "acme/demo"}},
+        "base": {"repo": {"full_name": "acme/demo"}},
+    }
 }
 
 

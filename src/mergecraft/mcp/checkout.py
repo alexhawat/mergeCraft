@@ -1173,9 +1173,7 @@ def checkout_pr_tool(ctx: ToolContext):
         head_ref = head.get("ref") or ""
         head_sha = head.get("sha") or ""
         base_ref = base.get("ref") or ""
-        # TB-D3 — one fork predicate. The ``full_name`` comparison stops being a
-        # decision input; ``is_fork_pull_request`` reads the same ``head.repo.fork``
-        # shape every other fork decision reads.
+        # Use the same head/base repository identity comparison as preflight.
         is_fork = is_fork_pull_request({"pull_request": pr})
 
         # TB-D4 — refuse a fork PR on a run that holds trusted execution or
