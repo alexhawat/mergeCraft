@@ -17,6 +17,7 @@ import typer
 from mergecraft.analyzers.finding import validate_findings_export, write_findings_json
 from mergecraft.analyzers.sarif import export_sarif
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json
 from mergecraft.findings.hunk_export import (
     count_dropped_file_level_findings,
@@ -126,7 +127,7 @@ def dispatch_review_output(
         target = output
         if target is None:
             console.print("[red]--output is required for --output-format jsonl[/red]")
-            raise typer.Exit(exit_code)
+            raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
         write_jsonl_findings(target, findings)
         console.print(f"[green]wrote[/green] {target}")
         return
@@ -135,7 +136,7 @@ def dispatch_review_output(
         target = output
         if target is None:
             console.print("[red]--output is required for --output-format sarif[/red]")
-            raise typer.Exit(exit_code)
+            raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE)
         document = export_sarif(list(findings))
         target.write_text(json.dumps(document, indent=2), encoding="utf-8")
         console.print(f"[green]wrote[/green] {target}")
