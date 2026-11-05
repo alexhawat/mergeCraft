@@ -532,7 +532,15 @@ def _packet_ctx(
     labels: list[str] | None = None,
     red_green: Any = None,
     fix_labels: list[str] | None = None,
+    operator_owned: bool = True,
+    base_fix_labels: tuple[str, ...] | None = None,
 ) -> Any:
+    """A packet-ready context; ``fix_labels`` is the run-start snapshot's ``fixLabels``.
+
+    ``operator_owned`` says whether that snapshot is the operator's (base) config;
+    ``base_fix_labels`` is what run start resolved from the base and stored on
+    ``ToolState.fix_labels``.
+    """
     from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
     from mergecraft.mcp.tool_state import ApprovalRecord, init_tool_state, primary_repo_state
     from mergecraft.modes import compute_modes
@@ -545,6 +553,8 @@ def _packet_ctx(
     tool_state.approval = ApprovalRecord(would_approve=True, sha="deadbeef")
     if red_green is not None:
         tool_state.red_green = red_green
+    if base_fix_labels is not None:
+        tool_state.fix_labels = base_fix_labels
     if hasattr(tool_state, "scope_declaration"):
         # Once declared scope lands (#1056 part 3) a run without one is ``scope.unknown``
         # at ``medium``; declare the diff's one path so only the fix proof moves the lane.
@@ -559,7 +569,9 @@ def _packet_ctx(
 
         settings = default_settings()
         settings.review.fix_labels = list(fix_labels)
-        snapshot = RepoSettingsSnapshot(settings=settings, config_hash="", repo_root=tmp_path)
+        snapshot = RepoSettingsSnapshot(
+            settings=settings, config_hash="", repo_root=tmp_path, operator_owned=operator_owned
+        )
     return ToolContext(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
@@ -651,6 +663,105 @@ def test_the_configured_fix_labels_replace_the_defaults(tmp_path: Path) -> None:
 
     assert "fix.no-receipt" in _packet_codes(custom)
     assert "fix.not-required" in _packet_codes(default_label)
+
+
+# ── fix labels come from the operator's base-side config only ───────────────
+
+
+def test_tool_state_starts_with_no_resolved_fix_labels(tmp_path: Path) -> None:
+    from mergecraft.mcp.tool_state import init_tool_state
+
+    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+
+    assert hasattr(state, "fix_labels")
+    assert state.fix_labels is None
+
+
+def test_a_head_only_empty_fix_labels_cannot_switch_off_label_detection(tmp_path: Path) -> None:
+    """A fork's head config sets ``fixLabels: []``; the ``bug`` label still marks a fix."""
+    packet = _packet(
+        tmp_path, title="feat: add a thing", labels=["bug"], fix_labels=[], operator_owned=False
+    )
+
+    assert "fix.no-receipt" in _packet_codes(packet)
+    assert "fix.not-required" not in _packet_codes(packet)
+    assert packet.blast_radius.lane == "medium"
+    assert _gates(packet.blast_radius)["fix_proof"] is False
+
+
+def test_a_head_only_fix_label_list_is_ignored_for_the_defaults(tmp_path: Path) -> None:
+    hotfix = _packet(
+        tmp_path,
+        title="feat: add a thing",
+        labels=["hotfix"],
+        fix_labels=["hotfix"],
+        operator_owned=False,
+    )
+    bug = _packet(
+        tmp_path,
+        title="feat: add a thing",
+        labels=["bug"],
+        fix_labels=["hotfix"],
+        operator_owned=False,
+    )
+
+    assert "fix.not-required" in _packet_codes(hotfix)
+    assert "fix.no-receipt" in _packet_codes(bug)
+
+
+def test_an_operator_owned_snapshot_fix_label_list_is_honoured(tmp_path: Path) -> None:
+    packet = _packet(
+        tmp_path,
+        title="feat: add a thing",
+        labels=["hotfix"],
+        fix_labels=["hotfix"],
+        operator_owned=True,
+    )
+
+    assert "fix.no-receipt" in _packet_codes(packet)
+    assert packet.blast_radius.lane == "medium"
+
+
+def test_the_base_resolved_fix_labels_win_over_a_head_that_removes_them(tmp_path: Path) -> None:
+    """Base ``fixLabels: [hotfix]`` resolved at run start; the head config drops it."""
+    hotfix = _packet(
+        tmp_path,
+        title="feat: add a thing",
+        labels=["hotfix"],
+        fix_labels=[],
+        operator_owned=False,
+        base_fix_labels=("hotfix",),
+    )
+    bug = _packet(
+        tmp_path,
+        title="feat: add a thing",
+        labels=["bug"],
+        fix_labels=[],
+        operator_owned=False,
+        base_fix_labels=("hotfix",),
+    )
+
+    assert "fix.no-receipt" in _packet_codes(hotfix)
+    assert "fix.not-required" in _packet_codes(bug)
+
+
+def test_the_verification_tool_reads_the_same_base_side_fix_labels(tmp_path: Path) -> None:
+    from mergecraft.mcp.verification import _run_lane
+
+    head_only = _packet_ctx(
+        tmp_path, title="feat: add a thing", labels=["bug"], fix_labels=[], operator_owned=False
+    )
+    base = _packet_ctx(
+        tmp_path,
+        title="feat: add a thing",
+        labels=["hotfix"],
+        fix_labels=[],
+        operator_owned=False,
+        base_fix_labels=("hotfix",),
+    )
+
+    assert _run_lane(head_only) == "medium"
+    assert _run_lane(base) == "medium"
 
 
 def test_a_proven_receipt_on_a_non_fix_run_is_still_not_required(tmp_path: Path) -> None:

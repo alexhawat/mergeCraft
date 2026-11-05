@@ -9,6 +9,8 @@ names. Sibling of ``test_coverage_mutation_settings.py``.
 
 from __future__ import annotations
 
+import base64
+from importlib import import_module
 from typing import TYPE_CHECKING
 
 import pytest
@@ -136,3 +138,106 @@ def test_ci_evidence_still_refuses_an_unknown_key() -> None:
         CiEvidenceSettings.model_validate({"redGreenArtifact": ["receipt"]})
 
     assert excinfo.value.errors()[0]["type"] == "extra_forbidden"
+
+
+# ── run start resolves review.fixLabels from the operator's side only ───────
+
+BASE_SHA = "1" * 40
+
+
+class _ContentsScm:
+    """Answers the contents API for ``.mergecraft/config.yaml`` at one ref."""
+
+    def __init__(self, *, config: str | None = None, error: Exception | None = None) -> None:
+        self.config = config
+        self.error = error
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    async def get(self, path: str, **kwargs: object) -> object:
+        params = kwargs.get("params")
+        self.calls.append((path, dict(params) if isinstance(params, dict) else {}))
+        if self.error is not None:
+            raise self.error
+        assert self.config is not None
+        content = base64.b64encode(self.config.encode("utf-8")).decode("ascii")
+        return {"type": "file", "encoding": "base64", "content": content}
+
+
+class _NotFoundError(Exception):
+    status_code = 404
+
+    def __init__(self) -> None:
+        super().__init__("Not Found")
+        self.response = type("R", (), {"status_code": 404})()
+
+
+def _event(base_sha: str = BASE_SHA) -> dict[str, object]:
+    return {"pull_request": {"number": 42, "base": {"sha": base_sha}, "head": {"sha": "2" * 40}}}
+
+
+async def _resolve(
+    scm: _ContentsScm, *, operator_owned: bool, head: list[str], event: object
+) -> list[str]:
+    module = import_module("mergecraft.review_policy.fix_labels")
+    review = ReviewSettings.model_validate({"fixLabels": head})
+    resolved = await module.resolve_fix_labels(
+        scm, "acme", "demo", event=event, run_start_review=review, operator_owned=operator_owned
+    )
+    return list(resolved)
+
+
+@pytest.mark.asyncio
+async def test_an_operator_owned_run_uses_the_run_start_fix_labels_without_a_read() -> None:
+    scm = _ContentsScm(config="review:\n  fixLabels: [other]\n")
+
+    resolved = await _resolve(scm, operator_owned=True, head=["hotfix"], event=_event())
+
+    assert resolved == ["hotfix"]
+    assert scm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_fork_run_reads_fix_labels_from_the_base_commit() -> None:
+    scm = _ContentsScm(config="push: restricted\nreview:\n  fixLabels:\n    - hotfix\n")
+
+    resolved = await _resolve(scm, operator_owned=False, head=[], event=_event())
+
+    assert resolved == ["hotfix"]
+    assert len(scm.calls) == 1
+    path, params = scm.calls[0]
+    assert path.endswith("/contents/.mergecraft/config.yaml")
+    assert params.get("ref") == BASE_SHA
+
+
+@pytest.mark.asyncio
+async def test_a_base_without_fix_labels_gives_the_defaults_not_the_head_list() -> None:
+    scm = _ContentsScm(config="push: restricted\n")
+
+    resolved = await _resolve(scm, operator_owned=False, head=[], event=_event())
+
+    assert resolved == ["bug", "fix"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [_NotFoundError(), RuntimeError("HTTP 502")],
+    ids=["base-has-no-config", "base-read-failed"],
+)
+async def test_an_unreadable_base_config_gives_the_defaults(error: Exception) -> None:
+    scm = _ContentsScm(error=error)
+
+    resolved = await _resolve(scm, operator_owned=False, head=[], event=_event())
+
+    assert resolved == ["bug", "fix"]
+    assert len(scm.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_base_sha_gives_the_defaults_without_a_read() -> None:
+    scm = _ContentsScm(config="review:\n  fixLabels: [hotfix]\n")
+
+    resolved = await _resolve(scm, operator_owned=False, head=[], event=_event(base_sha=""))
+
+    assert resolved == ["bug", "fix"]
+    assert scm.calls == []
