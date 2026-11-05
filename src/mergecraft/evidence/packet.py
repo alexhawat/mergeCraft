@@ -126,7 +126,12 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 #   gates whose ``passed`` is ``true`` / ``false`` / ``null`` (not measured).
 #   Both default to an empty list, so a packet built before this version still
 #   validates.
-PACKET_SCHEMA_VERSION = "1.18.0"
+# - 1.19.0 — the ``triage`` section gains the ``lite`` tier (one capped LLM call)
+#   and its accounting: ``token_cap`` (the configured cap), ``tokens_used`` (the
+#   provider's reported usage, or an estimate), ``usage_estimated``, ``cap_hit``
+#   and ``prompt_version``. Additive; every new field has a default, so a packet
+#   built before this version still validates.
+PACKET_SCHEMA_VERSION = "1.19.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
@@ -341,14 +346,24 @@ class CoverageSection(BaseModel):
 
 
 class TriageSection(BaseModel):
-    """The tier the deterministic pre-dispatch triage chose (``skip`` runs no LLM review)."""
+    """The tier the deterministic pre-dispatch triage chose.
+
+    ``skip`` runs no LLM review; ``lite`` runs one capped LLM call whose cap and usage
+    are recorded here; ``full`` is the normal review. Neither ``skip`` nor ``lite``
+    ever carries a ``success`` decision.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    tier: Literal["skip", "full"]
+    tier: Literal["skip", "lite", "full"]
     recognizer: str | None = None
     reason: str
     relied_on_checks: list[str] = Field(default_factory=list)
+    token_cap: int | None = None
+    tokens_used: int | None = None
+    usage_estimated: bool = False
+    cap_hit: bool = False
+    prompt_version: str | None = None
 
 
 class DispositionSection(BaseModel):

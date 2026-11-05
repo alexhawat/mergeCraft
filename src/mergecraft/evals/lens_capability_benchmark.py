@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 from typing import Final
 
+from mergecraft.classify.blast_radius import ChangeSet  # noqa: TC001 — TypedDict wire shape
 from mergecraft.classify.change_classifier import classify_change
-from mergecraft.classify.generated_files import ChangeSet  # noqa: TC001 — TypedDict wire shape
 from mergecraft.config.settings import load_repo_settings
 from mergecraft.evals.lens_capability import (
     LensRoutingCapabilityReport,

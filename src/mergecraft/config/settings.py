@@ -337,7 +337,7 @@ class ReviewCoverageSettings(BaseModel):
     )
 
 
-FastPathRecognizer = Literal["pinBump", "prose", "whitespace", "generated"]
+FastPathRecognizer = Literal["pinBump", "prose", "whitespace", "generated", "commentOnly"]
 
 
 class FastPathPinBumpSettings(BaseModel):
@@ -357,6 +357,29 @@ class FastPathPinBumpSettings(BaseModel):
     trusted_check_apps: list[str] = Field(default_factory=list, alias="trustedCheckApps")
 
 
+class FastPathLiteSettings(BaseModel):
+    """``review.fastPath.lite``: one capped LLM call for a matched-but-not-skipped diff.
+
+    Off by default. When ``enabled`` (in the operator's base-side config), a diff a
+    recognizer matched but that is not in ``skipLlm``, or a pin bump whose verifying
+    checks have not passed from a trusted App, gets a single non-streaming
+    ``chat/completions`` call to the operator-registered OpenAI-compatible
+    ``provider`` instead of the full review. ``provider`` is a registry label (or a
+    ``label/model`` slug; ``model`` wins for the model). The cap is checked before
+    the call: an upper-bound prompt estimate plus ``maxOutputTokens`` over
+    ``tokenCap`` downgrades the run to a full review. A ``lite`` run never grants
+    approval.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    enabled: bool = False
+    provider: str = ""
+    model: str = ""
+    token_cap: int = Field(default=50_000, ge=4_000, le=200_000, alias="tokenCap")
+    max_output_tokens: int = Field(default=4_000, ge=1, alias="maxOutputTokens")
+
+
 class FastPathSettings(BaseModel):
     """Deterministic pre-dispatch triage (``review.fastPath``), off by default.
 
@@ -365,7 +388,9 @@ class FastPathSettings(BaseModel):
     run posts the ``mergecraft`` check with the tier stated and leaves approval to a
     human. Anything else, and any doubt, is a full review. A pin bump additionally
     needs every ``pinBump.requireChecks`` check to have passed on the head SHA from a
-    ``pinBump.trustedCheckApps`` GitHub App.
+    ``pinBump.trustedCheckApps`` GitHub App. With ``lite.enabled``, a matched diff that
+    is not opted in (or an unverified pin bump) gets one capped LLM call instead of the
+    full review; see :class:`FastPathLiteSettings`.
     """
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
@@ -375,6 +400,45 @@ class FastPathSettings(BaseModel):
     pin_bump: FastPathPinBumpSettings = Field(
         default_factory=FastPathPinBumpSettings, alias="pinBump"
     )
+    lite: FastPathLiteSettings = Field(default_factory=FastPathLiteSettings)
+
+
+class FileGroupFanoutSettings(BaseModel):
+    """Bounded read-only file-group fan-out on large diffs (``review.fileGroupFanout``).
+
+    Off by default. When ``enabled``, a diff with at least ``min_files`` changed
+    files **or** at least ``min_diff_lines`` added lines is split into at most
+    ``max_groups`` balanced file groups, and mergeCraft dispatches one read-only
+    reviewer per group server-side, after the primary reviewer and before the
+    secondary roster. A failed group is a run-health note, never a failed review.
+
+    Args:
+        enabled: Turn the fan-out on. Default ``False``.
+        max_groups: Upper bound on the group count, ``1``..``12``. Default ``6``.
+        min_diff_lines: Added-line threshold that triggers the fan-out. Default ``800``.
+        min_files: Changed-file threshold that triggers the fan-out. Default ``20``.
+        binding: Registry agent id whose binding reviews each group; ``None``
+            reuses the primary reviewer's binding.
+        concurrency: Groups in flight at once, ``1``..``6``. Default ``1``
+            (sequential).
+        per_group_timeout_s: Seconds one group may run, ``1``..``900``, further
+            capped by the binding's ``timeoutS`` and the remaining run budget; no
+            bound can turn the cap off. Default ``600``.
+        budget_share: Share of the run budget left when the fan-out starts that
+            the whole fan-out may spend (above ``0``, at most ``0.9``; no minimum
+            duration), so the secondary roster keeps the rest. Default ``0.5``.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    enabled: bool = False
+    max_groups: int = Field(default=6, alias="maxGroups", ge=1, le=12)
+    min_diff_lines: int = Field(default=800, alias="minDiffLines")
+    min_files: int = Field(default=20, alias="minFiles")
+    binding: str | None = None
+    concurrency: int = Field(default=1, ge=1, le=6)
+    per_group_timeout_s: int = Field(default=600, alias="perGroupTimeoutS", ge=1, le=900)
+    budget_share: float = Field(default=0.5, alias="budgetShare", gt=0, le=0.9)
 
 
 class ReviewSettings(BaseModel):
@@ -391,6 +455,10 @@ class ReviewSettings(BaseModel):
     coverage: ReviewCoverageSettings = Field(default_factory=ReviewCoverageSettings)
     # Deterministic triage before dispatch (default off; base-side config only).
     fast_path: FastPathSettings = Field(default_factory=FastPathSettings, alias="fastPath")
+    # Bounded read-only file-group fan-out on large diffs (default off).
+    file_group_fanout: FileGroupFanoutSettings = Field(
+        default_factory=FileGroupFanoutSettings, alias="fileGroupFanout"
+    )
     # Globs whose changed files are kept out of the reviewer's diff (#1109). Read only
     # from the operator's side of a pull request (``mergecraft.review.ignore_paths``),
     # and merged with the ``ignore_paths`` Action input.
@@ -451,6 +519,119 @@ class ReviewSettings(BaseModel):
             "sources during review-context rendering (for example TEAM.md)."
         ),
     )
+
+
+# Evidence keys a repository may declare a proof for under ``policy.evidence``.
+# ``requirements`` and ``xrepo`` have their own in-run producers and take no
+# declaration; any other key has no producer at all.
+DECLARABLE_EVIDENCE_KEYS: Final[frozenset[str]] = frozenset(
+    {"health_check", "rollback_plan", "contract_schema"}
+)
+
+# The Actions app posts the check runs of ``pull_request`` workflows, whose job
+# names come from the head ref the pull request author controls.
+_REFUSED_EVIDENCE_APPS: Final[frozenset[str]] = frozenset({"github-actions"})
+
+
+class CheckRunProof(BaseModel):
+    """``policy.evidence.<key>.checkRun``: a check run that proves an evidence key.
+
+    The run counts only when it is completed with conclusion ``success``, carries
+    exactly ``name``, is bound to the reviewed head commit and was posted by a
+    GitHub App whose slug is in ``trustedApps``. ``github-actions`` is refused: the
+    job names in a ``pull_request`` workflow come from the head ref, which the pull
+    request author controls.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    name: str = Field(min_length=1)
+    trusted_apps: list[str] = Field(min_length=1, alias="trustedApps")
+
+    @field_validator("trusted_apps")
+    @classmethod
+    def _refuse_actions_app(cls, value: list[str]) -> list[str]:
+        refused = sorted({app for app in value if app.strip().lower() in _REFUSED_EVIDENCE_APPS})
+        if refused:
+            msg = (
+                "github-actions cannot be a trusted App for policy evidence: a "
+                "pull_request workflow names its own jobs from the head ref, so its "
+                f"check runs prove nothing about the pull request (got {', '.join(refused)})"
+            )
+            raise ValueError(msg)
+        return value
+
+
+class ArtifactProof(BaseModel):
+    """``policy.evidence.<key>.artifact``: a workflow artifact holding a proof document.
+
+    ``workflow`` is the repo-relative workflow file (``.github/workflows/…``) that is
+    the only allowed uploader. The artifact counts only when a run of exactly that
+    file, from this repository (never a fork), completed with ``success`` on the
+    reviewed head commit, the pull request does not change that file, and the
+    artifact holds one ``policy-evidence.json`` member of at most 64 KiB that names
+    this key and that commit with ``status: ok``.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    name: str = Field(min_length=1)
+    workflow: str = Field(min_length=1)
+
+    @field_validator("workflow")
+    @classmethod
+    def _repo_relative(cls, value: str) -> str:
+        path = value.strip().removeprefix("./")
+        if not path or path.startswith("/") or ".." in path.split("/"):
+            msg = f"workflow must be a repo-relative workflow file path, got {value!r}"
+            raise ValueError(msg)
+        return path
+
+
+class EvidenceProducerSettings(BaseModel):
+    """One ``policy.evidence.<key>`` declaration: exactly one of ``checkRun`` or ``artifact``."""
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    check_run: CheckRunProof | None = Field(default=None, alias="checkRun")
+    artifact: ArtifactProof | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_proof(self) -> EvidenceProducerSettings:
+        if (self.check_run is None) == (self.artifact is None):
+            msg = "declare exactly one proof: either checkRun or artifact"
+            raise ValueError(msg)
+        return self
+
+
+class PolicySettings(BaseModel):
+    """``policy``: how a repository proves the evidence its policy rules require.
+
+    ``evidence`` maps an evidence key (``health_check``, ``rollback_plan``,
+    ``contract_schema``) to the proof that satisfies it. Declarations are read from
+    the base side, like the policy rules: the operator-owned settings snapshot, else
+    ``.mergecraft/config.yaml`` at the base commit, never the pull request's own
+    configuration; see ``docs/policy-evidence.md``.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    evidence: dict[str, EvidenceProducerSettings] = Field(default_factory=dict)
+
+    @field_validator("evidence")
+    @classmethod
+    def _known_keys(
+        cls, value: dict[str, EvidenceProducerSettings]
+    ) -> dict[str, EvidenceProducerSettings]:
+        unknown = sorted(set(value) - DECLARABLE_EVIDENCE_KEYS)
+        if unknown:
+            allowed = ", ".join(sorted(DECLARABLE_EVIDENCE_KEYS))
+            msg = (
+                f"no declared producer exists for {', '.join(unknown)}; "
+                f"policy.evidence accepts {allowed}"
+            )
+            raise ValueError(msg)
+        return value
 
 
 # D5 / D9 / D15 — `tracing` block on `RepoSettings`. Additive-only, default off.
@@ -951,6 +1132,8 @@ class RepoSettings(BaseModel):
     # to ``shadow`` (D12). The override is layered on top of the default
     # policy at the gate; a mis-spelled value is rejected there.
     gates: GatesSettings = Field(default_factory=GatesSettings, alias="gates")
+    # How the evidence policy rules require is proved (base-side only).
+    policy: PolicySettings = Field(default_factory=PolicySettings)
     trust: TrustSettings = Field(default_factory=TrustSettings)
     env_allowlist: str | None = Field(default=None, alias="envAllowlist")
     # Extra GitHub logins (comma-separated) permitted to invoke mergeCraft by

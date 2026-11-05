@@ -22,6 +22,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mergeCraft injects one Major finding asking the author to reconsider the approach;
   the cap never auto-approves (#1166).
 
+- `review.fileGroupFanout` splits a large pull request into bounded read-only
+  file groups and has mergeCraft dispatch one reviewer per group, so one
+  reviewer does not have to read a 20-file or 800-line diff serially (#1031).
+  It is off by default and pending live validation on a large pull request.
+  When enabled, a diff with at least `minFiles` changed files or
+  `minDiffLines` added lines is split into at most `maxGroups` groups (default
+  6), run one after another unless `concurrency` is raised, each capped at
+  `perGroupTimeoutS` (1–900 seconds); the whole fan-out spends at most
+  `budgetShare` (default 0.5) of the remaining run budget so the secondary
+  roster keeps the rest, and an incremental review fans out over the
+  incremental diff only. The groups run after the primary
+  reviewer has published, so their findings reach the evidence packet and the
+  checks the way secondary roster findings do, not the posted review; each such
+  row's packet evidence names its group (`reviewer: file-group/<group-id>
+  (<model>)`). A failed group is one run-scoped `Minor` row under `run_health`,
+  never a failed review, and a smaller diff keeps the single-reviewer path
+  unchanged. Keys are documented in `docs/agent-roster.md`.
+
+- `review.fastPath.lite` adds a `lite` triage tier for the two cases a skip
+  leaves out: a recognizer that matched but is not in `skipLlm`, and a pin bump
+  whose verifying checks have not passed from a trusted App. Instead of the full
+  agent review, the run makes one non-streaming call to an operator-registered
+  OpenAI-compatible provider with the diff inlined, and posts the findings as a
+  review comment. The `tokenCap` (default 50,000) is checked before the call; a
+  diff over it, a missing credential or an unregistered provider gets the full
+  review, and no diff is truncated. The packet's `triage` section records the
+  cap, the tokens used and the prompt version (schema `1.19.0`). A `lite` run
+  never grants `mergecraft-approval`: the `mergecraft` check is `neutral`, or
+  `failure` on a Critical or Major finding, and usage over the cap or a
+  malformed answer is `inconclusive`. Off by default (#1010).
+
+- A `commentOnly` fast-path recognizer matches diffs that only edit `//` line
+  comments in `.ts .go .java .kt .c .h .cc .cpp .hpp .cs .swift` files. JavaScript
+  (`.js`, which can hold JSX), `.jsx` / `.tsx`, Rust, `Package.swift`, Go
+  `_test.go` files and Go files marked `DO NOT EDIT` are never recognised, and a
+  Java unicode escape or a C-family `??` refuses the file. Each changed line must
+  be `//`, one space and a plain word, and the head-side text proves it is a
+  comment. Non-ASCII text, backticks, raw-string markers, block comments, Swift
+  `#/` regex literals, a quote left open at the end of a line, a removal-only edit and every `#`-comment
+  language are refused. A recognised edit proves no runtime change; comments that
+  carry tool directives (lint, coverage, fallthrough, generator pragmas) are
+  refused on a best-effort word list. Opt in through `skipLlm` like the other recognizers
+  (#1010).
+
+- A `required` policy rule can now clear on evidence the review collects
+  itself, instead of sitting at `Major` until it is waived (#1114). The rule's
+  keys come from sources the pull request cannot write. `requirements`
+  keyword-matches the acceptance criteria of the issues the pull request closes
+  against the diff, never the pull request body, and names each issue's author:
+  it proves traceability, not independent review. `xrepo` needs every linked repository the base
+  manifest declares to be reviewed, with none omitted. `health_check`,
+  `rollback_plan` and `contract_schema` read a proof declared under the new
+  `policy.evidence.<key>` setting in the base-side configuration (the
+  operator-owned snapshot, or the base commit's `.mergecraft/config.yaml`; never
+  the pull request's own copy): either a successful check run on the head commit
+  from a trusted GitHub App (`github-actions` is refused), or a
+  `policy-evidence.json` of at most 64 KiB uploaded for that commit by a
+  successful run of the declared `artifact.workflow` file, from this repository
+  rather than a fork, when the pull request does not change that file. Producers run only
+  when a triggered rule requires evidence. The row lists each present key with
+  its source and gives the reason for each missing one. See
+  `docs/policy-evidence.md`.
+
 - The self-review's Codex rung writes the refreshed ChatGPT-subscription login
   back to the `CODEX_AUTH_JSON` repository secret after each run, so the
   rotated refresh token is never left spent (#970). The Codex driver exports
@@ -92,6 +155,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A pull request without a declared scope can no longer reach the `eligible`
+  lane (#1056). End the pull request body, or an issue it closes, with a
+  `Scope paths:` block listing the globs the change is expected to touch; the
+  review checks every changed path, both sides of a rename included, against it
+  through a new `scope` checklist gate. A path outside the globs is
+  `scope.drift`, a block with no globs `scope.undeclared`, a block over the
+  bounds (more than 64 globs, a glob over 200 characters, `..`, a leading `/`,
+  or a match-everything glob such as `**`) `scope.invalid`, and no block at all
+  `scope.unknown`: each keeps the lane at least `medium`. The approval check's
+  own verdict does not change; with an unknown scope the gate is unmeasured, so
+  the recorded gate action is no longer `auto_merge` and the pull request is
+  left for human review. Only `scope.within` passes the gate; a declared scope
+  never lowers any other gate. A block inside an HTML comment or a code fence
+  is ignored. Plan mode now ends its plans with the block. A classification
+  whose checklist misses a gate no longer selects either merge-shaped gate
+  action.
+
+- Review pipeline `changed_paths matches '<glob>'` predicates now let a `**`
+  segment cross directories: `.github/**` matches `.github/workflows/ci.yml`,
+  and `a/**/d.py` matches both `a/d.py` and `a/b/c/d.py`. Before, `**` matched
+  a single directory only. Glob matching no longer uses regular expressions or
+  `PurePath.match`, so a hostile glob such as `**/**/**/…` cannot stall a run.
+
 - A blast-radius classification now says which signal set its lane and which
   checks it never measured, so an unknown can no longer read as a pass (#1056).
   The packet's `blast_radius` section gains `reasons` (a stable dotted code such
@@ -105,6 +191,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   package `__init__.py` stays `medium`. A generated sibling no longer hides an
   untested source change. The merge evidence packet schema moves to
   `1.18.0`; older packets without the fields still validate and decide as before.
+- Change-scoped findings in the deterministic review record now read
+  `` `path:line` — message `` (they named only the path), so each finding in the
+  record points at the line it is about (#1010).
 
 - The self-review's Codex rung runs in its own job, the only one holding the
   `codex-subscription-auth` concurrency group; OpenCode Go and the Claude backstop run

@@ -53,12 +53,14 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from mergecraft.classify import BlastRadiusClassification
+    from mergecraft.classify.blast_radius import ScopeSignal
     from mergecraft.evidence.gate_policy import GateActionPolicy
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import RepoToolState, ToolState
     from mergecraft.modes import Mode
 
 TRIAGE_SKIP_REASON = "no LLM review ran (triage tier skip)"
+TRIAGE_LITE_REASON = "a lite review is one capped LLM call, not a full review (triage tier lite)"
 
 PACKET_FILENAME = "merge-evidence-packet.json"
 """Stable basename for the emitted packet, under whichever directory wins."""
@@ -169,17 +171,49 @@ def _diff_stats(diff_text: str) -> dict[str, object]:
     return {"diff": diff_text, "lines_added": added, "lines_deleted": deleted}
 
 
-def classify_run_blast_radius(diff_text: str) -> BlastRadiusClassification | None:
+def scope_signal_for_state(state: ToolState) -> ScopeSignal:
+    """The ``scope`` signal for the run's recorded ``Scope paths:`` declaration (#1056 part 3).
+
+    No declaration recorded (``None``: not read, or the read failed) or one with
+    ``declared=False`` is an unknown scope; a declaration with rejected items is
+    invalid. The packet and the verification tool both build the signal here, so
+    the lane a judge is held to is the lane the packet reports.
+
+    Args:
+        state (ToolState): The run state.
+
+    Returns:
+        ScopeSignal: Always supplied, so a run's checklist always lists ``scope``.
+    """
+    declaration = getattr(state, "scope_declaration", None)
+    if declaration is None or declaration.declared is not True:
+        return {"declared": False, "globs": [], "invalid": False}
+    return {
+        "declared": True,
+        "globs": list(declaration.globs),
+        "invalid": bool(declaration.rejected),
+    }
+
+
+def classify_run_blast_radius(
+    diff_text: str, *, scope: ScopeSignal
+) -> BlastRadiusClassification | None:
     """Classify the run's diff, or return ``None`` when there is no diff.
 
     Returning ``None`` for an empty diff keeps the packet honest: a run with
     nothing to classify records an absent section rather than a fabricated
-    ``low`` lane.
+    ``low`` lane. ``scope`` is required (build it with
+    :func:`scope_signal_for_state`) so a run never classifies without its
+    ``scope`` gate.
     """
     paths = changed_paths_from_diff(diff_text)
     if not paths:
         return None
-    change: ChangeSet = {"changed_paths": paths, "diff_stats": _diff_stats(diff_text)}
+    change: ChangeSet = {
+        "changed_paths": paths,
+        "diff_stats": _diff_stats(diff_text),
+        "scope": scope,
+    }
     return classify_blast_radius(change)
 
 
@@ -419,12 +453,15 @@ def _finalize_packet_with_gate(
     gate_mode = _resolve_gate_mode(ctx, pinned=pinned)
     gate_policy = _resolve_gate_policy(ctx, pinned=pinned)
     decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.authority_trust)
-    if packet.triage is not None and packet.triage.tier == "skip" and decision.verdict == "success":
-        # No LLM review ran, so mergeCraft never grants approval for it; a human does.
+    triage_tier = packet.triage.tier if packet.triage is not None else None
+    if triage_tier in {"skip", "lite"} and decision.verdict == "success":
+        # No full review ran (none at all for ``skip``, one capped call for ``lite``), so
+        # mergeCraft never grants approval for it; a human does. A ``failure`` is kept.
+        lead = TRIAGE_SKIP_REASON if triage_tier == "skip" else TRIAGE_LITE_REASON
         decision = decision.model_copy(
             update={
                 "verdict": "neutral",
-                "reason": f"{TRIAGE_SKIP_REASON}; approval is left to a human",
+                "reason": f"{lead}; approval is left to a human",
             }
         )
     packet_with_decision = packet.model_copy(update={"decision": decision})
@@ -554,6 +591,12 @@ def _assemble_packet_core(
         requested_model=requested_model,
         agent_id=ctx.agent_id,
     )
+    lite_slug = _lite_model_slug(state)
+    if lite_slug is not None:
+        # A lite run made one call to the operator's registered provider; the agent's
+        # model never ran, so the evidence names the lite provider/model instead.
+        executed_model = requested_model = lite_slug
+        provider = lite_slug.split("/", 1)[0]
     packet = build_packet(
         change_id=change_id,
         agent_id=ctx.agent_id,
@@ -648,7 +691,7 @@ def build_run_packet(
     state = ctx.tool_state
     repo_state = primary_repo_state(state)
     diff_text = _read_diff_text(repo_state)
-    blast_radius = classify_run_blast_radius(diff_text)
+    blast_radius = classify_run_blast_radius(diff_text, scope=scope_signal_for_state(state))
 
     from mergecraft.evidence.trajectory import build_trajectory_record
     from mergecraft.evidence.trajectory_audit import audit_trajectory
@@ -710,11 +753,17 @@ def _triage_section(state: ToolState) -> TriageSection | None:
     decision = state.triage
     if decision is None:
         return None
+    lite = getattr(state, "lite_review", None) if decision.tier == "lite" else None
     return TriageSection(
         tier=decision.tier,
         recognizer=decision.recognizer,
         reason=decision.reason,
         relied_on_checks=list(decision.relied_on_checks),
+        token_cap=getattr(decision, "token_cap", None),
+        tokens_used=getattr(lite, "tokens_used", None),
+        usage_estimated=bool(getattr(lite, "usage_estimated", False)),
+        cap_hit=bool(getattr(lite, "cap_hit", False)),
+        prompt_version=getattr(lite, "prompt_version", None),
     )
 
 
@@ -722,6 +771,14 @@ def _agent_version() -> str:
     from mergecraft import __version__
 
     return __version__
+
+
+def _lite_model_slug(state: ToolState) -> str | None:
+    """The ``label/model`` a ``lite`` run's single call targeted, or ``None``."""
+    if getattr(getattr(state, "triage", None), "tier", None) != "lite":
+        return None
+    slug = getattr(getattr(state, "lite_review", None), "model_slug", None)
+    return slug if isinstance(slug, str) and slug.strip() else None
 
 
 def _provider_for_model_evidence(
@@ -1084,4 +1141,5 @@ __all__ = [
     "resolve_evidence_dir",
     "resolve_packet_path",
     "resolve_prepared_run_packet",
+    "scope_signal_for_state",
 ]

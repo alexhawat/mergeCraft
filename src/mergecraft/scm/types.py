@@ -2,7 +2,24 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, NamedTuple
+
+
+@dataclass(frozen=True, slots=True)
+class LinkedIssue:
+    """One issue a pull request closes, as its closing references report it.
+
+    Attributes:
+        number (int): The issue number.
+        author_login (str): Login of the issue's author (``""`` when unknown,
+            e.g. a deleted account).
+        body (str): The issue body (``""`` when the issue has none).
+    """
+
+    number: int
+    author_login: str
+    body: str
 
 
 class ListedItems(NamedTuple):

@@ -16,6 +16,18 @@ from mergecraft.classify.blast_radius import GATE_ORDER
 from mergecraft.evidence.shadow_compare import _runtime_packets
 
 _RANK: dict[str, int] = {"low": 0, "medium": 1, "high": 2}
+_ALWAYS_ON: tuple[str, ...] = (
+    "inputs",
+    "migrations",
+    "auth_security_payment",
+    "secrets_config_deployment",
+    "irreversible_infra",
+    "public_api",
+    "dependencies",
+    "tests",
+    "review_config",
+    "source",
+)
 
 
 def _classifications() -> list[Any]:
@@ -34,7 +46,11 @@ def test_each_fixture_classification_has_reasons_and_a_full_checklist(index: int
     classification = _classifications()[index]
 
     assert len(classification.reasons) >= 1
-    assert [gate.gate for gate in classification.checklist] == list(GATE_ORDER)
+    names = [gate.gate for gate in classification.checklist]
+    # Every always-on gate, in ``GATE_ORDER``; an optional-signal gate (``scope``) may
+    # be absent when the fixture supplies no such signal.
+    assert names == [gate for gate in GATE_ORDER if gate in names]
+    assert names[: len(_ALWAYS_ON)] == list(_ALWAYS_ON)
     assert classification.lane == max(
         (reason.lane for reason in classification.reasons), key=_RANK.__getitem__
     )
