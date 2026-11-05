@@ -48,6 +48,13 @@ Flags:
 | `--viewport` | Pixel size, for example `1280x720` |
 | `--allow-stub` | Tests only: permit the non-browser stub when live browsing is unavailable |
 
+For YAML input, `repo_path` selects the repository whose settings are loaded
+and the working directory of `startup_command`. Relative repository paths are
+resolved from the directory where the command is invoked, and `~` is expanded.
+The target must be an existing directory. With flags alone the repository is
+the current directory. The parent process stays in its original directory;
+relative artifact paths are still relative to that invocation directory.
+
 ### Verify a feature
 
 ```bash
