@@ -1265,6 +1265,23 @@ Formatting rules that are enforced by the prompt:
   reviewer. `raised_by` is display and record only: it does not affect verdict,
   severity, dedup identity (`finding_key` stays `(path, body, line)`), or inline
   placement.
+- **File-group fan-out (`review.fileGroupFanout`).** Off by default. When an
+  operator enables it, a diff with at least `minFiles` changed files or at least
+  `minDiffLines` added lines is split into at most `maxGroups` balanced
+  read-only file groups, and mergeCraft dispatches one reviewer per group after
+  the primary reviewer and before the secondary roster, sequentially unless
+  `concurrency` says otherwise. An incremental review fans out over the
+  incremental diff, never the whole pull request, and the fan-out spends at
+  most `budgetShare` (default half) of the run budget left when it starts, so
+  the secondary roster keeps the rest. The groups run after the primary reviewer has
+  published, so their findings reach the evidence packet and the checks the
+  way secondary roster findings do, not the posted review body, and `raised_by`
+  never names a group. Each group row's packet evidence carries
+  `reviewer: file-group/<group-id> (<model>)`, and the entry survives a later
+  group re-verifying the same finding. A group that fails (missing
+  binding or credential, timeout, provider error) is one run-scoped `Minor` row
+  under the packet's `run_health`, never a failed review; a smaller diff keeps
+  the single-agent path unchanged.
 
 ## 10. Trajectory checks
 

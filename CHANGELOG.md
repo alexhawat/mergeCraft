@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `review.fileGroupFanout` splits a large pull request into bounded read-only
+  file groups and has mergeCraft dispatch one reviewer per group, so one
+  reviewer does not have to read a 20-file or 800-line diff serially (#1031).
+  It is off by default and pending live validation on a large pull request.
+  When enabled, a diff with at least `minFiles` changed files or
+  `minDiffLines` added lines is split into at most `maxGroups` groups (default
+  6), run one after another unless `concurrency` is raised, each capped at
+  `perGroupTimeoutS` (1–900 seconds); the whole fan-out spends at most
+  `budgetShare` (default 0.5) of the remaining run budget so the secondary
+  roster keeps the rest, and an incremental review fans out over the
+  incremental diff only. The groups run after the primary
+  reviewer has published, so their findings reach the evidence packet and the
+  checks the way secondary roster findings do, not the posted review; each such
+  row's packet evidence names its group (`reviewer: file-group/<group-id>
+  (<model>)`). A failed group is one run-scoped `Minor` row under `run_health`,
+  never a failed review, and a smaller diff keeps the single-reviewer path
+  unchanged. Keys are documented in `docs/agent-roster.md`.
+
 - `review.fastPath.lite` adds a `lite` triage tier for the two cases a skip
   leaves out: a recognizer that matched but is not in `skipLlm`, and a pin bump
   whose verifying checks have not passed from a trusted App. Instead of the full

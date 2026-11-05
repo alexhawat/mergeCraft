@@ -55,7 +55,12 @@ from mergecraft.mcp.tool_state import (
 from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.prep.types import is_prep_install_failure
 from mergecraft.review.engine import ReviewEngine
-from mergecraft.review.roster_execution import RosterExecutionSummary, apply_roster_failure
+from mergecraft.review.roster_execution import (
+    RosterExecutionSummary,
+    apply_roster_failure,
+    primary_repo_state_dir,
+    run_file_group_reviewers,
+)
 from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.review_policy.ignore_paths import INPUT_ENV as IGNORE_PATHS_INPUT_ENV
@@ -2339,7 +2344,12 @@ async def _ignore_paths_gate(ctx: RunContext) -> SkipAgentReview | None:
 
 
 async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecutionSummary | None:
-    """Dispatch secondary reviewers server-side; return the dispatch summary."""
+    """Dispatch file groups and secondary reviewers server-side; return the roster summary.
+
+    The opt-in file-group fan-out (``review.fileGroupFanout``) runs first, after
+    the primary reviewer. Its failures are run-health notes recorded on the tool
+    state, so its summary is never folded into the roster result.
+    """
     assert ctx.tool_context is not None
     assert ctx.tool_state is not None
     assert ctx.settings is not None
@@ -2352,6 +2362,21 @@ async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecu
         if ctx.agent_deadline_monotonic is None:
             return None
         return max(1.0, ctx.agent_deadline_monotonic - time.monotonic())
+
+    if ctx.settings.review.file_group_fanout.enabled:
+        fanout = await run_file_group_reviewers(
+            tool_context=ctx.tool_context,
+            base_run_ctx=ctx.run_ctx,
+            settings=ctx.settings,
+            payload=ctx.payload,
+            repo_root=Path(primary_repo_state_dir(ctx.tool_state)),
+            remaining_timeout_s=_remaining_roster_timeout_s,
+        )
+        if fanout.degraded:
+            logger.warning(
+                "» file-group fan-out degraded: {} group(s) recorded as run health",
+                len(fanout.failures),
+            )
 
     return await run_pending_roster_reviewers(
         tool_context=ctx.tool_context,
