@@ -341,3 +341,136 @@ async def test_a_block_only_in_the_comment_declares_nothing(main_mod: Any) -> No
     declaration = _declaration(ctx)
     assert declaration.declared is False
     assert declaration.globs == ()
+
+
+# ── bound events: the PR body is fetched when the event does not carry it ────
+#
+# On the comment trigger and a PR-naming ``workflow_dispatch`` the run binds the
+# target pull request into the event with only ``number``/``head``/``base``
+# (``config.trust_policy.bind_target_pull_request``), so the body is not there.
+# The seam then reads the pull request through the SCM (``get_pull``) once; a
+# failed read leaves the declaration unknown (``None``); an event that carries
+# ``body`` is used as is, with no read.
+
+_BOUND_PULL: dict[str, Any] = {
+    "number": 3,
+    "head": {"ref": "feat", "sha": "c" * 40, "repo": {"full_name": "acme/demo"}},
+    "base": {"ref": "main", "sha": "b" * 40, "repo": {"full_name": "acme/demo"}},
+}
+
+
+class _PullScm:
+    """Answers ``get_pull`` with ``body`` (or raises ``error``) and records each call."""
+
+    def __init__(self, body: str | None, *, error: Exception | None = None) -> None:
+        self.body = body
+        self.error = error
+        self.calls: list[tuple[str, str, int]] = []
+
+    async def get_pull(self, owner: str, repo: str, pull_number: int) -> dict[str, Any]:
+        self.calls.append((owner, repo, pull_number))
+        if self.error is not None:
+            raise self.error
+        return {**_BOUND_PULL, "body": self.body}
+
+
+def _bound_ctx(
+    gh_event: dict[str, Any],
+    trigger: str,
+    resolved_body: str | None,
+    scm: _PullScm,
+    *,
+    issues: tuple[str, ...] = (),
+) -> Any:
+    state = init_tool_state(owner="acme", name="demo", dir=".")
+    setattr(state, "linked_issues", _linked_issues(issues))  # noqa: B010
+    resolved = ResolvedPayload(
+        event=PayloadEvent(trigger=trigger, issue_number=3, is_pr=True, body=resolved_body)
+    )
+    repo = SimpleNamespace(owner="acme", name="demo")
+    return SimpleNamespace(
+        settings=RepoSettings(),
+        tool_state=state,
+        payload={"event": {"trigger": trigger, "issue_number": 3, "is_pr": True}},
+        ctx_payload=resolved,
+        scm=scm,
+        run_context=SimpleNamespace(repo=repo),
+        tool_context=SimpleNamespace(payload=resolved, repo=repo, scm=scm, tool_state=state),
+        gh_event=gh_event,
+        pr_number=3,
+        setup_hook_failure=None,
+        settings_snapshot_operator_owned=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_bound_event_reads_the_pull_request_body_through_the_scm(main_mod: Any) -> None:
+    scm = _PullScm(_BODY_SCOPE)
+    event = {"pull_request": dict(_BOUND_PULL), "comment": {"body": "@mergecraft review"}}
+    ctx = _bound_ctx(event, "issue_comment_created", "@mergecraft review", scm)
+
+    await _record(main_mod, ctx)
+
+    declaration = _declaration(ctx)
+    assert declaration.declared is True
+    assert declaration.globs == ("src/mergecraft/requirements/**",)
+    assert declaration.source_ref == "pr_description"
+    assert scm.calls == [("acme", "demo", 3)]
+
+
+@pytest.mark.asyncio
+async def test_a_bound_workflow_dispatch_reads_the_pull_request_body_through_the_scm(
+    main_mod: Any,
+) -> None:
+    scm = _PullScm(_BODY_SCOPE)
+    event = {"inputs": {"pr": "3"}, "pull_request": dict(_BOUND_PULL)}
+    ctx = _bound_ctx(event, "workflow_dispatch", None, scm)
+
+    await _record(main_mod, ctx)
+
+    assert _declaration(ctx).globs == ("src/mergecraft/requirements/**",)
+    assert _declaration(ctx).source_ref == "pr_description"
+    assert len(scm.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failed_pull_request_read_leaves_the_scope_unknown(main_mod: Any) -> None:
+    scm = _PullScm(None, error=RuntimeError("GitHub answered 502"))
+    event = {"pull_request": dict(_BOUND_PULL), "comment": {"body": "@mergecraft review"}}
+    # A closing issue's block must not stand in for a pull request body that could
+    # not be read: that body might have declared a narrower scope.
+    ctx = _bound_ctx(
+        event, "issue_comment_created", "@mergecraft review", scm, issues=(_ISSUE_SCOPE,)
+    )
+
+    await _record(main_mod, ctx)
+
+    assert len(scm.calls) == 1
+    assert hasattr(ctx.tool_state, "scope_declaration")
+    assert ctx.tool_state.scope_declaration is None
+
+
+@pytest.mark.asyncio
+async def test_an_event_that_carries_the_body_is_not_fetched(main_mod: Any) -> None:
+    scm = _PullScm("Scope paths:\n- other/**\n")
+    event = {"pull_request": {**_BOUND_PULL, "body": _BODY_SCOPE}}
+    ctx = _bound_ctx(event, "pull_request_synchronize", _BODY_SCOPE, scm)
+
+    await _record(main_mod, ctx)
+
+    assert _declaration(ctx).globs == ("src/mergecraft/requirements/**",)
+    assert scm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_bound_comment_run_never_reads_the_comment(main_mod: Any) -> None:
+    scm = _PullScm(_NO_SCOPE)
+    event = {"pull_request": dict(_BOUND_PULL), "comment": {"body": _COMMENT_SCOPE}}
+    ctx = _bound_ctx(event, "issue_comment_created", _COMMENT_SCOPE, scm)
+
+    await _record(main_mod, ctx)
+
+    declaration = _declaration(ctx)
+    assert len(scm.calls) == 1
+    assert declaration.declared is False
+    assert declaration.globs == ()
