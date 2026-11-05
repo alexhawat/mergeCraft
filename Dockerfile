@@ -91,14 +91,17 @@ ENV IS_SANDBOX=1
 # HIGH fixes (CVE-2026-86145, CVE-2026-89157, CVE-2026-89161). It also ships
 # openssl/libssl3 3.0.20-1~deb12u2, which bookworm-security supersedes for
 # CVE-2026-84782; both are pinned so the image cannot drift back.
+# DLA-4880-1 fixes CVE-2026-109518 in apt/libapt-pkg6.0 2.6.2.
 RUN apt-get update -qq \
     && apt-get install -qq -y --no-install-recommends \
+        apt=2.6.2 \
         ca-certificates \
         curl \
         git \
         iproute2 \
         iptables \
         jq \
+        libapt-pkg6.0=2.6.2 \
         libpcre2-8-0=10.42-1+deb12u2 \
         libssl3=3.0.22-1~deb12u2 \
         openssh-client \
