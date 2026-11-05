@@ -201,11 +201,12 @@ def test_owner_name_shorthand_source(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     mod = _patch_local_git(monkeypatch)
     captured_urls: list[str] = []
     acquired_cls = mod.AcquiredSource
+    content = _init_repo(tmp_path, "shorthand-content")
 
     def _recording_acquire(source: Any, **kwargs: Any) -> Any:
         captured_urls.append(source.url)
         dest = kwargs["dest"]
-        dest.mkdir(parents=True, exist_ok=True)
+        _git(tmp_path, "clone", str(content), str(dest))
         return acquired_cls(path=dest, workspace_root=dest)
 
     monkeypatch.setattr(mod, "acquire", _recording_acquire)
@@ -218,6 +219,8 @@ def test_owner_name_shorthand_source(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert workspace.cloned is True
     assert captured_urls
     assert "github.com/acme/widget" in captured_urls[0]
+    expected_sha = mod._run_git(["rev-parse", "HEAD"], cwd=str(content)).strip()
+    assert workspace.source_identity == f"{captured_urls[0]}@{expected_sha}"
 
 
 def test_private_repo_with_token(
