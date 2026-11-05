@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
-import yaml
 from pydantic import ValidationError
 from rich.table import Table
 
@@ -20,7 +19,7 @@ from mergecraft.config.io import (
     load_config_dict,
     patch_config_dict,
 )
-from mergecraft.config.layered import resolved_config_path
+from mergecraft.config.layered import load_layered_config_dict, resolve_config_sources
 from mergecraft.config.settings import RepoSettings
 
 _SETTABLE_KEYS = frozenset({"model", "models", "tracing.enabled", "tracing"})
@@ -80,26 +79,26 @@ def config_validate(
         help="Path to .mergecraft/config.yaml (default: workspace default).",
     ),
 ) -> None:
-    """Validate repo config — unknown keys are rejected (extra=forbid)."""
+    """Strictly parse contributing files and validate their merged configuration."""
     root = cwd.resolve()
-    config_path = config or resolved_config_path(root)
-    if config_path is None or not config_path.is_file():
+    files: tuple[Path, ...]
+    if config is not None:
+        if not config.is_file():
+            cli_bail(f"config file does not exist: {config}")
+        files = (config,)
+    else:
+        sources = resolve_config_sources(root)
+        if sources.env_config_missing:
+            cli_bail("MERGECRAFT_CONFIG names a missing config file")
+        files = sources.files
+    if not files:
         console.print("[green]ok[/green] — no config file (defaults apply)")
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
     try:
-        loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        cli_bail(f"config parse error: {exc}")
-    if loaded is None:
-        console.print(f"[green]ok[/green] — empty config at {config_path}")
-        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
-    if not isinstance(loaded, dict):
-        cli_bail(f"config root must be a mapping: {config_path}")
-    try:
-        RepoSettings.model_validate(loaded)
-    except ValidationError as exc:
-        cli_bail(f"config validation failed: {exc}")
-    console.print(f"[green]ok[/green] — {config_path}")
+        _validate_effective_config(cwd=root, explicit_path=config, strict=True)
+    except ValueError as exc:
+        cli_bail(str(exc))
+    console.print(f"[green]ok[/green] — merged configuration from {', '.join(map(str, files))}")
 
 
 def _parse_bool_value(value: str) -> bool:
@@ -171,22 +170,20 @@ def config_set(
     console.print(f"wrote [green]{display}[/green] {normalized}={value}")
 
 
-def validate_repo_config_or_raise(*, cwd: Path) -> None:
-    """Raise ``ValueError`` when the workspace config fails validation."""
-    config_path = resolved_config_path(cwd)
-    if config_path is None:
-        return
-    loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    if loaded is None:
-        return
-    if not isinstance(loaded, dict):
-        msg = f"config root must be a mapping: {config_path}"
-        raise ValueError(msg)
+def _validate_effective_config(
+    *, cwd: Path, explicit_path: Path | None = None, strict: bool = False
+) -> None:
+    loaded = load_layered_config_dict(root=cwd, explicit_path=explicit_path, strict=strict)
     try:
         RepoSettings.model_validate(loaded)
     except ValidationError as exc:
         msg = f"config validation failed: {exc}"
         raise ValueError(msg) from exc
+
+
+def validate_repo_config_or_raise(*, cwd: Path) -> None:
+    """Validate runtime's merged settings, retaining documented YAML fallback."""
+    _validate_effective_config(cwd=cwd)
 
 
 __all__ = [
