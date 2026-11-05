@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   successful workflow run on the head SHA, accepts it only for the pull
   request's exact base and head SHAs, and never runs a test itself. A pull
   request is a fix when its title has a conventional `fix` type or it carries a
-  label in the new `review.fixLabels` (default `bug`, `fix`). A new `fix_proof`
+  label in the new `review.fixLabels` (default `bug`, `fix`; honoured only from
+  the pull request base, so a pull request cannot drop its own labels). A new `fix_proof`
   checklist gate passes for a non-fix (`fix.not-required`) or a `proven`
   receipt (`fix.proven`); a fix whose receipt is missing, undeclared, unproven,
   malformed or for other commits keeps the lane at least `medium` with its own

@@ -638,6 +638,10 @@ class ToolState:
     # repository names none. ``None`` means no receipt was read (CI ingest did not
     # run); a fix pull request is then ``fix.no-receipt``, never proven.
     red_green: RedGreenEvidence | None = None
+    # ``review.fixLabels`` resolved at run start from the operator's side of the pull
+    # request only (``review_policy.fix_labels``); ``None`` until resolved. A pull
+    # request's own config can never switch off label-based fix detection.
+    fix_labels: tuple[str, ...] | None = None
 
     def iter_finding_rows(self) -> list[dict[str, Any]]:
         """Return every dict-shaped finding row across analyzer and agent lanes."""

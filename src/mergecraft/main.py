@@ -57,6 +57,7 @@ from mergecraft.review.engine import ReviewEngine
 from mergecraft.review.roster_execution import RosterExecutionSummary, apply_roster_failure
 from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.review_checks import StaticCheckConfig
+from mergecraft.review_policy.fix_labels import resolve_fix_labels
 from mergecraft.review_policy.ignore_paths import INPUT_ENV as IGNORE_PATHS_INPUT_ENV
 from mergecraft.review_policy.ignore_paths import list_pull_request_paths, resolve_review_ignore
 from mergecraft.run_outcome import (
@@ -2076,6 +2077,34 @@ async def _triage_gate(ctx: RunContext) -> SkipAgentReview | None:
 _IGNORE_SKIP_EVENTS: frozenset[str] = frozenset({"pull_request", "pull_request_target"})
 
 
+async def _resolve_run_fix_labels(ctx: RunContext) -> None:
+    """Record ``review.fixLabels`` from the operator's side of the pull request (#1056).
+
+    Stored on ``ToolState.fix_labels`` before any tier can skip the agent, so the
+    packet and the verification tool decide "is this a fix?" from base-side labels
+    only. Never fails the run: any doubt leaves the defaults (``bug``, ``fix``).
+    """
+    if ctx.settings is None or ctx.tool_state is None or ctx.tool_context is None:
+        return
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    repo = ctx.tool_context.repo
+    try:
+        labels = await resolve_fix_labels(
+            ctx.tool_context.scm,
+            repo.owner,
+            repo.name,
+            event=event,
+            run_start_review=ctx.settings.review,
+            operator_owned=ctx.settings_snapshot_operator_owned,
+        )
+    except Exception as err:  # fix detection falls back to the defaults, never off
+        logger.warning("fix_labels: could not resolve review.fixLabels, using defaults: {}", err)
+        from mergecraft.ci.red_green import DEFAULT_FIX_LABELS
+
+        labels = DEFAULT_FIX_LABELS
+    ctx.tool_state.fix_labels = labels
+
+
 async def _ignore_paths_gate(ctx: RunContext) -> SkipAgentReview | None:
     """Resolve review path ignoring (#1109); skip the agent when every changed file is ignored.
 
@@ -2203,6 +2232,7 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
         # Engine publish (``_finalize``) owns completion; do not publish here.
         return SkipAgentReview(reason=skip_reason)
 
+    await _resolve_run_fix_labels(ctx)
     triage_skip = await _triage_gate(ctx)
     if triage_skip is not None:
         return triage_skip

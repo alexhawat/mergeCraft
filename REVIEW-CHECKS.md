@@ -95,7 +95,9 @@ a successful workflow run on the head SHA, parses it as data under fixed bounds
 request's exact base and head SHAs. A pull request with a conventional `fix`
 title or a `review.fixLabels` label needs a `proven` receipt (a test red on the
 base, every listed test green on the head) for the `fix_proof` checklist gate;
-without one its lane is at least `medium` with a `fix.*` reason. See
+without one its lane is at least `medium` with a `fix.*` reason. `fixLabels` is
+honoured only from the pull request base, so a pull request cannot change its
+own label list. See
 [`docs/red-green-receipts.md`](docs/red-green-receipts.md).
 
 The merge-evidence packet's `decision` row is computed by

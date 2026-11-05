@@ -219,8 +219,10 @@ def fix_proof_signal_for_context(ctx: ToolContext) -> FixProofSignal:
     """:func:`fix_proof_signal_for_state` fed from the run's bound pull request.
 
     The title is ``ctx.payload.event.title`` (the bound event's title when that is
-    empty), the labels are the bound event's label names, and the fix labels are
-    ``review.fixLabels`` from the run's settings snapshot (the defaults without one).
+    empty) and the labels are the bound event's label names. The fix labels are
+    ``ToolState.fix_labels`` (resolved at run start from the pull request base),
+    else the settings snapshot's ``review.fixLabels`` only when that snapshot is
+    operator-owned, else the defaults: a pull request's own config never changes them.
 
     Args:
         ctx (ToolContext): The run context.
@@ -241,10 +243,15 @@ def fix_proof_signal_for_context(ctx: ToolContext) -> FixProofSignal:
         for label in (raw_labels if isinstance(raw_labels, list) else [])
         if isinstance(label, dict) and isinstance(name := label.get("name"), str)
     ]
+    resolved = getattr(ctx.tool_state, "fix_labels", None)
     snapshot = ctx.repo_settings_snapshot
-    fix_labels: Sequence[str] = (
-        snapshot.settings.review.fix_labels if snapshot is not None else DEFAULT_FIX_LABELS
-    )
+    fix_labels: Sequence[str]
+    if resolved is not None:
+        fix_labels = resolved
+    elif snapshot is not None and snapshot.operator_owned:
+        fix_labels = snapshot.settings.review.fix_labels
+    else:
+        fix_labels = DEFAULT_FIX_LABELS
     return fix_proof_signal_for_state(
         ctx.tool_state, title=title, labels=labels, fix_labels=fix_labels
     )

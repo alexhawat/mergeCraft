@@ -9,6 +9,8 @@ A pull request is a fix when either is true:
 - its title starts with a conventional `fix` type: `fix:`, `fix(scope):`, `fix!:` or `fix(scope)!:`, in any case, after leading whitespace;
 - it carries a label named in `review.fixLabels` (default `bug` and `fix`, compared without regard to case). A configured list replaces the default; an empty list turns label detection off.
 
+`review.fixLabels` is honoured only from the pull request base, like `review.ignorePaths`: the base checkout on a `pull_request_target` run, otherwise the base commit's `.mergecraft/config.yaml` read at `pull_request.base.sha`. A change to `fixLabels` in the pull request itself is ignored, so a pull request cannot switch off its own label detection. A base without the key, or one that cannot be read, gives the defaults.
+
 Everything else is `fix.not-required` and passes the gate without a receipt.
 
 ## Configuration
@@ -77,7 +79,7 @@ The receipt is data the pull request's own CI produced, so it is trusted only as
 - **Only a successful run counts.** The artifact is read from a workflow run whose listing row says `status: completed`, `conclusion: success` and `head_sha` equal to the pull request head. A failed, cancelled, timed-out or still-running run is never read.
 - **Bound to the exact commits.** `base_sha` and `head_sha` must equal the pull request's base and head in full (case does not matter). A short SHA never matches, so a receipt from an older push or another branch is `mismatch`.
 - **Never executed.** The zip is opened in memory and only the receipt member is read, at most one byte past the cap. Scripts, Makefiles or test files in the artifact are ignored, and test ids are plain strings that are never run or rendered into a prompt.
-- **Author inputs only add the requirement.** A `fix` title or label makes the proof required; nothing in the title, body or labels can satisfy it. A fix that is neither titled nor labelled as one is not asked for a receipt, which is the accepted gap.
+- **Author inputs only add the requirement.** A `fix` title or label makes the proof required; nothing in the title, body or labels can satisfy it. The label list itself comes from the pull request base, never from the pull request's own config. A fix that is neither titled nor labelled as one is not asked for a receipt, which is the accepted gap.
 - **A proof only passes its own gate.** A `proven` receipt never lowers another reason: a migration stays `high`, and a source change without tests stays `medium`.
 
 The receipt is evidence about your tests, not a test run by mergeCraft. Who may change the workflow that writes it is the same question as who may change any other required check.

@@ -94,7 +94,7 @@ A gate that reads `diff_stats` counts it as measured whenever the mapping is pre
 
 ## Fix proof
 
-A fix pull request has to show that it fixes something. A pull request is a fix when its title starts with a conventional `fix` type (`fix:`, `fix(scope):`, `fix!:`, `fix(scope)!:`, in any case, leading whitespace ignored) or when it carries a label named in `review.fixLabels` (default `bug` and `fix`, matched without regard to case; a configured list replaces the default). Both inputs are written by the author, so they can only add the requirement: nothing an author writes satisfies it.
+A fix pull request has to show that it fixes something. A pull request is a fix when its title starts with a conventional `fix` type (`fix:`, `fix(scope):`, `fix!:`, `fix(scope)!:`, in any case, leading whitespace ignored) or when it carries a label named in `review.fixLabels` (default `bug` and `fix`, matched without regard to case; a configured list replaces the default). `fixLabels` is read only from the pull request base, never from the pull request's own config. Both inputs are written by the author, so they can only add the requirement: nothing an author writes satisfies it.
 
 The proof is a fail-then-pass receipt that the repository's own CI uploads as a workflow artifact named in `ciEvidence.redGreenArtifacts`. mergeCraft reads it only from a successful workflow run on the head SHA, checks that its `base_sha` and `head_sha` are exactly the pull request's, and never runs a test itself. The format, the bounds and a sample workflow step are in [`red-green-receipts.md`](red-green-receipts.md).
 
