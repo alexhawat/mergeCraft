@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
     from agents import Agent, RunContextWrapper
 
+
 def _normalize_repo_path(path: str) -> str | None:
     cleaned = path.replace("\\", "/").strip()
     while cleaned.startswith("./"):
@@ -60,9 +61,7 @@ def _redact_text(text: str) -> str:
 
 
 def finding_looks_like_secret(finding: ReviewFinding) -> bool:
-    blob = " ".join(
-        part for part in (finding.message, finding.suggested_fix or "") if part
-    )
+    blob = " ".join(part for part in (finding.message, finding.suggested_fix or "") if part)
     if _text_contains_secret_pattern(blob):
         return True
     redacted = _redact_text(blob)

@@ -66,8 +66,10 @@ async def materialize_workspace_change(
     scope = allowed_paths if allowed_paths else frozenset(changed_paths)
     files: dict[str, str] = {}
     for rel in changed_paths:
-        if scope and rel not in scope and not any(
-            rel == root_path or rel.startswith(f"{root_path}/") for root_path in scope
+        if (
+            scope
+            and rel not in scope
+            and not any(rel == root_path or rel.startswith(f"{root_path}/") for root_path in scope)
         ):
             continue
         confined = root / rel
