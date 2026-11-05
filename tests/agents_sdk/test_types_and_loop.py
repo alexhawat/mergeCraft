@@ -106,7 +106,7 @@ async def test_review_agent_as_tool_returns_structured_report(
         model_config=config,
         allowed_paths=frozenset({"src/demo.py"}),
     )
-    tool = review_agent_as_tool(agent)
+    tool = review_agent_as_tool(agent, allowed_paths=frozenset({"src/demo.py"}))
 
     async def fake_run(_agent: object, input: str, **kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(
@@ -133,3 +133,64 @@ async def test_review_agent_as_tool_returns_structured_report(
     report = await tool.on_invoke_tool(ctx, "{}")
     assert isinstance(report, ReviewFindingsReport)
     assert report.findings[0].file == "src/demo.py"
+
+
+@pytest.mark.asyncio
+async def test_review_agent_as_tool_sanitizes_secret_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agents import Runner
+    from mergecraft.redaction_sentinel import REDACTION_SENTINEL
+
+    config = AgentsSdkModelConfig(
+        model="gpt-4o-mini",
+        base_url=None,
+        api_key_env="OPENAI_API_KEY",
+        api_key="dummy",
+    )
+    agent = review_agent(
+        repo_root=Path("examples/agents-sdk/workspace"),
+        model_config=config,
+        allowed_paths=frozenset({"src/demo.py"}),
+    )
+    tool = review_agent_as_tool(agent, allowed_paths=frozenset({"src/demo.py"}))
+
+    async def fake_run(_agent: object, input: str, **kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            final_output=ReviewFindingsReport(
+                summary="leaked sk-1234567890abcdefghijklmnop",
+                findings=[
+                    ReviewFinding(severity="Minor", file="src/demo.py", message="ok"),
+                ],
+            )
+        )
+
+    monkeypatch.setattr(Runner, "run", fake_run)
+    from agents.tool import ToolContext
+
+    ctx = ToolContext(
+        context=None,
+        tool_call_id="1",
+        tool_name="mergecraft_review",
+        tool_arguments="{}",
+    )
+    report = await tool.on_invoke_tool(ctx, "{}")
+    assert report.summary == REDACTION_SENTINEL
+
+
+@pytest.mark.asyncio
+async def test_run_review_loop_sanitizes_secret_summary() -> None:
+    from mergecraft.redaction_sentinel import REDACTION_SENTINEL
+
+    async def run_review() -> ReviewFindingsReport:
+        return ReviewFindingsReport(
+            summary="token sk-1234567890abcdefghijklmnop",
+            findings=[ReviewFinding(severity="Minor", file="src/a.py", message="ok")],
+        )
+
+    outcome = await run_review_loop(
+        run_review=run_review,
+        allowed_paths=frozenset({"src/a.py"}),
+        max_rounds=1,
+    )
+    assert outcome.final_report.summary == REDACTION_SENTINEL

@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from mergecraft.agents_sdk.agent import review_agent
 from mergecraft.agents_sdk.guardrails import (
     filter_guarded_findings,
     finding_looks_like_secret,
     path_in_change_set,
     review_output_guardrail,
+    sanitize_review_output,
 )
+from mergecraft.agents_sdk.model import AgentsSdkModelConfig
 from mergecraft.agents_sdk.types import ReviewFinding, ReviewFindingsReport
 from mergecraft.redaction_sentinel import REDACTION_SENTINEL
 
@@ -69,6 +74,16 @@ def test_summary_secret_is_redacted_not_passed_through() -> None:
     assert any("summary" in item for item in violations)
 
 
+def test_sanitize_review_output_strips_secret_summary() -> None:
+    report = ReviewFindingsReport(
+        summary="token sk-1234567890abcdefghijklmnop",
+        findings=[ReviewFinding(severity="Minor", file="src/app.py", message="ok")],
+    )
+    sanitized = sanitize_review_output(report, allowed_paths=frozenset({"src/app.py"}))
+    assert sanitized.summary == REDACTION_SENTINEL
+    assert "sk-" not in sanitized.summary
+
+
 def test_filter_guarded_findings_drops_out_of_scope_and_secrets() -> None:
     report = ReviewFindingsReport(
         findings=[
@@ -116,7 +131,7 @@ async def test_review_output_guardrail_trips_on_out_of_scope_path() -> None:
 
 
 @pytest.mark.asyncio
-async def test_review_output_guardrail_allows_redacted_summary_only() -> None:
+async def test_review_output_guardrail_trips_on_summary_secret() -> None:
     guard = review_output_guardrail(frozenset({"src/app.py"}))
     report = ReviewFindingsReport(
         summary="token sk-1234567890abcdefghijklmnop",
@@ -129,6 +144,41 @@ async def test_review_output_guardrail_allows_redacted_summary_only() -> None:
     class _Agent:
         pass
 
-    filtered, _ = filter_guarded_findings(report, allowed_paths=frozenset({"src/app.py"}))
-    result = await guard.run(RunContextWrapper(context=None), _Agent(), filtered)
-    assert result.output.tripwire_triggered is False
+    result = await guard.run(RunContextWrapper(context=None), _Agent(), report)
+    assert result.output.tripwire_triggered is True
+
+
+@pytest.mark.asyncio
+async def test_runner_run_raises_when_output_guardrail_trips(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agents.exceptions import OutputGuardrailTripwireTriggered
+
+    from agents import RunContextWrapper, Runner
+
+    config = AgentsSdkModelConfig(
+        model="gpt-4o-mini",
+        base_url=None,
+        api_key_env="OPENAI_API_KEY",
+        api_key="dummy",
+    )
+    agent = review_agent(
+        repo_root=Path("examples/agents-sdk/workspace"),
+        model_config=config,
+        allowed_paths=frozenset({"src/demo.py"}),
+    )
+    secret_report = ReviewFindingsReport(
+        summary="leaked sk-1234567890abcdefghijklmnop",
+        findings=[ReviewFinding(severity="Minor", file="src/demo.py", message="ok")],
+    )
+
+    async def fake_run(bound_agent: object, input: str, **kwargs: object) -> object:
+        for guard in bound_agent.output_guardrails:
+            outcome = await guard.run(RunContextWrapper(context=None), bound_agent, secret_report)
+            if outcome.output.tripwire_triggered:
+                raise OutputGuardrailTripwireTriggered(outcome)
+        return secret_report
+
+    monkeypatch.setattr(Runner, "run", fake_run)
+    with pytest.raises(OutputGuardrailTripwireTriggered):
+        await Runner.run(agent, input="Review")

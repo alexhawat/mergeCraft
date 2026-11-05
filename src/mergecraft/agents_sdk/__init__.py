@@ -9,6 +9,7 @@ from mergecraft.agents_sdk.agent import review_agent
 from mergecraft.agents_sdk.guardrails import (
     filter_guarded_findings,
     review_output_guardrail,
+    sanitize_review_output,
 )
 from mergecraft.agents_sdk.loop import ReviewLoopResult, run_review_loop
 from mergecraft.agents_sdk.model import AgentsSdkModelConfig, resolve_model_config
@@ -24,4 +25,5 @@ __all__ = [
     "review_agent",
     "review_output_guardrail",
     "run_review_loop",
+    "sanitize_review_output",
 ]

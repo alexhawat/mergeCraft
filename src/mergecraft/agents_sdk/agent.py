@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import importlib.util
 from contextlib import nullcontext
 from pathlib import Path
@@ -73,12 +72,11 @@ def review_agent(
         diff: str | None = None,
     ) -> dict[str, Any]:
         """Return diff text, changed paths, and file contents for the workspace change."""
-        diff_path = await asyncio.to_thread(Path(diff).resolve) if diff else None
         with _trace_tool("get_workspace_change") as span, _otel_bridge(span):
             return await materialize_workspace_change(
                 root,
                 allowed_paths=paths or None,
-                diff_file=diff_path,
+                diff=diff,
                 base=base,
                 head=head,
             )

@@ -84,11 +84,30 @@ For hosts that prefer subprocess MCP, use
 
 ## Guardrails and tracing
 
-``review_agent`` registers an output guardrail that blocks findings outside the
-``allowed_paths`` change set or containing secret-like strings in ``message`` /
-``suggested_fix`` (word-bounded patterns aligned with ``mergecraft.analyzers.redact``).
-Report ``summary`` fields are scanned and redacted the same way instead of passing
-secrets through unchanged.
+``review_agent`` registers an **output guardrail** that **trips** (blocks the run)
+when any finding is outside ``allowed_paths`` or when **any** part of the structured
+output looks secret-like—including ``summary`` (word-bounded patterns aligned with
+``mergecraft.analyzers.redact``). The Agents SDK cannot rewrite model output in place;
+on tripwire, ``Runner.run`` raises ``OutputGuardrailTripwireTriggered`` and the raw
+report is not returned.
+
+Callers that bypass ``Runner.run`` or wrap it should use
+``sanitize_review_output(report, allowed_paths=...)`` (same rules as
+``filter_guarded_findings``) or ``run_review_loop`` / ``review_agent_as_tool``, which
+always return the **sanitized** report (redacted ``summary``, secret findings removed).
+
+## Workspace boundaries for ``get_workspace_change``
+
+``get_workspace_change`` applies the same confinement as public MCP ``review_change``:
+
+- ``diff`` must resolve inside the workspace via ``confine_path`` (no ``../``, absolute
+  paths outside the root, or symlink escapes).
+- ``base`` / ``head`` must not start with ``-`` (git flag injection) and must stay
+  inside the workspace when interpreted as paths.
+- Diff hunks whose paths escape the workspace are dropped (``filter_confined_paths`` /
+  offline review parity).
+
+``review_change`` enforces the same rules through the public MCP handler.
 
 When mergeCraft tracing is enabled (``MERGECRAFT_TRACING`` / ``docs/TRACING.md``),
 tool spans emit through the existing tracer and ``attach_trace_context`` bridges

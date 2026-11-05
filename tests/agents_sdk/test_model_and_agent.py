@@ -123,10 +123,11 @@ async def test_review_agent_e2e_fake_model_surfaces_demo_bug(
         allowed_paths=frozenset({"src/demo.py"}),
     )
 
-    async def fake_run(review_agent: object, input: str, **kwargs: object) -> SimpleNamespace:
+    async def fake_run(bound_agent: object, input: str, **kwargs: object) -> SimpleNamespace:
         from agents.tool import ToolContext
 
-        tool = next(item for item in review_agent.tools if item.name == "get_workspace_change")  # type: ignore[attr-defined]
+        tools = bound_agent.tools
+        tool = next(item for item in tools if item.name == "get_workspace_change")
         ctx = ToolContext(
             context=None,
             tool_call_id="1",
@@ -151,3 +152,109 @@ async def test_review_agent_e2e_fake_model_surfaces_demo_bug(
     report = result.final_output
     assert isinstance(report, ReviewFindingsReport)
     assert report.blocking_findings()
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_change_rejects_diff_outside_workspace(tmp_path: Path) -> None:
+    from agents.tool import ToolContext
+
+    outside = tmp_path.parent / "outside.patch"
+    outside.write_text("diff --git a/x b/x\n", encoding="utf-8")
+    config = AgentsSdkModelConfig(
+        model="gpt-4o-mini",
+        base_url=None,
+        api_key_env="OPENAI_API_KEY",
+        api_key="dummy",
+    )
+    agent = review_agent(repo_root=tmp_path, model_config=config)
+    tool = next(item for item in agent.tools if item.name == "get_workspace_change")
+    ctx = ToolContext(
+        context=None,
+        tool_call_id="1",
+        tool_name="get_workspace_change",
+        tool_arguments='{"diff": "../outside.patch"}',
+    )
+    payload = await tool.on_invoke_tool(ctx, '{"diff": "../outside.patch"}')
+    assert payload.get("error") == "diff path must be inside the workspace"
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_change_rejects_absolute_diff_outside_workspace(
+    tmp_path: Path,
+) -> None:
+    from agents.tool import ToolContext
+
+    outside = tmp_path.parent / "abs.patch"
+    outside.write_text("diff --git a/x b/x\n", encoding="utf-8")
+    config = AgentsSdkModelConfig(
+        model="gpt-4o-mini",
+        base_url=None,
+        api_key_env="OPENAI_API_KEY",
+        api_key="dummy",
+    )
+    agent = review_agent(repo_root=tmp_path, model_config=config)
+    tool = next(item for item in agent.tools if item.name == "get_workspace_change")
+    ctx = ToolContext(
+        context=None,
+        tool_call_id="1",
+        tool_name="get_workspace_change",
+        tool_arguments="{}",
+    )
+    payload = await tool.on_invoke_tool(ctx, f'{{"diff": "{outside}"}}')
+    assert payload.get("error") == "diff path must be inside the workspace"
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_change_rejects_dash_prefixed_git_ref(tmp_path: Path) -> None:
+    from agents.tool import ToolContext
+
+    config = AgentsSdkModelConfig(
+        model="gpt-4o-mini",
+        base_url=None,
+        api_key_env="OPENAI_API_KEY",
+        api_key="dummy",
+    )
+    agent = review_agent(repo_root=tmp_path, model_config=config)
+    tool = next(item for item in agent.tools if item.name == "get_workspace_change")
+    ctx = ToolContext(
+        context=None,
+        tool_call_id="1",
+        tool_name="get_workspace_change",
+        tool_arguments="{}",
+    )
+    payload = await tool.on_invoke_tool(ctx, '{"base": "--output=/tmp/evil"}')
+    assert payload.get("error") is not None
+    assert "must not start with '-'" in payload["error"]
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_change_symlink_diff_stays_confined(tmp_path: Path) -> None:
+    from agents.tool import ToolContext
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    secret_dir = tmp_path / "secret"
+    secret_dir.mkdir()
+    secret_file = secret_dir / "leak.patch"
+    secret_file.write_text(
+        "diff --git a/leak.txt b/leak.txt\n--- a/leak.txt\n+++ b/leak.txt\n",
+        encoding="utf-8",
+    )
+    link = workspace / "link.patch"
+    link.symlink_to(secret_file)
+    config = AgentsSdkModelConfig(
+        model="gpt-4o-mini",
+        base_url=None,
+        api_key_env="OPENAI_API_KEY",
+        api_key="dummy",
+    )
+    agent = review_agent(repo_root=workspace, model_config=config)
+    tool = next(item for item in agent.tools if item.name == "get_workspace_change")
+    ctx = ToolContext(
+        context=None,
+        tool_call_id="1",
+        tool_name="get_workspace_change",
+        tool_arguments="{}",
+    )
+    payload = await tool.on_invoke_tool(ctx, '{"diff": "link.patch"}')
+    assert payload.get("error") == "diff path must be inside the workspace"

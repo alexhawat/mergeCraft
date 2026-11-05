@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.agents_sdk.guardrails import filter_guarded_findings
+from mergecraft.agents_sdk.guardrails import filter_guarded_findings, sanitize_review_output
 from mergecraft.agents_sdk.types import ReviewFindingsReport
 
 if TYPE_CHECKING:
@@ -59,7 +59,12 @@ async def run_review_loop(
     )
 
 
-def review_agent_as_tool(agent: Agent[Any], *, tool_name: str = "mergecraft_review") -> Any:
+def review_agent_as_tool(
+    agent: Agent[Any],
+    *,
+    allowed_paths: frozenset[str],
+    tool_name: str = "mergecraft_review",
+) -> Any:
     """Expose ``review_agent`` as an Agents SDK tool for a coding agent."""
     from agents import function_tool
 
@@ -71,7 +76,7 @@ def review_agent_as_tool(agent: Agent[Any], *, tool_name: str = "mergecraft_revi
         if not isinstance(result.final_output, ReviewFindingsReport):
             msg = "review agent did not return ReviewFindingsReport"
             raise TypeError(msg)
-        return result.final_output
+        return sanitize_review_output(result.final_output, allowed_paths=allowed_paths)
 
     return _review_tool
 

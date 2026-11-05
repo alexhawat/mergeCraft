@@ -113,11 +113,10 @@ def review_output_guardrail(
         _agent: Agent[Any],
         output: ReviewFindingsReport,
     ) -> GuardrailFunctionOutput:
-        _, violations = filter_guarded_findings(output, allowed_paths=allowed_paths)
-        blocking = [item for item in violations if "redacted" not in item]
-        if blocking:
+        _sanitized, violations = filter_guarded_findings(output, allowed_paths=allowed_paths)
+        if violations:
             return GuardrailFunctionOutput(
-                output_info={"violations": blocking},
+                output_info={"violations": violations},
                 tripwire_triggered=True,
             )
         return GuardrailFunctionOutput(output_info={}, tripwire_triggered=False)
@@ -125,9 +124,20 @@ def review_output_guardrail(
     return _guard
 
 
+def sanitize_review_output(
+    report: ReviewFindingsReport,
+    *,
+    allowed_paths: frozenset[str],
+) -> ReviewFindingsReport:
+    """Return a scope- and secret-scrubbed report for callers outside ``Runner.run``."""
+    sanitized, _violations = filter_guarded_findings(report, allowed_paths=allowed_paths)
+    return sanitized
+
+
 __all__ = [
     "filter_guarded_findings",
     "finding_looks_like_secret",
     "path_in_change_set",
     "review_output_guardrail",
+    "sanitize_review_output",
 ]
