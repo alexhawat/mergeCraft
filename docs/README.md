@@ -23,6 +23,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [action-reference](action-reference.md) | consumer | Complete action.yml input and output reference for the GitHub Action. |
 | [agent-loop](agent-loop.md) | consumer | Reference workflow for an external coding agent looping with mergecraft review --agent. |
 | [agent-roster](agent-roster.md) | consumer | Agent roster — priority slots, named agents, local overrides, multi-reviewer merge, and trust snapshot. |
+| [agents-sdk](agents-sdk.md) | consumer | OpenAI Agents SDK optional extra — review_agent helper, model config, guardrails, and example loop. |
 | [assets README](assets/README.md) | satellite | Demo capture path and rules — omit broken GIF/MP4 until a real asset exists. |
 | [authentication](authentication.md) | consumer | Provider auth, custom OpenAI-compatible gateways, and model fallback chains. |
 | [blast-radius](blast-radius.md) | contributor | Blast-radius lane semantics in the merge evidence packet. |

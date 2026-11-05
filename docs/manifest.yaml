@@ -91,6 +91,12 @@ pages:
     generator: null
     purpose: Public MCP install — what agents can do, per-runtime stdio config, and review-only boundaries.
 
+  - path: docs/agents-sdk.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: OpenAI Agents SDK optional extra — review_agent helper, model config, guardrails, and example loop.
+
   - path: docs/opencode.md
     audience: consumer
     template: consumer

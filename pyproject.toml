@@ -76,6 +76,9 @@ harbor = [
 # Imports are lazy and guarded inside the sink factory; `make ci-resume` passes
 # with these uninstalled (convention 5). Exact pins + `uv.lock` committed
 # gate via `make lockcheck`.
+agents = [
+    "openai-agents==0.24.0",
+]
 tracing = [
     "logfire==5.2.0",
     "opentelemetry-api==1.45.1",
@@ -196,6 +199,7 @@ ignore = [
 "tests/**" = ["T20", "RUF001", "TC001", "TC003"]
 "scripts/**" = ["T20"]
 "docker/e2e/**" = ["T20"]
+"examples/agents-sdk/**" = ["T20"]
 # Standalone regeneration script (uv run --with fonttools==4.63.0 python assets/brand/build_logo.py).
 "assets/brand/build_logo.py" = ["T20"]
 # Catalog prompts intentionally retain upstream emoji / typography.
@@ -205,6 +209,7 @@ ignore = [
 "src/mergecraft/mcp/**" = ["ASYNC221", "ASYNC230", "ASYNC240", "SIM105", "SIM102", "RUF001"]
 "src/mergecraft/ci/**" = ["ASYNC240", "RUF001"]
 "src/mergecraft/agents/**" = ["ASYNC221", "ASYNC230", "ASYNC240", "SIM105", "SIM102", "FLY002", "RUF001"]
+"src/mergecraft/agents_sdk/**" = ["ASYNC221", "ASYNC230", "ASYNC240", "SIM105", "SIM102", "RUF001"]
 "src/mergecraft/cli/**" = ["T20", "ASYNC221", "ASYNC230", "ASYNC240", "TC003"]
 "src/mergecraft/yes/**" = ["UP047"]
 "src/mergecraft/utils/learnings.py" = ["ASYNC240"]

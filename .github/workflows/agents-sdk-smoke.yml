@@ -1,0 +1,48 @@
+name: agents-sdk-smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/mergecraft/agents_sdk/**"
+      - "examples/agents-sdk/**"
+      - "tests/agents_sdk/**"
+      - ".github/workflows/agents-sdk-smoke.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync agents extra
+        run: uv sync --extra agents
+
+      - name: Unit tests (agents_sdk)
+        run: uv run pytest tests/agents_sdk -q -m "not live"
+
+      - name: Live example (OpenCode Go when secret present)
+        env:
+          OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+          MERGECRAFT_AGENTS_SDK_MODEL: opencode-go/deepseek-v4.1-flash
+          MERGECRAFT_AGENTS_SDK_MAX_ROUNDS: "2"
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" && "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]]; then
+            echo "::notice title=agents-sdk smoke skipped::fork PR — no repository secrets"
+            exit 0
+          fi
+          if [[ -z "${OPENCODE_GO_API_KEY:-}" ]]; then
+            echo "::notice title=agents-sdk smoke skipped::OPENCODE_GO_API_KEY not configured"
+            exit 0
+          fi
+          uv run python examples/agents-sdk/review_loop.py | tee /tmp/agents-sdk-smoke.log
+          echo "---- redacted tail ----"
+          tail -n 20 /tmp/agents-sdk-smoke.log | sed -E 's/(ghp_|sk-)[A-Za-z0-9_-]+/<redacted>/g'
