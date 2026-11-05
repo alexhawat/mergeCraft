@@ -571,3 +571,54 @@ def test_a_blank_diff_matches_nothing(name: str) -> None:
     from mergecraft.classify import triage
 
     assert getattr(triage, name)("") is False
+
+
+# ── renames and copies are never whitespace-only ──────────────────────────────
+
+
+def _moved_whitespace(old: str, new: str, *, kind: str = "rename") -> str:
+    return (
+        f"diff --git a/{old} b/{new}\n"
+        "similarity index 98%\n"
+        f"{kind} from {old}\n"
+        f"{kind} to {new}\n"
+        f"--- a/{old}\n"
+        f"+++ b/{new}\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-let a = 1;  \n"
+        "+let a = 1;\n"
+        " let b = 2;\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [("src/a.js", "src/b.js"), ("src/foo.ts", "src/foo.d.ts"), ("src/foo.c", "src/foo.cpp")],
+    ids=["js-to-js", "ts-to-declaration-file", "c-to-cpp"],
+)
+@pytest.mark.parametrize("kind", ["rename", "copy"])
+def test_a_renamed_or_copied_file_with_a_whitespace_edit_is_not_whitespace_only(
+    old: str, new: str, kind: str
+) -> None:
+    """The move itself is a change the whitespace recognizer cannot vouch for."""
+    from mergecraft.classify.triage import recognize_whitespace_only
+
+    in_place = _diff(new, _hunk("-let a = 1;  ", "+let a = 1;", " let b = 2;"))
+
+    assert recognize_whitespace_only(in_place) is True
+    assert recognize_whitespace_only(_moved_whitespace(old, new, kind=kind)) is False
+
+
+def test_a_pure_rename_beside_a_whitespace_edit_is_not_whitespace_only() -> None:
+    from mergecraft.classify.triage import recognize_whitespace_only
+
+    rename = (
+        "diff --git a/src/old.js b/src/new.js\n"
+        "similarity index 100%\n"
+        "rename from src/old.js\n"
+        "rename to src/new.js\n"
+    )
+    edit = _diff("src/app.js", _hunk("-let a = 1;  ", "+let a = 1;"))
+
+    assert recognize_whitespace_only(edit) is True
+    assert recognize_whitespace_only(rename + edit) is False

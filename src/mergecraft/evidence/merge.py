@@ -11,10 +11,51 @@ from typing import Any
 from loguru import logger
 from pydantic import ValidationError
 
-from mergecraft.analyzers.finding import Finding, FindingValidationError
+from mergecraft.analyzers.finding import Finding, FindingValidationError, make_finding
 from mergecraft.review_taxonomy import FINDING_SEVERITIES
 
 _SEVERITY_RANK: dict[str, int] = {name: index for index, name in enumerate(FINDING_SEVERITIES)}
+# The triage ``lite`` tier stores its findings in this compact shape (#1010).
+LITE_FINDING_TOOL = "lite"
+_LITE_ROW_KEYS: frozenset[str] = frozenset(
+    {"tool", "rule_id", "severity", "path", "line", "message"}
+)
+
+
+def _strip_record_markers(text: str) -> str:
+    """Drop deterministic-record markers from lite model output before it is rendered."""
+    from mergecraft.findings.ledger import _strip_deterministic_record_markers
+
+    return _strip_deterministic_record_markers(text)
+
+
+def lite_row_finding(row: dict[str, Any]) -> Finding | None:
+    """Expand one compact ``lite`` row into a ``Finding``; ``None`` when it is not one.
+
+    A row qualifies only with ``tool == "lite"``, no key beyond ``tool``, ``rule_id``,
+    ``severity``, ``path``, ``line`` and ``message``, and values ``make_finding``
+    accepts. Expansion can only add a finding the gate reads, never remove one.
+    """
+    if row.get("tool") != LITE_FINDING_TOOL or not set(row) <= _LITE_ROW_KEYS:
+        return None
+    line = row.get("line")
+    if not isinstance(line, int) or isinstance(line, bool) or line < 1:
+        return None
+    try:
+        return make_finding(
+            tool=LITE_FINDING_TOOL,
+            rule_id=str(row.get("rule_id") or "lite-review"),
+            category="Functional Correctness",
+            severity=str(row.get("severity") or ""),
+            confidence="possible",
+            message=_strip_record_markers(str(row.get("message") or "")),
+            path=str(row.get("path") or ""),
+            start_line=line,
+            end_line=line,
+            source="agent",
+        )
+    except (FindingValidationError, ValidationError, ValueError):
+        return None
 
 
 def typed_findings_from_rows(raw: list[Any]) -> list[Finding]:
@@ -77,6 +118,10 @@ def typed_findings_from_rows_with_drops(raw: list[Any]) -> tuple[list[Finding], 
         try:
             typed.append(Finding.model_validate(row))
         except (FindingValidationError, ValidationError, ValueError) as err:
+            lite = lite_row_finding(row)
+            if lite is not None:
+                typed.append(lite)
+                continue
             dropped += 1
             logger.warning(
                 "findings loader: dropping malformed finding row id={} — failed Finding "
