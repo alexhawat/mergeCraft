@@ -753,10 +753,11 @@ def replay_bank(
     *,
     results_dir: Path = DEFAULT_RESULTS_DIR,
     providers: tuple[str, ...] = DEFAULT_BENCHMARK_PROVIDERS,
+    update_latest: bool = True,
 ) -> tuple[BenchmarkResultSet, Path]:
     """Run structural replay and write the versioned result set."""
     result = run_structural_replay(bank_dir, providers=providers)
-    path = write_result_set(result, results_dir=results_dir)
+    path = write_result_set(result, results_dir=results_dir, update_latest=update_latest)
     return result, path
 
 

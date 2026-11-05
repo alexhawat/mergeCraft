@@ -408,6 +408,11 @@ eval-gate: eval-cases-sync-check ## Check eval-bank integrity (structural; see '
 eval-replay: ## Replay structural eval-bank integrity; keyless, not live detection scores
 	$(UV) run mergecraft eval replay-bank
 
+BASE_REF ?= main
+HEAD_REF ?= HEAD
+eval-rescore-delta: ## Advisory base-vs-head structural replay delta (#1164; needs git base/head)
+	./scripts/eval_rescore_delta_pr.sh $(BASE_REF) $(HEAD_REF)
+
 HARVEST_COMMITS ?=
 eval-harvest-failures: ## Print the failure-trajectory harvest plan for HARVEST_COMMITS (runs nothing; see docs/failure-trajectory-harvest.md)
 	$(UV) run python scripts/harvest_failure_trajectories.py $(foreach sha,$(HARVEST_COMMITS),--commit $(sha))

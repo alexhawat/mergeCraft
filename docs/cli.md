@@ -65,6 +65,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft describe` | Print a PR title, summary, walkthrough, risk areas, and testing notes. |
 | `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, and MCP wiring. |
 | `mergecraft eval add` | Add a case to the bank. |
+| `mergecraft eval add-incident` | Add an incident-derived structural case (postmortem PR + revert/fix) (#1163). |
 | `mergecraft eval adjudicate <baseline>` | Record who adjudicated one baseline label, enforcing repo policy. |
 | `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |
 | `mergecraft eval convergence` | Score multi-round convergence scenarios and write a versioned result set (RC6). |
@@ -76,6 +77,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft eval publish-benchmark` | Validate two saved provider runs and write an auditable report. |
 | `mergecraft eval replay <case-id>` | Replay a case and report the diff. |
 | `mergecraft eval replay-bank` | Replay the eval bank and write a versioned benchmark result set (#140). |
+| `mergecraft eval rescore-delta` | Compare two structural replay result sets (base vs head) (#1164, advisory). |
 | `mergecraft eval score <actual> <expected>` | Score review findings against a frozen benchmark baseline. |
 | `mergecraft eval trajectory-gate` | Compare a candidate trajectory report against a frozen baseline. |
 | `mergecraft eval trajectory-score --labels LABELS` | Score the deterministic trajectory auditor against frozen labels. |
@@ -85,6 +87,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft findings carryover --pr N` | File one issue per unresolved mergeCraft finding. Dry run unless `--apply`. |
 | `mergecraft findings export --pr N` | Print the findings a merge would bury. Never writes anything. |
 | `mergecraft findings ledger --pr N` | Print the open-PR finding ledger from formal reviews. Never writes. |
+| `mergecraft findings outcomes --pr N` | Advisory human outcomes for published mergeCraft findings (#1165). |
 | `mergecraft gha token` | Acquire a GitHub App installation token, or revoke it with `--post`. |
 | `mergecraft health run` | Emit JSON health status for the running mergeCraft installation. |
 | `mergecraft init` | Scaffold `.mergecraft/config.yaml` and an example workflow (local, no API). |

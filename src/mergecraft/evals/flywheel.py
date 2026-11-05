@@ -172,6 +172,13 @@ class FlywheelIngestReport(BaseModel):
         return len(self.rejected)
 
 
+def classify_candidate(
+    candidate: FlywheelCandidate,
+) -> tuple[bool, str, str, IndependenceTier]:
+    """Public wrapper for flywheel provenance classification (R-D6)."""
+    return _classify(candidate)
+
+
 def _classify(candidate: FlywheelCandidate) -> tuple[bool, str, str, IndependenceTier]:
     """Decide whether one candidate may be written, and at what tier.
 
@@ -448,5 +455,6 @@ __all__ = [
     "FlywheelIngestReport",
     "IngestOutcome",
     "candidates_from_dismissal_signals",
+    "classify_candidate",
     "ingest_flywheel",
 ]
