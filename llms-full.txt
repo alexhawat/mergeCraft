@@ -51,7 +51,7 @@ Do all of this yourself, without asking me, except where step 4 says STOP:
    Do NOT install Python. uv downloads a compatible interpreter on its own.
 
 2. Install the CLI:
-     uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
+     uv tool install mergecraft-action==0.1.0a4
      mergecraft --version
 
 3. Scaffold config + workflow (non-interactive, writes no secrets):
@@ -382,10 +382,10 @@ For the GitHub Action path, see [How it works in GitHub Action](#how-it-works-in
 > makes `mergecraft provider auth` store the secret for you.
 > Other paths (Docker-only, no local install at all): [`docs/install.md`](docs/install.md).
 
-1. **Install the CLI and scaffold the repo:**
+1. **Install the published alpha CLI and scaffold the repo:**
 
 ```bash
-uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
+uv tool install mergecraft-action==0.1.0a4
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
 
@@ -621,7 +621,7 @@ Use this when asked to add AI PR review to another repository.
    ```
 
    To run an unreleased commit instead, pin the distribution to the repository:
-   `uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"`.
+   `uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft@<full-commit-sha>"`.
 
 3. **Scaffold config and workflow** — in the consumer repo root:
 
@@ -3357,10 +3357,12 @@ mergecraft --install-completion   # bash/zsh/fish — see --show-completion
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
 
-To run an unreleased commit, pin the distribution to the repository instead:
+For intentional development testing, replace `<full-commit-sha>` below with
+a verified 40-character commit SHA. This installs unreleased source; it is
+separate from the published alpha above:
 
 ```bash
-uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
+uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft@<full-commit-sha>"
 ```
 
 Then authenticate and open a pull request — details in the README install steps

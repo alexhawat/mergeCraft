@@ -36,10 +36,12 @@ mergecraft --install-completion   # bash/zsh/fish — see --show-completion
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
 
-To run an unreleased commit, pin the distribution to the repository instead:
+For intentional development testing, replace `<full-commit-sha>` below with
+a verified 40-character commit SHA. This installs unreleased source; it is
+separate from the published alpha above:
 
 ```bash
-uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
+uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft@<full-commit-sha>"
 ```
 
 Then authenticate and open a pull request — details in the README install steps

@@ -22,7 +22,7 @@ Use this when asked to add AI PR review to another repository.
    ```
 
    To run an unreleased commit instead, pin the distribution to the repository:
-   `uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"`.
+   `uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft@<full-commit-sha>"`.
 
 3. **Scaffold config and workflow** — in the consumer repo root:
 

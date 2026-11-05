@@ -35,9 +35,7 @@ LLMS_TXT = REPO_ROOT / "llms.txt"
 README = REPO_ROOT / "README.md"
 GITIGNORE = REPO_ROOT / ".gitignore"
 
-_UNPINNED_INSTALL = (
-    'uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"'
-)
+_RELEASE_INSTALL = "uv tool install mergecraft-action==0.1.0a4"
 _VERSIONED_GIT_REF = re.compile(
     r"git\+https://github\.com/alexhawat/mergeCraft@([^\s\"')]+)",
     re.IGNORECASE,
@@ -106,8 +104,8 @@ def test_agents_md_stops_on_interactive_auth() -> None:
 
 def test_agents_md_install_ref_resolves() -> None:
     text = _read(AGENTS_MD)
-    assert _UNPINNED_INSTALL in text, (
-        "AGENTS-mergecraft.md must teach the unpinned uv tool install form (D11)"
+    assert _RELEASE_INSTALL in text, (
+        "AGENTS-mergecraft.md must teach the published pinned CLI install"
     )
     _assert_no_unresolvable_version_pins(text, label="AGENTS-mergecraft.md")
 
