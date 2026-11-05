@@ -1,7 +1,8 @@
 """Exclusions become visible review-coverage limitations (RA1.5, D11/D12).
 
-Every skip — gitignored, oversized, binary, symlink — must be reported on the
-result, never a silent omission. And "empty because nothing changed" must be
+Every eligible-source skip — oversized, binary, symlink — must be reported on
+the result. Gitignored untracked artifacts are outside the review scope.
+"Empty because nothing changed" must be
 distinguishable from "empty because everything was excluded", so an excluded
 run cannot render as a passed review with "no changes to review".
 """
@@ -10,7 +11,12 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from typer.testing import CliRunner
+
+if TYPE_CHECKING:
+    import pytest
 
 from mergecraft.utils.offline_diff import materialize_diff
 
@@ -59,7 +65,8 @@ def test_exclusions_are_reported_as_review_coverage_limitations(tmp_path: Path) 
 
     limitations = _limitations(result)
     assert limitations, "excluded files were not reported as coverage limitations"
-    for name in ("ignored.py", "huge.py", "blob.bin"):
+    assert not _reports(limitations, "ignored.py")
+    for name in ("huge.py", "blob.bin"):
         assert _reports(limitations, name), f"{name} was silently excluded"
 
 
@@ -78,3 +85,31 @@ def test_empty_because_nothing_changed_is_distinguishable_from_empty_because_exc
     assert _limitations(excluded_result), (
         "an all-excluded diff is indistinguishable from a clean one"
     )
+
+
+def test_clean_checkout_with_ignored_environment_is_a_clean_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real selector and CLI outcomes distinguish artifacts from omitted source."""
+    from mergecraft.cli.app import app
+
+    monkeypatch.delenv("MERGECRAFT_CONFIG", raising=False)
+    repo = _init_repo(tmp_path, gitignore=".venv/\n.cache/\n.env\n")
+    for name in (".venv/installed.py", ".cache/build/output", ".env"):
+        path = repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("ordinary ignored artifact\n", encoding="utf-8")
+    assert _git(repo, "status", "--porcelain") == ""
+
+    runner = CliRunner()
+    args = ["review", "--cwd", str(repo), "--base", "main", "--dry-run"]
+    clean = runner.invoke(app, args)
+    assert clean.exit_code == 0, clean.output
+    assert "no changes to review" in clean.output
+
+    (repo / "huge.py").write_bytes(b"# source\n" * 40_000)
+    excluded = runner.invoke(app, args)
+    assert excluded.exit_code == 20, excluded.output
+    assert "oversized" in excluded.output
+    assert "huge.py" in excluded.output
+    assert "gitignored path" not in excluded.output

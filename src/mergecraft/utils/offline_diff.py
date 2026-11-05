@@ -24,7 +24,7 @@ class DiffMaterialization:
     line_count: int
     empty: bool
     #: Working-tree paths the default materialization deliberately left out
-    #: (gitignored, oversized, binary, symlink, non-UTF-8). Carried on the
+    #: (oversized, binary, symlink, non-UTF-8). Carried on the
     #: result so an empty diff can never silently read as "nothing to review"
     #: (D11/D12) — the exclusion is visible, not just a log line.
     coverage_limitations: tuple[str, ...] = ()
@@ -160,44 +160,20 @@ def _is_managed_analyzer_cache_path(rel: str) -> bool:
     return rel == _MANAGED_ANALYZER_CACHE or rel.startswith(f"{_MANAGED_ANALYZER_CACHE}/")
 
 
-def _ignored_limitations(cwd: Path, *, already_seen: set[str]) -> list[str]:
-    """Return limitations for gitignored working-tree paths.
-
-    ``--exclude-standard`` hides ignored files from the eligible listing, so
-    they would otherwise disappear without a trace. ``--directory`` collapses
-    a fully-ignored directory (e.g. ``.venv/``) to one entry so the report
-    stays readable in a large checkout.
-    """
-    ignored = _run_git(
-        ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"],
-        cwd=cwd,
-    )
-    if ignored.returncode != 0:
-        return []
-    return [
-        f"gitignored path not reviewed: {rel}"
-        for rel in _nul_paths(ignored.stdout)
-        if rel not in already_seen
-    ]
-
-
-def _discover_untracked_additions(
-    cwd: Path,
-    *,
-    report_ignored: bool = False,
-) -> tuple[str, tuple[str, ...]]:
+def _discover_untracked_additions(cwd: Path) -> tuple[str, tuple[str, ...]]:
     """Return unified patches for eligible untracked files and their exclusions.
 
     This is the discovery half of :func:`git_unstaged_diff`, reused by the
     default ``--merge-base`` materialization (D11). A file that is skipped —
     symlink, oversized, binary, non-UTF-8 — is returned as a coverage
-    limitation as well as logged; gitignored paths are reported when
-    ``report_ignored`` is set (they never reach the eligible listing).
+    limitation as well as logged. Gitignored untracked paths are outside the
+    source scope, not omitted changes: their existence must not make an
+    otherwise clean checkout incomplete. Tracked paths still enter via Git's
+    diff even when an ignore pattern matches them.
     """
     listing = _run_git(["ls-files", "--others", "--exclude-standard", "-z"], cwd=cwd)
     patches: list[str] = []
     limitations: list[str] = []
-    eligible: set[str] = set()
     if listing.returncode == 0:
         for rel in _nul_paths(listing.stdout):
             # Managed analyzer installations are runtime artifacts, not source
@@ -207,7 +183,6 @@ def _discover_untracked_additions(
             # the merge-base diff above and are intentionally left untouched.
             if _is_managed_analyzer_cache_path(rel):
                 continue
-            eligible.add(rel)
             path = cwd / rel
             if path.is_symlink():
                 limitations.append(f"symlink not reviewed: {rel}")
@@ -238,8 +213,6 @@ def _discover_untracked_additions(
                 msg = f"failed to compute untracked diff for {rel!r}: {patch.stderr.strip()}"
                 raise RuntimeError(msg)
             patches.append(patch.stdout)
-    if report_ignored:
-        limitations.extend(_ignored_limitations(cwd, already_seen=eligible))
     return "".join(patches), tuple(limitations)
 
 
@@ -286,10 +259,7 @@ def materialize_diff(
         # source file would otherwise be invisible to the default review (N7/D11).
         if text and not text.endswith("\n"):
             text = f"{text}\n"
-        untracked_text, coverage_limitations = _discover_untracked_additions(
-            cwd,
-            report_ignored=True,
-        )
+        untracked_text, coverage_limitations = _discover_untracked_additions(cwd)
         text += untracked_text
 
     # Normalize trailing newline for stable line counts.

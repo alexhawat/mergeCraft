@@ -204,7 +204,7 @@ def test_gitignored_file_is_excluded(tmp_path: Path) -> None:
     result = materialize_diff(cwd=repo, out_dir=tmp_path / "out", base="main")
 
     assert "ignored.py" not in result.path.read_text(encoding="utf-8")
-    assert _reports(_limitations(result), "ignored.py")
+    assert not _limitations(result)
 
 
 def test_oversized_untracked_file_is_excluded_and_reported(tmp_path: Path) -> None:
