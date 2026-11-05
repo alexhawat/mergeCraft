@@ -46,6 +46,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [mcp-tools](mcp-tools.md) | consumer | Generated public MCP tool reference from ToolSpec schemas. |
 | [mcp](mcp.md) | consumer | Public MCP install — what agents can do, per-runtime stdio config, and review-only boundaries. |
 | [opencode](opencode.md) | consumer | OpenCode integration — commands, reviewer subagent, plugin, MCP wiring, and JEV/Logfire setup. |
+| [policy-evidence](policy-evidence.md) | consumer | Where each policy evidence key comes from, why a pull request cannot forge it, and the policy.evidence config. |
 | [railway-sandbox-evaluation](railway-sandbox-evaluation.md) | contributor | Evaluation kit for Railway sandboxes as ephemeral review and test runners — spike script, measurement template, go/no-go criteria. |
 | [red-green-receipts](red-green-receipts.md) | consumer | Fail-then-pass receipts that prove a fix pull request — format, bounds, trust, and a CI sketch. |
 | [release-process](release-process.md) | contributor | Release candidates, soak periods, changelog, and per-release migration notes. |

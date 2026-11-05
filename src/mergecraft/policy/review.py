@@ -16,7 +16,8 @@ a path-touch gate rather than a content detector. Every trigger goes through
 approval gate stays the single verdict authority.
 
 Module: mergecraft.policy.review
-Depends: hashlib, subprocess, mergecraft.policy.{enforcement,exceptions,schema,scoping}
+Depends: hashlib, subprocess, mergecraft.policy.{enforcement,evidence,evidence_producers,
+    exceptions,schema,scoping}
 
 Exports:
     Classes:
@@ -29,12 +30,16 @@ Exports:
         load_repo_policy — Read the policy tree under a repository root.
         load_review_policy — Resolve which copy of the policy judges this pull request.
         policy_summary_block — Render the summary block appended to a submission.
+        triggered_evidence_keys — The evidence keys the triggered rules require.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
 import os
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -46,6 +51,7 @@ from loguru import logger
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.policy.enforcement import evaluate_enforcement
 from mergecraft.policy.evidence import evaluate_rule_evidence
+from mergecraft.policy.evidence_producers import PolicyEvidence, collect_policy_evidence
 from mergecraft.policy.exceptions import (
     PolicyException,
     exception_applies,
@@ -60,7 +66,7 @@ from mergecraft.policy.scoping import ScopeContext, resolve_effective_rules
 from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Collection, Coroutine, Iterable, Sequence
 
 POLICY_DIR_REL = ".mergecraft/policy"
 RULES_REL = ".mergecraft/policy/rules.yaml"
@@ -147,10 +153,13 @@ class PolicyEvaluation:
     Attributes:
         diff_path (str): The full-pull-request diff the rows were computed from.
         rows (tuple[Finding, ...]): The policy findings for that diff.
+        evidence (PolicyEvidence | None): The evidence the in-run producers
+            collected for those rows; ``None`` when no triggered rule required any.
     """
 
     diff_path: str
     rows: tuple[Finding, ...] = ()
+    evidence: PolicyEvidence | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -805,6 +814,31 @@ def _waiver_description(
     return "; ".join(parts)
 
 
+def _present_evidence_lines(
+    required: Sequence[str], population: PolicyEvidence | None
+) -> list[str]:
+    """Return ``evidence present: <key> (<source>: <detail>)`` per required present key."""
+    if population is None:
+        return []
+    lines: list[str] = []
+    for key in required:
+        record = population.present.get(key)
+        if record is not None:
+            lines.append(f"evidence present: {key} ({record.source}: {record.detail})")
+    return lines
+
+
+def _absent_reason_lines(missing: Sequence[str], population: PolicyEvidence | None) -> list[str]:
+    """Return one line per missing key saying why the producers did not find it."""
+    if population is None:
+        return []
+    return [
+        f"why {key} is missing: {population.absent[key]}"
+        for key in missing
+        if key in population.absent
+    ]
+
+
 def _rule_finding(
     snapshot: PolicySnapshot,
     rule: PolicyRule,
@@ -816,17 +850,25 @@ def _rule_finding(
     unresolved: frozenset[str],
     exceptions_trusted: bool,
     now: datetime,
+    evidence_population: PolicyEvidence | None = None,
 ) -> Finding:
-    """Turn one triggered rule into exactly one policy finding."""
+    """Turn one triggered rule into exactly one policy finding.
+
+    ``evidence_population`` is what the in-run producers collected. Its present
+    keys (key → detail) are the ``available_evidence`` both the enforcement engine
+    and the evidence check read; ``None`` means nothing was collected, so every
+    required key is missing.
+    """
     rule_document = rule.model_dump(mode="json")
     message = _matched_message(rule, paths)
+    available = evidence_population.available() if evidence_population is not None else {}
     violation: dict[str, Any] = {
         "rule_id": rule.id,
         "path": paths[0],
         "message": message,
         "severity": rule.severity,
         "rule": rule_document,
-        "available_evidence": {},
+        "available_evidence": dict(available),
     }
     enforcement = evaluate_enforcement(rule.enforcement, violation=violation)
     finding = enforcement.finding
@@ -843,13 +885,15 @@ def _rule_finding(
             "as matching so the rule cannot fail open"
         )
 
-    missing: list[str] = []
-    if _required_keys(rule):
-        outcome = evaluate_rule_evidence(rule_document, available_evidence={})
+    required = _required_keys(rule)
+    if required:
+        evidence.extend(_present_evidence_lines(required, evidence_population))
+        outcome = evaluate_rule_evidence(rule_document, available_evidence=dict(available))
         if outcome.status != "satisfied":
-            missing = [key for key in _required_keys(rule)]
+            missing = [key for key in required if key not in available]
             message = f"{message}; required evidence missing: {', '.join(missing)}"
             evidence.append(f"required evidence missing: {', '.join(missing)}")
+            evidence.extend(_absent_reason_lines(missing, evidence_population))
 
     severity = finding.severity
     if exceptions_trusted:
@@ -888,6 +932,58 @@ def _rule_finding(
     )
 
 
+def _unresolved_dimensions_for(base_ref: str | None) -> frozenset[str]:
+    """Return the scope dimensions this review cannot resolve (treated as matching)."""
+    unresolved = frozenset({"language", "symbol"})
+    if not base_ref:
+        unresolved = unresolved | {"branch"}
+    return unresolved
+
+
+def triggered_evidence_keys(
+    snapshot: PolicySnapshot,
+    *,
+    changed_paths: list[str],
+    org: str,
+    repo: str,
+    base_ref: str | None,
+) -> tuple[str, ...]:
+    """Return the evidence keys the rules this change set triggers require, sorted.
+
+    Args:
+        snapshot (PolicySnapshot): The snapshot that judges this change.
+        changed_paths (list[str]): Every path the full-pull-request diff touches.
+        org (str): Organization slug for scope resolution.
+        repo (str): Repository name for scope resolution.
+        base_ref (str | None): Base branch name, or ``None`` when unknown.
+
+    Returns:
+        tuple[str, ...]: The union of ``evidence.required`` over triggered rules;
+            empty when no triggered rule requires evidence.
+
+    Examples:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> snapshot = load_repo_policy(Path(tempfile.mkdtemp()))
+        >>> triggered_evidence_keys(
+        ...     snapshot, changed_paths=["a.py"], org="acme", repo="demo", base_ref=None
+        ... )
+        ()
+    """
+    matched = _matching_rules(
+        snapshot,
+        changed_paths=changed_paths,
+        org=org,
+        repo=repo,
+        base_ref=base_ref,
+        unresolved=_unresolved_dimensions_for(base_ref),
+    )
+    keys: set[str] = set()
+    for rule, _source_layer, _paths in matched:
+        keys.update(_required_keys(rule))
+    return tuple(sorted(keys))
+
+
 def evaluate_review_policy(
     snapshot: PolicySnapshot,
     *,
@@ -897,6 +993,7 @@ def evaluate_review_policy(
     base_ref: str | None,
     exceptions_trusted: bool,
     now: datetime,
+    evidence: PolicyEvidence | None = None,
 ) -> list[Finding]:
     """Return the policy findings a review records for this change set.
 
@@ -909,6 +1006,11 @@ def evaluate_review_policy(
         exceptions_trusted (bool): Whether waivers come from an operator-owned
             source. An untrusted waiver set waives nothing.
         now (datetime): Clock used for waiver expiry, so a run is reproducible.
+        evidence (PolicyEvidence | None): The evidence the in-run producers
+            collected. Its present keys feed both the enforcement engine and the
+            evidence check, and each row names its present keys and the reason
+            for each missing one. ``None`` means no evidence: every required key
+            is missing.
 
     Returns:
         list[Finding]: One row per triggered **effective** rule — one row for each
@@ -942,9 +1044,7 @@ def evaluate_review_policy(
     if snapshot.unverifiable_source:
         rows.append(_unverifiable_row(snapshot))
 
-    unresolved = frozenset({"language", "symbol"})
-    if not base_ref:
-        unresolved = unresolved | {"branch"}
+    unresolved = _unresolved_dimensions_for(base_ref)
     matched = _matching_rules(
         snapshot,
         changed_paths=changed_paths,
@@ -965,6 +1065,7 @@ def evaluate_review_policy(
                 unresolved=unresolved,
                 exceptions_trusted=exceptions_trusted,
                 now=now,
+                evidence_population=evidence,
             )
         )
 
@@ -1078,7 +1179,52 @@ def _policy_source_says_fail_closed(ctx: Any, snapshot: PolicySnapshot, repo_roo
     return _base_carries_policy(repo_root, _resolve_base_sha(ctx, repo_root))
 
 
-def _evaluate_run_policy(ctx: Any) -> list[Finding]:
+def _run_sync(awaitable: Coroutine[Any, Any, PolicyEvidence]) -> PolicyEvidence:
+    """Run ``awaitable`` to completion from either a sync or an async caller.
+
+    The terminal tools reach the policy seam from async handlers, so a loop may
+    already be running: the collection then gets its own loop on a worker thread,
+    which keeps this seam synchronous without blocking re-entry into that loop.
+    The worker runs in a copy of the caller's context, so run-scope ContextVars
+    (the pinned settings snapshot among them) stay visible to the producers.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(awaitable)
+    context = contextvars.copy_context()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(context.run, asyncio.run, awaitable).result()
+
+
+async def _collect_on_own_loop(ctx: Any, keys: tuple[str, ...]) -> PolicyEvidence:
+    """Collect on the loop ``_run_sync`` created, closing its GitHub transport after.
+
+    The GitHub client keeps one transport per event loop; the loop this runs on is
+    closed when collection ends, so its transport is closed here, inside it.
+    """
+    from mergecraft.scm.github import github_client_from_scm
+
+    try:
+        return await collect_policy_evidence(ctx, required_keys=keys)
+    finally:
+        scm = getattr(ctx, "scm", None)
+        client = github_client_from_scm(scm) if scm is not None else None
+        if client is not None:
+            await client.aclose_loop_transport()
+
+
+def _collect_run_evidence(ctx: Any, keys: Collection[str]) -> PolicyEvidence:
+    """Collect ``keys`` through the producers; a failure leaves every key absent."""
+    try:
+        return _run_sync(_collect_on_own_loop(ctx, tuple(keys)))
+    except Exception as exc:  # evidence collection must never fail a review
+        logger.warning("policy: evidence collection failed, every key stays absent: {}", exc)
+        reason = f"evidence could not be collected: {type(exc).__name__}: {exc}"
+        return PolicyEvidence(present={}, absent=dict.fromkeys(keys, reason))
+
+
+def _evaluate_run_policy(ctx: Any) -> tuple[list[Finding], PolicyEvidence | None]:
     from mergecraft.mcp.tool_state import primary_repo_state
 
     primary = primary_repo_state(ctx.tool_state)
@@ -1086,7 +1232,7 @@ def _evaluate_run_policy(ctx: Any) -> list[Finding]:
     if not diff_path:
         # No review scope yet: the terminal tools refuse anyway, so no verdict
         # can be recorded over an unevaluated policy.
-        return []
+        return [], None
     repo_root = _primary_repo_dir(ctx)
     snapshot = _run_policy_snapshot(ctx, repo_root)
     nothing_loaded = not snapshot.rules and not snapshot.exceptions and not snapshot.load_errors
@@ -1101,9 +1247,9 @@ def _evaluate_run_policy(ctx: Any) -> list[Finding]:
             # tree, so a diff this run cannot read must not fail closed there:
             # it reviews exactly as it did before this feature existed.
             logger.debug("policy: no policy tree and no readable diff, skipping: {}", exc)
-            return []
+            return [], None
         detail = str(exc) or type(exc).__name__
-        return [_unevaluated_row(diff_path, detail=detail)]
+        return [_unevaluated_row(diff_path, detail=detail)], None
     if (
         nothing_loaded
         and not _policy_paths_in(changed)
@@ -1114,7 +1260,7 @@ def _evaluate_run_policy(ctx: Any) -> list[Finding]:
         # head tree is that same repository. A base commit that carries policy is
         # *not* an empty tree, though — its rules still judge this change — so
         # that case falls through to source resolution instead of shorting out.
-        return []
+        return [], None
 
     resolved = load_review_policy(
         snapshot,
@@ -1126,14 +1272,23 @@ def _evaluate_run_policy(ctx: Any) -> list[Finding]:
         or resolved.source.startswith(_BASE_SOURCE_PREFIX)
         or resolved.source == SOURCE_HEAD_UNCHANGED
     )
+    base_ref = _base_ref_from_env()
+    # Producers run only when a triggered rule requires evidence, and only for
+    # the keys those rules name: a repository without such a rule pays no
+    # network cost at all.
+    keys = triggered_evidence_keys(
+        resolved, changed_paths=changed, org=primary.owner, repo=primary.name, base_ref=base_ref
+    )
+    evidence = _collect_run_evidence(ctx, keys) if keys else None
     rows = evaluate_review_policy(
         resolved,
         changed_paths=changed,
         org=primary.owner,
         repo=primary.name,
-        base_ref=_base_ref_from_env(),
+        base_ref=base_ref,
         exceptions_trusted=exceptions_trusted,
         now=datetime.now(UTC),
+        evidence=evidence,
     )
     if rows:
         logger.info(
@@ -1142,7 +1297,7 @@ def _evaluate_run_policy(ctx: Any) -> list[Finding]:
             resolved.source,
             diff_path,
         )
-    return rows
+    return rows, evidence
 
 
 def ensure_policy_evaluated(ctx: Any) -> list[Finding]:
@@ -1152,7 +1307,9 @@ def ensure_policy_evaluated(ctx: Any) -> list[Finding]:
     terminal submission, ``validate_submission`` and the evidence packet. The
     result is cached on ``ToolState.policy_evaluation`` keyed by the diff it was
     computed from, so a re-scoped run evaluates again and a rule added to disk
-    mid-run cannot change a verdict already being formed.
+    mid-run cannot change a verdict already being formed. When a triggered rule
+    requires evidence, the in-run producers collect it here — once per diff path,
+    cached alongside the rows — and work whether or not an event loop is running.
 
     Args:
         ctx (Any): A ``ToolContext`` or an ``AgentRunContext``. Both carry the
@@ -1179,8 +1336,10 @@ def ensure_policy_evaluated(ctx: Any) -> list[Finding]:
     cached = state.policy_evaluation
     if isinstance(cached, PolicyEvaluation) and cached.diff_path == diff_path:
         return list(cached.rows)
-    rows = _evaluate_run_policy(ctx)
-    state.policy_evaluation = PolicyEvaluation(diff_path=diff_path, rows=tuple(rows))
+    rows, evidence = _evaluate_run_policy(ctx)
+    state.policy_evaluation = PolicyEvaluation(
+        diff_path=diff_path, rows=tuple(rows), evidence=evidence
+    )
     return list(rows)
 
 
@@ -1200,4 +1359,5 @@ __all__ = [
     "load_repo_policy",
     "load_review_policy",
     "policy_summary_block",
+    "triggered_evidence_keys",
 ]

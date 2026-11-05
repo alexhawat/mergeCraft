@@ -651,10 +651,32 @@ gate-facing severity of the single finding a rule contributes, and
 Whenever the mode changes the declared severity, the declared value is kept on
 the finding's `evidence`, so a cap never hides what the rule asked for.
 
-**Missing evidence blocks and says what is missing.** No in-run producer exists
-yet for the evidence keys (`health_check`, `rollback_plan`, `contract_schema`,
-`requirements`, `xrepo`), so a `required` rule that names one sits at `Major`,
-and its row names every missing key. The way past it is a waiver.
+**Missing evidence blocks and says what is missing.** A `required` rule stays
+at `Major` until every key it names is present. Each key is produced during the
+review. Every producer except `requirements` reads from a source the pull
+request cannot write; `requirements` is author-traceable, not independent:
+
+- `requirements`: acceptance criteria from the issues the pull request closes,
+  keyword-matched against the diff. The pull request body is never a source. An
+  issue the author wrote is author-controlled, so this proves traceability, not
+  independent review; the row names each issue's author.
+- `xrepo`: the linked-repo manifest on the base, with every repository in it
+  reviewed and none omitted.
+- `health_check`, `rollback_plan` and `contract_schema`: a proof declared under
+  `policy.evidence.<key>` in the base-side configuration (the operator-owned
+  snapshot, or the base commit's `.mergecraft/config.yaml`), never the pull
+  request's own copy. The proof is either a successful check run on the head
+  commit from a trusted GitHub App (`github-actions` is refused) or a bounded
+  `policy-evidence.json` uploaded for that commit by a successful run of the
+  declared workflow file, from this repository (never a fork), when the pull
+  request does not change that file.
+
+Producers run only when a triggered rule requires evidence. The row lists each
+present key with its source and names every missing key with the reason it is
+missing. A key without a producer or a declaration stays missing, and the way
+past it is a waiver. [`docs/policy-evidence.md`](docs/policy-evidence.md) has
+the trust story for each key, the `policy.evidence` configuration and the
+artifact format.
 
 **Where the rules come from.** Never the pull request under review. On a
 `pull_request_target` run they come from the operator-owned snapshot captured
