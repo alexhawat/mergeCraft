@@ -1134,6 +1134,12 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
         else:
             gh_event = bind_target_pull_request(gh_event, pull)
             ctx.gh_event = gh_event
+            # Dispatch events carry no PR number during setup. Keep the run and
+            # tool state in sync with the fetched PR before reading its issues.
+            bound_pull_number = pull.get("number")
+            if isinstance(bound_pull_number, int):
+                ctx.pr_number = bound_pull_number
+                ctx.tool_state.pr_number = bound_pull_number
 
     try:
         validate_fork_credential_invariant(event=gh_event, env=os.environ, settings=ctx.settings)

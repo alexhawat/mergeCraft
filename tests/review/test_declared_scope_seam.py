@@ -5,8 +5,8 @@
 request body, then the bodies of the issues the pull request closes
 (``ToolState.linked_issues``: ``LinkedIssue`` rows from ``mergecraft.scm.types``,
 read in order by ``.body``; ``()`` closes nothing, ``None`` was not read; the
-GraphQL read that fills it is the linked-issue read's own concern and is not
-exercised here). A body with no
+GraphQL parsing is covered by the linked-issue tests; the dispatch regression
+below exercises the run's read through the client boundary). A body with no
 ``Scope paths:`` block is not a declaration, so the next source is tried; a
 declaration that broke a bound or listed no globs still wins, so a later source
 can never widen it. A read that cannot happen leaves the field ``None`` and never
@@ -21,14 +21,18 @@ from __future__ import annotations
 
 import inspect
 from importlib import import_module
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from mergecraft.config.settings import RepoSettings
+from mergecraft.evidence.run_packet import classify_run_blast_radius, scope_signal_for_state
 from mergecraft.mcp.context import PayloadEvent, ResolvedPayload
 from mergecraft.mcp.tool_state import init_tool_state
+from mergecraft.scm.types import LinkedIssue
+from tests.support import run_main_harness
 
 _BODY_SCOPE = "Implements the parser.\n\nScope paths:\n- src/mergecraft/requirements/**\n"
 _ISSUE_SCOPE = "Plan.\n\nScope paths:\n- docs/**\n- tests/**\n"
@@ -40,13 +44,12 @@ def main_mod() -> Any:
     return import_module("mergecraft.main")
 
 
-def _linked_issues(bodies: tuple[str, ...] | None) -> tuple[Any, ...] | None:
-    """``LinkedIssue`` rows for ``bodies`` (read lazily so the suite collects first)."""
+def _linked_issues(bodies: tuple[str, ...] | None) -> tuple[LinkedIssue, ...] | None:
+    """``LinkedIssue`` rows for ``bodies``."""
     if bodies is None:
         return None
-    linked_issue = getattr(import_module("mergecraft.scm.types"), "LinkedIssue")  # noqa: B009
     return tuple(
-        linked_issue(number=101 + index, author_login="maintainer", body=body)
+        LinkedIssue(number=101 + index, author_login="maintainer", body=body)
         for index, body in enumerate(bodies)
     )
 
@@ -54,7 +57,7 @@ def _linked_issues(bodies: tuple[str, ...] | None) -> tuple[Any, ...] | None:
 def _ctx(body: str | None, issues: tuple[str, ...] | None) -> Any:
     state = init_tool_state(owner="acme", name="demo", dir=".")
     # The field the linked-issue read fills at run start.
-    setattr(state, "linked_issues", _linked_issues(issues))  # noqa: B010
+    state.linked_issues = _linked_issues(issues)
     resolved = ResolvedPayload(
         event=PayloadEvent(trigger="pull_request", issue_number=3, is_pr=True, body=body)
     )
@@ -256,7 +259,7 @@ _COMMENT_SCOPE = "@mergecraft review\n\nScope paths:\n- **/*.py\n- src/**\n"
 def _comment_ctx(gh_event: dict[str, Any], trigger: str, comment: str) -> Any:
     """A comment-triggered run: the resolved payload's body is the comment, as in production."""
     state = init_tool_state(owner="acme", name="demo", dir=".")
-    setattr(state, "linked_issues", _linked_issues(()))  # noqa: B010
+    state.linked_issues = _linked_issues(())
     resolved = ResolvedPayload(
         event=PayloadEvent(trigger=trigger, issue_number=3, is_pr=True, body=comment)
     )
@@ -383,7 +386,7 @@ def _bound_ctx(
     issues: tuple[str, ...] = (),
 ) -> Any:
     state = init_tool_state(owner="acme", name="demo", dir=".")
-    setattr(state, "linked_issues", _linked_issues(issues))  # noqa: B010
+    state.linked_issues = _linked_issues(issues)
     resolved = ResolvedPayload(
         event=PayloadEvent(trigger=trigger, issue_number=3, is_pr=True, body=resolved_body)
     )
@@ -431,6 +434,60 @@ async def test_a_bound_workflow_dispatch_reads_the_pull_request_body_through_the
     assert _declaration(ctx).globs == ("src/mergecraft/requirements/**",)
     assert _declaration(ctx).source_ref == "pr_description"
     assert len(scm.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prompt_in_event", [False, True], ids=["composed-prompt", "event-input"])
+async def test_workflow_dispatch_loads_closing_issue_scope_before_the_gate(
+    main_mod: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, prompt_in_event: bool
+) -> None:
+    """Drive raw dispatch -> PR binding -> closing issues -> scope through ``main()``."""
+    closing_calls: list[tuple[str, str, int]] = []
+    gate_pr_numbers: list[tuple[int | None, int | None]] = []
+    issue = LinkedIssue(number=101, author_login="maintainer", body=_ISSUE_SCOPE)
+
+    class DispatchGitHub(run_main_harness.FakeGitHubClient):
+        async def get_pull(self, owner: str, repo: str, pull_number: int) -> dict[str, Any]:
+            assert (owner, repo, pull_number) == ("acme", "demo", 3)
+            return {**_BOUND_PULL, "body": _NO_SCOPE}
+
+        async def closing_issues(
+            self, owner: str, repo: str, number: int
+        ) -> tuple[LinkedIssue, ...]:
+            closing_calls.append((owner, repo, number))
+            return (issue,)
+
+    async def capture_gate(ctx: Any) -> None:
+        gate_pr_numbers.append((ctx.pr_number, ctx.tool_state.pr_number))
+
+    monkeypatch.setattr(run_main_harness, "FakeGitHubClient", DispatchGitHub)
+    monkeypatch.setattr(main_mod, "_triage_gate", capture_gate)
+    prompt = "Review pull request #3. Please review."
+    record = await run_main_harness.run_main_for_test(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        event_name="workflow_dispatch",
+        event_payload={"inputs": {"prompt": prompt if prompt_in_event else ""}},
+        prompt=prompt if not prompt_in_event else "review the diff",
+    )
+
+    assert record.raised is None
+    assert record.result is not None
+    assert record.result.success
+    assert closing_calls == [("acme", "demo", 3)]
+    assert gate_pr_numbers == [(3, 3)]
+    state = record.tool_context.tool_state
+    assert state.linked_issues == (issue,)
+    assert state.scope_declaration.globs == ("docs/**", "tests/**")
+    assert state.scope_declaration.source_ref == "linked_issue#101"
+    classification = classify_run_blast_radius(
+        "diff --git a/docs/guide.md b/docs/guide.md\n"
+        "--- a/docs/guide.md\n+++ b/docs/guide.md\n@@ -1 +1 @@\n-old\n+new\n",
+        scope=scope_signal_for_state(state),
+    )
+    assert classification is not None
+    assert "scope.within" in {reason.code for reason in classification.reasons}
+    assert {gate.gate: gate.passed for gate in classification.checklist}["scope"] is True
 
 
 @pytest.mark.asyncio
