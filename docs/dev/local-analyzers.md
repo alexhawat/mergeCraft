@@ -12,11 +12,11 @@ can run them offline.
 | `vulture` | `2.16` | `pyproject.toml` `[project.optional-dependencies] dev` → `.venv/bin` |
 | `typos` | `1.50.1` | same dev extra → `.venv/bin` |
 | `markdownlint-cli` | `0.49.1` (npm) | `scripts/package.json` → `scripts/node_modules/.bin` |
-| `markdownlint` (engine) | `0.41.1` | resolved via `tools/package-lock.json` (catalog `version:`) |
+| `markdownlint` (engine) | `0.41.1` | resolved via `scripts/package-lock.json` (catalog `version:`) |
 | `jscpd` | `4.1.0` | same npm tooling package |
 
 Pins match the `version:` fields in `src/mergecraft/analyzers/catalog/*.yaml` and
-are locked via `uv.lock` (Python) and `tools/package-lock.json` (npm). `make setup`
+are locked via `uv.lock` (Python) and `scripts/package-lock.json` (npm). `make setup`
 runs `uv sync --extra dev` and a **soft** npm install via `make setup-local-analyzers`:
 when `npm` is missing or `npm ci` fails, setup prints a warning and continues —
 `markdownlint` and `jscpd` are skipped locally until `scripts/node_modules` exists.
