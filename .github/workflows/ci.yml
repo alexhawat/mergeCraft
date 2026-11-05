@@ -526,6 +526,40 @@ jobs:
           # "no approved protocol — advisory" and exits 0.
           make eval-trajectory-gate
 
+  eval-rescore-delta:
+    name: Eval rescore delta (advisory, reviewer surface)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/bootstrap
+      - name: Skip when diff does not touch reviewer surface
+        id: touch
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if uv run python scripts/ci_touches_reviewer_surface.py --base "${BASE_REF:-main}"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Base vs head structural replay delta
+        if: steps.touch.outputs.run == 'true'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          GITHUB_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          ./scripts/eval_rescore_delta_pr.sh "${BASE_REF:-main}" "$GITHUB_SHA"
+
   # R-D10 — optional, keyless fixture replay. Two hard-coded packets go
   # through the gate so the table can be published without a provider. This
   # is not a live-reviewer comparison and leaves #737 open.

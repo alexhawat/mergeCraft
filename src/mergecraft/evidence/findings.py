@@ -79,11 +79,23 @@ def load_run_findings_with_drops(
     from mergecraft.policy.review import ensure_policy_evaluated
 
     policy_findings = ensure_policy_evaluated(ctx)
+    from mergecraft.config.settings_snapshot import repo_settings_from_context
+    from mergecraft.review.round_cap import round_cap_findings_for_run
+
+    repo_settings = repo_settings_from_context(ctx)
+    cap_rows = round_cap_findings_for_run(
+        round_index=max(int(state.review_round_index or 1), 1),
+        settings=repo_settings,
+        already_posted=bool(state.review_round_cap_announced),
+    )
+    if cap_rows:
+        state.review_round_cap_announced = True
     merged = merge_findings(
         typed,
         ci_evidence_findings(state),
         list(extra or []),
         policy_findings,
+        cap_rows,
     )
     return merged, dropped
 

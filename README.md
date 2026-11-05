@@ -284,6 +284,7 @@ Everything else — install, scaffold, config, commit, PR — is unattended.
 | `mergecraft doctor` | Self-diagnosis of git, providers, analyzers, auth, config and MCP wiring |
 | `mergecraft provider status` | Roster inspection — what CI will run, credential and wiring state, optional `--github` secret check |
 | [`docs/mcp.md`](docs/mcp.md) | **Public MCP install** — six review-only tools over stdio for Cursor, Claude Desktop, Codex, Gemini CLI, OpenCode |
+| [`docs/agents-sdk.md`](docs/agents-sdk.md) | **OpenAI Agents SDK** optional extra — embed `review_agent` as a review step (`pip install mergecraft-action[agents]`) |
 | [`docs/opencode.md`](docs/opencode.md) · [`integrations/opencode/`](integrations/opencode/) | OpenCode integration — `/mergecraft/*` commands, read-only reviewer subagent, V2 MCP wiring, JEV + Logfire |
 | `mergecraft mcp serve` | The reviewer's **in-run** MCP tool surface at `/mcp/reviewer`, Bearer-authenticated (not the public stdio profile) |
 

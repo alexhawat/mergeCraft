@@ -72,6 +72,11 @@ mergecraft = "mergecraft.cli.app:main"
 harbor = [
     "harbor==0.20.0; python_version >= '3.12'",
 ]
+# Optional in-process OpenAI Agents SDK integration.
+agents = [
+    "openai-agents==0.24.0",
+    "openai==3.46.0",
+]
 # W8 / D6 — `tracing` extra behind which `logfire` and `opentelemetry-*` live.
 # Imports are lazy and guarded inside the sink factory; `make ci-resume` passes
 # with these uninstalled (convention 5). Exact pins + `uv.lock` committed
@@ -231,6 +236,11 @@ plugins = ["pydantic.mypy"]
 module = ["mergecraft.mcp.*"]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+module = ["mergecraft.agents_sdk.*"]
+disallow_untyped_decorators = false
 warn_return_any = false
 
 [[tool.mypy.overrides]]

@@ -71,6 +71,7 @@ larger than 10,000 files / 64 MiB run normally with result caching skipped.
 | `mergecraft describe` | Print a PR title, summary, walkthrough, risk areas, and testing notes. |
 | `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, and MCP wiring. |
 | `mergecraft eval add` | Add a case to the bank. |
+| `mergecraft eval add-incident` | Add an incident-derived structural case (postmortem PR + revert/fix) (#1163). |
 | `mergecraft eval adjudicate <baseline>` | Record who adjudicated one baseline label, enforcing repo policy. |
 | `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |
 | `mergecraft eval convergence` | Score multi-round convergence scenarios and write a versioned result set (RC6). |
@@ -82,6 +83,7 @@ larger than 10,000 files / 64 MiB run normally with result caching skipped.
 | `mergecraft eval publish-benchmark` | Validate two saved provider runs and write an auditable report. |
 | `mergecraft eval replay <case-id>` | Replay a case and report the diff. |
 | `mergecraft eval replay-bank` | Replay the eval bank and write a versioned benchmark result set (#140). |
+| `mergecraft eval rescore-delta` | Compare two structural replay result sets (base vs head) (#1164, advisory). |
 | `mergecraft eval score <actual> <expected>` | Score review findings against a frozen benchmark baseline. |
 | `mergecraft eval trajectory-gate` | Compare a candidate trajectory report against a frozen baseline. |
 | `mergecraft eval trajectory-score --labels LABELS` | Score the deterministic trajectory auditor against frozen labels. |
@@ -91,6 +93,7 @@ larger than 10,000 files / 64 MiB run normally with result caching skipped.
 | `mergecraft findings carryover --pr N` | File one issue per unresolved mergeCraft finding. Dry run unless `--apply`. |
 | `mergecraft findings export --pr N` | Print the findings a merge would bury. Never writes anything. |
 | `mergecraft findings ledger --pr N` | Print the open-PR finding ledger from formal reviews. Never writes. |
+| `mergecraft findings outcomes --pr N` | Advisory human outcomes for published mergeCraft findings (#1165). |
 | `mergecraft gha token` | Acquire a GitHub App installation token, or revoke it with `--post`. |
 | `mergecraft health run` | Emit JSON health status for the running mergeCraft installation. |
 | `mergecraft init` | Scaffold `.mergecraft/config.yaml` and an example workflow (local, no API). |
@@ -222,6 +225,7 @@ not part of the operator contract.
 | `MERGECRAFT_LOG_LEVEL` | Loguru level name (`TRACE` through `CRITICAL`) | unset — `INFO`, or `DEBUG` under `ACTIONS_STEP_DEBUG` / `--verbose` | CLI logging |
 | `MERGECRAFT_MAX_DIFF_LINES` | Diff line ceiling before scope reduction is recorded | `50000` | review diff loading |
 | `MERGECRAFT_MODEL` | Model slug override; wins over the config `models:` list | unset — the first configured model | model resolution |
+| `MERGECRAFT_AGENTS_SDK_MODEL` | Default `provider/model` slug for `mergecraft.agents_sdk.review_agent` when using the optional `[agents]` extra | unset — `gpt-4o-mini` with `OPENAI_API_KEY`, or `opencode-go/deepseek-v4.1-flash` with `OPENCODE_GO_API_KEY` | OpenAI Agents SDK integration |
 | `MERGECRAFT_NONINTERACTIVE` | Truthy disables interactive prompts | unset — prompts when stdin is a TTY | CLI interactive commands |
 | `MERGECRAFT_OPENCODE_OTEL_PLUGIN` | Package path or spec of [opencode-plugin-otel-v2](https://github.com/alexhawat/opencode-plugin-otel-v2); when set and tracing exports to `otel` or `logfire`, OpenCode 2.x runs emit per-LLM-step and per-tool spans into the review's trace | unset — not loaded | OpenCode tracing |
 | `MERGECRAFT_OTEL_ENDPOINT` | OTLP/HTTP endpoint for the `otel` tracing sink; setting it implies OTLP when no destination is chosen | unset | tracing sink resolution |

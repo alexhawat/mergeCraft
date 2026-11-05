@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Incident-derived eval cases: ``mergecraft eval add-incident`` seeds the structural
+  bank from an incident PR plus revert/fix-forward PR with a confirmed bug location
+  and mandatory provenance (fail-closed without either) (#1163).
+- Advisory base-vs-head structural replay delta: ``mergecraft eval rescore-delta``,
+  ``make eval-rescore-delta``, and a CI job on PRs that touch the reviewer surface
+  (#1164). Not live detection scores; nothing added to the landing README (RD4).
+- Deterministic human outcome tracking for published mergeCraft findings
+  (fixed/rejected/intentional/ignored) via ``mergecraft findings outcomes`` — advisory
+  only, never moves the verdict (#1165).
+- Configurable review round cap ``review.maxReviewRounds`` (default 3): after the cap,
+  mergeCraft injects one Major finding asking the author to reconsider the approach;
+  the cap never auto-approves (#1166).
+
 - `review.fileGroupFanout` splits a large pull request into bounded read-only
   file groups and has mergeCraft dispatch one reviewer per group, so one
   reviewer does not have to read a 20-file or 800-line diff serially (#1031).

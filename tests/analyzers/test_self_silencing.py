@@ -343,6 +343,35 @@ def test_pure_tightening_of_mergecraft_config_is_not_reported_as_loosening(tmp_p
     assert all(finding.severity in {"Trivial"} for finding in _scan(repo, diff))
 
 
+@pytest.mark.parametrize(
+    ("before", "after", "loosens"),
+    [
+        ("maxReviewRounds: 3", "maxReviewRounds: 0", True),
+        ("maxReviewRounds: 3", "maxReviewRounds: 99", True),
+        ("{}", "maxReviewRounds: 0", True),
+        ("maxReviewRounds: 1", "{}", True),
+        ("maxReviewRounds: 3", 'maxReviewRounds: "99"', True),
+        ("max_review_rounds: 3", "max_review_rounds: 0", True),
+        ("maxReviewRounds: 3", "maxReviewRounds: 2", False),
+        ("maxReviewRounds: 0", "maxReviewRounds: 3", False),
+        ("maxReviewRounds: 99", "{}", False),
+        ("maxReviewRounds: 3", 'maxReviewRounds: "3"', False),
+    ],
+)
+def test_review_round_cap_loosening_is_reported(
+    tmp_path: Path, before: str, after: str, loosens: bool
+) -> None:
+    repo, diff = _commit_change(
+        tmp_path,
+        {".mergecraft/config.yaml": f"review:\n  {before}\n"},
+        {".mergecraft/config.yaml": f"review:\n  {after}\n"},
+    )
+    findings = [f for f in _scan(repo, diff) if "review.maxReviewRounds" in f.message]
+    assert len(findings) == int(loosens)
+    if loosens:
+        assert findings[0].severity == "Major"
+
+
 def test_ruff_ignore_and_excluded_paths_are_reported_with_the_specific_change(
     tmp_path: Path,
 ) -> None:

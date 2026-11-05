@@ -483,6 +483,16 @@ class ReviewSettings(BaseModel):
         default_factory=RoundBudgetsSettings,
         alias="roundBudgets",
     )
+    max_review_rounds: int = Field(
+        default=3,
+        alias="maxReviewRounds",
+        ge=0,
+        description=(
+            "After this many mergeCraft review rounds on one PR, post one "
+            "'reconsider the approach' finding and keep reviewing only the "
+            "new diff. Never auto-approves because of the cap; 0 disables."
+        ),
+    )
     mcp_servers: list[dict[str, Any]] = Field(
         default_factory=list,
         alias="mcpServers",

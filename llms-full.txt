@@ -288,6 +288,7 @@ Everything else — install, scaffold, config, commit, PR — is unattended.
 | `mergecraft doctor` | Self-diagnosis of git, providers, analyzers, auth, config and MCP wiring |
 | `mergecraft provider status` | Roster inspection — what CI will run, credential and wiring state, optional `--github` secret check |
 | [`docs/mcp.md`](docs/mcp.md) | **Public MCP install** — six review-only tools over stdio for Cursor, Claude Desktop, Codex, Gemini CLI, OpenCode |
+| [`docs/agents-sdk.md`](docs/agents-sdk.md) | **OpenAI Agents SDK** optional extra — embed `review_agent` as a review step (`pip install mergecraft-action[agents]`) |
 | [`docs/opencode.md`](docs/opencode.md) · [`integrations/opencode/`](integrations/opencode/) | OpenCode integration — `/mergecraft/*` commands, read-only reviewer subagent, V2 MCP wiring, JEV + Logfire |
 | `mergecraft mcp serve` | The reviewer's **in-run** MCP tool surface at `/mcp/reviewer`, Bearer-authenticated (not the public stdio profile) |
 
@@ -1957,6 +1958,11 @@ of which only ever fed it tool output. The effect was that the noisiest source �
 model's own findings — was the one source that never got checked. `verify_agent_findings` and
 `record_finding_verdict` close that, on the same terms as the analyzer path: severity gate,
 withdrawn-memory skip, and a dispatch cap.
+
+**Review round cap (`review.maxReviewRounds`, default 3).** After this many mergeCraft-authored
+review rounds on one PR, the run injects one Major finding asking the author to reconsider the
+approach, then continues on the incremental diff only. The cap never auto-approves; it is not
+a substitute for human judgment.
 
 **The cap is `review.verificationBudget`, not the inline budget.** Verification protects what
 gets published, so it is its own control, **independent of inline placement**: the
