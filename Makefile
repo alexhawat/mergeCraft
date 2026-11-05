@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 
 UV ?= $(shell command -v uv 2>/dev/null || echo $(HOME)/.local/bin/uv)
+UV_SYNC_FLAGS ?=
 RUFF ?= $(UV) run ruff
 # Non-blocking advisory families (#146 / W8) — surfaced in CI via lint-ruff-advisory.
 RUFF_ADVISORY_FAMILIES ?= BLE,PTH,PERF,C901
@@ -42,7 +43,7 @@ ensure-uv: ## Install uv on PATH when missing
 	@test -x "$(HOME)/.local/bin/uv" || (echo "uv install failed" >&2; exit 1)
 
 setup: ensure-uv ## Fresh checkout: sync deps and pre-commit hooks
-	$(UV) sync --extra dev $(if $(MERGECRAFT_UV_EXTRAS),--extra $(MERGECRAFT_UV_EXTRAS),)
+	$(UV) sync $(UV_SYNC_FLAGS) --extra dev $(if $(MERGECRAFT_UV_EXTRAS),--extra $(MERGECRAFT_UV_EXTRAS),)
 	@$(MAKE) setup-local-analyzers
 	@if [ -n "$${CI}$${MERGECRAFT_SKIP_PRECOMMIT}" ]; then \
 	  echo "skipping pre-commit install (CI / MERGECRAFT_SKIP_PRECOMMIT)"; \
