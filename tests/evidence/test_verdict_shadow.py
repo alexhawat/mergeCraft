@@ -271,6 +271,32 @@ def test_shadow_row_carries_diagnostic_code(tmp_path: Path) -> None:
     )
 
 
+def test_a_driver_exit_after_an_accepted_verdict_is_not_a_provider_failure() -> None:
+    """#1132 — the verdict was accepted; the CLI's later non-zero exit is not the result."""
+    from mergecraft.evidence.shadow import predict_verdict_protocol
+    from mergecraft.mcp.verdict import VerdictDiagnostic
+
+    result = AgentResult(
+        success=False,
+        error="opencode failed (exit 1)",
+        terminal_submission_received=True,
+        terminal_submission_id="review-5757058145",
+    )
+
+    prediction = predict_verdict_protocol(result, mode="Review")
+
+    assert _as_outcome(_prediction_outcome(prediction)) is RunOutcome.passed
+    assert str(_prediction_diagnostic(prediction)) != VerdictDiagnostic.provider_failure.value
+
+    # Without an accepted verdict the same exit is still the provider's failure.
+    bare = predict_verdict_protocol(AgentResult(success=False, error="boom"), mode="Review")
+    assert _as_outcome(_prediction_outcome(bare)) is RunOutcome.failed
+    assert str(_prediction_diagnostic(bare)) in {
+        VerdictDiagnostic.provider_failure,
+        VerdictDiagnostic.provider_failure.value,
+    }
+
+
 def test_enforce_mode_changes_the_outcome() -> None:
     """With enforce on, the VP2 ``_classify_outcome`` branch fires.
 
