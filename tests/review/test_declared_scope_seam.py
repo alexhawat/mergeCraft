@@ -246,3 +246,98 @@ async def test_the_declaration_is_recorded_before_the_fast_path_gate(
     assert isinstance(outcome, main_mod.SkipAgentReview)
     assert len(seen) == 1
     assert getattr(seen[0], "globs", None) == ("src/mergecraft/requirements/**",)
+
+
+# ── comment-triggered runs: the comment is never a source ────────────────────
+
+_COMMENT_SCOPE = "@mergecraft review\n\nScope paths:\n- **/*.py\n- src/**\n"
+
+
+def _comment_ctx(gh_event: dict[str, Any], trigger: str, comment: str) -> Any:
+    """A comment-triggered run: the resolved payload's body is the comment, as in production."""
+    state = init_tool_state(owner="acme", name="demo", dir=".")
+    setattr(state, "linked_issues", _linked_issues(()))  # noqa: B010
+    resolved = ResolvedPayload(
+        event=PayloadEvent(trigger=trigger, issue_number=3, is_pr=True, body=comment)
+    )
+    return SimpleNamespace(
+        settings=RepoSettings(),
+        tool_state=state,
+        payload={"event": {"trigger": trigger, "issue_number": 3, "is_pr": True, "body": comment}},
+        ctx_payload=resolved,
+        tool_context=SimpleNamespace(
+            payload=resolved,
+            repo=SimpleNamespace(owner="acme", name="demo"),
+            tool_state=state,
+        ),
+        gh_event=gh_event,
+        pr_number=3,
+        setup_hook_failure=None,
+        settings_snapshot_operator_owned=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_issue_comment_run_reads_the_pull_request_body_not_the_comment(
+    main_mod: Any,
+) -> None:
+    event = {
+        "issue": {"number": 3, "body": _BODY_SCOPE, "pull_request": {"url": "https://x"}},
+        "comment": {"body": _COMMENT_SCOPE},
+    }
+    ctx = _comment_ctx(event, "issue_comment_created", _COMMENT_SCOPE)
+
+    await _record(main_mod, ctx)
+
+    declaration = _declaration(ctx)
+    assert declaration.globs == ("src/mergecraft/requirements/**",)
+    assert declaration.source_ref == "pr_description"
+
+
+@pytest.mark.asyncio
+async def test_a_review_comment_run_reads_the_pull_request_body_not_the_comment(
+    main_mod: Any,
+) -> None:
+    event = {
+        "pull_request": {"number": 3, "body": _BODY_SCOPE},
+        "comment": {"body": _COMMENT_SCOPE},
+    }
+    ctx = _comment_ctx(event, "pull_request_review_comment_created", _COMMENT_SCOPE)
+
+    await _record(main_mod, ctx)
+
+    declaration = _declaration(ctx)
+    assert declaration.globs == ("src/mergecraft/requirements/**",)
+    assert declaration.source_ref == "pr_description"
+
+
+@pytest.mark.asyncio
+async def test_a_pr_comment_run_records_the_declaration_in_the_issue_body(main_mod: Any) -> None:
+    """The ``issue.body`` of a comment on a pull request is the pull request's own body."""
+    event = {
+        "issue": {"number": 3, "body": _BODY_SCOPE, "pull_request": {"url": "https://x"}},
+        "comment": {"body": "@mergecraft review"},
+    }
+    ctx = _comment_ctx(event, "issue_comment_created", "@mergecraft review")
+
+    await _record(main_mod, ctx)
+
+    declaration = _declaration(ctx)
+    assert declaration.declared is True
+    assert declaration.globs == ("src/mergecraft/requirements/**",)
+    assert declaration.source_ref == "pr_description"
+
+
+@pytest.mark.asyncio
+async def test_a_block_only_in_the_comment_declares_nothing(main_mod: Any) -> None:
+    event = {
+        "issue": {"number": 3, "body": _NO_SCOPE, "pull_request": {"url": "https://x"}},
+        "comment": {"body": _COMMENT_SCOPE},
+    }
+    ctx = _comment_ctx(event, "issue_comment_created", _COMMENT_SCOPE)
+
+    await _record(main_mod, ctx)
+
+    declaration = _declaration(ctx)
+    assert declaration.declared is False
+    assert declaration.globs == ()

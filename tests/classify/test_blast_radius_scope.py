@@ -808,3 +808,93 @@ def test_the_changelog_says_an_undeclared_scope_cannot_reach_eligible() -> None:
     bullets = [chunk for chunk in changed.split("\n- ") if "eligible" in chunk]
 
     assert any("scope" in chunk.casefold() for chunk in bullets)
+
+
+def test_the_changelog_says_changed_paths_predicates_now_cross_directories() -> None:
+    text = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    unreleased = text.split("## [Unreleased]", 1)[1].split("\n## [", 1)[0]
+    bullets = [chunk for chunk in unreleased.split("\n- ") if "changed_paths matches" in chunk]
+
+    assert bullets, "no Unreleased bullet names the `changed_paths matches` predicate"
+    assert any("director" in chunk.casefold() and "**" in chunk for chunk in bullets)
+
+
+# ── the scope matcher is anchored at the repository root ─────────────────────
+
+
+@pytest.mark.parametrize(
+    ("glob", "outside"),
+    [("tests/**", "src/tests/x.py"), ("README.md", "docs/README.md"), ("*.md", "docs/a.md")],
+    ids=["tree", "root-file", "suffix-only"],
+)
+def test_a_glob_does_not_match_a_deeper_path_with_the_same_tail(glob: str, outside: str) -> None:
+    result = _classify(_c([outside], _scope([glob])))
+
+    assert outside in _reason(result, "scope.drift").message
+    assert _gates(result)["scope"] is False
+
+
+# ── hostile globs from the body never stall the run ──────────────────────────
+
+_E2E_PROBE = """
+import json, sys, time
+from mergecraft.classify.blast_radius import classify_blast_radius
+from mergecraft.requirements.ingest import parse_scope_paths
+body = sys.stdin.read()
+paths = ["/".join(["d"] * 29) + "/f.md", "x" * 60 + "/" + "a" * 60]
+start = time.perf_counter()
+declaration = parse_scope_paths(body)
+signal = {
+    "declared": declaration.declared,
+    "globs": list(declaration.globs),
+    "invalid": bool(declaration.rejected),
+}
+result = classify_blast_radius(
+    {"changed_paths": paths, "diff_stats": {"lines_added": 1, "lines_deleted": 0}, "scope": signal}
+)
+elapsed = time.perf_counter() - start
+print(json.dumps({
+    "globs": len(declaration.globs),
+    "rejected": len(declaration.rejected),
+    "codes": [reason.code for reason in result.reasons],
+    "elapsed": elapsed,
+}))
+"""
+
+
+def _hostile_globs() -> list[str]:
+    globs: list[str] = []
+    for index in range(32):
+        globs.append("**/" * (8 + index % 7) + f"zz{index}")
+        globs.append("x" * 60 + "/" + "*a" * (6 + index % 4) + f"*b{index}")
+    return globs
+
+
+def test_sixty_four_hostile_globs_parse_and_classify_in_under_a_second() -> None:
+    import json
+    import subprocess
+    import sys
+
+    globs = _hostile_globs()
+    assert len(globs) == 64
+    assert all(len(glob) <= 200 for glob in globs)
+    body = "Fixes the thing.\n\nScope paths:\n" + "".join(f"- {glob}\n" for glob in globs)
+
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-I", "-c", _E2E_PROBE],
+            input=body,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("parse + classify over 64 hostile globs did not finish in 30 s")
+    assert completed.returncode == 0, completed.stderr[-2000:]
+    outcome = json.loads(completed.stdout.strip().splitlines()[-1])
+
+    assert outcome["globs"] == 64
+    assert outcome["rejected"] == 0
+    assert "scope.drift" in outcome["codes"]
+    assert outcome["elapsed"] < 1.0, outcome

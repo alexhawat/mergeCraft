@@ -359,3 +359,51 @@ def test_the_scope_globs_only_appear_inside_the_nonce_fence(ingest: Any) -> None
     end = fenced.index(_FENCE_CLOSE)
     assert fenced.count(marker) == 1
     assert start < fenced.index(marker) < end
+
+
+# ── hidden and quoted blocks are not declarations ────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Visible text.\n<!--\nScope paths:\n- src/**\n-->\n",
+        "Visible text.\n\n<!-- Scope paths:\n- src/**\n-->\n",
+        "Example:\n```markdown\nScope paths:\n- src/**\n```\n",
+        "Example:\n~~~\nScope paths:\n- src/**\n~~~\n",
+    ],
+    ids=["html-comment", "html-comment-same-line", "backtick-fence", "tilde-fence"],
+)
+def test_a_block_inside_an_html_comment_or_a_code_fence_is_not_honoured(
+    ingest: Any, body: str
+) -> None:
+    declaration = _parse(ingest, body)
+
+    assert declaration.declared is False
+    assert declaration.globs == ()
+
+
+@pytest.mark.parametrize(
+    "hidden",
+    [
+        "<!--\nScope paths:\n- **/*.py\n-->\n",
+        "```\nScope paths:\n- **/*.py\n```\n",
+    ],
+    ids=["html-comment", "code-fence"],
+)
+def test_the_visible_block_is_the_declaration_beside_a_hidden_one(ingest: Any, hidden: str) -> None:
+    body = f"{hidden}\nScope paths:\n- docs/**\n"
+
+    declaration = _parse(ingest, body)
+
+    assert declaration.declared is True
+    assert declaration.globs == ("docs/**",)
+
+
+def test_an_unclosed_fence_does_not_swallow_the_next_heading(ingest: Any) -> None:
+    body = "Scope paths:\n```\ndocs/**\n## Testing\nsrc/**\n"
+
+    declaration = _parse(ingest, body)
+
+    assert declaration.declared is True
+    assert declaration.globs == ("docs/**",)
