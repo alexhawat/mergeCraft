@@ -239,6 +239,11 @@ disallow_incomplete_defs = false
 warn_return_any = false
 
 [[tool.mypy.overrides]]
+module = ["mergecraft.agents_sdk.*"]
+disallow_untyped_decorators = false
+warn_return_any = false
+
+[[tool.mypy.overrides]]
 module = ["mergecraft.yes.*", "mergecraft.yes"]
 disallow_untyped_decorators = false
 warn_return_any = false
