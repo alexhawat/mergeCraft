@@ -112,4 +112,4 @@ Optional HTTP public (`--role public` without `--transport stdio`) also requires
   event payload, never the comment body.
 - **Model skipped** — no credential for that provider; run `mergecraft models list`.
 - **Full docs:** [`README.md`](../../README.md), [`AGENTS-mergecraft.md`](../../AGENTS-mergecraft.md),
-  [`REVIEW-CHECKS.md`](../../REVIEW-CHECKS.md), [`docs/`](../../docs/).
+  [`docs/REVIEW-CHECKS.md`](../../docs/REVIEW-CHECKS.md), [`docs/`](../../docs/).

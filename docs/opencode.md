@@ -101,7 +101,7 @@ rm -rf /tmp/mergecraft-src
 Two subagents ship:
 
 - **`mergecraft/reviewer`** — read-only (`edit` and `shell` denied). Grades the
-  diff against the connected MCP policy, `REVIEW-CHECKS.md` when present, then a
+  diff against the connected MCP policy, `docs/REVIEW-CHECKS.md` when present, then a
   built-in three-axis rubric. Emits findings and exactly one verdict.
 - **`mergecraft/fixer`** — the only writer. Applies findings, then re-reviews
   with `mergecraft review --agent` and stops on the exit code. mergeCraft stays

@@ -80,7 +80,7 @@ if [[ ! -f "${GITHUB_WORKSPACE}/coverage-base.json" ]]; then
     if ! "${UV:-uv}" sync --extra dev --extra tracing >>"$base_measure_log" 2>&1; then
       measure_ok=false
     fi
-    # Repo-native analyzer tests (#427) require tools/node_modules/.bin; bootstrap
+    # Repo-native analyzer tests (#427) require scripts/node_modules/.bin; bootstrap
     # only runs on the PR checkout, not this detached base worktree.
     if [[ "$measure_ok" == true ]]; then
       if ! make setup-local-analyzers >>"$base_measure_log" 2>&1; then

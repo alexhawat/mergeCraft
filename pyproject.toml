@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.hooks.custom]
-path = "hatch_build.py"
+path = "scripts/hatch_build.py"
 
 [project]
 name = "mergecraft-action"
@@ -163,7 +163,7 @@ artifacts = [
 "integrations/opencode" = "mergecraft/data/opencode"
 
 [tool.hatch.build.targets.sdist]
-include = ["/src/mergecraft", "/tests", "/README.md", "/pyproject.toml", "/hatch_build.py", "/evals/corpora/recall_pass_corpus.json", "/integrations/opencode"]
+include = ["/src/mergecraft", "/tests", "/README.md", "/pyproject.toml", "/scripts/hatch_build.py", "/evals/corpora/recall_pass_corpus.json", "/integrations/opencode"]
 
 [tool.ruff]
 target-version = "py311"
@@ -201,8 +201,8 @@ ignore = [
 "tests/**" = ["T20", "RUF001", "TC001", "TC003"]
 "scripts/**" = ["T20"]
 "docker/e2e/**" = ["T20"]
-# Standalone regeneration script (uv run --with fonttools==4.63.0 python assets/brand/build_logo.py).
-"assets/brand/build_logo.py" = ["T20"]
+# Standalone regeneration script (uv run --with fonttools==4.63.0 python docs/assets/brand/build_logo.py).
+"docs/assets/brand/build_logo.py" = ["T20"]
 # Catalog prompts intentionally retain upstream emoji / typography.
 "src/mergecraft/modes.py" = ["RUF001", "TC003"]
 "src/mergecraft/modes/**" = ["RUF001", "TC003"]

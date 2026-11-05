@@ -92,7 +92,7 @@ shape carry identical meaning.
 
 ### The `[tracing]` extra in the Action image
 
-The Action runs from `Dockerfile`, which installs
+The Action runs from `docker/Dockerfile`, which installs
 `uv sync --frozen --no-dev --extra tracing`. Without that extra the sink
 factory degrades a `logfire` / `otel` sink to `NullSink` with a warning
 (`src/mergecraft/tracing/sinks.py`) — the workflow looks correctly wired and

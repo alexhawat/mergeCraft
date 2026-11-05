@@ -33,7 +33,7 @@ from mergecraft.run_outcome import RunOutcome
 from mergecraft.utils import privilege
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_DOCKERFILE = _REPO_ROOT / "Dockerfile"
+_DOCKERFILE = _REPO_ROOT / "docker/Dockerfile"
 
 
 class _FakePwnam:
@@ -359,18 +359,18 @@ def test_main_missing_agent_user_fails_closed_as_configuration_error(
 
 
 # ---------------------------------------------------------------------------
-# Dockerfile build-time assertion (D11)
+# docker/Dockerfile build-time assertion (D11)
 # ---------------------------------------------------------------------------
 
 
 def _dockerfile_run_lines(dockerfile_text: str) -> list[str]:
     """Concatenate every ``RUN`` instruction body in source order.
 
-    The Dockerfile uses line-continuation backslashes inside ``RUN``, so a
+    The docker/Dockerfile uses line-continuation backslashes inside ``RUN``, so a
     naive split-on-``\n`` will fragment the body. This walks the file once,
     tracking line continuations, and returns the joined instruction body for
     each ``RUN`` line. Comment-only lines (``#``) inside a ``RUN`` survive the
-    parse because they are not stripped by the Dockerfile parser either —
+    parse because they are not stripped by the docker/Dockerfile parser either —
     what matters for the assertion is that the **tokens** ``command``,
     ``getent``, and ``mergecraft`` appear together in at least one ``RUN``.
     """
@@ -416,6 +416,6 @@ def test_dockerfile_asserts_setpriv_and_agent_user() -> None:
         if "setpriv" in body and "mergecraft" in body and "exit 1" in body
     ]
     assert matching, (
-        "Dockerfile must contain a RUN instruction that asserts setpriv + "
+        "docker/Dockerfile must contain a RUN instruction that asserts setpriv + "
         "mergecraft user are present and exits 1 otherwise; none found."
     )

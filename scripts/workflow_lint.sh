@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Download the same SHA256-pinned actionlint + zizmor binaries the analyzers
-# image ships (Dockerfile.analyzers) and lint .github/workflows (W12.3 / #27).
+# image ships (docker/Dockerfile.analyzers) and lint .github/workflows (W12.3 / #27).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -49,7 +49,7 @@ if [[ ! -x "${ZIZMOR_BIN}" ]]; then
   tmp="${tmp:-$(mktemp -d)}"
   curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL -o "${tmp}/zizmor.tar.gz" \
     "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-${zizmor_arch}-unknown-linux-gnu.tar.gz"
-  # ARM64 digest differs from the amd64 pin in Dockerfile.analyzers — SARIF emit
+  # ARM64 digest differs from the amd64 pin in docker/Dockerfile.analyzers — SARIF emit
   # runs on ubuntu-latest amd64 only; arm64 installs trust the release HTTPS path.
   if [[ "${arch_norm}" == "amd64" ]]; then
     echo "${ZIZMOR_SHA256}  ${tmp}/zizmor.tar.gz" | sha256sum -c -
@@ -77,7 +77,7 @@ run_zizmor_sarif() {
   local out="$1"
   echo "» zizmor ${ZIZMOR_VERSION} (SARIF)"
   set +e
-  "${ZIZMOR_BIN}" --config "${ROOT}/zizmor.yml" --format sarif .github/workflows/ > "${out}"
+  "${ZIZMOR_BIN}" --config "${ROOT}/.github/zizmor.yml" --format sarif .github/workflows/ > "${out}"
   local rc=$?
   set -e
   if [[ ! -s "${out}" ]]; then
@@ -96,8 +96,8 @@ run_zizmor_human() {
   # Fail the gate on high-severity findings only. Medium/low (e.g. artipacked
   # persist-credentials suggestions, secrets-inherit on Craft preview) stay
   # visible in the log as a ratchet surface without blocking the PR. Intentional
-  # high-severity exceptions live in repo-root ``zizmor.yml``.
-  "${ZIZMOR_BIN}" --config "${ROOT}/zizmor.yml" --min-severity high .github/workflows/
+  # high-severity exceptions live in ``.github/zizmor.yml``.
+  "${ZIZMOR_BIN}" --config "${ROOT}/.github/zizmor.yml" --min-severity high .github/workflows/
 }
 
 if [[ -n "${MERGECRAFT_WORKFLOW_SARIF_DIR:-}" ]]; then

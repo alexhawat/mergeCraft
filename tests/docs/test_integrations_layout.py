@@ -49,7 +49,7 @@ def test_host_dictated_locations_did_not_move() -> None:
 
 
 def test_contributing_states_the_rule_and_the_python_split() -> None:
-    text = read_text("CONTRIBUTING.md")
+    text = read_text(".github/CONTRIBUTING.md")
     assert "`integrations/`" in text
     assert "one directory per host" in text
     assert "src/mergecraft/integrations/" in text

@@ -23,4 +23,4 @@ keyword, nothing closes the issue.
 
 > Note: code changes under `src/mergecraft/**` or `scripts/**` require a matching
 > `## [Unreleased]` entry in [`CHANGELOG.md`](../CHANGELOG.md) — see
-> [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+> [`.github/CONTRIBUTING.md`](CONTRIBUTING.md).

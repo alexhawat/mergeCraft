@@ -3,7 +3,7 @@
 
 Reads expected values from :mod:`mergecraft.review_taxonomy` and
 :mod:`mergecraft.findings.severity` at check time — never diffs
-``REVIEW-CHECKS.md`` prose.
+``docs/REVIEW-CHECKS.md`` prose.
 """
 
 from __future__ import annotations

@@ -29,8 +29,8 @@ SHELL := /bin/bash
 	tracked-markdown-check
 
 PIPELINE_D2 := docs/diagrams/pipeline.d2
-PIPELINE_LIGHT := assets/diagrams/pipeline-light.svg
-PIPELINE_DARK := assets/diagrams/pipeline-dark.svg
+PIPELINE_LIGHT := docs/assets/diagrams/pipeline-light.svg
+PIPELINE_DARK := docs/assets/diagrams/pipeline-dark.svg
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -53,9 +53,9 @@ setup: ensure-uv ## Fresh checkout: sync deps and pre-commit hooks
 	fi
 
 setup-local-analyzers: ## Install pinned repo-native analyzer npm CLIs (#427)
-	@if [ -f tools/package.json ]; then \
+	@if [ -f scripts/package.json ]; then \
 	  if command -v npm >/dev/null 2>&1; then \
-	    cd tools && npm ci --ignore-scripts --no-audit --no-fund \
+	    cd scripts && npm ci --ignore-scripts --no-audit --no-fund \
 	      || echo "warning: npm ci failed; markdownlint and jscpd will be skipped locally"; \
 	  else \
 	    echo "warning: npm not found; markdownlint and jscpd will be skipped locally"; \
@@ -71,7 +71,7 @@ lockcheck: ## Fail if uv.lock is out of date
 
 npm-lockcheck: ## Fail when npm lockfiles drift from package.json
 	@command -v npm >/dev/null 2>&1 || { echo "npm not found on PATH" >&2; exit 2; }
-	cd tools && npm ci --dry-run --ignore-scripts --no-audit --no-fund
+	cd scripts && npm ci --dry-run --ignore-scripts --no-audit --no-fund
 	cd docker/agent-clis && npm ci --dry-run --ignore-scripts --no-audit --no-fund
 
 lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + tracked-markdown + hook-pins-check + privilege-drop chown + type-ignore reasons + called-workflow permissions
@@ -313,8 +313,8 @@ diagrams-check: ## Assert committed pipeline SVGs exist and README references th
 	@test -s $(PIPELINE_D2) || (echo "missing $(PIPELINE_D2)" >&2; exit 1)
 	@test -s $(PIPELINE_LIGHT) || (echo "missing $(PIPELINE_LIGHT)" >&2; exit 1)
 	@test -s $(PIPELINE_DARK) || (echo "missing $(PIPELINE_DARK)" >&2; exit 1)
-	@grep -q 'assets/diagrams/pipeline-light.svg' README.md
-	@grep -q 'assets/diagrams/pipeline-dark.svg' README.md
+	@grep -q 'docs/assets/diagrams/pipeline-light.svg' README.md
+	@grep -q 'docs/assets/diagrams/pipeline-dark.svg' README.md
 	@if [ -n "$$MERGECRAFT_REQUIRE_D2" ]; then \
 		command -v d2 >/dev/null 2>&1 || { echo "d2 not found — install from https://d2lang.com" >&2; exit 1; }; \
 		tmp=$$(mktemp -d); \
@@ -440,7 +440,7 @@ bench-detect: ## Join structural replay + live finding-location detection (#140,
 	$(UV) run mergecraft eval bench $(BENCH_DETECT_ARGS)
 
 docker-build: ## Build action Docker image
-	docker build -t mergecraft:local -f Dockerfile .
+	docker build -t mergecraft:local -f docker/Dockerfile .
 
 clean: ## Remove caches and build artifacts
 	rm -rf .venv dist build .mypy_cache .ruff_cache .pytest_cache htmlcov coverage.xml .cache

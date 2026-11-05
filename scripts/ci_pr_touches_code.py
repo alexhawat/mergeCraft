@@ -12,7 +12,9 @@ from pathlib import PurePosixPath
 
 # Paths that may change without running the full unit/coverage/integration matrix.
 _DOCS_ONLY_PATTERNS: tuple[str, ...] = (
-    "plans/**",
+    "docs/dev/plans/**",
+    ".github/CONTRIBUTING.md",
+    ".github/CODE_OF_CONDUCT.md",
     "evals/results/**",
     "llms-full.txt",
     "llms.txt",
@@ -29,7 +31,7 @@ _NEVER_DOCS_ONLY_PREFIXES: tuple[str, ...] = (
 
 
 def _matches_docs_only(path: str) -> bool:
-    normalized = path.replace("\\", "/").lstrip("./")
+    normalized = path.replace("\\", "/").removeprefix("./")
     if not normalized:
         return False
     for prefix in _NEVER_DOCS_ONLY_PREFIXES:

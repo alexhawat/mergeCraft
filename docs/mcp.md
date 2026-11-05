@@ -239,4 +239,4 @@ Through the **public** MCP catalog, mergeCraft **will not**:
 a write tool as correct on this profile.
 
 See also: [`docs/workflows.md`](workflows.md) (trust tiers),
-[`REVIEW-CHECKS.md`](../REVIEW-CHECKS.md), [`docs/mcp-tools.md`](mcp-tools.md).
+[`docs/REVIEW-CHECKS.md`](REVIEW-CHECKS.md), [`docs/mcp-tools.md`](mcp-tools.md).

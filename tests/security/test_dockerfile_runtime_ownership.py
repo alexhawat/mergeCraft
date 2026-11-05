@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_DOCKERFILES = (_REPO_ROOT / "Dockerfile", _REPO_ROOT / "Dockerfile.analyzers")
+_DOCKERFILES = (_REPO_ROOT / "docker/Dockerfile", _REPO_ROOT / "docker/Dockerfile.analyzers")
 
 
 def _run_bodies(dockerfile_text: str) -> list[str]:
@@ -77,7 +77,7 @@ def test_agent_user_and_precompiled_bytecode_remain(dockerfile_text: str) -> Non
 
 
 def test_action_dockerfile_still_asserts_the_privilege_drop() -> None:
-    text = (_REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    text = (_REPO_ROOT / "docker/Dockerfile").read_text(encoding="utf-8")
     assert any(
         "setpriv" in body and "mergecraft" in body and "exit 1" in body
         for body in _run_bodies(text)

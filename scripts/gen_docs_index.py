@@ -95,8 +95,8 @@ def _render_index(pages: list[dict[str, Any]]) -> str:
             "",
             "## See also",
             "",
-            "- [CONTRIBUTING.md](../CONTRIBUTING.md)",
-            "- [REVIEW-CHECKS.md](../REVIEW-CHECKS.md)",
+            "- [.github/CONTRIBUTING.md](../.github/CONTRIBUTING.md)",
+            "- [docs/REVIEW-CHECKS.md](REVIEW-CHECKS.md)",
             "- [Landing README](../README.md)",
             "",
         ]

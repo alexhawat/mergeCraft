@@ -789,7 +789,7 @@ def test_the_checklist_section_says_what_fails_the_scope_gate() -> None:
 
 
 def test_review_checks_describes_the_scope_gate_under_blast_radius_lanes() -> None:
-    section = _section(_ROOT / "REVIEW-CHECKS.md", "Blast-radius merge lanes")
+    section = _section(_ROOT / "docs" / "REVIEW-CHECKS.md", "Blast-radius merge lanes")
 
     assert "Scope paths:" in section
     assert "scope.drift" in section

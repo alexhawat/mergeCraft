@@ -155,6 +155,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Consolidate container files under `docker/`, documentation and assets under `docs/`, community guidelines under `.github/`, and build/analyzer tooling under `scripts/`; preserve published Action and plugin paths (#1151).
+
 - A pull request without a declared scope can no longer reach the `eligible`
   lane (#1056). End the pull request body, or an issue it closes, with a
   `Scope paths:` block listing the globs the change is expected to touch; the

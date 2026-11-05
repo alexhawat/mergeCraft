@@ -6,16 +6,14 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 
 | Page | Audience | Purpose |
 |------|----------|---------|
+| [CONTRIBUTING](../.github/CONTRIBUTING.md) | contributor | Contributor setup, make targets, and PR expectations for mergeCraft itself. |
 | [AGENTS-mergecraft](../AGENTS-mergecraft.md) | consumer | Cross-vendor agent guidance — consumer setup and mergeCraft development rules. |
-| [CONTRIBUTING](../CONTRIBUTING.md) | contributor | Contributor setup, make targets, and PR expectations for mergeCraft itself. |
 | [Landing README](../README.md) | consumer | Product landing page — install, features, and pointers to generated reference pages. |
-| [REVIEW-CHECKS](../REVIEW-CHECKS.md) | contributor | Enumerated review checks mergeCraft applies on pull requests. |
-| [brand README](../assets/brand/README.md) | satellite | Brand SVG inventory and regeneration commands for logo assets. |
-| [diagrams README](../assets/diagrams/README.md) | satellite | Architecture diagram SVG inventory and Terrastruct diagram regeneration commands. |
 | [ANALYZERS](ANALYZERS.md) | consumer | Shipped analyzer catalog — rows generated from manifests via make catalog-check. |
 | [CONTRIBUTING-ANALYZERS](CONTRIBUTING-ANALYZERS.md) | contributor | How to add or change a catalog analyzer and keep make catalog-check green. |
 | [EXIT-CODES](EXIT-CODES.md) | consumer | Named CLI exit codes and when mergecraft returns each status. |
 | [docs README](README.md) | contributor | Generated map of every manifest row with audience and purpose. |
+| [REVIEW-CHECKS](REVIEW-CHECKS.md) | contributor | Enumerated review checks mergeCraft applies on pull requests. |
 | [REVIEW-DOCTRINE](REVIEW-DOCTRINE.md) | contributor | Review philosophy, lenses, grading, and verifier doctrine for maintainers. |
 | [THREAT-MODEL](THREAT-MODEL.md) | contributor | Threat model — egress allow-list, SSRF guards, and vulnerability gate regression surface (#362). |
 | [TRACING](TRACING.md) | contributor | Tracing sinks, retention, and Logfire/OTLP wiring for operators. |
@@ -25,6 +23,8 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [agent-roster](agent-roster.md) | consumer | Agent roster — priority slots, named agents, local overrides, multi-reviewer merge, and trust snapshot. |
 | [agents-sdk](agents-sdk.md) | consumer | OpenAI Agents SDK optional extra — review_agent helper, model config, guardrails, and example loop. |
 | [assets README](assets/README.md) | satellite | Demo capture path and rules — omit broken GIF/MP4 until a real asset exists. |
+| [brand README](assets/brand/README.md) | satellite | Brand SVG inventory and regeneration commands for logo assets. |
+| [diagrams README](assets/diagrams/README.md) | satellite | Architecture diagram SVG inventory and Terrastruct diagram regeneration commands. |
 | [authentication](authentication.md) | consumer | Provider auth, custom OpenAI-compatible gateways, and model fallback chains. |
 | [blast-radius](blast-radius.md) | contributor | Blast-radius lane semantics in the merge evidence packet. |
 | [cli-examples](cli-examples.md) | consumer | Runnable mergecraft review CLI example trees under examples/cli/. |
@@ -62,6 +62,6 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 
 ## See also
 
-- [CONTRIBUTING.md](../CONTRIBUTING.md)
-- [REVIEW-CHECKS.md](../REVIEW-CHECKS.md)
+- [.github/CONTRIBUTING.md](../.github/CONTRIBUTING.md)
+- [docs/REVIEW-CHECKS.md](REVIEW-CHECKS.md)
 - [Landing README](../README.md)

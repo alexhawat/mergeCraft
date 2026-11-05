@@ -19,9 +19,9 @@ on:
   push:
     branches: [main, pre-0.0.1]
     paths:
-      - Dockerfile
-      - Dockerfile.analyzers
-      - docker-entrypoint.sh
+      - docker/Dockerfile
+      - docker/Dockerfile.analyzers
+      - docker/docker-entrypoint.sh
       - pyproject.toml
       - uv.lock
       - src/**
@@ -49,7 +49,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: Dockerfile
+          file: docker/Dockerfile
           push: false
           load: true
           tags: mergecraft:ci
@@ -59,7 +59,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: Dockerfile.analyzers
+          file: docker/Dockerfile.analyzers
           push: false
           load: true
           tags: mergecraft-analyzers:ci

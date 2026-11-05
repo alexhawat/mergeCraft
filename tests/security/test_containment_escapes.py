@@ -142,7 +142,7 @@ def test_safe_directory_wildcard_absent(shell: str, push: str) -> None:
     Parametrized over the full ``shell x push`` matrix: a wildcard
     ``safe.directory`` undermines containment in every cell.
     """
-    text = (_REPO_ROOT / "docker-entrypoint.sh").read_text(encoding="utf-8")
+    text = (_REPO_ROOT / "docker/docker-entrypoint.sh").read_text(encoding="utf-8")
     wildcards = [m.group(0) for m in re.finditer(r"safe\.directory\s+['\"]?\*['\"]?", text)]
     assert not wildcards, (
         f"wildcard safe.directory entries under shell={shell} push={push}: {wildcards}"

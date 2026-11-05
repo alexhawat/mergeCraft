@@ -670,7 +670,7 @@ jobs:
         # against bugs that no longer existed. `make action-pin-check` detects this
         # correctly but is wired into no gate — see #532, which fixes the guard.
         # b34e9f25 was the pre-0.0.1 tip promoted by #533; it carried the
-        # Dockerfile `--extra tracing` line and the lane A hardening from #519.
+        # docker/Dockerfile `--extra tracing` line and the lane A hardening from #519.
         # 2026-08-28 (eleventh bump, PR #546): re-bumped to b3638ea7 so the
         # reviewer can authenticate at all. Every rung at b34e9f25 brokered the
         # GitHub token to git as `Authorization: Bearer`, which GitHub's git
@@ -981,7 +981,7 @@ jobs:
         # against bugs that no longer existed. `make action-pin-check` detects this
         # correctly but is wired into no gate — see #532, which fixes the guard.
         # b34e9f25 was the pre-0.0.1 tip promoted by #533; it carried the
-        # Dockerfile `--extra tracing` line and the lane A hardening from #519.
+        # docker/Dockerfile `--extra tracing` line and the lane A hardening from #519.
         # 2026-08-28 (eleventh bump, PR #546): re-bumped to b3638ea7 so the
         # reviewer can authenticate at all. Every rung at b34e9f25 brokered the
         # GitHub token to git as `Authorization: Bearer`, which GitHub's git

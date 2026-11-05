@@ -241,25 +241,25 @@ pages:
     generator: null
     purpose: Two-axis trust policy — execution vs authority, selfReview levels, mergecraft-approve.yml, base snapshot rule.
 
-  - path: assets/diagrams/README.md
+  - path: docs/assets/diagrams/README.md
     audience: satellite
     template: satellite
     generator: null
     purpose: Architecture diagram SVG inventory and Terrastruct diagram regeneration commands.
 
-  - path: assets/brand/README.md
+  - path: docs/assets/brand/README.md
     audience: satellite
     template: satellite
     generator: null
     purpose: Brand SVG inventory and regeneration commands for logo assets.
 
-  - path: CONTRIBUTING.md
+  - path: .github/CONTRIBUTING.md
     audience: contributor
     template: contributor
     generator: null
     purpose: Contributor setup, make targets, and PR expectations for mergeCraft itself.
 
-  - path: REVIEW-CHECKS.md
+  - path: docs/REVIEW-CHECKS.md
     audience: contributor
     template: contributor
     generator: null
