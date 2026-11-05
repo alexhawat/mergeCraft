@@ -32,4 +32,4 @@ runs:
         MERGECRAFT_SKIP_PRECOMMIT: "1"
       run: |
         export PATH="$(dirname "$(command -v uv)"):$PATH"
-        make setup UV="$(command -v uv)"
+        make setup UV="$(command -v uv)" UV_SYNC_FLAGS=--locked
