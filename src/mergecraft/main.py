@@ -1243,8 +1243,46 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     # and the MCP-token client is installed regardless.
     await _close_superseded_scm(ctx.scm)
     ctx.scm = create_github_scm(token_ref.mcp_token, client=GitHubClient(token_ref.mcp_token))
+    await _read_linked_issues(ctx)
 
     return ctx
+
+
+async def _read_linked_issues(ctx: RunContext) -> None:
+    """Record the issues this pull request closes, with their authors, once, at run start.
+
+    The ``requirements`` policy evidence producer maps their acceptance criteria
+    against the diff and names their authors. A run without a pull request reads
+    nothing and leaves ``ToolState.linked_issues`` at ``None``. A read that fails,
+    is malformed or spans more than one page *writes* ``None`` ("not read"), so the
+    evidence stays absent rather than treating the pull request as closing nothing.
+    """
+    tool_state = ctx.tool_state
+    run_context = ctx.run_context
+    if tool_state is None or run_context is None or ctx.pr_number is None or ctx.scm is None:
+        return
+    client = github_client_from_scm(ctx.scm)
+    if client is None:
+        tool_state.linked_issues = None
+        return
+    try:
+        issues = await client.closing_issues(
+            run_context.repo.owner, run_context.repo.name, int(ctx.pr_number)
+        )
+    except Exception as exc:  # an advisory read: a failure must never fail the run
+        logger.warning(
+            "linked issues of PR #{} could not be read; requirements evidence stays absent: {}",
+            ctx.pr_number,
+            exc,
+        )
+        tool_state.linked_issues = None
+        return
+    if issues is None:
+        logger.warning(
+            "linked issues of PR #{} were not fully read; requirements evidence stays absent",
+            ctx.pr_number,
+        )
+    tool_state.linked_issues = issues
 
 
 def _stamp_requested_model(ctx: RunContext, payload_model: object) -> None:

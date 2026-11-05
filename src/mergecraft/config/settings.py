@@ -485,6 +485,119 @@ class ReviewSettings(BaseModel):
     )
 
 
+# Evidence keys a repository may declare a proof for under ``policy.evidence``.
+# ``requirements`` and ``xrepo`` have their own in-run producers and take no
+# declaration; any other key has no producer at all.
+DECLARABLE_EVIDENCE_KEYS: Final[frozenset[str]] = frozenset(
+    {"health_check", "rollback_plan", "contract_schema"}
+)
+
+# The Actions app posts the check runs of ``pull_request`` workflows, whose job
+# names come from the head ref the pull request author controls.
+_REFUSED_EVIDENCE_APPS: Final[frozenset[str]] = frozenset({"github-actions"})
+
+
+class CheckRunProof(BaseModel):
+    """``policy.evidence.<key>.checkRun``: a check run that proves an evidence key.
+
+    The run counts only when it is completed with conclusion ``success``, carries
+    exactly ``name``, is bound to the reviewed head commit and was posted by a
+    GitHub App whose slug is in ``trustedApps``. ``github-actions`` is refused: the
+    job names in a ``pull_request`` workflow come from the head ref, which the pull
+    request author controls.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    name: str = Field(min_length=1)
+    trusted_apps: list[str] = Field(min_length=1, alias="trustedApps")
+
+    @field_validator("trusted_apps")
+    @classmethod
+    def _refuse_actions_app(cls, value: list[str]) -> list[str]:
+        refused = sorted({app for app in value if app.strip().lower() in _REFUSED_EVIDENCE_APPS})
+        if refused:
+            msg = (
+                "github-actions cannot be a trusted App for policy evidence: a "
+                "pull_request workflow names its own jobs from the head ref, so its "
+                f"check runs prove nothing about the pull request (got {', '.join(refused)})"
+            )
+            raise ValueError(msg)
+        return value
+
+
+class ArtifactProof(BaseModel):
+    """``policy.evidence.<key>.artifact``: a workflow artifact holding a proof document.
+
+    ``workflow`` is the repo-relative workflow file (``.github/workflows/…``) that is
+    the only allowed uploader. The artifact counts only when a run of exactly that
+    file, from this repository (never a fork), completed with ``success`` on the
+    reviewed head commit, the pull request does not change that file, and the
+    artifact holds one ``policy-evidence.json`` member of at most 64 KiB that names
+    this key and that commit with ``status: ok``.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    name: str = Field(min_length=1)
+    workflow: str = Field(min_length=1)
+
+    @field_validator("workflow")
+    @classmethod
+    def _repo_relative(cls, value: str) -> str:
+        path = value.strip().removeprefix("./")
+        if not path or path.startswith("/") or ".." in path.split("/"):
+            msg = f"workflow must be a repo-relative workflow file path, got {value!r}"
+            raise ValueError(msg)
+        return path
+
+
+class EvidenceProducerSettings(BaseModel):
+    """One ``policy.evidence.<key>`` declaration: exactly one of ``checkRun`` or ``artifact``."""
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    check_run: CheckRunProof | None = Field(default=None, alias="checkRun")
+    artifact: ArtifactProof | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_proof(self) -> EvidenceProducerSettings:
+        if (self.check_run is None) == (self.artifact is None):
+            msg = "declare exactly one proof: either checkRun or artifact"
+            raise ValueError(msg)
+        return self
+
+
+class PolicySettings(BaseModel):
+    """``policy``: how a repository proves the evidence its policy rules require.
+
+    ``evidence`` maps an evidence key (``health_check``, ``rollback_plan``,
+    ``contract_schema``) to the proof that satisfies it. Declarations are read from
+    the base side, like the policy rules: the operator-owned settings snapshot, else
+    ``.mergecraft/config.yaml`` at the base commit, never the pull request's own
+    configuration; see ``docs/policy-evidence.md``.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    evidence: dict[str, EvidenceProducerSettings] = Field(default_factory=dict)
+
+    @field_validator("evidence")
+    @classmethod
+    def _known_keys(
+        cls, value: dict[str, EvidenceProducerSettings]
+    ) -> dict[str, EvidenceProducerSettings]:
+        unknown = sorted(set(value) - DECLARABLE_EVIDENCE_KEYS)
+        if unknown:
+            allowed = ", ".join(sorted(DECLARABLE_EVIDENCE_KEYS))
+            msg = (
+                f"no declared producer exists for {', '.join(unknown)}; "
+                f"policy.evidence accepts {allowed}"
+            )
+            raise ValueError(msg)
+        return value
+
+
 # D5 / D9 / D15 — `tracing` block on `RepoSettings`. Additive-only, default off.
 # The block is opt-in: a repo that does not declare one sees identical behaviour,
 # identical performance, and zero egress (convention 9). See docs/TRACING.md.
@@ -983,6 +1096,8 @@ class RepoSettings(BaseModel):
     # to ``shadow`` (D12). The override is layered on top of the default
     # policy at the gate; a mis-spelled value is rejected there.
     gates: GatesSettings = Field(default_factory=GatesSettings, alias="gates")
+    # How the evidence policy rules require is proved (base-side only).
+    policy: PolicySettings = Field(default_factory=PolicySettings)
     trust: TrustSettings = Field(default_factory=TrustSettings)
     env_allowlist: str | None = Field(default=None, alias="envAllowlist")
     # Extra GitHub logins (comma-separated) permitted to invoke mergeCraft by

@@ -103,6 +103,12 @@ pages:
     generator: null
     purpose: Blast-radius lane semantics in the merge evidence packet.
 
+  - path: docs/policy-evidence.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Where each policy evidence key comes from, why a pull request cannot forge it, and the policy.evidence config.
+
   - path: docs/compatibility-matrix.md
     audience: contributor
     template: contributor
