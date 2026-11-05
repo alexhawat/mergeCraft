@@ -1108,13 +1108,13 @@ def _annotate_review_round(
     result: dict[str, Any],
     *,
     round_index: int,
-    repo_root: Path,
+    ctx: ToolContext,
 ) -> None:
     """Expose round index and cap metadata for the reviewing agent (#1166)."""
-    from mergecraft.config.settings import load_repo_settings
+    from mergecraft.config.settings_snapshot import repo_settings_from_context
     from mergecraft.review.round_cap import max_review_rounds, review_round_cap_exceeded
 
-    settings = load_repo_settings(root=repo_root, load_learnings_files=False)
+    settings = repo_settings_from_context(ctx)
     cap = max_review_rounds(settings)
     result["reviewRoundIndex"] = round_index
     result["maxReviewRounds"] = cap
@@ -1279,7 +1279,7 @@ def checkout_pr_tool(ctx: ToolContext):
             _annotate_review_round(
                 result,
                 round_index=round_index,
-                repo_root=Path(primary_repo_state(ctx.tool_state).dir or cwd),
+                ctx=ctx,
             )
 
             await hydrate_review_context(
@@ -1533,7 +1533,7 @@ def checkout_pr_tool(ctx: ToolContext):
         _annotate_review_round(
             result,
             round_index=round_index,
-            repo_root=Path(primary_repo_state(ctx.tool_state).dir or cwd),
+            ctx=ctx,
         )
         logger.info("checked out PR #{} -> {}", pull_number, local_branch)
         from mergecraft.mcp.review_context import hydrate_review_context

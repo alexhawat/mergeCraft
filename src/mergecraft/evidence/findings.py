@@ -79,14 +79,10 @@ def load_run_findings_with_drops(
     from mergecraft.policy.review import ensure_policy_evaluated
 
     policy_findings = ensure_policy_evaluated(ctx)
-    from pathlib import Path
-
-    from mergecraft.config.settings import load_repo_settings
-    from mergecraft.mcp.tool_state import primary_repo_state
+    from mergecraft.config.settings_snapshot import repo_settings_from_context
     from mergecraft.review.round_cap import round_cap_findings_for_run
 
-    repo_root = Path(primary_repo_state(state).dir or Path.cwd())
-    repo_settings = load_repo_settings(root=repo_root, load_learnings_files=False)
+    repo_settings = repo_settings_from_context(ctx)
     cap_rows = round_cap_findings_for_run(
         round_index=max(int(state.review_round_index or 1), 1),
         settings=repo_settings,

@@ -9,9 +9,12 @@ mkdir -p "$RESULTS_DIR"
 
 merge_base="$(git merge-base "origin/${BASE_REF}" "$HEAD_REF")"
 head_commit="$(git rev-parse "$HEAD_REF")"
+original_ref="$(git symbolic-ref --quiet --short HEAD || git rev-parse HEAD)"
+trap 'git checkout --quiet "$original_ref"' EXIT
 
 git checkout --quiet "$merge_base"
-uv run mergecraft eval replay-bank --json --no-update-latest --results-dir "$RESULTS_DIR" \
+# The merge-base CLI predates --no-update-latest. Its latest.json stays in RESULTS_DIR.
+uv run mergecraft eval replay-bank --json --results-dir "$RESULTS_DIR" \
   > "${RESULTS_DIR}/rescore-base.json"
 
 git checkout --quiet "$head_commit"

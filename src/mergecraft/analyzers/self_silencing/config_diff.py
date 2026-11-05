@@ -32,7 +32,7 @@ from loguru import logger
 
 from mergecraft.analyzers.scope import DiffHunk, iter_diff_hunks
 from mergecraft.classify.review_config import is_review_config_path as _is_review_config_path
-from mergecraft.config.settings import AnalyzersSettings
+from mergecraft.config.settings import AnalyzersSettings, ReviewSettings
 from mergecraft.utils.path_confinement import resolved_within_root
 
 _MAX_CONFIG_BYTES = 512 * 1024
@@ -157,6 +157,11 @@ def _mergecraft_changes(old: Any, new: Any) -> list[tuple[str, bool]]:
     old_a = _dict(_dict(old).get("analyzers"))
     new_a = _dict(_dict(new).get("analyzers"))
     changes: list[tuple[str, bool]] = []
+    # Use the runtime model for defaults, aliases and numeric-string coercion.
+    old_cap = ReviewSettings.model_validate(_dict(_dict(old).get("review"))).max_review_rounds
+    new_cap = ReviewSettings.model_validate(_dict(_dict(new).get("review"))).max_review_rounds
+    if old_cap > 0 and (new_cap == 0 or new_cap > old_cap):
+        changes.append((f"loosened `review.maxReviewRounds` {old_cap} -> {new_cap}", True))
     if _disabled(new_a.get("enabled")) and not _disabled(old_a.get("enabled")):
         changes.append(("disabled every catalog analyzer (`analyzers.enabled: false`)", True))
     old_over = _dict(old_a.get("overrides"))
