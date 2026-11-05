@@ -1484,7 +1484,8 @@ async def test_no_bound_can_disable_the_group_timeout(
     [
         pytest.param(
             _single_reviewer_config(enabled=True, maxGroups=1),
-            lambda: 1.5,
+            # The fan-out's default half share of 3.0 s left is a 1.5 s cap.
+            lambda: 3.0,
             "timed out after 1.5s",
             id="fractional-remaining-budget",
         ),
@@ -1548,3 +1549,258 @@ async def test_tool_context_agent_id_is_restored_after_a_group_raises(
     assert _failed_group_ids(summary) == {"group-2", "group-3"}
     assert "denied-tools boom" in env.tool_state.reviewer_dispatch_errors["file-group/group-3"]
     assert _FAILURE_REASON in env.tool_state.reviewer_dispatch_errors["file-group/group-2"]
+
+
+# --------------------------------------------------------------------------- budget share
+#
+# The fan-out and the secondary roster draw on one remaining run budget. The
+# fan-out may spend at most ``budgetShare`` (default 0.5) of the budget left
+# when it starts, floored at 1 s, so the secondary roster keeps its share. The
+# share is applied inside ``run_file_group_reviewers`` against the value
+# ``remaining_timeout_s()`` returns when the fan-out starts.
+
+
+@pytest.mark.parametrize(
+    ("share", "remaining", "hang_s", "ceiling_s"),
+    [
+        pytest.param(None, 4.0, 3.0, 2.7, id="default-half-of-4s"),
+        pytest.param(0.25, 8.0, 6.0, 2.7, id="quarter-of-8s"),
+    ],
+)
+async def test_fanout_spends_at_most_its_share_of_the_remaining_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    share: float | None,
+    remaining: float,
+    hang_s: float,
+    ceiling_s: float,
+) -> None:
+    """A group that would finish inside the whole budget is cut off at the share."""
+    groups = _group_paths(_LARGE_DIFF, max_groups=1)
+    agent = _RecordingAgent(groups, hang_s=hang_s)
+    fanout: dict[str, object] = {"enabled": True, "maxGroups": 1}
+    if share is not None:
+        fanout["budgetShare"] = share
+    env = _build_env(
+        tmp_path,
+        monkeypatch,
+        config=_single_reviewer_config(**fanout),
+        diff=_LARGE_DIFF,
+        agent=agent,
+    )
+
+    started = time.monotonic()
+    summary = await _fan_out(env, remaining_timeout_s=lambda: remaining)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < ceiling_s
+    assert _failed_group_ids(summary) == {"group-1"}
+    assert "timed out" in env.tool_state.reviewer_dispatch_errors["file-group/group-1"]
+
+
+async def test_fanout_share_is_floored_at_one_second(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Guard: half of a 1 s budget still gives the group the 1 s floor."""
+    groups = _group_paths(_LARGE_DIFF, max_groups=1)
+    agent = _RecordingAgent(groups, hang_s=3.0)
+    env = _build_env(
+        tmp_path,
+        monkeypatch,
+        config=_single_reviewer_config(enabled=True, maxGroups=1),
+        diff=_LARGE_DIFF,
+        agent=agent,
+    )
+
+    started = time.monotonic()
+    summary = await _fan_out(env, remaining_timeout_s=lambda: 1.0)
+    elapsed = time.monotonic() - started
+
+    assert 0.9 <= elapsed < 2.5
+    assert _failed_group_ids(summary) == {"group-1"}
+
+
+class _SlowGroupsSlowSecondaryAgent:
+    """Groups hang; the secondary reviewer needs a few seconds and records its run."""
+
+    name = "opencode"
+
+    def __init__(
+        self,
+        groups: dict[str, tuple[str, ...]],
+        *,
+        group_hang_s: float,
+        secondary_s: float,
+        deadline: list[float],
+    ) -> None:
+        self.groups = dict(groups)
+        self.group_hang_s = group_hang_s
+        self.secondary_s = secondary_s
+        self.deadline = deadline
+        self.secondary_started_with: list[float] = []
+        self.fanout_started: list[float] = []
+
+    async def install(self) -> None:
+        return None
+
+    async def run(self, ctx: AgentRunContext) -> AgentResult:
+        prompt = _prompt_text(ctx.instructions)
+        if any(path in prompt for paths in self.groups.values() for path in paths):
+            if not self.fanout_started:
+                self.fanout_started.append(time.monotonic())
+            await asyncio.sleep(self.group_hang_s)
+            return AgentResult(success=True, output="ok")
+        self.secondary_started_with.append(self.deadline[0] - time.monotonic())
+        await asyncio.sleep(self.secondary_s)
+        record_reviewer_dispatch_run(
+            ctx.tool_state,
+            agent_id="reviewer2",
+            findings=[
+                {"path": "src/a.py", "body": "from secondary", "severity": "Minor", "line": 1}
+            ],
+            model_slug=ctx.resolved_model,
+        )
+        return AgentResult(success=True, output="ok")
+
+
+async def test_low_budget_fanout_leaves_the_secondary_roster_its_share(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """20 s left, two 15 s groups, one secondary: the roster still runs and succeeds.
+
+    Without the share the groups consume the whole budget and the secondary is
+    left a 1 s timeout, which becomes a roster hard error.
+    """
+    from mergecraft.main import _run_server_roster_reviewers_if_needed
+
+    groups = _group_paths(_LARGE_DIFF, max_groups=2)
+    deadline: list[float] = [0.0]
+    agent = _SlowGroupsSlowSecondaryAgent(
+        groups, group_hang_s=15.0, secondary_s=3.0, deadline=deadline
+    )
+    env = _build_env(
+        tmp_path,
+        monkeypatch,
+        config=_two_reviewer_config(enabled=True, maxGroups=2),
+        diff=_LARGE_DIFF,
+        agent=agent,
+    )
+    ctx = _main_ctx(env)
+    started = time.monotonic()
+    deadline[0] = started + 20.0
+    ctx.agent_deadline_monotonic = deadline[0]
+
+    roster = await _run_server_roster_reviewers_if_needed(ctx)
+
+    assert roster is not None
+    assert roster.hard_error is None
+    assert roster.dispatched_agent_ids == ("reviewer2",)
+    assert len(agent.secondary_started_with) == 1
+    # The fan-out stopped near half the budget, leaving the secondary its share.
+    assert agent.secondary_started_with[0] >= 7.5
+    assert {"file-group/group-1", "file-group/group-2"} <= set(
+        env.tool_state.reviewer_dispatch_errors
+    )
+    assert "reviewer2" in {run.agent_id for run in env.tool_state.reviewer_dispatch_runs}
+
+
+# --------------------------------------------------------------------------- incremental diff source
+
+
+def _prefixed_diff(prefix: str, file_count: int, lines_per_file: int) -> str:
+    chunks: list[str] = []
+    for index in range(file_count):
+        path = f"{prefix}/inc_{index:02d}.py"
+        added = "\n".join(f"+inc_{index}_{line} = {line}" for line in range(lines_per_file))
+        chunks.append(
+            f"diff --git a/{path} b/{path}\n"
+            f"--- a/{path}\n"
+            f"+++ b/{path}\n"
+            f"@@ -0,0 +1,{lines_per_file} @@\n{added}\n"
+        )
+    return "".join(chunks)
+
+
+def _set_incremental_diff(env: _Env, text: str) -> Path:
+    assert env.diff_path is not None
+    incremental = env.diff_path.parent / "incremental.diff"
+    incremental.write_text(text, encoding="utf-8")
+    primary_repo_state(env.tool_state).incremental_diff_path = str(incremental)
+    return incremental
+
+
+async def test_incremental_review_plans_and_prompts_from_the_incremental_diff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With an incremental diff recorded, the full PR diff is not what groups review."""
+    incremental_text = _prefixed_diff("src/inc", 25, 10)
+    incremental_groups = _group_paths(incremental_text, max_groups=3)
+    full_paths = {path for paths in _group_paths(_LARGE_DIFF).values() for path in paths}
+    agent = _RecordingAgent({**incremental_groups})
+    env = _build_env(
+        tmp_path,
+        monkeypatch,
+        config=_single_reviewer_config(enabled=True, maxGroups=3),
+        diff=_LARGE_DIFF,
+        agent=agent,
+    )
+    incremental = _set_incremental_diff(env, incremental_text)
+    env.tool_state.selected_mode = "IncrementalReview"
+
+    await _fan_out(env)
+
+    assert set(_group_runs(env.tool_state)) == {
+        _group_agent_id(group_id) for group_id in incremental_groups
+    }
+    prompts = [prompt for _model, prompt in agent.calls]
+    assert len(prompts) == len(incremental_groups)
+    for prompt in prompts:
+        assert str(incremental) in prompt
+        assert str(env.diff_path) not in prompt
+        assert not any(path in prompt for path in full_paths)
+    seen = {agent.group_for(prompt) for prompt in prompts}
+    assert seen == set(incremental_groups)
+
+
+async def test_an_empty_incremental_diff_means_no_fanout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing changed since the last review: no groups, even on a large PR diff."""
+    agent = _RecordingAgent(_group_paths(_LARGE_DIFF))
+    env = _build_env(
+        tmp_path,
+        monkeypatch,
+        config=_single_reviewer_config(enabled=True),
+        diff=_LARGE_DIFF,
+        agent=agent,
+    )
+    _set_incremental_diff(env, "")
+    env.tool_state.selected_mode = "IncrementalReview"
+
+    summary = await _fan_out(env)
+
+    assert summary == FanoutSummary()
+    assert agent.calls == []
+    assert _group_runs(env.tool_state) == {}
+
+
+async def test_a_full_review_still_uses_the_pr_diff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Guard: without an incremental diff the groups review the full PR diff."""
+    groups = _group_paths(_LARGE_DIFF, max_groups=2)
+    agent = _RecordingAgent(groups)
+    env = _build_env(
+        tmp_path,
+        monkeypatch,
+        config=_single_reviewer_config(enabled=True, maxGroups=2),
+        diff=_LARGE_DIFF,
+        agent=agent,
+    )
+    assert primary_repo_state(env.tool_state).incremental_diff_path is None
+
+    await _fan_out(env)
+
+    prompts = [prompt for _model, prompt in agent.group_calls()]
+    assert len(prompts) == 2
+    assert all(str(env.diff_path) in prompt for prompt in prompts)

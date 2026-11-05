@@ -27,6 +27,7 @@ _DEFAULTS: dict[str, Any] = {
     "binding": None,
     "concurrency": 1,
     "per_group_timeout_s": 600,
+    "budget_share": 0.5,
 }
 
 _WIRE: dict[str, Any] = {
@@ -37,6 +38,7 @@ _WIRE: dict[str, Any] = {
     "binding": "reviewer2",
     "concurrency": 2,
     "perGroupTimeoutS": 300,
+    "budgetShare": 0.4,
 }
 
 
@@ -82,6 +84,7 @@ def test_camel_case_aliases_populate_every_field() -> None:
         "binding": "reviewer2",
         "concurrency": 2,
         "per_group_timeout_s": 300,
+        "budget_share": 0.4,
     }
 
 
@@ -115,10 +118,14 @@ def test_dump_by_alias_round_trips() -> None:
         pytest.param("perGroupTimeoutS", 0, "greater_than_equal", id="per-group-timeout-zero"),
         pytest.param("perGroupTimeoutS", -5, "greater_than_equal", id="per-group-timeout-negative"),
         pytest.param("perGroupTimeoutS", 901, "less_than_equal", id="per-group-timeout-above-900"),
+        pytest.param("budgetShare", 0, "greater_than", id="budget-share-zero"),
+        pytest.param("budgetShare", -0.1, "greater_than", id="budget-share-negative"),
+        pytest.param("budgetShare", 0.95, "less_than_equal", id="budget-share-above-0.9"),
+        pytest.param("budgetShare", 1.0, "less_than_equal", id="budget-share-whole-budget"),
     ],
 )
 def test_out_of_range_bounds_are_rejected_naming_the_field(
-    key: str, value: int, error_type: str
+    key: str, value: float, error_type: str
 ) -> None:
     with pytest.raises(ValidationError) as exc_info:
         ReviewSettings.model_validate({"fileGroupFanout": {key: value}})
@@ -136,9 +143,11 @@ def test_out_of_range_bounds_are_rejected_naming_the_field(
         pytest.param("concurrency", 6, id="concurrency-6"),
         pytest.param("perGroupTimeoutS", 1, id="per-group-timeout-1"),
         pytest.param("perGroupTimeoutS", 900, id="per-group-timeout-900"),
+        pytest.param("budgetShare", 0.1, id="budget-share-0.1"),
+        pytest.param("budgetShare", 0.9, id="budget-share-0.9"),
     ],
 )
-def test_inclusive_bounds_are_accepted(key: str, value: int) -> None:
+def test_inclusive_bounds_are_accepted(key: str, value: float) -> None:
     review = ReviewSettings.model_validate({"fileGroupFanout": {key: value}})
 
     dumped = review.model_dump(by_alias=True)["fileGroupFanout"]

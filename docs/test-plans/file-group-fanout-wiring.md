@@ -40,10 +40,10 @@ uv run pytest --collect-only -q tests/review tests/config             # collecti
 
 | Surface | Name | Shape |
 | --- | --- | --- |
-| Settings model | `mergecraft.config.settings.FileGroupFanoutSettings` | `enabled: bool = False`; `max_groups: int = 6` (`maxGroups`, 1..12); `min_diff_lines: int = 800` (`minDiffLines`); `min_files: int = 20` (`minFiles`); `binding: str \| None = None`; `concurrency: int = 1` (1..6); `per_group_timeout_s: int = 600` (`perGroupTimeoutS`, 1..900); unknown keys rejected |
+| Settings model | `mergecraft.config.settings.FileGroupFanoutSettings` | `enabled: bool = False`; `max_groups: int = 6` (`maxGroups`, 1..12); `min_diff_lines: int = 800` (`minDiffLines`); `min_files: int = 20` (`minFiles`); `binding: str \| None = None`; `concurrency: int = 1` (1..6); `per_group_timeout_s: int = 600` (`perGroupTimeoutS`, 1..900); `budget_share: float = 0.5` (`budgetShare`, greater than 0, at most 0.9); unknown keys rejected |
 | Settings field | `ReviewSettings.file_group_fanout` | alias `fileGroupFanout`; a by-alias dump validates back to an equal model |
 | Dispatch entry | `mergecraft.review.roster_execution.run_file_group_reviewers(*, tool_context, base_run_ctx, settings, payload, repo_root, remaining_timeout_s=None) -> FanoutSummary` | `remaining_timeout_s` has the same shape as `run_pending_roster_reviewers`' (`Callable[[], float \| None] \| None`) |
-| Diff source | `RepoToolState.diff_path` of the primary repo | no path or an unreadable file means an empty summary, no exception |
+| Diff source | `RepoToolState.incremental_diff_path` when set, else `RepoToolState.diff_path`, of the primary repo | the plan and every group prompt use that one diff; an empty incremental diff means no fan-out; no path or an unreadable file means an empty summary, no exception |
 | Group agent id | `file-group/<group-id>` | `group-1`, `group-2`, … in plan order |
 | Group prompt | rendered instructions of each group dispatch | the group's own paths, the shared diff path, and a file-group block saying the server records the outcome; never the roster submit instructions (`_ROSTER_SUBMIT_INSTRUCTIONS`), no recording or verdict tool name (`record_reviewer_dispatch_run`, `submit_review_verdict`), and no other group's paths |
 | Aggregation | `ToolState.reviewer_dispatch_runs` | one `ReviewerRun` per successful group, `agent_id` = the group id, `model_slug` = the dispatched model, findings = only that group's new rows |
@@ -51,7 +51,8 @@ uv run pytest --collect-only -q tests/review tests/config             # collecti
 | Failure record | `record_reviewer_dispatch_error(tool_state, agent_id="file-group/<id>", reason=…)` | for a raised exception, a failed `AgentResult`, a missing binding, a missing credential and a timeout; a timeout reason renders one decimal (`timed out after 1.5s`) |
 | Run-health row | a `Finding`-shaped row appended to `ToolState.agent_findings` | `scope="run"`, `severity="Minor"`, `tool="review"`, message names the group and the reason; validates through `typed_findings_from_rows_with_drops` with no drops and lands in `run_health` through `evidence.build._partition_findings` |
 | Planner concurrency | `file_group_fanout.dispatch_file_groups(plan, dispatch, *, on_failure=None, concurrency=1)` | at most `concurrency` groups in flight; results and failures stay in plan order |
-| Per-group timeout | the timeout each group dispatch runs under | `min(perGroupTimeoutS, binding timeoutS, remaining run budget)`; no bound can disable the cap (a binding `timeoutS: 0` or an exhausted budget still cuts the group off) |
+| Budget share | the fan-out's slice of the remaining run budget | inside `run_file_group_reviewers`, the fan-out as a whole may spend at most `budgetShare` of what `remaining_timeout_s()` returns when it starts (floor 1 s), so the secondary roster keeps the rest |
+| Per-group timeout | the timeout each group dispatch runs under | `min(perGroupTimeoutS, binding timeoutS, remaining fan-out budget)`; no bound can disable the cap (a binding `timeoutS: 0` or an exhausted budget still cuts the group off) |
 | Main wiring | `mergecraft.main._run_server_roster_reviewers_if_needed` | calls `run_file_group_reviewers` before `run_pending_roster_reviewers`, only when enabled, and returns the roster summary unchanged |
 | Packet provenance | finding `evidence` in the evidence packet | when the server records a group run it appends exactly one `reviewer: file-group/<id> (<model_slug>)` entry to every row the run claims; the primary's rows carry none |
 | Attribution | the group a new finding row belongs to | the group whose dispatch recorded it (the active group at record time, through the reviewer's finding tool), never the group that owns the row's path |
@@ -88,7 +89,7 @@ request; the in-process tests do not prove that by themselves.
 | Off and sequential by default, on `ReviewSettings` and on the standalone model | unit | `test_review_settings_default_fanout_is_off_and_sequential`, `test_standalone_model_defaults_match_the_review_default` |
 | camelCase aliases populate every field; field names populate too | unit | `test_camel_case_aliases_populate_every_field`, `test_field_names_populate_too` |
 | A by-alias dump round-trips | unit | `test_dump_by_alias_round_trips` |
-| `maxGroups` 1..12, `concurrency` 1..6 and `perGroupTimeoutS` 1..900, inclusive; the error names the field and the bound (0, -5 and 901 for the timeout) | unit, edge + error | `test_out_of_range_bounds_are_rejected_naming_the_field` (7 cases), `test_inclusive_bounds_are_accepted` (6 cases) |
+| `maxGroups` 1..12, `concurrency` 1..6 and `perGroupTimeoutS` 1..900, inclusive, and `budgetShare` above 0 up to 0.9; the error names the field and the bound (0, -5 and 901 for the timeout; 0, -0.1, 0.95 and 1.0 for the share) | unit, edge + error | `test_out_of_range_bounds_are_rejected_naming_the_field` (11 cases), `test_inclusive_bounds_are_accepted` (8 cases) |
 | Unknown keys inside the block are rejected at that key | error | `test_unknown_fanout_key_is_rejected` |
 | The YAML block loads through `load_repo_settings`, unspecified keys keep defaults | integration | `test_repo_config_yaml_block_loads` |
 | This repository's own config keeps fan-out off | integration | `test_this_repository_keeps_fanout_off` |
@@ -135,6 +136,12 @@ resolution and instruction rendering replaced by recording fakes (the same seams
 | A missing credential is a recorded error per group, no provider call | error | `test_missing_credential_is_a_recorded_error_per_group` |
 | The group timeout is the smallest of `perGroupTimeoutS`, the binding's `timeoutS` and the remaining run budget | integration, error | `test_group_timeout_is_the_smallest_of_its_three_bounds` (3 cases; each hangs a fake reviewer and asserts the group is cut off in well under the hang) |
 | No bound disables the cap: binding `timeoutS: 0` with 1.5 s remaining, binding `timeoutS: 0` with `perGroupTimeoutS: 1`, an exhausted budget; a 4 s hang is cut off under 3 s | integration, edge | `test_no_bound_can_disable_the_group_timeout` (3 cases) |
+| The fan-out spends at most its share of the remaining budget (default half of 4 s, a quarter of 8 s), cutting off a group that would have finished inside the whole budget | integration, edge | `test_fanout_spends_at_most_its_share_of_the_remaining_budget` (2 cases) |
+| The share keeps the 1 s floor | edge (*guard*) | `test_fanout_share_is_floored_at_one_second` |
+| 20 s left, two 15 s groups and one secondary reviewer, through `main`: the groups stop near half the budget, the secondary starts with at least 7.5 s left and succeeds, the roster's hard error is `None` | functional, error | `test_low_budget_fanout_leaves_the_secondary_roster_its_share` |
+| With an incremental diff recorded, groups are planned from it and every prompt names it, never the full PR diff or its paths | integration | `test_incremental_review_plans_and_prompts_from_the_incremental_diff` |
+| An empty incremental diff means no fan-out, even on a large PR diff | edge | `test_an_empty_incremental_diff_means_no_fanout` |
+| A full review (no incremental diff) still uses the PR diff | integration (*guard*) | `test_a_full_review_still_uses_the_pr_diff` |
 | The timeout reason renders one decimal (`1.5s`, `1.0s`) | unit-level, error | `test_group_timeout_reason_renders_one_decimal` (2 cases) |
 | `tool_context.agent_id` is restored (sentinel distinct from the runtime's name) after a raise inside the agent run and inside the denied-tools computation | edge, error (*guard*) | `test_tool_context_agent_id_is_restored_after_a_group_raises` |
 | `main` calls the fan-out after the primary and before the secondary roster, passing the run's tool context, run context, payload and a remaining-budget callable | functional | `test_main_runs_the_fanout_before_the_secondary_roster_when_enabled` |
@@ -177,3 +184,7 @@ A test changed after an implementation escalation gets a one-line rationale here
 * Concurrent groups attribute rows by the recording group, pinned in three finish orders.
 * Pinned the error-tool refusal beside the run-tool one (the guard had no test), and the
   survival of a group's evidence stamp when a later group re-verifies the same row.
+* The fan-out and the secondary roster share one remaining budget, so the fan-out now takes at
+  most a configurable share of it; the one-decimal timeout case moved from 1.5 s remaining
+  to 3.0 s remaining so its 1.5 s cap comes from the default half share. Incremental reviews
+  plan from the incremental diff.

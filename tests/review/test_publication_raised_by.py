@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from mergecraft.agents.registry import AgentRole
+from mergecraft.agents.registry import AgentRole, Registry
 from mergecraft.analyzers.budget import default_inline_budget, place_findings
 from mergecraft.mcp.verdict import SubmitReviewVerdictParams, register_review_scope
 from mergecraft.review.finding_key import finding_key
@@ -311,8 +311,8 @@ async def test_submit_review_verdict_pairs_models_on_deduped_finding(tmp_path: A
 # ``test_file_group_fanout_wiring.py``).
 
 
-def _file_group_registry(*, reviewer_count: int) -> object:
-    from mergecraft.agents.registry import AgentBinding, Registry
+def _file_group_registry(*, reviewer_count: int) -> Registry:
+    from mergecraft.agents.registry import AgentBinding
 
     def _binding(agent_id: str, model: str) -> AgentBinding:
         return AgentBinding(
@@ -353,7 +353,7 @@ def test_file_group_run_recorded_before_the_submit_keeps_its_group_id(
     group_row = _finding(path="src/pkg/mod_07.py", body="from file group one", severity="Minor")
     primary_row = _finding(path="src/a.py", body="from primary", severity="Minor")
     stamped = stamped_findings_for_terminal_submission(
-        registry=registry,  # type: ignore[arg-type]
+        registry=registry,
         terminal_findings=[primary_row],
         dispatch_runs=[
             ReviewerRun(
@@ -365,7 +365,7 @@ def test_file_group_run_recorded_before_the_submit_keeps_its_group_id(
     )
 
     merged, _verdict = prepare_terminal_submission(
-        registry=registry,  # type: ignore[arg-type]
+        registry=registry,
         findings=stamped,
         verdict="approve",
     )
@@ -390,7 +390,7 @@ def test_a_foreign_reviewer_id_still_reads_as_unknown_beside_file_groups() -> No
     registry = _file_group_registry(reviewer_count=2)
 
     merged, _verdict = prepare_terminal_submission(
-        registry=registry,  # type: ignore[arg-type]
+        registry=registry,
         findings=[_finding(body="stray", severity="Minor", raised_by="ghost-reviewer")],
         verdict="approve",
     )
