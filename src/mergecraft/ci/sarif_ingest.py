@@ -155,6 +155,10 @@ def _require_workflow_untouched(ctx: ToolContext, *, workflow: str, label: str) 
         f"whether this pull request changes the declared workflow {workflow} could not be "
         f"verified, so {label} cannot count"
     )
+    coverage = getattr(state, "coverage", None)
+    if getattr(coverage, "diff_truncated", False):
+        msg = f"{unverified}: the pull request's diff file listing was truncated"
+        raise _NoReceipt(msg)
     diff_path = primary_repo_state(state).diff_path
     if not diff_path:
         msg = f"{unverified}: the review has no diff"
@@ -166,7 +170,6 @@ def _require_workflow_untouched(ctx: ToolContext, *, workflow: str, label: str) 
         raise _NoReceipt(msg) from exc
     reviewed = {_workflow_path(path) for path in changed_paths_from_diff(text)}
     ignored = {_workflow_path(path) for path in getattr(state, "ignored_review_paths", ())}
-    coverage = getattr(state, "coverage", None)
     unreviewable = {
         _workflow_path(path) for path in getattr(coverage, "unreviewable_paths", ()) or ()
     }
@@ -187,9 +190,6 @@ def _require_workflow_untouched(ctx: ToolContext, *, workflow: str, label: str) 
             f"this pull request changes the declared workflow {workflow}, so nothing it "
             f"uploads counts as {label}"
         )
-        raise _NoReceipt(msg)
-    if getattr(coverage, "diff_truncated", False):
-        msg = f"{unverified}: the pull request's diff file listing was truncated"
         raise _NoReceipt(msg)
 
 
