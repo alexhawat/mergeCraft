@@ -8,6 +8,12 @@ Full `mergecraft` command reference derived from the live Typer application.
 
 Pass `--help` to any invocation below for its full flag set.
 
+`review --use-cache` and `--resume` reuse a result only when the patch, review
+settings, resolved revisions, and tracked/nonignored source contents match.
+Gitignored artifacts are outside this source fingerprint. Workspaces without a
+reliable Git identity, submodules, external symlinks, unreadable source, or source
+larger than 10,000 files / 64 MiB run normally with result caching skipped.
+
 <!-- BEGIN:cli-commands -->
 | Command | Description |
 |---------|-------------|

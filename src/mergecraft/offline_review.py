@@ -944,18 +944,29 @@ class _OfflineDiffReviewRun:
                 load_review_result,
                 verification_report_cache_digest,
             )
+            from mergecraft.utils.review_source_context import review_source_context_digest
 
-            self.cache_key = cache_key_for_diff_path(
-                self.materialization.path,
-                model=resolved_model,
-                trust_tier=self.trust_tier,
-                prompt_extra=self.prompt_extra,
-                json_mode=output_schema is not None,
-                base_ref=self.materialization.base_ref,
-                cwd=self.cwd,
-                verification_report_digest=verification_report_cache_digest(verification_report),
+            source_digest = review_source_context_digest(
+                cwd=self.cwd, base_ref=self.materialization.base_ref
             )
-            cached = load_review_result(self.cache_key)
+            self.cache_key = (
+                cache_key_for_diff_path(
+                    self.materialization.path,
+                    model=resolved_model,
+                    trust_tier=self.trust_tier,
+                    prompt_extra=self.prompt_extra,
+                    json_mode=output_schema is not None,
+                    base_ref=self.materialization.base_ref,
+                    cwd=self.cwd,
+                    verification_report_digest=verification_report_cache_digest(
+                        verification_report
+                    ),
+                    source_context_digest=source_digest,
+                )
+                if source_digest is not None
+                else None
+            )
+            cached = load_review_result(self.cache_key) if self.cache_key is not None else None
             if cached is not None:
                 if cached.diff_path is None:
                     cached.diff_path = str(self.materialization.path)
