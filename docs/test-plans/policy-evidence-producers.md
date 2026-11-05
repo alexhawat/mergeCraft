@@ -126,6 +126,7 @@ author and says the criteria were keyword-matched, and `docs/policy-evidence.md`
 | Run start: closes none ⇒ `()` | integration | `…::test_run_start_records_an_empty_tuple_when_nothing_is_closed` |
 | Run start: GraphQL failure, `hasNextPage`, no pull request object, a malformed node ⇒ `None` | error | `…::test_run_start_leaves_linked_issues_unread_on_any_doubt[…]` |
 | Run start without a pull request ⇒ no call, `None` | integration | `…::test_run_start_without_a_pull_request_reads_nothing` |
+| The real credential phase (`main._resolve_credentials`) calls `closing_issues` once with the repository and pull request number and fills `ToolState.linked_issues`; deleting the call in that phase turns it red (checked against a mutated copy) | functional | `…::test_the_credential_phase_reads_the_closing_issues_once` |
 | `closing_issues` over a mock transport: `POST /graphql`, `first: 25`, the fields above | integration | `…::test_closing_issues_asks_for_one_bounded_page_with_authors` |
 | `closing_issues` with `hasNextPage` ⇒ `None` | error | `…::test_closing_issues_refuses_a_second_page` |
 
@@ -242,6 +243,7 @@ document is read with a hard size bound.
 | The same, called synchronously from inside a running event loop | functional | `…::test_the_run_path_collects_evidence_from_inside_a_running_event_loop` |
 | The collector is asked only for the triggered rules' keys | integration | `…::test_the_producers_are_asked_only_for_the_triggered_rules_keys` |
 | Two calls on one diff ⇒ one collection and no extra reads; a re-scoped diff collects again | integration | `…::test_evidence_is_collected_once_per_diff_path` |
+| After collection on the producers' own loop (called from inside a running loop and from none), every per-loop GitHub transport it opened is closed and `GitHubClient._clients` holds no entry; removing the loop-transport close in `policy/review.py` turns it red (checked against a mutated copy) | integration | `…::test_the_collection_loop_closes_its_github_transport[inside-a-running-loop]`, `…[no-loop]` |
 | Inside a running event loop, with the operator snapshot only in the run-scope ContextVar (not on the context), the producers still see it (the worker hop copies the context) | functional | `…::test_the_run_scope_snapshot_reaches_the_producers_inside_a_running_loop` |
 | No base-side declaration ⇒ the rule stays at the outstanding severity, the row carries the declare-it reason, and no check run is read | functional | `…::test_a_declaration_the_operator_did_not_make_keeps_the_rule_blocking` |
 

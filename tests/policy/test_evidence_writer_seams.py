@@ -163,6 +163,71 @@ async def test_run_start_without_a_pull_request_reads_nothing() -> None:
     assert client.calls == []
 
 
+class _CredentialPhaseGitHub(GitHubClient):
+    """The client ``_resolve_credentials`` installs: binds the PR, answers closing issues."""
+
+    def __init__(self) -> None:
+        super().__init__(token="test-token")
+        self.closing_calls: list[tuple[str, str, int]] = []
+        self.pull_calls: list[int] = []
+
+    async def get_pull(self, owner: str, repo: str, pull_number: int) -> dict[str, Any]:
+        from tests.test_main_phases import _pull_metadata
+
+        self.pull_calls.append(pull_number)
+        return _pull_metadata(number=pull_number, fork=False)
+
+    async def closing_issues(self, owner: str, repo: str, number: int) -> Any:
+        from tests.support.policy_evidence_fixtures import linked_issue
+
+        self.closing_calls.append((owner, repo, number))
+        return (linked_issue("## Acceptance criteria\n\n- [ ] refunds", number=12),)
+
+
+async def test_the_credential_phase_reads_the_closing_issues_once(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The real run-start phase calls the read, so the field is never dead in production."""
+    from mergecraft.config.settings import RepoSettings
+    from mergecraft.main import RunContext
+    from mergecraft.scm.github import GitHubScmAdapter
+    from tests.test_main_phases import (
+        _comment_on_pr_event,
+        _FakeTokenRef,
+        _run_context_data,
+    )
+
+    main = importlib.import_module("mergecraft.main")
+    client = _CredentialPhaseGitHub()
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "issue_comment")
+
+    async def _fake_resolve_tokens(**_kwargs: Any) -> _FakeTokenRef:
+        return _FakeTokenRef()
+
+    monkeypatch.setattr(main, "resolve_tokens", _fake_resolve_tokens)
+    monkeypatch.setattr(main, "GitHubClient", lambda *a, **k: client)
+    monkeypatch.setattr(main, "create_github_scm", lambda *a, **k: GitHubScmAdapter(client))
+    ctx = RunContext(
+        settings=RepoSettings(),
+        tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
+        run_context=_run_context_data(),
+        gh_event=_comment_on_pr_event(number=7),
+        payload={"push": "restricted", "shell": "restricted"},
+        scm=GitHubScmAdapter(client),
+    )
+    ctx.pr_number = 7
+    assert ctx.tool_state is not None
+    assert ctx.tool_state.linked_issues is None
+
+    await main._resolve_credentials(ctx)
+
+    assert client.closing_calls == [("acme", "demo", 7)]
+    issues = ctx.tool_state.linked_issues
+    assert issues is not None
+    assert [(issue.number, issue.author_login) for issue in issues] == [(12, "octo-author")]
+
+
 # ---------------------------------------------------------------------------
 # GitHubClient.closing_issues over a real transport
 # ---------------------------------------------------------------------------

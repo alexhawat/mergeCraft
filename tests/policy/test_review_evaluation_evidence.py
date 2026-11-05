@@ -476,3 +476,40 @@ async def test_the_run_scope_snapshot_reaches_the_producers_inside_a_running_loo
 
     assert row.severity == _engine_severity(document, available={"health_check": "proved"})
     assert "list_check_runs_for_ref" in github.call_names()
+
+
+class _TransportGitHub(EvidenceGitHub):
+    """Opens a real per-loop transport on each check-run read, so a leak is observable."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.transports: list[Any] = []
+
+    async def list_check_runs_for_ref(self, owner: str, repo: str, ref: str, **kwargs: Any) -> Any:
+        self.transports.append(self._active_client())
+        return await super().list_check_runs_for_ref(owner, repo, ref, **kwargs)
+
+
+@pytest.mark.parametrize("in_loop", [True, False], ids=["inside-a-running-loop", "no-loop"])
+def test_the_collection_loop_closes_its_github_transport(tmp_path: Path, in_loop: bool) -> None:
+    """The producers' own loop ends after collection: its transport is closed and forgotten."""
+    import asyncio
+
+    document = _required_rule(["health_check"])
+    github = _TransportGitHub(check_runs_by_ref={HEAD_SHA: [check_run()]})
+    ctx = _run_ctx(
+        tmp_path,
+        rules=[document],
+        github=github,
+        declarations={"health_check": check_run_declaration()},
+    )
+
+    async def _inside_a_loop() -> list[Any]:
+        return _ensure(ctx)
+
+    rows = asyncio.run(_inside_a_loop()) if in_loop else _ensure(ctx)
+
+    assert _row(rows).severity == _engine_severity(document, available={"health_check": "ok"})
+    assert github.transports, "the check-run read must have opened a transport"
+    assert all(transport.is_closed for transport in github.transports)
+    assert github._clients == {}, "no transport may stay bound to a finished loop"
