@@ -671,7 +671,7 @@ def _require_workflow_untouched(ctx: Any, *, workflow: str, label: str) -> None:
         )
         raise _Absent(msg)
     if getattr(coverage, "diff_truncated", False):
-        msg = f"{unverified}: the pull request's file listing was truncated"
+        msg = f"{unverified}: the pull request's diff file listing was truncated"
         raise _Absent(msg)
 
 

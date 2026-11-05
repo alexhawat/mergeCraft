@@ -22,11 +22,17 @@ The suite is written before the provenance checks exist, so it is red until they
 
 from __future__ import annotations
 
+import asyncio
 import importlib
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from mergecraft.config.settings import ReviewSettings
+from mergecraft.mcp.checkout import _apply_review_ignore
+from mergecraft.mcp.tool_state import primary_repo_state
+from mergecraft.review_policy.ignore_paths import build_review_ignore
 from tests.support.policy_evidence_fixtures import (
     ARTIFACT_NAME,
     DECLARED_WORKFLOW,
@@ -44,8 +50,6 @@ from tests.support.policy_evidence_fixtures import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from mergecraft.mcp.context import ToolContext
 
 _FORGED_WORKFLOW = ".github/workflows/forged.yml"
@@ -175,6 +179,62 @@ async def test_a_diff_that_edits_the_declared_workflow_voids_its_artifact(tmp_pa
     evidence = await _collect(ctx, ["rollback_plan"])
 
     assert DECLARED_WORKFLOW in _reason(evidence), "the reason must name the edited workflow"
+
+
+@pytest.mark.parametrize("source", ["config", "input"])
+async def test_an_ignored_workflow_edit_voids_its_artifact(tmp_path: Path, source: str) -> None:
+    github = _github([workflow_run()])
+    ctx = _ctx(tmp_path, github, diff_paths=(*DIFF_PATHS, DECLARED_WORKFLOW))
+    ctx.tool_state.review_ignore = build_review_ignore(
+        input_value=".github/workflows/**" if source == "input" else None,
+        review=ReviewSettings(ignore_paths=[".github/workflows/**"] if source == "config" else []),
+        source=source,
+    )
+    diff_path = Path(primary_repo_state(ctx.tool_state).diff_path or "")
+    diff = await asyncio.to_thread(diff_path.read_text, encoding="utf-8")
+    filtered, _, ignored = _apply_review_ignore(ctx, diff, unreviewable=[], truncated=False)
+    assert DECLARED_WORKFLOW in ignored
+    assert DECLARED_WORKFLOW not in filtered
+    await asyncio.to_thread(diff_path.write_text, filtered, encoding="utf-8")
+
+    evidence = await _collect(ctx, ["rollback_plan"])
+
+    reason = _reason(evidence)
+    assert DECLARED_WORKFLOW in reason
+    assert "ignored" in reason
+    assert github.call_names() == [], "refuse the proof before any artifact API call"
+
+
+@pytest.mark.parametrize("missing", ["truncated", "unreviewable", "no-diff", "unreadable"])
+async def test_unverifiable_workflow_changes_void_the_artifact(
+    tmp_path: Path, missing: str
+) -> None:
+    github = _github([workflow_run()])
+    ctx = _ctx(tmp_path, github)
+    if missing == "truncated":
+        ctx.tool_state.coverage.diff_truncated = True
+    elif missing == "unreviewable":
+        ctx.tool_state.coverage.unreviewable_paths = [DECLARED_WORKFLOW]
+    elif missing == "no-diff":
+        primary_repo_state(ctx.tool_state).diff_path = None
+    else:
+        await asyncio.to_thread(Path(primary_repo_state(ctx.tool_state).diff_path or "").unlink)
+
+    evidence = await _collect(ctx, ["rollback_plan"])
+
+    reason = _reason(evidence)
+    assert "diff" in reason or "unreviewable" in reason
+    assert github.call_names() == [], "unknown provenance must never reach the artifact API"
+
+
+async def test_unrelated_omitted_paths_do_not_void_the_artifact(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path, _github([workflow_run()]))
+    ctx.tool_state.ignored_review_paths = ["CHANGELOG.md"]
+    ctx.tool_state.coverage.unreviewable_paths = ["assets/logo.png"]
+
+    evidence = await _collect(ctx, ["rollback_plan"])
+
+    assert "rollback_plan" in evidence.present, evidence.absent
 
 
 async def test_the_declared_run_is_chosen_over_a_newer_forged_one(tmp_path: Path) -> None:
