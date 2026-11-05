@@ -16,43 +16,43 @@ R7–R15 name the originally unnumbered residual findings. R3 covers both mergin
 
 | ID | Scope | Group | Status | PR | Verification |
 |---|---|---|---|---|---|
-| N1 | Whitespace semantics and executable metadata | findings | IMPLEMENTED / VALIDATING | [#1199](https://github.com/alexhawat/mergeCraft/pull/1199) | 1,058 classification/fast-path tests; Ruff/mypy |
-| N2 | Deleted front matter | findings | IMPLEMENTED / VALIDATING | [#1199](https://github.com/alexhawat/mergeCraft/pull/1199) | 1,085 combined triage tests; Ruff/mypy |
-| N3 | Space-containing no-hunk paths | security | IMPLEMENTED / VALIDATING | [#1197](https://github.com/alexhawat/mergeCraft/pull/1197) | 127 focused tests; Ruff/mypy |
-| N4 | Ignored files in clean trees | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 33 focused tests; Ruff/mypy |
-| N5 | Unstaged omission metadata | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 21 focused tests; Ruff/mypy |
-| N6 | Verification target workspace | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 31 focused tests; Ruff/mypy |
-| N7 | Consumer coverage toolchain | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 35 passed, 1 optional-tool skip; Ruff/mypy |
-| N8 | GHES GraphQL URL | security | IMPLEMENTED / VALIDATING | [#1197](https://github.com/alexhawat/mergeCraft/pull/1197) | 95 GitHub/SCM tests; Ruff/mypy |
-| N9 | Per-architecture lint tool digests | ci | IMPLEMENTED / VALIDATING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 10 passed, 1 platform skip; Ruff/bash |
-| R1 | Approval revision binding | security | IMPLEMENTED / VALIDATING | [#1197](https://github.com/alexhawat/mergeCraft/pull/1197) | 42 focused tests; Ruff/mypy |
-| R2 | Pinned operator budgets | security | IMPLEMENTED / VALIDATING | [#1197](https://github.com/alexhawat/mergeCraft/pull/1197) | 8 focused tests; Ruff/mypy |
-| R3 | Monotone clustering and scope union | findings | IMPLEMENTED / VALIDATING | [#1199](https://github.com/alexhawat/mergeCraft/pull/1199) | 761 focused tests; Ruff/mypy |
-| R4 | Impact-aware severity | findings | IMPLEMENTED / VALIDATING | [#1199](https://github.com/alexhawat/mergeCraft/pull/1199) | 282 focused tests; Ruff/mypy |
-| R5 | Finding occurrence identity | findings | IMPLEMENTED / VALIDATING | [#1199](https://github.com/alexhawat/mergeCraft/pull/1199) | 435 focused tests; Ruff/mypy |
-| R6 | Contributing config validation | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 33 focused tests; Ruff/mypy |
-| R7 | Checkout revision race | security | IMPLEMENTED / VALIDATING | [#1197](https://github.com/alexhawat/mergeCraft/pull/1197) | 20 real-Git/fallback tests; Ruff/mypy |
-| R8 | Git show cache identity | security | IMPLEMENTED / VALIDATING | [#1197](https://github.com/alexhawat/mergeCraft/pull/1197) | 301 focused Git tests; Ruff/mypy |
-| R9 | Same-repository fork trust | security | IMPLEMENTED / VALIDATING | [#1197](https://github.com/alexhawat/mergeCraft/pull/1197) | 236 core +132 broader tests; 1 optional-tool skip; Ruff/mypy |
-| R10 | Review cache source context | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 44 focused cache tests; Ruff/mypy |
-| R11 | Explicit revision source checkout | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | Local revision mismatch/dirty-tree Git regressions; Ruff/mypy |
-| R12 | Resolved repository persistence | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 24 provenance/persistence tests; preflight regression |
-| R13 | Target workspace env loading | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 44 startup/environment tests; Ruff/mypy |
-| R14 | Anonymous fallback without gh | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 4 focused auth/clone tests; Ruff/mypy |
-| R15 | Output usage exit status | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 17 output tests; Ruff/mypy |
-| T1 | Mutation error classification/baseline | ci | IMPLEMENTED / VALIDATING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 20 tests; Ruff/mypy |
+| N1 | Whitespace semantics and executable metadata | findings | VERIFIED LOCALLY | [#1199](https://github.com/alexhawat/mergeCraft/pull/1199) | 1,058 classification/fast-path tests; Ruff/mypy |
+| N2 | Deleted front matter | findings | VERIFIED LOCALLY | [#1199](https://github.com/alexhawat/mergeCraft/pull/1199) | 1,085 combined triage tests; Ruff/mypy |
+| N3 | Space-containing no-hunk paths | security | VERIFIED LOCALLY | [#1197](https://github.com/alexhawat/mergeCraft/pull/1197) | 127 focused tests; Ruff/mypy |
+| N4 | Ignored files in clean trees | cli | VERIFIED LOCALLY | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 33 focused tests; Ruff/mypy |
+| N5 | Unstaged omission metadata | cli | VERIFIED LOCALLY | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 21 focused tests; Ruff/mypy |
+| N6 | Verification target workspace | cli | VERIFIED LOCALLY | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 31 focused tests; Ruff/mypy |
+| N7 | Consumer coverage toolchain | cli | VERIFIED LOCALLY | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 35 passed, 1 optional-tool skip; Ruff/mypy |
+| N8 | GHES GraphQL URL | security | VERIFIED LOCALLY | [#1197](https://github.com/alexhawat/mergeCraft/pull/1197) | 95 GitHub/SCM tests; Ruff/mypy |
+| N9 | Per-architecture lint tool digests | ci | VERIFIED LOCALLY | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 10 passed, 1 platform skip; Ruff/bash |
+| R1 | Approval revision binding | security | VERIFIED LOCALLY | [#1197](https://github.com/alexhawat/mergeCraft/pull/1197) | 42 focused tests; Ruff/mypy |
+| R2 | Pinned operator budgets | security | VERIFIED LOCALLY | [#1197](https://github.com/alexhawat/mergeCraft/pull/1197) | 8 focused tests; Ruff/mypy |
+| R3 | Monotone clustering and scope union | findings | VERIFIED LOCALLY | [#1199](https://github.com/alexhawat/mergeCraft/pull/1199) | 761 focused tests; Ruff/mypy |
+| R4 | Impact-aware severity | findings | VERIFIED LOCALLY | [#1199](https://github.com/alexhawat/mergeCraft/pull/1199) | 282 focused tests; Ruff/mypy |
+| R5 | Finding occurrence identity | findings | VERIFIED LOCALLY | [#1199](https://github.com/alexhawat/mergeCraft/pull/1199) | 435 focused tests; Ruff/mypy |
+| R6 | Contributing config validation | cli | VERIFIED LOCALLY | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 33 focused tests; Ruff/mypy |
+| R7 | Checkout revision race and retry scope | security | VERIFIED LOCALLY | [#1197](https://github.com/alexhawat/mergeCraft/pull/1197) | Real-Git push/fetch and failed-checkout/retry regressions; 119 focused tests plus expanded proof/integrity cases; Ruff/mypy |
+| R8 | Git show cache identity | security | VERIFIED LOCALLY | [#1197](https://github.com/alexhawat/mergeCraft/pull/1197) | 301 focused Git tests; Ruff/mypy |
+| R9 | Same-repository fork trust | security | VERIFIED LOCALLY | [#1197](https://github.com/alexhawat/mergeCraft/pull/1197) | 236 core +132 broader tests; 1 optional-tool skip; Ruff/mypy |
+| R10 | Review cache source context | cli | VERIFIED LOCALLY | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 44 focused cache tests; Ruff/mypy |
+| R11 | Explicit revision source checkout | cli | VERIFIED LOCALLY | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | Local revision mismatch/dirty-tree Git regressions; Ruff/mypy |
+| R12 | Resolved repository persistence | cli | VERIFIED LOCALLY | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 24 provenance/persistence tests; preflight regression |
+| R13 | Target workspace env loading | cli | VERIFIED LOCALLY | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 44 startup/environment tests; Ruff/mypy |
+| R14 | Anonymous fallback without gh | cli | VERIFIED LOCALLY | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 4 focused auth/clone tests; Ruff/mypy |
+| R15 | Output usage exit status | cli | VERIFIED LOCALLY | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 17 output tests; Ruff/mypy |
+| T1 | Mutation error classification/baseline | ci | VERIFIED LOCALLY | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 20 tests; Ruff/mypy |
 | T2 | Semantic Action E2E receipts/protocol | ci | IMPLEMENTED / IMAGE CI PENDING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 29 protocol/assertion tests; real host GHA approval/refusal; Ruff/mypy/bash |
-| T3 | Clean installed-wheel CLI acceptance | ci | IMPLEMENTED / VALIDATING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | Clean wheel acceptance; 6 packaging tests; Ruff/mypy |
-| T4 | Locked CI bootstrap | ci | IMPLEMENTED / VALIDATING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | real stale-lock bootstrap regression; Ruff |
-| DOC1 | Released pinned onboarding | docs | IMPLEMENTED / VALIDATING | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | 26 docs tests; generated packages; Ruff |
-| DOC2 | Supported/tested/published matrix | docs | IMPLEMENTED / VALIDATING | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | 9 docs tests; generator drift; Ruff |
-| DOC3 | CLI workspace behavior documentation | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | Documented workspace and output contracts |
+| T3 | Clean installed-wheel CLI acceptance | ci | VERIFIED LOCALLY | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | Clean wheel acceptance; 6 packaging tests; Ruff/mypy |
+| T4 | Locked CI bootstrap | ci | VERIFIED LOCALLY | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | real stale-lock bootstrap regression; Ruff |
+| DOC1 | Released pinned onboarding | docs | VERIFIED LOCALLY | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | 26 docs tests; generated packages; Ruff |
+| DOC2 | Supported/tested/published matrix | docs | VERIFIED LOCALLY | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | 9 docs tests; generator drift; Ruff |
+| DOC3 | CLI workspace behavior documentation | cli | VERIFIED LOCALLY | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | Documented workspace and output contracts |
 | DOC4 | Enforce reliable deterministic checks | ci | IMPLEMENTED / IMAGE CI PENDING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 78 guard/workflow tests; permissions; Ruff |
-| DOC5 | Dated audit/history and complete remediation index | docs | IMPLEMENTED / VALIDATING | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | Dated report, probes, open-work snapshot and full finding index |
+| DOC5 | Dated audit/history and complete remediation index | docs | VERIFIED LOCALLY | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | Dated report, probes, open-work snapshot and full finding index |
 
 ## Verification and execution contract
 
-Each fix includes a focused regression suite, lint/format checks and appropriate typing checks. The regression cases exercise observable behavior, including real Git histories and consumer environments. Counts above overlap and must not be added as unique tests. Combined static/build, unit, coverage and deterministic integration validation is recorded below when complete. Platform-specific and installed-image evidence remains separate from local Python evidence.
+Each fix includes a focused regression suite, lint/format checks and appropriate typing checks. The regression cases exercise observable behavior, including real Git histories and consumer environments. Counts above overlap and must not be added as unique tests. Combined static/build, unit, coverage and deterministic integration results are recorded below. Platform-specific and installed-image evidence remains separate from local Python evidence.
 
 The original audit probes reproduce defects against the audit source commit; they are historical evidence, not the repaired behavior's acceptance suite. Source-level regression tests accompany the fixes. No paid model calls or private provider credentials are required.
 
@@ -66,4 +66,16 @@ The original audit probes reproduce defects against the audit source commit; the
 
 ## Combined verification
 
-Validation is in progress. Individual test evidence is listed above. The documentation/index will be updated with the final combined results and any remaining platform limits before the grouped PRs leave draft.
+The five branches merge without conflicts. Their source, tests, workflows and generated artifacts match the combined tree used for local validation; the subsequent documentation change records these results. The shared target is `3de00fc1`: main at `42285b46` plus integration-branch CI triggers and their test assertions. No product remediation has been merged into that target or main.
+
+Tested group inputs: security `68de6470`, CLI `610aa32b`, findings `b27933d6`, testing/CI `ab64e450`, and documentation `a5a653b6`. The final documentation commit adds this verification record only.
+
+- Full `make ci` on Python 3.14.6: **passed**. All four complete coverage shards passed: **15,199 passed, 67 skipped, 1 expected failure**. Statement coverage is **87.79%**, branch coverage **77.55%**, and combined coverage **85.19%**. The coverage ratchet, global floor and every critical-path floor passed. Static/build/generated-reference/type checks and dependency/security audits also passed.
+- Deterministic integration: **23 passed, 13 skipped**. The execution-count guard passed. Skips cover optional Agents SDK/Harbor packages, the absent `meat` executable, and disposable Linux isolation.
+- Python 3.11: **34 passed** in the final checkout/retry/evidence/Action-protocol suite. The broader CLI/triage/protocol selection first produced 187 passes and one consumer-venv fixture failure; after correcting POSIX interpreter symlinks, both consumer-environment cases passed. That full selection was not rerun as a single batch.
+- Final installed wheel: clean runtime-only installation, isolated Python/cwd/home, corpus replay, console help, configuration, version and JSON capabilities all passed. The tested wheel identifies source `38522f2`.
+- Structural eval gate and adversarial corpus checks passed. These are deterministic replay checks, not a live detection-accuracy benchmark.
+
+The first complete coverage attempt exposed two old workflow branch-list expectations and a remote-source fixture that returned an empty directory. The assertions now include the integration target, and the fixture clones a real local repository and verifies URL/SHA provenance. The affected suites passed **15** and **18** tests respectively before the complete rerun. These corrections removed no tests and lowered no coverage thresholds.
+
+The local Docker daemon was unavailable. Host Action protocol/publication tests passed, but installed-image Linux execution remains pending hosted CI. Native ARM execution and paid-provider/human-label campaigns were not performed. Hosted results are attached to each PR; local validation is not a claim that every hosted job is green.
