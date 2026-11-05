@@ -142,8 +142,11 @@ lane adds `fix_proof` on top:
   signal. `fix.not-required` and `fix.proven` are `low` and pass every gate; the
   four `medium` codes fail `fix_proof`. The catalogue-equality test keeps its
   assertion, so these rows are red until this lane's implementation. The
-  declared-scope lane's `# declared scope (part 3)` block goes immediately
-  before this one.
+  declared-scope lane's `# declared scope (part 3)` block and its two consumer
+  tweaks sit immediately before this one, taken verbatim. Its rows stay red on
+  this branch until that lane's implementation merges. The gate-order check
+  requires the `fix_proof` gate exactly when a row supplies a `fix_proof`
+  signal, the same way it treats `scope`.
 
 The shared hunks hold on `main`, with either lane alone, and after both merge.
 The packet-level tests in `test_blast_radius_fix_proof.py` also declare a

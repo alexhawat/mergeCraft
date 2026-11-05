@@ -69,6 +69,13 @@ def _gates(result: Any) -> dict[str, bool | None]:
     return {gate.gate: gate.passed for gate in result.checklist}
 
 
+def _scoped(
+    paths: list[str], globs: list[str], *, declared: bool = True, invalid: bool = False
+) -> dict[str, Any]:
+    """A complete change carrying a ``scope`` signal (#1056 part 3)."""
+    return {**_c(paths), "scope": {"declared": declared, "globs": globs, "invalid": invalid}}
+
+
 def _fix_proof_case(*, status: str, required: bool = True) -> dict[str, Any]:
     """A clean docs change carrying a ``fix_proof`` signal (#1056 part 5)."""
     return {
@@ -145,6 +152,12 @@ CODE_CASES: list[tuple[str, dict[str, Any], str, str | None]] = [
     ("paths.generated", _c(["generated/client.py"]), "low", None),
     ("source.small_isolated", _c(["src/pkg/time.py"], _SMALL), "low", None),
     ("baseline.clean", _c(["docs/guide.md"], {"lines_added": 3, "lines_deleted": 0}), "low", None),
+    # declared scope (part 3)
+    ("scope.within", _scoped(["docs/guide.md"], ["docs/**"]), "low", None),
+    ("scope.drift", _scoped(["docs/guide.md", "README.md"], ["docs/**"]), "medium", "scope"),
+    ("scope.undeclared", _scoped(["docs/guide.md"], []), "medium", "scope"),
+    ("scope.invalid", _scoped(["docs/guide.md"], [], invalid=True), "medium", "scope"),
+    ("scope.unknown", _scoped(["docs/guide.md"], [], declared=False), "medium", None),
     # fix proof (part 5)
     ("fix.not-required", _fix_proof_case(required=False, status="not-required"), "low", None),
     ("fix.proven", _fix_proof_case(status="proven"), "low", None),
@@ -241,13 +254,19 @@ def test_the_checklist_lists_every_gate_in_gate_order(api: Any, change: dict[str
     # the change set supplies that signal; every gate here is always listed, in order.
     assert names == [gate for gate in api.GATE_ORDER if gate in names]
     assert set(_LOCKED_GATE_ORDER) | {"source"} <= set(names)
-    assert "scope" not in names
+    assert ("scope" in names) is ("scope" in change)
+    assert ("fix_proof" in names) is ("fix_proof" in change)
 
 
 @pytest.mark.parametrize(
     "change",
-    [change for code, change, _lane, _gate in CODE_CASES if not code.startswith("signal.")],
-    ids=[code for code in _CODE_IDS if not code.startswith("signal.")],
+    # ``scope.unknown`` leaves its gate ``None`` by design: no scope was declared.
+    [
+        change
+        for code, change, _lane, _gate in CODE_CASES
+        if not code.startswith("signal.") and code != "scope.unknown"
+    ],
+    ids=[code for code in _CODE_IDS if not code.startswith("signal.") and code != "scope.unknown"],
 )
 def test_a_complete_change_measures_every_gate(change: dict[str, Any]) -> None:
     gates = _gates(_classify(change))
