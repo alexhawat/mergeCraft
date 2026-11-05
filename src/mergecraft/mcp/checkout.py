@@ -1132,6 +1132,18 @@ def get_git_status(cwd: str) -> str:
     return _run_git(["status", "--porcelain"], cwd=cwd).strip()
 
 
+async def _verify_files_api_head(ctx: ToolContext, *, pull_number: int, head_sha: str) -> None:
+    """The files endpoint follows a moving PR, so verify its head after reading."""
+    current = await ctx.scm.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
+    current_sha = (current.get("head") or {}).get("sha") or ""
+    if not head_sha or current_sha.lower() != head_sha.lower():
+        msg = (
+            f"PR #{pull_number} head changed or could not be verified while reading "
+            "its files; retry checkout before reviewing this revision."
+        )
+        raise RuntimeError(msg)
+
+
 def checkout_pr_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         params = normalize_pull_number_aliases(params, _CHECKOUT_PR_INPUT_SCHEMA)
@@ -1221,6 +1233,7 @@ def checkout_pr_tool(ctx: ToolContext):
                 detail=(fetch_err or "git fetch failed").splitlines()[0]
             )
             fetch_files_diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
+            await _verify_files_api_head(ctx, pull_number=pull_number, head_sha=head_sha)
             fetch_truncated = fetch_files_diff.truncated
             fetch_diff, fetch_unreviewable, fetch_ignored = _apply_review_ignore(
                 ctx,
@@ -1294,7 +1307,18 @@ def checkout_pr_tool(ctx: ToolContext):
             )
             return result
 
-        _run_git(["checkout", local_branch], cwd=cwd)
+        # The API lookup and refs/pull/N/head fetch can straddle a push. Bind
+        # the checkout to the verified immutable object before exposing scope.
+        checkout_sha = _run_git(
+            ["rev-parse", "--verify", f"{local_branch}^{{commit}}"], cwd=cwd
+        ).strip()
+        if head_sha and checkout_sha.lower() != head_sha.lower():
+            msg = (
+                f"PR #{pull_number} head changed between the API lookup and fetch; "
+                "retry checkout before reviewing this revision."
+            )
+            raise RuntimeError(msg)
+        _run_git(["checkout", "-B", local_branch, checkout_sha], cwd=cwd)
         # Ensure base is available for merge-base diffs
         base_env, base_remote_url = _git_env_for_cwd(cwd, ctx.git_token)
         base_fetch_failure: str | None = None
@@ -1321,7 +1345,7 @@ def checkout_pr_tool(ctx: ToolContext):
                 logger.info("base branch alias soft-failed: {}", err)
 
         state.issue_number = pull_number
-        state.checkout_sha = head_sha or _run_git(["rev-parse", "HEAD"], cwd=cwd).strip()
+        state.checkout_sha = checkout_sha
         state.push_dest = StoredPushDest(
             remote_name="origin",
             remote_branch=head_ref,
@@ -1350,6 +1374,7 @@ def checkout_pr_tool(ctx: ToolContext):
         except Exception as err:
             diff_failure = str(err).splitlines()[0] if str(err) else "git diff failed"
             files_diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
+            await _verify_files_api_head(ctx, pull_number=pull_number, head_sha=checkout_sha)
             diff = files_diff
             unreviewable = files_diff.unreviewable_paths
             diff_truncated = files_diff.truncated
