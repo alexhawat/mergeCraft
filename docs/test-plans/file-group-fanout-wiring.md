@@ -55,7 +55,8 @@ uv run pytest --collect-only -q tests/review tests/config             # collecti
 | Main wiring | `mergecraft.main._run_server_roster_reviewers_if_needed` | calls `run_file_group_reviewers` before `run_pending_roster_reviewers`, only when enabled, and returns the roster summary unchanged |
 | Packet provenance | finding `evidence` in the evidence packet | when the server records a group run it appends exactly one `reviewer: file-group/<id> (<model_slug>)` entry to every row the run claims; the primary's rows carry none |
 | Attribution | the group a new finding row belongs to | the group whose dispatch recorded it (the active group at record time, through the reviewer's finding tool), never the group that owns the row's path |
-| Roster bypass | `record_reviewer_dispatch_run_tool` | refused while a file group is active, with an error naming that group; outside a fan-out it behaves as before |
+| Roster bypass | `record_reviewer_dispatch_run_tool` and `record_reviewer_dispatch_error_tool` | both refused while a file group is active, with an error naming that group (`… is not available to file-group reviewer …`); outside a fan-out they behave as before |
+| Stamp durability | a row `verify_agent_findings` re-stores by fingerprint | keeps the `reviewer: file-group/<id> (<model>)` entry an earlier group's run gave it |
 | Terminal provenance (isolated) | `prepare_terminal_submission` / `stamped_findings_for_terminal_submission` | a group run recorded before the submit keeps `raised_by = "file-group/<id>"` and `raised_by_model` |
 
 The run-health row deliberately goes into `ToolState.agent_findings` rather than a new
@@ -119,6 +120,8 @@ resolution and instruction rendering replaced by recording fakes (the same seams
 | Each group's prompt: its own paths and the shared diff path; never the roster submit block or a recording/verdict tool name; no other group's paths | integration | `test_each_group_prompt_names_only_its_own_paths_and_never_the_roster_submit_block` |
 | A group following the roster instruction cannot record a run as its binding (`binding: reviewer2`): the tool refuses naming the group, and reviewer2's own provider still dispatches; the secondary prompt keeps the roster block; outside a fan-out the tool works as before | integration, error | `test_a_group_cannot_record_a_run_under_its_binding_id` |
 | Production order (primary submit, then fan-out): each group row's packet evidence names its group and model, the primary's rows name no group | integration | `test_group_findings_reach_the_packet_naming_their_group_in_production_order` (primary binding, `reviewer2` binding) |
+| The error-tool twin: a group marking `reviewer2` degraded during the fan-out is refused naming the group; reviewer2 still dispatches; outside a fan-out the error tool records as before | integration, error (*guard*) | `test_a_group_cannot_record_an_error_under_its_binding_id` |
+| Sequential groups: group-2 re-verifies group-1's finding; the packet row still carries group-1's entry once, and group-2's own row carries group-2's | integration, edge | `test_a_group_stamp_survives_a_later_group_re_verifying_the_row` |
 | `concurrency: 2`, each group raising a finding on the other's path: no row is lost from the packet, each row's evidence and run claim name the group that raised it | integration, edge | `test_concurrent_groups_attribute_each_row_to_the_group_that_raised_it` (three finish orders) |
 | Findings land on `reviewer_dispatch_runs` under the group id with `model_slug`; `tool_context.agent_id` is restored | integration | `test_group_findings_are_recorded_under_the_group_agent_id_with_model_slug` |
 | `binding` selects the group model; `None` reuses the primary reviewer | integration | `test_configured_binding_selects_the_group_model` (with the primary case covered above) |
@@ -172,3 +175,5 @@ A test changed after an implementation escalation gets a one-line rationale here
 * `perGroupTimeoutS` gained bounds (1..900) and a zero binding timeout may no longer
   disable the cap; the timeout reason renders one decimal.
 * Concurrent groups attribute rows by the recording group, pinned in three finish orders.
+* Pinned the error-tool refusal beside the run-tool one (the guard had no test), and the
+  survival of a group's evidence stamp when a later group re-verifies the same row.

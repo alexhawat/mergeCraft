@@ -39,7 +39,10 @@ from mergecraft.evidence.build import _partition_findings
 from mergecraft.evidence.merge import typed_findings_from_rows_with_drops
 from mergecraft.evidence.run_packet import build_run_packet
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
-from mergecraft.mcp.reviewer_dispatch import record_reviewer_dispatch_run_tool
+from mergecraft.mcp.reviewer_dispatch import (
+    record_reviewer_dispatch_error_tool,
+    record_reviewer_dispatch_run_tool,
+)
 from mergecraft.mcp.tool_state import (
     ToolState,
     init_tool_state,
@@ -1105,7 +1108,10 @@ class _ToolRecordingAgent:
     first path by default), after ``timing[group][0]`` seconds, then waits
     ``timing[group][1]``. With ``dispatch_tool_agent_id`` set, it also follows
     the roster instruction and calls ``record_reviewer_dispatch_run`` under that
-    id. Any other dispatch acts as the secondary roster reviewer.
+    id; with ``dispatch_error_tool_agent_id`` set, it calls
+    ``record_reviewer_dispatch_error`` under that id. ``findings_for[group]``
+    replaces the one default finding with an explicit list. Any other dispatch
+    acts as the secondary roster reviewer.
     """
 
     name = "opencode"
@@ -1117,11 +1123,16 @@ class _ToolRecordingAgent:
         targets: dict[str, str] | None = None,
         timing: dict[str, tuple[float, float]] | None = None,
         dispatch_tool_agent_id: str | None = None,
+        dispatch_error_tool_agent_id: str | None = None,
+        findings_for: dict[str, list[dict[str, Any]]] | None = None,
     ) -> None:
         self.groups = dict(groups)
         self.targets = dict(targets or {})
         self.timing = dict(timing or {})
         self.dispatch_tool_agent_id = dispatch_tool_agent_id
+        self.dispatch_error_tool_agent_id = dispatch_error_tool_agent_id
+        self.findings_for = dict(findings_for or {})
+        self.error_tool_results: dict[str, Any] = {}
         self.tool_context: ToolContext | None = None
         self.calls: list[tuple[str, str]] = []
         self.dispatch_tool_results: dict[str, Any] = {}
@@ -1154,12 +1165,12 @@ class _ToolRecordingAgent:
         if before:
             await asyncio.sleep(before)
         target = self.targets.get(group_id, self.groups[group_id][0])
+        findings = self.findings_for.get(
+            group_id,
+            [{"path": target, "body": _raised_body(group_id), "severity": "Minor", "line": 1}],
+        )
         recorded = await verify_agent_findings_tool(self.tool_context).execute(
-            {
-                "findings": [
-                    {"path": target, "body": _raised_body(group_id), "severity": "Minor", "line": 1}
-                ]
-            }
+            {"findings": findings}
         )
         assert recorded.is_error is False
         if self.dispatch_tool_agent_id is not None:
@@ -1173,6 +1184,10 @@ class _ToolRecordingAgent:
                     ],
                 }
             )
+        if self.dispatch_error_tool_agent_id is not None:
+            self.error_tool_results[group_id] = await record_reviewer_dispatch_error_tool(
+                self.tool_context
+            ).execute({"agent_id": self.dispatch_error_tool_agent_id, "reason": "quota"})
         if after:
             await asyncio.sleep(after)
         return AgentResult(success=True, output="ok")
@@ -1335,6 +1350,88 @@ async def test_a_group_cannot_record_a_run_under_its_binding_id(
         {"agent_id": "reviewer2", "findings": []}
     )
     assert outside.is_error is False
+
+
+async def test_a_group_cannot_record_an_error_under_its_binding_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The error-tool twin: a group marking ``reviewer2`` degraded is refused.
+
+    An accepted error would read as reviewer2's outcome, so the roster would
+    skip reviewer2's own provider.
+    """
+    groups = _group_paths(_LARGE_DIFF, max_groups=2)
+    agent = _ToolRecordingAgent(groups, dispatch_error_tool_agent_id="reviewer2")
+    env = _tool_env(
+        tmp_path,
+        monkeypatch,
+        config=_two_reviewer_config(enabled=True, maxGroups=2, binding="reviewer2"),
+        agent=agent,
+    )
+
+    await _fan_out(env)
+
+    assert set(agent.error_tool_results) == set(groups)
+    for group_id, result in agent.error_tool_results.items():
+        assert result.is_error is True
+        text = result.content[0]["text"]
+        assert "not available to file-group" in text
+        assert _group_agent_id(group_id) in text
+    assert "reviewer2" not in env.tool_state.reviewer_dispatch_errors
+
+    roster = await _run_roster(env)
+
+    assert roster.hard_error is None
+    assert roster.dispatched_agent_ids == ("reviewer2",)
+
+    # Outside a fan-out the error tool behaves as it always has.
+    outside = await record_reviewer_dispatch_error_tool(env.tool_context).execute(
+        {"agent_id": "reviewer2", "reason": "quota"}
+    )
+    assert outside.is_error is False
+    assert env.tool_state.reviewer_dispatch_errors["reviewer2"] == "quota"
+
+
+async def test_a_group_stamp_survives_a_later_group_re_verifying_the_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sequential groups: group-2 re-verifies the finding group-1 raised.
+
+    ``verify_agent_findings`` re-stores the row by fingerprint; the packet row
+    must still carry group-1's evidence entry.
+    """
+    groups = _group_paths(_LARGE_DIFF, max_groups=2)
+    shared = {
+        "path": groups["group-1"][0],
+        "body": "shared defect seen by both groups",
+        "severity": "Minor",
+        "line": 1,
+    }
+    own = {
+        "path": groups["group-2"][0],
+        "body": _raised_body("group-2"),
+        "severity": "Minor",
+        "line": 1,
+    }
+    agent = _ToolRecordingAgent(
+        groups, findings_for={"group-1": [shared], "group-2": [dict(shared), own]}
+    )
+    env = _tool_env(
+        tmp_path,
+        monkeypatch,
+        config=_single_reviewer_config(enabled=True, maxGroups=2),
+        agent=agent,
+    )
+
+    await _fan_out(env)
+    packet = build_run_packet(env.tool_context, change_id=_CHANGE_ID, run_succeeded=True)
+
+    by_message = {finding.message: finding for finding in packet.findings}
+    group_1_entry = _group_evidence("group-1", _PRIMARY_MODEL)
+    assert _reviewer_evidence(by_message[shared["body"]]).count(group_1_entry) == 1
+    assert _reviewer_evidence(by_message[_raised_body("group-2")]) == [
+        _group_evidence("group-2", _PRIMARY_MODEL)
+    ]
 
 
 # --------------------------------------------------------------------------- timeout bounds
