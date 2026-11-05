@@ -182,3 +182,23 @@ async def test_runner_run_raises_when_output_guardrail_trips(
     monkeypatch.setattr(Runner, "run", fake_run)
     with pytest.raises(OutputGuardrailTripwireTriggered):
         await Runner.run(agent, input="Review")
+
+
+@pytest.mark.parametrize("allowed", [frozenset(), frozenset({"src"})])
+def test_secret_in_filename_is_removed_from_report_and_diagnostics(allowed: frozenset[str]) -> None:
+    secret = "sk-1234567890abcdefghijklmnop"
+    report = ReviewFindingsReport(
+        findings=[
+            ReviewFinding(severity="Major", file=f"src/{secret}.py", message="bug"),
+        ]
+    )
+    filtered, violations = filter_guarded_findings(report, allowed_paths=allowed)
+    assert not filtered.findings
+    assert violations
+    assert secret not in str(violations)
+    assert secret not in filtered.model_dump_json()
+
+
+@pytest.mark.parametrize("path", ["../outside.py", "/etc/passwd", ""])
+def test_unscoped_guardrail_still_requires_relative_path(path: str) -> None:
+    assert not path_in_change_set(path, frozenset())

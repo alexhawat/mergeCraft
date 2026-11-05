@@ -13,3 +13,6 @@ uv run python examples/agents-sdk/review_loop.py
 
 The script uses a tiny workspace under ``examples/agents-sdk/workspace/`` with an
 intentional bug, runs up to three review/fix rounds, and prints structured findings.
+
+Each run reviews and fixes a temporary copy of `workspace/`; the tracked demo
+fixture remains unchanged.

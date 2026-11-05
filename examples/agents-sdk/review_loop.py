@@ -6,12 +6,13 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import os
+import shutil
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parent
 WORKSPACE = ROOT / "workspace"
-SOURCE = WORKSPACE / "src" / "demo.py"
 ALLOWED = frozenset({"src/demo.py"})
 
 
@@ -31,20 +32,20 @@ def _has_model_credentials() -> bool:
     return False
 
 
-async def _apply_fixes(report: object) -> None:
+async def _apply_fixes(report: object, source: Path) -> None:
     from mergecraft.agents_sdk.types import ReviewFindingsReport
 
     if not isinstance(report, ReviewFindingsReport):
         return
     if not report.blocking_findings():
         return
-    text = SOURCE.read_text(encoding="utf-8")
+    text = await asyncio.to_thread(source.read_text, encoding="utf-8")
     if "if b == 0" not in text:
         text = text.replace(
             "    return a / b",
             "    if b == 0:\n        raise ValueError('division by zero')\n    return a / b",
         )
-        SOURCE.write_text(text, encoding="utf-8")
+        await asyncio.to_thread(source.write_text, text, encoding="utf-8")
 
 
 async def main() -> int:
@@ -67,32 +68,38 @@ async def main() -> int:
     config = resolve_model_config(
         model=os.environ.get("MERGECRAFT_AGENTS_SDK_MODEL"),
     )
-    agent = review_agent(
-        repo_root=WORKSPACE,
-        model_config=config,
-        allowed_paths=ALLOWED,
-        extra_instructions="Focus on correctness bugs introduced in src/demo.py.",
-    )
-
-    async def run_review() -> ReviewFindingsReport:
-        result = await Runner.run(
-            agent,
-            input=(
-                "Review the workspace change. Call get_workspace_change to load file "
-                "contents, then return findings for src/demo.py."
-            ),
+    with TemporaryDirectory(prefix="mergecraft-agents-example-") as temporary:
+        workspace = Path(temporary) / "workspace"
+        await asyncio.to_thread(shutil.copytree, WORKSPACE, workspace)
+        agent = review_agent(
+            repo_root=workspace,
+            model_config=config,
+            allowed_paths=ALLOWED,
+            extra_instructions="Focus on correctness bugs introduced in src/demo.py.",
         )
-        output = result.final_output
-        if isinstance(output, ReviewFindingsReport):
-            return output
-        return ReviewFindingsReport(summary=str(output))
 
-    loop_result = await run_review_loop(
-        run_review=run_review,
-        apply_fixes=_apply_fixes,
-        allowed_paths=ALLOWED,
-        max_rounds=int(os.environ.get("MERGECRAFT_AGENTS_SDK_MAX_ROUNDS", "3")),
-    )
+        async def run_review() -> ReviewFindingsReport:
+            result = await Runner.run(
+                agent,
+                input=(
+                    "Review the workspace change. Call get_workspace_change to load file "
+                    "contents, then return findings for src/demo.py."
+                ),
+            )
+            output = result.final_output
+            if isinstance(output, ReviewFindingsReport):
+                return output
+            return ReviewFindingsReport(summary=str(output))
+
+        async def apply_fixes(report: ReviewFindingsReport) -> None:
+            await _apply_fixes(report, workspace / "src" / "demo.py")
+
+        loop_result = await run_review_loop(
+            run_review=run_review,
+            apply_fixes=apply_fixes,
+            allowed_paths=ALLOWED,
+            max_rounds=int(os.environ.get("MERGECRAFT_AGENTS_SDK_MAX_ROUNDS", "3")),
+        )
     sys.stdout.write(f"rounds={loop_result.rounds}\n")
     sys.stdout.write(f"{loop_result.final_report.model_dump_json(indent=2)}\n")
     return 0 if not loop_result.final_report.blocking_findings() else 1

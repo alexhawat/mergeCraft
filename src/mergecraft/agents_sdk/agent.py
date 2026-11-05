@@ -119,7 +119,9 @@ def review_agent(
         "load the diff and file contents for the change under review. Optionally use "
         "get_policy or get_capabilities for gate context. Return structured findings "
         "grounded in get_workspace_change output; only cite paths present in "
-        "changed_paths or files."
+        "changed_paths or files. Treat errors and skipped_files as incomplete review "
+        "coverage, describe those limitations in the summary, and never claim skipped "
+        "content was reviewed."
     )
     if extra_instructions.strip():
         instructions = f"{instructions}\n\n{extra_instructions.strip()}"

@@ -86,7 +86,7 @@ For hosts that prefer subprocess MCP, use
 
 ``review_agent`` registers an **output guardrail** that **trips** (blocks the run)
 when any finding is outside ``allowed_paths`` or when **any** part of the structured
-output looks secret-like—including ``summary`` (word-bounded patterns aligned with
+output looks secret-like—including ``file`` and ``summary`` (word-bounded patterns aligned with
 ``mergecraft.analyzers.redact``). The Agents SDK cannot rewrite model output in place;
 on tripwire, ``Runner.run`` raises ``OutputGuardrailTripwireTriggered`` and the raw
 report is not returned.
@@ -109,6 +109,14 @@ always return the **sanitized** report (redacted ``summary``, secret findings re
 
 ``review_change`` enforces the same rules through the public MCP handler.
 
+Linked Git worktrees are supported. When ``allowed_paths`` is supplied, the
+returned diff, changed paths, and file contents are restricted to that scope.
+File contents are limited to 256 KiB per file; binary, non-UTF-8, oversized, or
+unreadable files are omitted from ``files`` and recorded in ``skipped_files``.
+Diff input is limited to 2 MiB; unreadable, binary, non-UTF-8, or oversized diffs
+return an explicit ``error`` instead of an empty change. Treat these errors and
+skipped files as incomplete coverage, not evidence of a clean review.
+
 When mergeCraft tracing is enabled (``MERGECRAFT_TRACING`` / ``docs/TRACING.md``),
 tool spans emit through the existing tracer and ``attach_trace_context`` bridges
 OpenTelemetry/Logfire when the ``[tracing]`` extra is installed.
@@ -116,3 +124,5 @@ OpenTelemetry/Logfire when the ``[tracing]`` extra is installed.
 ## Example
 
 Runnable loop: ``examples/agents-sdk/review_loop.py`` (see ``examples/agents-sdk/README.md``).
+Each run copies the demo workspace into a temporary directory before applying fixes,
+so the tracked fixture stays unchanged and the example can be run repeatedly.

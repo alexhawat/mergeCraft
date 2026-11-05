@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from mergecraft.review.offline_result import OfflineReviewResult
 
+from mergecraft.agents_sdk.guardrails import path_in_change_set
 from mergecraft.mcp.checkout import changed_paths_in_diff
 from mergecraft.utils.source_resolve import (
     SourceResolverSpec,
@@ -53,8 +54,27 @@ def _confine_diff_paths(repo_root: Path, diff_text: str) -> tuple[str, list[str]
     return filtered, sorted(kept)
 
 
-async def _read_text(path: Path) -> str:
-    return await asyncio.to_thread(path.read_text, encoding="utf-8")
+_MAX_FILE_BYTES = 256 * 1024
+_MAX_DIFF_BYTES = 2 * 1024 * 1024
+
+
+def _read_bounded_text(path: Path, limit: int) -> tuple[str | None, str | None]:
+    try:
+        with path.open("rb") as stream:
+            raw = stream.read(limit + 1)
+        if len(raw) > limit:
+            return None, f"exceeds {limit} byte limit"
+        if b"\x00" in raw:
+            return None, "binary content"
+        return raw.decode("utf-8"), None
+    except UnicodeDecodeError:
+        return None, "non-UTF-8 content"
+    except OSError:
+        return None, "unreadable file"
+
+
+async def _read_text(path: Path, limit: int) -> tuple[str | None, str | None]:
+    return await asyncio.to_thread(_read_bounded_text, path, limit)
 
 
 async def materialize_workspace_change(
@@ -76,9 +96,12 @@ async def materialize_workspace_change(
     changed_paths: list[str] = []
 
     if diff_path is not None:
-        diff_text = await _read_text(diff_path)
+        text, reason = await _read_text(diff_path, _MAX_DIFF_BYTES)
+        if text is None:
+            return {"error": f"Cannot read diff: {reason}"}
+        diff_text = text
         diff_text, changed_paths = _confine_diff_paths(root, diff_text)
-    elif await asyncio.to_thread((root / ".git").is_dir):
+    elif await asyncio.to_thread((root / ".git").exists):
         try:
             workspace = resolve_workspace(spec)
         except (OSError, RuntimeError, ValueError):
@@ -99,40 +122,41 @@ async def materialize_workspace_change(
                 source_spec=spec,
                 engine=engine,
             )
-            if result.success and result.diff_path:
+            if not result.success:
+                return {"error": "Could not materialize workspace diff"}
+            if result.diff_path:
                 materialized = Path(result.diff_path)
-                if await asyncio.to_thread(materialized.is_file):
-                    diff_text = await _read_text(materialized)
-                    diff_text, changed_paths = _confine_diff_paths(root, diff_text)
+                text, reason = await _read_text(materialized, _MAX_DIFF_BYTES)
+                if text is None:
+                    return {"error": f"Cannot read materialized diff: {reason}"}
+                diff_text, changed_paths = _confine_diff_paths(root, text)
+
+    if allowed_paths:
+        from mergecraft.offline_review import _filter_diff_to_paths
+
+        changed_paths = [p for p in changed_paths if path_in_change_set(p, allowed_paths)]
+        diff_text = _filter_diff_to_paths(diff_text, changed_paths)
 
     if not changed_paths and allowed_paths:
         changed_paths = sorted(allowed_paths)
 
-    scope = allowed_paths if allowed_paths else frozenset(changed_paths)
     files: dict[str, str] = {}
+    skipped_files: dict[str, str] = {}
     for rel in changed_paths:
-        if (
-            scope
-            and rel not in scope
-            and not any(rel == root_path or rel.startswith(f"{root_path}/") for root_path in scope)
-        ):
-            continue
         confined = confine_path(root, rel)
         if confined is None or not await asyncio.to_thread(confined.is_file):
             continue
-        files[rel] = await _read_text(confined)
-
-    if not files and allowed_paths:
-        for rel in sorted(allowed_paths):
-            confined = confine_path(root, rel)
-            if confined is None or not await asyncio.to_thread(confined.is_file):
-                continue
-            files[rel] = await _read_text(confined)
+        text, reason = await _read_text(confined, _MAX_FILE_BYTES)
+        if text is None:
+            skipped_files[rel] = reason or "unreadable file"
+        else:
+            files[rel] = text
 
     return {
         "diff": diff_text,
         "changed_paths": changed_paths,
         "files": files,
+        "skipped_files": skipped_files,
     }
 
 

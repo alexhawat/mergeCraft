@@ -38,11 +38,11 @@ def _normalize_repo_path(path: str) -> str | None:
 
 def path_in_change_set(path: str, allowed_paths: frozenset[str]) -> bool:
     """Return whether ``path`` is the same as or under an allowed changed path."""
-    if not allowed_paths:
-        return True
     normalized = _normalize_repo_path(path)
     if normalized is None:
         return False
+    if not allowed_paths:
+        return True
     for allowed in allowed_paths:
         root = _normalize_repo_path(allowed)
         if root is None:
@@ -61,7 +61,9 @@ def _redact_text(text: str) -> str:
 
 
 def finding_looks_like_secret(finding: ReviewFinding) -> bool:
-    blob = " ".join(part for part in (finding.message, finding.suggested_fix or "") if part)
+    blob = " ".join(
+        part for part in (finding.file, finding.message, finding.suggested_fix or "") if part
+    )
     if _text_contains_secret_pattern(blob):
         return True
     redacted = _redact_text(blob)
@@ -86,11 +88,11 @@ def filter_guarded_findings(
     kept: list[ReviewFinding] = []
     violations: list[str] = []
     for row in report.findings:
+        if finding_looks_like_secret(row):
+            violations.append("finding contains secret-like strings")
+            continue
         if not path_in_change_set(row.file, allowed_paths):
             violations.append(f"finding references path outside change set: {row.file!r}")
-            continue
-        if finding_looks_like_secret(row):
-            violations.append(f"finding message looks secret-like for {row.file!r}")
             continue
         kept.append(row)
     summary = _sanitize_summary(report.summary)
