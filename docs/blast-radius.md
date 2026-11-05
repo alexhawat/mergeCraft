@@ -58,7 +58,7 @@ Every classification carries `reasons`: one row per signal, each with a stable d
 | `fix.not-required` | low | the pull request is not a fix (see *Fix proof*), so no receipt is needed |
 | `fix.proven` | low | a fix whose receipt, from a successful run on the exact head and base SHAs, shows a test failing on the base and every listed test passing on the head |
 | `fix.not-proven` | medium | a fix whose receipt proves nothing: no test failed on the base, a test did not pass on the head, or it lists no tests |
-| `fix.no-receipt` | medium | a fix with no readable receipt from a successful run on the head, or in a repository that declares no `redGreenArtifacts`; the message says which |
+| `fix.no-receipt` | medium | a fix with no readable receipt from a successful run on the head, or with no `ciEvidence.redGreen` declared on the base; the message says which and repeats the evidence detail |
 | `fix.receipt.invalid` | medium | a fix whose receipt is malformed, has the wrong schema, or is over the 1 MB cap |
 | `fix.receipt.mismatch` | medium | a fix whose receipt was produced for other commits than the pull request's base and head |
 
@@ -96,14 +96,14 @@ A gate that reads `diff_stats` counts it as measured whenever the mapping is pre
 
 A fix pull request has to show that it fixes something. A pull request is a fix when its title starts with a conventional `fix` type (`fix:`, `fix(scope):`, `fix!:`, `fix(scope)!:`, in any case, leading whitespace ignored) or when it carries a label named in `review.fixLabels` (default `bug` and `fix`, matched without regard to case; a configured list replaces the default). `fixLabels` is read only from the pull request base, never from the pull request's own config. Both inputs are written by the author, so they can only add the requirement: nothing an author writes satisfies it.
 
-The proof is a fail-then-pass receipt that the repository's own CI uploads as a workflow artifact named in `ciEvidence.redGreenArtifacts`. mergeCraft reads it only from a successful workflow run on the head SHA, checks that its `base_sha` and `head_sha` are exactly the pull request's, and never runs a test itself. The format, the bounds and a sample workflow step are in [`red-green-receipts.md`](red-green-receipts.md).
+The proof is a fail-then-pass receipt that the repository's own CI uploads as the workflow artifact declared in `ciEvidence.redGreen` (`artifact` and the one `workflow` allowed to upload it), honoured only from the pull request base. mergeCraft reads it only from a successful run of that workflow in the reviewed repository (never a fork) on the head SHA, only when the pull request leaves that workflow untouched, checks that its `base_sha` and `head_sha` are exactly the pull request's, and never runs a test itself. The format, the bounds and a sample workflow step are in [`red-green-receipts.md`](red-green-receipts.md).
 
 | Pull request | Receipt status | `fix_proof` gate | Reason |
 |---|---|---|---|
 | not a fix | any | `true` | `fix.not-required` (low) |
 | fix | `proven` | `true` | `fix.proven` (low) |
 | fix | `not-proven` or `no-tests` | `false` | `fix.not-proven` (medium) |
-| fix | no receipt read, or `redGreenArtifacts` not declared | `false` | `fix.no-receipt` (medium) |
+| fix | no receipt read, or `redGreen` not declared | `false` | `fix.no-receipt` (medium) |
 | fix | `invalid` (malformed, wrong schema, oversized) | `false` | `fix.receipt.invalid` (medium) |
 | fix | `mismatch` (other SHAs) | `false` | `fix.receipt.mismatch` (medium) |
 

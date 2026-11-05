@@ -107,6 +107,30 @@ class ProviderRegistryEntry(_OptionalFeatureModel):
     models: list[ProviderModelEntry] = Field(default_factory=list)
 
 
+class RedGreenReceiptSettings(_OptionalFeatureModel):
+    """``ciEvidence.redGreen``: where a fix pull request's fail-then-pass receipt comes from.
+
+    ``artifact`` is the workflow artifact that holds the receipt
+    (``docs/red-green-receipts.md``); ``workflow`` is the repo-relative workflow file
+    (``.github/workflows/…``) that is the only allowed uploader. The receipt counts
+    only when a run of exactly that file, from this repository (never a fork),
+    completed with ``success`` on the reviewed head commit and the pull request does
+    not change that file. Honoured only from the pull request base (#1056).
+    """
+
+    artifact: str = Field(min_length=1)
+    workflow: str = Field(min_length=1)
+
+    @field_validator("workflow")
+    @classmethod
+    def _repo_relative(cls, value: str) -> str:
+        path = value.strip().removeprefix("./")
+        if not path or path.startswith("/") or ".." in path.split("/"):
+            msg = f"workflow must be a repo-relative workflow file path, got {value!r}"
+            raise ValueError(msg)
+        return path
+
+
 class CiEvidenceSettings(_OptionalFeatureModel):
     """Which of the repo's *own* CI results mergeCraft may treat as evidence (#36).
 
@@ -130,17 +154,17 @@ class CiEvidenceSettings(_OptionalFeatureModel):
     (mutmut or Stryker JSON) the reviewer may ingest as survivor findings.
     Empty means no ingest and no extra API call (C-D2).
 
-    ``redGreenArtifacts`` lists workflow artifact names that carry a
-    fail-then-pass receipt (``docs/red-green-receipts.md``), read only from a
-    successful workflow run on the head SHA. Empty means no ingest and no extra
-    API call; a fix pull request then has no proof (#1056).
+    ``redGreen`` declares the fail-then-pass receipt (:class:`RedGreenReceiptSettings`:
+    the artifact and the one workflow allowed to upload it). Unset means no ingest and
+    no extra API call; a fix pull request then has no proof (#1056). It is honoured
+    only from the pull request base (``review_policy.red_green``).
     """
 
     gates: dict[str, str] = Field(default_factory=dict)
     sarif_artifacts: list[str] = Field(default_factory=list, alias="sarifArtifacts")
     coverage_artifacts: list[str] = Field(default_factory=list, alias="coverageArtifacts")
     mutation_artifacts: list[str] = Field(default_factory=list, alias="mutationArtifacts")
-    red_green_artifacts: list[str] = Field(default_factory=list, alias="redGreenArtifacts")
+    red_green: RedGreenReceiptSettings | None = Field(default=None, alias="redGreen")
 
 
 class AnalyzerOverride(_OptionalFeatureModel):
@@ -417,7 +441,7 @@ class ReviewSettings(BaseModel):
         ),
     )
     # #1056 part 5 — labels that mark a pull request as a fix, which then needs a
-    # fail-then-pass receipt (``ciEvidence.redGreenArtifacts``). A conventional ``fix``
+    # fail-then-pass receipt (``ciEvidence.redGreen``). A conventional ``fix``
     # title is a fix whatever this lists; a configured list replaces the default.
     fix_labels: list[str] = Field(
         default_factory=lambda: ["bug", "fix"],

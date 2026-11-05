@@ -181,8 +181,8 @@ def fix_proof_signal_for_state(
     """The ``fix_proof`` signal for the run's pull request and recorded receipt (#1056 part 5).
 
     A pull request that is not a fix (``is_fix_pull_request``) needs no proof. A fix
-    carries the status of ``ToolState.red_green``; with nothing recorded (CI ingest
-    did not run) it is ``no-receipt``, never proven. The packet and the
+    carries the status and detail of ``ToolState.red_green``; with nothing recorded
+    (CI ingest did not run) it is ``no-receipt``, never proven. The packet and the
     verification tool both build the signal here, so the lane a judge is held to
     is the lane the packet reports.
 
@@ -203,7 +203,14 @@ def fix_proof_signal_for_state(
     status = getattr(evidence, "status", None)
     if status not in _FIX_PROOF_STATUSES:
         return {"required": True, "status": "no-receipt"}
-    return {"required": True, "status": cast("FixProofStatus", status)}  # reason: checked above
+    signal: FixProofSignal = {
+        "required": True,
+        "status": cast("FixProofStatus", status),  # reason: membership checked above
+    }
+    detail = getattr(evidence, "detail", None)
+    if isinstance(detail, str) and detail.strip():
+        signal["detail"] = detail.strip()
+    return signal
 
 
 def _event_pull_request(ctx: ToolContext) -> dict[str, Any]:

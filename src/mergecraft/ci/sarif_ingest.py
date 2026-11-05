@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import zipfile
+from collections.abc import Mapping
 from io import BytesIO
-from typing import TYPE_CHECKING, Any, Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 from loguru import logger
 
@@ -22,9 +24,10 @@ from mergecraft.ci.red_green import (
 from mergecraft.scm.github import github_client_from_scm
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
     from mergecraft.ci.red_green import RedGreenStatus
+    from mergecraft.config.settings import RedGreenReceiptSettings
     from mergecraft.mcp.context import ToolContext
     from mergecraft.utils.github import GitHubClient
 
@@ -56,15 +59,195 @@ def ci_wait_inputs_from_env() -> tuple[str, int] | None:
 
 
 _RECEIPT_MEMBER = "red-green.json"
+RED_GREEN_ARCHIVE_MAX_BYTES: Final[int] = 2 * 1024 * 1024
+"""The largest receipt archive (``size_in_bytes``) that is ever downloaded."""
 
 
-def _successful_run_on(run: Mapping[str, Any], head_sha: str) -> bool:
-    """A finished, successful workflow run on exactly ``head_sha`` (listing row fields)."""
-    return (
-        run.get("status") == "completed"
-        and run.get("conclusion") == "success"
-        and str(run.get("head_sha") or "").strip().lower() == head_sha
+class _NoReceipt(Exception):
+    """No receipt can count for this run; the message is the evidence detail."""
+
+
+def _short(sha: str) -> str:
+    return sha[:7] if sha else "unknown"
+
+
+def _same_sha(value: object, head: str) -> bool:
+    return isinstance(value, str) and bool(head) and value.strip().lower() == head
+
+
+def _workflow_path(value: object) -> str:
+    return value.strip().removeprefix("./") if isinstance(value, str) else ""
+
+
+def _head_repository(run: Mapping[str, Any]) -> str:
+    repository = run.get("head_repository")
+    name = repository.get("full_name") if isinstance(repository, dict) else None
+    return name.strip() if isinstance(name, str) else ""
+
+
+def _provenanced_runs(
+    runs: Sequence[Mapping[str, Any]], *, head: str, workflow: str, repo: str, label: str
+) -> list[Mapping[str, Any]]:
+    """Return the runs whose upload may count: the declared workflow, this repo, success.
+
+    A run counts only when it executed exactly the declared workflow file, its head
+    repository is the reviewed repository (never a fork, never unknown), and it
+    completed with ``success`` on the head commit. Every other run is ignored, so a
+    forged run listed beside the operator's can never shadow it.
+    """
+    on_head = [run for run in runs if _same_sha(run.get("head_sha"), head)]
+    if not on_head:
+        msg = f"no workflow run on the head commit {_short(head)} could have uploaded {label}"
+        raise _NoReceipt(msg)
+    declared = [run for run in on_head if _workflow_path(run.get("path")) == workflow]
+    if not declared:
+        seen = sorted({_workflow_path(run.get("path")) or "no workflow path" for run in on_head})
+        msg = (
+            f"no run of the declared workflow {workflow} on the head commit {_short(head)} "
+            f"could have uploaded {label} (runs seen: {', '.join(seen)})"
+        )
+        raise _NoReceipt(msg)
+    same_repo: list[Mapping[str, Any]] = []
+    foreign: list[str] = []
+    for run in declared:
+        origin = _head_repository(run)
+        if origin.lower() == repo.lower():
+            same_repo.append(run)
+        elif origin:
+            foreign.append(f"run {run.get('id')} came from {origin}")
+        else:
+            foreign.append(f"run {run.get('id')} has no head repository")
+    if not same_repo:
+        msg = (
+            f"no run of {workflow} on the head commit came from the reviewed repository "
+            f"{repo}, so {label} cannot count ({'; '.join(foreign)})"
+        )
+        raise _NoReceipt(msg)
+    succeeded = [
+        run
+        for run in same_repo
+        if run.get("status") == "completed" and run.get("conclusion") == "success"
+    ]
+    if not succeeded:
+        msg = (
+            f"no run of {workflow} on the head commit {_short(head)} that uploads {label} succeeded"
+        )
+        raise _NoReceipt(msg)
+    return succeeded
+
+
+def _require_workflow_untouched(ctx: ToolContext, *, workflow: str, label: str) -> None:
+    """Fail closed unless the full, unfiltered change set shows ``workflow`` untouched.
+
+    The review diff is filtered: ``review.ignorePaths`` and the ``ignore_paths``
+    input drop whole files from it, and GitHub sends no patch for some files. The
+    change set judged here is therefore the review diff's paths (rename sources
+    included) plus every path the review ignored (``ToolState.ignored_review_paths``)
+    plus every path it could not review (``ToolState.coverage.unreviewable_paths``).
+    A diff that is missing or unreadable, or a files listing that was truncated,
+    cannot show the workflow untouched, so the receipt never counts then either.
+    """
+    from mergecraft.mcp.tool_state import primary_repo_state
+    from mergecraft.utils.diff_paths import changed_paths_from_diff
+
+    state = ctx.tool_state
+    unverified = (
+        f"whether this pull request changes the declared workflow {workflow} could not be "
+        f"verified, so {label} cannot count"
     )
+    diff_path = primary_repo_state(state).diff_path
+    if not diff_path:
+        msg = f"{unverified}: the review has no diff"
+        raise _NoReceipt(msg)
+    try:
+        text = Path(diff_path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        msg = f"{unverified}: the diff could not be read ({type(exc).__name__})"
+        raise _NoReceipt(msg) from exc
+    reviewed = {_workflow_path(path) for path in changed_paths_from_diff(text)}
+    ignored = {_workflow_path(path) for path in getattr(state, "ignored_review_paths", ())}
+    coverage = getattr(state, "coverage", None)
+    unreviewable = {
+        _workflow_path(path) for path in getattr(coverage, "unreviewable_paths", ()) or ()
+    }
+    if workflow in ignored:
+        msg = (
+            f"this pull request changes the declared workflow {workflow}; the change was "
+            f"ignored in review (ignorePaths) but still voids {label}"
+        )
+        raise _NoReceipt(msg)
+    if workflow in unreviewable:
+        msg = (
+            f"this pull request changes the declared workflow {workflow} (GitHub sent no "
+            f"reviewable patch for it), so nothing it uploads counts as {label}"
+        )
+        raise _NoReceipt(msg)
+    if workflow in reviewed:
+        msg = (
+            f"this pull request changes the declared workflow {workflow}, so nothing it "
+            f"uploads counts as {label}"
+        )
+        raise _NoReceipt(msg)
+    if getattr(coverage, "diff_truncated", False):
+        msg = f"{unverified}: the pull request's diff file listing was truncated"
+        raise _NoReceipt(msg)
+
+
+async def _receipt_archive(
+    client: GitHubClient,
+    *,
+    owner: str,
+    repo: str,
+    runs: list[Mapping[str, Any]],
+    artifact: str,
+    label: str,
+) -> tuple[Mapping[str, Any], bytes]:
+    """Return ``(run, archive bytes)`` for the declared artifact of a provenanced run."""
+    for run in sorted(runs, key=lambda item: _run_id(item), reverse=True):
+        run_id = _run_id(run)
+        try:
+            artifacts = await client.list_workflow_run_artifacts(owner, repo, run_id)
+        except Exception as exc:  # a transport failure records no receipt, never a crash
+            msg = f"the artifacts of workflow run {run_id} could not be listed for {label}"
+            raise _NoReceipt(f"{msg} ({type(exc).__name__})") from exc
+        if artifacts.incomplete:
+            msg = f"the artifact listing of workflow run {run_id} was incomplete, so {label} is unconfirmed"
+            raise _NoReceipt(msg)
+        for item in artifacts.items:
+            if not isinstance(item, dict) or item.get("name") != artifact:
+                continue
+            if item.get("expired"):
+                msg = f"{label} from workflow run {run_id} has expired"
+                raise _NoReceipt(msg)
+            size = item.get("size_in_bytes")
+            if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+                msg = (
+                    f"{label} from workflow run {run_id} reports an unknown size, so it was "
+                    "not downloaded"
+                )
+                raise _NoReceipt(msg)
+            if size > RED_GREEN_ARCHIVE_MAX_BYTES:
+                msg = f"{label} is a {size}-byte archive, past the {RED_GREEN_ARCHIVE_MAX_BYTES}-byte limit"
+                raise _NoReceipt(msg)
+            artifact_id = item.get("id")
+            if not isinstance(artifact_id, int) or isinstance(artifact_id, bool):
+                continue
+            try:
+                archive = await client.download_artifact_zip(owner, repo, artifact_id)
+            except Exception as exc:  # a transport failure records no receipt, never a crash
+                msg = f"{label} could not be downloaded from workflow run {run_id}"
+                raise _NoReceipt(f"{msg} ({type(exc).__name__})") from exc
+            if len(archive) > RED_GREEN_ARCHIVE_MAX_BYTES:
+                msg = f"{label} is past the {RED_GREEN_ARCHIVE_MAX_BYTES}-byte archive limit"
+                raise _NoReceipt(msg)
+            return run, bytes(archive)
+    msg = f"no successful run of the declared workflow on the head commit uploaded {label}"
+    raise _NoReceipt(msg)
+
+
+def _run_id(run: Mapping[str, Any]) -> int:
+    value = run.get("id")
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
 def _receipt_member_bytes(archive: bytes) -> bytes | None:
@@ -116,17 +299,26 @@ def _evidence_from_archive(
     try:
         receipt = parse_red_green_receipt(raw)
     except RedGreenReceiptError as err:
-        prefix = "receipt oversized" if err.kind == "oversized" else "receipt invalid"
-        return _row("invalid", f"{prefix}: {err}")
+        # An oversized error already says so; an invalid one gets its own prefix.
+        detail = str(err) if err.kind == "oversized" else f"receipt invalid: {err}"
+        return _row("invalid", detail)
     count = len(receipt.tests)
     if not receipt_matches(receipt, base_sha=base_sha, head_sha=head_sha):
         return _row(
             "mismatch",
-            "the receipt's base and head SHAs do not match this pull request's",
+            f"the receipt names base {_short(receipt.base_sha)} and head "
+            f"{_short(receipt.head_sha)}, this pull request is at base {_short(base_sha)} "
+            f"and head {_short(head_sha)}",
             count,
         )
     verdict = red_green_verdict(receipt)
     return _row(verdict, f"receipt lists {count} test(s): {verdict}", count)
+
+
+def _no_receipt(detail: str, *, artifact: str | None = None) -> RedGreenEvidence:
+    return RedGreenEvidence(
+        status="no-receipt", test_count=0, artifact=artifact, run_url=None, detail=detail
+    )
 
 
 async def collect_ci_red_green_evidence(
@@ -134,72 +326,61 @@ async def collect_ci_red_green_evidence(
     *,
     client: GitHubClient,
     runs: Sequence[Mapping[str, Any]],
-    artifacts: Sequence[str],
+    declaration: RedGreenReceiptSettings | None,
     base_sha: str,
     head_sha: str,
 ) -> RedGreenEvidence:
-    """Read the declared fail-then-pass receipt from a successful run on ``head_sha``.
+    """Read the declared fail-then-pass receipt for this head; never raises.
 
-    Undeclared (no non-blank name) is ``not-declared`` with no API call. Only a
-    listing row with ``status == "completed"``, ``conclusion == "success"`` and
-    ``head_sha`` equal to the head is read; the first such run carrying a named
-    artifact decides. The receipt is parsed as data (never executed), bound to
-    ``base_sha`` / ``head_sha`` and judged. A failed listing or download, a
-    missing artifact or no successful run is ``no-receipt``. Never raises.
+    No declaration is ``not-declared`` with no API call. The pull request must leave
+    the declared workflow untouched (judged on the unfiltered change set; any doubt
+    fails closed), and only a run of exactly that workflow, from the reviewed
+    repository, completed with ``success`` on the head SHA may supply the artifact.
+    Its listed ``size_in_bytes`` must be known and at most 2 MiB before it is
+    downloaded. The receipt is parsed as data (never executed), bound to
+    ``base_sha`` / ``head_sha`` and judged. Every other outcome is ``no-receipt``
+    with the reason in ``detail``.
 
     Args:
-        ctx (ToolContext): The run context (repository identity).
+        ctx (ToolContext): The run context (repository identity, review diff).
         client (GitHubClient): The GitHub client for listings and downloads.
         runs (Sequence[Mapping[str, Any]]): Workflow runs listed for the head SHA.
-        artifacts (Sequence[str]): ``ciEvidence.redGreenArtifacts``.
+        declaration (RedGreenReceiptSettings | None): The base-side ``ciEvidence.redGreen``.
         base_sha (str): The run's bound base SHA.
         head_sha (str): The run's bound head SHA.
 
     Returns:
         RedGreenEvidence: What the run recorded about its receipt.
     """
-    wanted = {name.strip() for name in artifacts if name.strip()}
-    if not wanted:
+    if declaration is None:
         return undeclared_red_green_evidence()
+    artifact = declaration.artifact
+    workflow = _workflow_path(declaration.workflow)
+    label = f"the receipt artifact '{artifact}'"
     head = head_sha.strip().lower()
-    detail = f"no successful workflow run on {head[:7] or 'the head'} uploaded a receipt"
-    for run in runs:
-        run_id = run.get("id")
-        if not isinstance(run_id, int) or not _successful_run_on(run, head):
-            continue
-        raw_url = run.get("html_url")
-        run_url = raw_url if isinstance(raw_url, str) and raw_url else None
-        try:
-            listed = await client.list_workflow_run_artifacts(ctx.repo.owner, ctx.repo.name, run_id)
-        except Exception as err:
-            logger.warning("ci evidence: receipt listing failed for run {} — {}", run_id, err)
-            detail = f"artifact listing failed for run {run_id}"
-            continue
-        if listed.incomplete:
-            detail = f"artifact listing truncated for run {run_id}"
-            continue
-        for item in listed.items:
-            name = str(item.get("name") or "")
-            artifact_id = item.get("id")
-            if name not in wanted or not isinstance(artifact_id, int):
-                continue
-            try:
-                archive = await client.download_artifact_zip(
-                    ctx.repo.owner, ctx.repo.name, artifact_id
-                )
-            except Exception as err:
-                logger.warning("ci evidence: receipt artifact {} download failed — {}", name, err)
-                detail = f"artifact {name} download failed for run {run_id}"
-                continue
-            return _evidence_from_archive(
-                bytes(archive),
-                artifact=name,
-                run_url=run_url,
-                base_sha=base_sha,
-                head_sha=head_sha,
-            )
-    return RedGreenEvidence(
-        status="no-receipt", test_count=0, artifact=None, run_url=None, detail=detail
+    owner, repo = ctx.repo.owner, ctx.repo.name
+    try:
+        _require_workflow_untouched(ctx, workflow=workflow, label=label)
+        provenanced = _provenanced_runs(
+            [run for run in runs if isinstance(run, Mapping)],
+            head=head,
+            workflow=workflow,
+            repo=f"{owner}/{repo}",
+            label=label,
+        )
+        run, archive = await _receipt_archive(
+            client, owner=owner, repo=repo, runs=provenanced, artifact=artifact, label=label
+        )
+    except _NoReceipt as absent:
+        logger.info("ci evidence: no fail-then-pass receipt — {}", absent)
+        return _no_receipt(str(absent))
+    except Exception as err:  # the steps above are total; this keeps the run going regardless
+        logger.warning("ci evidence: receipt ingest failed — {}", err)
+        return _no_receipt(f"{label} could not be read ({type(err).__name__})")
+    raw_url = run.get("html_url")
+    run_url = raw_url if isinstance(raw_url, str) and raw_url else None
+    return _evidence_from_archive(
+        archive, artifact=artifact, run_url=run_url, base_sha=base_sha, head_sha=head_sha
     )
 
 
@@ -212,10 +393,16 @@ def _bound_base_sha(ctx: ToolContext) -> str:
     return sha.strip() if isinstance(sha, str) else ""
 
 
-async def ingest_ci_sarif_for_head_sha(ctx: ToolContext, head_sha: str) -> None:
+async def ingest_ci_sarif_for_head_sha(
+    ctx: ToolContext, head_sha: str, *, red_green: bool = True
+) -> None:
     """List workflow runs for ``head_sha`` and record declared SARIF artifacts.
 
-    Shared by the action-side wait-for-ci lane and ``run_ci_intelligence``.
+    Shared by the action-side wait-for-ci lane and ``run_ci_intelligence``. With
+    ``red_green`` (the default) it also reads the fail-then-pass receipt declared on
+    ``ToolState.red_green_declaration``; the review run passes ``False`` here, before
+    the review diff exists, and reads the receipt after the agent phase
+    (:func:`ingest_red_green_after_review`).
     """
     if not head_sha.strip():
         return
@@ -313,19 +500,104 @@ async def ingest_ci_sarif_for_head_sha(ctx: ToolContext, head_sha: str) -> None:
             if mutation.findings:
                 record_ci_findings(ctx.tool_state, mutation.findings)
 
-    red_green_names = [name.strip() for name in ctx.ci_red_green_artifacts if name.strip()]
-    if red_green_names:
-        try:
-            ctx.tool_state.red_green = await collect_ci_red_green_evidence(
-                ctx,
-                client=client,
-                runs=listed.items,
-                artifacts=red_green_names,
-                base_sha=_bound_base_sha(ctx),
-                head_sha=head_sha.strip(),
+    declaration = getattr(ctx.tool_state, "red_green_declaration", None)
+    if red_green and declaration is not None:
+        await _record_red_green(ctx, client=client, runs=listed.items, head_sha=head_sha)
+
+
+async def _record_red_green(
+    ctx: ToolContext, *, client: GitHubClient, runs: Sequence[Any], head_sha: str
+) -> None:
+    """Collect the declared receipt onto ``ToolState.red_green``; never raises."""
+    try:
+        ctx.tool_state.red_green = await collect_ci_red_green_evidence(
+            ctx,
+            client=client,
+            runs=runs,
+            declaration=getattr(ctx.tool_state, "red_green_declaration", None),
+            base_sha=_bound_base_sha(ctx),
+            head_sha=head_sha.strip(),
+        )
+    except Exception as err:  # the collector is total; this is belt and braces
+        warn_ci_evidence(f"ci evidence: receipt ingest failed for {head_sha[:7]} — {err}")
+        ctx.tool_state.red_green = _no_receipt(f"the receipt ingest failed ({type(err).__name__})")
+
+
+def record_unverified_red_green(ctx: ToolContext, *, reason: str) -> None:
+    """Record ``no-receipt`` for a declared receipt that this run cannot verify.
+
+    Used when the agent never produced a review diff (a skipped or lite run), so the
+    declared workflow cannot be shown untouched. Does nothing without a declaration,
+    and never overwrites evidence already recorded.
+
+    Args:
+        ctx (ToolContext): The run context.
+        reason (str): Why the change set is unavailable.
+    """
+    state = ctx.tool_state
+    declaration = getattr(state, "red_green_declaration", None)
+    if declaration is None or getattr(state, "red_green", None) is not None:
+        return
+    state.red_green = _no_receipt(
+        f"whether this pull request changes the declared workflow "
+        f"{_workflow_path(declaration.workflow)} could not be verified: {reason}"
+    )
+
+
+async def ingest_red_green_after_review(
+    ctx: ToolContext,
+    gh_event: dict[str, Any],
+    *,
+    event_name: str | None = None,
+) -> None:
+    """Read the declared fail-then-pass receipt once the review diff exists (#1056).
+
+    The action-side SARIF lane runs before the agent's ``checkout_pr`` writes the
+    review diff, so the receipt is read here, after the agent phase and before the
+    packet is assembled: the unfiltered change set (diff, ignored and unreviewable
+    paths) is on ``ToolState`` by then. Like the SARIF lane it reads CI artifacts
+    only after ``wait-for-ci`` reports ``complete``. Never raises.
+
+    Args:
+        ctx (ToolContext): The run context.
+        gh_event (dict[str, Any]): The bound GitHub event.
+        event_name (str | None): ``GITHUB_EVENT_NAME``; read from the env when omitted.
+    """
+    if getattr(ctx.tool_state, "red_green_declaration", None) is None:
+        return
+    try:
+        wait_inputs = ci_wait_inputs_from_env()
+        if wait_inputs is None or wait_inputs[0] != "complete":
+            state = "not forwarded" if wait_inputs is None else wait_inputs[0]
+            ctx.tool_state.red_green = _no_receipt(
+                f"CI had not completed (wait-for-ci state {state}), so no receipt was read"
             )
-        except Exception as err:  # the collector is total; this is belt and braces
-            warn_ci_evidence(f"ci evidence: receipt ingest failed for {head_sha[:7]} — {err}")
+            return
+        from mergecraft.config.trust_policy import bound_head_sha
+
+        resolved_event = event_name or os.environ.get("GITHUB_EVENT_NAME", "")
+        head_sha = bound_head_sha(gh_event, event_name=resolved_event)
+        client = github_client_from_scm(ctx.scm)
+        if not head_sha or client is None:
+            ctx.tool_state.red_green = _no_receipt(
+                "the head commit or the GitHub client is unknown, so no receipt was read"
+            )
+            return
+        listed = await client.list_workflow_runs_for_head_sha(
+            ctx.repo.owner, ctx.repo.name, head_sha.strip()
+        )
+    except Exception as err:  # a transport failure records no receipt, never a crash
+        ctx.tool_state.red_green = _no_receipt(
+            f"the workflow runs on the head commit could not be listed ({type(err).__name__})"
+        )
+        return
+    if listed.incomplete:
+        ctx.tool_state.red_green = _no_receipt(
+            f"the workflow-run listing for {_short(head_sha)} was incomplete, so no receipt "
+            "was read"
+        )
+        return
+    await _record_red_green(ctx, client=client, runs=listed.items, head_sha=head_sha)
 
 
 async def ingest_ci_sarif_after_ci_wait(
@@ -334,6 +606,7 @@ async def ingest_ci_sarif_after_ci_wait(
     ci_wait_state: CiWaitState | str,
     head_sha: str,
     ci_failed_count: int = 0,
+    red_green: bool = True,
 ) -> None:
     """Ingest declared CI SARIF artifacts after wait-for-ci reaches ``complete``.
 
@@ -353,7 +626,7 @@ async def ingest_ci_sarif_after_ci_wait(
             "ci evidence: ingesting declared SARIF after complete wait with {} failed job(s)",
             ci_failed_count,
         )
-    await ingest_ci_sarif_for_head_sha(ctx, head_sha)
+    await ingest_ci_sarif_for_head_sha(ctx, head_sha, red_green=red_green)
 
 
 async def ingest_ci_sarif_from_action_env(
@@ -361,8 +634,13 @@ async def ingest_ci_sarif_from_action_env(
     gh_event: dict[str, Any],
     *,
     event_name: str | None = None,
+    red_green: bool = True,
 ) -> None:
-    """Action-side SARIF ingest lane — not agent-invoked (D9)."""
+    """Action-side SARIF ingest lane — not agent-invoked (D9).
+
+    The review run passes ``red_green=False``: this lane runs before the review diff
+    exists, so the receipt is read later by :func:`ingest_red_green_after_review`.
+    """
     wait_inputs = ci_wait_inputs_from_env()
     if wait_inputs is None:
         return
@@ -378,14 +656,18 @@ async def ingest_ci_sarif_from_action_env(
         ci_wait_state=ci_wait_state,
         ci_failed_count=ci_failed_count,
         head_sha=head_sha,
+        red_green=red_green,
     )
 
 
 __all__ = [
+    "RED_GREEN_ARCHIVE_MAX_BYTES",
     "CiWaitState",
     "ci_wait_inputs_from_env",
     "collect_ci_red_green_evidence",
     "ingest_ci_sarif_after_ci_wait",
     "ingest_ci_sarif_for_head_sha",
     "ingest_ci_sarif_from_action_env",
+    "ingest_red_green_after_review",
+    "record_unverified_red_green",
 ]

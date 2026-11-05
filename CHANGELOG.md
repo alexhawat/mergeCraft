@@ -10,12 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - A fix pull request now has to prove the fix with a fail-then-pass receipt
-  before it can reach the `eligible` lane (#1056). Name the artifact your CI
-  uploads in `ciEvidence.redGreenArtifacts`: a JSON receipt
-  (`mergecraft.red-green/1`, at most 1 MB and 2 000 tests) listing each test's
-  result on the base and on the head. The review reads it only from a
-  successful workflow run on the head SHA, accepts it only for the pull
-  request's exact base and head SHAs, and never runs a test itself. A pull
+  before it can reach the `eligible` lane (#1056). Declare the receipt in
+  `ciEvidence.redGreen` (`artifact`, and the `workflow` that uploads it; read
+  only from the pull request base): a JSON receipt (`mergecraft.red-green/1`, at
+  most 1 MB and 2 000 tests) listing each test's result on the base and on the
+  head. The review reads it only from a successful run of that workflow in the
+  reviewed repository (never a fork) on the head SHA, only when the pull request
+  leaves that workflow untouched, accepts it only for the pull request's exact
+  base and head SHAs, and never runs a test itself. A pull
   request is a fix when its title has a conventional `fix` type or it carries a
   label in the new `review.fixLabels` (default `bug`, `fix`; honoured only from
   the pull request base, so a pull request cannot drop its own labels). A new `fix_proof`

@@ -121,7 +121,7 @@ class RedGreenEvidence:
 
 
 def undeclared_red_green_evidence() -> RedGreenEvidence:
-    """The evidence for a repository that declares no ``ciEvidence.redGreenArtifacts``.
+    """The evidence for a pull request whose base declares no ``ciEvidence.redGreen``.
 
     Returns:
         RedGreenEvidence: Status ``not-declared``, no artifact and no run.
@@ -131,7 +131,7 @@ def undeclared_red_green_evidence() -> RedGreenEvidence:
         test_count=0,
         artifact=None,
         run_url=None,
-        detail="ciEvidence.redGreenArtifacts declares no receipt artifact",
+        detail="the pull request base declares no ciEvidence.redGreen receipt",
     )
 
 

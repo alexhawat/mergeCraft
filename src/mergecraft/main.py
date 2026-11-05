@@ -28,7 +28,11 @@ from mergecraft.analyzers.trust import (
     derive_trust_tier,
     resolve_analyzers_mode,
 )
-from mergecraft.ci.sarif_ingest import ingest_ci_sarif_from_action_env
+from mergecraft.ci.sarif_ingest import (
+    ingest_ci_sarif_from_action_env,
+    ingest_red_green_after_review,
+    record_unverified_red_green,
+)
 from mergecraft.classify.triage import TriageDecision
 from mergecraft.config.env import ActionInputEnv, EnvSettingsError, validate_env_settings
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
@@ -60,6 +64,7 @@ from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.review_policy.fix_labels import resolve_fix_labels
 from mergecraft.review_policy.ignore_paths import INPUT_ENV as IGNORE_PATHS_INPUT_ENV
 from mergecraft.review_policy.ignore_paths import list_pull_request_paths, resolve_review_ignore
+from mergecraft.review_policy.red_green import resolve_red_green_declaration
 from mergecraft.run_outcome import (
     RUN_OUTCOME_CONCLUSION,
     RunOutcome,
@@ -1457,7 +1462,6 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         ci_sarif_artifacts=list(settings.ci_evidence.sarif_artifacts),
         ci_coverage_artifacts=list(settings.ci_evidence.coverage_artifacts),
         ci_mutation_artifacts=list(settings.ci_evidence.mutation_artifacts),
-        ci_red_green_artifacts=list(settings.ci_evidence.red_green_artifacts),
         analyzers_mode=analyzers_mode,
         trust_tier=ctx.trust_tier,
         authority_trust=ctx.authority_trust,
@@ -1471,12 +1475,6 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         budget_tracker=ctx.budget_tracker,
         gh_event=ctx.gh_event,
     )
-    if not any(name.strip() for name in settings.ci_evidence.red_green_artifacts):
-        # No receipt artifact declared: a fix pull request is told which setting is
-        # missing (``fix.no-receipt`` naming ``redGreenArtifacts``), and no call is made.
-        from mergecraft.ci.red_green import undeclared_red_green_evidence
-
-        tool_state.red_green = undeclared_red_green_evidence()
     from mergecraft.config.settings_snapshot import capture_run_scope_snapshot
 
     snapshot = capture_run_scope_snapshot(
@@ -2105,6 +2103,46 @@ async def _resolve_run_fix_labels(ctx: RunContext) -> None:
     ctx.tool_state.fix_labels = labels
 
 
+async def _resolve_run_red_green_declaration(ctx: RunContext) -> None:
+    """Record the base-side ``ciEvidence.redGreen`` before any CI ingest (#1056).
+
+    Stored on ``ToolState.red_green_declaration``; with none declared,
+    ``ToolState.red_green`` records ``not-declared`` so a fix pull request is told
+    which setting is missing. A pull request's own config never declares its
+    receipt. Never fails the run: any doubt declares nothing.
+    """
+    if ctx.settings is None or ctx.tool_state is None or ctx.tool_context is None:
+        return
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    repo = ctx.tool_context.repo
+    try:
+        declaration = await resolve_red_green_declaration(
+            ctx.tool_context.scm,
+            repo.owner,
+            repo.name,
+            event=event,
+            run_start_ci_evidence=ctx.settings.ci_evidence,
+            operator_owned=ctx.settings_snapshot_operator_owned,
+        )
+    except Exception as err:  # an unresolvable declaration declares nothing, never fails
+        logger.warning("red_green: could not resolve ciEvidence.redGreen: {}", err)
+        declaration = None
+    ctx.tool_state.red_green_declaration = declaration
+    if declaration is None:
+        from mergecraft.ci.red_green import undeclared_red_green_evidence
+
+        ctx.tool_state.red_green = undeclared_red_green_evidence()
+
+
+def _skip_without_review_diff(ctx: RunContext, skip: SkipAgentReview) -> SkipAgentReview:
+    """A run that skips the agent has no review diff, so a declared receipt is unverified."""
+    if ctx.tool_context is not None:
+        record_unverified_red_green(
+            ctx.tool_context, reason=f"the agent did not run ({skip.reason})"
+        )
+    return skip
+
+
 async def _ignore_paths_gate(ctx: RunContext) -> SkipAgentReview | None:
     """Resolve review path ignoring (#1109); skip the agent when every changed file is ignored.
 
@@ -2189,10 +2227,14 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
     """Setup script, MCP start, and payload-timed agent dispatch (review stage)."""
     await _apply_overrides_and_setup_git(ctx)
     assert ctx.tool_context is not None
+    await _resolve_run_red_green_declaration(ctx)
+    # The fail-then-pass receipt is read after the agent phase, once the review diff
+    # exists (``ingest_red_green_after_review`` below), not in this pre-agent lane.
     await ingest_ci_sarif_from_action_env(
         ctx.tool_context,
         ctx.gh_event or {},
         event_name=os.environ.get("GITHUB_EVENT_NAME", ""),
+        red_green=False,
     )
     await _run_setup_script_phase(ctx)
 
@@ -2230,21 +2272,28 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
             skip_reason,
         )
         # Engine publish (``_finalize``) owns completion; do not publish here.
-        return SkipAgentReview(reason=skip_reason)
+        return _skip_without_review_diff(ctx, SkipAgentReview(reason=skip_reason))
 
     await _resolve_run_fix_labels(ctx)
     triage_skip = await _triage_gate(ctx)
     if triage_skip is not None:
-        return triage_skip
+        return _skip_without_review_diff(ctx, triage_skip)
     ignore_skip = await _ignore_paths_gate(ctx)
     if ignore_skip is not None:
-        return ignore_skip
+        return _skip_without_review_diff(ctx, ignore_skip)
 
     with gha_log.group("agent-dispatch"):
         await _prepare_agent_dispatch(ctx)
         dispatch_started = time.perf_counter()
         result = await _dispatch_agent_with_deadline(ctx)
         roster = await _run_server_roster_reviewers_if_needed(ctx)
+        # The review diff, ignored paths and unreviewable paths exist now, so the
+        # declared workflow can be shown untouched before the packet is assembled.
+        await ingest_red_green_after_review(
+            ctx.tool_context,
+            ctx.gh_event or {},
+            event_name=os.environ.get("GITHUB_EVENT_NAME", ""),
+        )
         if ctx.tool_state is not None:
             ctx.tool_state.phase_elapsed_s["agent"] = round(
                 time.perf_counter() - dispatch_started, 3

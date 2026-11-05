@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, NamedTuple, cast
+from typing import Literal, NamedTuple, NotRequired, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import TypedDict
@@ -42,10 +42,13 @@ class FixProofSignal(TypedDict):
     ``required`` is ``True`` for a fix pull request (conventional ``fix`` type or a
     ``review.fixLabels`` label); ``status`` is the recorded receipt status
     (``mergecraft.ci.red_green``), or ``not-required`` for a change that is not a fix.
+    ``detail`` is the recorded evidence's own sentence (why there is no receipt, which
+    fork ran it, what the size was); the unproven reasons repeat it.
     """
 
     required: bool
     status: FixProofStatus
+    detail: NotRequired[str]
 
 
 class ChangeSet(TypedDict, total=False):
@@ -634,7 +637,7 @@ _FIX_PROOF_OUTCOMES: dict[str, tuple[str, str]] = {
     "not-declared": (
         "fix.no-receipt",
         "this is a fix pull request and the repository declares no "
-        "ciEvidence.redGreenArtifacts receipt artifact, so the fix cannot be proven",
+        "ciEvidence.redGreen receipt on its base, so the fix cannot be proven",
     ),
     "invalid": (
         "fix.receipt.invalid",
@@ -647,6 +650,12 @@ _FIX_PROOF_OUTCOMES: dict[str, tuple[str, str]] = {
         "do not match this pull request's",
     ),
 }
+
+
+# The unproven reasons whose message repeats the evidence detail.
+_FIX_PROOF_DETAILED: frozenset[str] = frozenset(
+    {"fix.no-receipt", "fix.receipt.invalid", "fix.receipt.mismatch"}
+)
 
 
 def _fix_proof_outcome(change: ChangeSet) -> tuple[list[LaneReason], bool]:
@@ -676,6 +685,9 @@ def _fix_proof_outcome(change: ChangeSet) -> tuple[list[LaneReason], bool]:
                 "this is a fix pull request and its fail-then-pass receipt status is unknown",
             ),
         )
+        detail = signal.get("detail")
+        if code in _FIX_PROOF_DETAILED and isinstance(detail, str) and detail.strip():
+            message = f"{message} ({detail.strip()})"
     reason = LaneReason(code=code, lane=LANE_REASON_CATALOGUE[code], message=message)
     return [reason], code in {"fix.not-required", "fix.proven"}
 

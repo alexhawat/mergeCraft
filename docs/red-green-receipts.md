@@ -17,15 +17,20 @@ Everything else is `fix.not-required` and passes the gate without a receipt.
 
 ```yaml
 ciEvidence:
-  redGreenArtifacts:
-    - red-green-receipt
+  redGreen:
+    artifact: red-green-receipt
+    workflow: .github/workflows/red-green.yml
 review:
   fixLabels:
     - bug
     - regression
 ```
 
-`redGreenArtifacts` lists workflow artifact names. It is empty by default, and an empty list makes no API call. A fix pull request in a repository that declares none gets `fix.no-receipt`, and the reason names the setting. Like the other `ciEvidence` names, the receipt is ingested after the `wait-for-ci` step reports `complete`, so forward its outputs to the review job as described in [`ANALYZERS.md`](ANALYZERS.md).
+`ciEvidence.redGreen` declares one receipt: `artifact` is the workflow artifact that holds it, and `workflow` is the repo-relative workflow file that is the only one allowed to upload it. Both keys are required; an absolute `workflow` path or one with a `..` segment is refused. Unset by default, which makes no API call; a fix pull request in a repository that declares none gets `fix.no-receipt`, and the reason names `ciEvidence.redGreen`.
+
+Like `review.fixLabels`, the block is honoured only from the pull request base: the base checkout on a `pull_request_target` run, otherwise the base commit's `.mergecraft/config.yaml` read at `pull_request.base.sha`. A block that the pull request adds or rewrites in its own config is ignored, and a base that has no block, cannot be read or does not validate declares nothing.
+
+The receipt is read after the review has its diff, once the `wait-for-ci` step reports `complete`, so forward its outputs to the review job as described in [`ANALYZERS.md`](ANALYZERS.md). A run that skips the agent has no review diff, so its receipt cannot be verified and is `no-receipt`.
 
 ## Format
 
@@ -67,8 +72,8 @@ Bounds, all refused rather than truncated:
 | an empty `tests` list | `no-tests` | `fix.not-proven` (medium) |
 | SHAs that are not exactly the pull request's base and head | `mismatch` | `fix.receipt.mismatch` (medium) |
 | malformed, over a bound, or another schema | `invalid` | `fix.receipt.invalid` (medium) |
-| no successful run on the head uploaded one, or the download failed | `no-receipt` | `fix.no-receipt` (medium) |
-| `redGreenArtifacts` is empty | `not-declared` | `fix.no-receipt` (medium) |
+| no successful same-repository run of the declared workflow uploaded one, the pull request changes that workflow, the change set could not be verified, the archive is too large, or the download failed | `no-receipt` | `fix.no-receipt` (medium) |
+| the base declares no `ciEvidence.redGreen` | `not-declared` | `fix.no-receipt` (medium) |
 
 A test that is green on both sides is fine beside a red-then-green one: it shows the fix did not break a neighbour. A test that is `skipped` on the head is not a pass.
 
@@ -76,13 +81,16 @@ A test that is green on both sides is fine beside a red-then-green one: it shows
 
 The receipt is data the pull request's own CI produced, so it is trusted only as far as the run that produced it:
 
-- **Only a successful run counts.** The artifact is read from a workflow run whose listing row says `status: completed`, `conclusion: success` and `head_sha` equal to the pull request head. A failed, cancelled, timed-out or still-running run is never read.
+- **Only the declared workflow, in this repository, counts.** The artifact is read only from a run of exactly the declared `workflow` file (the run's `path`) whose `head_repository` is the reviewed repository. A run from a fork is never read, even of the declared workflow, and the detail names the fork; a run with no head repository is never read either. A workflow the pull request adds, or any other workflow, cannot supply the receipt, and a forged run listed beside the real one never shadows it.
+- **Only a successful run counts.** The run's listing row must say `status: completed`, `conclusion: success` and `head_sha` equal to the pull request head. A failed, cancelled, timed-out or still-running run is never read.
+- **The pull request must leave the declared workflow alone.** The check uses the unfiltered change set: every path in the review diff (both sides of a rename), plus the files the review ignored by config (`review.ignorePaths`) and the files GitHub sent no reviewable patch for. If the declared workflow is anywhere in it, nothing that workflow uploads counts. When the change set cannot be verified (no diff, an unreadable diff, or a truncated file listing) the receipt does not count either.
+- **Bounded before and after download.** The artifact's listed `size_in_bytes` must be known and at most 2 MiB (2 097 152 bytes); a larger, missing or malformed size is never downloaded. Inside the zip, the receipt member is read at most one byte past the 1 MB cap.
 - **Bound to the exact commits.** `base_sha` and `head_sha` must equal the pull request's base and head in full (case does not matter). A short SHA never matches, so a receipt from an older push or another branch is `mismatch`.
 - **Never executed.** The zip is opened in memory and only the receipt member is read, at most one byte past the cap. Scripts, Makefiles or test files in the artifact are ignored, and test ids are plain strings that are never run or rendered into a prompt.
 - **Author inputs only add the requirement.** A `fix` title or label makes the proof required; nothing in the title, body or labels can satisfy it. The label list itself comes from the pull request base, never from the pull request's own config. A fix that is neither titled nor labelled as one is not asked for a receipt, which is the accepted gap.
 - **A proof only passes its own gate.** A `proven` receipt never lowers another reason: a migration stays `high`, and a source change without tests stays `medium`.
 
-The receipt is evidence about your tests, not a test run by mergeCraft. Who may change the workflow that writes it is the same question as who may change any other required check.
+The receipt is evidence about your tests, not a test run by mergeCraft. The `fix.*` reason repeats the recorded detail, so a refused receipt says why. Who may change the workflow that writes it is the same question as who may change any other required check.
 
 ## Producing a receipt
 
