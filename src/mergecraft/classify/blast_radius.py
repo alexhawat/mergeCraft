@@ -7,8 +7,8 @@ from typing import Literal, NamedTuple, cast
 from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import TypedDict
 
+from mergecraft.classify.path_globs import path_full_matches_glob
 from mergecraft.classify.review_config import is_review_config_path
-from mergecraft.utils.path_globs import path_full_matches_glob
 
 Lane = Literal["low", "medium", "high"]
 AutoMergeLane = Literal["eligible", "assisted", "human_review", "forbidden"]

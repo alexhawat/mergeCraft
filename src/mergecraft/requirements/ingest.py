@@ -122,15 +122,62 @@ _FENCE_RE = re.compile(r"^[ \t]*(`{3,}|~{3,})[^`]*$")
 _WILDCARD_ONLY_CHARS = frozenset("*?./")
 
 
+def _closes_fence(line: str, marker: str) -> bool:
+    """Whether ``line`` closes a fence opened with ``marker`` (same character, as long)."""
+    stripped = line.strip()
+    return stripped.startswith(marker[0] * len(marker)) and not stripped.strip(marker[0])
+
+
+def _visible_header(lines: list[str]) -> int | None:
+    """The first ``Scope paths:`` header outside an HTML comment and a code fence.
+
+    A block inside ``<!-- … -->`` (an opener on the header line included) or a
+    backtick / tilde fence is not rendered, so it is not a declaration.
+    """
+    in_comment = False
+    fence: str | None = None
+    for index, line in enumerate(lines):
+        if fence is not None:
+            if _closes_fence(line, fence):
+                fence = None
+            continue
+        visible = line
+        if in_comment:
+            close = visible.find("-->")
+            if close == -1:
+                continue
+            in_comment = False
+            visible = visible[close + 3 :]
+        while (opener := visible.find("<!--")) != -1:
+            close = visible.find("-->", opener + 4)
+            if close == -1:
+                in_comment = True
+                visible = visible[:opener]
+                break
+            visible = visible[:opener] + visible[close + 3 :]
+        if in_comment:
+            # A header before an unclosed opener would have its items hidden by
+            # the comment: no declaration starts on this line.
+            continue
+        opened = _FENCE_RE.match(visible)
+        if opened is not None:
+            fence = opened.group(1)
+            continue
+        if _SCOPE_HEADER_RE.match(visible):
+            return index
+    return None
+
+
 def _scope_block(lines: list[str]) -> tuple[int, int, list[str]] | None:
-    """Locate the first ``Scope paths:`` block: ``(start, end, raw items)`` or ``None``.
+    """Locate the first visible ``Scope paths:`` block: ``(start, end, raw items)`` or ``None``.
 
     ``start`` is the header line and ``end`` is one past the block's last line.
     Items are list entries (``-`` / ``*``) or the lines of one fenced block; the
     block stops at a blank line after the first item, the next heading, the
-    closing fence, or any other line.
+    closing fence (or, for an unclosed fence, the next heading), or any other
+    line. A header inside an HTML comment or a code fence is skipped.
     """
-    start = next((i for i, line in enumerate(lines) if _SCOPE_HEADER_RE.match(line)), None)
+    start = _visible_header(lines)
     if start is None:
         return None
     index = start + 1
@@ -145,10 +192,10 @@ def _scope_block(lines: list[str]) -> tuple[int, int, list[str]] | None:
         index += 1
         while index < len(lines):
             line = lines[index]
+            if _HEADING_RE.match(line):
+                break
             index += 1
-            if line.strip().startswith(marker[0] * len(marker)) and not line.strip().strip(
-                marker[0]
-            ):
+            if _closes_fence(line, marker):
                 break
             if line.strip():
                 items.append(line)
