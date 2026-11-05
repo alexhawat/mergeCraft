@@ -34,6 +34,7 @@ _CLI_DOC = REPO_ROOT / "docs" / "cli.md"
 #: non-interactive + keep-temp toggles, and the config/env file paths.
 DOCUMENT: tuple[str, ...] = (
     "MERGECRAFT_AGENT",
+    "MERGECRAFT_AGENTS_SDK_MODEL",
     "MERGECRAFT_AGENT_TIMEOUT",
     "MERGECRAFT_CACHE_DIR",
     "MERGECRAFT_CACHE_MAX_BYTES",

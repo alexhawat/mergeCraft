@@ -1850,6 +1850,7 @@ dependencies = [
 
 [package.optional-dependencies]
 agents = [
+    { name = "openai" },
     { name = "openai-agents" },
 ]
 dev = [
@@ -1901,6 +1902,7 @@ requires-dist = [
     { name = "logfire", marker = "extra == 'tracing'", specifier = "==5.2.0" },
     { name = "loguru", specifier = "==0.7.3" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==2.3.1" },
+    { name = "openai", marker = "extra == 'agents'", specifier = "==3.46.0" },
     { name = "openai-agents", marker = "extra == 'agents'", specifier = "==0.24.0" },
     { name = "opentelemetry-api", marker = "extra == 'tracing'", specifier = "==1.45.1" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'tracing'", specifier = "==1.45.1" },

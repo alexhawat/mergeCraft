@@ -72,7 +72,10 @@ def resolve_model_config(
             api_key=key,
         )
 
-    slug = (model or os.environ.get("MERGECRAFT_AGENTS_SDK_MODEL") or "").strip()
+    from mergecraft.config.env.agents import AgentRuntimeEnv
+
+    runtime = AgentRuntimeEnv()
+    slug = (model or runtime.agents_sdk_model or "").strip()
     if slug:
         endpoint = resolve_gateway_endpoint(slug)
         if endpoint is not None:

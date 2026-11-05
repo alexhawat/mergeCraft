@@ -101,6 +101,9 @@ class AgentRuntimeEnv(EnvSettings):
         default=None, validation_alias="MERGECRAFT_CODEX_AUTH_EXPORT"
     )
     model: _Stripped = Field(default=None, validation_alias="MERGECRAFT_MODEL")
+    agents_sdk_model: _Stripped = Field(
+        default=None, validation_alias="MERGECRAFT_AGENTS_SDK_MODEL"
+    )
     agent: _Stripped = Field(default=None, validation_alias="MERGECRAFT_AGENT")
     opencode_otel_plugin: _Stripped = Field(
         default=None, validation_alias="MERGECRAFT_OPENCODE_OTEL_PLUGIN"

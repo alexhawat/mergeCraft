@@ -78,6 +78,7 @@ harbor = [
 # gate via `make lockcheck`.
 agents = [
     "openai-agents==0.24.0",
+    "openai==3.46.0",
 ]
 tracing = [
     "logfire==5.2.0",
