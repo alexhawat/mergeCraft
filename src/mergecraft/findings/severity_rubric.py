@@ -40,6 +40,8 @@ SEVERITY_RUBRIC: Final[tuple[_RubricRule, ...]] = (
         "id": "docs-only-nit",
         "categories": ("Maintainability & Code Quality",),
         "patterns": (
+            r"^(?:readme|documentation|comment|docstring)\s+"
+            r"(?:spelling\s+)?(?:typo|spelling mistake|spelling error)[.!]?$",
             r"\b(?:update|clarify|reword|correct|fix|improve)\s+(?:(?:the|this|a)\s+)?"
             r"(?:comment|docstring|readme|documentation)\b"
             r"(?!\s+(?:handler|api|endpoint|function|method|route|request|service)\b)",

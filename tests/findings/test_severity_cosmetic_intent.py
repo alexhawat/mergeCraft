@@ -51,7 +51,7 @@ def test_functional_impact_reaches_gate_and_publication(body: str, severity: str
     ],
 )
 def test_cosmetic_lead_cannot_hide_impact_later_in_message(separator: str, impact: str) -> None:
-    for lead in ["Fix the typo in the comment", "Update the README"]:
+    for lead in ["Fix the typo in the comment", "Update the README", "README spelling typo"]:
         normalized = normalize_agent_findings_via_pipeline(
             [
                 AgentFinding(
@@ -70,6 +70,8 @@ def test_cosmetic_lead_cannot_hide_impact_later_in_message(separator: str, impac
         ("The authorship rules say prefer f-string over percent formatting", "Minor"),
         ("Update the comment in this module", "Trivial"),
         ("Fix spelling in the README", "Trivial"),
+        ("README spelling typo", "Trivial"),
+        ("Documentation spelling error.", "Trivial"),
         ("Prefer f-string over percent formatting in the token handler", "Minor"),
         ("Update the comment in the authentication module", "Trivial"),
     ],
