@@ -2,7 +2,7 @@
 name: Image security
 on:
   pull_request:
-    branches: [main, pre-0.0.1]
+    branches: [main, pre-0.0.1, codex/audit-remediation]
     # Always evaluate PRs: source, entrypoint, build hooks and future COPY
     # inputs all affect the shipped image, not just dependency manifests.
 permissions:

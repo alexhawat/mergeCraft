@@ -6,7 +6,7 @@ on:
   pull_request:
     # fix/review-pipeline-hardening is the stacked hardening base: its layer
     # PRs must run the same verify gate as a main-targeted PR.
-    branches: [main, pre-0.0.1, fix/review-pipeline-hardening]
+    branches: [main, pre-0.0.1, fix/review-pipeline-hardening, codex/audit-remediation]
   push:
     branches: [main, pre-0.0.1, "release/**"]
   schedule:
