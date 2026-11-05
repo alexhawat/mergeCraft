@@ -618,35 +618,67 @@ def _provenanced_runs(
     return succeeded
 
 
-async def _produce_artifact(ctx: Any, key: str, proof: ArtifactProof) -> EvidenceRecord:
-    label = f"artifact '{proof.name}'"
-    workflow = _workflow_path(proof.workflow)
-    coverage = ctx.tool_state.coverage
-    if coverage.diff_truncated:
+def _require_workflow_untouched(ctx: Any, *, workflow: str, label: str) -> None:
+    """Fail closed unless the full, unfiltered change set shows ``workflow`` untouched.
+
+    The review diff is filtered: ``review.ignorePaths`` and the ``ignore_paths``
+    input drop whole files from it, and GitHub sends no patch for some files. The
+    change set judged here is therefore the review diff's paths plus every path
+    the review ignored (``ToolState.ignored_review_paths``) plus every path it could
+    not review (``ToolState.coverage.unreviewable_paths``). A diff that is missing
+    or unreadable, or a files listing that was truncated, cannot show the workflow
+    untouched, so the artifact never counts then either.
+    """
+    from mergecraft.mcp.tool_state import primary_repo_state
+    from mergecraft.utils.diff_paths import changed_paths_from_diff
+
+    state = ctx.tool_state
+    unverified = (
+        f"whether this pull request changes the declared workflow {workflow} could not be "
+        f"verified, so {label} cannot count"
+    )
+    diff_path = primary_repo_state(state).diff_path
+    if not diff_path:
+        msg = f"{unverified}: the review has no diff"
+        raise _Absent(msg)
+    try:
+        text = Path(diff_path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        msg = f"{unverified}: the diff could not be read ({exc})"
+        raise _Absent(msg) from exc
+    reviewed = {_workflow_path(path) for path in changed_paths_from_diff(text)}
+    ignored = {_workflow_path(path) for path in getattr(state, "ignored_review_paths", ())}
+    coverage = getattr(state, "coverage", None)
+    unreviewable = {
+        _workflow_path(path) for path in getattr(coverage, "unreviewable_paths", ()) or ()
+    }
+    if workflow in ignored:
         msg = (
-            f"the diff listing was truncated, so changes to the declared workflow {workflow} "
-            f"cannot be ruled out and {label} is unconfirmed"
+            f"this pull request changes the declared workflow {workflow}; the change was "
+            f"ignored in review (ignorePaths) but still voids {label}"
         )
         raise _Absent(msg)
-    # The delivered diff has already lost ignored file sections and may lack
-    # patches the files API could not return. Neither omission proves unchanged.
-    omitted = {
-        "ignored": ctx.tool_state.ignored_review_paths,
-        "unreviewable": coverage.unreviewable_paths,
-    }
-    for reason, paths in omitted.items():
-        if workflow in {_workflow_path(path) for path in paths}:
-            msg = (
-                f"the declared workflow {workflow} is {reason} in the review diff, "
-                f"so nothing it uploads counts as {label}"
-            )
-            raise _Absent(msg)
-    if workflow in frozenset(_workflow_path(path) for path in _diff_changed_paths(ctx)):
+    if workflow in unreviewable:
+        msg = (
+            f"this pull request changes the declared workflow {workflow} (GitHub sent no "
+            f"reviewable patch for it, so the path is unreviewable in the diff), so nothing it uploads counts as {label}"
+        )
+        raise _Absent(msg)
+    if workflow in reviewed:
         msg = (
             f"this pull request changes the declared workflow {workflow}, so nothing it "
             f"uploads counts as {label}"
         )
         raise _Absent(msg)
+    if getattr(coverage, "diff_truncated", False):
+        msg = f"{unverified}: the pull request's diff file listing was truncated"
+        raise _Absent(msg)
+
+
+async def _produce_artifact(ctx: Any, key: str, proof: ArtifactProof) -> EvidenceRecord:
+    label = f"artifact '{proof.name}'"
+    workflow = _workflow_path(proof.workflow)
+    _require_workflow_untouched(ctx, workflow=workflow, label=label)
     head = _head_sha(ctx)
     client = _client(ctx, label)
     owner, repo = _repo_slug(ctx)
