@@ -2,72 +2,13 @@
 
 from __future__ import annotations
 
-import re
-
-from mergecraft.analyzers.scope import parse_diff_scope
+from mergecraft.analyzers.scope import (
+    parse_diff_scope,
+    split_diff_git_paths,
+    unquote_git_path,
+)
 
 _HEADER = "diff --git "
-# One header entry: ``a/<old> b/<new>``, where either side may instead be a
-# C-quoted path (``"a/…"``) as git writes it when a path has a space, a quote or
-# a non-ASCII byte under the default ``core.quotePath``.
-_HEADER_RE = re.compile(
-    r"^diff --git (?:a/(?P<old>\S+)|"
-    r'"(?P<old_quoted>(?:\\.|[^"\\])*)")'
-    r" (?:b/(?P<new>\S+)|"
-    r'"(?P<new_quoted>(?:\\.|[^"\\])*)")$'
-)
-# Git's C-style escapes inside a quoted path.
-_QUOTED_ESCAPES = {
-    "a": "\a",
-    "b": "\b",
-    "f": "\f",
-    "n": "\n",
-    "r": "\r",
-    "t": "\t",
-    "v": "\v",
-    "\\": "\\",
-    '"': '"',
-}
-_OCTAL_DIGITS = frozenset("01234567")
-
-
-def _unescape_quoted_path(raw: str) -> str:
-    """Decode the body of one git-quoted path (the text between the quotes).
-
-    Git's quoted form is byte-oriented: a non-ASCII byte arrives as one octal
-    escape, so the escapes are re-assembled as bytes and decoded as UTF-8 once —
-    ``\\303\\251`` is ``é``, not two characters.
-    """
-    data = bytearray()
-    index = 0
-    while index < len(raw):
-        char = raw[index]
-        if char != "\\" or index + 1 >= len(raw):
-            data.extend(char.encode("utf-8", errors="surrogatepass"))
-            index += 1
-            continue
-        nxt = raw[index + 1]
-        if nxt in _QUOTED_ESCAPES:
-            data.extend(_QUOTED_ESCAPES[nxt].encode("utf-8"))
-            index += 2
-            continue
-        octal = raw[index + 1 : index + 4]
-        if len(octal) == 3 and _OCTAL_DIGITS.issuperset(octal):
-            data.append(int(octal, 8))
-            index += 4
-            continue
-        data.extend(nxt.encode("utf-8", errors="surrogatepass"))
-        index += 2
-    return data.decode("utf-8", errors="surrogateescape")
-
-
-def _quoted_or_plain(match: re.Match[str], *, plain: str, quoted: str, prefix: str) -> str:
-    """Return one side of a header pair without its quotes or ``a/``/``b/`` prefix."""
-    value = match.group(plain)
-    if value is not None:
-        return str(value)
-    decoded = _unescape_quoted_path(match.group(quoted) or "")
-    return decoded[len(prefix) :] if decoded.startswith(prefix) else decoded
 
 
 def paths_from_diff_headers(diff_text: str) -> set[str]:
@@ -95,15 +36,51 @@ def paths_from_diff_headers(diff_text: str) -> set[str]:
         ['x.py', 'y.py']
     """
     found: set[str] = set()
+    header: str | None = None
+    pair: tuple[str, str] | None = None
+    images: dict[str, str] = {}
+    in_hunk = False
+
+    def finish_entry() -> None:
+        if header is None:
+            return
+        # Extended rename/copy metadata and ---/+++ headers are authoritative
+        # when an unquoted path itself contains the header separator " b/".
+        resolved = (images["old"], images["new"]) if len(images) == 2 else pair
+        if resolved is None:
+            msg = f"could not parse changed paths from diff header: {header}"
+            raise ValueError(msg)
+        found.update(path for path in resolved if path and path != "/dev/null")
+
     for line in diff_text.splitlines():
-        if not line.startswith(_HEADER):
-            continue
-        match = _HEADER_RE.match(line)
-        if match is None:
-            continue
-        old = _quoted_or_plain(match, plain="old", quoted="old_quoted", prefix="a/")
-        new = _quoted_or_plain(match, plain="new", quoted="new_quoted", prefix="b/")
-        found.update(path for path in (old, new) if path)
+        if line.startswith(_HEADER):
+            finish_entry()
+            header = line
+            pair = split_diff_git_paths(line[len(_HEADER) :])
+            images = {}
+            in_hunk = False
+        elif line.startswith("@@"):
+            in_hunk = True
+        elif header is not None and not in_hunk:
+            for prefix, image, diff_prefix in (
+                ("rename from ", "old", ""),
+                ("rename to ", "new", ""),
+                ("copy from ", "old", ""),
+                ("copy to ", "new", ""),
+                ("--- ", "old", "a/"),
+                ("+++ ", "new", "b/"),
+            ):
+                if line.startswith(prefix):
+                    token = line[len(prefix) :]
+                    # Git separates a space-bearing ---/+++ path from an
+                    # optional timestamp with a tab. Tabs in names are quoted.
+                    if diff_prefix:
+                        token = token.split("\t", 1)[0]
+                    decoded = unquote_git_path(token)
+                    if decoded is not None:
+                        images[image] = decoded.removeprefix(diff_prefix)
+                    break
+    finish_entry()
     return found
 
 
