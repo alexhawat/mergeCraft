@@ -75,11 +75,14 @@ class _StubGitHub(GitHubClient):
         )
         return {
             "number": pull_number,
-            "head": {"ref": "feature", "sha": "a" * 40, "repo": head_repo},
+            "head": {"ref": "feature", "sha": self._head_sha, "repo": head_repo},
             "base": {"ref": "base", "sha": "b" * 40, "repo": base_repo},
             "title": "A pull request",
             "html_url": f"https://example.test/pull/{pull_number}",
         }
+
+    async def get(self, path: str, **kwargs: Any) -> Any:
+        return [] if path.endswith(("/comments", "/reviews")) else {}
 
     async def list_reviews(
         self, owner: str, repo: str, pull_number: int, **kwargs: Any
@@ -98,6 +101,9 @@ def _ctx_for(
     payload_event: PayloadEvent | None = None,
     gh_event: dict[str, Any] | None = None,
 ) -> ToolContext:
+    github._head_sha = subprocess.check_output(
+        ["git", "rev-parse", "feature"], cwd=repo, text=True
+    ).strip()
     state = init_tool_state(owner="acme", name="demo", dir=str(repo))
     state.selected_mode = "Review"
     (tmp_path / "artifacts").mkdir(parents=True, exist_ok=True)
