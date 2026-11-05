@@ -100,8 +100,16 @@ async def test_unreadable_file_does_not_abort_grounding(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("content", [None, b"\xff", b"a\x00b", b"x" * (_MAX_DIFF_BYTES + 1)])
-async def test_unusable_diff_returns_explicit_error(tmp_path: Path, content: bytes | None) -> None:
+@pytest.mark.parametrize("case", ["missing", "non-utf8", "binary", "oversized"])
+async def test_unusable_diff_returns_explicit_error(tmp_path: Path, case: str) -> None:
+    # Keep multi-megabyte payloads out of pytest node IDs and CI log lines.
+    content = {
+        "missing": None,
+        "non-utf8": b"\xff",
+        "binary": b"a\x00b",
+    }.get(case)
+    if case == "oversized":
+        content = b"x" * (_MAX_DIFF_BYTES + 1)
     if content is not None:
         (tmp_path / "change.patch").write_bytes(content)
     result = await materialize_workspace_change(tmp_path, diff="change.patch")
