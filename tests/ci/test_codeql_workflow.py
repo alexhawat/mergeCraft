@@ -58,7 +58,11 @@ def test_analysis_failure_fails_the_job_without_gating_the_repo() -> None:
 
     triggers = workflow_on(doc)
     assert set(triggers["push"]["branches"]) == {"main", "pre-0.0.1"}
-    assert set(triggers["pull_request"]["branches"]) == {"main", "pre-0.0.1"}
+    assert set(triggers["pull_request"]["branches"]) == {
+        "main",
+        "pre-0.0.1",
+        "codex/audit-remediation",
+    }
     assert triggers["schedule"], "the weekly CodeQL schedule must stay"
 
 
