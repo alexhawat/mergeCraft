@@ -245,12 +245,18 @@ def _discover_untracked_additions(
 
 def git_unstaged_diff(*, cwd: Path) -> str:
     """Return unstaged working-tree diff (tracked edits plus untracked adds)."""
+    text, _ = git_unstaged_diff_with_limitations(cwd=cwd)
+    return text
+
+
+def git_unstaged_diff_with_limitations(*, cwd: Path) -> tuple[str, tuple[str, ...]]:
+    """Return the unstaged patch and eligible additions omitted from coverage."""
     result = _run_git(["diff"], cwd=cwd)
     if result.returncode != 0:
         msg = f"failed to compute unstaged diff: {result.stderr.strip()}"
         raise RuntimeError(msg)
-    untracked_text, _ = _discover_untracked_additions(cwd)
-    return result.stdout + untracked_text
+    untracked_text, limitations = _discover_untracked_additions(cwd)
+    return result.stdout + untracked_text, limitations
 
 
 def git_range_diff(*, cwd: Path, range_spec: str) -> str:
