@@ -402,6 +402,18 @@ auto-merge lane after required checks pass, `medium` means assisted review, and
 disable auto-merge; `autoMergeEnabled` remains `false`, and Batch D (#46) owns
 the separate mapping from evidence outcomes to workflow actions.
 
+A pull request can declare the paths it is expected to touch with a
+`Scope paths:` block of globs at the end of its body (or of an issue it
+closes; the pull request body wins). The run reads it once, before the
+fast-path gate, and the classifier checks every changed path, both images of a
+rename, against it: a path outside the globs is `scope.drift` (`medium`), a
+block with no globs is `scope.undeclared`, a block that broke a bound is
+`scope.invalid`, and no block at all is `scope.unknown`, all `medium`. Only
+`scope.within` passes the `scope` gate, so a pull request without a declared
+scope is never in the `eligible` lane. The globs are untrusted data: bounded,
+matched against the diff's path list only, never used to open a file. See
+[`docs/blast-radius.md`](docs/blast-radius.md#declared-scope).
+
 ## 5. Finding grading
 
 Every surviving finding is graded on three independent axes before it is placed. The grade decides placement, so it isn't decoration.

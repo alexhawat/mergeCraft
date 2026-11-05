@@ -53,6 +53,7 @@ from mergecraft.mcp.tool_state import (
 )
 from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.prep.types import is_prep_install_failure
+from mergecraft.requirements.ingest import ScopeDeclaration, parse_scope_paths
 from mergecraft.review.engine import ReviewEngine
 from mergecraft.review.roster_execution import RosterExecutionSummary, apply_roster_failure
 from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
@@ -1238,8 +1239,46 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     # and the MCP-token client is installed regardless.
     await _close_superseded_scm(ctx.scm)
     ctx.scm = create_github_scm(token_ref.mcp_token, client=GitHubClient(token_ref.mcp_token))
+    await _read_linked_issues(ctx)
 
     return ctx
+
+
+async def _read_linked_issues(ctx: RunContext) -> None:
+    """Record the issues this pull request closes, with their authors, once, at run start.
+
+    The ``requirements`` policy evidence producer maps their acceptance criteria
+    against the diff and names their authors. A run without a pull request reads
+    nothing and leaves ``ToolState.linked_issues`` at ``None``. A read that fails,
+    is malformed or spans more than one page *writes* ``None`` ("not read"), so the
+    evidence stays absent rather than treating the pull request as closing nothing.
+    """
+    tool_state = ctx.tool_state
+    run_context = ctx.run_context
+    if tool_state is None or run_context is None or ctx.pr_number is None or ctx.scm is None:
+        return
+    client = github_client_from_scm(ctx.scm)
+    if client is None:
+        tool_state.linked_issues = None
+        return
+    try:
+        issues = await client.closing_issues(
+            run_context.repo.owner, run_context.repo.name, int(ctx.pr_number)
+        )
+    except Exception as exc:  # an advisory read: a failure must never fail the run
+        logger.warning(
+            "linked issues of PR #{} could not be read; requirements evidence stays absent: {}",
+            ctx.pr_number,
+            exc,
+        )
+        tool_state.linked_issues = None
+        return
+    if issues is None:
+        logger.warning(
+            "linked issues of PR #{} were not fully read; requirements evidence stays absent",
+            ctx.pr_number,
+        )
+    tool_state.linked_issues = issues
 
 
 def _stamp_requested_model(ctx: RunContext, payload_model: object) -> None:
@@ -2069,6 +2108,72 @@ async def _triage_gate(ctx: RunContext) -> SkipAgentReview | None:
 _IGNORE_SKIP_EVENTS: frozenset[str] = frozenset({"pull_request", "pull_request_target"})
 
 
+def _pull_request_body(ctx: RunContext) -> str | None:
+    """The pull request's own description, never a comment body.
+
+    Read from the raw event: ``pull_request.body`` on pull-request and review
+    comment events, ``issue.body`` on a comment on a pull request. The resolved
+    payload's ``event.body`` is the comment for comment triggers, so it is used
+    only for a pull-request trigger.
+    """
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    pull = event.get("pull_request")
+    if isinstance(pull, dict):
+        body = pull.get("body")
+        return body if isinstance(body, str) else None
+    issue = event.get("issue")
+    if isinstance(issue, dict) and issue.get("pull_request") is not None:
+        body = issue.get("body")
+        return body if isinstance(body, str) else None
+    resolved = ctx.ctx_payload
+    if resolved is not None and resolved.event.is_pr:
+        trigger = resolved.event.trigger
+        if trigger.startswith("pull_request") and "comment" not in trigger:
+            return resolved.event.body
+    return None
+
+
+def _record_scope_declaration(ctx: RunContext) -> None:
+    """Record the run's ``Scope paths:`` declaration on ``ToolState.scope_declaration``.
+
+    Sources in order, first declaration wins: the pull request body
+    (``source_ref="pr_description"``), then the body of each issue the pull
+    request closes (``ToolState.linked_issues``, ``source_ref="linked_issue#<n>"``).
+    A body without a block is skipped; a block that is empty or broke a bound
+    still wins, so a later source never widens it. No block anywhere records an
+    undeclared scope. The bodies are untrusted data and never open a file. Any
+    failure leaves ``None`` (unknown) and never raises into the run.
+    """
+    tool_state = ctx.tool_state
+    if tool_state is None:
+        return
+    try:
+        sources: list[tuple[str, str | None]] = [("pr_description", _pull_request_body(ctx))]
+        sources.extend(
+            (f"linked_issue#{issue.number}", issue.body) for issue in tool_state.linked_issues or ()
+        )
+        declaration = ScopeDeclaration(declared=False, globs=(), source_ref="", rejected=())
+        for source_ref, body in sources:
+            if not body:
+                continue
+            parsed = parse_scope_paths(body)
+            if parsed.declared:
+                declaration = replace(parsed, source_ref=source_ref)
+                break
+    except Exception as exc:  # unknown, never an error: the scope gate stays null
+        logger.warning("scope declaration could not be read; the scope stays unknown: {}", exc)
+        tool_state.scope_declaration = None
+        return
+    tool_state.scope_declaration = declaration
+    if declaration.declared:
+        logger.info(
+            "» scope declared in {}: {} glob(s), {} rejected",
+            declaration.source_ref,
+            len(declaration.globs),
+            len(declaration.rejected),
+        )
+
+
 async def _ignore_paths_gate(ctx: RunContext) -> SkipAgentReview | None:
     """Resolve review path ignoring (#1109); skip the agent when every changed file is ignored.
 
@@ -2196,6 +2301,8 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
         # Engine publish (``_finalize``) owns completion; do not publish here.
         return SkipAgentReview(reason=skip_reason)
 
+    # #1056 part 3: read once, before the fast-path gate and before any dispatch.
+    _record_scope_declaration(ctx)
     triage_skip = await _triage_gate(ctx)
     if triage_skip is not None:
         return triage_skip

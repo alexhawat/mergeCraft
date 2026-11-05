@@ -79,6 +79,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A pull request without a declared scope can no longer reach the `eligible`
+  lane (#1056). End the pull request body, or an issue it closes, with a
+  `Scope paths:` block listing the globs the change is expected to touch; the
+  review checks every changed path, both sides of a rename included, against it
+  through a new `scope` checklist gate. A path outside the globs is
+  `scope.drift`, a block with no globs `scope.undeclared`, a block over the
+  bounds (more than 64 globs, a glob over 200 characters, `..`, a leading `/`,
+  or a match-everything glob such as `**`) `scope.invalid`, and no block at all
+  `scope.unknown`: each keeps the lane at least `medium`, and an unknown scope
+  leaves the gate unmeasured, so the approval gate routes the pull request to
+  human review. Only `scope.within` passes the gate; a declared scope never
+  lowers any other gate. Plan mode now ends its plans with the block. A
+  classification whose checklist misses a gate no longer takes either approval
+  route.
+
 - A blast-radius classification now says which signal set its lane and which
   checks it never measured, so an unknown can no longer read as a pass (#1056).
   The packet's `blast_radius` section gains `reasons` (a stable dotted code such

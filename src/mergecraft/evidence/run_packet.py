@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from mergecraft.classify import BlastRadiusClassification
+    from mergecraft.classify.blast_radius import ScopeSignal
     from mergecraft.evidence.gate_policy import GateActionPolicy
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import RepoToolState, ToolState
@@ -169,17 +170,49 @@ def _diff_stats(diff_text: str) -> dict[str, object]:
     return {"diff": diff_text, "lines_added": added, "lines_deleted": deleted}
 
 
-def classify_run_blast_radius(diff_text: str) -> BlastRadiusClassification | None:
+def scope_signal_for_state(state: ToolState) -> ScopeSignal:
+    """The ``scope`` signal for the run's recorded ``Scope paths:`` declaration (#1056 part 3).
+
+    No declaration recorded (``None``: not read, or the read failed) or one with
+    ``declared=False`` is an unknown scope; a declaration with rejected items is
+    invalid. The packet and the verification tool both build the signal here, so
+    the lane a judge is held to is the lane the packet reports.
+
+    Args:
+        state (ToolState): The run state.
+
+    Returns:
+        ScopeSignal: Always supplied, so a run's checklist always lists ``scope``.
+    """
+    declaration = getattr(state, "scope_declaration", None)
+    if declaration is None or declaration.declared is not True:
+        return {"declared": False, "globs": [], "invalid": False}
+    return {
+        "declared": True,
+        "globs": list(declaration.globs),
+        "invalid": bool(declaration.rejected),
+    }
+
+
+def classify_run_blast_radius(
+    diff_text: str, *, scope: ScopeSignal
+) -> BlastRadiusClassification | None:
     """Classify the run's diff, or return ``None`` when there is no diff.
 
     Returning ``None`` for an empty diff keeps the packet honest: a run with
     nothing to classify records an absent section rather than a fabricated
-    ``low`` lane.
+    ``low`` lane. ``scope`` is required (build it with
+    :func:`scope_signal_for_state`) so a run never classifies without its
+    ``scope`` gate.
     """
     paths = changed_paths_from_diff(diff_text)
     if not paths:
         return None
-    change: ChangeSet = {"changed_paths": paths, "diff_stats": _diff_stats(diff_text)}
+    change: ChangeSet = {
+        "changed_paths": paths,
+        "diff_stats": _diff_stats(diff_text),
+        "scope": scope,
+    }
     return classify_blast_radius(change)
 
 
@@ -648,7 +681,7 @@ def build_run_packet(
     state = ctx.tool_state
     repo_state = primary_repo_state(state)
     diff_text = _read_diff_text(repo_state)
-    blast_radius = classify_run_blast_radius(diff_text)
+    blast_radius = classify_run_blast_radius(diff_text, scope=scope_signal_for_state(state))
 
     from mergecraft.evidence.trajectory import build_trajectory_record
     from mergecraft.evidence.trajectory_audit import audit_trajectory
@@ -1084,4 +1117,5 @@ __all__ = [
     "resolve_evidence_dir",
     "resolve_packet_path",
     "resolve_prepared_run_packet",
+    "scope_signal_for_state",
 ]

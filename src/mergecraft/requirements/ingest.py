@@ -4,10 +4,16 @@ External requirement text is treated as untrusted data. Extraction runs on the
 raw body; the nonce fence is retained so review prompts can cite the same
 envelope the rest of mergeCraft uses. Suggestions are never written back to
 the reviewed tree (D13).
+
+A body may also declare the paths the change is expected to touch with a
+``Scope paths:`` block (#1056 part 3); :func:`parse_scope_paths` reads it into a
+:class:`ScopeDeclaration`. The globs are data: they are bounded, fail closed,
+are matched against the diff's path list only and never open a file.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -79,13 +85,174 @@ class Requirement:
 
 
 @dataclass(frozen=True, slots=True)
+class ScopeDeclaration:
+    """The ``Scope paths:`` block of one untrusted body (#1056 part 3).
+
+    Attributes:
+        declared (bool): ``True`` when the body has a ``Scope paths:`` block, even
+            an empty or rejected one; ``False`` when it has none.
+        globs (tuple[str, ...]): The accepted globs, in order; ``()`` when the block
+            listed none or any item broke a bound.
+        source_ref (str): Where the body came from (``"pr_description"``,
+            ``"linked_issue#<n>"``); ``""`` when unknown.
+        rejected (tuple[str, ...]): The items that broke a bound (all of them when
+            the count bound broke); non-empty means the declaration is invalid.
+    """
+
+    declared: bool
+    globs: tuple[str, ...]
+    source_ref: str
+    rejected: tuple[str, ...]
+
+
+SCOPE_MAX_GLOBS = 64
+"""Most globs one ``Scope paths:`` block may list; one more rejects all of them."""
+
+SCOPE_MAX_GLOB_CHARS = 200
+"""Longest accepted glob, in characters."""
+
+_SCOPE_HEADER_RE = re.compile(
+    r"^[ ]{0,3}(?:#{2,3}[ \t]+)?(?:\*\*|__)?[ \t]*scope[ \t]+paths[ \t]*"
+    r"(?:(?:\*\*|__)[ \t]*:|:[ \t]*(?:\*\*|__)?)[ \t]*$",
+    re.IGNORECASE,
+)
+_HEADING_RE = re.compile(r"^[ ]{0,3}#{1,6}(?:[ \t]|$)")
+_LIST_ITEM_RE = re.compile(r"^[ \t]*[-*][ \t]+(.*)$")
+_FENCE_RE = re.compile(r"^[ \t]*(`{3,}|~{3,})[^`]*$")
+_WILDCARD_ONLY_CHARS = frozenset("*?./")
+
+
+def _scope_block(lines: list[str]) -> tuple[int, int, list[str]] | None:
+    """Locate the first ``Scope paths:`` block: ``(start, end, raw items)`` or ``None``.
+
+    ``start`` is the header line and ``end`` is one past the block's last line.
+    Items are list entries (``-`` / ``*``) or the lines of one fenced block; the
+    block stops at a blank line after the first item, the next heading, the
+    closing fence, or any other line.
+    """
+    start = next((i for i, line in enumerate(lines) if _SCOPE_HEADER_RE.match(line)), None)
+    if start is None:
+        return None
+    index = start + 1
+    while index < len(lines) and not lines[index].strip():
+        index += 1
+    items: list[str] = []
+    if index >= len(lines) or _HEADING_RE.match(lines[index]):
+        return start, index, items
+    fence = _FENCE_RE.match(lines[index])
+    if fence is not None:
+        marker = fence.group(1)
+        index += 1
+        while index < len(lines):
+            line = lines[index]
+            index += 1
+            if line.strip().startswith(marker[0] * len(marker)) and not line.strip().strip(
+                marker[0]
+            ):
+                break
+            if line.strip():
+                items.append(line)
+        return start, index, items
+    while index < len(lines):
+        item = _LIST_ITEM_RE.match(lines[index])
+        if item is None or _HEADING_RE.match(lines[index]):
+            break
+        items.append(item.group(1))
+        index += 1
+    return start, index, items
+
+
+def _clean_scope_item(raw: str) -> str:
+    """Trim spaces and tabs and unwrap one pair of backticks (validated afterwards)."""
+    value = raw.strip(" \t")
+    if len(value) >= 2 and value.startswith("`") and value.endswith("`"):
+        value = value[1:-1].strip(" ")
+    return value
+
+
+def scope_glob_problem(glob: str) -> str | None:
+    """Why ``glob`` cannot be a declared scope glob, or ``None`` when it is acceptable.
+
+    Args:
+        glob (str): One cleaned item from a ``Scope paths:`` block.
+
+    Returns:
+        str | None: A short reason (``"too long"``, ``"control character"``,
+        ``"absolute"``, ``"parent segment"``, ``"matches everything"``), or ``None``.
+    """
+    if len(glob) > SCOPE_MAX_GLOB_CHARS:
+        return "too long"
+    if not all(char.isprintable() for char in glob):
+        return "control character"
+    if glob.startswith(("/", "\\")):
+        return "absolute"
+    if ".." in glob.replace("\\", "/").split("/"):
+        return "parent segment"
+    if set(glob) <= _WILDCARD_ONLY_CHARS:
+        return "matches everything"
+    return None
+
+
+def parse_scope_paths(body: str, *, source_ref: str = "") -> ScopeDeclaration:
+    """Parse the ``Scope paths:`` block of an untrusted body; never reads a file.
+
+    The block starts at a line ``Scope paths:`` (any case; bare, bold, or a
+    ``##`` / ``###`` heading) and lists globs as ``-`` / ``*`` items or the lines
+    of one fenced block. Every bound fails the whole declaration closed: more
+    than :data:`SCOPE_MAX_GLOBS` items, an item over :data:`SCOPE_MAX_GLOB_CHARS`
+    characters, a non-printable character, a leading ``/``, a ``..`` segment, or
+    a glob made only of wildcards (``*``, ``**``, ``**/*``, ``**/*.*``) gives
+    ``declared=True, globs=()`` with the offenders in ``rejected``.
+
+    Args:
+        body (str): The untrusted text (a pull request or issue body).
+        source_ref (str): Recorded on the declaration as-is.
+
+    Returns:
+        ScopeDeclaration: ``declared=False`` when the body has no block.
+
+    Examples:
+        >>> parse_scope_paths("Scope paths:\\n- docs/**\\n").globs
+        ('docs/**',)
+    """
+    lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    block = _scope_block(lines)
+    if block is None:
+        return ScopeDeclaration(declared=False, globs=(), source_ref=source_ref, rejected=())
+    items = [item for item in (_clean_scope_item(raw) for raw in block[2]) if item]
+    if len(items) > SCOPE_MAX_GLOBS:
+        return ScopeDeclaration(
+            declared=True, globs=(), source_ref=source_ref, rejected=tuple(items)
+        )
+    rejected = tuple(item for item in items if scope_glob_problem(item) is not None)
+    if rejected:
+        return ScopeDeclaration(declared=True, globs=(), source_ref=source_ref, rejected=rejected)
+    return ScopeDeclaration(declared=True, globs=tuple(items), source_ref=source_ref, rejected=())
+
+
+def _without_scope_block(body: str) -> str:
+    """``body`` with its ``Scope paths:`` block removed (scope globs are not criteria)."""
+    lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    block = _scope_block(lines)
+    if block is None:
+        return body
+    start, end, _items = block
+    return "\n".join(lines[:start] + lines[end:])
+
+
+@dataclass(frozen=True, slots=True)
 class IngestResult:
-    """Ingested requirements plus the nonce-fenced external text."""
+    """Ingested requirements plus the nonce-fenced external text.
+
+    ``scope`` is the body's ``Scope paths:`` declaration (``declared=False`` when
+    it has none); its globs are never acceptance criteria.
+    """
 
     source: str
     source_ref: str
     fenced_text: str
     requirements: tuple[Requirement, ...]
+    scope: ScopeDeclaration
 
 
 def _read_local_spec(repo_root: Path) -> tuple[str, str]:
@@ -210,7 +377,8 @@ def ingest_requirements(
         label=source,
         nonce=fence.nonce,
     )
-    criteria = extract_acceptance_criteria(body) if body else []
+    scope = parse_scope_paths(body, source_ref=source_ref)
+    criteria = extract_acceptance_criteria(_without_scope_block(body)) if body else []
     resolved_map = change_map or ChangeMap(changed_paths=(), touched_symbols=())
     mappings = map_criteria_to_evidence(criteria, change_map=resolved_map)
     requirements: list[Requirement] = []
@@ -233,14 +401,20 @@ def ingest_requirements(
         source_ref=source_ref,
         fenced_text=fenced,
         requirements=tuple(requirements),
+        scope=scope,
     )
 
 
 __all__ = [
     "REQUIREMENT_SOURCES",
     "REQUIREMENT_STATES",
+    "SCOPE_MAX_GLOBS",
+    "SCOPE_MAX_GLOB_CHARS",
     "IngestResult",
     "Requirement",
     "RequirementState",
+    "ScopeDeclaration",
     "ingest_requirements",
+    "parse_scope_paths",
+    "scope_glob_problem",
 ]
