@@ -198,7 +198,10 @@ async def test_legitimate_readonly_invocations_still_forwarded(
     payload = json.loads(result.content[0]["text"])
     assert result.is_error is False, result.content[0]["text"]
     assert "ok" in payload["output"]
-    assert recorder.calls == [expected_prefix]
+    expected = [expected_prefix]
+    if command == "show":
+        expected.insert(0, ["rev-parse", "--verify", "--end-of-options", *args])
+    assert recorder.calls == expected
 
 
 # --- Review round 2 findings (PR #567) -------------------------------------

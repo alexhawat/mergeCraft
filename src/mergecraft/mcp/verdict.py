@@ -153,7 +153,7 @@ def record_terminal_rejection(tool_state: ToolState, rejection_reason: str) -> N
 
 def terminal_tool_was_attempted(tool_state: ToolState) -> bool:
     """Return whether a terminal review tool was invoked this run."""
-    for call in tool_state.tool_calls:
+    for call in tool_state.tool_calls[tool_state.review_scope_tool_call_start :]:
         tool_name = getattr(call, "tool", None)
         if tool_name in _TERMINAL_TOOL_NAMES:
             return True
@@ -162,6 +162,8 @@ def terminal_tool_was_attempted(tool_state: ToolState) -> bool:
 
 def scope_blocks_terminal(tool_state: ToolState) -> bool:
     """Return whether review scope is missing for a terminal tool in Review modes."""
+    if tool_state.checkout_scope_invalidated:
+        return True
     mode = tool_state.selected_mode
     if mode not in _REVIEW_MODES:
         return False
@@ -237,7 +239,7 @@ def diff_coverage_nudge_for_state(tool_state: ToolState) -> str | None:
         except OSError:
             continue
         calls: list[ToolCallRecord] = []
-        for row in tool_state.tool_calls:
+        for row in tool_state.tool_calls[tool_state.review_scope_tool_call_start :]:
             try:
                 calls.append(
                     row if isinstance(row, ToolCallRecord) else ToolCallRecord.model_validate(row)
@@ -273,6 +275,7 @@ def register_review_scope(
         raise ValueError(msg)
     primary_repo_state(tool_state).diff_path = diff_path
     tool_state.scope_provenance = provenance
+    tool_state.checkout_scope_invalidated = False
     tool_state.review_scope = (
         review_scope
         if review_scope is not None
@@ -395,7 +398,9 @@ def ensure_review_scope_for_terminal(tool_state: ToolState, tool_name: str) -> N
     ``REPOSITORY_READ`` and its patch is an inspection artifact only.
     """
     mode = tool_state.selected_mode
-    if mode not in _REVIEW_MODES or _current_review_phase(tool_state) != ReviewPhase.INIT:
+    if not tool_state.checkout_scope_invalidated and (
+        mode not in _REVIEW_MODES or _current_review_phase(tool_state) != ReviewPhase.INIT
+    ):
         return
     if primary_repo_state(tool_state).diff_path:
         return

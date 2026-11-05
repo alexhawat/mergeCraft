@@ -18,6 +18,7 @@ from loguru import logger
 from mergecraft.analyzers.impact import resolve_ast_grep_binary, write_impact
 from mergecraft.analyzers.trust import analyzers_enabled
 from mergecraft.config.trust_policy import is_fork_pull_request
+from mergecraft.mcp.checkout_state import invalidate_checkout_review_state
 from mergecraft.mcp.git import _git_env, _is_auth_failure, _run_git
 from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
 from mergecraft.mcp.tool_call import normalize_pull_number_aliases
@@ -1145,7 +1146,7 @@ async def _verify_files_api_head(ctx: ToolContext, *, pull_number: int, head_sha
 
 
 def checkout_pr_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+    async def _checkout(params: dict[str, Any]):
         params = normalize_pull_number_aliases(params, _CHECKOUT_PR_INPUT_SCHEMA)
         pull_number = int(params["pull_number"])
         state = primary_repo_state(ctx.tool_state)
@@ -1159,9 +1160,6 @@ def checkout_pr_tool(ctx: ToolContext):
                 f"uncommitted changes. dirty paths:\n{dirty}"
             )
             raise RuntimeError(msg)
-        if ctx.tool_state.review_tree_baseline is not None:
-            ctx.tool_state.review_tree_baseline.before_checkout()
-
         # TB-D4 — refuse a PR the run was not bound to. The bound number lives on
         # the run's **bound** event (``_resolve_credentials`` writes the fetched
         # ``pull_request`` onto ``ctx.gh_event``); the resolved payload therefore
@@ -1317,6 +1315,10 @@ def checkout_pr_tool(ctx: ToolContext):
             )
             raise RuntimeError(msg)
         _run_git(["checkout", "-B", local_branch, checkout_sha], cwd=cwd)
+        # Configuration and tree bytes may change at this controlled boundary.
+        # Re-pin their hashes before later API calls can fail or be cancelled;
+        # the run's trusted settings/policy values remain pinned across retries.
+        _rebaseline_config_after_checkout(ctx)
         # Ensure base is available for merge-base diffs
         base_env, base_remote_url = _git_env_for_cwd(cwd, ctx.git_token)
         base_fetch_failure: str | None = None
@@ -1572,6 +1574,26 @@ def checkout_pr_tool(ctx: ToolContext):
             incremental_changed_paths=state.incremental_changed_paths,
         )
         return result
+
+    async def _run(params: dict[str, Any]):
+        if ctx.tool_state.review is not None:
+            msg = "cannot restart checkout after this run has published a review"
+            raise RuntimeError(msg)
+        baseline = ctx.tool_state.review_tree_baseline
+        if baseline is not None:
+            baseline.before_checkout()
+        invalidate_checkout_review_state(ctx.tool_state)
+        try:
+            result = await _checkout(params)
+            # Reads that arrived while the workspace was changing cannot attest
+            # the newly established scope. Keep their audit records only.
+            ctx.tool_state.review_scope_tool_call_start = len(ctx.tool_state.tool_calls)
+            return result
+        except BaseException:
+            # Errors and cancellation can happen after HEAD or partial scope
+            # state changed. Neither the previous nor partial new proof is valid.
+            invalidate_checkout_review_state(ctx.tool_state)
+            raise
 
     return tool(
         name="checkout_pr",

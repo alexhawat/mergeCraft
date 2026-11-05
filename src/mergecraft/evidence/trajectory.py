@@ -1533,6 +1533,7 @@ def build_trajectory_record(
     *,
     files_modified: list[str] | None = None,
     external_trace: ExternalTraceRef | None = None,
+    current_scope_only: bool = False,
 ) -> TrajectoryRecord:
     """Assemble the record from recorded tool calls and the run's diff.
 
@@ -1544,15 +1545,18 @@ def build_trajectory_record(
     ``external_trace`` is optional enrichment (D8): its ``tool_calls`` are
     appended after the mediated ones, which is what can lift
     ``read_coverage`` for a driver whose file reads never cross MCP.
+    ``current_scope_only`` excludes calls before the latest checkout boundary
+    when evaluating current read/completion proof; the default retains all audit history.
     """
+    start = getattr(state, "review_scope_tool_call_start", 0) if current_scope_only else 0
     calls = [
         _sanitize_tool_call(ToolCallRecord.model_validate(call))
-        for call in (getattr(state, "tool_calls", []) or [])
+        for call in (getattr(state, "tool_calls", []) or [])[start:]
     ]
     sources: list[str] = []
     if calls:
         sources.append(SOURCE_MCP)
-    if external_trace is not None:
+    if external_trace is not None and (not current_scope_only or start == 0):
         sanitized_external_calls = [_sanitize_tool_call(call) for call in external_trace.tool_calls]
         external_trace = external_trace.model_copy(update={"tool_calls": sanitized_external_calls})
         calls = [*calls, *sanitized_external_calls]

@@ -591,6 +591,7 @@ def audit_trajectory(
     diff_text: str | None = None,
     diff_path: str | None = None,
     in_flight_tool: str | None = None,
+    scope_record: TrajectoryRecord | None = None,
 ) -> list[Finding]:
     """Run every trajectory check over ``record`` and return the findings.
 
@@ -608,18 +609,22 @@ def audit_trajectory(
     appended to the trajectory only after it returns, so without the name the
     audit would miss the completion signal being sent *right now*.
 
+    ``scope_record`` limits current read/completion proof to the latest checkout,
+    while errors, writes and unsafe retries remain audited over the complete record.
+
     Returns findings in check order. An empty list means every check was either
     satisfied or had no evidence to judge on — the two are deliberately
     indistinguishable to the caller, because both mean "nothing to report".
     """
     findings: list[Finding] = []
+    scope = scope_record if scope_record is not None else record
     if diff_text:
-        findings.extend(_changed_unread_lines(record, diff_text=diff_text, diff_path=diff_path))
+        findings.extend(_changed_unread_lines(scope, diff_text=diff_text, diff_path=diff_path))
     else:
-        findings.extend(_changed_unread_file(record))
+        findings.extend(_changed_unread_file(scope))
     for check in _CHECK_FUNCTIONS:
-        findings.extend(check(record))
-    findings.extend(_missing_completion_signal(record, in_flight_tool=in_flight_tool))
+        findings.extend(check(scope if check is _no_post_edit_verification else record))
+    findings.extend(_missing_completion_signal(scope, in_flight_tool=in_flight_tool))
     return findings
 
 

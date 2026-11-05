@@ -705,6 +705,9 @@ def build_run_packet(
     trajectory = build_trajectory_record(state, files_modified=changed_paths)
     trajectory_findings = audit_trajectory(
         trajectory,
+        scope_record=build_trajectory_record(
+            state, files_modified=changed_paths, current_scope_only=True
+        ),
         diff_text=coverage_diff or None,
         diff_path=coverage_path,
         in_flight_tool=in_flight_tool,
