@@ -299,7 +299,10 @@ async def report_status_checks(
     [outcome]`` once a caller has a ``RunOutcome`` rather than a bare bool.
     Omitted, it falls back to the pre-W5 ``success``/``failure`` split driven
     by ``run_succeeded`` alone. The ``mergecraft-approval`` check uses
-    ``packet.decision.verdict`` and is skipped when ``packet`` is None.
+    ``packet.decision.verdict`` and is neutral when ``packet`` is None. Both
+    checks target the immutable reviewed SHA, never a newer PR head. A run
+    without a bound revision may report diagnostics on the current head, but
+    cannot publish approval success there.
 
     ``approval_failure_reason`` (SX-D10) forces the ``mergecraft-approval``
     conclusion to ``failure`` regardless of the packet verdict — a post-run sink
@@ -321,23 +324,28 @@ async def report_status_checks(
     if event.is_pr is not True or not isinstance(pull_number, int):
         return
 
-    try:
-        pr = await ctx.scm.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
-        head_sha = str(pr.get("head", {}).get("sha") or "")
-        if not head_sha:
-            return
-    except Exception as err:
-        logger.warning(
-            "status checks: failed to resolve PR #{} head sha: {}",
-            pull_number,
-            err,
-        )
-        gha_log.warning(f"status checks: failed to resolve PR #{pull_number} head sha: {err}")
-        return
-
     from mergecraft.mcp.tool_state import primary_repo_state
 
-    completion_sha = primary_repo_state(ctx.tool_state).checkout_sha or head_sha
+    checkout_sha = primary_repo_state(ctx.tool_state).checkout_sha
+    packet_sha = packet.reviewed_head_sha if packet is not None else None
+    bound_sha = checkout_sha or packet_sha
+    identity_error = None
+    if checkout_sha and packet_sha and checkout_sha != packet_sha:
+        identity_error = "The evidence packet and checkout identify different reviewed commits."
+    elif not bound_sha:
+        identity_error = "No immutable reviewed commit was recorded for this run."
+    head_sha = bound_sha
+    if not head_sha:
+        try:
+            pr = await ctx.scm.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
+            head_sha = str(pr.get("head", {}).get("sha") or "")
+            if not head_sha:
+                return
+        except Exception as err:
+            logger.warning("status checks: failed to resolve PR #{} head sha: {}", pull_number, err)
+            gha_log.warning(f"status checks: failed to resolve PR #{pull_number} head sha: {err}")
+            return
+
     completion_conclusion: CompletionConclusion = conclusion or (
         "success" if run_succeeded else "failure"
     )
@@ -347,7 +355,7 @@ async def report_status_checks(
         packet_findings.extend(packet.run_health.findings)
     approval = ctx.tool_state.approval
     run_url = _run_url(ctx)
-    reviewed_sha = _reviewed_sha(approval, packet)
+    reviewed_sha = bound_sha or _reviewed_sha(approval, packet)
     coverage_line = _coverage_line(ctx, packet)
     completion_summary = _build_completion_summary(
         run_succeeded=run_succeeded,
@@ -364,7 +372,7 @@ async def report_status_checks(
         await _create_check_run(
             ctx,
             name=COMPLETION_CHECK,
-            head_sha=completion_sha,
+            head_sha=head_sha,
             conclusion=completion_conclusion,
             title=(
                 "mergeCraft run completed"
@@ -376,7 +384,7 @@ async def report_status_checks(
     except Exception as err:
         _log_check_post_failure(
             check_name=COMPLETION_CHECK,
-            head_sha=completion_sha,
+            head_sha=head_sha,
             err=err,
         )
 
@@ -454,6 +462,9 @@ async def report_status_checks(
         else:
             approval_conclusion = packet.decision.verdict
             decision_reason = packet.decision.reason
+        if approval_conclusion == "success" and identity_error:
+            approval_conclusion = "neutral"
+            decision_reason = identity_error
         findings = list(packet.findings)
         if packet.run_health is not None:
             findings.extend(packet.run_health.findings)
