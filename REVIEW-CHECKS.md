@@ -631,7 +631,8 @@ the finding's `evidence`, so a cap never hides what the rule asked for.
 
 **Missing evidence blocks and says what is missing.** A `required` rule stays
 at `Major` until every key it names is present. Each key is produced during the
-review from a source the pull request cannot write:
+review. Every producer except `requirements` reads from a source the pull
+request cannot write; `requirements` is author-traceable, not independent:
 
 - `requirements`: acceptance criteria from the issues the pull request closes,
   keyword-matched against the diff. The pull request body is never a source. An

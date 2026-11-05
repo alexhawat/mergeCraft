@@ -9,9 +9,11 @@ why the pull request under review cannot produce its own evidence.
 
 **Nothing a pull request writes about itself counts as evidence.** That excludes
 the pull request body, a manifest or config key added on the head branch, and a
-check run that a head-branch workflow can post under any name it likes. Each
-producer reads from a source the author cannot write, and each key that stays
-absent carries a reason, which the policy row repeats.
+check run that a head-branch workflow can post under any name it likes. Every
+producer except `requirements` reads from a source the pull request cannot
+write. `requirements` reads issues the author may have written: it is
+author-traceable, not independent (see below). Each key that stays absent
+carries a reason, which the policy row repeats.
 
 ## Producers
 
@@ -131,6 +133,11 @@ before download. Inside the zip mergeCraft looks for exactly one member,
 `policy-evidence.json`, of at most 64 KiB uncompressed. The cap applies to the
 read itself: mergeCraft never decompresses more than 64 KiB plus one byte. The
 record names the artifact, the workflow run and the workflow file.
+
+An untouched workflow file is not the whole story: a `pull_request` run still
+executes head-side code that the declared workflow calls, such as scripts, local
+actions and reusable workflows, so keep the step that writes the proof document
+inline in the declared workflow itself.
 
 The member must be a JSON object of this shape:
 
