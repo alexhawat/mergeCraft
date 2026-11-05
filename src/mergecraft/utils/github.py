@@ -300,6 +300,23 @@ class GitHubClient:
                     await transport.aclose()
         self._clients.clear()
 
+    async def aclose_loop_transport(self) -> None:
+        """Close and forget the transport bound to the running loop, if any.
+
+        For callers that drive this client on a short-lived loop of their own
+        (a worker thread's ``asyncio.run``): the transport must be closed inside
+        that loop, before it ends, while the other loops' transports stay open.
+        """
+        if not self._owns_client:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        transport = self._clients.pop(loop, None)
+        if transport is not None:
+            await transport.aclose()
+
     async def __aenter__(self) -> GitHubClient:
         return self
 

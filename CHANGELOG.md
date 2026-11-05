@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A `required` policy rule can now clear on evidence the review collects
+  itself, instead of sitting at `Major` until it is waived (#1114). The rule's
+  keys come from sources the pull request cannot write. `requirements`
+  keyword-matches the acceptance criteria of the issues the pull request closes
+  against the diff, never the pull request body, and names each issue's author:
+  it proves traceability, not independent review. `xrepo` needs every linked repository the base
+  manifest declares to be reviewed, with none omitted. `health_check`,
+  `rollback_plan` and `contract_schema` read a proof declared under the new
+  `policy.evidence.<key>` setting in the base-side configuration (the
+  operator-owned snapshot, or the base commit's `.mergecraft/config.yaml`; never
+  the pull request's own copy): either a successful check run on the head commit
+  from a trusted GitHub App (`github-actions` is refused), or a
+  `policy-evidence.json` of at most 64 KiB uploaded for that commit by a
+  successful run of the declared `artifact.workflow` file, from this repository
+  rather than a fork, when the pull request does not change that file. Producers run only
+  when a triggered rule requires evidence. The row lists each present key with
+  its source and gives the reason for each missing one. See
+  `docs/policy-evidence.md`.
+
 - The self-review's Codex rung writes the refreshed ChatGPT-subscription login
   back to the `CODEX_AUTH_JSON` repository secret after each run, so the
   rotated refresh token is never left spent (#970). The Codex driver exports
