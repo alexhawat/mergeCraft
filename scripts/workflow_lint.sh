@@ -7,9 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 ACTIONLINT_VERSION=1.7.12
-ACTIONLINT_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
 ZIZMOR_VERSION=1.28.0
-ZIZMOR_SHA256=e87b67160194884e375a46a12c57ccc904f762b53845f254fab7f17d98809c09
 
 CACHE_DIR="${MERGECRAFT_TOOL_CACHE:-${ROOT}/.cache/workflow-lint}"
 mkdir -p "${CACHE_DIR}"
@@ -20,8 +18,16 @@ ACTIONLINT_SARIF_TEMPLATE="${ROOT}/src/mergecraft/analyzers/catalog/actionlint-s
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
 case "${arch}" in
-  x86_64|amd64) arch_norm=amd64; zizmor_arch=x86_64 ;;
-  aarch64|arm64) arch_norm=arm64; zizmor_arch=aarch64 ;;
+  x86_64|amd64)
+    arch_norm=amd64; zizmor_arch=x86_64
+    ACTIONLINT_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+    ZIZMOR_SHA256=e87b67160194884e375a46a12c57ccc904f762b53845f254fab7f17d98809c09
+    ;;
+  aarch64|arm64)
+    arch_norm=arm64; zizmor_arch=aarch64
+    ACTIONLINT_SHA256=325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6
+    ZIZMOR_SHA256=324e43770cfacf4216f8aefb287263b5b5c733c85b03bf7583b5cc4a0460239e
+    ;;
   *) echo "unsupported arch: ${arch}" >&2; exit 2 ;;
 esac
 
@@ -47,13 +53,10 @@ if [[ ! -x "${ZIZMOR_BIN}" ]]; then
     exit 1
   fi
   tmp="${tmp:-$(mktemp -d)}"
+  trap 'rm -rf "${tmp}"' EXIT
   curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL -o "${tmp}/zizmor.tar.gz" \
     "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-${zizmor_arch}-unknown-linux-gnu.tar.gz"
-  # ARM64 digest differs from the amd64 pin in Dockerfile.analyzers — SARIF emit
-  # runs on ubuntu-latest amd64 only; arm64 installs trust the release HTTPS path.
-  if [[ "${arch_norm}" == "amd64" ]]; then
-    echo "${ZIZMOR_SHA256}  ${tmp}/zizmor.tar.gz" | sha256sum -c -
-  fi
+  echo "${ZIZMOR_SHA256}  ${tmp}/zizmor.tar.gz" | sha256sum -c -
   tar -xzf "${tmp}/zizmor.tar.gz" -C "${tmp}" zizmor
   install -m 0755 "${tmp}/zizmor" "${ZIZMOR_BIN}"
 fi
