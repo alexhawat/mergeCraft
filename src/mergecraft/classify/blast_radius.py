@@ -7,6 +7,7 @@ from typing import Literal, NamedTuple, cast
 from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import TypedDict
 
+from mergecraft.classify.path_globs import path_full_matches_glob
 from mergecraft.classify.review_config import is_review_config_path
 
 Lane = Literal["low", "medium", "high"]
@@ -24,11 +25,29 @@ Category = Literal[
 ]
 
 
+class ScopeSignal(TypedDict):
+    """The declared ``Scope paths:`` of a change, as the classifier reads it (#1056 part 3).
+
+    ``declared`` is ``False`` when no source carried a block (the scope is
+    unknown); ``invalid`` is ``True`` when the block broke a bound; ``globs`` are
+    the accepted globs, matched against the changed paths only.
+    """
+
+    declared: bool
+    globs: list[str]
+    invalid: bool
+
+
 class ChangeSet(TypedDict, total=False):
-    """Side-effect-free change payload fed to the classifier."""
+    """Side-effect-free change payload fed to the classifier.
+
+    ``scope`` is optional: without it the ``scope`` gate is left out of the
+    checklist (a library caller); a review run always supplies it.
+    """
 
     changed_paths: list[str]
     diff_stats: dict[str, object]
+    scope: ScopeSignal
 
 
 class RuleOverride(TypedDict, total=False):
@@ -190,6 +209,11 @@ LANE_REASON_CATALOGUE: dict[str, Lane] = {
     "paths.generated": "low",
     "source.small_isolated": "low",
     "baseline.clean": "low",
+    "scope.unknown": "medium",
+    "scope.undeclared": "medium",
+    "scope.invalid": "medium",
+    "scope.drift": "medium",
+    "scope.within": "low",
 }
 """The closed catalogue of lane-reason codes and their **default** lanes (#1056).
 
@@ -209,8 +233,15 @@ GATE_ORDER: tuple[str, ...] = (
     "tests",
     "review_config",
     "source",
+    "scope",
 )
-"""The fixed order of :attr:`BlastRadiusClassification.checklist` gates."""
+"""The fixed order of :attr:`BlastRadiusClassification.checklist` gates.
+
+``scope`` is listed only when the change set carries a ``scope`` signal; every
+other gate is always listed.
+"""
+
+_OPTIONAL_GATES: frozenset[str] = frozenset({"scope"})
 
 _Input = Literal["paths", "diff"]
 
@@ -260,6 +291,12 @@ _REASON_SPECS: dict[str, _ReasonSpec] = {
     "paths.generated": _ReasonSpec("generated_files", "source"),
     "source.small_isolated": _ReasonSpec(None, None),
     "baseline.clean": _ReasonSpec(None, None),
+    # ``scope.unknown`` leaves the gate ``None`` (not measured) rather than failing it.
+    "scope.unknown": _ReasonSpec(None, None),
+    "scope.undeclared": _ReasonSpec(None, "scope"),
+    "scope.invalid": _ReasonSpec(None, "scope"),
+    "scope.drift": _ReasonSpec(None, "scope"),
+    "scope.within": _ReasonSpec(None, None),
 }
 
 # Floors a repository override may raise but never lower: the review-config
@@ -268,6 +305,7 @@ _REASON_SPECS: dict[str, _ReasonSpec] = {
 _OVERRIDE_FLOORS: frozenset[str] = frozenset({"paths.review_config"})
 
 _SMALL_SOURCE_MAX_LINES = 5
+_SCOPE_DRIFT_MAX_LISTED = 10
 
 
 def _detect(paths: list[str], diff_text: str) -> tuple[list[str], dict[str, str]]:
@@ -562,9 +600,78 @@ def _lane_reasons(
     return reasons
 
 
-def _checklist(reasons: list[LaneReason], missing: list[str]) -> list[ChecklistGate]:
+def _scope_reason(code: str, message: str) -> LaneReason:
+    return LaneReason(code=code, lane=LANE_REASON_CATALOGUE[code], message=message)
+
+
+def _scope_outcome(change: ChangeSet, paths: list[str]) -> tuple[list[LaneReason], bool | None]:
+    """The ``scope.*`` reasons and the ``scope`` gate for a supplied signal.
+
+    Glob text is untrusted and never appears in a message; only changed paths do.
+    A malformed signal reads as not declared, so it can never pass the gate.
+    """
+    raw = change.get("scope")
+    signal: dict[str, object] = (
+        cast("dict[str, object]", raw)  # reason: the TypedDict is a plain dict at runtime
+        if isinstance(raw, dict)
+        else {}
+    )
+    if signal.get("declared") is not True:
+        return [
+            _scope_reason(
+                "scope.unknown",
+                "no Scope paths: block was found in the pull request or the issues it "
+                "closes, so the changed paths were not checked against a declared scope",
+            )
+        ], None
+    if signal.get("invalid") is True:
+        return [
+            _scope_reason(
+                "scope.invalid",
+                "the Scope paths: block broke a bound, so it declares nothing",
+            )
+        ], False
+    raw_globs = signal.get("globs")
+    globs = (
+        [glob for glob in raw_globs if isinstance(glob, str) and glob]
+        if isinstance(raw_globs, list)
+        else []
+    )
+    if not globs:
+        return [_scope_reason("scope.undeclared", "the Scope paths: block lists no globs")], False
+    if not paths:
+        # No changed paths to check: not measured (``signal.missing.paths`` says why).
+        return [], None
+    outside = [path for path in paths if not any(path_full_matches_glob(g, path) for g in globs)]
+    if not outside:
+        return [
+            _scope_reason(
+                "scope.within",
+                f"every changed path ({len(paths)}) is inside the declared scope",
+            )
+        ], True
+    listed = ", ".join(outside[:_SCOPE_DRIFT_MAX_LISTED])
+    more = len(outside) - _SCOPE_DRIFT_MAX_LISTED
+    suffix = f" (and {more} more)" if more > 0 else ""
+    return [
+        _scope_reason(
+            "scope.drift",
+            f"{len(outside)} changed path(s) outside the declared scope: {listed}{suffix}",
+        )
+    ], False
+
+
+def _checklist(
+    reasons: list[LaneReason],
+    missing: list[str],
+    *,
+    optional: dict[str, bool | None],
+) -> list[ChecklistGate]:
     """Every gate in :data:`GATE_ORDER`: ``False`` when a reason forces it above ``low``,
-    ``True`` when measured and clean, ``None`` when its inputs were not given."""
+    ``True`` when measured and clean, ``None`` when its inputs were not given.
+
+    An optional gate (``scope``) is listed only when ``optional`` names it, with
+    the value its own signal produced."""
     failed = {
         gate
         for reason in reasons
@@ -578,7 +685,11 @@ def _checklist(reasons: list[LaneReason], missing: list[str]) -> list[ChecklistG
     gates: list[ChecklistGate] = []
     for gate in GATE_ORDER:
         passed: bool | None
-        if gate == "inputs":
+        if gate in _OPTIONAL_GATES:
+            if gate not in optional:
+                continue
+            passed = optional[gate]
+        elif gate == "inputs":
             passed = not missing
         elif gate in failed:
             passed = False
@@ -601,6 +712,13 @@ def classify_blast_radius(
     ``diff_stats``, add the :data:`SIGNAL_MISSING_CATEGORY` category, a
     ``signal.missing.*`` reason at ``medium`` that no override can lower, and
     ``None`` (not measured) for every gate that reads the missing input.
+
+    A ``scope`` signal adds the ``scope`` gate and one ``scope.*`` reason: every
+    changed path inside a declared glob is ``scope.within`` (gate ``True``); any
+    path outside is ``scope.drift``; a block with no globs is ``scope.undeclared``;
+    a block that broke a bound is ``scope.invalid`` (gate ``False``, all
+    ``medium``); no declaration is ``scope.unknown`` (``medium``, gate ``None``).
+    Without a ``scope`` key the gate is left out and nothing else changes.
     """
     missing = _missing_signals(change)
     raw_paths = change.get("changed_paths")
@@ -611,6 +729,10 @@ def classify_blast_radius(
     reasons = _lane_reasons(
         missing=missing, hits=hits, paths=paths, diff_stats=diff_stats, rule_set=rule_set
     )
+    optional: dict[str, bool | None] = {}
+    if "scope" in change:
+        scope_reasons, optional["scope"] = _scope_outcome(change, paths)
+        reasons.extend(scope_reasons)
     lane = _max_lane([reason.lane for reason in reasons])
     if missing:
         categories.append(SIGNAL_MISSING_CATEGORY)
@@ -630,7 +752,7 @@ def classify_blast_radius(
         next_action=_NEXT_ACTION[lane],
         categories=categories,
         reasons=reasons,
-        checklist=_checklist(reasons, missing),
+        checklist=_checklist(reasons, missing, optional=optional),
     )
 
 
@@ -646,5 +768,6 @@ __all__ = [
     "Lane",
     "LaneReason",
     "RuleSet",
+    "ScopeSignal",
     "classify_blast_radius",
 ]

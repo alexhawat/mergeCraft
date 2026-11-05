@@ -10,6 +10,7 @@ content in it.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from pathlib import Path
 from typing import Any
@@ -71,6 +72,17 @@ diff --git a/README.md b/README.md
 -old line
 +new line
 """
+
+
+def _classify_run(diff_text: str) -> Any:
+    """Call the run's diff classifier with an undeclared scope once it requires one.
+
+    #1056 part 3 makes ``scope`` a required keyword on ``classify_run_blast_radius``.
+    """
+    if "scope" in inspect.signature(classify_run_blast_radius).parameters:
+        undeclared = {"declared": False, "globs": [], "invalid": False}
+        return classify_run_blast_radius(diff_text, scope=undeclared)
+    return classify_run_blast_radius(diff_text)
 
 
 def _make_ctx(
@@ -474,10 +486,10 @@ class TestBlastRadiusFromDiff:
     """The classifier is fed from the analyzer scope parser, not a second one."""
 
     def test_empty_diff_classifies_to_nothing(self) -> None:
-        assert classify_run_blast_radius("") is None
+        assert _classify_run("") is None
 
     def test_lockfile_change_is_detected(self) -> None:
-        classification = classify_run_blast_radius(_MIGRATION_DIFF)
+        classification = _classify_run(_MIGRATION_DIFF)
         assert classification is not None
         assert "dependency_changes" in classification.categories
 

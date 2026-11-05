@@ -54,6 +54,7 @@ from mergecraft.mcp.tool_state import (
 )
 from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.prep.types import is_prep_install_failure
+from mergecraft.requirements.ingest import ScopeDeclaration, parse_scope_paths
 from mergecraft.review.engine import ReviewEngine
 from mergecraft.review.roster_execution import (
     RosterExecutionSummary,
@@ -1189,6 +1190,12 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
         else:
             gh_event = bind_target_pull_request(gh_event, pull)
             ctx.gh_event = gh_event
+            # Dispatch events carry no PR number during setup. Keep the run and
+            # tool state in sync with the fetched PR before reading its issues.
+            bound_pull_number = pull.get("number")
+            if isinstance(bound_pull_number, int):
+                ctx.pr_number = bound_pull_number
+                ctx.tool_state.pr_number = bound_pull_number
 
     try:
         validate_fork_credential_invariant(event=gh_event, env=os.environ, settings=ctx.settings)
@@ -2287,6 +2294,102 @@ def _lite_inconclusive_reason(outcome: LiteOutcome) -> str | None:
 _IGNORE_SKIP_EVENTS: frozenset[str] = frozenset({"pull_request", "pull_request_target"})
 
 
+async def _fetch_pull_request_body(ctx: RunContext, pull: dict[str, Any]) -> str | None:
+    """Read the pull request's description through the SCM (one ``get_pull``).
+
+    Raises when the read fails or there is no SCM to read with, so the caller
+    records the scope as unknown rather than skipping a body it could not see.
+    """
+    scm = getattr(ctx, "scm", None)
+    tool_context = getattr(ctx, "tool_context", None)
+    if scm is None and tool_context is not None:
+        scm = getattr(tool_context, "scm", None)
+    repo = getattr(getattr(ctx, "run_context", None), "repo", None)
+    if repo is None and tool_context is not None:
+        repo = getattr(tool_context, "repo", None)
+    raw_number = pull.get("number")
+    number = raw_number if isinstance(raw_number, int) else ctx.pr_number
+    if scm is None or repo is None or number is None:
+        msg = "the pull request body is not in the event and cannot be read"
+        raise RuntimeError(msg)
+    fetched = await scm.get_pull(repo.owner, repo.name, int(number))
+    body = fetched.get("body") if isinstance(fetched, dict) else None
+    return body if isinstance(body, str) else None
+
+
+async def _pull_request_body(ctx: RunContext) -> str | None:
+    """The pull request's own description, never a comment body.
+
+    Read from the raw event: ``pull_request.body`` on pull-request and review
+    comment events, ``issue.body`` on a comment on a pull request. A
+    ``pull_request`` the run bound itself (the comment trigger, a PR-naming
+    ``workflow_dispatch``) carries no ``body`` key, so the pull request is read
+    through the SCM once; a failed read raises. The resolved payload's
+    ``event.body`` is the comment for comment triggers, so it is used only for a
+    pull-request trigger.
+    """
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    pull = event.get("pull_request")
+    if isinstance(pull, dict):
+        if "body" not in pull:
+            return await _fetch_pull_request_body(ctx, pull)
+        body = pull.get("body")
+        return body if isinstance(body, str) else None
+    issue = event.get("issue")
+    if isinstance(issue, dict) and issue.get("pull_request") is not None:
+        body = issue.get("body")
+        return body if isinstance(body, str) else None
+    resolved = ctx.ctx_payload
+    if resolved is not None and resolved.event.is_pr:
+        trigger = resolved.event.trigger
+        if trigger.startswith("pull_request") and "comment" not in trigger:
+            return resolved.event.body
+    return None
+
+
+async def _record_scope_declaration(ctx: RunContext) -> None:
+    """Record the run's ``Scope paths:`` declaration on ``ToolState.scope_declaration``.
+
+    Sources in order, first declaration wins: the pull request body
+    (``source_ref="pr_description"``), then the body of each issue the pull
+    request closes (``ToolState.linked_issues``, ``source_ref="linked_issue#<n>"``).
+    A body without a block is skipped; a block that is empty or broke a bound
+    still wins, so a later source never widens it. No block anywhere records an
+    undeclared scope. The bodies are untrusted data and never open a file. Any
+    failure, including a pull request body that had to be fetched and could not
+    be, leaves ``None`` (unknown) and never raises into the run: a closing
+    issue's block never stands in for a body that might declare a narrower scope.
+    """
+    tool_state = ctx.tool_state
+    if tool_state is None:
+        return
+    try:
+        sources: list[tuple[str, str | None]] = [("pr_description", await _pull_request_body(ctx))]
+        sources.extend(
+            (f"linked_issue#{issue.number}", issue.body) for issue in tool_state.linked_issues or ()
+        )
+        declaration = ScopeDeclaration(declared=False, globs=(), source_ref="", rejected=())
+        for source_ref, body in sources:
+            if not body:
+                continue
+            parsed = parse_scope_paths(body)
+            if parsed.declared:
+                declaration = replace(parsed, source_ref=source_ref)
+                break
+    except Exception as exc:  # unknown, never an error: the scope gate stays null
+        logger.warning("scope declaration could not be read; the scope stays unknown: {}", exc)
+        tool_state.scope_declaration = None
+        return
+    tool_state.scope_declaration = declaration
+    if declaration.declared:
+        logger.info(
+            "» scope declared in {}: {} glob(s), {} rejected",
+            declaration.source_ref,
+            len(declaration.globs),
+            len(declaration.rejected),
+        )
+
+
 async def _ignore_paths_gate(ctx: RunContext) -> SkipAgentReview | None:
     """Resolve review path ignoring (#1109); skip the agent when every changed file is ignored.
 
@@ -2436,6 +2539,8 @@ async def _run_review_after_analyze(
         # Engine publish (``_finalize``) owns completion; do not publish here.
         return SkipAgentReview(reason=skip_reason)
 
+    # #1056 part 3: read once, before the fast-path gate and before any dispatch.
+    await _record_scope_declaration(ctx)
     triage_out = await _triage_gate(ctx)
     if triage_out is not None:
         return triage_out

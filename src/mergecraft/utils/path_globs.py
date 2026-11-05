@@ -1,19 +1,12 @@
-"""Shared path glob matching for pipeline predicates and analyzers."""
+"""Shared path glob matching for pipeline predicates, analyzers and declared scopes.
+
+The matcher lives in :mod:`mergecraft.classify.path_globs`, a leaf module the
+classifier can import without loading :mod:`mergecraft.utils`; it is re-exported
+here for the pipeline predicates and analyzers.
+"""
 
 from __future__ import annotations
 
-from pathlib import PurePath
+from mergecraft.classify.path_globs import path_full_matches_glob, path_matches_glob
 
-
-def path_matches_glob(pattern: str, path: str) -> bool:
-    """Return whether ``path`` matches ``pattern`` (including ``**/`` root fallback)."""
-    pure = PurePath(path.replace("\\", "/"))
-    pat = pattern.replace("\\", "/")
-    if pure.match(pat):
-        return True
-    if pat.startswith("**/"):
-        return pure.match(pat[3:])
-    return False
-
-
-__all__ = ["path_matches_glob"]
+__all__ = ["path_full_matches_glob", "path_matches_glob"]

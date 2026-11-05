@@ -242,9 +242,10 @@ def _run_lane(ctx: ToolContext) -> str | None:
     Reuses the packet's classifier rather than a second rule set, so the lane
     a judge is held to is the same lane the merge evidence packet reports.
     """
-    from mergecraft.evidence.run_packet import classify_run_blast_radius
+    from mergecraft.evidence.run_packet import classify_run_blast_radius, scope_signal_for_state
 
     state = primary_repo_state(ctx.tool_state)
+    scope = scope_signal_for_state(ctx.tool_state)
     for attr in ("diff_path", "incremental_diff_path"):
         raw = getattr(state, attr, None)
         if not raw:
@@ -252,7 +253,7 @@ def _run_lane(ctx: ToolContext) -> str | None:
         path = Path(raw)
         if not path.is_file():
             continue
-        classification = classify_run_blast_radius(path.read_text(encoding="utf-8"))
+        classification = classify_run_blast_radius(path.read_text(encoding="utf-8"), scope=scope)
         if classification is not None:
             return classification.lane
     return None

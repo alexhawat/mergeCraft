@@ -24,7 +24,8 @@ blockers, which is the condition that was meant.
 from __future__ import annotations
 
 import typing
-from typing import TYPE_CHECKING
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -106,6 +107,20 @@ _LOW_RISK_DIFF = (
 )
 
 
+def _declare_scope(ctx: Any, globs: tuple[str, ...]) -> None:
+    """Record a declared scope covering the diff, once the run state carries one.
+
+    Since #1056 part 3 a run without a declared scope leaves the ``scope`` gate
+    unmeasured, so it can never select ``low_risk_passing``.
+    """
+    if not hasattr(ctx.tool_state, "scope_declaration"):
+        return
+    ingest = import_module("mergecraft.requirements.ingest")
+    ctx.tool_state.scope_declaration = ingest.ScopeDeclaration(
+        declared=True, globs=globs, source_ref="pr_description", rejected=()
+    )
+
+
 def test_low_risk_passing_is_reachable_from_build_run_packet(tmp_path: Path) -> None:
     """A clean low-risk packet must be able to select ``low_risk_passing``.
 
@@ -121,6 +136,7 @@ def test_low_risk_passing_is_reachable_from_build_run_packet(tmp_path: Path) -> 
     from mergecraft.evidence.trajectory import record_tool_call
 
     ctx = _make_ctx(tmp_path, diff_text=_LOW_RISK_DIFF)
+    _declare_scope(ctx, ("docs/notes.md",))
     # A run that verified after its last write. Without this the trajectory
     # auditor raises ``no-post-edit-verification`` at ``Major``, which is a
     # blocker and would mask the reachability this test is about.
