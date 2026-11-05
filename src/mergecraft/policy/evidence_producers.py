@@ -661,7 +661,7 @@ def _require_workflow_untouched(ctx: Any, *, workflow: str, label: str) -> None:
     if workflow in unreviewable:
         msg = (
             f"this pull request changes the declared workflow {workflow} (GitHub sent no "
-            f"reviewable patch for it), so nothing it uploads counts as {label}"
+            f"reviewable patch for it, so the path is unreviewable in the diff), so nothing it uploads counts as {label}"
         )
         raise _Absent(msg)
     if workflow in reviewed:
