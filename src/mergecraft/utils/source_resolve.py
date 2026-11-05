@@ -536,7 +536,7 @@ def materialize_resolved_diff(
         git_range_diff,
         git_ref_diff,
         git_staged_diff,
-        git_unstaged_diff,
+        git_unstaged_diff_with_limitations,
     )
 
     if diff_file is not None:
@@ -550,12 +550,13 @@ def materialize_resolved_diff(
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "review.diff"
     base_ref: str | None = None
+    coverage_limitations: tuple[str, ...] = ()
 
     if spec.staged:
         text = git_staged_diff(cwd=workspace.cwd)
         base_ref = None
     elif spec.unstaged:
-        text = git_unstaged_diff(cwd=workspace.cwd)
+        text, coverage_limitations = git_unstaged_diff_with_limitations(cwd=workspace.cwd)
         base_ref = None
     elif spec.commit_range:
         parse_commit_range(spec.commit_range)
@@ -600,7 +601,13 @@ def materialize_resolved_diff(
         f", base={base_ref}" if base_ref else "",
         path,
     )
-    return DiffMaterialization(path=path, base_ref=base_ref, line_count=line_count, empty=empty)
+    return DiffMaterialization(
+        path=path,
+        base_ref=base_ref,
+        line_count=line_count,
+        empty=empty,
+        coverage_limitations=coverage_limitations,
+    )
 
 
 __all__ = [
