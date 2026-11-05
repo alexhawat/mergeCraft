@@ -245,9 +245,11 @@ def _run_lane(ctx: ToolContext) -> str | None:
     from mergecraft.evidence.run_packet import (
         classify_run_blast_radius,
         fix_proof_signal_for_context,
+        scope_signal_for_state,
     )
 
     state = primary_repo_state(ctx.tool_state)
+    scope = scope_signal_for_state(ctx.tool_state)
     fix_proof = fix_proof_signal_for_context(ctx)
     for attr in ("diff_path", "incremental_diff_path"):
         raw = getattr(state, attr, None)
@@ -257,7 +259,7 @@ def _run_lane(ctx: ToolContext) -> str | None:
         if not path.is_file():
             continue
         classification = classify_run_blast_radius(
-            path.read_text(encoding="utf-8"), fix_proof=fix_proof
+            path.read_text(encoding="utf-8"), scope=scope, fix_proof=fix_proof
         )
         if classification is not None:
             return classification.lane

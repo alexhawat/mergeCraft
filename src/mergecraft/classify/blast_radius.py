@@ -7,6 +7,7 @@ from typing import Literal, NamedTuple, NotRequired, cast
 from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import TypedDict
 
+from mergecraft.classify.path_globs import path_full_matches_glob
 from mergecraft.classify.review_config import is_review_config_path
 
 Lane = Literal["low", "medium", "high"]
@@ -22,6 +23,19 @@ Category = Literal[
     "irreversible_infra",
     "review_config",
 ]
+
+
+class ScopeSignal(TypedDict):
+    """The declared ``Scope paths:`` of a change, as the classifier reads it (#1056 part 3).
+
+    ``declared`` is ``False`` when no source carried a block (the scope is
+    unknown); ``invalid`` is ``True`` when the block broke a bound; ``globs`` are
+    the accepted globs, matched against the changed paths only.
+    """
+
+    declared: bool
+    globs: list[str]
+    invalid: bool
 
 
 FixProofStatus = Literal[
@@ -54,12 +68,13 @@ class FixProofSignal(TypedDict):
 class ChangeSet(TypedDict, total=False):
     """Side-effect-free change payload fed to the classifier.
 
-    ``fix_proof`` is optional: without it the ``fix_proof`` gate is left out of
-    the checklist (a library caller); a review run always supplies it.
+    ``scope`` and ``fix_proof`` are optional: without one, its gate is left out of
+    the checklist (a library caller); a review run always supplies both.
     """
 
     changed_paths: list[str]
     diff_stats: dict[str, object]
+    scope: ScopeSignal
     fix_proof: FixProofSignal
 
 
@@ -222,6 +237,11 @@ LANE_REASON_CATALOGUE: dict[str, Lane] = {
     "paths.generated": "low",
     "source.small_isolated": "low",
     "baseline.clean": "low",
+    "scope.unknown": "medium",
+    "scope.undeclared": "medium",
+    "scope.invalid": "medium",
+    "scope.drift": "medium",
+    "scope.within": "low",
     "fix.not-required": "low",
     "fix.proven": "low",
     "fix.not-proven": "medium",
@@ -247,15 +267,16 @@ GATE_ORDER: tuple[str, ...] = (
     "tests",
     "review_config",
     "source",
+    "scope",
     "fix_proof",
 )
 """The fixed order of :attr:`BlastRadiusClassification.checklist` gates.
 
-``fix_proof`` is listed only when the change set carries a ``fix_proof`` signal;
-every other gate is always listed.
+``scope`` and ``fix_proof`` are listed only when the change set carries the
+matching signal; every other gate is always listed.
 """
 
-_OPTIONAL_GATES: frozenset[str] = frozenset({"fix_proof"})
+_OPTIONAL_GATES: frozenset[str] = frozenset({"scope", "fix_proof"})
 
 _Input = Literal["paths", "diff"]
 
@@ -305,6 +326,12 @@ _REASON_SPECS: dict[str, _ReasonSpec] = {
     "paths.generated": _ReasonSpec("generated_files", "source"),
     "source.small_isolated": _ReasonSpec(None, None),
     "baseline.clean": _ReasonSpec(None, None),
+    # ``scope.unknown`` leaves the gate ``None`` (not measured) rather than failing it.
+    "scope.unknown": _ReasonSpec(None, None),
+    "scope.undeclared": _ReasonSpec(None, "scope"),
+    "scope.invalid": _ReasonSpec(None, "scope"),
+    "scope.drift": _ReasonSpec(None, "scope"),
+    "scope.within": _ReasonSpec(None, None),
     "fix.not-required": _ReasonSpec(None, None),
     "fix.proven": _ReasonSpec(None, None),
     "fix.not-proven": _ReasonSpec(None, "fix_proof"),
@@ -319,6 +346,7 @@ _REASON_SPECS: dict[str, _ReasonSpec] = {
 _OVERRIDE_FLOORS: frozenset[str] = frozenset({"paths.review_config"})
 
 _SMALL_SOURCE_MAX_LINES = 5
+_SCOPE_DRIFT_MAX_LISTED = 10
 
 
 def _detect(paths: list[str], diff_text: str) -> tuple[list[str], dict[str, str]]:
@@ -613,6 +641,67 @@ def _lane_reasons(
     return reasons
 
 
+def _scope_reason(code: str, message: str) -> LaneReason:
+    return LaneReason(code=code, lane=LANE_REASON_CATALOGUE[code], message=message)
+
+
+def _scope_outcome(change: ChangeSet, paths: list[str]) -> tuple[list[LaneReason], bool | None]:
+    """The ``scope.*`` reasons and the ``scope`` gate for a supplied signal.
+
+    Glob text is untrusted and never appears in a message; only changed paths do.
+    A malformed signal reads as not declared, so it can never pass the gate.
+    """
+    raw = change.get("scope")
+    signal: dict[str, object] = (
+        cast("dict[str, object]", raw)  # reason: the TypedDict is a plain dict at runtime
+        if isinstance(raw, dict)
+        else {}
+    )
+    if signal.get("declared") is not True:
+        return [
+            _scope_reason(
+                "scope.unknown",
+                "no Scope paths: block was found in the pull request or the issues it "
+                "closes, so the changed paths were not checked against a declared scope",
+            )
+        ], None
+    if signal.get("invalid") is True:
+        return [
+            _scope_reason(
+                "scope.invalid",
+                "the Scope paths: block broke a bound, so it declares nothing",
+            )
+        ], False
+    raw_globs = signal.get("globs")
+    globs = (
+        [glob for glob in raw_globs if isinstance(glob, str) and glob]
+        if isinstance(raw_globs, list)
+        else []
+    )
+    if not globs:
+        return [_scope_reason("scope.undeclared", "the Scope paths: block lists no globs")], False
+    if not paths:
+        # No changed paths to check: not measured (``signal.missing.paths`` says why).
+        return [], None
+    outside = [path for path in paths if not any(path_full_matches_glob(g, path) for g in globs)]
+    if not outside:
+        return [
+            _scope_reason(
+                "scope.within",
+                f"every changed path ({len(paths)}) is inside the declared scope",
+            )
+        ], True
+    listed = ", ".join(outside[:_SCOPE_DRIFT_MAX_LISTED])
+    more = len(outside) - _SCOPE_DRIFT_MAX_LISTED
+    suffix = f" (and {more} more)" if more > 0 else ""
+    return [
+        _scope_reason(
+            "scope.drift",
+            f"{len(outside)} changed path(s) outside the declared scope: {listed}{suffix}",
+        )
+    ], False
+
+
 # A fix pull request's receipt status → the reason code and its message (#1056 part 5).
 _FIX_PROOF_OUTCOMES: dict[str, tuple[str, str]] = {
     "proven": (
@@ -701,8 +790,8 @@ def _checklist(
     """Every gate in :data:`GATE_ORDER`: ``False`` when a reason forces it above ``low``,
     ``True`` when measured and clean, ``None`` when its inputs were not given.
 
-    An optional gate (``fix_proof``) is listed only when ``optional`` names it,
-    with the value its own signal produced."""
+    An optional gate (``scope``, ``fix_proof``) is listed only when ``optional``
+    names it, with the value its own signal produced."""
     failed = {
         gate
         for reason in reasons
@@ -744,6 +833,12 @@ def classify_blast_radius(
     ``signal.missing.*`` reason at ``medium`` that no override can lower, and
     ``None`` (not measured) for every gate that reads the missing input.
 
+    A ``scope`` signal adds the ``scope`` gate and one ``scope.*`` reason: every
+    changed path inside a declared glob is ``scope.within`` (gate ``True``); any
+    path outside is ``scope.drift``; a block with no globs is ``scope.undeclared``;
+    a block that broke a bound is ``scope.invalid`` (gate ``False``, all
+    ``medium``); no declaration is ``scope.unknown`` (``medium``, gate ``None``).
+    Without a ``scope`` key the gate is left out and nothing else changes.
     A ``fix_proof`` signal adds the ``fix_proof`` gate and one ``fix.*`` reason: a
     change that is not a fix is ``fix.not-required`` and a fix with a ``proven``
     receipt is ``fix.proven`` (both ``low``, gate ``True``); every other receipt
@@ -760,6 +855,9 @@ def classify_blast_radius(
         missing=missing, hits=hits, paths=paths, diff_stats=diff_stats, rule_set=rule_set
     )
     optional: dict[str, bool | None] = {}
+    if "scope" in change:
+        scope_reasons, optional["scope"] = _scope_outcome(change, paths)
+        reasons.extend(scope_reasons)
     if "fix_proof" in change:
         fix_reasons, optional["fix_proof"] = _fix_proof_outcome(change)
         reasons.extend(fix_reasons)
@@ -800,5 +898,6 @@ __all__ = [
     "Lane",
     "LaneReason",
     "RuleSet",
+    "ScopeSignal",
     "classify_blast_radius",
 ]

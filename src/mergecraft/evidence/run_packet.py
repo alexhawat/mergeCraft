@@ -54,7 +54,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from mergecraft.classify import BlastRadiusClassification
-    from mergecraft.classify.blast_radius import FixProofSignal
+    from mergecraft.classify.blast_radius import FixProofSignal, ScopeSignal
     from mergecraft.evidence.gate_policy import GateActionPolicy
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import RepoToolState, ToolState
@@ -172,6 +172,30 @@ def _diff_stats(diff_text: str) -> dict[str, object]:
     return {"diff": diff_text, "lines_added": added, "lines_deleted": deleted}
 
 
+def scope_signal_for_state(state: ToolState) -> ScopeSignal:
+    """The ``scope`` signal for the run's recorded ``Scope paths:`` declaration (#1056 part 3).
+
+    No declaration recorded (``None``: not read, or the read failed) or one with
+    ``declared=False`` is an unknown scope; a declaration with rejected items is
+    invalid. The packet and the verification tool both build the signal here, so
+    the lane a judge is held to is the lane the packet reports.
+
+    Args:
+        state (ToolState): The run state.
+
+    Returns:
+        ScopeSignal: Always supplied, so a run's checklist always lists ``scope``.
+    """
+    declaration = getattr(state, "scope_declaration", None)
+    if declaration is None or declaration.declared is not True:
+        return {"declared": False, "globs": [], "invalid": False}
+    return {
+        "declared": True,
+        "globs": list(declaration.globs),
+        "invalid": bool(declaration.rejected),
+    }
+
+
 # A recorded receipt status a fix carries as-is; ``not-required`` is never one.
 _FIX_PROOF_STATUSES: frozenset[str] = frozenset(get_args(FixProofStatus)) - {"not-required"}
 
@@ -266,15 +290,15 @@ def fix_proof_signal_for_context(ctx: ToolContext) -> FixProofSignal:
 
 
 def classify_run_blast_radius(
-    diff_text: str, *, fix_proof: FixProofSignal
+    diff_text: str, *, scope: ScopeSignal, fix_proof: FixProofSignal
 ) -> BlastRadiusClassification | None:
     """Classify the run's diff, or return ``None`` when there is no diff.
 
     Returning ``None`` for an empty diff keeps the packet honest: a run with
     nothing to classify records an absent section rather than a fabricated
-    ``low`` lane. ``fix_proof`` is required (build it with
-    :func:`fix_proof_signal_for_state`) so a run never classifies without its
-    ``fix_proof`` gate.
+    ``low`` lane. ``scope`` and ``fix_proof`` are required (build them with
+    :func:`scope_signal_for_state` and :func:`fix_proof_signal_for_state`) so a
+    run never classifies without its ``scope`` and ``fix_proof`` gates.
     """
     paths = changed_paths_from_diff(diff_text)
     if not paths:
@@ -282,6 +306,7 @@ def classify_run_blast_radius(
     change: ChangeSet = {
         "changed_paths": paths,
         "diff_stats": _diff_stats(diff_text),
+        "scope": scope,
         "fix_proof": fix_proof,
     }
     return classify_blast_radius(change)
@@ -761,7 +786,11 @@ def build_run_packet(
     state = ctx.tool_state
     repo_state = primary_repo_state(state)
     diff_text = _read_diff_text(repo_state)
-    blast_radius = classify_run_blast_radius(diff_text, fix_proof=fix_proof_signal_for_context(ctx))
+    blast_radius = classify_run_blast_radius(
+        diff_text,
+        scope=scope_signal_for_state(state),
+        fix_proof=fix_proof_signal_for_context(ctx),
+    )
 
     from mergecraft.evidence.trajectory import build_trajectory_record
     from mergecraft.evidence.trajectory_audit import audit_trajectory
@@ -1213,4 +1242,5 @@ __all__ = [
     "resolve_evidence_dir",
     "resolve_packet_path",
     "resolve_prepared_run_packet",
+    "scope_signal_for_state",
 ]

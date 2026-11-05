@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from mergecraft.findings.ledger import FindingLedger
     from mergecraft.modes import Mode
     from mergecraft.prep.types import PrepResult
+    from mergecraft.requirements.ingest import ScopeDeclaration
     from mergecraft.review.lens_routing import LensRoutingDecision
     from mergecraft.scm.types import LinkedIssue
     from mergecraft.xrepo.review import BaseManifestLookup, XrepoReview
@@ -622,6 +623,11 @@ class ToolState:
     # a CI source is actually read, so a run that consulted no CI records
     # nothing rather than an empty section.
     ci_evidence: CiEvidenceState | None = None
+    # The ``Scope paths:`` declaration read once at run start (#1056 part 3): the
+    # pull request body first, then each closing issue's body; the first source
+    # with a block wins. ``None`` means it was not read (or the read failed); the
+    # blast-radius ``scope`` gate is then unknown, never green.
+    scope_declaration: ScopeDeclaration | None = None
     # D7 — single evidence-packet snapshot for the review preamble and sticky
     # record; assembled once via ``resolve_prepared_run_packet`` and reused.
     prepared_run_packet: Any | None = None
