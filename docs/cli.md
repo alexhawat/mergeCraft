@@ -172,6 +172,17 @@ entry point — it is a Typer group callback, not a `registered_commands` leaf
 itself, so it is described here in prose rather than as its own table row;
 `mergecraft gha token` above is the one real leaf command under that group.
 
+## Local coverage toolchain
+
+`mergecraft review --with-coverage --shell enabled` uses the `coverage`
+executable on `PATH` for both test collection and JSON export. Activate the
+consumer project's environment containing coverage, pytest, and its test
+dependencies before running a separately installed mergeCraft CLI. If no
+`coverage` executable is found, mergeCraft uses the coverage module in its own
+Python environment when available. The existing trusted-source and sandbox
+requirements still apply; the GitHub Action consumes declared CI evidence
+instead of running consumer tests.
+
 ## JSON output schema
 
 Every CLI `--json` payload carries a top-level `schema_version` field, currently
