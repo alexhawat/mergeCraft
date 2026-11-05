@@ -29,6 +29,8 @@ jobs:
         run: uv run pytest tests/agents_sdk -q -m "not live"
 
       - name: Live example (OpenCode Go when secret present)
+        id: live
+        continue-on-error: true
         env:
           OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
           MERGECRAFT_AGENTS_SDK_MODEL: opencode-go/deepseek-v4.1-flash
@@ -46,3 +48,16 @@ jobs:
           uv run python examples/agents-sdk/review_loop.py | tee /tmp/agents-sdk-smoke.log
           echo "---- redacted tail ----"
           tail -n 20 /tmp/agents-sdk-smoke.log | sed -E 's/(ghp_|sk-)[A-Za-z0-9_-]+/<redacted>/g'
+
+      - name: Live smoke outcome
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.live.outcome }}" == "success" || "${{ steps.live.outcome }}" == "skipped" ]]; then
+            exit 0
+          fi
+          if [[ -f /tmp/agents-sdk-smoke.log ]] && grep -q "Insufficient account funds" /tmp/agents-sdk-smoke.log; then
+            echo "::warning title=agents-sdk live smoke::OpenCode Go returned 402 insufficient funds; unit tests still gate this workflow"
+            exit 0
+          fi
+          echo "::error title=agents-sdk live smoke::example failed (see live step log)"
+          exit 1
