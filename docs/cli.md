@@ -8,21 +8,34 @@ Full `mergecraft` command reference derived from the live Typer application.
 
 Pass `--help` to any invocation below for its full flag set.
 
-`review --use-cache` and `--resume` reuse a result only when the patch, review
-settings, resolved revisions, and tracked/nonignored source contents match.
-Gitignored artifacts are outside this source fingerprint. Workspaces without a
-reliable Git identity, submodules, external symlinks, unreadable source, or source
-larger than 10,000 files / 64 MiB run normally with result caching skipped.
-For a local `review --head REF` or `--range BASE..HEAD`, select a clean checkout
-at the requested head with `--cwd` or `--repo`. A mismatched revision, staged or
-unstaged tracked edit, or nonignored untracked file is a configuration error
-(exit 30). mergeCraft leaves your checkout unchanged; a separate Git worktree
-can supply another revision. Gitignored artifacts do not make a checkout dirty.
-Local `review --repo PATH` stores completed reviews in that repository's
-`.mergecraft/reviews/`. For a remote `--repo`, durable reviews stay under
-`--cwd` (the invocation directory by default), while their snapshot names the
-remote URL and resolved commit. Manifests and evidence use the acquired source
-checkout in both cases. Explicit output destinations remain invocation-relative.
+## Repository and output locations
+
+`review` separates the shell's invocation directory, the selected source
+repository, and explicit output destinations. Choose a checkout before choosing
+a revision; a diff alone is not a replacement for its surrounding source tree.
+
+| Input or operation | Source/configuration context | Storage and side effects |
+|---|---|---|
+| `review --cwd PATH` | Selects that local workspace; default is the invocation directory. Repository settings and implicit local `.env` follow the selected local target. | Review snapshots persist in the resolved local repository. Cache entries use that repository’s identity but live in `MERGECRAFT_CACHE_DIR` or the global XDG cache. The parent shell does not change directory. |
+| `review --repo PATH` | Selects an existing local repository instead of the caller's repository. | Results persist under that repository; explicit output paths still follow the invocation directory. |
+| Remote `--repo URL` or PR source | Acquires a source checkout and reads its repository configuration. Remote acquisition does not load a cloned `.env` as local credentials. | Durable `.mergecraft/reviews` records live under selected `--cwd` (default: invocation directory); snapshots identify the normalized remote URL and resolved commit, with manifests/evidence from the acquired source. |
+| `--head REF` or a commit range | For a local repository, the reviewed endpoint must equal its checked-out `HEAD`, and the tracked/nonignored working tree must be clean. Otherwise the command rejects the request. | Use a separate `git worktree` or check out the requested revision first. mergeCraft does not silently switch the user's local branch. |
+| Default working-tree review | Includes tracked changes and eligible nonignored additions relative to the selected base. Ignored environments/caches are outside source scope. | Oversized, binary, symlink or non-UTF-8 eligible additions are reported as coverage limitations. An empty but incomplete diff is not a clean pass. |
+| `--unstaged` | Reads tracked unstaged changes and eligible untracked additions, preserving omission metadata. | Does not stage or commit files. |
+| `MERGECRAFT_ENV` / ambient environment | An explicit env-file override wins; existing process variables keep precedence over loaded file values. GitHub Actions skips implicit local `.env` loading. | Relative explicit env-file paths follow the invocation directory. See [authentication](authentication.md). |
+| `--output` / `--json` | Explicit destinations are interpreted relative to the invocation directory. | JSONL/SARIF require `--output` before review starts; missing destinations produce a configuration error. |
+| `verify-behavior` YAML `repo_path` | Selects the policy/settings root and `startup_command` working directory. Relative paths follow the invocation directory; `~` expands. | Relative verification artifact paths remain relative to the invocation directory. See [verification](verify-behavior.md). |
+
+Cache reuse requires both a matching review patch/configuration and a trustworthy
+source-context identity. Changing surrounding tracked or nonignored source,
+the base revision, or the reviewed endpoint invalidates reuse. When context
+cannot be safely fingerprinted, caching is skipped instead of claiming a hit.
+This includes submodules, external symlinks, unreadable source, and contexts
+exceeding 10,000 files or 64 MiB.
+
+The CLI's local file/environment rules are separate from Action checkout and
+operator-setting snapshots. Action approval and completion receipts remain bound
+to the immutable commit reviewed; a later PR push needs a new review.
 
 <!-- BEGIN:cli-commands -->
 | Command | Description |
