@@ -42,6 +42,14 @@ Examples:
 | Syntactically broken `.mergecraft/config.yaml` | Warn, fall back to `default_settings()` (broken YAML is **not** fail-closed) |
 | Learnings seed / bundled-skills install failure | Warn and continue without that feature |
 
+`mergecraft config validate` is the strict diagnostic surface: it parses every
+contributing configuration file and validates the migrated, merged result. A
+valid local overlay does not hide malformed committed YAML. Files replaced by
+an explicit `--config` or existing `MERGECRAFT_CONFIG` are not contributors;
+local overlays do not contribute in GitHub Actions. Runtime loading and review
+preflight retain the warn/default syntax policy above, while validating the
+effective merged settings for schema errors.
+
 > Trusted-tier `setupScript` failures are **not** in this table: see the
 > dedicated section below — S1 changed the default from warn-only to
 > `inconclusive`.
