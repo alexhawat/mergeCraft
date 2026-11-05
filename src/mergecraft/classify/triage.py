@@ -14,8 +14,9 @@ matches and hides one real change matches nothing and gets a full review.
 * ``prose`` — only ``.md`` / ``.markdown`` / ``.txt`` files, outside high-stakes
   paths, with no changed line in a code fence, front matter, or indented code. A
   dependency manifest or lockfile named like prose, and an agent-instruction file
-  that steers later reviews, are never prose. The head-side file text proves the
-  rest; without it nothing is proven.
+  that steers later reviews, are never prose. Validated head text and diff hunks
+  reconstruct the base: removals are checked in the old structure and additions in
+  the new one. Without both sides nothing is proven.
 * ``whitespace`` — reconstruct the complete base text from the head and verified
   hunks. Python must retain the same AST; a closed C-family subset must contain no
   ambiguous multiline lexical constructs. Normalized file text must also match.
@@ -304,22 +305,30 @@ def _prose_file_ok(file: _File, head_text: str) -> bool:
         path.lower().endswith(_MARKDOWN_SUFFIXES) for path in (file.previous_path, file.path)
     ):
         return True  # plain text: no fences, no front matter
-    head_lines = head_text.splitlines()
-    inside = _inside_code_before(head_lines)
-    front_matter = _front_matter_end(head_lines)
+    before_text = _reconstruct_before(file, head_text)
+    if before_text is None:
+        return False
+    old_lines, new_lines = before_text.split("\n"), head_text.split("\n")
+    old_inside, new_inside = _inside_code_before(old_lines), _inside_code_before(new_lines)
+    old_front_matter, new_front_matter = _front_matter_end(old_lines), _front_matter_end(new_lines)
     for hunk in file.hunks:
-        position = hunk.new_start
+        old_position, new_position = hunk.old_start, hunk.new_start
         for line in hunk.lines:
-            if line[0] == " ":
-                position += 1
+            kind, text = line[0], line[1:]
+            if kind == " ":
+                old_position += 1
+                new_position += 1
                 continue
-            text = line[1:]
             if _FENCE.match(text) or text.startswith(("    ", "\t")):
                 return False
+            if kind == "-":
+                position, front_matter, inside = old_position, old_front_matter, old_inside
+                old_position += 1
+            else:
+                position, front_matter, inside = new_position, new_front_matter, new_inside
+                new_position += 1
             if position <= front_matter or (position < len(inside) and inside[position]):
                 return False
-            if line[0] == "+":
-                position += 1
     return True
 
 
