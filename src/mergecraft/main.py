@@ -2300,11 +2300,14 @@ def _lite_inconclusive_reason(outcome: LiteOutcome) -> str | None:
 _IGNORE_SKIP_EVENTS: frozenset[str] = frozenset({"pull_request", "pull_request_target"})
 
 
-async def _fetch_pull_request_body(ctx: RunContext, pull: dict[str, Any]) -> str | None:
-    """Read the pull request's description through the SCM (one ``get_pull``).
+async def _fetch_pull_request(
+    ctx: RunContext, pull: dict[str, Any], *, what: str
+) -> dict[str, Any]:
+    """Read the pull request through the SCM (one ``get_pull``).
 
-    Raises when the read fails or there is no SCM to read with, so the caller
-    records the scope as unknown rather than skipping a body it could not see.
+    *what* names the field the caller is after, for the error. Raises when the
+    read fails or there is no SCM to read with, so the caller records what it
+    could not see rather than silently reading an empty value.
     """
     scm = getattr(ctx, "scm", None)
     tool_context = getattr(ctx, "tool_context", None)
@@ -2316,11 +2319,60 @@ async def _fetch_pull_request_body(ctx: RunContext, pull: dict[str, Any]) -> str
     raw_number = pull.get("number")
     number = raw_number if isinstance(raw_number, int) else ctx.pr_number
     if scm is None or repo is None or number is None:
-        msg = "the pull request body is not in the event and cannot be read"
+        msg = f"the pull request {what} is not in the event and cannot be read"
         raise RuntimeError(msg)
     fetched = await scm.get_pull(repo.owner, repo.name, int(number))
-    body = fetched.get("body") if isinstance(fetched, dict) else None
+    return fetched if isinstance(fetched, dict) else {}
+
+
+async def _fetch_pull_request_body(ctx: RunContext, pull: dict[str, Any]) -> str | None:
+    """Read the pull request's description through the SCM (one ``get_pull``).
+
+    Raises when the read fails or there is no SCM to read with, so the caller
+    records the scope as unknown rather than skipping a body it could not see.
+    """
+    body = (await _fetch_pull_request(ctx, pull, what="body")).get("body")
     return body if isinstance(body, str) else None
+
+
+async def _resolve_run_pull_request_labels(ctx: RunContext) -> None:
+    """Record the pull request's label names on ``ToolState.pull_request_labels`` (#1056 part 5).
+
+    A ``pull_request`` the run bound itself (the comment trigger, a PR-naming
+    ``workflow_dispatch``) carries only ``number``/``head``/``base``, so label-based
+    fix detection would see no labels and a ``bug``-labelled fix would pass as
+    ``fix.not-required``. The labels are taken from the raw event when it has them
+    (``pull_request.labels``, or ``issue.labels`` on a comment on a pull request)
+    and read through the SCM once otherwise. Never fails the run: a read that fails
+    leaves ``None`` and is logged, so title-based detection still applies.
+    """
+    if ctx.tool_state is None:
+        return
+    from mergecraft.evidence.run_packet import event_pull_request_labels
+
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    labels = event_pull_request_labels(event)
+    if labels is None:
+        pull = event.get("pull_request")
+        if not isinstance(pull, dict):
+            return
+        try:
+            fetched = await _fetch_pull_request(ctx, pull, what="labels")
+        except Exception as err:  # label detection stays title-only, never crashes the run
+            logger.warning(
+                "fix_labels: the pull request's labels could not be read; "
+                "fix detection is by title only: {}",
+                err,
+            )
+            return
+        labels = event_pull_request_labels({"pull_request": fetched})
+        if labels is None:
+            logger.warning(
+                "fix_labels: the pull request read carries no labels; "
+                "fix detection is by title only"
+            )
+            return
+    ctx.tool_state.pull_request_labels = tuple(labels)
 
 
 async def _pull_request_body(ctx: RunContext) -> str | None:
@@ -2621,6 +2673,7 @@ async def _run_review_after_analyze(
     # Base-side fix labels are recorded before any tier can skip the agent, the
     # setup-script ``inconclusive`` skip included, so the packet never falls back.
     await _resolve_run_fix_labels(ctx)
+    await _resolve_run_pull_request_labels(ctx)
     if sc_action == "skip_agent":
         assert isinstance(sc_payload, str)
         skip_reason = sc_payload

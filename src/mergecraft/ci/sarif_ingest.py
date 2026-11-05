@@ -6,7 +6,6 @@ import os
 import zipfile
 from collections.abc import Mapping
 from io import BytesIO
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 from loguru import logger
@@ -20,6 +19,12 @@ from mergecraft.ci.red_green import (
     receipt_matches,
     red_green_verdict,
     undeclared_red_green_evidence,
+)
+from mergecraft.scm.artifact_provenance import (
+    declared_artifact_archive,
+    provenanced_runs,
+    require_workflow_untouched,
+    workflow_path,
 )
 from mergecraft.scm.github import github_client_from_scm
 
@@ -69,185 +74,6 @@ class _NoReceipt(Exception):
 
 def _short(sha: str) -> str:
     return sha[:7] if sha else "unknown"
-
-
-def _same_sha(value: object, head: str) -> bool:
-    return isinstance(value, str) and bool(head) and value.strip().lower() == head
-
-
-def _workflow_path(value: object) -> str:
-    return value.strip().removeprefix("./") if isinstance(value, str) else ""
-
-
-def _head_repository(run: Mapping[str, Any]) -> str:
-    repository = run.get("head_repository")
-    name = repository.get("full_name") if isinstance(repository, dict) else None
-    return name.strip() if isinstance(name, str) else ""
-
-
-def _provenanced_runs(
-    runs: Sequence[Mapping[str, Any]], *, head: str, workflow: str, repo: str, label: str
-) -> list[Mapping[str, Any]]:
-    """Return the runs whose upload may count: the declared workflow, this repo, success.
-
-    A run counts only when it executed exactly the declared workflow file, its head
-    repository is the reviewed repository (never a fork, never unknown), and it
-    completed with ``success`` on the head commit. Every other run is ignored, so a
-    forged run listed beside the operator's can never shadow it.
-    """
-    on_head = [run for run in runs if _same_sha(run.get("head_sha"), head)]
-    if not on_head:
-        msg = f"no workflow run on the head commit {_short(head)} could have uploaded {label}"
-        raise _NoReceipt(msg)
-    declared = [run for run in on_head if _workflow_path(run.get("path")) == workflow]
-    if not declared:
-        seen = sorted({_workflow_path(run.get("path")) or "no workflow path" for run in on_head})
-        msg = (
-            f"no run of the declared workflow {workflow} on the head commit {_short(head)} "
-            f"could have uploaded {label} (runs seen: {', '.join(seen)})"
-        )
-        raise _NoReceipt(msg)
-    same_repo: list[Mapping[str, Any]] = []
-    foreign: list[str] = []
-    for run in declared:
-        origin = _head_repository(run)
-        if origin.lower() == repo.lower():
-            same_repo.append(run)
-        elif origin:
-            foreign.append(f"run {run.get('id')} came from {origin}")
-        else:
-            foreign.append(f"run {run.get('id')} has no head repository")
-    if not same_repo:
-        msg = (
-            f"no run of {workflow} on the head commit came from the reviewed repository "
-            f"{repo}, so {label} cannot count ({'; '.join(foreign)})"
-        )
-        raise _NoReceipt(msg)
-    succeeded = [
-        run
-        for run in same_repo
-        if run.get("status") == "completed" and run.get("conclusion") == "success"
-    ]
-    if not succeeded:
-        msg = (
-            f"no run of {workflow} on the head commit {_short(head)} that uploads {label} succeeded"
-        )
-        raise _NoReceipt(msg)
-    return succeeded
-
-
-def _require_workflow_untouched(ctx: ToolContext, *, workflow: str, label: str) -> None:
-    """Fail closed unless the full, unfiltered change set shows ``workflow`` untouched.
-
-    The review diff is filtered: ``review.ignorePaths`` and the ``ignore_paths``
-    input drop whole files from it, and GitHub sends no patch for some files. The
-    change set judged here is therefore the review diff's paths (rename sources
-    included) plus every path the review ignored (``ToolState.ignored_review_paths``)
-    plus every path it could not review (``ToolState.coverage.unreviewable_paths``).
-    A diff that is missing or unreadable, or a files listing that was truncated,
-    cannot show the workflow untouched, so the receipt never counts then either.
-    """
-    from mergecraft.mcp.tool_state import primary_repo_state
-    from mergecraft.utils.diff_paths import changed_paths_from_diff
-
-    state = ctx.tool_state
-    unverified = (
-        f"whether this pull request changes the declared workflow {workflow} could not be "
-        f"verified, so {label} cannot count"
-    )
-    coverage = getattr(state, "coverage", None)
-    if getattr(coverage, "diff_truncated", False):
-        msg = f"{unverified}: the pull request's diff file listing was truncated"
-        raise _NoReceipt(msg)
-    diff_path = primary_repo_state(state).diff_path
-    if not diff_path:
-        msg = f"{unverified}: the review has no diff"
-        raise _NoReceipt(msg)
-    try:
-        text = Path(diff_path).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        msg = f"{unverified}: the diff could not be read ({type(exc).__name__})"
-        raise _NoReceipt(msg) from exc
-    reviewed = {_workflow_path(path) for path in changed_paths_from_diff(text)}
-    ignored = {_workflow_path(path) for path in getattr(state, "ignored_review_paths", ())}
-    unreviewable = {
-        _workflow_path(path) for path in getattr(coverage, "unreviewable_paths", ()) or ()
-    }
-    if workflow in ignored:
-        msg = (
-            f"this pull request changes the declared workflow {workflow}; the change was "
-            f"ignored in review (ignorePaths) but still voids {label}"
-        )
-        raise _NoReceipt(msg)
-    if workflow in unreviewable:
-        msg = (
-            f"this pull request changes the declared workflow {workflow} (GitHub sent no "
-            f"reviewable patch for it), so nothing it uploads counts as {label}"
-        )
-        raise _NoReceipt(msg)
-    if workflow in reviewed:
-        msg = (
-            f"this pull request changes the declared workflow {workflow}, so nothing it "
-            f"uploads counts as {label}"
-        )
-        raise _NoReceipt(msg)
-
-
-async def _receipt_archive(
-    client: GitHubClient,
-    *,
-    owner: str,
-    repo: str,
-    runs: list[Mapping[str, Any]],
-    artifact: str,
-    label: str,
-) -> tuple[Mapping[str, Any], bytes]:
-    """Return ``(run, archive bytes)`` for the declared artifact of a provenanced run."""
-    for run in sorted(runs, key=lambda item: _run_id(item), reverse=True):
-        run_id = _run_id(run)
-        try:
-            artifacts = await client.list_workflow_run_artifacts(owner, repo, run_id)
-        except Exception as exc:  # a transport failure records no receipt, never a crash
-            msg = f"the artifacts of workflow run {run_id} could not be listed for {label}"
-            raise _NoReceipt(f"{msg} ({type(exc).__name__})") from exc
-        if artifacts.incomplete:
-            msg = f"the artifact listing of workflow run {run_id} was incomplete, so {label} is unconfirmed"
-            raise _NoReceipt(msg)
-        for item in artifacts.items:
-            if not isinstance(item, dict) or item.get("name") != artifact:
-                continue
-            if item.get("expired"):
-                msg = f"{label} from workflow run {run_id} has expired"
-                raise _NoReceipt(msg)
-            size = item.get("size_in_bytes")
-            if not isinstance(size, int) or isinstance(size, bool) or size < 0:
-                msg = (
-                    f"{label} from workflow run {run_id} reports an unknown size, so it was "
-                    "not downloaded"
-                )
-                raise _NoReceipt(msg)
-            if size > RED_GREEN_ARCHIVE_MAX_BYTES:
-                msg = f"{label} is a {size}-byte archive, past the {RED_GREEN_ARCHIVE_MAX_BYTES}-byte limit"
-                raise _NoReceipt(msg)
-            artifact_id = item.get("id")
-            if not isinstance(artifact_id, int) or isinstance(artifact_id, bool):
-                continue
-            try:
-                archive = await client.download_artifact_zip(owner, repo, artifact_id)
-            except Exception as exc:  # a transport failure records no receipt, never a crash
-                msg = f"{label} could not be downloaded from workflow run {run_id}"
-                raise _NoReceipt(f"{msg} ({type(exc).__name__})") from exc
-            if len(archive) > RED_GREEN_ARCHIVE_MAX_BYTES:
-                msg = f"{label} is past the {RED_GREEN_ARCHIVE_MAX_BYTES}-byte archive limit"
-                raise _NoReceipt(msg)
-            return run, bytes(archive)
-    msg = f"no successful run of the declared workflow on the head commit uploaded {label}"
-    raise _NoReceipt(msg)
-
-
-def _run_id(run: Mapping[str, Any]) -> int:
-    value = run.get("id")
-    return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
 def _receipt_member_bytes(archive: bytes) -> bytes | None:
@@ -355,21 +181,32 @@ async def collect_ci_red_green_evidence(
     if declaration is None:
         return undeclared_red_green_evidence()
     artifact = declaration.artifact
-    workflow = _workflow_path(declaration.workflow)
+    workflow = workflow_path(declaration.workflow)
     label = f"the receipt artifact '{artifact}'"
     head = head_sha.strip().lower()
     owner, repo = ctx.repo.owner, ctx.repo.name
     try:
-        _require_workflow_untouched(ctx, workflow=workflow, label=label)
-        provenanced = _provenanced_runs(
+        require_workflow_untouched(
+            ctx.tool_state, workflow=workflow, label=label, refuse=_NoReceipt
+        )
+        provenanced = provenanced_runs(
             [run for run in runs if isinstance(run, Mapping)],
             head=head,
             workflow=workflow,
             repo=f"{owner}/{repo}",
             label=label,
+            refuse=_NoReceipt,
+            short=_short,
         )
-        run, archive = await _receipt_archive(
-            client, owner=owner, repo=repo, runs=provenanced, artifact=artifact, label=label
+        run, archive = await declared_artifact_archive(
+            client,
+            owner=owner,
+            repo=repo,
+            runs=provenanced,
+            artifact=artifact,
+            label=label,
+            max_bytes=RED_GREEN_ARCHIVE_MAX_BYTES,
+            refuse=_NoReceipt,
         )
     except _NoReceipt as absent:
         logger.info("ci evidence: no fail-then-pass receipt — {}", absent)
@@ -540,7 +377,7 @@ def record_unverified_red_green(ctx: ToolContext, *, reason: str) -> None:
         return
     state.red_green = _no_receipt(
         f"whether this pull request changes the declared workflow "
-        f"{_workflow_path(declaration.workflow)} could not be verified: {reason}"
+        f"{workflow_path(declaration.workflow)} could not be verified: {reason}"
     )
 
 

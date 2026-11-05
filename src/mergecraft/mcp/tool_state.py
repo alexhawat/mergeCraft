@@ -673,6 +673,11 @@ class ToolState:
     # request only (``review_policy.fix_labels``); ``None`` until resolved. A pull
     # request's own config can never switch off label-based fix detection.
     fix_labels: tuple[str, ...] | None = None
+    # The pull request's own label names, read through the SCM at run start when the
+    # bound event carries none (the comment trigger, a PR-naming ``workflow_dispatch``
+    # bind a ``pull_request`` without ``labels``). ``None`` until read; the raw
+    # event's labels are used then. Labels only ever add the fix requirement.
+    pull_request_labels: tuple[str, ...] | None = None
 
     def iter_finding_rows(self) -> list[dict[str, Any]]:
         """Return every dict-shaped finding row across analyzer and agent lanes."""

@@ -247,11 +247,46 @@ def _event_pull_request(ctx: ToolContext) -> dict[str, Any]:
     return {}
 
 
+def _label_names(raw: object) -> list[str]:
+    return [
+        name
+        for label in (raw if isinstance(raw, list) else [])
+        if isinstance(label, dict) and isinstance(name := label.get("name"), str)
+    ]
+
+
+def event_pull_request_labels(event: object) -> list[str] | None:
+    """The pull request's label names carried by the raw event, or ``None``.
+
+    A ``pull_request`` the run bound itself (the comment trigger, a PR-naming
+    ``workflow_dispatch``) carries only ``number``/``head``/``base`` and no
+    ``labels`` key, so it is skipped: on a comment on a pull request the labels
+    are still on ``issue.labels``. ``None`` means the event names no labels at
+    all and they have to be read through the SCM (``ToolState.pull_request_labels``).
+
+    Args:
+        event (object): The raw (possibly bound) GitHub event.
+
+    Returns:
+        list[str] | None: The label names, or ``None`` when the event has none to give.
+    """
+    if not isinstance(event, dict):
+        return None
+    for key in ("pull_request", "issue"):
+        item = event.get(key)
+        if isinstance(item, dict) and "labels" in item:
+            return _label_names(item.get("labels"))
+    return None
+
+
 def fix_proof_signal_for_context(ctx: ToolContext) -> FixProofSignal:
     """:func:`fix_proof_signal_for_state` fed from the run's bound pull request.
 
     The title is ``ctx.payload.event.title`` (the bound event's title when that is
-    empty) and the labels are the bound event's label names. The fix labels are
+    empty). The labels are ``ToolState.pull_request_labels`` when run start read
+    them through the SCM, else the raw event's (``pull_request.labels``, or
+    ``issue.labels`` on a comment on a pull request): a ``pull_request`` the run
+    bound itself carries no labels and never hides the issue's. The fix labels are
     ``ToolState.fix_labels`` (resolved at run start from the pull request base),
     else the settings snapshot's ``review.fixLabels`` only when that snapshot is
     operator-owned, else the defaults: a pull request's own config never changes them.
@@ -269,12 +304,10 @@ def fix_proof_signal_for_context(ctx: ToolContext) -> FixProofSignal:
     if not isinstance(title, str) or not title.strip():
         raw_title = pull.get("title")
         title = raw_title if isinstance(raw_title, str) else ""
-    raw_labels = pull.get("labels")
-    labels = [
-        name
-        for label in (raw_labels if isinstance(raw_labels, list) else [])
-        if isinstance(label, dict) and isinstance(name := label.get("name"), str)
-    ]
+    read = getattr(ctx.tool_state, "pull_request_labels", None)
+    labels: Sequence[str] = (
+        read if read is not None else event_pull_request_labels(ctx.gh_event) or []
+    )
     resolved = getattr(ctx.tool_state, "fix_labels", None)
     snapshot = ctx.repo_settings_snapshot
     fix_labels: Sequence[str]
@@ -1236,6 +1269,7 @@ __all__ = [
     "build_run_packet",
     "classify_run_blast_radius",
     "emit_run_packet",
+    "event_pull_request_labels",
     "fix_proof_signal_for_context",
     "fix_proof_signal_for_state",
     "prepare_run_packet",

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -199,7 +199,7 @@ async def test_an_incomplete_listing_records_no_receipt_and_downloads_nothing(
 async def test_no_github_client_records_no_receipt(tmp_path: Path) -> None:
     github = _proven_github()
     ctx = _ctx(tmp_path, github=github, declaration=_declaration())
-    ctx.scm = object()  # type: ignore[assignment]  # — a non-GitHub provider has no client
+    ctx.scm = cast("Any", object())  # a non-GitHub provider has no client
 
     await _read(ctx)
 
