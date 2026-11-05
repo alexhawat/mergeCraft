@@ -1,17 +1,21 @@
 """Config surface for fail-then-pass receipts (#1056 part 5).
 
-``ciEvidence.redGreenArtifacts`` names the receipt artifact (empty by default,
-so an undeclared repository makes no extra API call); ``review.fixLabels``
-names the labels that mark a pull request as a fix (default ``bug``, ``fix``).
-Both are read from the operator-owned settings like the other ``ciEvidence``
-names. Sibling of ``test_coverage_mutation_settings.py``.
+``ciEvidence.redGreen`` (``RedGreenReceiptSettings``: ``artifact``, ``workflow``)
+declares the one receipt artifact and the repo-relative workflow that uploads
+it. Both keys are required when the block is present, and the workflow path may
+not be absolute or contain ``..``. It replaced ``ciEvidence.redGreenArtifacts``,
+which is now an unknown key. ``review.fixLabels`` names the labels that mark a
+pull request as a fix (default ``bug``, ``fix``). Both are honoured only from
+the base side (see the run-start resolvers below and
+``tests/review_policy/test_red_green_declaration.py``). Sibling of
+``test_coverage_mutation_settings.py``.
 """
 
 from __future__ import annotations
 
 import base64
 from importlib import import_module
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from pydantic import ValidationError
@@ -26,6 +30,12 @@ from mergecraft.config.settings import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+WORKFLOW = ".github/workflows/red-green.yml"
+
+
+def _receipt_settings() -> Any:
+    return import_module("mergecraft.config.settings").RedGreenReceiptSettings
+
 
 def _write_config(tmp_path: Path, body: str) -> None:
     config = tmp_path / ".mergecraft" / "config.yaml"
@@ -33,10 +43,10 @@ def _write_config(tmp_path: Path, body: str) -> None:
     config.write_text("push: restricted\nshell: restricted\n" + body, encoding="utf-8")
 
 
-def test_red_green_artifacts_default_empty_beside_the_other_ci_evidence_names() -> None:
+def test_red_green_is_undeclared_by_default_beside_the_other_ci_evidence_names() -> None:
     settings = default_settings()
 
-    assert settings.ci_evidence.red_green_artifacts == []
+    assert settings.ci_evidence.red_green is None
     assert settings.ci_evidence.coverage_artifacts == []
 
 
@@ -47,16 +57,17 @@ def test_fix_labels_default_to_bug_and_fix() -> None:
 def test_a_missing_config_file_keeps_both_defaults(tmp_path: Path) -> None:
     settings = load_repo_settings(tmp_path / "missing.yaml", load_learnings_files=False)
 
-    assert settings.ci_evidence.red_green_artifacts == []
+    assert settings.ci_evidence.red_green is None
     assert settings.review.fix_labels == ["bug", "fix"]
 
 
-def test_consumer_yaml_declares_the_receipt_artifact_and_fix_labels(tmp_path: Path) -> None:
+def test_consumer_yaml_declares_the_receipt_and_fix_labels(tmp_path: Path) -> None:
     _write_config(
         tmp_path,
         "ciEvidence:\n"
-        "  redGreenArtifacts:\n"
-        "    - red-green-receipt\n"
+        "  redGreen:\n"
+        "    artifact: red-green-receipt\n"
+        f"    workflow: {WORKFLOW}\n"
         "review:\n"
         "  fixLabels:\n"
         "    - regression\n"
@@ -65,7 +76,9 @@ def test_consumer_yaml_declares_the_receipt_artifact_and_fix_labels(tmp_path: Pa
 
     settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
 
-    assert settings.ci_evidence.red_green_artifacts == ["red-green-receipt"]
+    declaration = settings.ci_evidence.red_green
+    assert declaration is not None
+    assert (declaration.artifact, declaration.workflow) == ("red-green-receipt", WORKFLOW)
     assert settings.review.fix_labels == ["regression", "hotfix"]
 
 
@@ -78,17 +91,18 @@ def test_an_empty_fix_labels_list_is_kept_empty(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("payload", "expected"),
+    "payload",
     [
-        ({"redGreenArtifacts": ["receipt"]}, ["receipt"]),
-        ({"red_green_artifacts": ["receipt"]}, ["receipt"]),
+        {"redGreen": {"artifact": "receipt", "workflow": WORKFLOW}},
+        {"red_green": {"artifact": "receipt", "workflow": WORKFLOW}},
     ],
     ids=["alias", "field-name"],
 )
-def test_ci_evidence_accepts_the_alias_and_the_field_name(
-    payload: dict[str, object], expected: list[str]
-) -> None:
-    assert CiEvidenceSettings.model_validate(payload).red_green_artifacts == expected
+def test_ci_evidence_accepts_the_alias_and_the_field_name(payload: dict[str, object]) -> None:
+    declaration = CiEvidenceSettings.model_validate(payload).red_green
+
+    assert isinstance(declaration, _receipt_settings())
+    assert (declaration.artifact, declaration.workflow) == ("receipt", WORKFLOW)
 
 
 @pytest.mark.parametrize(
@@ -106,20 +120,73 @@ def test_review_accepts_the_alias_and_the_field_name(
 
 
 def test_the_aliases_round_trip_by_alias() -> None:
-    ci = CiEvidenceSettings.model_validate({"redGreenArtifacts": ["receipt"]})
+    ci = CiEvidenceSettings.model_validate(
+        {"redGreen": {"artifact": "receipt", "workflow": WORKFLOW}}
+    )
     review = ReviewSettings.model_validate({"fixLabels": ["regression"]})
 
-    assert ci.model_dump(by_alias=True)["redGreenArtifacts"] == ["receipt"]
+    assert ci.model_dump(by_alias=True)["redGreen"] == {"artifact": "receipt", "workflow": WORKFLOW}
     assert review.model_dump(by_alias=True)["fixLabels"] == ["regression"]
 
 
-def test_a_string_instead_of_a_list_is_refused_at_the_alias() -> None:
+@pytest.mark.parametrize("missing", ["artifact", "workflow"])
+def test_both_receipt_keys_are_required_when_the_block_is_present(missing: str) -> None:
+    block = {"artifact": "receipt", "workflow": WORKFLOW}
+    del block[missing]
+
     with pytest.raises(ValidationError) as excinfo:
-        CiEvidenceSettings.model_validate({"redGreenArtifacts": "red-green-receipt"})
+        CiEvidenceSettings.model_validate({"redGreen": block})
+
+    errors = excinfo.value.errors()
+    assert [error["loc"] for error in errors] == [("redGreen", missing)]
+    assert errors[0]["type"] == "missing"
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        "/home/runner/work/demo/.github/workflows/red-green.yml",
+        "../outside/red-green.yml",
+        ".github/workflows/../../red-green.yml",
+        ".github/../workflows/red-green.yml",
+    ],
+    ids=["absolute", "leading-dotdot", "inner-dotdot", "dotdot-segment"],
+)
+def test_a_workflow_path_outside_the_repository_is_refused(workflow: str) -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        _receipt_settings().model_validate({"artifact": "receipt", "workflow": workflow})
+
+    assert [error["loc"] for error in excinfo.value.errors()] == [("workflow",)]
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [WORKFLOW, ".github/workflows/ci.yaml", ".github/workflows/sub..dir.yml"],
+    ids=["red-green", "yaml-suffix", "dots-inside-a-name"],
+)
+def test_a_repo_relative_workflow_path_is_accepted(workflow: str) -> None:
+    declaration = _receipt_settings().model_validate({"artifact": "receipt", "workflow": workflow})
+
+    assert declaration.workflow == workflow
+
+
+def test_the_receipt_block_refuses_unknown_keys() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        _receipt_settings().model_validate(
+            {"artifact": "receipt", "workflow": WORKFLOW, "artifacts": ["x"]}
+        )
+
+    assert excinfo.value.errors()[0]["type"] == "extra_forbidden"
+
+
+def test_the_old_red_green_artifacts_key_is_now_unknown() -> None:
+    assert CiEvidenceSettings.model_validate({"redGreen": None}).red_green is None
+    with pytest.raises(ValidationError) as excinfo:
+        CiEvidenceSettings.model_validate({"redGreenArtifacts": ["red-green-receipt"]})
 
     errors = excinfo.value.errors()
     assert [error["loc"] for error in errors] == [("redGreenArtifacts",)]
-    assert errors[0]["type"] == "list_type"
+    assert errors[0]["type"] == "extra_forbidden"
 
 
 def test_a_non_string_fix_label_is_refused_at_the_alias() -> None:
@@ -129,15 +196,6 @@ def test_a_non_string_fix_label_is_refused_at_the_alias() -> None:
     errors = excinfo.value.errors()
     assert [error["loc"] for error in errors] == [("fixLabels", 0)]
     assert errors[0]["type"] == "string_type"
-
-
-def test_ci_evidence_still_refuses_an_unknown_key() -> None:
-    """The new key does not loosen ``extra="forbid"``: a misspelling still fails."""
-    assert CiEvidenceSettings.model_validate({"redGreenArtifacts": []}).red_green_artifacts == []
-    with pytest.raises(ValidationError) as excinfo:
-        CiEvidenceSettings.model_validate({"redGreenArtifact": ["receipt"]})
-
-    assert excinfo.value.errors()[0]["type"] == "extra_forbidden"
 
 
 # ── run start resolves review.fixLabels from the operator's side only ───────

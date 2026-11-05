@@ -142,7 +142,9 @@ def test_fix_proof_is_appended_after_the_part2_gates_once() -> None:
 def test_the_signal_types_carry_the_contract_keys() -> None:
     api = _api()
 
-    assert set(api.FixProofSignal.__annotations__) == {"required", "status"}
+    keys = set(api.FixProofSignal.__annotations__)
+    assert {"required", "status", "detail"} <= keys
+    assert keys <= {"required", "status", "detail"}
     assert "fix_proof" in api.ChangeSet.__annotations__
 
 
@@ -203,7 +205,8 @@ def test_a_fix_without_a_proven_receipt_is_medium_with_its_code(status: str, cod
 def test_an_undeclared_receipt_on_a_fix_names_the_setting() -> None:
     reason = _codes(_classify(_change("not-declared")))["fix.no-receipt"]
 
-    assert "redGreenArtifacts" in reason.message
+    assert "ciEvidence.redGreen" in reason.message
+    assert "redGreenArtifacts" not in reason.message
 
 
 def test_a_missing_receipt_message_differs_from_an_undeclared_one() -> None:
@@ -211,7 +214,56 @@ def test_a_missing_receipt_message_differs_from_an_undeclared_one() -> None:
     undeclared = _codes(_classify(_change("not-declared")))["fix.no-receipt"]
 
     assert missing.message != undeclared.message
-    assert "redGreenArtifacts" in undeclared.message
+    assert "ciEvidence.redGreen" in undeclared.message
+
+
+# ── the evidence detail reaches the reason message ──────────────────────────
+
+DETAIL_CASES: list[tuple[str, str, str]] = [
+    (
+        "invalid",
+        "fix.receipt.invalid",
+        "receipt oversized: 1000001 bytes, past the 1000000-byte cap",
+    ),
+    (
+        "no-receipt",
+        "fix.no-receipt",
+        "workflow run 99 ran in the fork attacker/demo, not acme/demo",
+    ),
+    ("no-receipt", "fix.no-receipt", "the change set could not be verified: the diff is truncated"),
+    (
+        "mismatch",
+        "fix.receipt.mismatch",
+        "the receipt names head 3333333, this pull request is at 2222222",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("status", "code", "detail"),
+    DETAIL_CASES,
+    ids=["oversized", "fork", "truncated", "mismatch"],
+)
+def test_the_reason_message_carries_the_evidence_detail(
+    status: str, code: str, detail: str
+) -> None:
+    change = {**_DOCS, "fix_proof": {"required": True, "status": status, "detail": detail}}
+
+    reason = _codes(_classify(change))[code]
+
+    assert detail in reason.message
+    assert reason.lane == "medium"
+
+
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [("invalid", "fix.receipt.invalid"), ("no-receipt", "fix.no-receipt")],
+)
+def test_a_signal_without_a_detail_still_has_a_message(status: str, code: str) -> None:
+    reason = _codes(_classify(_change(status)))[code]
+
+    assert reason.message.strip()
+    assert "None" not in reason.message
 
 
 @pytest.mark.parametrize("status", [status for status in ALL_STATUSES if status != "proven"])
@@ -435,7 +487,7 @@ def test_the_shared_helper_builds_a_proven_signal_from_tool_state() -> None:
         _state(_evidence("proven")), title="fix(ci): x", labels=[], fix_labels=_DEFAULT_FIX_LABELS
     )
 
-    assert signal == {"required": True, "status": "proven"}
+    assert (signal["required"], signal["status"]) == (True, "proven")
     result = _classify({**_DOCS, "fix_proof": signal})
     assert "fix.proven" in _codes(result)
     assert result.lane == "low"
@@ -447,7 +499,8 @@ def test_the_shared_helper_carries_the_recorded_status(status: str) -> None:
         _state(_evidence(status)), title="fix: x", labels=[], fix_labels=_DEFAULT_FIX_LABELS
     )
 
-    assert signal == {"required": True, "status": status}
+    assert (signal["required"], signal["status"]) == (True, status)
+    assert signal.get("detail") == f"receipt {status}"
     assert FAILING_STATUS_CODES[status] in _codes(_classify({**_DOCS, "fix_proof": signal}))
 
 
@@ -636,6 +689,25 @@ def test_a_fix_titled_run_maps_the_recorded_status_to_its_code(
 
     assert code in _packet_codes(packet)
     assert packet.blast_radius.lane == "medium"
+
+
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [
+        ("invalid", "fix.receipt.invalid"),
+        ("no-receipt", "fix.no-receipt"),
+        ("mismatch", "fix.receipt.mismatch"),
+    ],
+)
+def test_the_packet_reason_shows_the_recorded_evidence_detail(
+    tmp_path: Path, status: str, code: str
+) -> None:
+    evidence = _evidence(status)
+    packet = _packet(tmp_path, title="fix: handle x", red_green=evidence)
+
+    assert packet.blast_radius is not None
+    reasons = {reason.code: reason for reason in packet.blast_radius.reasons}
+    assert evidence.detail in reasons[code].message
 
 
 def test_a_feature_run_is_not_required(tmp_path: Path) -> None:
@@ -950,7 +1022,8 @@ def test_the_blast_radius_doc_has_a_fix_proof_section() -> None:
     )
 
     assert "`fix_proof`" in section
-    assert "redGreenArtifacts" in section
+    assert "redGreen" in section
+    assert "redGreenArtifacts" not in section
     assert "fixLabels" in section
     assert "red-green-receipts.md" in section
 
@@ -961,7 +1034,10 @@ def test_the_receipt_doc_documents_the_format_and_the_cap() -> None:
 
     assert "mergecraft.red-green/1" in text
     assert re.search(r"1\s?MB|1[ ,_]?000[ ,_]?000\s*bytes", text)
-    assert "redGreenArtifacts" in text
+    assert "redGreen" in text
+    assert "redGreenArtifacts" not in text
+    assert "`workflow`" in text
+    assert "fork" in text.lower()
     for key in ("base_sha", "head_sha", "tests"):
         assert f"`{key}`" in text or f'"{key}"' in text
     assert "${{" not in text
@@ -969,7 +1045,7 @@ def test_the_receipt_doc_documents_the_format_and_the_cap() -> None:
 
 def test_review_checks_says_receipts_never_run_tests() -> None:
     text = (REPO_ROOT / "REVIEW-CHECKS.md").read_text(encoding="utf-8")
-    paragraphs = [p for p in re.split(r"\n\s*\n", text) if "redGreenArtifacts" in p]
+    paragraphs = [p for p in re.split(r"\n\s*\n", text) if "redGreen" in p]
 
     assert paragraphs
     assert any(
@@ -982,4 +1058,5 @@ def test_the_changelog_adds_the_receipts_under_unreleased() -> None:
     unreleased = text.split("## [Unreleased]", 1)[1].split("\n## [", 1)[0]
     added = unreleased.split("### Added", 1)[1].split("\n### ", 1)[0]
 
-    assert "redGreenArtifacts" in added
+    assert "redGreen" in added
+    assert "redGreenArtifacts" not in added
