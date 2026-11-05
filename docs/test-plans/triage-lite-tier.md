@@ -70,9 +70,10 @@ The verdict rules are checked at three levels: the packet builder
 `main()` run through `tests/support/run_main_harness.py` with the driver substituted.
 No test calls a live provider.
 
-Until the implementation lands, these tests are expected to fail (they collect
-cleanly). New names are imported inside each test, so a missing symbol fails that one
-test and does not break collection.
+The implementation has landed and the suite passes. New names are still imported
+inside each test, so if a symbol goes missing only that test fails; collection does
+not break. Each later hardening round adds its tests failing first, and they pass
+once the matching fix lands.
 
 ## Seams the implementation must provide
 
@@ -161,6 +162,7 @@ test and does not break collection.
 | REVIEW-CHECKS.md names the excluded languages and why, and says comments can still carry tool directives | `test_fast_path_lite_gate.py::test_review_checks_names_the_excluded_languages_and_why`, `test_review_checks_says_comments_can_still_carry_tool_directives` |
 | Swift extended regex literals (`#/ … /#`, `##/ … /##`) refused: any `#/` in head text or diff lines; a plain Swift edit stays recognised | `test_comment_only.py::test_a_swift_extended_regex_literal_is_refused`, `test_a_regex_literal_marker_only_on_the_removed_side_refuses_the_edit`, `test_a_plain_swift_comment_edit_is_still_recognised` |
 | Fourth-gate pragmas refused verbatim (`fall through`, `falls through`, `ReSharper`, `NOSONAR`, `noinspection`, `tslint`, `detekt`) and the new words in any case | `test_comment_only.py::test_every_fourth_gate_pragma_is_refused`, `test_the_fourth_gate_directive_words_are_refused_in_any_case` |
+| A renamed or copied file (`rename from`/`copy from`) is never comment-only or whitespace-only, even between two recognised suffixes; a pure rename beside an edit refuses the whole diff; an in-place edit stays recognised | `test_comment_only.py::test_a_renamed_or_copied_file_with_a_comment_edit_is_refused`, `test_a_pure_rename_beside_a_comment_edit_refuses_the_whole_diff`, `test_triage_does_not_skip_a_renamed_file_as_comment_only`; `tests/classify/test_triage_recognizers.py::test_a_renamed_or_copied_file_with_a_whitespace_edit_is_not_whitespace_only`, `test_a_pure_rename_beside_a_whitespace_edit_is_not_whitespace_only` |
 | The API key never appears in a loguru line (success, HTTP 401, connect error) | `tests/agents/test_lite_review.py::test_the_api_key_never_appears_in_a_log_line` |
 | Lite record published as a `COMMENT` review with summary and finding location/message | `tests/review/test_fast_path_lite_gate.py::test_a_clean_lite_run_publishes_its_summary_as_a_comment_review`, `test_a_blocking_lite_run_publishes_each_finding_location_and_message` |
 | A failed completion check never says "finished successfully" | `test_fast_path_lite_gate.py::test_a_failed_completion_check_never_says_the_run_finished_successfully` |
@@ -206,3 +208,7 @@ provider is an operator step, not part of `make test`.
   can span lines, so a `// word` line inside one is regex text; the compiled fixture
   goes from MATCH to NO MATCH. Any `#/` now refuses the file. Seven more pragma first
   words joined the directive list.
+- The pull request's self-review found that a rename or copy between two recognised
+  suffixes (`src/foo.ts` → `src/foo.d.ts`, `foo.c` → `foo.cpp`, `a.go` → `z.go`) plus
+  one `//` edit matched `commentOnly`. The whitespace recognizer had the same blind
+  spot. Both now refuse any renamed or copied file.

@@ -1288,3 +1288,73 @@ def test_the_fourth_gate_directive_words_are_refused_in_any_case(word: str, casi
 
     assert _recognize(diff, heads) is False
     assert _recognize(plain_diff, plain_heads) is True
+
+
+# ── renames and copies: a moved file is never "only a comment" ────────────────
+
+
+def _moved(old: str, new: str, *, kind: str = "rename", similarity: int = 95) -> str:
+    """A git rename/copy entry from ``old`` to ``new`` with one ``//`` comment edit."""
+    return (
+        f"diff --git a/{old} b/{new}\n"
+        f"similarity index {similarity}%\n"
+        f"{kind} from {old}\n"
+        f"{kind} to {new}\n"
+        f"--- a/{old}\n"
+        f"+++ b/{new}\n"
+        "@@ -1,3 +1,3 @@\n"
+        " int a = 1;\n"
+        "-// old note\n"
+        "+// new note\n"
+        " int b = 2;\n"
+    )
+
+
+_MOVED_HEAD = "int a = 1;\n// new note\nint b = 2;\n"
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("src/foo.ts", "src/foo.d.ts"),
+        ("src/foo.c", "src/foo.cpp"),
+        ("pkg/a.go", "pkg/z.go"),
+    ],
+    ids=["ts-to-declaration-file", "c-to-cpp", "go-to-go"],
+)
+@pytest.mark.parametrize("kind", ["rename", "copy"])
+def test_a_renamed_or_copied_file_with_a_comment_edit_is_refused(
+    old: str, new: str, kind: str
+) -> None:
+    """Moving a file changes what is built; the comment edit beside it proves nothing."""
+    diff = _moved(old, new, kind=kind)
+    in_place, in_place_heads = _comment_edit(new)
+
+    assert _recognize(diff, {new: _MOVED_HEAD, old: _MOVED_HEAD}) is False
+    assert _recognize(in_place, in_place_heads) is True
+
+
+def test_a_pure_rename_beside_a_comment_edit_refuses_the_whole_diff() -> None:
+    rename = (
+        "diff --git a/src/old.ts b/src/new.ts\n"
+        "similarity index 100%\n"
+        "rename from src/old.ts\n"
+        "rename to src/new.ts\n"
+    )
+    edit, edit_heads = _comment_edit("src/app.ts")
+
+    assert _recognize(edit, edit_heads) is True
+    assert _recognize(rename + edit, {**edit_heads, "src/new.ts": _MOVED_HEAD}) is False
+
+
+def test_triage_does_not_skip_a_renamed_file_as_comment_only() -> None:
+    from mergecraft.classify.triage import triage_diff
+    from mergecraft.config.settings import FastPathSettings
+
+    config = FastPathSettings.model_validate({"enabled": True, "skipLlm": ["commentOnly"]})
+    diff = _moved("src/foo.ts", "src/foo.d.ts")
+
+    decision = triage_diff(diff, config=config, head_files={"src/foo.d.ts": _MOVED_HEAD})
+
+    assert decision.tier == "full"
+    assert decision.recognizer is None
