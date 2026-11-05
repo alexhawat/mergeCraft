@@ -173,9 +173,38 @@ jobs:
           path: coverage.json
           if-no-files-found: error
 
+  deterministic-integration:
+    name: Required integration (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: ${{ matrix.python }}
+        env:
+          MERGECRAFT_UV_EXTRAS: tracing
+      - name: Keyless integration acceptance
+        run: make test-integration
+
+  action-e2e:
+    uses: ./.github/workflows/e2e.yml
+    with:
+      required-security: true
+
   static:
     name: Verify (static + build py${{ matrix.python }})
-    needs: changes
+    needs: [changes, toolchain, deployment-candidate, eval-gate, privilege-root, deterministic-integration, action-e2e]
+    # A skipped required job may be accepted by branch protection. Always run
+    # this existing required context and explicitly fail unsuccessful parents.
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -183,6 +212,18 @@ jobs:
       matrix:
         python: ["3.11", "3.14"]
     steps:
+      - name: Require successful deterministic prerequisites
+        env:
+          REQUIRED_JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os, sys
+          jobs = json.loads(os.environ["REQUIRED_JOB_RESULTS"])
+          failed = {name: job.get("result") for name, job in jobs.items() if job.get("result") != "success"}
+          if not jobs or failed:
+              print(f"Required checks did not succeed: {failed or 'no prerequisite results'}", file=sys.stderr)
+              sys.exit(1)
+          PYCODE
       - name: Docs-only notice
         if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
         run: echo "::notice title=Verify (docs-only)::Running docs-check only — full static/build tier skipped."
