@@ -22,8 +22,8 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Sync agents extra
-        run: uv sync --extra agents
+      - name: Sync agents + dev extras
+        run: uv sync --extra dev --extra agents
 
       - name: Unit tests (agents_sdk)
         run: uv run pytest tests/agents_sdk -q -m "not live"
