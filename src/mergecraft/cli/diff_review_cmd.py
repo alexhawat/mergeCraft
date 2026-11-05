@@ -585,6 +585,11 @@ def run(
     if capture_verdicts:
         os.environ["MERGECRAFT_CAPTURE_VERDICTS"] = "1"
     effective_output_format = _resolve_review_output_format(ctx, output_format=output_format)
+    if effective_output_format in {"jsonl", "sarif"} and output is None:
+        _exit_with_message(
+            f"--output is required for --output-format {effective_output_format}",
+            cli_exit_code_for_review(RunOutcome.configuration_error),
+        )
     invocation_root = Path.cwd().resolve()
     root = cwd.resolve()
     source_spec = SourceResolverSpec(

@@ -11,7 +11,7 @@ import json
 import re
 from pathlib import Path
 
-import pytest  # noqa: TC002 — MonkeyPatch annotations on test functions
+import pytest
 from tests.analyzers.support import import_module as import_analyzer_module
 from typer.testing import CliRunner
 
@@ -108,6 +108,36 @@ def test_json_format_requires_output(tmp_path: Path, monkeypatch: pytest.MonkeyP
     combined = _plain(result.stdout + result.stderr)
     assert result.exit_code == 30, combined
     assert "--output is required" in combined.lower() or "output" in combined.lower()
+
+
+@pytest.mark.parametrize("output_format", ["jsonl", "sarif"])
+@pytest.mark.parametrize("with_json_path", [False, True])
+def test_file_export_requires_output_before_review(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    output_format: str,
+    with_json_path: bool,
+) -> None:
+    """Invalid destinations fail before source acquisition or paid review work."""
+    called = False
+
+    async def unexpected_review(**kwargs: object) -> OfflineReviewResult:
+        nonlocal called
+        called = True
+        raise AssertionError("invalid export must not start a review")
+
+    monkeypatch.setattr("mergecraft.cli.diff_review_cmd.run_offline_diff_review", unexpected_review)
+    extra = ["--json", str(tmp_path / "findings.json")] if with_json_path else []
+    result = runner.invoke(
+        app,
+        _review_argv(tmp_path, "--output-format", output_format, *extra),
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+
+    assert result.exit_code == 30, result.output
+    assert "--output is required" in result.output
+    assert not called
+    assert not (tmp_path / "findings.json").exists()
 
 
 def test_json_format_writes_output_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
