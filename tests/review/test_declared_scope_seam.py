@@ -28,6 +28,7 @@ from typing import Any
 import pytest
 
 from mergecraft.config.settings import RepoSettings
+from mergecraft.config.trust_policy import bind_target_pull_request
 from mergecraft.evidence.run_packet import classify_run_blast_radius, scope_signal_for_state
 from mergecraft.mcp.context import PayloadEvent, ResolvedPayload
 from mergecraft.mcp.tool_state import init_tool_state
@@ -45,7 +46,7 @@ def main_mod() -> Any:
 
 
 def _linked_issues(bodies: tuple[str, ...] | None) -> tuple[LinkedIssue, ...] | None:
-    """``LinkedIssue`` rows for ``bodies``."""
+    """``LinkedIssue`` rows for ``bodies``, numbered from 101."""
     if bodies is None:
         return None
     return tuple(
@@ -362,6 +363,29 @@ _BOUND_PULL: dict[str, Any] = {
 }
 
 
+def _comment_on_pr(body: str, comment: str) -> dict[str, Any]:
+    """An ``issue_comment`` event on pull request #3, as GitHub delivers it."""
+    return {
+        "action": "created",
+        "issue": {
+            "number": 3,
+            "body": body,
+            "pull_request": {"url": "https://api.github.com/repos/acme/demo/pulls/3"},
+        },
+        "comment": {"author_association": "OWNER", "body": comment},
+    }
+
+
+def _dispatch_naming_pr() -> dict[str, Any]:
+    """A ``workflow_dispatch`` whose review prompt names pull request #3."""
+    return {"action": "workflow_dispatch", "inputs": {"prompt": "Review pull request #3."}}
+
+
+def _bound(event: dict[str, Any], *, body: str | None) -> dict[str, Any]:
+    """Bind the target pull request into ``event`` the way the run does at start."""
+    return bind_target_pull_request(event, {**_BOUND_PULL, "body": body})
+
+
 class _PullScm:
     """Answers ``get_pull`` with ``body`` (or raises ``error``) and records each call."""
 
@@ -409,7 +433,8 @@ def _bound_ctx(
 @pytest.mark.asyncio
 async def test_a_bound_event_reads_the_pull_request_body_through_the_scm(main_mod: Any) -> None:
     scm = _PullScm(_BODY_SCOPE)
-    event = {"pull_request": dict(_BOUND_PULL), "comment": {"body": "@mergecraft review"}}
+    event = _bound(_comment_on_pr(_BODY_SCOPE, "@mergecraft review"), body=_BODY_SCOPE)
+    assert "body" not in event["pull_request"]
     ctx = _bound_ctx(event, "issue_comment_created", "@mergecraft review", scm)
 
     await _record(main_mod, ctx)
@@ -426,7 +451,7 @@ async def test_a_bound_workflow_dispatch_reads_the_pull_request_body_through_the
     main_mod: Any,
 ) -> None:
     scm = _PullScm(_BODY_SCOPE)
-    event = {"inputs": {"pr": "3"}, "pull_request": dict(_BOUND_PULL)}
+    event = _bound(_dispatch_naming_pr(), body=_BODY_SCOPE)
     ctx = _bound_ctx(event, "workflow_dispatch", None, scm)
 
     await _record(main_mod, ctx)
@@ -493,7 +518,7 @@ async def test_workflow_dispatch_loads_closing_issue_scope_before_the_gate(
 @pytest.mark.asyncio
 async def test_a_failed_pull_request_read_leaves_the_scope_unknown(main_mod: Any) -> None:
     scm = _PullScm(None, error=RuntimeError("GitHub answered 502"))
-    event = {"pull_request": dict(_BOUND_PULL), "comment": {"body": "@mergecraft review"}}
+    event = _bound(_comment_on_pr(_BODY_SCOPE, "@mergecraft review"), body=_BODY_SCOPE)
     # A closing issue's block must not stand in for a pull request body that could
     # not be read: that body might have declared a narrower scope.
     ctx = _bound_ctx(
@@ -522,7 +547,7 @@ async def test_an_event_that_carries_the_body_is_not_fetched(main_mod: Any) -> N
 @pytest.mark.asyncio
 async def test_a_bound_comment_run_never_reads_the_comment(main_mod: Any) -> None:
     scm = _PullScm(_NO_SCOPE)
-    event = {"pull_request": dict(_BOUND_PULL), "comment": {"body": _COMMENT_SCOPE}}
+    event = _bound(_comment_on_pr(_NO_SCOPE, _COMMENT_SCOPE), body=_NO_SCOPE)
     ctx = _bound_ctx(event, "issue_comment_created", _COMMENT_SCOPE, scm)
 
     await _record(main_mod, ctx)

@@ -256,7 +256,7 @@ def test_the_run_packet_counts_a_rename_source_against_the_scope(
     tmp_path: Path, run_api: Any
 ) -> None:
     ctx = _run_ctx(tmp_path, diff_text=_RENAME_DIFF)
-    setattr(ctx.tool_state, "scope_declaration", _declaration(("docs/**",)))  # noqa: B010
+    ctx.tool_state.scope_declaration = _declaration(("docs/**",))
 
     packet = run_api.build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
 
@@ -269,9 +269,7 @@ def test_the_run_packet_passes_a_rename_with_both_images_in_scope(
     tmp_path: Path, run_api: Any
 ) -> None:
     ctx = _run_ctx(tmp_path, diff_text=_RENAME_DIFF)
-    setattr(  # noqa: B010
-        ctx.tool_state, "scope_declaration", _declaration(("docs/**", "legacy/**"))
-    )
+    ctx.tool_state.scope_declaration = _declaration(("docs/**", "legacy/**"))
 
     packet = run_api.build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
 
@@ -398,9 +396,9 @@ def test_the_verification_tool_lane_reads_the_recorded_declaration(tmp_path: Pat
     verification = import_module("mergecraft.mcp.verification")
     ctx = _run_ctx(tmp_path)
 
-    setattr(ctx.tool_state, "scope_declaration", _declaration(("README.md",)))  # noqa: B010
+    ctx.tool_state.scope_declaration = _declaration(("README.md",))
     within = verification._run_lane(ctx)
-    setattr(ctx.tool_state, "scope_declaration", _declaration(("docs/**",)))  # noqa: B010
+    ctx.tool_state.scope_declaration = _declaration(("docs/**",))
     drift = verification._run_lane(ctx)
 
     assert within == "low"
@@ -587,7 +585,7 @@ def test_the_run_packet_classifies_against_the_recorded_declaration(
     tmp_path: Path, run_api: Any
 ) -> None:
     ctx = _run_ctx(tmp_path)
-    setattr(ctx.tool_state, "scope_declaration", _declaration(("README.md",)))  # noqa: B010
+    ctx.tool_state.scope_declaration = _declaration(("README.md",))
 
     packet = run_api.build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
 
@@ -600,7 +598,7 @@ def test_the_run_packet_reports_drift_from_the_recorded_declaration(
     tmp_path: Path, run_api: Any
 ) -> None:
     ctx = _run_ctx(tmp_path)
-    setattr(ctx.tool_state, "scope_declaration", _declaration(("docs/**",)))  # noqa: B010
+    ctx.tool_state.scope_declaration = _declaration(("docs/**",))
 
     packet = run_api.build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
 
@@ -611,9 +609,7 @@ def test_the_run_packet_reports_drift_from_the_recorded_declaration(
 
 def test_the_run_packet_marks_a_rejected_declaration_invalid(tmp_path: Path, run_api: Any) -> None:
     ctx = _run_ctx(tmp_path)
-    setattr(  # noqa: B010
-        ctx.tool_state, "scope_declaration", _declaration((), rejected=("**",))
-    )
+    ctx.tool_state.scope_declaration = _declaration((), rejected=("**",))
 
     packet = run_api.build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
 
@@ -643,10 +639,8 @@ def test_the_run_packet_with_an_unparsed_body_leaves_the_scope_gate_unknown(
 ) -> None:
     ingest = import_module("mergecraft.requirements.ingest")
     ctx = _run_ctx(tmp_path)
-    setattr(  # noqa: B010
-        ctx.tool_state,
-        "scope_declaration",
-        ingest.ScopeDeclaration(declared=False, globs=(), source_ref="", rejected=()),
+    ctx.tool_state.scope_declaration = ingest.ScopeDeclaration(
+        declared=False, globs=(), source_ref="", rejected=()
     )
 
     packet = run_api.build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
