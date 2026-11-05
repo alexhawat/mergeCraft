@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from mergecraft.modes import Mode
 
 TRIAGE_SKIP_REASON = "no LLM review ran (triage tier skip)"
+TRIAGE_LITE_REASON = "a lite review is one capped LLM call, not a full review (triage tier lite)"
 
 PACKET_FILENAME = "merge-evidence-packet.json"
 """Stable basename for the emitted packet, under whichever directory wins."""
@@ -419,12 +420,15 @@ def _finalize_packet_with_gate(
     gate_mode = _resolve_gate_mode(ctx, pinned=pinned)
     gate_policy = _resolve_gate_policy(ctx, pinned=pinned)
     decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.authority_trust)
-    if packet.triage is not None and packet.triage.tier == "skip" and decision.verdict == "success":
-        # No LLM review ran, so mergeCraft never grants approval for it; a human does.
+    triage_tier = packet.triage.tier if packet.triage is not None else None
+    if triage_tier in {"skip", "lite"} and decision.verdict == "success":
+        # No full review ran (none at all for ``skip``, one capped call for ``lite``), so
+        # mergeCraft never grants approval for it; a human does. A ``failure`` is kept.
+        lead = TRIAGE_SKIP_REASON if triage_tier == "skip" else TRIAGE_LITE_REASON
         decision = decision.model_copy(
             update={
                 "verdict": "neutral",
-                "reason": f"{TRIAGE_SKIP_REASON}; approval is left to a human",
+                "reason": f"{lead}; approval is left to a human",
             }
         )
     packet_with_decision = packet.model_copy(update={"decision": decision})
@@ -554,6 +558,12 @@ def _assemble_packet_core(
         requested_model=requested_model,
         agent_id=ctx.agent_id,
     )
+    lite_slug = _lite_model_slug(state)
+    if lite_slug is not None:
+        # A lite run made one call to the operator's registered provider; the agent's
+        # model never ran, so the evidence names the lite provider/model instead.
+        executed_model = requested_model = lite_slug
+        provider = lite_slug.split("/", 1)[0]
     packet = build_packet(
         change_id=change_id,
         agent_id=ctx.agent_id,
@@ -710,11 +720,17 @@ def _triage_section(state: ToolState) -> TriageSection | None:
     decision = state.triage
     if decision is None:
         return None
+    lite = getattr(state, "lite_review", None) if decision.tier == "lite" else None
     return TriageSection(
         tier=decision.tier,
         recognizer=decision.recognizer,
         reason=decision.reason,
         relied_on_checks=list(decision.relied_on_checks),
+        token_cap=getattr(decision, "token_cap", None),
+        tokens_used=getattr(lite, "tokens_used", None),
+        usage_estimated=bool(getattr(lite, "usage_estimated", False)),
+        cap_hit=bool(getattr(lite, "cap_hit", False)),
+        prompt_version=getattr(lite, "prompt_version", None),
     )
 
 
@@ -722,6 +738,14 @@ def _agent_version() -> str:
     from mergecraft import __version__
 
     return __version__
+
+
+def _lite_model_slug(state: ToolState) -> str | None:
+    """The ``label/model`` a ``lite`` run's single call targeted, or ``None``."""
+    if getattr(getattr(state, "triage", None), "tier", None) != "lite":
+        return None
+    slug = getattr(getattr(state, "lite_review", None), "model_slug", None)
+    return slug if isinstance(slug, str) and slug.strip() else None
 
 
 def _provider_for_model_evidence(

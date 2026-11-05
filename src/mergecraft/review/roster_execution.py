@@ -542,13 +542,14 @@ def _file_group_timeout_s(
 
     The cap is the smallest of ``perGroupTimeoutS`` (always at least 1), the
     binding's ``timeoutS`` when it is positive, and what is left of the
-    fan-out's budget (floored at one second, as for the secondary roster).
+    fan-out's budget. An exhausted budget returns zero; callers must skip
+    dispatch rather than pass zero to the dispatcher's uncapped-timeout path.
     """
     bounds = [float(max(1, per_group_timeout_s))]
     if binding_timeout_s > 0:
         bounds.append(float(binding_timeout_s))
     if budget_left_s is not None:
-        bounds.append(max(1.0, budget_left_s))
+        bounds.append(max(0.0, budget_left_s))
     return min(bounds)
 
 
@@ -559,7 +560,7 @@ def _fanout_budget_s(
 ) -> float | None:
     """Return the fan-out's whole budget: ``share`` of the run budget left now.
 
-    Measured once, when the fan-out starts, and floored at one second; the
+    Measured once, when the fan-out starts, without a minimum duration; the
     secondary roster keeps the rest. ``None`` when the run has no budget.
     """
     if remaining_timeout_s is None:
@@ -567,12 +568,12 @@ def _fanout_budget_s(
     remaining = remaining_timeout_s()
     if remaining is None:
         return None
-    return max(1.0, share * max(0.0, remaining))
+    return share * max(0.0, remaining)
 
 
-def _fanout_diff_path(repo_state: RepoToolState) -> str | None:
-    """Return the diff the fan-out plans from: the incremental diff when one is set."""
-    if repo_state.incremental_diff_path is not None:
+def _fanout_diff_path(repo_state: RepoToolState, *, selected_mode: str | None) -> str | None:
+    """Return the selected mode's diff, without widening an incremental review."""
+    if selected_mode == "IncrementalReview":
         return repo_state.incremental_diff_path
     return repo_state.diff_path
 
@@ -621,13 +622,15 @@ async def run_file_group_reviewers(
     """Dispatch one read-only reviewer per file group of a large diff.
 
     Off unless ``review.fileGroupFanout.enabled``. The plan is built from the
-    primary checkout's incremental diff when one is recorded (an incremental
-    review), else its materialised PR diff; with no diff path, an unreadable or
+    primary checkout's incremental diff in ``IncrementalReview`` mode, else
+    its materialised PR diff; with no diff path, an unreadable or
     empty diff, or a diff below both size thresholds, nothing is dispatched and
     the summary is empty. The whole fan-out may spend ``budgetShare`` of the run
-    budget left when it starts (at least one second), so the secondary roster
-    keeps the rest. Each group runs through the same dispatch core as a secondary
-    reviewer, under the agent id ``file-group/<group-id>``, with its own paths,
+    budget left when it starts, without a minimum duration. Once that slice is
+    exhausted, remaining groups are recorded as failures without dispatch, so
+    the secondary roster keeps the rest. Each group runs through the same
+    dispatch core as a secondary reviewer, under the agent id
+    ``file-group/<group-id>``, with its own paths,
     the shared diff path and a file-group submit block (never the roster block)
     in the prompt. While a group runs, the roster recording tools refuse it.
 
@@ -664,7 +667,9 @@ async def run_file_group_reviewers(
     tool_state = tool_context.tool_state
     # An incremental review fans out over what changed since the last review,
     # never the whole pull request; an empty incremental diff plans no groups.
-    diff_path = _fanout_diff_path(primary_repo_state(tool_state))
+    diff_path = _fanout_diff_path(
+        primary_repo_state(tool_state), selected_mode=tool_state.selected_mode
+    )
     if not diff_path:
         return FanoutSummary()
     try:
@@ -698,6 +703,8 @@ async def run_file_group_reviewers(
             binding_timeout_s=binding.timeout_s,
             budget_left_s=None if budget_s is None else budget_s - (time.monotonic() - started),
         )
+        if timeout <= 0:
+            raise _FileGroupDispatchError("file-group fan-out budget exhausted before dispatch")
 
         def _owns(row: dict[str, Any]) -> bool:
             owner = file_group_row_owner(tool_state, row.get("fingerprint"))

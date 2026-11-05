@@ -124,15 +124,19 @@ group's outcome; it carries no roster submit block, and while a group runs the
 refuse it, so a group can never stand in for the reviewer whose binding it
 uses. A diff below both thresholds dispatches nothing.
 
-**Which diff.** A full review fans out over the pull request diff. An
-incremental review fans out over the incremental diff — what changed since the
-last review — and never over the whole pull request or its paths; when nothing
-changed since the last review, there is no fan-out even on a large pull request.
+**Which diff.** The selected mode determines the scope. `Review` fans out over
+the full pull request diff even if checkout also produced an incremental diff.
+`IncrementalReview` uses only the incremental diff — what changed since the
+last review. If that diff is empty or its path is absent (including checkout's
+`empty` and `unavailable` statuses), there is no fan-out even on a large pull
+request; it never falls back to the full diff.
 
 **Budget.** The fan-out and the secondary roster draw on the same remaining
 run budget. When the fan-out starts it takes `budgetShare` of the budget left
-(default half, at least one second), and every group's cap counts against that
-slice, so the secondary roster always keeps the rest.
+(default half), and every group's cap counts against that slice, including
+fractional seconds. Once the slice is exhausted, queued groups are recorded as
+run-health failures without starting another reviewer. There is no one-second
+minimum that can consume the secondary roster's remaining share.
 
 **What you can observe.** The groups run after the primary reviewer has
 submitted and published, so `raised_by` on the posted review never names a
@@ -175,8 +179,8 @@ review:
 | `minDiffLines` | `800` | Added-line count that triggers the fan-out on its own. |
 | `binding` | _(primary reviewer)_ | Registry agent id whose model reviews every group. |
 | `concurrency` | `1` | Groups in flight at once (`1`–`6`). |
-| `perGroupTimeoutS` | `600` | Seconds per group (`1`–`900`), further capped by the binding's `timeoutS` and what is left of the fan-out budget. No bound turns the cap off: a binding `timeoutS: 0` is ignored, and an exhausted budget still allows one second. |
-| `budgetShare` | `0.5` | Share of the run budget left when the fan-out starts that the whole fan-out may spend (above `0`, at most `0.9`; at least one second). The secondary roster keeps the rest. |
+| `perGroupTimeoutS` | `600` | Seconds per group (`1`–`900`), further capped by the binding's `timeoutS` and what is left of the fan-out budget. A binding `timeoutS: 0` is ignored; an exhausted fan-out budget prevents dispatch. |
+| `budgetShare` | `0.5` | Share of the run budget left when the fan-out starts that the whole fan-out may spend (above `0`, at most `0.9`; no minimum duration). The secondary roster keeps the rest. |
 
 Unknown keys under `fileGroupFanout` are rejected. Each group is a full
 provider dispatch, so a fan-out of six groups costs roughly six extra reviewer
