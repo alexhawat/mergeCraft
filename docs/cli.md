@@ -58,7 +58,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft config set <key> <value>` | Write a supported config key into `.mergecraft/config.yaml`. |
 | `mergecraft config show <key>` | Show a resolved config value and the precedence layer that supplied it. |
 | `mergecraft config tracing` | Render the resolved tracing config — sinks, retention, redaction, token redacted. |
-| `mergecraft config validate` | Validate repo config — unknown keys are rejected (extra=forbid). |
+| `mergecraft config validate` | Strictly parse contributing files and validate their merged configuration. |
 | `mergecraft context explain` | Explain why retrieved context was selected for a review. |
 | `mergecraft context inspect` | Report sources, scope, provenance citations, and token totals. |
 | `mergecraft context search <query>` | Search retrieved review context for a query. |
