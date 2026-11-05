@@ -490,5 +490,5 @@ test-uid-drop-privileged: ## Analyzer UID-drop proofs, disposable root Linux lan
 	MERGECRAFT_PRIVILEGED_LANE=1 "$(CURDIR)/.venv-dev/bin/python" -m pytest tests/analyzers/test_trusted_uid_drop.py::test_root_backend_trusted_analyzer_payload_runs_unprivileged_and_writes_scratch tests/security/test_analyzer_uid_drop.py -v --tb=short --strict-markers -m "not integration" -p no:cacheprovider
 
 .PHONY: test-wheel-corpus
-test-wheel-corpus: build ## Verify installed convergence corpus outside the checkout
+test-wheel-corpus: build ## Verify installed CLI and corpus with runtime-only dependencies
 	UV="$(UV)" $(UV) run python scripts/check_wheel_corpus.py dist/mergecraft_action-*.whl

@@ -208,6 +208,9 @@ jobs:
       - name: Static, typecheck, build tier
         if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         run: make ci-static
+      - name: Installed wheel acceptance (runtime dependencies only)
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+        run: make test-wheel-corpus
       - name: Docs-check (docs-only PRs)
         if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
         run: make docs-check
