@@ -621,6 +621,26 @@ def _provenanced_runs(
 async def _produce_artifact(ctx: Any, key: str, proof: ArtifactProof) -> EvidenceRecord:
     label = f"artifact '{proof.name}'"
     workflow = _workflow_path(proof.workflow)
+    coverage = ctx.tool_state.coverage
+    if coverage.diff_truncated:
+        msg = (
+            f"the diff listing was truncated, so changes to the declared workflow {workflow} "
+            f"cannot be ruled out and {label} is unconfirmed"
+        )
+        raise _Absent(msg)
+    # The delivered diff has already lost ignored file sections and may lack
+    # patches the files API could not return. Neither omission proves unchanged.
+    omitted = {
+        "ignored": ctx.tool_state.ignored_review_paths,
+        "unreviewable": coverage.unreviewable_paths,
+    }
+    for reason, paths in omitted.items():
+        if workflow in {_workflow_path(path) for path in paths}:
+            msg = (
+                f"the declared workflow {workflow} is {reason} in the review diff, "
+                f"so nothing it uploads counts as {label}"
+            )
+            raise _Absent(msg)
     if workflow in frozenset(_workflow_path(path) for path in _diff_changed_paths(ctx)):
         msg = (
             f"this pull request changes the declared workflow {workflow}, so nothing it "
