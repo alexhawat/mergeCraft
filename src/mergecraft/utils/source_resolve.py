@@ -334,13 +334,18 @@ def resolve_auth_token(*, explicit: str | None = None) -> AuthResolution:
         value = os.environ.get(env_var)
         if value:
             return AuthResolution(token=value, source=env_var)
-    result = subprocess.run(
-        ["gh", "auth", "token"],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=timeout_for_external_operation("http_request"),
-    )
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "token"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout_for_external_operation("http_request"),
+        )
+    except FileNotFoundError:
+        # gh is an optional credential source; public acquisition also works
+        # anonymously. Other execution failures retain their diagnostics.
+        return AuthResolution(token=None, source="anonymous")
     if result.returncode == 0:
         token = result.stdout.strip()
         if token:
