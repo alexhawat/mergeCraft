@@ -368,8 +368,12 @@ uncovered range with its cause.
 The "genuinely trivial" rule in the review modes is a decision the agent makes,
 after the tokens are spent. `review.fastPath` moves a narrow slice of it in
 front of the agent as a pure function of the unified diff: recognizers for a
-verified pin substitution, prose, whitespace and regenerated lockfiles. The
-tier is `skip` or `full`; there is no partial credit and no "probably". The
+verified pin substitution, prose, whitespace and regenerated lockfiles. Whitespace
+recognition requires complete head text and validated diff hunks. It compares
+Python ASTs or uses a conservative lexical subset for C-family files; unsupported
+syntax gets full review. The GitHub path also verifies unchanged regular-file modes
+against complete base/head Git trees, because files-API patches omit executable-bit
+changes. The tier is `skip` or `full`; there is no partial credit and no "probably". The
 refusals are the design: a skipped run is stated as such on the check and the
 record, never grants approval, only counts a pin bump when its verifying check
 passed on the head SHA from a `pinBump.trustedCheckApps` GitHub App (a check
