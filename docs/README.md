@@ -47,6 +47,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [mcp](mcp.md) | consumer | Public MCP install — what agents can do, per-runtime stdio config, and review-only boundaries. |
 | [opencode](opencode.md) | consumer | OpenCode integration — commands, reviewer subagent, plugin, MCP wiring, and JEV/Logfire setup. |
 | [railway-sandbox-evaluation](railway-sandbox-evaluation.md) | contributor | Evaluation kit for Railway sandboxes as ephemeral review and test runners — spike script, measurement template, go/no-go criteria. |
+| [red-green-receipts](red-green-receipts.md) | consumer | Fail-then-pass receipts that prove a fix pull request — format, bounds, trust, and a CI sketch. |
 | [release-process](release-process.md) | contributor | Release candidates, soak periods, changelog, and per-release migration notes. |
 | [supply-chain](supply-chain.md) | contributor | Supply-chain and SBOM posture for releases and the Action image. |
 | [support-matrix](support-matrix.md) | consumer | Generated six-axis support matrix — OS, SCM, languages, analyzers, providers, models. |

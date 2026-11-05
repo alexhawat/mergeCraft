@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from mergecraft.analyzers.dispositions import DispositionLedger
+    from mergecraft.ci.red_green import RedGreenEvidence
     from mergecraft.config.trust_policy import AgentSandboxDecision
     from mergecraft.findings.ledger import FindingLedger
     from mergecraft.modes import Mode
@@ -632,6 +633,11 @@ class ToolState:
     # out of the reviewer's diff, which the review body lists as not reviewed.
     review_ignore: Any = None
     ignored_review_paths: list[str] = field(default_factory=list)
+    # Fail-then-pass receipt (#1056 part 5): what the run read from the declared
+    # ``ciEvidence.redGreenArtifacts`` on the head SHA, or ``not-declared`` when the
+    # repository names none. ``None`` means no receipt was read (CI ingest did not
+    # run); a fix pull request is then ``fix.no-receipt``, never proven.
+    red_green: RedGreenEvidence | None = None
 
     def iter_finding_rows(self) -> list[dict[str, Any]]:
         """Return every dict-shaped finding row across analyzer and agent lanes."""

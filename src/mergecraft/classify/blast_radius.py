@@ -24,11 +24,40 @@ Category = Literal[
 ]
 
 
+FixProofStatus = Literal[
+    "proven",
+    "not-proven",
+    "no-tests",
+    "no-receipt",
+    "invalid",
+    "mismatch",
+    "not-declared",
+    "not-required",
+]
+
+
+class FixProofSignal(TypedDict):
+    """Whether a change needs fail-then-pass proof, and what its receipt showed (#1056 part 5).
+
+    ``required`` is ``True`` for a fix pull request (conventional ``fix`` type or a
+    ``review.fixLabels`` label); ``status`` is the recorded receipt status
+    (``mergecraft.ci.red_green``), or ``not-required`` for a change that is not a fix.
+    """
+
+    required: bool
+    status: FixProofStatus
+
+
 class ChangeSet(TypedDict, total=False):
-    """Side-effect-free change payload fed to the classifier."""
+    """Side-effect-free change payload fed to the classifier.
+
+    ``fix_proof`` is optional: without it the ``fix_proof`` gate is left out of
+    the checklist (a library caller); a review run always supplies it.
+    """
 
     changed_paths: list[str]
     diff_stats: dict[str, object]
+    fix_proof: FixProofSignal
 
 
 class RuleOverride(TypedDict, total=False):
@@ -190,6 +219,12 @@ LANE_REASON_CATALOGUE: dict[str, Lane] = {
     "paths.generated": "low",
     "source.small_isolated": "low",
     "baseline.clean": "low",
+    "fix.not-required": "low",
+    "fix.proven": "low",
+    "fix.not-proven": "medium",
+    "fix.no-receipt": "medium",
+    "fix.receipt.invalid": "medium",
+    "fix.receipt.mismatch": "medium",
 }
 """The closed catalogue of lane-reason codes and their **default** lanes (#1056).
 
@@ -209,8 +244,15 @@ GATE_ORDER: tuple[str, ...] = (
     "tests",
     "review_config",
     "source",
+    "fix_proof",
 )
-"""The fixed order of :attr:`BlastRadiusClassification.checklist` gates."""
+"""The fixed order of :attr:`BlastRadiusClassification.checklist` gates.
+
+``fix_proof`` is listed only when the change set carries a ``fix_proof`` signal;
+every other gate is always listed.
+"""
+
+_OPTIONAL_GATES: frozenset[str] = frozenset({"fix_proof"})
 
 _Input = Literal["paths", "diff"]
 
@@ -260,6 +302,12 @@ _REASON_SPECS: dict[str, _ReasonSpec] = {
     "paths.generated": _ReasonSpec("generated_files", "source"),
     "source.small_isolated": _ReasonSpec(None, None),
     "baseline.clean": _ReasonSpec(None, None),
+    "fix.not-required": _ReasonSpec(None, None),
+    "fix.proven": _ReasonSpec(None, None),
+    "fix.not-proven": _ReasonSpec(None, "fix_proof"),
+    "fix.no-receipt": _ReasonSpec(None, "fix_proof"),
+    "fix.receipt.invalid": _ReasonSpec(None, "fix_proof"),
+    "fix.receipt.mismatch": _ReasonSpec(None, "fix_proof"),
 }
 
 # Floors a repository override may raise but never lower: the review-config
@@ -562,9 +610,87 @@ def _lane_reasons(
     return reasons
 
 
-def _checklist(reasons: list[LaneReason], missing: list[str]) -> list[ChecklistGate]:
+# A fix pull request's receipt status → the reason code and its message (#1056 part 5).
+_FIX_PROOF_OUTCOMES: dict[str, tuple[str, str]] = {
+    "proven": (
+        "fix.proven",
+        "a fail-then-pass receipt for this pull request's exact base and head SHAs shows a "
+        "test failing on the base and every listed test passing on the head",
+    ),
+    "not-proven": (
+        "fix.not-proven",
+        "the fail-then-pass receipt does not prove the fix: no listed test failed on the "
+        "base, or a listed test did not pass on the head",
+    ),
+    "no-tests": (
+        "fix.not-proven",
+        "the fail-then-pass receipt lists no tests, so it proves nothing",
+    ),
+    "no-receipt": (
+        "fix.no-receipt",
+        "this is a fix pull request and no successful workflow run on the head SHA "
+        "provided a readable fail-then-pass receipt",
+    ),
+    "not-declared": (
+        "fix.no-receipt",
+        "this is a fix pull request and the repository declares no "
+        "ciEvidence.redGreenArtifacts receipt artifact, so the fix cannot be proven",
+    ),
+    "invalid": (
+        "fix.receipt.invalid",
+        "the fail-then-pass receipt could not be read: malformed, the wrong schema, or "
+        "over the size cap",
+    ),
+    "mismatch": (
+        "fix.receipt.mismatch",
+        "the fail-then-pass receipt was produced for other commits: its base and head SHAs "
+        "do not match this pull request's",
+    ),
+}
+
+
+def _fix_proof_outcome(change: ChangeSet) -> tuple[list[LaneReason], bool]:
+    """The one ``fix.*`` reason and the ``fix_proof`` gate for a supplied signal.
+
+    Only ``required is False`` reads as "not a fix"; any other value, and any
+    status outside the vocabulary, fails closed as a missing receipt.
+    """
+    raw = change.get("fix_proof")
+    signal: dict[str, object] = (
+        cast("dict[str, object]", raw)  # reason: the TypedDict is a plain dict at runtime
+        if isinstance(raw, dict)
+        else {}
+    )
+    if signal.get("required") is False:
+        code = "fix.not-required"
+        message = (
+            "not a fix pull request (no conventional fix type and no fix label), so no "
+            "fail-then-pass receipt is required"
+        )
+    else:
+        status = signal.get("status")
+        code, message = _FIX_PROOF_OUTCOMES.get(
+            status if isinstance(status, str) else "",
+            (
+                "fix.no-receipt",
+                "this is a fix pull request and its fail-then-pass receipt status is unknown",
+            ),
+        )
+    reason = LaneReason(code=code, lane=LANE_REASON_CATALOGUE[code], message=message)
+    return [reason], code in {"fix.not-required", "fix.proven"}
+
+
+def _checklist(
+    reasons: list[LaneReason],
+    missing: list[str],
+    *,
+    optional: dict[str, bool | None],
+) -> list[ChecklistGate]:
     """Every gate in :data:`GATE_ORDER`: ``False`` when a reason forces it above ``low``,
-    ``True`` when measured and clean, ``None`` when its inputs were not given."""
+    ``True`` when measured and clean, ``None`` when its inputs were not given.
+
+    An optional gate (``fix_proof``) is listed only when ``optional`` names it,
+    with the value its own signal produced."""
     failed = {
         gate
         for reason in reasons
@@ -578,7 +704,11 @@ def _checklist(reasons: list[LaneReason], missing: list[str]) -> list[ChecklistG
     gates: list[ChecklistGate] = []
     for gate in GATE_ORDER:
         passed: bool | None
-        if gate == "inputs":
+        if gate in _OPTIONAL_GATES:
+            if gate not in optional:
+                continue
+            passed = optional[gate]
+        elif gate == "inputs":
             passed = not missing
         elif gate in failed:
             passed = False
@@ -601,6 +731,12 @@ def classify_blast_radius(
     ``diff_stats``, add the :data:`SIGNAL_MISSING_CATEGORY` category, a
     ``signal.missing.*`` reason at ``medium`` that no override can lower, and
     ``None`` (not measured) for every gate that reads the missing input.
+
+    A ``fix_proof`` signal adds the ``fix_proof`` gate and one ``fix.*`` reason: a
+    change that is not a fix is ``fix.not-required`` and a fix with a ``proven``
+    receipt is ``fix.proven`` (both ``low``, gate ``True``); every other receipt
+    status is ``medium`` with its own code and gate ``False``. Without a
+    ``fix_proof`` key the gate is left out and nothing else changes.
     """
     missing = _missing_signals(change)
     raw_paths = change.get("changed_paths")
@@ -611,6 +747,10 @@ def classify_blast_radius(
     reasons = _lane_reasons(
         missing=missing, hits=hits, paths=paths, diff_stats=diff_stats, rule_set=rule_set
     )
+    optional: dict[str, bool | None] = {}
+    if "fix_proof" in change:
+        fix_reasons, optional["fix_proof"] = _fix_proof_outcome(change)
+        reasons.extend(fix_reasons)
     lane = _max_lane([reason.lane for reason in reasons])
     if missing:
         categories.append(SIGNAL_MISSING_CATEGORY)
@@ -630,7 +770,7 @@ def classify_blast_radius(
         next_action=_NEXT_ACTION[lane],
         categories=categories,
         reasons=reasons,
-        checklist=_checklist(reasons, missing),
+        checklist=_checklist(reasons, missing, optional=optional),
     )
 
 
@@ -643,6 +783,8 @@ __all__ = [
     "BlastRadiusClassification",
     "ChangeSet",
     "ChecklistGate",
+    "FixProofSignal",
+    "FixProofStatus",
     "Lane",
     "LaneReason",
     "RuleSet",

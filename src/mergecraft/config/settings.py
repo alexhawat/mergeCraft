@@ -129,12 +129,18 @@ class CiEvidenceSettings(_OptionalFeatureModel):
     ``mutationArtifacts`` lists workflow artifact names whose mutation reports
     (mutmut or Stryker JSON) the reviewer may ingest as survivor findings.
     Empty means no ingest and no extra API call (C-D2).
+
+    ``redGreenArtifacts`` lists workflow artifact names that carry a
+    fail-then-pass receipt (``docs/red-green-receipts.md``), read only from a
+    successful workflow run on the head SHA. Empty means no ingest and no extra
+    API call; a fix pull request then has no proof (#1056).
     """
 
     gates: dict[str, str] = Field(default_factory=dict)
     sarif_artifacts: list[str] = Field(default_factory=list, alias="sarifArtifacts")
     coverage_artifacts: list[str] = Field(default_factory=list, alias="coverageArtifacts")
     mutation_artifacts: list[str] = Field(default_factory=list, alias="mutationArtifacts")
+    red_green_artifacts: list[str] = Field(default_factory=list, alias="redGreenArtifacts")
 
 
 class AnalyzerOverride(_OptionalFeatureModel):
@@ -408,6 +414,17 @@ class ReviewSettings(BaseModel):
         description=(
             "Also ignore the built-in defaults: changelogs, lockfiles, package-lock.json, "
             "and generated or minified files. ``false`` reviews them."
+        ),
+    )
+    # #1056 part 5 — labels that mark a pull request as a fix, which then needs a
+    # fail-then-pass receipt (``ciEvidence.redGreenArtifacts``). A conventional ``fix``
+    # title is a fix whatever this lists; a configured list replaces the default.
+    fix_labels: list[str] = Field(
+        default_factory=lambda: ["bug", "fix"],
+        alias="fixLabels",
+        description=(
+            "Label names (case-insensitive) that mark a pull request as a fix. A fix "
+            "needs a proven fail-then-pass receipt to reach the low lane."
         ),
     )
     # RC12 — optional per-round budget taper (default flat).

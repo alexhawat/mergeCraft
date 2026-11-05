@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Final, Union, overload
 from loguru import logger
 
 from mergecraft.analyzers.run import REQUIRED_CHECK_SATISFIED_STATUSES
-from mergecraft.classify.blast_radius import SIGNAL_MISSING_CATEGORY
+from mergecraft.classify.blast_radius import GATE_ORDER, SIGNAL_MISSING_CATEGORY
 from mergecraft.evidence.gate_policy import (
     DEFAULT_GATE_POLICIES,
     NAMED_GATE_POLICY_ROWS,
@@ -619,6 +619,22 @@ def _checklist_all_passed(packet: MergeEvidencePacket) -> bool:
     return all(gate.passed is True for gate in blast_radius.checklist)
 
 
+def _checklist_complete(packet: MergeEvidencePacket) -> bool:
+    """Whether a checklist lists every gate in ``GATE_ORDER``; vacuously true for none.
+
+    A classification that skipped a gate (a library caller that supplied no
+    ``scope`` signal, or a packet written before the gate existed) never takes
+    an approval route (#1056 part 3). An empty checklist is a packet written
+    before the field existed (schema ``1.17.0``) and keeps the legacy route.
+    """
+    blast_radius = packet.blast_radius
+    if blast_radius is None:
+        return False
+    if not blast_radius.checklist:
+        return True
+    return set(GATE_ORDER) <= {gate.gate for gate in blast_radius.checklist}
+
+
 def _checklist_all_measured(packet: MergeEvidencePacket) -> bool:
     """Whether no checklist gate is ``None`` (not measured); a ``False`` gate is measured.
 
@@ -656,7 +672,8 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
 
     When the packet carries a checklist, every gate must be ``True``: a
     ``low`` lane beside a gate that failed or was not measured is
-    inconsistent, so it never takes the auto-merge route (#1056).
+    inconsistent, so it never takes the auto-merge route (#1056). The checklist
+    must also list every gate in ``GATE_ORDER`` (``_checklist_complete``).
     """
     if _packet_has_blockers(packet):
         return False
@@ -667,6 +684,8 @@ def _is_low_risk_passing(packet: MergeEvidencePacket) -> bool:
     if not _blast_radius_had_inputs(packet):
         return False
     if not _checklist_all_passed(packet):
+        return False
+    if not _checklist_complete(packet):
         return False
     return _trusted_positive_decision(packet)
 
@@ -691,7 +710,8 @@ def _is_clean_pass(packet: MergeEvidencePacket) -> bool:
       inputs (``_blast_radius_had_inputs``) or any checklist gate that was
       not measured (``None``). A ``False`` gate is a measured failure and is
       accepted on a ``medium`` lane: every real ``medium`` lane carries one.
-      A ``low`` lane with any gate not ``True`` is inconsistent and is refused.
+      A ``low`` lane with any gate not ``True`` is inconsistent and is refused,
+      and a checklist missing any gate of ``GATE_ORDER`` is refused too.
 
     Ordering: after the finding-driven rules so ``has_blockers`` /
     ``changed-unread-file`` / ``tool_loop`` keep winning when their findings
@@ -705,6 +725,8 @@ def _is_clean_pass(packet: MergeEvidencePacket) -> bool:
     if not _blast_radius_had_inputs(packet):
         return False
     if not _checklist_all_measured(packet):
+        return False
+    if not _checklist_complete(packet):
         return False
     if packet.blast_radius.lane == "low" and not _checklist_all_passed(packet):
         return False

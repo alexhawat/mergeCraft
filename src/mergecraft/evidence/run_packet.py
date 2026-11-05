@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 
 from loguru import logger
 from pydantic import ValidationError
@@ -34,6 +34,7 @@ from pydantic import ValidationError
 from mergecraft.analyzers.dispositions import DispositionCounts
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.classify import ChangeSet, classify_blast_radius
+from mergecraft.classify.blast_radius import FixProofStatus
 from mergecraft.evidence.build import build_packet
 from mergecraft.evidence.coverage import coverage_section_for_state
 from mergecraft.evidence.emit import write_packet
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from mergecraft.classify import BlastRadiusClassification
+    from mergecraft.classify.blast_radius import FixProofSignal
     from mergecraft.evidence.gate_policy import GateActionPolicy
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import RepoToolState, ToolState
@@ -169,17 +171,104 @@ def _diff_stats(diff_text: str) -> dict[str, object]:
     return {"diff": diff_text, "lines_added": added, "lines_deleted": deleted}
 
 
-def classify_run_blast_radius(diff_text: str) -> BlastRadiusClassification | None:
+# A recorded receipt status a fix carries as-is; ``not-required`` is never one.
+_FIX_PROOF_STATUSES: frozenset[str] = frozenset(get_args(FixProofStatus)) - {"not-required"}
+
+
+def fix_proof_signal_for_state(
+    state: ToolState, *, title: str, labels: Sequence[str], fix_labels: Sequence[str]
+) -> FixProofSignal:
+    """The ``fix_proof`` signal for the run's pull request and recorded receipt (#1056 part 5).
+
+    A pull request that is not a fix (``is_fix_pull_request``) needs no proof. A fix
+    carries the status of ``ToolState.red_green``; with nothing recorded (CI ingest
+    did not run) it is ``no-receipt``, never proven. The packet and the
+    verification tool both build the signal here, so the lane a judge is held to
+    is the lane the packet reports.
+
+    Args:
+        state (ToolState): The run state.
+        title (str): The pull request title.
+        labels (Sequence[str]): The pull request's label names.
+        fix_labels (Sequence[str]): The configured ``review.fixLabels``.
+
+    Returns:
+        FixProofSignal: Always supplied, so a run's checklist always lists ``fix_proof``.
+    """
+    from mergecraft.ci.red_green import is_fix_pull_request
+
+    if not is_fix_pull_request(title, labels, fix_labels=fix_labels):
+        return {"required": False, "status": "not-required"}
+    evidence = getattr(state, "red_green", None)
+    status = getattr(evidence, "status", None)
+    if status not in _FIX_PROOF_STATUSES:
+        return {"required": True, "status": "no-receipt"}
+    return {"required": True, "status": cast("FixProofStatus", status)}  # reason: checked above
+
+
+def _event_pull_request(ctx: ToolContext) -> dict[str, Any]:
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    for key in ("pull_request", "issue"):
+        item = event.get(key)
+        if isinstance(item, dict):
+            return item
+    return {}
+
+
+def fix_proof_signal_for_context(ctx: ToolContext) -> FixProofSignal:
+    """:func:`fix_proof_signal_for_state` fed from the run's bound pull request.
+
+    The title is ``ctx.payload.event.title`` (the bound event's title when that is
+    empty), the labels are the bound event's label names, and the fix labels are
+    ``review.fixLabels`` from the run's settings snapshot (the defaults without one).
+
+    Args:
+        ctx (ToolContext): The run context.
+
+    Returns:
+        FixProofSignal: The run's ``fix_proof`` signal.
+    """
+    from mergecraft.ci.red_green import DEFAULT_FIX_LABELS
+
+    pull = _event_pull_request(ctx)
+    title = getattr(getattr(ctx.payload, "event", None), "title", None)
+    if not isinstance(title, str) or not title.strip():
+        raw_title = pull.get("title")
+        title = raw_title if isinstance(raw_title, str) else ""
+    raw_labels = pull.get("labels")
+    labels = [
+        name
+        for label in (raw_labels if isinstance(raw_labels, list) else [])
+        if isinstance(label, dict) and isinstance(name := label.get("name"), str)
+    ]
+    snapshot = ctx.repo_settings_snapshot
+    fix_labels: Sequence[str] = (
+        snapshot.settings.review.fix_labels if snapshot is not None else DEFAULT_FIX_LABELS
+    )
+    return fix_proof_signal_for_state(
+        ctx.tool_state, title=title, labels=labels, fix_labels=fix_labels
+    )
+
+
+def classify_run_blast_radius(
+    diff_text: str, *, fix_proof: FixProofSignal
+) -> BlastRadiusClassification | None:
     """Classify the run's diff, or return ``None`` when there is no diff.
 
     Returning ``None`` for an empty diff keeps the packet honest: a run with
     nothing to classify records an absent section rather than a fabricated
-    ``low`` lane.
+    ``low`` lane. ``fix_proof`` is required (build it with
+    :func:`fix_proof_signal_for_state`) so a run never classifies without its
+    ``fix_proof`` gate.
     """
     paths = changed_paths_from_diff(diff_text)
     if not paths:
         return None
-    change: ChangeSet = {"changed_paths": paths, "diff_stats": _diff_stats(diff_text)}
+    change: ChangeSet = {
+        "changed_paths": paths,
+        "diff_stats": _diff_stats(diff_text),
+        "fix_proof": fix_proof,
+    }
     return classify_blast_radius(change)
 
 
@@ -648,7 +737,7 @@ def build_run_packet(
     state = ctx.tool_state
     repo_state = primary_repo_state(state)
     diff_text = _read_diff_text(repo_state)
-    blast_radius = classify_run_blast_radius(diff_text)
+    blast_radius = classify_run_blast_radius(diff_text, fix_proof=fix_proof_signal_for_context(ctx))
 
     from mergecraft.evidence.trajectory import build_trajectory_record
     from mergecraft.evidence.trajectory_audit import audit_trajectory
@@ -1080,6 +1169,8 @@ __all__ = [
     "build_run_packet",
     "classify_run_blast_radius",
     "emit_run_packet",
+    "fix_proof_signal_for_context",
+    "fix_proof_signal_for_state",
     "prepare_run_packet",
     "resolve_evidence_dir",
     "resolve_packet_path",

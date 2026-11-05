@@ -1,0 +1,116 @@
+# Fail-then-pass receipts
+
+A fix pull request has to show that it fixes something: at least one test that failed before the change and passes after it. mergeCraft never runs your tests to find out. Your own CI runs them, on the base commit and on the head commit, and uploads the results as a small JSON receipt. The review reads that receipt, checks it belongs to this pull request, and turns it into the `fix_proof` gate of the blast-radius checklist (see [`blast-radius.md`](blast-radius.md#fix-proof)).
+
+## Which pull requests need one
+
+A pull request is a fix when either is true:
+
+- its title starts with a conventional `fix` type: `fix:`, `fix(scope):`, `fix!:` or `fix(scope)!:`, in any case, after leading whitespace;
+- it carries a label named in `review.fixLabels` (default `bug` and `fix`, compared without regard to case). A configured list replaces the default; an empty list turns label detection off.
+
+Everything else is `fix.not-required` and passes the gate without a receipt.
+
+## Configuration
+
+```yaml
+ciEvidence:
+  redGreenArtifacts:
+    - red-green-receipt
+review:
+  fixLabels:
+    - bug
+    - regression
+```
+
+`redGreenArtifacts` lists workflow artifact names. It is empty by default, and an empty list makes no API call. A fix pull request in a repository that declares none gets `fix.no-receipt`, and the reason names the setting. Like the other `ciEvidence` names, the receipt is ingested after the `wait-for-ci` step reports `complete`, so forward its outputs to the review job as described in [`ANALYZERS.md`](ANALYZERS.md).
+
+## Format
+
+The receipt is a JSON member of the artifact zip, preferably named `red-green.json` (otherwise the first `.json` member is read):
+
+```json
+{
+  "schema": "mergecraft.red-green/1",
+  "base_sha": "0123456789abcdef0123456789abcdef01234567",
+  "head_sha": "89abcdef0123456789abcdef0123456789abcdef",
+  "tests": [
+    {"id": "tests/test_parser.py::test_empty_input", "base": "failed", "head": "passed"},
+    {"id": "tests/test_parser.py::test_plain_input", "base": "passed", "head": "passed"}
+  ]
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `schema` | exactly `mergecraft.red-green/1` |
+| `base_sha` | the full SHA of the pull request's base commit the tests ran against |
+| `head_sha` | the full SHA of the pull request's head commit |
+| `tests` | the tests that matter for the fix, each with `id`, `base` and `head` |
+
+Each `base` and `head` is one of `passed`, `failed`, `error` or `skipped`.
+
+Bounds, all refused rather than truncated:
+
+- at most 1 MB (1 000 000 bytes of UTF-8), checked before anything is decoded; a larger receipt is `invalid` and the detail says it was oversized;
+- at most 2 000 tests, each `id` at most 500 characters;
+- no other keys, at the top level or in a test; a missing key, a wrong type, an unknown result or another schema id is `invalid`.
+
+## Verdict
+
+| Receipt | Status | Reason on a fix |
+|---|---|---|
+| at least one test `failed` or `error` on the base, and every listed test `passed` on the head | `proven` | `fix.proven` (low) |
+| any other combination: nothing red on the base, or a test not green on the head | `not-proven` | `fix.not-proven` (medium) |
+| an empty `tests` list | `no-tests` | `fix.not-proven` (medium) |
+| SHAs that are not exactly the pull request's base and head | `mismatch` | `fix.receipt.mismatch` (medium) |
+| malformed, over a bound, or another schema | `invalid` | `fix.receipt.invalid` (medium) |
+| no successful run on the head uploaded one, or the download failed | `no-receipt` | `fix.no-receipt` (medium) |
+| `redGreenArtifacts` is empty | `not-declared` | `fix.no-receipt` (medium) |
+
+A test that is green on both sides is fine beside a red-then-green one: it shows the fix did not break a neighbour. A test that is `skipped` on the head is not a pass.
+
+## Trust
+
+The receipt is data the pull request's own CI produced, so it is trusted only as far as the run that produced it:
+
+- **Only a successful run counts.** The artifact is read from a workflow run whose listing row says `status: completed`, `conclusion: success` and `head_sha` equal to the pull request head. A failed, cancelled, timed-out or still-running run is never read.
+- **Bound to the exact commits.** `base_sha` and `head_sha` must equal the pull request's base and head in full (case does not matter). A short SHA never matches, so a receipt from an older push or another branch is `mismatch`.
+- **Never executed.** The zip is opened in memory and only the receipt member is read, at most one byte past the cap. Scripts, Makefiles or test files in the artifact are ignored, and test ids are plain strings that are never run or rendered into a prompt.
+- **Author inputs only add the requirement.** A `fix` title or label makes the proof required; nothing in the title, body or labels can satisfy it. A fix that is neither titled nor labelled as one is not asked for a receipt, which is the accepted gap.
+- **A proof only passes its own gate.** A `proven` receipt never lowers another reason: a migration stays `high`, and a source change without tests stays `medium`.
+
+The receipt is evidence about your tests, not a test run by mergeCraft. Who may change the workflow that writes it is the same question as who may change any other required check.
+
+## Producing a receipt
+
+Any CI can write the receipt. The sketch below is a GitHub Actions job: it reads both SHAs from the event file, runs the fix's tests on the head, runs the same tests against the base's source, writes the receipt with a script of your own, and uploads it. The job itself must succeed, so test failures are recorded rather than allowed to fail the step.
+
+```yaml
+red-green:
+  if: github.event_name == 'pull_request'
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Run the fix's tests on the head and on the base
+      run: |
+        BASE_SHA=$(jq -r .pull_request.base.sha "$GITHUB_EVENT_PATH")
+        HEAD_SHA=$(jq -r .pull_request.head.sha "$GITHUB_EVENT_PATH")
+        TESTS="tests/test_parser.py"
+        git checkout --quiet "$HEAD_SHA"
+        pytest "$TESTS" --junitxml=head.xml || true
+        git checkout --quiet "$BASE_SHA" -- src/
+        pytest "$TESTS" --junitxml=base.xml || true
+        git checkout --quiet "$HEAD_SHA" -- src/
+        python scripts/write_red_green_receipt.py \
+          --base base.xml --head head.xml \
+          --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA" > red-green.json
+    - uses: actions/upload-artifact@v4
+      with:
+        name: red-green-receipt
+        path: red-green.json
+```
+
+`scripts/write_red_green_receipt.py` stands for your own converter from test reports to the format above; mergeCraft does not ship one. Which tests to list is your call: the tests the pull request adds or changes are the usual choice. The checkout of `HEAD_SHA` matters, because the default `pull_request` checkout is a merge commit whose SHA is neither the base nor the head.

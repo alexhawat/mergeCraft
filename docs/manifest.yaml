@@ -103,6 +103,12 @@ pages:
     generator: null
     purpose: Blast-radius lane semantics in the merge evidence packet.
 
+  - path: docs/red-green-receipts.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Fail-then-pass receipts that prove a fix pull request — format, bounds, trust, and a CI sketch.
+
   - path: docs/compatibility-matrix.md
     audience: contributor
     template: contributor

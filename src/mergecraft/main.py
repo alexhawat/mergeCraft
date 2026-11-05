@@ -1456,6 +1456,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         ci_sarif_artifacts=list(settings.ci_evidence.sarif_artifacts),
         ci_coverage_artifacts=list(settings.ci_evidence.coverage_artifacts),
         ci_mutation_artifacts=list(settings.ci_evidence.mutation_artifacts),
+        ci_red_green_artifacts=list(settings.ci_evidence.red_green_artifacts),
         analyzers_mode=analyzers_mode,
         trust_tier=ctx.trust_tier,
         authority_trust=ctx.authority_trust,
@@ -1469,6 +1470,12 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         budget_tracker=ctx.budget_tracker,
         gh_event=ctx.gh_event,
     )
+    if not any(name.strip() for name in settings.ci_evidence.red_green_artifacts):
+        # No receipt artifact declared: a fix pull request is told which setting is
+        # missing (``fix.no-receipt`` naming ``redGreenArtifacts``), and no call is made.
+        from mergecraft.ci.red_green import undeclared_red_green_evidence
+
+        tool_state.red_green = undeclared_red_green_evidence()
     from mergecraft.config.settings_snapshot import capture_run_scope_snapshot
 
     snapshot = capture_run_scope_snapshot(

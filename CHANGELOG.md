@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A fix pull request now has to prove the fix with a fail-then-pass receipt
+  before it can reach the `eligible` lane (#1056). Name the artifact your CI
+  uploads in `ciEvidence.redGreenArtifacts`: a JSON receipt
+  (`mergecraft.red-green/1`, at most 1 MB and 2 000 tests) listing each test's
+  result on the base and on the head. The review reads it only from a
+  successful workflow run on the head SHA, accepts it only for the pull
+  request's exact base and head SHAs, and never runs a test itself. A pull
+  request is a fix when its title has a conventional `fix` type or it carries a
+  label in the new `review.fixLabels` (default `bug`, `fix`). A new `fix_proof`
+  checklist gate passes for a non-fix (`fix.not-required`) or a `proven`
+  receipt (`fix.proven`); a fix whose receipt is missing, undeclared, unproven,
+  malformed or for other commits keeps the lane at least `medium` with its own
+  `fix.*` reason. See `docs/red-green-receipts.md`.
+
 - The self-review's Codex rung writes the refreshed ChatGPT-subscription login
   back to the `CODEX_AUTH_JSON` repository secret after each run, so the
   rotated refresh token is never left spent (#970). The Codex driver exports
