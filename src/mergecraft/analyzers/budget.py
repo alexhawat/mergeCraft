@@ -335,9 +335,12 @@ def finding_to_deferred_row(finding: Finding) -> dict[str, Any]:
     return {
         "path": finding.path,
         "line": finding.start_line,
+        "end_line": finding.end_line,
         "body": finding.message,
         "severity": finding.severity,
         "fingerprint": finding.fingerprint,
+        "scope": finding.scope,
+        "introduced_by_pr": finding.introduced_by_pr,
     }
 
 
