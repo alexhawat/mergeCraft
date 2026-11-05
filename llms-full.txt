@@ -1237,7 +1237,8 @@ Formatting rules that are enforced by the prompt:
   published, so their findings reach the evidence packet and the checks the
   way secondary roster findings do, not the posted review body, and `raised_by`
   never names a group. Each group row's packet evidence carries
-  `reviewer: file-group/<group-id> (<model>)`. A group that fails (missing
+  `reviewer: file-group/<group-id> (<model>)`, and the entry survives a later
+  group re-verifying the same finding. A group that fails (missing
   binding or credential, timeout, provider error) is one run-scoped `Minor` row
   under the packet's `run_health`, never a failed review; a smaller diff keeps
   the single-agent path unchanged.

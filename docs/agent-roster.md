@@ -130,7 +130,8 @@ group. Group findings reach the evidence packet and the checks the way
 secondary roster findings do. When mergeCraft records a group's run under
 `file-group/<group-id>` (`group-1`, `group-2`, …), every finding row that group
 raised gains one packet evidence entry `reviewer: file-group/<group-id>
-(<model>)`. A group that fails — missing binding or credential, timeout,
+(<model>)`. The entry survives re-verification: when a later group records the
+same finding again, the row keeps the earlier group's entry exactly once. A group that fails — missing binding or credential, timeout,
 provider error — is recorded as a reviewer dispatch error plus one run-scoped
 `Minor` row under the packet's `run_health`; it never fails the review, and the
 other groups' findings stand.

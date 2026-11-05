@@ -32,6 +32,7 @@ Exports:
     active_file_groups — The groups that may be making the current tool call.
     note_file_group_rows — Record which group raised newly stored finding rows.
     file_group_row_owner — The group that raised one finding row, if known.
+    carry_file_group_evidence — Keep group evidence stamps when a row is re-stored.
     plan_file_groups — Build a bounded plan from a unified diff.
     dispatch_file_groups — Run the dispatcher, degrading failures.
 """
@@ -225,6 +226,38 @@ def file_group_row_owner(tool_state: ToolState, fingerprint: object) -> str | No
     return tool_state.file_group_row_owners.get(fingerprint)
 
 
+FILE_GROUP_EVIDENCE_PREFIX: Final[str] = f"reviewer: {FILE_GROUP_AGENT_PREFIX}"
+"""Evidence entries naming a file-group run start with this prefix."""
+
+
+def carry_file_group_evidence(previous: object, row: dict[str, Any]) -> None:
+    """Copy file-group evidence stamps from a row being replaced onto its successor.
+
+    A finding tool that re-stores a row by fingerprint (a later group
+    re-verifying a finding an earlier group raised) must not wipe the
+    earlier group's ``reviewer: file-group/<id> (<model>)`` entry. Each entry
+    is kept exactly once; ``row`` is updated in place.
+
+    Args:
+        previous: The stored row being replaced (anything not a dict is ignored).
+        row: The row that replaces it.
+    """
+    if not isinstance(previous, dict):
+        return
+    old = previous.get("evidence")
+    if not isinstance(old, list):
+        return
+    stamps = [str(item) for item in old if str(item).startswith(FILE_GROUP_EVIDENCE_PREFIX)]
+    if not stamps:
+        return
+    current = row.get("evidence")
+    entries = [str(item) for item in current] if isinstance(current, list) else []
+    for stamp in stamps:
+        if stamp not in entries:
+            entries.append(stamp)
+    row["evidence"] = entries
+
+
 def plan_file_groups(
     diff_text: str,
     *,
@@ -349,11 +382,13 @@ __all__ = [
     "DEFAULT_MIN_DIFF_LINES",
     "DEFAULT_MIN_FILES",
     "FILE_GROUP_AGENT_PREFIX",
+    "FILE_GROUP_EVIDENCE_PREFIX",
     "FanoutPlan",
     "FanoutSummary",
     "FileGroup",
     "active_file_groups",
     "bind_active_file_group",
+    "carry_file_group_evidence",
     "dispatch_file_groups",
     "file_group_agent_id",
     "file_group_row_owner",
