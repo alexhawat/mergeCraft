@@ -41,13 +41,13 @@ R7–R15 name the originally unnumbered residual findings. R3 covers both mergin
 | R14 | Anonymous fallback without gh | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 4 focused auth/clone tests; Ruff/mypy |
 | R15 | Output usage exit status | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 17 output tests; Ruff/mypy |
 | T1 | Mutation error classification/baseline | ci | IMPLEMENTED / VALIDATING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 20 tests; Ruff/mypy |
-| T2 | Semantic Action E2E receipts/protocol | ci | IN PROGRESS | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | — |
+| T2 | Semantic Action E2E receipts/protocol | ci | IMPLEMENTED / IMAGE CI PENDING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 29 protocol/assertion tests; real host GHA approval/refusal; Ruff/mypy/bash |
 | T3 | Clean installed-wheel CLI acceptance | ci | IMPLEMENTED / VALIDATING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | Clean wheel acceptance; 6 packaging tests; Ruff/mypy |
 | T4 | Locked CI bootstrap | ci | IMPLEMENTED / VALIDATING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | real stale-lock bootstrap regression; Ruff |
 | DOC1 | Released pinned onboarding | docs | IMPLEMENTED / VALIDATING | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | 26 docs tests; generated packages; Ruff |
 | DOC2 | Supported/tested/published matrix | docs | IMPLEMENTED / VALIDATING | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | 9 docs tests; generator drift; Ruff |
 | DOC3 | CLI workspace behavior documentation | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | Documented workspace and output contracts |
-| DOC4 | Enforce reliable deterministic checks | ci | IMPLEMENTED / T2 ACCEPTANCE REQUIRED | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 78 guard/workflow tests; permissions; Ruff |
+| DOC4 | Enforce reliable deterministic checks | ci | IMPLEMENTED / IMAGE CI PENDING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 78 guard/workflow tests; permissions; Ruff |
 | DOC5 | Dated audit/history and complete remediation index | docs | IMPLEMENTED / VALIDATING | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | Dated report, probes, open-work snapshot and full finding index |
 
 ## Verification and execution contract
