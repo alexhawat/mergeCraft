@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import importlib.util
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from mergecraft.agents_sdk.change_data import materialize_workspace_change
 from mergecraft.agents_sdk.guardrails import review_output_guardrail
 from mergecraft.agents_sdk.mcp_tools import call_public_tool, tool_context_for_workspace
 from mergecraft.agents_sdk.model import (
@@ -22,14 +26,12 @@ if TYPE_CHECKING:
 
 
 def _require_agents_sdk() -> None:
-    try:
-        import agents  # noqa: F401
-    except ImportError as exc:
+    if importlib.util.find_spec("agents") is None:
         msg = (
             "OpenAI Agents SDK is not installed. "
             "Install mergecraft with the optional extra: pip install 'mergecraft-action[agents]'"
         )
-        raise ImportError(msg) from exc
+        raise ImportError(msg)
 
 
 def review_agent(
@@ -62,9 +64,24 @@ def review_agent(
     def _otel_bridge(span: Span | NullSpan) -> Any:
         if isinstance(span, Span):
             return attach_trace_context(span)
-        from contextlib import nullcontext
-
         return nullcontext()
+
+    @function_tool
+    async def get_workspace_change(
+        base: str | None = None,
+        head: str | None = None,
+        diff: str | None = None,
+    ) -> dict[str, Any]:
+        """Return diff text, changed paths, and file contents for the workspace change."""
+        diff_path = await asyncio.to_thread(Path(diff).resolve) if diff else None
+        with _trace_tool("get_workspace_change") as span, _otel_bridge(span):
+            return await materialize_workspace_change(
+                root,
+                allowed_paths=paths or None,
+                diff_file=diff_path,
+                base=base,
+                head=head,
+            )
 
     @function_tool
     async def review_change(
@@ -100,10 +117,11 @@ def review_agent(
             return await call_public_tool(ctx, "get_policy")
 
     instructions = (
-        "You are mergeCraft's code review agent. Use review_change with dry_run=true "
-        "first to materialize the diff, then inspect the change and return structured "
-        "findings. Only cite paths that appear in the change. Prefer deterministic "
-        "evidence from tool output over speculation."
+        "You are mergeCraft's code review agent. Call get_workspace_change first to "
+        "load the diff and file contents for the change under review. Optionally use "
+        "get_policy or get_capabilities for gate context. Return structured findings "
+        "grounded in get_workspace_change output; only cite paths present in "
+        "changed_paths or files."
     )
     if extra_instructions.strip():
         instructions = f"{instructions}\n\n{extra_instructions.strip()}"
@@ -111,7 +129,7 @@ def review_agent(
     return Agent(
         name="mergecraft_reviewer",
         instructions=instructions,
-        tools=[review_change, get_capabilities, get_policy],
+        tools=[get_workspace_change, review_change, get_capabilities, get_policy],
         model=sdk_model,
         output_type=ReviewFindingsReport,
         output_guardrails=[review_output_guardrail(paths)],

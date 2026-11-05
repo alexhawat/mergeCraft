@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from mergecraft.agents.openai_compatible_gateways import (
     CUSTOM_PROVIDER_API_KEY_ENV,
+    CUSTOM_PROVIDER_BASE_URL_ENV,
     resolve_gateway_endpoint,
 )
 
@@ -43,6 +44,20 @@ def _read_key(env_name: str) -> str | None:
     return value or None
 
 
+def _custom_provider_env_pair_set() -> bool:
+    return bool(_read_key(CUSTOM_PROVIDER_API_KEY_ENV) and _read_key(CUSTOM_PROVIDER_BASE_URL_ENV))
+
+
+def _api_key_env_for_provider_id(provider_id: str) -> str:
+    from mergecraft.config.runtime_provider_registry import lookup_registry_entry
+    from mergecraft.config.settings_snapshot import repo_settings_for_gateway_resolvers
+
+    entry = lookup_registry_entry(repo_settings_for_gateway_resolvers(), provider_id)
+    if entry is not None:
+        return f"LLM_PROVIDER_{entry.env_index}_API_KEY"
+    return CUSTOM_PROVIDER_API_KEY_ENV
+
+
 def resolve_model_config(
     *,
     model: str | None = None,
@@ -59,6 +74,10 @@ def resolve_model_config(
     3. ``OPENAI_API_KEY`` with ``DEFAULT_OPENAI_MODEL``.
     4. ``OPENCODE_GO_API_KEY`` with OpenCode Zen base URL and
        ``DEFAULT_OPENCODE_GO_MODEL``.
+
+    When only ``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}`` are set, also set
+    ``MERGECRAFT_AGENTS_SDK_MODEL`` to a ``provider/model-id`` slug (for example
+    ``custom/my-model``).
     """
     if model and base_url and (api_key or api_key_env):
         key = api_key or (_read_key(api_key_env or "") or "")
@@ -83,9 +102,17 @@ def resolve_model_config(
             return AgentsSdkModelConfig(
                 model=slug,
                 base_url=resolved_base.rstrip("/"),
-                api_key_env=f"LLM_PROVIDER_{provider_id}_API_KEY",
+                api_key_env=_api_key_env_for_provider_id(provider_id),
                 api_key=key,
             )
+
+    if _custom_provider_env_pair_set():
+        msg = (
+            f"{CUSTOM_PROVIDER_API_KEY_ENV} and {CUSTOM_PROVIDER_BASE_URL_ENV} are set; "
+            "also set MERGECRAFT_AGENTS_SDK_MODEL to a provider/model slug "
+            "(for example custom/my-model)."
+        )
+        raise ValueError(msg)
 
     openai_key = api_key or _read_key(api_key_env or "OPENAI_API_KEY")
     if openai_key:
@@ -109,7 +136,8 @@ def resolve_model_config(
 
     msg = (
         "No model credentials found. Set OPENAI_API_KEY, OPENCODE_GO_API_KEY, "
-        "MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}, or pass api_key explicitly."
+        f"{CUSTOM_PROVIDER_API_KEY_ENV} and {CUSTOM_PROVIDER_BASE_URL_ENV} "
+        "(with MERGECRAFT_AGENTS_SDK_MODEL), or pass api_key explicitly."
     )
     raise ValueError(msg)
 

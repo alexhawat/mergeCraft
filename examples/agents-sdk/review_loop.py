@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import os
 import sys
 from pathlib import Path
@@ -15,11 +16,19 @@ ALLOWED = frozenset({"src/demo.py"})
 
 
 def _ensure_agents_extra() -> None:
-    try:
-        import agents  # noqa: F401
-    except ImportError:
-        print("Install the optional extra: uv sync --extra agents", file=sys.stderr)
-        raise SystemExit(2) from None
+    if importlib.util.find_spec("agents") is None:
+        sys.stderr.write("Install the optional extra: uv sync --extra agents\n")
+        raise SystemExit(2)
+
+
+def _has_model_credentials() -> bool:
+    if os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENCODE_GO_API_KEY"):
+        return True
+    custom_key = os.environ.get("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", "").strip()
+    custom_base = os.environ.get("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "").strip()
+    if custom_key and custom_base:
+        return bool(os.environ.get("MERGECRAFT_AGENTS_SDK_MODEL", "").strip())
+    return False
 
 
 async def _apply_fixes(report: object) -> None:
@@ -48,12 +57,11 @@ async def main() -> int:
     )
     from mergecraft.agents_sdk.types import ReviewFindingsReport
 
-    if not (
-        os.environ.get("OPENAI_API_KEY")
-        or os.environ.get("OPENCODE_GO_API_KEY")
-        or os.environ.get("MERGECRAFT_CUSTOM_PROVIDER_API_KEY")
-    ):
-        print("Set OPENAI_API_KEY or OPENCODE_GO_API_KEY", file=sys.stderr)
+    if not _has_model_credentials():
+        sys.stderr.write(
+            "Set OPENAI_API_KEY, OPENCODE_GO_API_KEY, or "
+            "MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL} with MERGECRAFT_AGENTS_SDK_MODEL\n"
+        )
         return 2
 
     config = resolve_model_config(
@@ -70,8 +78,8 @@ async def main() -> int:
         result = await Runner.run(
             agent,
             input=(
-                "Review the workspace change. Call review_change with dry_run=true "
-                "to materialize the diff, then return findings for src/demo.py."
+                "Review the workspace change. Call get_workspace_change to load file "
+                "contents, then return findings for src/demo.py."
             ),
         )
         output = result.final_output
@@ -85,8 +93,8 @@ async def main() -> int:
         allowed_paths=ALLOWED,
         max_rounds=int(os.environ.get("MERGECRAFT_AGENTS_SDK_MAX_ROUNDS", "3")),
     )
-    print(f"rounds={loop_result.rounds}")
-    print(loop_result.final_report.model_dump_json(indent=2))
+    sys.stdout.write(f"rounds={loop_result.rounds}\n")
+    sys.stdout.write(f"{loop_result.final_report.model_dump_json(indent=2)}\n")
     return 0 if not loop_result.final_report.blocking_findings() else 1
 
 

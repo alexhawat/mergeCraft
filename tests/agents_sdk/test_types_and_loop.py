@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 
-from mergecraft.agents_sdk.loop import run_review_loop
+pytest.importorskip("agents")
+
+from mergecraft.agents_sdk.agent import review_agent
+from mergecraft.agents_sdk.loop import review_agent_as_tool, run_review_loop
+from mergecraft.agents_sdk.model import AgentsSdkModelConfig
 from mergecraft.agents_sdk.types import ReviewFinding, ReviewFindingsReport
 
 
@@ -80,3 +87,49 @@ async def test_run_review_loop_respects_max_rounds_with_fixes() -> None:
     assert result.rounds == 2
     assert rounds_seen == 1
     assert result.final_report.blocking_findings()
+
+
+@pytest.mark.asyncio
+async def test_review_agent_as_tool_returns_structured_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agents import Runner
+
+    config = AgentsSdkModelConfig(
+        model="gpt-4o-mini",
+        base_url=None,
+        api_key_env="OPENAI_API_KEY",
+        api_key="dummy",
+    )
+    agent = review_agent(
+        repo_root=Path("examples/agents-sdk/workspace"),
+        model_config=config,
+        allowed_paths=frozenset({"src/demo.py"}),
+    )
+    tool = review_agent_as_tool(agent)
+
+    async def fake_run(_agent: object, input: str, **kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            final_output=ReviewFindingsReport(
+                findings=[
+                    ReviewFinding(
+                        severity="Minor",
+                        file="src/demo.py",
+                        message="ok",
+                    )
+                ]
+            )
+        )
+
+    monkeypatch.setattr(Runner, "run", fake_run)
+    from agents.tool import ToolContext
+
+    ctx = ToolContext(
+        context=None,
+        tool_call_id="1",
+        tool_name="mergecraft_review",
+        tool_arguments="{}",
+    )
+    report = await tool.on_invoke_tool(ctx, "{}")
+    assert isinstance(report, ReviewFindingsReport)
+    assert report.findings[0].file == "src/demo.py"

@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mergecraft.findings.severity import BLOCKING_SEVERITIES
 from mergecraft.review_taxonomy import FINDING_SEVERITIES
 
 ReviewSeverity = Literal["Critical", "Major", "Minor", "Trivial"]
@@ -37,8 +38,7 @@ class ReviewFindingsReport(BaseModel):
 
     def blocking_findings(self) -> list[ReviewFinding]:
         """Findings at Major severity or above (mergeCraft gate convention)."""
-        blocking = {"Critical", "Major"}
-        return [row for row in self.findings if row.severity in blocking]
+        return [row for row in self.findings if row.severity in BLOCKING_SEVERITIES]
 
 
 __all__ = ["ReviewFinding", "ReviewFindingsReport", "ReviewSeverity"]

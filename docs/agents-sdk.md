@@ -58,19 +58,24 @@ Structured findings use ``ReviewFinding``: ``severity``, ``file``, ``line``,
 
 1. Explicit ``model`` + ``base_url`` + ``api_key`` arguments.
 2. Registry / ``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}`` via
-   ``mergecraft.agents.openai_compatible_gateways.resolve_gateway_endpoint``.
+   ``resolve_gateway_endpoint`` when ``MERGECRAFT_AGENTS_SDK_MODEL`` (or an explicit
+   ``model=`` argument) is a ``provider/model-id`` slug.
 3. ``OPENAI_API_KEY`` (default model ``gpt-4o-mini``).
 4. ``OPENCODE_GO_API_KEY`` with OpenCode Zen ``https://opencode.ai/zen/v1`` and
    ``opencode-go/deepseek-v4.1-flash``.
 
-Override the slug with ``MERGECRAFT_AGENTS_SDK_MODEL=provider/model-id``.
+Override the slug with ``MERGECRAFT_AGENTS_SDK_MODEL=provider/model-id``. If only the
+custom provider env pair is set, ``MERGECRAFT_AGENTS_SDK_MODEL`` is required (for example
+``custom/my-model``).
 
 ## Tools: MCP vs function wrappers
 
 The default ``review_agent`` exposes **in-process function tools** that call the
-same handlers as the public MCP server (`review_change`, `get_capabilities`,
-``get_policy``). This avoids spawning ``mergecraft mcp serve`` on stdio, works
-when the CLI is not on ``PATH``, and keeps mergeCraft tracing spans in-process.
+same handlers as the public MCP server. Call ``get_workspace_change`` first to load
+diff text and file contents for grounding; ``review_change``, ``get_capabilities``,
+and ``get_policy`` wrap the public MCP tools. This avoids spawning
+``mergecraft mcp serve`` on stdio, works when the CLI is not on ``PATH``, and keeps
+mergeCraft tracing spans in-process.
 
 For hosts that prefer subprocess MCP, use
 ``mergecraft.agents_sdk.mcp_stdio.mergecraft_public_mcp_stdio_server()`` with
@@ -80,8 +85,10 @@ For hosts that prefer subprocess MCP, use
 ## Guardrails and tracing
 
 ``review_agent`` registers an output guardrail that blocks findings outside the
-``allowed_paths`` change set or containing secret-like strings (pattern + redaction
-parity with ``mergecraft.analyzers.redact``).
+``allowed_paths`` change set or containing secret-like strings in ``message`` /
+``suggested_fix`` (word-bounded patterns aligned with ``mergecraft.analyzers.redact``).
+Report ``summary`` fields are scanned and redacted the same way instead of passing
+secrets through unchanged.
 
 When mergeCraft tracing is enabled (``MERGECRAFT_TRACING`` / ``docs/TRACING.md``),
 tool spans emit through the existing tracer and ``attach_trace_context`` bridges

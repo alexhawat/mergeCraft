@@ -14,4 +14,4 @@ async def test_get_capabilities_tool_wires_public_mcp(tmp_path: Path) -> None:
     ctx = tool_context_for_workspace(tmp_path)
     payload = await call_public_tool(ctx, "get_capabilities")
     assert "error" not in payload
-    assert "allowed" in payload or "capabilities" in payload or payload
+    assert "capabilities" in payload or "allowed" in payload
