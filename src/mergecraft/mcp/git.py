@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -211,12 +212,31 @@ def _parse_show_rev_path(args: list[str]) -> tuple[str, str] | None:
     return None
 
 
-def _git_show_cache_key(rev: str, path: str) -> str:
-    return f"{rev}\0{path}"
+def _git_show_cache_identity(
+    *, cwd: str, global_opts: list[str], args: list[str]
+) -> tuple[str, str] | None:
+    """Cache only a single unformatted blob, resolved in the selected repository.
+
+    Resolve symbolic refs on every call and read that exact object afterwards:
+    a ref moving between lookup and execution cannot poison its cache entry.
+    Multi-object and option-bearing shows retain Git's ordinary semantics.
+    """
+    if len(args) != 1:
+        return None
+    object_id = _run_git(
+        [*global_opts, "rev-parse", "--verify", "--end-of-options", args[0]], cwd=cwd
+    ).strip()
+    if not re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", object_id):
+        return None
+    kind = _run_git([*global_opts, "cat-file", "-t", object_id], cwd=cwd).strip()
+    if kind != "blob":
+        return None
+    key = json.dumps([str(Path(cwd).resolve()), global_opts, args, object_id])
+    return key, object_id
 
 
-def _git_show_output_path(temp: str, rev: str, path: str) -> str:
-    digest = hashlib.sha256(_git_show_cache_key(rev, path).encode()).hexdigest()[:16]
+def _git_show_output_path(temp: str, identity: str) -> str:
+    digest = hashlib.sha256(identity.encode()).hexdigest()[:16]
     return str(Path(temp) / f"git-show-{digest}.txt")
 
 
@@ -685,16 +705,23 @@ def git_tool(ctx: ToolContext):
         tmpdir = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
         _validate_git_invocation(command, args, global_opts, cwd, tmpdir=tmpdir)
         show_target = _parse_show_rev_path(args) if command == "show" else None
+        cache_key: str | None = None
+        run_args = args
         if show_target is not None:
-            rev, file_path = show_target
-            cache_key = _git_show_cache_key(rev, file_path)
-            cached_path = ctx.tool_state.git_show_cache.get(cache_key)
-            if cached_path and Path(cached_path).is_file():
-                return {
-                    "output": _git_show_preview(cached_path),
-                    "outputPath": cached_path,
-                    "cached": True,
-                }
+            try:
+                identity = _git_show_cache_identity(cwd=cwd, global_opts=global_opts, args=args)
+            except RuntimeError as err:
+                raise RuntimeError(redact_secrets(str(err))) from err
+            if identity is not None:
+                cache_key, object_id = identity
+                run_args = [object_id]
+                cached_path = ctx.tool_state.git_show_cache.get(cache_key)
+                if cached_path and Path(cached_path).is_file():
+                    return {
+                        "output": _git_show_preview(cached_path),
+                        "outputPath": cached_path,
+                        "cached": True,
+                    }
         context_dropped = False
         matched = True
         merge_base_found = True
@@ -706,16 +733,15 @@ def git_tool(ctx: ToolContext):
             elif command == "merge-base":
                 output, merge_base_found = _run_merge_base([*global_opts, command, *args], cwd=cwd)
             else:
-                output = _run_git([*global_opts, command, *args], cwd=cwd)
+                output = _run_git([*global_opts, command, *run_args], cwd=cwd)
         except RuntimeError as err:
             raise RuntimeError(redact_secrets(str(err))) from err
         if show_target is not None:
-            rev, file_path = show_target
-            cache_key = _git_show_cache_key(rev, file_path)
             temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
-            path = _git_show_output_path(temp, rev, file_path)
+            path = _git_show_output_path(temp, cache_key or uuid.uuid4().hex)
             Path(path).write_text(output, encoding="utf-8")
-            ctx.tool_state.git_show_cache[cache_key] = path
+            if cache_key is not None:
+                ctx.tool_state.git_show_cache[cache_key] = path
             return {
                 "output": _git_show_preview(path),
                 "outputPath": path,
