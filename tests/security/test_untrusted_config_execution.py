@@ -274,7 +274,10 @@ async def test_trusted_source_still_executes_scripts(
         event_name="pull_request",
         event_payload={
             "action": "opened",
-            "pull_request": {"head": {"sha": "abc", "repo": {"fork": False}}},
+            "pull_request": {
+                "head": {"sha": "abc", "repo": {"id": 42, "fork": False}},
+                "base": {"repo": {"id": 42}},
+            },
         },
         env={"INPUT_SHELL": "restricted", "INPUT_PUSH": "restricted"},
     )
@@ -292,7 +295,14 @@ def test_action_path_behaviour_unchanged(monkeypatch: pytest.MonkeyPatch) -> Non
     assert tier == "trusted"
 
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
-    tier = derive_trust_tier(event={"pull_request": {"head": {"repo": {"fork": False}}}})
+    tier = derive_trust_tier(
+        event={
+            "pull_request": {
+                "head": {"repo": {"id": 42, "fork": False}},
+                "base": {"repo": {"id": 42}},
+            }
+        }
+    )
     assert tier == "untrusted"
 
 

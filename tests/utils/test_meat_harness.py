@@ -205,7 +205,8 @@ def _event_for(trust: str) -> dict[str, Any] | None:
         # same-repo PR head — derive_trust_tier returns 'trusted'
         return {
             "pull_request": {
-                "head": {"repo": {"fork": False}},
+                "head": {"repo": {"id": 42, "fork": False}},
+                "base": {"repo": {"id": 42}},
             },
         }
     if trust == "untrusted":

@@ -14,7 +14,10 @@ from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
 
 SAME_REPO_EVENT: dict[str, Any] = {
-    "pull_request": {"head": {"repo": {"fork": False, "full_name": "acme/demo"}}}
+    "pull_request": {
+        "head": {"repo": {"fork": False, "full_name": "acme/demo"}},
+        "base": {"repo": {"full_name": "acme/demo"}},
+    }
 }
 FORK_EVENT: dict[str, Any] = {
     "pull_request": {"head": {"repo": {"fork": True, "full_name": "fork/demo"}}}
@@ -38,7 +41,12 @@ def test_default_resolved_trust_policy_is_off(tmp_path: Path) -> None:
     config.write_text("analyzers:\n  enabled: true\n", encoding="utf-8")
 
     policy = _resolve_policy(
-        event={"pull_request": {"head": {"repo": {"fork": False}}}},
+        event={
+            "pull_request": {
+                "head": {"repo": {"id": 42, "fork": False}},
+                "base": {"repo": {"id": 42}},
+            }
+        },
         config_root=tmp_path,
         event_name="pull_request_target",
     )
@@ -89,7 +97,12 @@ def test_trust_levels_resolve_documented_pairs(
     config.write_text(_trust_config_yaml(level), encoding="utf-8")
 
     policy = _resolve_policy(
-        event={"pull_request": {"head": {"repo": {"fork": False}}}},
+        event={
+            "pull_request": {
+                "head": {"repo": {"id": 42, "fork": False}},
+                "base": {"repo": {"id": 42}},
+            }
+        },
         config_root=tmp_path,
         event_name="pull_request_target",
     )
@@ -209,7 +222,12 @@ def test_pr_head_trust_edit_does_not_change_effective_policy(tmp_path: Path) -> 
     head_config.write_text(_trust_config_yaml("full"), encoding="utf-8")
 
     policy = _resolve_policy(
-        event={"pull_request": {"head": {"repo": {"fork": False}}}},
+        event={
+            "pull_request": {
+                "head": {"repo": {"id": 42, "fork": False}},
+                "base": {"repo": {"id": 42}},
+            }
+        },
         config_root=base,
         event_name="pull_request_target",
         settings_snapshot=snapshot,

