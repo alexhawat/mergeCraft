@@ -1409,7 +1409,10 @@ request cannot write; `requirements` is author-traceable, not independent:
   commit from a trusted GitHub App (`github-actions` is refused) or a bounded
   `policy-evidence.json` uploaded for that commit by a successful run of the
   declared workflow file, from this repository (never a fork), when the pull
-  request does not change that file.
+  request does not change that file. That is judged on the unfiltered change
+  set and fails closed: an edit hidden by `ignorePaths` or sent without a patch
+  still counts as a change, and a truncated or unreadable change set could not
+  be verified, so no artifact counts.
 
 Producers run only when a triggered rule requires evidence. The row lists each
 present key with its source and names every missing key with the reason it is

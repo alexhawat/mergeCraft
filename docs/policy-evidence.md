@@ -120,12 +120,13 @@ only when all of the following hold:
   `path` are ignored;
 - the pull request does not change that workflow file. A `pull_request` run
   executes the pull request's own copy of the workflow, so a diff that edits it
-  could make it upload anything; such a diff voids the artifact;
-- the workflow's unchanged status is verifiable. If its changed path was ignored
-  by `review.ignorePaths` or the `ignore_paths` Action input, or its patch was
-  unavailable, the artifact is refused before any workflow or artifact API call.
-  A truncated files listing or an absent/unreadable diff also keeps the evidence
-  key absent, because the workflow might have changed outside the delivered diff;
+  could make it upload anything; such a diff voids the artifact. This is judged
+  on the full, unfiltered change set, and it fails closed: an edit that
+  `review.ignorePaths` or the `ignore_paths` input kept out of the review diff,
+  or one GitHub sent no reviewable patch for, still voids the artifact. If the
+  file listing was truncated, or the diff is missing or unreadable, whether the
+  workflow changed could not be verified, so no artifact counts. This check runs
+  before any workflow or artifact API call;
 - the run's `head_repository` is the reviewed repository. A fork's run, and a run
   whose head repository is not reported, never count;
 - the run completed with `success` and is bound to the head commit.
