@@ -191,7 +191,8 @@ comment can still carry tool directives for linters, coverage or code
 generators; a directive-word list (`fallthrough`, `fall`, `Output`, `nolint`,
 `NOLINTNEXTLINE`, `istanbul`, `IWYU`, `noinspection`, `ReSharper`, `detekt`,
 `pragma`, `build`, `Code`, …) refuses the
-known ones on a best-effort basis). A mixed diff matches nothing and gets a
+known ones on a best-effort basis. A renamed or copied file is never recognised as
+comment-only or whitespace-only, because the path itself carries meaning. A mixed diff matches nothing and gets a
 full review. `skipLlm` opts each
 recognizer in; a pin bump also needs every `pinBump.requireChecks` check to have
 passed on the head SHA **from a GitHub App named in

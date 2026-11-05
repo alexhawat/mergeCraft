@@ -523,7 +523,7 @@ async def publish_deterministic_record(
         analyzer_summary=analyzer_run.pre_merge_summary if analyzer_run is not None else None,
         # The accepted summary already lives in the formal review body; a lite run
         # has no formal review body, so its single call's summary is the record's.
-        agent_summary=getattr(tool_state.lite_review, "summary", None),
+        agent_summary=_lite_record_summary(tool_state.lite_review),
         trust_tier=resolved_ctx.trust_tier,
         attempt_count=len(tool_state.usage_entries) if tool_state.usage_entries else None,
         token_summary=_token_summary(
@@ -2188,6 +2188,20 @@ def _lite_finding_rows(outcome: LiteOutcome) -> list[dict[str, Any]]:
         }
         for item in outcome.findings
     ]
+
+
+def _lite_record_summary(outcome: LiteOutcome | None) -> str | None:
+    """The lite model's summary for the deterministic record, with record markers stripped.
+
+    The full-review path strips forged or stale deterministic-record markers from
+    agent prose before it is rendered; a lite summary is model output too.
+    """
+    from mergecraft.findings.ledger import _strip_deterministic_record_markers
+
+    summary = getattr(outcome, "summary", None)
+    if not summary:
+        return None
+    return _strip_deterministic_record_markers(str(summary)) or None
 
 
 def _lite_completion_conclusion(

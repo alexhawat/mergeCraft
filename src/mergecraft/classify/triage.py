@@ -370,12 +370,25 @@ def _blocks(hunk: _Hunk) -> list[tuple[list[str], list[str]]]:
     return blocks
 
 
+def _renamed_or_copied(file: _File) -> bool:
+    """A rename or copy is never a mechanical edit: the path itself carries meaning.
+
+    ``src/foo.ts`` → ``src/foo.d.ts`` stops emitting JS, ``foo.c`` → ``foo.cpp``
+    changes the compiler dialect and Go runs ``init`` in lexical filename order,
+    so a renamed or copied file (``previous_path`` differs) refuses the recognizers
+    that promise "no runtime change", whatever its hunks contain.
+    """
+    return bool(file.previous_path) and file.previous_path != file.path
+
+
 def recognize_whitespace_only(diff_text: str) -> bool:
     """Every change block is the same tokens before and after, differing only in whitespace."""
     files = _parse(diff_text)
     if not _changeable(files):
         return False
     for file in files:
+        if _renamed_or_copied(file):
+            return False
         lowered = file.path.lower()
         if lowered.endswith(_WHITESPACE_INELIGIBLE_SUFFIXES):
             return False
@@ -597,6 +610,8 @@ def recognize_comment_only(diff_text: str, *, head_files: Mapping[str, str]) -> 
     if not _changeable(files):
         return False
     for file in files:
+        if _renamed_or_copied(file):
+            return False
         if not file.path.lower().endswith(COMMENT_ONLY_SUFFIXES):
             return False
         head_text = head_files.get(file.path)
