@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from itertools import permutations
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -195,3 +196,67 @@ async def test_concurrent_overlapping_runs_do_not_lose_findings(
 
     fingerprints = await _retained_fingerprints(ctx)
     assert {"fp-a", "fp-b"} <= fingerprints
+
+
+def test_overlapping_scopes_preserve_strongest_occurrence_in_every_order(tmp_path: Path) -> None:
+    from mergecraft.agents.gates import decide_approval
+    from mergecraft.analyzers.finding import Finding
+    from mergecraft.mcp.analyzers import _store_run_state
+    from mergecraft.mcp.tool_state import analyzer_run_key
+
+    states = []
+    for index, severity in enumerate(["Minor", "Major", "Minor"]):
+        row = _row("shared", severity)
+        row["evidence"] = [f"scope-{index}"]
+        key = analyzer_run_key(
+            repo_root=tmp_path,
+            changed_files=["bug.py", f"scope-{index}.py"],
+            tier="trusted",
+            shell="restricted",
+            mode="auto",
+            inline_budget=10,
+            offline=True,
+            base_ref="base",
+            diff_text="diff",
+        )
+        states.append(
+            AnalyzerRunState(
+                ran=True,
+                key=key,
+                covered_scope=key,
+                findings=[row],
+                inline=[{"finding": row, "inlineBody": severity, "path": "bug.py", "line": 10}],
+                deferred_findings=[
+                    {
+                        "fingerprint": "shared",
+                        "severity": severity,
+                        "path": "bug.py",
+                        "line": 10,
+                        "body": "same defect",
+                    }
+                ],
+            )
+        )
+    reference = None
+    for ordering in permutations(states):
+        ctx = _ctx(tmp_path)
+        for state in ordering:
+            _store_run_state(ctx, state)
+        result = ctx.tool_state.analyzer_run
+        assert result is not None
+        assert [row["severity"] for row in result.findings] == ["Major"]
+        assert result.findings[0]["evidence"] == ["scope-0", "scope-1", "scope-2"]
+        assert result.inline[0]["finding"]["severity"] == "Major"
+        assert result.inline[0]["inlineBody"] == "Major"
+        assert result.deferred_findings[0]["severity"] == "Major"
+        assert (
+            decide_approval(
+                [Finding.model_validate(row) for row in result.findings],
+                run_succeeded=True,
+                tier="trusted",
+            )
+            == "failure"
+        )
+        output = (result.findings, result.inline, result.deferred_findings)
+        assert reference is None or output == reference
+        reference = output
