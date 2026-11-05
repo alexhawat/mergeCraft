@@ -41,8 +41,7 @@ def _extract_agent_from_create(payload: dict[str, Any]) -> dict[str, Any]:
 class CursorCloudClient:
     """Async client for Cursor Cloud Agents (``create_cloud_agent``, ``get_run``, ``list_artifacts``)."""
 
-    def __init__(self, *, api_key: str, **kwargs: object) -> None:
-        _ = kwargs
+    def __init__(self, *, api_key: str) -> None:
         self._api_key = api_key.strip()
         self._agent_id: str | None = None
         self._run_id: str | None = None

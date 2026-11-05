@@ -33,7 +33,7 @@ async def test_cursor_harness_launches_cloud_agent_and_parses_agent_result(
     calls: list[tuple[str, dict[str, Any]]] = []
 
     class _FakeCloudClient:
-        def __init__(self, *, api_key: str, **kwargs: object) -> None:
+        def __init__(self, *, api_key: str) -> None:
             calls.append(("init", {"api_key": api_key}))
 
         async def create_cloud_agent(self, **payload: object) -> dict[str, str]:
