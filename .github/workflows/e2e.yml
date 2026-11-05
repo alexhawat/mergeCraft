@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Action-image E2E gate + compatibility matrix (W11 / #3 / #36 / D6).
 #
-# PR job: build the production image from the PR, docker-run the Action against
+# PR job (called by CI): build the production image from the PR, docker-run the Action against
 # fixture event payloads with a fake provider CLI shim (no live LLMs), assert
 # structured result + check-run shape, then run the W4 adversarial suite
 # inside the built image (the real containment boundary).
@@ -12,8 +12,6 @@
 name: E2E
 
 on:
-  pull_request:
-    branches: [main, pre-0.0.1]
   schedule:
     # Nightly broad + live-provider slice (UTC).
     - cron: "17 5 * * *"
