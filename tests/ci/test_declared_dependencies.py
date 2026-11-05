@@ -34,6 +34,12 @@ _ALLOWLISTED_RUNTIME: Final[dict[str, str]] = {
     ),
 }
 
+# Top-level import roots that ship only under an optional extra (PyPI name).
+_OPTIONAL_EXTRA_IMPORT_ROOTS: Final[dict[str, str]] = {
+    "agents": "openai-agents",
+    "openai": "openai",
+}
+
 _NAME_SPLIT: Final = re.compile(r"[<>=!~\[; ]")
 _REQUIREMENT: Final = re.compile(
     r"^(?P<name>[A-Za-z0-9._-]+)(?P<extras>\[[^\]]*\])?\s*(?P<spec>.*)$"
@@ -97,6 +103,9 @@ def _resolves(root: str, mapping: dict[str, list[str]], declared: set[str]) -> b
     # An optional extra that is not installed has no metadata to map through;
     # fall back to the distribution name the module ships under.
     normalized = _normalize(root)
+    extra_dist = _OPTIONAL_EXTRA_IMPORT_ROOTS.get(root)
+    if extra_dist is not None and _normalize(extra_dist) in declared:
+        return True
     return normalized in declared or any(name.startswith(f"{normalized}-") for name in declared)
 
 

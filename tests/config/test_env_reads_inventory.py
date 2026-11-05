@@ -160,6 +160,7 @@ IN_SCOPE: Final[tuple[InScope, ...]] = (
     InScope("MERGECRAFT_CODEX_HOME_PARENT", "PS6", "AgentRuntimeEnv"),
     InScope("MERGECRAFT_CODEX_AUTH_EXPORT", "PS6", "AgentRuntimeEnv"),
     InScope("MERGECRAFT_MODEL", "PS6", "AgentRuntimeEnv"),
+    InScope("MERGECRAFT_AGENTS_SDK_MODEL", "PS6", "AgentRuntimeEnv"),
     InScope("MERGECRAFT_AGENT", "PS6", "AgentRuntimeEnv"),
     InScope("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", "PS6", "ProviderGatewayEnv"),
     InScope("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", "PS6", "ProviderGatewayEnv"),

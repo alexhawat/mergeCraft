@@ -208,6 +208,7 @@ not part of the operator contract.
 | `MERGECRAFT_LOG_LEVEL` | Loguru level name (`TRACE` through `CRITICAL`) | unset — `INFO`, or `DEBUG` under `ACTIONS_STEP_DEBUG` / `--verbose` | CLI logging |
 | `MERGECRAFT_MAX_DIFF_LINES` | Diff line ceiling before scope reduction is recorded | `50000` | review diff loading |
 | `MERGECRAFT_MODEL` | Model slug override; wins over the config `models:` list | unset — the first configured model | model resolution |
+| `MERGECRAFT_AGENTS_SDK_MODEL` | Default `provider/model` slug for `mergecraft.agents_sdk.review_agent` when using the optional `[agents]` extra | unset — `gpt-4o-mini` with `OPENAI_API_KEY`, or `opencode-go/deepseek-v4.1-flash` with `OPENCODE_GO_API_KEY` | OpenAI Agents SDK integration |
 | `MERGECRAFT_NONINTERACTIVE` | Truthy disables interactive prompts | unset — prompts when stdin is a TTY | CLI interactive commands |
 | `MERGECRAFT_OPENCODE_OTEL_PLUGIN` | Package path or spec of [opencode-plugin-otel-v2](https://github.com/alexhawat/opencode-plugin-otel-v2); when set and tracing exports to `otel` or `logfire`, OpenCode 2.x runs emit per-LLM-step and per-tool spans into the review's trace | unset — not loaded | OpenCode tracing |
 | `MERGECRAFT_OTEL_ENDPOINT` | OTLP/HTTP endpoint for the `otel` tracing sink; setting it implies OTLP when no destination is chosen | unset | tracing sink resolution |
