@@ -120,7 +120,13 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 #   tier (``skip`` / ``full``) the pre-dispatch gate chose, the recognizer behind
 #   a skip, why, and the checks a skip relied on. Both default to ``None``, so a
 #   packet built before this version still validates.
-PACKET_SCHEMA_VERSION = "1.17.0"
+# - 1.18.0 — #1056 adds ``reasons`` and ``checklist`` to ``blast_radius``: coded
+#   lane reasons (a stable dotted ``code``, the ``lane`` it forces after overrides
+#   and the small isolated-source carve-out, a ``message``) and the fixed-order
+#   gates whose ``passed`` is ``true`` / ``false`` / ``null`` (not measured).
+#   Both default to an empty list, so a packet built before this version still
+#   validates.
+PACKET_SCHEMA_VERSION = "1.18.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional

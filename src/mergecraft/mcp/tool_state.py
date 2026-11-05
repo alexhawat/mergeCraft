@@ -527,6 +527,10 @@ class ToolState:
     # time ``submit_review_verdict`` refuses with unread ranges so the second
     # submission is accepted regardless; the nudge is guidance, never a gate.
     diff_coverage_nudge_sent: bool = False
+    # True while the running driver reports its native reads on ``tool_calls``, so
+    # a reviewer told to read the diff can clear an unobserved run by doing it. Set
+    # by the driver, cleared before each chain attempt.
+    driver_reports_reads: bool = False
     # Slice 7 — measured wall time by phase (setup / analyzers / agent / judge /
     # publish). Measurement only: the run record and packet read it, no gate.
     phase_elapsed_s: dict[str, float] = field(default_factory=dict)

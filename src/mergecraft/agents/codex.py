@@ -15,7 +15,11 @@ from typing import TYPE_CHECKING, Any, TypeAlias
 from loguru import logger
 
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_stream
-from mergecraft.agents.activity_watchdog import event_has_model_output, watchdog_for_process
+from mergecraft.agents.activity_watchdog import (
+    event_has_model_output,
+    event_type_name,
+    watchdog_for_process,
+)
 from mergecraft.agents.codex_broker import (
     OPENAI_API_KEY_ENV,
     active_broker_handle,
@@ -977,6 +981,8 @@ def _run_codex_streaming(
     )
     from mergecraft.tracing import resolve_driver_tracer
 
+    # Codex reads through ``command_execution`` items, and every one is recorded.
+    ctx.tool_state.driver_reports_reads = True
     accumulator = StreamSpanAccumulator(agent_name="codex")
     tracer: Tracer | None = None
     try:
@@ -1020,7 +1026,9 @@ def _run_codex_streaming(
     )
 
     def _watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
-        watchdog.touch(model_output=event_has_model_output(event))
+        watchdog.touch(
+            model_output=event_has_model_output(event), event_type=event_type_name(event)
+        )
         handler(acc, event)
 
     try:

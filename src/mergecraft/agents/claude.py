@@ -21,7 +21,11 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_stream
-from mergecraft.agents.activity_watchdog import event_has_model_output, watchdog_for_process
+from mergecraft.agents.activity_watchdog import (
+    event_has_model_output,
+    event_type_name,
+    watchdog_for_process,
+)
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
@@ -1086,7 +1090,9 @@ def _run_claude_once(
     )
 
     def _watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
-        watchdog.touch(model_output=event_has_model_output(event))
+        watchdog.touch(
+            model_output=event_has_model_output(event), event_type=event_type_name(event)
+        )
         handler(acc, event)
 
     try:
