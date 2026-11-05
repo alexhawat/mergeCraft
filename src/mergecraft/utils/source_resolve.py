@@ -529,6 +529,34 @@ def resolve_workspace(spec: SourceResolverSpec) -> ResolvedWorkspace:
     )
 
 
+def _require_local_revision_context(workspace: ResolvedWorkspace, spec: SourceResolverSpec) -> None:
+    """Reject revision patches whose source context is not the local checkout."""
+    if workspace.cloned or spec.staged or spec.unstaged:
+        return
+    target = parse_commit_range(spec.commit_range)[1] if spec.commit_range else spec.head
+    if target is None:
+        return
+    try:
+        current = _run_git(
+            ["rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"],
+            cwd=str(workspace.cwd),
+        ).strip()
+        requested = _run_git(
+            ["rev-parse", "--verify", "--end-of-options", f"{target}^{{commit}}"],
+            cwd=str(workspace.cwd),
+        ).strip()
+        dirty = _run_git(
+            ["status", "--porcelain=v1", "--untracked-files=normal"], cwd=str(workspace.cwd)
+        ).strip()
+    except RuntimeError as exc:
+        raise SourceResolveError("cannot resolve the requested local revision") from exc
+    if current != requested or dirty:
+        raise SourceResolveError(
+            "explicit local --head/--range requires a clean checkout at the requested head; "
+            "select a clean checkout or Git worktree with --cwd/--repo"
+        )
+
+
 def materialize_resolved_diff(
     workspace: ResolvedWorkspace,
     *,
@@ -552,6 +580,7 @@ def materialize_resolved_diff(
             git_dir=workspace.git_common_dir,
         )
 
+    _require_local_revision_context(workspace, spec)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "review.diff"
     base_ref: str | None = None

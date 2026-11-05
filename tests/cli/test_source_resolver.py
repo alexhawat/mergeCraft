@@ -273,8 +273,8 @@ def test_head_does_not_checkout_local_branch(tmp_path: Path) -> None:
         invocation_root=tmp_path,
     )
     workspace = resolve(spec)
-    result = materialize(workspace, spec=spec, out_dir=tmp_path / "no-checkout-out")
-    assert "head.txt" in result.path.read_text(encoding="utf-8")
+    with pytest.raises(ValueError, match="clean checkout"):
+        materialize(workspace, spec=spec, out_dir=tmp_path / "no-checkout-out")
 
     after = subprocess.run(
         ["git", "branch", "--show-current"],
@@ -293,7 +293,6 @@ def test_head_and_base_refs_select_the_diff(tmp_path: Path) -> None:
     (repo / "head.txt").write_text("head change\n", encoding="utf-8")
     _git(repo, "add", "head.txt")
     _git(repo, "commit", "-m", "feature commit")
-    _git(repo, "checkout", "main")
 
     spec_cls = _spec_cls()
     resolve = _resolve_workspace()

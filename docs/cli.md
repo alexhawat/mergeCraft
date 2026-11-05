@@ -13,6 +13,11 @@ settings, resolved revisions, and tracked/nonignored source contents match.
 Gitignored artifacts are outside this source fingerprint. Workspaces without a
 reliable Git identity, submodules, external symlinks, unreadable source, or source
 larger than 10,000 files / 64 MiB run normally with result caching skipped.
+For a local `review --head REF` or `--range BASE..HEAD`, select a clean checkout
+at the requested head with `--cwd` or `--repo`. A mismatched revision, staged or
+unstaged tracked edit, or nonignored untracked file is a configuration error
+(exit 30). mergeCraft leaves your checkout unchanged; a separate Git worktree
+can supply another revision. Gitignored artifacts do not make a checkout dirty.
 
 <!-- BEGIN:cli-commands -->
 | Command | Description |
