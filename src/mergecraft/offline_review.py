@@ -423,6 +423,10 @@ async def run_offline_diff_review(
         return _offline_failure(error=str(exc), outcome=_offline_error_outcome(exc))
 
     cwd = workspace.cwd
+    if engine is not None:
+        engine.snapshot = engine.snapshot.model_copy(
+            update={"source": workspace.source_identity or str(cwd)}
+        )
     cloned = workspace.cloned or cloned
     try:
         from mergecraft.cli.config_surface_cmd import validate_repo_config_or_raise
@@ -439,7 +443,7 @@ async def run_offline_diff_review(
             cwd=cwd, review_root=review_root, trust_override=trust_override, cloned=cloned
         )
     ):
-        return await _run_offline_diff_review(
+        result = await _run_offline_diff_review(
             cwd=cwd,
             base=base,
             diff_file=diff_file,
@@ -462,6 +466,9 @@ async def run_offline_diff_review(
             with_coverage=with_coverage,
             with_mutation=with_mutation,
         )
+        result.source_root = cwd
+        result.persistence_root = spec.cwd.resolve() if workspace.cloned else cwd
+        return result
 
 
 def _offline_review_context(

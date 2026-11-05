@@ -18,6 +18,11 @@ at the requested head with `--cwd` or `--repo`. A mismatched revision, staged or
 unstaged tracked edit, or nonignored untracked file is a configuration error
 (exit 30). mergeCraft leaves your checkout unchanged; a separate Git worktree
 can supply another revision. Gitignored artifacts do not make a checkout dirty.
+Local `review --repo PATH` stores completed reviews in that repository's
+`.mergecraft/reviews/`. For a remote `--repo`, durable reviews stay under
+`--cwd` (the invocation directory by default), while their snapshot names the
+remote URL and resolved commit. Manifests and evidence use the acquired source
+checkout in both cases. Explicit output destinations remain invocation-relative.
 
 <!-- BEGIN:cli-commands -->
 | Command | Description |

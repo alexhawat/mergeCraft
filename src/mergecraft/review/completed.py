@@ -124,6 +124,7 @@ def persist_offline_review(
     evidence_packet_path: str | None = None,
     trace_dir: Path | None = None,
     agent_id: str = "mergecraft",
+    source_root: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Persist an offline review and return serialized finding rows."""
     from mergecraft.evidence.run_manifest import build_run_manifest
@@ -132,8 +133,9 @@ def persist_offline_review(
         collect_trace_events_for_review,
     )
 
+    reviewed_root = source_root or repo_root
     manifest = build_run_manifest(
-        cwd=repo_root,
+        cwd=reviewed_root,
         model=model,
         agent_id=agent_id,
         prompt_text=prompt or "",
@@ -148,7 +150,7 @@ def persist_offline_review(
     )
     evidence_packets = collect_evidence_packets_for_persist(
         findings,
-        repo_root=repo_root,
+        repo_root=reviewed_root,
         evidence_packet_path=evidence_packet_path,
     )
     trace_events = collect_trace_events_for_review(

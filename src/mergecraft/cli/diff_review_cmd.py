@@ -183,6 +183,7 @@ def _persist_completed_cli_review(
     findings: Sequence[Finding],
     evidence_packet_path: str | None = None,
     trace_dir: Path | None = None,
+    source_root: Path | None = None,
 ) -> None:
     try:
         persist_offline_review(
@@ -195,6 +196,7 @@ def _persist_completed_cli_review(
             findings=findings,
             evidence_packet_path=evidence_packet_path,
             trace_dir=trace_dir,
+            source_root=source_root,
         )
     except (OSError, ValueError) as exc:
         logger.warning("skipped durable review persistence: {}", exc)
@@ -831,8 +833,9 @@ def run(
             _persist_completed_cli_review(
                 review_id=persist_review_id,
                 trace_session_id=review_id,
-                snapshot=snapshot,
-                cwd=root,
+                snapshot=engine.snapshot,
+                cwd=result.persistence_root or root,
+                source_root=result.source_root,
                 model=model,
                 prompt=prompt,
                 findings=findings,

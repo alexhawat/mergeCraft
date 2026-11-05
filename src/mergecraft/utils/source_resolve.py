@@ -322,6 +322,7 @@ class ResolvedWorkspace:
     git_common_dir: Path | None
     cloned: bool
     temp_dir: Path | None = None
+    source_identity: str | None = None
 
 
 def resolve_auth_token(*, explicit: str | None = None) -> AuthResolution:
@@ -516,6 +517,7 @@ def resolve_workspace(spec: SourceResolverSpec) -> ResolvedWorkspace:
             git_common_dir=resolve_git_common_dir(acquired.path),
             cloned=True,
             temp_dir=temp_dir,
+            source_identity=f"{url}@{_run_git(['rev-parse', 'HEAD'], cwd=str(acquired.path)).strip()}",
         )
 
     local = Path(repo).expanduser().resolve()
