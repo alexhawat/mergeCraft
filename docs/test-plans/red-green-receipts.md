@@ -209,3 +209,4 @@ only with the fix proof.
   The pins drive the collector with the diff already on `ToolState`. The
   implementation must make that true where the receipt is read, either by
   reading it after checkout or by supplying the change set beforehand.
+- `test_the_fork_pr_added_workflow_forgery_never_proves_a_fix` now accepts a `medium` or `high` lane. Its fixture diff edits `.github/workflows/forged.yml`, which part 2 classifies as `paths.deployment` (`high`). The property under test is "never `low`", and the test still requires the `fix.no-receipt` reason itself to be `medium`.

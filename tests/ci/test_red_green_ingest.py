@@ -948,7 +948,11 @@ async def test_the_fork_pr_added_workflow_forgery_never_proves_a_fix(tmp_path: P
     codes = [reason.code for reason in packet.blast_radius.reasons]
     assert "fix.no-receipt" in codes
     assert "fix.proven" not in codes
-    assert packet.blast_radius.lane == "medium"
+    # The fixture edits a workflow, which part 2 classifies as ``paths.deployment``
+    # (``high``); the property under test is that the forgery never yields ``low``.
+    assert packet.blast_radius.lane in {"medium", "high"}
+    fix_reason = next(r for r in packet.blast_radius.reasons if r.code == "fix.no-receipt")
+    assert fix_reason.lane == "medium"
     assert select_rule_id(packet) != "low_risk_passing"
 
 
