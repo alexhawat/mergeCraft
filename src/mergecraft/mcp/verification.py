@@ -391,6 +391,8 @@ def verify_agent_findings_tool(ctx: ToolContext):
             repo_root=repo_root,
             trust_tier=trust,
         )
+        from mergecraft.review.file_group_fanout import carry_file_group_evidence
+
         stored: dict[str, dict[str, Any]] = {}
         for item in ctx.tool_state.agent_findings:
             fingerprint = item.get("fingerprint") if isinstance(item, dict) else None
@@ -413,8 +415,18 @@ def verify_agent_findings_tool(ctx: ToolContext):
             typed = agent_finding_to_finding(finding, rule_id="agent:draft")
             row = typed.model_dump(mode="json")
             row["fingerprint"] = finding.identity()
+            # A re-stored row keeps the file-group stamps an earlier group's
+            # recorded run gave it (the packet's per-group provenance).
+            carry_file_group_evidence(stored.get(str(row["fingerprint"])), row)
             stored[str(row["fingerprint"])] = row
         ctx.tool_state.agent_findings = list(stored.values())
+        # File-group fan-out: remember which group raised these rows so its run
+        # claims them however concurrent groups finish.
+        from mergecraft.review.file_group_fanout import note_file_group_rows
+
+        note_file_group_rows(
+            ctx.tool_state, [str(finding.identity()) for finding in normalized_findings]
+        )
         _emit_finding_stage(
             ctx,
             [

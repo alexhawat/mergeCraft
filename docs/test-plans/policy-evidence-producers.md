@@ -173,7 +173,12 @@ the base declares (`artifact.workflow`, matched against the run's `path`), the p
 does not change that file, the run's `head_repository` is the reviewed repository (never a
 fork), and the run completed with `success` on the head commit. A pull request that adds its
 own workflow, or a fork's run, can upload the right name with a perfect document; neither
-proves anything. The archive's reported size must be known before it is downloaded, and the
+proves anything. "Untouched" is judged on the unfiltered change set — the review diff's
+paths plus `ToolState.ignored_review_paths` (files `review.ignorePaths` or the
+`ignore_paths` input dropped) and `ToolState.coverage.unreviewable_paths` — and fails
+closed: a truncated listing (`coverage.diff_truncated`) or a missing or unreadable diff
+means the change set could not be verified, so no artifact counts. The suite reads this
+set from tool state only; a fresh files-API listing in the producer is not pinned. The archive's reported size must be known before it is downloaded, and the
 document is read with a hard size bound.
 
 | Behaviour | Layer | Test |
@@ -191,6 +196,12 @@ document is read with a hard size bound.
 | A fork run of the declared workflow, another same-repo workflow, a run with no `path`, a run with no `head_repository` ⇒ absent, named | unit | `…::test_an_artifact_from_any_other_run_is_not_evidence[…]` |
 | A diff that edits the declared workflow ⇒ absent, naming the file | unit | `…::test_a_diff_that_edits_the_declared_workflow_voids_its_artifact` |
 | A newer forged run listed beside the operator's run never shadows it | unit | `…::test_the_declared_run_is_chosen_over_a_newer_forged_one` |
+| The declared workflow dropped from the review diff by `review.ignorePaths` (it is in `ToolState.ignored_review_paths`) ⇒ absent, naming the file and the ignore; no download | unit | `tests/policy/test_evidence_artifact_provenance.py::test_an_ignored_edit_to_the_declared_workflow_voids_its_artifact` |
+| The declared workflow in `ToolState.coverage.unreviewable_paths` (no patch from the files API) ⇒ absent, naming the file; no download | unit | `…::test_an_unreviewable_edit_to_the_declared_workflow_voids_its_artifact` |
+| `ToolState.coverage.diff_truncated` ⇒ absent, the reason mentions the truncation; no download | edge | `…::test_a_truncated_change_set_cannot_prove_the_workflow_untouched` |
+| No diff, or a diff that cannot be read ⇒ absent, `could not be verified`; no download | error | `…::test_an_unavailable_change_set_cannot_prove_the_workflow_untouched[no-diff]`, `…[unreadable-diff]` |
+| Control: workflows ignored in review, other files ignored or unreviewable, nothing truncated, declared workflow untouched ⇒ present (guard: green before and after) | unit | `…::test_a_complete_unfiltered_change_set_without_the_workflow_counts` |
+| `docs/policy-evidence.md` names `ignorePaths`, `truncated` and `could not be verified` | doc | `…::test_the_policy_evidence_doc_states_the_fail_closed_change_set_rule` |
 | `size_in_bytes` null, a string or missing ⇒ absent, the reason says the size is unknown, and the archive is never downloaded | edge | `…::test_an_artifact_of_unknown_size_is_never_downloaded[…]` |
 
 ### Declarations come from the operator-owned snapshot, else the base commit

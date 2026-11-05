@@ -113,6 +113,79 @@ published review and run record; it does not change verdict, severity, or dedup.
 cardinality is unchanged: `mergecraft-approval` stays a single hardcoded check
 name because there is only ever one submission.
 
+### File-group fan-out (`review.fileGroupFanout`)
+
+Off by default. On a large diff, mergeCraft can split the changed files into
+bounded read-only groups and dispatch one reviewer per group server-side, after
+the primary reviewer and before the secondary roster. Each group's prompt names
+its own files and the shared diff path, and says that mergeCraft records the
+group's outcome; it carries no roster submit block, and while a group runs the
+`record_reviewer_dispatch_run` and `record_reviewer_dispatch_error` tools
+refuse it, so a group can never stand in for the reviewer whose binding it
+uses. A diff below both thresholds dispatches nothing.
+
+**Which diff.** The selected mode determines the scope. `Review` fans out over
+the full pull request diff even if checkout also produced an incremental diff.
+`IncrementalReview` uses only the incremental diff — what changed since the
+last review. If that diff is empty or its path is absent (including checkout's
+`empty` and `unavailable` statuses), there is no fan-out even on a large pull
+request; it never falls back to the full diff.
+
+**Budget.** The fan-out and the secondary roster draw on the same remaining
+run budget. When the fan-out starts it takes `budgetShare` of the budget left
+(default half), and every group's cap counts against that slice, including
+fractional seconds. Once the slice is exhausted, queued groups are recorded as
+run-health failures without starting another reviewer. There is no one-second
+minimum that can consume the secondary roster's remaining share.
+
+**What you can observe.** The groups run after the primary reviewer has
+submitted and published, so `raised_by` on the posted review never names a
+group. Group findings reach the evidence packet and the checks the way
+secondary roster findings do. When mergeCraft records a group's run under
+`file-group/<group-id>` (`group-1`, `group-2`, …), every finding row that group
+raised gains one packet evidence entry `reviewer: file-group/<group-id>
+(<model>)`. The entry survives re-verification: when a later group records the
+same finding again, the row keeps the earlier group's entry exactly once. A group that fails — missing binding or credential, timeout,
+provider error — is recorded as a reviewer dispatch error plus one run-scoped
+`Minor` row under the packet's `run_health`; it never fails the review, and the
+other groups' findings stand.
+
+**Attribution and `concurrency`.** A row belongs to the group that recorded it.
+mergeCraft knows that group when only one group is in flight, which is always
+the case at the default `concurrency: 1`. With `concurrency` above 1, a
+reviewer's tool calls over the MCP server do not say which group made them, so
+rows are attributed in recording order: the first group whose run is recorded
+after a row was stored claims it. Keep `concurrency: 1` when exact per-group
+attribution matters.
+
+```yaml
+review:
+  fileGroupFanout:
+    enabled: true          # default false
+    maxGroups: 6           # 1..12
+    minFiles: 20           # fan out at >= 20 changed files ...
+    minDiffLines: 800      # ... or at >= 800 added lines
+    binding: reviewer2     # registry agent id; omit to reuse the primary reviewer
+    concurrency: 1         # groups in flight, 1..6; 1 runs them one after another
+    perGroupTimeoutS: 600  # 1..900; also capped by the binding's timeoutS and the fan-out budget
+    budgetShare: 0.5       # share of the remaining run budget the whole fan-out may spend
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Turn the fan-out on. |
+| `maxGroups` | `6` | Most groups per run (`1`–`12`). |
+| `minFiles` | `20` | Changed-file count that triggers the fan-out on its own. |
+| `minDiffLines` | `800` | Added-line count that triggers the fan-out on its own. |
+| `binding` | _(primary reviewer)_ | Registry agent id whose model reviews every group. |
+| `concurrency` | `1` | Groups in flight at once (`1`–`6`). |
+| `perGroupTimeoutS` | `600` | Seconds per group (`1`–`900`), further capped by the binding's `timeoutS` and what is left of the fan-out budget. A binding `timeoutS: 0` is ignored; an exhausted fan-out budget prevents dispatch. |
+| `budgetShare` | `0.5` | Share of the run budget left when the fan-out starts that the whole fan-out may spend (above `0`, at most `0.9`; no minimum duration). The secondary roster keeps the rest. |
+
+Unknown keys under `fileGroupFanout` are rejected. Each group is a full
+provider dispatch, so a fan-out of six groups costs roughly six extra reviewer
+runs.
+
 ## Trust boundary
 
 `.mergecraft/config.yaml` is PR-controlled after `checkout_pr`. The roster is

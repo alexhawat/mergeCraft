@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `review.fileGroupFanout` splits a large pull request into bounded read-only
+  file groups and has mergeCraft dispatch one reviewer per group, so one
+  reviewer does not have to read a 20-file or 800-line diff serially (#1031).
+  It is off by default and pending live validation on a large pull request.
+  When enabled, a diff with at least `minFiles` changed files or
+  `minDiffLines` added lines is split into at most `maxGroups` groups (default
+  6), run one after another unless `concurrency` is raised, each capped at
+  `perGroupTimeoutS` (1–900 seconds); the whole fan-out spends at most
+  `budgetShare` (default 0.5) of the remaining run budget so the secondary
+  roster keeps the rest, and an incremental review fans out over the
+  incremental diff only. The groups run after the primary
+  reviewer has published, so their findings reach the evidence packet and the
+  checks the way secondary roster findings do, not the posted review; each such
+  row's packet evidence names its group (`reviewer: file-group/<group-id>
+  (<model>)`). A failed group is one run-scoped `Minor` row under `run_health`,
+  never a failed review, and a smaller diff keeps the single-reviewer path
+  unchanged. Keys are documented in `docs/agent-roster.md`.
+
+- `review.fastPath.lite` adds a `lite` triage tier for the two cases a skip
+  leaves out: a recognizer that matched but is not in `skipLlm`, and a pin bump
+  whose verifying checks have not passed from a trusted App. Instead of the full
+  agent review, the run makes one non-streaming call to an operator-registered
+  OpenAI-compatible provider with the diff inlined, and posts the findings as a
+  review comment. The `tokenCap` (default 50,000) is checked before the call; a
+  diff over it, a missing credential or an unregistered provider gets the full
+  review, and no diff is truncated. The packet's `triage` section records the
+  cap, the tokens used and the prompt version (schema `1.19.0`). A `lite` run
+  never grants `mergecraft-approval`: the `mergecraft` check is `neutral`, or
+  `failure` on a Critical or Major finding, and usage over the cap or a
+  malformed answer is `inconclusive`. Off by default (#1010).
+
+- A `commentOnly` fast-path recognizer matches diffs that only edit `//` line
+  comments in `.ts .go .java .kt .c .h .cc .cpp .hpp .cs .swift` files. JavaScript
+  (`.js`, which can hold JSX), `.jsx` / `.tsx`, Rust, `Package.swift`, Go
+  `_test.go` files and Go files marked `DO NOT EDIT` are never recognised, and a
+  Java unicode escape or a C-family `??` refuses the file. Each changed line must
+  be `//`, one space and a plain word, and the head-side text proves it is a
+  comment. Non-ASCII text, backticks, raw-string markers, block comments, Swift
+  `#/` regex literals, a quote left open at the end of a line, a removal-only edit and every `#`-comment
+  language are refused. A recognised edit proves no runtime change; comments that
+  carry tool directives (lint, coverage, fallthrough, generator pragmas) are
+  refused on a best-effort word list. Opt in through `skipLlm` like the other recognizers
+  (#1010).
 - A fix pull request now has to prove the fix with a fail-then-pass receipt
   before it can reach the `eligible` lane (#1056). Declare the receipt in
   `ciEvidence.redGreen` (`artifact`, and the `workflow` that uploads it; read
@@ -128,6 +171,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   package `__init__.py` stays `medium`. A generated sibling no longer hides an
   untested source change. The merge evidence packet schema moves to
   `1.18.0`; older packets without the fields still validate and decide as before.
+- Change-scoped findings in the deterministic review record now read
+  `` `path:line` — message `` (they named only the path), so each finding in the
+  record points at the line it is about (#1010).
 
 - The self-review's Codex rung runs in its own job, the only one holding the
   `codex-subscription-auth` concurrency group; OpenCode Go and the Claude backstop run

@@ -367,7 +367,7 @@ class ReviewCoverageSettings(BaseModel):
     )
 
 
-FastPathRecognizer = Literal["pinBump", "prose", "whitespace", "generated"]
+FastPathRecognizer = Literal["pinBump", "prose", "whitespace", "generated", "commentOnly"]
 
 
 class FastPathPinBumpSettings(BaseModel):
@@ -387,6 +387,29 @@ class FastPathPinBumpSettings(BaseModel):
     trusted_check_apps: list[str] = Field(default_factory=list, alias="trustedCheckApps")
 
 
+class FastPathLiteSettings(BaseModel):
+    """``review.fastPath.lite``: one capped LLM call for a matched-but-not-skipped diff.
+
+    Off by default. When ``enabled`` (in the operator's base-side config), a diff a
+    recognizer matched but that is not in ``skipLlm``, or a pin bump whose verifying
+    checks have not passed from a trusted App, gets a single non-streaming
+    ``chat/completions`` call to the operator-registered OpenAI-compatible
+    ``provider`` instead of the full review. ``provider`` is a registry label (or a
+    ``label/model`` slug; ``model`` wins for the model). The cap is checked before
+    the call: an upper-bound prompt estimate plus ``maxOutputTokens`` over
+    ``tokenCap`` downgrades the run to a full review. A ``lite`` run never grants
+    approval.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    enabled: bool = False
+    provider: str = ""
+    model: str = ""
+    token_cap: int = Field(default=50_000, ge=4_000, le=200_000, alias="tokenCap")
+    max_output_tokens: int = Field(default=4_000, ge=1, alias="maxOutputTokens")
+
+
 class FastPathSettings(BaseModel):
     """Deterministic pre-dispatch triage (``review.fastPath``), off by default.
 
@@ -395,7 +418,9 @@ class FastPathSettings(BaseModel):
     run posts the ``mergecraft`` check with the tier stated and leaves approval to a
     human. Anything else, and any doubt, is a full review. A pin bump additionally
     needs every ``pinBump.requireChecks`` check to have passed on the head SHA from a
-    ``pinBump.trustedCheckApps`` GitHub App.
+    ``pinBump.trustedCheckApps`` GitHub App. With ``lite.enabled``, a matched diff that
+    is not opted in (or an unverified pin bump) gets one capped LLM call instead of the
+    full review; see :class:`FastPathLiteSettings`.
     """
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
@@ -405,6 +430,45 @@ class FastPathSettings(BaseModel):
     pin_bump: FastPathPinBumpSettings = Field(
         default_factory=FastPathPinBumpSettings, alias="pinBump"
     )
+    lite: FastPathLiteSettings = Field(default_factory=FastPathLiteSettings)
+
+
+class FileGroupFanoutSettings(BaseModel):
+    """Bounded read-only file-group fan-out on large diffs (``review.fileGroupFanout``).
+
+    Off by default. When ``enabled``, a diff with at least ``min_files`` changed
+    files **or** at least ``min_diff_lines`` added lines is split into at most
+    ``max_groups`` balanced file groups, and mergeCraft dispatches one read-only
+    reviewer per group server-side, after the primary reviewer and before the
+    secondary roster. A failed group is a run-health note, never a failed review.
+
+    Args:
+        enabled: Turn the fan-out on. Default ``False``.
+        max_groups: Upper bound on the group count, ``1``..``12``. Default ``6``.
+        min_diff_lines: Added-line threshold that triggers the fan-out. Default ``800``.
+        min_files: Changed-file threshold that triggers the fan-out. Default ``20``.
+        binding: Registry agent id whose binding reviews each group; ``None``
+            reuses the primary reviewer's binding.
+        concurrency: Groups in flight at once, ``1``..``6``. Default ``1``
+            (sequential).
+        per_group_timeout_s: Seconds one group may run, ``1``..``900``, further
+            capped by the binding's ``timeoutS`` and the remaining run budget; no
+            bound can turn the cap off. Default ``600``.
+        budget_share: Share of the run budget left when the fan-out starts that
+            the whole fan-out may spend (above ``0``, at most ``0.9``; no minimum
+            duration), so the secondary roster keeps the rest. Default ``0.5``.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    enabled: bool = False
+    max_groups: int = Field(default=6, alias="maxGroups", ge=1, le=12)
+    min_diff_lines: int = Field(default=800, alias="minDiffLines")
+    min_files: int = Field(default=20, alias="minFiles")
+    binding: str | None = None
+    concurrency: int = Field(default=1, ge=1, le=6)
+    per_group_timeout_s: int = Field(default=600, alias="perGroupTimeoutS", ge=1, le=900)
+    budget_share: float = Field(default=0.5, alias="budgetShare", gt=0, le=0.9)
 
 
 class ReviewSettings(BaseModel):
@@ -421,6 +485,10 @@ class ReviewSettings(BaseModel):
     coverage: ReviewCoverageSettings = Field(default_factory=ReviewCoverageSettings)
     # Deterministic triage before dispatch (default off; base-side config only).
     fast_path: FastPathSettings = Field(default_factory=FastPathSettings, alias="fastPath")
+    # Bounded read-only file-group fan-out on large diffs (default off).
+    file_group_fanout: FileGroupFanoutSettings = Field(
+        default_factory=FileGroupFanoutSettings, alias="fileGroupFanout"
+    )
     # Globs whose changed files are kept out of the reviewer's diff (#1109). Read only
     # from the operator's side of a pull request (``mergecraft.review.ignore_paths``),
     # and merged with the ``ignore_paths`` Action input.

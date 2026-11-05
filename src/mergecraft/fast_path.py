@@ -2,8 +2,9 @@
 
 ``mergecraft.classify.triage`` is the pure decision. This module is its I/O shell: it
 reads the pull request's diff through the files API, the head-side text of any prose
-file the prose recognizer must prove stays out of a code fence, and the checks that
-passed on the head SHA — then asks the pure function.
+file the prose recognizer must prove stays out of a code fence (or of any
+comment-only-language file the ``commentOnly`` lexer must prove stays out of a string),
+and the checks that passed on the head SHA — then asks the pure function.
 
 Everything here fails toward spending *more*: a failed read, a truncated listing, a file
 GitHub sent no patch for, or a config that is not the operator's base-side config all
@@ -13,6 +14,7 @@ the verifying check to belong to a GitHub App the operator named in
 
 Exports:
     load_triage_inputs: Read one pull request's diff, head text and passed checks.
+    triage_pull_request: Read and decide, returning the inputs the decision saw.
     decide_fast_path: Read and decide, or say why the answer is ``full``.
 """
 
@@ -24,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Final
 from loguru import logger
 
 from mergecraft.classify.triage import (
+    COMMENT_ONLY_SUFFIXES,
     TriageDecision,
     TriageInputs,
     triage_diff,
@@ -38,8 +41,10 @@ if TYPE_CHECKING:
 
 _FILES_PAGE_SIZE: Final[int] = 100
 _FILES_MAX_PAGES: Final[int] = 30
-# Head-side text is read only to prove a prose edit stays out of a code fence.
+# Head-side text is read only to prove a prose edit stays out of a code fence, or a
+# comment-only edit stays out of a string literal or a block comment.
 _PROSE_SUFFIXES: Final[tuple[str, ...]] = (".md", ".markdown", ".txt")
+_HEAD_TEXT_SUFFIXES: Final[tuple[str, ...]] = (*_PROSE_SUFFIXES, *COMMENT_ONLY_SUFFIXES)
 _MAX_PROSE_FILES: Final[int] = 25
 _MAX_HEAD_CHARS: Final[int] = 512_000
 
@@ -115,11 +120,18 @@ async def _read_diff(
 
 
 async def _read_head_files(
-    scm: ScmProvider, owner: str, repo: str, head_sha: str, paths: list[str]
+    scm: ScmProvider,
+    owner: str,
+    repo: str,
+    head_sha: str,
+    paths: list[str],
+    *,
+    read_code_head: bool = False,
 ) -> dict[str, str]:
     if not paths or len(paths) > _MAX_PROSE_FILES:
         return {}
-    if not all(path.lower().endswith(_PROSE_SUFFIXES) for path in paths):
+    suffixes = _HEAD_TEXT_SUFFIXES if read_code_head else _PROSE_SUFFIXES
+    if not all(path.lower().endswith(suffixes) for path in paths):
         return {}
     texts: dict[str, str] = {}
     for path in paths:
@@ -189,20 +201,99 @@ async def load_triage_inputs(
     head_sha: str,
     *,
     trusted_apps: Collection[str] = (),
+    read_code_head: bool = False,
 ) -> TriageInputs:
-    """Read the diff, the head-side prose text and the trusted Apps' passed checks.
+    """Read the diff, the head-side prose/comment text and the trusted Apps' passed checks.
 
     ``trusted_apps`` is the operator's ``pinBump.trustedCheckApps``: a check run
-    only counts when its ``app.slug`` is in it.
+    only counts when its ``app.slug`` is in it. ``read_code_head`` also reads the head
+    text of comment-only-language files; the caller sets it only when ``commentOnly``
+    is opted in or ``lite`` is enabled, the only consumers of that text.
 
     Raises:
         TriageUnavailableError: The diff could not be read completely.
         Exception: Any transport error; :func:`decide_fast_path` turns it into ``full``.
     """
     diff_text, paths = await _read_diff(scm, owner, repo, pull_number)
-    head_files = await _read_head_files(scm, owner, repo, head_sha, paths)
+    head_files = await _read_head_files(
+        scm, owner, repo, head_sha, paths, read_code_head=read_code_head
+    )
     passed = await _passed_checks(scm, owner, repo, head_sha, trusted_apps=trusted_apps)
     return TriageInputs(diff_text=diff_text, head_files=head_files, passed_checks=passed)
+
+
+async def triage_pull_request(
+    scm: ScmProvider,
+    owner: str,
+    repo: str,
+    pull_number: int,
+    head_sha: str,
+    *,
+    config: FastPathSettings,
+    operator_owned: bool,
+    loader: Callable[..., Awaitable[TriageInputs]] | None = None,
+) -> tuple[TriageDecision, TriageInputs | None]:
+    """Return the triage tier and the inputs it was decided from.
+
+    The inputs are ``None`` whenever the pull request was not read (fast path off,
+    config not the operator's, or a failed read), so a caller that acts on the diff
+    (the ``lite`` driver) only ever sees the exact text the decision saw.
+    ``operator_owned`` says the config was read from the base ref, which a fork cannot
+    write. Head-side config can never opt a pull request out of review. ``loader``
+    replaces :func:`load_triage_inputs` (the caller's module-level binding, so the
+    read can be substituted in tests).
+    """
+    if not config.enabled:
+        return (
+            TriageDecision(tier="full", recognizer=None, reason="review.fastPath is not enabled"),
+            None,
+        )
+    if not operator_owned:
+        logger.info(
+            "fast path: review.fastPath is ignored — it is only honoured from the "
+            "operator's base-side config (a pull_request_target run)"
+        )
+        return (
+            TriageDecision(
+                tier="full",
+                recognizer=None,
+                reason="review.fastPath is only honoured from the operator's base-side config",
+            ),
+            None,
+        )
+    try:
+        read = loader or load_triage_inputs
+        inputs = await read(
+            scm,
+            owner,
+            repo,
+            pull_number,
+            head_sha,
+            trusted_apps=config.pin_bump.trusted_check_apps,
+            read_code_head="commentOnly" in config.skip_llm or config.lite.enabled,
+        )
+    except Exception as err:  # any read failure is a reason to review, never to skip
+        logger.warning(
+            "fast path: PR #{} could not be read, so it gets a full review: {}", pull_number, err
+        )
+        return (
+            TriageDecision(
+                tier="full",
+                recognizer=None,
+                reason=(
+                    f"the pull request could not be read completely ({type(err).__name__}: {err})"
+                ),
+            ),
+            None,
+        )
+    decision = triage_diff(
+        inputs.diff_text,
+        config=config,
+        head_files=inputs.head_files,
+        passed_checks=inputs.passed_checks,
+    )
+    logger.info("fast path: PR #{} triaged {} ({})", pull_number, decision.tier, decision.reason)
+    return decision, inputs
 
 
 async def decide_fast_path(
@@ -218,50 +309,24 @@ async def decide_fast_path(
 ) -> TriageDecision:
     """Return the triage tier for a pull request, ``full`` whenever there is any doubt.
 
-    ``operator_owned`` says the config was read from the base ref, which a fork cannot
-    write. Head-side config can never opt a pull request out of review. ``loader``
-    replaces :func:`load_triage_inputs` (the caller's module-level binding, so the
-    read can be substituted in tests).
+    The decision half of :func:`triage_pull_request`.
     """
-    if not config.enabled:
-        return TriageDecision(tier="full", recognizer=None, reason="review.fastPath is not enabled")
-    if not operator_owned:
-        logger.info(
-            "fast path: review.fastPath is ignored — it is only honoured from the "
-            "operator's base-side config (a pull_request_target run)"
-        )
-        return TriageDecision(
-            tier="full",
-            recognizer=None,
-            reason="review.fastPath is only honoured from the operator's base-side config",
-        )
-    try:
-        read = loader or load_triage_inputs
-        inputs = await read(
-            scm,
-            owner,
-            repo,
-            pull_number,
-            head_sha,
-            trusted_apps=config.pin_bump.trusted_check_apps,
-        )
-    except Exception as err:  # any read failure is a reason to review, never to skip
-        logger.warning(
-            "fast path: PR #{} could not be read, so it gets a full review: {}", pull_number, err
-        )
-        return TriageDecision(
-            tier="full",
-            recognizer=None,
-            reason=f"the pull request could not be read completely ({type(err).__name__}: {err})",
-        )
-    decision = triage_diff(
-        inputs.diff_text,
+    decision, _inputs = await triage_pull_request(
+        scm,
+        owner,
+        repo,
+        pull_number,
+        head_sha,
         config=config,
-        head_files=inputs.head_files,
-        passed_checks=inputs.passed_checks,
+        operator_owned=operator_owned,
+        loader=loader,
     )
-    logger.info("fast path: PR #{} triaged {} ({})", pull_number, decision.tier, decision.reason)
     return decision
 
 
-__all__ = ["TriageUnavailableError", "decide_fast_path", "load_triage_inputs"]
+__all__ = [
+    "TriageUnavailableError",
+    "decide_fast_path",
+    "load_triage_inputs",
+    "triage_pull_request",
+]

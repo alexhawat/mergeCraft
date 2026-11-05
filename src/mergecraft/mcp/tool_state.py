@@ -429,6 +429,10 @@ class ToolState:
     reviewer_dispatch_errors: dict[str, str] = field(default_factory=dict)
     # D7 / #574 — per-reviewer findings recorded before terminal submission.
     reviewer_dispatch_runs: list[Any] = field(default_factory=list)
+    # File-group fan-out: group agent ids dispatched right now, and which group
+    # recorded each finding row (fingerprint -> ``file-group/<group-id>``).
+    active_file_groups: list[str] = field(default_factory=list)
+    file_group_row_owners: dict[str, str] = field(default_factory=dict)
     approval: ApprovalRecord | None = None
     review_replies: dict[int, ReviewReplyRecord] = field(default_factory=dict)
     dependency_installation: DependencyInstallationState | None = None
@@ -642,6 +646,9 @@ class ToolState:
     # Pre-dispatch triage (#890): the ``TriageDecision`` when ``review.fastPath`` was
     # evaluated for this run; ``None`` when the fast path is off.
     triage: Any = None
+    # The ``LiteOutcome`` of the triage ``lite`` tier's single capped call (#1010);
+    # ``None`` unless that call ran. Its usage is copied onto the packet's ``triage``.
+    lite_review: Any = None
     # Review path ignoring (#1109): the run's ``ReviewIgnore`` matcher (``None`` when it
     # was never resolved, so ``checkout_pr`` filters nothing) and the changed files kept
     # out of the reviewer's diff, which the review body lists as not reviewed.

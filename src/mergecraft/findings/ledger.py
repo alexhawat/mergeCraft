@@ -1330,6 +1330,15 @@ def render_deterministic_review_block(
     triage = getattr(packet, "triage", None)
     if triage is not None and triage.tier == "skip":
         header_lines.append(f"- **Tier:** skip ({triage.recognizer}) — no LLM review ran")
+    elif triage is not None and triage.tier == "lite":
+        used = getattr(triage, "tokens_used", None)
+        usage = "" if used is None else f"; {used} tokens used"
+        if used is not None and getattr(triage, "usage_estimated", False):
+            usage += " (estimated)"
+        header_lines.append(
+            f"- **Tier:** lite ({triage.recognizer}) — single-call review, "
+            f"cap {triage.token_cap} tokens{usage}; approval is left to a human"
+        )
     blast_radius_line = _blast_radius_record_line(getattr(packet, "blast_radius", None))
     if blast_radius_line is not None:
         header_lines.append(blast_radius_line)
@@ -1489,7 +1498,8 @@ def render_deterministic_review_block(
     finding_lines = ["", "<details>", "<summary>Change-scoped findings</summary>", ""]
     if change_findings:
         for finding in change_findings:
-            location = f"`{finding.path}` — " if finding.path else ""
+            line = f":{finding.start_line}" if finding.path and finding.start_line else ""
+            location = f"`{finding.path}{line}` — " if finding.path else ""
             finding_lines.append(f"- **{finding.severity}** · {location}{finding.message}")
     else:
         finding_lines.append("_No change-scoped findings recorded._")

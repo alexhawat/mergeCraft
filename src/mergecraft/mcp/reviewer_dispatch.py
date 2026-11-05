@@ -33,6 +33,26 @@ def _validate_reviewer_agent_id(ctx: ToolContext, agent_id: str) -> None:
         raise ValueError(msg)
 
 
+def _refuse_during_file_group(ctx: ToolContext, tool_name: str) -> None:
+    """Refuse a roster record while a file group is dispatched.
+
+    A file-group reviewer runs under a registry binding; letting it record a
+    run or an error under that binding's id would satisfy the roster and skip
+    that reviewer's own provider. mergeCraft records a group's outcome itself.
+    """
+    from mergecraft.review.file_group_fanout import active_file_groups
+
+    groups = active_file_groups(ctx.tool_state)
+    if not groups:
+        return
+    named = ", ".join(groups)
+    msg = (
+        f"{tool_name} is not available to file-group reviewer {named}: mergeCraft "
+        "records the group's outcome itself"
+    )
+    raise ValueError(msg)
+
+
 class RecordReviewerDispatchErrorParams(BaseModel):
     """Parameters for ``record_reviewer_dispatch_error``."""
 
@@ -57,6 +77,7 @@ class RecordReviewerDispatchRunParams(BaseModel):
 def record_reviewer_dispatch_error_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         validated = RecordReviewerDispatchErrorParams.model_validate(params)
+        _refuse_during_file_group(ctx, "record_reviewer_dispatch_error")
         record_reviewer_dispatch_error(
             ctx.tool_state,
             agent_id=validated.agent_id,
@@ -99,6 +120,7 @@ def record_reviewer_dispatch_error_tool(ctx: ToolContext):
 def record_reviewer_dispatch_run_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         validated = RecordReviewerDispatchRunParams.model_validate(params)
+        _refuse_during_file_group(ctx, "record_reviewer_dispatch_run")
         _validate_reviewer_agent_id(ctx, validated.agent_id)
         from mergecraft.agents.registry import AgentRole, load_registry, resolve_agent_model
 

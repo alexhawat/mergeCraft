@@ -277,3 +277,123 @@ async def test_an_artifact_of_unknown_size_is_never_downloaded(
     assert "unknown" in reason
     assert "list_workflow_run_artifacts" in github.call_names(), "the artifact must be listed"
     assert "download_artifact_zip" not in github.call_names()
+
+
+# ---------------------------------------------------------------------------
+# "the PR did not change the workflow" needs the unfiltered, complete change set
+# ---------------------------------------------------------------------------
+#
+# The review diff is filtered: ``review.ignorePaths`` (and the ``ignore_paths``
+# input) drop whole files from it, and a files listing that hit its page cap is
+# truncated. Neither may hide an edit to the declared workflow. The untouched check
+# reads the unfiltered set — the review diff's paths plus
+# ``ToolState.ignored_review_paths`` and ``ToolState.coverage.unreviewable_paths`` —
+# and fails closed when that set is truncated or unavailable.
+
+
+def _ignoring_ctx(tmp_path: Path, github: EvidenceGitHub) -> ToolContext:
+    """An operator snapshot that ignores every workflow file in review."""
+    from mergecraft.config.settings import RepoSettings
+
+    settings = RepoSettings.model_validate(
+        {
+            "review": {"ignorePaths": [".github/workflows/**"]},
+            "policy": {"evidence": {"rollback_plan": artifact_declaration()}},
+        }
+    )
+    snapshot = settings_snapshot(tmp_path, settings, operator_owned=True)
+    return evidence_ctx(tmp_path, github=github, snapshot=snapshot, diff_paths=DIFF_PATHS)
+
+
+async def test_an_ignored_edit_to_the_declared_workflow_voids_its_artifact(
+    tmp_path: Path,
+) -> None:
+    """``ignorePaths`` dropped the workflow from the review diff; the edit still counts."""
+    github = _github([workflow_run()])
+    ctx = _ignoring_ctx(tmp_path, github)
+    ctx.tool_state.ignored_review_paths = [DECLARED_WORKFLOW]
+
+    evidence = await _collect(ctx, ["rollback_plan"])
+
+    reason = _reason(evidence)
+    assert DECLARED_WORKFLOW in reason
+    assert "ignore" in reason.casefold(), "the reason must say the edit was ignored in review"
+    assert "download_artifact_zip" not in github.call_names()
+
+
+async def test_an_unreviewable_edit_to_the_declared_workflow_voids_its_artifact(
+    tmp_path: Path,
+) -> None:
+    """A workflow edit GitHub sent no patch for is still a change to the workflow."""
+    github = _github([workflow_run()])
+    ctx = _ctx(tmp_path, github)
+    ctx.tool_state.coverage.unreviewable_paths = [DECLARED_WORKFLOW]
+
+    evidence = await _collect(ctx, ["rollback_plan"])
+
+    assert DECLARED_WORKFLOW in _reason(evidence)
+    assert "download_artifact_zip" not in github.call_names()
+
+
+async def test_a_truncated_change_set_cannot_prove_the_workflow_untouched(
+    tmp_path: Path,
+) -> None:
+    """Files past the listing's page cap were never seen: the workflow may be among them."""
+    github = _github([workflow_run()])
+    ctx = _ctx(tmp_path, github)
+    ctx.tool_state.coverage.diff_truncated = True
+
+    evidence = await _collect(ctx, ["rollback_plan"])
+
+    assert "truncat" in _reason(evidence).casefold()
+    assert "download_artifact_zip" not in github.call_names()
+
+
+@pytest.mark.parametrize("diff", ["none", "unreadable"], ids=["no-diff", "unreadable-diff"])
+async def test_an_unavailable_change_set_cannot_prove_the_workflow_untouched(
+    tmp_path: Path, diff: str
+) -> None:
+    """No diff and no listing: the change set could not be verified, so nothing counts."""
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    github = _github([workflow_run()])
+    ctx = _ctx(tmp_path, github)
+    primary = primary_repo_state(ctx.tool_state)
+    primary.diff_path = None if diff == "none" else str(tmp_path / "missing.diff")
+
+    evidence = await _collect(ctx, ["rollback_plan"])
+
+    reason = _reason(evidence)
+    assert "could not be verified" in reason, reason
+    assert "download_artifact_zip" not in github.call_names()
+
+
+async def test_a_complete_unfiltered_change_set_without_the_workflow_counts(
+    tmp_path: Path,
+) -> None:
+    """The control: workflows ignored in review, others ignored, nothing truncated."""
+    github = _github([workflow_run()])
+    ctx = _ignoring_ctx(tmp_path, github)
+    ctx.tool_state.ignored_review_paths = [".github/workflows/lint.yml", "docs/changelog.md"]
+    ctx.tool_state.coverage.unreviewable_paths = ["assets/logo.png"]
+    ctx.tool_state.coverage.diff_truncated = False
+
+    evidence = await _collect(ctx, ["rollback_plan"])
+
+    record = evidence.present.get("rollback_plan")
+    assert record is not None, evidence.absent
+    assert DECLARED_WORKFLOW in record.detail
+
+
+def test_the_policy_evidence_doc_states_the_fail_closed_change_set_rule() -> None:
+    """Operators must read that ignored or truncated changes never let a proof count."""
+    from pathlib import Path as _Path
+
+    doc = (_Path(__file__).resolve().parents[2] / "docs" / "policy-evidence.md").read_text(
+        encoding="utf-8"
+    )
+    lowered = " ".join(doc.casefold().split())
+
+    assert "ignorepaths" in lowered
+    assert "truncated" in lowered
+    assert "could not be verified" in lowered

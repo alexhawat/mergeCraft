@@ -9,6 +9,7 @@ from loguru import logger
 
 from mergecraft.analyzers.budget import default_inline_budget, place_findings
 from mergecraft.findings.severity import normalized_severity_rank
+from mergecraft.review.file_group_fanout import is_file_group_agent_id
 from mergecraft.review.finding_key import finding_key
 
 if TYPE_CHECKING:
@@ -320,18 +321,41 @@ def prepare_terminal_submission(
     from mergecraft.agents.registry import AgentRole
 
     reviewers = registry.resolve_roles(AgentRole.reviewer)
+    reviewer_rows, file_group_groups = _split_file_group_findings(findings)
     if not reviewers:
-        groups = [("reviewer", findings)]
+        groups = [("reviewer", reviewer_rows)]
     elif len(reviewers) == 1:
-        groups = [(reviewers[0].agent_id, findings)]
+        groups = [(reviewers[0].agent_id, reviewer_rows)]
     else:
-        groups = _group_findings_by_reviewer(findings, reviewers)
+        groups = _group_findings_by_reviewer(reviewer_rows, reviewers)
+    groups.extend(file_group_groups)
     merged = merge_reviewer_findings(groups, errors=errors, apply_placement=False)
     if _every_reviewer_degraded(reviewers, errors) and not merged:
         return merged, "request_changes"
     merged_verdict = verdict_from_merged_findings(merged)
     enforced = _strictest_terminal_verdict(verdict, merged_verdict)
     return merged, enforced
+
+
+def _split_file_group_findings(
+    findings: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[tuple[str, list[dict[str, Any]]]]]:
+    """Separate rows stamped by a file-group run from the registry reviewers' rows.
+
+    A file-group run is recorded server-side under ``file-group/<group-id>``
+    (``record_reviewer_dispatch_run_tool`` only accepts registry reviewer ids),
+    so its stamp is trusted and keeps its own provenance group instead of
+    collapsing into the primary reviewer or ``unknown``.
+    """
+    reviewer_rows: list[dict[str, Any]] = []
+    by_group: dict[str, list[dict[str, Any]]] = {}
+    for row in findings:
+        raised = row.get("raised_by") if isinstance(row, dict) else None
+        if isinstance(raised, str) and is_file_group_agent_id(raised):
+            by_group.setdefault(raised, []).append(row)
+        else:
+            reviewer_rows.append(row)
+    return reviewer_rows, sorted(by_group.items())
 
 
 def _every_reviewer_degraded(
