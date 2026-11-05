@@ -578,6 +578,8 @@ class ToolState:
     finding_ledger_loaded: bool = False
     # RC12 — 1-based review round, set by ``checkout_pr`` from prior PR reviews.
     review_round_index: int = 1
+    # #1166 — server injected the round-cap finding once this run.
+    review_round_cap_announced: bool = False
     # Plan 13 W4 — ``api-only`` when the PR diff is authoritative but the head
     # ref is not checked out locally; ``None`` means full local scope.
     review_scope: str | None = None

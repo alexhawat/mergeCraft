@@ -1272,4 +1272,77 @@ def score(
         raise typer.Exit(code=CLI_CONFIGURATION_EXIT_CODE)
 
 
+@app.command("add-incident")
+def add_incident_cmd(
+    case_id: str = typer.Option(..., "--id", help="Stable case id for the bank file."),
+    title: str = typer.Option(..., "--title"),
+    incident_pr: int = typer.Option(..., "--incident-pr", help="PR that caused the incident."),
+    followup_pr: int = typer.Option(..., "--followup-pr", help="Revert or fix-forward PR number."),
+    bug_path: str = typer.Option(..., "--bug-path", help="Confirmed bug file path."),
+    bug_start: int = typer.Option(..., "--bug-start-line", min=1),
+    bug_end: int = typer.Option(..., "--bug-end-line", min=1),
+    provenance: str = typer.Option(
+        ...,
+        "--provenance",
+        help="Label provenance tier string (e.g. agent-seeded, human, jev-adjudicated).",
+    ),
+    run_id: str = typer.Option(..., "--run-id"),
+    author: str = typer.Option(..., "--author", help="Author login for LearningProvenance."),
+    bank: Path | None = typer.Option(None, "--bank", help="Bank directory (default evals/cases/)."),
+    expected_decision: str = typer.Option("block", "--expected-decision"),
+) -> None:
+    """Add an incident-derived structural case (postmortem PR + revert/fix) (#1163)."""
+    from mergecraft.evals.incident import IncidentCaseInput, add_incident_case
+
+    spec = IncidentCaseInput(
+        case_id=case_id,
+        title=title,
+        incident_pr=incident_pr,
+        followup_pr=followup_pr,
+        confirmed_bug_path=bug_path,
+        confirmed_bug_start_line=bug_start,
+        confirmed_bug_end_line=bug_end,
+        label_provenance=provenance,
+        expected_decision=expected_decision,
+        run_id=run_id,
+        author_login=author,
+    )
+    outcome = add_incident_case(spec, bank_dir=_bank_dir(bank))
+    if not outcome.accepted:
+        cli_bail(outcome.reason or "incident case refused")
+    console.print(f"incident case written: {outcome.path}")
+
+
+@app.command("rescore-delta")
+def rescore_delta_cmd(
+    ctx: typer.Context,
+    baseline: Path = typer.Option(..., "--baseline", exists=True, dir_okay=False),
+    candidate: Path = typer.Option(..., "--candidate", exists=True, dir_okay=False),
+    output: Path = typer.Option(
+        Path("evals/results/rescore-delta.json"),
+        "--output",
+        help="Where to write the advisory delta report.",
+    ),
+    tolerance: float = typer.Option(0.02, "--tolerance"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Compare two structural replay result sets (base vs head) (#1164, advisory)."""
+    from mergecraft.evals.gate import load_result_set
+    from mergecraft.evals.rescore_delta import (
+        compare_result_sets,
+        format_rescore_summary,
+        write_rescore_delta_report,
+    )
+
+    base_set = load_result_set(baseline)
+    head_set = load_result_set(candidate)
+    report = compare_result_sets(base_set, head_set, tolerance=tolerance)
+    write_rescore_delta_report(report, output)
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(report.model_dump(mode="json"))
+    else:
+        console.print(format_rescore_summary(report))
+        console.print(f"report: {output}")
+
+
 __all__ = ["CATEGORY_REJECTED", "CATEGORY_REVERTED", "FAILURE_CATEGORIES", "app"]

@@ -25,6 +25,19 @@ performance, dependency, and **clean** PRs (expected empty blocker set).
 Extra benchmark kinds (also packaged): historical PR, cross-repo (`xrepo`),
 requirements, large-PR, and incremental-review.
 
+**Incident-derived structural cases** (`category: incident_derived`) live in the
+main bank under `evals/cases/`. Seed them with `mergecraft eval add-incident`
+from the incident PR, the revert or fix-forward PR, and a confirmed bug path plus
+line range. Provenance uses the same tier vocabulary as flywheel ingest; rows
+without location or provenance are refused fail-closed. This path does not claim
+detection quality — it records postmortem evidence for structural replay only.
+
+**Base-vs-head rescore delta** (`mergecraft eval rescore-delta`, `make
+eval-rescore-delta`) compares two structural replay result sets (typically merge-base
+vs PR head) and reports keep/drop flips plus gate metric deltas under
+`evals/results/`. CI posts the delta advisedly on PRs that touch the reviewer
+surface; it is not live-provider rescoring unless you opt into a separate bench run.
+
 APIs: `mergecraft.evals.corpora`, `mergecraft.evals.quality_metrics`.
 
 ### Authoring and packaged copies
