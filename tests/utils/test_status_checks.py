@@ -16,9 +16,10 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from mergecraft.evidence.packet import Decision
 from mergecraft.evidence.run_packet import build_run_packet, prepare_run_packet
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
-from mergecraft.mcp.tool_state import ApprovalRecord, init_tool_state
+from mergecraft.mcp.tool_state import ApprovalRecord, init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
 from mergecraft.utils.status_checks import APPROVAL_CHECK, COMPLETION_CHECK, report_status_checks
@@ -151,9 +152,10 @@ async def test_report_status_checks_neutral_for_crashed_run_with_recorded_approv
     )
 
 
-@pytest.mark.asyncio
-async def test_report_status_checks_anchors_approval_to_pr_head_sha(
+@pytest.mark.parametrize("verdict", ["success", "failure", "neutral", "missing", "sink_failure"])
+async def test_report_status_checks_keeps_every_conclusion_on_reviewed_sha(
     tmp_path: Path,
+    verdict: str,
 ) -> None:
     github = _RecordingGitHub(pr_head_sha=PR_HEAD_SHA)
     ctx = _ctx(
@@ -162,14 +164,53 @@ async def test_report_status_checks_anchors_approval_to_pr_head_sha(
         approval=ApprovalRecord(would_approve=True, sha=REVIEWED_SHA),
     )
 
-    await _report(ctx, run_succeeded=True)
+    primary_repo_state(ctx.tool_state).checkout_sha = REVIEWED_SHA
+    packet = build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
+    packet.decision = Decision.model_validate(
+        {
+            "verdict": verdict if verdict in {"success", "failure", "neutral"} else "success",
+            "reason": "Recorded decision for the reviewed commit",
+            "decided_by": "mergecraft",
+        }
+    )
+    await report_status_checks(
+        ctx,
+        run_succeeded=True,
+        packet=None if verdict == "missing" else packet,
+        approval_failure_reason="synthetic sink scan failure"
+        if verdict == "sink_failure"
+        else None,
+    )
 
     approval_checks = _approval_checks(github)
     assert len(approval_checks) == 1
     check = approval_checks[0]
-    assert check["head_sha"] == PR_HEAD_SHA
+    assert {run["head_sha"] for run in github.check_runs} == {REVIEWED_SHA}
+    expected = {"missing": "neutral", "sink_failure": "failure"}.get(verdict, verdict)
+    assert check["conclusion"] == expected
     summary = check["output"]["summary"]
     assert REVIEWED_SHA in summary or REVIEWED_SHA[:7] in summary
+
+
+@pytest.mark.parametrize("binding", ["missing", "mismatched", "packet_only"])
+async def test_approval_success_requires_consistent_reviewed_identity(
+    tmp_path: Path,
+    binding: str,
+) -> None:
+    github = _RecordingGitHub()
+    ctx = _ctx(tmp_path, github=github)
+    packet = build_run_packet(ctx, change_id="acme/demo#42", run_succeeded=True)
+    packet.decision = Decision(
+        verdict="success", reason="Recorded decision", decided_by="mergecraft"
+    )
+    if binding != "missing":
+        packet.reviewed_head_sha = REVIEWED_SHA
+    if binding == "mismatched":
+        primary_repo_state(ctx.tool_state).checkout_sha = PR_HEAD_SHA
+    await report_status_checks(ctx, run_succeeded=True, packet=packet)
+    check = _approval_checks(github)[0]
+    assert check["conclusion"] == ("success" if binding == "packet_only" else "neutral")
+    assert check["head_sha"] == (REVIEWED_SHA if binding == "packet_only" else PR_HEAD_SHA)
 
 
 @pytest.mark.asyncio
