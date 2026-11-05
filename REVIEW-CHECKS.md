@@ -163,15 +163,37 @@ that reads only that way ends `not_observed` and `inconclusive`.
 When enabled in the operator's base-side config (a `pull_request_target`
 run — head-side config is never honoured), mergeCraft decides from the diff
 alone, before the MCP server and the agent exist, whether an LLM review is
-worth running. Four recognizers answer "is *every* change in this diff of this
+worth running. Five recognizers answer "is *every* change in this diff of this
 kind?": `pinBump` (each changed line pair differs only in a 40-hex SHA or
 `sha256:` digest, always the same single old → new pair), `prose` (only
 `.md` / `.txt` edits outside code fences, front matter and high-stakes
 paths, never a dependency manifest, lockfile or agent-instruction file, proved
 against the head-side text), `whitespace` (the same tokens before and after;
-indentation counts in whitespace-sensitive languages) and `generated` (only
+indentation counts in whitespace-sensitive languages), `generated` (only
 lockfiles or generated paths, with no manifest or generator config beside
-them). A mixed diff matches nothing and gets a full review. `skipLlm` opts each
+them) and `commentOnly` (only `//` line comments changed, in a closed list of
+`//`-comment languages — `.ts .go .java .kt .c .h .cc .cpp .hpp .cs .swift`.
+JavaScript (`.js`, which can hold JSX) and `.jsx` / `.tsx` are excluded because a
+JSX text child can start with `//` and render; Rust because a lifetime's lone `'`
+defeats the quote check; `Package.swift` because SwiftPM reads its first comment;
+and Go `_test.go` files (an `// Output:` comment is a test assertion) and Go files
+marked `DO NOT EDIT` (generated). A Java file with a `\u` unicode escape
+(translated before lexing, even in comments) and a C-family file with `??` (a
+trigraph can splice the next line) are refused. Each changed line must be `//`,
+one space and a plain alphabetic first word, so `//go:build`, `// +build`, `///`
+and `// @ts-ignore` never match; a removed line must be replaced by an added
+one. The diff and the head-side file must be printable ASCII and are split on
+newlines only, and a file with a backtick, a raw-string marker, any `/*`, a
+Swift `#/` regex literal (it can span lines) or a quote left open at the end of a line is refused, so the lexer over the head text
+proves every changed line is a comment; every `#`-comment language is refused.
+For the listed languages a recognised edit proves no runtime change, but a
+comment can still carry tool directives for linters, coverage or code
+generators; a directive-word list (`fallthrough`, `fall`, `Output`, `nolint`,
+`NOLINTNEXTLINE`, `istanbul`, `IWYU`, `noinspection`, `ReSharper`, `detekt`,
+`pragma`, `build`, `Code`, …) refuses the
+known ones on a best-effort basis. A renamed or copied file is never recognised as
+comment-only or whitespace-only, because the path itself carries meaning. A mixed diff matches nothing and gets a
+full review. `skipLlm` opts each
 recognizer in; a pin bump also needs every `pinBump.requireChecks` check to have
 passed on the head SHA **from a GitHub App named in
 `pinBump.trustedCheckApps`** — a check-run name is chosen by its creator, and
@@ -179,7 +201,20 @@ the `github-actions` runs of a `pull_request` workflow come from the head ref, s
 neither can vouch. A skipped run posts the `mergecraft` check stating
 `Tier: skip (pinBump) — no LLM review ran`, names the checks it relied on,
 **never grants `mergecraft-approval`**, and records the tier in the evidence
-packet and the shadow log. Any read
+packet and the shadow log. With `review.fastPath.lite.enabled`, the two cases a
+skip leaves out — a recognizer that matched but is not in `skipLlm`, and a pin
+bump whose verifying checks have not passed — get a `lite` review instead: one
+non-streaming call to an operator-registered OpenAI-compatible provider
+(`lite.provider`, `lite.model`), with the diff inlined and no checkout, MCP
+server, specialists or verifier. The `lite.tokenCap` (default 50,000) is checked
+before the call: an upper-bound prompt estimate plus `maxOutputTokens` over the
+cap, a missing credential or an unregistered provider downgrades the run to the
+full review, and a diff is never truncated. A `lite` run posts its findings as a
+review comment, states `Tier: lite — single-call review, cap N tokens`, records
+the cap and the tokens used in the evidence packet, and **never grants
+`mergecraft-approval`**: the `mergecraft` check is `neutral`, or `failure` on a
+Critical or Major finding, and usage over the cap or a malformed answer is
+`inconclusive`. Any read
 failure, truncated listing or file without a patch is a full review. The PR
 title, body and labels are never inputs.
 
@@ -664,7 +699,10 @@ request cannot write; `requirements` is author-traceable, not independent:
   commit from a trusted GitHub App (`github-actions` is refused) or a bounded
   `policy-evidence.json` uploaded for that commit by a successful run of the
   declared workflow file, from this repository (never a fork), when the pull
-  request does not change that file.
+  request does not change that file. That is judged on the unfiltered change
+  set and fails closed: an edit hidden by `ignorePaths` or sent without a patch
+  still counts as a change, and a truncated or unreadable change set could not
+  be verified, so no artifact counts.
 
 Producers run only when a triggered rule requires evidence. The row lists each
 present key with its source and names every missing key with the reason it is

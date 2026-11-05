@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `review.fastPath.lite` adds a `lite` triage tier for the two cases a skip
+  leaves out: a recognizer that matched but is not in `skipLlm`, and a pin bump
+  whose verifying checks have not passed from a trusted App. Instead of the full
+  agent review, the run makes one non-streaming call to an operator-registered
+  OpenAI-compatible provider with the diff inlined, and posts the findings as a
+  review comment. The `tokenCap` (default 50,000) is checked before the call; a
+  diff over it, a missing credential or an unregistered provider gets the full
+  review, and no diff is truncated. The packet's `triage` section records the
+  cap, the tokens used and the prompt version (schema `1.19.0`). A `lite` run
+  never grants `mergecraft-approval`: the `mergecraft` check is `neutral`, or
+  `failure` on a Critical or Major finding, and usage over the cap or a
+  malformed answer is `inconclusive`. Off by default (#1010).
+
+- A `commentOnly` fast-path recognizer matches diffs that only edit `//` line
+  comments in `.ts .go .java .kt .c .h .cc .cpp .hpp .cs .swift` files. JavaScript
+  (`.js`, which can hold JSX), `.jsx` / `.tsx`, Rust, `Package.swift`, Go
+  `_test.go` files and Go files marked `DO NOT EDIT` are never recognised, and a
+  Java unicode escape or a C-family `??` refuses the file. Each changed line must
+  be `//`, one space and a plain word, and the head-side text proves it is a
+  comment. Non-ASCII text, backticks, raw-string markers, block comments, Swift
+  `#/` regex literals, a quote left open at the end of a line, a removal-only edit and every `#`-comment
+  language are refused. A recognised edit proves no runtime change; comments that
+  carry tool directives (lint, coverage, fallthrough, generator pragmas) are
+  refused on a best-effort word list. Opt in through `skipLlm` like the other recognizers
+  (#1010).
+
 - A `required` policy rule can now clear on evidence the review collects
   itself, instead of sitting at `Major` until it is waived (#1114). The rule's
   keys come from sources the pull request cannot write. `requirements`
@@ -134,6 +160,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   package `__init__.py` stays `medium`. A generated sibling no longer hides an
   untested source change. The merge evidence packet schema moves to
   `1.18.0`; older packets without the fields still validate and decide as before.
+- Change-scoped findings in the deterministic review record now read
+  `` `path:line` — message `` (they named only the path), so each finding in the
+  record points at the line it is about (#1010).
 
 - The self-review's Codex rung runs in its own job, the only one holding the
   `codex-subscription-auth` concurrency group; OpenCode Go and the Claude backstop run

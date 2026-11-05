@@ -646,6 +646,9 @@ class ToolState:
     # Pre-dispatch triage (#890): the ``TriageDecision`` when ``review.fastPath`` was
     # evaluated for this run; ``None`` when the fast path is off.
     triage: Any = None
+    # The ``LiteOutcome`` of the triage ``lite`` tier's single capped call (#1010);
+    # ``None`` unless that call ran. Its usage is copied onto the packet's ``triage``.
+    lite_review: Any = None
     # Review path ignoring (#1109): the run's ``ReviewIgnore`` matcher (``None`` when it
     # was never resolved, so ``checkout_pr`` filters nothing) and the changed files kept
     # out of the reviewer's diff, which the review body lists as not reviewed.
