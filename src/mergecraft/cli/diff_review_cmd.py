@@ -39,7 +39,7 @@ from mergecraft.review.output import finding_json_records
 from mergecraft.review.snapshot import ReviewSnapshot, ReviewStageName, canonical_review_snapshot
 from mergecraft.types import ShellPermission  # noqa: TC001
 from mergecraft.utils.log import configure_logging
-from mergecraft.utils.source_resolve import SourceResolverSpec
+from mergecraft.utils.source_resolve import SourceResolverSpec, _is_remote_source
 
 _PANEL_SOURCE = "Source"
 _PANEL_DIFF = "Diff selection"
@@ -594,6 +594,8 @@ def run(
         )
     invocation_root = Path.cwd().resolve()
     root = cwd.resolve()
+    if repo is not None and not _is_remote_source(repo):
+        root = Path(repo.strip()).expanduser().resolve()
     source_spec = SourceResolverSpec(
         repo=repo,
         head=head,

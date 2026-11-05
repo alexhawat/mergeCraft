@@ -53,6 +53,9 @@ def test_resolved_source_controls_snapshot_manifest_and_history(
     target = tmp_path / "target"
     _repo(caller, "caller")
     target_config = _repo(target, "reviewed")
+    if not remote:
+        # The caller's unrelated config must not veto a review of target B.
+        (caller / ".mergecraft" / "config.yaml").write_text("unknown_caller_only_key: true\n")
     monkeypatch.chdir(caller)
     monkeypatch.setenv("MERGECRAFT_REVIEW_ID", "source-provenance")
     monkeypatch.setenv("MERGECRAFT_TRACING", "false")
