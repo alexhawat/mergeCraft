@@ -8,6 +8,7 @@
 #
 # Expects mock GitHub API already listening; set:
 #   E2E_GITHUB_API_URL   (default http://host.docker.internal:8765)
+#   E2E_GITHUB_CONTROL_URL (optional host-side URL; Docker host maps to loopback)
 #   E2E_CHECK_RUNS_DIR   (host path; default docker/e2e/fixtures/check-runs/<event>)
 #   E2E_WORK_DIR         (scratch dir for GITHUB_OUTPUT / workspace copy)
 set -euo pipefail
@@ -21,29 +22,24 @@ API_URL="${E2E_GITHUB_API_URL:-http://host.docker.internal:8765}"
 WORK_DIR="${E2E_WORK_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/mergecraft-e2e.XXXXXX")}"
 CHECK_RUNS_DIR="${E2E_CHECK_RUNS_DIR:-${E2E_DIR}/fixtures/check-runs/live}"
 
-mkdir -p "${WORK_DIR}/workspace" "${WORK_DIR}/runner-temp" "${WORK_DIR}/github" "${CHECK_RUNS_DIR}"
-# Caller clears check-runs between events when sharing one mock server.
-
-# Fresh fixture workspace (git init so setup_git / safe.directory paths work).
-rm -rf "${WORK_DIR}/workspace"
-cp -R "${E2E_DIR}/fixtures/repo" "${WORK_DIR}/workspace"
-(
-  cd "${WORK_DIR}/workspace"
-  git init -q -b main
-  git config user.email "e2e@example.com"
-  git config user.name "e2e"
-  git add -A
-  git commit -q -m "e2e fixture"
-)
-
-EVENT_FILE="${E2E_DIR}/fixtures/events/${EVENT_NAME}.json"
-if [[ ! -f "${EVENT_FILE}" ]]; then
-  echo "missing event fixture: ${EVENT_FILE}" >&2
-  exit 1
-fi
-cp "${EVENT_FILE}" "${WORK_DIR}/github/event.json"
-: >"${WORK_DIR}/github/output"
-: >"${WORK_DIR}/github/state"
+python3 "${E2E_DIR}/prepare_fixture.py" --work-dir "${WORK_DIR}" --event "${EVENT_NAME}"
+python3 - "${WORK_DIR}/github/event.json" "${E2E_GITHUB_CONTROL_URL:-${API_URL}}" <<'PYCONFIG'
+import json
+import sys
+from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
+from pathlib import Path
+url = urlsplit(sys.argv[2])
+# host.docker.internal is installed inside the container, not the Linux runner.
+if url.hostname == "host.docker.internal":
+    url = url._replace(netloc="127.0.0.1" + (f":{url.port}" if url.port else ""))
+request = Request(url.geturl() + "/_e2e/fixture", data=Path(sys.argv[1]).read_bytes(),
+                  headers={"Content-Type": "application/json"}, method="POST")
+with urlopen(request, timeout=10) as response:
+    assert json.load(response)["configured"]
+PYCONFIG
+HEAD_SHA="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pull_request"]["head"]["sha"])' "${WORK_DIR}/github/event.json")"
+OUTPUT_SCHEMA="$(python3 -c 'import sys,json; sys.path.insert(0,sys.argv[1]); from fake_provider import OUTPUT_SCHEMA; print(json.dumps(OUTPUT_SCHEMA))' "${E2E_DIR}/fake-provider-cli")"
 
 # Fake CLI shims must win over the image's real agent CLIs.
 chmod +x "${E2E_DIR}/fake-provider-cli/claude" "${E2E_DIR}/fake-provider-cli/codex"
@@ -75,7 +71,9 @@ docker run --rm \
   -e INPUT_STATUS_CHECKS=enabled \
   -e INPUT_SHELL=restricted \
   -e INPUT_PUSH=restricted \
-  -e INPUT_ANALYZERS=off \
+  -e INPUT_ANALYZERS=auto \
+  -e INPUT_OUTPUT_SCHEMA="${OUTPUT_SCHEMA}" \
+  -e MERGECRAFT_RUN_TIMEOUT_S=180 \
   -e INPUT_MODEL=anthropic/claude-sonnet \
   -e INPUT_MODEL_PIN=enabled \
   -e ANTHROPIC_API_KEY=sk-e2e-fake-anthropic-key \
@@ -105,6 +103,7 @@ python3 "${E2E_DIR}/assert_e2e_outputs.py" \
   --github-output "${WORK_DIR}/github/output" \
   --check-runs-dir "${CHECK_RUNS_DIR}" \
   --expect-outcome "${EXPECT_OUTCOME}" \
+  --expected-head-sha "${HEAD_SHA}" \
   "${REQUIRE_CHECK_RUNS_ARG[@]}"
 
 echo "» E2E OK: ${EVENT_NAME}"
