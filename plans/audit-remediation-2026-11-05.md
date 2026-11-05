@@ -7,12 +7,12 @@ The complete actionable scope is organized into **five PRs**, all targeting **`c
 | Group | PR | Findings |
 |---|---|---|
 | Security and revision identity | [#1197](https://github.com/alexhawat/mergeCraft/pull/1197) | R1, R2, R7–R9, N3, N8 |
-| CLI and workspaces | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | N4–N7, R6, R10–R15, D3 |
+| CLI and workspaces | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | N4–N7, R6, R10–R15, DOC3 |
 | Findings and triage | [#1199](https://github.com/alexhawat/mergeCraft/pull/1199) | R3–R5, N1, N2 |
-| Testing and CI | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | T1–T4, N9, D4 |
-| Documentation and audit record | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | D1, D2, D5 |
+| Testing and CI | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | T1–T4, N9, DOC4 |
+| Documentation and audit record | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | DOC1, DOC2, DOC5 |
 
-R7–R15 name the originally unnumbered residual findings. R3 covers both merging stages in its original finding. D1–D5 track the report's documentation and CI-assurance recommendations. Individual finding commits remain available within the grouped PRs. Superseded per-finding PRs #1171–#1195 and the temporary combined PR #1196 are closed.
+R7–R15 name the originally unnumbered residual findings. R3 covers both merging stages in its original finding. DOC1–DOC5 track the report's documentation and CI-assurance recommendations. Individual finding commits remain available within the grouped PRs. Superseded per-finding PRs #1171–#1195 and the temporary combined PR #1196 are closed.
 
 | ID | Scope | Group | Status | PR | Verification |
 |---|---|---|---|---|---|
@@ -44,11 +44,11 @@ R7–R15 name the originally unnumbered residual findings. R3 covers both mergin
 | T2 | Semantic Action E2E receipts/protocol | ci | IN PROGRESS | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | — |
 | T3 | Clean installed-wheel CLI acceptance | ci | IMPLEMENTED / VALIDATING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | Clean wheel acceptance; 6 packaging tests; Ruff/mypy |
 | T4 | Locked CI bootstrap | ci | IMPLEMENTED / VALIDATING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | real stale-lock bootstrap regression; Ruff |
-| D1 | Released pinned onboarding | docs | IMPLEMENTED / VALIDATING | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | 26 docs tests; generated packages; Ruff |
-| D2 | Supported/tested/published matrix | docs | IMPLEMENTED / VALIDATING | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | 9 docs tests; generator drift; Ruff |
-| D3 | CLI workspace behavior documentation | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | Documented workspace and output contracts |
-| D4 | Enforce reliable deterministic checks | ci | IMPLEMENTED / VALIDATING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 78 guard/workflow tests; permissions; Ruff |
-| D5 | Dated audit/history and complete remediation index | docs | IMPLEMENTED / VALIDATING | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | Dated report, probes, open-work snapshot and full finding index |
+| DOC1 | Released pinned onboarding | docs | IMPLEMENTED / VALIDATING | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | 26 docs tests; generated packages; Ruff |
+| DOC2 | Supported/tested/published matrix | docs | IMPLEMENTED / VALIDATING | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | 9 docs tests; generator drift; Ruff |
+| DOC3 | CLI workspace behavior documentation | cli | IMPLEMENTED / VALIDATING | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | Documented workspace and output contracts |
+| DOC4 | Enforce reliable deterministic checks | ci | IMPLEMENTED / VALIDATING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 78 guard/workflow tests; permissions; Ruff |
+| DOC5 | Dated audit/history and complete remediation index | docs | IMPLEMENTED / VALIDATING | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | Dated report, probes, open-work snapshot and full finding index |
 
 ## Verification and execution contract
 
