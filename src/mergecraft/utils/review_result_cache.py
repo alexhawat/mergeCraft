@@ -59,6 +59,7 @@ def review_result_cache_key(
     version: str | None = None,
     settings_digest: str | None = None,
     verification_report_digest: str | None = None,
+    source_context_digest: str | None = None,
 ) -> str:
     """Return a cache key for a materialized review, including inputs that change it."""
     identity = repo_identity if repo_identity is not None else review_cache_repo_identity(cwd=cwd)
@@ -85,6 +86,8 @@ def review_result_cache_key(
     hasher.update(digest.encode("utf-8"))
     hasher.update(b"\0vreport=")
     hasher.update((verification_report_digest or "").encode("utf-8"))
+    hasher.update(b"\0source-context=")
+    hasher.update((source_context_digest or "").encode("utf-8"))
     return f"{_KEY_PREFIX}{hasher.hexdigest()}"
 
 
@@ -222,6 +225,7 @@ def cache_key_for_diff_path(
     version: str | None = None,
     settings_digest: str | None = None,
     verification_report_digest: str | None = None,
+    source_context_digest: str | None = None,
 ) -> str:
     """Hash an on-disk unified diff plus review-changing inputs into a result-cache key."""
     return review_result_cache_key(
@@ -236,6 +240,7 @@ def cache_key_for_diff_path(
         version=version,
         settings_digest=settings_digest,
         verification_report_digest=verification_report_digest,
+        source_context_digest=source_context_digest,
     )
 
 
