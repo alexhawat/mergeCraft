@@ -12,6 +12,7 @@ a large diff, recorded under ``file-group/<group-id>``.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -49,7 +50,7 @@ if TYPE_CHECKING:
     from mergecraft.agents.shared import AgentResult, AgentRunContext
     from mergecraft.config.settings import RepoSettings
     from mergecraft.mcp.context import ToolContext
-    from mergecraft.mcp.tool_state import ToolState
+    from mergecraft.mcp.tool_state import RepoToolState, ToolState
 
 _ROSTER_SUBMIT_INSTRUCTIONS = """
 You are a secondary reviewer on this run. Review the diff and record your outcome
@@ -535,22 +536,45 @@ def _file_group_timeout_s(
     *,
     per_group_timeout_s: int,
     binding_timeout_s: int,
-    remaining_timeout_s: Callable[[], float | None] | None,
+    budget_left_s: float | None,
 ) -> float:
     """Return the cap one group runs under; no bound can turn the cap off.
 
     The cap is the smallest of ``perGroupTimeoutS`` (always at least 1), the
-    binding's ``timeoutS`` when it is positive, and the remaining run budget
-    (floored at one second, as for the secondary roster).
+    binding's ``timeoutS`` when it is positive, and what is left of the
+    fan-out's budget (floored at one second, as for the secondary roster).
     """
     bounds = [float(max(1, per_group_timeout_s))]
     if binding_timeout_s > 0:
         bounds.append(float(binding_timeout_s))
-    if remaining_timeout_s is not None:
-        remaining = remaining_timeout_s()
-        if remaining is not None:
-            bounds.append(max(1.0, remaining))
+    if budget_left_s is not None:
+        bounds.append(max(1.0, budget_left_s))
     return min(bounds)
+
+
+def _fanout_budget_s(
+    remaining_timeout_s: Callable[[], float | None] | None,
+    *,
+    share: float,
+) -> float | None:
+    """Return the fan-out's whole budget: ``share`` of the run budget left now.
+
+    Measured once, when the fan-out starts, and floored at one second; the
+    secondary roster keeps the rest. ``None`` when the run has no budget.
+    """
+    if remaining_timeout_s is None:
+        return None
+    remaining = remaining_timeout_s()
+    if remaining is None:
+        return None
+    return max(1.0, share * max(0.0, remaining))
+
+
+def _fanout_diff_path(repo_state: RepoToolState) -> str | None:
+    """Return the diff the fan-out plans from: the incremental diff when one is set."""
+    if repo_state.incremental_diff_path is not None:
+        return repo_state.incremental_diff_path
+    return repo_state.diff_path
 
 
 def _claimed_by_file_group_runs(tool_state: ToolState) -> set[str]:
@@ -597,9 +621,12 @@ async def run_file_group_reviewers(
     """Dispatch one read-only reviewer per file group of a large diff.
 
     Off unless ``review.fileGroupFanout.enabled``. The plan is built from the
-    primary checkout's materialised diff; with no diff path, an unreadable diff,
-    or a diff below both size thresholds, nothing is dispatched and the summary
-    is empty. Each group runs through the same dispatch core as a secondary
+    primary checkout's incremental diff when one is recorded (an incremental
+    review), else its materialised PR diff; with no diff path, an unreadable or
+    empty diff, or a diff below both size thresholds, nothing is dispatched and
+    the summary is empty. The whole fan-out may spend ``budgetShare`` of the run
+    budget left when it starts (at least one second), so the secondary roster
+    keeps the rest. Each group runs through the same dispatch core as a secondary
     reviewer, under the agent id ``file-group/<group-id>``, with its own paths,
     the shared diff path and a file-group submit block (never the roster block)
     in the prompt. While a group runs, the roster recording tools refuse it.
@@ -635,7 +662,9 @@ async def run_file_group_reviewers(
     if not fanout.enabled:
         return FanoutSummary()
     tool_state = tool_context.tool_state
-    diff_path = primary_repo_state(tool_state).diff_path
+    # An incremental review fans out over what changed since the last review,
+    # never the whole pull request; an empty incremental diff plans no groups.
+    diff_path = _fanout_diff_path(primary_repo_state(tool_state))
     if not diff_path:
         return FanoutSummary()
     try:
@@ -656,6 +685,8 @@ async def run_file_group_reviewers(
 
     registry = load_registry(settings=effective_settings, repo_root=repo_root)
     binding, binding_gap = _file_group_binding(registry, fanout.binding)
+    budget_s = _fanout_budget_s(remaining_timeout_s, share=fanout.budget_share)
+    started = time.monotonic()
 
     async def _dispatch(group: FileGroup) -> str:
         agent_id = file_group_agent_id(group.group_id)
@@ -665,7 +696,7 @@ async def run_file_group_reviewers(
         timeout = _file_group_timeout_s(
             per_group_timeout_s=fanout.per_group_timeout_s,
             binding_timeout_s=binding.timeout_s,
-            remaining_timeout_s=remaining_timeout_s,
+            budget_left_s=None if budget_s is None else budget_s - (time.monotonic() - started),
         )
 
         def _owns(row: dict[str, Any]) -> bool:

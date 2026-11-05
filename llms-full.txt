@@ -1235,7 +1235,10 @@ Formatting rules that are enforced by the prompt:
   `minDiffLines` added lines is split into at most `maxGroups` balanced
   read-only file groups, and mergeCraft dispatches one reviewer per group after
   the primary reviewer and before the secondary roster, sequentially unless
-  `concurrency` says otherwise. The groups run after the primary reviewer has
+  `concurrency` says otherwise. An incremental review fans out over the
+  incremental diff, never the whole pull request, and the fan-out spends at
+  most `budgetShare` (default half) of the run budget left when it starts, so
+  the secondary roster keeps the rest. The groups run after the primary reviewer has
   published, so their findings reach the evidence packet and the checks the
   way secondary roster findings do, not the posted review body, and `raised_by`
   never names a group. Each group row's packet evidence carries

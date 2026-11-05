@@ -398,6 +398,9 @@ class FileGroupFanoutSettings(BaseModel):
         per_group_timeout_s: Seconds one group may run, ``1``..``900``, further
             capped by the binding's ``timeoutS`` and the remaining run budget; no
             bound can turn the cap off. Default ``600``.
+        budget_share: Share of the run budget left when the fan-out starts that
+            the whole fan-out may spend (above ``0``, at most ``0.9``; at least
+            one second), so the secondary roster keeps the rest. Default ``0.5``.
     """
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
@@ -409,6 +412,7 @@ class FileGroupFanoutSettings(BaseModel):
     binding: str | None = None
     concurrency: int = Field(default=1, ge=1, le=6)
     per_group_timeout_s: int = Field(default=600, alias="perGroupTimeoutS", ge=1, le=900)
+    budget_share: float = Field(default=0.5, alias="budgetShare", gt=0, le=0.9)
 
 
 class ReviewSettings(BaseModel):

@@ -16,7 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   When enabled, a diff with at least `minFiles` changed files or
   `minDiffLines` added lines is split into at most `maxGroups` groups (default
   6), run one after another unless `concurrency` is raised, each capped at
-  `perGroupTimeoutS` (1–900 seconds). The groups run after the primary
+  `perGroupTimeoutS` (1–900 seconds); the whole fan-out spends at most
+  `budgetShare` (default 0.5) of the remaining run budget so the secondary
+  roster keeps the rest, and an incremental review fans out over the
+  incremental diff only. The groups run after the primary
   reviewer has published, so their findings reach the evidence packet and the
   checks the way secondary roster findings do, not the posted review; each such
   row's packet evidence names its group (`reviewer: file-group/<group-id>
