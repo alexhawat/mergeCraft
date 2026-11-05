@@ -323,6 +323,8 @@ def test_anonymous_clone_of_private_repo_is_a_clear_error(
     if run_git is None:
         pytest.fail("_run_git not defined in mergecraft.utils.source_resolve")
     monkeypatch.setattr(mod, "_run_git", _fail_auth)
+    # This case exercises auth diagnostics after URL validation, not live DNS.
+    monkeypatch.setattr(mod, "guard_external_url", lambda url: url)
 
     acquire = _acquire()
     source = _review_source(url="https://github.com/private-owner/private-repo.git", token=None)

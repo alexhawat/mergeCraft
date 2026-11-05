@@ -474,6 +474,32 @@ def test_auth_precedence_order(monkeypatch: pytest.MonkeyPatch) -> None:
     assert resolve_auth().source == "anonymous"
 
 
+def test_auth_falls_back_when_gh_is_not_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An actual missing executable still permits anonymous public acquisition."""
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    auth = _resolve_auth_token()()
+
+    assert auth.token is None
+    assert auth.source == "anonymous"
+
+
+def test_auth_does_not_hide_other_execution_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    def denied(*args: object, **kwargs: object) -> None:
+        raise PermissionError("fixture execution denied")
+
+    monkeypatch.setattr(subprocess, "run", denied)
+    with pytest.raises(PermissionError, match="execution denied"):
+        _resolve_auth_token()()
+
+
 def test_review_alias_diff_review_still_works(tmp_path: Path) -> None:
     """D8 — ``diff-review`` remains a working entry point (Harbor pin)."""
     patch = tmp_path / "change.diff"
