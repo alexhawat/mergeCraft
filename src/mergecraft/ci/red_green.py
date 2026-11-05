@@ -120,18 +120,30 @@ class RedGreenEvidence:
     detail: str
 
 
-def undeclared_red_green_evidence() -> RedGreenEvidence:
-    """The evidence for a pull request whose base declares no ``ciEvidence.redGreen``.
+def undeclared_red_green_evidence(unreadable: str | None = None) -> RedGreenEvidence:
+    """The evidence for a pull request with no base-side ``ciEvidence.redGreen``.
+
+    Args:
+        unreadable (str | None): Why the base config could not be read, when that is
+            the cause; ``None`` when the base was read and declares no receipt.
 
     Returns:
         RedGreenEvidence: Status ``not-declared``, no artifact and no run.
     """
+    detail = (
+        "the pull request base declares no ciEvidence.redGreen receipt"
+        if unreadable is None
+        else (
+            "the pull request base config could not be read, so no ciEvidence.redGreen "
+            f"receipt is in force ({unreadable})"
+        )
+    )
     return RedGreenEvidence(
         status="not-declared",
         test_count=0,
         artifact=None,
         run_url=None,
-        detail="the pull request base declares no ciEvidence.redGreen receipt",
+        detail=detail,
     )
 
 

@@ -70,7 +70,7 @@ from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.review_policy.fix_labels import resolve_fix_labels
 from mergecraft.review_policy.ignore_paths import INPUT_ENV as IGNORE_PATHS_INPUT_ENV
 from mergecraft.review_policy.ignore_paths import list_pull_request_paths, resolve_review_ignore
-from mergecraft.review_policy.red_green import resolve_red_green_declaration
+from mergecraft.review_policy.red_green import read_red_green_declaration
 from mergecraft.run_outcome import (
     RUN_OUTCOME_CONCLUSION,
     CompletionConclusion,
@@ -2333,8 +2333,9 @@ async def _resolve_run_red_green_declaration(ctx: RunContext) -> None:
         return
     event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
     repo = ctx.tool_context.repo
+    unreadable: str | None
     try:
-        declaration = await resolve_red_green_declaration(
+        declaration, unreadable = await read_red_green_declaration(
             ctx.tool_context.scm,
             repo.owner,
             repo.name,
@@ -2345,11 +2346,12 @@ async def _resolve_run_red_green_declaration(ctx: RunContext) -> None:
     except Exception as err:  # an unresolvable declaration declares nothing, never fails
         logger.warning("red_green: could not resolve ciEvidence.redGreen: {}", err)
         declaration = None
+        unreadable = f"the PR base config could not be read ({type(err).__name__})"
     ctx.tool_state.red_green_declaration = declaration
     if declaration is None:
         from mergecraft.ci.red_green import undeclared_red_green_evidence
 
-        ctx.tool_state.red_green = undeclared_red_green_evidence()
+        ctx.tool_state.red_green = undeclared_red_green_evidence(unreadable)
 
 
 def _skip_without_review_diff(
@@ -2513,6 +2515,9 @@ async def _run_review_after_analyze(
             ctx.setup_hook_failure,
         )
         raise sc_payload
+    # Base-side fix labels are recorded before any tier can skip the agent, the
+    # setup-script ``inconclusive`` skip included, so the packet never falls back.
+    await _resolve_run_fix_labels(ctx)
     if sc_action == "skip_agent":
         assert isinstance(sc_payload, str)
         skip_reason = sc_payload
@@ -2524,7 +2529,6 @@ async def _run_review_after_analyze(
         # Engine publish (``_finalize``) owns completion; do not publish here.
         return _skip_without_review_diff(ctx, SkipAgentReview(reason=skip_reason))
 
-    await _resolve_run_fix_labels(ctx)
     triage_out = await _triage_gate(ctx)
     if triage_out is not None:
         return _skip_without_review_diff(ctx, triage_out)

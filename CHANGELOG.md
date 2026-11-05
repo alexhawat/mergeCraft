@@ -68,6 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   receipt (`fix.proven`); a fix whose receipt is missing, undeclared, unproven,
   malformed or for other commits keeps the lane at least `medium` with its own
   `fix.*` reason. See `docs/red-green-receipts.md`.
+  - A base whose config cannot be read, does not validate, or whose commit is
+    unknown now says the base config "could not be read" instead of reporting
+    that it declares no receipt; the base-side `review.fixLabels` is also
+    resolved when a setup-script failure skips the agent.
 
 - A `required` policy rule can now clear on evidence the review collects
   itself, instead of sitting at `Major` until it is waived (#1114). The rule's
