@@ -102,7 +102,7 @@ Scope paths:
 - docs/blast-radius.md
 ```
 
-The block ends at a blank line after the first item, at the next heading, or at the closing fence. A glob wrapped in backticks is unwrapped. Globs match the whole repository-relative path: `*`, `?` and `[...]` stay inside one directory, a `**` segment spans zero or more directories (`src/**/*.py` matches `src/c.py` and `src/a/b.py`), and `README.md` matches only the root file. Both the old and the new path of a rename or copy must match.
+The block ends at a blank line after the first item, at the next heading, or at the closing fence; an unclosed fence still stops at the next heading. A block inside an HTML comment or inside a code fence is not a declaration: only text a reviewer can see on the rendered page counts, so a hidden block beside a visible one is ignored. A glob wrapped in backticks is unwrapped. Globs match the whole repository-relative path: `*`, `?` and `[...]` (with `[!...]` negation) stay inside one directory, a `**` segment spans zero or more directories (`src/**/*.py` matches `src/c.py` and `src/a/b.py`, and `docs/**` matches `docs` itself), and `README.md` matches only the root file. Matching is linear in the length of the glob and the path, so a hostile glob cannot stall the run. Both the old and the new path of a rename or copy must match.
 
 The body is untrusted, so every bound fails closed. More than 64 globs, a glob over 200 characters, a control or other non-printable character, a leading `/`, a `..` segment, or a glob made only of wildcards (`*`, `**`, `**/*`, `**/*.*`) makes the whole block declare nothing: `scope.invalid`. The globs are data. They are matched against the diff's path list and nothing else, are never used to open a file, and no reason message repeats them.
 
