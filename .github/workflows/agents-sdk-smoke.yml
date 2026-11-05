@@ -45,7 +45,7 @@ jobs:
             echo "::notice title=agents-sdk smoke skipped::OPENCODE_GO_API_KEY not configured"
             exit 0
           fi
-          uv run python examples/agents-sdk/review_loop.py | tee /tmp/agents-sdk-smoke.log
+          uv run python examples/agents-sdk/review_loop.py 2>&1 | tee /tmp/agents-sdk-smoke.log
           echo "---- redacted tail ----"
           tail -n 20 /tmp/agents-sdk-smoke.log | sed -E 's/(ghp_|sk-)[A-Za-z0-9_-]+/<redacted>/g'
 
@@ -55,7 +55,7 @@ jobs:
           if [[ "${{ steps.live.outcome }}" == "success" || "${{ steps.live.outcome }}" == "skipped" ]]; then
             exit 0
           fi
-          if [[ -f /tmp/agents-sdk-smoke.log ]] && grep -q "Insufficient account funds" /tmp/agents-sdk-smoke.log; then
+          if [[ -f /tmp/agents-sdk-smoke.log ]] && grep -qE '402|Insufficient account funds' /tmp/agents-sdk-smoke.log; then
             echo "::warning title=agents-sdk live smoke::OpenCode Go returned 402 insufficient funds; unit tests still gate this workflow"
             exit 0
           fi
