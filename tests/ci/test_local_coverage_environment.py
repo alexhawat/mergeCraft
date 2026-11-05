@@ -43,7 +43,9 @@ def test_path_coverage_uses_separate_consumer_environment(
     project: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     consumer = tmp_path / "consumer-venv"
-    venv.EnvBuilder(with_pip=False).create(consumer)
+    # Match the standard venv CLI on POSIX: standalone Python builds need
+    # their original executable location to resolve the shared runtime library.
+    venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(consumer)
     scripts = consumer / ("Scripts" if os.name == "nt" else "bin")
     python = scripts / ("python.exe" if os.name == "nt" else "python")
     site_result = subprocess.run(
