@@ -103,7 +103,15 @@ anchors, and `MERGECRAFT_ENV` overrides both:
 | Command shape | Anchor |
 |---------------|--------|
 | Takes `--cwd` (`provider`, `model`, `agents`, `trust`) | `<cwd>/.env`, taken literally — the same directory `<cwd>/.mergecraft/config.yaml` is read from, so the registry and the credentials always name one repository |
-| Takes no `--cwd` (`auth`, `tracing logfire`, and the CLI startup load) | `<git-repo-root>/.env`, walking up from the process working directory |
+| Local `review --repo PATH` | `<PATH>/.env`, taking precedence over `--cwd` |
+| Takes no explicit local target (`auth`, `tracing logfire`, or a command without `--cwd`) | `<git-repo-root>/.env`, walking up from the process working directory |
+
+Startup parses explicit target options before loading credentials, so a caller's
+`.env` cannot mask the selected target's values. A remote `--repo` never loads
+credentials from its acquired checkout; it uses the operator's `--cwd` or the
+normal process-directory anchor. Existing process variables always win, and a
+missing target `.env` does not fall back to the caller's file. Relative
+`MERGECRAFT_ENV` paths remain relative to the invocation directory.
 
 The walk-up is why `mergecraft auth` run from a subdirectory writes the `.env`
 the next invocation actually loads. Outside a git checkout the writers fail

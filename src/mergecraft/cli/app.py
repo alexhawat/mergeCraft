@@ -70,7 +70,11 @@ from mergecraft.cli.global_surface import (
     emit_cli_json,
     validate_log_level_option,
 )
-from mergecraft.cli.local_env import _configured_env_path, local_env_path_for_process_cwd
+from mergecraft.cli.local_env import (
+    _configured_env_path,
+    local_env_path_for_cwd,
+    local_env_path_for_process_cwd,
+)
 from mergecraft.cli.typer_group import MergecraftTyperGroup
 from mergecraft.config.env import EnvSettingsError, LocalDotEnv
 from mergecraft.config.layered import running_in_github_actions
@@ -241,7 +245,7 @@ def version_cmd(
     typer.echo(format_version_display(__version__, mergecraft.__commit__))
 
 
-def _load_local_env() -> None:
+def _load_local_env(args: list[str] | None = None) -> None:
     """Populate ``os.environ`` from the local ``.env`` (no override).
 
     The auth command writes ``MERGECRAFT_LOGFIRE_TOKEN`` and
@@ -267,7 +271,14 @@ def _load_local_env() -> None:
     """
     if running_in_github_actions() and _configured_env_path() is None:
         return
-    env_path = local_env_path_for_process_cwd(on_missing_repo="use-process-cwd")
+    from mergecraft.cli.startup_env import startup_local_target
+
+    target = startup_local_target(app, args) if args is not None else None
+    env_path = (
+        local_env_path_for_cwd(target)
+        if target is not None
+        else local_env_path_for_process_cwd(on_missing_repo="use-process-cwd")
+    )
     if not env_path.is_file():
         return
     for key, value in LocalDotEnv.from_file(env_path).raw_values().items():
@@ -275,8 +286,8 @@ def _load_local_env() -> None:
 
 
 def main() -> None:
-    _load_local_env()
     try:
+        _load_local_env(sys.argv[1:])
         app()
     except EnvSettingsError as exc:
         # A malformed control-carrying environment variable (e.g. a typo'd
