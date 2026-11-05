@@ -28,7 +28,7 @@ _MIGRATION_PREFIXES: tuple[str, ...] = (
 
 # ── diff header parsing (AN-D7) ───────────────────────────────────────────────
 # A ``diff --git`` header is not ``a/<old> b/<new>`` split on whitespace: Git
-# C-quotes a path that contains a space, a quote, a backslash, a control
+# C-quotes a path that contains a quote, a backslash, a control
 # character, or a non-ASCII byte. Splitting the raw header on `` b/`` therefore
 # misreads a quoted or space-bearing path, attaching the next file's hunks to
 # the previous file. Every path source is decoded the same way, and a header
@@ -60,7 +60,7 @@ _C_ESCAPES: dict[str, int] = {
 _OCTAL_DIGITS = frozenset("01234567")
 
 
-def _unquote_git_path(token: str) -> str | None:
+def unquote_git_path(token: str) -> str | None:
     """Decode a Git C-style quoted path, or return an unquoted token unchanged.
 
     Git wraps a path in double quotes and escapes it C-style (``\\t``, ``\\n``,
@@ -117,7 +117,7 @@ def _take_quoted_token(text: str) -> tuple[str | None, str]:
             index += 2
             continue
         if char == '"':
-            return _unquote_git_path(text[: index + 1]), text[index + 1 :]
+            return unquote_git_path(text[: index + 1]), text[index + 1 :]
         index += 1
     return None, text
 
@@ -127,27 +127,35 @@ def _strip_diff_prefix(path: str, prefix: str) -> str:
     return path[len(prefix) :] if path.startswith(prefix) else path
 
 
-def _split_diff_git_paths(body: str) -> tuple[str, str] | None:
+def split_diff_git_paths(body: str) -> tuple[str, str] | None:
     """Split ``a/<old> b/<new>`` into the two unquoted paths.
 
-    Returns ``None`` when the body cannot be read as two prefixed paths.
+    Spaces are not necessarily quoted by Git. For an ambiguous unquoted
+    rename, return ``None`` and let the caller use ``rename from/to``. Equal
+    pre/post paths disambiguate ordinary binary and mode-only changes.
     """
     if body.startswith('"'):
         old, rest = _take_quoted_token(body)
         if old is None:
             return None
-        new, tail = _take_quoted_token(rest.lstrip(" "))
-        if new is None or tail.strip():
+        if not rest.startswith(" "):
             return None
-        return _strip_diff_prefix(old, _A_PREFIX), _strip_diff_prefix(new, _B_PREFIX)
-    separator = body.find(" b/")
-    if separator == -1:
+        new = unquote_git_path(rest[1:])
+        if new is None or not old.startswith(_A_PREFIX) or not new.startswith(_B_PREFIX):
+            return None
+        return old[len(_A_PREFIX) :], new[len(_B_PREFIX) :]
+    if not body.startswith(_A_PREFIX):
         return None
-    old_raw = body[:separator]
-    new_raw = body[separator + 1 :]
-    if not old_raw.startswith(_A_PREFIX) or not new_raw.startswith(_B_PREFIX):
-        return None
-    return old_raw[len(_A_PREFIX) :], new_raw[len(_B_PREFIX) :]
+    candidates: list[tuple[str, str]] = []
+    for match in re.finditer(r' (?=b/|"b/)', body):
+        old = body[len(_A_PREFIX) : match.start()]
+        new = unquote_git_path(body[match.end() :])
+        if old and new is not None and new.startswith(_B_PREFIX):
+            candidates.append((old, new[len(_B_PREFIX) :]))
+    same_path = [pair for pair in candidates if pair[0] == pair[1]]
+    if len(same_path) == 1:
+        return same_path[0]
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def _path_from_rename(raw_line: str) -> str | None:
@@ -155,7 +163,7 @@ def _path_from_rename(raw_line: str) -> str | None:
     token = raw_line[len(_RENAME_TO_PREFIX) :].strip()
     if not token:
         return None
-    return _unquote_git_path(token)
+    return unquote_git_path(token)
 
 
 def _path_from_postimage(raw_line: str) -> str | None:
@@ -163,7 +171,7 @@ def _path_from_postimage(raw_line: str) -> str | None:
     token = raw_line[len(_POSTIMAGE_PREFIX) :].strip()
     if not token or token == _DEV_NULL_PATH:
         return None
-    decoded = _unquote_git_path(token)
+    decoded = unquote_git_path(token)
     if decoded is None:
         return None
     return _strip_diff_prefix(decoded, _B_PREFIX)
@@ -180,7 +188,7 @@ def _classify_header_line(raw_line: str, *, in_hunk: bool) -> tuple[str, str | N
     ``+++ `` and must not be read as a header.
     """
     if raw_line.startswith(_DIFF_GIT_PREFIX):
-        paths = _split_diff_git_paths(raw_line[len(_DIFF_GIT_PREFIX) :])
+        paths = split_diff_git_paths(raw_line[len(_DIFF_GIT_PREFIX) :])
         return (_HEADER_FILE, paths[1] if paths is not None else None)
     if raw_line.startswith(_RENAME_TO_PREFIX):
         return (_HEADER_RENAME, _path_from_rename(raw_line))
@@ -700,6 +708,8 @@ __all__ = [
     "line_intersects_hunks",
     "parse_diff_scope",
     "scope_findings",
+    "split_diff_git_paths",
     "suppress_withdrawn_findings",
+    "unquote_git_path",
     "withdrawn_fingerprints",
 ]

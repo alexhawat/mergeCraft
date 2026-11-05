@@ -643,10 +643,10 @@ def _require_workflow_untouched(ctx: Any, *, workflow: str, label: str) -> None:
         raise _Absent(msg)
     try:
         text = Path(diff_path).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        msg = f"{unverified}: the diff could not be read ({exc})"
+        reviewed = {_workflow_path(path) for path in changed_paths_from_diff(text)}
+    except (OSError, ValueError) as exc:
+        msg = f"{unverified}: the diff could not be read or parsed ({exc})"
         raise _Absent(msg) from exc
-    reviewed = {_workflow_path(path) for path in changed_paths_from_diff(text)}
     ignored = {_workflow_path(path) for path in getattr(state, "ignored_review_paths", ())}
     coverage = getattr(state, "coverage", None)
     unreviewable = {

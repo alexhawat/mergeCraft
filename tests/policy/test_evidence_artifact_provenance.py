@@ -181,6 +181,26 @@ async def test_a_diff_that_edits_the_declared_workflow_voids_its_artifact(tmp_pa
     assert DECLARED_WORKFLOW in _reason(evidence), "the reason must name the edited workflow"
 
 
+async def test_mode_only_change_to_spaced_workflow_voids_artifact(tmp_path: Path) -> None:
+    workflow = ".github/workflows/deploy proof.yml"
+    github = _github([workflow_run(path=workflow)])
+    snapshot = settings_snapshot(
+        tmp_path,
+        evidence_settings({"rollback_plan": artifact_declaration(workflow=workflow)}),
+        operator_owned=True,
+    )
+    ctx = evidence_ctx(tmp_path, github=github, snapshot=snapshot)
+    diff_path = primary_repo_state(ctx.tool_state).diff_path
+    assert diff_path is not None
+    await asyncio.to_thread(
+        Path(diff_path).write_text,
+        f"diff --git a/{workflow} b/{workflow}\nold mode 100644\nnew mode 100755\n",
+    )
+    evidence = await _collect(ctx, ["rollback_plan"])
+    assert workflow in _reason(evidence)
+    assert github.call_names() == []
+
+
 @pytest.mark.parametrize("source", ["config", "input"])
 async def test_an_ignored_workflow_edit_voids_its_artifact(tmp_path: Path, source: str) -> None:
     github = _github([workflow_run()])
@@ -349,7 +369,7 @@ async def test_a_truncated_change_set_cannot_prove_the_workflow_untouched(
     assert "download_artifact_zip" not in github.call_names()
 
 
-@pytest.mark.parametrize("diff", ["none", "unreadable"], ids=["no-diff", "unreadable-diff"])
+@pytest.mark.parametrize("diff", ["none", "unreadable", "unparseable"])
 async def test_an_unavailable_change_set_cannot_prove_the_workflow_untouched(
     tmp_path: Path, diff: str
 ) -> None:
@@ -360,6 +380,11 @@ async def test_an_unavailable_change_set_cannot_prove_the_workflow_untouched(
     ctx = _ctx(tmp_path, github)
     primary = primary_repo_state(ctx.tool_state)
     primary.diff_path = None if diff == "none" else str(tmp_path / "missing.diff")
+    if diff == "unparseable":
+        await asyncio.to_thread(
+            (tmp_path / "missing.diff").write_text,
+            'diff --git "a/broken\nold mode 100644\nnew mode 100755\n',
+        )
 
     evidence = await _collect(ctx, ["rollback_plan"])
 

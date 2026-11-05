@@ -19,7 +19,18 @@ until the implementation lands.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+import pytest
+
+from mergecraft.policy.review import PolicySnapshot, evaluate_review_policy
+from mergecraft.policy.schema import PolicyRule
 from mergecraft.utils.diff_paths import changed_paths_from_diff
+from tests.support.policy_fixtures import commit_all, git, init_git_repo
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ``git mv .mergecraft/policy/rules.yaml .mergecraft/policy/rules.yaml.bak``
 # with no content change: no ``---``/``+++`` lines and no hunk.
@@ -90,3 +101,57 @@ def test_a_hunk_diff_keeps_its_result_sorted_and_deduplicated() -> None:
 
     assert paths == ["src/app.py", "src/new.py"]
     assert paths == sorted(set(paths))
+
+
+@pytest.mark.parametrize("name", ["file name", "file b/name", "café", 'a"quote', "tab\tname"])
+@pytest.mark.parametrize("change", ["mode", "binary", "rename"])
+def test_git_generated_no_hunk_paths_reach_required_policy(
+    tmp_path: Path, name: str, change: str
+) -> None:
+    repo = init_git_repo(tmp_path)
+    old = f"old/{name}"
+    file = repo / old
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_bytes(b"\x00before" if change == "binary" else b"fixture\n")
+    commit_all(repo, "base")
+    expected = {old}
+    if change == "mode":
+        git(repo, "update-index", "--chmod=+x", "--", old)
+    elif change == "binary":
+        file.write_bytes(b"\x00after")
+        git(repo, "add", "--", old)
+    else:
+        new = "new/plain name"
+        (repo / "new").mkdir()
+        git(repo, "mv", "--", old, new)
+        expected.add(new)
+    diff = git(repo, "diff", "--cached", "--no-ext-diff", "--no-textconv")
+    paths = changed_paths_from_diff(diff)
+    assert set(paths) == expected
+    policy = PolicyRule.model_validate(
+        {
+            "id": "required-proof",
+            "owner": "operator",
+            "version": 1,
+            "rationale": "Changes under old require independent proof.",
+            "severity": "Major",
+            "enforcement": "required",
+            "scope": {"path": "old/**"},
+            "evidence": {"required": ["rollback_plan"]},
+        }
+    )
+    rows = evaluate_review_policy(
+        PolicySnapshot(repo_root=repo, rules=(policy,), operator_owned=True),
+        changed_paths=paths,
+        org="acme",
+        repo="demo",
+        base_ref="main",
+        exceptions_trusted=True,
+        now=datetime(2026, 11, 5, tzinfo=UTC),
+    )
+    assert [row.severity for row in rows] == ["Major"]
+
+
+def test_unparseable_header_is_unknown_instead_of_no_changes() -> None:
+    with pytest.raises(ValueError, match=r"changed paths.*diff"):
+        changed_paths_from_diff('diff --git "a/broken\nold mode 100644\nnew mode 100755\n')
