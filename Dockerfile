@@ -90,8 +90,10 @@ ENV IS_SANDBOX=1
 # libpcre2-8-0 10.42-1. Debian DLA-4772-1 / bookworm-security has the
 # HIGH fixes (CVE-2026-86145, CVE-2026-89157, CVE-2026-89161). It also ships
 # openssl/libssl3 3.0.20-1~deb12u2, which bookworm-security supersedes for
-# CVE-2026-84782; both are pinned so the image cannot drift back.
-# DLA-4880-1 fixes CVE-2026-109518 in apt/libapt-pkg6.0 2.6.2.
+# CVE-2026-84782; both are pinned so the image cannot drift back. apt 2.6.1 is
+# vulnerable to CVE-2026-109518 (DLA-4880-1, HIGH: an on-path mirror can make a
+# retried download install an unverified package); bookworm-security ships
+# 2.6.2, pinned the same way.
 RUN apt-get update -qq \
     && apt-get install -qq -y --no-install-recommends \
         apt=2.6.2 \
