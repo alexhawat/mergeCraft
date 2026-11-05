@@ -2108,17 +2108,45 @@ async def _triage_gate(ctx: RunContext) -> SkipAgentReview | None:
 _IGNORE_SKIP_EVENTS: frozenset[str] = frozenset({"pull_request", "pull_request_target"})
 
 
-def _pull_request_body(ctx: RunContext) -> str | None:
+async def _fetch_pull_request_body(ctx: RunContext, pull: dict[str, Any]) -> str | None:
+    """Read the pull request's description through the SCM (one ``get_pull``).
+
+    Raises when the read fails or there is no SCM to read with, so the caller
+    records the scope as unknown rather than skipping a body it could not see.
+    """
+    scm = getattr(ctx, "scm", None)
+    tool_context = getattr(ctx, "tool_context", None)
+    if scm is None and tool_context is not None:
+        scm = getattr(tool_context, "scm", None)
+    repo = getattr(getattr(ctx, "run_context", None), "repo", None)
+    if repo is None and tool_context is not None:
+        repo = getattr(tool_context, "repo", None)
+    raw_number = pull.get("number")
+    number = raw_number if isinstance(raw_number, int) else ctx.pr_number
+    if scm is None or repo is None or number is None:
+        msg = "the pull request body is not in the event and cannot be read"
+        raise RuntimeError(msg)
+    fetched = await scm.get_pull(repo.owner, repo.name, int(number))
+    body = fetched.get("body") if isinstance(fetched, dict) else None
+    return body if isinstance(body, str) else None
+
+
+async def _pull_request_body(ctx: RunContext) -> str | None:
     """The pull request's own description, never a comment body.
 
     Read from the raw event: ``pull_request.body`` on pull-request and review
-    comment events, ``issue.body`` on a comment on a pull request. The resolved
-    payload's ``event.body`` is the comment for comment triggers, so it is used
-    only for a pull-request trigger.
+    comment events, ``issue.body`` on a comment on a pull request. A
+    ``pull_request`` the run bound itself (the comment trigger, a PR-naming
+    ``workflow_dispatch``) carries no ``body`` key, so the pull request is read
+    through the SCM once; a failed read raises. The resolved payload's
+    ``event.body`` is the comment for comment triggers, so it is used only for a
+    pull-request trigger.
     """
     event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
     pull = event.get("pull_request")
     if isinstance(pull, dict):
+        if "body" not in pull:
+            return await _fetch_pull_request_body(ctx, pull)
         body = pull.get("body")
         return body if isinstance(body, str) else None
     issue = event.get("issue")
@@ -2133,7 +2161,7 @@ def _pull_request_body(ctx: RunContext) -> str | None:
     return None
 
 
-def _record_scope_declaration(ctx: RunContext) -> None:
+async def _record_scope_declaration(ctx: RunContext) -> None:
     """Record the run's ``Scope paths:`` declaration on ``ToolState.scope_declaration``.
 
     Sources in order, first declaration wins: the pull request body
@@ -2142,13 +2170,15 @@ def _record_scope_declaration(ctx: RunContext) -> None:
     A body without a block is skipped; a block that is empty or broke a bound
     still wins, so a later source never widens it. No block anywhere records an
     undeclared scope. The bodies are untrusted data and never open a file. Any
-    failure leaves ``None`` (unknown) and never raises into the run.
+    failure, including a pull request body that had to be fetched and could not
+    be, leaves ``None`` (unknown) and never raises into the run: a closing
+    issue's block never stands in for a body that might declare a narrower scope.
     """
     tool_state = ctx.tool_state
     if tool_state is None:
         return
     try:
-        sources: list[tuple[str, str | None]] = [("pr_description", _pull_request_body(ctx))]
+        sources: list[tuple[str, str | None]] = [("pr_description", await _pull_request_body(ctx))]
         sources.extend(
             (f"linked_issue#{issue.number}", issue.body) for issue in tool_state.linked_issues or ()
         )
@@ -2302,7 +2332,7 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
         return SkipAgentReview(reason=skip_reason)
 
     # #1056 part 3: read once, before the fast-path gate and before any dispatch.
-    _record_scope_declaration(ctx)
+    await _record_scope_declaration(ctx)
     triage_skip = await _triage_gate(ctx)
     if triage_skip is not None:
         return triage_skip
