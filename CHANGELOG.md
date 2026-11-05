@@ -67,7 +67,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checklist gate passes for a non-fix (`fix.not-required`) or a `proven`
   receipt (`fix.proven`); a fix whose receipt is missing, undeclared, unproven,
   malformed or for other commits keeps the lane at least `medium` with its own
-  `fix.*` reason. See `docs/red-green-receipts.md`.
+  `fix.*` reason. The receipt is written by the head's own test run, so it
+  proves what that run reported and is no defence against an author with push
+  access to the workflows. See `docs/red-green-receipts.md`.
   - A base whose config cannot be read, does not validate, or whose commit is
     unknown now says the base config "could not be read" instead of reporting
     that it declares no receipt; the base-side `review.fixLabels` is also
