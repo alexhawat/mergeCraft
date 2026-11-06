@@ -214,3 +214,78 @@ async def test_published_receipt_prevents_recheckout_without_erasing_it(tmp_path
     assert "published a review" in str(result.content)
     assert ctx.tool_state.review is receipt
     assert primary_repo_state(ctx.tool_state).checkout_sha == "a" * 40
+
+
+@pytest.mark.parametrize(
+    "refusal", ["dirty", "wrong-pr", "fork", "api-error", "cancelled", "published-during-lookup"]
+)
+async def test_preflight_refusal_preserves_the_existing_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refusal: str
+) -> None:
+    # The recovery cases above exercise a real checkout. Here a refusal must
+    # never reach workspace mutation or replace any existing state field.
+    from unittest.mock import Mock
+
+    from mergecraft.mcp.verdict import register_review_scope
+
+    old_sha = "a" * 40
+    scm = _StubGitHub(head_sha=old_sha, reviews=[])
+    monkeypatch.setattr(scm, "get", AsyncMock(return_value={}))
+    ctx = _ctx_for(tmp_path, scm, tmp_path, mode="Review", analyzers_mode="off")
+    ctx.gh_event = {"pull_request": {"number": 1}}
+    state = ctx.tool_state
+    primary_repo_state(state).checkout_sha = old_sha
+    register_review_scope(state, diff_path=str(tmp_path / "old.diff"), provenance="checkout")
+    fetch = Mock(side_effect=AssertionError("preflight refusal reached checkout mutation"))
+    monkeypatch.setattr(checkout_module, "_fetch_head_with_retry", fetch)
+    monkeypatch.setattr(checkout_module, "get_git_status", lambda cwd: "")
+    state.output = "existing structured output"
+    state.agent_findings = [{"body": "existing finding"}]
+    state.analyzer_run = AnalyzerRunState(ran=True)
+    state.verified_ids = {"existing-verification"}
+    state.approval = ApprovalRecord(would_approve=True, sha=old_sha)
+    state.pending_review_publication = {"commit_id": old_sha}
+    state.prepared_run_packet = object()
+    from dataclasses import fields
+
+    saved_state = {field.name: getattr(state, field.name) for field in fields(state)}
+    primary = primary_repo_state(state)
+    saved_repo = {field.name: getattr(primary, field.name) for field in fields(primary)}
+    get_pull = AsyncMock(wraps=scm.get_pull)
+    monkeypatch.setattr(scm, "get_pull", get_pull)
+    number = 1
+    if refusal == "dirty":
+        monkeypatch.setattr(checkout_module, "get_git_status", lambda cwd: " M reviewed.py")
+    elif refusal == "wrong-pr":
+        number = 2
+    elif refusal == "fork":
+        pr = await get_pull("acme", "demo", 1)
+        pr["head"]["repo"] = {"full_name": "external/demo"}
+        get_pull.return_value = pr
+        get_pull.side_effect = None
+        ctx.trust_tier = "trusted"
+    elif refusal == "api-error":
+        get_pull.side_effect = RuntimeError("PR lookup unavailable")
+    elif refusal == "published-during-lookup":
+        pr = await get_pull("acme", "demo", 1)
+        receipt = ReviewRecord(id=1, node_id="R1", reviewed_sha=old_sha, verdict="approve")
+
+        async def publish_during_lookup(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            state.review = receipt
+            return pr
+
+        get_pull.side_effect = publish_during_lookup
+        saved_state["review"] = receipt
+    else:
+        get_pull.side_effect = asyncio.CancelledError
+    if refusal == "cancelled":
+        with pytest.raises(asyncio.CancelledError):
+            await checkout_module.checkout_pr_tool(ctx).execute({"pull_number": number})
+    else:
+        result = await checkout_module.checkout_pr_tool(ctx).execute({"pull_number": number})
+        assert result.is_error, result.content
+    for name, value in saved_state.items():
+        assert getattr(state, name) is value, f"preflight refusal replaced {name}"
+    for name, value in saved_repo.items():
+        assert getattr(primary, name) is value, f"preflight refusal replaced repo.{name}"
+    fetch.assert_not_called()

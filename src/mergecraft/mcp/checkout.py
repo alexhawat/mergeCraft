@@ -770,11 +770,11 @@ async def pull_request_path_expectations(
         )
         batch = list(files or [])
         for f in batch:
-            filename = str(f.get("filename") or "").strip()
+            filename = str(f.get("filename") or "")
             if filename:
                 required.add(filename)
                 allowed.add(filename)
-            previous = str(f.get("previous_filename") or "").strip()
+            previous = str(f.get("previous_filename") or "")
             if previous:
                 allowed.add(previous)
                 if renames is not None and filename:
@@ -811,6 +811,25 @@ class _FilesApiDiff(str):
         return obj
 
 
+def _quote_diff_path(path: str) -> str:
+    """C-quote paths that could split or inject a synthetic Git header."""
+    if (
+        path == path.strip()
+        and " b/" not in path
+        and all(32 <= ord(char) < 127 and char not in '\\"' for char in path)
+    ):
+        return path
+    escaped: list[str] = []
+    for byte in path.encode("utf-8"):
+        if byte < 32 or byte >= 127:
+            escaped.append(f"\\{byte:03o}")
+        elif chr(byte) in '\\"':
+            escaped.append("\\" + chr(byte))
+        else:
+            escaped.append(chr(byte))
+    return '"' + "".join(escaped) + '"'
+
+
 async def _diff_from_pull_files(ctx: ToolContext, *, pull_number: int) -> _FilesApiDiff:
     """Build a unified diff from the PR files API, following pagination.
 
@@ -835,11 +854,16 @@ async def _diff_from_pull_files(ctx: ToolContext, *, pull_number: int) -> _Files
         )
         batch = list(files or [])
         for f in batch:
-            filename = str(f.get("filename") or "").strip()
+            filename = str(f.get("filename") or "")
             # A rename keeps its source on the ``a/`` side, as ``git diff`` writes it, so
             # the pre-image is never lost to readers of the header.
-            previous = str(f.get("previous_filename") or "").strip() or filename
-            parts.append(f"diff --git a/{previous} b/{filename}\n")
+            previous = str(f.get("previous_filename") or "") or filename
+            old_image = _quote_diff_path(f"a/{previous}")
+            new_image = _quote_diff_path(f"b/{filename}")
+            parts.append(f"diff --git {old_image} {new_image}\n")
+            if previous != filename:
+                parts.append(f"rename from {_quote_diff_path(previous)}\n")
+                parts.append(f"rename to {_quote_diff_path(filename)}\n")
             if f.get("patch"):
                 parts.append(f.get("patch") + "\n")
             elif filename and _line_change_count(f) > 0:
@@ -1146,12 +1170,11 @@ async def _verify_files_api_head(ctx: ToolContext, *, pull_number: int, head_sha
 
 
 def checkout_pr_tool(ctx: ToolContext):
-    async def _checkout(params: dict[str, Any]):
+    async def _preflight(params: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         params = normalize_pull_number_aliases(params, _CHECKOUT_PR_INPUT_SCHEMA)
         pull_number = int(params["pull_number"])
         state = primary_repo_state(ctx.tool_state)
         cwd = state.dir
-        prior_reviews: list[dict[str, Any]] = []
 
         dirty = get_git_status(cwd)
         if dirty:
@@ -1183,11 +1206,6 @@ def checkout_pr_tool(ctx: ToolContext):
             raise RuntimeError(msg)
 
         pr = await ctx.scm.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
-        head = pr.get("head") or {}
-        base = pr.get("base") or {}
-        head_ref = head.get("ref") or ""
-        head_sha = head.get("sha") or ""
-        base_ref = base.get("ref") or ""
         # Use the same head/base repository identity comparison as preflight.
         is_fork = is_fork_pull_request({"pull_request": pr})
 
@@ -1200,6 +1218,19 @@ def checkout_pr_tool(ctx: ToolContext):
                 "but this run holds trusted execution or authority trust."
             )
             raise RuntimeError(msg)
+
+        return pull_number, pr
+
+    async def _checkout(pull_number: int, pr: dict[str, Any]):
+        state = primary_repo_state(ctx.tool_state)
+        cwd = state.dir
+        prior_reviews: list[dict[str, Any]] = []
+        head = pr.get("head") or {}
+        base = pr.get("base") or {}
+        head_ref = head.get("ref") or ""
+        head_sha = head.get("sha") or ""
+        base_ref = base.get("ref") or ""
+        is_fork = is_fork_pull_request({"pull_request": pr})
 
         # HS8 — read the run-bound checkpoint once and record the sticky id on
         # the tool state so HS1's selection can use it. Fail-closed when the
@@ -1579,12 +1610,19 @@ def checkout_pr_tool(ctx: ToolContext):
         if ctx.tool_state.review is not None:
             msg = "cannot restart checkout after this run has published a review"
             raise RuntimeError(msg)
+        # Read-only refusals preserve the last valid review. From the first
+        # workspace mutation onward, every error invalidates partial evidence.
+        pull_number, pr = await _preflight(params)
+        # Publication can complete while the API lookup above is awaiting.
+        if ctx.tool_state.review is not None:
+            msg = "cannot restart checkout after this run has published a review"
+            raise RuntimeError(msg)
         baseline = ctx.tool_state.review_tree_baseline
         if baseline is not None:
             baseline.before_checkout()
         invalidate_checkout_review_state(ctx.tool_state)
         try:
-            result = await _checkout(params)
+            result = await _checkout(pull_number, pr)
             # Reads that arrived while the workspace was changing cannot attest
             # the newly established scope. Keep their audit records only.
             ctx.tool_state.review_scope_tool_call_start = len(ctx.tool_state.tool_calls)
