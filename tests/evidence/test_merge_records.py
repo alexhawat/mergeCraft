@@ -38,3 +38,22 @@ def test_incomplete_stronger_record_does_not_replace_a_valid_copy() -> None:
     findings, drops = typed_findings_from_rows_with_drops(merged)
     assert drops == 1
     assert [finding.severity for finding in findings] == ["Minor"]
+
+
+@pytest.mark.parametrize("inline", [False, True])
+def test_merged_occurrences_keep_first_seen_positions(inline: bool) -> None:
+    first = make_finding(path="z.py", severity="Minor", evidence=["first"]).model_dump()
+    second = make_finding(path="a.py", severity="Major").model_dump()
+    stronger = {**first, "severity": "Critical", "evidence": ["second"]}
+    invalid = {"malformed": "must remain visible in place"}
+    records = [first, invalid, second, stronger]
+    wrapped = [{"finding": row} if inline else row for row in records]
+
+    merged = merge_finding_records(wrapped, inline=inline)
+    rows = [row["finding"] if inline else row for row in merged]
+
+    assert [row.get("path") for row in rows] == ["z.py", None, "a.py"]
+    assert rows[0]["severity"] == "Critical"
+    assert rows[0]["evidence"] == ["first", "second"]
+    assert rows[1] == invalid
+    assert merge_finding_records(merged, inline=inline) == merged

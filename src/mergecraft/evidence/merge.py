@@ -194,15 +194,15 @@ def merge_finding_records(
 
     Deferred rows use ``line`` and inline records wrap a full ``finding``. Their
     strongest compatible copy supplies presentation fields; evidence is additive.
-    Sorting makes overlapping scopes independent of arrival order. Invalid rows
-    remain visible for the downstream validation/drop accounting.
+    Each occurrence keeps its first-seen position, including invalid rows for
+    downstream validation/drop accounting. Duplicate selection is deterministic.
     """
     buckets: dict[str, list[dict[str, Any]]] = {}
-    unkeyed: list[dict[str, Any]] = []
+    order: list[str | dict[str, Any]] = []
     for record in records:
         row = record.get("finding") if inline else record
         if not isinstance(row, dict) or not _mergeable_record(row):
-            unkeyed.append(record)
+            order.append(record)
             continue
         line = row.get("start_line", row.get("line"))
         key = json.dumps(
@@ -216,10 +216,12 @@ def merge_finding_records(
             ],
             sort_keys=True,
         )
-        buckets.setdefault(key, []).append(record)
-    merged: list[dict[str, Any]] = []
-    for key in sorted(buckets):
-        members = buckets[key]
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(record)
+    merged: dict[str, dict[str, Any]] = {}
+    for key, members in buckets.items():
 
         def priority(record: dict[str, Any]) -> tuple[int, str]:
             row = record["finding"] if inline else record
@@ -241,8 +243,8 @@ def merge_finding_records(
             row["evidence"] = sorted(evidence)
         if inline:
             result["finding"] = row
-        merged.append(result)
-    return merged + unkeyed
+        merged[key] = result
+    return [merged[item] if isinstance(item, str) else item for item in order]
 
 
 def _mergeable_record(row: dict[str, Any]) -> bool:

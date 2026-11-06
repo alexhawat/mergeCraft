@@ -218,6 +218,7 @@ async def _verify_file_modes(
     ):
         raise TriageUnavailableError("pull request SHA mismatch in file-mode proof")
     modes: list[dict[str, str]] = []
+    wanted_paths = set(paths)
     for sha in (base_sha, head_sha):
         tree = await scm.get(f"{root}/git/trees/{sha}", params={"recursive": "1"})
         if not isinstance(tree, dict) or tree.get("truncated") is not False:
@@ -227,13 +228,17 @@ async def _verify_file_modes(
             raise TriageUnavailableError("invalid tree in file-mode proof")
         matched: dict[str, str] = {}
         for row in rows:
-            if not isinstance(row, dict) or row.get("path") not in paths:
+            if (
+                not isinstance(row, dict)
+                or not isinstance(row.get("path"), str)
+                or row["path"] not in wanted_paths
+            ):
                 continue
             path, mode = row["path"], row.get("mode")
             if mode not in {"100644", "100755"} or row.get("type") != "blob" or path in matched:
                 raise TriageUnavailableError("unproven regular-file mode")
             matched[path] = mode
-        if set(matched) != set(paths):
+        if set(matched) != wanted_paths:
             raise TriageUnavailableError("missing changed path in file-mode proof")
         modes.append(matched)
     if modes[0] != modes[1]:

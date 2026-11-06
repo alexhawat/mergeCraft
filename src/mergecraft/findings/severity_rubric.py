@@ -15,7 +15,7 @@ from mergecraft.review_policy.security_tokens import SECURITY_MESSAGE_PATTERNS
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
 
-SEVERITY_RUBRIC_VERSION: Final[str] = "1.1.0"
+SEVERITY_RUBRIC_VERSION: Final[str] = "1.1.1"
 
 _RubricRule = dict[str, Any]
 
@@ -63,6 +63,19 @@ def _compile_patterns(rule: _RubricRule) -> tuple[re.Pattern[str], ...]:
 
 
 _SECURITY_PATTERNS: Final[tuple[re.Pattern[str], ...]] = _compile_patterns(_SECURITY_RULE)
+# Credential exposure is impact even without a verb like "leaks". Qualify
+# credential nouns so a cosmetic request in a token/auth handler stays a nit.
+_CREDENTIAL_NOUN = r"(?:secrets?|tokens?|credentials?|passwords?|(?:access |api |private )?keys?)"
+_EXPOSURE_QUALIFIER = r"(?:real|live|hard[ -]?coded|plain[ -]?text|embedded|committed)"
+_CREDENTIAL_EXPOSURE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        rf"\b{_EXPOSURE_QUALIFIER}\b[^.;!?\n]{{0,60}}\b{_CREDENTIAL_NOUN}\b",
+        rf"\b{_CREDENTIAL_NOUN}\b[^.;!?\n]{{0,60}}\b{_EXPOSURE_QUALIFIER}\b",
+        rf"\b(?:contains?|embeds?|publishes?|stores?)\b[^.;!?\n]{{0,60}}"
+        rf"\b{_CREDENTIAL_NOUN}\b",
+    )
+)
 #: Cosmetic intent rules. Security vocabulary alone is not an impact claim;
 #: a positive cosmetic request can mention the module's security domain.
 _NON_SECURITY_RULES: Final[tuple[tuple[_RubricRule, tuple[re.Pattern[str], ...]], ...]] = tuple(
@@ -98,7 +111,7 @@ def _matches_any(message: str, patterns: tuple[re.Pattern[str], ...]) -> bool:
 
 
 def _matches_security_signal(message: str) -> bool:
-    return _matches_any(message, _SECURITY_PATTERNS)
+    return _matches_any(message, _SECURITY_PATTERNS + _CREDENTIAL_EXPOSURE_PATTERNS)
 
 
 def _core_impact_message(message: str) -> str:
@@ -112,7 +125,7 @@ def _core_impact_message(message: str) -> str:
 
 def _core_is_genuine_style_or_docs_nit(message: str) -> bool:
     """Recognize a cosmetic request only when no contrary impact is asserted."""
-    if _matches_any(message, _IMPACT_PATTERNS):
+    if _matches_any(message, _IMPACT_PATTERNS + _CREDENTIAL_EXPOSURE_PATTERNS):
         return False
     core = _core_impact_message(message)
     return any(_matches_any(core, patterns) for _, patterns in _NON_SECURITY_RULES)
