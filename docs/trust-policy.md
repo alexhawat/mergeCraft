@@ -299,3 +299,12 @@ covered each Codex run. Read more: [SECURITY.md — agent credential broker](../
 - [Threat model — trust knob boundary](THREAT-MODEL.md#operator-trust-knob)
 - [CLI — `mergecraft trust`](cli.md)
 - [Glossary — trust tier](glossary.md#trust-tier)
+
+### Same-repository pull requests in forks
+
+A pull request between two branches of the same repository is a same-repository
+review even when that repository is itself a fork. Trust compares the head and
+base repository IDs, falling back to their case-insensitive `full_name` values
+when IDs are unavailable. Missing or deleted repository metadata keeps the
+untrusted floor. The repository's `fork` ancestry flag does not grant or remove
+trust by itself.

@@ -162,10 +162,34 @@ def _is_fork_pull_request(event: dict[str, Any]) -> bool:
     head = pull_request.get("head")
     if not isinstance(head, dict):
         return True
-    repo = head.get("repo")
-    if not isinstance(repo, dict):
+    base = pull_request.get("base")
+    if not isinstance(base, dict):
         return True
-    return bool(repo.get("fork"))
+    head_repo, base_repo = head.get("repo"), base.get("repo")
+    if not isinstance(head_repo, dict) or not isinstance(base_repo, dict):
+        return True
+    # repo.fork describes ancestry, not whether this PR crosses repositories:
+    # two branches within a fork still share the same repository identity.
+    head_id, base_id = head_repo.get("id"), base_repo.get("id")
+    if (
+        isinstance(head_id, int)
+        and not isinstance(head_id, bool)
+        and head_id > 0
+        and isinstance(base_id, int)
+        and not isinstance(base_id, bool)
+        and base_id > 0
+    ):
+        return head_id != base_id
+    head_name, base_name = head_repo.get("full_name"), base_repo.get("full_name")
+    if (
+        isinstance(head_name, str)
+        and isinstance(base_name, str)
+        and re.fullmatch(r"[^/\s]+/[^/\s]+", head_name)
+        and re.fullmatch(r"[^/\s]+/[^/\s]+", base_name)
+    ):
+        return head_name.casefold() != base_name.casefold()
+    # Missing/deleted repository metadata cannot prove the head is ours.
+    return True
 
 
 def bind_target_pull_request(event: dict[str, Any], pull: dict[str, Any]) -> dict[str, Any]:

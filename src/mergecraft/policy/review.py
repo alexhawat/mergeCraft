@@ -1241,7 +1241,7 @@ def _evaluate_run_policy(ctx: Any) -> tuple[list[Finding], PolicyEvidence | None
     # apart from a repository that never had one: both leave an empty head copy.
     try:
         changed = _changed_paths(diff_path)
-    except (OSError, UnicodeDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         if nothing_loaded and not _policy_source_says_fail_closed(ctx, snapshot, repo_root):
             # The diff is not a policy input for a repository with no policy
             # tree, so a diff this run cannot read must not fail closed there:

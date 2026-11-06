@@ -237,7 +237,9 @@ def _read_evidence(
 
     if not authoritative:
         return False, {}
-    reads = getattr(state, "tool_calls", None) or []
+    reads = (getattr(state, "tool_calls", None) or [])[
+        getattr(state, "review_scope_tool_call_start", 0) :
+    ]
     breakdown = compute_diff_coverage(authoritative, reads, diff_path=None)
     covered = {
         file.path: [(item.start, item.end) for item in file.covered]

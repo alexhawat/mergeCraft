@@ -64,3 +64,11 @@ respectively.
 - [CLI reference](cli.md)
 - [Authentication](authentication.md)
 - [Config failure policy](config-failure-policy.md)
+
+## GitHub Enterprise endpoints
+
+The GitHub client uses `GITHUB_API_URL` for REST requests and
+`GITHUB_GRAPHQL_URL` for GraphQL requests. GitHub Actions supplies these values
+for the runner's server. Outside Actions, set them when using a custom API
+proxy. Without an explicit GraphQL URL, a REST base ending in `/api/v3` maps
+to `/api/graphql`; other bases use `/graphql` beneath the configured API base.

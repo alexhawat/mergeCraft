@@ -196,11 +196,10 @@ def derive_trust_tier(
     if resolved_event_name == "pull_request":
         pull_request = event.get("pull_request")
         if isinstance(pull_request, dict):
-            head = pull_request.get("head")
-            if isinstance(head, dict):
-                repo = head.get("repo")
-                if isinstance(repo, dict) and repo.get("fork") is False:
-                    return "trusted"
+            from mergecraft.config.trust_policy import is_fork_pull_request
+
+            if not is_fork_pull_request(event):
+                return "trusted"
         return "untrusted"
 
     if resolved_event_name == "issue_comment":

@@ -433,7 +433,10 @@ def test_a_base_blob_git_show_cannot_read_is_a_blocking_row(tmp_path: Path) -> N
 # ---------------------------------------------------------------------------
 
 
-def test_an_unreadable_diff_over_a_policy_base_fails_closed(tmp_path: Path) -> None:
+@pytest.mark.parametrize("malformed", [False, True])
+def test_an_unreadable_diff_over_a_policy_base_fails_closed(
+    tmp_path: Path, malformed: bool
+) -> None:
     """The deleting PR's diff is the only way to learn it touched policy files."""
     from mergecraft.agents.gates import blocking_findings
     from mergecraft.policy.review import ensure_policy_evaluated
@@ -441,6 +444,8 @@ def test_an_unreadable_diff_over_a_policy_base_fails_closed(tmp_path: Path) -> N
     repo, base = _base_repo_with_blocking_rule(tmp_path)
     _delete_rules_and_touch_the_guarded_path(repo)
     missing_diff = tmp_path / "missing.diff"
+    if malformed:
+        missing_diff.write_text('diff --git "a/broken\nold mode 100644\nnew mode 100755\n')
     ctx = _run_ctx(repo, before_sha=base, diff_path=missing_diff)
 
     rows = ensure_policy_evaluated(ctx)

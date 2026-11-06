@@ -74,7 +74,7 @@ class _StubGitHub(GitHubClient):
         repo_ref = {"full_name": f"{owner}/{repo}", "fork": False}
         return {
             "number": pull_number,
-            "head": {"ref": "feature", "sha": "a" * 40, "repo": repo_ref},
+            "head": {"ref": "feature", "sha": self._head_sha, "repo": repo_ref},
             "base": {"ref": "base", "sha": "b" * 40, "repo": repo_ref},
             "title": "A pull request",
             "html_url": f"https://example.test/pull/{pull_number}",
@@ -94,6 +94,9 @@ class _StubGitHub(GitHubClient):
 
 
 def _ctx_for(repo: Path, github: GitHubClient, tmp_path: Path) -> ToolContext:
+    github._head_sha = subprocess.check_output(
+        ["git", "rev-parse", "feature"], cwd=repo, text=True
+    ).strip()
     state = init_tool_state(owner="acme", name="demo", dir=str(repo))
     state.selected_mode = "Review"
     (tmp_path / "artifacts").mkdir(parents=True, exist_ok=True)

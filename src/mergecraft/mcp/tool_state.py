@@ -528,6 +528,9 @@ class ToolState:
     # rather than ``list[ToolCallRecord]`` only to keep this module free of an
     # import cycle back into ``evidence``.
     tool_calls: list[Any] = field(default_factory=list)
+    # Earlier calls remain in the audit trail but cannot prove a new checkout was read.
+    review_scope_tool_call_start: int = 0
+    checkout_scope_invalidated: bool = False
     # One-time diff line-range coverage nudge (review scope). Set the first
     # time ``submit_review_verdict`` refuses with unread ranges so the second
     # submission is accepted regardless; the nudge is guidance, never a gate.

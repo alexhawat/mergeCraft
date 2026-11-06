@@ -228,12 +228,26 @@ class GitHubClient:
         token: str,
         *,
         base_url: str | None = None,
+        graphql_url: str | None = None,
         timeout: float = 60.0,
         user_agent: str = "mergeCraft",
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.token = usable_github_token(token)
         self.base_url = (base_url or _default_api_base_url()).rstrip("/")
+        # GHES exposes REST at /api/v3 and GraphQL at /api/graphql. An explicit
+        # REST server must not inherit another runner's ambient GraphQL host.
+        graphql_override = graphql_url or (
+            os.environ.get("GITHUB_GRAPHQL_URL") if base_url is None else None
+        )
+        graphql_base = (
+            self.base_url.removesuffix("/v3")
+            if self.base_url.endswith("/api/v3")
+            else self.base_url
+        )
+        self.graphql_url = graphql_override or (
+            f"{graphql_base}/graphql" if self.base_url.endswith("/api/v3") else "/graphql"
+        )
         self._owns_client = client is None
         headers = {
             "Accept": DEFAULT_ACCEPT,
@@ -396,11 +410,11 @@ class GitHubClient:
         query: str,
         variables: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Execute a GraphQL query against ``/graphql``."""
+        """Execute a query against the server's separate GraphQL endpoint."""
         payload: dict[str, Any] = {"query": query}
         if variables is not None:
             payload["variables"] = variables
-        data = await self.post("/graphql", json=payload)
+        data = await self.post(self.graphql_url, json=payload)
         if not isinstance(data, dict):
             msg = "unexpected GraphQL response"
             raise RuntimeError(msg)

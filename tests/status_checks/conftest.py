@@ -144,7 +144,8 @@ def trusted_pr_event() -> dict:
                     "fork": False,
                     "full_name": "acme/widgets",
                 }
-            }
+            },
+            "base": {"repo": {"full_name": "acme/widgets"}},
         }
     }
 

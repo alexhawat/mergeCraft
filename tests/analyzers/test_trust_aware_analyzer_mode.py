@@ -337,7 +337,12 @@ def test_event_trust_analyzers_matrix(
         ("workflow_dispatch", {"action": "workflow_dispatch"}, "trusted"),
         (
             "pull_request",
-            {"pull_request": {"head": {"repo": {"fork": False}}}},
+            {
+                "pull_request": {
+                    "head": {"repo": {"id": 42, "fork": False}},
+                    "base": {"repo": {"id": 42}},
+                }
+            },
             "trusted",
         ),
     ],
