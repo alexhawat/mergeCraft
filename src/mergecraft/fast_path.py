@@ -2,8 +2,7 @@
 
 ``mergecraft.classify.triage`` is the pure decision. This module is its I/O shell: it
 reads the pull request's diff through the files API, the head-side text of any prose
-file the prose recognizer must prove stays out of a code fence (or of any
-comment-only-language file the ``commentOnly`` lexer must prove stays out of a string),
+file needed to prove prose, comments or whitespace stay outside executable content,
 and the checks that passed on the head SHA — then asks the pure function.
 
 Everything here fails toward spending *more*: a failed read, a truncated listing, a file
@@ -21,6 +20,7 @@ Exports:
 from __future__ import annotations
 
 import base64
+import re
 from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
@@ -29,6 +29,7 @@ from mergecraft.classify.triage import (
     COMMENT_ONLY_SUFFIXES,
     TriageDecision,
     TriageInputs,
+    recognize_whitespace_only,
     triage_diff,
     trusted_check_apps,
 )
@@ -42,9 +43,14 @@ if TYPE_CHECKING:
 _FILES_PAGE_SIZE: Final[int] = 100
 _FILES_MAX_PAGES: Final[int] = 30
 # Head-side text is read only to prove a prose edit stays out of a code fence, or a
-# comment-only edit stays out of a string literal or a block comment.
+# comment-only/whitespace edit stays out of a string literal or a block comment.
 _PROSE_SUFFIXES: Final[tuple[str, ...]] = (".md", ".markdown", ".txt")
-_HEAD_TEXT_SUFFIXES: Final[tuple[str, ...]] = (*_PROSE_SUFFIXES, *COMMENT_ONLY_SUFFIXES)
+_HEAD_TEXT_SUFFIXES: Final[tuple[str, ...]] = (
+    *_PROSE_SUFFIXES,
+    *COMMENT_ONLY_SUFFIXES,
+    ".py",
+    ".js",
+)
 _MAX_PROSE_FILES: Final[int] = 25
 _MAX_HEAD_CHARS: Final[int] = 512_000
 
@@ -193,6 +199,52 @@ def _check_app_slug(row: dict[str, Any]) -> str:
     return slug.strip().lower() if isinstance(slug, str) else ""
 
 
+async def _verify_file_modes(
+    scm: ScmProvider, owner: str, repo: str, pull_number: int, head_sha: str, paths: list[str]
+) -> None:
+    """Files-API patches omit mode changes; compare complete immutable Git trees."""
+    root = f"/repos/{owner}/{repo}"
+    pull = await scm.get(f"{root}/pulls/{pull_number}")
+    if not isinstance(pull, dict):
+        raise TriageUnavailableError("missing pull request metadata for file-mode proof")
+    base, head = pull.get("base"), pull.get("head")
+    base_sha = base.get("sha") if isinstance(base, dict) else None
+    if (
+        not isinstance(base_sha, str)
+        or re.fullmatch(r"[0-9a-f]{40}", base_sha) is None
+        or re.fullmatch(r"[0-9a-f]{40}", head_sha) is None
+        or not isinstance(head, dict)
+        or head.get("sha") != head_sha
+    ):
+        raise TriageUnavailableError("pull request SHA mismatch in file-mode proof")
+    modes: list[dict[str, str]] = []
+    wanted_paths = set(paths)
+    for sha in (base_sha, head_sha):
+        tree = await scm.get(f"{root}/git/trees/{sha}", params={"recursive": "1"})
+        if not isinstance(tree, dict) or tree.get("truncated") is not False:
+            raise TriageUnavailableError("missing or truncated tree in file-mode proof")
+        rows = tree.get("tree")
+        if not isinstance(rows, list):
+            raise TriageUnavailableError("invalid tree in file-mode proof")
+        matched: dict[str, str] = {}
+        for row in rows:
+            if (
+                not isinstance(row, dict)
+                or not isinstance(row.get("path"), str)
+                or row["path"] not in wanted_paths
+            ):
+                continue
+            path, mode = row["path"], row.get("mode")
+            if mode not in {"100644", "100755"} or row.get("type") != "blob" or path in matched:
+                raise TriageUnavailableError("unproven regular-file mode")
+            matched[path] = mode
+        if set(matched) != wanted_paths:
+            raise TriageUnavailableError("missing changed path in file-mode proof")
+        modes.append(matched)
+    if modes[0] != modes[1]:
+        raise TriageUnavailableError("file modes changed with whitespace")
+
+
 async def load_triage_inputs(
     scm: ScmProvider,
     owner: str,
@@ -202,13 +254,16 @@ async def load_triage_inputs(
     *,
     trusted_apps: Collection[str] = (),
     read_code_head: bool = False,
+    verify_file_modes: bool = False,
 ) -> TriageInputs:
     """Read the diff, the head-side prose/comment text and the trusted Apps' passed checks.
 
     ``trusted_apps`` is the operator's ``pinBump.trustedCheckApps``: a check run
     only counts when its ``app.slug`` is in it. ``read_code_head`` also reads the head
-    text of comment-only-language files; the caller sets it only when ``commentOnly``
-    is opted in or ``lite`` is enabled, the only consumers of that text.
+    text needed by comment-only and whitespace proofs. The caller sets it when either
+    recognizer is opted in or ``lite`` is enabled. ``verify_file_modes`` compares the
+    immutable base/head Git trees before permitting a whitespace match, since the
+    files API patch omits executable-mode changes. Incomplete trees fail closed.
 
     Raises:
         TriageUnavailableError: The diff could not be read completely.
@@ -218,6 +273,8 @@ async def load_triage_inputs(
     head_files = await _read_head_files(
         scm, owner, repo, head_sha, paths, read_code_head=read_code_head
     )
+    if verify_file_modes and recognize_whitespace_only(diff_text, head_files=head_files):
+        await _verify_file_modes(scm, owner, repo, pull_number, head_sha, paths)
     passed = await _passed_checks(scm, owner, repo, head_sha, trusted_apps=trusted_apps)
     return TriageInputs(diff_text=diff_text, head_files=head_files, passed_checks=passed)
 
@@ -270,7 +327,9 @@ async def triage_pull_request(
             pull_number,
             head_sha,
             trusted_apps=config.pin_bump.trusted_check_apps,
-            read_code_head="commentOnly" in config.skip_llm or config.lite.enabled,
+            read_code_head=bool({"commentOnly", "whitespace"} & set(config.skip_llm))
+            or config.lite.enabled,
+            verify_file_modes="whitespace" in config.skip_llm or config.lite.enabled,
         )
     except Exception as err:  # any read failure is a reason to review, never to skip
         logger.warning(

@@ -15,7 +15,7 @@ from mergecraft.review_policy.security_tokens import SECURITY_MESSAGE_PATTERNS
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
 
-SEVERITY_RUBRIC_VERSION: Final[str] = "1.0.0"
+SEVERITY_RUBRIC_VERSION: Final[str] = "1.1.1"
 
 _RubricRule = dict[str, Any]
 
@@ -29,26 +29,30 @@ SEVERITY_RUBRIC: Final[tuple[_RubricRule, ...]] = (
         "id": "maint-style-nit",
         "categories": ("Maintainability & Code Quality",),
         "patterns": (
-            r"f-?string",
-            r"percent formatting",
-            r"typo",
-            r"spelling",
-            r"prefer .* over",
-            r"style",
-            r"naming",
+            r"\bprefer\s+f-?strings?\s+(?:over|to)\s+percent formatting\b",
+            r"\b(?:prefer|use)\s+(?:snake_case|camelCase|PascalCase)\b",
+            r"\b(?:cosmetic|stylistic|formatting-only|style-only)\s+(?:change|issue|nit)\b",
+            r"^(?:a\s+)?(?:typo|spelling mistake|spelling error)[.!]?$",
         ),
         "max_severity": "Minor",
     },
     {
         "id": "docs-only-nit",
         "categories": ("Maintainability & Code Quality",),
-        "patterns": (r"comment", r"docstring", r"readme"),
+        "patterns": (
+            r"^(?:readme|documentation|comment|docstring)\s+"
+            r"(?:spelling\s+)?(?:typo|spelling mistake|spelling error)[.!]?$",
+            r"\b(?:update|clarify|reword|correct|fix|improve)\s+(?:(?:the|this|a)\s+)?"
+            r"(?:comment|docstring|readme|documentation)\b"
+            r"(?!\s+(?:handler|api|endpoint|function|method|route|request|service)\b)",
+            r"\b(?:typo|spelling(?: mistake| error)?)\s+in\s+(?:the\s+)?"
+            r"(?:comment|docstring|readme|documentation|prose|heading|text)\b",
+        ),
         "max_severity": "Trivial",
     },
 )
 
 _SECURITY_RULE_ID: Final[str] = "security-signal"
-_ASSERTED_BLOCKING_SEVERITIES: Final[frozenset[str]] = frozenset({"Critical", "Major"})
 
 _RULES_BY_ID: Final[dict[str, _RubricRule]] = {str(rule["id"]): rule for rule in SEVERITY_RUBRIC}
 _SECURITY_RULE: Final[_RubricRule] = _RULES_BY_ID[_SECURITY_RULE_ID]
@@ -58,13 +62,61 @@ def _compile_patterns(rule: _RubricRule) -> tuple[re.Pattern[str], ...]:
     return tuple(re.compile(pattern, re.IGNORECASE) for pattern in rule["patterns"])
 
 
-_SECURITY_PATTERNS: Final[tuple[re.Pattern[str], ...]] = _compile_patterns(_SECURITY_RULE)
-#: Every category rule except the security lane. Security is handled explicitly
-#: first (D5), so its position in ``SEVERITY_RUBRIC`` is no longer load-bearing.
+_SECURITY_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
+    *_compile_patterns(_SECURITY_RULE),
+    re.compile(
+        r"\b(?:secrets|tokens|credentials|passwords|(?:api|access|private) keys?)\b", re.IGNORECASE
+    ),
+)
+# Credential exposure is impact even without a verb like "leaks". Qualify
+# credential nouns so a cosmetic request in a token/auth handler stays a nit.
+_CREDENTIAL_NOUN = r"(?:secrets?|tokens?|credentials?|passwords?|(?:access |api |private )?keys?)"
+_EXPOSURE_QUALIFIER = r"(?:real|live|hard[ -]?coded|plain[ -]?text|embedded|committed)"
+_CREDENTIAL_EXPOSURE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        rf"\b{_EXPOSURE_QUALIFIER}\b[^.;!?\n]{{0,60}}\b{_CREDENTIAL_NOUN}\b",
+        rf"\b{_CREDENTIAL_NOUN}\b[^.;!?\n]{{0,60}}\b{_EXPOSURE_QUALIFIER}\b",
+        rf"\b(?:contains?|embeds?|publishes?|stores?)\b[^.;!?\n]{{0,60}}"
+        rf"\b{_CREDENTIAL_NOUN}\b",
+    )
+)
+# Only a trailing location qualifier establishes incidental domain vocabulary.
+# Strip that qualifier, never an arbitrary security word: "remove the password"
+# and unfamiliar descriptions of exposure must retain their asserted severity.
+_INCIDENTAL_SECURITY_LOCATION = re.compile(
+    r"\s+(?:in|of)\s+(?:the\s+)?"
+    r"(?:auth(?:entication|orization)?|tokens?|credentials?|passwords?|secrets?|sql)\s+"
+    r"(?:module|handler|function|class|service)(?:\s+example)?[.!]?$",
+    re.IGNORECASE,
+)
+#: Cosmetic intent rules. Security vocabulary alone is not an impact claim;
+#: a positive cosmetic request can mention the module's security domain.
 _NON_SECURITY_RULES: Final[tuple[tuple[_RubricRule, tuple[re.Pattern[str], ...]], ...]] = tuple(
     (rule, _compile_patterns(rule))
     for rule in SEVERITY_RUBRIC
     if str(rule["id"]) != _SECURITY_RULE_ID
+)
+
+# These describe consequences, unlike vocabulary such as "comment", "typo"
+# or "token". Look across the entire finding: an impact after a punctuation
+# boundary is still impact. Unknown claims keep their asserted severity; only
+# positively recognized cosmetic requests are eligible for a cap.
+_IMPACT_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\b(?:rais(?:e[sd]?|ing)|throw\w*|crash\w*|fail\w*|break\w*|hang\w*|"
+        r"deadlock\w*|corrupt\w*|leak\w*|bypass\w*|drop\w*|los(?:e[sd]?|ing)|"
+        r"delet\w*|allow\w*|permit\w*|expos\w*|emit\w*|return\w*|caus\w*|"
+        r"prevent\w*|block\w*|malformed|broken|regression|unhandled|unsafe|"
+        r"cannot|can't|doesn't|does not|no longer)\b",
+        r"\b(?:injection|vulnerabilit\w*|exploit\w*|request forgery|path traversal|"
+        r"remote code execution|privilege escalation|data loss)\b",
+        r"\b(?:missing|lacks?|without|never)\b[^.;!?\n]*\b"
+        r"(?:validation|authorization|authentication|timeout|permission check|sanitization)\b",
+        r"\b(?:incorrect|wrong|invalid|empty)\b[^.;!?\n]*\b"
+        r"(?:result|return|output|response|value|data|request|query|command|status code)\b",
+    )
 )
 
 
@@ -73,38 +125,26 @@ def _matches_any(message: str, patterns: tuple[re.Pattern[str], ...]) -> bool:
 
 
 def _matches_security_signal(message: str) -> bool:
-    return _matches_any(message, _SECURITY_PATTERNS)
+    return _matches_any(message, _SECURITY_PATTERNS + _CREDENTIAL_EXPOSURE_PATTERNS)
 
 
 def _core_impact_message(message: str) -> str:
-    """Return the asserted impact, excluding incidental prose after a semicolon.
+    """Return the leading claim used to establish positive cosmetic intent.
 
-    Reviewers append incidental notes (``; see README``, ``; typo``) after the
-    impact they are describing. The core is what carries the claim, so the
-    capping vocabulary is evaluated against it, not against the whole message.
+    A trailing style suggestion does not turn an earlier defect into a nit.
+    Functional impact is checked separately across the complete message.
     """
     return message.split(";", maxsplit=1)[0].strip()
 
 
 def _core_is_genuine_style_or_docs_nit(message: str) -> bool:
-    """Whether the asserted impact itself is a maintainability/docs nit."""
+    """Recognize a cosmetic request only when no contrary impact is asserted."""
+    if _matches_any(message, _IMPACT_PATTERNS + _CREDENTIAL_EXPOSURE_PATTERNS):
+        return False
+    if _matches_security_signal(_INCIDENTAL_SECURITY_LOCATION.sub("", message.strip())):
+        return False
     core = _core_impact_message(message)
     return any(_matches_any(core, patterns) for _, patterns in _NON_SECURITY_RULES)
-
-
-def _cap_inapplicable(message: str, asserted_severity: str) -> bool:
-    """Whether D5 forbids deflating this finding.
-
-    A security signal anywhere makes every capping rule inapplicable (the
-    security lane is non-capping in both directions). Otherwise, a
-    Critical/Major assertion with a non-nit core impact is impact evidence and
-    is not lowered by a stray maintainability or docs word.
-    """
-    if _matches_security_signal(message):
-        return True
-    if asserted_severity not in _ASSERTED_BLOCKING_SEVERITIES:
-        return False
-    return not _core_is_genuine_style_or_docs_nit(message)
 
 
 def _cap_severity(current: str, maximum: str) -> str:
@@ -128,7 +168,7 @@ def apply_severity_rubric(
     """Normalize inflated model severity using the code-defined rubric."""
     severity = model_assigned_severity or finding.severity
     message = finding.message
-    if _cap_inapplicable(message, severity):
+    if not _core_is_genuine_style_or_docs_nit(message):
         if severity == finding.severity:
             return finding
         return finding.model_copy(update={"severity": severity})
@@ -136,7 +176,7 @@ def apply_severity_rubric(
         categories = rule.get("categories")
         if categories and finding.category not in categories:
             continue
-        if _matches_any(message, patterns):
+        if _matches_any(_core_impact_message(message), patterns):
             max_severity = rule.get("max_severity")
             if max_severity is not None:
                 severity = _cap_severity(severity, str(max_severity))
@@ -148,18 +188,15 @@ def apply_severity_rubric(
 def infer_category_from_message(body: str) -> str:
     """Infer a taxonomy category from message text using rubric patterns.
 
-    The security lane is checked first as a deliberate precedent (D5), not by
-    virtue of its position in ``SEVERITY_RUBRIC``.
+    Explicit cosmetic intent takes precedence over incidental vocabulary:
+    updating a comment in an authentication module is still documentation.
+    Functional/security impact prevents that cosmetic inference.
     """
+    if _core_is_genuine_style_or_docs_nit(body):
+        return "Maintainability & Code Quality"
     if _matches_security_signal(body):
         categories = _SECURITY_RULE.get("categories")
         if categories:
-            return str(categories[0])
-    for rule, patterns in _NON_SECURITY_RULES:
-        categories = rule.get("categories")
-        if not categories:
-            continue
-        if _matches_any(body, patterns):
             return str(categories[0])
     return "Functional Correctness"
 

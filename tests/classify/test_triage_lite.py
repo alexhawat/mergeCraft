@@ -50,7 +50,7 @@ _CODE = _diff("src/app.py", "-x = 1", "+x = 2")
 _CASES: dict[str, tuple[str, dict[str, str]]] = {
     "pinBump": (_PIN_DIFF, {}),
     "prose": (_PROSE, _PROSE_HEAD),
-    "whitespace": (_WHITESPACE, {}),
+    "whitespace": (_WHITESPACE, {"src/a.js": "let a = 1;\n"}),
     "generated": (_GENERATED, {}),
     "commentOnly": (_COMMENT, _COMMENT_HEAD),
 }
@@ -250,7 +250,9 @@ def test_an_opted_in_recognizer_still_skips_when_lite_is_enabled() -> None:
 
     config = _config(lite=_lite(), skipLlm=["whitespace"])
 
-    decision = triage_diff(_WHITESPACE, config=config, passed_checks=[])
+    decision = triage_diff(
+        _WHITESPACE, head_files={"src/a.js": "let a = 1;\n"}, config=config, passed_checks=[]
+    )
 
     assert (decision.tier, decision.recognizer) == ("skip", "whitespace")
     assert decision.token_cap is None
@@ -344,7 +346,9 @@ def test_lite_enabled_under_a_disabled_fast_path_is_full() -> None:
 
     config = _config(lite=_lite(), enabled=False)
 
-    decision = triage_diff(_WHITESPACE, config=config, passed_checks=[])
+    decision = triage_diff(
+        _WHITESPACE, head_files={"src/a.js": "let a = 1;\n"}, config=config, passed_checks=[]
+    )
 
     assert decision.tier == "full"
     assert decision.reason == "review.fastPath is not enabled"
@@ -354,8 +358,12 @@ def test_the_lite_decision_is_deterministic() -> None:
     from mergecraft.classify.triage import triage_diff
 
     config = _config(lite=_lite())
-    first = triage_diff(_WHITESPACE, config=config, passed_checks=[])
-    second = triage_diff(_WHITESPACE, config=config, passed_checks=[])
+    first = triage_diff(
+        _WHITESPACE, head_files={"src/a.js": "let a = 1;\n"}, config=config, passed_checks=[]
+    )
+    second = triage_diff(
+        _WHITESPACE, head_files={"src/a.js": "let a = 1;\n"}, config=config, passed_checks=[]
+    )
 
     assert first.tier == "lite"
     assert first == second
@@ -365,7 +373,10 @@ def test_the_lite_cap_on_the_decision_follows_the_operator_config() -> None:
     from mergecraft.classify.triage import triage_diff
 
     decision = triage_diff(
-        _WHITESPACE, config=_config(lite=_lite(tokenCap=120_000)), passed_checks=[]
+        _WHITESPACE,
+        head_files={"src/a.js": "let a = 1;\n"},
+        config=_config(lite=_lite(tokenCap=120_000)),
+        passed_checks=[],
     )
 
     assert decision.tier == "lite"

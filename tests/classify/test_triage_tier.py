@@ -233,7 +233,7 @@ def test_prose_whitespace_and_generated_diffs_skip_when_opted_in() -> None:
         return decision.tier, decision.recognizer
 
     assert tier(prose, {"README.md": "New words.\n"}) == ("skip", "prose")
-    assert tier(whitespace) == ("skip", "whitespace")
+    assert tier(whitespace, {"src/a.js": "let a = 1;\n"}) == ("skip", "whitespace")
     assert tier(generated) == ("skip", "generated")
 
 

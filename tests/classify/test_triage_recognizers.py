@@ -387,7 +387,7 @@ def test_trailing_whitespace_removal_is_whitespace_only() -> None:
 
     diff = _diff("src/app.js", _hunk("-const a = 1;   ", "+const a = 1;"))
 
-    assert recognize_whitespace_only(diff) is True
+    assert recognize_whitespace_only(diff, head_files={"src/app.js": "const a = 1;\n"}) is True
 
 
 def test_reindenting_a_brace_language_is_whitespace_only() -> None:
@@ -395,7 +395,7 @@ def test_reindenting_a_brace_language_is_whitespace_only() -> None:
 
     diff = _diff("src/app.js", _hunk("-  call();", "+    call();", "-", "+"))
 
-    assert recognize_whitespace_only(diff) is True
+    assert recognize_whitespace_only(diff, head_files={"src/app.js": "    call();\n\n"}) is True
 
 
 def test_blank_lines_added_and_removed_are_whitespace_only() -> None:
@@ -403,7 +403,7 @@ def test_blank_lines_added_and_removed_are_whitespace_only() -> None:
 
     diff = _diff("src/app.go", _hunk(" a()", "+", " b()", "-", " c()"))
 
-    assert recognize_whitespace_only(diff) is True
+    assert recognize_whitespace_only(diff, head_files={"src/app.go": "a()\n\nb()\nc()\n"}) is True
 
 
 def test_a_semantic_change_hidden_beside_whitespace_noise_is_not_whitespace_only() -> None:
@@ -463,7 +463,7 @@ def test_trailing_whitespace_in_python_is_whitespace_only() -> None:
 
     diff = _diff("src/app.py", _hunk("-x = 1   ", "+x = 1"))
 
-    assert recognize_whitespace_only(diff) is True
+    assert recognize_whitespace_only(diff, head_files={"src/app.py": "x = 1\n"}) is True
 
 
 def test_a_tab_to_space_change_in_a_makefile_is_not_whitespace_only() -> None:
@@ -605,8 +605,13 @@ def test_a_renamed_or_copied_file_with_a_whitespace_edit_is_not_whitespace_only(
 
     in_place = _diff(new, _hunk("-let a = 1;  ", "+let a = 1;", " let b = 2;"))
 
-    assert recognize_whitespace_only(in_place) is True
-    assert recognize_whitespace_only(_moved_whitespace(old, new, kind=kind)) is False
+    assert recognize_whitespace_only(in_place, head_files={new: "let a = 1;\nlet b = 2;\n"}) is True
+    assert (
+        recognize_whitespace_only(
+            _moved_whitespace(old, new, kind=kind), head_files={new: "let a = 1;\nlet b = 2;\n"}
+        )
+        is False
+    )
 
 
 def test_a_pure_rename_beside_a_whitespace_edit_is_not_whitespace_only() -> None:
@@ -620,5 +625,7 @@ def test_a_pure_rename_beside_a_whitespace_edit_is_not_whitespace_only() -> None
     )
     edit = _diff("src/app.js", _hunk("-let a = 1;  ", "+let a = 1;"))
 
-    assert recognize_whitespace_only(edit) is True
-    assert recognize_whitespace_only(rename + edit) is False
+    assert recognize_whitespace_only(edit, head_files={"src/app.js": "let a = 1;\n"}) is True
+    assert (
+        recognize_whitespace_only(rename + edit, head_files={"src/app.js": "let a = 1;\n"}) is False
+    )

@@ -17,7 +17,10 @@ _CONFIDENCE_RANK = {name: index for index, name in enumerate(FINDING_CONFIDENCES
 def cluster_key(finding: Finding) -> str:
     """Derive a cluster key from the existing ``finding_fingerprint()`` helper (D12)."""
     fp = finding_fingerprint(path=finding.path, body=finding.message)
-    return f"{finding.path}:{finding.start_line}:{fp}"
+    return (
+        f"{finding.path}:{finding.start_line}:{finding.end_line}:{fp}:"
+        f"{finding.scope}:{finding.introduced_by_pr}"
+    )
 
 
 def _raise_confidence(confidence: str, steps: int = 1) -> str:
@@ -52,12 +55,10 @@ def _merge_into_canonical(
     ci_members = [member for member in members if member.source == "ci"]
     analyzer_members = [member for member in members if member.source == "analyzer"]
 
-    if agent_members:
-        canonical = agent_members[0]
-    elif ci_members:
-        canonical = ci_members[0]
-    else:
-        canonical = sorted(analyzer_members, key=lambda item: item.tool)[0]
+    canonical = min(
+        agent_members or ci_members or analyzer_members,
+        key=lambda item: (item.tool, item.rule_id, item.model_dump_json()),
+    )
 
     strongest = min(members, key=_severity_rank)
 
@@ -120,6 +121,9 @@ def _merge_into_canonical(
         remediation=canonical.remediation,
         autofix=canonical.autofix,
         introduced_by_pr=canonical.introduced_by_pr,
+        scope=canonical.scope,
+        lens=canonical.lens,
+        collateral=sorted({item for member in members for item in member.collateral}),
         cluster_id=key,
         fingerprint=canonical.fingerprint,
     )
