@@ -45,7 +45,7 @@ class ModeScm(FakeScm):
             sha = path.rsplit("/", 1)[-1]
             self.refs.append(sha)
             assert sha in {BASE, HEAD}
-            assert params == {"recursive": "1"}
+            assert params is None
             if self.problem == "missing-tree":
                 return {}
             rows = [{"path": "run.py", "mode": self.modes[sha], "type": "blob"}]
@@ -96,3 +96,44 @@ async def test_unavailable_or_stale_mode_proof_falls_back_to_full(problem: str) 
         operator_owned=True,
     )
     assert decision.tier == "full"
+
+
+async def test_nested_mode_proof_reads_only_changed_directories_once() -> None:
+    """Unrelated giant trees are irrelevant to a pair of changed files."""
+    from typing import cast
+
+    from mergecraft.fast_path import _verify_file_modes
+    from mergecraft.scm.protocol import ScmProvider
+
+    class NestedScm:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+            if path.endswith("/pulls/7"):
+                return {"base": {"sha": BASE}, "head": {"sha": HEAD}}
+            assert params is None
+            sha = path.rsplit("/", 1)[-1]
+            self.calls.append(sha)
+            if sha in {BASE, HEAD}:
+                return {
+                    "truncated": False,
+                    "tree": [
+                        {"path": "src", "mode": "040000", "type": "tree", "sha": "a" * 40},
+                        {"path": "huge", "mode": "040000", "type": "tree", "sha": "f" * 40},
+                    ],
+                }
+            assert sha == "a" * 40, "must not traverse unrelated trees"
+            return {
+                "truncated": False,
+                "tree": [
+                    {"path": name, "mode": "100644", "type": "blob"}
+                    for name in ("one.py", "two.py")
+                ],
+            }
+
+    scm = NestedScm()
+    await _verify_file_modes(
+        cast("ScmProvider", scm), "acme", "demo", 7, HEAD, ["src/one.py", "src/two.py"]
+    )
+    assert scm.calls == [BASE, "a" * 40, HEAD]

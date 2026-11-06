@@ -65,6 +65,10 @@ def startup_local_target(app: typer.Typer, args: list[str]) -> Path | None:
     Command/option callbacks and interactive prompts never run during this pass.
     Normal invocation remains responsible for reporting invalid arguments.
     """
+    # Only explicit target options can redirect credential discovery. Keep the
+    # full grammar pass when they occur, including as another option's value.
+    if not any(arg.split("=", 1)[0] in {"--cwd", "--repo"} for arg in args):
+        return None
     command: click.Command | None = get_command(app)
     remaining = list(args)
     target: Path | None = None

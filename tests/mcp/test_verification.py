@@ -373,3 +373,19 @@ async def test_known_trust_tier_reaches_draft_normalization(
     await _plan(ctx, [_finding("Session token logged in plaintext.")])
 
     assert seen == [tier]
+
+
+async def test_malformed_diff_refuses_verification_dispatch(tmp_path: Path) -> None:
+    """An unknown changed-file set never permits arbitrary verifier citations."""
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    ctx = _ctx(tmp_path)
+    diff = tmp_path / "malformed.diff"
+    diff.write_text("diff --git a/x b/y b/z\nsimilarity index 100%\n")
+    primary_repo_state(ctx.tool_state).diff_path = str(diff)
+    result = await verify_agent_findings_tool(ctx).execute({"findings": []})
+    assert not result.is_error
+    payload = json.loads(result.content[0]["text"])
+    assert payload["ready"] is False
+    assert payload["dispatch"] == []
+    assert "diff could not establish changed paths" in payload["reason"]

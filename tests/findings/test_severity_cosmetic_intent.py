@@ -85,3 +85,63 @@ def test_clear_cosmetic_intent_still_caps_even_with_security_vocabulary(
         rule_id="test:cosmetic",
     )
     assert normalized[0].severity == expected
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Update the docstring to document the return value",
+        "Fix typo in the docstring for the raised error",
+        "Clarify the documentation for allowed values",
+        "Update the docstring describing failure modes",
+    ],
+)
+def test_documented_behavior_is_not_itself_an_impact_claim(body: str) -> None:
+    """Mentioning return values and exceptions does not claim broken execution."""
+    normalized = normalize_agent_findings_via_pipeline(
+        [AgentFinding(path="src/app.py", line=10, body=body, severity="Major")],
+        rule_id="test:docs-vocabulary",
+    )
+    assert normalized[0].severity == "Trivial"
+
+
+@pytest.mark.parametrize("noun", ["token", "tokens", "lexer tokens", "parser token", "LLM tokens"])
+def test_tokenizer_naming_nits_are_not_credentials(noun: str) -> None:
+    """Unqualified token collections are ordinary identifiers."""
+    normalized = normalize_agent_findings_via_pipeline(
+        [
+            AgentFinding(
+                path="src/parser.py",
+                line=10,
+                body=f"Use snake_case for the {noun} list",
+                severity="Major",
+            )
+        ],
+        rule_id="test:token-naming",
+    )
+    from mergecraft.findings.severity_rubric import infer_category_from_message
+
+    assert infer_category_from_message(normalized[0].body) == "Maintainability & Code Quality"
+    assert normalized[0].severity == "Minor"
+
+
+@pytest.mark.parametrize(
+    "impact",
+    [
+        "the handler raised TypeError for every request",
+        "the process failed to persist the user's data",
+        "the handler returned an incorrect status code",
+        "the endpoint logs tokens in plaintext",
+    ],
+)
+def test_docs_request_does_not_hide_past_tense_or_exposure(impact: str) -> None:
+    """Cosmetic wording cannot erase a concrete defect after the request."""
+    normalized = normalize_agent_findings_via_pipeline(
+        [
+            AgentFinding(
+                path="src/app.py", line=10, body=f"Update the docstring; {impact}", severity="Major"
+            )
+        ],
+        rule_id="test:impact-tense",
+    )
+    assert normalized[0].severity == "Major"

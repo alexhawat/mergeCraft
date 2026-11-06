@@ -185,6 +185,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Local `mergecraft review --range` and `--head` revision reviews require a clean
+  checkout at the reviewed endpoint, including no nonignored untracked source
+  files. Commit or stash local work (including untracked files), or use a clean
+  Git worktree. Default working-tree reviews still include local changes;
+  ignored files and untracked mergeCraft runtime artifacts remain excluded.
+
 - Consolidate container files under `docker/`, documentation and assets under `docs/`, community guidelines under `.github/`, and build/analyzer tooling under `scripts/`; preserve published Action and plugin paths (#1151).
 
 - A pull request without a declared scope can no longer reach the `eligible`

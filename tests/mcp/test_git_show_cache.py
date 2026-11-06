@@ -127,3 +127,36 @@ async def test_show_reads_the_resolved_object_when_head_moves_before_read(
     assert moved
     assert first["output"] == "before"
     assert second["output"] == "after"
+
+
+async def test_missing_show_path_keeps_git_diagnostic(tmp_path: Path) -> None:
+    """Cache probing must not replace the user's git-show error."""
+    repo = tmp_path / "repo"
+    await asyncio.to_thread(_repo, repo, "readme\n")
+    tool = git_tool(_ctx(repo))
+    result = await tool.execute({"command": "show", "args": ["HEAD:missing.py"]})
+    assert result.is_error
+    assert "path 'missing.py' does not exist" in str(result.content)
+
+
+async def test_immutable_revision_cache_hit_does_not_spawn_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Immutable revision/path lookups can reuse an already verified blob."""
+    from mergecraft.mcp import git as git_module
+
+    repo = tmp_path / "repo"
+    await asyncio.to_thread(_repo, repo, "readme\n")
+    oid = git_module._run_git(["rev-parse", "HEAD"], cwd=str(repo)).strip()
+    ctx = _ctx(repo)
+    ctx.tmpdir = str(tmp_path)
+    tool = git_tool(ctx)
+    first = await _show(tool, [f"{oid}:README.md"])
+
+    def unexpected(*args: Any, **kwargs: Any) -> str:
+        raise AssertionError("immutable cache hit must not run Git")
+
+    monkeypatch.setattr(git_module, "_run_git", unexpected)
+    again = await _show(tool, [f"{oid}:README.md"])
+    assert again["cached"] is True
+    assert again["output"] == first["output"]

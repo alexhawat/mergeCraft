@@ -99,3 +99,33 @@ def test_serialized_union_retains_location_and_contradictory_attribution(shape: 
         result = merge_finding_records(list(ordering), inline=shape == "inline")
         assert len(result) == 4
         assert result == merge_finding_records(result, inline=shape == "inline")
+
+
+@pytest.mark.parametrize("variant", ["span", "attribution"])
+def test_ci_duplicate_keeps_one_conservative_failure(variant: str) -> None:
+    """CI ingestion can enrich a failure without counting it twice."""
+    first = make_finding(source="ci", fingerprint="fp1", introduced_by_pr="unknown")
+    first = first.model_copy(update={"end_line": None, "evidence": ["check run"]})
+    update = {"end_line": 12, "evidence": ["clustered log"]}
+    if variant == "attribution":
+        update.update(severity="Minor", introduced_by_pr="false")
+    second = first.model_copy(update=update)
+    for ordering in permutations([first, second]):
+        result = merge_findings(list(ordering))
+        assert len(result) == 1
+        assert result[0].severity == "Major"
+        assert result[0].introduced_by_pr == "unknown"
+        assert result[0].evidence == ["check run", "clustered log"]
+        assert decide_approval(result, run_succeeded=True, tier="trusted") == "failure"
+
+
+def test_ci_conflicting_causality_cannot_hide_or_invent_blockers() -> None:
+    """A severe baseline failure cannot borrow a new failure's attribution."""
+    old = make_finding(
+        source="ci", fingerprint="fp1", severity="Critical", introduced_by_pr="false"
+    )
+    uncertain = old.model_copy(update={"severity": "Major", "introduced_by_pr": "unknown"})
+    for ordering in permutations([old, uncertain]):
+        result = merge_findings(list(ordering))
+        assert len(result) == 2
+        assert decide_approval(result, run_succeeded=True, tier="trusted") == "failure"

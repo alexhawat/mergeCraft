@@ -139,3 +139,59 @@ def test_cache_decline_emits_a_safe_debug_reason(
         logger.remove(sink)
     assert any(reason in entry for entry in logs)
     assert all("synthetic-sensitive-content" not in entry for entry in logs)
+
+
+def test_unchanged_tracked_files_do_not_consume_mutable_source_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Committed monorepo content is already pinned by Git object IDs."""
+    _git(tmp_path, "init", "-q")
+    for name in ("first.py", "second.py", "third.py"):
+        (tmp_path / name).write_text("original = 1\n" * 20)
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-qm", "base")
+    monkeypatch.setattr("mergecraft.utils.review_source_context._MAX_FILES", 1)
+    monkeypatch.setattr("mergecraft.utils.review_source_context._MAX_BYTES", 30)
+    before = review_source_context_digest(cwd=tmp_path, base_ref="HEAD")
+    assert before is not None
+    (tmp_path / "first.py").write_text("changed = 2\n")
+    after = review_source_context_digest(cwd=tmp_path, base_ref="HEAD")
+    assert after is not None
+    assert after != before
+
+
+@pytest.mark.parametrize("change", ["staged", "deleted", "renamed", "mode"])
+def test_mutable_tracked_identity_survives_index_changes(tmp_path: Path, change: str) -> None:
+    """All mutable tracked surfaces continue to invalidate result reuse."""
+    _git(tmp_path, "init", "-q")
+    source = tmp_path / "source.py"
+    source.write_text("before\n")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-qm", "base")
+    before = review_source_context_digest(cwd=tmp_path, base_ref="HEAD")
+    if change == "staged":
+        source.write_text("after\n")
+        _git(tmp_path, "add", ".")
+    elif change == "deleted":
+        source.unlink()
+    elif change == "renamed":
+        _git(tmp_path, "mv", "source.py", "renamed.py")
+    else:
+        source.chmod(0o755)
+    after = review_source_context_digest(cwd=tmp_path, base_ref="HEAD")
+    assert before is not None
+    assert after is not None
+    assert after != before
+
+
+@pytest.mark.parametrize("flag", ["--skip-worktree", "--assume-unchanged"])
+def test_index_flags_cannot_hide_mutable_context(tmp_path: Path, flag: str) -> None:
+    """Git's promises to skip checks are not source identity evidence."""
+    _git(tmp_path, "init", "-q")
+    source = tmp_path / "source.py"
+    source.write_text("before\n")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-qm", "base")
+    _git(tmp_path, "update-index", flag, "source.py")
+    source.write_text("after\n")
+    assert review_source_context_digest(cwd=tmp_path, base_ref="HEAD") is None

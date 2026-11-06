@@ -673,6 +673,10 @@ def _validate_git_invocation(
 
 
 def git_tool(ctx: ToolContext):
+    # Only immutable revision/path resolutions are reusable. Symbolic refs must
+    # still be resolved each time because they can move outside this tool.
+    immutable_show_ids: dict[str, tuple[str, str]] = {}
+
     async def _run(params: dict[str, Any]):
         command = str(params["command"]).strip()
         args = list(params.get("args") or [])
@@ -708,10 +712,21 @@ def git_tool(ctx: ToolContext):
         cache_key: str | None = None
         run_args = args
         if show_target is not None:
-            try:
-                identity = _git_show_cache_identity(cwd=cwd, global_opts=global_opts, args=args)
-            except RuntimeError as err:
-                raise RuntimeError(redact_secrets(str(err))) from err
+            immutable = (
+                len(args) == 1
+                and re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", show_target[0]) is not None
+            )
+            lookup = json.dumps([str(Path(cwd).resolve()), global_opts, args])
+            identity = immutable_show_ids.get(lookup) if immutable else None
+            if identity is None:
+                try:
+                    identity = _git_show_cache_identity(cwd=cwd, global_opts=global_opts, args=args)
+                except RuntimeError:
+                    # Let git show report its own path/ref diagnostic. A cache
+                    # optimization must not replace the command's semantics.
+                    identity = None
+                if immutable and identity is not None:
+                    immutable_show_ids[lookup] = identity
             if identity is not None:
                 cache_key, object_id = identity
                 run_args = [object_id]

@@ -191,3 +191,18 @@ def test_implicit_env_symlink_loop_is_not_trusted(tmp_path: Path) -> None:
     path = tmp_path / ".env"
     path.symlink_to(path.name)
     assert implicit_env_is_tracked(path)
+
+
+@pytest.mark.parametrize(
+    "args", [["--help"], ["--version"], ["review"], ["config", "show", "model"]]
+)
+def test_no_target_options_skips_command_tree(
+    args: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Normal invocations need no preliminary Click tree construction."""
+
+    def unexpected(*args: object) -> None:
+        raise AssertionError("startup must not build the command tree")
+
+    monkeypatch.setattr("mergecraft.cli.startup_env.get_command", unexpected)
+    assert startup_local_target(typer.Typer(), args) is None

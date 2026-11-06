@@ -15,7 +15,7 @@ from mergecraft.review_policy.security_tokens import SECURITY_MESSAGE_PATTERNS
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
 
-SEVERITY_RUBRIC_VERSION: Final[str] = "1.1.1"
+SEVERITY_RUBRIC_VERSION: Final[str] = "1.1.2"
 
 _RubricRule = dict[str, Any]
 
@@ -63,21 +63,29 @@ def _compile_patterns(rule: _RubricRule) -> tuple[re.Pattern[str], ...]:
 
 
 _SECURITY_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
-    *_compile_patterns(_SECURITY_RULE),
+    *(
+        re.compile(pattern, re.IGNORECASE)
+        for pattern in _SECURITY_RULE["patterns"]
+        if pattern != r"\btoken\b"
+    ),
     re.compile(
-        r"\b(?:secrets|tokens|credentials|passwords|(?:api|access|private) keys?)\b", re.IGNORECASE
+        r"\b(?:auth|access|api|bearer|session|refresh|identity|id|github|oauth|jwt)[ -]tokens?\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:secrets|credentials|passwords|(?:api|access|private) keys?)\b", re.IGNORECASE
     ),
 )
 # Credential exposure is impact even without a verb like "leaks". Qualify
 # credential nouns so a cosmetic request in a token/auth handler stays a nit.
 _CREDENTIAL_NOUN = r"(?:secrets?|tokens?|credentials?|passwords?|(?:access |api |private )?keys?)"
-_EXPOSURE_QUALIFIER = r"(?:real|live|hard[ -]?coded|plain[ -]?text|embedded|committed)"
+_EXPOSURE_QUALIFIER = r"(?:real|live|production|hard[ -]?coded|plain[ -]?text|embedded|committed)"
 _CREDENTIAL_EXPOSURE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
         rf"\b{_EXPOSURE_QUALIFIER}\b[^.;!?\n]{{0,60}}\b{_CREDENTIAL_NOUN}\b",
         rf"\b{_CREDENTIAL_NOUN}\b[^.;!?\n]{{0,60}}\b{_EXPOSURE_QUALIFIER}\b",
-        rf"\b(?:contains?|embeds?|publishes?|stores?)\b[^.;!?\n]{{0,60}}"
+        rf"\b(?:contains?|embeds?|publishes?|stores?|leaks?|exposes?|logs?|prints?|reveals?|discloses?)\b[^.;!?\n]{{0,60}}"
         rf"\b{_CREDENTIAL_NOUN}\b",
     )
 )
@@ -105,11 +113,16 @@ _NON_SECURITY_RULES: Final[tuple[tuple[_RubricRule, tuple[re.Pattern[str], ...]]
 _IMPACT_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
-        r"\b(?:rais(?:e[sd]?|ing)|throw\w*|crash\w*|fail\w*|break\w*|hang\w*|"
+        r"\b(?:raises|raising|throws|throwing|crash\w*|fails|failing|break\w*|hang\w*|"
         r"deadlock\w*|corrupt\w*|leak\w*|bypass\w*|drop\w*|los(?:e[sd]?|ing)|"
-        r"delet\w*|allow\w*|permit\w*|expos\w*|emit\w*|return\w*|caus\w*|"
+        r"delet\w*|allows|allowing|permits|permitting|expos\w*|emits|emitting|returns|returning|caus\w*|"
         r"prevent\w*|block\w*|malformed|broken|regression|unhandled|unsafe|"
         r"cannot|can't|doesn't|does not|no longer)\b",
+        r"\b(?:raise|throw|return|allow|permit|emit|fail)\s+"
+        r"(?:when|instead|on|for every|the wrong|an? (?:incorrect|invalid|empty))\b",
+        r"\b(?:raised|threw)\s+(?:[a-z_]\w*(?:error|exception)|when|instead|on)\b",
+        r"\b(?:returned|allowed|permitted|emitted|failed)\s+"
+        r"(?:to|when|instead|on|for|during|an?|the)\b",
         r"\b(?:injection|vulnerabilit\w*|exploit\w*|request forgery|path traversal|"
         r"remote code execution|privilege escalation|data loss)\b",
         r"\b(?:missing|lacks?|without|never)\b[^.;!?\n]*\b"

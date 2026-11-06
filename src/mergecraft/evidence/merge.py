@@ -137,7 +137,8 @@ def finding_dedupe_key(finding: Finding) -> str:
     """Identify one occurrence with compatible scope and causal attribution.
 
     Fingerprints identify wording, not occurrences. Conflicting attribution
-    stays explicit: combining a pre-existing Critical with an introduced Minor
+    stays explicit; end-line enrichment does not create a new occurrence.
+    Combining a pre-existing Critical with an introduced Minor
     must neither hide an introduced blocker nor invent an introduced Critical.
     """
     fingerprint = finding.fingerprint.strip() if finding.fingerprint else ""
@@ -146,7 +147,6 @@ def finding_dedupe_key(finding: Finding) -> str:
             fingerprint or [finding.tool, finding.rule_id, finding.message],
             finding.path,
             finding.start_line,
-            finding.end_line,
             finding.scope,
             finding.introduced_by_pr,
         ]
@@ -170,21 +170,53 @@ def merge_findings(*groups: list[Finding]) -> list[Finding]:
     for group in groups:
         for finding in group:
             key = finding_dedupe_key(finding)
-            existing = unique.get(key)
-            if existing is None:
+            if key not in unique:
                 unique[key] = finding
                 order.append(key)
-                continue
-            strongest = min(
-                (existing, finding), key=lambda item: (_severity_rank(item), item.model_dump_json())
-            )
-            unique[key] = strongest.model_copy(
-                update={
-                    "evidence": sorted(set(existing.evidence) | set(finding.evidence)),
-                    "collateral": sorted(set(existing.collateral) | set(finding.collateral)),
-                }
-            )
-    return [unique[key] for key in order]
+            else:
+                unique[key] = _merge_duplicate(unique[key], finding)
+
+    aliases: dict[str, str] = {}
+    for key in order:
+        finding = unique[key]
+        if finding.source != "ci" or finding.introduced_by_pr != "false":
+            continue
+        uncertain_key = finding_dedupe_key(
+            finding.model_copy(update={"introduced_by_pr": "unknown"})
+        )
+        uncertain = unique.get(uncertain_key)
+        # A weaker baseline copy cannot clear or double-count an uncertain
+        # blocker. A more severe baseline row stays separate: it must not
+        # borrow attribution to invent a more severe change finding.
+        if (
+            uncertain is not None
+            and uncertain.source == "ci"
+            and _severity_rank(uncertain) <= _severity_rank(finding)
+        ):
+            unique[uncertain_key] = _merge_duplicate(uncertain, finding, strongest=uncertain)
+            aliases[key] = uncertain_key
+    return [unique[key] for key in dict.fromkeys(aliases.get(key, key) for key in order)]
+
+
+def _merge_duplicate(left: Finding, right: Finding, *, strongest: Finding | None = None) -> Finding:
+    """Union evidence and line coverage while retaining the chosen causal claim."""
+    winner = strongest or min(
+        (left, right), key=lambda item: (_severity_rank(item), item.model_dump_json())
+    )
+    return winner.model_copy(
+        update={
+            "evidence": sorted(set(left.evidence) | set(right.evidence)),
+            "collateral": sorted(set(left.collateral) | set(right.collateral)),
+            "end_line": max(
+                (
+                    line
+                    for line in (left.end_line, left.start_line, right.end_line, right.start_line)
+                    if line is not None
+                ),
+                default=None,
+            ),
+        }
+    )
 
 
 def merge_finding_records(

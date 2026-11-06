@@ -28,7 +28,7 @@ def _git(root: Path, *args: str) -> bytes:
 
 
 def review_source_context_digest(*, cwd: Path, base_ref: str | None) -> str | None:
-    """Hash revisions and tracked/nonignored source, or decline unsafe cache reuse.
+    """Hash revisions, index and mutable source, or decline unsafe cache reuse.
 
     Gitignored artifacts are outside this identity. Unsupported workspaces,
     submodules, unreadable files and exceeded bounds disable optional caching.
@@ -64,13 +64,39 @@ def _source_digest(root: Path, *, base_ref: str | None) -> str | None:
             continue
         base = _git(root, "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}")
         digest.update(b"base\0" + base)
-    tracked = set(_git(root, "ls-files", "-z", "--cached").split(b"\0")) - {b""}
+    # Index metadata is cheap even in monorepos. Its OIDs pin staged content;
+    # HEAD pins unchanged tracked bytes, so only mutable paths need file reads.
+    index = _git(root, "ls-files", "-v", "--stage", "-z")
+    digest.update(b"index\0" + index)
+    tracked: set[bytes] = set()
+    links: set[bytes] = set()
+    for entry in index.split(b"\0"):
+        if not entry:
+            continue
+        metadata, raw_path = entry.split(b"\t", 1)
+        tag, index_mode, _oid, stage = metadata.split()
+        if tag != b"H" or stage != b"0" or index_mode not in {b"100644", b"100755", b"120000"}:
+            logger.debug(
+                "Review result cache disabled: source includes a submodule, sparse or unmerged index"
+            )
+            return None
+        tracked.add(raw_path)
+        if index_mode == b"120000":
+            links.add(raw_path)
     untracked = {
         path
         for path in _git(root, "ls-files", "-z", "--others", "--exclude-standard").split(b"\0")
         if path and not is_untracked_runtime_artifact(os.fsdecode(path))
     }
-    paths = sorted(tracked | untracked)
+    changed = (
+        tracked
+        if head == b"unborn"
+        else set(_git(root, "diff", "--name-only", "--no-renames", "-z", "HEAD", "--").split(b"\0"))
+        - {b""}
+    )
+    # Inspect tracked links even when unchanged: their target may be mutable
+    # outside this repository and outside the Git object identity.
+    paths = sorted(changed | untracked | links)
     if len(paths) > _MAX_FILES:
         logger.debug("Review result cache disabled: source exceeds {} files", _MAX_FILES)
         return None

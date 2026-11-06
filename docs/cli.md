@@ -26,6 +26,16 @@ a revision; a diff alone is not a replacement for its surrounding source tree.
 | `--output` / `--json` | Explicit destinations are interpreted relative to the invocation directory. | JSONL/SARIF require `--output` before review starts; missing destinations produce a configuration error. |
 | `verify-behavior` YAML `repo_path` | Selects the policy/settings root and `startup_command` working directory. Relative paths follow the invocation directory; `~` expands. | Relative verification artifact paths remain relative to the invocation directory. See [verification](verify-behavior.md). |
 
+**Compatibility change:** local `review --range main..HEAD` and `review --head REF`
+now require the selected endpoint to match the checkout and refuse staged changes,
+unstaged changes, and nonignored untracked source files, including scratch files
+such as `notes.txt`. The agent reads the checkout as context, so a commit-only diff
+cannot safely describe a different working tree. Commit or stash that work
+(`git stash push --include-untracked` also saves untracked files), or review in a
+separate clean `git worktree` at the requested revision. Ignored files and
+mergeCraft's untracked runtime artifacts do not trigger this refusal. Use the
+default working-tree review when you intend to review local edits.
+
 Cache reuse requires both a matching review patch/configuration and a trustworthy
 source-context identity. Changing surrounding tracked or nonignored source,
 the base revision, or the reviewed endpoint invalidates reuse. When context

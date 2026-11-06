@@ -913,3 +913,18 @@ async def test_no_producer_ever_runs_a_subprocess(
     assert spawned == []
     assert set(evidence.present) == {"requirements", "xrepo", "health_check", "rollback_plan"}
     assert _absent_reason(evidence, "contract_schema") == _not_declared("contract_schema")
+
+
+def test_malformed_diff_is_absent_requirements_evidence(tmp_path: Path) -> None:
+    """A parser failure is an unavailable proof, not an exception escaping the producer."""
+    from types import SimpleNamespace
+
+    from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
+    from mergecraft.policy.evidence_producers import _Absent, _diff_changed_paths
+
+    state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
+    diff = tmp_path / "malformed.diff"
+    diff.write_text("diff --git a/x b/y b/z\nsimilarity index 100%\n")
+    primary_repo_state(state).diff_path = str(diff)
+    with pytest.raises(_Absent, match="diff paths could not be parsed"):
+        _diff_changed_paths(SimpleNamespace(tool_state=state))
