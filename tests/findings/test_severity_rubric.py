@@ -57,6 +57,10 @@ def test_rubric_is_code_defined_not_model_defined() -> None:
         "Update the comment to remove the hardcoded password",
         "Fix the documentation: the API key is stored in plaintext",
         "Clarify the README: it contains credentials",
+        "Fix the README: it prints our production GitHub token",
+        "Update the comment to remove the password",
+        "Fix the README: it includes credentials",
+        "Update the comment to remove the password in the authentication module",
     ],
 )
 def test_documentation_credentials_remain_security_blockers(body: str) -> None:

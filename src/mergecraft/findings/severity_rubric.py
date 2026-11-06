@@ -62,7 +62,12 @@ def _compile_patterns(rule: _RubricRule) -> tuple[re.Pattern[str], ...]:
     return tuple(re.compile(pattern, re.IGNORECASE) for pattern in rule["patterns"])
 
 
-_SECURITY_PATTERNS: Final[tuple[re.Pattern[str], ...]] = _compile_patterns(_SECURITY_RULE)
+_SECURITY_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
+    *_compile_patterns(_SECURITY_RULE),
+    re.compile(
+        r"\b(?:secrets|tokens|credentials|passwords|(?:api|access|private) keys?)\b", re.IGNORECASE
+    ),
+)
 # Credential exposure is impact even without a verb like "leaks". Qualify
 # credential nouns so a cosmetic request in a token/auth handler stays a nit.
 _CREDENTIAL_NOUN = r"(?:secrets?|tokens?|credentials?|passwords?|(?:access |api |private )?keys?)"
@@ -75,6 +80,15 @@ _CREDENTIAL_EXPOSURE_PATTERNS: Final[tuple[re.Pattern[str], ...]] = tuple(
         rf"\b(?:contains?|embeds?|publishes?|stores?)\b[^.;!?\n]{{0,60}}"
         rf"\b{_CREDENTIAL_NOUN}\b",
     )
+)
+# Only a trailing location qualifier establishes incidental domain vocabulary.
+# Strip that qualifier, never an arbitrary security word: "remove the password"
+# and unfamiliar descriptions of exposure must retain their asserted severity.
+_INCIDENTAL_SECURITY_LOCATION = re.compile(
+    r"\s+(?:in|of)\s+(?:the\s+)?"
+    r"(?:auth(?:entication|orization)?|tokens?|credentials?|passwords?|secrets?|sql)\s+"
+    r"(?:module|handler|function|class|service)(?:\s+example)?[.!]?$",
+    re.IGNORECASE,
 )
 #: Cosmetic intent rules. Security vocabulary alone is not an impact claim;
 #: a positive cosmetic request can mention the module's security domain.
@@ -126,6 +140,8 @@ def _core_impact_message(message: str) -> str:
 def _core_is_genuine_style_or_docs_nit(message: str) -> bool:
     """Recognize a cosmetic request only when no contrary impact is asserted."""
     if _matches_any(message, _IMPACT_PATTERNS + _CREDENTIAL_EXPOSURE_PATTERNS):
+        return False
+    if _matches_security_signal(_INCIDENTAL_SECURITY_LOCATION.sub("", message.strip())):
         return False
     core = _core_impact_message(message)
     return any(_matches_any(core, patterns) for _, patterns in _NON_SECURITY_RULES)
