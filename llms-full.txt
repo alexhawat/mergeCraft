@@ -53,6 +53,8 @@ Do all of this yourself, without asking me, except where step 4 says STOP:
 2. Install the CLI:
      uv tool install mergecraft-action==0.1.0a4
      mergecraft --version
+   Main-branch instructions may include unreleased behavior. Match this install
+   to https://github.com/alexhawat/mergeCraft/tree/v0.1.0a4/docs before using newer features.
 
 3. Scaffold config + workflow (non-interactive, writes no secrets):
      mergecraft init
@@ -390,6 +392,11 @@ uv tool install mergecraft-action==0.1.0a4
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
 
+Docs on `main` may describe unreleased behavior. For this install, use the
+[matching release documentation](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a4/docs).
+To test newer source deliberately, use the full commit SHA install in
+[`docs/install.md`](docs/install.md#path-b--local-cli).
+
 2. **Authenticate** a provider (subscription recommended — no metered API billing):
 
 ```bash
@@ -620,6 +627,10 @@ Use this when asked to add AI PR review to another repository.
    uv tool install mergecraft-action==0.1.0a4
    mergecraft --install-completion   # optional shell completion
    ```
+
+   Docs on `main` may describe unreleased behavior. Use the
+   [matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a4/docs)
+   for this install; do not assume newer CLI flags or fixes are included.
 
    To run an unreleased commit instead, pin the distribution to the repository:
    `uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft@<full-commit-sha>"`.
@@ -3362,6 +3373,11 @@ uv tool install mergecraft-action==0.1.0a4
 mergecraft --install-completion   # bash/zsh/fish — see --show-completion
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
+
+Docs on `main` may describe unreleased behavior, including CLI selection rules
+and review fixes that this alpha does not contain. Use the
+[matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a4/docs)
+for the installed version.
 
 For intentional development testing, replace `<full-commit-sha>` below with
 a verified 40-character commit SHA. This installs unreleased source; it is

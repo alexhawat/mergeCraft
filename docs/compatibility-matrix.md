@@ -62,7 +62,7 @@ provider fails the job.
 |------|----------|
 | Security slice (above) | Always |
 | Live provider coverage | `github` in the nightly Integration matrix. E2E requires `MERGECRAFT_E2E_LIVE_MODEL` and its selected API credential (OpenCode Go/OpenAI/Anthropic/Google); no model means explicitly unavailable. It does not consume the rotating Codex subscription. A green skipped/unavailable slice proves no live-provider acceptance. |
-| Arch | `ubuntu-latest` today; arm64 expansion tracked with multi-arch publish |
+| Arch | `ubuntu-latest` (amd64). This lane provides no ARM64 execution or publication evidence; inspect the selected image manifest before choosing ARM64. |
 
 ## Out of scope / dogfood
 

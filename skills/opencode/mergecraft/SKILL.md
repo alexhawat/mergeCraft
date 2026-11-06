@@ -77,6 +77,10 @@ a read-only verifier; typed findings drive inline comments and the
    mergecraft init
    ```
 
+   Docs on `main` may describe unreleased behavior. Use the
+   [matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a4/docs)
+   for this install; do not assume newer CLI flags or fixes are included.
+
 3. **Authentication — STOP and ask the user.** Use `mergecraft provider list`
    to find the configured provider label or id from `init`. Authenticate that
    entry with `mergecraft provider auth <label-or-id> --scope local` for local

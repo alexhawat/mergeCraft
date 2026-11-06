@@ -71,6 +71,10 @@ The plugin makes the default configurable with the `engine` plugin option, so
 
 ## Install
 
+Docs on `main` may describe unreleased behavior. Use the
+[matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a4/docs)
+for the pinned install; newer integration features may require an unreleased source commit.
+
 ```bash
 uv tool install mergecraft-action==0.1.0a4
 mergecraft init                      # if the repo is not set up yet

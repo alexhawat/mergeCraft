@@ -21,6 +21,10 @@ Use this when asked to add AI PR review to another repository.
    mergecraft --install-completion   # optional shell completion
    ```
 
+   Docs on `main` may describe unreleased behavior. Use the
+   [matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a4/docs)
+   for this install; do not assume newer CLI flags or fixes are included.
+
    To run an unreleased commit instead, pin the distribution to the repository:
    `uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft@<full-commit-sha>"`.
 

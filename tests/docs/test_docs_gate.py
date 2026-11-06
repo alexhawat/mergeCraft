@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 import yaml
+from scripts.consumer_install_pins import documented_release, plan_pin_updates
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
 from tests.docs.support import (
@@ -35,7 +36,7 @@ MANIFEST = REPO_ROOT / "docs" / "manifest.yaml"
 GEN_LLMS_FULL = REPO_ROOT / "scripts" / "gen_llms_full.py"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 
-_RELEASE_INSTALL = "uv tool install mergecraft-action==0.1.0a4"
+_RELEASE_INSTALL = f"uv tool install mergecraft-action=={documented_release(REPO_ROOT)}"
 _PIN_SCAN_PATHS = (README, AGENTS_MD, SKILL_MD, INSTALL_DOC, LLMS_TXT)
 _LINK_SURFACE_PATHS = (README, AGENTS_MD, SKILL_MD, LLMS_TXT)
 
@@ -198,6 +199,13 @@ def test_released_install_line_is_the_documented_form() -> None:
     assert not pinned_installs, (
         "consumer install must not pin git+…@v… in README/AGENTS/skill (D11):\n"
         + "\n".join(pinned_installs)
+    )
+
+
+def test_consumer_release_metadata_and_all_surfaces_stay_synchronized() -> None:
+    """Release trees advertise their version; dev trees retain the last release."""
+    assert plan_pin_updates(REPO_ROOT, _pyproject_version()) == {}, (
+        "consumer install surfaces drifted: run the release version bump"
     )
 
 

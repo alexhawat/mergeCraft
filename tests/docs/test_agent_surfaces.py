@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from scripts.consumer_install_pins import documented_release
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
 from tests.docs.support import (
@@ -35,7 +36,7 @@ LLMS_TXT = REPO_ROOT / "llms.txt"
 README = REPO_ROOT / "README.md"
 GITIGNORE = REPO_ROOT / ".gitignore"
 
-_RELEASE_INSTALL = "uv tool install mergecraft-action==0.1.0a4"
+_RELEASE_INSTALL = f"uv tool install mergecraft-action=={documented_release(REPO_ROOT)}"
 _VERSIONED_GIT_REF = re.compile(
     r"git\+https://github\.com/alexhawat/mergeCraft@([^\s\"')]+)",
     re.IGNORECASE,
