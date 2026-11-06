@@ -24,7 +24,7 @@ from mergecraft.findings.agent_adapter import (
     coerce_agent_finding,
     normalize_agent_findings_via_pipeline,
 )
-from mergecraft.mcp.shared import ToolClass, execute, tool
+from mergecraft.mcp.shared import ToolClass, ToolRefusedError, execute, tool
 from mergecraft.mcp.tool_state import TerminalSubmission, ToolState, primary_repo_state
 from mergecraft.modes._api_only_scope import API_ONLY_SCOPE
 from mergecraft.review_taxonomy import FINDING_SEVERITIES
@@ -144,6 +144,25 @@ def _looks_like_unified_diff(text: str) -> bool:
     if not stripped:
         return False
     return any(marker in stripped for marker in _UNIFIED_DIFF_MARKERS)
+
+
+class TerminalSubmissionRejectedError(ToolRefusedError):
+    """Terminal validation refused the verdict, so nothing was recorded (#1211).
+
+    A refused verdict is not a completed review. Raising the typed refusal lets
+    ``execute()`` tag the error result, so the trajectory records the terminal
+    call as ``ok=False, failure_class="refused"`` naming the rejection, instead
+    of an ``ok=True`` completion claim for a call that recorded nothing. The
+    agent still receives the same tool error text. Subclasses ``ValueError``
+    (through ``ToolRefusedError``) so existing callers and pins keep working.
+    """
+
+
+def _raise_terminal_rejection(tool_state: ToolState, rejection_reason: str | None) -> None:
+    reason = rejection_reason or ""
+    record_terminal_rejection(tool_state, reason)
+    msg = f"terminal submission rejected: {reason}"
+    raise TerminalSubmissionRejectedError(msg)
 
 
 def record_terminal_rejection(tool_state: ToolState, rejection_reason: str) -> None:
@@ -443,9 +462,7 @@ def record_validated_terminal_submission(
                 state=validation_state_from_tool_context(ctx),
             )
             if not validation.accepted:
-                record_terminal_rejection(ctx.tool_state, validation.rejection_reason or "")
-                msg = f"terminal submission rejected: {validation.rejection_reason}"
-                raise ValueError(msg)
+                _raise_terminal_rejection(ctx.tool_state, validation.rejection_reason)
             return existing
         ctx.tool_state.terminal_submission_conflict = True
         msg = (
@@ -459,9 +476,7 @@ def record_validated_terminal_submission(
         state=validation_state_from_tool_context(ctx),
     )
     if not validation.accepted:
-        record_terminal_rejection(ctx.tool_state, validation.rejection_reason or "")
-        msg = f"terminal submission rejected: {validation.rejection_reason}"
-        raise ValueError(msg)
+        _raise_terminal_rejection(ctx.tool_state, validation.rejection_reason)
 
     verdict = submission["verdict"]
     summary = submission["summary"]
@@ -1104,7 +1119,7 @@ def revalidate_recorded_submission(ctx: ToolContext) -> None:
     )
     if not validation.accepted:
         msg = f"terminal submission rejected: {validation.rejection_reason}"
-        raise ValueError(msg)
+        raise TerminalSubmissionRejectedError(msg)
 
 
 def after_terminal_submission_recorded(
@@ -1401,6 +1416,7 @@ __all__ = [
     "ReviewPhase",
     "SubmissionValidation",
     "SubmitReviewVerdictParams",
+    "TerminalSubmissionRejectedError",
     "ValidationState",
     "VerdictDiagnostic",
     "after_terminal_submission_recorded",

@@ -51,6 +51,15 @@ _MISSING_TERMINAL_VERDICT_REASON = "no terminal review verdict was submitted for
 _UNPUBLISHED_TERMINAL_VERDICT_REASON = (
     "terminal review verdict was recorded but never published to GitHub"
 )
+# #1211 — the agent did call a terminal review tool, but validation refused
+# every attempt, so no model verdict was accepted. Distinct from the missing
+# reason above: it holds whatever mode the run selected (a modeless run that
+# calls the terminal tool is still a review attempt), and under either verdict
+# protocol, because a provider that exited 0 after a refused verdict did not
+# complete a review.
+_REJECTED_TERMINAL_VERDICT_REASON = (
+    "the terminal review verdict was rejected and no model verdict was accepted"
+)
 # Distinct from both reasons above: a verdict was recorded and no POST failed,
 # yet the run holds no receipt for it. Nothing reached GitHub (the publisher
 # was never reached, or raised before posting). Fail closed, and say which.
@@ -167,6 +176,7 @@ def _classify_outcome(
     terminal_publication_mismatch: tuple[str, str] | None = None,
     terminal_publication_unproven: bool = False,
     coverage_incomplete_reason: str | None = None,
+    terminal_rejection: str | None = None,
 ) -> tuple[RunOutcome, str | None]:
     """Map the run's result + side-channels to a ``RunOutcome`` (D3/W5.2 + S1/D5/D10).
 
@@ -197,7 +207,10 @@ def _classify_outcome(
     protocol. A review-mode run whose changed-line coverage is incomplete
     (``coverage_incomplete_reason``, set only when the pinned policy gates on it) ->
     ``RunOutcome.inconclusive`` naming the gap, even though the agent submitted a
-    verdict. A roster slot skipped for missing credentials is not an input:
+    verdict. A run whose terminal attempt was refused
+    (``terminal_rejection`` names the last rejection) and that accepted no
+    submission -> ``RunOutcome.inconclusive`` naming the rejection, whatever
+    the selected mode or verdict protocol (#1211). A roster slot skipped for missing credentials is not an input:
     a published verdict classifies by that verdict. Otherwise (the closed ``SetupFailurePolicy``
     value ``"warn"`` or no failure surface) -> ``RunOutcome.passed``. Each
     non-pass branch logs a warning here so the call site only needs the tuple.
@@ -241,6 +254,14 @@ def _classify_outcome(
     if prep_reason:
         logger.warning("» prep failure mapped run to inconclusive: {}", prep_reason)
         return RunOutcome.inconclusive, prep_reason
+    if (
+        terminal_rejection
+        and not result.terminal_submission_received
+        and not (_is_incremental_review(mode) and final_summary_written)
+    ):
+        reason = f"{_REJECTED_TERMINAL_VERDICT_REASON} ({terminal_rejection})"
+        logger.warning("» {}", reason)
+        return RunOutcome.inconclusive, reason
     if _is_review_mode(mode) and terminal_publication_failed and verdict_protocol != "shadow":
         logger.warning("» {}", _UNPUBLISHED_TERMINAL_VERDICT_REASON)
         return RunOutcome.inconclusive, _UNPUBLISHED_TERMINAL_VERDICT_REASON
