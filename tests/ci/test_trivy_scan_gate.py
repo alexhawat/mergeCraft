@@ -283,7 +283,7 @@ def test_pr_image_scan_has_no_release_authority_and_is_blocking() -> None:
     """Untrusted PR image builds cannot publish; both matrix legs retain a hard gate."""
     doc = load_workflow("image-security.yml")
     trigger = workflow_on(doc)["pull_request"]
-    assert set(trigger["branches"]) == {"main", "pre-0.0.1"}
+    assert set(trigger["branches"]) == {"main", "pre-0.0.1", "codex/audit-remediation"}
     assert not {"paths", "paths-ignore"}.intersection(trigger), (
         "source-only or entrypoint PRs must not bypass the image gate"
     )

@@ -343,7 +343,12 @@ def run(
             viewport=viewport,
         )
 
-    settings = load_repo_settings(root=Path.cwd())
+    repo_root = Path(spec.repo_path).expanduser().resolve()
+    if not repo_root.is_dir():
+        raise typer.BadParameter(
+            f"repository directory does not exist: {repo_root}", param_hint="repo_path"
+        )
+    settings = load_repo_settings(root=repo_root)
     offline, event, event_name = _cli_trust_context()
     skip = collect_skip_reasons(
         event=event,

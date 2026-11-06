@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from scripts.consumer_install_pins import documented_release
 
 from tests.ci.workflow_support import REPO_ROOT, read_text
 from tests.docs.support import (
@@ -35,9 +36,7 @@ LLMS_TXT = REPO_ROOT / "llms.txt"
 README = REPO_ROOT / "README.md"
 GITIGNORE = REPO_ROOT / ".gitignore"
 
-_UNPINNED_INSTALL = (
-    'uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"'
-)
+_RELEASE_INSTALL = f"uv tool install mergecraft-action=={documented_release(REPO_ROOT)}"
 _VERSIONED_GIT_REF = re.compile(
     r"git\+https://github\.com/alexhawat/mergeCraft@([^\s\"')]+)",
     re.IGNORECASE,
@@ -106,8 +105,8 @@ def test_agents_md_stops_on_interactive_auth() -> None:
 
 def test_agents_md_install_ref_resolves() -> None:
     text = _read(AGENTS_MD)
-    assert _UNPINNED_INSTALL in text, (
-        "AGENTS-mergecraft.md must teach the unpinned uv tool install form (D11)"
+    assert _RELEASE_INSTALL in text, (
+        "AGENTS-mergecraft.md must teach the published pinned CLI install"
     )
     _assert_no_unresolvable_version_pins(text, label="AGENTS-mergecraft.md")
 

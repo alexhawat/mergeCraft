@@ -161,7 +161,10 @@ def require_workflow_untouched(state: Any, *, workflow: str, label: str, refuse:
         text = Path(diff_path).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise refuse(f"{unverified}: the diff could not be read ({type(exc).__name__})") from exc
-    reviewed = {workflow_path(path) for path in changed_paths_from_diff(text)}
+    try:
+        reviewed = {workflow_path(path) for path in changed_paths_from_diff(text)}
+    except ValueError as exc:
+        raise refuse(f"{unverified}: the diff could not be parsed ({exc})") from exc
     ignored = {workflow_path(path) for path in getattr(state, "ignored_review_paths", ())}
     unreviewable = {
         workflow_path(path) for path in getattr(coverage, "unreviewable_paths", ()) or ()

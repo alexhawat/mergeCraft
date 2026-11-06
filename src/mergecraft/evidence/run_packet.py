@@ -352,7 +352,11 @@ def classify_run_blast_radius(
     :func:`scope_signal_for_state` and :func:`fix_proof_signal_for_state`) so a
     run never classifies without its ``scope`` and ``fix_proof`` gates.
     """
-    paths = changed_paths_from_diff(diff_text)
+    try:
+        paths = changed_paths_from_diff(diff_text)
+    except ValueError:
+        logger.warning("evidence packet: diff paths are unparseable; blast radius unavailable")
+        return None
     if not paths:
         return None
     change: ChangeSet = {
@@ -847,7 +851,12 @@ def build_run_packet(
     from mergecraft.evidence.trajectory import build_trajectory_record
     from mergecraft.evidence.trajectory_audit import audit_trajectory
 
-    changed_paths = changed_paths_from_diff(diff_text)
+    invalid_diff = False
+    try:
+        changed_paths = changed_paths_from_diff(diff_text)
+    except ValueError:
+        changed_paths = []
+        invalid_diff = True
     coverage_diff, coverage_path = _read_coverage_scope(repo_state)
     # Plan 12 D2/D4: trajectory findings are run-scoped and partition into
     # ``run_health`` at build time. They are advisory-only — never block via
@@ -856,6 +865,9 @@ def build_run_packet(
     trajectory = build_trajectory_record(state, files_modified=changed_paths)
     trajectory_findings = audit_trajectory(
         trajectory,
+        scope_record=build_trajectory_record(
+            state, files_modified=changed_paths, current_scope_only=True
+        ),
         diff_text=coverage_diff or None,
         diff_path=coverage_path,
         in_flight_tool=in_flight_tool,
@@ -865,6 +877,23 @@ def build_run_packet(
     loaded_findings, dropped_finding_rows = load_run_findings_with_drops(ctx, extra=extra_findings)
     health_finding = _dropped_findings_health(dropped_finding_rows)
     run_health_findings = [health_finding] if health_finding is not None else []
+    if invalid_diff:
+        run_health_findings.append(
+            make_finding(
+                tool="diff-parser",
+                rule_id="unparseable-diff-paths",
+                category="Data Integrity & Atomicity",
+                severity="Major",
+                confidence="certain",
+                message="The review diff has unparseable paths; changed-file scope and blast radius are unavailable.",
+                path="",
+                start_line=1,
+                end_line=1,
+                source="trajectory",
+                scope="run",
+                introduced_by_pr="false",
+            )
+        )
 
     # #941 closure check: every raw analyzer hit must have ended with a disposition.
     # An open ledger makes the run inconclusive (a non-passing run → ``neutral`` at
@@ -894,8 +923,10 @@ def build_run_packet(
     return _finalize_packet_with_gate(
         packet,
         ctx=ctx,
-        run_succeeded=run_succeeded and not orphaned_hits,
-        decision_reason_suffix=_open_ledger_reason(orphaned_hits),
+        run_succeeded=run_succeeded and not orphaned_hits and not invalid_diff,
+        decision_reason_suffix=(
+            "diff paths could not be parsed" if invalid_diff else _open_ledger_reason(orphaned_hits)
+        ),
     )
 
 

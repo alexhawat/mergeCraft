@@ -39,7 +39,7 @@ from mergecraft.review.output import finding_json_records
 from mergecraft.review.snapshot import ReviewSnapshot, ReviewStageName, canonical_review_snapshot
 from mergecraft.types import ShellPermission  # noqa: TC001
 from mergecraft.utils.log import configure_logging
-from mergecraft.utils.source_resolve import SourceResolverSpec
+from mergecraft.utils.source_resolve import SourceResolverSpec, _is_remote_source
 
 _PANEL_SOURCE = "Source"
 _PANEL_DIFF = "Diff selection"
@@ -183,6 +183,7 @@ def _persist_completed_cli_review(
     findings: Sequence[Finding],
     evidence_packet_path: str | None = None,
     trace_dir: Path | None = None,
+    source_root: Path | None = None,
 ) -> None:
     try:
         persist_offline_review(
@@ -195,6 +196,7 @@ def _persist_completed_cli_review(
             findings=findings,
             evidence_packet_path=evidence_packet_path,
             trace_dir=trace_dir,
+            source_root=source_root,
         )
     except (OSError, ValueError) as exc:
         logger.warning("skipped durable review persistence: {}", exc)
@@ -585,8 +587,15 @@ def run(
     if capture_verdicts:
         os.environ["MERGECRAFT_CAPTURE_VERDICTS"] = "1"
     effective_output_format = _resolve_review_output_format(ctx, output_format=output_format)
+    if effective_output_format in {"jsonl", "sarif"} and output is None:
+        _exit_with_message(
+            f"--output is required for --output-format {effective_output_format}",
+            cli_exit_code_for_review(RunOutcome.configuration_error),
+        )
     invocation_root = Path.cwd().resolve()
     root = cwd.resolve()
+    if repo is not None and not _is_remote_source(repo):
+        root = Path(repo.strip()).expanduser().resolve()
     source_spec = SourceResolverSpec(
         repo=repo,
         head=head,
@@ -826,8 +835,9 @@ def run(
             _persist_completed_cli_review(
                 review_id=persist_review_id,
                 trace_session_id=review_id,
-                snapshot=snapshot,
-                cwd=root,
+                snapshot=engine.snapshot,
+                cwd=result.persistence_root or root,
+                source_root=result.source_root,
                 model=model,
                 prompt=prompt,
                 findings=findings,

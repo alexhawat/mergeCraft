@@ -30,6 +30,7 @@ from mergecraft.config.settings import RepoSettings
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.run_outcome import RunOutcome
 from tests.review.test_fast_path_gate import FakeScm, _check, _files_from_diff
+from tests.review.test_fast_path_whitespace_modes import ModeScm
 from tests.support.run_main_harness import FakeAgent, run_main_for_test
 
 if TYPE_CHECKING:
@@ -117,7 +118,7 @@ async def _decide(scm: FakeScm, **kwargs: Any) -> Any:
 
 
 async def test_an_unopted_recognizer_match_is_lite_from_the_operators_config() -> None:
-    scm = FakeScm(files=_files_from_diff(_WHITESPACE_DIFF))
+    scm = ModeScm()
 
     decision = await _decide(scm)
 
@@ -163,7 +164,7 @@ async def test_a_disabled_lite_block_keeps_todays_full_review() -> None:
     decision = await _decide(scm, config=_config(lite_enabled=False))
 
     assert decision.tier == "full"
-    assert decision.reason == "whitespace matched but is not enabled in review.fastPath.skipLlm"
+    assert decision.reason == "no recognizer matches the whole diff"
 
 
 async def test_a_comment_only_edit_reads_the_head_text_and_skips_when_opted_in() -> None:

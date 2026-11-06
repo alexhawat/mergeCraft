@@ -242,7 +242,7 @@ async def test_checkout_pr_parameter_aliases_resolve_to_pull_number(
     monkeypatch.setattr("mergecraft.mcp.checkout.get_git_status", lambda cwd: "")
     monkeypatch.setattr(
         "mergecraft.mcp.checkout._run_git",
-        lambda *args, **kwargs: "deadbeef\n" if args[0] == ["rev-parse", "HEAD"] else "ok\n",
+        lambda *args, **kwargs: "a" * 40 + "\n" if args[0][0] == "rev-parse" else "ok\n",
     )
 
     result = await checkout_pr_tool(

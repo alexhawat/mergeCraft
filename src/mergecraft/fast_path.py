@@ -2,8 +2,7 @@
 
 ``mergecraft.classify.triage`` is the pure decision. This module is its I/O shell: it
 reads the pull request's diff through the files API, the head-side text of any prose
-file the prose recognizer must prove stays out of a code fence (or of any
-comment-only-language file the ``commentOnly`` lexer must prove stays out of a string),
+file needed to prove prose, comments or whitespace stay outside executable content,
 and the checks that passed on the head SHA — then asks the pure function.
 
 Everything here fails toward spending *more*: a failed read, a truncated listing, a file
@@ -21,6 +20,7 @@ Exports:
 from __future__ import annotations
 
 import base64
+import re
 from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
@@ -42,9 +42,14 @@ if TYPE_CHECKING:
 _FILES_PAGE_SIZE: Final[int] = 100
 _FILES_MAX_PAGES: Final[int] = 30
 # Head-side text is read only to prove a prose edit stays out of a code fence, or a
-# comment-only edit stays out of a string literal or a block comment.
+# comment-only/whitespace edit stays out of a string literal or a block comment.
 _PROSE_SUFFIXES: Final[tuple[str, ...]] = (".md", ".markdown", ".txt")
-_HEAD_TEXT_SUFFIXES: Final[tuple[str, ...]] = (*_PROSE_SUFFIXES, *COMMENT_ONLY_SUFFIXES)
+_HEAD_TEXT_SUFFIXES: Final[tuple[str, ...]] = (
+    *_PROSE_SUFFIXES,
+    *COMMENT_ONLY_SUFFIXES,
+    ".py",
+    ".js",
+)
 _MAX_PROSE_FILES: Final[int] = 25
 _MAX_HEAD_CHARS: Final[int] = 512_000
 
@@ -193,6 +198,77 @@ def _check_app_slug(row: dict[str, Any]) -> str:
     return slug.strip().lower() if isinstance(slug, str) else ""
 
 
+async def _verify_file_modes(
+    scm: ScmProvider, owner: str, repo: str, pull_number: int, head_sha: str, paths: list[str]
+) -> None:
+    """Files-API patches omit mode changes; compare only the immutable directories containing changed files."""
+    root = f"/repos/{owner}/{repo}"
+    pull = await scm.get(f"{root}/pulls/{pull_number}")
+    if not isinstance(pull, dict):
+        raise TriageUnavailableError("missing pull request metadata for file-mode proof")
+    base, head = pull.get("base"), pull.get("head")
+    base_sha = base.get("sha") if isinstance(base, dict) else None
+    if (
+        not isinstance(base_sha, str)
+        or re.fullmatch(r"[0-9a-f]{40}", base_sha) is None
+        or re.fullmatch(r"[0-9a-f]{40}", head_sha) is None
+        or not isinstance(head, dict)
+        or head.get("sha") != head_sha
+    ):
+        raise TriageUnavailableError("pull request SHA mismatch in file-mode proof")
+    trees: dict[str, dict[str, dict[str, Any]]] = {}
+
+    async def entries(sha: str) -> dict[str, dict[str, Any]]:
+        """Read each immutable directory once; never request a repository-wide tree."""
+        if sha not in trees:
+            if len(trees) >= 128:
+                raise TriageUnavailableError("file-mode proof exceeds directory budget")
+            tree = await scm.get(f"{root}/git/trees/{sha}")
+            if not isinstance(tree, dict) or tree.get("truncated") is not False:
+                raise TriageUnavailableError("missing or truncated tree in file-mode proof")
+            rows = tree.get("tree")
+            if not isinstance(rows, list):
+                raise TriageUnavailableError("invalid tree in file-mode proof")
+            indexed: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                if not isinstance(row, dict) or not isinstance(row.get("path"), str):
+                    raise TriageUnavailableError("invalid directory entry in file-mode proof")
+                name = row["path"]
+                if name in indexed:
+                    raise TriageUnavailableError("duplicate directory entry in file-mode proof")
+                indexed[name] = row
+            trees[sha] = indexed
+        return trees[sha]
+
+    modes: list[dict[str, str]] = []
+    for revision in (base_sha, head_sha):
+        matched: dict[str, str] = {}
+        for path in set(paths):
+            parts = path.split("/")
+            if any(part in {"", ".", ".."} for part in parts):
+                raise TriageUnavailableError("invalid path in file-mode proof")
+            sha = revision
+            for directory in parts[:-1]:
+                row = (await entries(sha)).get(directory, {})
+                child = row.get("sha")
+                if (
+                    row.get("type") != "tree"
+                    or row.get("mode") != "040000"
+                    or not isinstance(child, str)
+                    or re.fullmatch(r"[0-9a-f]{40}", child) is None
+                ):
+                    raise TriageUnavailableError("unproven parent directory in file-mode proof")
+                sha = child
+            row = (await entries(sha)).get(parts[-1], {})
+            mode = row.get("mode")
+            if mode not in {"100644", "100755"} or row.get("type") != "blob":
+                raise TriageUnavailableError("unproven regular-file mode")
+            matched[path] = mode
+        modes.append(matched)
+    if modes[0] != modes[1]:
+        raise TriageUnavailableError("file modes changed with whitespace")
+
+
 async def load_triage_inputs(
     scm: ScmProvider,
     owner: str,
@@ -207,8 +283,9 @@ async def load_triage_inputs(
 
     ``trusted_apps`` is the operator's ``pinBump.trustedCheckApps``: a check run
     only counts when its ``app.slug`` is in it. ``read_code_head`` also reads the head
-    text of comment-only-language files; the caller sets it only when ``commentOnly``
-    is opted in or ``lite`` is enabled, the only consumers of that text.
+    text needed by comment-only and whitespace proofs. The caller sets it when either
+    recognizer is opted in or ``lite`` is enabled. The caller verifies file modes
+    after classification and before acting on a whitespace match.
 
     Raises:
         TriageUnavailableError: The diff could not be read completely.
@@ -219,7 +296,11 @@ async def load_triage_inputs(
         scm, owner, repo, head_sha, paths, read_code_head=read_code_head
     )
     passed = await _passed_checks(scm, owner, repo, head_sha, trusted_apps=trusted_apps)
-    return TriageInputs(diff_text=diff_text, head_files=head_files, passed_checks=passed)
+    return TriageInputs(
+        diff_text=diff_text,
+        head_files=head_files,
+        passed_checks=passed,
+    )
 
 
 async def triage_pull_request(
@@ -270,8 +351,28 @@ async def triage_pull_request(
             pull_number,
             head_sha,
             trusted_apps=config.pin_bump.trusted_check_apps,
-            read_code_head="commentOnly" in config.skip_llm or config.lite.enabled,
+            read_code_head=bool({"commentOnly", "whitespace"} & set(config.skip_llm))
+            or config.lite.enabled,
         )
+        decision = triage_diff(
+            inputs.diff_text,
+            config=config,
+            head_files=inputs.head_files,
+            passed_checks=inputs.passed_checks,
+        )
+        if decision.recognizer == "whitespace" and decision.tier != "full":
+            from mergecraft.utils.diff_paths import changed_paths_from_diff
+
+            # Recognize once, then prove the omitted file modes before spending
+            # less. Both skip and lite decisions require the same proof.
+            await _verify_file_modes(
+                scm,
+                owner,
+                repo,
+                pull_number,
+                head_sha,
+                changed_paths_from_diff(inputs.diff_text),
+            )
     except Exception as err:  # any read failure is a reason to review, never to skip
         logger.warning(
             "fast path: PR #{} could not be read, so it gets a full review: {}", pull_number, err
@@ -286,12 +387,6 @@ async def triage_pull_request(
             ),
             None,
         )
-    decision = triage_diff(
-        inputs.diff_text,
-        config=config,
-        head_files=inputs.head_files,
-        passed_checks=inputs.passed_checks,
-    )
     logger.info("fast path: PR #{} triaged {} ({})", pull_number, decision.tier, decision.reason)
     return decision, inputs
 

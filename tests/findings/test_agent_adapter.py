@@ -26,6 +26,9 @@ def test_category_hints_match_whole_tokens_not_substrings() -> None:
         "Functional Correctness"
     )
     assert infer_category_from_message("Token bucket refill rate is too high") == (
+        "Functional Correctness"
+    )
+    assert infer_category_from_message("The response exposes bearer tokens") == (
         "Security & Privacy"
     )
 

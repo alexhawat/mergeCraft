@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.analyzers.dispositions import DispositionLedger
+from mergecraft.evidence.merge import merge_finding_records
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import (
     AnalyzerRunKey,
@@ -104,9 +105,10 @@ def _merge_analyzer_segments(
     N2 / D9 — analyzer findings are additive across scopes. A rerun over a
     different covered-file selection must not erase a finding produced for a
     file it never looked at, so the merged view is the union of every retained
-    segment. Rows are de-duplicated on fingerprint (an overlapping scope cannot
-    double-count a finding); descriptive fields take the most recent non-empty
-    value, since they describe the latest run rather than the union.
+    segment. Compatible duplicate occurrences retain their strongest severity
+    and evidence; contradictory attribution stays explicit. Descriptive fields
+    take the most recent non-empty value, since they describe the latest run
+    rather than the union.
     """
     if len(segments) == 1:
         return next(iter(segments.values()))
@@ -115,9 +117,6 @@ def _merge_analyzer_segments(
     deferred: list[dict[str, Any]] = []
     analyzers: list[AnalyzerStatusRow] = []
     verified: set[str] = set()
-    seen_findings: set[str] = set()
-    seen_deferred: set[str] = set()
-    seen_inline: set[str] = set()
     seen_analyzers: set[str] = set()
     mechanical_section: str | None = None
     deferred_section: str | None = None
@@ -125,27 +124,9 @@ def _merge_analyzer_segments(
     lockfile_digest: str | None = None
     ledger: DispositionLedger | None = None
     for segment in segments.values():
-        for row in segment.findings:
-            fingerprint = str(row.get("fingerprint") or "")
-            if fingerprint and fingerprint in seen_findings:
-                continue
-            if fingerprint:
-                seen_findings.add(fingerprint)
-            findings.append(row)
-        for row in segment.inline:
-            fingerprint = str((row.get("finding") or {}).get("fingerprint") or "")
-            if fingerprint and fingerprint in seen_inline:
-                continue
-            if fingerprint:
-                seen_inline.add(fingerprint)
-            inline.append(row)
-        for row in segment.deferred_findings:
-            fingerprint = str(row.get("fingerprint") or "")
-            if fingerprint and fingerprint in seen_deferred:
-                continue
-            if fingerprint:
-                seen_deferred.add(fingerprint)
-            deferred.append(row)
+        findings.extend(segment.findings)
+        inline.extend(segment.inline)
+        deferred.extend(segment.deferred_findings)
         for status_row in segment.analyzers:
             if status_row.id in seen_analyzers:
                 continue
@@ -165,11 +146,11 @@ def _merge_analyzer_segments(
         ran=any(segment.ran for segment in segments.values()),
         reason=latest.reason,
         analyzers=analyzers,
-        findings=findings,
-        inline=inline,
+        findings=merge_finding_records(findings),
+        inline=merge_finding_records(inline, inline=True),
         mechanical_section=mechanical_section,
         deferred_section=deferred_section,
-        deferred_findings=deferred,
+        deferred_findings=merge_finding_records(deferred),
         pre_merge_summary=pre_merge_summary,
         lockfile_digest=lockfile_digest,
         verified_ids=verified,

@@ -185,6 +185,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Local `mergecraft review --range` and `--head` revision reviews require a clean
+  checkout at the reviewed endpoint, including no nonignored untracked source
+  files. Commit or stash local work (including untracked files), or use a clean
+  Git worktree. Default working-tree reviews still include local changes;
+  ignored files and untracked mergeCraft runtime artifacts remain excluded.
+
 - Consolidate container files under `docker/`, documentation and assets under `docs/`, community guidelines under `.github/`, and build/analyzer tooling under `scripts/`; preserve published Action and plugin paths (#1151).
 
 - A pull request without a declared scope can no longer reach the `eligible`
@@ -265,6 +271,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read from the environment stay masked in diagnostics.
 
 ### Fixed
+
+- Audit remediation hardens revision-bound approvals, checkout recovery, fork
+  trust, CLI workspace and cache identity, finding attribution and severity.
+  Checkout retries also discard fail-then-pass evidence from the old revision;
+  malformed diffs cannot establish artifact provenance. Includes regression
+  coverage, real Action-image acceptance, pinned consumer installation docs and
+  release-pin maintenance (#1197, #1198, #1199, #1200, #1201).
+
 
 - A review whose verdict was accepted no longer ends `failed` with
   `provider_failure` and `action failed: opencode failed` when the agent CLI then

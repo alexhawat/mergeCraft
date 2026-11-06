@@ -6,6 +6,8 @@
 # uv.lock all move together: a post-release bump that touched pyproject.toml
 # alone would turn `lockcheck` and `mcp-server-json-check` red on the next
 # commit, which is the same defect the prepare bump was fixed for.
+# Consumer pins and matching release-doc links keep the release just published;
+# the next development version is not an installable PyPI release.
 #
 # The dev version is a canonical PEP 440 "successor development release":
 #

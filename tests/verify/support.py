@@ -206,7 +206,9 @@ def untrusted_fork_event() -> dict[str, Any]:
 
 def trusted_same_repo_event() -> dict[str, Any]:
     """GitHub ``pull_request`` payload whose head repo is not a fork."""
-    return {"pull_request": {"head": {"repo": {"fork": False}}}}
+    return {
+        "pull_request": {"head": {"repo": {"id": 42, "fork": False}}, "base": {"repo": {"id": 42}}}
+    }
 
 
 def sample_input_payload(**overrides: Any) -> dict[str, Any]:

@@ -1,7 +1,12 @@
-# Minimal fixture repo config for the Action-image E2E gate (D6).
-# Single pinned model — fake CLI shim on PATH supplies canned output.
+# One pinned fake provider; the native self-silencing analyzer runs for real.
 models:
   - anthropic/claude-sonnet
 allowFallback: false
 analyzers:
-  enabled: false
+  enabled: true
+  overrides:
+    markdownlint:
+      enabled: false
+    typos:
+      enabled: false
+prApproveEnabled: true

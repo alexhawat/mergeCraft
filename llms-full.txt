@@ -51,8 +51,10 @@ Do all of this yourself, without asking me, except where step 4 says STOP:
    Do NOT install Python. uv downloads a compatible interpreter on its own.
 
 2. Install the CLI:
-     uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
+     uv tool install mergecraft-action==0.1.0a4
      mergecraft --version
+   Main-branch instructions may include unreleased behavior. Match this install
+   to https://github.com/alexhawat/mergeCraft/tree/v0.1.0a4/docs before using newer features.
 
 3. Scaffold config + workflow (non-interactive, writes no secrets):
      mergecraft init
@@ -383,12 +385,17 @@ For the GitHub Action path, see [How it works in GitHub Action](#how-it-works-in
 > makes `mergecraft provider auth` store the secret for you.
 > Other paths (Docker-only, no local install at all): [`docs/install.md`](docs/install.md).
 
-1. **Install the CLI and scaffold the repo:**
+1. **Install the published alpha CLI and scaffold the repo:**
 
 ```bash
-uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
+uv tool install mergecraft-action==0.1.0a4
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
+
+Docs on `main` may describe unreleased behavior. For this install, use the
+[matching release documentation](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a4/docs).
+To test newer source deliberately, use the full commit SHA install in
+[`docs/install.md`](docs/install.md#path-b--local-cli).
 
 2. **Authenticate** a provider (subscription recommended — no metered API billing):
 
@@ -621,8 +628,12 @@ Use this when asked to add AI PR review to another repository.
    mergecraft --install-completion   # optional shell completion
    ```
 
+   Docs on `main` may describe unreleased behavior. Use the
+   [matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a4/docs)
+   for this install; do not assume newer CLI flags or fixes are included.
+
    To run an unreleased commit instead, pin the distribution to the repository:
-   `uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"`.
+   `uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft@<full-commit-sha>"`.
 
 3. **Scaffold config and workflow** — in the consumer repo root:
 
@@ -2180,8 +2191,14 @@ uncovered range with its cause.
 The "genuinely trivial" rule in the review modes is a decision the agent makes,
 after the tokens are spent. `review.fastPath` moves a narrow slice of it in
 front of the agent as a pure function of the unified diff: recognizers for a
-verified pin substitution, prose, whitespace and regenerated lockfiles. The
-tier is `skip` or `full`; there is no partial credit and no "probably". The
+verified pin substitution, prose, whitespace and regenerated lockfiles. Prose
+recognition checks removed Markdown lines in the reconstructed base structure and
+added lines in the head structure; deleting YAML front matter still needs review.
+Whitespace recognition requires complete head text and validated diff hunks. It compares
+Python ASTs or uses a conservative lexical subset for C-family files; unsupported
+syntax gets full review. The GitHub path also verifies unchanged regular-file modes
+against complete base/head Git trees, because files-API patches omit executable-bit
+changes. The tier is `skip` or `full`; there is no partial credit and no "probably". The
 refusals are the design: a skipped run is stated as such on the check and the
 record, never grants approval, only counts a pin bump when its verifying check
 passed on the head SHA from a `pinBump.trustedCheckApps` GitHub App (a check
@@ -3380,10 +3397,17 @@ mergecraft --install-completion   # bash/zsh/fish — see --show-completion
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
 
-To run an unreleased commit, pin the distribution to the repository instead:
+Docs on `main` may describe unreleased behavior, including CLI selection rules
+and review fixes that this alpha does not contain. Use the
+[matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a4/docs)
+for the installed version.
+
+For intentional development testing, replace `<full-commit-sha>` below with
+a verified 40-character commit SHA. This installs unreleased source; it is
+separate from the published alpha above:
 
 ```bash
-uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
+uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft@<full-commit-sha>"
 ```
 
 Then authenticate and open a pull request — details in the README install steps
@@ -3504,7 +3528,21 @@ anchors, and `MERGECRAFT_ENV` overrides both:
 | Command shape | Anchor |
 |---------------|--------|
 | Takes `--cwd` (`provider`, `model`, `agents`, `trust`) | `<cwd>/.env`, taken literally — the same directory `<cwd>/.mergecraft/config.yaml` is read from, so the registry and the credentials always name one repository |
-| Takes no `--cwd` (`auth`, `tracing logfire`, and the CLI startup load) | `<git-repo-root>/.env`, walking up from the process working directory |
+| Local `review --repo PATH` | `<PATH>/.env`, taking precedence over `--cwd` |
+| Takes no explicit local target (`auth`, `tracing logfire`, or a command without `--cwd`) | `<git-repo-root>/.env`, walking up from the process working directory |
+
+Startup parses explicit target options before loading credentials, so a caller's
+`.env` cannot mask the selected target's values. A remote `--repo` never loads
+credentials from its acquired checkout; it uses the operator's `--cwd` or the
+normal process-directory anchor. Existing process variables always win, and a
+missing target `.env` does not fall back to the caller's file. Relative
+`MERGECRAFT_ENV` paths remain relative to the invocation directory.
+
+Startup skips an implicit `.env` tracked by Git, or a symlink to a tracked
+file, and prints a warning. Keep local credentials untracked; repository content
+under review must not choose provider endpoints or arbitrary process variables.
+An explicitly selected `MERGECRAFT_ENV` file remains an operator override and
+can be loaded regardless of its tracking status.
 
 The walk-up is why `mergecraft auth` run from a subdirectory writes the `.env`
 the next invocation actually loads. Outside a git checkout the writers fail

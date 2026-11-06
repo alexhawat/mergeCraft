@@ -196,12 +196,30 @@ collection. With the flag set but secrets absent the suite still fails loudly
 
 ## Operator: branch protection
 
-The **CI/CD** workflow (`.github/workflows/ci-cd.yml`) must be a **required status
-check** on `main` and `pre-0.0.1`. A workflow that fails at startup
-(``startup_failure``) — for example when a ``uses:`` job does not grant the
-permissions its called workflow declares — produces no logs, annotations, or check
-runs (#425). Requiring CI/CD makes that silence block merges. Apply this in GitHub
-branch protection; this repository does not configure it automatically.
+The required `Verify (static + build py3.11)` and `py3.14` contexts also
+check the dependency graph's results explicitly: lock/toolchain, deployment
+candidate verification, structural evaluation, root-container privilege,
+keyless integration on both Python versions, and the reusable Action E2E
+slice must all succeed. Failure, cancellation, or a skipped prerequisite
+makes the required context fail. PR Action E2E is called by CI once; release,
+scheduled and manual invocation remain available. The existing Integration
+workflow still provides its coverage ratchet and diagnostic artifacts.
+
+This graph also runs for documentation-only PRs: they build the Action image
+and run deterministic integration on both Python versions. The integration job
+has a 55-minute timeout, so the full required graph can take substantially longer
+than the docs checks alone. This cost keeps the same required acceptance checks
+on every PR; a path-based skip cannot stand in for a successful prerequisite.
+
+Live-provider and mutation advisory jobs remain outside this required graph.
+They provide different evidence and are not a substitute for deterministic
+acceptance. Keep the existing required static check names in branch protection.
+
+A workflow that fails at startup (`startup_failure`) may produce no check
+runs, for example when reusable-workflow permissions are incompatible. Missing
+required contexts must block merges too. Workflow changes do not install or
+replace GitHub branch-protection rules; maintain those required context names
+in the repository ruleset.
 
 `make lint` now includes ``scripts/check_called_workflow_permissions.py`` to catch
 the permissions mismatch at authoring time.

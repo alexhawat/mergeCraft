@@ -38,6 +38,7 @@ import pytest
 import yaml
 
 from tests.ci.workflow_support import REPO_ROOT
+from tests.release.consumer_pin_support import copy_consumer_pin_inputs
 
 _CRAFT_CONFIG = ".craft.yml"
 _BUMP_SCRIPT = "scripts/bump-version.sh"
@@ -64,6 +65,7 @@ def _prepare_tree(tmp_path: Path) -> Path:
         destination = root / rel
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
+    copy_consumer_pin_inputs(root)
     return root
 
 

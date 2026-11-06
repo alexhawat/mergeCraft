@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Set the version Craft is preparing in pyproject.toml, server.json and uv.lock.
+# Set the package/manifests and synchronized consumer release-install surfaces.
 #
 # Craft invokes this as `bash scripts/bump-version.sh <oldVersion> <newVersion>`,
 # positionally, with CRAFT_OLD_VERSION / CRAFT_NEW_VERSION also exported. The
@@ -32,6 +32,10 @@ import re
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path("scripts").resolve()))
+from consumer_install_pins import plan_pin_updates
+
 new_version = sys.argv[1]
 
 # --- validate every input before writing anything -------------------------
@@ -62,6 +66,11 @@ lock_pattern = re.compile(r'(\[\[package\]\]\nname = "mergecraft-action"\nversio
 if len(lock_pattern.findall(lock_text)) != 1:
     raise SystemExit("uv.lock must carry exactly one mergecraft-action package block")
 
+# A release advances every install pin, release-doc link, generated skill hash
+# and bundled copy. A development bump keeps the last documented release.
+# Plan before writing so missing/drifted consumer inputs cannot half-bump a tree.
+consumer_updates = plan_pin_updates(Path.cwd(), new_version)
+
 # --- write, with the manifest's own serialization --------------------------
 pyproject_path.write_text(
     pyproject_pattern.sub(f'version = "{new_version}"', pyproject_text),
@@ -79,6 +88,8 @@ lock_path.write_text(
     lock_pattern.sub(lambda match: f'{match.group(1)}"{new_version}"', lock_text),
     encoding="utf-8",
 )
+for path, text in consumer_updates.items():
+    path.write_text(text, encoding="utf-8")
 PY
 
-echo "Bumped pyproject.toml, server.json and uv.lock to ${new_version}"
+echo "Bumped version to ${new_version}; consumer release pins synchronized"

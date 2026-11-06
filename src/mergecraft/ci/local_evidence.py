@@ -326,6 +326,11 @@ def _read_artifact(path: Path) -> str | None:
 
 def _execute_coverage(repo_root: Path, *, timeout_seconds: int) -> Path | None:
     """Best-effort ``coverage run`` + ``coverage json``. Returns the artifact or None."""
+    # A tool-installed mergeCraft has a different interpreter from the
+    # consumer's activated environment. Execute the tool we discovered so its
+    # interpreter owns pytest and project dependencies, for both run and export.
+    executable = shutil.which("coverage")
+    coverage_command = [executable] if executable else [sys.executable, "-m", "coverage"]
     workdir = Path(tempfile.mkdtemp(prefix="mergecraft-local-cov-"))
     data_file = workdir / ".coverage"
     dest = workdir / "coverage.json"
@@ -333,9 +338,7 @@ def _execute_coverage(repo_root: Path, *, timeout_seconds: int) -> Path | None:
         run_result = subprocess.run(
             _sandboxed_argv(
                 [
-                    sys.executable,
-                    "-m",
-                    "coverage",
+                    *coverage_command,
                     "run",
                     "--data-file",
                     str(data_file),
@@ -359,9 +362,7 @@ def _execute_coverage(repo_root: Path, *, timeout_seconds: int) -> Path | None:
         json_run = subprocess.run(
             _sandboxed_argv(
                 [
-                    sys.executable,
-                    "-m",
-                    "coverage",
+                    *coverage_command,
                     "json",
                     "--data-file",
                     str(data_file),

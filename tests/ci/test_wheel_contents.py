@@ -9,7 +9,7 @@ wheel.
 This test pins the packaging config itself — it does **not** build a wheel. The
 real, installed-wheel proof is ``make test-wheel-corpus`` (the corpus check plus
 ``mergecraft --help`` / ``mergecraft eval --help`` from a scratch venv), which CI
-runs in ``build-dist``. If a module's absence breaks the installed CLI, this list
+runs in PR static jobs and release ``build-dist``. If a module's absence breaks the installed CLI, this list
 must shrink.
 """
 

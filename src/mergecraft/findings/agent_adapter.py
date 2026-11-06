@@ -11,7 +11,7 @@ from mergecraft.findings.causality import (
     causality_text,
 )
 from mergecraft.findings.dedup import dedupe_findings_with_indices
-from mergecraft.findings.precision_pipeline import apply_precision_pipeline
+from mergecraft.findings.precision_pipeline import apply_precision_pipeline_with_indices
 from mergecraft.findings.severity_rubric import infer_category_from_message
 
 if TYPE_CHECKING:
@@ -109,25 +109,16 @@ def _apply_row_level_precision(
     rule_id: str,
     repo_root: Path | None = None,
     trust_tier: Literal["trusted", "untrusted"] = "trusted",
-) -> list[tuple[AgentFinding, Finding]]:
-    """Run rubric, causality, and optional memory; return aligned draft pairs."""
+) -> list[tuple[int, Finding]]:
+    """Run row transforms and return findings aligned to original draft indices."""
     converted = [agent_finding_to_finding(draft, rule_id=rule_id) for draft in drafts]
-    refined = apply_precision_pipeline(
+    refined = apply_precision_pipeline_with_indices(
         converted,
         dedupe=False,
         repo_root=repo_root,
         trust_tier=trust_tier,
     )
-    draft_by_fingerprint = {
-        finding.fingerprint: draft for draft, finding in zip(drafts, converted, strict=True)
-    }
-    pairs: list[tuple[AgentFinding, Finding]] = []
-    for finding in refined:
-        draft = draft_by_fingerprint.get(finding.fingerprint)
-        if draft is None:
-            continue
-        pairs.append((draft, finding))
-    return pairs
+    return list(zip(refined.kept_indices, refined.findings, strict=True))
 
 
 def normalize_agent_findings_via_pipeline(
@@ -156,19 +147,17 @@ def normalize_agent_findings_via_pipeline(
         refined = [finding for _, finding in pairs]
         dedupe_result = dedupe_findings_with_indices(refined)
         return [
-            finding_to_agent_draft(refined[index], source=pairs[index][0])
-            for index in dedupe_result.kept_indices
+            finding_to_agent_draft(finding, source=drafts[pairs[index][0]])
+            for index, finding in zip(
+                dedupe_result.kept_indices, dedupe_result.findings, strict=True
+            )
         ]
 
-    original_by_fingerprint = {
-        agent_finding_to_finding(draft, rule_id=rule_id).fingerprint: original
-        for draft, original in zip(drafts, findings, strict=True)
-    }
     normalized: list[Any] = []
-    for draft, finding in pairs:
-        original = original_by_fingerprint[finding.fingerprint]
+    for source_index, finding in pairs:
+        original = findings[source_index]
         if isinstance(original, AgentFinding):
-            normalized.append(draft.model_copy(update={"severity": finding.severity}))
+            normalized.append(original.model_copy(update={"severity": finding.severity}))
         elif isinstance(original, dict):
             row = dict(original)
             row["severity"] = finding.severity

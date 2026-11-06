@@ -70,7 +70,11 @@ from mergecraft.cli.global_surface import (
     emit_cli_json,
     validate_log_level_option,
 )
-from mergecraft.cli.local_env import _configured_env_path, local_env_path_for_process_cwd
+from mergecraft.cli.local_env import (
+    _configured_env_path,
+    local_env_path_for_cwd,
+    local_env_path_for_process_cwd,
+)
 from mergecraft.cli.typer_group import MergecraftTyperGroup
 from mergecraft.config.env import EnvSettingsError, LocalDotEnv
 from mergecraft.config.layered import running_in_github_actions
@@ -241,7 +245,7 @@ def version_cmd(
     typer.echo(format_version_display(__version__, mergecraft.__commit__))
 
 
-def _load_local_env() -> None:
+def _load_local_env(args: list[str] | None = None) -> None:
     """Populate ``os.environ`` from the local ``.env`` (no override).
 
     The auth command writes ``MERGECRAFT_LOGFIRE_TOKEN`` and
@@ -263,20 +267,36 @@ def _load_local_env() -> None:
     ``.env`` could otherwise set ``MERGECRAFT_*`` keys the workflow never chose.
     This mirrors the ``config.local.yaml`` rule
     (:func:`mergecraft.config.layered.running_in_github_actions`). Outside
-    Actions nothing changes; an explicit ``$MERGECRAFT_ENV`` always wins.
+    Actions an implicitly selected tracked file is also skipped: credentials
+    must be operator-owned. An explicit ``$MERGECRAFT_ENV`` always wins.
     """
     if running_in_github_actions() and _configured_env_path() is None:
         return
-    env_path = local_env_path_for_process_cwd(on_missing_repo="use-process-cwd")
+    from mergecraft.cli.startup_env import implicit_env_is_tracked, startup_local_target
+
+    target = startup_local_target(app, args) if args is not None else None
+    env_path = (
+        local_env_path_for_cwd(target)
+        if target is not None
+        else local_env_path_for_process_cwd(on_missing_repo="use-process-cwd")
+    )
     if not env_path.is_file():
+        return
+    if _configured_env_path() is None and implicit_env_is_tracked(env_path):
+        err_console.print(
+            "Skipping implicit .env: file or symlink target is tracked by Git, "
+            "or its tracking status could not be verified. "
+            "Use an untracked credential file or explicitly set MERGECRAFT_ENV.",
+            style="yellow",
+        )
         return
     for key, value in LocalDotEnv.from_file(env_path).raw_values().items():
         os.environ.setdefault(key, value)
 
 
 def main() -> None:
-    _load_local_env()
     try:
+        _load_local_env(sys.argv[1:])
         app()
     except EnvSettingsError as exc:
         # A malformed control-carrying environment variable (e.g. a typo'd

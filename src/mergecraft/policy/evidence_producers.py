@@ -156,7 +156,11 @@ def _diff_changed_paths(ctx: Any) -> tuple[str, ...]:
     except (OSError, UnicodeDecodeError) as exc:
         msg = f"the diff could not be read, so no acceptance criterion was mapped: {exc}"
         raise _Absent(msg) from exc
-    return tuple(changed_paths_from_diff(text))
+    try:
+        return tuple(changed_paths_from_diff(text))
+    except ValueError as exc:
+        msg = "the diff paths could not be parsed, so no acceptance criterion was mapped"
+        raise _Absent(msg) from exc
 
 
 async def _produce_requirements(ctx: Any, key: str, _declarations: _Declarations) -> EvidenceRecord:

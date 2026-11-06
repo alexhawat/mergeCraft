@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -27,24 +26,22 @@ async def hydrate_review_context(
     reads prior review metadata and tells the orchestrator which lenses to
     dispatch; this hook does not pre-dispatch lenses at checkout.
     """
-    from mergecraft.config.settings import load_repo_settings
+    from mergecraft.config.settings_snapshot import repo_settings_from_context
     from mergecraft.findings.ledger import (
         ensure_finding_ledger,
         hydrate_finding_ledger_from_progress_comment,
     )
-    from mergecraft.mcp.tool_state import primary_repo_state
     from mergecraft.modes._incremental_promotion import (
         deferred_rows_from_ledger,
         promote_deferred_for_incremental_paths,
     )
     from mergecraft.utils.run_bounds import resolve_run_bounds
 
-    repo_root = Path(primary_repo_state(ctx.tool_state).dir or Path.cwd())
-    repo_settings = load_repo_settings(root=repo_root, load_learnings_files=False)
-
     if ctx.budget_tracker is not None:
+        # Checkout rebaselines the config integrity hash while retaining the
+        # operator's settings. Head YAML must not replace those run limits.
         ctx.budget_tracker.bounds = resolve_run_bounds(
-            settings=repo_settings,
+            settings=repo_settings_from_context(ctx),
             round_index=round_index,
         )
 

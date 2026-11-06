@@ -948,3 +948,15 @@ def test_deterministic_checks_unknown_id_is_keyerror_only(
     monkeypatch.setattr("mergecraft.analyzers.registry.get_manifest", _raise_os)
     with pytest.raises(OSError, match="catalog unreadable"):
         run_packet_mod._deterministic_checks(ctx.tool_state)
+
+
+def test_malformed_diff_preserves_packet_but_cannot_approve(tmp_path: Path) -> None:
+    """A malformed path header is missing scope evidence, not an assembly crash."""
+    ctx = _make_ctx(
+        tmp_path, diff_text="diff --git a/x b/y b/z\nsimilarity index 100%\n", findings=[]
+    )
+    packet = build_run_packet(ctx, run_succeeded=True)
+    assert packet.decision is not None
+    assert packet.decision.verdict != "success"
+    assert packet.blast_radius is None
+    assert any(row.rule_id == "unparseable-diff-paths" for row in packet.run_health.findings)

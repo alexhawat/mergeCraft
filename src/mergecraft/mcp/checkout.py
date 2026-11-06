@@ -18,6 +18,7 @@ from loguru import logger
 from mergecraft.analyzers.impact import resolve_ast_grep_binary, write_impact
 from mergecraft.analyzers.trust import analyzers_enabled
 from mergecraft.config.trust_policy import is_fork_pull_request
+from mergecraft.mcp.checkout_state import invalidate_checkout_review_state
 from mergecraft.mcp.git import _git_env, _is_auth_failure, _run_git
 from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
 from mergecraft.mcp.tool_call import normalize_pull_number_aliases
@@ -769,11 +770,11 @@ async def pull_request_path_expectations(
         )
         batch = list(files or [])
         for f in batch:
-            filename = str(f.get("filename") or "").strip()
+            filename = str(f.get("filename") or "")
             if filename:
                 required.add(filename)
                 allowed.add(filename)
-            previous = str(f.get("previous_filename") or "").strip()
+            previous = str(f.get("previous_filename") or "")
             if previous:
                 allowed.add(previous)
                 if renames is not None and filename:
@@ -810,6 +811,25 @@ class _FilesApiDiff(str):
         return obj
 
 
+def _quote_diff_path(path: str) -> str:
+    """C-quote paths that could split or inject a synthetic Git header."""
+    if (
+        path == path.strip()
+        and " b/" not in path
+        and all(32 <= ord(char) < 127 and char not in '\\"' for char in path)
+    ):
+        return path
+    escaped: list[str] = []
+    for byte in path.encode("utf-8"):
+        if byte < 32 or byte >= 127:
+            escaped.append(f"\\{byte:03o}")
+        elif chr(byte) in '\\"':
+            escaped.append("\\" + chr(byte))
+        else:
+            escaped.append(chr(byte))
+    return '"' + "".join(escaped) + '"'
+
+
 async def _diff_from_pull_files(ctx: ToolContext, *, pull_number: int) -> _FilesApiDiff:
     """Build a unified diff from the PR files API, following pagination.
 
@@ -834,11 +854,16 @@ async def _diff_from_pull_files(ctx: ToolContext, *, pull_number: int) -> _Files
         )
         batch = list(files or [])
         for f in batch:
-            filename = str(f.get("filename") or "").strip()
+            filename = str(f.get("filename") or "")
             # A rename keeps its source on the ``a/`` side, as ``git diff`` writes it, so
             # the pre-image is never lost to readers of the header.
-            previous = str(f.get("previous_filename") or "").strip() or filename
-            parts.append(f"diff --git a/{previous} b/{filename}\n")
+            previous = str(f.get("previous_filename") or "") or filename
+            old_image = _quote_diff_path(f"a/{previous}")
+            new_image = _quote_diff_path(f"b/{filename}")
+            parts.append(f"diff --git {old_image} {new_image}\n")
+            if previous != filename:
+                parts.append(f"rename from {_quote_diff_path(previous)}\n")
+                parts.append(f"rename to {_quote_diff_path(filename)}\n")
             if f.get("patch"):
                 parts.append(f.get("patch") + "\n")
             elif filename and _line_change_count(f) > 0:
@@ -1132,13 +1157,24 @@ def get_git_status(cwd: str) -> str:
     return _run_git(["status", "--porcelain"], cwd=cwd).strip()
 
 
+async def _verify_files_api_head(ctx: ToolContext, *, pull_number: int, head_sha: str) -> None:
+    """The files endpoint follows a moving PR, so verify its head after reading."""
+    current = await ctx.scm.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
+    current_sha = (current.get("head") or {}).get("sha") or ""
+    if not head_sha or current_sha.lower() != head_sha.lower():
+        msg = (
+            f"PR #{pull_number} head changed or could not be verified while reading "
+            "its files; retry checkout before reviewing this revision."
+        )
+        raise RuntimeError(msg)
+
+
 def checkout_pr_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+    async def _preflight(params: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         params = normalize_pull_number_aliases(params, _CHECKOUT_PR_INPUT_SCHEMA)
         pull_number = int(params["pull_number"])
         state = primary_repo_state(ctx.tool_state)
         cwd = state.dir
-        prior_reviews: list[dict[str, Any]] = []
 
         dirty = get_git_status(cwd)
         if dirty:
@@ -1147,9 +1183,6 @@ def checkout_pr_tool(ctx: ToolContext):
                 f"uncommitted changes. dirty paths:\n{dirty}"
             )
             raise RuntimeError(msg)
-        if ctx.tool_state.review_tree_baseline is not None:
-            ctx.tool_state.review_tree_baseline.before_checkout()
-
         # TB-D4 — refuse a PR the run was not bound to. The bound number lives on
         # the run's **bound** event (``_resolve_credentials`` writes the fetched
         # ``pull_request`` onto ``ctx.gh_event``); the resolved payload therefore
@@ -1173,14 +1206,7 @@ def checkout_pr_tool(ctx: ToolContext):
             raise RuntimeError(msg)
 
         pr = await ctx.scm.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
-        head = pr.get("head") or {}
-        base = pr.get("base") or {}
-        head_ref = head.get("ref") or ""
-        head_sha = head.get("sha") or ""
-        base_ref = base.get("ref") or ""
-        # TB-D3 — one fork predicate. The ``full_name`` comparison stops being a
-        # decision input; ``is_fork_pull_request`` reads the same ``head.repo.fork``
-        # shape every other fork decision reads.
+        # Use the same head/base repository identity comparison as preflight.
         is_fork = is_fork_pull_request({"pull_request": pr})
 
         # TB-D4 — refuse a fork PR on a run that holds trusted execution or
@@ -1192,6 +1218,19 @@ def checkout_pr_tool(ctx: ToolContext):
                 "but this run holds trusted execution or authority trust."
             )
             raise RuntimeError(msg)
+
+        return pull_number, pr
+
+    async def _checkout(pull_number: int, pr: dict[str, Any]):
+        state = primary_repo_state(ctx.tool_state)
+        cwd = state.dir
+        prior_reviews: list[dict[str, Any]] = []
+        head = pr.get("head") or {}
+        base = pr.get("base") or {}
+        head_ref = head.get("ref") or ""
+        head_sha = head.get("sha") or ""
+        base_ref = base.get("ref") or ""
+        is_fork = is_fork_pull_request({"pull_request": pr})
 
         # HS8 — read the run-bound checkpoint once and record the sticky id on
         # the tool state so HS1's selection can use it. Fail-closed when the
@@ -1221,6 +1260,7 @@ def checkout_pr_tool(ctx: ToolContext):
                 detail=(fetch_err or "git fetch failed").splitlines()[0]
             )
             fetch_files_diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
+            await _verify_files_api_head(ctx, pull_number=pull_number, head_sha=head_sha)
             fetch_truncated = fetch_files_diff.truncated
             fetch_diff, fetch_unreviewable, fetch_ignored = _apply_review_ignore(
                 ctx,
@@ -1294,7 +1334,22 @@ def checkout_pr_tool(ctx: ToolContext):
             )
             return result
 
-        _run_git(["checkout", local_branch], cwd=cwd)
+        # The API lookup and refs/pull/N/head fetch can straddle a push. Bind
+        # the checkout to the verified immutable object before exposing scope.
+        checkout_sha = _run_git(
+            ["rev-parse", "--verify", f"{local_branch}^{{commit}}"], cwd=cwd
+        ).strip()
+        if head_sha and checkout_sha.lower() != head_sha.lower():
+            msg = (
+                f"PR #{pull_number} head changed between the API lookup and fetch; "
+                "retry checkout before reviewing this revision."
+            )
+            raise RuntimeError(msg)
+        _run_git(["checkout", "-B", local_branch, checkout_sha], cwd=cwd)
+        # Configuration and tree bytes may change at this controlled boundary.
+        # Re-pin their hashes before later API calls can fail or be cancelled;
+        # the run's trusted settings/policy values remain pinned across retries.
+        _rebaseline_config_after_checkout(ctx)
         # Ensure base is available for merge-base diffs
         base_env, base_remote_url = _git_env_for_cwd(cwd, ctx.git_token)
         base_fetch_failure: str | None = None
@@ -1321,7 +1376,7 @@ def checkout_pr_tool(ctx: ToolContext):
                 logger.info("base branch alias soft-failed: {}", err)
 
         state.issue_number = pull_number
-        state.checkout_sha = head_sha or _run_git(["rev-parse", "HEAD"], cwd=cwd).strip()
+        state.checkout_sha = checkout_sha
         state.push_dest = StoredPushDest(
             remote_name="origin",
             remote_branch=head_ref,
@@ -1350,6 +1405,7 @@ def checkout_pr_tool(ctx: ToolContext):
         except Exception as err:
             diff_failure = str(err).splitlines()[0] if str(err) else "git diff failed"
             files_diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
+            await _verify_files_api_head(ctx, pull_number=pull_number, head_sha=checkout_sha)
             diff = files_diff
             unreviewable = files_diff.unreviewable_paths
             diff_truncated = files_diff.truncated
@@ -1549,6 +1605,33 @@ def checkout_pr_tool(ctx: ToolContext):
             incremental_changed_paths=state.incremental_changed_paths,
         )
         return result
+
+    async def _run(params: dict[str, Any]):
+        if ctx.tool_state.review is not None:
+            msg = "cannot restart checkout after this run has published a review"
+            raise RuntimeError(msg)
+        # Read-only refusals preserve the last valid review. From the first
+        # workspace mutation onward, every error invalidates partial evidence.
+        pull_number, pr = await _preflight(params)
+        # Publication can complete while the API lookup above is awaiting.
+        if ctx.tool_state.review is not None:
+            msg = "cannot restart checkout after this run has published a review"
+            raise RuntimeError(msg)
+        baseline = ctx.tool_state.review_tree_baseline
+        if baseline is not None:
+            baseline.before_checkout()
+        invalidate_checkout_review_state(ctx.tool_state)
+        try:
+            result = await _checkout(pull_number, pr)
+            # Reads that arrived while the workspace was changing cannot attest
+            # the newly established scope. Keep their audit records only.
+            ctx.tool_state.review_scope_tool_call_start = len(ctx.tool_state.tool_calls)
+            return result
+        except BaseException:
+            # Errors and cancellation can happen after HEAD or partial scope
+            # state changed. Neither the previous nor partial new proof is valid.
+            invalidate_checkout_review_state(ctx.tool_state)
+            raise
 
     return tool(
         name="checkout_pr",

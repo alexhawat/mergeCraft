@@ -47,94 +47,95 @@ def _load_check_runs(directory: Path) -> list[dict[str, Any]]:
     return runs
 
 
+def validate_outputs(
+    outputs: dict[str, str],
+    runs: list[dict[str, Any]],
+    publications: list[dict[str, Any]],
+    *,
+    expected_outcome: str,
+    expected_sha: str,
+    require_checks: bool,
+) -> None:
+    """Reject prose, incomplete reviews, wrong revisions, and nonpassing checks."""
+    result = json.loads(outputs.get("result", ""))
+    if not isinstance(result, dict) or result.get("outcome") != expected_outcome:
+        raise ValueError("result must be structured JSON with the expected outcome")
+    if expected_outcome != "passed":
+        if not isinstance(result.get("error"), dict) or not result["error"].get("code"):
+            raise ValueError("failed result must identify its error code")
+        if any((run.get("body") or {}).get("conclusion") == "success" for run in runs):
+            raise ValueError("a refused fixture must not publish a successful check")
+        if any(
+            row.get("method") == "POST" and row.get("path", "").endswith("/reviews")
+            for row in publications
+        ):
+            raise ValueError("a refused fixture must not publish a formal review")
+        return
+    if result.get("head_sha") != expected_sha or not result.get("terminal_id"):
+        raise ValueError("result must identify the reviewed head and accepted terminal submission")
+    packet = json.loads(outputs.get("evidence_packet", ""))
+    if (
+        packet.get("reviewed_head_sha") != expected_sha
+        or packet.get("agent_terminal_verdict") != "approve"
+    ):
+        raise ValueError("packet must contain an accepted approval for the fixture head")
+    if (packet.get("decision") or {}).get("verdict") != "success":
+        raise ValueError("packet must record a successful evidence decision")
+    calls = (packet.get("trajectory") or {}).get("tool_calls") or []
+    successful = {call.get("tool") for call in calls if call.get("ok") is True}
+    required = {"select_mode", "checkout_pr", "git", "run_analyzers", "submit_review_verdict"}
+    if not required <= successful:
+        raise ValueError("packet is missing successful MCP review protocol calls")
+    if outputs.get("verdict_diagnostic") != "approved":
+        raise ValueError("review reported a terminal verdict diagnostic")
+    if require_checks:
+        for name in ("mergecraft", "mergecraft-approval"):
+            bodies = [
+                run.get("body") or {} for run in runs if (run.get("body") or {}).get("name") == name
+            ]
+            completed = [body for body in bodies if body.get("status") == "completed"]
+            if not completed:
+                raise ValueError(f"completed {name} check missing")
+            for body in completed:
+                if body.get("head_sha") != expected_sha or body.get("conclusion") != "success":
+                    raise ValueError(f"{name} must succeed on the reviewed head")
+                if not (body.get("output") or {}).get("summary"):
+                    raise ValueError(f"{name} must explain its result")
+        reviews = [
+            row["body"]
+            for row in publications
+            if row.get("method") == "POST" and row.get("path", "").endswith("/reviews")
+        ]
+        if not any(
+            row.get("commit_id") == expected_sha and row.get("event") == "APPROVE"
+            for row in reviews
+        ):
+            raise ValueError("no formal review was published on the fixture head")
+        if any(row.get("commit_id") != expected_sha for row in reviews):
+            raise ValueError("a formal review was published on another revision")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--github-output", type=Path, required=True)
     parser.add_argument("--check-runs-dir", type=Path, required=True)
-    parser.add_argument(
-        "--expect-outcome",
-        default="passed",
-        help="Expected RunOutcome value when result is structured JSON (default: passed)",
-    )
-    parser.add_argument(
-        "--require-check-runs",
-        action="store_true",
-        help="Require at least the mergecraft completion check-run",
-    )
+    parser.add_argument("--expect-outcome", default="passed")
+    parser.add_argument("--expected-head-sha", required=True)
+    parser.add_argument("--require-check-runs", action="store_true")
     args = parser.parse_args()
-
-    if not args.github_output.is_file():
-        print(f"FAIL: GITHUB_OUTPUT missing: {args.github_output}", file=sys.stderr)
-        return 1
-
-    outputs = _parse_github_output(args.github_output)
-    raw_result = outputs.get("result")
-    if raw_result is None or raw_result == "":
-        print("FAIL: result output missing from GITHUB_OUTPUT", file=sys.stderr)
-        print(f"outputs keys: {sorted(outputs)}", file=sys.stderr)
-        return 1
-
-    # Successful runs write the agent text output; failures write structured JSON
-    # with outcome + error.code. Accept either, but prefer structured when present.
     try:
-        parsed: Any = json.loads(raw_result)
-    except json.JSONDecodeError:
-        parsed = None
-
-    if isinstance(parsed, dict) and "outcome" in parsed:
-        outcome = parsed.get("outcome")
-        if outcome != args.expect_outcome:
-            print(
-                f"FAIL: result.outcome={outcome!r}, expected {args.expect_outcome!r}",
-                file=sys.stderr,
-            )
-            print(raw_result, file=sys.stderr)
-            return 1
-        print(f"OK: structured result outcome={outcome}")
-    else:
-        if "E2E review complete" not in raw_result and args.expect_outcome == "passed":
-            print(
-                f"FAIL: unexpected result text for passed run: {raw_result!r}",
-                file=sys.stderr,
-            )
-            return 1
-        print(f"OK: result text present ({len(raw_result)} chars)")
-
-    runs = _load_check_runs(args.check_runs_dir)
-    if args.require_check_runs:
-        if not runs:
-            print(f"FAIL: no check-runs recorded under {args.check_runs_dir}", file=sys.stderr)
-            return 1
-        bodies = [r.get("body") or {} for r in runs]
-        names = {str(b.get("name")) for b in bodies}
-        if "mergecraft" not in names:
-            print(f"FAIL: completion check-run missing; got names={sorted(names)}", file=sys.stderr)
-            return 1
-        for body in bodies:
-            if body.get("name") != "mergecraft":
-                continue
-            required = {"name", "head_sha", "status", "conclusion", "output"}
-            missing = required - set(body)
-            if missing:
-                print(
-                    f"FAIL: mergecraft check-run missing keys: {sorted(missing)}", file=sys.stderr
-                )
-                return 1
-            if body.get("status") != "completed":
-                print(f"FAIL: mergecraft status={body.get('status')!r}", file=sys.stderr)
-                return 1
-            output = body.get("output") or {}
-            if not isinstance(output, dict) or "title" not in output or "summary" not in output:
-                print("FAIL: mergecraft check-run output missing title/summary", file=sys.stderr)
-                return 1
-            print(
-                f"OK: check-run shape name=mergecraft "
-                f"conclusion={body.get('conclusion')!r} head_sha={str(body.get('head_sha'))[:7]}"
-            )
-        print(f"OK: recorded {len(runs)} check-run(s): {sorted(names)}")
-    else:
-        print(f"OK: check-runs dir has {len(runs)} file(s) (not required)")
-
+        validate_outputs(
+            _parse_github_output(args.github_output),
+            _load_check_runs(args.check_runs_dir),
+            _load_check_runs(args.check_runs_dir / "requests"),
+            expected_outcome=args.expect_outcome,
+            expected_sha=args.expected_head_sha,
+            require_checks=args.require_check_runs,
+        )
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
+    print(f"OK: {args.expect_outcome} with verified review and publication semantics")
     return 0
 
 

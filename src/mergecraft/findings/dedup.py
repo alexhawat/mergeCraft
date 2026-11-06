@@ -269,9 +269,12 @@ def dedupe_findings_with_indices(
         return DedupeResult(findings=[], kept_indices=[])
 
     indexed: list[tuple[int, Finding]] = list(enumerate(findings))
-    buckets: dict[tuple[str, int | None, int | None, str], list[tuple[int, Finding]]] = {}
+    buckets: dict[tuple[str, int | None, int | None, str, str, str], list[tuple[int, Finding]]] = {}
     for index, finding in indexed:
-        buckets.setdefault(_location_key(finding), []).append((index, finding))
+        # Contradictory attribution remains explicit instead of borrowing a
+        # weaker copy's causality or promoting a pre-existing defect to new.
+        key = (*_location_key(finding), finding.scope, finding.introduced_by_pr)
+        buckets.setdefault(key, []).append((index, finding))
 
     deduped: list[Finding] = []
     kept_indices: list[int] = []

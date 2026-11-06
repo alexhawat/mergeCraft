@@ -6,6 +6,7 @@ Both import this module so neither has to import the other for merge logic.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from loguru import logger
@@ -133,18 +134,22 @@ def typed_findings_from_rows_with_drops(raw: list[Any]) -> tuple[list[Finding], 
 
 
 def finding_dedupe_key(finding: Finding) -> str:
-    """Stable identity for merge: fingerprint, else tool/rule/path/line/message."""
+    """Identify one occurrence with compatible scope and causal attribution.
+
+    Fingerprints identify wording, not occurrences. Conflicting attribution
+    stays explicit; end-line enrichment does not create a new occurrence.
+    Combining a pre-existing Critical with an introduced Minor
+    must neither hide an introduced blocker nor invent an introduced Critical.
+    """
     fingerprint = finding.fingerprint.strip() if finding.fingerprint else ""
-    if fingerprint:
-        return fingerprint
-    return "|".join(
-        (
-            finding.tool,
-            finding.rule_id,
+    return json.dumps(
+        [
+            fingerprint or [finding.tool, finding.rule_id, finding.message],
             finding.path,
-            str(finding.start_line or 0),
-            finding.message,
-        )
+            finding.start_line,
+            finding.scope,
+            finding.introduced_by_pr,
+        ]
     )
 
 
@@ -157,27 +162,158 @@ def merge_findings(*groups: list[Finding]) -> list[Finding]:
     """Concatenate finding groups, keeping the more severe duplicate identity.
 
     First-seen order is preserved. When fingerprints (or fallback keys)
-    collide, Major/Critical wins over Minor/Trivial so a CI blocker is not
-    dropped behind a less severe agent copy.
+    collide at one occurrence with compatible attribution, Major/Critical wins
+    over Minor/Trivial and evidence from all copies survives.
     """
     unique: dict[str, Finding] = {}
     order: list[str] = []
     for group in groups:
         for finding in group:
             key = finding_dedupe_key(finding)
-            existing = unique.get(key)
-            if existing is None:
+            if key not in unique:
                 unique[key] = finding
                 order.append(key)
-                continue
-            if _severity_rank(finding) < _severity_rank(existing):
-                unique[key] = finding
-    return [unique[key] for key in order]
+            else:
+                unique[key] = _merge_duplicate(unique[key], finding)
+
+    aliases: dict[str, str] = {}
+    for key in order:
+        finding = unique[key]
+        if finding.source != "ci" or finding.introduced_by_pr != "false":
+            continue
+        uncertain_key = finding_dedupe_key(
+            finding.model_copy(update={"introduced_by_pr": "unknown"})
+        )
+        uncertain = unique.get(uncertain_key)
+        # A weaker baseline copy cannot clear or double-count an uncertain
+        # blocker. A more severe baseline row stays separate: it must not
+        # borrow attribution to invent a more severe change finding.
+        if (
+            uncertain is not None
+            and uncertain.source == "ci"
+            and _severity_rank(uncertain) <= _severity_rank(finding)
+        ):
+            unique[uncertain_key] = _merge_duplicate(uncertain, finding, strongest=uncertain)
+            aliases[key] = uncertain_key
+    return [unique[key] for key in dict.fromkeys(aliases.get(key, key) for key in order)]
+
+
+def _merge_duplicate(left: Finding, right: Finding, *, strongest: Finding | None = None) -> Finding:
+    """Union evidence and line coverage while retaining the chosen causal claim."""
+    winner = strongest or min(
+        (left, right), key=lambda item: (_severity_rank(item), item.model_dump_json())
+    )
+    return winner.model_copy(
+        update={
+            "evidence": sorted(set(left.evidence) | set(right.evidence)),
+            "collateral": sorted(set(left.collateral) | set(right.collateral)),
+            "end_line": max(
+                (
+                    line
+                    for line in (left.end_line, left.start_line, right.end_line, right.start_line)
+                    if line is not None
+                ),
+                default=None,
+            ),
+        }
+    )
+
+
+def merge_finding_records(
+    records: list[dict[str, Any]], *, inline: bool = False
+) -> list[dict[str, Any]]:
+    """Union serialized analyzer occurrences, preserving malformed/unkeyed rows.
+
+    Deferred rows use ``line`` and inline records wrap a full ``finding``. Their
+    strongest compatible copy supplies presentation fields; evidence is additive.
+    Each occurrence keeps its first-seen position, including invalid rows for
+    downstream validation/drop accounting. Duplicate selection is deterministic.
+    """
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    order: list[str | dict[str, Any]] = []
+    for record in records:
+        row = record.get("finding") if inline else record
+        if not isinstance(row, dict) or not _mergeable_record(row):
+            order.append(record)
+            continue
+        line = row.get("start_line", row.get("line"))
+        key = json.dumps(
+            [
+                row["fingerprint"],
+                row.get("path"),
+                line,
+                row.get("end_line", line),
+                row.get("scope", "change"),
+                row.get("introduced_by_pr", "unknown"),
+            ],
+            sort_keys=True,
+        )
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(record)
+    merged: dict[str, dict[str, Any]] = {}
+    for key, members in buckets.items():
+
+        def priority(record: dict[str, Any]) -> tuple[int, str]:
+            row = record["finding"] if inline else record
+            return (
+                _SEVERITY_RANK.get(str(row.get("severity", "")), len(_SEVERITY_RANK)),
+                json.dumps(record, sort_keys=True),
+            )
+
+        canonical = min(members, key=priority)
+        result = dict(canonical)
+        row = dict(canonical["finding"]) if inline else result
+        evidence = {
+            item
+            for member in members
+            for item in (member["finding"] if inline else member).get("evidence", [])
+            if isinstance(item, str)
+        }
+        if evidence:
+            row["evidence"] = sorted(evidence)
+        if inline:
+            result["finding"] = row
+        merged[key] = result
+    return [merged[item] if isinstance(item, str) else item for item in order]
+
+
+def _mergeable_record(row: dict[str, Any]) -> bool:
+    """Invalid evidence must reach validation unchanged, never win a merge."""
+    if not isinstance(row.get("fingerprint"), str) or not row["fingerprint"]:
+        return False
+    evidence = row.get("evidence", [])
+    if not isinstance(evidence, list) or any(not isinstance(item, str) for item in evidence):
+        return False
+    if "body" not in row:
+        try:
+            Finding.model_validate(row)
+        except (FindingValidationError, ValidationError, ValueError):
+            return False
+        return True
+    # Deferred presentation rows intentionally have a smaller schema.
+    line = row.get("line")
+    severity = row.get("severity")
+    scope = row.get("scope", "change")
+    introduced = row.get("introduced_by_pr", "unknown")
+    return (
+        isinstance(row.get("body"), str)
+        and isinstance(row.get("path"), str)
+        and isinstance(severity, str)
+        and severity in _SEVERITY_RANK
+        and (line is None or (isinstance(line, int) and not isinstance(line, bool) and line > 0))
+        and isinstance(scope, str)
+        and scope in {"change", "run"}
+        and isinstance(introduced, str)
+        and introduced in {"true", "false", "unknown"}
+    )
 
 
 __all__ = [
     "_severity_rank",
     "finding_dedupe_key",
+    "merge_finding_records",
     "merge_findings",
     "typed_findings_from_rows",
     "typed_findings_from_rows_with_drops",

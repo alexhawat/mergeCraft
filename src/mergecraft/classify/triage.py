@@ -14,12 +14,13 @@ matches and hides one real change matches nothing and gets a full review.
 * ``prose`` — only ``.md`` / ``.markdown`` / ``.txt`` files, outside high-stakes
   paths, with no changed line in a code fence, front matter, or indented code. A
   dependency manifest or lockfile named like prose, and an agent-instruction file
-  that steers later reviews, are never prose. The head-side file text proves the
-  rest; without it nothing is proven.
-* ``whitespace`` — every contiguous change block is the same tokens before and
-  after. Whitespace-sensitive languages only get trailing-whitespace and blank-line
-  changes; comment-only changes are not recognized (they need the language's string
-  rules) and fall through to a full review.
+  that steers later reviews, are never prose. Validated head text and diff hunks
+  reconstruct the base: removals are checked in the old structure and additions in
+  the new one. Without both sides nothing is proven.
+* ``whitespace`` — reconstruct the complete base text from the head and verified
+  hunks. Python must retain the same AST; a closed C-family subset must contain no
+  ambiguous multiline lexical constructs. Normalized file text must also match.
+  Missing context, executable-mode changes and unsupported syntax get full review.
 * ``generated`` — only lockfiles or generated paths changed, and no dependency
   manifest or generator config changed with them.
 * ``commentOnly`` — only ``//`` comment lines changed, in a closed list of
@@ -57,6 +58,7 @@ Exports:
 
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -113,27 +115,6 @@ _PROSE_REFUSED_PATH_PARTS: Final[tuple[str, ...]] = (
     "agent-instructions",
 )
 _MARKDOWN_SUFFIXES: Final[tuple[str, ...]] = (".md", ".markdown")
-# Whitespace carries meaning here, so only trailing whitespace and blank lines are noise.
-_INDENT_SENSITIVE_SUFFIXES: Final[tuple[str, ...]] = (
-    ".py",
-    ".pyx",
-    ".mk",
-    ".nim",
-    ".haml",
-    ".pug",
-    ".slim",
-    ".coffee",
-)
-_INDENT_SENSITIVE_NAMES: Final[frozenset[str]] = frozenset({"Makefile", "makefile", "GNUmakefile"})
-# Formats where even trailing whitespace is content (hard breaks, block scalars).
-_WHITESPACE_INELIGIBLE_SUFFIXES: Final[tuple[str, ...]] = (
-    ".md",
-    ".markdown",
-    ".rst",
-    ".txt",
-    ".yml",
-    ".yaml",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +160,9 @@ class TriageInputs:
 @dataclass(slots=True)
 class _Hunk:
     new_start: int
+    old_start: int = 0
+    old_count: int = -1
+    new_count: int = -1
     lines: list[str] = field(default_factory=list)
 
 
@@ -187,6 +171,7 @@ class _File:
     path: str
     previous_path: str
     binary: bool = False
+    metadata_changed: bool = False
     hunks: list[_Hunk] = field(default_factory=list)
 
 
@@ -205,6 +190,11 @@ def _parse(diff_text: str, *, newline_only: bool = False) -> list[_File]:
             continue
         if current is None:
             continue
+        if raw.startswith(
+            ("old mode ", "new mode ", "new file mode ", "deleted file mode ", "\\ No newline")
+        ):
+            current.metadata_changed = True
+            continue
         if hunk is None:
             if raw.startswith("+++ b/"):
                 current.path = raw[6:].strip()
@@ -219,14 +209,21 @@ def _parse(diff_text: str, *, newline_only: bool = False) -> list[_File]:
             hunk = _new_hunk(raw, current)
         elif raw[:1] in {" ", "+", "-"}:
             hunk.lines.append(raw)
-        elif raw == "":
-            hunk.lines.append(" ")
     return files
 
 
 def _new_hunk(header: str, current: _File) -> _Hunk:
-    match = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", header)
-    hunk = _Hunk(new_start=int(match.group(1)) if match else 1)
+    match = re.match(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", header)
+    hunk = (
+        _Hunk(
+            new_start=int(match.group(3)),
+            old_start=int(match.group(1)),
+            old_count=int(match.group(2) or 1),
+            new_count=int(match.group(4) or 1),
+        )
+        if match
+        else _Hunk(new_start=1)
+    )
     current.hunks.append(hunk)
     return hunk
 
@@ -308,22 +305,30 @@ def _prose_file_ok(file: _File, head_text: str) -> bool:
         path.lower().endswith(_MARKDOWN_SUFFIXES) for path in (file.previous_path, file.path)
     ):
         return True  # plain text: no fences, no front matter
-    head_lines = head_text.splitlines()
-    inside = _inside_code_before(head_lines)
-    front_matter = _front_matter_end(head_lines)
+    before_text = _reconstruct_before(file, head_text)
+    if before_text is None:
+        return False
+    old_lines, new_lines = before_text.split("\n"), head_text.split("\n")
+    old_inside, new_inside = _inside_code_before(old_lines), _inside_code_before(new_lines)
+    old_front_matter, new_front_matter = _front_matter_end(old_lines), _front_matter_end(new_lines)
     for hunk in file.hunks:
-        position = hunk.new_start
+        old_position, new_position = hunk.old_start, hunk.new_start
         for line in hunk.lines:
-            if line[0] == " ":
-                position += 1
+            kind, text = line[0], line[1:]
+            if kind == " ":
+                old_position += 1
+                new_position += 1
                 continue
-            text = line[1:]
             if _FENCE.match(text) or text.startswith(("    ", "\t")):
                 return False
+            if kind == "-":
+                position, front_matter, inside = old_position, old_front_matter, old_inside
+                old_position += 1
+            else:
+                position, front_matter, inside = new_position, new_front_matter, new_inside
+                new_position += 1
             if position <= front_matter or (position < len(inside) and inside[position]):
                 return False
-            if line[0] == "+":
-                position += 1
     return True
 
 
@@ -381,23 +386,89 @@ def _renamed_or_copied(file: _File) -> bool:
     return bool(file.previous_path) and file.previous_path != file.path
 
 
-def recognize_whitespace_only(diff_text: str) -> bool:
-    """Every change block is the same tokens before and after, differing only in whitespace."""
-    files = _parse(diff_text)
-    if not _changeable(files):
+def _reconstruct_before(file: _File, head_text: str) -> str | None:
+    """Reverse complete, position-checked hunks against the immutable head text."""
+    if file.metadata_changed or not head_text.endswith("\n") or "\r" in head_text:
+        return None
+    head = head_text[:-1].split("\n")
+    before: list[str] = []
+    cursor = 0
+    for hunk in file.hunks:
+        start = hunk.new_start - (hunk.new_count != 0)
+        if start < cursor or start > len(head):
+            return None
+        before.extend(head[cursor:start])
+        if len(before) != hunk.old_start - (hunk.old_count != 0):
+            return None
+        cursor = start
+        old_count = new_count = 0
+        for line in hunk.lines:
+            kind, text = line[0], line[1:]
+            if kind in {" ", "+"}:
+                if cursor >= len(head) or head[cursor] != text:
+                    return None
+                cursor += 1
+                new_count += 1
+            if kind in {" ", "-"}:
+                before.append(text)
+                old_count += 1
+        if (old_count, new_count) != (hunk.old_count, hunk.new_count):
+            return None
+    return "\n".join([*before, *head[cursor:]]) + "\n"
+
+
+def _whitespace_context_safe(path: str, before: str, after: str) -> bool:
+    # Shebang position and directive comments are executable/build metadata too.
+    if any("#!" in text for text in (before, after)):
+        return False
+    if path.lower().endswith(".py"):
+        try:
+            return ast.dump(ast.parse(before, type_comments=True)) == ast.dump(
+                ast.parse(after, type_comments=True)
+            )
+        except (SyntaxError, ValueError, RecursionError):
+            return False
+    if not path.lower().endswith((*COMMENT_ONLY_SUFFIXES, ".js")):
+        return False
+    text = before + after
+    # No multi-line lexical constructs, preprocessing, escapes or JSX: this is a
+    # deliberately small proof, not a lexer for every dialect these suffixes allow.
+    if _COMMENT_ONLY_TEXT.fullmatch(text) is None:
+        return False
+    if any(marker in text for marker in (*_UNLEXABLE_MARKERS, "\\", "#", "??")):
+        return False
+    if path.lower().endswith((".js", ".ts")) and any(c in text for c in "<>"):
+        return False
+    if any(marker in text for marker in ("//go:", "// +build", "// swift-tools-version")):
+        return False
+    if [line for line in before.split("\n") if "//" in line] != [
+        line for line in after.split("\n") if "//" in line
+    ]:
+        return False
+    return _strings_close_on_every_line(text.split("\n"))
+
+
+def recognize_whitespace_only(
+    diff_text: str, *, head_files: Mapping[str, str] | None = None
+) -> bool:
+    """Whitespace changes whose complete before/after text proves no literal changed."""
+    files = _parse(diff_text, newline_only=True)
+    if not _changeable(files) or head_files is None:
         return False
     for file in files:
         if _renamed_or_copied(file):
             return False
-        lowered = file.path.lower()
-        if lowered.endswith(_WHITESPACE_INELIGIBLE_SUFFIXES):
+        head = head_files.get(file.path)
+        if head is None:
             return False
-        name = _basename(file.path)
-        strict = name in _INDENT_SENSITIVE_NAMES or lowered.endswith(_INDENT_SENSITIVE_SUFFIXES)
-        for hunk in file.hunks:
-            for removed, added in _blocks(hunk):
-                if _normalize(removed, strict=strict) != _normalize(added, strict=strict):
-                    return False
+        before = _reconstruct_before(file, head)
+        if before is None or not _whitespace_context_safe(file.path, before, head):
+            return False
+        strict = file.path.lower().endswith(".py")
+        if _normalize(before.split("\n"), strict=strict) != _normalize(
+            head.split("\n"), strict=strict
+        ):
+            return False
     return True
 
 
@@ -705,7 +776,7 @@ def triage_diff(
         matched.append("pinBump")
     if recognize_prose_only(diff_text, head_files=heads):
         matched.append("prose")
-    if recognize_whitespace_only(diff_text):
+    if recognize_whitespace_only(diff_text, head_files=heads):
         matched.append("whitespace")
     if recognize_generated(diff_text):
         matched.append("generated")

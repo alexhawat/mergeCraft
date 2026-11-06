@@ -20,8 +20,9 @@ This module pins the fix:
    regenerates (test 4).
 4. It also rewrites the editable root package's ``version`` line in
    ``uv.lock``, so ``make lockcheck`` (a required context) stays green, while
-   touching nothing else — no ``CHANGELOG.md``, no ``docs/mcp-tools.md``
-   (test 5). It keeps non-ASCII text unescaped the way the generator does
+   updating the consumer release metadata/pins and generated copies too, but
+   leaving ``CHANGELOG.md`` and ``docs/mcp-tools.md`` alone (test 5).
+   It keeps non-ASCII text unescaped the way the generator does
    (test 6), and the lockfile block it rewrites is asserted directly
    (test 10).
 5. A missing or empty new version exits non-zero and leaves the versioned
@@ -54,9 +55,11 @@ from typing import Any
 
 import pytest
 import yaml
+from scripts.consumer_install_pins import METADATA, pin_paths
 
 from tests.ci.workflow_support import REPO_ROOT
 from tests.docs.support import load_script_module
+from tests.release.consumer_pin_support import copy_consumer_pin_inputs
 
 _CRAFT_CONFIG = ".craft.yml"
 _BUMP_SCRIPT = "scripts/bump-version.sh"
@@ -106,6 +109,7 @@ def _prepare_tree(tmp_path: Path) -> Path:
         destination = root / rel
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
+    copy_consumer_pin_inputs(root)
     return root
 
 
@@ -330,7 +334,7 @@ def test_server_json_after_bump_is_byte_identical_to_the_generator_render(
 
 
 def test_prepare_bump_touches_only_the_versioned_files(tmp_path: Path) -> None:
-    """Edge: exactly pyproject.toml, server.json and uv.lock change."""
+    """Only package versions and the synchronized consumer release surfaces change."""
     root = _prepare_tree(tmp_path)
     before = _snapshot(root)
     assert _UV_LOCK in before, before.keys()
@@ -344,7 +348,16 @@ def test_prepare_bump_touches_only_the_versioned_files(tmp_path: Path) -> None:
     changed = sorted(
         path for path in set(before) | set(after) if before.get(path) != after.get(path)
     )
-    assert changed == sorted([_PYPROJECT, _SERVER_JSON, _UV_LOCK])
+    assert changed == sorted(
+        [
+            _PYPROJECT,
+            _SERVER_JSON,
+            _UV_LOCK,
+            METADATA,
+            "skills-lock.json",
+            *(path.relative_to(root).as_posix() for path in pin_paths(root)),
+        ]
+    )
 
 
 def test_prepare_bump_preserves_non_ascii_without_escaping(tmp_path: Path) -> None:

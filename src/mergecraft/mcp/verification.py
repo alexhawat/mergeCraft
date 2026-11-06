@@ -365,8 +365,15 @@ def verify_agent_findings_tool(ctx: ToolContext):
         if state.diff_path:
             from mergecraft.utils.diff_paths import changed_paths_from_diff
 
-            diff_text = Path(state.diff_path).read_text(encoding="utf-8")
-            changed_paths = frozenset(changed_paths_from_diff(diff_text))
+            try:
+                diff_text = Path(state.diff_path).read_text(encoding="utf-8")
+                changed_paths = frozenset(changed_paths_from_diff(diff_text))
+            except (OSError, ValueError):
+                return {
+                    "ready": False,
+                    "reason": "the review diff could not establish changed paths; verification is unavailable",
+                    "dispatch": [],
+                }
         elif state.issue_number is not None or ctx.tool_state.pr_number is not None:
             # PR-bound runs without a diff cannot attest changed paths — fail closed
             # so verifier citations cannot cite arbitrary checkout files (MCB-20).

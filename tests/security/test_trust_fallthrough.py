@@ -9,7 +9,7 @@ malformed payload missing the keys the recognised branches read.
 This suite pins the **post-flip** contract: the fall-through resolves to
 ``"untrusted"`` in every case the prior default silently trusted. The PR-shaped
 ``pull_request`` branch is gated on ``GITHUB_EVENT_NAME == "pull_request"`` and
-only a same-repo shape (``fork is False``) earns the trusted tier; unknown
+only matching head/base repository identities earn the trusted tier; unknown
 event names, and ``pull_request`` payloads with missing or wrong-typed nested
 fields, all fail closed to ``"untrusted"``. The regression pins keep the
 recognised branches locked down so the flip cannot move them by accident. The
@@ -102,7 +102,7 @@ def test_pull_request_empty_dict_is_untrusted(
 
     The P1 regression: a ``pull_request`` whose ``head`` is missing used to
     fall out of the nested lookups and hit the permissive ``return "trusted"``.
-    Only ``fork is False`` earns the trusted tier now.
+    Only matching head/base repository identities earn the trusted tier.
     """
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
     tier = derive_trust_tier(event={"pull_request": {}})
@@ -133,8 +133,8 @@ def test_pull_request_missing_fork_is_untrusted(
     """S4.1 — ``pull_request.head.repo`` without ``fork`` resolves to ``"untrusted"``.
 
     The P1 regression: a missing ``fork`` key used to fall through to the
-    permissive ``return "trusted"``; only an explicit ``fork is False``
-    (same-repo) earns the trusted tier.
+    permissive ``return "trusted"``; a repository without a usable identity
+    cannot earn the trusted tier.
     """
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
     tier = derive_trust_tier(event={"pull_request": {"head": {"repo": {}}}})
@@ -146,8 +146,7 @@ def test_pull_request_wrong_typed_fork_is_untrusted(
 ) -> None:
     """S4.1 — a wrong-typed ``fork`` value resolves to ``"untrusted"``.
 
-    ``fork`` is compared with ``is False``, so a truthy or non-boolean value
-    cannot accidentally land on the same-repo trusted branch.
+    An ancestry flag alone cannot prove head/base repository identity.
     """
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
     tier = derive_trust_tier(event={"pull_request": {"head": {"repo": {"fork": "false"}}}})

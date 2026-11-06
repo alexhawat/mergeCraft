@@ -106,6 +106,10 @@ class ModuleResult:
         return 100.0 * self.survived / self.mutants
 
 
+class BaselineFailure(RuntimeError):
+    """The unmodified test selection did not pass and cannot score mutants."""
+
+
 def resolve_module_path(module: str, *, repo_root: Path = REPO) -> Path:
     """Return the on-disk path for a repo-relative module key."""
     if module.startswith("scripts/"):
@@ -344,6 +348,10 @@ def _run_pytest(
         "--tb=no",
         "-q",
         "-x",
+        # Pytest otherwise reports collection failures and KeyboardInterrupt
+        # as exit 2. Import-breaking mutants are ordinary detected failures;
+        # keep actual interrupts invalid instead of counting every exit 2 as a kill.
+        "--continue-on-collection-errors",
     ]
     proc = subprocess.run(
         cmd,
@@ -395,6 +403,12 @@ def _mutate_module(
 
     mutate_path = resolve_module_path(module, repo_root=sandbox_root)
     try:
+        # Score exactly the source that passed the baseline, including local edits.
+        mutate_path.write_text(original, encoding="utf-8")
+        code, output = _run_pytest(test_dirs, repo_root=sandbox_root, python=python)
+        if code != 0:
+            msg = f"{module}: unmodified baseline failed (pytest exit {code})\n{output.strip()}"
+            raise BaselineFailure(msg)
         for mutant in selected:
             mutated_source = _apply_mutant(original, mutant)
             if mutated_source == original:
@@ -410,9 +424,16 @@ def _mutate_module(
             if code == 0:
                 survived += 1
                 status = "SURVIVED"
-            else:
+            elif code == 1:
                 killed += 1
                 status = "KILLED"
+            else:
+                errors += 1
+                status = "ERROR"
+                print(
+                    f"{module}: {mutant.label}: pytest exit {code}\n{output.strip()}",
+                    file=sys.stderr,
+                )
             if verbose:
                 print(f"  {status} {mutant.label}")
                 if verbose >= 2 and output.strip():
@@ -432,8 +453,8 @@ def _mutate_module(
 
 def _print_table(results: Sequence[ModuleResult]) -> None:
     """Print the §2.6-style summary table."""
-    print("\n| module | mutants | survived | escape % |")
-    print("|---|---:|---:|---:|")
+    print("\n| module | mutants | survived | errors | escape % |")
+    print("|---|---:|---:|---:|---:|")
     total_mutants = 0
     total_survived = 0
     for row in results:
@@ -441,11 +462,15 @@ def _print_table(results: Sequence[ModuleResult]) -> None:
         total_survived += row.survived
         rate = f"{row.escape_rate_pct:.0f}%" if row.mutants else "—"
         print(
-            f"| `{row.module}` | {row.mutants} | {row.survived} | {rate} |",
+            f"| `{row.module}` | {row.mutants} | {row.survived} | {row.errors} | {rate} |",
         )
     if total_mutants:
         overall = 100.0 * total_survived / total_mutants
-        print(f"| **TOTAL** | **{total_mutants}** | **{total_survived}** | **{overall:.0f}%** |")
+        errors = sum(row.errors for row in results)
+        print(
+            f"| **TOTAL** | **{total_mutants}** | **{total_survived}** | "
+            f"**{errors}** | **{overall:.0f}%** |",
+        )
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -526,10 +551,17 @@ def main(argv: list[str] | None = None) -> int:
                     verbose=args.verbose,
                 ),
             )
+    except BaselineFailure as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
     finally:
         cleanup()
 
     _print_table(results)
+
+    if any(result.errors for result in results):
+        print("ERROR: invalid mutation runs; escape score is incomplete.", file=sys.stderr)
+        return 2
 
     total_mutants = sum(r.mutants for r in results)
     total_survived = sum(r.survived for r in results)
