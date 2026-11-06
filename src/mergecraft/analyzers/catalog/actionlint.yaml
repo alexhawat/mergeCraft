@@ -2,9 +2,12 @@ id: actionlint
 category: ci
 languages: []
 detect:
+  # Workflow files only. actionlint validates the *workflow* schema (`on`,
+  # `jobs`); action manifests (root `action.yml`, `.github/actions/**/action.yml`,
+  # composite or not) are a different schema and produce false Major blockers
+  # when linted as workflows (#1210). zizmor still covers action manifests.
   files:
     - ".github/workflows/*.{yml,yaml}"
-    - ".github/actions/**/action.yml"
 command: ["actionlint", "-format", "@catalog:actionlint-sarif-template.txt", "{files}"]
 scope: diff
 parser: sarif

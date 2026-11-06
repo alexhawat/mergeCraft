@@ -1,0 +1,19 @@
+# Valid composite action manifest (#1210). It has no `on:` / `jobs:` because it
+# is not a workflow: actionlint must never be handed this file.
+name: Bootstrap fixture toolchain
+description: Install the fixture toolchain.
+
+inputs:
+  python-version:
+    description: Python version to install.
+    required: false
+    default: "3.14"
+
+runs:
+  using: composite
+  steps:
+    - name: Show Python version
+      shell: bash
+      run: echo "python ${PYTHON_VERSION}"
+      env:
+        PYTHON_VERSION: ${{ inputs.python-version }}

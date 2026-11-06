@@ -92,6 +92,33 @@ def test_adapter_invents_no_unplanted_findings_on_untouched_files(
         assert untouched not in reported_paths
 
 
+def test_actionlint_ignores_composite_action_but_catches_invalid_workflow(
+    adapter_fixture_repo: Path,
+) -> None:
+    """#1210: a valid composite action yields no workflow-schema findings.
+
+    The diff carries both the fixture's valid composite action and its invalid
+    workflow. The workflow defect must still be caught; the composite must not
+    be linted against the workflow schema at all.
+    """
+    adapters = import_module("mergecraft.analyzers.adapters")
+    composite = ".github/actions/bootstrap/action.yml"
+    workflow, line = PLANTED["actionlint"]
+    result = adapters.run_adapter(
+        tool_id="actionlint",
+        repo_root=adapter_fixture_repo,
+        changed_files=[composite, workflow],
+        tier="trusted",
+    )
+    _fail_if_skipped(result, "actionlint")
+    assert not [f for f in result.findings if finding_path_matches(composite, f.path)]
+    assert [
+        f
+        for f in result.findings
+        if finding_path_matches(workflow, f.path) and f.start_line == line
+    ], f"actionlint must still catch the planted finding at {workflow}:{line}"
+
+
 def test_unprovisioned_managed_tool_skips_with_a_provisioning_reason(
     adapter_fixture_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -272,6 +272,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- actionlint now lints workflow files only. Action manifests (root `action.yml`
+  and `.github/actions/**/action.yml`, composite or not) were linted against the
+  workflow schema, producing false Major `syntax-check` blockers; zizmor still
+  covers them (#1210).
 - Audit remediation hardens revision-bound approvals, checkout recovery, fork
   trust, CLI workspace and cache identity, finding attribution and severity.
   Checkout retries also discard fail-then-pass evidence from the old revision;
