@@ -1,7 +1,8 @@
 # Compatibility matrix
 
-Supported Action runtime combinations for mergeCraft (production-readiness
-`#36`). The PR E2E gate exercises the **security-relevant slice**; a
+Configured Action runtime combinations and their actual test lanes. See the
+[generated support matrix](support-matrix.md) for separate support, automated
+evidence, and artifact contracts. The PR E2E gate exercises the **security-relevant slice**; a
 scheduled nightly job covers the **broad slice** plus live providers
 (secrets-gated).
 
@@ -14,7 +15,7 @@ scheduled nightly job covers the **broad slice** plus live providers
 | **Providers** | `anthropic`, `openai`, `google`, `tokenhub`, custom OpenAI-compatible | BYOK — credentials via Action secrets / env allowlist (W2) |
 | **Shell** | `disabled`, `restricted`, `enabled` | MCP `shell` tool only under `restricted`; hooks off unless `enabled` |
 | **Push** | `disabled`, `restricted`, `enabled` | Production modes are **review-only**: mergeCraft refuses commit and push whatever the value, so no value grants write access. Default runtime resolve is `restricted`; default branch protected under `restricted` |
-| **Arch** | `linux/amd64`, `linux/arm64` | Images built multi-arch where the release pipeline publishes them; PR E2E runs on `ubuntu-latest` (amd64) |
+| **Arch** | `linux/amd64`, `linux/arm64` | Runtime/provisioning choices; inspect the selected OCI manifest before use. PR E2E runs on `ubuntu-latest` (amd64); ARM64 execution/publication is not established by that job. |
 
 ## Harness × model
 
@@ -60,8 +61,8 @@ provider fails the job.
 | Cell | Coverage |
 |------|----------|
 | Security slice (above) | Always |
-| Live provider coverage | `github` in the nightly Integration workflow's live matrix; the ChatGPT/Codex subscription in this workflow's live slice. The `anthropic` / `openai` / `gemini` HTTP-API legs are not exercised — no such API key is configured |
-| Arch | `ubuntu-latest` today; arm64 expansion tracked with multi-arch publish |
+| Live provider coverage | `github` in the nightly Integration matrix. E2E requires `MERGECRAFT_E2E_LIVE_MODEL` and its selected API credential (OpenCode Go/OpenAI/Anthropic/Google); no model means explicitly unavailable. It does not consume the rotating Codex subscription. A green skipped/unavailable slice proves no live-provider acceptance. |
+| Arch | `ubuntu-latest` (amd64). This lane provides no ARM64 execution or publication evidence; inspect the selected image manifest before choosing ARM64. |
 
 ## Out of scope / dogfood
 

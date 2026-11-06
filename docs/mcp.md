@@ -8,10 +8,14 @@ runtime harness at `/mcp/reviewer`.
 Registry namespace: `mcp-name: io.github.alexhawat/mergecraft` (generated
 [`server.json`](../server.json)). Tool schemas: [`docs/mcp-tools.md`](mcp-tools.md).
 
-**Prereqs:** install the CLI (`uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"`)
+**Prereqs:** install the CLI (`uv tool install mergecraft-action==0.1.0a4`)
 and authenticate a provider for local stdio (`mergecraft auth <provider> --scope local`, or
 `--scope both` if you also use GitHub Actions). Run `mergecraft init` in the repo
 you want reviewed so `.mergecraft/config.yaml` exists.
+
+Docs on `main` may describe unreleased behavior. Use the
+[matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a4/docs)
+for the pinned install; newer MCP behavior may require an unreleased source commit.
 
 **Not in this release:** hosted HTTP remote MCP, OAuth connectors, or ChatGPT Apps /
 Anthropic Connectors Directory submission. Local stdio is the supported install path;

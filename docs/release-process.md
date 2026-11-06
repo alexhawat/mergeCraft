@@ -17,8 +17,13 @@ changelog section.
    generates a version section and inserts it **above** `CHANGELOG.md`
    `## [Unreleased]`, which it leaves in place; fold the hand-written block
    into the generated section by hand before pushing. It also bumps
-   `pyproject.toml` and `server.json` in step, so the branch passes its own
-   `mcp-server-json-check` drift gate.
+   `pyproject.toml`, `server.json`, and `uv.lock` in step. The same transaction
+   updates `docs/consumer-release.json`, consumer install pins, matching release
+   documentation links, generated skill copies/hashes, and `llms-full.txt`.
+   Candidate-branch docs name the release being prepared; publish that candidate
+   before recommending its install version. The post-release development bump
+   retains the published release pin, never the next unpublished `.dev` version.
+   Docs gates reject drift against this metadata and the package release version.
 2. CI/CD on that branch must be green: `make ci`, image build, SBOM + Trivy
    CRITICAL/HIGH, eval regression gate. That run is also what builds the Python
    dist: its `build-dist` job installs the wheel outside the checkout, attests its

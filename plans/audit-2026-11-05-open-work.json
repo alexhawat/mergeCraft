@@ -1,0 +1,242 @@
+[
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/issues/1169",
+    "title": "Self-review Action pin on main is stale",
+    "issue_number": 1169,
+    "state": null,
+    "updated_at": null,
+    "kind": "issue"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/issues/1166",
+    "title": "review: cap review rounds per PR, then ask author to reconsider",
+    "issue_number": 1166,
+    "state": null,
+    "updated_at": null,
+    "kind": "issue"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/issues/1165",
+    "title": "evidence: track human outcomes of published findings (fixed/rejected/intentional/ignored)",
+    "issue_number": 1165,
+    "state": null,
+    "updated_at": null,
+    "kind": "issue"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/issues/1164",
+    "title": "evals: rescore reviewer changes against the bank (keep-or-drop delta)",
+    "issue_number": 1164,
+    "state": null,
+    "updated_at": null,
+    "kind": "issue"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/issues/1163",
+    "title": "evals: incident-derived eval cases (postmortem PRs + revert/fix-forward)",
+    "issue_number": 1163,
+    "state": null,
+    "updated_at": null,
+    "kind": "issue"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/issues/1162",
+    "title": "Security sweep: advisories on main",
+    "issue_number": 1162,
+    "state": null,
+    "updated_at": null,
+    "kind": "issue"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/issues/1151",
+    "title": "Consolidate repository root files into existing directories",
+    "issue_number": 1151,
+    "state": null,
+    "updated_at": null,
+    "kind": "issue"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/issues/1056",
+    "title": "Gate: escalate on unknowns, coded lane reasons, declared scope drift, and fail-then-pass proof for fixes",
+    "issue_number": 1056,
+    "state": null,
+    "updated_at": null,
+    "kind": "issue"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/issues/1031",
+    "title": "Wire bounded file-group fan-out into server-side reviewer dispatch",
+    "issue_number": 1031,
+    "state": null,
+    "updated_at": null,
+    "kind": "issue"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/issues/860",
+    "title": "evals: language fixture and public-repo sourcing sweep across supported languages",
+    "issue_number": 860,
+    "state": null,
+    "updated_at": null,
+    "kind": "issue"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/issues/859",
+    "title": "evals: harvest failure-shaped trajectories for the auditor (offline-review batch)",
+    "issue_number": 859,
+    "state": null,
+    "updated_at": null,
+    "kind": "issue"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/issues/780",
+    "title": "E1: independent adjudication of the eval corpus \u2014 batch 1, the nine golden cases",
+    "issue_number": 780,
+    "state": null,
+    "updated_at": null,
+    "kind": "issue"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/issues/736",
+    "title": "evals: calibrate judge against human-adjudicated labels only",
+    "issue_number": 736,
+    "state": null,
+    "updated_at": null,
+    "kind": "issue"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/issues/735",
+    "title": "evals: score trajectory auditor against labelled trajectories",
+    "issue_number": 735,
+    "state": null,
+    "updated_at": null,
+    "kind": "issue"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/pull/1167",
+    "title": "feat: incident evals, rescore delta, finding outcomes, review round cap (#1163\u2013#1166)",
+    "issue_number": 1167,
+    "state": null,
+    "updated_at": null,
+    "kind": "pr"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/pull/1161",
+    "title": "feat(agents-sdk): embed mergeCraft review via OpenAI Agents SDK",
+    "issue_number": 1161,
+    "state": null,
+    "updated_at": null,
+    "kind": "pr"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/pull/1160",
+    "title": "feat(classify): declared scope paths drive the scope gate",
+    "issue_number": 1160,
+    "state": null,
+    "updated_at": null,
+    "kind": "pr"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/pull/1154",
+    "title": "chore(integrations): D47 drop swallowed kwargs from CursorCloudClient",
+    "issue_number": 1154,
+    "state": null,
+    "updated_at": null,
+    "kind": "pr"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/pull/1142",
+    "title": "chore(deps): bump the python-patch-minor group across 1 directory with 21 updates",
+    "issue_number": 1142,
+    "state": null,
+    "updated_at": null,
+    "kind": "pr"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/pull/1090",
+    "title": "chore(deps): bump js-yaml and markdownlint-cli in /tools",
+    "issue_number": 1090,
+    "state": null,
+    "updated_at": null,
+    "kind": "pr"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/pull/1079",
+    "title": "chore(prep): D42 drop private names from python.py __all__",
+    "issue_number": 1079,
+    "state": null,
+    "updated_at": null,
+    "kind": "pr"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/pull/1067",
+    "title": "chore(utils): D41 drop test-only parse_timeout",
+    "issue_number": 1067,
+    "state": null,
+    "updated_at": null,
+    "kind": "pr"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/pull/1066",
+    "title": "chore(deps): bump getsentry/craft from 2.35.1 to 3.0.0",
+    "issue_number": 1066,
+    "state": null,
+    "updated_at": null,
+    "kind": "pr"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/pull/1065",
+    "title": "chore(deps): bump getsentry/craft/.github/workflows/changelog-preview.yml from 2.35.1 to 3.0.0",
+    "issue_number": 1065,
+    "state": null,
+    "updated_at": null,
+    "kind": "pr"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/pull/1063",
+    "title": "chore(deps): bump logfire from 5.2.0 to 5.4.0 in the python-tracing group across 1 directory",
+    "issue_number": 1063,
+    "state": null,
+    "updated_at": null,
+    "kind": "pr"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/pull/1057",
+    "title": "chore(classify): D40 drop test-only classify_change agent_runner",
+    "issue_number": 1057,
+    "state": null,
+    "updated_at": null,
+    "kind": "pr"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/pull/1042",
+    "title": "chore(memory): D37 drop unused MemoryBackend alias",
+    "issue_number": 1042,
+    "state": null,
+    "updated_at": null,
+    "kind": "pr"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/pull/1041",
+    "title": "chore(action): D36 drop unused Shorthand alias",
+    "issue_number": 1041,
+    "state": null,
+    "updated_at": null,
+    "kind": "pr"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/pull/949",
+    "title": "chore(models): D31 drop unused ModelProvider",
+    "issue_number": 949,
+    "state": null,
+    "updated_at": null,
+    "kind": "pr"
+  },
+  {
+    "url": "https://github.com/alexhawat/mergeCraft/pull/865",
+    "title": "chore(evals): pre-register the trajectory auditor protocol for #735",
+    "issue_number": 865,
+    "state": null,
+    "updated_at": null,
+    "kind": "pr"
+  }
+]
