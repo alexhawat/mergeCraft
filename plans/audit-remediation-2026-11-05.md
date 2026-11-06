@@ -66,7 +66,7 @@ The original audit probes reproduce defects against the audit source commit; the
 
 ## Combined verification
 
-The five branches merge without conflicts. Their source, tests, workflows and generated artifacts match the combined tree used for local validation; the subsequent documentation change records these results. The shared target is `3de00fc1`: main at `42285b46` plus integration-branch CI triggers and their test assertions. No product remediation has been merged into that target or main.
+At the initial combined validation, the five branches merged without conflicts and exactly matched the tested tree. The input revisions below identify that run; later follow-up repairs and their separate validation are recorded in the next section. The shared target is `3de00fc1`: main at `42285b46` plus integration-branch CI triggers and their test assertions. No product remediation has been merged into that target or main.
 
 Tested group inputs: security `68de6470`, CLI `610aa32b`, findings `b27933d6`, testing/CI `ab64e450`, and documentation `a5a653b6`. The final documentation commit adds this verification record only.
 
@@ -85,7 +85,7 @@ The local Docker daemon was unavailable. The subsequent [hosted Action-image job
 The follow-up found no merge conflicts or submitted review findings on the five PRs. Hosted failures exposed three environment-dependent test defects, now repaired on their existing branches:
 
 - Security `5713180f`: the SCM snapshot client explicitly selects its mock API base, preventing ambient `GITHUB_GRAPHQL_URL` from changing its recorded endpoint form. Tests exercise absent and conflicting environment settings; 32 focused Python 3.14 tests and 66 Python 3.11 SCM/endpoint tests passed.
-- CLI `c813946c`: the layered-config regression verifies the full diagnostic path across Rich line wrapping at widths 40 and 80. All nine cases passed on Python 3.11 and 3.14; runtime validation policy is unchanged.
+- CLI `202be2b3`: the layered-config regression verifies the full diagnostic path across Rich line wrapping at widths 40 and 80. An isolated console prevents the narrow-width test from leaking its setting into later tracing tests. The combined, ordered config/tracing selection reproduced five failures before that isolation repair and passed all 21 tests afterward on Python 3.11 and 3.14. Runtime validation policy is unchanged.
 - Testing/CI `59623c04`: fixture preparation runs inside the Action image as the controller user, preserving production Git ownership checks while making the local origin usable. Diagnostic report steps also require successful bootstrap, avoiding missing-tool errors after the required prerequisite guard rejects a failed dependency. The guard correctly rejected the earlier failed image job. Locally, 69 protocol/workflow tests passed with one Linux-only skip; actionlint, zizmor and shell syntax checks passed. The real container job linked above subsequently passed.
 
 The findings and documentation PRs had no failed functional checks; their cancelled changelog previews were rerun successfully. All five branches still merge cleanly in the local integration check. The shared target and main remain unmerged; these follow-up commits do not change the five-PR integration structure.
