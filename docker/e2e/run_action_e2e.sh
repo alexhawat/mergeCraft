@@ -22,7 +22,16 @@ API_URL="${E2E_GITHUB_API_URL:-http://host.docker.internal:8765}"
 WORK_DIR="${E2E_WORK_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/mergecraft-e2e.XXXXXX")}"
 CHECK_RUNS_DIR="${E2E_CHECK_RUNS_DIR:-${E2E_DIR}/fixtures/check-runs/live}"
 
-python3 "${E2E_DIR}/prepare_fixture.py" --work-dir "${WORK_DIR}" --event "${EVENT_NAME}"
+# The local origin invokes git-upload-pack inside the Action container. Create
+# its .git directory as that container's controller user; a runner-owned .git
+# fails Git's ownership check even when the worktree itself is safe.directory.
+# Keep the production ownership checks intact instead of adding a trust bypass.
+docker run --rm --user 0:0 \
+  --entrypoint /opt/mergecraft/.venv/bin/python \
+  -v "${WORK_DIR}:/e2e-work" \
+  -v "${E2E_DIR}:/e2e-fixtures:ro" \
+  "${IMAGE}" /e2e-fixtures/prepare_fixture.py \
+  --work-dir /e2e-work --event "${EVENT_NAME}"
 python3 - "${WORK_DIR}/github/event.json" "${E2E_GITHUB_CONTROL_URL:-${API_URL}}" <<'PYCONFIG'
 import json
 import sys
