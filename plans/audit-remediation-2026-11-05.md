@@ -41,13 +41,13 @@ R7–R15 name the originally unnumbered residual findings. R3 covers both mergin
 | R14 | Anonymous fallback without gh | cli | VERIFIED LOCALLY | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 4 focused auth/clone tests; Ruff/mypy |
 | R15 | Output usage exit status | cli | VERIFIED LOCALLY | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | 17 output tests; Ruff/mypy |
 | T1 | Mutation error classification/baseline | ci | VERIFIED LOCALLY | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 20 tests; Ruff/mypy |
-| T2 | Semantic Action E2E receipts/protocol | ci | IMPLEMENTED / IMAGE CI PENDING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 29 protocol/assertion tests; real host GHA approval/refusal; Ruff/mypy/bash |
+| T2 | Semantic Action E2E receipts/protocol | ci | VERIFIED IN HOSTED IMAGE | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 29 protocol/assertion tests; real host GHA approval/refusal; Ruff/mypy/bash |
 | T3 | Clean installed-wheel CLI acceptance | ci | VERIFIED LOCALLY | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | Clean wheel acceptance; 6 packaging tests; Ruff/mypy |
 | T4 | Locked CI bootstrap | ci | VERIFIED LOCALLY | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | real stale-lock bootstrap regression; Ruff |
 | DOC1 | Released pinned onboarding | docs | VERIFIED LOCALLY | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | 26 docs tests; generated packages; Ruff |
 | DOC2 | Supported/tested/published matrix | docs | VERIFIED LOCALLY | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | 9 docs tests; generator drift; Ruff |
 | DOC3 | CLI workspace behavior documentation | cli | VERIFIED LOCALLY | [#1198](https://github.com/alexhawat/mergeCraft/pull/1198) | Documented workspace and output contracts |
-| DOC4 | Enforce reliable deterministic checks | ci | IMPLEMENTED / IMAGE CI PENDING | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 78 guard/workflow tests; permissions; Ruff |
+| DOC4 | Enforce reliable deterministic checks | ci | VERIFIED LOCALLY AND FAILURE PROPAGATION IN CI | [#1200](https://github.com/alexhawat/mergeCraft/pull/1200) | 78 guard/workflow tests; permissions; Ruff |
 | DOC5 | Dated audit/history and complete remediation index | docs | VERIFIED LOCALLY | [#1201](https://github.com/alexhawat/mergeCraft/pull/1201) | Dated report, probes, open-work snapshot and full finding index |
 
 ## Verification and execution contract
@@ -78,4 +78,14 @@ Tested group inputs: security `68de6470`, CLI `610aa32b`, findings `b27933d6`, t
 
 The first complete coverage attempt exposed two old workflow branch-list expectations and a remote-source fixture that returned an empty directory. The assertions now include the integration target, and the fixture clones a real local repository and verifies URL/SHA provenance. The affected suites passed **15** and **18** tests respectively before the complete rerun. These corrections removed no tests and lowered no coverage thresholds.
 
-The local Docker daemon was unavailable. Host Action protocol/publication tests passed, but installed-image Linux execution remains pending hosted CI. Native ARM execution and paid-provider/human-label campaigns were not performed. Hosted results are attached to each PR; local validation is not a claim that every hosted job is green.
+The local Docker daemon was unavailable. The subsequent [hosted Action-image job](https://github.com/alexhawat/mergeCraft/actions/runs/42173188346/job/127745549026) at testing/CI head `59623c04` passed both PR fixtures (approval and external-fork refusal) and the in-image adversarial suite. This is image evidence for PR #1200, separate from the combined local source validation above. Native ARM execution and paid-provider/human-label campaigns were not performed. Current hosted results are attached to each PR; a passing local or image check does not imply that every other hosted job is green.
+
+## Hosted-check follow-up
+
+The follow-up found no merge conflicts or submitted review findings on the five PRs. Hosted failures exposed three environment-dependent test defects, now repaired on their existing branches:
+
+- Security `5713180f`: the SCM snapshot client explicitly selects its mock API base, preventing ambient `GITHUB_GRAPHQL_URL` from changing its recorded endpoint form. Tests exercise absent and conflicting environment settings; 32 focused Python 3.14 tests and 66 Python 3.11 SCM/endpoint tests passed.
+- CLI `c813946c`: the layered-config regression verifies the full diagnostic path across Rich line wrapping at widths 40 and 80. All nine cases passed on Python 3.11 and 3.14; runtime validation policy is unchanged.
+- Testing/CI `59623c04`: fixture preparation runs inside the Action image as the controller user, preserving production Git ownership checks while making the local origin usable. Diagnostic report steps also require successful bootstrap, avoiding missing-tool errors after the required prerequisite guard rejects a failed dependency. The guard correctly rejected the earlier failed image job. Locally, 69 protocol/workflow tests passed with one Linux-only skip; actionlint, zizmor and shell syntax checks passed. The real container job linked above subsequently passed.
+
+The findings and documentation PRs had no failed functional checks; their cancelled changelog previews were rerun successfully. All five branches still merge cleanly in the local integration check. The shared target and main remain unmerged; these follow-up commits do not change the five-PR integration structure.
