@@ -86,6 +86,23 @@ substitute for reading the diff. `skipped` and `blocked` are not a pass —
 `blocked` names the missing input and stays visible; omitting the report
 leaves the review unchanged.
 
+A fail-then-pass receipt is how a fix pull request proves itself, and mergeCraft
+still never runs a consumer's tests to get one. The repository's own CI runs
+them on the base and on the head and uploads a JSON receipt as the workflow
+artifact declared in `ciEvidence.redGreen` (`artifact`, and the one `workflow`
+allowed to upload it; honoured only from the pull request base). The review
+reads it only from a successful run of that workflow in the reviewed repository
+on the head SHA (never a fork's run), only when the pull request's unfiltered
+change set leaves that workflow untouched, parses it as data under fixed bounds
+(a 2 MiB archive, a 1 MB receipt; nothing in the artifact is executed), and
+accepts it only for the pull request's exact base and head SHAs. A pull request with a conventional `fix`
+title or a `review.fixLabels` label needs a `proven` receipt (a test red on the
+base, every listed test green on the head) for the `fix_proof` checklist gate;
+without one its lane is at least `medium` with a `fix.*` reason. `fixLabels` is
+honoured only from the pull request base, so a pull request cannot change its
+own label list. See
+[`docs/red-green-receipts.md`](docs/red-green-receipts.md).
+
 The merge-evidence packet's `decision` row is computed by
 `mergecraft.agents.gates.decide_approval(findings, *, run_succeeded,
 tier)` from these structural inputs. When the packet is given directly

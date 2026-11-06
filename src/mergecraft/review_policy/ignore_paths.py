@@ -52,7 +52,7 @@ from mergecraft.classify.generated_files import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-    from mergecraft.config.settings import ReviewSettings
+    from mergecraft.config.settings import RepoSettings, ReviewSettings
     from mergecraft.scm.protocol import ScmProvider
 
 DEFAULT_IGNORE_PATHS: Final[tuple[str, ...]] = (
@@ -335,17 +335,21 @@ def _http_status(err: BaseException) -> int | None:
     return status if isinstance(status, int) else None
 
 
-def _review_settings_from_text(text: str) -> ReviewSettings:
+def _repo_settings_from_text(text: str) -> RepoSettings:
     from mergecraft.analyzers.settings_pin import repo_settings_from_text
 
-    return repo_settings_from_text(text).review
+    return repo_settings_from_text(text)
 
 
-async def _base_review_settings(
+async def _base_repo_settings(
     scm: ScmProvider, owner: str, repo: str, base_sha: str
-) -> tuple[ReviewSettings | None, str, str | None]:
-    """Read ``review`` settings from the base commit's config through the contents API."""
-    from mergecraft.config.settings import ReviewSettings
+) -> tuple[RepoSettings | None, str, str | None]:
+    """Read the base commit's whole config through the contents API.
+
+    A base without the file is the defaults; an unreadable, oversized or invalid one
+    is ``None`` with the reason, so each caller fails toward its own safe side.
+    """
+    from mergecraft.config.settings import default_settings
 
     try:
         payload = await scm.get(
@@ -353,7 +357,7 @@ async def _base_review_settings(
         )
     except Exception as err:  # an unreadable base config drops the YAML half, never the review
         if _http_status(err) == 404:
-            return ReviewSettings(), "base_sha", f"the PR base has no {_CONFIG_REL}"
+            return default_settings(), "base_sha", f"the PR base has no {_CONFIG_REL}"
         return None, "defaults", f"the PR base config could not be read ({type(err).__name__})"
     if not isinstance(payload, dict) or payload.get("type") != "file":
         return None, "defaults", f"{_CONFIG_REL} at the PR base is not a regular file"
@@ -363,9 +367,17 @@ async def _base_review_settings(
         raw = base64.b64decode(str(payload.get("content") or ""))
         if len(raw) > _MAX_CONFIG_BYTES:
             return None, "defaults", f"{_CONFIG_REL} at the PR base is too large"
-        return _review_settings_from_text(raw.decode("utf-8")), "base_sha", None
+        return _repo_settings_from_text(raw.decode("utf-8")), "base_sha", None
     except Exception as err:  # a malformed base config fails toward reviewing more
         return None, "defaults", f"{_CONFIG_REL} at the PR base is invalid ({err})"
+
+
+async def _base_review_settings(
+    scm: ScmProvider, owner: str, repo: str, base_sha: str
+) -> tuple[ReviewSettings | None, str, str | None]:
+    """Read ``review`` settings from the base commit's config through the contents API."""
+    settings, source, detail = await _base_repo_settings(scm, owner, repo, base_sha)
+    return (settings.review if settings is not None else None), source, detail
 
 
 def _event_base_sha(event: dict[str, Any] | None) -> str:

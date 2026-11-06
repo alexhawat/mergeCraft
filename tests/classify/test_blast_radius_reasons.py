@@ -76,6 +76,14 @@ def _scoped(
     return {**_c(paths), "scope": {"declared": declared, "globs": globs, "invalid": invalid}}
 
 
+def _fix_proof_case(*, status: str, required: bool = True) -> dict[str, Any]:
+    """A clean docs change carrying a ``fix_proof`` signal (#1056 part 5)."""
+    return {
+        **_c(["docs/guide.md"], {"lines_added": 3, "lines_deleted": 0}),
+        "fix_proof": {"required": required, "status": status},
+    }
+
+
 # (code, change, default lane, gate the code must fail — None when the code is low
 # or the contract does not name a gate for it)
 CODE_CASES: list[tuple[str, dict[str, Any], str, str | None]] = [
@@ -150,6 +158,13 @@ CODE_CASES: list[tuple[str, dict[str, Any], str, str | None]] = [
     ("scope.undeclared", _scoped(["docs/guide.md"], []), "medium", "scope"),
     ("scope.invalid", _scoped(["docs/guide.md"], [], invalid=True), "medium", "scope"),
     ("scope.unknown", _scoped(["docs/guide.md"], [], declared=False), "medium", None),
+    # fix proof (part 5)
+    ("fix.not-required", _fix_proof_case(required=False, status="not-required"), "low", None),
+    ("fix.proven", _fix_proof_case(status="proven"), "low", None),
+    ("fix.not-proven", _fix_proof_case(status="not-proven"), "medium", "fix_proof"),
+    ("fix.no-receipt", _fix_proof_case(status="no-receipt"), "medium", "fix_proof"),
+    ("fix.receipt.invalid", _fix_proof_case(status="invalid"), "medium", "fix_proof"),
+    ("fix.receipt.mismatch", _fix_proof_case(status="mismatch"), "medium", "fix_proof"),
 ]
 _CODE_IDS = [code for code, _change, _lane, _gate in CODE_CASES]
 
@@ -240,6 +255,7 @@ def test_the_checklist_lists_every_gate_in_gate_order(api: Any, change: dict[str
     assert names == [gate for gate in api.GATE_ORDER if gate in names]
     assert set(_LOCKED_GATE_ORDER) | {"source"} <= set(names)
     assert ("scope" in names) is ("scope" in change)
+    assert ("fix_proof" in names) is ("fix_proof" in change)
 
 
 @pytest.mark.parametrize(
@@ -510,6 +526,17 @@ new file mode 100644
 """
 
 
+def _fix_proof_kwargs(classifier: Any) -> dict[str, Any]:
+    """A non-fix ``fix_proof`` signal once the run classifier requires one.
+
+    #1056 part 5 makes ``fix_proof`` a required keyword on ``classify_run_blast_radius``;
+    a pull request that is not a fix leaves every part-2 gate exactly as before.
+    """
+    if "fix_proof" in inspect.signature(classifier).parameters:
+        return {"fix_proof": {"required": False, "status": "not-required"}}
+    return {}
+
+
 def _classify_run(diff_text: str) -> Any:
     """Call the run's diff classifier with an undeclared scope once it requires one.
 
@@ -520,8 +547,10 @@ def _classify_run(diff_text: str) -> Any:
 
     if "scope" in inspect.signature(classify_run_blast_radius).parameters:
         undeclared = {"declared": False, "globs": [], "invalid": False}
-        return classify_run_blast_radius(diff_text, scope=undeclared)
-    return classify_run_blast_radius(diff_text)
+        return classify_run_blast_radius(
+            diff_text, scope=undeclared, **_fix_proof_kwargs(classify_run_blast_radius)
+        )
+    return classify_run_blast_radius(diff_text, **_fix_proof_kwargs(classify_run_blast_radius))
 
 
 def test_the_run_diff_classifier_emits_reasons_and_a_measured_checklist() -> None:

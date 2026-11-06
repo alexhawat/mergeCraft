@@ -124,12 +124,13 @@ def test_known_risk_bands_keep_their_order() -> None:
 
 # Declared scopes for the approval-route controls (#1056 part 3): a change classified
 # without one has no ``scope`` gate, and the approval rows need every gate.
-_IN_SCOPE_DOCS: dict[str, Any] = {
+_IN_SCOPE_DOCS: ChangeSet = {
     "scope": {"declared": True, "globs": ["docs/guide.md"], "invalid": False}
 }
-_IN_SCOPE_LOCK: dict[str, Any] = {
-    "scope": {"declared": True, "globs": ["uv.lock"], "invalid": False}
-}
+_IN_SCOPE_LOCK: ChangeSet = {"scope": {"declared": True, "globs": ["uv.lock"], "invalid": False}}
+# A non-fix signal for the same controls (#1056 part 5): a change classified without
+# one has no ``fix_proof`` gate either.
+_NOT_A_FIX: ChangeSet = {"fix_proof": {"required": False, "status": "not-required"}}
 
 
 def _decided_packet(
@@ -194,7 +195,8 @@ def test_a_measured_low_change_still_selects_low_risk_passing() -> None:
         "diff_stats": {"lines_added": 3},
         # A declared scope the change is inside: without one the ``scope`` gate is
         # missing from the checklist and no approval row is reachable (#1056 part 3).
-        **_IN_SCOPE_DOCS,  # type: ignore[typeddict-item]
+        **_IN_SCOPE_DOCS,
+        **_NOT_A_FIX,
     }
     packet = _decided_packet(classify_blast_radius(change), files_changed=["docs/guide.md"])
 
@@ -571,7 +573,8 @@ def test_a_real_medium_classification_with_a_failed_gate_still_reaches_clean_pas
         {
             "changed_paths": ["uv.lock"],
             "diff_stats": {"lines_added": 4, "lines_deleted": 1},
-            **_IN_SCOPE_LOCK,  # type: ignore[typeddict-item]
+            **_IN_SCOPE_LOCK,
+            **_NOT_A_FIX,
         }
     )
     packet = _decided_packet(classification, files_changed=["uv.lock"])

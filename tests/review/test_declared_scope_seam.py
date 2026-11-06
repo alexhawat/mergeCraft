@@ -509,6 +509,9 @@ async def test_workflow_dispatch_loads_closing_issue_scope_before_the_gate(
         "diff --git a/docs/guide.md b/docs/guide.md\n"
         "--- a/docs/guide.md\n+++ b/docs/guide.md\n@@ -1 +1 @@\n-old\n+new\n",
         scope=scope_signal_for_state(state),
+        # #1056 part 5: ``fix_proof`` is a required keyword too; a non-fix signal
+        # leaves the scope gate exactly as before.
+        fix_proof={"required": False, "status": "not-required"},
     )
     assert classification is not None
     assert "scope.within" in {reason.code for reason in classification.reasons}
