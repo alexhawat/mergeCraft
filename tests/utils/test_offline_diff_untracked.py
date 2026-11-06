@@ -139,6 +139,23 @@ def test_unstaged_diff_skips_managed_analyzer_cache(tmp_path: Path) -> None:
     assert ".mergecraft/analyzer-cache/pip/semgrep/1.170.0/module.py" not in text
 
 
+def test_generated_review_and_audit_output_never_becomes_untracked_source(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    for relative in ("reviews/run/snapshot.json", "audit.jsonl"):
+        artifact = repo / ".mergecraft" / relative
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text("generated\n")
+    assert git_unstaged_diff(cwd=repo) == ""
+    result = materialize_diff(cwd=repo, out_dir=tmp_path / "output", base="main")
+    assert result.empty
+    assert result.coverage_limitations == ()
+
+    _git(repo, "add", ".mergecraft")
+    _git(repo, "commit", "-m", "tracked output is source")
+    (repo / ".mergecraft" / "audit.jsonl").write_text("changed tracked data\n")
+    assert "changed tracked data" in git_unstaged_diff(cwd=repo)
+
+
 def test_tracked_analyzer_cache_change_remains_in_default_diff(tmp_path: Path) -> None:
     """The reserved path only excludes untracked runtime artifacts."""
     repo = _init_repo(tmp_path)
@@ -204,7 +221,7 @@ def test_gitignored_file_is_excluded(tmp_path: Path) -> None:
     result = materialize_diff(cwd=repo, out_dir=tmp_path / "out", base="main")
 
     assert "ignored.py" not in result.path.read_text(encoding="utf-8")
-    assert _reports(_limitations(result), "ignored.py")
+    assert not _limitations(result)
 
 
 def test_oversized_untracked_file_is_excluded_and_reported(tmp_path: Path) -> None:

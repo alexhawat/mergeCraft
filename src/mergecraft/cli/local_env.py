@@ -10,8 +10,8 @@ it literally --- :func:`mergecraft.cli.provider_cmd._config_path`,
 up. :func:`local_env_path_for_cwd` matches that so a command cannot read its
 registry from one directory and write credentials to another.
 
-Commands with no ``--cwd`` (``auth``, ``tracing logfire``, and the startup
-load) have only the process working directory, which may be any subdirectory
+Commands with no explicit local target (``auth``, ``tracing logfire``) have
+only the process working directory, which may be any subdirectory
 of the checkout. :func:`local_env_path_for_process_cwd` walks up to the git
 root for those, so the loader and the writers agree on one file.
 
@@ -72,8 +72,8 @@ def local_env_path_for_process_cwd(
 ) -> Path:
     """Return the ``.env`` for a command that has only the process cwd.
 
-    ``auth``, ``tracing logfire``, and the startup load take no ``--cwd``, so
-    the process working directory is all they have --- and it is routinely a
+    ``auth``, ``tracing logfire``, and startup without an explicit local target
+    have only the process working directory --- and it is routinely a
     subdirectory of the checkout. Walking up to the git root is what makes the
     loader read the file the writers wrote; anchoring on the raw cwd silently
     wrote a nested ``.env`` that nothing reads and still reported success

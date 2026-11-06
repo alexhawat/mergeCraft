@@ -171,13 +171,15 @@ def test_linked_worktree_resolves_common_dir(tmp_path: Path) -> None:
     assert result.base_ref == "main"
 
 
+@pytest.mark.parametrize("name", ["remote.git", "repo#name?literal.git"])
 def test_public_repo_url_source(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    name: str,
 ) -> None:
     """A public ``file://`` bare URL is acquired and reviewed."""
     content = _init_repo(tmp_path, "content")
-    bare = _init_bare_remote(tmp_path)
+    bare = _init_bare_remote(tmp_path, name)
     _push_to_bare(content, bare)
     _patch_local_git(monkeypatch)
 
@@ -190,6 +192,8 @@ def test_public_repo_url_source(
     workspace = resolve(spec)
     assert workspace.cloned is True
     assert workspace.cwd.is_dir()
+    resolved_sha = _resolver_mod()._run_git(["rev-parse", "HEAD"], cwd=str(content)).strip()
+    assert workspace.source_identity == f"{bare}@{resolved_sha}"
 
     result = materialize(workspace, spec=spec, out_dir=tmp_path / "url-out")
     assert isinstance(result, DiffMaterialization)
@@ -201,11 +205,12 @@ def test_owner_name_shorthand_source(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     mod = _patch_local_git(monkeypatch)
     captured_urls: list[str] = []
     acquired_cls = mod.AcquiredSource
+    content = _init_repo(tmp_path, "shorthand-content")
 
     def _recording_acquire(source: Any, **kwargs: Any) -> Any:
         captured_urls.append(source.url)
         dest = kwargs["dest"]
-        dest.mkdir(parents=True, exist_ok=True)
+        _git(tmp_path, "clone", str(content), str(dest))
         return acquired_cls(path=dest, workspace_root=dest)
 
     monkeypatch.setattr(mod, "acquire", _recording_acquire)
@@ -218,6 +223,8 @@ def test_owner_name_shorthand_source(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert workspace.cloned is True
     assert captured_urls
     assert "github.com/acme/widget" in captured_urls[0]
+    expected_sha = mod._run_git(["rev-parse", "HEAD"], cwd=str(content)).strip()
+    assert workspace.source_identity == f"{captured_urls[0]}@{expected_sha}"
 
 
 def test_private_repo_with_token(
@@ -273,8 +280,8 @@ def test_head_does_not_checkout_local_branch(tmp_path: Path) -> None:
         invocation_root=tmp_path,
     )
     workspace = resolve(spec)
-    result = materialize(workspace, spec=spec, out_dir=tmp_path / "no-checkout-out")
-    assert "head.txt" in result.path.read_text(encoding="utf-8")
+    with pytest.raises(ValueError, match="clean checkout"):
+        materialize(workspace, spec=spec, out_dir=tmp_path / "no-checkout-out")
 
     after = subprocess.run(
         ["git", "branch", "--show-current"],
@@ -293,7 +300,6 @@ def test_head_and_base_refs_select_the_diff(tmp_path: Path) -> None:
     (repo / "head.txt").write_text("head change\n", encoding="utf-8")
     _git(repo, "add", "head.txt")
     _git(repo, "commit", "-m", "feature commit")
-    _git(repo, "checkout", "main")
 
     spec_cls = _spec_cls()
     resolve = _resolve_workspace()
@@ -472,6 +478,32 @@ def test_auth_precedence_order(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert resolve_auth().token is None
     assert resolve_auth().source == "anonymous"
+
+
+def test_auth_falls_back_when_gh_is_not_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An actual missing executable still permits anonymous public acquisition."""
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    auth = _resolve_auth_token()()
+
+    assert auth.token is None
+    assert auth.source == "anonymous"
+
+
+def test_auth_does_not_hide_other_execution_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    def denied(*args: object, **kwargs: object) -> None:
+        raise PermissionError("fixture execution denied")
+
+    monkeypatch.setattr(subprocess, "run", denied)
+    with pytest.raises(PermissionError, match="execution denied"):
+        _resolve_auth_token()()
 
 
 def test_review_alias_diff_review_still_works(tmp_path: Path) -> None:

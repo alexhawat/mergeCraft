@@ -18,6 +18,7 @@ from mergecraft.security.egress import SsrfBlockedError, guard_external_url
 from mergecraft.utils.git_hardening import git_argv
 from mergecraft.utils.git_setup import git_env_for_token, scrub_clone_credentials
 from mergecraft.utils.offline_diff import DiffMaterialization, materialize_diff
+from mergecraft.utils.runtime_artifacts import is_untracked_runtime_artifact
 from mergecraft.utils.workspace import register_workspace_root
 
 if TYPE_CHECKING:
@@ -322,6 +323,7 @@ class ResolvedWorkspace:
     git_common_dir: Path | None
     cloned: bool
     temp_dir: Path | None = None
+    source_identity: str | None = None
 
 
 def resolve_auth_token(*, explicit: str | None = None) -> AuthResolution:
@@ -334,13 +336,18 @@ def resolve_auth_token(*, explicit: str | None = None) -> AuthResolution:
         value = os.environ.get(env_var)
         if value:
             return AuthResolution(token=value, source=env_var)
-    result = subprocess.run(
-        ["gh", "auth", "token"],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=timeout_for_external_operation("http_request"),
-    )
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "token"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout_for_external_operation("http_request"),
+        )
+    except FileNotFoundError:
+        # gh is an optional credential source; public acquisition also works
+        # anonymously. Other execution failures retain their diagnostics.
+        return AuthResolution(token=None, source="anonymous")
     if result.returncode == 0:
         token = result.stdout.strip()
         if token:
@@ -511,6 +518,10 @@ def resolve_workspace(spec: SourceResolverSpec) -> ResolvedWorkspace:
             git_common_dir=resolve_git_common_dir(acquired.path),
             cloned=True,
             temp_dir=temp_dir,
+            source_identity=(
+                f"{_remote_source_identity(url)}@"
+                f"{_run_git(['rev-parse', 'HEAD'], cwd=str(acquired.path)).strip()}"
+            ),
         )
 
     local = Path(repo).expanduser().resolve()
@@ -522,6 +533,54 @@ def resolve_workspace(spec: SourceResolverSpec) -> ResolvedWorkspace:
         git_common_dir=resolve_git_common_dir(local),
         cloned=False,
     )
+
+
+def _remote_source_identity(url: str) -> str:
+    """Remove credential-bearing URL components from durable provenance only.
+
+    Acquisition still validates the original URL and rejects embedded userinfo.
+    Query strings and fragments are not repository identity and may hold tokens.
+    """
+    # file:// acquisition has already normalized to a literal local path.
+    # Its '?' and '#' characters belong to the filename, not URL metadata.
+    if not url.startswith(("https://", "http://")):
+        return url
+    parsed = urlparse(url)
+    return parsed._replace(netloc=parsed.netloc.rsplit("@", 1)[-1], query="", fragment="").geturl()
+
+
+def _require_local_revision_context(workspace: ResolvedWorkspace, spec: SourceResolverSpec) -> None:
+    """Reject revision patches whose source context is not the local checkout."""
+    if workspace.cloned or spec.staged or spec.unstaged:
+        return
+    target = parse_commit_range(spec.commit_range)[1] if spec.commit_range else spec.head
+    if target is None:
+        return
+    try:
+        current = _run_git(
+            ["rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"],
+            cwd=str(workspace.cwd),
+        ).strip()
+        requested = _run_git(
+            ["rev-parse", "--verify", "--end-of-options", f"{target}^{{commit}}"],
+            cwd=str(workspace.cwd),
+        ).strip()
+        dirty = _run_git(
+            ["status", "--porcelain=v1", "--untracked-files=no"], cwd=str(workspace.cwd)
+        ).strip()
+        untracked = _run_git(
+            ["ls-files", "-z", "--others", "--exclude-standard"], cwd=str(workspace.cwd)
+        )
+    except RuntimeError as exc:
+        raise SourceResolveError("cannot resolve the requested local revision") from exc
+    has_untracked_source = any(
+        path and not is_untracked_runtime_artifact(path) for path in untracked.split("\0")
+    )
+    if current != requested or dirty or has_untracked_source:
+        raise SourceResolveError(
+            "explicit local --head/--range requires a clean checkout at the requested head; "
+            "select a clean checkout or Git worktree with --cwd/--repo"
+        )
 
 
 def materialize_resolved_diff(
@@ -536,7 +595,7 @@ def materialize_resolved_diff(
         git_range_diff,
         git_ref_diff,
         git_staged_diff,
-        git_unstaged_diff,
+        git_unstaged_diff_with_limitations,
     )
 
     if diff_file is not None:
@@ -547,15 +606,17 @@ def materialize_resolved_diff(
             git_dir=workspace.git_common_dir,
         )
 
+    _require_local_revision_context(workspace, spec)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "review.diff"
     base_ref: str | None = None
+    coverage_limitations: tuple[str, ...] = ()
 
     if spec.staged:
         text = git_staged_diff(cwd=workspace.cwd)
         base_ref = None
     elif spec.unstaged:
-        text = git_unstaged_diff(cwd=workspace.cwd)
+        text, coverage_limitations = git_unstaged_diff_with_limitations(cwd=workspace.cwd)
         base_ref = None
     elif spec.commit_range:
         parse_commit_range(spec.commit_range)
@@ -600,7 +661,13 @@ def materialize_resolved_diff(
         f", base={base_ref}" if base_ref else "",
         path,
     )
-    return DiffMaterialization(path=path, base_ref=base_ref, line_count=line_count, empty=empty)
+    return DiffMaterialization(
+        path=path,
+        base_ref=base_ref,
+        line_count=line_count,
+        empty=empty,
+        coverage_limitations=coverage_limitations,
+    )
 
 
 __all__ = [

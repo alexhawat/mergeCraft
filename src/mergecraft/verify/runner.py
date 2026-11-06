@@ -182,11 +182,16 @@ def _write_artifacts(dest: Path, report: VerificationReport, log_text: str) -> N
         log_path.write_text(_redact_truncate(log_text), encoding="utf-8")
 
 
-async def _start_app(command: str) -> asyncio.subprocess.Process:
+def _resolve_repo_path(repo_path: str) -> Path:
+    return Path(repo_path).expanduser().resolve()
+
+
+async def _start_app(command: str, *, cwd: Path) -> asyncio.subprocess.Process:
     argv = shlex.split(command)
     logger.debug("verify-behavior starting app argv_len={}", len(argv))
     return await asyncio.create_subprocess_exec(
         *argv,
+        cwd=cwd,
         start_new_session=True,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
@@ -547,7 +552,8 @@ async def run_verify_behavior(
     logs: list[str] = []
     try:
         if spec.startup_command.strip():
-            proc = await _start_app(spec.startup_command)
+            repo_root = await asyncio.to_thread(_resolve_repo_path, spec.repo_path)
+            proc = await _start_app(spec.startup_command, cwd=repo_root)
             await asyncio.sleep(_STARTUP_SETTLE_S)
 
         if driver is None:

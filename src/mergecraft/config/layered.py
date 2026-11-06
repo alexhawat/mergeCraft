@@ -42,12 +42,17 @@ def merge_config_dicts(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> d
     return merged
 
 
-def _read_yaml_mapping(path: Path) -> dict[str, Any]:
+def _read_yaml_mapping(path: Path, *, strict: bool = False) -> dict[str, Any]:
     if not path.is_file():
         return {}
     try:
         loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as exc:
+        if strict:
+            # Parser exception text can echo source values; name the file and
+            # error type without printing potential credentials from its YAML.
+            msg = f"config parse error: {path} ({type(exc).__name__})"
+            raise ValueError(msg) from exc
         logger.warning("failed to parse config overlay {}: {}", path, exc)
         return {}
     if loaded is None:
@@ -63,26 +68,27 @@ def load_layered_config_dict(
     root: Path,
     explicit_path: Path | str | None = None,
     include_local: bool | None = None,
+    strict: bool = False,
 ) -> dict[str, Any]:
-    """Load config with precedence: committed < local < ``MERGECRAFT_CONFIG`` (D2 / W4)."""
+    """Load merged config; strict parsing is for explicit validation, not runtime."""
     if explicit_path is not None:
         candidate = Path(explicit_path)
         if not candidate.is_file():
             return {}
-        return migrate_config(_read_yaml_mapping(candidate))
+        return migrate_config(_read_yaml_mapping(candidate, strict=strict))
 
     env_path = ConfigLocatorEnv().config_path
     if env_path:
         candidate = Path(env_path)
         if candidate.is_file():
-            return migrate_config(_read_yaml_mapping(candidate))
+            return migrate_config(_read_yaml_mapping(candidate, strict=strict))
 
-    committed = migrate_config(_read_yaml_mapping(config_path_for_root(root)))
+    committed = migrate_config(_read_yaml_mapping(config_path_for_root(root), strict=strict))
     use_local = include_local if include_local is not None else not running_in_github_actions()
     if not use_local:
         return committed
 
-    local_raw = _read_yaml_mapping(local_config_path(root))
+    local_raw = _read_yaml_mapping(local_config_path(root), strict=strict)
     if not local_raw:
         return committed
     return migrate_config(merge_config_dicts(committed, local_raw))

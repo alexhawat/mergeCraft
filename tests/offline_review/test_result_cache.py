@@ -314,6 +314,12 @@ async def test_offline_cache_hit_rewrites_findings_json(
     async def _agent_must_not_run(**kwargs: object) -> OfflineReviewResult:
         raise AssertionError("cache hit must not re-run the agent")
 
+    # A completed review and managed analyzers can write these between runs
+    # even if the consumer has never run init or added gitignore entries.
+    for relative in ("reviews/run/snapshot.json", "analyzer-cache/tool/data", "audit.jsonl"):
+        artifact = repo / ".mergecraft" / relative
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text("generated output\n")
     monkeypatch.setattr(offline_mod, "run_offline_agent_review", _agent_must_not_run)
     second_path = tmp_path / "from-cache.json"
     second = await offline_mod._run_offline_diff_review(
@@ -635,3 +641,47 @@ async def test_resolved_model_cache_keys_do_not_collide(
     )
     assert len(keys) == 2
     assert keys[0] != keys[1]
+
+
+@pytest.mark.asyncio
+async def test_identical_patch_reruns_after_surrounding_source_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The actual offline driver caches only while surrounding source is identical."""
+    _isolate_cache(tmp_path, monkeypatch)
+    _patch_offline_harness(monkeypatch)
+    repo = _real_git_repo(tmp_path)
+    dependency = repo / "dependency.py"
+    dependency.write_text("result = 1\n")
+    monkeypatch.setattr(
+        offline_mod,
+        "materialize_resolved_diff",
+        lambda workspace, *, spec, out_dir, diff_file=None: _nonempty_materialization(out_dir),
+    )
+    runs = 0
+
+    async def agent(**kwargs: object) -> OfflineReviewResult:
+        nonlocal runs
+        runs += 1
+        return OfflineReviewResult(
+            success=True,
+            output="review",
+            structured_output=_valid_structured_output(),
+            outcome=RunOutcome.passed,
+        )
+
+    monkeypatch.setattr(offline_mod, "run_offline_agent_review", agent)
+    workspace = ResolvedWorkspace(cwd=repo, git_common_dir=repo / ".git", cloned=False)
+    for expected, content in [(1, "result = 1\n"), (1, "result = 1\n"), (2, "result = 2\n")]:
+        dependency.write_text(content)
+        result = await offline_mod._run_offline_diff_review(
+            cwd=repo,
+            workspace=workspace,
+            spec=SourceResolverSpec(cwd=repo, invocation_root=repo),
+            review_root=repo,
+            json_path=tmp_path / "findings.json",
+            use_cache=True,
+            model="test-model",
+        )
+        assert result.success
+        assert runs == expected

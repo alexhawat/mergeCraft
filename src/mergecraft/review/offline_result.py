@@ -53,6 +53,9 @@ class OfflineReviewResult:
     #: all-skipped run must not render as a clean screen (#786).
     jev_dispatch_skips: list[str] | None = None
     llm_review_timing: dict[str, object] | None = None
+    # Source and durable-storage roots differ for a temporary remote clone.
+    source_root: Path | None = None
+    persistence_root: Path | None = None
 
 
 def _offline_failure(

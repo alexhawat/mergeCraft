@@ -8,6 +8,46 @@ Full `mergecraft` command reference derived from the live Typer application.
 
 Pass `--help` to any invocation below for its full flag set.
 
+## Repository and output locations
+
+`review` separates the shell's invocation directory, the selected source
+repository, and explicit output destinations. Choose a checkout before choosing
+a revision; a diff alone is not a replacement for its surrounding source tree.
+
+| Input or operation | Source/configuration context | Storage and side effects |
+|---|---|---|
+| `review --cwd PATH` | Selects that local workspace; default is the invocation directory. Repository settings and implicit local `.env` follow the selected local target. | Review snapshots persist in the resolved local repository. Cache entries use that repository’s identity but live in `MERGECRAFT_CACHE_DIR` or the global XDG cache. The parent shell does not change directory. |
+| `review --repo PATH` | Selects an existing local repository instead of the caller's repository. | Results persist under that repository; explicit output paths still follow the invocation directory. |
+| Remote `--repo URL` or PR source | Acquires a source checkout and reads its repository configuration. Remote acquisition does not load a cloned `.env` as local credentials. | Durable `.mergecraft/reviews` records live under selected `--cwd` (default: invocation directory); snapshots identify the normalized remote URL and resolved commit, with manifests/evidence from the acquired source. |
+| `--head REF` or a commit range | When selecting a revision diff (without `--diff`, `--staged`, or `--unstaged`), for a local repository, the reviewed endpoint must equal its checked-out `HEAD`, and the tracked/nonignored working tree must be clean. Otherwise the command rejects the request. | Use a separate `git worktree` or check out the requested revision first. mergeCraft does not silently switch the user's local branch. |
+| Default working-tree review | Includes tracked changes and eligible nonignored additions relative to the selected base. Ignored environments/caches are outside source scope. | Oversized, binary, symlink or non-UTF-8 eligible additions are reported as coverage limitations. An empty but incomplete diff is not a clean pass. |
+| `--unstaged` | Reads tracked unstaged changes and eligible untracked additions, preserving omission metadata. | Does not stage or commit files. |
+| `MERGECRAFT_ENV` / ambient environment | An explicit env-file override wins; existing process variables keep precedence over loaded file values. GitHub Actions skips implicit local `.env` loading; local startup also skips Git-tracked implicit files and links to them. | Relative explicit env-file paths follow the invocation directory. See [authentication](authentication.md). |
+| `--output` / `--json` | Explicit destinations are interpreted relative to the invocation directory. | JSONL/SARIF require `--output` before review starts; missing destinations produce a configuration error. |
+| `verify-behavior` YAML `repo_path` | Selects the policy/settings root and `startup_command` working directory. Relative paths follow the invocation directory; `~` expands. | Relative verification artifact paths remain relative to the invocation directory. See [verification](verify-behavior.md). |
+
+Cache reuse requires both a matching review patch/configuration and a trustworthy
+source-context identity. Changing surrounding tracked or nonignored source,
+the base revision, or the reviewed endpoint invalidates reuse. When context
+cannot be safely fingerprinted, caching is skipped instead of claiming a hit.
+This includes submodules, external symlinks, unreadable source, and contexts
+exceeding 10,000 files or 64 MiB. Debug logging explains the skip without
+including file contents. External symlinks remain uncached because registered
+cross-repository roots can make their mutable targets visible to review tools;
+the selected repository's digest does not identify those targets.
+
+Untracked `.mergecraft/reviews/`, `.mergecraft/analyzer-cache/` and the legacy
+`.mergecraft/audit.jsonl` are generated output: they do not dirty an explicit
+local revision review, enter its diff, or invalidate its result cache. Tracked
+files at those locations still count as source. Other nonignored untracked
+files, including repository configuration, continue to count.
+
+The CLI's local file/environment rules are separate from Action checkout and
+operator-setting snapshots. Bound Action reviews retain their immutable reviewed
+commit for approval and completion. An unbound run can publish a diagnostic
+completion against the current API head, but cannot approve it. A later PR push
+needs a new review.
+
 <!-- BEGIN:cli-commands -->
 | Command | Description |
 |---------|-------------|
@@ -58,7 +98,7 @@ Pass `--help` to any invocation below for its full flag set.
 | `mergecraft config set <key> <value>` | Write a supported config key into `.mergecraft/config.yaml`. |
 | `mergecraft config show <key>` | Show a resolved config value and the precedence layer that supplied it. |
 | `mergecraft config tracing` | Render the resolved tracing config — sinks, retention, redaction, token redacted. |
-| `mergecraft config validate` | Validate repo config — unknown keys are rejected (extra=forbid). |
+| `mergecraft config validate` | Strictly parse contributing files and validate their merged configuration. |
 | `mergecraft context explain` | Explain why retrieved context was selected for a review. |
 | `mergecraft context inspect` | Report sources, scope, provenance citations, and token totals. |
 | `mergecraft context search <query>` | Search retrieved review context for a query. |
@@ -171,6 +211,17 @@ The bare `gha` group invocation (no subcommand) is the Docker action's runtime
 entry point — it is a Typer group callback, not a `registered_commands` leaf
 itself, so it is described here in prose rather than as its own table row;
 `mergecraft gha token` above is the one real leaf command under that group.
+
+## Local coverage toolchain
+
+`mergecraft review --with-coverage --shell enabled` uses the `coverage`
+executable on `PATH` for both test collection and JSON export. Activate the
+consumer project's environment containing coverage, pytest, and its test
+dependencies before running a separately installed mergeCraft CLI. If no
+`coverage` executable is found, mergeCraft uses the coverage module in its own
+Python environment when available. The existing trusted-source and sandbox
+requirements still apply; the GitHub Action consumes declared CI evidence
+instead of running consumer tests.
 
 ## JSON output schema
 
