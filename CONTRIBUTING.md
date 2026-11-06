@@ -205,6 +205,12 @@ makes the required context fail. PR Action E2E is called by CI once; release,
 scheduled and manual invocation remain available. The existing Integration
 workflow still provides its coverage ratchet and diagnostic artifacts.
 
+This graph also runs for documentation-only PRs: they build the Action image
+and run deterministic integration on both Python versions. The integration job
+has a 55-minute timeout, so the full required graph can take substantially longer
+than the docs checks alone. This cost keeps the same required acceptance checks
+on every PR; a path-based skip cannot stand in for a successful prerequisite.
+
 Live-provider and mutation advisory jobs remain outside this required graph.
 They provide different evidence and are not a substitute for deterministic
 acceptance. Keep the existing required static check names in branch protection.

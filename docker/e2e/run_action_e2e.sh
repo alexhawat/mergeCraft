@@ -11,6 +11,11 @@
 #   E2E_GITHUB_CONTROL_URL (optional host-side URL; Docker host maps to loopback)
 #   E2E_CHECK_RUNS_DIR   (host path; default docker/e2e/fixtures/check-runs/<event>)
 #   E2E_WORK_DIR         (scratch dir for GITHUB_OUTPUT / workspace copy)
+#
+# Local Linux runs retain root-owned fixture/output files in E2E_WORK_DIR for
+# debugging (the controller must own the local Git origin). After inspection,
+# restore ownership with `sudo chown -R "$(id -u):$(id -g)" <printed-work-dir>`
+# before deleting the scratch directory. Docker Desktop may map ownership for you.
 set -euo pipefail
 
 IMAGE="${1:?image tag required}"
@@ -21,6 +26,7 @@ E2E_DIR="${ROOT}/docker/e2e"
 API_URL="${E2E_GITHUB_API_URL:-http://host.docker.internal:8765}"
 WORK_DIR="${E2E_WORK_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/mergecraft-e2e.XXXXXX")}"
 CHECK_RUNS_DIR="${E2E_CHECK_RUNS_DIR:-${E2E_DIR}/fixtures/check-runs/live}"
+echo "» E2E artifacts retained in: ${WORK_DIR}"
 
 # The local origin invokes git-upload-pack inside the Action container. Create
 # its .git directory as that container's controller user; a runner-owned .git

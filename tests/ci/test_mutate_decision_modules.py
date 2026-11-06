@@ -157,3 +157,47 @@ def test_cli_fails_invalid_runs_and_cleans_up(
     monkeypatch.setattr(module, "_run_pytest", lambda *a, **kw: (next(codes), "collection failed"))
     assert module.main(["--module", "sample.py", "--max-mutants", "1"]) == 2
     assert cleaned == [True]
+
+
+@pytest.mark.parametrize("failure", ["dataclass-import", "collection-interrupt", "test-interrupt"])
+def test_real_pytest_distinguishes_import_kills_from_interrupts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    """Exercise pytest's real collection exits after a passing baseline."""
+    module = _load_mutate_module()
+    source = _sandbox(module, tmp_path, monkeypatch)
+    if failure == "dataclass-import":
+        original = (
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\nclass Base:\n    pass\n"
+            "@dataclass(frozen=True)\nclass Child(Base):\n    pass\n"
+            "def test_instance():\n    assert isinstance(Child(), Base)\n"
+        )
+    elif failure == "collection-interrupt":
+        original = (
+            "ready = True\nif not ready:\n    raise KeyboardInterrupt\ndef test_ok():\n    pass\n"
+        )
+    else:
+        original = (
+            "ready = True\ndef test_ok():\n    if not ready:\n        raise KeyboardInterrupt\n"
+        )
+    source.write_text(original)
+    mutant = next(
+        m for m in module._enumerate_line_mutants(original) if "'True'->'False'" in m.label
+    )
+    monkeypatch.setattr(module, "_enumerate_line_mutants", lambda text: [mutant])
+    monkeypatch.setattr(module, "_module_test_dirs", lambda: {"sample.py": ("sample.py",)})
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    monkeypatch.setenv("PYTEST_ADDOPTS", "")
+    result = module._mutate_module(
+        "sample.py",
+        sandbox_root=tmp_path,
+        python=Path(sys.executable),
+        max_mutants=1,
+        seed=42,
+        verbose=0,
+    )
+    assert source.read_text() == original
+    assert result.killed == int(failure == "dataclass-import")
+    assert result.errors == int(failure != "dataclass-import")
+    assert result.survived == 0

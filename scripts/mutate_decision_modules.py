@@ -348,6 +348,10 @@ def _run_pytest(
         "--tb=no",
         "-q",
         "-x",
+        # Pytest otherwise reports collection failures and KeyboardInterrupt
+        # as exit 2. Import-breaking mutants are ordinary detected failures;
+        # keep actual interrupts invalid instead of counting every exit 2 as a kill.
+        "--continue-on-collection-errors",
     ]
     proc = subprocess.run(
         cmd,
