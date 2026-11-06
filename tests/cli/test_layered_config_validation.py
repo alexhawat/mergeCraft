@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from rich.console import Console
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -31,9 +32,9 @@ def test_malformed_base_is_reported_but_runtime_policy_is_preserved(
     monkeypatch: pytest.MonkeyPatch,
     terminal_width: int,
 ) -> None:
-    from mergecraft.cli.consoles import err_console
+    from mergecraft.cli import errors
 
-    monkeypatch.setattr(err_console, "width", terminal_width)
+    monkeypatch.setattr(errors, "console", Console(stderr=True, width=terminal_width))
     root, committed, _local = config_pair
     assert load_repo_settings(root=root, load_learnings_files=False).shell == "disabled"
     committed.write_text("shell: disabled\nrunBounds: [\n", encoding="utf-8")
