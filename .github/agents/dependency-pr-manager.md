@@ -113,7 +113,7 @@ Assert every path is a manifest or lockfile for the PR's ecosystem:
 | pip | `pyproject.toml`, `uv.lock` |
 | npm | `docker/agent-clis/package.json`, `docker/agent-clis/package-lock.json` |
 | github-actions | `.github/workflows/*.yml`, `.github/actions/**/action.yml` |
-| docker | `Dockerfile`, `Dockerfile.analyzers` |
+| docker | `docker/Dockerfile`, `docker/Dockerfile.analyzers` |
 
 Anything else → lane `suspicious`, and say exactly which path failed the audit.
 

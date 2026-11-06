@@ -32,7 +32,7 @@ def _fail_under_from_pyproject() -> float:
 
 
 # Critical-path floors (line %, branch %). Values are measured - 2 on
-# 2026-09-22 @ HEAD 157f57a3 (see plans/COVERAGE-BASELINE.md).
+# 2026-09-22 @ HEAD 157f57a3 (see docs/dev/plans/COVERAGE-BASELINE.md).
 MODULE_FLOORS: dict[str, tuple[float, float]] = {
     "utils/token.py": (93.7, 91.2),
     "utils/git_setup.py": (93.3, 86.7),

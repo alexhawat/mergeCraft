@@ -5,7 +5,7 @@
 > skill distills for prompts.
 
 Review-check reasoning from `review_checks.py`, `review_taxonomy.py`,
-`mcp/static_checks.py`, and `REVIEW-CHECKS.md`. Later review-integrity
+`mcp/static_checks.py`, and `docs/REVIEW-CHECKS.md`. Later review-integrity
 work builds on these decisions — they are not recoverable from code alone.
 
 ## Mechanical gates vs findings
@@ -392,7 +392,7 @@ What the merge-evidence packet carries, and how each signal weights:
 | Signal | Weight | Notes |
 |--------|--------|-------|
 | `findings: list[Finding]` (typed, taxonomy-validated, `extra="forbid"`) | **structural** | One `Critical` or `Major` finding blocks. Source/severity/confidence preserved verbatim. |
-| `deterministic_checks: list[DeterministicCheck]` (name, status, command) | **mechanical** | Only `passed` / `failed` count as positive / negative evidence; `unavailable` / `declared-but-cannot-run` / `timed_out` are honest skips — not silent passes (PR #17 vocabulary, see `REVIEW-CHECKS.md`). |
+| `deterministic_checks: list[DeterministicCheck]` (name, status, command) | **mechanical** | Only `passed` / `failed` count as positive / negative evidence; `unavailable` / `declared-but-cannot-run` / `timed_out` are honest skips — not silent passes (PR #17 vocabulary, see `docs/REVIEW-CHECKS.md`). |
 | `ci_check_runs` / `ci_intelligence.annotations` | **mechanical** | Per-ref check-suite outcome + log-cluster signatures, flaky vs stable, blame-attributed. |
 | `self_assessment.approved: bool` + `self_assessment.sha` | **advisory only** | Recorded; never the sole positive input. The packet's `decision` row is authoritative. |
 | `decision: { verdict, reason, decided_by }` | **authoritative** | Populated by `decide_approval`. When present on the packet, it wins over every other signal. |
@@ -621,7 +621,7 @@ also skips Codex when the neutral reason names the untrusted tier: the tier is
 structurally inert, so a second rung can only reproduce the same neutral at
 full cost (#1078).
 
-See also [`REVIEW-CHECKS.md`](../REVIEW-CHECKS.md#terminal-verdict-vs-structural-verdict-vp2).
+See also [`docs/REVIEW-CHECKS.md`](REVIEW-CHECKS.md#terminal-verdict-vs-structural-verdict-vp2).
 
 ## Provenance
 

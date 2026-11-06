@@ -237,7 +237,7 @@ def test_llms_txt_lists_required_urls() -> None:
     required = (
         "README.md",
         "AGENTS-mergecraft.md",
-        "REVIEW-CHECKS.md",
+        "docs/REVIEW-CHECKS.md",
         "docs/ANALYZERS.md",
         "skills/mergecraft/SKILL.md",
     )

@@ -24,8 +24,8 @@ _REQUIRED_MANIFEST_PATHS = (
     "docs/cli.md",
     "docs/action-reference.md",
     "docs/ANALYZERS.md",
-    "CONTRIBUTING.md",
-    "REVIEW-CHECKS.md",
+    ".github/CONTRIBUTING.md",
+    "docs/REVIEW-CHECKS.md",
     "evals/README.md",
 )
 

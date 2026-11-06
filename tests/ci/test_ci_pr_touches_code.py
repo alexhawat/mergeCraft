@@ -26,7 +26,7 @@ pr_touches_code = _classifier.pr_touches_code
 
 
 def test_docs_only_markdown_and_docs_tree() -> None:
-    changed = ["README.md", "docs/guide.md", "plans/008-coverage-shards.md"]
+    changed = ["README.md", "docs/guide.md", "docs/dev/plans/008-coverage-shards.md"]
     assert pr_touches_code(changed) is False
     assert _matches_docs_only("CHANGELOG.md")
     assert not _matches_docs_only("evals/cases/foo.md")
@@ -65,3 +65,17 @@ def test_classifier_exits_zero_for_docs_only(tmp_path: Path) -> None:
 
 def test_empty_diff_is_not_code() -> None:
     assert pr_touches_code([]) is False
+
+
+def test_relocated_documents_preserve_docs_only_classification() -> None:
+    assert not pr_touches_code(
+        [
+            ".github/CONTRIBUTING.md",
+            "./.github/CODE_OF_CONDUCT.md",
+            "docs/dev/plans/README.md",
+            "docs/dev/plans/issues/coverage.md",
+        ]
+    )
+    assert pr_touches_code(["docs/assets/brand/build_logo.py"])
+    assert pr_touches_code([".github/zizmor.yml"])
+    assert pr_touches_code(["./.github/skills/code-review/SKILL.md"])

@@ -80,7 +80,7 @@ Follow the same consumer flow as other agents:
 ## Working on this repo (development)
 
 mergeCraft itself: Python **3.11+**, managed with uv, recurring commands via **Make**
-only (see [`CONTRIBUTING.md`](CONTRIBUTING.md) and
+only (see [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md) and
 [`docs/_standards/coding-standards.md`](docs/_standards/coding-standards.md)).
 
 ```bash
@@ -92,7 +92,7 @@ make ci         # full pre-merge gate
 ```
 
 - **Source:** `src/mergecraft/` — `cli/`, `agents/`, `analyzers/`, `mcp/`, `action/`, `config/`
-- **Docs:** `docs/`; review checks: [`REVIEW-CHECKS.md`](REVIEW-CHECKS.md)
+- **Docs:** `docs/`; review checks: [`docs/REVIEW-CHECKS.md`](docs/REVIEW-CHECKS.md)
 - **Review behaviour:** read [`docs/REVIEW-DOCTRINE.md`](docs/REVIEW-DOCTRINE.md) before
   editing review logic under `modes/`, `agents/`, or `analyzers/`
 - **Examples:** generated under `examples/` — edit templates in `scripts/`, not generated files

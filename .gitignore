@@ -67,7 +67,7 @@ tests/security/fixtures/evil-fsmonitor.sh
 docker/agent-clis/node_modules/
 
 # Local repo-native analyzer CLIs (#427)
-tools/node_modules/
+scripts/node_modules/
 
 # Regenerable verifier/tool output (never source of truth)
 /evidence/

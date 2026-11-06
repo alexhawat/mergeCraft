@@ -27,7 +27,7 @@ Read more: [Security model](workflows.md#security-model) in `docs/workflows.md`,
 A **typed finding** is one review issue with a severity, a file location, and a short
 explanation — the unit that drives inline comments and the merge gate.
 
-Read more: [REVIEW-CHECKS.md](../REVIEW-CHECKS.md) — how findings are graded and gated.
+Read more: [docs/REVIEW-CHECKS.md](REVIEW-CHECKS.md) — how findings are graded and gated.
 
 <span id="blast-radius"></span>
 
@@ -90,7 +90,7 @@ Read more: [Analyzer catalog — SARIF upload](ANALYZERS.md).
 The **structural approval gate** is the `mergecraft-approval` check: its pass or fail is
 computed only from typed findings and run state, not from free-form review prose.
 
-Read more: [Terminal verdict vs structural verdict](../REVIEW-CHECKS.md#terminal-verdict-vs-structural-verdict-vp2).
+Read more: [Terminal verdict vs structural verdict](REVIEW-CHECKS.md#terminal-verdict-vs-structural-verdict-vp2).
 
 <span id="learnings"></span>
 
@@ -105,4 +105,4 @@ Read more: [Eval bank — learnings](eval-bank.md).
 
 - [Landing README](../README.md) — links here on first use of each term
 - [docs/workflows.md](workflows.md) — trust tiers and workflow examples
-- [REVIEW-CHECKS.md](../REVIEW-CHECKS.md) — every check a review applies
+- [docs/REVIEW-CHECKS.md](REVIEW-CHECKS.md) — every check a review applies

@@ -1044,7 +1044,7 @@ def test_the_receipt_doc_documents_the_format_and_the_cap() -> None:
 
 
 def test_review_checks_says_receipts_never_run_tests() -> None:
-    text = (REPO_ROOT / "REVIEW-CHECKS.md").read_text(encoding="utf-8")
+    text = (REPO_ROOT / "docs" / "REVIEW-CHECKS.md").read_text(encoding="utf-8")
     paragraphs = [p for p in re.split(r"\n\s*\n", text) if "redGreen" in p]
 
     assert paragraphs

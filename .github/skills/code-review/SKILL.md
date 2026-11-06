@@ -24,7 +24,7 @@ correct, complete review of this repository. The `references/` files add depth;
 they are never prerequisites. Nothing in this skill tree links outside
 `.github/skills/code-review/`.
 
-> **For humans:** `REVIEW-CHECKS.md` is the consumer-facing check catalog;
+> **For humans:** `docs/REVIEW-CHECKS.md` is the consumer-facing check catalog;
 > `docs/REVIEW-DOCTRINE.md` is the rationale and rejected alternatives. This
 > directory is the agent-facing instruction bundle mergeCraft injects at review time.
 
