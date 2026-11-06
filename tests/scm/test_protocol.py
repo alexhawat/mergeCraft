@@ -236,11 +236,14 @@ def test_every_github_operation_is_expressible_through_the_protocol() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("ambient_graphql_url", [None, "https://ambient.example/api/graphql"])
 @pytest.mark.parametrize(
     ("tool_factory", "params", "expected_calls", "expected_payload"), _ENDPOINT_CASES
 )
 async def test_github_tool_endpoint_behaviour_is_unchanged(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ambient_graphql_url: str | None,
     tool_factory: Any,
     params: dict[str, Any],
     expected_calls: tuple[tuple[str, str], ...],
@@ -252,6 +255,10 @@ async def test_github_tool_endpoint_behaviour_is_unchanged(
     change to one endpoint or one rendered payload fails only that case instead
     of invalidating the behaviour pin for every other tool.
     """
+    if ambient_graphql_url is None:
+        monkeypatch.delenv("GITHUB_GRAPHQL_URL", raising=False)
+    else:
+        monkeypatch.setenv("GITHUB_GRAPHQL_URL", ambient_graphql_url)
     transport = github_snapshot_transport()
     github = RecordingGitHubClient(transport=transport)
     ctx = tool_ctx(tmp_path, github=github)

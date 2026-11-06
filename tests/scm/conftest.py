@@ -31,6 +31,7 @@ class RecordingGitHubClient(GitHubClient):
     def __init__(self, *, transport: httpx.MockTransport) -> None:
         super().__init__(
             "snapshot-token",
+            base_url="https://api.github.com",
             client=httpx.AsyncClient(
                 transport=transport,
                 base_url="https://api.github.com",
