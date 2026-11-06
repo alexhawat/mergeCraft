@@ -25,9 +25,15 @@ def config_pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, 
     return tmp_path, committed, local
 
 
+@pytest.mark.parametrize("terminal_width", [40, 80])
 def test_malformed_base_is_reported_but_runtime_policy_is_preserved(
     config_pair: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_width: int,
 ) -> None:
+    from mergecraft.cli.consoles import err_console
+
+    monkeypatch.setattr(err_console, "width", terminal_width)
     root, committed, _local = config_pair
     assert load_repo_settings(root=root, load_learnings_files=False).shell == "disabled"
     committed.write_text("shell: disabled\nrunBounds: [\n", encoding="utf-8")
@@ -35,7 +41,7 @@ def test_malformed_base_is_reported_but_runtime_policy_is_preserved(
     result = CliRunner().invoke(app, ["config", "validate", "--cwd", str(root)])
     assert result.exit_code != 0
     assert "config parse error" in result.output
-    assert "config.yaml" in result.output
+    assert str(committed) in result.output.replace("\n", "")
     assert load_repo_settings(root=root, load_learnings_files=False).shell == "restricted"
     validate_repo_config_or_raise(cwd=root)
 
