@@ -29,7 +29,11 @@ from mergecraft.analyzers.trust import (
     derive_trust_tier,
     resolve_analyzers_mode,
 )
-from mergecraft.ci.sarif_ingest import ingest_ci_sarif_from_action_env
+from mergecraft.ci.sarif_ingest import (
+    ingest_ci_sarif_from_action_env,
+    ingest_red_green_after_review,
+    record_unverified_red_green,
+)
 from mergecraft.classify.triage import TriageDecision
 from mergecraft.config.env import ActionInputEnv, EnvSettingsError, validate_env_settings
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
@@ -64,8 +68,10 @@ from mergecraft.review.roster_execution import (
 )
 from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.review_checks import StaticCheckConfig
+from mergecraft.review_policy.fix_labels import resolve_fix_labels
 from mergecraft.review_policy.ignore_paths import INPUT_ENV as IGNORE_PATHS_INPUT_ENV
 from mergecraft.review_policy.ignore_paths import list_pull_request_paths, resolve_review_ignore
+from mergecraft.review_policy.red_green import read_red_green_declaration
 from mergecraft.run_outcome import (
     RUN_OUTCOME_CONCLUSION,
     CompletionConclusion,
@@ -2294,11 +2300,14 @@ def _lite_inconclusive_reason(outcome: LiteOutcome) -> str | None:
 _IGNORE_SKIP_EVENTS: frozenset[str] = frozenset({"pull_request", "pull_request_target"})
 
 
-async def _fetch_pull_request_body(ctx: RunContext, pull: dict[str, Any]) -> str | None:
-    """Read the pull request's description through the SCM (one ``get_pull``).
+async def _fetch_pull_request(
+    ctx: RunContext, pull: dict[str, Any], *, what: str
+) -> dict[str, Any]:
+    """Read the pull request through the SCM (one ``get_pull``).
 
-    Raises when the read fails or there is no SCM to read with, so the caller
-    records the scope as unknown rather than skipping a body it could not see.
+    *what* names the field the caller is after, for the error. Raises when the
+    read fails or there is no SCM to read with, so the caller records what it
+    could not see rather than silently reading an empty value.
     """
     scm = getattr(ctx, "scm", None)
     tool_context = getattr(ctx, "tool_context", None)
@@ -2310,11 +2319,74 @@ async def _fetch_pull_request_body(ctx: RunContext, pull: dict[str, Any]) -> str
     raw_number = pull.get("number")
     number = raw_number if isinstance(raw_number, int) else ctx.pr_number
     if scm is None or repo is None or number is None:
-        msg = "the pull request body is not in the event and cannot be read"
+        msg = f"the pull request {what} is not in the event and cannot be read"
         raise RuntimeError(msg)
     fetched = await scm.get_pull(repo.owner, repo.name, int(number))
-    body = fetched.get("body") if isinstance(fetched, dict) else None
+    return fetched if isinstance(fetched, dict) else {}
+
+
+async def _fetch_pull_request_body(ctx: RunContext, pull: dict[str, Any]) -> str | None:
+    """Read the pull request's description through the SCM (one ``get_pull``).
+
+    Raises when the read fails or there is no SCM to read with, so the caller
+    records the scope as unknown rather than skipping a body it could not see.
+    """
+    body = (await _fetch_pull_request(ctx, pull, what="body")).get("body")
     return body if isinstance(body, str) else None
+
+
+async def _resolve_run_pull_request_metadata(ctx: RunContext) -> None:
+    """Record the pull request's title and label names on the run state (#1056 part 5).
+
+    A ``pull_request`` the run bound itself (the comment trigger, a PR-naming
+    ``workflow_dispatch``) carries only ``number``/``head``/``base``, and a dispatch
+    payload has no title either, so fix detection would see neither a ``fix:`` title
+    nor a ``bug`` label and an unproven fix would pass as ``fix.not-required``. The
+    title and labels are taken from the raw event when it has them
+    (``pull_request.*``, or ``issue.*`` on a comment on a pull request) and read
+    through the SCM once otherwise, onto ``ToolState.pull_request_title`` and
+    ``ToolState.pull_request_labels``. Never fails the run: a read that fails leaves
+    both ``None`` and is logged, so detection falls back to whatever the payload
+    carries. Author inputs only ever add the requirement.
+    """
+    if ctx.tool_state is None:
+        return
+    from mergecraft.evidence.run_packet import (
+        event_pull_request_labels,
+        event_pull_request_title,
+    )
+
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    title = event_pull_request_title(event)
+    labels = event_pull_request_labels(event)
+    if title is None or labels is None:
+        pull = event.get("pull_request")
+        if not isinstance(pull, dict):
+            return
+        try:
+            fetched = await _fetch_pull_request(ctx, pull, what="title and labels")
+        except Exception as err:  # fix detection keeps the payload's inputs, never crashes the run
+            logger.warning(
+                "fix_labels: the pull request's title and labels could not be read; "
+                "fix detection uses the event's inputs only: {}",
+                err,
+            )
+            return
+        read = {"pull_request": fetched}
+        if title is None:
+            title = event_pull_request_title(read)
+        if labels is None:
+            labels = event_pull_request_labels(read)
+        if title is None and labels is None:
+            logger.warning(
+                "fix_labels: the pull request read carries neither title nor labels; "
+                "fix detection uses the event's inputs only"
+            )
+            return
+    if title is not None:
+        ctx.tool_state.pull_request_title = title
+    if labels is not None:
+        ctx.tool_state.pull_request_labels = tuple(labels)
 
 
 async def _pull_request_body(ctx: RunContext) -> str | None:
@@ -2388,6 +2460,86 @@ async def _record_scope_declaration(ctx: RunContext) -> None:
             len(declaration.globs),
             len(declaration.rejected),
         )
+
+
+async def _resolve_run_fix_labels(ctx: RunContext) -> None:
+    """Record ``review.fixLabels`` from the operator's side of the pull request (#1056).
+
+    Stored on ``ToolState.fix_labels`` before any tier can skip the agent, so the
+    packet and the verification tool decide "is this a fix?" from base-side labels
+    only. Never fails the run: any doubt leaves the defaults (``bug``, ``fix``).
+    """
+    if ctx.settings is None or ctx.tool_state is None or ctx.tool_context is None:
+        return
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    repo = ctx.tool_context.repo
+    try:
+        labels = await resolve_fix_labels(
+            ctx.tool_context.scm,
+            repo.owner,
+            repo.name,
+            event=event,
+            run_start_review=ctx.settings.review,
+            operator_owned=ctx.settings_snapshot_operator_owned,
+        )
+    except Exception as err:  # fix detection falls back to the defaults, never off
+        logger.warning("fix_labels: could not resolve review.fixLabels, using defaults: {}", err)
+        from mergecraft.ci.red_green import DEFAULT_FIX_LABELS
+
+        labels = DEFAULT_FIX_LABELS
+    ctx.tool_state.fix_labels = labels
+
+
+async def _resolve_run_red_green_declaration(ctx: RunContext) -> None:
+    """Record the base-side ``ciEvidence.redGreen`` before any CI ingest (#1056).
+
+    Stored on ``ToolState.red_green_declaration``; with none declared,
+    ``ToolState.red_green`` records ``not-declared`` so a fix pull request is told
+    which setting is missing. A pull request's own config never declares its
+    receipt. Never fails the run: any doubt declares nothing.
+    """
+    if ctx.settings is None or ctx.tool_state is None or ctx.tool_context is None:
+        return
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    repo = ctx.tool_context.repo
+    unreadable: str | None
+    try:
+        declaration, unreadable = await read_red_green_declaration(
+            ctx.tool_context.scm,
+            repo.owner,
+            repo.name,
+            event=event,
+            run_start_ci_evidence=ctx.settings.ci_evidence,
+            operator_owned=ctx.settings_snapshot_operator_owned,
+        )
+    except Exception as err:  # an unresolvable declaration declares nothing, never fails
+        logger.warning("red_green: could not resolve ciEvidence.redGreen: {}", err)
+        declaration = None
+        unreadable = f"the PR base config could not be read ({type(err).__name__})"
+    ctx.tool_state.red_green_declaration = declaration
+    if declaration is None:
+        from mergecraft.ci.red_green import undeclared_red_green_evidence
+
+        ctx.tool_state.red_green = undeclared_red_green_evidence(unreadable)
+
+
+def _skip_without_review_diff(
+    ctx: RunContext, skip: SkipAgentReview | LiteAgentReview
+) -> SkipAgentReview | LiteAgentReview:
+    """A run without the agent has no review diff, so a declared receipt is unverified.
+
+    Both a ``skip`` tier and a ``lite`` tier leave the pull request unchecked out:
+    neither writes the review diff the untouched-workflow check needs, so the
+    fail-then-pass receipt cannot be verified on either path.
+    """
+    if ctx.tool_context is not None:
+        reason = (
+            skip.reason
+            if isinstance(skip, SkipAgentReview)
+            else f"lite tier: {skip.decision.reason}"
+        )
+        record_unverified_red_green(ctx.tool_context, reason=f"the agent did not run ({reason})")
+    return skip
 
 
 async def _ignore_paths_gate(ctx: RunContext) -> SkipAgentReview | None:
@@ -2496,10 +2648,14 @@ async def _run_review_after_analyze(
     """Setup script, MCP start, and payload-timed agent dispatch (review stage)."""
     await _apply_overrides_and_setup_git(ctx)
     assert ctx.tool_context is not None
+    await _resolve_run_red_green_declaration(ctx)
+    # The fail-then-pass receipt is read after the agent phase, once the review diff
+    # exists (``ingest_red_green_after_review`` below), not in this pre-agent lane.
     await ingest_ci_sarif_from_action_env(
         ctx.tool_context,
         ctx.gh_event or {},
         event_name=os.environ.get("GITHUB_EVENT_NAME", ""),
+        red_green=False,
     )
     await _run_setup_script_phase(ctx)
 
@@ -2528,6 +2684,10 @@ async def _run_review_after_analyze(
             ctx.setup_hook_failure,
         )
         raise sc_payload
+    # Base-side fix labels are recorded before any tier can skip the agent, the
+    # setup-script ``inconclusive`` skip included, so the packet never falls back.
+    await _resolve_run_fix_labels(ctx)
+    await _resolve_run_pull_request_metadata(ctx)
     if sc_action == "skip_agent":
         assert isinstance(sc_payload, str)
         skip_reason = sc_payload
@@ -2537,22 +2697,29 @@ async def _run_review_after_analyze(
             skip_reason,
         )
         # Engine publish (``_finalize``) owns completion; do not publish here.
-        return SkipAgentReview(reason=skip_reason)
+        return _skip_without_review_diff(ctx, SkipAgentReview(reason=skip_reason))
 
     # #1056 part 3: read once, before the fast-path gate and before any dispatch.
     await _record_scope_declaration(ctx)
     triage_out = await _triage_gate(ctx)
     if triage_out is not None:
-        return triage_out
+        return _skip_without_review_diff(ctx, triage_out)
     ignore_skip = await _ignore_paths_gate(ctx)
     if ignore_skip is not None:
-        return ignore_skip
+        return _skip_without_review_diff(ctx, ignore_skip)
 
     with gha_log.group("agent-dispatch"):
         await _prepare_agent_dispatch(ctx)
         dispatch_started = time.perf_counter()
         result = await _dispatch_agent_with_deadline(ctx)
         roster = await _run_server_roster_reviewers_if_needed(ctx)
+        # The review diff, ignored paths and unreviewable paths exist now, so the
+        # declared workflow can be shown untouched before the packet is assembled.
+        await ingest_red_green_after_review(
+            ctx.tool_context,
+            ctx.gh_event or {},
+            event_name=os.environ.get("GITHUB_EVENT_NAME", ""),
+        )
         if ctx.tool_state is not None:
             ctx.tool_state.phase_elapsed_s["agent"] = round(
                 time.perf_counter() - dispatch_started, 3

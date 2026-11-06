@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, NamedTuple, cast
+from typing import Literal, NamedTuple, NotRequired, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import TypedDict
@@ -38,16 +38,44 @@ class ScopeSignal(TypedDict):
     invalid: bool
 
 
+FixProofStatus = Literal[
+    "proven",
+    "not-proven",
+    "no-tests",
+    "no-receipt",
+    "invalid",
+    "mismatch",
+    "not-declared",
+    "not-required",
+]
+
+
+class FixProofSignal(TypedDict):
+    """Whether a change needs fail-then-pass proof, and what its receipt showed (#1056 part 5).
+
+    ``required`` is ``True`` for a fix pull request (conventional ``fix`` type or a
+    ``review.fixLabels`` label); ``status`` is the recorded receipt status
+    (``mergecraft.ci.red_green``), or ``not-required`` for a change that is not a fix.
+    ``detail`` is the recorded evidence's own sentence (why there is no receipt, which
+    fork ran it, what the size was); the unproven reasons repeat it.
+    """
+
+    required: bool
+    status: FixProofStatus
+    detail: NotRequired[str]
+
+
 class ChangeSet(TypedDict, total=False):
     """Side-effect-free change payload fed to the classifier.
 
-    ``scope`` is optional: without it the ``scope`` gate is left out of the
-    checklist (a library caller); a review run always supplies it.
+    ``scope`` and ``fix_proof`` are optional: without one, its gate is left out of
+    the checklist (a library caller); a review run always supplies both.
     """
 
     changed_paths: list[str]
     diff_stats: dict[str, object]
     scope: ScopeSignal
+    fix_proof: FixProofSignal
 
 
 class RuleOverride(TypedDict, total=False):
@@ -214,6 +242,12 @@ LANE_REASON_CATALOGUE: dict[str, Lane] = {
     "scope.invalid": "medium",
     "scope.drift": "medium",
     "scope.within": "low",
+    "fix.not-required": "low",
+    "fix.proven": "low",
+    "fix.not-proven": "medium",
+    "fix.no-receipt": "medium",
+    "fix.receipt.invalid": "medium",
+    "fix.receipt.mismatch": "medium",
 }
 """The closed catalogue of lane-reason codes and their **default** lanes (#1056).
 
@@ -234,14 +268,15 @@ GATE_ORDER: tuple[str, ...] = (
     "review_config",
     "source",
     "scope",
+    "fix_proof",
 )
 """The fixed order of :attr:`BlastRadiusClassification.checklist` gates.
 
-``scope`` is listed only when the change set carries a ``scope`` signal; every
-other gate is always listed.
+``scope`` and ``fix_proof`` are listed only when the change set carries the
+matching signal; every other gate is always listed.
 """
 
-_OPTIONAL_GATES: frozenset[str] = frozenset({"scope"})
+_OPTIONAL_GATES: frozenset[str] = frozenset({"scope", "fix_proof"})
 
 _Input = Literal["paths", "diff"]
 
@@ -297,6 +332,12 @@ _REASON_SPECS: dict[str, _ReasonSpec] = {
     "scope.invalid": _ReasonSpec(None, "scope"),
     "scope.drift": _ReasonSpec(None, "scope"),
     "scope.within": _ReasonSpec(None, None),
+    "fix.not-required": _ReasonSpec(None, None),
+    "fix.proven": _ReasonSpec(None, None),
+    "fix.not-proven": _ReasonSpec(None, "fix_proof"),
+    "fix.no-receipt": _ReasonSpec(None, "fix_proof"),
+    "fix.receipt.invalid": _ReasonSpec(None, "fix_proof"),
+    "fix.receipt.mismatch": _ReasonSpec(None, "fix_proof"),
 }
 
 # Floors a repository override may raise but never lower: the review-config
@@ -661,6 +702,85 @@ def _scope_outcome(change: ChangeSet, paths: list[str]) -> tuple[list[LaneReason
     ], False
 
 
+# A fix pull request's receipt status → the reason code and its message (#1056 part 5).
+_FIX_PROOF_OUTCOMES: dict[str, tuple[str, str]] = {
+    "proven": (
+        "fix.proven",
+        "a fail-then-pass receipt for this pull request's exact base and head SHAs shows a "
+        "test failing on the base and every listed test passing on the head",
+    ),
+    "not-proven": (
+        "fix.not-proven",
+        "the fail-then-pass receipt does not prove the fix: no listed test failed on the "
+        "base, or a listed test did not pass on the head",
+    ),
+    "no-tests": (
+        "fix.not-proven",
+        "the fail-then-pass receipt lists no tests, so it proves nothing",
+    ),
+    "no-receipt": (
+        "fix.no-receipt",
+        "this is a fix pull request and no successful workflow run on the head SHA "
+        "provided a readable fail-then-pass receipt",
+    ),
+    "not-declared": (
+        "fix.no-receipt",
+        "this is a fix pull request and the repository declares no "
+        "ciEvidence.redGreen receipt on its base, so the fix cannot be proven",
+    ),
+    "invalid": (
+        "fix.receipt.invalid",
+        "the fail-then-pass receipt could not be read: malformed, the wrong schema, or "
+        "over the size cap",
+    ),
+    "mismatch": (
+        "fix.receipt.mismatch",
+        "the fail-then-pass receipt was produced for other commits: its base and head SHAs "
+        "do not match this pull request's",
+    ),
+}
+
+
+# The unproven reasons whose message repeats the evidence detail.
+_FIX_PROOF_DETAILED: frozenset[str] = frozenset(
+    {"fix.no-receipt", "fix.receipt.invalid", "fix.receipt.mismatch"}
+)
+
+
+def _fix_proof_outcome(change: ChangeSet) -> tuple[list[LaneReason], bool]:
+    """The one ``fix.*`` reason and the ``fix_proof`` gate for a supplied signal.
+
+    Only ``required is False`` reads as "not a fix"; any other value, and any
+    status outside the vocabulary, fails closed as a missing receipt.
+    """
+    raw = change.get("fix_proof")
+    signal: dict[str, object] = (
+        cast("dict[str, object]", raw)  # reason: the TypedDict is a plain dict at runtime
+        if isinstance(raw, dict)
+        else {}
+    )
+    if signal.get("required") is False:
+        code = "fix.not-required"
+        message = (
+            "not a fix pull request (no conventional fix type and no fix label), so no "
+            "fail-then-pass receipt is required"
+        )
+    else:
+        status = signal.get("status")
+        code, message = _FIX_PROOF_OUTCOMES.get(
+            status if isinstance(status, str) else "",
+            (
+                "fix.no-receipt",
+                "this is a fix pull request and its fail-then-pass receipt status is unknown",
+            ),
+        )
+        detail = signal.get("detail")
+        if code in _FIX_PROOF_DETAILED and isinstance(detail, str) and detail.strip():
+            message = f"{message} ({detail.strip()})"
+    reason = LaneReason(code=code, lane=LANE_REASON_CATALOGUE[code], message=message)
+    return [reason], code in {"fix.not-required", "fix.proven"}
+
+
 def _checklist(
     reasons: list[LaneReason],
     missing: list[str],
@@ -670,8 +790,8 @@ def _checklist(
     """Every gate in :data:`GATE_ORDER`: ``False`` when a reason forces it above ``low``,
     ``True`` when measured and clean, ``None`` when its inputs were not given.
 
-    An optional gate (``scope``) is listed only when ``optional`` names it, with
-    the value its own signal produced."""
+    An optional gate (``scope``, ``fix_proof``) is listed only when ``optional``
+    names it, with the value its own signal produced."""
     failed = {
         gate
         for reason in reasons
@@ -719,6 +839,11 @@ def classify_blast_radius(
     a block that broke a bound is ``scope.invalid`` (gate ``False``, all
     ``medium``); no declaration is ``scope.unknown`` (``medium``, gate ``None``).
     Without a ``scope`` key the gate is left out and nothing else changes.
+    A ``fix_proof`` signal adds the ``fix_proof`` gate and one ``fix.*`` reason: a
+    change that is not a fix is ``fix.not-required`` and a fix with a ``proven``
+    receipt is ``fix.proven`` (both ``low``, gate ``True``); every other receipt
+    status is ``medium`` with its own code and gate ``False``. Without a
+    ``fix_proof`` key the gate is left out and nothing else changes.
     """
     missing = _missing_signals(change)
     raw_paths = change.get("changed_paths")
@@ -733,6 +858,9 @@ def classify_blast_radius(
     if "scope" in change:
         scope_reasons, optional["scope"] = _scope_outcome(change, paths)
         reasons.extend(scope_reasons)
+    if "fix_proof" in change:
+        fix_reasons, optional["fix_proof"] = _fix_proof_outcome(change)
+        reasons.extend(fix_reasons)
     lane = _max_lane([reason.lane for reason in reasons])
     if missing:
         categories.append(SIGNAL_MISSING_CATEGORY)
@@ -765,6 +893,8 @@ __all__ = [
     "BlastRadiusClassification",
     "ChangeSet",
     "ChecklistGate",
+    "FixProofSignal",
+    "FixProofStatus",
     "Lane",
     "LaneReason",
     "RuleSet",
