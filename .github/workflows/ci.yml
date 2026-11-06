@@ -173,9 +173,38 @@ jobs:
           path: coverage.json
           if-no-files-found: error
 
+  deterministic-integration:
+    name: Required integration (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: ${{ matrix.python }}
+        env:
+          MERGECRAFT_UV_EXTRAS: tracing
+      - name: Keyless integration acceptance
+        run: make test-integration
+
+  action-e2e:
+    uses: ./.github/workflows/e2e.yml
+    with:
+      required-security: true
+
   static:
     name: Verify (static + build py${{ matrix.python }})
-    needs: changes
+    needs: [changes, toolchain, deployment-candidate, eval-gate, privilege-root, deterministic-integration, action-e2e]
+    # A skipped required job may be accepted by branch protection. Always run
+    # this existing required context and explicitly fail unsuccessful parents.
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -183,6 +212,18 @@ jobs:
       matrix:
         python: ["3.11", "3.14"]
     steps:
+      - name: Require successful deterministic prerequisites
+        env:
+          REQUIRED_JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os, sys
+          jobs = json.loads(os.environ["REQUIRED_JOB_RESULTS"])
+          failed = {name: job.get("result") for name, job in jobs.items() if job.get("result") != "success"}
+          if not jobs or failed:
+              print(f"Required checks did not succeed: {failed or 'no prerequisite results'}", file=sys.stderr)
+              sys.exit(1)
+          PYCODE
       - name: Docs-only notice
         if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
         run: echo "::notice title=Verify (docs-only)::Running docs-check only — full static/build tier skipped."
@@ -195,6 +236,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/bootstrap
+        id: bootstrap
         with:
           python-version: ${{ matrix.python }}
       - name: Restore mypy analysis cache
@@ -208,6 +250,9 @@ jobs:
       - name: Static, typecheck, build tier
         if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         run: make ci-static
+      - name: Installed wheel acceptance (runtime dependencies only)
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+        run: make test-wheel-corpus
       - name: Docs-check (docs-only PRs)
         if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
         run: make docs-check
@@ -232,8 +277,9 @@ jobs:
           make action-pin-check
       # First-wave CI SARIF for mergeCraft ingest (#464 / D8). Upload even when
       # the static tier failed so the review still sees the tool's findings.
+      # A failed prerequisite skips checkout/bootstrap, so no report tools exist then.
       - name: Emit ruff and mypy SARIF
-        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
+        if: always() && steps.bootstrap.outcome == 'success' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         env:
           # Makefile bootstrap installs dev tools into .venv-dev (AG8); bare
           # `uv run` would create a base-only .venv and fail to spawn ruff/mypy.
@@ -255,7 +301,7 @@ jobs:
           fi
           uv run python scripts/native_output_to_sarif.py mypy .sarif/mypy.json .sarif/mypy.sarif
       - name: Upload ruff SARIF
-        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
+        if: always() && steps.bootstrap.outcome == 'success' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -263,7 +309,7 @@ jobs:
           path: .sarif/ruff.sarif
           if-no-files-found: warn
       - name: Upload mypy SARIF
-        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
+        if: always() && steps.bootstrap.outcome == 'success' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -275,13 +321,13 @@ jobs:
       # (JSONL converted to SARIF). Uploads run on Python 3.14 only — one
       # canonical artifact set per PR.
       - name: Emit actionlint and zizmor SARIF
-        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
+        if: always() && steps.bootstrap.outcome == 'success' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         continue-on-error: true
         env:
           MERGECRAFT_WORKFLOW_SARIF_DIR: .sarif
         run: ./scripts/workflow_lint.sh
       - name: Upload actionlint SARIF
-        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
+        if: always() && steps.bootstrap.outcome == 'success' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -289,7 +335,7 @@ jobs:
           path: .sarif/actionlint.sarif
           if-no-files-found: warn
       - name: Upload zizmor SARIF
-        if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
+        if: always() && steps.bootstrap.outcome == 'success' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         continue-on-error: true
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
