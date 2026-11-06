@@ -52,6 +52,13 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 
 from loguru import logger
 
+from mergecraft.scm.artifact_provenance import (
+    declared_artifact_archive,
+    provenanced_runs,
+    require_workflow_untouched,
+    workflow_path,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Coroutine, Mapping
 
@@ -507,178 +514,10 @@ def _vouch(raw: bytes, *, key: str, head: str, label: str) -> str:
     return detail if isinstance(detail, str) else ""
 
 
-async def _artifact_archive(
-    client: GitHubClient,
-    *,
-    owner: str,
-    repo: str,
-    runs: list[dict[str, Any]],
-    proof: ArtifactProof,
-    label: str,
-) -> tuple[int, bytes]:
-    """Return ``(run id, archive bytes)`` for the declared artifact of a successful run."""
-    for run in sorted(runs, key=lambda item: int(item.get("id") or 0), reverse=True):
-        run_id = int(run.get("id") or 0)
-        try:
-            artifacts = await client.list_workflow_run_artifacts(owner, repo, run_id)
-        except Exception as exc:  # a transport failure keeps the key absent
-            msg = f"the artifacts of workflow run {run_id} could not be listed for {label}: {exc}"
-            raise _Absent(msg) from exc
-        if artifacts.incomplete:
-            msg = f"the artifact listing of workflow run {run_id} was incomplete, so {label} is unconfirmed"
-            raise _Absent(msg)
-        for artifact in artifacts.items:
-            if not isinstance(artifact, dict) or artifact.get("name") != proof.name:
-                continue
-            if artifact.get("expired"):
-                msg = f"{label} from workflow run {run_id} has expired"
-                raise _Absent(msg)
-            size = artifact.get("size_in_bytes")
-            if not isinstance(size, int) or isinstance(size, bool) or size < 0:
-                msg = (
-                    f"{label} from workflow run {run_id} reports an unknown size, so it was "
-                    "not downloaded"
-                )
-                raise _Absent(msg)
-            if size > EVIDENCE_ARCHIVE_MAX_BYTES:
-                msg = f"{label} is a {size}-byte archive, past the {EVIDENCE_ARCHIVE_MAX_BYTES}-byte limit"
-                raise _Absent(msg)
-            artifact_id = int(artifact.get("id") or 0)
-            try:
-                archive = await client.download_artifact_zip(owner, repo, artifact_id)
-            except Exception as exc:  # a transport failure keeps the key absent
-                msg = f"{label} could not be downloaded: {exc}"
-                raise _Absent(msg) from exc
-            if len(archive) > EVIDENCE_ARCHIVE_MAX_BYTES:
-                msg = f"{label} is past the {EVIDENCE_ARCHIVE_MAX_BYTES}-byte archive limit"
-                raise _Absent(msg)
-            return run_id, archive
-    msg = f"no successful workflow run on the head commit uploaded {label}"
-    raise _Absent(msg)
-
-
-def _workflow_path(value: object) -> str:
-    return value.strip().removeprefix("./") if isinstance(value, str) else ""
-
-
-def _head_repository(run: Mapping[str, Any]) -> str:
-    repository = run.get("head_repository")
-    name = repository.get("full_name") if isinstance(repository, dict) else None
-    return name.strip() if isinstance(name, str) else ""
-
-
-def _provenanced_runs(
-    runs: list[dict[str, Any]], *, head: str, workflow: str, repo: str, label: str
-) -> list[dict[str, Any]]:
-    """Return the runs whose upload may count: the declared workflow, this repo, success.
-
-    A run counts only when it executed exactly the declared workflow file, its head
-    repository is the reviewed repository (never a fork, never unknown), and it
-    completed with ``success`` on the head commit. Every other run is ignored, so a
-    forged run listed beside the operator's can never shadow it.
-    """
-    on_head = [run for run in runs if _same_sha(run.get("head_sha"), head)]
-    if not on_head:
-        msg = f"no workflow run on the head commit {_short(head)} could have uploaded {label}"
-        raise _Absent(msg)
-    declared = [run for run in on_head if _workflow_path(run.get("path")) == workflow]
-    if not declared:
-        seen = sorted({_workflow_path(run.get("path")) or "no workflow path" for run in on_head})
-        msg = (
-            f"no run of the declared workflow {workflow} on the head commit {_short(head)} "
-            f"could have uploaded {label} (runs seen: {', '.join(seen)})"
-        )
-        raise _Absent(msg)
-    same_repo: list[dict[str, Any]] = []
-    foreign: list[str] = []
-    for run in declared:
-        origin = _head_repository(run)
-        if origin.lower() == repo.lower():
-            same_repo.append(run)
-        elif origin:
-            foreign.append(f"run {run.get('id')} came from {origin}")
-        else:
-            foreign.append(f"run {run.get('id')} has no head repository")
-    if not same_repo:
-        msg = (
-            f"no run of {workflow} on the head commit came from the reviewed repository "
-            f"{repo}, so {label} cannot count ({'; '.join(foreign)})"
-        )
-        raise _Absent(msg)
-    succeeded = [
-        run
-        for run in same_repo
-        if run.get("status") == "completed" and run.get("conclusion") == "success"
-    ]
-    if not succeeded:
-        msg = (
-            f"no run of {workflow} on the head commit {_short(head)} that uploads {label} succeeded"
-        )
-        raise _Absent(msg)
-    return succeeded
-
-
-def _require_workflow_untouched(ctx: Any, *, workflow: str, label: str) -> None:
-    """Fail closed unless the full, unfiltered change set shows ``workflow`` untouched.
-
-    The review diff is filtered: ``review.ignorePaths`` and the ``ignore_paths``
-    input drop whole files from it, and GitHub sends no patch for some files. The
-    change set judged here is therefore the review diff's paths plus every path
-    the review ignored (``ToolState.ignored_review_paths``) plus every path it could
-    not review (``ToolState.coverage.unreviewable_paths``). A diff that is missing
-    or unreadable, or a files listing that was truncated, cannot show the workflow
-    untouched, so the artifact never counts then either.
-    """
-    from mergecraft.mcp.tool_state import primary_repo_state
-    from mergecraft.utils.diff_paths import changed_paths_from_diff
-
-    state = ctx.tool_state
-    unverified = (
-        f"whether this pull request changes the declared workflow {workflow} could not be "
-        f"verified, so {label} cannot count"
-    )
-    diff_path = primary_repo_state(state).diff_path
-    if not diff_path:
-        msg = f"{unverified}: the review has no diff"
-        raise _Absent(msg)
-    try:
-        text = Path(diff_path).read_text(encoding="utf-8")
-        reviewed = {_workflow_path(path) for path in changed_paths_from_diff(text)}
-    except (OSError, ValueError) as exc:
-        msg = f"{unverified}: the diff could not be read or parsed ({exc})"
-        raise _Absent(msg) from exc
-    ignored = {_workflow_path(path) for path in getattr(state, "ignored_review_paths", ())}
-    coverage = getattr(state, "coverage", None)
-    unreviewable = {
-        _workflow_path(path) for path in getattr(coverage, "unreviewable_paths", ()) or ()
-    }
-    if workflow in ignored:
-        msg = (
-            f"this pull request changes the declared workflow {workflow}; the change was "
-            f"ignored in review (ignorePaths) but still voids {label}"
-        )
-        raise _Absent(msg)
-    if workflow in unreviewable:
-        msg = (
-            f"this pull request changes the declared workflow {workflow} (GitHub sent no "
-            f"reviewable patch for it, so the path is unreviewable in the diff), so nothing it uploads counts as {label}"
-        )
-        raise _Absent(msg)
-    if workflow in reviewed:
-        msg = (
-            f"this pull request changes the declared workflow {workflow}, so nothing it "
-            f"uploads counts as {label}"
-        )
-        raise _Absent(msg)
-    if getattr(coverage, "diff_truncated", False):
-        msg = f"{unverified}: the pull request's diff file listing was truncated"
-        raise _Absent(msg)
-
-
 async def _produce_artifact(ctx: Any, key: str, proof: ArtifactProof) -> EvidenceRecord:
     label = f"artifact '{proof.name}'"
-    workflow = _workflow_path(proof.workflow)
-    _require_workflow_untouched(ctx, workflow=workflow, label=label)
+    workflow = workflow_path(proof.workflow)
+    require_workflow_untouched(ctx.tool_state, workflow=workflow, label=label, refuse=_Absent)
     head = _head_sha(ctx)
     client = _client(ctx, label)
     owner, repo = _repo_slug(ctx)
@@ -693,12 +532,26 @@ async def _produce_artifact(ctx: Any, key: str, proof: ArtifactProof) -> Evidenc
         )
         raise _Absent(msg)
     runs = [run for run in listed.items if isinstance(run, dict)]
-    succeeded = _provenanced_runs(
-        runs, head=head, workflow=workflow, repo=f"{owner}/{repo}", label=label
+    succeeded = provenanced_runs(
+        runs,
+        head=head,
+        workflow=workflow,
+        repo=f"{owner}/{repo}",
+        label=label,
+        refuse=_Absent,
+        short=_short,
     )
-    run_id, archive = await _artifact_archive(
-        client, owner=owner, repo=repo, runs=succeeded, proof=proof, label=label
+    run, archive = await declared_artifact_archive(
+        client,
+        owner=owner,
+        repo=repo,
+        runs=succeeded,
+        artifact=proof.name,
+        label=label,
+        max_bytes=EVIDENCE_ARCHIVE_MAX_BYTES,
+        refuse=_Absent,
     )
+    run_id = run.get("id")
     raw = _read_document(archive, label=label)
     detail = _vouch(raw, key=key, head=head, label=label)
     shown = f"{proof.name} from workflow run {run_id} of {workflow}"

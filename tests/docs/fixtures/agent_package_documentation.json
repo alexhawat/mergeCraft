@@ -1,11 +1,11 @@
 {
-  "ref": "09d441236e80a10758d4058b64e7ac60fe52925e",
+  "ref": "a0cbc782b19cb6447eb566fd34edc0329567d548",
   "blobs": {
-    "README.md": "d501035cbee516e82f2a470fbe33924a72d4e35f",
-    "AGENTS-mergecraft.md": "ecab2f19c69246d5d703d5cc31934d2447d5b584",
-    "REVIEW-CHECKS.md": "45e8e026e5b0d5da2cd2fba9499f5f58f3177bdf",
-    "docs/README.md": "8c396d809394e4b56c8a4a388e8f03d054caea37",
-    "docs/install.md": "1af91b4ef60fbd41c585d91893c4b88fcdff291c",
-    "docs/mcp.md": "228267a5c5cf579185e0e78dcde771a10521a5d6"
+    "README.md": "6332e8a959e165a619f50c09a52a1ad9ce9f815d",
+    "AGENTS-mergecraft.md": "7edb0e56ddf898b6a35e03b0b67f34e490b74306",
+    "docs/REVIEW-CHECKS.md": "77e678fb89db2891eb5928287953928fa1e4760a",
+    "docs/README.md": "b687f5095f18c032fcfd6e3b469f00332c6713b1",
+    "docs/install.md": "1ae8e77ea6c5c4337c738193a6cfa4cd6b653e10",
+    "docs/mcp.md": "c4ee1d6b7e7f891b3003f51234973fd770919bdc"
   }
 }

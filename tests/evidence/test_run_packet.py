@@ -74,6 +74,17 @@ diff --git a/README.md b/README.md
 """
 
 
+def _fix_proof_kwargs(classifier: Any) -> dict[str, Any]:
+    """A non-fix ``fix_proof`` signal once the run classifier requires one.
+
+    #1056 part 5 makes ``fix_proof`` a required keyword on ``classify_run_blast_radius``;
+    a pull request that is not a fix leaves every part-2 gate exactly as before.
+    """
+    if "fix_proof" in inspect.signature(classifier).parameters:
+        return {"fix_proof": {"required": False, "status": "not-required"}}
+    return {}
+
+
 def _classify_run(diff_text: str) -> Any:
     """Call the run's diff classifier with an undeclared scope once it requires one.
 
@@ -81,8 +92,10 @@ def _classify_run(diff_text: str) -> Any:
     """
     if "scope" in inspect.signature(classify_run_blast_radius).parameters:
         undeclared = {"declared": False, "globs": [], "invalid": False}
-        return classify_run_blast_radius(diff_text, scope=undeclared)
-    return classify_run_blast_radius(diff_text)
+        return classify_run_blast_radius(
+            diff_text, scope=undeclared, **_fix_proof_kwargs(classify_run_blast_radius)
+        )
+    return classify_run_blast_radius(diff_text, **_fix_proof_kwargs(classify_run_blast_radius))
 
 
 def _make_ctx(

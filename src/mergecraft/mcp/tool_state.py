@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from mergecraft.analyzers.dispositions import DispositionLedger
+    from mergecraft.ci.red_green import RedGreenEvidence
+    from mergecraft.config.settings import RedGreenReceiptSettings
     from mergecraft.config.trust_policy import AgentSandboxDecision
     from mergecraft.findings.ledger import FindingLedger
     from mergecraft.modes import Mode
@@ -663,6 +665,28 @@ class ToolState:
     # out of the reviewer's diff, which the review body lists as not reviewed.
     review_ignore: Any = None
     ignored_review_paths: list[str] = field(default_factory=list)
+    # Fail-then-pass receipt (#1056 part 5): what the run read for the declared
+    # ``ciEvidence.redGreen`` on the head SHA, or ``not-declared`` when the base
+    # declares none. ``None`` means no receipt was read (CI ingest did not run); a
+    # fix pull request is then ``fix.no-receipt``, never proven.
+    red_green: RedGreenEvidence | None = None
+    # The base-side ``ciEvidence.redGreen`` resolved at run start
+    # (``review_policy.red_green``); ``None`` when the base declares none or could
+    # not be read. A pull request's own config never declares its receipt.
+    red_green_declaration: RedGreenReceiptSettings | None = None
+    # ``review.fixLabels`` resolved at run start from the operator's side of the pull
+    # request only (``review_policy.fix_labels``); ``None`` until resolved. A pull
+    # request's own config can never switch off label-based fix detection.
+    fix_labels: tuple[str, ...] | None = None
+    # The pull request's own label names, read through the SCM at run start when the
+    # bound event carries none (the comment trigger, a PR-naming ``workflow_dispatch``
+    # bind a ``pull_request`` without ``labels``). ``None`` until read; the raw
+    # event's labels are used then. Labels only ever add the fix requirement.
+    pull_request_labels: tuple[str, ...] | None = None
+    # The pull request's own title, read the same way: a bound ``pull_request`` has
+    # no ``title`` and a PR-naming ``workflow_dispatch`` payload has none either, so
+    # without this read a ``fix:``-titled pull request would pass as not a fix there.
+    pull_request_title: str | None = None
 
     def iter_finding_rows(self) -> list[dict[str, Any]]:
         """Return every dict-shaped finding row across analyzer and agent lanes."""

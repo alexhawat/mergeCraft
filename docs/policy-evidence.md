@@ -229,7 +229,7 @@ missing: <reason>` line for each of them.
 
 ## See also
 
-- [`REVIEW-CHECKS.md`](../REVIEW-CHECKS.md), *Policy rules*: enforcement modes,
+- [`docs/REVIEW-CHECKS.md`](REVIEW-CHECKS.md), *Policy rules*: enforcement modes,
   where the rules come from, and waivers.
 - [`docs/trust-policy.md`](trust-policy.md): which events capture an operator-owned
   snapshot, and when the base commit's configuration applies instead.

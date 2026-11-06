@@ -16,6 +16,7 @@ from tests.mcp.test_checkout import (
     _StubGitHub,
 )
 
+from mergecraft.ci.red_green import RedGreenEvidence
 from mergecraft.config.settings_snapshot import assert_config_unchanged
 from mergecraft.evidence.coverage import _read_evidence
 from mergecraft.evidence.trajectory import ToolCallRecord
@@ -107,6 +108,9 @@ async def test_checkout_retry_invalidates_old_scope_and_can_recover(
     state.approval = ApprovalRecord(would_approve=True, sha=old_sha)
     state.pending_review_publication = {"commit_id": old_sha, "body": "old verdict"}
     state.prepared_run_packet = object()
+    state.red_green = RedGreenEvidence(
+        status="proven", test_count=1, artifact="old-receipt", run_url=None, detail="old SHA"
+    )
     state.analyzer_run = AnalyzerRunState(ran=True)
     state.static_checks_ran = True
     state.verified_ids.add("old-verification")
@@ -154,6 +158,7 @@ async def test_checkout_retry_invalidates_old_scope_and_can_recover(
     assert state.checkout_scope_invalidated
     assert state.approval is state.pending_review_publication is state.prepared_run_packet is None
     assert not state.agent_findings
+    assert state.red_green is None
     assert state.analyzer_run is None
     assert not state.static_checks_ran
     assert not state.verified_ids

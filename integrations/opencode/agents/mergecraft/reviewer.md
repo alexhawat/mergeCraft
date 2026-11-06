@@ -34,7 +34,7 @@ If none of these yields a change, say so and stop — do not invent a diff.
 1. Repo policy, when the mergecraft MCP server is connected: call
    `get_policy` and `get_capabilities` first, and `explain_finding` for any
    finding you are unsure about.
-2. `REVIEW-CHECKS.md` at the repository root, when present.
+2. `docs/REVIEW-CHECKS.md` at the repository root, when present.
 3. The built-in rules below.
 
 ### Built-in rules

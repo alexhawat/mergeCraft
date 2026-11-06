@@ -214,7 +214,7 @@ a `findings` item.
 
 **`raised_by` is not a packet field.** Multi-reviewer provenance is stamped
 server-side on terminal-submission finding rows and rendered in the published
-review body / deterministic run record (`REVIEW-CHECKS.md` §8 and §11). It is
+review body / deterministic run record (`docs/REVIEW-CHECKS.md` §8 and §11). It is
 deliberately absent from the agent-facing `submit_review_verdict` schema and
 from the typed `Finding` model here — an agent-supplied provenance field would
 be forgeable. Packet consumers that need reviewer attribution should read the

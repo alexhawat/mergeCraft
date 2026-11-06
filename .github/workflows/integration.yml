@@ -4,7 +4,7 @@
 # PR: mocked / self-skipping ``@pytest.mark.integration`` suite + coverage
 # ratchet + npm audit + actionlint/zizmor.
 # Schedule / dispatch: live-provider integration with secrets (release
-# precondition — see CONTRIBUTING.md §Cut a release), plus a non-blocking
+# precondition — see .github/CONTRIBUTING.md §Cut a release), plus a non-blocking
 # unit-suite run with a per-run random seed (#776 / F9): a pinned seed fixes
 # the permutation of a collection, not the collection itself.
 #
@@ -232,7 +232,7 @@ jobs:
           cache: npm
           cache-dependency-path: |
             docker/agent-clis/package-lock.json
-            tools/package-lock.json
+            scripts/package-lock.json
       - name: npm audit (agent-clis lockfile)
         run: make npm-audit
       - name: actionlint + zizmor

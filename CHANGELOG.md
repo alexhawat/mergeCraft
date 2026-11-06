@@ -65,6 +65,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carry tool directives (lint, coverage, fallthrough, generator pragmas) are
   refused on a best-effort word list. Opt in through `skipLlm` like the other recognizers
   (#1010).
+- A fix pull request now has to prove the fix with a fail-then-pass receipt
+  before it can reach the `eligible` lane (#1056). Declare the receipt in
+  `ciEvidence.redGreen` (`artifact`, and the `workflow` that uploads it; read
+  only from the pull request base): a JSON receipt (`mergecraft.red-green/1`, at
+  most 1 MB and 2 000 tests) listing each test's result on the base and on the
+  head. The review reads it only from a successful run of that workflow in the
+  reviewed repository (never a fork) on the head SHA, only when the pull request
+  leaves that workflow untouched, accepts it only for the pull request's exact
+  base and head SHAs, and never runs a test itself. A pull
+  request is a fix when its title has a conventional `fix` type or it carries a
+  label in the new `review.fixLabels` (default `bug`, `fix`; honoured only from
+  the pull request base, so a pull request cannot drop its own labels). A new `fix_proof`
+  checklist gate passes for a non-fix (`fix.not-required`) or a `proven`
+  receipt (`fix.proven`); a fix whose receipt is missing, undeclared, unproven,
+  malformed or for other commits keeps the lane at least `medium` with its own
+  `fix.*` reason. The receipt is written by the head's own test run, so it
+  proves what that run reported and is no defence against an author with push
+  access to the workflows. See `docs/red-green-receipts.md`.
+  - A base whose config cannot be read, does not validate, or whose commit is
+    unknown now says the base config "could not be read" instead of reporting
+    that it declares no receipt; the base-side `review.fixLabels` is also
+    resolved when a setup-script failure skips the agent.
+  - The pull request's title and labels are read once at run start when the event
+    does not carry them (a review started from a comment on the pull request or
+    from a `workflow_dispatch` naming it), so a `fix:`-titled or `bug`-labelled fix
+    is still asked for its receipt on those triggers; a failed read falls back to
+    what the event carries. The
+    artifact provenance checks the receipt shares with the policy proofs
+    (declared workflow untouched, same-repository successful run, bounded
+    download) now live in one module used by both.
 
 - A `required` policy rule can now clear on evidence the review collects
   itself, instead of sitting at `Major` until it is waived (#1114). The rule's
@@ -155,6 +185,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Consolidate container files under `docker/`, documentation and assets under `docs/`, community guidelines under `.github/`, and build/analyzer tooling under `scripts/`; preserve published Action and plugin paths (#1151).
+
 - A pull request without a declared scope can no longer reach the `eligible`
   lane (#1056). End the pull request body, or an issue it closes, with a
   `Scope paths:` block listing the globs the change is expected to touch; the
@@ -233,6 +265,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read from the environment stay masked in diagnostics.
 
 ### Fixed
+
+- Audit remediation hardens revision-bound approvals, checkout recovery, fork
+  trust, CLI workspace and cache identity, finding attribution and severity.
+  Checkout retries also discard fail-then-pass evidence from the old revision;
+  malformed diffs cannot establish artifact provenance. Includes regression
+  coverage, real Action-image acceptance, pinned consumer installation docs and
+  release-pin maintenance (#1197, #1198, #1199, #1200, #1201).
+
 
 - A review whose verdict was accepted no longer ends `failed` with
   `provider_failure` and `action failed: opencode failed` when the agent CLI then

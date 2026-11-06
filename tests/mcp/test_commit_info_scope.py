@@ -115,6 +115,10 @@ async def test_blast_radius_survives_head_inspection(tmp_path: Path) -> None:
         if "scope" in inspect.signature(classify_run_blast_radius).parameters
         else {}
     )
+    # #1056 part 5: ``fix_proof`` becomes a required keyword too; a non-fix signal
+    # leaves the lane comparison exactly as before.
+    if "fix_proof" in inspect.signature(classify_run_blast_radius).parameters:
+        kwargs["fix_proof"] = {"required": False, "status": "not-required"}
     before = classify_run_blast_radius(pr.pr_diff_text(), **kwargs)
 
     await _inspect_head(ctx, pr.head_sha)

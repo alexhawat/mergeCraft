@@ -5,8 +5,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/mark-dark.svg">
-  <img src="assets/brand/mark-light.svg" alt="mergeCraft logo" width="120"/>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/mark-dark.svg">
+  <img src="docs/assets/brand/mark-light.svg" alt="mergeCraft logo" width="120"/>
 </picture>
 
 # mergeCraft
@@ -333,8 +333,8 @@ One Docker action, one YAML workflow, MIT-licensed Python you can read end to en
 ## How it works in GitHub Action
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/pipeline-dark.svg">
-  <img src="assets/diagrams/pipeline-light.svg" alt="mergeCraft review pipeline: PR event through analyzers, review agent, verifier, and findings">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/diagrams/pipeline-dark.svg">
+  <img src="docs/assets/diagrams/pipeline-light.svg" alt="mergeCraft review pipeline: PR event through analyzers, review agent, verifier, and findings">
 </picture>
 
 A pull request event resolves a **[trust tier](docs/glossary.md#trust-tier)**, runs the matching **[analyzers](docs/glossary.md#analyzer)**,
@@ -581,7 +581,7 @@ When `harness:` is unset, mergeCraft infers the runtime from the model slug — 
 | [`docs/trust-policy.md`](docs/trust-policy.md) | Operator trust knobs (`selfReview`, `agentSandbox`) |
 | [`docs/action-reference.md`](docs/action-reference.md) | Every Action `with:` input and output |
 | [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md) | Contractual CLI exit codes |
-| [`REVIEW-CHECKS.md`](REVIEW-CHECKS.md) | Every check a review applies — lenses, gates, grading |
+| [`docs/REVIEW-CHECKS.md`](docs/REVIEW-CHECKS.md) | Every check a review applies — lenses, gates, grading |
 | [`docs/ANALYZERS.md`](docs/ANALYZERS.md) | Analyzer catalog, trust tiers, SARIF upload |
 | [`docs/compatibility-matrix.md`](docs/compatibility-matrix.md) | Supported events, agents, providers, shell/push modes |
 | [`SECURITY.md`](SECURITY.md) | Threat model, trust tiers, reporting |
@@ -597,7 +597,7 @@ make test       # pytest
 make ci         # full gate
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor workflow.
+See [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) for contributor workflow.
 
 ## License
 
@@ -691,7 +691,7 @@ Follow the same consumer flow as other agents:
 ## Working on this repo (development)
 
 mergeCraft itself: Python **3.11+**, managed with uv, recurring commands via **Make**
-only (see [`CONTRIBUTING.md`](CONTRIBUTING.md) and
+only (see [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md) and
 [`docs/_standards/coding-standards.md`](docs/_standards/coding-standards.md)).
 
 ```bash
@@ -703,7 +703,7 @@ make ci         # full pre-merge gate
 ```
 
 - **Source:** `src/mergecraft/` — `cli/`, `agents/`, `analyzers/`, `mcp/`, `action/`, `config/`
-- **Docs:** `docs/`; review checks: [`REVIEW-CHECKS.md`](REVIEW-CHECKS.md)
+- **Docs:** `docs/`; review checks: [`docs/REVIEW-CHECKS.md`](docs/REVIEW-CHECKS.md)
 - **Review behaviour:** read [`docs/REVIEW-DOCTRINE.md`](docs/REVIEW-DOCTRINE.md) before
   editing review logic under `modes/`, `agents/`, or `analyzers/`
 - **Examples:** generated under `examples/` — edit templates in `scripts/`, not generated files
@@ -730,7 +730,7 @@ Do not set these in CI or production workflows.
 - Do not add entries to `evidence/` (slated for deletion).
 - Conventional Commits; subject ≤ 72 characters; no `--no-verify` unless the operator allows it.
 
-===== FILE: REVIEW-CHECKS.md =====
+===== FILE: docs/REVIEW-CHECKS.md =====
 
 # What mergecraft checks for
 
@@ -746,7 +746,7 @@ Every check mergecraft applies when it reviews a pull request, grouped by what i
 
 A quick orientation before the lists:
 
-- Most of these are **judgment checks** carried out by the reviewing agent, not scripted rules. There is no rule engine — the behavior lives in the `Review` and `IncrementalReview` mode prompts in [`src/mergecraft/modes/Review.py`](src/mergecraft/modes/Review.py) and [`src/mergecraft/modes/IncrementalReview.py`](src/mergecraft/modes/IncrementalReview.py).
+- Most of these are **judgment checks** carried out by the reviewing agent, not scripted rules. There is no rule engine — the behavior lives in the `Review` and `IncrementalReview` mode prompts in [`src/mergecraft/modes/Review.py`](../src/mergecraft/modes/Review.py) and [`src/mergecraft/modes/IncrementalReview.py`](../src/mergecraft/modes/IncrementalReview.py).
 - **Mechanical evidence** comes from two layers: your repo's own gates (`staticChecks` / Makefile targets via `run_static_checks`) and mergeCraft's **catalog analyzers** (`run_analyzers`). Only **`failed`** gate status and **verified** analyzer findings become review signal — everything else is reported as skipped.
 - Groups 1–3 are the ones that produce findings. Groups 4–8 govern how findings are graded, placed, filtered, and formatted — they are why the review stays short.
 
@@ -819,6 +819,23 @@ before any prompt. Treat it as evidence about the running app, not a
 substitute for reading the diff. `skipped` and `blocked` are not a pass —
 `blocked` names the missing input and stays visible; omitting the report
 leaves the review unchanged.
+
+A fail-then-pass receipt is how a fix pull request proves itself, and mergeCraft
+still never runs a consumer's tests to get one. The repository's own CI runs
+them on the base and on the head and uploads a JSON receipt as the workflow
+artifact declared in `ciEvidence.redGreen` (`artifact`, and the one `workflow`
+allowed to upload it; honoured only from the pull request base). The review
+reads it only from a successful run of that workflow in the reviewed repository
+on the head SHA (never a fork's run), only when the pull request's unfiltered
+change set leaves that workflow untouched, parses it as data under fixed bounds
+(a 2 MiB archive, a 1 MB receipt; nothing in the artifact is executed), and
+accepts it only for the pull request's exact base and head SHAs. A pull request with a conventional `fix`
+title or a `review.fixLabels` label needs a `proven` receipt (a test red on the
+base, every listed test green on the head) for the `fix_proof` checklist gate;
+without one its lane is at least `medium` with a `fix.*` reason. `fixLabels` is
+honoured only from the pull request base, so a pull request cannot change its
+own label list. See
+[`docs/red-green-receipts.md`](red-green-receipts.md).
 
 The merge-evidence packet's `decision` row is computed by
 `mergecraft.agents.gates.decide_approval(findings, *, run_succeeded,
@@ -988,7 +1005,7 @@ The reviewer reads the whole diff itself, then picks the **lenses** the PR actua
 
 Each review round records which lenses were **selected**, which were **skipped** (with reasons from deterministic routing), and which were **actually dispatched**. That set is written into the review metadata HTML comment and the merge-evidence packet so the next round — and incremental complement routing in a follow-up review — can read what already ran without re-deriving it from prose.
 
-**Run lifecycle (S1)** — a failed or timed-out trusted-tier `setupScript` yields `RunOutcome.inconclusive` (neutral check conclusion), not a review. An under-provisioned tree never receives a review verdict. See [`docs/config-failure-policy.md`](docs/config-failure-policy.md#setup-script-failures) for the policy table and operator checklist.
+**Run lifecycle (S1)** — a failed or timed-out trusted-tier `setupScript` yields `RunOutcome.inconclusive` (neutral check conclusion), not a review. An under-provisioned tree never receives a review verdict. See [`docs/config-failure-policy.md`](config-failure-policy.md#setup-script-failures) for the policy table and operator checklist.
 
 **Always in play**
 
@@ -1067,15 +1084,15 @@ Shipped catalog spans **P0 workflow/Docker gates** (actionlint, zizmor, ShellChe
 rules on MCP/skill manifests), and **P1–P3 long-tail manifests** (Go, Rust, IaC, SQL, PHP,
 Ruby, …) — each is YAML plus an existing parser, not bespoke adapter code.
 
-Reference: [`docs/ANALYZERS.md`](docs/ANALYZERS.md) (generated from manifests; CI-enforced).
-Contributor path: [`docs/CONTRIBUTING-ANALYZERS.md`](docs/CONTRIBUTING-ANALYZERS.md).
+Reference: [`docs/ANALYZERS.md`](ANALYZERS.md) (generated from manifests; CI-enforced).
+Contributor path: [`docs/CONTRIBUTING-ANALYZERS.md`](CONTRIBUTING-ANALYZERS.md).
 Offline inspection: `mergecraft analyzers list|detect|run|explain|export --sarif|lock`.
 
 **Execution preference:** `repo-native` → existing CI result → managed pinned binary → container → **skip with a named reason**. Skipped is skipped — never a finding, never a failed pre-merge row.
 
 **Trust tiers:** `trusted` (same-repo PR, `workflow_dispatch`, offline `diff-review`) vs `untrusted` (fork PR / `pull_request_target` — no secrets, network deny-by-default, no PR-authored command construction; trusted-only manifests skip with reasons). Offline `diff-review` runs analyzers at trusted tier without shell.
 
-**`shell: disabled` (#35):** hardening the workflow no longer costs you the catalog. Repo-declared gates stay withheld — they run command strings the PR author controls — but mergeCraft's own **`managed` / `container` analyzers still run**, because their argv comes verbatim from a manifest mergeCraft ships and a repo-provided binary may not stand in for the pinned one. `repo-native` manifests are withheld, each with a named reason, since they exist to run the repo's own tool against the repo's own config. What a consumer sees on a `pull_request_target` + `shell: disabled` run: analyzer rows for the managed tools that matched the diff, `unavailable` rows naming why each other manifest was withheld, and the `staticChecks` gates reported as `declared-but-cannot-run`. The full runtime × shell × trust matrix is generated into [`docs/ANALYZERS.md`](docs/ANALYZERS.md).
+**`shell: disabled` (#35):** hardening the workflow no longer costs you the catalog. Repo-declared gates stay withheld — they run command strings the PR author controls — but mergeCraft's own **`managed` / `container` analyzers still run**, because their argv comes verbatim from a manifest mergeCraft ships and a repo-provided binary may not stand in for the pinned one. `repo-native` manifests are withheld, each with a named reason, since they exist to run the repo's own tool against the repo's own config. What a consumer sees on a `pull_request_target` + `shell: disabled` run: analyzer rows for the managed tools that matched the diff, `unavailable` rows naming why each other manifest was withheld, and the `staticChecks` gates reported as `declared-but-cannot-run`. The full runtime × shell × trust matrix is generated into [`docs/ANALYZERS.md`](ANALYZERS.md).
 
 **Scoping:** analyzers run on **head** by default; findings outside the diff hunks are dropped unless the path is an explicit exception (new file, dependency manifest, lockfile, workflow, migration). `introduced_by_pr: unknown` when no base run happened — never implied `true`. Every drop is recorded against the hit with the stage and a reason (see **Disposition ledger** below).
 
@@ -1083,11 +1100,11 @@ Offline inspection: `mergecraft analyzers list|detect|run|explain|export --sarif
 
 **Verification:** Critical/Major analyzer hits are **hypotheses** until the read-only `mergecraft-verifier` subagent confirms, downgrades, or drops them. Drops write a reason under `## Withdrawn review findings (known non-issues)` **and** are recorded against the hit in the disposition ledger (`dropped:verifier`, or `downgraded` with the old and new severity).
 
-**Disposition ledger:** every raw analyzer hit gets a stable `hit_id` when it is parsed and must end with exactly one terminal disposition — `kept`, `merged`, `downgraded` or `dropped:<out_of_scope|baseline|withdrawn|generated|verifier>` — each with a stage and a non-empty reason. The packet carries the ledger, per-stage counts and the baseline-suppression audit rows ([`docs/evidence-packet.md`](docs/evidence-packet.md)), and the pre-merge **Analyzers** row shows it, for example `ruff 14 raw → 3 kept (9 out_of_scope, 2 baseline)`. If a stage loses a hit without recording it, the run is **inconclusive** and a run-scoped finding names the orphaned hit ids; blockers still win. SARIF ingested via `ciEvidence.sarifArtifacts` follows the same contract.
+**Disposition ledger:** every raw analyzer hit gets a stable `hit_id` when it is parsed and must end with exactly one terminal disposition — `kept`, `merged`, `downgraded` or `dropped:<out_of_scope|baseline|withdrawn|generated|verifier>` — each with a stage and a non-empty reason. The packet carries the ledger, per-stage counts and the baseline-suppression audit rows ([`docs/evidence-packet.md`](evidence-packet.md)), and the pre-merge **Analyzers** row shows it, for example `ruff 14 raw → 3 kept (9 out_of_scope, 2 baseline)`. If a stage loses a hit without recording it, the run is **inconclusive** and a run-scoped finding names the orphaned hit ids; blockers still win. SARIF ingested via `ciEvidence.sarifArtifacts` follows the same contract.
 
 **Self-silencing (`self-silencing`):** a deterministic, in-process analyzer — no shell, eligible on every trust tier — that makes a PR's own reduction of scrutiny visible. It reports each **added** suppression marker (`# nosec`, `# noqa`, `# type: ignore`, `// eslint-disable-next-line`, `// @ts-ignore`, `#[allow(..)]`, `//nolint`, `// NOLINT`, `# rubocop:disable`, `@SuppressWarnings`, `# shellcheck disable=`, `nosemgrep`, `gitleaks:allow`) with the rule codes it silences — markers already on base are not reported — and it reports **what loosened** in `.mergecraft/config.yaml`, `ruff.toml` / `pyproject.toml [tool.ruff]`, ESLint config and scanner ignore files (an analyzer disabled, a rule added to `ignore`, a path excluded, a rule turned off, a budget lowered); pure tightening is not reported. `Major` for a loosening edit to mergeCraft config and for a suppression on a security rule, `Minor` for style-linter suppressions, one level higher on the `untrusted` tier. The suppression stays allowed; the finding says "justify in the PR or remove".
 
-**A PR's own analyzer config never applies to its own review.** Analyzer settings (`analyzers.enabled`, `overrides.<id>.enabled`, the `antislop` `rules` / `ignore`, `baseComparison`, `inlineBudget`, `impact`) are resolved from the PR's **base** — the operator-owned base snapshot, or `git show <base sha>:.mergecraft/config.yaml` on events whose run-start tree is the PR head — and a symlinked config fails closed to built-in defaults with a named reason. A head-side change to `analyzers.*` is therefore *reported* by `self-silencing` but not *applied*: land analyzer-config changes in their own PR; they take effect from the next PR on. The packet records where the settings came from ([`docs/trust-policy.md`](docs/trust-policy.md), [`docs/evidence-packet.md`](docs/evidence-packet.md)). Edits to `.mergecraft/**` and analyzer/linter config also keep the PR out of the `eligible` blast-radius lane.
+**A PR's own analyzer config never applies to its own review.** Analyzer settings (`analyzers.enabled`, `overrides.<id>.enabled`, the `antislop` `rules` / `ignore`, `baseComparison`, `inlineBudget`, `impact`) are resolved from the PR's **base** — the operator-owned base snapshot, or `git show <base sha>:.mergecraft/config.yaml` on events whose run-start tree is the PR head — and a symlinked config fails closed to built-in defaults with a named reason. A head-side change to `analyzers.*` is therefore *reported* by `self-silencing` but not *applied*: land analyzer-config changes in their own PR; they take effect from the next PR on. The packet records where the settings came from ([`docs/trust-policy.md`](trust-policy.md), [`docs/evidence-packet.md`](evidence-packet.md)). Edits to `.mergecraft/**` and analyzer/linter config also keep the PR out of the `eligible` blast-radius lane.
 
 **Noise budget:** inline analyzer slots cap at **8**. Analyzer overflow lands in `### 🔧 Mechanical findings` (compact tool table). Agent overflow lands in `### 🗂 Deferred findings` with full finding text (non-blocking, server-appended). Agent findings win ties; Trivial/Low value never inline.
 
@@ -1122,11 +1139,11 @@ To discover a `check_suite_id` for a commit, call `list_check_runs` with the PR 
 
 The review publishes `### 🚨 CI failures` with clustered root causes, flaky/blame verdicts, and redacted excerpts. The pre-merge **CI** row reports failure count, cluster count, flaky count, PR-attributed count, unattributed count, and whether truncation occurred. Inline CI comments may carry a one-click `suggestion` when the fix is a contained single-hunk edit; pushing a fix commit stays behind the existing `push` permission. Only an inline comment is posted for a `caused_by_pr` failure: an unattributed one has no proven hunk to anchor to.
 
-**Recorded as evidence (#36).** Each clustered CI failure is also recorded as a `source: ci` finding on the run and carried into the [merge evidence packet](docs/REVIEW-DOCTRINE.md), keeping the blame verdict it was given: a failure attributed to this PR is `Major` / `introduced_by_pr: true`; a flaky or pre-existing one is `Minor` / `introduced_by_pr: false`; and an **unattributed** one — no diff overlap and no same-fingerprint base-branch failure — is `Major` / `introduced_by_pr: unknown`. Since every gate that consumes findings is monotone in blockers, the annotation is what makes the verdict mechanical rather than a matter of wording — a flaky pipeline cannot block a clean pull request, and an unattributed failure cannot be cleared without evidence.
+**Recorded as evidence (#36).** Each clustered CI failure is also recorded as a `source: ci` finding on the run and carried into the [merge evidence packet](REVIEW-DOCTRINE.md), keeping the blame verdict it was given: a failure attributed to this PR is `Major` / `introduced_by_pr: true`; a flaky or pre-existing one is `Minor` / `introduced_by_pr: false`; and an **unattributed** one — no diff overlap and no same-fingerprint base-branch failure — is `Major` / `introduced_by_pr: unknown`. Since every gate that consumes findings is monotone in blockers, the annotation is what makes the verdict mechanical rather than a matter of wording — a flaky pipeline cannot block a clean pull request, and an unattributed failure cannot be cleared without evidence.
 
 **SARIF your CI already produced.** Naming artifacts under `ciEvidence.sarifArtifacts` lets the reviewer ingest their SARIF as CI findings through the same parser the analyzer catalog uses. Default is empty, in which case no artifact API call is made. Ingested results are reported at a non-blocking severity with `introduced_by_pr: unknown` — SARIF from another pipeline describes the tree, not this diff.
 
-Implementation: [`src/mergecraft/ci/intelligence.py`](src/mergecraft/ci/intelligence.py), [`src/mergecraft/ci/review.py`](src/mergecraft/ci/review.py), [`src/mergecraft/ci/cluster.py`](src/mergecraft/ci/cluster.py), [`src/mergecraft/mcp/ci_intelligence.py`](src/mergecraft/mcp/ci_intelligence.py), [`src/mergecraft/mcp/check_suite.py`](src/mergecraft/mcp/check_suite.py), [`src/mergecraft/mcp/check_runs.py`](src/mergecraft/mcp/check_runs.py).
+Implementation: [`src/mergecraft/ci/intelligence.py`](../src/mergecraft/ci/intelligence.py), [`src/mergecraft/ci/review.py`](../src/mergecraft/ci/review.py), [`src/mergecraft/ci/cluster.py`](../src/mergecraft/ci/cluster.py), [`src/mergecraft/mcp/ci_intelligence.py`](../src/mergecraft/mcp/ci_intelligence.py), [`src/mergecraft/mcp/check_suite.py`](../src/mergecraft/mcp/check_suite.py), [`src/mergecraft/mcp/check_runs.py`](../src/mergecraft/mcp/check_runs.py).
 
 ## 3. Pull request hygiene
 
@@ -1181,7 +1198,7 @@ block with no globs is `scope.undeclared`, a block that broke a bound is
 `scope.within` passes the `scope` gate, so a pull request without a declared
 scope is never in the `eligible` lane. The globs are untrusted data: bounded,
 matched against the diff's path list only, never used to open a file. See
-[`docs/blast-radius.md`](docs/blast-radius.md#declared-scope).
+[`docs/blast-radius.md`](blast-radius.md#declared-scope).
 
 ## 5. Finding grading
 
@@ -1200,7 +1217,7 @@ Then placement is mechanical:
 
 The axes are also a sweep: a PR that writes persistent state with no Data Integrity & Atomicity finding gets one more look before the reviewer concludes there was nothing there.
 
-Values live in [`src/mergecraft/review_taxonomy.py`](src/mergecraft/review_taxonomy.py); a test asserts the prompt still names every one of them.
+Values live in [`src/mergecraft/review_taxonomy.py`](../src/mergecraft/review_taxonomy.py); a test asserts the prompt still names every one of them.
 
 ### Verification before publication
 
@@ -1458,7 +1475,7 @@ request cannot write; `requirements` is author-traceable, not independent:
 Producers run only when a triggered rule requires evidence. The row lists each
 present key with its source and names every missing key with the reason it is
 missing. A key without a producer or a declaration stays missing, and the way
-past it is a waiver. [`docs/policy-evidence.md`](docs/policy-evidence.md) has
+past it is a waiver. [`docs/policy-evidence.md`](policy-evidence.md) has
 the trust story for each key, the `policy.evidence` configuration and the
 artifact format.
 
@@ -1811,7 +1828,7 @@ Check-run annotations are the documented alternative surface and are not impleme
 > skill distills for prompts.
 
 Review-check reasoning from `review_checks.py`, `review_taxonomy.py`,
-`mcp/static_checks.py`, and `REVIEW-CHECKS.md`. Later review-integrity
+`mcp/static_checks.py`, and `docs/REVIEW-CHECKS.md`. Later review-integrity
 work builds on these decisions — they are not recoverable from code alone.
 
 ## Mechanical gates vs findings
@@ -2204,7 +2221,7 @@ What the merge-evidence packet carries, and how each signal weights:
 | Signal | Weight | Notes |
 |--------|--------|-------|
 | `findings: list[Finding]` (typed, taxonomy-validated, `extra="forbid"`) | **structural** | One `Critical` or `Major` finding blocks. Source/severity/confidence preserved verbatim. |
-| `deterministic_checks: list[DeterministicCheck]` (name, status, command) | **mechanical** | Only `passed` / `failed` count as positive / negative evidence; `unavailable` / `declared-but-cannot-run` / `timed_out` are honest skips — not silent passes (PR #17 vocabulary, see `REVIEW-CHECKS.md`). |
+| `deterministic_checks: list[DeterministicCheck]` (name, status, command) | **mechanical** | Only `passed` / `failed` count as positive / negative evidence; `unavailable` / `declared-but-cannot-run` / `timed_out` are honest skips — not silent passes (PR #17 vocabulary, see `docs/REVIEW-CHECKS.md`). |
 | `ci_check_runs` / `ci_intelligence.annotations` | **mechanical** | Per-ref check-suite outcome + log-cluster signatures, flaky vs stable, blame-attributed. |
 | `self_assessment.approved: bool` + `self_assessment.sha` | **advisory only** | Recorded; never the sole positive input. The packet's `decision` row is authoritative. |
 | `decision: { verdict, reason, decided_by }` | **authoritative** | Populated by `decide_approval`. When present on the packet, it wins over every other signal. |
@@ -2433,7 +2450,7 @@ also skips Codex when the neutral reason names the untrusted tier: the tier is
 structurally inert, so a second rung can only reproduce the same neutral at
 full cost (#1078).
 
-See also [`REVIEW-CHECKS.md`](../REVIEW-CHECKS.md#terminal-verdict-vs-structural-verdict-vp2).
+See also [`docs/REVIEW-CHECKS.md`](REVIEW-CHECKS.md#terminal-verdict-vs-structural-verdict-vp2).
 
 ## Provenance
 
@@ -2535,7 +2552,7 @@ shape carry identical meaning.
 
 ### The `[tracing]` extra in the Action image
 
-The Action runs from `Dockerfile`, which installs
+The Action runs from `docker/Dockerfile`, which installs
 `uv sync --frozen --no-dev --extra tracing`. Without that extra the sink
 factory degrades a `logfire` / `otel` sink to `NullSink` with a warning
 (`src/mergecraft/tracing/sinks.py`) — the workflow looks correctly wired and

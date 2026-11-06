@@ -172,7 +172,7 @@ them without extra config. Full config schema, the redaction guarantee, and
 the payload/span-count caps: [docs/TRACING.md](TRACING.md).
 
 <!-- Asset pending: a screenshot of this trace tree for a real review,
-committed under assets/ and linked here — operator-captured, see the
+committed under docs/assets/ and linked here — operator-captured, see the
 issues-showcase-readiness follow-up. -->
 
 <span id="security-model"></span>
@@ -236,7 +236,7 @@ issues-showcase-readiness follow-up. -->
   reach their APIs.
 
 Report vulnerabilities via [SECURITY.md](../SECURITY.md). What a review does and
-never does: [REVIEW-CHECKS.md](../REVIEW-CHECKS.md).
+never does: [docs/REVIEW-CHECKS.md](REVIEW-CHECKS.md).
 
 ## ⚙️ Workflow-placement gotchas (`pull_request_target`)
 

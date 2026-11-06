@@ -41,61 +41,61 @@
       "source": "alexhawat/mergeCraft",
       "sourceType": "local",
       "skillPath": "skills/mergecraft/SKILL.md",
-      "computedHash": "fe43b3dd2b336b475c0cddb5c1447824c97bdd2236286ced5ee134653f9ee789"
+      "computedHash": "1e1c7765c20d07a746eb506e15c399b943a4230e7ab639da0a06fc2167e8a991"
     },
     "mergecraft-codex": {
       "source": "alexhawat/mergeCraft",
       "sourceType": "local",
       "skillPath": "skills/codex/mergecraft/SKILL.md",
-      "computedHash": "f0322335accf7ff18faa9a6d116501cf1fab082e810c590c8da204f0152133fd"
+      "computedHash": "0b1125163f25f28283644372d563c2d9c312965261f1feae29ce747a8875e0bc"
     },
     "mergecraft-cursor": {
       "source": "alexhawat/mergeCraft",
       "sourceType": "local",
       "skillPath": "skills/cursor/mergecraft/SKILL.md",
-      "computedHash": "f0322335accf7ff18faa9a6d116501cf1fab082e810c590c8da204f0152133fd"
+      "computedHash": "0b1125163f25f28283644372d563c2d9c312965261f1feae29ce747a8875e0bc"
     },
     "mergecraft-opencode": {
       "source": "alexhawat/mergeCraft",
       "sourceType": "local",
       "skillPath": "skills/opencode/mergecraft/SKILL.md",
-      "computedHash": "14a0162d1ac9aaca5e8f13b0dc69ed2e0c3d1e88f136b77a4b9ba1192c5da56c"
+      "computedHash": "8c9ac418383bdff80fcf72778ef5dd2e40c4b6e91925aea96c06c89efad63b65"
     },
     "mergecraft-gemini-cli": {
       "source": "alexhawat/mergeCraft",
       "sourceType": "local",
       "skillPath": "skills/gemini-cli/mergecraft/SKILL.md",
-      "computedHash": "f0322335accf7ff18faa9a6d116501cf1fab082e810c590c8da204f0152133fd"
+      "computedHash": "0b1125163f25f28283644372d563c2d9c312965261f1feae29ce747a8875e0bc"
     },
     "mergecraft-openclaw": {
       "source": "alexhawat/mergeCraft",
       "sourceType": "local",
       "skillPath": "skills/openclaw/mergecraft/SKILL.md",
-      "computedHash": "f0322335accf7ff18faa9a6d116501cf1fab082e810c590c8da204f0152133fd"
+      "computedHash": "0b1125163f25f28283644372d563c2d9c312965261f1feae29ce747a8875e0bc"
     },
     "mergecraft-hermes": {
       "source": "alexhawat/mergeCraft",
       "sourceType": "local",
       "skillPath": "skills/hermes/mergecraft/SKILL.md",
-      "computedHash": "4c1e7636a71b1f94dbb009f4428a86c47e98330d0b2e734a0e75e4a219d1ed02"
+      "computedHash": "b2d8e2f667c552088430b86804402c4da6f11405185d9dff24bfbebd599c34da"
     },
     "mergecraft-claude-code": {
       "source": "alexhawat/mergeCraft",
       "sourceType": "local",
       "skillPath": "skills/claude-code/mergecraft/SKILL.md",
-      "computedHash": "f0322335accf7ff18faa9a6d116501cf1fab082e810c590c8da204f0152133fd"
+      "computedHash": "0b1125163f25f28283644372d563c2d9c312965261f1feae29ce747a8875e0bc"
     },
     "mergecraft-grok-bot": {
       "source": "alexhawat/mergeCraft",
       "sourceType": "local",
       "skillPath": "skills/grok-bot/mergecraft/SKILL.md",
-      "computedHash": "f0322335accf7ff18faa9a6d116501cf1fab082e810c590c8da204f0152133fd"
+      "computedHash": "0b1125163f25f28283644372d563c2d9c312965261f1feae29ce747a8875e0bc"
     },
     "mergecraft-copilot": {
       "source": "alexhawat/mergeCraft",
       "sourceType": "local",
       "skillPath": "skills/copilot/mergecraft/SKILL.md",
-      "computedHash": "f0322335accf7ff18faa9a6d116501cf1fab082e810c590c8da204f0152133fd"
+      "computedHash": "0b1125163f25f28283644372d563c2d9c312965261f1feae29ce747a8875e0bc"
     }
   }
 }

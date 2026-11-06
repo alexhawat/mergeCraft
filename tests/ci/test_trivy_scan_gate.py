@@ -224,7 +224,7 @@ def test_expiry_checker_accepts_two_separately_documented_entries(tmp_path: Path
 def test_waiver_docs_exist() -> None:
     """Operators must have a documented path to waive a finding (D7)."""
     supply = REPO_ROOT / "docs" / "supply-chain.md"
-    contributing = REPO_ROOT / "CONTRIBUTING.md"
+    contributing = REPO_ROOT / ".github" / "CONTRIBUTING.md"
     if supply.is_file():
         text = supply.read_text(encoding="utf-8")
     else:

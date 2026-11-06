@@ -2,7 +2,7 @@
 
 How mergeCraft cuts a **release candidate**, soaks it, and promotes a stable
 version. Contributor Craft mechanics (`craft prepare` / `craft publish`) live in
-[CONTRIBUTING.md](../CONTRIBUTING.md#releases-craft). This page is the
+[.github/CONTRIBUTING.md](../.github/CONTRIBUTING.md#releases-craft). This page is the
 process gate around those commands.
 
 **Audience:** contributor.
@@ -103,7 +103,7 @@ An RC soaks before a stable GitHub/PyPI/GHCR promotion:
 
 - Keep the RC published long enough for at least one scheduled **Integration**
   live-provider job and one scheduled **E2E** nightly security slice to pass
-  (same preconditions as CONTRIBUTING.md).
+  (same preconditions as .github/CONTRIBUTING.md).
 - Collect **real-world adoption evidence** sufficient to validate production
   behaviour (dogfood on this repo plus any consumer reports against the RC
   tag). Promote only when that evidence does not contradict the candidate.
@@ -126,7 +126,7 @@ second schema-migration system on this page.
 
 ## See also
 
-- [CONTRIBUTING.md](../CONTRIBUTING.md) — Craft prepare/publish
+- [.github/CONTRIBUTING.md](../.github/CONTRIBUTING.md) — Craft prepare/publish
 - [CHANGELOG.md](../CHANGELOG.md)
 - [support-matrix.md](support-matrix.md) — generated support matrix
 - [SECURITY.md](../SECURITY.md) — security-response and disclosure

@@ -6,7 +6,7 @@ Contracts:
   repo whose ``post-checkout`` hook writes a sentinel.
 - ``cwd`` / ``working_directory`` escapes outside ``$GITHUB_WORKSPACE`` are
   rejected (W3.3).
-- ``docker-entrypoint.sh`` scopes ``safe.directory`` instead of ``'*'`` (W3.1).
+- ``docker/docker-entrypoint.sh`` scopes ``safe.directory`` instead of ``'*'`` (W3.1).
 - Agent subprocesses drop to the unprivileged ``mergecraft`` user (W3.4) —
   pinned as a spawn-site contract so it fails if the privilege drop is
   deleted, without depending on the host's UID.
@@ -27,7 +27,7 @@ from tests.security.conftest import HOOK_SENTINEL, PlantedRepo
 from tests.support.tool_context import write_capable_mcp_mode
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_ENTRYPOINT = _REPO_ROOT / "docker-entrypoint.sh"
+_ENTRYPOINT = _REPO_ROOT / "docker/docker-entrypoint.sh"
 
 
 def _checkout_branch(repo: Path, branch: str) -> None:
@@ -137,10 +137,10 @@ def test_entrypoint_safe_directory_has_no_wildcard() -> None:
     """W3.1 — ``safe.directory '*'`` must be gone from the entrypoint."""
     text = _ENTRYPOINT.read_text(encoding="utf-8")
     assert "safe.directory '*'" not in text, (
-        "docker-entrypoint.sh still trusts every path on the runner"
+        "docker/docker-entrypoint.sh still trusts every path on the runner"
     )
     assert 'safe.directory "*"' not in text, (
-        "docker-entrypoint.sh still trusts every path on the runner"
+        "docker/docker-entrypoint.sh still trusts every path on the runner"
     )
     for match in re.finditer(r"safe\.directory\s+(\S+)", text):
         value = match.group(1).strip("'\"")

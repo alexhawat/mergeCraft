@@ -45,6 +45,7 @@ RESET_TOOL_FIELDS = (
     "analyzer_run",
     "analyzer_evidence",
     "ci_evidence",
+    "red_green",
     "verified_ids",
     "withdrawn_fingerprints",
     "pinned_analyzer_settings",

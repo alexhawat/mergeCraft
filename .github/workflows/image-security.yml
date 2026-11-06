@@ -22,9 +22,9 @@ jobs:
       matrix:
         include:
           - image: slim
-            dockerfile: Dockerfile
+            dockerfile: docker/Dockerfile
           - image: analyzers
-            dockerfile: Dockerfile.analyzers
+            dockerfile: docker/Dockerfile.analyzers
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

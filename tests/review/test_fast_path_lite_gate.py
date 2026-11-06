@@ -956,7 +956,7 @@ async def test_prose_head_text_is_still_read_without_comment_only_or_lite() -> N
 def test_review_checks_lists_exactly_the_recognised_comment_only_suffixes() -> None:
     from mergecraft.classify.triage import COMMENT_ONLY_SUFFIXES
 
-    text = (_REPO_ROOT / "REVIEW-CHECKS.md").read_text(encoding="utf-8")
+    text = (_REPO_ROOT / "docs" / "REVIEW-CHECKS.md").read_text(encoding="utf-8")
     match = re.search(r"`//`-comment languages — `([^`]+)`", text)
 
     assert match is not None
@@ -986,7 +986,7 @@ def test_the_changelog_records_the_finding_line_format_under_changed() -> None:
 
 
 def _comment_only_paragraph() -> str:
-    text = (_REPO_ROOT / "REVIEW-CHECKS.md").read_text(encoding="utf-8")
+    text = (_REPO_ROOT / "docs" / "REVIEW-CHECKS.md").read_text(encoding="utf-8")
     start = text.index("`commentOnly` (")
     end = text.index("A mixed diff matches nothing", start)
     return text[start:end]
