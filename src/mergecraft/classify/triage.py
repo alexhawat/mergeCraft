@@ -22,10 +22,23 @@ matches and hides one real change matches nothing and gets a full review.
   rules) and fall through to a full review.
 * ``generated`` — only lockfiles or generated paths changed, and no dependency
   manifest or generator config changed with them.
+* ``commentOnly`` — only ``//`` comment lines changed, in a closed list of
+  ``//``-comment languages chosen by suffix (no JavaScript, JSX/TSX or Rust;
+  ``Package.swift`` and Go ``_test.go`` / ``DO NOT EDIT`` files refused; a Java unicode
+  escape or a C-family ``??`` refuses the file). Each
+  changed line is ``//``, one space and a plain alphabetic word that is not a directive
+  word; a removal must be replaced by an added line. The diff and the head text must be
+  printable ASCII (plus tab and newline) and are split on ``\n`` only. A file with a
+  backtick, a raw-string marker, any ``/*``, or a quote left open at the end of a line
+  is refused, so every head line provably starts outside a string or comment.
+  ``#``-comment languages are never recognised: a ``#`` line can be content.
 
-Two tiers ship: ``skip`` (no LLM review) and ``full`` (today's review). A cheaper
-``lite`` tier is not implemented; a recognizer that matches but is not enabled, or a
-pin bump whose verifying check has not passed from a trusted GitHub App, is ``full``.
+Three tiers ship: ``skip`` (no LLM review), ``lite`` (one capped LLM call, see
+:mod:`mergecraft.agents.lite`) and ``full`` (today's review). ``lite`` is chosen only
+when the operator enabled ``review.fastPath.lite``, and only for the two cases ``skip``
+deliberately leaves out: a recognizer that matches but is not opted in to ``skipLlm``,
+and a pin bump whose verifying check has not passed from a trusted GitHub App. With
+``lite`` off both stay ``full``.
 
 The tier is a pure function of the diff, the config, head-side text used only to prove
 a markdown edit stays out of a code fence, and the names of the checks that passed on
@@ -38,7 +51,8 @@ Exports:
     TriageInputs: What the I/O layer reads for one pull request.
     triage_diff: The pure tier decision.
     recognize_pin_bump, recognize_prose_only, recognize_whitespace_only,
-    recognize_generated: The recognizers.
+    recognize_generated, recognize_comment_only: The recognizers.
+    COMMENT_ONLY_SUFFIXES: The closed ``//``-comment language list.
 """
 
 from __future__ import annotations
@@ -62,7 +76,7 @@ if TYPE_CHECKING:
 
     from mergecraft.config.settings import FastPathSettings
 
-Tier = Literal["skip", "full"]
+Tier = Literal["skip", "lite", "full"]
 
 _SHA: Final[re.Pattern[str]] = re.compile(
     r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{40}(?![0-9A-Fa-f])|sha256:[0-9A-Fa-f]{64}"
@@ -127,21 +141,26 @@ class TriageDecision:
     """The triage tier and the reasoning behind it.
 
     Attributes:
-        tier: ``skip`` (no LLM review runs) or ``full`` (today's review).
-        recognizer: The recognizer behind a ``skip``; ``None`` for ``full``.
+        tier: ``skip`` (no LLM review runs), ``lite`` (one capped LLM call) or
+            ``full`` (today's review).
+        recognizer: The recognizer behind a ``skip`` or ``lite``; ``None`` for ``full``.
         reason: Why, in one sentence.
         relied_on_checks: Checks that had to pass on the head SHA for this ``skip``.
+        token_cap: The configured ``lite`` token cap on a ``lite`` decision, else ``None``.
     """
 
     tier: Tier
     recognizer: str | None
     reason: str
     relied_on_checks: tuple[str, ...] = field(default_factory=tuple)
+    token_cap: int | None = None
 
     def record_line(self) -> str:
         """The line the run record and the checks show, so a skip never reads as a review."""
         if self.tier == "skip":
             return f"Tier: skip ({self.recognizer}) — no LLM review ran"
+        if self.tier == "lite":
+            return f"Tier: lite — single-call review, cap {self.token_cap} tokens"
         return "Tier: full"
 
 
@@ -171,11 +190,13 @@ class _File:
     hunks: list[_Hunk] = field(default_factory=list)
 
 
-def _parse(diff_text: str) -> list[_File]:
+def _parse(diff_text: str, *, newline_only: bool = False) -> list[_File]:
+    """Parse a unified diff; ``newline_only`` splits on ``\n`` alone, never ``splitlines``."""
     files: list[_File] = []
     current: _File | None = None
     hunk: _Hunk | None = None
-    for raw in diff_text.splitlines():
+    raws = diff_text.split("\n") if newline_only else diff_text.splitlines()
+    for raw in raws:
         if raw.startswith("diff --git "):
             previous, _, path = raw.removeprefix("diff --git a/").rpartition(" b/")
             current = _File(path=path.strip(), previous_path=previous.strip())
@@ -349,12 +370,25 @@ def _blocks(hunk: _Hunk) -> list[tuple[list[str], list[str]]]:
     return blocks
 
 
+def _renamed_or_copied(file: _File) -> bool:
+    """A rename or copy is never a mechanical edit: the path itself carries meaning.
+
+    ``src/foo.ts`` → ``src/foo.d.ts`` stops emitting JS, ``foo.c`` → ``foo.cpp``
+    changes the compiler dialect and Go runs ``init`` in lexical filename order,
+    so a renamed or copied file (``previous_path`` differs) refuses the recognizers
+    that promise "no runtime change", whatever its hunks contain.
+    """
+    return bool(file.previous_path) and file.previous_path != file.path
+
+
 def recognize_whitespace_only(diff_text: str) -> bool:
     """Every change block is the same tokens before and after, differing only in whitespace."""
     files = _parse(diff_text)
     if not _changeable(files):
         return False
     for file in files:
+        if _renamed_or_copied(file):
+            return False
         lowered = file.path.lower()
         if lowered.endswith(_WHITESPACE_INELIGIBLE_SUFFIXES):
             return False
@@ -396,6 +430,198 @@ def recognize_generated(diff_text: str) -> bool:
     )
 
 
+# ── comment-only ──────────────────────────────────────────────────────────────
+
+# JavaScript (``.js``, which may hold JSX), JSX and TSX are off the list: a JSX text
+# child can start with ``//`` and render. Rust is off the list: a lifetime's lone ``'``
+# makes the quote check unsound.
+COMMENT_ONLY_SUFFIXES: Final[tuple[str, ...]] = (
+    ".ts",
+    ".go",
+    ".java",
+    ".kt",
+    ".c",
+    ".h",
+    ".cc",
+    ".cpp",
+    ".hpp",
+    ".cs",
+    ".swift",
+)
+# Manifests whose comments a tool reads (SwiftPM reads the tools-version line).
+_COMMENT_ONLY_REFUSED_BASENAMES: Final[frozenset[str]] = frozenset({"package.swift"})
+# Strings the lexer does not model (template literals; raw, verbatim and multi-line
+# strings) and any block comment: a file holding one is refused outright.
+_UNLEXABLE_MARKERS: Final[tuple[str, ...]] = (
+    "`",
+    'r#"',
+    'R"',
+    '@"',
+    '@$"',
+    '#"',
+    '"""',
+    "/*",
+    "#/",  # Swift extended regex literals (``#/…/#``) can span lines
+)
+# Java translates ``\uXXXX`` (any number of ``u``) before lexing, even inside comments,
+# so ``// note \u000a doEvil();`` is a call. C trigraphs (``??/`` is a backslash) can
+# splice the next line into a comment.
+_JAVA_UNICODE_ESCAPE: Final[re.Pattern[str]] = re.compile(r"\\u+")
+_C_FAMILY_SUFFIXES: Final[tuple[str, ...]] = (".c", ".h", ".cc", ".cpp", ".hpp")
+_C_TRIGRAPH_MARKER: Final[str] = "??"
+# Go: a ``_test.go`` file's ``// Output:`` comments are test assertions, and a file
+# marked ``DO NOT EDIT`` is generated (its comments may be generator input or output).
+_GO_TEST_SUFFIX: Final[str] = "_test.go"
+_GO_GENERATED_MARKER: Final[re.Pattern[str]] = re.compile(r"do not edit", re.IGNORECASE)
+# Printable ASCII plus tab and newline. Anything else (U+2028, U+2029, a lone CR, NEL,
+# CRLF, any non-ASCII byte) could end a line for the language but not for this lexer.
+_COMMENT_ONLY_TEXT: Final[re.Pattern[str]] = re.compile(r"[\t\n\x20-\x7e]*")
+# The comment shape: optional indentation, ``//``, exactly one space, then a purely
+# alphabetic first word followed by a space or the end of the line. Directive and
+# pragma comments (``//go:``, ``// +build``, ``///``, ``// @ts-ignore``,
+# ``// eslint-disable``, ``// Output:``) all fail this shape.
+_PLAIN_COMMENT: Final[re.Pattern[str]] = re.compile(r"[ \t]*// ([A-Za-z]+)(?: .*)?")
+# Plain words that still steer a compiler, a test runner or a linter.
+_DIRECTIVE_WORDS: Final[frozenset[str]] = frozenset(
+    {
+        "fallthrough",
+        "output",
+        "unordered",
+        "nosonar",
+        "nolint",
+        "revive",
+        "golangci",
+        "pragma",
+        "build",
+        "line",
+        "code",
+        "istanbul",
+        "nolintnextline",
+        "nolintbegin",
+        "nolintend",
+        "iwyu",
+        "jshint",
+        "noqa",
+        "coverage",
+        "fall",
+        "falls",
+        "fallthru",
+        "resharper",
+        "noinspection",
+        "tslint",
+        "detekt",
+    }
+)
+
+
+def _strings_close_on_every_line(lines: list[str]) -> bool:
+    """Every ``"`` or ``'`` string opened outside a ``//`` comment closes on its line.
+
+    With no block comment in the file and no string allowed to run past the end of a
+    line, every line starts outside a string or comment, so a ``//`` line is a comment.
+    """
+    for line in lines:
+        quote = ""
+        index = 0
+        while index < len(line):
+            char = line[index]
+            if quote:
+                if char == "\\":
+                    index += 2
+                    continue
+                if char == quote:
+                    quote = ""
+            elif line.startswith("//", index):
+                break
+            elif char in {'"', "'"}:
+                quote = char
+            index += 1
+        if quote:
+            return False
+    return True
+
+
+def _is_plain_comment(text: str) -> bool:
+    """A whole ``//`` line comment of plain words that cannot splice or steer a tool."""
+    match = _PLAIN_COMMENT.fullmatch(text)
+    if match is None or text.rstrip().endswith("\\"):
+        return False
+    return match.group(1).lower() not in _DIRECTIVE_WORDS
+
+
+def _comment_file_ok(file: _File, head_text: str) -> bool:
+    lowered = file.path.lower()
+    if PurePosixPath(lowered).name in _COMMENT_ONLY_REFUSED_BASENAMES:
+        return False
+    if _COMMENT_ONLY_TEXT.fullmatch(head_text) is None:
+        return False
+    file_text = "\n".join([head_text, *(line[1:] for hunk in file.hunks for line in hunk.lines)])
+    if any(marker in file_text for marker in _UNLEXABLE_MARKERS):
+        return False
+    if lowered.endswith(".java") and _JAVA_UNICODE_ESCAPE.search(file_text):
+        return False
+    if lowered.endswith(_C_FAMILY_SUFFIXES) and _C_TRIGRAPH_MARKER in file_text:
+        return False
+    if lowered.endswith(_GO_TEST_SUFFIX):
+        return False
+    if lowered.endswith(".go") and _GO_GENERATED_MARKER.search(file_text):
+        return False
+    if lowered.endswith(".go") and '"C"' in head_text:
+        return False  # a cgo preamble is C code written as a comment
+    head_lines = head_text.split("\n")
+    if not _strings_close_on_every_line(head_lines):
+        return False
+
+    def head_line(number: int) -> str | None:
+        return head_lines[number - 1] if 1 <= number <= len(head_lines) else None
+
+    def spliced(number: int) -> bool:
+        previous = head_line(number - 1)
+        return previous is not None and previous.rstrip().endswith("\\")
+
+    for hunk in file.hunks:
+        for _removed, added in _blocks(hunk):
+            if not added:
+                return False  # a removal exists only on the base side; nothing proves it
+        position = hunk.new_start
+        for line in hunk.lines:
+            kind, text = line[0], line[1:]
+            if kind == " ":
+                position += 1
+                continue
+            if not _is_plain_comment(text) or spliced(position):
+                return False
+            if kind == "+":
+                if head_line(position) != text:
+                    return False
+                position += 1
+    return True
+
+
+def recognize_comment_only(diff_text: str, *, head_files: Mapping[str, str]) -> bool:
+    """Only plain ``//`` comment lines changed, each proven a comment by the head text.
+
+    The diff and the head text are split on ``\\n`` only, and either one holding a
+    character outside printable ASCII plus tab and newline refuses the diff.
+    """
+    if _COMMENT_ONLY_TEXT.fullmatch(diff_text) is None:
+        return False
+    files = _parse(diff_text, newline_only=True)
+    if not _changeable(files):
+        return False
+    for file in files:
+        if _renamed_or_copied(file):
+            return False
+        if not file.path.lower().endswith(COMMENT_ONLY_SUFFIXES):
+            return False
+        head_text = head_files.get(file.path)
+        if head_text is None:
+            return False
+        if not _comment_file_ok(file, head_text):
+            return False
+    return True
+
+
 # ── the decision ──────────────────────────────────────────────────────────────
 
 _DESCRIPTIONS: Final[dict[str, str]] = {
@@ -403,11 +629,27 @@ _DESCRIPTIONS: Final[dict[str, str]] = {
     "prose": "prose edit outside code, fences and front matter",
     "whitespace": "whitespace-only change",
     "generated": "lockfile or generated-file regeneration",
+    "commentOnly": "comment-only edit of // line comments",
 }
 
 
 def _full(reason: str) -> TriageDecision:
     return TriageDecision(tier="full", recognizer=None, reason=reason)
+
+
+def _lite_or_full(reason: str, *, recognizer: str, config: FastPathSettings) -> TriageDecision:
+    """``lite`` for a case ``skip`` deliberately leaves out, when the operator enabled it.
+
+    With ``review.fastPath.lite`` off this is today's ``full`` with the same reason.
+    """
+    if not config.lite.enabled:
+        return _full(reason)
+    return TriageDecision(
+        tier="lite",
+        recognizer=recognizer,
+        reason=f"{reason}; review.fastPath.lite gives it a single capped LLM call",
+        token_cap=config.lite.token_cap,
+    )
 
 
 # The Actions app creates the check runs of `pull_request` workflows, whose job names
@@ -442,9 +684,16 @@ def triage_diff(
     """Decide the tier for one diff.
 
     Pure: no I/O, no clock, no environment. ``head_files`` is the head-side text of
-    prose files (only used to prove an edit stays out of a code fence) and
-    ``passed_checks`` the names of the checks that passed on the head SHA **from a
-    configured trusted App** — the I/O shell filters by ``app.slug`` before calling.
+    prose and comment-only-language files (only used to prove an edit stays out of a
+    code fence, a string literal or a block comment) and ``passed_checks`` the names
+    of the checks that passed on the head SHA **from a configured trusted App** — the
+    I/O shell filters by ``app.slug`` before calling.
+
+    ``lite`` (with ``config.lite.enabled``) replaces exactly two ``full`` outcomes: a
+    matched recognizer that is not in ``skipLlm``, and an opted-in pin bump whose
+    verifying checks have not passed from a trusted App (including a pin bump with no
+    ``requireChecks`` or no ``trustedCheckApps``, which can never pass). It never
+    takes a diff away from ``skip``.
     """
     if not config.enabled:
         return _full("review.fastPath is not enabled")
@@ -460,6 +709,8 @@ def triage_diff(
         matched.append("whitespace")
     if recognize_generated(diff_text):
         matched.append("generated")
+    if recognize_comment_only(diff_text, head_files=heads):
+        matched.append("commentOnly")
     if not matched:
         return _full("no recognizer matches the whole diff")
     for name in matched:
@@ -468,20 +719,26 @@ def triage_diff(
         if name == "pinBump":
             required = list(config.pin_bump.require_checks)
             if not required:
-                return _full(
-                    "a pin bump needs at least one review.fastPath.pinBump.requireChecks check"
+                return _lite_or_full(
+                    "a pin bump needs at least one review.fastPath.pinBump.requireChecks check",
+                    recognizer=name,
+                    config=config,
                 )
             apps = trusted_check_apps(config.pin_bump.trusted_check_apps)
             if not apps:
-                return _full(
+                return _lite_or_full(
                     "a pin bump needs at least one review.fastPath.pinBump.trustedCheckApps "
-                    "GitHub App; a check name alone cannot prove who verified it"
+                    "GitHub App; a check name alone cannot prove who verified it",
+                    recognizer=name,
+                    config=config,
                 )
             missing = [check for check in required if check not in set(passed_checks)]
             if missing:
-                return _full(
+                return _lite_or_full(
                     "a pin bump needs its verifying check(s) passed on the head SHA from a "
-                    "trusted App; not passed: " + ", ".join(missing)
+                    "trusted App; not passed: " + ", ".join(missing),
+                    recognizer=name,
+                    config=config,
                 )
             return TriageDecision(
                 tier="skip",
@@ -497,13 +754,19 @@ def triage_diff(
             recognizer=name,
             reason=f"every change is a {_DESCRIPTIONS[name]}",
         )
-    return _full(f"{', '.join(matched)} matched but is not enabled in review.fastPath.skipLlm")
+    return _lite_or_full(
+        f"{', '.join(matched)} matched but is not enabled in review.fastPath.skipLlm",
+        recognizer=matched[0],
+        config=config,
+    )
 
 
 __all__ = [
+    "COMMENT_ONLY_SUFFIXES",
     "Tier",
     "TriageDecision",
     "TriageInputs",
+    "recognize_comment_only",
     "recognize_generated",
     "recognize_pin_bump",
     "recognize_prose_only",

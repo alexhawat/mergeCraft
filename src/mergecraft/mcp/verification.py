@@ -242,9 +242,15 @@ def _run_lane(ctx: ToolContext) -> str | None:
     Reuses the packet's classifier rather than a second rule set, so the lane
     a judge is held to is the same lane the merge evidence packet reports.
     """
-    from mergecraft.evidence.run_packet import classify_run_blast_radius
+    from mergecraft.evidence.run_packet import (
+        classify_run_blast_radius,
+        fix_proof_signal_for_context,
+        scope_signal_for_state,
+    )
 
     state = primary_repo_state(ctx.tool_state)
+    scope = scope_signal_for_state(ctx.tool_state)
+    fix_proof = fix_proof_signal_for_context(ctx)
     for attr in ("diff_path", "incremental_diff_path"):
         raw = getattr(state, attr, None)
         if not raw:
@@ -252,7 +258,9 @@ def _run_lane(ctx: ToolContext) -> str | None:
         path = Path(raw)
         if not path.is_file():
             continue
-        classification = classify_run_blast_radius(path.read_text(encoding="utf-8"))
+        classification = classify_run_blast_radius(
+            path.read_text(encoding="utf-8"), scope=scope, fix_proof=fix_proof
+        )
         if classification is not None:
             return classification.lane
     return None
@@ -385,6 +393,8 @@ def verify_agent_findings_tool(ctx: ToolContext):
             repo_root=repo_root,
             trust_tier=trust,
         )
+        from mergecraft.review.file_group_fanout import carry_file_group_evidence
+
         stored: dict[str, dict[str, Any]] = {}
         for item in ctx.tool_state.agent_findings:
             fingerprint = item.get("fingerprint") if isinstance(item, dict) else None
@@ -407,8 +417,18 @@ def verify_agent_findings_tool(ctx: ToolContext):
             typed = agent_finding_to_finding(finding, rule_id="agent:draft")
             row = typed.model_dump(mode="json")
             row["fingerprint"] = finding.identity()
+            # A re-stored row keeps the file-group stamps an earlier group's
+            # recorded run gave it (the packet's per-group provenance).
+            carry_file_group_evidence(stored.get(str(row["fingerprint"])), row)
             stored[str(row["fingerprint"])] = row
         ctx.tool_state.agent_findings = list(stored.values())
+        # File-group fan-out: remember which group raised these rows so its run
+        # claims them however concurrent groups finish.
+        from mergecraft.review.file_group_fanout import note_file_group_rows
+
+        note_file_group_rows(
+            ctx.tool_state, [str(finding.identity()) for finding in normalized_findings]
+        )
         _emit_finding_stage(
             ctx,
             [

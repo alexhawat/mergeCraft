@@ -18,6 +18,7 @@ from mergecraft.action.inputs import (
     export_tracing_env_from_action_inputs,
 )
 from mergecraft.agents.gates import subagent_denied_tool_names
+from mergecraft.agents.lite import LiteOutcome, lite_model_slug, run_lite_review
 from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import FAILOVER_ELIGIBLE_KEY, Agent, AgentResult, AgentRunContext
 from mergecraft.agents.verifier import verifier_denied_tool_names
@@ -28,11 +29,15 @@ from mergecraft.analyzers.trust import (
     derive_trust_tier,
     resolve_analyzers_mode,
 )
-from mergecraft.ci.sarif_ingest import ingest_ci_sarif_from_action_env
+from mergecraft.ci.sarif_ingest import (
+    ingest_ci_sarif_from_action_env,
+    ingest_red_green_after_review,
+    record_unverified_red_green,
+)
 from mergecraft.classify.triage import TriageDecision
 from mergecraft.config.env import ActionInputEnv, EnvSettingsError, validate_env_settings
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
-from mergecraft.fast_path import decide_fast_path, load_triage_inputs
+from mergecraft.fast_path import load_triage_inputs, triage_pull_request
 from mergecraft.main_outcome import (
     _classify_outcome,
     _is_review_mode,
@@ -53,14 +58,23 @@ from mergecraft.mcp.tool_state import (
 )
 from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.prep.types import is_prep_install_failure
+from mergecraft.requirements.ingest import ScopeDeclaration, parse_scope_paths
 from mergecraft.review.engine import ReviewEngine
-from mergecraft.review.roster_execution import RosterExecutionSummary, apply_roster_failure
+from mergecraft.review.roster_execution import (
+    RosterExecutionSummary,
+    apply_roster_failure,
+    primary_repo_state_dir,
+    run_file_group_reviewers,
+)
 from mergecraft.review.snapshot import ReviewSnapshot, canonical_review_snapshot
 from mergecraft.review_checks import StaticCheckConfig
+from mergecraft.review_policy.fix_labels import resolve_fix_labels
 from mergecraft.review_policy.ignore_paths import INPUT_ENV as IGNORE_PATHS_INPUT_ENV
 from mergecraft.review_policy.ignore_paths import list_pull_request_paths, resolve_review_ignore
+from mergecraft.review_policy.red_green import read_red_green_declaration
 from mergecraft.run_outcome import (
     RUN_OUTCOME_CONCLUSION,
+    CompletionConclusion,
     RunOutcome,
     outcome_with_disposition_ledger,
     run_succeeded_for_outcome,
@@ -251,10 +265,12 @@ class RunContext:
             await _assemble_model_chain(self)
             await _build_run_tool_context(self)
 
-    async def review(self) -> AgentResult | SkipAgentReview:
+    async def review(self) -> AgentResult | SkipAgentReview | LiteAgentReview:
         return await _run_review_after_analyze(self)
 
-    async def publish(self, review_out: AgentResult | SkipAgentReview) -> MainResult:
+    async def publish(
+        self, review_out: AgentResult | SkipAgentReview | LiteAgentReview
+    ) -> MainResult:
         with gha_log.group("publish"):
             return await _finalize(self, review_out)
 
@@ -264,6 +280,19 @@ class SkipAgentReview:
     """Review-stage outcome when setup-script policy or the triage fast path skips the agent."""
 
     reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class LiteAgentReview:
+    """Review-stage outcome when the triage ``lite`` tier replaced the agent with one call.
+
+    ``outcome`` is ``reviewed`` or ``failed``; a ``downgraded`` call never becomes a
+    ``LiteAgentReview`` (the run takes the full review instead). The agent, its MCP
+    server and the roster never start for it, and it never grants approval.
+    """
+
+    decision: TriageDecision
+    outcome: LiteOutcome
 
 
 def _first_runnable_in_chain(chain: list[str]) -> str:
@@ -504,8 +533,9 @@ async def publish_deterministic_record(
         run_outcome=run_outcome,
         verdict_diagnostic=verdict_diagnostic,
         analyzer_summary=analyzer_run.pre_merge_summary if analyzer_run is not None else None,
-        # The accepted summary already lives in the formal review body.
-        agent_summary=None,
+        # The accepted summary already lives in the formal review body; a lite run
+        # has no formal review body, so its single call's summary is the record's.
+        agent_summary=_lite_record_summary(tool_state.lite_review),
         trust_tier=resolved_ctx.trust_tier,
         attempt_count=len(tool_state.usage_entries) if tool_state.usage_entries else None,
         token_summary=_token_summary(
@@ -697,6 +727,20 @@ def _cost_summary(
     return cost_summary_from_usage_entries(usage_entries, budget_tracker=budget_tracker)
 
 
+async def _report_record_publication_failure(
+    tool_context: ToolContext, prepared: Any, sink_error: str | None
+) -> None:
+    """Post the checks for a run whose formal review record failed to publish."""
+    await report_status_checks(
+        tool_context,
+        run_succeeded=False,
+        failure_reason="formal review record publication failed",
+        conclusion="neutral",
+        packet=prepared,
+        approval_failure_reason=sink_error,
+    )
+
+
 async def _publish(
     ctx: RunContext,
     *,
@@ -763,16 +807,21 @@ async def _publish(
         review_run = tool_context.tool_state.selected_mode in {"Review", "IncrementalReview"}
         if rejection_reason is None and tool_context.tool_state.terminal_publication_failed:
             rejection_reason = "terminal_publication_failed"
+        lite_run = tool_context.tool_state.lite_review is not None
         if (
             rejection_reason is None
             and review_run
             and tool_context.tool_state.terminal_submission is None
         ):
-            rejection_reason = effective_failure_reason or "no_accepted_model_verdict"
+            # A lite run records no terminal verdict by design (one capped call, no
+            # agent); only a real failure reason belongs in its record.
+            rejection_reason = effective_failure_reason or (
+                None if lite_run else "no_accepted_model_verdict"
+            )
         if (
             pull_number is not None
             and prepared is not None
-            and (review_run or tool_context.tool_state.review is not None)
+            and (review_run or lite_run or tool_context.tool_state.review is not None)
         ):
             try:
                 await publish_deterministic_record(
@@ -784,22 +833,36 @@ async def _publish(
                     run_outcome=effective_outcome,
                     verdict_diagnostic=verdict_diagnostic,
                 )
-            except Exception:
-                await report_status_checks(
-                    tool_context,
-                    run_succeeded=False,
-                    failure_reason="formal review record publication failed",
-                    conclusion="neutral",
-                    packet=prepared,
-                    approval_failure_reason=effective_sink_error,
-                )
-                raise
+            except Exception as err:
+                if lite_run:
+                    # The lite comment is the record a human reads, but the checks carry
+                    # the same findings and the never-approve rule; a failed post is
+                    # reported, and the checks below still post.
+                    logger.warning(
+                        "» the lite review comment could not be published ({}); the checks "
+                        "still carry its findings",
+                        type(err).__name__,
+                    )
+                    gha_log.warning("mergeCraft: the lite review comment could not be published")
+                else:
+                    await _report_record_publication_failure(
+                        tool_context, prepared, effective_sink_error
+                    )
+                    raise
         run_ok = run_succeeded_for_outcome(effective_outcome)
+        completion: CompletionConclusion = RUN_OUTCOME_CONCLUSION[effective_outcome]
+        completion_reason = effective_failure_reason
+        lite_completion = _lite_completion_conclusion(
+            tool_context.tool_state, prepared, outcome_conclusion=completion
+        )
+        if lite_completion is not None:
+            completion, lite_reason = lite_completion
+            completion_reason = completion_reason or lite_reason
         await report_status_checks(
             tool_context,
             run_succeeded=run_ok,
-            failure_reason=effective_failure_reason,
-            conclusion=RUN_OUTCOME_CONCLUSION[effective_outcome],
+            failure_reason=completion_reason,
+            conclusion=completion,
             packet=prepared,
             approval_failure_reason=effective_sink_error,
         )
@@ -1133,6 +1196,12 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
         else:
             gh_event = bind_target_pull_request(gh_event, pull)
             ctx.gh_event = gh_event
+            # Dispatch events carry no PR number during setup. Keep the run and
+            # tool state in sync with the fetched PR before reading its issues.
+            bound_pull_number = pull.get("number")
+            if isinstance(bound_pull_number, int):
+                ctx.pr_number = bound_pull_number
+                ctx.tool_state.pr_number = bound_pull_number
 
     try:
         validate_fork_credential_invariant(event=gh_event, env=os.environ, settings=ctx.settings)
@@ -1238,8 +1307,46 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
     # and the MCP-token client is installed regardless.
     await _close_superseded_scm(ctx.scm)
     ctx.scm = create_github_scm(token_ref.mcp_token, client=GitHubClient(token_ref.mcp_token))
+    await _read_linked_issues(ctx)
 
     return ctx
+
+
+async def _read_linked_issues(ctx: RunContext) -> None:
+    """Record the issues this pull request closes, with their authors, once, at run start.
+
+    The ``requirements`` policy evidence producer maps their acceptance criteria
+    against the diff and names their authors. A run without a pull request reads
+    nothing and leaves ``ToolState.linked_issues`` at ``None``. A read that fails,
+    is malformed or spans more than one page *writes* ``None`` ("not read"), so the
+    evidence stays absent rather than treating the pull request as closing nothing.
+    """
+    tool_state = ctx.tool_state
+    run_context = ctx.run_context
+    if tool_state is None or run_context is None or ctx.pr_number is None or ctx.scm is None:
+        return
+    client = github_client_from_scm(ctx.scm)
+    if client is None:
+        tool_state.linked_issues = None
+        return
+    try:
+        issues = await client.closing_issues(
+            run_context.repo.owner, run_context.repo.name, int(ctx.pr_number)
+        )
+    except Exception as exc:  # an advisory read: a failure must never fail the run
+        logger.warning(
+            "linked issues of PR #{} could not be read; requirements evidence stays absent: {}",
+            ctx.pr_number,
+            exc,
+        )
+        tool_state.linked_issues = None
+        return
+    if issues is None:
+        logger.warning(
+            "linked issues of PR #{} were not fully read; requirements evidence stays absent",
+            ctx.pr_number,
+        )
+    tool_state.linked_issues = issues
 
 
 def _stamp_requested_model(ctx: RunContext, payload_model: object) -> None:
@@ -2026,14 +2133,19 @@ async def _dispatch_agent_with_deadline(ctx: RunContext) -> AgentResult:
     return _promote_and_finalize_agent_result(ctx, winning_slug, result)
 
 
-async def _triage_gate(ctx: RunContext) -> SkipAgentReview | None:
+async def _triage_gate(ctx: RunContext) -> SkipAgentReview | LiteAgentReview | None:
     """Deterministic pre-dispatch triage (``review.fastPath``): skip the agent when certain.
 
-    Returns ``SkipAgentReview`` only for a ``skip`` tier. Off by default; the config is
-    honoured only when it is the operator's base-side config. The decision is recorded
-    on the run (packet, check summaries, shadow log) whenever the gate was evaluated,
-    and any doubt is ``full``. The PR's title, body, labels and head-side config are
-    never read.
+    Returns ``SkipAgentReview`` for a ``skip`` tier and ``LiteAgentReview`` for a
+    ``lite`` tier whose single capped call ran (``reviewed`` or ``failed``). A ``lite``
+    call the driver ``downgraded`` (over the cap, no credential) returns ``None`` and
+    records a ``full`` decision carrying the downgrade reason, so the run gets the
+    normal review. Off by default; the config is honoured only when it is the
+    operator's base-side config. The pull request is read once, and the ``lite``
+    driver gets exactly the diff the decision was made from. The decision is
+    recorded on the run (packet, check summaries, shadow log) whenever the gate was
+    evaluated, and any doubt is ``full``. The PR's title, body, labels and head-side
+    config are never read.
     """
     assert ctx.settings is not None
     assert ctx.tool_state is not None
@@ -2048,7 +2160,7 @@ async def _triage_gate(ctx: RunContext) -> SkipAgentReview | None:
     head_sha = str(head.get("sha") or "") if isinstance(head, dict) else ""
     assert ctx.tool_context is not None
     repo = ctx.tool_context.repo
-    decision = await decide_fast_path(
+    decision, inputs = await triage_pull_request(
         ctx.tool_context.scm,
         repo.owner,
         repo.name,
@@ -2059,6 +2171,8 @@ async def _triage_gate(ctx: RunContext) -> SkipAgentReview | None:
         loader=load_triage_inputs,
     )
     ctx.tool_state.triage = decision
+    if decision.tier == "lite" and inputs is not None:
+        return await _run_lite_tier(ctx, decision, diff_text=inputs.diff_text)
     if decision.tier != "skip":
         return None
     logger.warning("» {} — {}", decision.record_line(), decision.reason)
@@ -2066,7 +2180,366 @@ async def _triage_gate(ctx: RunContext) -> SkipAgentReview | None:
     return SkipAgentReview(reason=decision.reason)
 
 
+async def _run_lite_tier(
+    ctx: RunContext, decision: TriageDecision, *, diff_text: str
+) -> LiteAgentReview | None:
+    """Run the ``lite`` tier's single call; ``None`` (a full review) when it downgraded.
+
+    Findings are recorded twice. The checks fail through the packet findings: compact
+    ``tool="lite"`` rows on ``agent_findings``, which
+    :func:`mergecraft.evidence.merge.lite_row_finding` expands, so a Critical or Major
+    one fails the checks like any review finding. The roster record
+    (``record_reviewer_dispatch_run(agent_id="lite")``) is kept separately as the
+    provenance of who raised them. The driver is reached through this module's
+    ``run_lite_review`` binding.
+    """
+    assert ctx.settings is not None
+    assert ctx.tool_state is not None
+    tool_state = ctx.tool_state
+    try:
+        outcome = await run_lite_review(
+            decision=decision, diff_text=diff_text, settings=ctx.settings
+        )
+    except Exception as err:  # the driver is total; a bug in it must not crash the run
+        logger.warning("» lite review raised {}: the run is inconclusive", type(err).__name__)
+        outcome = LiteOutcome(
+            status="failed", reason=f"the lite review raised {type(err).__name__}"
+        )
+    if outcome.status == "downgraded":
+        tool_state.triage = TriageDecision(tier="full", recognizer=None, reason=outcome.reason)
+        logger.warning("» Tier: full — lite downgraded: {}", outcome.reason)
+        return None
+    model_slug = outcome.model_slug or lite_model_slug(ctx.settings)
+    if outcome.model_slug is None and model_slug is not None:
+        outcome = replace(outcome, model_slug=model_slug)
+    tool_state.lite_review = outcome
+    if outcome.findings:
+        from mergecraft.mcp.tool_state import record_reviewer_dispatch_run
+
+        rows = [dict(finding) for finding in outcome.findings]
+        record_reviewer_dispatch_run(
+            tool_state, agent_id="lite", findings=rows, model_slug=model_slug
+        )
+        tool_state.agent_findings.extend(_lite_finding_rows(outcome))
+    logger.warning("» {} — {} ({})", decision.record_line(), outcome.reason, outcome.status)
+    gha_log.warning(decision.record_line())
+    return LiteAgentReview(decision=decision, outcome=outcome)
+
+
+def _lite_finding_rows(outcome: LiteOutcome) -> list[dict[str, Any]]:
+    """Compact ``lite`` rows for the packet, so a lite blocker reaches the gate.
+
+    :func:`mergecraft.evidence.merge.lite_row_finding` expands them into findings.
+    """
+    from mergecraft.evidence.merge import LITE_FINDING_TOOL
+
+    return [
+        {
+            "tool": LITE_FINDING_TOOL,
+            "rule_id": "lite-review",
+            "severity": item["severity"],
+            "path": item["path"],
+            "line": item["line"],
+            "message": item["message"],
+        }
+        for item in outcome.findings
+    ]
+
+
+def _lite_record_summary(outcome: LiteOutcome | None) -> str | None:
+    """The lite model's summary for the deterministic record, with record markers stripped.
+
+    The full-review path strips forged or stale deterministic-record markers from
+    agent prose before it is rendered; a lite summary is model output too.
+    """
+    from mergecraft.findings.ledger import _strip_deterministic_record_markers
+
+    summary = getattr(outcome, "summary", None)
+    if not summary:
+        return None
+    return _strip_deterministic_record_markers(str(summary)) or None
+
+
+def _lite_completion_conclusion(
+    tool_state: ToolState, prepared: Any, *, outcome_conclusion: CompletionConclusion
+) -> tuple[CompletionConclusion, str | None] | None:
+    """The ``mergecraft`` check for a ``lite`` run, and the lead its summary states.
+
+    ``None`` when the run was not a ``lite`` run. A Critical or Major finding fails the
+    check whatever else happened (a cap overrun never softens a blocker); otherwise a
+    clean completion is ``neutral``, never ``success``, because a lite call is triage,
+    not a review. Any other outcome conclusion (``neutral`` for ``inconclusive``,
+    ``failure``) is kept.
+    """
+    triage = tool_state.triage
+    if tool_state.lite_review is None or getattr(triage, "tier", None) != "lite":
+        return None
+    from mergecraft.agents.gates import blocking_findings
+
+    blockers = blocking_findings(list(getattr(prepared, "findings", None) or []))
+    if blockers and outcome_conclusion in {"success", "neutral"}:
+        noun = "finding" if len(blockers) == 1 else "findings"
+        return "failure", f"The lite review raised {len(blockers)} blocking {noun}."
+    if outcome_conclusion == "success":
+        return "neutral", "The lite review finished; approval is left to a human."
+    return outcome_conclusion, None
+
+
+def _lite_inconclusive_reason(outcome: LiteOutcome) -> str | None:
+    """Why a ``lite`` run is ``inconclusive``: a failed call, or usage over the cap."""
+    if outcome.status == "failed":
+        return f"the lite review failed: {outcome.reason}"
+    if outcome.cap_hit:
+        return (
+            f"the lite review used {outcome.tokens_used} tokens, over its cap; "
+            "its result is not trusted"
+        )
+    return None
+
+
 _IGNORE_SKIP_EVENTS: frozenset[str] = frozenset({"pull_request", "pull_request_target"})
+
+
+async def _fetch_pull_request(
+    ctx: RunContext, pull: dict[str, Any], *, what: str
+) -> dict[str, Any]:
+    """Read the pull request through the SCM (one ``get_pull``).
+
+    *what* names the field the caller is after, for the error. Raises when the
+    read fails or there is no SCM to read with, so the caller records what it
+    could not see rather than silently reading an empty value.
+    """
+    scm = getattr(ctx, "scm", None)
+    tool_context = getattr(ctx, "tool_context", None)
+    if scm is None and tool_context is not None:
+        scm = getattr(tool_context, "scm", None)
+    repo = getattr(getattr(ctx, "run_context", None), "repo", None)
+    if repo is None and tool_context is not None:
+        repo = getattr(tool_context, "repo", None)
+    raw_number = pull.get("number")
+    number = raw_number if isinstance(raw_number, int) else ctx.pr_number
+    if scm is None or repo is None or number is None:
+        msg = f"the pull request {what} is not in the event and cannot be read"
+        raise RuntimeError(msg)
+    fetched = await scm.get_pull(repo.owner, repo.name, int(number))
+    return fetched if isinstance(fetched, dict) else {}
+
+
+async def _fetch_pull_request_body(ctx: RunContext, pull: dict[str, Any]) -> str | None:
+    """Read the pull request's description through the SCM (one ``get_pull``).
+
+    Raises when the read fails or there is no SCM to read with, so the caller
+    records the scope as unknown rather than skipping a body it could not see.
+    """
+    body = (await _fetch_pull_request(ctx, pull, what="body")).get("body")
+    return body if isinstance(body, str) else None
+
+
+async def _resolve_run_pull_request_metadata(ctx: RunContext) -> None:
+    """Record the pull request's title and label names on the run state (#1056 part 5).
+
+    A ``pull_request`` the run bound itself (the comment trigger, a PR-naming
+    ``workflow_dispatch``) carries only ``number``/``head``/``base``, and a dispatch
+    payload has no title either, so fix detection would see neither a ``fix:`` title
+    nor a ``bug`` label and an unproven fix would pass as ``fix.not-required``. The
+    title and labels are taken from the raw event when it has them
+    (``pull_request.*``, or ``issue.*`` on a comment on a pull request) and read
+    through the SCM once otherwise, onto ``ToolState.pull_request_title`` and
+    ``ToolState.pull_request_labels``. Never fails the run: a read that fails leaves
+    both ``None`` and is logged, so detection falls back to whatever the payload
+    carries. Author inputs only ever add the requirement.
+    """
+    if ctx.tool_state is None:
+        return
+    from mergecraft.evidence.run_packet import (
+        event_pull_request_labels,
+        event_pull_request_title,
+    )
+
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    title = event_pull_request_title(event)
+    labels = event_pull_request_labels(event)
+    if title is None or labels is None:
+        pull = event.get("pull_request")
+        if not isinstance(pull, dict):
+            return
+        try:
+            fetched = await _fetch_pull_request(ctx, pull, what="title and labels")
+        except Exception as err:  # fix detection keeps the payload's inputs, never crashes the run
+            logger.warning(
+                "fix_labels: the pull request's title and labels could not be read; "
+                "fix detection uses the event's inputs only: {}",
+                err,
+            )
+            return
+        read = {"pull_request": fetched}
+        if title is None:
+            title = event_pull_request_title(read)
+        if labels is None:
+            labels = event_pull_request_labels(read)
+        if title is None and labels is None:
+            logger.warning(
+                "fix_labels: the pull request read carries neither title nor labels; "
+                "fix detection uses the event's inputs only"
+            )
+            return
+    if title is not None:
+        ctx.tool_state.pull_request_title = title
+    if labels is not None:
+        ctx.tool_state.pull_request_labels = tuple(labels)
+
+
+async def _pull_request_body(ctx: RunContext) -> str | None:
+    """The pull request's own description, never a comment body.
+
+    Read from the raw event: ``pull_request.body`` on pull-request and review
+    comment events, ``issue.body`` on a comment on a pull request. A
+    ``pull_request`` the run bound itself (the comment trigger, a PR-naming
+    ``workflow_dispatch``) carries no ``body`` key, so the pull request is read
+    through the SCM once; a failed read raises. The resolved payload's
+    ``event.body`` is the comment for comment triggers, so it is used only for a
+    pull-request trigger.
+    """
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    pull = event.get("pull_request")
+    if isinstance(pull, dict):
+        if "body" not in pull:
+            return await _fetch_pull_request_body(ctx, pull)
+        body = pull.get("body")
+        return body if isinstance(body, str) else None
+    issue = event.get("issue")
+    if isinstance(issue, dict) and issue.get("pull_request") is not None:
+        body = issue.get("body")
+        return body if isinstance(body, str) else None
+    resolved = ctx.ctx_payload
+    if resolved is not None and resolved.event.is_pr:
+        trigger = resolved.event.trigger
+        if trigger.startswith("pull_request") and "comment" not in trigger:
+            return resolved.event.body
+    return None
+
+
+async def _record_scope_declaration(ctx: RunContext) -> None:
+    """Record the run's ``Scope paths:`` declaration on ``ToolState.scope_declaration``.
+
+    Sources in order, first declaration wins: the pull request body
+    (``source_ref="pr_description"``), then the body of each issue the pull
+    request closes (``ToolState.linked_issues``, ``source_ref="linked_issue#<n>"``).
+    A body without a block is skipped; a block that is empty or broke a bound
+    still wins, so a later source never widens it. No block anywhere records an
+    undeclared scope. The bodies are untrusted data and never open a file. Any
+    failure, including a pull request body that had to be fetched and could not
+    be, leaves ``None`` (unknown) and never raises into the run: a closing
+    issue's block never stands in for a body that might declare a narrower scope.
+    """
+    tool_state = ctx.tool_state
+    if tool_state is None:
+        return
+    try:
+        sources: list[tuple[str, str | None]] = [("pr_description", await _pull_request_body(ctx))]
+        sources.extend(
+            (f"linked_issue#{issue.number}", issue.body) for issue in tool_state.linked_issues or ()
+        )
+        declaration = ScopeDeclaration(declared=False, globs=(), source_ref="", rejected=())
+        for source_ref, body in sources:
+            if not body:
+                continue
+            parsed = parse_scope_paths(body)
+            if parsed.declared:
+                declaration = replace(parsed, source_ref=source_ref)
+                break
+    except Exception as exc:  # unknown, never an error: the scope gate stays null
+        logger.warning("scope declaration could not be read; the scope stays unknown: {}", exc)
+        tool_state.scope_declaration = None
+        return
+    tool_state.scope_declaration = declaration
+    if declaration.declared:
+        logger.info(
+            "» scope declared in {}: {} glob(s), {} rejected",
+            declaration.source_ref,
+            len(declaration.globs),
+            len(declaration.rejected),
+        )
+
+
+async def _resolve_run_fix_labels(ctx: RunContext) -> None:
+    """Record ``review.fixLabels`` from the operator's side of the pull request (#1056).
+
+    Stored on ``ToolState.fix_labels`` before any tier can skip the agent, so the
+    packet and the verification tool decide "is this a fix?" from base-side labels
+    only. Never fails the run: any doubt leaves the defaults (``bug``, ``fix``).
+    """
+    if ctx.settings is None or ctx.tool_state is None or ctx.tool_context is None:
+        return
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    repo = ctx.tool_context.repo
+    try:
+        labels = await resolve_fix_labels(
+            ctx.tool_context.scm,
+            repo.owner,
+            repo.name,
+            event=event,
+            run_start_review=ctx.settings.review,
+            operator_owned=ctx.settings_snapshot_operator_owned,
+        )
+    except Exception as err:  # fix detection falls back to the defaults, never off
+        logger.warning("fix_labels: could not resolve review.fixLabels, using defaults: {}", err)
+        from mergecraft.ci.red_green import DEFAULT_FIX_LABELS
+
+        labels = DEFAULT_FIX_LABELS
+    ctx.tool_state.fix_labels = labels
+
+
+async def _resolve_run_red_green_declaration(ctx: RunContext) -> None:
+    """Record the base-side ``ciEvidence.redGreen`` before any CI ingest (#1056).
+
+    Stored on ``ToolState.red_green_declaration``; with none declared,
+    ``ToolState.red_green`` records ``not-declared`` so a fix pull request is told
+    which setting is missing. A pull request's own config never declares its
+    receipt. Never fails the run: any doubt declares nothing.
+    """
+    if ctx.settings is None or ctx.tool_state is None or ctx.tool_context is None:
+        return
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    repo = ctx.tool_context.repo
+    unreadable: str | None
+    try:
+        declaration, unreadable = await read_red_green_declaration(
+            ctx.tool_context.scm,
+            repo.owner,
+            repo.name,
+            event=event,
+            run_start_ci_evidence=ctx.settings.ci_evidence,
+            operator_owned=ctx.settings_snapshot_operator_owned,
+        )
+    except Exception as err:  # an unresolvable declaration declares nothing, never fails
+        logger.warning("red_green: could not resolve ciEvidence.redGreen: {}", err)
+        declaration = None
+        unreadable = f"the PR base config could not be read ({type(err).__name__})"
+    ctx.tool_state.red_green_declaration = declaration
+    if declaration is None:
+        from mergecraft.ci.red_green import undeclared_red_green_evidence
+
+        ctx.tool_state.red_green = undeclared_red_green_evidence(unreadable)
+
+
+def _skip_without_review_diff(
+    ctx: RunContext, skip: SkipAgentReview | LiteAgentReview
+) -> SkipAgentReview | LiteAgentReview:
+    """A run without the agent has no review diff, so a declared receipt is unverified.
+
+    Both a ``skip`` tier and a ``lite`` tier leave the pull request unchecked out:
+    neither writes the review diff the untouched-workflow check needs, so the
+    fail-then-pass receipt cannot be verified on either path.
+    """
+    if ctx.tool_context is not None:
+        reason = (
+            skip.reason
+            if isinstance(skip, SkipAgentReview)
+            else f"lite tier: {skip.decision.reason}"
+        )
+        record_unverified_red_green(ctx.tool_context, reason=f"the agent did not run ({reason})")
+    return skip
 
 
 async def _ignore_paths_gate(ctx: RunContext) -> SkipAgentReview | None:
@@ -2126,7 +2599,12 @@ async def _ignore_paths_gate(ctx: RunContext) -> SkipAgentReview | None:
 
 
 async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecutionSummary | None:
-    """Dispatch secondary reviewers server-side; return the dispatch summary."""
+    """Dispatch file groups and secondary reviewers server-side; return the roster summary.
+
+    The opt-in file-group fan-out (``review.fileGroupFanout``) runs first, after
+    the primary reviewer. Its failures are run-health notes recorded on the tool
+    state, so its summary is never folded into the roster result.
+    """
     assert ctx.tool_context is not None
     assert ctx.tool_state is not None
     assert ctx.settings is not None
@@ -2140,6 +2618,21 @@ async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecu
             return None
         return max(1.0, ctx.agent_deadline_monotonic - time.monotonic())
 
+    if ctx.settings.review.file_group_fanout.enabled:
+        fanout = await run_file_group_reviewers(
+            tool_context=ctx.tool_context,
+            base_run_ctx=ctx.run_ctx,
+            settings=ctx.settings,
+            payload=ctx.payload,
+            repo_root=Path(primary_repo_state_dir(ctx.tool_state)),
+            remaining_timeout_s=_remaining_roster_timeout_s,
+        )
+        if fanout.degraded:
+            logger.warning(
+                "» file-group fan-out degraded: {} group(s) recorded as run health",
+                len(fanout.failures),
+            )
+
     return await run_pending_roster_reviewers(
         tool_context=ctx.tool_context,
         base_run_ctx=ctx.run_ctx,
@@ -2149,14 +2642,20 @@ async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecu
     )
 
 
-async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentReview:
+async def _run_review_after_analyze(
+    ctx: RunContext,
+) -> AgentResult | SkipAgentReview | LiteAgentReview:
     """Setup script, MCP start, and payload-timed agent dispatch (review stage)."""
     await _apply_overrides_and_setup_git(ctx)
     assert ctx.tool_context is not None
+    await _resolve_run_red_green_declaration(ctx)
+    # The fail-then-pass receipt is read after the agent phase, once the review diff
+    # exists (``ingest_red_green_after_review`` below), not in this pre-agent lane.
     await ingest_ci_sarif_from_action_env(
         ctx.tool_context,
         ctx.gh_event or {},
         event_name=os.environ.get("GITHUB_EVENT_NAME", ""),
+        red_green=False,
     )
     await _run_setup_script_phase(ctx)
 
@@ -2185,6 +2684,10 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
             ctx.setup_hook_failure,
         )
         raise sc_payload
+    # Base-side fix labels are recorded before any tier can skip the agent, the
+    # setup-script ``inconclusive`` skip included, so the packet never falls back.
+    await _resolve_run_fix_labels(ctx)
+    await _resolve_run_pull_request_metadata(ctx)
     if sc_action == "skip_agent":
         assert isinstance(sc_payload, str)
         skip_reason = sc_payload
@@ -2194,20 +2697,29 @@ async def _run_review_after_analyze(ctx: RunContext) -> AgentResult | SkipAgentR
             skip_reason,
         )
         # Engine publish (``_finalize``) owns completion; do not publish here.
-        return SkipAgentReview(reason=skip_reason)
+        return _skip_without_review_diff(ctx, SkipAgentReview(reason=skip_reason))
 
-    triage_skip = await _triage_gate(ctx)
-    if triage_skip is not None:
-        return triage_skip
+    # #1056 part 3: read once, before the fast-path gate and before any dispatch.
+    await _record_scope_declaration(ctx)
+    triage_out = await _triage_gate(ctx)
+    if triage_out is not None:
+        return _skip_without_review_diff(ctx, triage_out)
     ignore_skip = await _ignore_paths_gate(ctx)
     if ignore_skip is not None:
-        return ignore_skip
+        return _skip_without_review_diff(ctx, ignore_skip)
 
     with gha_log.group("agent-dispatch"):
         await _prepare_agent_dispatch(ctx)
         dispatch_started = time.perf_counter()
         result = await _dispatch_agent_with_deadline(ctx)
         roster = await _run_server_roster_reviewers_if_needed(ctx)
+        # The review diff, ignored paths and unreviewable paths exist now, so the
+        # declared workflow can be shown untouched before the packet is assembled.
+        await ingest_red_green_after_review(
+            ctx.tool_context,
+            ctx.gh_event or {},
+            event_name=os.environ.get("GITHUB_EVENT_NAME", ""),
+        )
         if ctx.tool_state is not None:
             ctx.tool_state.phase_elapsed_s["agent"] = round(
                 time.perf_counter() - dispatch_started, 3
@@ -2475,7 +2987,9 @@ def _coverage_gate_reason(tool_context: ToolContext, settings: RepoSettings) -> 
         return None
 
 
-async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> MainResult:
+async def _finalize(
+    ctx: RunContext, result: AgentResult | SkipAgentReview | LiteAgentReview
+) -> MainResult:
     """Phase 4 — post-run, publish, outcome mapping (G4.2)."""
     assert ctx.tool_context is not None
     assert ctx.tool_state is not None
@@ -2486,7 +3000,8 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
     settings = ctx.settings
 
     finalize_failure: str | None = None
-    if isinstance(result, SkipAgentReview):
+    lite = result if isinstance(result, LiteAgentReview) else None
+    if isinstance(result, (SkipAgentReview, LiteAgentReview)):
         agent_result = AgentResult(success=True)
     else:
         agent_result = result
@@ -2570,7 +3085,9 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
             setup_reason=setup_reason,
             setup_policy=settings.setup_failure_policy,
             prep_reason=prep_reason,
-            mode=tool_state.selected_mode,
+            # A lite run owes no terminal verdict and delivers no checkout coverage:
+            # it is classified on its own call below, not as a review-mode run.
+            mode=None if lite is not None else tool_state.selected_mode,
             verdict_protocol=settings.gates.terminal_verdict,
             final_summary_written=tool_state.final_summary_written,
             terminal_publication_failed=tool_state.terminal_publication_failed,
@@ -2584,6 +3101,10 @@ async def _finalize(ctx: RunContext, result: AgentResult | SkipAgentReview) -> M
                 f"{finalize_failure} — the post-run finalize step raised, so the terminal "
                 "verdict could not be confirmed"
             )
+        lite_reason = _lite_inconclusive_reason(lite.outcome) if lite is not None else None
+        if lite_reason is not None and outcome is RunOutcome.passed:
+            logger.warning("» {}", lite_reason)
+            outcome, failure_reason = RunOutcome.inconclusive, lite_reason
     if sink_scan_error is not None:
         # A sink hit outranks the published verdict: the run failed, whatever
         # the review said, and ``failure_reason`` names the sink path so the

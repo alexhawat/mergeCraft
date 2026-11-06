@@ -113,7 +113,10 @@ CASE_STATUS_BLOCKED: CaseStatus = "blocked"
 # — the promote workflow's tests pin them as the canonical examples.
 CATEGORY_REJECTED: str = "rejected"
 CATEGORY_REVERTED: str = "reverted"
-FAILURE_CATEGORIES: frozenset[str] = frozenset({CATEGORY_REJECTED, CATEGORY_REVERTED})
+CATEGORY_INCIDENT_DERIVED: str = "incident_derived"
+FAILURE_CATEGORIES: frozenset[str] = frozenset(
+    {CATEGORY_REJECTED, CATEGORY_REVERTED, CATEGORY_INCIDENT_DERIVED}
+)
 
 # The case directory's per-file front-matter shape. Each row is the
 # field name and the parser key expected in the YAML map. Keeping the
@@ -276,6 +279,13 @@ class Case(BaseModel):
     # Multi-round convergence corpus (W10). When set, the case is scored via
     # :func:`convergence_rounds_from_case` rather than single-round replay.
     rounds: list[CaseRound] | None = None
+    # Incident-derived cases (#1163): optional metadata; required when
+    # ``category == incident_derived`` at ingest time, not on every case file.
+    incident_pr: int | None = None
+    followup_pr: int | None = None
+    confirmed_bug_path: str = ""
+    confirmed_bug_start_line: int | None = None
+    confirmed_bug_end_line: int | None = None
 
     @property
     def is_multi_round(self) -> bool:

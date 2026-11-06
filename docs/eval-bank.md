@@ -378,6 +378,15 @@ The following rules are pinned:
    function of the case and the current verdict. The CLI does not
    invoke the agent; the caller supplies the verdict.
 
+### Incident-derived cases (#1163)
+
+Use `mergecraft eval add-incident` after a postmortem to capture the incident PR,
+the revert or fix-forward PR, and the confirmed bug location (`path:start-end` in
+`expected_finding`). Optional front matter records `incident_pr`, `followup_pr`, and
+the confirmed line range. The same flywheel provenance rules apply: `agent-seeded`
+or an adjudicated tier with a matching `AdjudicationRecord` — never silent `human`.
+See `docs/eval-methodology.md` for seeding from postmortems without quality claims.
+
 ## Source
 
 - `src/mergecraft/evals/store.py` — the pure core (schema, parse,

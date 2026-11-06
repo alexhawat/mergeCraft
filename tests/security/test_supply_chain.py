@@ -4,7 +4,7 @@ Lightweight file-content tests for the parts of the supply-chain waves that
 pytest can see without building images:
 
 - W7.1: base images pinned by digest in both Dockerfiles.
-- W7.2: no ``curl … | bash`` installer pipes (NodeSource) in either Dockerfile.
+- W7.2: no ``curl … | bash`` installer pipes (NodeSource) in either docker/Dockerfile.
 - W7.3: the ``gh`` CLI install is pinned (no floating apt-from-vendor-repo).
 - W7.4: agent CLIs come from a committed lockfile (``docker/agent-clis/``),
   not a floating ``npm install -g``.
@@ -24,7 +24,7 @@ import pytest
 import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_DOCKERFILES = ["Dockerfile", "Dockerfile.analyzers"]
+_DOCKERFILES = ["docker/Dockerfile", "docker/Dockerfile.analyzers"]
 _WORKFLOWS = _REPO_ROOT / ".github" / "workflows"
 
 

@@ -15,6 +15,7 @@ import pytest
 
 from mergecraft.agents.gates import _is_low_risk_passing, decide_action, select_rule_id
 from mergecraft.classify.blast_radius import (
+    GATE_ORDER,
     SIGNAL_MISSING_CATEGORY,
     BlastRadiusClassification,
     ChangeSet,
@@ -121,6 +122,17 @@ def test_known_risk_bands_keep_their_order() -> None:
     assert risk_at_or_above("Critical", "high") is True
 
 
+# Declared scopes for the approval-route controls (#1056 part 3): a change classified
+# without one has no ``scope`` gate, and the approval rows need every gate.
+_IN_SCOPE_DOCS: ChangeSet = {
+    "scope": {"declared": True, "globs": ["docs/guide.md"], "invalid": False}
+}
+_IN_SCOPE_LOCK: ChangeSet = {"scope": {"declared": True, "globs": ["uv.lock"], "invalid": False}}
+# A non-fix signal for the same controls (#1056 part 5): a change classified without
+# one has no ``fix_proof`` gate either.
+_NOT_A_FIX: ChangeSet = {"fix_proof": {"required": False, "status": "not-required"}}
+
+
 def _decided_packet(
     blast_radius: BlastRadiusClassification, *, files_changed: list[str]
 ) -> MergeEvidencePacket:
@@ -178,7 +190,14 @@ def test_a_blast_radius_without_inputs_never_selects_low_risk_auto_merge(
 
 def test_a_measured_low_change_still_selects_low_risk_passing() -> None:
     """Control: the gate row is reachable when the classification had inputs."""
-    change: ChangeSet = {"changed_paths": ["docs/guide.md"], "diff_stats": {"lines_added": 3}}
+    change: ChangeSet = {
+        "changed_paths": ["docs/guide.md"],
+        "diff_stats": {"lines_added": 3},
+        # A declared scope the change is inside: without one the ``scope`` gate is
+        # missing from the checklist and no approval row is reachable (#1056 part 3).
+        **_IN_SCOPE_DOCS,
+        **_NOT_A_FIX,
+    }
     packet = _decided_packet(classify_blast_radius(change), files_changed=["docs/guide.md"])
 
     assert _is_low_risk_passing(packet) is True
@@ -266,10 +285,12 @@ def test_a_missing_signal_marks_its_unmeasured_gates_unknown(
 
 
 def test_gate_order_starts_with_the_missing_signal_table_gates() -> None:
-    from mergecraft.classify.blast_radius import GATE_ORDER
+    names = [gate.gate for gate in classify_blast_radius({}).checklist]
 
     assert tuple(GATE_ORDER[: len(_NO_PATHS)]) == tuple(_NO_PATHS)
-    assert [gate.gate for gate in classify_blast_radius({}).checklist] == list(GATE_ORDER)
+    # A gate fed by an optional signal (``scope``) is listed only when it is supplied.
+    assert names == [gate for gate in GATE_ORDER if gate in names]
+    assert names[: len(_NO_PATHS)] == list(_NO_PATHS)
 
 
 @pytest.mark.parametrize(
@@ -351,9 +372,10 @@ def _classification_with_checklist(
             "next_action": "forged",
             "categories": categories,
             "reasons": [{"code": "baseline.clean", "lane": lane, "message": "forged"}],
+            # Every gate in ``GATE_ORDER``: the approval rows require the full list (#1056).
             "checklist": [
                 {"gate": gate, "passed": inputs if gate == "inputs" else True}
-                for gate in _LOCKED_GATES
+                for gate in GATE_ORDER
             ],
         }
     )
@@ -548,7 +570,12 @@ def test_the_issue_example_low_lane_with_nonpassing_tests_never_auto_merges(
 def test_a_real_medium_classification_with_a_failed_gate_still_reaches_clean_pass() -> None:
     """Control: a measured ``medium`` lane always has a ``False`` gate; clean_pass keeps it."""
     classification = classify_blast_radius(
-        {"changed_paths": ["uv.lock"], "diff_stats": {"lines_added": 4, "lines_deleted": 1}}
+        {
+            "changed_paths": ["uv.lock"],
+            "diff_stats": {"lines_added": 4, "lines_deleted": 1},
+            **_IN_SCOPE_LOCK,
+            **_NOT_A_FIX,
+        }
     )
     packet = _decided_packet(classification, files_changed=["uv.lock"])
 

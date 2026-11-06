@@ -166,7 +166,7 @@ env:
   # Single Action SHA for all three review rungs (D10 / #532). Bump here only;
   # every `uses: alexhawat/mergeCraft@…` below must match — enforced by
   # `make action-pin-check`.
-  MERGECRAFT_ACTION_SHA: "f312aa8110f8fb4e8ea3bd04e206d2d9d223d998"
+  MERGECRAFT_ACTION_SHA: "c6a9752125e9044cfe90fd0fad19a59853dc805e"
 
 concurrency:
   # pull_request_target resolves github.ref to the default branch; key on PR number
@@ -670,7 +670,7 @@ jobs:
         # against bugs that no longer existed. `make action-pin-check` detects this
         # correctly but is wired into no gate — see #532, which fixes the guard.
         # b34e9f25 was the pre-0.0.1 tip promoted by #533; it carried the
-        # Dockerfile `--extra tracing` line and the lane A hardening from #519.
+        # docker/Dockerfile `--extra tracing` line and the lane A hardening from #519.
         # 2026-08-28 (eleventh bump, PR #546): re-bumped to b3638ea7 so the
         # reviewer can authenticate at all. Every rung at b34e9f25 brokered the
         # GitHub token to git as `Authorization: Bearer`, which GitHub's git
@@ -686,7 +686,7 @@ jobs:
         # work (#573, #536, #520). 3ed2c798 is the sync of main into
         # pre-0.0.1 before the lane A/C pin; #583 promotes that workflow to
         # main. pull_request_target still resolves from main until then.
-        uses: alexhawat/mergeCraft@f312aa8110f8fb4e8ea3bd04e206d2d9d223d998 # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
+        uses: alexhawat/mergeCraft@c6a9752125e9044cfe90fd0fad19a59853dc805e # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
           prompt: ${{ steps.prompt.outputs.text }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
@@ -981,7 +981,7 @@ jobs:
         # against bugs that no longer existed. `make action-pin-check` detects this
         # correctly but is wired into no gate — see #532, which fixes the guard.
         # b34e9f25 was the pre-0.0.1 tip promoted by #533; it carried the
-        # Dockerfile `--extra tracing` line and the lane A hardening from #519.
+        # docker/Dockerfile `--extra tracing` line and the lane A hardening from #519.
         # 2026-08-28 (eleventh bump, PR #546): re-bumped to b3638ea7 so the
         # reviewer can authenticate at all. Every rung at b34e9f25 brokered the
         # GitHub token to git as `Authorization: Bearer`, which GitHub's git
@@ -997,7 +997,7 @@ jobs:
         # work (#573, #536, #520). 3ed2c798 is the sync of main into
         # pre-0.0.1 before the lane A/C pin; #583 promotes that workflow to
         # main. pull_request_target still resolves from main until then.
-        uses: alexhawat/mergeCraft@f312aa8110f8fb4e8ea3bd04e206d2d9d223d998 # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
+        uses: alexhawat/mergeCraft@c6a9752125e9044cfe90fd0fad19a59853dc805e # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
           prompt: ${{ needs.review.outputs.prompt }}
           # Must stay BELOW the job's timeout-minutes: when GitHub kills the job
@@ -1418,7 +1418,7 @@ jobs:
         # lockstep when bumping, and mirror to the sevn-side workflow. This rung
         # was authored against the pre-#533 pin; carried forward on each bump so
         # all three rungs run the same product code (#532). Now 3ed2c798 (#582).
-        uses: alexhawat/mergeCraft@f312aa8110f8fb4e8ea3bd04e206d2d9d223d998 # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
+        uses: alexhawat/mergeCraft@c6a9752125e9044cfe90fd0fad19a59853dc805e # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
           prompt: ${{ needs.review.outputs.prompt }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m

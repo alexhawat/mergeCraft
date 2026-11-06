@@ -1104,6 +1104,23 @@ _IGNORED_PATHS_NOTE = (
 )
 
 
+def _annotate_review_round(
+    result: dict[str, Any],
+    *,
+    round_index: int,
+    ctx: ToolContext,
+) -> None:
+    """Expose round index and cap metadata for the reviewing agent (#1166)."""
+    from mergecraft.config.settings_snapshot import repo_settings_from_context
+    from mergecraft.review.round_cap import max_review_rounds, review_round_cap_exceeded
+
+    settings = repo_settings_from_context(ctx)
+    cap = max_review_rounds(settings)
+    result["reviewRoundIndex"] = round_index
+    result["maxReviewRounds"] = cap
+    result["reviewRoundCapExceeded"] = review_round_cap_exceeded(round_index=round_index, cap=cap)
+
+
 def _annotate_ignored(result: dict[str, Any], ignored: list[str]) -> None:
     if ignored:
         result["ignoredPaths"] = ignored
@@ -1259,6 +1276,11 @@ def checkout_pr_tool(ctx: ToolContext):
             if fetch_truncated:
                 result["diffTruncated"] = True
             _annotate_ignored(result, fetch_ignored)
+            _annotate_review_round(
+                result,
+                round_index=round_index,
+                ctx=ctx,
+            )
 
             await hydrate_review_context(
                 ctx,
@@ -1490,24 +1512,34 @@ def checkout_pr_tool(ctx: ToolContext):
 
         try:
             from mergecraft.review.linked_repos import (
-                attach_linked_repo_review,
+                linked_repo_review_with_payload,
                 operator_authorized_linked_repos,
             )
 
             base_lookup = _base_linked_repo_manifest(
                 cwd=cwd, base_ref=base_ref, base_fetch_failure=base_fetch_failure
             )
-            linked = attach_linked_repo_review(
+            # Recorded for the ``xrepo`` policy evidence producer, which reads
+            # what this checkout computed instead of walking git a second time.
+            ctx.tool_state.linked_repo_base_manifest = base_lookup
+            ctx.tool_state.linked_repo_review = None
+            linked = linked_repo_review_with_payload(
                 Path(cwd),
                 authorized_repos=operator_authorized_linked_repos(),
                 base_manifest=base_lookup.manifest,
                 base_manifest_error=base_lookup.unreadable_reason,
             )
             if linked is not None:
-                result.update(linked)
+                ctx.tool_state.linked_repo_review = linked[0]
+                result.update(linked[1])
         except Exception as xrepo_err:
             logger.info("linked-repo review soft-failed: {}", xrepo_err)
 
+        _annotate_review_round(
+            result,
+            round_index=round_index,
+            ctx=ctx,
+        )
         logger.info("checked out PR #{} -> {}", pull_number, local_branch)
         from mergecraft.mcp.review_context import hydrate_review_context
 

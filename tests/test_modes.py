@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
@@ -271,6 +272,12 @@ def _outside_terminal(template: str, *, start: str, keep: str) -> str:
     return template[:start_at] + template[keep_at:]
 
 
+def _without_scope_paths_line(template: str) -> str:
+    """Drop the Plan-mode ``Scope paths:`` line and the blank line it may open."""
+    kept = [line for line in template.split("\n") if "Scope paths:" not in line]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+
+
 def _load_pre_split_snapshot() -> Mapping[str, Mapping[str, str]]:
     """Load the snapshot fixture captured on the pre-split tree.
 
@@ -465,6 +472,13 @@ def test_mode_prompt_text_is_byte_identical_after_split() -> None:
     for name, (description, prompt) in current.items():
         expected = snapshot[name]
         assert description == expected["description"], (f"{name}: description drifted",)
+        if name == "Plan":
+            # #1056 part 3 adds exactly one checklist line asking the plan body to
+            # end with a ``Scope paths:`` block; everything else stays verbatim.
+            assert _without_scope_paths_line(prompt or "") == _without_scope_paths_line(
+                expected["prompt"]
+            ), f"{name}: prompt drifted outside the Scope paths line"
+            continue
         markers = terminal_markers.get(name)
         if markers is None:
             assert prompt == expected["prompt"], f"{name}: prompt drifted"

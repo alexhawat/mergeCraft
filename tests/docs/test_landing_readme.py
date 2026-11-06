@@ -14,8 +14,8 @@ from tests.docs.support import action_uses_pattern, git_ref_exists
 
 README = REPO_ROOT / "README.md"
 _D2_SOURCE = REPO_ROOT / "docs" / "diagrams" / "pipeline.d2"
-_PIPELINE_LIGHT = REPO_ROOT / "assets" / "diagrams" / "pipeline-light.svg"
-_PIPELINE_DARK = REPO_ROOT / "assets" / "diagrams" / "pipeline-dark.svg"
+_PIPELINE_LIGHT = REPO_ROOT / "docs" / "assets" / "diagrams" / "pipeline-light.svg"
+_PIPELINE_DARK = REPO_ROOT / "docs" / "assets" / "diagrams" / "pipeline-dark.svg"
 _PAGES = "https://alexhawat.github.io/mergeCraft/"
 # SW-D7: Example 1 pins the Action by full commit SHA and names the release tag.
 _SHA_PIN = re.compile(r"^[0-9a-f]{40}$")
@@ -23,8 +23,7 @@ _TAG_LABEL = re.compile(r"#\s*v\d+\.\d+\.\d+(?:a\d+|b\d+|rc\d+)?", re.IGNORECASE
 
 _DEMO_PATHS = (
     "docs/assets/demo.gif",
-    "assets/demo.gif",
-    "assets/demo.mp4",
+    "docs/assets/demo.mp4",
 )
 
 
@@ -109,11 +108,11 @@ def test_landing_has_problem_solution_cards() -> None:
 
 def test_landing_has_picture_architecture_diagram() -> None:
     text = _readme_text()
-    assert "assets/diagrams/pipeline-dark.svg" in text, (
-        "README architecture hero must reference assets/diagrams/pipeline-dark.svg"
+    assert "docs/assets/diagrams/pipeline-dark.svg" in text, (
+        "README architecture hero must reference docs/assets/diagrams/pipeline-dark.svg"
     )
-    assert "assets/diagrams/pipeline-light.svg" in text, (
-        "README architecture hero must reference assets/diagrams/pipeline-light.svg"
+    assert "docs/assets/diagrams/pipeline-light.svg" in text, (
+        "README architecture hero must reference docs/assets/diagrams/pipeline-light.svg"
     )
     assert "<picture>" in text, "README must wrap the architecture hero in a <picture> element"
 

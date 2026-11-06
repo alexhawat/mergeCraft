@@ -62,7 +62,7 @@ from mergecraft.scm.github import GitHubScmAdapter
 from mergecraft.utils.github import GitHubClient, parse_repo_context
 from mergecraft.utils.token import get_job_token
 
-_FINDINGS_SUBCOMMANDS = frozenset({"export", "carryover", "ledger"})
+_FINDINGS_SUBCOMMANDS = frozenset({"export", "carryover", "ledger", "outcomes"})
 _REVIEW_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 FindingsOutputFormat = Literal["json", "markdown"]
 
@@ -273,6 +273,63 @@ def _render_ledger_markdown(records: list[LifecycleRecord], *, pull_number: int)
         if record.recorded_at:
             lines.append(f"  - recorded: {record.recorded_at}")
     return "\n".join(lines).rstrip() + "\n"
+
+
+@app.command("outcomes")
+def outcomes(
+    ctx: typer.Context,
+    pr: Annotated[int, typer.Option("--pr", help="Pull request number.")],
+    repo: Annotated[str | None, typer.Option("--repo", help=_REPO_HELP)] = None,
+    merged: Annotated[
+        bool, typer.Option("--merged/--not-merged", help="Whether the PR merged.")
+    ] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit JSON.")] = False,
+) -> None:
+    """Advisory human outcomes for published mergeCraft findings (#1165)."""
+    from mergecraft.findings.outcomes import classify_pull_request_outcomes
+    from mergecraft.findings.sweep import carryover_publishers
+    from mergecraft.findings.threads import ReviewThreadPage
+
+    owner, name = _resolve_repo(repo)
+
+    async def _run() -> tuple[ReviewThreadPage, frozenset[str]]:
+        client = _client()
+        try:
+            page = await fetch_review_threads(
+                GitHubScmAdapter(client), owner, name, pr, include_resolved=True
+            )
+            publishers = await carryover_publishers(client, owner, name, pr)
+            return page, publishers
+        finally:
+            await client.aclose()
+
+    page, publishers = asyncio.run(_run())
+    report = classify_pull_request_outcomes(
+        pull_number=pr,
+        threads=page.threads,
+        publishers=publishers,
+        merged=merged,
+        incomplete=page.incomplete,
+    )
+    if wants_json_output(ctx, json_flag=json_output):
+        emit_cli_json(
+            {
+                "pull_number": report.pull_number,
+                "merged": report.merged,
+                "incomplete": report.incomplete,
+                "rates": report.rates(),
+                "rows": [row.model_dump() for row in report.rows],
+            }
+        )
+        return
+    typer.echo(f"# Finding outcomes — #{pr}")
+    for row in report.rows:
+        typer.echo(f"- {row.fingerprint[:12]}… → **{row.outcome}** ({row.reason})")
+    rates = report.rates()
+    typer.echo(
+        f"Rates (classified): fixed={rates['fixed']:.0%} rejected={rates['rejected']:.0%} "
+        f"intentional={rates['intentional']:.0%} ignored={rates['ignored']:.0%}"
+    )
 
 
 @app.command("ledger")

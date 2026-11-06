@@ -26,7 +26,7 @@ contract lock (plan decisions) → test-creator (author the full suite, RED) →
 
 Author RED tests from:
 
-1. **doc sections** — the relevant `docs/*.md` / `REVIEW-CHECKS.md` sections; these are the
+1. **doc sections** — the relevant `docs/*.md` / `docs/REVIEW-CHECKS.md` sections; these are the
    normative contract alongside the plan.
 2. **Locked decisions** — the plan's `## Decisions` table; locked rows win over bullet prose.
 
@@ -77,7 +77,7 @@ gateway is reachable, record `skipped: no live gate` in the wave report and **co
 
 1. The plan file the orchestrator names — especially `## Decisions` (the locked contracts), the
    per-PR sections (find the `test-creator` sub-wave and what the impl sub-wave will build), and
-   the relevant **docs sections** (`docs/*.md`, `REVIEW-CHECKS.md`) named in the plan.
+   the relevant **docs sections** (`docs/*.md`, `docs/REVIEW-CHECKS.md`) named in the plan.
 2. The locked decision table — for exact field names, defaults, error messages, and file layout.
 3. The source modules the plan will create/modify — read them to target the real public API. When a
    symbol does not exist yet, that is what your test pins down (it will be red until the impl wave).

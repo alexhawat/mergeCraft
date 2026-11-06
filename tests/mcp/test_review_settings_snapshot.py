@@ -61,6 +61,50 @@ def test_publish_uses_the_presnapshot_settings(tmp_path: Path) -> None:
     assert publish_mode == snapshot.settings.gates.gate_action == "enforce"
 
 
+@pytest.mark.parametrize("head_cap", [0, 99])
+def test_round_cap_uses_base_settings_after_checkout(tmp_path: Path, head_cap: int) -> None:
+    from mergecraft.evidence.findings import load_run_findings_with_drops
+    from mergecraft.mcp.checkout import _annotate_review_round
+
+    _write_config(tmp_path, "enforce")
+    config = tmp_path / ".mergecraft" / "config.yaml"
+    config.write_text("review:\n  maxReviewRounds: 3\n", encoding="utf-8")
+    snapshot = capture_repo_settings_snapshot(root=tmp_path, operator_owned=True)
+    ctx = _tool_context(tmp_path, snapshot=snapshot)
+    ctx.tool_state.review_round_index = 4
+
+    config.write_text(f"review:\n  maxReviewRounds: {head_cap}\n", encoding="utf-8")
+    rebaseline_repo_settings_snapshot(ctx)
+    result: dict[str, object] = {}
+    _annotate_review_round(result, round_index=4, ctx=ctx)
+    assert result == {
+        "reviewRoundIndex": 4,
+        "maxReviewRounds": 3,
+        "reviewRoundCapExceeded": True,
+    }
+
+    findings, dropped = load_run_findings_with_drops(ctx)
+    assert dropped == 0
+    assert [finding.rule_id for finding in findings] == ["review-round-cap-exceeded"]
+    assert ctx.tool_state.review_round_cap_announced
+    assert load_run_findings_with_drops(ctx) == ([], 0)
+
+
+@pytest.mark.parametrize(("round_index", "already_posted"), [(3, False), (4, True)])
+def test_round_cap_loader_skips_ineligible_runs(
+    tmp_path: Path, round_index: int, already_posted: bool
+) -> None:
+    from mergecraft.evidence.findings import load_run_findings_with_drops
+
+    snapshot = capture_repo_settings_snapshot(root=tmp_path)
+    ctx = _tool_context(tmp_path, snapshot=snapshot)
+    ctx.tool_state.review_round_index = round_index
+    ctx.tool_state.review_round_cap_announced = already_posted
+
+    assert load_run_findings_with_drops(ctx) == ([], 0)
+    assert ctx.tool_state.review_round_cap_announced == already_posted
+
+
 def test_publish_refuses_when_config_mutates_after_snapshot(tmp_path: Path) -> None:
     """A config mutation after snapshot time must not change publish/gate inputs."""
     _write_config(tmp_path, "enforce")

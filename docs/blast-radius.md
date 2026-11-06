@@ -54,7 +54,18 @@ Every classification carries `reasons`: one row per signal, each with a stable d
 | `source.changed` | medium | a `src/` path that is not generated output changed, whatever generated paths sit beside it; a change made only of generated paths emits `paths.generated` instead |
 | `paths.generated` | low | a changed path is under a `generated` directory |
 | `source.small_isolated` | low | the carve-out applies: one `src/` file, at most 5 changed lines, no review config, no `source_without_tests` override, no high reason |
-| `baseline.clean` | low | no other reason was emitted |
+| `baseline.clean` | low | no reason other than a `scope.*` or `fix.*` one was emitted |
+| `scope.unknown` | medium | a review run found no `Scope paths:` block in the pull request body or the issues it closes, or could not read them |
+| `scope.undeclared` | medium | a `Scope paths:` block lists no globs |
+| `scope.invalid` | medium | a `Scope paths:` block broke a bound (see *Declared scope*), so it declares nothing |
+| `scope.drift` | medium | a changed path (either image of a rename) matches no declared glob; the message names at most ten such paths |
+| `scope.within` | low | every changed path matches a declared glob |
+| `fix.not-required` | low | the pull request is not a fix (see *Fix proof*), so no receipt is needed |
+| `fix.proven` | low | a fix whose receipt, from a successful run on the exact head and base SHAs, shows a test failing on the base and every listed test passing on the head |
+| `fix.not-proven` | medium | a fix whose receipt proves nothing: no test failed on the base, a test did not pass on the head, or it lists no tests |
+| `fix.no-receipt` | medium | a fix with no readable receipt from a successful run on the head, or with no `ciEvidence.redGreen` declared on the base; the message says which and repeats the evidence detail |
+| `fix.receipt.invalid` | medium | a fix whose receipt is malformed, has the wrong schema, or is over the 1 MB cap |
+| `fix.receipt.mismatch` | medium | a fix whose receipt was produced for other commits than the pull request's base and head |
 
 The rendered `reason` string starts with the codes (`Lane reasons: deps.changed, source.changed.`) and keeps the category sentence, so existing readers keep working. The run record prints the lane and the codes on one line.
 
@@ -62,7 +73,7 @@ The small-isolated-source carve-out lowers only `tests.missing` and replaces `so
 
 ## Checklist
 
-Every classification also carries `checklist`: one row per gate, always in this order, with `passed` set to `true`, `false` or `null`.
+Every classification also carries `checklist`: one row per gate, always in this order, with `passed` set to `true`, `false` or `null`. The `scope` and `fix_proof` rows are listed only when the change set carries the matching signal; a review run always supplies both, so its checklist always lists every gate.
 
 | Gate | Reasons that fail it | Reads |
 |---|---|---|
@@ -76,6 +87,8 @@ Every classification also carries `checklist`: one row per gate, always in this 
 | `tests` | `tests.missing` | paths and `diff_stats` |
 | `review_config` | `paths.review_config` | paths |
 | `source` | `source.changed`, and `paths.generated` when an override raises it | paths and `diff_stats` |
+| `scope` | `scope.drift`, `scope.undeclared`, `scope.invalid`; `null` with `scope.unknown` | paths and the declared scope |
+| `fix_proof` | `fix.not-proven`, `fix.no-receipt`, `fix.receipt.invalid`, `fix.receipt.mismatch` | the fix signal; never `null` when supplied |
 
 A gate that reads `diff_stats` counts it as measured whenever the mapping is present, even when it carries no diff-text key. The production packet always puts the diff text in it, beside the line counts.
 
@@ -83,7 +96,49 @@ A gate that reads `diff_stats` counts it as measured whenever the mapping is pre
 - `false`: one of its reasons forces the lane above `low`. A failure measured from one input stays `false` even when the other input is missing.
 - `null`: not measured. Without `changed_paths` every gate except `inputs` is `null` unless a reason already failed it. Without `diff_stats`, `migrations`, `secrets_config_deployment`, `irreversible_infra`, `tests` and `source` are `null` unless a path already failed them. `inputs` is `false` whenever either input is missing.
 
-`auto_merge_lane` is `eligible` exactly when every gate is `true`, which is exactly when the lane is `low`. A single `false` or `null` keeps the result out of `eligible`: unknown is never green.
+`auto_merge_lane` is `eligible` exactly when every gate is `true`, which is exactly when the lane is `low`. A single `false` or `null` keeps the result out of `eligible`: unknown is never green. The approval rows (`low_risk_passing`, `clean_pass`) also refuse a checklist that does not list every gate.
+
+## Declared scope
+
+A pull request may declare the paths it is expected to touch. The review reads the pull request body first, then the body of each issue the pull request closes, in order; the first body that has a block wins, even when that block is empty or invalid, so a later source can never widen it. The block starts at a line `Scope paths:` (any case; bare, bold, or a `##` / `###` heading) and lists one glob per `-` or `*` item, or one per line of a fenced code block:
+
+```markdown
+Scope paths:
+- src/mergecraft/requirements/**
+- tests/requirements/*.py
+- docs/blast-radius.md
+```
+
+The block ends at a blank line after the first item, at the next heading, or at the closing fence; an unclosed fence still stops at the next heading. A block inside an HTML comment or inside a code fence is not a declaration: only text a reviewer can see on the rendered page counts, so a hidden block beside a visible one is ignored. A glob wrapped in backticks is unwrapped. Globs match the whole repository-relative path: `*`, `?` and `[...]` (with `[!...]` negation) stay inside one directory, a `**` segment spans zero or more directories (`src/**/*.py` matches `src/c.py` and `src/a/b.py`, and `docs/**` matches `docs` itself), and `README.md` matches only the root file. Matching is linear in the length of the glob and the path, so a hostile glob cannot stall the run. Both the old and the new path of a rename or copy must match.
+
+The body is untrusted, so every bound fails closed. More than 64 globs, a glob over 200 characters, a control or other non-printable character, a leading `/`, a `..` segment, or a glob made only of wildcards (`*`, `**`, `**/*`, `**/*.*`) makes the whole block declare nothing: `scope.invalid`. The globs are data. They are matched against the diff's path list and nothing else, are never used to open a file, and no reason message repeats them.
+
+| Declaration | `scope` gate | Reason |
+|---|---|---|
+| no block anywhere, or the bodies could not be read | `null` | `scope.unknown` (medium) |
+| a block with no globs | `false` | `scope.undeclared` (medium) |
+| a block that broke a bound | `false` | `scope.invalid` (medium) |
+| every changed path matches a glob | `true` | `scope.within` (low) |
+| any changed path matches no glob | `false` | `scope.drift` (medium) |
+
+A declared scope can only add a `scope.*` reason or pass its own gate: a `high` category inside the scope stays `high`, and every other gate still has to pass. A pull request without a declared scope is therefore never `eligible`. A library caller that passes no `scope` signal keeps the gate out of the checklist and gets no `scope.*` reason.
+
+## Fix proof
+
+A fix pull request has to show that it fixes something. A pull request is a fix when its title starts with a conventional `fix` type (`fix:`, `fix(scope):`, `fix!:`, `fix(scope)!:`, in any case, leading whitespace ignored) or when it carries a label named in `review.fixLabels` (default `bug` and `fix`, matched without regard to case; a configured list replaces the default). `fixLabels` is read only from the pull request base, never from the pull request's own config. Both inputs are written by the author, so they can only add the requirement: nothing an author writes satisfies it.
+
+The proof is a fail-then-pass receipt that the repository's own CI uploads as the workflow artifact declared in `ciEvidence.redGreen` (`artifact` and the one `workflow` allowed to upload it), honoured only from the pull request base. mergeCraft reads it only from a successful run of that workflow in the reviewed repository (never a fork) on the head SHA, only when the pull request leaves that workflow untouched, checks that its `base_sha` and `head_sha` are exactly the pull request's, and never runs a test itself. The format, the bounds and a sample workflow step are in [`red-green-receipts.md`](red-green-receipts.md).
+
+| Pull request | Receipt status | `fix_proof` gate | Reason |
+|---|---|---|---|
+| not a fix | any | `true` | `fix.not-required` (low) |
+| fix | `proven` | `true` | `fix.proven` (low) |
+| fix | `not-proven` or `no-tests` | `false` | `fix.not-proven` (medium) |
+| fix | no receipt read, or `redGreen` not declared | `false` | `fix.no-receipt` (medium) |
+| fix | `invalid` (malformed, wrong schema, oversized) | `false` | `fix.receipt.invalid` (medium) |
+| fix | `mismatch` (other SHAs) | `false` | `fix.receipt.mismatch` (medium) |
+
+A proof only passes its own gate: a `high` reason beside a proven fix stays `high`, and a `source.changed` or a missing input stays `medium`. A fix pull request without a `proven` receipt is therefore never `eligible`. A label that was never added lets a mislabelled fix through as `fix.not-required`; that is accepted, and the title rule is there to catch the common case. A library caller that passes no `fix_proof` signal keeps the gate out of the checklist and gets no `fix.*` reason.
 
 ## Missing inputs escalate
 

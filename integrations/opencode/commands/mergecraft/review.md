@@ -7,7 +7,7 @@ Review the current change for correctness, security, compatibility, reliability,
 performance, and test gaps. $ARGUMENTS
 
 Criteria: use the mergecraft MCP `get_policy` and `get_capabilities` tools when
-they are connected; otherwise read `REVIEW-CHECKS.md` at the repository root when
+they are connected; otherwise read `docs/REVIEW-CHECKS.md` at the repository root when
 it exists.
 
 Working tree and staged changes:

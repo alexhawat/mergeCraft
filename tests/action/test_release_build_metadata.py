@@ -12,7 +12,7 @@ from tests.ci.workflow_support import REPO_ROOT
 
 
 def _stamp_source() -> str:
-    text = (REPO_ROOT / "Dockerfile").read_text()
+    text = (REPO_ROOT / "docker/Dockerfile").read_text()
     return text.split("python - <<'PYTHON'\n", 1)[1].split("\nPYTHON", 1)[0]
 
 

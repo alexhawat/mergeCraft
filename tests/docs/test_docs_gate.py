@@ -57,9 +57,9 @@ _PINNED_GIT_INSTALL = re.compile(
 
 _SATELLITE_READMES = (
     REPO_ROOT / "evals" / "README.md",
-    REPO_ROOT / "assets" / "brand" / "README.md",
+    REPO_ROOT / "docs" / "assets" / "brand" / "README.md",
     REPO_ROOT / "docs" / "assets" / "README.md",
-    REPO_ROOT / "CONTRIBUTING.md",
+    REPO_ROOT / ".github/CONTRIBUTING.md",
 )
 
 _EVAL_SCORE_TERMS = re.compile(

@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from mergecraft.agents.registry import AgentRole
+from mergecraft.agents.registry import AgentRole, Registry
 from mergecraft.analyzers.budget import default_inline_budget, place_findings
 from mergecraft.mcp.verdict import SubmitReviewVerdictParams, register_review_scope
 from mergecraft.review.finding_key import finding_key
@@ -300,3 +300,99 @@ async def test_submit_review_verdict_pairs_models_on_deduped_finding(tmp_path: A
         "reviewer2": "openai/gpt-5.3-codex",
     }
     assert validated.raised_by_model is None
+
+
+# --------------------------------------------------------------------------- file-group provenance
+#
+# A file-group run recorded before the terminal submission keeps
+# ``file-group/<id>`` as ``raised_by`` rather than collapsing into the primary
+# or into ``unknown``. In production the fan-out runs after the primary's
+# submit; its provenance reaches the packet as finding evidence instead (see
+# ``test_file_group_fanout_wiring.py``).
+
+
+def _file_group_registry(*, reviewer_count: int) -> Registry:
+    from mergecraft.agents.registry import AgentBinding
+
+    def _binding(agent_id: str, model: str) -> AgentBinding:
+        return AgentBinding(
+            agent_id=agent_id,
+            role=AgentRole.reviewer,
+            model_chain=(model,),
+            prompt_id="mergecraft.reviewer",
+            prompt_version="1.0.0",
+            tool_classes=frozenset(),
+            budget=8,
+            timeout_s=600,
+        )
+
+    bindings = {"reviewer": _binding("mergecraft-reviewer", "anthropic/claude-sonnet")}
+    if reviewer_count > 1:
+        bindings["reviewer2"] = _binding("reviewer2", "openai/gpt-5.3-codex")
+    return Registry(bindings)
+
+
+@pytest.mark.parametrize("reviewer_count", [1, 2], ids=["single-reviewer", "two-reviewers"])
+def test_file_group_run_recorded_before_the_submit_keeps_its_group_id(
+    reviewer_count: int,
+) -> None:
+    """Isolated case only: a group run already on the tool state when the verdict merges.
+
+    Production runs the fan-out after the primary's submit, so this path covers a
+    run recorded before the submit; the packet-evidence test in
+    ``test_file_group_fanout_wiring.py`` covers the production order.
+    """
+    from mergecraft.review.terminal_submission import (
+        ReviewerRun,
+        format_finding_provenance_line,
+        should_render_finding_provenance,
+        stamped_findings_for_terminal_submission,
+    )
+
+    registry = _file_group_registry(reviewer_count=reviewer_count)
+    group_row = _finding(path="src/pkg/mod_07.py", body="from file group one", severity="Minor")
+    primary_row = _finding(path="src/a.py", body="from primary", severity="Minor")
+    stamped = stamped_findings_for_terminal_submission(
+        registry=registry,
+        terminal_findings=[primary_row],
+        dispatch_runs=[
+            ReviewerRun(
+                agent_id="file-group/group-1",
+                findings=[group_row],
+                model_slug="anthropic/claude-sonnet",
+            )
+        ],
+    )
+
+    merged, _verdict = prepare_terminal_submission(
+        registry=registry,
+        findings=stamped,
+        verdict="approve",
+    )
+
+    by_body = {row["body"]: row for row in merged}
+    group_merged = by_body["from file group one"]
+    assert group_merged["raised_by"] == "file-group/group-1"
+    assert group_merged.get("raised_by_model") == "anthropic/claude-sonnet"
+    assert by_body["from primary"]["raised_by"] == "mergecraft-reviewer"
+    assert should_render_finding_provenance(merged) is True
+    assert (
+        format_finding_provenance_line(
+            group_merged["raised_by"],
+            raised_by_model=group_merged.get("raised_by_model"),
+        )
+        == "_Raised by: `file-group/group-1` (`anthropic/claude-sonnet`)_"
+    )
+
+
+def test_a_foreign_reviewer_id_still_reads_as_unknown_beside_file_groups() -> None:
+    """Guard: only recorded group ids are trusted; any other stray id stays ``unknown``."""
+    registry = _file_group_registry(reviewer_count=2)
+
+    merged, _verdict = prepare_terminal_submission(
+        registry=registry,
+        findings=[_finding(body="stray", severity="Minor", raised_by="ghost-reviewer")],
+        verdict="approve",
+    )
+
+    assert [row["raised_by"] for row in merged] == ["unknown"]

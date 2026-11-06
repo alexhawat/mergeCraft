@@ -13,11 +13,16 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from mergecraft.analyzers.dispositions import DispositionLedger
+    from mergecraft.ci.red_green import RedGreenEvidence
+    from mergecraft.config.settings import RedGreenReceiptSettings
     from mergecraft.config.trust_policy import AgentSandboxDecision
     from mergecraft.findings.ledger import FindingLedger
     from mergecraft.modes import Mode
     from mergecraft.prep.types import PrepResult
+    from mergecraft.requirements.ingest import ScopeDeclaration
     from mergecraft.review.lens_routing import LensRoutingDecision
+    from mergecraft.scm.types import LinkedIssue
+    from mergecraft.xrepo.review import BaseManifestLookup, XrepoReview
 
 RepoAccess = Literal["primary", "write", "read"]
 
@@ -425,6 +430,10 @@ class ToolState:
     reviewer_dispatch_errors: dict[str, str] = field(default_factory=dict)
     # D7 / #574 — per-reviewer findings recorded before terminal submission.
     reviewer_dispatch_runs: list[Any] = field(default_factory=list)
+    # File-group fan-out: group agent ids dispatched right now, and which group
+    # recorded each finding row (fingerprint -> ``file-group/<group-id>``).
+    active_file_groups: list[str] = field(default_factory=list)
+    file_group_row_owners: dict[str, str] = field(default_factory=dict)
     approval: ApprovalRecord | None = None
     review_replies: dict[int, ReviewReplyRecord] = field(default_factory=dict)
     dependency_installation: DependencyInstallationState | None = None
@@ -578,6 +587,8 @@ class ToolState:
     finding_ledger_loaded: bool = False
     # RC12 — 1-based review round, set by ``checkout_pr`` from prior PR reviews.
     review_round_index: int = 1
+    # #1166 — server injected the round-cap finding once this run.
+    review_round_cap_announced: bool = False
     # Plan 13 W4 — ``api-only`` when the PR diff is authoritative but the head
     # ref is not checked out locally; ``None`` means full local scope.
     review_scope: str | None = None
@@ -599,10 +610,26 @@ class ToolState:
     # means policy has not been evaluated yet. Typed ``Any`` only to keep this
     # module free of an import cycle back into ``policy.review``.
     policy_evaluation: Any = None
+    # The issues this pull request closes (GraphQL ``closingIssuesReferences``),
+    # read once at run start. ``()`` means it closes none; ``None`` means they
+    # were not (fully) read — no pull request, a failed, partial or malformed
+    # read — which is never the same as "closes no issue".
+    linked_issues: tuple[LinkedIssue, ...] | None = None
+    # The linked-repo manifest as ``checkout_pr`` read it from the base, and the
+    # ``review_linked_repos`` result it recorded. ``None`` means not read / not
+    # reviewed in this run. The policy evidence producers read these instead of
+    # walking git again.
+    linked_repo_base_manifest: BaseManifestLookup | None = None
+    linked_repo_review: XrepoReview | None = None
     # Evidence normalised from the consumer's finished CI (#36). ``None`` until
     # a CI source is actually read, so a run that consulted no CI records
     # nothing rather than an empty section.
     ci_evidence: CiEvidenceState | None = None
+    # The ``Scope paths:`` declaration read once at run start (#1056 part 3): the
+    # pull request body first, then each closing issue's body; the first source
+    # with a block wins. ``None`` means it was not read (or the read failed); the
+    # blast-radius ``scope`` gate is then unknown, never green.
+    scope_declaration: ScopeDeclaration | None = None
     # D7 — single evidence-packet snapshot for the review preamble and sticky
     # record; assembled once via ``resolve_prepared_run_packet`` and reused.
     prepared_run_packet: Any | None = None
@@ -627,11 +654,36 @@ class ToolState:
     # Pre-dispatch triage (#890): the ``TriageDecision`` when ``review.fastPath`` was
     # evaluated for this run; ``None`` when the fast path is off.
     triage: Any = None
+    # The ``LiteOutcome`` of the triage ``lite`` tier's single capped call (#1010);
+    # ``None`` unless that call ran. Its usage is copied onto the packet's ``triage``.
+    lite_review: Any = None
     # Review path ignoring (#1109): the run's ``ReviewIgnore`` matcher (``None`` when it
     # was never resolved, so ``checkout_pr`` filters nothing) and the changed files kept
     # out of the reviewer's diff, which the review body lists as not reviewed.
     review_ignore: Any = None
     ignored_review_paths: list[str] = field(default_factory=list)
+    # Fail-then-pass receipt (#1056 part 5): what the run read for the declared
+    # ``ciEvidence.redGreen`` on the head SHA, or ``not-declared`` when the base
+    # declares none. ``None`` means no receipt was read (CI ingest did not run); a
+    # fix pull request is then ``fix.no-receipt``, never proven.
+    red_green: RedGreenEvidence | None = None
+    # The base-side ``ciEvidence.redGreen`` resolved at run start
+    # (``review_policy.red_green``); ``None`` when the base declares none or could
+    # not be read. A pull request's own config never declares its receipt.
+    red_green_declaration: RedGreenReceiptSettings | None = None
+    # ``review.fixLabels`` resolved at run start from the operator's side of the pull
+    # request only (``review_policy.fix_labels``); ``None`` until resolved. A pull
+    # request's own config can never switch off label-based fix detection.
+    fix_labels: tuple[str, ...] | None = None
+    # The pull request's own label names, read through the SCM at run start when the
+    # bound event carries none (the comment trigger, a PR-naming ``workflow_dispatch``
+    # bind a ``pull_request`` without ``labels``). ``None`` until read; the raw
+    # event's labels are used then. Labels only ever add the fix requirement.
+    pull_request_labels: tuple[str, ...] | None = None
+    # The pull request's own title, read the same way: a bound ``pull_request`` has
+    # no ``title`` and a PR-naming ``workflow_dispatch`` payload has none either, so
+    # without this read a ``fix:``-titled pull request would pass as not a fix there.
+    pull_request_title: str | None = None
 
     def iter_finding_rows(self) -> list[dict[str, Any]]:
         """Return every dict-shaped finding row across analyzer and agent lanes."""

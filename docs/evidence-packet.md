@@ -88,7 +88,7 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.18.0`.
+The current version is `1.19.0`.
 
 Wiring a consumer is **not** a shape change: #96 gave these models their first
 runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
@@ -158,6 +158,9 @@ not move.
   the fixed-order gates whose `passed` is `true`, `false` or `null` (not
   measured). Both default to an empty list, so a packet written before this
   version still validates.
+- `1.19.0` — the `triage` section gains the `lite` tier (one capped LLM call)
+  and its accounting: `token_cap`, `tokens_used`, `usage_estimated`, `cap_hit`
+  and `prompt_version`. Additive; every new field has a default.
 
 ## Top-level fields
 
@@ -211,7 +214,7 @@ a `findings` item.
 
 **`raised_by` is not a packet field.** Multi-reviewer provenance is stamped
 server-side on terminal-submission finding rows and rendered in the published
-review body / deterministic run record (`REVIEW-CHECKS.md` §8 and §11). It is
+review body / deterministic run record (`docs/REVIEW-CHECKS.md` §8 and §11). It is
 deliberately absent from the agent-facing `submit_review_verdict` schema and
 from the typed `Finding` model here — an agent-supplied provenance field would
 be forgeable. Packet consumers that need reviewer attribution should read the
@@ -268,12 +271,19 @@ off, so a run with no `review.fastPath` config is unchanged.
 
 | Field | Type | Notes |
 |------|------|-------|
-| `tier` | `str` | `skip` (no LLM review ran) or `full`. |
-| `recognizer` | `str \| null` | The recognizer behind a `skip` (`pinBump`, `prose`, `whitespace`, `generated`). |
-| `reason` | `str` | Why. |
+| `tier` | `str` | `skip` (no LLM review ran), `lite` (one capped LLM call, `review.fastPath.lite`) or `full`. |
+| `recognizer` | `str \| null` | The recognizer behind a `skip` or `lite` (`pinBump`, `prose`, `whitespace`, `generated`, `commentOnly`). |
+| `reason` | `str` | Why. For a `lite` call the driver downgraded (over the cap, no credential), the tier is `full` and this is the downgrade reason. |
 | `relied_on_checks` | `list[str]` | Checks that had to pass on the head SHA, from a `pinBump.trustedCheckApps` GitHub App, for a `skip`. |
+| `token_cap` | `int \| null` | The configured `lite.tokenCap` on a `lite` run; `null` otherwise. (Added in 1.19.0.) |
+| `tokens_used` | `int \| null` | Tokens the `lite` call used: the provider's `usage.total_tokens`, or an estimate. `null` when no call ran. (Added in 1.19.0.) |
+| `usage_estimated` | `bool` | `tokens_used` is an estimate because the provider reported no usage. (Added in 1.19.0.) |
+| `cap_hit` | `bool` | `tokens_used` exceeded `token_cap`; the run is `inconclusive`. (Added in 1.19.0.) |
+| `prompt_version` | `str \| null` | The version of the `lite` system prompt. (Added in 1.19.0.) |
 
-A `skip` run never carries a `success` decision: approval is left to a human.
+Neither a `skip` nor a `lite` run ever carries a `success` decision: approval is
+left to a human. A `lite` run with a Critical or Major finding still carries
+`failure`.
 ### `run_metrics` — `RunMetrics | None` (added in `1.15.0`)
 
 Measurement only. It records how the review spent its time and its reads so the

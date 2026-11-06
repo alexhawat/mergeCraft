@@ -17,7 +17,12 @@ from mergecraft.xrepo.linked_repos import (
     load_linked_repo_content,
     parse_manifest,
 )
-from mergecraft.xrepo.review import MANIFEST_REL, discover_linked_repo_roots, review_linked_repos
+from mergecraft.xrepo.review import (
+    MANIFEST_REL,
+    XrepoReview,
+    discover_linked_repo_roots,
+    review_linked_repos,
+)
 
 
 def operator_authorized_linked_repos() -> frozenset[str]:
@@ -78,11 +83,32 @@ def attach_linked_repo_review(
     base_manifest: LinkedReposManifest | None = None,
     base_manifest_error: str | None = None,
 ) -> dict[str, Any] | None:
+    """Return the ``checkout_pr`` payload of :func:`linked_repo_review_with_payload`.
+
+    Returns:
+        The payload when ``.mergecraft/linked-repos.yaml`` exists, otherwise ``None``.
+    """
+    reviewed = linked_repo_review_with_payload(
+        repo_root,
+        authorized_repos=authorized_repos,
+        base_manifest=base_manifest,
+        base_manifest_error=base_manifest_error,
+    )
+    return reviewed[1] if reviewed is not None else None
+
+
+def linked_repo_review_with_payload(
+    repo_root: Path,
+    *,
+    authorized_repos: frozenset[str] | None = None,
+    base_manifest: LinkedReposManifest | None = None,
+    base_manifest_error: str | None = None,
+) -> tuple[XrepoReview, dict[str, Any]] | None:
     """Parse the SHA-pinned manifest and return consumer-impact findings.
 
     Returns:
-        A payload for ``checkout_pr`` when ``.mergecraft/linked-repos.yaml``
-        exists, otherwise ``None``. Unauthorized linked repos raise
+        The ``XrepoReview`` and a payload for ``checkout_pr`` when
+        ``.mergecraft/linked-repos.yaml`` exists, otherwise ``None``. Unauthorized linked repos raise
         :class:`LinkedRepoAccessError` and are omitted from findings.
 
     The operator grant (``authorized_repos``, typically from
@@ -136,7 +162,7 @@ def attach_linked_repo_review(
         }
         for finding in review.findings
     ]
-    return {
+    return review, {
         "linkedRepoCount": len(manifest.repos),
         "linkedRepoFindings": findings,
         "linkedRepoOmitted": [
@@ -145,4 +171,8 @@ def attach_linked_repo_review(
     }
 
 
-__all__ = ["attach_linked_repo_review", "operator_authorized_linked_repos"]
+__all__ = [
+    "attach_linked_repo_review",
+    "linked_repo_review_with_payload",
+    "operator_authorized_linked_repos",
+]

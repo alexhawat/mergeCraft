@@ -4,7 +4,7 @@ Wave plan: ``.ignorelocal/waves/44-prompts-docs-contracts-wave-plan.md`` (PD1).
 Locked decision **PD-D9** — a pytest in ``tests/docs/`` (not a make target)
 using GitHub slug rules plus explicit ``<span id>`` / ``<a id>`` / ``<a name>``
 anchors; ``{#id}`` is **not** an anchor. Scope: ``docs/**/*.md``,
-``README.md``, ``REVIEW-CHECKS.md``, ``SECURITY.md``, ``CONTRIBUTING.md``,
+``README.md``, ``docs/REVIEW-CHECKS.md``, ``SECURITY.md``, ``.github/CONTRIBUTING.md``,
 ``AGENTS-mergecraft.md``; ``CHANGELOG.md`` and the generated ``docs/action-reference.md``
 are excluded. Relative links resolve against the containing file's directory;
 a directory target is valid.
@@ -48,9 +48,9 @@ _IGNORED_DIR = ".ignorelocal"
 
 _ROOT_FILES = (
     "README.md",
-    "REVIEW-CHECKS.md",
     "SECURITY.md",
-    "CONTRIBUTING.md",
+    ".github/CONTRIBUTING.md",
+    ".github/CODE_OF_CONDUCT.md",
     "AGENTS-mergecraft.md",
 )
 _EXCLUDED = frozenset({"docs/action-reference.md"})

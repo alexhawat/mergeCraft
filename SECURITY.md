@@ -69,7 +69,7 @@ code, prompts, or credentials through a third-party SaaS backend.
   or transmitted anywhere else.
 - Analyzer and static-check tooling (`actionlint`, `zizmor`, `ShellCheck`,
   `Hadolint`) run locally inside the Action container; see
-  [REVIEW-CHECKS.md](REVIEW-CHECKS.md) for the full list of what a review
+  [docs/REVIEW-CHECKS.md](docs/REVIEW-CHECKS.md) for the full list of what a review
   checks and what it deliberately never reports.
 
 ## Agent credential broker (Codex, #553)

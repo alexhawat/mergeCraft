@@ -1,8 +1,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/mark-dark.svg">
-  <img src="assets/brand/mark-light.svg" alt="mergeCraft logo" width="120"/>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/mark-dark.svg">
+  <img src="docs/assets/brand/mark-light.svg" alt="mergeCraft logo" width="120"/>
 </picture>
 
 # mergeCraft
@@ -284,6 +284,7 @@ Everything else — install, scaffold, config, commit, PR — is unattended.
 | `mergecraft doctor` | Self-diagnosis of git, providers, analyzers, auth, config and MCP wiring |
 | `mergecraft provider status` | Roster inspection — what CI will run, credential and wiring state, optional `--github` secret check |
 | [`docs/mcp.md`](docs/mcp.md) | **Public MCP install** — six review-only tools over stdio for Cursor, Claude Desktop, Codex, Gemini CLI, OpenCode |
+| [`docs/agents-sdk.md`](docs/agents-sdk.md) | **OpenAI Agents SDK** optional extra — embed `review_agent` as a review step (`pip install mergecraft-action[agents]`) |
 | [`docs/opencode.md`](docs/opencode.md) · [`integrations/opencode/`](integrations/opencode/) | OpenCode integration — `/mergecraft/*` commands, read-only reviewer subagent, V2 MCP wiring, JEV + Logfire |
 | `mergecraft mcp serve` | The reviewer's **in-run** MCP tool surface at `/mcp/reviewer`, Bearer-authenticated (not the public stdio profile) |
 
@@ -326,8 +327,8 @@ One Docker action, one YAML workflow, MIT-licensed Python you can read end to en
 ## How it works in GitHub Action
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/pipeline-dark.svg">
-  <img src="assets/diagrams/pipeline-light.svg" alt="mergeCraft review pipeline: PR event through analyzers, review agent, verifier, and findings">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/diagrams/pipeline-dark.svg">
+  <img src="docs/assets/diagrams/pipeline-light.svg" alt="mergeCraft review pipeline: PR event through analyzers, review agent, verifier, and findings">
 </picture>
 
 A pull request event resolves a **[trust tier](docs/glossary.md#trust-tier)**, runs the matching **[analyzers](docs/glossary.md#analyzer)**,
@@ -569,7 +570,7 @@ When `harness:` is unset, mergeCraft infers the runtime from the model slug — 
 | [`docs/trust-policy.md`](docs/trust-policy.md) | Operator trust knobs (`selfReview`, `agentSandbox`) |
 | [`docs/action-reference.md`](docs/action-reference.md) | Every Action `with:` input and output |
 | [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md) | Contractual CLI exit codes |
-| [`REVIEW-CHECKS.md`](REVIEW-CHECKS.md) | Every check a review applies — lenses, gates, grading |
+| [`docs/REVIEW-CHECKS.md`](docs/REVIEW-CHECKS.md) | Every check a review applies — lenses, gates, grading |
 | [`docs/ANALYZERS.md`](docs/ANALYZERS.md) | Analyzer catalog, trust tiers, SARIF upload |
 | [`docs/compatibility-matrix.md`](docs/compatibility-matrix.md) | Supported events, agents, providers, shell/push modes |
 | [`SECURITY.md`](SECURITY.md) | Threat model, trust tiers, reporting |
@@ -585,7 +586,7 @@ make test       # pytest
 make ci         # full gate
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor workflow.
+See [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) for contributor workflow.
 
 ## License
 

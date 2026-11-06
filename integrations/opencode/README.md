@@ -129,4 +129,4 @@ run in V2, so there is no V1 `server()` fallback. See
 ## Contributing
 
 This directory is mergeCraft-owned. Edit the sources here, not a copied
-`.opencode/` tree. See [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md).
+`.opencode/` tree. See [`../../CONTRIBUTING.md`](../../.github/CONTRIBUTING.md).

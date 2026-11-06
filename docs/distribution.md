@@ -21,7 +21,7 @@ For Action references, follow the separate source → manifest → consumer pin
 [lifecycle](release-process.md#action-manifest-and-consumer-pin-lifecycle).
 Workflow configuration alone is not evidence that the jobs ran.
 
-Verify a published digest locally (see [CONTRIBUTING.md](../CONTRIBUTING.md#verify-a-published-image)).
+Verify a published digest locally (see [.github/CONTRIBUTING.md](../.github/CONTRIBUTING.md#verify-a-published-image)).
 
 ## Operator actions
 
@@ -40,7 +40,7 @@ The project was first published as `0.1.0a4`; before that no `mergecraft-action`
    local `docker login`; a `gh auth token` value has no `write:packages` and the
    image retag fails after PyPI has already published.
 3. Release preconditions green on the release branch (live integration, E2E nightly,
-   image SBOM + Trivy gate) — see [CONTRIBUTING.md](../CONTRIBUTING.md#releases-craft).
+   image SBOM + Trivy gate) — see [.github/CONTRIBUTING.md](../.github/CONTRIBUTING.md#releases-craft).
 
 **Cut and publish `<version>`**
 
@@ -72,7 +72,7 @@ Docker `:latest` promotion:
 
 > **Prerequisite — verify image attestations before listing.**
 > Run the `cosign verify` and `gh attestation verify` commands in
-> [CONTRIBUTING.md § Verify a published image](../CONTRIBUTING.md#verify-a-published-image)
+> [.github/CONTRIBUTING.md § Verify a published image](../.github/CONTRIBUTING.md#verify-a-published-image)
 > against the release-tag digest. The signatures and attestations are produced by
 > the `sign-attest` job in `.github/workflows/ci-cd.yml`. Do **not** submit the
 > Marketplace listing until both verifications pass for the release tag.
@@ -81,13 +81,13 @@ Docker `:latest` promotion:
 2. Point at `alexhawat/mergeCraft` and the release tag (`v0.1.0`).
 3. Use the Docker action entry (`action.yml` + `ghcr.io/alexhawat/mergecraft` image).
 4. Categories: **Code review**, **Continuous integration**.
-5. Link docs: `docs/`, `REVIEW-CHECKS.md`, `docs/ANALYZERS.md`.
+5. Link docs: `docs/`, `docs/REVIEW-CHECKS.md`, `docs/ANALYZERS.md`.
 6. Note BYOK / no SaaS backend in the listing description (see README positioning).
 7. Note GitHub-only SCM scope for 0.1.0 in the listing description.
 
 ### README assets
 
-The mark and wordmark are already tracked in [`assets/brand/`](../assets/brand/) — nothing
+The mark and wordmark are already tracked in [`docs/assets/brand/`](assets/brand/) — nothing
 to add there. The one binary still outstanding is the demo capture; see
 [`docs/assets/README.md`](assets/README.md) for what's needed and where it goes.
 
