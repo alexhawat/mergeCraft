@@ -12,7 +12,7 @@ import pytest
 import typer
 
 from mergecraft.cli import app as cli_app
-from mergecraft.cli.startup_env import startup_local_target
+from mergecraft.cli.startup_env import implicit_env_is_tracked, startup_local_target
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -139,3 +139,55 @@ def test_target_discovery_never_invokes_option_or_command_callbacks(tmp_path: Pa
         raise AssertionError("command must not run during discovery")
 
     assert startup_local_target(app, ["--cwd", str(tmp_path)]) == tmp_path.resolve()
+
+
+@pytest.mark.parametrize("symlink", [False, True])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_tracked_target_env_requires_explicit_operator_selection(
+    workspaces: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    symlink: bool,
+    explicit: bool,
+) -> None:
+    from io import StringIO
+
+    from rich.console import Console
+
+    _, target = workspaces
+    env_path = target / ".env"
+    tracked = target / "tracked-credentials" if symlink else env_path
+    if symlink:
+        env_path.rename(tracked)
+        env_path.symlink_to(tracked.name)
+    subprocess.run(["git", "add", tracked.name], cwd=target, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "tracked credential fixture",
+        ],
+        cwd=target,
+        check=True,
+        capture_output=True,
+    )
+    if explicit:
+        monkeypatch.setenv("MERGECRAFT_ENV", str(env_path))
+    captured = StringIO()
+    monkeypatch.setattr(cli_app, "err_console", Console(file=captured, width=120))
+
+    cli_app._load_local_env(["review", "--repo", str(target)])
+
+    assert os.environ.get(_KEY) == ("target-model" if explicit else None)
+    assert ("Skipping implicit .env" in captured.getvalue()) is not explicit
+    assert "target-model" not in captured.getvalue()
+
+
+def test_implicit_env_symlink_loop_is_not_trusted(tmp_path: Path) -> None:
+    path = tmp_path / ".env"
+    path.symlink_to(path.name)
+    assert implicit_env_is_tracked(path)

@@ -314,6 +314,12 @@ async def test_offline_cache_hit_rewrites_findings_json(
     async def _agent_must_not_run(**kwargs: object) -> OfflineReviewResult:
         raise AssertionError("cache hit must not re-run the agent")
 
+    # A completed review and managed analyzers can write these between runs
+    # even if the consumer has never run init or added gitignore entries.
+    for relative in ("reviews/run/snapshot.json", "analyzer-cache/tool/data", "audit.jsonl"):
+        artifact = repo / ".mergecraft" / relative
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text("generated output\n")
     monkeypatch.setattr(offline_mod, "run_offline_agent_review", _agent_must_not_run)
     second_path = tmp_path / "from-cache.json"
     second = await offline_mod._run_offline_diff_review(

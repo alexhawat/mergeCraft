@@ -18,6 +18,7 @@ from mergecraft.security.egress import SsrfBlockedError, guard_external_url
 from mergecraft.utils.git_hardening import git_argv
 from mergecraft.utils.git_setup import git_env_for_token, scrub_clone_credentials
 from mergecraft.utils.offline_diff import DiffMaterialization, materialize_diff
+from mergecraft.utils.runtime_artifacts import is_untracked_runtime_artifact
 from mergecraft.utils.workspace import register_workspace_root
 
 if TYPE_CHECKING:
@@ -517,7 +518,10 @@ def resolve_workspace(spec: SourceResolverSpec) -> ResolvedWorkspace:
             git_common_dir=resolve_git_common_dir(acquired.path),
             cloned=True,
             temp_dir=temp_dir,
-            source_identity=f"{url}@{_run_git(['rev-parse', 'HEAD'], cwd=str(acquired.path)).strip()}",
+            source_identity=(
+                f"{_remote_source_identity(url)}@"
+                f"{_run_git(['rev-parse', 'HEAD'], cwd=str(acquired.path)).strip()}"
+            ),
         )
 
     local = Path(repo).expanduser().resolve()
@@ -529,6 +533,20 @@ def resolve_workspace(spec: SourceResolverSpec) -> ResolvedWorkspace:
         git_common_dir=resolve_git_common_dir(local),
         cloned=False,
     )
+
+
+def _remote_source_identity(url: str) -> str:
+    """Remove credential-bearing URL components from durable provenance only.
+
+    Acquisition still validates the original URL and rejects embedded userinfo.
+    Query strings and fragments are not repository identity and may hold tokens.
+    """
+    # file:// acquisition has already normalized to a literal local path.
+    # Its '?' and '#' characters belong to the filename, not URL metadata.
+    if not url.startswith(("https://", "http://")):
+        return url
+    parsed = urlparse(url)
+    return parsed._replace(netloc=parsed.netloc.rsplit("@", 1)[-1], query="", fragment="").geturl()
 
 
 def _require_local_revision_context(workspace: ResolvedWorkspace, spec: SourceResolverSpec) -> None:
@@ -548,11 +566,17 @@ def _require_local_revision_context(workspace: ResolvedWorkspace, spec: SourceRe
             cwd=str(workspace.cwd),
         ).strip()
         dirty = _run_git(
-            ["status", "--porcelain=v1", "--untracked-files=normal"], cwd=str(workspace.cwd)
+            ["status", "--porcelain=v1", "--untracked-files=no"], cwd=str(workspace.cwd)
         ).strip()
+        untracked = _run_git(
+            ["ls-files", "-z", "--others", "--exclude-standard"], cwd=str(workspace.cwd)
+        )
     except RuntimeError as exc:
         raise SourceResolveError("cannot resolve the requested local revision") from exc
-    if current != requested or dirty:
+    has_untracked_source = any(
+        path and not is_untracked_runtime_artifact(path) for path in untracked.split("\0")
+    )
+    if current != requested or dirty or has_untracked_source:
         raise SourceResolveError(
             "explicit local --head/--range requires a clean checkout at the requested head; "
             "select a clean checkout or Git worktree with --cwd/--repo"

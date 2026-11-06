@@ -267,11 +267,12 @@ def _load_local_env(args: list[str] | None = None) -> None:
     ``.env`` could otherwise set ``MERGECRAFT_*`` keys the workflow never chose.
     This mirrors the ``config.local.yaml`` rule
     (:func:`mergecraft.config.layered.running_in_github_actions`). Outside
-    Actions nothing changes; an explicit ``$MERGECRAFT_ENV`` always wins.
+    Actions an implicitly selected tracked file is also skipped: credentials
+    must be operator-owned. An explicit ``$MERGECRAFT_ENV`` always wins.
     """
     if running_in_github_actions() and _configured_env_path() is None:
         return
-    from mergecraft.cli.startup_env import startup_local_target
+    from mergecraft.cli.startup_env import implicit_env_is_tracked, startup_local_target
 
     target = startup_local_target(app, args) if args is not None else None
     env_path = (
@@ -280,6 +281,14 @@ def _load_local_env(args: list[str] | None = None) -> None:
         else local_env_path_for_process_cwd(on_missing_repo="use-process-cwd")
     )
     if not env_path.is_file():
+        return
+    if _configured_env_path() is None and implicit_env_is_tracked(env_path):
+        err_console.print(
+            "Skipping implicit .env: file or symlink target is tracked by Git, "
+            "or its tracking status could not be verified. "
+            "Use an untracked credential file or explicitly set MERGECRAFT_ENV.",
+            style="yellow",
+        )
         return
     for key, value in LocalDotEnv.from_file(env_path).raw_values().items():
         os.environ.setdefault(key, value)

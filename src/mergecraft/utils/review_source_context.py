@@ -8,7 +8,10 @@ import stat
 import subprocess
 from typing import TYPE_CHECKING
 
+from loguru import logger
+
 from mergecraft.utils.git_hardening import git_argv
+from mergecraft.utils.runtime_artifacts import is_untracked_runtime_artifact
 from mergecraft.utils.workspace import git_repo_root
 
 if TYPE_CHECKING:
@@ -33,10 +36,14 @@ def review_source_context_digest(*, cwd: Path, base_ref: str | None) -> str | No
     """
     root = git_repo_root(str(cwd))
     if root is None:
+        logger.debug("Review result cache disabled: Git source root unavailable")
         return None
     try:
         return _source_digest(root, base_ref=base_ref)
-    except (OSError, ValueError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        logger.debug(
+            "Review result cache disabled: source identity failed ({})", type(exc).__name__
+        )
         return None
 
 
@@ -57,16 +64,23 @@ def _source_digest(root: Path, *, base_ref: str | None) -> str | None:
             continue
         base = _git(root, "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}")
         digest.update(b"base\0" + base)
-    paths = sorted(
-        set(_git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard").split(b"\0"))
-        - {b""}
-    )
+    tracked = set(_git(root, "ls-files", "-z", "--cached").split(b"\0")) - {b""}
+    untracked = {
+        path
+        for path in _git(root, "ls-files", "-z", "--others", "--exclude-standard").split(b"\0")
+        if path and not is_untracked_runtime_artifact(os.fsdecode(path))
+    }
+    paths = sorted(tracked | untracked)
     if len(paths) > _MAX_FILES:
+        logger.debug("Review result cache disabled: source exceeds {} files", _MAX_FILES)
         return None
     remaining = _MAX_BYTES
     for raw_path in paths:
         path = root / os.fsdecode(raw_path)
         if not path.resolve().is_relative_to(root.resolve()):
+            # Tool confinement can admit other registered checkouts, whose
+            # mutable contents are not covered by this repository's digest.
+            logger.debug("Review result cache disabled: source symlink resolves outside repository")
             return None
         digest.update(b"\0path\0" + raw_path + b"\0")
         try:
@@ -81,9 +95,13 @@ def _source_digest(root: Path, *, base_ref: str | None) -> str | None:
             with path.open("rb") as source:
                 content = source.read(remaining + 1)
         else:
+            logger.debug(
+                "Review result cache disabled: source includes a submodule or special file"
+            )
             return None
         remaining -= len(content)
         if remaining < 0:
+            logger.debug("Review result cache disabled: source exceeds {} bytes", _MAX_BYTES)
             return None
         digest.update(hashlib.sha256(content).digest())
     return digest.hexdigest()

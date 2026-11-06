@@ -3497,6 +3497,12 @@ normal process-directory anchor. Existing process variables always win, and a
 missing target `.env` does not fall back to the caller's file. Relative
 `MERGECRAFT_ENV` paths remain relative to the invocation directory.
 
+Startup skips an implicit `.env` tracked by Git, or a symlink to a tracked
+file, and prints a warning. Keep local credentials untracked; repository content
+under review must not choose provider endpoints or arbitrary process variables.
+An explicitly selected `MERGECRAFT_ENV` file remains an operator override and
+can be loaded regardless of its tracking status.
+
 The walk-up is why `mergecraft auth` run from a subdirectory writes the `.env`
 the next invocation actually loads. Outside a git checkout the writers fail
 with the directory they consulted named in the error; the startup load falls

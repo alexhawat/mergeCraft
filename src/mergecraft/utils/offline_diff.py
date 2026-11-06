@@ -9,10 +9,10 @@ from pathlib import Path
 from loguru import logger
 
 from mergecraft.utils.git_hardening import git_argv
+from mergecraft.utils.runtime_artifacts import is_untracked_runtime_artifact
 
 _DEFAULT_BASES = ("main", "master", "develop", "trunk")
 _MAX_UNTRACKED_FILE_BYTES = 256 * 1024
-_MANAGED_ANALYZER_CACHE = ".mergecraft/analyzer-cache"
 
 
 @dataclass(slots=True)
@@ -155,11 +155,6 @@ def _nul_paths(data: str) -> list[str]:
     return [item for item in data.split("\0") if item]
 
 
-def _is_managed_analyzer_cache_path(rel: str) -> bool:
-    """Return whether *rel* belongs to mergeCraft's generated analyzer cache."""
-    return rel == _MANAGED_ANALYZER_CACHE or rel.startswith(f"{_MANAGED_ANALYZER_CACHE}/")
-
-
 def _discover_untracked_additions(cwd: Path) -> tuple[str, tuple[str, ...]]:
     """Return unified patches for eligible untracked files and their exclusions.
 
@@ -176,12 +171,9 @@ def _discover_untracked_additions(cwd: Path) -> tuple[str, tuple[str, ...]]:
     limitations: list[str] = []
     if listing.returncode == 0:
         for rel in _nul_paths(listing.stdout):
-            # Managed analyzer installations are runtime artifacts, not source
-            # additions. They can contain thousands of small package files and
-            # must never turn a local review into one ``git diff --no-index``
-            # invocation per cache entry. Tracked cache paths still arrive via
-            # the merge-base diff above and are intentionally left untouched.
-            if _is_managed_analyzer_cache_path(rel):
+            # Runtime output must not become input to the next review. Tracked
+            # paths at these locations still arrive through the ordinary diff.
+            if is_untracked_runtime_artifact(rel):
                 continue
             path = cwd / rel
             if path.is_symlink():

@@ -75,3 +75,37 @@ def test_dirty_explicit_head_is_a_cli_configuration_error(repo: Path, dirty: str
     assert result.exit_code == 30, result.output
     assert "clean checkout" in result.output
     assert path.read_text() == "value = 3\n"
+
+
+@pytest.mark.parametrize(
+    "artifact", ["reviews/run/snapshot.json", "analyzer-cache/tool/data", "audit.jsonl"]
+)
+def test_runtime_output_is_clean_only_while_untracked(
+    repo: Path, tmp_path: Path, artifact: str
+) -> None:
+    _git(repo, "checkout", "-q", "feature")
+    path = repo / ".mergecraft" / artifact
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("generated\n")
+    spec = SourceResolverSpec(cwd=repo, head="HEAD", base="main")
+    result = materialize_resolved_diff(
+        resolve_workspace(spec), spec=spec, out_dir=tmp_path / "output"
+    )
+    assert "+value = 2" in result.path.read_text()
+
+    _git(repo, "add", ".mergecraft")
+    with pytest.raises(SourceResolveError, match="clean checkout"):
+        materialize_resolved_diff(resolve_workspace(spec), spec=spec, out_dir=tmp_path / "bad")
+
+
+@pytest.mark.parametrize("path", [".mergecraft/config.yaml", ".mergecraft/reviews-copy/output"])
+def test_other_untracked_mergecraft_files_are_source(repo: Path, path: str) -> None:
+    _git(repo, "checkout", "-q", "feature")
+    source = repo / path
+    source.parent.mkdir(parents=True)
+    source.write_text("{}\n" if source.suffix == ".yaml" else "source\n")
+    result = CliRunner().invoke(
+        app, ["review", "--cwd", str(repo), "--head", "HEAD", "--base", "main", "--dry-run"]
+    )
+    assert result.exit_code == 30, result.output
+    assert "clean checkout" in result.output

@@ -171,13 +171,15 @@ def test_linked_worktree_resolves_common_dir(tmp_path: Path) -> None:
     assert result.base_ref == "main"
 
 
+@pytest.mark.parametrize("name", ["remote.git", "repo#name?literal.git"])
 def test_public_repo_url_source(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    name: str,
 ) -> None:
     """A public ``file://`` bare URL is acquired and reviewed."""
     content = _init_repo(tmp_path, "content")
-    bare = _init_bare_remote(tmp_path)
+    bare = _init_bare_remote(tmp_path, name)
     _push_to_bare(content, bare)
     _patch_local_git(monkeypatch)
 
@@ -190,6 +192,8 @@ def test_public_repo_url_source(
     workspace = resolve(spec)
     assert workspace.cloned is True
     assert workspace.cwd.is_dir()
+    resolved_sha = _resolver_mod()._run_git(["rev-parse", "HEAD"], cwd=str(content)).strip()
+    assert workspace.source_identity == f"{bare}@{resolved_sha}"
 
     result = materialize(workspace, spec=spec, out_dir=tmp_path / "url-out")
     assert isinstance(result, DiffMaterialization)

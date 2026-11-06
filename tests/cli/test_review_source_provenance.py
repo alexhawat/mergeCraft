@@ -6,7 +6,7 @@ import hashlib
 import shutil
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
@@ -15,10 +15,13 @@ from mergecraft.cli.app import app
 from mergecraft.review.completed import load_completed_review
 from mergecraft.review.offline_result import OfflineReviewResult
 from mergecraft.run_outcome import RunOutcome
-from mergecraft.utils.source_resolve import AcquiredSource, AuthResolution
-
-if TYPE_CHECKING:
-    from mergecraft.utils.source_resolve import ReviewSource
+from mergecraft.utils.source_resolve import (
+    AcquiredSource,
+    AuthResolution,
+    CloneUrlError,
+    ReviewSource,
+    acquire,
+)
 
 
 def _repo(path: Path, label: str) -> str:
@@ -45,9 +48,9 @@ def _repo(path: Path, label: str) -> str:
     return body
 
 
-@pytest.mark.parametrize("remote", [False, True])
+@pytest.mark.parametrize("remote", [False, True, "url-credentials"])
 def test_resolved_source_controls_snapshot_manifest_and_history(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, remote: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, remote: bool | str
 ) -> None:
     caller = tmp_path / "caller"
     target = tmp_path / "target"
@@ -83,9 +86,13 @@ def test_resolved_source_controls_snapshot_manifest_and_history(
             ["git", "rev-parse", "HEAD"], cwd=target, check=True, capture_output=True, text=True
         ).stdout.strip()
         expected_source = f"{source}@{head}"
+        if remote == "url-credentials":
+            source += "?access_token=synthetic-query-credential#synthetic-fragment-credential"
         storage = caller
 
         def acquire(source: ReviewSource, *, dest: Path) -> AcquiredSource:
+            if remote == "url-credentials":
+                assert "synthetic-query-credential" in source.url
             shutil.copytree(target, dest, dirs_exist_ok=True)
             return AcquiredSource(path=dest, workspace_root=dest)
 
@@ -100,6 +107,8 @@ def test_resolved_source_controls_snapshot_manifest_and_history(
     completed = load_completed_review("source-provenance", repo_root=storage)
     assert completed is not None
     assert completed.snapshot.source == expected_source
+    assert "synthetic-query-credential" not in completed.snapshot.model_dump_json()
+    assert "synthetic-fragment-credential" not in completed.snapshot.model_dump_json()
     assert completed.manifest["config_hash"] == hashlib.sha256(target_config.encode()).hexdigest()
     other = target if remote else caller
     assert not (other / ".mergecraft" / "reviews").exists()
@@ -107,3 +116,13 @@ def test_resolved_source_controls_snapshot_manifest_and_history(
         assert seen[0] != caller
         assert seen[0] != target
         shutil.rmtree(seen[0])
+
+
+def test_userinfo_is_rejected_before_acquisition(tmp_path: Path) -> None:
+    destination = tmp_path / "not-created"
+    with pytest.raises(CloneUrlError, match="embedded credentials"):
+        acquire(
+            ReviewSource(url="https://user:synthetic-password@github.com/example/reviewed.git"),
+            dest=destination,
+        )
+    assert not destination.exists()

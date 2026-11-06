@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from copy import copy
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -10,10 +11,51 @@ import click
 from click.core import ParameterSource
 from typer.main import get_command
 
+from mergecraft.utils.git_hardening import git_argv
 from mergecraft.utils.source_resolve import _is_remote_source
+from mergecraft.utils.workspace import git_repo_root
 
 if TYPE_CHECKING:
     import typer
+
+
+def implicit_env_is_tracked(path: Path) -> bool:
+    """Reject implicit repository credentials, including links to tracked files.
+
+    Explicit MERGECRAFT_ENV overrides are an operator choice and do not use
+    this guard. Probe the link itself as well as its resolved destination.
+    """
+    try:
+        candidates = {path, path.resolve(strict=True)}
+    except (OSError, RuntimeError):
+        return True
+    for candidate in candidates:
+        root = git_repo_root(str(candidate.parent))
+        if root is None:
+            continue
+        try:
+            result = subprocess.run(
+                git_argv(
+                    [
+                        "--literal-pathspecs",
+                        "ls-files",
+                        "--error-unmatch",
+                        "--",
+                        str(candidate.relative_to(root)),
+                    ]
+                ),
+                cwd=root,
+                capture_output=True,
+                check=False,
+                timeout=5,
+            )
+        except (OSError, ValueError, subprocess.SubprocessError):
+            # A repository was located but its index could not be inspected.
+            # Explicitly selecting the credential file remains available.
+            return True
+        if result.returncode != 1:
+            return True
+    return False
 
 
 def startup_local_target(app: typer.Typer, args: list[str]) -> Path | None:

@@ -22,7 +22,7 @@ a revision; a diff alone is not a replacement for its surrounding source tree.
 | `--head REF` or a commit range | When selecting a revision diff (without `--diff`, `--staged`, or `--unstaged`), for a local repository, the reviewed endpoint must equal its checked-out `HEAD`, and the tracked/nonignored working tree must be clean. Otherwise the command rejects the request. | Use a separate `git worktree` or check out the requested revision first. mergeCraft does not silently switch the user's local branch. |
 | Default working-tree review | Includes tracked changes and eligible nonignored additions relative to the selected base. Ignored environments/caches are outside source scope. | Oversized, binary, symlink or non-UTF-8 eligible additions are reported as coverage limitations. An empty but incomplete diff is not a clean pass. |
 | `--unstaged` | Reads tracked unstaged changes and eligible untracked additions, preserving omission metadata. | Does not stage or commit files. |
-| `MERGECRAFT_ENV` / ambient environment | An explicit env-file override wins; existing process variables keep precedence over loaded file values. GitHub Actions skips implicit local `.env` loading. | Relative explicit env-file paths follow the invocation directory. See [authentication](authentication.md). |
+| `MERGECRAFT_ENV` / ambient environment | An explicit env-file override wins; existing process variables keep precedence over loaded file values. GitHub Actions skips implicit local `.env` loading; local startup also skips Git-tracked implicit files and links to them. | Relative explicit env-file paths follow the invocation directory. See [authentication](authentication.md). |
 | `--output` / `--json` | Explicit destinations are interpreted relative to the invocation directory. | JSONL/SARIF require `--output` before review starts; missing destinations produce a configuration error. |
 | `verify-behavior` YAML `repo_path` | Selects the policy/settings root and `startup_command` working directory. Relative paths follow the invocation directory; `~` expands. | Relative verification artifact paths remain relative to the invocation directory. See [verification](verify-behavior.md). |
 
@@ -31,7 +31,16 @@ source-context identity. Changing surrounding tracked or nonignored source,
 the base revision, or the reviewed endpoint invalidates reuse. When context
 cannot be safely fingerprinted, caching is skipped instead of claiming a hit.
 This includes submodules, external symlinks, unreadable source, and contexts
-exceeding 10,000 files or 64 MiB.
+exceeding 10,000 files or 64 MiB. Debug logging explains the skip without
+including file contents. External symlinks remain uncached because registered
+cross-repository roots can make their mutable targets visible to review tools;
+the selected repository's digest does not identify those targets.
+
+Untracked `.mergecraft/reviews/`, `.mergecraft/analyzer-cache/` and the legacy
+`.mergecraft/audit.jsonl` are generated output: they do not dirty an explicit
+local revision review, enter its diff, or invalidate its result cache. Tracked
+files at those locations still count as source. Other nonignored untracked
+files, including repository configuration, continue to count.
 
 The CLI's local file/environment rules are separate from Action checkout and
 operator-setting snapshots. Bound Action reviews retain their immutable reviewed
