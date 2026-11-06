@@ -440,7 +440,9 @@ def ensure_review_scope_for_terminal(tool_state: ToolState, tool_name: str) -> N
         f"recorded. Establish scope via one of: {'; '.join(routes)}. "
         f"This run: {detail}."
     )
-    raise ValueError(msg)
+    # A typed refusal, like the validation rejections: the trajectory records
+    # ``ok=False, failure_class="refused"`` instead of a completion claim (#1211).
+    raise TerminalSubmissionRejectedError(msg)
 
 
 def record_validated_terminal_submission(

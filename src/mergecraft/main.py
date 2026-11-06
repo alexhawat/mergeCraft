@@ -3132,6 +3132,7 @@ async def _finalize(
         terminal_publication_failed=tool_state.terminal_publication_failed,
         terminal_publication_receipt=publication_receipt,
         terminal_publication_mismatch=publication_mismatch,
+        terminal_rejection=tool_state.last_terminal_rejection,
     )
     diagnostic_attrs = verdict_publish.attrs
     verdict_prediction = verdict_publish.prediction

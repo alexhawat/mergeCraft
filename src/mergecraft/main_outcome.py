@@ -313,6 +313,7 @@ def _verdict_protocol_publish(
     terminal_publication_failed: bool = False,
     terminal_publication_receipt: bool | None = None,
     terminal_publication_mismatch: tuple[str, str] | None = None,
+    terminal_rejection: str | None = None,
 ) -> VerdictProtocolPublish:
     """Predict the enforce-path verdict protocol and build publish span attrs.
 
@@ -334,6 +335,7 @@ def _verdict_protocol_publish(
         terminal_publication_failed=terminal_publication_failed,
         terminal_publication_receipt=terminal_publication_receipt,
         terminal_publication_mismatch=terminal_publication_mismatch,
+        terminal_rejection=terminal_rejection,
     )
     diagnostic = VerdictDiagnostic(prediction.diagnostic)
     attrs = span_attrs_for_verdict_diagnostic(diagnostic, summary=result.output or "")

@@ -21,11 +21,14 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from mergecraft.agents.shared import AgentResult
+from mergecraft.evidence.shadow import predict_verdict_protocol
 from mergecraft.evidence.trajectory import build_trajectory_record
-from mergecraft.main_outcome import _classify_outcome
+from mergecraft.main_outcome import _classify_outcome, _verdict_protocol_publish
 from mergecraft.mcp.rpc import dispatch_mcp_rpc
 from mergecraft.mcp.verdict import (
     REJECTION_APPROVE_CONFIRMED_BLOCKER,
+    REJECTION_REQUEST_CHANGES_NO_FINDINGS,
+    REJECTION_SCOPE_UNAVAILABLE,
     TerminalSubmissionRejectedError,
     submit_review_verdict_tool,
 )
@@ -177,6 +180,59 @@ def test_a_modeless_run_with_no_terminal_attempt_is_unchanged() -> None:
     assert (outcome, reason) == (RunOutcome.passed, None)
 
 
+@pytest.mark.parametrize("mode", ["", "Review"])
+def test_prediction_agrees_with_the_classifier_after_a_refused_verdict(mode: str) -> None:
+    """The verdict diagnostic and the shadow comparison must not read ``approved``."""
+    result = AgentResult(success=True, terminal_submission_received=False)
+    prediction = predict_verdict_protocol(
+        result, mode=mode, terminal_rejection=REJECTION_APPROVE_CONFIRMED_BLOCKER
+    )
+    actual, _reason = _classify_outcome(
+        result=result,
+        setup_reason="",
+        setup_policy="warn",
+        prep_reason=None,
+        mode=mode or None,
+        verdict_protocol="shadow",
+        terminal_rejection=REJECTION_APPROVE_CONFIRMED_BLOCKER,
+    )
+
+    assert prediction.outcome is RunOutcome.inconclusive
+    assert prediction.diagnostic == "provider_success_without_submission"
+    # Shadow compares these two: equal means no false disagreement row.
+    assert prediction.outcome is actual
+
+
+def test_prediction_keeps_the_incremental_final_summary_exemption() -> None:
+    prediction = predict_verdict_protocol(
+        AgentResult(success=True),
+        mode="IncrementalReview",
+        final_summary_written=True,
+        terminal_rejection=REJECTION_APPROVE_CONFIRMED_BLOCKER,
+    )
+
+    assert prediction.outcome is RunOutcome.passed
+
+
+@pytest.mark.asyncio
+async def test_scope_refused_terminal_call_is_refused_and_never_a_completion_claim(
+    tmp_path: Path,
+) -> None:
+    ctx = _context(tmp_path, _Scm())
+    ctx.tool_state.selected_mode = "Review"
+    assert ctx.tool_state.terminal_submission is None
+
+    response = await _call(ctx, submit_review_verdict_tool(ctx), dict(_APPROVE))
+
+    assert response["result"]["isError"] is True
+    (row,) = [call for call in ctx.tool_state.tool_calls if call.tool == "submit_review_verdict"]
+    assert row.ok is False
+    assert row.failure_class == "refused"
+    assert "requires review scope" in (row.error or "")
+    assert build_trajectory_record(ctx.tool_state).completion_claims == []
+    assert ctx.tool_state.last_terminal_rejection == REJECTION_SCOPE_UNAVAILABLE
+
+
 async def _publish_once(
     ctx: Any, packet: Any, monkeypatch: pytest.MonkeyPatch
 ) -> list[dict[str, Any]]:
@@ -196,8 +252,9 @@ async def _publish_once(
     monkeypatch.setattr(main_mod, "resolve_prepared_run_packet", lambda *_a, **_k: packet)
     monkeypatch.setattr(step_summary_mod, "append_step_summary", lambda _body: None)
 
+    result = AgentResult(success=True)
     outcome, reason = _classify_outcome(
-        result=AgentResult(success=True),
+        result=result,
         setup_reason="",
         setup_policy="warn",
         prep_reason=None,
@@ -205,10 +262,21 @@ async def _publish_once(
         verdict_protocol="enforce",
         terminal_rejection=ctx.tool_state.last_terminal_rejection,
     )
+    diagnostic = _verdict_protocol_publish(
+        result=result,
+        mode=ctx.tool_state.selected_mode,
+        setup_reason="",
+        setup_policy="warn",
+        prep_reason=None,
+        final_summary_written=False,
+        terminal_verdict="enforce",
+        terminal_rejection=ctx.tool_state.last_terminal_rejection,
+    ).diagnostic
     await main_mod._publish(
         main_mod.RunContext(tool_context=ctx),
         outcome=outcome,
         failure_reason=reason,
+        verdict_diagnostic=diagnostic,
         emit=False,
     )
     return checks
@@ -243,6 +311,7 @@ async def test_modeless_rejected_run_publishes_an_explanatory_record_once(
     assert "- **Decision:** `failure` — 1 blocking change finding" in body
     assert ".github/actions/bootstrap/action.yml:3" in body
     assert "- **Outcome:** `inconclusive`" in body
+    assert "- **Verdict diagnostic:** `provider_success_without_submission`" in body
     # The completion check agrees: not a successful review.
     assert len(checks) == 1
     assert checks[0]["run_succeeded"] is False
@@ -275,3 +344,31 @@ async def test_non_terminal_neutral_rung_stays_sticky_only(
 
     assert scm.created == 0
     assert not scm.reviews
+
+
+@pytest.mark.asyncio
+async def test_record_never_shows_approved_beside_a_refused_verdict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refused verdict on a clean diff: the decision is not a failure, so nothing
+    else demotes the diagnostic; it must still not read ``approved``."""
+    monkeypatch.delenv("MERGECRAFT_STICKY_ONLY_NEUTRAL", raising=False)
+    scm = _Scm()
+    ctx = _context(tmp_path, scm)
+    ctx.run_id = 42211929360
+    response = await _call(
+        ctx,
+        submit_review_verdict_tool(ctx),
+        {"verdict": "request_changes", "summary": "Nits.", "findings": []},
+    )
+    assert response["result"]["isError"] is True
+    assert ctx.tool_state.last_terminal_rejection == REJECTION_REQUEST_CHANGES_NO_FINDINGS
+    packet = _sample_packet(findings=[], verdict="success", reason="approved")
+
+    await _publish_once(ctx, packet, monkeypatch)
+
+    body = scm.reviews[1]
+    assert "- **Outcome:** `inconclusive`" in body
+    assert "- **Verdict diagnostic:** `provider_success_without_submission`" in body
+    assert "`approved`" not in body.split("- **Decision:**", 1)[0]
