@@ -678,6 +678,10 @@ class ToolState:
     # bind a ``pull_request`` without ``labels``). ``None`` until read; the raw
     # event's labels are used then. Labels only ever add the fix requirement.
     pull_request_labels: tuple[str, ...] | None = None
+    # The pull request's own title, read the same way: a bound ``pull_request`` has
+    # no ``title`` and a PR-naming ``workflow_dispatch`` payload has none either, so
+    # without this read a ``fix:``-titled pull request would pass as not a fix there.
+    pull_request_title: str | None = None
 
     def iter_finding_rows(self) -> list[dict[str, Any]]:
         """Return every dict-shaped finding row across analyzer and agent lanes."""

@@ -238,21 +238,35 @@ def fix_proof_signal_for_state(
     return signal
 
 
-def _event_pull_request(ctx: ToolContext) -> dict[str, Any]:
-    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
-    for key in ("pull_request", "issue"):
-        item = event.get(key)
-        if isinstance(item, dict):
-            return item
-    return {}
-
-
 def _label_names(raw: object) -> list[str]:
     return [
         name
         for label in (raw if isinstance(raw, list) else [])
         if isinstance(label, dict) and isinstance(name := label.get("name"), str)
     ]
+
+
+def event_pull_request_title(event: object) -> str | None:
+    """The pull request's title carried by the raw event, or ``None``.
+
+    Like :func:`event_pull_request_labels`: a bound ``pull_request`` has no
+    ``title`` key and is skipped, a comment on a pull request carries
+    ``issue.title``, and a PR-naming ``workflow_dispatch`` carries neither.
+
+    Args:
+        event (object): The raw (possibly bound) GitHub event.
+
+    Returns:
+        str | None: The title, or ``None`` when the event has none to give.
+    """
+    if not isinstance(event, dict):
+        return None
+    for key in ("pull_request", "issue"):
+        item = event.get(key)
+        if isinstance(item, dict) and "title" in item:
+            title = item.get("title")
+            return title if isinstance(title, str) else ""
+    return None
 
 
 def event_pull_request_labels(event: object) -> list[str] | None:
@@ -282,11 +296,13 @@ def event_pull_request_labels(event: object) -> list[str] | None:
 def fix_proof_signal_for_context(ctx: ToolContext) -> FixProofSignal:
     """:func:`fix_proof_signal_for_state` fed from the run's bound pull request.
 
-    The title is ``ctx.payload.event.title`` (the bound event's title when that is
-    empty). The labels are ``ToolState.pull_request_labels`` when run start read
-    them through the SCM, else the raw event's (``pull_request.labels``, or
-    ``issue.labels`` on a comment on a pull request): a ``pull_request`` the run
-    bound itself carries no labels and never hides the issue's. The fix labels are
+    The title is ``ctx.payload.event.title``, else ``ToolState.pull_request_title``
+    when run start read it through the SCM, else the raw event's. The labels are
+    ``ToolState.pull_request_labels`` when run start read them, else the raw
+    event's (``pull_request.labels``, or ``issue.labels`` on a comment on a pull
+    request). A ``pull_request`` the run bound itself carries neither title nor
+    labels and never hides the issue's; a PR-naming ``workflow_dispatch`` payload
+    carries neither either, which is why run start reads them. The fix labels are
     ``ToolState.fix_labels`` (resolved at run start from the pull request base),
     else the settings snapshot's ``review.fixLabels`` only when that snapshot is
     operator-owned, else the defaults: a pull request's own config never changes them.
@@ -299,11 +315,14 @@ def fix_proof_signal_for_context(ctx: ToolContext) -> FixProofSignal:
     """
     from mergecraft.ci.red_green import DEFAULT_FIX_LABELS
 
-    pull = _event_pull_request(ctx)
     title = getattr(getattr(ctx.payload, "event", None), "title", None)
     if not isinstance(title, str) or not title.strip():
-        raw_title = pull.get("title")
-        title = raw_title if isinstance(raw_title, str) else ""
+        read_title = getattr(ctx.tool_state, "pull_request_title", None)
+        title = (
+            read_title
+            if isinstance(read_title, str)
+            else event_pull_request_title(ctx.gh_event) or ""
+        )
     read = getattr(ctx.tool_state, "pull_request_labels", None)
     labels: Sequence[str] = (
         read if read is not None else event_pull_request_labels(ctx.gh_event) or []
@@ -1270,6 +1289,7 @@ __all__ = [
     "classify_run_blast_radius",
     "emit_run_packet",
     "event_pull_request_labels",
+    "event_pull_request_title",
     "fix_proof_signal_for_context",
     "fix_proof_signal_for_state",
     "prepare_run_packet",

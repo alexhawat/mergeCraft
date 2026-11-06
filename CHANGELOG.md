@@ -74,10 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     unknown now says the base config "could not be read" instead of reporting
     that it declares no receipt; the base-side `review.fixLabels` is also
     resolved when a setup-script failure skips the agent.
-  - The pull request's labels are read once at run start when the event does not
-    carry them (a review started from a comment on the pull request or from a
-    `workflow_dispatch` naming it), so a `bug`-labelled fix is still asked for its
-    receipt on those triggers; a failed read falls back to title detection. The
+  - The pull request's title and labels are read once at run start when the event
+    does not carry them (a review started from a comment on the pull request or
+    from a `workflow_dispatch` naming it), so a `fix:`-titled or `bug`-labelled fix
+    is still asked for its receipt on those triggers; a failed read falls back to
+    what the event carries. The
     artifact provenance checks the receipt shares with the policy proofs
     (declared workflow untouched, same-repository successful run, bounded
     download) now live in one module used by both.

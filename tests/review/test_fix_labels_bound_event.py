@@ -7,16 +7,17 @@ Reading the labels off that stub made every such run see an unlabelled pull
 request, so a ``bug``-labelled fix with a non-``fix`` title was ``fix.not-required``
 and could stay in the low lane the gate exists to prevent. Pinned here:
 
-- ``event_pull_request_labels`` skips a ``pull_request`` without a ``labels`` key and
-  reads ``issue.labels`` on a comment event; it is ``None`` only when the event has
-  no labels anywhere, never an empty list by default;
+- ``event_pull_request_labels`` / ``event_pull_request_title`` skip a ``pull_request``
+  without the key and read ``issue.labels`` / ``issue.title`` on a comment event;
+  they are ``None`` only when the event has nothing to give, never an empty value
+  by default;
 - ``fix_proof_signal_for_context`` prefers ``ToolState.pull_request_labels`` and
-  otherwise the event's labels, so a bound comment event still makes a labelled
-  pull request a fix;
+  ``ToolState.pull_request_title`` (the payload title first) and otherwise the
+  event's, so a bound comment event still makes a labelled pull request a fix and
+  a dispatch-bound ``fix:`` title, which the payload never carries, still counts;
 - at run start (the real ``_run_review_after_analyze``), a dispatch-bound event
-  reads the pull request once and records its labels on
-  ``ToolState.pull_request_labels``; a read that fails leaves ``None`` and the run
-  goes on with title-only detection.
+  reads the pull request once and records its title and labels; a read that fails
+  leaves both ``None`` and the run goes on with what the event carries.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from mergecraft.config.settings import default_settings
 from mergecraft.config.trust_policy import bind_target_pull_request
 from mergecraft.evidence.run_packet import (
     event_pull_request_labels,
+    event_pull_request_title,
     fix_proof_signal_for_context,
 )
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
@@ -40,10 +42,10 @@ BASE_SHA = "a" * 40
 HEAD_SHA = "b" * 40
 
 
-def _pull(labels: list[str]) -> dict[str, Any]:
+def _pull(labels: list[str], *, title: str = "Handle empty input") -> dict[str, Any]:
     return {
         "number": 42,
-        "title": "Handle empty input",
+        "title": title,
         "labels": [{"name": name} for name in labels],
         "base": {"sha": BASE_SHA, "ref": "main", "repo": {"full_name": "acme/demo"}},
         "head": {"sha": HEAD_SHA, "ref": "fix-it", "repo": {"full_name": "acme/demo"}},
@@ -65,10 +67,10 @@ def _comment_event(labels: list[str]) -> dict[str, Any]:
     return bind_target_pull_request(raw, _pull(labels))
 
 
-def _dispatch_event() -> dict[str, Any]:
-    """A PR-naming ``workflow_dispatch``, bound: no labels anywhere on the event."""
+def _dispatch_event(pull: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A PR-naming ``workflow_dispatch``, bound: no title or labels anywhere on the event."""
     raw = {"inputs": {"prompt": "Review pull request #42."}}
-    return bind_target_pull_request(raw, _pull(["bug"]))
+    return bind_target_pull_request(raw, pull if pull is not None else _pull(["bug"]))
 
 
 # --- event_pull_request_labels ------------------------------------------------------
@@ -100,11 +102,32 @@ def test_malformed_label_entries_are_skipped() -> None:
     assert event_pull_request_labels(event) == ["bug"]
 
 
+# --- event_pull_request_title -------------------------------------------------------
+
+
+def test_a_bound_comment_event_still_gives_the_issue_title() -> None:
+    assert event_pull_request_title(_comment_event(["bug"])) == "Handle empty input"
+
+
+def test_a_pull_request_event_gives_its_own_title() -> None:
+    assert event_pull_request_title({"pull_request": _pull([], title="fix: x")}) == "fix: x"
+
+
+def test_a_bound_dispatch_event_has_no_title_to_give() -> None:
+    assert event_pull_request_title(_dispatch_event()) is None
+
+
 # --- fix_proof_signal_for_context -------------------------------------------------
 
 
 def _tool_context(
-    tmp_path: Path, *, gh_event: dict[str, Any], read_labels: tuple[str, ...] | None
+    tmp_path: Path,
+    *,
+    gh_event: dict[str, Any],
+    read_labels: tuple[str, ...] | None,
+    read_title: str | None = None,
+    payload_title: str | None = "Handle empty input",
+    trigger: str = "issue_comment",
 ) -> Any:
 
     from mergecraft.config.settings_snapshot import RepoSettingsSnapshot
@@ -118,6 +141,7 @@ def _tool_context(
     primary_repo_state(tool_state).diff_path = str(diff_path)
     tool_state.fix_labels = ("bug", "fix")
     tool_state.pull_request_labels = read_labels
+    tool_state.pull_request_title = read_title
     settings = default_settings()
     snapshot = RepoSettingsSnapshot(
         settings=settings, config_hash="", repo_root=tmp_path, operator_owned=True
@@ -126,9 +150,7 @@ def _tool_context(
         agent_id="claude",
         repo=RepoIdentity(owner="acme", name="demo"),
         payload=ResolvedPayload(
-            event=PayloadEvent(
-                trigger="issue_comment", issue_number=42, is_pr=True, title="Handle empty input"
-            ),
+            event=PayloadEvent(trigger=trigger, issue_number=42, is_pr=True, title=payload_title),
         ),
         github=GitHubClient(token=""),
         modes=compute_modes("claude"),
@@ -158,12 +180,51 @@ def test_labels_read_at_run_start_win_over_the_event(tmp_path: Path) -> None:
     assert signal["required"] is True
 
 
-def test_a_bound_dispatch_event_with_nothing_read_falls_back_to_the_title(tmp_path: Path) -> None:
+def test_a_bound_dispatch_event_with_nothing_read_falls_back_to_the_payload_title(
+    tmp_path: Path,
+) -> None:
     ctx = _tool_context(tmp_path, gh_event=_dispatch_event(), read_labels=None)
 
     signal = fix_proof_signal_for_context(ctx)
 
     assert signal == {"required": False, "status": "not-required"}
+
+
+def test_a_fix_titled_unlabelled_pull_request_is_a_fix_on_a_dispatch_review(
+    tmp_path: Path,
+) -> None:
+    """Production shape: the dispatch payload has no title, the bound stub has none; run start read it."""
+    pull = _pull([], title="fix: handle empty input")
+    ctx = _tool_context(
+        tmp_path,
+        gh_event=_dispatch_event(pull),
+        read_labels=(),
+        read_title="fix: handle empty input",
+        payload_title=None,
+        trigger="workflow_dispatch",
+    )
+
+    signal = fix_proof_signal_for_context(ctx)
+
+    assert signal["required"] is True
+    assert signal["status"] == "no-receipt"
+
+
+def test_a_dispatch_review_with_nothing_read_and_no_payload_title_cannot_see_a_fix(
+    tmp_path: Path,
+) -> None:
+    """The degraded path a failed read leaves: nothing names the pull request a fix."""
+    pull = _pull([], title="fix: handle empty input")
+    ctx = _tool_context(
+        tmp_path,
+        gh_event=_dispatch_event(pull),
+        read_labels=None,
+        read_title=None,
+        payload_title=None,
+        trigger="workflow_dispatch",
+    )
+
+    assert fix_proof_signal_for_context(ctx)["required"] is False
 
 
 def test_an_unlabelled_comment_event_is_not_a_fix(tmp_path: Path) -> None:
@@ -172,7 +233,7 @@ def test_an_unlabelled_comment_event_is_not_a_fix(tmp_path: Path) -> None:
     assert fix_proof_signal_for_context(ctx)["required"] is False
 
 
-# --- run start reads the labels through the SCM -----------------------------------
+# --- run start reads the title and labels through the SCM --------------------------
 
 
 class _Scm:
@@ -220,6 +281,7 @@ def seen(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     async def _triage(ctx: Any) -> Any:
         record["pull_request_labels"] = ctx.tool_state.pull_request_labels
+        record["pull_request_title"] = ctx.tool_state.pull_request_title
         record["fix_labels"] = ctx.tool_state.fix_labels
         return main_mod.SkipAgentReview(reason="stopped at triage by the test")
 
@@ -231,17 +293,33 @@ def seen(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_run_start_reads_the_labels_of_a_dispatch_bound_pull_request(
+async def test_run_start_reads_the_title_and_labels_of_a_dispatch_bound_pull_request(
     tmp_path: Path, seen: dict[str, Any]
 ) -> None:
-    scm = _Scm(pull=_pull(["bug"]))
-    ctx = _run_ctx(tmp_path, scm, gh_event=_dispatch_event())
+    pull = _pull(["bug"], title="fix: handle empty input")
+    scm = _Scm(pull=pull)
+    ctx = _run_ctx(tmp_path, scm, gh_event=_dispatch_event(pull))
 
     result = await main_mod._run_review_after_analyze(ctx)
 
     assert isinstance(result, main_mod.SkipAgentReview)
     assert seen["pull_request_labels"] == ("bug",)
-    assert ("acme", "demo", 42) in scm.get_pull_calls
+    assert seen["pull_request_title"] == "fix: handle empty input"
+    assert scm.get_pull_calls.count(("acme", "demo", 42)) >= 1
+
+
+@pytest.mark.asyncio
+async def test_run_start_reads_a_fix_title_for_an_unlabelled_dispatch_bound_pull_request(
+    tmp_path: Path, seen: dict[str, Any]
+) -> None:
+    pull = _pull([], title="fix: handle empty input")
+    scm = _Scm(pull=pull)
+    ctx = _run_ctx(tmp_path, scm, gh_event=_dispatch_event(pull))
+
+    await main_mod._run_review_after_analyze(ctx)
+
+    assert seen["pull_request_title"] == "fix: handle empty input"
+    assert seen["pull_request_labels"] == ()
 
 
 @pytest.mark.asyncio
@@ -254,10 +332,12 @@ async def test_run_start_takes_the_labels_from_a_comment_event_without_a_read(
     await main_mod._run_review_after_analyze(ctx)
 
     assert seen["pull_request_labels"] == ("bug", "docs")
+    assert seen["pull_request_title"] == "Handle empty input"
+    assert scm.get_pull_calls == [] or all(c == ("acme", "demo", 42) for c in scm.get_pull_calls)
 
 
 @pytest.mark.asyncio
-async def test_a_failed_label_read_leaves_title_only_detection_and_the_run_going(
+async def test_a_failed_read_leaves_the_event_inputs_and_the_run_going(
     tmp_path: Path, seen: dict[str, Any]
 ) -> None:
     scm = _Scm(pull=None, fail=True)
@@ -267,4 +347,5 @@ async def test_a_failed_label_read_leaves_title_only_detection_and_the_run_going
 
     assert isinstance(result, main_mod.SkipAgentReview)
     assert seen["pull_request_labels"] is None
+    assert seen["pull_request_title"] is None
     assert seen["fix_labels"] is not None, "the base fix labels are still resolved"
