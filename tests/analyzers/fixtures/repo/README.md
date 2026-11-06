@@ -6,6 +6,7 @@ Deliberately planted findings for adapter and catalog waves. Paths are relative 
 |---|---|---|
 | Broken GitHub workflow (invalid `on:` key) | `.github/workflows/broken.yml` | W6 actionlint |
 | Unpinned third-party action (`@main`) | `.github/workflows/unpinned-action.yml` | W6 zizmor |
+| Valid composite action — **no** workflow-schema findings (#1210) | `.github/actions/bootstrap/action.yml` | W6 actionlint (negative) |
 | Unquoted shell variable | `scripts/deploy.sh` | W6 ShellCheck |
 | `FROM …:latest` Dockerfile tag | `Dockerfile` | W6 Hadolint |
 | Vulnerable pinned dependency (`requests==2.25.0`) | `requirements.txt` | Catalog C2 (OSV/Trivy) |

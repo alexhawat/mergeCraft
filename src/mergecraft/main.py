@@ -818,10 +818,19 @@ async def _publish(
             rejection_reason = effective_failure_reason or (
                 None if lite_run else "no_accepted_model_verdict"
             )
+        # A refused terminal attempt owes the PR a record even when the agent never
+        # selected a mode: without it a rejected approval left only a failing
+        # approval check and no review naming the rejection (#1211).
+        terminal_rejected = tool_context.tool_state.last_terminal_rejection is not None
         if (
             pull_number is not None
             and prepared is not None
-            and (review_run or lite_run or tool_context.tool_state.review is not None)
+            and (
+                review_run
+                or lite_run
+                or terminal_rejected
+                or tool_context.tool_state.review is not None
+            )
         ):
             try:
                 await publish_deterministic_record(
@@ -3095,6 +3104,7 @@ async def _finalize(
             terminal_publication_mismatch=publication_mismatch,
             terminal_publication_unproven=_publication_unproven(tool_state),
             coverage_incomplete_reason=coverage_reason,
+            terminal_rejection=tool_state.last_terminal_rejection,
         )
         if finalize_failure is not None and outcome is RunOutcome.inconclusive:
             failure_reason = (
@@ -3122,6 +3132,7 @@ async def _finalize(
         terminal_publication_failed=tool_state.terminal_publication_failed,
         terminal_publication_receipt=publication_receipt,
         terminal_publication_mismatch=publication_mismatch,
+        terminal_rejection=tool_state.last_terminal_rejection,
     )
     diagnostic_attrs = verdict_publish.attrs
     verdict_prediction = verdict_publish.prediction

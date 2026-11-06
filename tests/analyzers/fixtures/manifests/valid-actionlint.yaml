@@ -4,7 +4,6 @@ languages: []
 detect:
   files:
     - ".github/workflows/*.{yml,yaml}"
-    - ".github/actions/**/action.yml"
 command: ["actionlint", "-format", "sarif", "{files}"]
 scope: diff
 parser: sarif

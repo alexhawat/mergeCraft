@@ -272,6 +272,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- actionlint now lints workflow files only. Action manifests (root `action.yml`
+  and `.github/actions/**/action.yml`, composite or not) were linted against the
+  workflow schema, producing false Major `syntax-check` blockers; zizmor still
+  covers them (#1210).
+- A terminal review verdict refused by validation (for example
+  `approve_with_confirmed_blocker`) no longer reads as a completed review. The
+  refused call is recorded on the trajectory as `ok: false`,
+  `failure_class: refused` and is not a completion claim. The run publishes its
+  deterministic record naming the rejection and the remaining blockers even
+  when no mode was selected, and it classifies `inconclusive` instead of
+  `passed` when the provider exits 0 (#1211).
 - Audit remediation hardens revision-bound approvals, checkout recovery, fork
   trust, CLI workspace and cache identity, finding attribution and severity.
   Checkout retries also discard fail-then-pass evidence from the old revision;

@@ -252,6 +252,7 @@ def predict_verdict_protocol(
     terminal_publication_failed: bool = False,
     terminal_publication_receipt: bool | None = None,
     terminal_publication_mismatch: tuple[str, str] | None = None,
+    terminal_rejection: str | None = None,
 ) -> VerdictProtocolPrediction:
     """Read the terminal-verdict protocol prediction without recording it (VP3).
 
@@ -266,6 +267,12 @@ def predict_verdict_protocol(
     shows a different published verdict: both predict ``inconclusive`` with
     ``terminal_submission_unpublished`` (the recorded verdict is not what
     GitHub shows). Both inputs default to "not applicable".
+
+    A refused terminal attempt (``terminal_rejection``) with no accepted
+    submission predicts ``inconclusive`` with
+    ``provider_success_without_submission`` in any mode, mirroring
+    ``_classify_outcome`` so the run record never shows ``approved`` beside an
+    ``inconclusive`` outcome (#1211).
     """
     from mergecraft.mcp.verdict import VerdictDiagnostic
 
@@ -290,6 +297,15 @@ def predict_verdict_protocol(
         return VerdictProtocolPrediction(
             outcome=RunOutcome.inconclusive,
             diagnostic=VerdictDiagnostic.policy_rejection.value,
+        )
+    if (
+        terminal_rejection
+        and not result.terminal_submission_received
+        and not (mode in _INCREMENTAL_REVIEW_NAMES and final_summary_written)
+    ):
+        return VerdictProtocolPrediction(
+            outcome=RunOutcome.inconclusive,
+            diagnostic=VerdictDiagnostic.provider_success_without_submission.value,
         )
     if mode in _REVIEW_MODE_NAMES and terminal_publication_failed:
         return VerdictProtocolPrediction(
