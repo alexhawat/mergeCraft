@@ -20,7 +20,6 @@ from mergecraft.utils.secrets import (
 from mergecraft.utils.time_parse import (
     TIMEOUT_DISABLED,
     parse_time_string,
-    parse_timeout,
     resolve_timeout_ms,
 )
 
@@ -36,7 +35,6 @@ __all__ = [
     "normalize_env",
     "parse_repo_context",
     "parse_time_string",
-    "parse_timeout",
     "resolve_payload",
     "resolve_prompt_input",
     "resolve_run_context_data",

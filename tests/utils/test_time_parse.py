@@ -8,7 +8,6 @@ from mergecraft.utils.time_parse import (
     TIMEOUT_DISABLED,
     normalize_timeout_input,
     parse_time_string,
-    parse_timeout,
     resolve_timeout_ms,
 )
 
@@ -58,10 +57,7 @@ def test_resolve_timeout_ms_rejects_zero_and_overflow() -> None:
     assert resolve_timeout_ms("596h31m23s") == 2_147_483_000
 
 
-def test_normalize_and_parse_timeout_notimeout() -> None:
+def test_normalize_timeout_input_notimeout() -> None:
     assert normalize_timeout_input("--notimeout") == TIMEOUT_DISABLED
     assert normalize_timeout_input("notimeout") == TIMEOUT_DISABLED
     assert normalize_timeout_input("none") == TIMEOUT_DISABLED
-    assert parse_timeout("--notimeout") is None
-    assert parse_timeout("10m") == 600_000
-    assert parse_timeout("0m") is None

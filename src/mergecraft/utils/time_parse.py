@@ -49,16 +49,3 @@ def normalize_timeout_input(raw: str | None) -> str | None:
     if stripped in {"--notimeout", "notimeout", TIMEOUT_DISABLED}:
         return TIMEOUT_DISABLED
     return stripped
-
-
-def parse_timeout(raw: str | None) -> int | None:
-    """Parse a timeout input into milliseconds.
-
-    Returns ``None`` when timeout is disabled (``--notimeout`` / ``none``) or when the
-    value cannot be honored (invalid / zero / overflow). Callers that need to
-    distinguish disabled vs invalid should inspect ``normalize_timeout_input`` first.
-    """
-    normalized = normalize_timeout_input(raw)
-    if normalized is None or normalized == TIMEOUT_DISABLED:
-        return None
-    return resolve_timeout_ms(normalized)
