@@ -70,6 +70,17 @@ def test_an_exempt_job_really_pushes(workflow: str, job_id: str) -> None:
     text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
     doc = yaml.safe_load(text)
     job = doc["jobs"][job_id]
+    checkouts = [
+        step
+        for step in job.get("steps") or []
+        if isinstance(step, dict) and str(step.get("uses", "")).startswith("actions/checkout@")
+    ]
+    assert checkouts, f"{workflow}:{job_id} has no checkout"
+    token = str((checkouts[0].get("with") or {}).get("token", ""))
+    if token:
+        # A GitHub App token can push workflow files with the job token read-only.
+        assert "app-token" in token, f"{workflow}:{job_id} persists an unrecognised checkout token"
+        return
     permissions = job.get("permissions") or {}
     assert permissions.get("contents") == "write", (
         f"{workflow}:{job_id} is exempt from persist-credentials: false but cannot push"

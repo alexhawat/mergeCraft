@@ -1,39 +1,29 @@
 # SPDX-License-Identifier: MIT
-# The S -> D -> C -> P pin cycle (#641). It is two commits and they cannot be
-# one PR: the consumer pin P must name manifest commit C, and C's SHA is not
-# known until it merges. This workflow automates C and prepares P for a human.
+# The S -> D -> C -> P pin cycle (#641), end to end.
 #
 #   stage=manifest  Resolve main's tip as source S, verify the published image D
-#                   against GHCR, run `make action-manifest-prepare`, and push
-#                   the one-line action.yml change on a branch. This stage can
-#                   push — action.yml is not a workflow file, so the job's
-#                   `contents: write` scope is sufficient.
-#   stage=pin       Given the merged MANIFEST_COMMIT, run `make
-#                   action-pin-prepare`, verify and rewrite the four consumer
-#                   references, keep the preparation in the runner, and print
-#                   the exact local command for a human to land.
+#                   against GHCR, run `make action-manifest-prepare`, push the
+#                   one-line action.yml branch and open the manifest PR (C).
+#   stage=pin       Given the merged manifest commit C, run `make
+#                   action-pin-prepare`, push the consumer pin branch and open
+#                   the pin PR (P). This stage fires automatically when the
+#                   manifest PR merges, or by `workflow_dispatch`.
 #
-# stage=pin cannot push, by construction. It must edit `.github/workflows/
-# mergecraft.yml`, and GitHub refuses a GITHUB_TOKEN push that touches
-# `.github/workflows/`:
+# Both stages push and open PRs with a GitHub App token rather than the job
+# token. A `GITHUB_TOKEN` push cannot touch `.github/workflows/` (the pin
+# rewrites `mergecraft.yml`), and a `GITHUB_TOKEN`-opened PR arrives with no
+# required checks. The App needs `contents: write`, `pull_requests: write` and
+# `workflows: write`; the secrets are the reviewer App's
+# (`MERGECRAFT_APP_ID` / `MERGECRAFT_APP_PRIVATE_KEY`).
 #
-#   (refusing to allow a GitHub App to create or update workflow
-#    `.github/workflows/mergecraft.yml` without `workflows` permission)
+# What stays human: merging. The workflow never merges, never enables
+# auto-merge and never uses `--admin`. Manifest and pin PRs must be merged with
+# a merge commit, never a squash: a squashed manifest orphans C and leaves
+# nothing for P to name (#684).
 #
-# `workflows` is not a GITHUB_TOKEN `permissions:` scope, so adding it to the
-# block changes nothing; and a `uses:` reference cannot read a variable, so the
-# rungs must carry literal SHAs. Advertising a push GitHub rejects would fail at
-# the last step after looking like it worked, so this stage documents the manual
-# step instead. No PAT is introduced to route around it.
-#
-# The manifest branch is left for a human too: a PR opened with GITHUB_TOKEN
-# does not trigger `pull_request` workflows, so it would arrive carrying zero
-# required checks — the pin is exactly the change that must not merge unchecked.
-#
-# What this removes is the error-prone part, not the judgement: resolving the
-# digest, keeping S/D/C consistent, and retyping 40-hex SHAs by hand. Merging
-# stays manual, and manifest PRs must be merged with a merge commit — a squash
-# orphans C and leaves nothing for P to name (#684).
+# The automatic stage only listens for a merged manifest PR from this
+# repository; it never checks out or executes pull-request code (the checkout is
+# `main`), so a fork cannot drive it.
 name: Bump action pin
 
 on:
@@ -49,11 +39,11 @@ on:
           - pin
       manifest_commit:
         description: >-
-          stage=pin only. The 40-hex SHA that manifest commit C actually landed
-          as on main — not the PR's merge commit, which differs from the image
-          source in more than action.yml and is rejected by verify_manifest.
+          stage=pin only. The 40-hex SHA that the manifest PR landed as on main.
         required: false
         default: ""
+  pull_request:
+    types: [closed]
 
 permissions:
   contents: read
@@ -64,17 +54,40 @@ concurrency:
 
 jobs:
   prepare:
+    # The automatic path speaks only for a merged manifest PR from this
+    # repository whose head is the manifest branch this workflow creates.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       startsWith(github.event.pull_request.head.ref, 'chore/action-manifest-'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: write
+      contents: read
       packages: read
       id-token: write
     steps:
+      # The App token is the only identity that can push a workflow file and
+      # whose opened PRs still run required checks.
+      - name: Mint the App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.MERGECRAFT_APP_ID }}
+          private-key: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-packages: read
+          permission-pull-requests: write
+          permission-workflows: write
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: main
+          token: ${{ steps.app-token.outputs.token }}
           persist-credentials: true
 
       - uses: ./.github/actions/bootstrap
@@ -84,17 +97,42 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
 
+      # The manifest PR's head commit is C: its diff from the image source is
+      # only action.yml. The merge commit is not C — it also carries whatever
+      # main gained while the manifest PR was open, which verify_manifest
+      # rejects (and a squash would orphan C entirely).
+      - name: Resolve the stage and its inputs
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_STAGE: ${{ inputs.stage }}
+          INPUT_MANIFEST: ${{ inputs.manifest_commit }}
+          MANIFEST_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request" ]; then
+            stage=pin
+            manifest_commit="$MANIFEST_SHA"
+          else
+            stage="$INPUT_STAGE"
+            manifest_commit="$INPUT_MANIFEST"
+          fi
+          if [ "$stage" = "pin" ] && [ -z "$manifest_commit" ]; then
+            echo "::error::stage=pin needs the merged manifest commit"
+            exit 1
+          fi
+          echo "stage=$stage" >> "$GITHUB_OUTPUT"
+          echo "manifest_commit=$manifest_commit" >> "$GITHUB_OUTPUT"
+
       # stage=manifest only. The pin stage must not resolve from main's tip: by
       # then main has advanced to the manifest PR's own merge commit, which is
-      # never the source the image was built from, so this always resolved an
-      # empty digest and failed. It is redundant there anyway —
-      # `action-pin-prepare` runs verify_manifest(manifest_commit) internally,
-      # which verifies the digest against GHCR for the correct source.
+      # never the source the image was built from. `action-pin-prepare` verifies
+      # the manifest/digest pair internally there.
       - name: Resolve and verify the published image
         id: image
-        if: inputs.stage == 'manifest'
+        if: steps.mode.outputs.stage == 'manifest'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           source_sha="$(git rev-parse HEAD)"
@@ -115,14 +153,12 @@ jobs:
       - name: Prepare the change
         id: prepare
         env:
-          GH_TOKEN: ${{ github.token }}
-          STAGE: ${{ inputs.stage }}
-          MANIFEST_COMMIT: ${{ inputs.manifest_commit }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          STAGE: ${{ steps.mode.outputs.stage }}
+          MANIFEST_COMMIT: ${{ steps.mode.outputs.manifest_commit }}
           SOURCE_REVISION: ${{ steps.image.outputs.source }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
           SHORT: ${{ steps.image.outputs.short }}
-          # Empty for stage=pin, where the source is derived from the manifest
-          # commit by action-pin-prepare rather than from main's tip.
         run: |
           set -euo pipefail
           if [ "$STAGE" = "manifest" ]; then
@@ -133,10 +169,6 @@ jobs:
             digest_short="${IMAGE_DIGEST#sha256:}"
             title="chore(action): prepare verified image manifest ${digest_short:0:8}"
           else
-            if [ -z "$MANIFEST_COMMIT" ]; then
-              echo "::error::stage=pin requires manifest_commit (the SHA C landed as on main)"
-              exit 1
-            fi
             branch="chore/action-pin-${MANIFEST_COMMIT:0:8}"
             RELEASE_BASE_BRANCH=main make action-pin-prepare
             title="chore(action): pin self-review to verified manifest ${MANIFEST_COMMIT:0:8}"
@@ -148,11 +180,7 @@ jobs:
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
           echo "title=$title" >> "$GITHUB_OUTPUT"
 
-      # stage=manifest only. Only C can be pushed: stage=pin rewrites
-      # `.github/workflows/` files, which GitHub refuses to accept from a
-      # GITHUB_TOKEN push.
       - name: Push the branch
-        if: inputs.stage == 'manifest'
         env:
           BRANCH: ${{ steps.prepare.outputs.branch }}
           TITLE: ${{ steps.prepare.outputs.title }}
@@ -162,27 +190,66 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$BRANCH"
           git commit -am "$TITLE"
-          git push origin "$BRANCH"
+          # This workflow owns the branch; a re-run after a partial failure
+          # replaces it rather than failing on a non-fast-forward push.
+          git push --force-with-lease origin "$BRANCH"
+
+      - name: Open the pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH: ${{ steps.prepare.outputs.branch }}
+          TITLE: ${{ steps.prepare.outputs.title }}
+          STAGE: ${{ steps.mode.outputs.stage }}
+          MANIFEST_COMMIT: ${{ steps.mode.outputs.manifest_commit }}
+          SOURCE_REVISION: ${{ steps.image.outputs.source }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          existing="$(gh pr list --head "$BRANCH" --state open --json url -q '.[0].url // empty')"
+          if [ -n "$existing" ]; then
+            echo "url=$existing" >> "$GITHUB_OUTPUT"
+            echo "reused=$existing" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          body_file="$(mktemp)"
+          {
+            echo "## What"
+            echo
+            if [ "$STAGE" = "manifest" ]; then
+              echo "Points \`action.yml\` at the signed slim image built from \`$SOURCE_REVISION\` (\`$IMAGE_DIGEST\`). Only \`action.yml\` changes. This is the manifest commit (C) the consumer pin will reference."
+            else
+              echo "Pins the self-review Action to \`$MANIFEST_COMMIT\`, the merged manifest commit. \`MERGECRAFT_ACTION_SHA\` and the three \`uses:\` review rungs move together."
+            fi
+            echo
+            echo "## Merge"
+            echo
+            echo "Merge with a **merge commit**, not a squash."
+            if [ "$STAGE" = "manifest" ]; then
+              echo "Do not merge any product-side PR between this and the pin PR."
+            fi
+            echo
+            echo "Opened by the pin-cycle workflow; the merge stays human."
+          } > "$body_file"
+          url="$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file "$body_file")"
+          rm -f "$body_file"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
 
       - name: Summarise the next step
         env:
           BRANCH: ${{ steps.prepare.outputs.branch }}
-          TITLE: ${{ steps.prepare.outputs.title }}
-          STAGE: ${{ inputs.stage }}
-          MANIFEST_COMMIT: ${{ inputs.manifest_commit }}
+          STAGE: ${{ steps.mode.outputs.stage }}
+          MANIFEST_COMMIT: ${{ steps.mode.outputs.manifest_commit }}
           SOURCE_REVISION: ${{ steps.image.outputs.source }}
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          PR_URL: ${{ steps.pr.outputs.url }}
         run: |
           {
-            if [ "$STAGE" = "manifest" ]; then
-              echo "### Branch pushed: \`$BRANCH\` (manifest C)"
-            else
-              echo "### Prepared locally — no push (pin P)"
-            fi
+            echo "### Stage \`$STAGE\` — \`$BRANCH\`"
             echo
             echo "| | |"
             echo "| --- | --- |"
-            echo "| stage | \`$STAGE\` |"
+            echo "| pull request | ${PR_URL:-already open} |"
             if [ -n "$SOURCE_REVISION" ]; then
               echo "| source S | \`$SOURCE_REVISION\` |"
               echo "| image D | \`$IMAGE_DIGEST\` |"
@@ -190,43 +257,9 @@ jobs:
               echo "| manifest C | \`$MANIFEST_COMMIT\` |"
             fi
             echo
+            echo "**Merge it with a merge commit, not a squash.**"
             if [ "$STAGE" = "manifest" ]; then
-              echo "Open the PR yourself — a GITHUB_TOKEN-opened PR carries no required checks:"
-              echo
-              echo '```bash'
-              echo "gh pr create --base main --head $BRANCH --title \"$TITLE\""
-              echo '```'
-              echo
-              echo "**Merge it with a merge commit, not a squash** — a squash orphans the"
-              echo "manifest commit and leaves nothing for the pin stage to name (#684)."
-              echo "Then re-run this workflow with \`stage=pin\` and that commit's SHA."
-            else
-              echo "No branch was pushed and no PR was opened, because this stage cannot"
-              echo "push. Run the exact preparation in a clean isolated worktree, then"
-              echo "review and merge it yourself:"
-              echo
-              echo '```bash'
-              echo "MANIFEST_COMMIT=$MANIFEST_COMMIT RELEASE_BASE_BRANCH=main make action-pin-prepare"
-              echo '```'
-              echo
-              echo "The worktree must be clean: \`_prepared_state\` rejects **any** untracked"
-              echo "file, not just the files it expects to change, and it also rejects staged"
-              echo "or mode-changing edits. An untracked scratch file in the checkout is"
-              echo "enough for the preparation to refuse."
-              echo
-              echo "**Why the push cannot happen here.** The pin rewrites the \`uses:\` rungs"
-              echo "and \`MERGECRAFT_ACTION_SHA\` in \`.github/workflows/mergecraft.yml\`, and"
-              echo "GitHub refuses a \`GITHUB_TOKEN\` push that touches \`.github/workflows/\`:"
-              echo
-              echo '```'
-              echo "(refusing to allow a GitHub App to create or update workflow"
-              echo " \`.github/workflows/mergecraft.yml\` without \`workflows\` permission)"
-              echo '```'
-              echo
-              echo "\`workflows\` is not a \`GITHUB_TOKEN\` \`permissions:\` scope, so widening the"
-              echo "block changes nothing, and a \`uses:\` reference cannot read a variable, so"
-              echo "the rungs must carry literal SHAs. This stage does everything it can — it"
-              echo "runs \`verify_manifest\`, rewrites the four references and shows the diff —"
-              echo "and stops where GitHub stops it."
+              echo "When it merges, this workflow opens the pin PR automatically;"
+              echo "hold product-side merges until that pin PR lands."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

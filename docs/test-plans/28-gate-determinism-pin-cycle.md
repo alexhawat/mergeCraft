@@ -39,9 +39,9 @@ verdict" posture (F10, F11, F12).
 | F3 | Both variables are cleared in this process, and the probe child agrees | unit | `tests/probe/test_ambient_event_probe.py` | no (green — fixture landed) |
 | F4 | `stage=manifest` emits a Conventional-Commit subject <= 72 chars | functional | `tests/workflow/test_bump_action_pin_cycle.py::test_manifest_stage_subject_is_within_the_commit_cap` | **yes** — assertion (111 chars) |
 | F4 | `stage=pin` keeps its subject within the cap | functional | `tests/workflow/test_bump_action_pin_cycle.py::test_pin_stage_subject_is_within_the_commit_cap` | no (regression pin) |
-| F5 | `stage=pin` never attempts a `git push` | functional | `tests/workflow/test_bump_action_pin_cycle.py::test_pin_stage_does_not_attempt_a_git_push` | **yes** — assertion |
-| F5 | `stage=pin` prints the exact local command and the reason | functional | `tests/workflow/test_bump_action_pin_cycle.py::test_pin_stage_prints_the_prepared_local_command` | **yes** — assertion |
-| F5 | The workflow header stops claiming the "mechanical half" | doc | `tests/workflow/test_bump_action_pin_cycle.py::test_workflow_header_no_longer_claims_to_automate_p` | **yes** — assertion |
+| F5 | `stage=pin` pushes its branch with the App token | functional | `tests/workflow/test_bump_action_pin_cycle.py::test_pin_stage_pushes_the_branch` | **yes** — assertion |
+| F5 | `stage=pin` opens its PR with the App token | functional | `tests/workflow/test_bump_action_pin_cycle.py::test_pin_stage_opens_a_pr_with_the_app_token` | **yes** — assertion |
+| F5 | The workflow header says merging stays human | doc | `tests/workflow/test_bump_action_pin_cycle.py::test_header_says_merging_stays_human` | **yes** — assertion |
 | F10/F11 | A skipped reviewer credential reports `inconclusive`, not approval | unit | `tests/review_record/test_credential_gap_verdict_775.py::test_credential_gap_record_reports_inconclusive_not_approval` | **yes** — assertion |
 | F10/F11 | The record names analyzers ran/withheld and reviewer participation | unit | `tests/review_record/test_credential_gap_verdict_775.py::test_credential_gap_record_names_who_participated` | **yes** — assertion |
 | F10/F11 | A complete run still reports `passed` and `approved` | unit | `tests/review_record/test_credential_gap_verdict_775.py::test_a_complete_run_still_reports_passed_and_approved` | no (anti-weakening guard) |
