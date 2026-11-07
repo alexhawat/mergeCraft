@@ -55,3 +55,19 @@ def test_required_artifact_lane_is_reusable_keyless_and_not_duplicated() -> None
     assert integration["strategy"]["matrix"]["python"] == ["3.11", "3.14"]
     assert any(step.get("run") == "make test-integration" for step in integration["steps"])
     assert "secrets" not in json.dumps(integration)
+
+
+@pytest.mark.parametrize("verifier", ["success", "failure", "cancelled", "skipped"])
+def test_image_only_required_guard_still_requires_verified_candidate(verifier: str) -> None:
+    guard = job(load_workflow("ci.yml"), "static")["steps"][0]["run"]
+    results: dict[str, dict[str, object]] = {name: {"result": "skipped"} for name in _PREREQUISITES}
+    results["changes"] = {"result": "success", "outputs": {"image_only": "true"}}
+    results["deployment-candidate"] = {"result": verifier}
+    run = subprocess.run(
+        ["bash", "-ec", guard],
+        env={**os.environ, "REQUIRED_JOB_RESULTS": json.dumps(results)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert (run.returncode == 0) == (verifier == "success")
