@@ -75,6 +75,12 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           trivyignores: .trivyignore
+      - name: List blocking image findings
+        if: failure() && hashFiles('trivy-image.json') != ''
+        run: |
+          jq -r '.Results[] | .Target as $target |
+            (.Vulnerabilities[]? | [$target, .VulnerabilityID, .PkgName, .InstalledVersion, .FixedVersion]),
+            (.Secrets[]? | [$target, .RuleID, .Severity]) | @tsv' trivy-image.json
       - name: Convert scan report
         if: always() && hashFiles('trivy-image.json') != ''
         run: make image-scan-sarif
