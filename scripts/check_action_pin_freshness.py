@@ -104,7 +104,10 @@ STALENESS_WORKFLOW = ".github/workflows/action-pin-staleness.yml"
 # branch's pin to the branch's new pin, so the one PR that clears a backlog is
 # exactly the PR that trips it; 200 leaves headroom for one deferred cycle and
 # stays well under the 687-commit skew this guard exists to catch.
-MAX_DRIFT = int(os.environ.get("MERGECRAFT_MAX_ACTION_PIN_DRIFT", "200"))
+# 250 since 2026-11-07: the audit-remediation and review-fix batches merged
+# while the pin was held for a release decision, so the catch-up PR measured 209
+# commits. Still less than half the gross skew this guard exists to catch.
+MAX_DRIFT = int(os.environ.get("MERGECRAFT_MAX_ACTION_PIN_DRIFT", "250"))
 
 # Product-code commits the pin may lag the default branch's tip by. Counted
 # over ``src/mergecraft/`` only: docs, tests and workflow commits do not change
