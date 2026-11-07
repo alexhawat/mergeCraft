@@ -193,20 +193,23 @@ def test_the_pin_bump_workflow_verifies_the_image_before_committing() -> None:
     assert "make action-pin-prepare" in text
 
 
-def test_the_pin_bump_workflow_does_not_open_its_own_pull_request() -> None:
+def test_the_pin_bump_workflow_opens_prs_only_with_the_app_token() -> None:
     """A GITHUB_TOKEN-opened PR triggers no `pull_request` workflows.
 
-    It would arrive with zero required checks — and the pin is precisely the
-    change that must not merge unchecked. The workflow pushes a branch and
-    leaves the PR to a human rather than introducing a PAT to route around it.
+    The workflow may open its own PRs only with the App token, whose PRs do run
+    the required checks. A step that creates one with the job token would arrive
+    green-free, and the pin is precisely the change that must not merge
+    unchecked.
     """
-    text = read_text(f".github/workflows/{_BUMP_WORKFLOW}")
-    mentions = [line.strip() for line in text.splitlines() if "gh pr create" in line]
-    assert mentions, "the workflow should still tell the operator what to run"
-    for line in mentions:
-        # Echoed into the job summary, or described in a comment — never run.
-        assert line.startswith(("echo ", "#")), (
-            f"workflow executes `gh pr create`; that PR would carry no required checks: {line}"
+    doc = load_workflow(_BUMP_WORKFLOW)
+    steps = [
+        step for step in job(doc, "prepare")["steps"] if "gh pr create" in str(step.get("run", ""))
+    ]
+    assert steps, "the workflow no longer opens a PR in either stage"
+    for step in steps:
+        env = step.get("env") or {}
+        assert env.get("GH_TOKEN") == "${{ steps.app-token.outputs.token }}", (
+            "a PR-creating step must use the App token, not the job token"
         )
 
 

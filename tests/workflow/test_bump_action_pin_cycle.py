@@ -1,12 +1,8 @@
-"""F4 / F5 (#749, #750) — the pin automation may only claim what it can do.
+"""The pin automation's contracts, exercised by running its shell snippets.
 
-The contract is exercised by *running* the workflow's shell snippets under
-stubs, not by asserting on the YAML text: the subject titles are read back out
-of ``$GITHUB_OUTPUT`` and the push behaviour is read from a recording ``git``
-stub. ``stage=manifest`` must emit a Conventional-Commit subject at or under
-the 72-character cap; ``stage=pin`` must not attempt the ``GITHUB_TOKEN`` push
-GitHub refuses by construction, and must instead print the exact local command
-plus the reason.
+The subjects are read back out of ``$GITHUB_OUTPUT`` and the push/PR behaviour
+is read from recording ``git`` and ``gh`` stubs. Both stages push and open a PR
+with the App token; merging stays human.
 """
 
 from __future__ import annotations
@@ -25,10 +21,13 @@ _JOB = "prepare"
 _SUBJECT_CAP = 72
 _DIGEST = "sha256:" + "a" * 64
 _MANIFEST_COMMIT = "b" * 40
+_APP_TOKEN = "not-a-real-token"
 _STUB_PREAMBLE = (
     "set -euo pipefail\n"
     "make() { return 0; }\n"
     'git() { printf "%s\\n" "$*" >> "$GIT_CALL_LOG"; case "$1" in diff) return 1 ;; esac; return 0; }\n'
+    'gh() { printf "%s\\n" "$*" >> "$GH_CALL_LOG"; '
+    'case "$*" in *"pr list"*) return 0 ;; *"pr create"*) echo "https://example.test/pr/1" ;; esac; return 0; }\n'
 )
 
 
@@ -41,15 +40,16 @@ def _run_step(
     *,
     env: dict[str, str],
     tmp_path: Path,
-) -> tuple[subprocess.CompletedProcess[str], str, str, str]:
+) -> tuple[subprocess.CompletedProcess[str], str, str, str, str]:
     """Execute one step's ``run`` body under stubs.
 
-    Returns ``(process, step_summary, git_calls, github_output)``.
+    Returns ``(process, step_summary, git_calls, gh_calls, github_output)``.
     """
     label = str(step.get("name", "step")).lower().replace(" ", "-")
     summary_path = tmp_path / f"{label}.summary"
     output_path = tmp_path / f"{label}.output"
     git_log = tmp_path / f"{label}.git"
+    gh_log = tmp_path / f"{label}.gh"
     script = _STUB_PREAMBLE + str(step["run"]) + "\n"
     full_env = {
         **os.environ,
@@ -57,6 +57,7 @@ def _run_step(
         "GITHUB_OUTPUT": str(output_path),
         "GITHUB_STEP_SUMMARY": str(summary_path),
         "GIT_CALL_LOG": str(git_log),
+        "GH_CALL_LOG": str(gh_log),
     }
     proc = subprocess.run(
         ["bash", "-c", script],
@@ -68,8 +69,9 @@ def _run_step(
     )
     summary = summary_path.read_text(encoding="utf-8") if summary_path.exists() else ""
     calls = git_log.read_text(encoding="utf-8") if git_log.exists() else ""
+    gh_calls = gh_log.read_text(encoding="utf-8") if gh_log.exists() else ""
     output = output_path.read_text(encoding="utf-8") if output_path.exists() else ""
-    return proc, summary, calls, output
+    return proc, summary, calls, gh_calls, output
 
 
 def _step_named(name: str) -> dict[str, Any]:
@@ -93,9 +95,9 @@ def _title_for_stage(stage: str, tmp_path: Path) -> str:
         "SHORT": "abcd1234",
         "MANIFEST_COMMIT": _MANIFEST_COMMIT,
         "SOURCE_REVISION": "c" * 40,
-        "GH_TOKEN": "not-a-real-token",
+        "GH_TOKEN": _APP_TOKEN,
     }
-    proc, _summary, _calls, output = _run_step(
+    proc, _summary, _calls, _gh_calls, output = _run_step(
         _step_named("Prepare the change"), env=env, tmp_path=tmp_path
     )
     assert proc.returncode == 0, (
@@ -105,7 +107,6 @@ def _title_for_stage(stage: str, tmp_path: Path) -> str:
 
 
 def test_manifest_stage_subject_is_within_the_commit_cap(tmp_path: Path) -> None:
-    """F4 (#749) — ``stage=manifest`` must emit a subject <= 72 characters."""
     title = _title_for_stage("manifest", tmp_path)
     assert title.startswith("chore(action): ")
     assert len(title) <= _SUBJECT_CAP, (
@@ -114,12 +115,29 @@ def test_manifest_stage_subject_is_within_the_commit_cap(tmp_path: Path) -> None
 
 
 def test_pin_stage_subject_is_within_the_commit_cap(tmp_path: Path) -> None:
-    """F4 (#749) — ``stage=pin`` already truncates; keep it that way."""
     title = _title_for_stage("pin", tmp_path)
     assert title.startswith("chore(action): ")
     assert len(title) <= _SUBJECT_CAP, (
         f"stage=pin subject is {len(title)} characters (cap {_SUBJECT_CAP}): {title!r}"
     )
+
+
+def _pin_env() -> dict[str, str]:
+    return {
+        "EVENT": "workflow_dispatch",
+        "INPUT_STAGE": "pin",
+        "INPUT_MANIFEST": _MANIFEST_COMMIT,
+        "MERGED_COMMIT": "",
+        "STAGE": "pin",
+        "IMAGE_DIGEST": "",
+        "SHORT": "",
+        "MANIFEST_COMMIT": _MANIFEST_COMMIT,
+        "SOURCE_REVISION": "",
+        "GH_TOKEN": _APP_TOKEN,
+        "BRANCH": f"chore/action-pin-{_MANIFEST_COMMIT[:8]}",
+        "TITLE": "chore(action): pin self-review to verified manifest bbbbbbbb",
+        "PR_URL": "",
+    }
 
 
 def _pin_stage_run_steps() -> list[dict[str, Any]]:
@@ -135,59 +153,34 @@ def _pin_stage_run_steps() -> list[dict[str, Any]]:
     return selected
 
 
-def test_pin_stage_does_not_attempt_a_git_push(tmp_path: Path) -> None:
-    """F5 (#750) — GitHub refuses a ``GITHUB_TOKEN`` push touching workflows."""
-    env = {
-        "STAGE": "pin",
-        "IMAGE_DIGEST": "",
-        "SHORT": "",
-        "MANIFEST_COMMIT": _MANIFEST_COMMIT,
-        "SOURCE_REVISION": "",
-        "GH_TOKEN": "not-a-real-token",
-        "BRANCH": f"chore/action-pin-{_MANIFEST_COMMIT[:8]}",
-        "TITLE": "chore(action): pin self-review to verified manifest bbbbbbbb",
-    }
-    pushes: list[str] = []
-    for step in _pin_stage_run_steps():
-        proc, _summary, calls, _output = _run_step(step, env=env, tmp_path=tmp_path)
-        assert proc.returncode == 0, (
-            f"pin step {step.get('name')!r} failed:\n{proc.stdout}\n{proc.stderr}"
-        )
-        pushes.extend(line for line in calls.splitlines() if line.startswith("push"))
-    assert pushes == [], f"stage=pin must not push; it invoked: {pushes}"
+def test_pin_stage_pushes_the_branch(tmp_path: Path) -> None:
+    proc, _summary, calls, _gh_calls, _output = _run_step(
+        _step_named("Push the branch"), env=_pin_env(), tmp_path=tmp_path
+    )
+    assert proc.returncode == 0, f"push step failed:\n{proc.stdout}\n{proc.stderr}"
+    pushes = [line for line in calls.splitlines() if line.startswith("push")]
+    assert pushes, "the pin stage must push its branch; it invoked no push"
 
 
-def test_pin_stage_prints_the_prepared_local_command(tmp_path: Path) -> None:
-    """F5 (#750) — the pin stage prepares P and hands the operator the command."""
-    env = {
-        "STAGE": "pin",
-        "IMAGE_DIGEST": "",
-        "SHORT": "",
-        "MANIFEST_COMMIT": _MANIFEST_COMMIT,
-        "SOURCE_REVISION": "",
-        "GH_TOKEN": "not-a-real-token",
-        "BRANCH": f"chore/action-pin-{_MANIFEST_COMMIT[:8]}",
-        "TITLE": "chore(action): pin self-review to verified manifest bbbbbbbb",
-    }
-    proc, summary, _calls, _output = _run_step(
-        _step_named("Summarise the next step"), env=env, tmp_path=tmp_path
+def test_pin_stage_opens_a_pr_with_the_app_token(tmp_path: Path) -> None:
+    step = _step_named("Open the pull request")
+    assert (step.get("env") or {}).get("GH_TOKEN") == "${{ steps.app-token.outputs.token }}"
+    proc, _summary, _calls, gh_calls, output = _run_step(step, env=_pin_env(), tmp_path=tmp_path)
+    assert proc.returncode == 0, f"PR step failed:\n{proc.stdout}\n{proc.stderr}"
+    assert "pr create" in gh_calls, f"no PR was opened; gh called: {gh_calls!r}"
+    assert "url=https://example.test/pr/1" in output
+
+
+def test_pin_stage_summary_requires_a_merge_commit(tmp_path: Path) -> None:
+    proc, summary, _calls, _gh_calls, _output = _run_step(
+        _step_named("Summarise the next step"), env=_pin_env(), tmp_path=tmp_path
     )
     assert proc.returncode == 0, f"summary step failed:\n{proc.stdout}\n{proc.stderr}"
-    assert "make action-pin-prepare" in summary, (
-        "the pin stage must print the exact local command that completes P; "
-        f"summary was:\n{summary}"
-    )
-    assert "RELEASE_BASE_BRANCH=main" in summary
+    assert "Merge it with a merge commit" in summary
     assert _MANIFEST_COMMIT in summary
-    assert "gh pr create" not in summary, (
-        "the pin stage cannot push, so it must not advertise opening a PR"
-    )
 
 
-def test_workflow_header_no_longer_claims_to_automate_p() -> None:
-    """F5 (#750) — the header advertises C and prepares P, not 'the mechanical half'."""
+def test_header_says_merging_stays_human() -> None:
     header = (REPO_ROOT / ".github" / "workflows" / _WORKFLOW).read_text(encoding="utf-8")
-    assert "mechanical half" not in header, (
-        "the header must stop claiming to automate the cycle's mechanical half: the pin "
-        "stage cannot push"
-    )
+    assert "What stays human: merging" in header
+    assert "never merges" in header
