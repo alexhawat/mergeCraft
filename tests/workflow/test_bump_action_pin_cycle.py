@@ -140,19 +140,6 @@ def _pin_env() -> dict[str, str]:
     }
 
 
-def _pin_stage_run_steps() -> list[dict[str, Any]]:
-    """Run steps that execute for ``stage=pin`` (manifest-only steps are skipped)."""
-    selected: list[dict[str, Any]] = []
-    for step in _steps():
-        if "run" not in step:
-            continue
-        condition = str(step.get("if", ""))
-        if "stage == 'manifest'" in condition or 'stage == "manifest"' in condition:
-            continue
-        selected.append(step)
-    return selected
-
-
 def test_pin_stage_pushes_the_branch(tmp_path: Path) -> None:
     proc, _summary, calls, _gh_calls, _output = _run_step(
         _step_named("Push the branch"), env=_pin_env(), tmp_path=tmp_path
@@ -171,7 +158,7 @@ def test_pin_stage_opens_a_pr_with_the_app_token(tmp_path: Path) -> None:
     assert "url=https://example.test/pr/1" in output
 
 
-def test_pin_stage_summary_requires_a_merge_commit(tmp_path: Path) -> None:
+def test_pin_stage_summary_says_merge_with_a_merge_commit(tmp_path: Path) -> None:
     proc, summary, _calls, _gh_calls, _output = _run_step(
         _step_named("Summarise the next step"), env=_pin_env(), tmp_path=tmp_path
     )

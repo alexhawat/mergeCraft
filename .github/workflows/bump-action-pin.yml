@@ -97,18 +97,22 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
 
+      # The manifest PR's head commit is C: its diff from the image source is
+      # only action.yml. The merge commit is not C — it also carries whatever
+      # main gained while the manifest PR was open, which verify_manifest
+      # rejects (and a squash would orphan C entirely).
       - name: Resolve the stage and its inputs
         id: mode
         env:
           EVENT: ${{ github.event_name }}
           INPUT_STAGE: ${{ inputs.stage }}
           INPUT_MANIFEST: ${{ inputs.manifest_commit }}
-          MERGED_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+          MANIFEST_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           if [ "$EVENT" = "pull_request" ]; then
             stage=pin
-            manifest_commit="$MERGED_COMMIT"
+            manifest_commit="$MANIFEST_SHA"
           else
             stage="$INPUT_STAGE"
             manifest_commit="$INPUT_MANIFEST"

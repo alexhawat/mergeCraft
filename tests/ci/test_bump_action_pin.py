@@ -355,12 +355,13 @@ def test_the_pin_cycle_starts_only_on_a_merged_manifest_pr_from_this_repo() -> N
     assert "github.event_name == 'workflow_dispatch'" in condition
 
 
-def test_the_automatic_stage_is_pin_with_the_merged_manifest_commit() -> None:
+def test_the_automatic_stage_pins_the_manifest_pr_head_not_the_merge_commit() -> None:
     mode = _step(id="mode")
     script = str(mode.get("run"))
     assert "stage=pin" in script
     env = mode.get("env") or {}
-    assert env.get("MERGED_COMMIT") == "${{ github.event.pull_request.merge_commit_sha }}"
+    assert env.get("MANIFEST_SHA") == "${{ github.event.pull_request.head.sha }}"
+    assert "merge_commit_sha" not in str(env)
 
 
 def test_the_cycle_uses_an_app_token_that_may_push_workflows() -> None:
