@@ -1,0 +1,99 @@
+{
+  "schema_version": "1.0.0",
+  "protocol_id": "trajectory-auditor-protocol-v1",
+  "issue": 735,
+  "registration_status": "pre-registered, uncalibrated",
+  "registration_note": "Every value in this file is pre-registered and uncalibrated. No held-out label was recorded before this file was written; no number here is a validated result. The per-check minimums and tolerance were supplied by the maintainer (HL-D6) on 2026-09-24 and must not be lowered after the label counts are seen.",
+  "auditor_version": "1.0.0",
+  "scorer_version": "1.0.0",
+  "source_commit": "cc6d1464c86a708bad510edf33f6860f15d4740f",
+  "source_commit_note": "The main commit whose trajectory auditor (TRAJECTORY_AUDITOR_VERSION 1.0.0) is being scored. Re-anchor if the auditor or scorer version changes before the labels are committed.",
+  "label_unit": "exact (rule_id, path) multiplicity",
+  "absence_semantics": "absence is `unknown`, never `negative`",
+  "label_set_location": "evals/trajectories/calibration/ and evals/trajectories/held_out/ (this protocol file sits BESIDE those directories, never inside one — HF5)",
+  "reports_location": "evals/trajectories/reports/<split>-v1.json",
+  "split_rule": {
+    "mechanism": "first hex digit of sha256(case_id)",
+    "case_id_scheme": "mergecraft-{pr}-{agent}-{trajectory_sha256[:12]}",
+    "held_out_hex_digits": ["0", "1", "2", "3", "4"],
+    "declared_held_out_share": 0.3125,
+    "real_held_out_ratio": {
+      "held_out": 113,
+      "calibration": 191,
+      "total": 304,
+      "held_out_share": 0.3717
+    },
+    "assigned_before_auditor_output": true,
+    "targeted_calibration_only_prs": [819, 823],
+    "targeted_calibration_note": "#819 and #823 are closed issues whose remediation landed in PR #836 before the harvest; no harvested packet maps to them, so no case was force-added to calibration."
+  },
+  "selection": {
+    "harvest_packets_inspected": 387,
+    "distinct_trajectories": 304,
+    "duplicates_dropped_by_digest": 83,
+    "secret_scan_drops": 0,
+    "selection_report": "$HOME/mc-human-harvest/hl3-selection.md",
+    "selection_json": "$HOME/mc-human-harvest/hl3-selection.json"
+  },
+  "checks": [
+    {
+      "rule_id": "changed-unread-file",
+      "minimum_positives": 5,
+      "minimum_negatives": 5
+    },
+    {
+      "rule_id": "ignored-tool-error",
+      "minimum_positives": 5,
+      "minimum_negatives": 5,
+      "note": "no positive candidates in the v1 harvest; expected `insufficient` until #858/#859"
+    },
+    {
+      "rule_id": "no-post-edit-verification",
+      "minimum_positives": 5,
+      "minimum_negatives": 5
+    },
+    {
+      "rule_id": "repeated-tool-loop",
+      "minimum_positives": 5,
+      "minimum_negatives": 5,
+      "note": "no positive candidates in the v1 harvest; expected `insufficient` until #858/#859"
+    },
+    {
+      "rule_id": "unresolved-failure",
+      "minimum_positives": 5,
+      "minimum_negatives": 5,
+      "note": "no positive candidates in the v1 harvest; expected `insufficient` until #858/#859"
+    },
+    {
+      "rule_id": "suspicious-broad-edit",
+      "minimum_positives": 5,
+      "minimum_negatives": 5
+    },
+    {
+      "rule_id": "stale-assumption-after-failure",
+      "minimum_positives": 5,
+      "minimum_negatives": 5,
+      "note": "no positive candidates in the v1 harvest; expected `insufficient` until #858/#859"
+    },
+    {
+      "rule_id": "missing-completion-signal",
+      "minimum_positives": 5,
+      "minimum_negatives": 5
+    }
+  ],
+  "tolerance": "advisory in v1; no fail-closed comparison. Plan 51 (HS3) owns the binding value.",
+  "comparison": {
+    "consumer": "plan 51 (HS3) trajectory enforcement: read this protocol and compare a fresh run against the committed baseline reports",
+    "metric": "per-check precision and recall, plus run-level exact-match rate",
+    "baseline": "evals/trajectories/reports/calibration-v1.json and held_out-v1.json",
+    "tolerance_source": "top-level `tolerance`",
+    "tolerance_note": "v1 scores are advisory (the scorer hard-codes quality_eligible=false), so this tolerance gates nothing. The binding enforcement tolerance is owned by plan 51 (HS3) once #858/#859 supply failure-shaped cases."
+  },
+  "notes": [
+    "Per-check minimums are 5 positives and 5 negatives per check, per split — a modest floor for a non-degenerate precision/recall estimate. They are not lowered after seeing counts (HL-D6).",
+    "The harvest is positive-poor: ignored-tool-error, repeated-tool-loop, unresolved-failure and stale-assumption-after-failure have zero positive candidates in either split, so those checks are expected to report `insufficient` in v1. See #858 (recorder) and #859 (failure-shaped harvest batch). They are NOT set to zero: a check must not meet its minimum without evidence.",
+    "If a check reaches the floor on calibration but not on held-out (the split is starved for some), report `insufficient` for held-out only and keep the calibration result.",
+    "A future v2 (after #858/#859) adds cases for the four checks and is scored as a new set id (set-002 / report-v2); v1 reports are immutable.",
+    "No trajectory may be committed from a non-public or consumer repository (HL-D8)."
+  ]
+}
