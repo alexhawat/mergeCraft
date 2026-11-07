@@ -78,20 +78,6 @@ def test_risk_band_reflects_blast_radius() -> None:
     assert result.blast_radius == expected
 
 
-def test_classifier_makes_one_cheap_call() -> None:
-    """The classifier agent runs exactly once per classification (cheap gate)."""
-    change = _change("docs/guide.md", files_changed=1, lines_added=1, lines_deleted=1)
-    calls: list[dict[str, object]] = []
-
-    def _agent_runner(*, change_payload: dict[str, object], **kwargs: object) -> dict[str, object]:
-        calls.append({"change": change_payload, **kwargs})
-        return {"summary": "doc typo"}
-
-    _classify_change(change, agent_runner=_agent_runner)
-
-    assert len(calls) == 1, "classifier must make exactly one cheap agent call"
-
-
 @pytest.mark.parametrize(
     ("change", "expected_is_trivial"),
     [

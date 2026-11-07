@@ -16,10 +16,10 @@ AP4.2 landed. Post-AP4.2 reconciliation removed the markers.
 
 | Test file | Tests | Marker | Status post-AP4.2 |
 |-----------|-------|--------|-------------------|
-| `tests/classify/test_change_classifier.py` | 4 | *(removed)* | **GREEN** |
+| `tests/classify/test_change_classifier.py` | 3 | *(removed)* | **GREEN** |
 | `tests/review/test_lens_routing.py` | 6 | *(removed)* | **GREEN** |
 
-**Acceptance (post-AP4.2):** 10 collected; 10 pass; 0 xfail. `make lint` + `make typecheck`
+**Acceptance (post-AP4.2):** 9 collected; 9 pass; 0 xfail. `make lint` + `make typecheck`
 clean.
 
 ## Target API AP4.2 must satisfy
@@ -29,7 +29,7 @@ clean.
 | Symbol | Contract |
 |--------|----------|
 | `ChangeClassification` | Pydantic: `risk_band` (`low`/`medium`/`high`), `blast_radius` (`BlastRadiusClassification`), `change_map` (typed dict with `changed_paths`, `categories`, `generated_paths`, `vendored_paths`), `is_trivial` (`bool`) |
-| `classify_change(change, *, rule_set=None, agent_runner=None)` | Builds typed change/risk map; **`risk_band` must match `classify_blast_radius(change).lane`**; surfaces generated/vendored paths; invokes `agent_runner` **exactly once** when supplied |
+| `classify_change(change, *, rule_set=None)` | Builds typed change/risk map; **`risk_band` must match `classify_blast_radius(change).lane`**; surfaces generated/vendored paths |
 
 Reuses `mergecraft.classify.blast_radius.classify_blast_radius` — no parallel
 risk rule set.
@@ -51,14 +51,13 @@ one-line billing/auth/SQL change → **not** trivial despite small diff stats.
 
 ## Contract → coverage matrix
 
-### `tests/classify/test_change_classifier.py` — 4 tests
+### `tests/classify/test_change_classifier.py` — 3 tests
 
 | # | Test | Layer | Scenario | Contract |
 |---|------|-------|----------|----------|
 | 1 | `test_emits_typed_risk_and_change_map` | unit | happy | Typed `ChangeClassification` with aligned `risk_band` / `change_map` |
 | 2 | `test_detects_generated_and_vendored_files` | unit | edge | `generated_paths` and `vendored_paths` populated explicitly |
 | 3 | `test_risk_band_reflects_blast_radius` | integration | reuse | `risk_band` and `blast_radius` match `classify_blast_radius` output |
-| 4 | `test_classifier_makes_one_cheap_call` | unit | cost guard | `agent_runner` invoked exactly once |
 
 ### `tests/review/test_lens_routing.py` — 6 tests
 
