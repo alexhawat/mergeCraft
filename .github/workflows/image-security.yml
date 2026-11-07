@@ -11,7 +11,12 @@ concurrency:
   group: image-security-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  changes:
+    uses: ./.github/workflows/classify-pr.yml
+
   scan:
+    needs: changes
+    if: needs.changes.outputs.image_only != 'true'
     name: Image scan (${{ matrix.image }})
     runs-on: ubuntu-latest
     timeout-minutes: 60

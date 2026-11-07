@@ -23,25 +23,9 @@ concurrency:
 
 jobs:
   changes:
-    name: Classify PR diff
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      code: ${{ steps.classify.outputs.code }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Docs-only vs code paths
-        id: classify
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          set -euo pipefail
-          python3 scripts/ci_pr_touches_code.py \
-            --event "${{ github.event_name }}" \
-            --base "${BASE_REF:-main}"
+    uses: ./.github/workflows/classify-pr.yml
+    with:
+      classify-code: true
 
   deployment-candidate:
     name: Verify changed deployment candidates
@@ -72,6 +56,8 @@ jobs:
         run: make action-candidate-check
 
   toolchain:
+    needs: changes
+    if: needs.changes.outputs.image_only != 'true'
     name: Verify (toolchain py${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -107,7 +93,7 @@ jobs:
     steps:
       - name: Docs-only skip
         if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
-        run: echo "::notice title=Verify skipped::Docs-only PR — unit test shard skipped."
+        run: echo "::notice title=Verify skipped::Docs or verified separately as an image pin — unit test shard skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
@@ -140,7 +126,7 @@ jobs:
     steps:
       - name: Docs-only skip
         if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
-        run: echo "::notice title=Verify skipped::Docs-only PR — coverage gate skipped."
+        run: echo "::notice title=Verify skipped::Docs or verified separately as an image pin — coverage gate skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
@@ -174,6 +160,8 @@ jobs:
           if-no-files-found: error
 
   deterministic-integration:
+    needs: changes
+    if: needs.changes.outputs.image_only != 'true'
     name: Required integration (py${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 55
@@ -195,6 +183,8 @@ jobs:
         run: make test-integration
 
   action-e2e:
+    needs: changes
+    if: needs.changes.outputs.image_only != 'true'
     uses: ./.github/workflows/e2e.yml
     with:
       required-security: true
@@ -202,8 +192,7 @@ jobs:
   static:
     name: Verify (static + build py${{ matrix.python }})
     needs: [changes, toolchain, deployment-candidate, eval-gate, privilege-root, deterministic-integration, action-e2e]
-    # A skipped required job may be accepted by branch protection. Always run
-    # this existing required context and explicitly fail unsuccessful parents.
+    # Keep the named matrix checks visible to branch protection on every PR.
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -219,15 +208,21 @@ jobs:
           python3 - <<'PYCODE'
           import json, os, sys
           jobs = json.loads(os.environ["REQUIRED_JOB_RESULTS"])
-          failed = {name: job.get("result") for name, job in jobs.items() if job.get("result") != "success"}
+          image_only = jobs.get("changes", {}).get("outputs", {}).get("image_only") == "true"
+          skipped = {"toolchain", "eval-gate", "privilege-root", "deterministic-integration", "action-e2e"}
+          failed = {
+              name: job.get("result") for name, job in jobs.items()
+              if job.get("result") != ("skipped" if image_only and name in skipped else "success")
+          }
           if not jobs or failed:
               print(f"Required checks did not succeed: {failed or 'no prerequisite results'}", file=sys.stderr)
               sys.exit(1)
           PYCODE
       - name: Docs-only notice
-        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
+        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true' && needs.changes.outputs.image_only != 'true'
         run: echo "::notice title=Verify (docs-only)::Running docs-check only — full static/build tier skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.changes.outputs.image_only != 'true'
         with:
           # Ref-resolution checks ask git whether a tag or branch exists
           # (README Action pin D25, tests/docs/support.py). A shallow fetch
@@ -236,6 +231,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/bootstrap
+        if: needs.changes.outputs.image_only != 'true'
         id: bootstrap
         with:
           python-version: ${{ matrix.python }}
@@ -254,10 +250,10 @@ jobs:
         if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         run: make test-wheel-corpus
       - name: Docs-check (docs-only PRs)
-        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
+        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true' && needs.changes.outputs.image_only != 'true'
         run: make docs-check
       - name: Docs/skills/eval guards (docs-only PRs)
-        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true' && matrix.python == '3.14'
+        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true' && needs.changes.outputs.image_only != 'true' && matrix.python == '3.14'
         env:
           UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-dev
         run: uv run pytest tests/docs tests/skills tests/evals/test_packaged_cases_sync.py -q --tb=short
@@ -355,7 +351,7 @@ jobs:
     steps:
       - name: Docs-only skip
         if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
-        run: echo "::notice title=Verify skipped::Docs-only PR — security audit skipped."
+        run: echo "::notice title=Verify skipped::Docs or verified separately as an image pin — security audit skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
@@ -431,6 +427,7 @@ jobs:
           if-no-files-found: warn
 
   privilege-root:
+    if: needs.changes.outputs.image_only != 'true'
     name: Verify (root container privilege py3.14)
     needs: changes
     runs-on: ubuntu-latest
@@ -438,7 +435,7 @@ jobs:
     steps:
       - name: Docs-only skip
         if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
-        run: echo "::notice title=Verify skipped::Docs-only PR — container privilege check skipped."
+        run: echo "::notice title=Verify skipped::Docs or verified separately as an image pin — container privilege check skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
@@ -486,6 +483,8 @@ jobs:
   # The check summary (GITHUB_STEP_SUMMARY / format_pr_gate_summary) states
   # that this proves structural replay, not live detection quality.
   eval-gate:
+    needs: changes
+    if: needs.changes.outputs.image_only != 'true'
     name: Eval gate (structural replay, not live detection)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -529,8 +528,9 @@ jobs:
           make eval-trajectory-gate
 
   eval-rescore-delta:
+    needs: changes
     name: Eval rescore delta (advisory, reviewer surface)
-    if: github.event_name == 'pull_request'
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name == 'pull_request')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     continue-on-error: true
@@ -567,6 +567,8 @@ jobs:
   # is not a live-reviewer comparison and leaves #737 open.
   # continue-on-error keeps it advisory, and it reads no provider secret.
   shadow-comparison:
+    needs: changes
+    if: needs.changes.outputs.image_only != 'true'
     name: Shadow fixture replay (advisory, keyless)
     runs-on: ubuntu-latest
     timeout-minutes: 10

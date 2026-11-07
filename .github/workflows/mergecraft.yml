@@ -175,6 +175,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    uses: ./.github/workflows/classify-pr.yml
+
+  image-review:
+    name: Review action image
+    needs: changes
+    if: needs.changes.outputs.image_only == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    env:
+      HAS_APP: ${{ secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APP_PRIVATE_KEY != '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Mint a scoped reviewer token
+        id: reviewer
+        if: env.HAS_APP == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.MERGECRAFT_APP_ID }}
+          private-key: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-pull-requests: write
+      - name: Submit the deployment verifier's verdict for this head
+        env:
+          GH_TOKEN: ${{ steps.reviewer.outputs.token || github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 -I scripts/image_candidate_review.py
+
   # Hold the review until mergeCraft's own CI has finished on the PR head SHA, so the
   # reviewer can read real lint/typecheck/test outcomes instead of guessing.
   # `needs:` cannot reference another workflow file, so this polls the check-runs
@@ -185,8 +223,10 @@ jobs:
   # permanent merge block. Timing out just means the review proceeds without CI
   # context, which is the pre-existing behavior.
   wait-for-ci:
+    needs: changes
     name: mergecraft wait for CI
     if: >-
+      always() && needs.changes.outputs.image_only != 'true' &&
       (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
       github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
@@ -287,7 +327,7 @@ jobs:
 
   review:
     name: mergecraft review attempts
-    needs: wait-for-ci
+    needs: [changes, wait-for-ci]
     # The rungs run as three jobs: this one (prep + OpenCode Go + the Codex
     # routing decision), `review-codex` (the Codex rung, alone in the
     # codex-subscription-auth concurrency group) and `review-backstop` (the
@@ -335,7 +375,7 @@ jobs:
     # `@dependabot recreate` makes the human the actor on the resulting
     # synchronize, while user.login stays dependabot[bot].
     if: >-
-      always() &&
+      always() && needs.changes.outputs.image_only != 'true' &&
       (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
       github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
@@ -1548,13 +1588,13 @@ jobs:
 
   approval-gate:
     name: mergecraft review
-    needs: [review, review-codex, review-backstop]
+    needs: [changes, image-review, review, review-codex, review-backstop]
     # Same draft/dispatch/dependabot guard as the attempts job. `always()` keeps
     # the required check reporting when the attempts job errors on a runner fault;
     # a skipped attempts job still skips the gate.
     if: >-
       always() &&
-      needs.review-backstop.result != 'skipped' &&
+      (needs.changes.outputs.image_only == 'true' || needs.review-backstop.result != 'skipped') &&
       (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
       github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
@@ -1572,6 +1612,11 @@ jobs:
       # both copies. `tests/ci/test_approval_gate_auth_predicate.py` pins them.
       HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.OPENCODE_GO_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
+      - name: Require a successful deterministic image review
+        if: needs.changes.outputs.image_only == 'true'
+        env:
+          RESULT: ${{ needs.image-review.result }}
+        run: test "$RESULT" = success
       - name: Fail when mergeCraft would not approve
         # The verdict comes from this run's own review job output, which no other
         # workflow can write. A `mergecraft-approval` check-run only corroborates
@@ -1587,7 +1632,7 @@ jobs:
         # finished.
         if: >-
           github.event_name == 'pull_request_target' &&
-          env.HAS_AUTH == 'true'
+          needs.changes.outputs.image_only != 'true' && env.HAS_AUTH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
