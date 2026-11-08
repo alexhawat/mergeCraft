@@ -249,7 +249,7 @@ jobs:
           if gh release view "v$RELEASE_VERSION" >/dev/null 2>&1; then
             echo "release v$RELEASE_VERSION already exists; leaving it in place"
           else
-            gh release create "v$RELEASE_VERSION" "$RELEASE_SHA" "${args[@]}"
+            gh release create "v$RELEASE_VERSION" --target "$RELEASE_SHA" "${args[@]}"
           fi
 
       - name: Retag the signed images
@@ -290,7 +290,9 @@ jobs:
             exit 0
           fi
           git commit -m "chore(release): start the next development version"
-          git push origin "$branch"
+          # Workflow-owned branch: a re-run recreates the same tree with a new
+          # commit date, so a plain push would be non-fast-forward.
+          git push --force-with-lease origin "$branch"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
       - name: Open the merge-back PR
@@ -318,6 +320,8 @@ jobs:
             --title "chore(release): merge $RELEASE_VERSION back" --body-file "$body"
 
       - name: Summarise the release
+        env:
+          MERGE_BACK_BRANCH: ${{ steps.post.outputs.branch }}
         run: |
           {
             echo "### Released \`$RELEASE_VERSION\`"

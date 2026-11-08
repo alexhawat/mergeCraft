@@ -156,3 +156,21 @@ def test_the_publish_job_bumps_the_next_development_version_first() -> None:
     merge = names.index("Open the merge-back PR")
     assert post < merge
     assert 'scripts/post-release.sh "" "$RELEASE_VERSION"' in _publish_scripts()
+
+
+def test_the_github_release_targets_the_release_sha() -> None:
+    scripts = _publish_scripts()
+    assert 'gh release create "v$RELEASE_VERSION" --target "$RELEASE_SHA"' in scripts
+    assert 'gh release create "v$RELEASE_VERSION" "$RELEASE_SHA"' not in scripts
+
+
+def test_the_merge_back_branch_push_is_rerunnable() -> None:
+    assert "git push --force-with-lease origin" in _publish_scripts()
+
+
+def test_the_summary_names_the_merge_back_branch() -> None:
+    summary = [step for step in _publish_steps() if step.get("name") == "Summarise the release"]
+    assert summary
+    assert (summary[0].get("env") or {}).get("MERGE_BACK_BRANCH") == (
+        "${{ steps.post.outputs.branch }}"
+    )
