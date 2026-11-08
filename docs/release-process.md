@@ -1,7 +1,7 @@
 # Release process
 
 How mergeCraft cuts a **release candidate**, soaks it, and promotes a stable
-version. Contributor Craft mechanics (`craft prepare` / `craft publish`) live in
+version. Contributor Craft mechanics (`craft prepare`) and the workflow publish live in
 [.github/CONTRIBUTING.md](../.github/CONTRIBUTING.md#releases-craft). This page is the
 process gate around those commands.
 
@@ -27,7 +27,7 @@ changelog section.
 2. CI/CD on that branch must be green: `make ci`, image build, SBOM + Trivy
    CRITICAL/HIGH, eval regression gate. That run is also what builds the Python
    dist: its `build-dist` job installs the wheel outside the checkout, attests its
-   provenance and uploads `artifact-python-dist`, which `craft publish` reads.
+   provenance and uploads `artifact-python-dist`, which the publish job reads.
    See [Where the dist artifact comes from](#where-the-dist-artifact-comes-from).
 3. Tag the candidate as an RC (Craft/`pre-0.0.1` promotes images to `:rc`). CI/CD
    owns `:latest`/`:analyzers` and promotes them from `main` only; `.craft.yml`
@@ -55,47 +55,30 @@ The two ways of cutting a release reach the same artifact:
   event created with `GITHUB_TOKEN` is the one event GitHub does start). It holds
   only `actions: write` and reads no secret.
 
-Either way the publish step is the same local command, run with publish credentials:
+Either way the publish step is the same: dispatch **Release** with the version,
+then approve its `pypi` deployment. The workflow is the only publisher.
 
-```bash
-craft publish <version>
-```
+### Publishing from the workflow
 
-Nothing publishes from a workflow, and nothing in this repository reacts to a label
-on an issue or to a comment: the command is the approval. Craft does open a
-publish-request issue during `prepare`; the `prepare` job closes it as not planned
-and comments the command above, so it is informational and never a pending approval.
+The `publish` job runs in the `pypi` environment, whose required reviewers are the
+approval. After approval it:
 
-### Publishing from a workstation
+1. waits for the CI/CD run on the release SHA, downloads the dist it built, and
+   verifies it is exactly the wheel and sdist for the version;
+2. publishes to PyPI with **Trusted Publishing** (OIDC) — there is no PyPI token;
+3. creates the GitHub release at the release SHA with the CHANGELOG section as notes;
+4. retags the signed GHCR digests to `:<version>` and `:analyzers-<version>`, and
+   fails if the digest changes;
+5. opens the merge-back PR with the App token. Merge it with a merge commit.
 
-A local publish can fail part-way through its target list, and the credentials are
-the part most likely to be wrong. Check these before running it:
+A later step can fail after PyPI accepted the files (for example a transient
+registry issue). Re-run the job and approve the deployment again: the upload has
+`skip-existing`, so it passes and the remaining steps finish. Do not delete a tag,
+re-cut the branch, or bump the version to recover.
 
-- **PyPI:** `TWINE_USERNAME=__token__` and `TWINE_PASSWORD` set to an API token.
-  The first upload of a new distribution needs a token that can create the
-  project; project-scoped tokens cannot exist until the project does.
-- **GHCR:** `GITHUB_TOKEN` must carry **`write:packages`**. A token from
-  `gh auth token` does not: it has `gist`, `read:org`, `repo` and `workflow`, so
-  the image retag fails with `403 Forbidden` *after* PyPI and the GitHub release
-  have already succeeded. Craft logs in with `GITHUB_TOKEN`, not with your
-  `docker login`.
-- **GitHub release:** the same `GITHUB_TOKEN` needs `repo`.
-
-Craft writes a publish-state file under `~/.local/state/craft/` after each target,
-so a re-run with a corrected credential skips what already published and retries
-the rest. Do not delete a tag, re-cut the branch, or bump the version to recover:
-finish the same candidate. After a successful run, discard the post-release
-version bump with `git restore pyproject.toml`; never commit it.
-
-Use `--no-merge --keep-branch` when the merge-back must go through a reviewed PR:
-
-```bash
-craft publish <version> --no-merge --keep-branch
-```
-
-Without those flags Craft checks out the default branch, merges the release branch
-and pushes it directly, which the branch ruleset rejects after the targets have
-already published.
+**One-time setup:** the PyPI project has a Trusted Publisher for
+`alexhawat/mergeCraft`, workflow `release.yml`, environment `pypi`; the repository
+has the `pypi` environment with required reviewers.
 
 ## Soak period
 

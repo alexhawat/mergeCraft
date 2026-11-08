@@ -30,6 +30,9 @@ requireNames:
 preReleaseCommand: bash scripts/bump-version.sh
 postReleaseCommand: bash scripts/post-release.sh
 
+# The Release workflow is the publisher: PyPI Trusted Publishing, the GitHub
+# release, the GHCR version retags and the merge-back PR. These targets are kept
+# for craft prepare's release metadata; `craft publish` is no longer used.
 targets:
   - name: pypi
     includeNames: /^mergecraft[_-]action.*$/

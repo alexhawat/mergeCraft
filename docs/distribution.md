@@ -28,32 +28,29 @@ Verify a published digest locally (see [.github/CONTRIBUTING.md](../.github/CONT
 ### PyPI (`mergecraft-action`)
 
 PyPI distribution name is **`mergecraft-action`** (hyphen); import and CLI remain
-`mergecraft`. Craft publishes via the `pypi` target in [`.craft.yml`](../.craft.yml).
+`mergecraft`. The Release workflow publishes it through PyPI Trusted Publishing.
 The project was first published as `0.1.0a4`; before that no `mergecraft-action`
 (and no `merge-craft`) release existed.
 
 **Prerequisites**
 
-1. Repository secrets: `TWINE_USERNAME`, `TWINE_PASSWORD` (API token as password).
-2. `GITHUB_TOKEN` with `repo` **and `write:packages`** for `craft prepare` /
-   `craft publish`. The registry login inside Craft uses this token, not your
-   local `docker login`; a `gh auth token` value has no `write:packages` and the
-   image retag fails after PyPI has already published.
-3. Release preconditions green on the release branch (live integration, E2E nightly,
+1. **No PyPI token.** The `publish` job uses Trusted Publishing (OIDC): the PyPI
+   project needs a Trusted Publisher for `alexhawat/mergeCraft`, workflow
+   `release.yml`, environment `pypi`, and this repository needs the `pypi`
+   environment with required reviewers.
+2. Release preconditions green on the release branch (live integration, E2E nightly,
    image SBOM + Trivy gate) — see [.github/CONTRIBUTING.md](../.github/CONTRIBUTING.md#releases-craft).
 
 **Cut and publish `<version>`**
 
 ```bash
 craft prepare <version>          # explicit version, not `auto`
-# Wait for CI/CD on the release branch (build, scan, sign, attest, promote).
-craft publish <version> --no-merge --keep-branch
 ```
 
-Or dispatch **Release** (`.github/workflows/release.yml`) with `version: <version>`,
-then `craft publish <version> --no-merge --keep-branch` after CI is green. The two
-flags keep the merge-back a reviewed pull request; without them Craft pushes to the
-default branch, which the branch ruleset rejects after the targets have published.
+Then dispatch **Release** (`.github/workflows/release.yml`) with `version: <version>`
+and approve the `pypi` deployment. The workflow publishes PyPI via Trusted
+Publishing, creates the GitHub release, retags the signed GHCR digests to
+`:<version>` / `:analyzers-<version>`, and opens the merge-back PR.
 
 Post-publish smoke — the version you just published:
 
