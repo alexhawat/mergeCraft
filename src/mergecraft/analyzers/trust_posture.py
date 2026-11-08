@@ -48,7 +48,7 @@ def trust_posture_from_tool_state(
     ).lower()
     analyzers: AnalyzersMode = "auto"
     if mode_raw in {"off", "auto", "full", "untrusted-only"}:
-        analyzers = mode_raw  # type: ignore[assignment] — membership narrows to AnalyzersMode
+        analyzers = mode_raw  # type: ignore[assignment]  # — membership narrows to AnalyzersMode
     gate = "not-configured"
     if tool_state.agent_sandbox_decision is not None:
         gate = tool_state.agent_sandbox_decision.author_gate
@@ -57,7 +57,7 @@ def trust_posture_from_tool_state(
         authority_trust="trusted" if authority == "trusted" else "untrusted",
         analyzers_mode=analyzers,
         self_review_level=tool_state.trust_self_review_level or "off",
-        author_gate_status=gate,  # type: ignore[arg-type] — gate is a runtime string from sandbox decision
+        author_gate_status=gate,  # type: ignore[arg-type]  # — gate is a runtime string from sandbox decision
     )
 
 
