@@ -40,8 +40,11 @@ Use this when asked to add AI PR review to another repository.
    below assume these provider labels were configured by `init`:
 
    ```bash
-   mergecraft provider auth anthropic --scope github   # Claude Pro/Max subscription
-   mergecraft provider auth openai --scope github    # ChatGPT Plus/Pro/Team/Enterprise
+   mergecraft provider auth opencode --scope github     # OpenCode Zen (billing-backed key)
+   mergecraft provider auth opencode-go --scope github  # OpenCode Go subscription
+   mergecraft provider auth openai --scope github       # ChatGPT Plus/Pro/Team/Enterprise
+   mergecraft provider auth anthropic --scope github    # Claude Pro/Max subscription
+   mergecraft provider auth google --scope github       # Google AI Studio key
    ```
 
    Other providers: [`docs/authentication.md`](docs/authentication.md). **Never**
