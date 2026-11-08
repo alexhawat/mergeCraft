@@ -48,7 +48,14 @@ def verify_dist(dist_dir: Path, version: str) -> list[Path]:
         ValueError: The directory has anything else, or a file names another
             version.
     """
-    files = sorted(path for path in dist_dir.iterdir() if path.is_file())
+    entries = sorted(dist_dir.iterdir())
+    if any(not path.is_file() for path in entries):
+        msg = (
+            "the dist directory must hold only the wheel and sdist, "
+            f"found: {[path.name for path in entries if not path.is_file()]}"
+        )
+        raise ValueError(msg)
+    files = entries
     wheels = [path for path in files if path.suffix == ".whl"]
     sdists = [path for path in files if path.name.endswith(".tar.gz")]
     if len(files) != 2 or len(wheels) != 1 or len(sdists) != 1:

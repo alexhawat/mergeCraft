@@ -147,3 +147,15 @@ def test_an_alpha_dist_is_not_accepted_for_the_stable_version(
     )
     with pytest.raises(ValueError, match=r"names version 0\.1\.0a5, not 0\.1\.0"):
         module.verify_dist(directory, "0.1.0")
+
+
+def test_a_stray_directory_is_refused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    module = _module(monkeypatch)
+    directory = _dist(
+        tmp_path,
+        "mergecraft_action-0.1.0a5-py3-none-any.whl",
+        "mergecraft_action-0.1.0a5.tar.gz",
+    )
+    (directory / "stamped_build_metadata").mkdir()
+    with pytest.raises(ValueError, match="must hold only the wheel and sdist"):
+        module.verify_dist(directory, "0.1.0a5")
