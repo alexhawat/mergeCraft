@@ -551,7 +551,7 @@ in `.mergecraft/config.yaml` to log diagnostics only.
 | DeepSeek | — | `mergecraft provider auth deepseek --scope github` → indexed credentials | `deepseek/deepseek-chat` |
 | Cursor Cloud | `mergecraft auth cursor --scope github` (legacy shim) | `CURSOR_API_KEY` | `cursor/cloud-agent` |
 | OpenRouter | — | `mergecraft provider auth openrouter --scope github` → indexed credentials | any OpenRouter slug |
-| xAI | — | `mergecraft provider auth xai --scope github` → indexed credentials | `xai/grok-4` |
+| xAI | — | `mergecraft provider auth xai --scope github` → indexed credentials | `xai/grok` |
 | Moonshot AI | — | `mergecraft provider auth moonshotai --scope github` → indexed credentials | `moonshotai/kimi-k2` |
 | OpenAI-compatible (custom) | — | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `<your-prefix>/<your-model>` |
 | [LiteLLM](https://docs.litellm.ai/) proxy | — | same custom-provider env pair — [`examples/config-litellm.yaml`](examples/config-litellm.yaml) | `default/<model>` or `<label>/<model>` |

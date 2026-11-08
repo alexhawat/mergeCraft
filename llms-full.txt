@@ -555,7 +555,7 @@ in `.mergecraft/config.yaml` to log diagnostics only.
 | DeepSeek | — | `mergecraft provider auth deepseek --scope github` → indexed credentials | `deepseek/deepseek-chat` |
 | Cursor Cloud | `mergecraft auth cursor --scope github` (legacy shim) | `CURSOR_API_KEY` | `cursor/cloud-agent` |
 | OpenRouter | — | `mergecraft provider auth openrouter --scope github` → indexed credentials | any OpenRouter slug |
-| xAI | — | `mergecraft provider auth xai --scope github` → indexed credentials | `xai/grok-4` |
+| xAI | — | `mergecraft provider auth xai --scope github` → indexed credentials | `xai/grok` |
 | Moonshot AI | — | `mergecraft provider auth moonshotai --scope github` → indexed credentials | `moonshotai/kimi-k2` |
 | OpenAI-compatible (custom) | — | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `<your-prefix>/<your-model>` |
 | [LiteLLM](https://docs.litellm.ai/) proxy | — | same custom-provider env pair — [`examples/config-litellm.yaml`](examples/config-litellm.yaml) | `default/<model>` or `<label>/<model>` |
@@ -3476,12 +3476,12 @@ run on `pull_request_target` (opened / synchronize).
 | Google Gemini | `mergecraft provider auth google --scope github` → indexed credentials (AI Studio) | `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` | `google/gemini-3.1-pro-preview` | `gemini` |
 | Tencent TokenHub | — (API key) | `mergecraft provider auth tokenhub --scope github` → indexed credentials | `tokenhub/hy3` | `opencode` |
 | MiniMax | — (API key) | `mergecraft provider auth minimax --scope github` → indexed credentials | `minimax/MiniMax-M3` | `opencode` |
-| DeepSeek | — (API key) | `mergecraft provider auth deepseek --scope github` → indexed credentials | `DEEPSEEK_API_KEY` | `deepseek/deepseek-chat` | `opencode` |
-| Cursor Cloud | `mergecraft auth cursor --scope github` (legacy shim) | `CURSOR_API_KEY` | `cursor/cloud-agent` |
-| OpenRouter | — (API key) | `mergecraft provider auth openrouter --scope github` → indexed credentials | `OPENROUTER_API_KEY` | any OpenRouter slug | `opencode` |
-| xAI | — (API key) | `mergecraft provider auth xai --scope github` → indexed credentials | `XAI_API_KEY` | `xai/grok-4` | `opencode` |
-| Moonshot AI | — (API key) | `mergecraft provider auth moonshotai --scope github` → indexed credentials | `MOONSHOT_API_KEY` | `moonshotai/kimi-k2` | `opencode` |
-| Bedrock / Vertex | cloud credential chain (`AWS_*` / `GOOGLE_APPLICATION_CREDENTIALS`), no `--api-key` | `mergecraft provider auth bedrock --scope github` / `… vertex …` | — | — | `opencode` |
+| DeepSeek | — (API key) | `mergecraft provider auth deepseek --scope github` → indexed credentials | `deepseek/deepseek-chat` | `opencode` |
+| Cursor Cloud | `mergecraft auth cursor --scope github` (legacy shim) | `CURSOR_API_KEY` | `cursor/cloud-agent` | `cursor` |
+| OpenRouter | — (API key) | `mergecraft provider auth openrouter --scope github` → indexed credentials | any OpenRouter slug | `opencode` |
+| xAI | — (API key) | `mergecraft provider auth xai --scope github` → indexed credentials | `xai/grok` | `opencode` |
+| Moonshot AI | — (API key) | `mergecraft provider auth moonshotai --scope github` → indexed credentials | `moonshotai/kimi-k2` | `opencode` |
+| Bedrock / Vertex | cloud credential chain (`AWS_*` / `GOOGLE_APPLICATION_CREDENTIALS`), no `--api-key` | `mergecraft provider auth bedrock --scope github` / `… vertex …` | — | `opencode` |
 | OpenAI-compatible (custom) | — | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` (indexed `_1`/`_2` …) | `<your-prefix>/<your-model>` — see [Custom OpenAI-compatible provider](#custom-openai-compatible-provider) | `opencode` |
 | Logfire tracing | `mergecraft auth logfire` → `MERGECRAFT_LOGFIRE_TOKEN` + `MERGECRAFT_TRACING_PROJECT` (local) and `LOGFIRE_TOKEN` (Actions) | see [`docs/TRACING.md`](TRACING.md) | — | — |
 
