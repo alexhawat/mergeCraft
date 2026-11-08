@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
-# Craft prepare + publish gate. Image build / SBOM / scan / sign / promote live in
+# Craft prepare + workflow publish (PyPI Trusted Publishing, GitHub release, GHCR
+# retag, merge-back PR). Image build / SBOM / scan / sign / promote live in
 # ci-cd.yml (build-once → digest → attest → retag). Dependabot (github-actions)
 # owns bumps of the pinned Craft / checkout SHAs below.
 name: Release
@@ -58,9 +59,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Craft's "Request publish" step always runs and opens
       # `publish: <owner>/<repo>@<version>`. Nothing in this repository acts on
-      # that issue — the approval is the operator running `craft publish` with
-      # publish credentials — so leaving it open reads as a pending approval that
-      # nobody can give (#1005). It is closed here, with the real instruction in
+      # that issue — the approval is the `pypi` environment deployment review — so
+      # leaving it open reads as a pending approval nobody can give (#1005). It is closed here, with the real instruction in
       # the comment, and its URL is recorded for the publish gate below.
       - name: Close the informational publish issue
         if: ${{ steps.craft.outputs.issue_url != '' }}
@@ -181,7 +181,9 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ needs.prepare.outputs.branch }}
-          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token }}
+          # The post-release bump is committed and pushed on the merge-back branch.
+          persist-credentials: true
 
       - uses: ./.github/actions/bootstrap
 
@@ -271,13 +273,34 @@ jobs:
             fi
           done
 
+      - name: Bump to the next development version
+        id: post
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          branch="chore/release-merge-back-$RELEASE_VERSION"
+          git switch -c "$branch"
+          bash scripts/post-release.sh "" "$RELEASE_VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml server.json uv.lock
+          if git diff --cached --quiet; then
+            echo "branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git commit -m "chore(release): start the next development version"
+          git push origin "$branch"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
       - name: Open the merge-back PR
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
+          MERGE_BACK_BRANCH: ${{ steps.post.outputs.branch }}
         run: |
           set -euo pipefail
-          existing="$(gh pr list --base main --head "$RELEASE_BRANCH" --state open --json url -q '.[0].url // empty')"
+          existing="$(gh pr list --base main --head "$MERGE_BACK_BRANCH" --state open --json url -q '.[0].url // empty')"
           if [ -n "$existing" ]; then
             echo "merge-back PR already open: $existing" >> "$GITHUB_STEP_SUMMARY"
             exit 0
@@ -291,7 +314,7 @@ jobs:
             echo
             echo "Merge with a **merge commit**."
           } > "$body"
-          gh pr create --base main --head "$RELEASE_BRANCH" \
+          gh pr create --base main --head "$MERGE_BACK_BRANCH" \
             --title "chore(release): merge $RELEASE_VERSION back" --body-file "$body"
 
       - name: Summarise the release
@@ -304,7 +327,7 @@ jobs:
             echo "| source | \`$RELEASE_SHA\` |"
             echo "| PyPI | published from the CI/CD dist artifact |"
             echo "| GitHub release | \`v$RELEASE_VERSION\` |"
-            echo "| merge-back | PR from \`$RELEASE_BRANCH\` |"
+            echo "| merge-back | PR from \`$MERGE_BACK_BRANCH\` |"
             echo
             echo "Merge the merge-back PR with a merge commit."
           } >> "$GITHUB_STEP_SUMMARY"

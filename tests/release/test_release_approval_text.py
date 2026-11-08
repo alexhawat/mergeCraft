@@ -148,3 +148,11 @@ def test_the_registry_path_follows_the_repository() -> None:
     scripts = _publish_scripts()
     assert "GITHUB_REPOSITORY" in scripts
     assert "ghcr.io/alexhawat/mergecraft" not in scripts
+
+
+def test_the_publish_job_bumps_the_next_development_version_first() -> None:
+    names = [str(step.get("name")) for step in _publish_steps()]
+    post = names.index("Bump to the next development version")
+    merge = names.index("Open the merge-back PR")
+    assert post < merge
+    assert 'scripts/post-release.sh "" "$RELEASE_VERSION"' in _publish_scripts()

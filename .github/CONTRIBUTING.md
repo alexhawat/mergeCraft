@@ -324,17 +324,17 @@ Local mirrors: `make test-integration`, `make test-integration-live`,
 That workflow prepares the release branch and
 then dispatches CI/CD on it, because a branch pushed with the workflow's own token
 does not start CI/CD by itself; CI/CD's `build-dist` job then builds the dist for
-that dispatch. It does not publish: step 3 above, run with publish credentials, is the
-only thing that does, and nothing reacts to a label or comment on an issue. The jobs
-are least-privilege (no `secrets: inherit`); image signing stays in CI/CD. After a
-publish, `scripts/post-release.sh` moves the versioned files to the next development
-version; see [Release process](../docs/release-process.md).
+that dispatch. Step 3 publishes: the `publish` job runs only after the `pypi`
+environment's required reviewers approve it. The jobs are least-privilege (no
+`secrets: inherit`); image signing stays in CI/CD. The publish job then commits
+`scripts/post-release.sh`'s next-development-version bump on the merge-back branch;
+see [Release process](../docs/release-process.md).
 
 Dry-run locally: `craft prepare auto --dry-run`.
 
 The first release has no prior git tag — use an explicit version (e.g. `craft prepare 0.0.1`)
-instead of `auto`. GitHub releases are created by Craft's `github` target during `publish`
-(not the CI/CD workflow).
+instead of `auto`. GitHub releases are created by the publish job at the release SHA
+(not by CI/CD).
 
 Changelog previews post on pull requests via `.github/workflows/changelog-preview.yml`.
 Skip entries with `#skip-changelog` or the `skip-changelog` label.

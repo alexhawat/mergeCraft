@@ -20,6 +20,7 @@ from tests.ci.workflow_support import WORKFLOWS
 _PUSHING_JOBS: dict[tuple[str, str], str] = {
     ("bump-action-pin.yml", "prepare"): "commits and pushes the pin-bump branch",
     ("release.yml", "prepare"): "Craft pushes the release branch with the checkout credential",
+    ("release.yml", "publish"): "pushes the post-release bump on the merge-back branch",
 }
 
 

@@ -28,7 +28,7 @@ Verify a published digest locally (see [.github/CONTRIBUTING.md](../.github/CONT
 ### PyPI (`mergecraft-action`)
 
 PyPI distribution name is **`mergecraft-action`** (hyphen); import and CLI remain
-`mergecraft`. Craft publishes via the `pypi` target in [`.craft.yml`](../.craft.yml).
+`mergecraft`. The Release workflow publishes it through PyPI Trusted Publishing.
 The project was first published as `0.1.0a4`; before that no `mergecraft-action`
 (and no `merge-craft`) release existed.
 
