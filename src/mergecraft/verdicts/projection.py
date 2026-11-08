@@ -50,9 +50,7 @@ def project_run_verdict(
     from mergecraft.run_outcome import RUN_OUTCOME_CONCLUSION
 
     run_succeeded = run_succeeded_for_outcome(outcome)
-    structural = project_structural_conclusion(
-        findings, run_succeeded=run_succeeded, tier=tier
-    )
+    structural = project_structural_conclusion(findings, run_succeeded=run_succeeded, tier=tier)
     completion = RUN_OUTCOME_CONCLUSION[outcome]
     return ComposedRunVerdict(
         run_outcome=outcome,

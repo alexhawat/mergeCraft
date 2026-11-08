@@ -1,4 +1,4 @@
-"""Incremental re-review scope × verdict/progress exit matrix (#SM6)."""
+"""Incremental re-review scope x verdict/progress exit matrix (#SM6)."""
 
 from __future__ import annotations
 

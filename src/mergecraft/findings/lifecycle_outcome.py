@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from mergecraft.findings.lifecycle import LifecycleState
-from mergecraft.findings.outcomes import FindingOutcomeKind
 
-_LIFECYCLE_TO_ADVISORY: dict[LifecycleState, FindingOutcomeKind] = {
+_LIFECYCLE_TO_ADVISORY: dict[LifecycleState, str] = {
     "resolved-by-change": "fixed",
     "open": "unknown",
     "stale": "unknown",
@@ -17,7 +16,7 @@ _LIFECYCLE_TO_ADVISORY: dict[LifecycleState, FindingOutcomeKind] = {
 }
 
 
-def advisory_outcome_for_lifecycle(state: LifecycleState) -> FindingOutcomeKind:
+def advisory_outcome_for_lifecycle(state: LifecycleState) -> str:
     """Map one ledger state to an advisory outcome (total, no gaps)."""
     return _LIFECYCLE_TO_ADVISORY[state]
 

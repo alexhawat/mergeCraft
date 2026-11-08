@@ -5,10 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from mergecraft.analyzers.trust import AnalyzersMode
-from mergecraft.config.trust_policy import AuthorGateStatus, TrustPolicy
-
 if TYPE_CHECKING:
+    from mergecraft.analyzers.trust import AnalyzersMode
+    from mergecraft.config.trust_policy import AuthorGateStatus, TrustPolicy
     from mergecraft.mcp.tool_state import ToolState
 
 TrustTierName = Literal["trusted", "untrusted"]
@@ -40,7 +39,9 @@ def trust_posture_from_tool_state(
     """Read posture fields stamped once on ``ToolState`` (fail-closed defaults)."""
     tier = (tool_state.trust_tier or "untrusted").lower()
     authority = (tool_state.authority_trust or tool_state.trust_tier or "untrusted").lower()
-    mode_raw = (analyzers_mode or tool_state.run_manifest_trust.get("analyzers_mode") or "auto").lower()
+    mode_raw = (
+        analyzers_mode or tool_state.run_manifest_trust.get("analyzers_mode") or "auto"
+    ).lower()
     analyzers: AnalyzersMode = "auto"
     if mode_raw in {"off", "auto", "full", "untrusted-only"}:
         analyzers = mode_raw  # type: ignore[assignment]

@@ -702,9 +702,7 @@ def _receipt_conflict_response(
             apply_terminal_publication_flags,
         )
 
-        apply_terminal_publication_flags(
-            ctx.tool_state, TerminalPublicationState.unproven_receipt
-        )
+        apply_terminal_publication_flags(ctx.tool_state, TerminalPublicationState.unproven_receipt)
         reason = (
             f"review {review.id} on sha {commit_id} shows neither an approval nor a change "
             f"request, so it proves no verdict; the recorded verdict {recorded} is not "
@@ -1688,9 +1686,7 @@ async def _publish_github_review(
             apply_terminal_publication_flags,
         )
 
-        apply_terminal_publication_flags(
-            ctx.tool_state, TerminalPublicationState.publish_failed
-        )
+        apply_terminal_publication_flags(ctx.tool_state, TerminalPublicationState.publish_failed)
         raise
     review_id = int(result["id"])
     if recovered is not None:
@@ -1942,8 +1938,9 @@ def create_pull_request_review_tool(ctx: ToolContext):
             publication_params["body"] = submission.summary
         ctx.tool_state.pending_review_publication = publication_params
 
-        ctx.tool_state.review_phase = ReviewPhase.PUBLISH.value
-        stamp_review_phase_on_active_span(ReviewPhase.PUBLISH)
+        from mergecraft.mcp.review_phase_machine import advance_review_phase
+
+        advance_review_phase(ctx.tool_state, ReviewPhase.PUBLISH)
         from mergecraft.mcp.verification import emit_published_findings
 
         emit_published_findings(ctx)
@@ -1952,8 +1949,7 @@ def create_pull_request_review_tool(ctx: ToolContext):
             publication_params,
             entrypoint="create_pull_request_review",
         )
-        ctx.tool_state.review_phase = ReviewPhase.COMPLETE.value
-        stamp_review_phase_on_active_span(ReviewPhase.COMPLETE)
+        advance_review_phase(ctx.tool_state, ReviewPhase.COMPLETE)
         return result
 
     return tool(

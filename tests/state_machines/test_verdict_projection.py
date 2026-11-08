@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from mergecraft.agents.gates import decide_approval
 from mergecraft.analyzers.finding import make_finding
-from mergecraft.verdicts.projection import project_run_verdict, project_structural_conclusion
 from mergecraft.run_outcome import RunOutcome
+from mergecraft.verdicts.projection import project_run_verdict, project_structural_conclusion
 
 
 def _critical():

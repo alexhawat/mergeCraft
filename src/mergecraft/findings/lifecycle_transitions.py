@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
-from mergecraft.findings.lifecycle import LifecycleState
+if TYPE_CHECKING:
+    from mergecraft.findings.lifecycle import LifecycleState
 
 # First record for a fingerprint may enter any state; thereafter only listed edges.
 _ALLOWED_LIFECYCLE_TRANSITIONS: Final[dict[LifecycleState, frozenset[LifecycleState]]] = {

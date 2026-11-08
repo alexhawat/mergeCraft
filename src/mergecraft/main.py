@@ -3177,9 +3177,7 @@ async def _finalize(
     # this run's own result agrees with the completion check it posted.
     from mergecraft.review.outcome_resolution import finalize_run_outcome
 
-    outcome, ledger_reason = finalize_run_outcome(
-        outcome, tool_state.prepared_run_packet
-    )
+    outcome, ledger_reason = finalize_run_outcome(outcome, tool_state.prepared_run_packet)
     failure_reason = ledger_reason or failure_reason
 
     # O9 (OB4) — the verdict span at the publish convergence point. Emitted

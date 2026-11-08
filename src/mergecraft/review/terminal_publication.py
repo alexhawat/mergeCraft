@@ -118,9 +118,7 @@ def resolve_terminal_publication(
         )
 
     receipt_verdict = review is not None and review.verdict is not None
-    unproven = (
-        review is not None and review.verdict is None and review.reviewed_sha is not None
-    )
+    unproven = review is not None and review.verdict is None and review.reviewed_sha is not None
     incomplete = tuple(sorted(tool_state.publication_incomplete))
 
     if not receipt_verdict:
@@ -167,7 +165,9 @@ def apply_terminal_publication_flags(
 ) -> None:
     """Set legacy flags from a canonical publication state (mutually exclusive)."""
     tool_state.terminal_publication_state = state.value
-    tool_state.review_publication_sticky_only = state is TerminalPublicationState.sticky_progress_only
+    tool_state.review_publication_sticky_only = (
+        state is TerminalPublicationState.sticky_progress_only
+    )
     tool_state.terminal_publication_failed = state is TerminalPublicationState.publish_failed
     tool_state.terminal_publication_mismatch = state is TerminalPublicationState.verdict_mismatch
     tool_state.publication_incomplete = list(publication_incomplete)

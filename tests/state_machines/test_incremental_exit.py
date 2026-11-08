@@ -1,4 +1,4 @@
-"""Incremental scope × exit matrix."""
+"""Incremental scope x exit matrix."""
 
 from __future__ import annotations
 

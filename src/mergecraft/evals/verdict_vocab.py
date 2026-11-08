@@ -5,9 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 # GitHub check-run conclusions from ``decide_approval()`` / completion mapping.
-CHECK_CONCLUSIONS: Final[frozenset[str]] = frozenset(
-    {"success", "failure", "neutral", "timed_out"}
-)
+CHECK_CONCLUSIONS: Final[frozenset[str]] = frozenset({"success", "failure", "neutral", "timed_out"})
 
 # W9 thermostat gate actions — not check conclusions.
 GATE_ACTIONS: Final[frozenset[str]] = frozenset(

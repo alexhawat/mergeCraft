@@ -6,7 +6,10 @@ import pytest
 
 from mergecraft.findings.ledger import FindingLedger
 from mergecraft.findings.lifecycle import LifecycleState
-from mergecraft.findings.lifecycle_outcome import advisory_outcome_for_lifecycle, all_lifecycle_states_mapped
+from mergecraft.findings.lifecycle_outcome import (
+    advisory_outcome_for_lifecycle,
+    all_lifecycle_states_mapped,
+)
 from mergecraft.findings.lifecycle_transitions import (
     _ALLOWED_LIFECYCLE_TRANSITIONS,
     assert_lifecycle_transition,
