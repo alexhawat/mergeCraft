@@ -107,7 +107,7 @@ def classify_thread_outcome(
     if thread.get("isResolved") or thread.get("resolved"):
         return "fixed", "thread resolved"
     if thread.get("isOutdated") or thread.get("outdated"):
-        return "fixed", "thread outdated"
+        return "unknown", "stale thread (outdated but unresolved)"
     human = _human_replies(comments, publishers)
     combined = "\n".join(human)
     if combined and _REJECT_RE.search(combined):

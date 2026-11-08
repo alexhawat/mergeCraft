@@ -388,6 +388,9 @@ class ToolState:
     # verdict tools (``mcp/verdict.py``). Empty default means the run has not
     # yet pinned INIT after a scope-guard refusal (plan 13 W5).
     review_phase: str = ""
+    # Canonical terminal-publication state (``review.terminal_publication``);
+    # legacy bool flags below are kept in sync via ``apply_terminal_publication_flags``.
+    terminal_publication_state: str = ""
     # Stashed ``create_pull_request_review`` params for ``publish_pull_request_review``.
     pending_review_publication: dict[str, Any] | None = None
     # Lane A W3 — which publication entrypoint won and whether 422 recovery demoted inline.

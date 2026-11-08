@@ -3175,7 +3175,9 @@ async def _finalize(
         failure_reason = post_emission_sink[0]
     # #1014 — the same open-ledger rule ``_publish`` applied to the checks, so
     # this run's own result agrees with the completion check it posted.
-    outcome, ledger_reason = outcome_with_disposition_ledger(
+    from mergecraft.review.outcome_resolution import finalize_run_outcome
+
+    outcome, ledger_reason = finalize_run_outcome(
         outcome, tool_state.prepared_run_packet
     )
     failure_reason = ledger_reason or failure_reason

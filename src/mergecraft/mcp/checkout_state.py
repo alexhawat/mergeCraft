@@ -84,7 +84,9 @@ def invalidate_checkout_review_state(state: ToolState) -> None:
     empty = ToolState(repos={}, primary_repo_key="")
     for name in RESET_TOOL_FIELDS:
         setattr(state, name, getattr(empty, name))
-    state.review_phase = "INIT"
+    from mergecraft.mcp.review_phase_machine import reset_review_phase_on_scope_invalidate
+
+    reset_review_phase_on_scope_invalidate(state)
     state.checkout_scope_invalidated = True
     # Keep earlier calls for the security audit, but they cannot prove that the
     # reviewer read the new revision or its newly materialized diff.
