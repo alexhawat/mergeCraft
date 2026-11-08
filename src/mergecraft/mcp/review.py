@@ -49,7 +49,6 @@ from mergecraft.mcp.verdict import (
     record_validated_terminal_submission,
     recorded_submission_payload,
     revalidate_recorded_submission,
-    stamp_review_phase_on_active_span,
     validate_submission,
     validation_state_from_tool_context,
 )
