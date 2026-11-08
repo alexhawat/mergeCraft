@@ -50,8 +50,7 @@ class TerminalPublicationResolution:
 def _is_review_mode(mode: str | None) -> bool:
     if not mode:
         return False
-    name = mode.name if hasattr(mode, "name") else mode
-    return name in _REVIEW_MODE_NAMES
+    return mode in _REVIEW_MODE_NAMES
 
 
 def resolve_terminal_publication(
