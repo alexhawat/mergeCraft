@@ -58,8 +58,11 @@ def verify_dist(dist_dir: Path, version: str) -> list[Path]:
         )
         raise ValueError(msg)
     for path in files:
-        if version not in path.name:
-            msg = f"{path.name} does not name version {version}"
+        stem = path.name[:-4] if path.name.endswith(".whl") else path.name[:-7]
+        parts = stem.split("-")
+        found = parts[1] if len(parts) > 1 else ""
+        if found != version:
+            msg = f"{path.name} names version {found or '<none>'}, not {version}"
             raise ValueError(msg)
     return files
 

@@ -274,11 +274,12 @@ lives in `.craft.yml` at the repo root.
 
 ### Prerequisites
 
-- Craft CLI: `npm install -g @sentry/craft` (or download a [binary release](https://github.com/getsentry/craft/releases))
-- `GITHUB_TOKEN` with `repo` scope (local prepare/publish, or supplied by Actions)
-- PyPI credentials for publish: `TWINE_USERNAME` and `TWINE_PASSWORD` (or API token as password)
-
-Add repository secrets for Craft publish: `TWINE_USERNAME`, `TWINE_PASSWORD`.
+- Craft CLI: `npm install -g @sentry/craft` (or download a [binary release](https://github.com/getsentry/craft/releases)) — used by `craft prepare` only
+- `GITHUB_TOKEN` with `repo` scope for a local prepare (or supplied by Actions)
+- **No PyPI token.** The `publish` job uses Trusted Publishing (OIDC). The PyPI
+  project needs a Trusted Publisher for `alexhawat/mergeCraft`, workflow
+  `release.yml`, environment `pypi`, and this repository needs the `pypi`
+  environment with required reviewers.
 
 ### Cut a release
 
@@ -303,7 +304,7 @@ Add repository secrets for Craft publish: `TWINE_USERNAME`, `TWINE_PASSWORD`.
      `:latest` / `:analyzers` tags just by finishing later
 
 **Release preconditions** (must be green or an explicit documented skip before
-`craft publish`):
+the publish deployment):
 
 - Scheduled **Integration** workflow live-provider job
   (`.github/workflows/integration.yml` → `make test-integration-live`) with at
@@ -314,14 +315,13 @@ Add repository secrets for Craft publish: `TWINE_USERNAME`, `TWINE_PASSWORD`.
 Local mirrors: `make test-integration`, `make test-integration-live`,
 `make coverage-gate`, `make npm-audit`, `make workflow-lint`.
 
-3. **Publish** (Craft retags the signed SHA digests → version / latest tags via
-   `.craft.yml`, then uploads to GitHub/PyPI):
-   ```bash
-   craft publish <version>
-   ```
+3. **Publish** — dispatch **Release** in GitHub Actions
+   (`.github/workflows/release.yml`) with `version: auto` or an explicit semver,
+   then approve the `pypi` deployment when the run pauses. The workflow publishes
+   PyPI via Trusted Publishing, creates the GitHub release, retags the signed GHCR
+   digests to the version tags, and opens the merge-back PR.
 
-Or dispatch **Release** in GitHub Actions (`.github/workflows/release.yml`) with
-`version: auto` or an explicit semver. That workflow prepares the release branch and
+That workflow prepares the release branch and
 then dispatches CI/CD on it, because a branch pushed with the workflow's own token
 does not start CI/CD by itself; CI/CD's `build-dist` job then builds the dist for
 that dispatch. It does not publish: step 3 above, run with publish credentials, is the

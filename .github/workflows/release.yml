@@ -227,6 +227,10 @@ jobs:
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: dist/
+          # A later step can fail after PyPI accepted the files (for example a
+          # transient registry issue). The re-run must finish the release, not
+          # die on an existing version.
+          skip-existing: true
 
       - name: Create the GitHub release
         env:
@@ -253,7 +257,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
-          repo="ghcr.io/alexhawat/mergecraft"
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
           docker buildx imagetools create -t "$repo:$RELEASE_VERSION" "$repo:$RELEASE_SHA"
           docker buildx imagetools create -t "$repo:analyzers-$RELEASE_VERSION" "$repo:analyzers-$RELEASE_SHA"
           for pair in "$RELEASE_VERSION:$RELEASE_SHA" "analyzers-$RELEASE_VERSION:analyzers-$RELEASE_SHA"; do

@@ -117,7 +117,7 @@ def test_another_versions_artifact_is_refused(
         "mergecraft_action-0.1.0a4-py3-none-any.whl",
         "mergecraft_action-0.1.0a4.tar.gz",
     )
-    with pytest.raises(ValueError, match=r"does not name version 0\.1\.0a5"):
+    with pytest.raises(ValueError, match=r"names version 0\.1\.0a4, not 0\.1\.0a5"):
         module.verify_dist(directory, "0.1.0a5")
 
 
@@ -133,3 +133,17 @@ def test_cli_notes_and_verify_dist(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     )
     assert module.main(["verify-dist", "--dist", str(directory), "--version", "0.1.0a5"]) == 0
     assert module.main(["notes", "--changelog", str(changelog), "--version", "9.9.9"]) == 1
+
+
+def test_an_alpha_dist_is_not_accepted_for_the_stable_version(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A substring check would accept 0.1.0a5 for 0.1.0."""
+    module = _module(monkeypatch)
+    directory = _dist(
+        tmp_path,
+        "mergecraft_action-0.1.0a5-py3-none-any.whl",
+        "mergecraft_action-0.1.0a5.tar.gz",
+    )
+    with pytest.raises(ValueError, match=r"names version 0\.1\.0a5, not 0\.1\.0"):
+        module.verify_dist(directory, "0.1.0")

@@ -125,3 +125,26 @@ def test_post_release_refuses_a_call_with_no_released_version(tmp_path: Path) ->
 
 def test_craft_config_still_names_the_post_release_hook() -> None:
     assert "postReleaseCommand: bash scripts/post-release.sh" in read_text(".craft.yml")
+
+
+def test_the_pypi_upload_is_resumable() -> None:
+    uploads = [
+        step
+        for step in _publish_steps()
+        if str(step.get("uses", "")).startswith("pypa/gh-action-pypi-publish@")
+    ]
+    assert len(uploads) == 1
+    with_ = uploads[0].get("with") or {}
+    assert with_.get("skip-existing") is True
+
+
+def test_no_publish_run_text_expands_a_template() -> None:
+    for step in _publish_steps():
+        run = str(step.get("run", ""))
+        assert "${{" not in run, f"{step.get('name')} interpolates a template into run:"
+
+
+def test_the_registry_path_follows_the_repository() -> None:
+    scripts = _publish_scripts()
+    assert "GITHUB_REPOSITORY" in scripts
+    assert "ghcr.io/alexhawat/mergecraft" not in scripts
