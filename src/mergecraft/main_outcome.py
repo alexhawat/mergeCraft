@@ -121,7 +121,7 @@ def _publication_outcome_inputs(
     resolution = resolve_terminal_publication(
         tool_state,
         result=result,
-        verdict_protocol=verdict_protocol,  # type: ignore[arg-type]
+        verdict_protocol=verdict_protocol,  # type: ignore[arg-type] — param is str | None at this callsite
         mode=tool_state.selected_mode,
     )
     return resolution.terminal_publication_receipt, resolution.terminal_publication_mismatch
