@@ -223,6 +223,9 @@ jobs:
         run: |
           set -euo pipefail
           gh run download "$RUN_ID" -n artifact-python-dist -D dist
+          # The build-provenance stamp travels with the artifact but is not a
+          # distribution; keep only the wheel and sdist for the upload.
+          find dist -mindepth 1 -maxdepth 1 ! -name '*.whl' ! -name '*.tar.gz' -exec rm -rf {} +
           uv run python scripts/release_publish.py verify-dist --dist dist --version "$RELEASE_VERSION"
 
       - name: Publish to PyPI
