@@ -249,9 +249,10 @@ jobs:
       - name: Retag the signed images
         env:
           GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
-          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
           repo="ghcr.io/alexhawat/mergecraft"
           docker buildx imagetools create -t "$repo:$RELEASE_VERSION" "$repo:$RELEASE_SHA"
           docker buildx imagetools create -t "$repo:analyzers-$RELEASE_VERSION" "$repo:analyzers-$RELEASE_SHA"
