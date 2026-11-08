@@ -72,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           gh issue close "${ISSUE_URL}" --reason "not planned" \
-            --comment "Informational only: nothing in this repository acts on this issue. Publish with: craft publish ${RELEASED_VERSION} from a machine with publish credentials (docs/release-process.md)."
+            --comment "Informational only: the Release workflow publishes ${RELEASED_VERSION} after the pypi environment approval; nothing acts on this issue (docs/release-process.md)."
           echo "Publish-request issue (closed automatically, informational only): ${ISSUE_URL}" \
             >> "$GITHUB_STEP_SUMMARY"
 
@@ -144,39 +144,162 @@ jobs:
         # (`mergecraft eval replay-bank` → `evals/results/latest.json`) so the
         # gate measures drift, not corpus edits.
 
-  # W8.2 publish gate — read-only reminder that CI/CD signs digests before
-  # `craft publish` (PyPI + GHCR SHA→version retag via .craft.yml).
+  # The only publisher. The `pypi` environment's required reviewers are the
+  # approval; PyPI uses Trusted Publishing (OIDC, no token), and the GitHub
+  # release, GHCR version tags and merge-back PR follow in the same job.
   publish:
-    name: Publish gate
+    name: Publish release
     needs: [prepare, dispatch-build, eval-gate]
+    if: ${{ needs.prepare.outputs.branch != '' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 60
+    environment: pypi
     permissions:
       contents: read
+      packages: write
+      id-token: write
       actions: read
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_BRANCH: ${{ needs.prepare.outputs.branch }}
+      RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
     steps:
-      - name: Record prepared release
+      # The merge-back PR and GitHub release use the App token, so the PR runs
+      # the required checks (a job-token PR triggers none).
+      - name: Mint the App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.MERGECRAFT_APP_ID }}
+          private-key: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.branch }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/bootstrap
+
+      - name: Wait for CI/CD on the release SHA
+        id: build
         env:
-          ISSUE_URL: ${{ needs.prepare.outputs.issue_url }}
-          PREPARED_VERSION: ${{ needs.prepare.outputs.version }}
-          PREPARED_BRANCH: ${{ needs.prepare.outputs.branch }}
-          PREPARED_SHA: ${{ needs.prepare.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          cat <<EOF
-          Prepared version: ${PREPARED_VERSION}
-          Release branch:   ${PREPARED_BRANCH}
-          Release SHA:      ${PREPARED_SHA}
-          Publish-request issue (informational only, closed automatically):
-                            ${ISSUE_URL}
+          for _ in $(seq 1 100); do
+            row="$(gh run list --workflow ci-cd.yml --branch "$RELEASE_BRANCH" --limit 30 \
+              --json databaseId,headSha,status,conclusion \
+              --jq ".[] | select(.headSha == \"$RELEASE_SHA\") | [.databaseId, .status, .conclusion] | @tsv" \
+              | head -1)"
+            if [ -n "$row" ]; then
+              IFS=$'\t' read -r run_id status conclusion <<< "$row"
+              if [ "$status" = "completed" ]; then
+                if [ "$conclusion" != "success" ]; then
+                  echo "::error::CI/CD on $RELEASE_SHA concluded $conclusion"
+                  exit 1
+                fi
+                echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
+            sleep 30
+          done
+          echo "::error::CI/CD did not finish on $RELEASE_SHA within the wait window"
+          exit 1
 
-          CI/CD was dispatched on the release branch: it builds the Python dist
-          once, builds the images once, scans them, cosign-signs and attests the
-          image digests. After that run is green, publish from a machine that has
-          the publish credentials (GITHUB_TOKEN, TWINE_USERNAME, TWINE_PASSWORD):
+      - name: Download and verify the dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ steps.build.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          gh run download "$RUN_ID" -n artifact-python-dist -D dist
+          uv run python scripts/release_publish.py verify-dist --dist dist --version "$RELEASE_VERSION"
 
-            craft publish ${PREPARED_VERSION}
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist/
 
-          That command is the only thing that publishes. No workflow publishes,
-          and nothing in this repository acts on an issue or a comment.
-          EOF
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          notes="$(mktemp)"
+          uv run python scripts/release_publish.py notes --changelog CHANGELOG.md \
+            --version "$RELEASE_VERSION" > "$notes"
+          args=(--title "v$RELEASE_VERSION" --notes-file "$notes")
+          if [[ "$RELEASE_VERSION" =~ (a|b|rc)[0-9]+$ ]]; then
+            args+=(--prerelease)
+          fi
+          if gh release view "v$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo "release v$RELEASE_VERSION already exists; leaving it in place"
+          else
+            gh release create "v$RELEASE_VERSION" "$RELEASE_SHA" "${args[@]}"
+          fi
+
+      - name: Retag the signed images
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          repo="ghcr.io/alexhawat/mergecraft"
+          docker buildx imagetools create -t "$repo:$RELEASE_VERSION" "$repo:$RELEASE_SHA"
+          docker buildx imagetools create -t "$repo:analyzers-$RELEASE_VERSION" "$repo:analyzers-$RELEASE_SHA"
+          for pair in "$RELEASE_VERSION:$RELEASE_SHA" "analyzers-$RELEASE_VERSION:analyzers-$RELEASE_SHA"; do
+            target="${pair%%:*}"
+            source="${pair##*:}"
+            src_digest="$(docker buildx imagetools inspect "$repo:$source" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+            dst_digest="$(docker buildx imagetools inspect "$repo:$target" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+            if [ "$src_digest" != "$dst_digest" ]; then
+              echo "::error::retagging $source changed the digest ($src_digest -> $dst_digest)"
+              exit 1
+            fi
+          done
+
+      - name: Open the merge-back PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          existing="$(gh pr list --base main --head "$RELEASE_BRANCH" --state open --json url -q '.[0].url // empty')"
+          if [ -n "$existing" ]; then
+            echo "merge-back PR already open: $existing" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          body="$(mktemp)"
+          {
+            echo "Merges \`$RELEASE_VERSION\` back into \`main\`."
+            echo
+            echo "Published by the release workflow: PyPI (Trusted Publishing), the GitHub"
+            echo "release at \`$RELEASE_SHA\`, and the GHCR version tags."
+            echo
+            echo "Merge with a **merge commit**."
+          } > "$body"
+          gh pr create --base main --head "$RELEASE_BRANCH" \
+            --title "chore(release): merge $RELEASE_VERSION back" --body-file "$body"
+
+      - name: Summarise the release
+        run: |
+          {
+            echo "### Released \`$RELEASE_VERSION\`"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| source | \`$RELEASE_SHA\` |"
+            echo "| PyPI | published from the CI/CD dist artifact |"
+            echo "| GitHub release | \`v$RELEASE_VERSION\` |"
+            echo "| merge-back | PR from \`$RELEASE_BRANCH\` |"
+            echo
+            echo "Merge the merge-back PR with a merge commit."
+          } >> "$GITHUB_STEP_SUMMARY"
