@@ -35,10 +35,14 @@ def trust_posture_from_tool_state(
     tool_state: ToolState,
     *,
     analyzers_mode: AnalyzersMode | None = None,
+    execution_trust: TrustTierName | None = None,
+    authority_trust: TrustTierName | None = None,
 ) -> TrustPosture:
     """Read posture fields stamped once on ``ToolState`` (fail-closed defaults)."""
-    tier = (tool_state.trust_tier or "untrusted").lower()
-    authority = (tool_state.authority_trust or tool_state.trust_tier or "untrusted").lower()
+    tier = (execution_trust or tool_state.trust_tier or "untrusted").lower()
+    authority = (
+        authority_trust or tool_state.authority_trust or tool_state.trust_tier or "untrusted"
+    ).lower()
     mode_raw = (
         analyzers_mode or tool_state.run_manifest_trust.get("analyzers_mode") or "auto"
     ).lower()

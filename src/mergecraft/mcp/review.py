@@ -1873,7 +1873,10 @@ def create_pull_request_review_tool(ctx: ToolContext):
         from mergecraft.analyzers.trust_posture import trust_posture_from_tool_state
 
         posture = trust_posture_from_tool_state(
-            ctx.tool_state, analyzers_mode=getattr(ctx, "analyzers_mode", None)
+            ctx.tool_state,
+            analyzers_mode=getattr(ctx, "analyzers_mode", None),
+            execution_trust=ctx.trust_tier,
+            authority_trust=ctx.authority_trust,
         )
         if _wants_approve_review(params) and not posture.may_approve_on_github():
             msg = (

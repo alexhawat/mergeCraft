@@ -35,6 +35,7 @@ RESET_TOOL_FIELDS = (
     "review_body_truncated",
     "terminal_publication_failed",
     "terminal_publication_mismatch",
+    "terminal_publication_state",
     "publication_incomplete",
     "reviewer_dispatch_errors",
     "reviewer_dispatch_runs",
