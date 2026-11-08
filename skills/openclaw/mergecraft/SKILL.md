@@ -35,9 +35,12 @@ a read-only verifier; typed findings drive inline comments and the
    entry with `mergecraft provider auth <label-or-id> --scope local` for local
    evaluation, or `--scope github` to adopt GitHub Actions. Examples below assume
    these provider labels are configured:
-   - `mergecraft provider auth anthropic --scope github` (Claude Pro/Max)
+   - `mergecraft provider auth opencode --scope github` (OpenCode Zen, billing-backed key)
+   - `mergecraft provider auth opencode-go --scope github` (OpenCode Go subscription)
    - `mergecraft provider auth openai --scope github` (ChatGPT Plus/Pro/Team/Enterprise)
-   - `mergecraft provider auth cursor --scope github` / `mergecraft provider auth google --scope github` / API-key providers
+   - `mergecraft provider auth anthropic --scope github` (Claude Pro/Max)
+   - `mergecraft provider auth google --scope github` (Google AI Studio)
+   - API-key providers: `mergecraft provider auth deepseek|minimax|tokenhub|openrouter|xai --scope github`
 
    Never handle raw credentials; never commit secrets. GitHub scope checks the exact
    target repository before collecting credentials and stores Actions secrets.

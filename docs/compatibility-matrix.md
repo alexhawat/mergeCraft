@@ -37,6 +37,9 @@ configuration errors naming both halves.
 | `opencode/gpt-5.6-sol` | `opencode/gpt-5.6-sol` | `opencode` | — |
 | `opencode-go/deepseek-v4-pro` | `opencode-go/deepseek-v4-pro` | `opencode` | — |
 | `opencode-go/deepseek-v4.1-flash` | `opencode-go/deepseek-v4.1-flash` | `opencode` | — |
+| `deepseek/deepseek-chat` | `deepseek/deepseek-chat` | `opencode` | — |
+| `xai/grok` | `xai/grok` (resolves `xai/grok-4.3`) | `opencode` | — |
+| `moonshotai/kimi-k2` | `moonshotai/kimi-k2` | `opencode` | — |
 
 ## Security-relevant slice (PR gate — `.github/workflows/e2e.yml`)
 

@@ -63,12 +63,16 @@ Do all of this yourself, without asking me, except where step 4 says STOP:
    or id configured by init (add the provider first if missing). Examples
    below assume those labels exist; use
    --scope local instead for local evaluation:
-     mergecraft provider auth anthropic --scope github     # Claude Pro/Max subscription
-     mergecraft provider auth openai --scope github      # ChatGPT Plus/Pro/Team/Enterprise
-     mergecraft provider auth google --scope github     # Google AI Studio key
-     mergecraft provider auth cursor --scope github     # Cursor Cloud key
-     mergecraft provider auth tokenhub --scope github   # Tencent TokenHub key
-     mergecraft provider auth minimax --scope github    # MiniMax key
+     mergecraft provider auth opencode --scope github     # OpenCode Zen (billing-backed key)
+     mergecraft provider auth opencode-go --scope github  # OpenCode Go subscription
+     mergecraft provider auth openai --scope github       # ChatGPT Plus/Pro/Team/Enterprise
+     mergecraft provider auth anthropic --scope github    # Claude Pro/Max subscription
+     mergecraft provider auth google --scope github       # Google AI Studio key
+     mergecraft provider auth deepseek --scope github     # DeepSeek API key
+     mergecraft provider auth minimax --scope github      # MiniMax key
+     mergecraft provider auth tokenhub --scope github     # Tencent TokenHub key
+     mergecraft provider auth openrouter --scope github   # OpenRouter key
+     mergecraft provider auth xai --scope github          # xAI key
    Any other OpenAI-compatible endpoint also works — if I say "something else",
    read docs/authentication.md and set up the custom-provider env pair instead.
    Each command stores a GitHub Actions secret for me via `gh secret set`.
@@ -396,8 +400,12 @@ To test newer source deliberately, use the full commit SHA install in
 2. **Authenticate** a provider (subscription recommended — no metered API billing):
 
 ```bash
-mergecraft provider auth anthropic --scope github   # Claude Pro/Max
-# use the configured label or id from: mergecraft provider list
+mergecraft provider auth opencode --scope github     # OpenCode Zen (recommended)
+mergecraft provider auth opencode-go --scope github  # OpenCode Go subscription
+mergecraft provider auth openai --scope github       # ChatGPT Plus/Pro/Team/Enterprise
+mergecraft provider auth anthropic --scope github    # Claude Pro/Max
+mergecraft provider auth google --scope github       # Google AI Studio
+# or pick any configured label from: mergecraft provider list
 ```
 
 The credential is stored as a GitHub Actions secret via `gh secret set`. Add
@@ -540,7 +548,11 @@ in `.mergecraft/config.yaml` to log diagnostics only.
 | Google Gemini | `mergecraft provider auth google --scope github` → indexed credentials | `GEMINI_API_KEY` | `google/gemini-3.1-pro-preview` |
 | Tencent TokenHub | — | `mergecraft provider auth tokenhub --scope github` → indexed credentials | `tokenhub/hy3` |
 | MiniMax | — | `mergecraft provider auth minimax --scope github` → indexed credentials | `minimax/MiniMax-M3` |
-| Cursor Cloud | `mergecraft provider auth cursor --scope github` → indexed credentials | `CURSOR_API_KEY` | `cursor/cloud-agent` |
+| DeepSeek | — | `mergecraft provider auth deepseek --scope github` → indexed credentials | `deepseek/deepseek-chat` |
+| Cursor Cloud | `mergecraft auth cursor --scope github` (legacy shim) | `CURSOR_API_KEY` | `cursor/cloud-agent` |
+| OpenRouter | — | `mergecraft provider auth openrouter --scope github` → indexed credentials | any OpenRouter slug |
+| xAI | — | `mergecraft provider auth xai --scope github` → indexed credentials | `xai/grok` |
+| Moonshot AI | — | `mergecraft provider auth moonshotai --scope github` → indexed credentials | `moonshotai/kimi-k2` |
 | OpenAI-compatible (custom) | — | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `<your-prefix>/<your-model>` |
 | [LiteLLM](https://docs.litellm.ai/) proxy | — | same custom-provider env pair — [`examples/config-litellm.yaml`](examples/config-litellm.yaml) | `default/<model>` or `<label>/<model>` |
 | Logfire tracing | `mergecraft auth logfire` | see [`docs/TRACING.md`](docs/TRACING.md) | — |

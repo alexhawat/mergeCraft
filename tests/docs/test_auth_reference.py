@@ -144,12 +144,15 @@ def test_every_auth_subcommand_has_a_row() -> None:
     auth_doc_region = _auth_table_region(AUTH_DOC.read_text(encoding="utf-8"))
     documented = (readme_region + "\n" + (auth_doc_region or "")).lower()
     labels = {"claude": "anthropic", "codex": "openai", "gemini": "google"}
+    # `cursor` is a legacy auth shim: it stores CURSOR_API_KEY but init seeds no
+    # provider label for it, so its row is `mergecraft auth cursor`.
+    legacy = {"cursor"}
     missing = sorted(
         name
         for name in _auth_subcommands()
         if (
             f"mergecraft auth {name}"
-            if name == "logfire"
+            if name in {"logfire"} | legacy
             else f"mergecraft provider auth {labels.get(name, name)}"
         )
         not in documented
