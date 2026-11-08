@@ -22,12 +22,12 @@ a read-only verifier; typed findings drive inline comments and the
 2. **Install:**
 
    ```bash
-   uv tool install mergecraft-action==0.1.0a4
+   uv tool install mergecraft-action==0.1.0a5
    mergecraft init
    ```
 
    Docs on `main` may describe unreleased behavior. Use the
-   [matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a4/docs)
+   [matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a5/docs)
    for this install; do not assume newer CLI flags or fixes are included.
 
 3. **Authentication — STOP and ask the user.** Use `mergecraft provider list`

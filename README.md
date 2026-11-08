@@ -47,10 +47,10 @@ Do all of this yourself, without asking me, except where step 4 says STOP:
    Do NOT install Python. uv downloads a compatible interpreter on its own.
 
 2. Install the CLI:
-     uv tool install mergecraft-action==0.1.0a4
+     uv tool install mergecraft-action==0.1.0a5
      mergecraft --version
    Main-branch instructions may include unreleased behavior. Match this install
-   to https://github.com/alexhawat/mergeCraft/tree/v0.1.0a4/docs before using newer features.
+   to https://github.com/alexhawat/mergeCraft/tree/v0.1.0a5/docs before using newer features.
 
 3. Scaffold config + workflow (non-interactive, writes no secrets):
      mergecraft init
@@ -388,12 +388,12 @@ For the GitHub Action path, see [How it works in GitHub Action](#how-it-works-in
 1. **Install the published alpha CLI and scaffold the repo:**
 
 ```bash
-uv tool install mergecraft-action==0.1.0a4
+uv tool install mergecraft-action==0.1.0a5
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
 
 Docs on `main` may describe unreleased behavior. For this install, use the
-[matching release documentation](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a4/docs).
+[matching release documentation](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a5/docs).
 To test newer source deliberately, use the full commit SHA install in
 [`docs/install.md`](docs/install.md#path-b--local-cli).
 

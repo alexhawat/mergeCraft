@@ -72,11 +72,11 @@ The plugin makes the default configurable with the `engine` plugin option, so
 ## Install
 
 Docs on `main` may describe unreleased behavior. Use the
-[matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a4/docs)
+[matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a5/docs)
 for the pinned install; newer integration features may require an unreleased source commit.
 
 ```bash
-uv tool install mergecraft-action==0.1.0a4
+uv tool install mergecraft-action==0.1.0a5
 mergecraft init                      # if the repo is not set up yet
 mergecraft opencode install          # commands, agents, plugin, MCP block, harness
 mergecraft opencode doctor --strict  # verify
@@ -221,7 +221,7 @@ mergeCraft's behalf.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `/mergecraft/review-deep` says the CLI is missing | mergeCraft not installed | `uv tool install mergecraft-action==0.1.0a4` |
+| `/mergecraft/review-deep` says the CLI is missing | mergeCraft not installed | `uv tool install mergecraft-action==0.1.0a5` |
 | MCP tools absent | server not configured or not connected | `opencode mcp list`; add the `mcp.servers.mergecraft` block |
 | Broken MCP config | V1 shape (`mcp.mergecraft`, `enabled`) | use `mcp.servers.mergecraft` and `disabled` |
 | Reviewer reports no diff | nothing changed | check `git status`; pass a ref to `/mergecraft/review` |
