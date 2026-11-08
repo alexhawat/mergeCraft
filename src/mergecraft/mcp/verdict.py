@@ -594,8 +594,8 @@ class ValidationState:
 
     Finding rows rejected as ungradable still block approve. Ledger lifecycle
     states (``findings.lifecycle``) are orthogonal and enforced at
-    ``FindingLedger.record`` — advisory thread outcomes project separately via
-    ``findings.lifecycle_outcome``.
+    ``FindingLedger.record``. Advisory thread outcomes are classified separately
+    by ``findings.outcomes.classify_thread_outcome``.
 
     Every analyzer and agent row this run knows about is graded exactly once,
     by ``build_validation_state``, into one of three populations. Producer and

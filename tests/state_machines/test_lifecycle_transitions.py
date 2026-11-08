@@ -6,10 +6,6 @@ import pytest
 
 from mergecraft.findings.ledger import FindingLedger
 from mergecraft.findings.lifecycle import LifecycleState
-from mergecraft.findings.lifecycle_outcome import (
-    advisory_outcome_for_lifecycle,
-    all_lifecycle_states_mapped,
-)
 from mergecraft.findings.lifecycle_transitions import (
     _ALLOWED_LIFECYCLE_TRANSITIONS,
     assert_lifecycle_transition,
@@ -33,12 +29,6 @@ def test_ledger_rejects_illegal_transition() -> None:
     book.record(fp, "withdrawn", source="verifier-drop", round_index=1)
     with pytest.raises(ValueError, match="illegal lifecycle transition"):
         book.record(fp, "open", source="inline", round_index=2)
-
-
-def test_advisory_projection_is_total() -> None:
-    mapped = all_lifecycle_states_mapped()
-    for state in mapped:
-        advisory_outcome_for_lifecycle(state)
 
 
 def test_assert_transition_accepts_first_record() -> None:

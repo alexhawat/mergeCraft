@@ -163,7 +163,6 @@ def apply_terminal_publication_flags(
     publication_incomplete: tuple[str, ...] = (),
 ) -> None:
     """Set legacy flags from a canonical publication state (mutually exclusive)."""
-    tool_state.terminal_publication_state = state.value
     tool_state.review_publication_sticky_only = (
         state is TerminalPublicationState.sticky_progress_only
     )
