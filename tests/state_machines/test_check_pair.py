@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
-
 from typing import cast
+
+import pytest
 
 from mergecraft.utils.check_pair import (
     LEGAL_CHECK_PAIRS,
@@ -17,8 +17,8 @@ from mergecraft.utils.check_pair import (
 @pytest.mark.parametrize(("completion", "approval"), sorted(LEGAL_CHECK_PAIRS))
 def test_legal_pairs_pass(completion: str, approval: str) -> None:
     pair = pair_from_conclusions(
-        cast(CompletionConclusion, completion),
-        cast(ApprovalConclusion, approval),
+        cast("CompletionConclusion", completion),
+        cast("ApprovalConclusion", approval),
     )
     assert pair.legal() is True
 
