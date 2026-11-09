@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Final
 
-# Check-run conclusions — what ``decide_approval()`` emits today.
-# Lane verdicts — the W9 thermostat action vocabulary (#46, W9.1).
-EXPECTED_VERDICT_VALUES: Final[frozenset[str]] = frozenset(
+# GitHub check-run conclusions from ``decide_approval()`` / completion mapping.
+CHECK_CONCLUSIONS: Final[frozenset[str]] = frozenset({"success", "failure", "neutral", "timed_out"})
+
+# W9 thermostat gate actions — not check conclusions.
+GATE_ACTIONS: Final[frozenset[str]] = frozenset(
     {
-        "success",
-        "failure",
         "auto_merge",
         "block",
         "request_changes",
@@ -18,8 +18,13 @@ EXPECTED_VERDICT_VALUES: Final[frozenset[str]] = frozenset(
         "quarantine",
         "escalate",
         "unavailable",
-        "neutral",
     }
 )
 
-__all__ = ["EXPECTED_VERDICT_VALUES"]
+EXPECTED_VERDICT_VALUES: Final[frozenset[str]] = CHECK_CONCLUSIONS | GATE_ACTIONS
+
+__all__ = [
+    "CHECK_CONCLUSIONS",
+    "EXPECTED_VERDICT_VALUES",
+    "GATE_ACTIONS",
+]
