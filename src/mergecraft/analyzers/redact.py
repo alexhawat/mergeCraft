@@ -69,7 +69,7 @@ _BENIGN_PURE_HEX_RE = re.compile(r"^[a-f0-9]+$")
 # ``_`` or ``-`` separators are not identifiers either. ``sk-…`` / ``ghp_…``
 # still match ``_SECRET_PATTERNS`` first.
 _BENIGN_IDENTIFIER_RE = re.compile(
-    r"^(?:_[a-z][a-z0-9_]*|[a-z][a-z0-9]*(?:_[a-z0-9_]+)+"
+    r"^(?:_[a-z][a-z0-9_]*|[a-z][a-z0-9]*_[a-z0-9_]+"
     r"|[a-z][a-z0-9]*(?:-[a-z0-9]+)+|[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+"
     r"|[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)$"  # RUSTSEC-2024-0001
 )

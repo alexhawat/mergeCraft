@@ -538,6 +538,23 @@ def test_http_error_text_does_not_carry_url_userinfo() -> None:
         assert all(secret not in str(value) for value in attrs.values()), secret
 
 
+def test_tool_error_output_does_not_carry_url_userinfo() -> None:
+    from mergecraft.tracing import MemorySink, Tracer
+    from mergecraft.tracing._tool_attrs import enrich_tool_response
+
+    sink = MemorySink()
+    tracer = Tracer(sink=sink, session_id="s", run_id="r")
+    userinfo = "alice:hunter2pw"
+    error = RuntimeError(f"Request failed for https://{userinfo}@api.example.com/v1")
+    with tracer.start_span("tool.call") as span:
+        enrich_tool_response(span, output=None, error=error)
+    events = sink.events
+    assert events
+    for event in events:
+        assert "hunter2pw" not in str(event.attrs)
+    assert any("gen_ai.tool.output" in event.attrs for event in events)
+
+
 __all__ = [
     "test_disabled_tracer_path_emits_no_http_span",
     "test_http_error_text_does_not_carry_url_userinfo",

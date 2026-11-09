@@ -172,3 +172,27 @@ def test_pypi_workflow_slug_is_not_a_pypi_token() -> None:
 
     slug = "pypi-publish-release-workflow"
     assert redact_secrets(f"job {slug} finished") == f"job {slug} finished"
+
+
+def test_long_rejected_identifier_does_not_backtrack() -> None:
+    import subprocess
+    import sys
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from mergecraft.analyzers.redact import redact_secrets; "
+            "redact_secrets('a' + '_0' * 10000 + '+'); "
+            "redact_secrets('a_' + '_0' * 10000 + '+')",
+        ],
+        check=True,
+        timeout=10,
+    )
+
+
+@pytest.mark.parametrize("identifier", ["a_b", "a__", "a_b__c_", "_private_name", "UPPER_CASE"])
+def test_snake_case_identifier_shapes_remain_readable(identifier: str) -> None:
+    from mergecraft.analyzers.redact import _is_benign_identifier
+
+    assert _is_benign_identifier(identifier)

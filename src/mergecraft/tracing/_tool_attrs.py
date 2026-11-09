@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.tracing.cap import TRACE_ATTRS_JSON_MAX_BYTES
-from mergecraft.tracing.redaction import redact_tool_payload
+from mergecraft.tracing.redaction import redact_tool_payload, redact_url
 
 if TYPE_CHECKING:
     from mergecraft.tracing.tracer import NullSpan, NullTracer, Span, Tracer
@@ -179,7 +179,7 @@ def enrich_tool_response(
         span.set_attribute("tool.error_class", type(error).__name__)
         from mergecraft.analyzers.redact import redact_secrets
 
-        message = redact_secrets(str(error))[:TRACE_ATTRS_JSON_MAX_BYTES]
+        message = redact_secrets(redact_url(str(error)))[:TRACE_ATTRS_JSON_MAX_BYTES]
         span.set_attribute("tool.error_message", message)
         # Keep the GenAI conventions attr wired so the GenAI dashboard sees
         # the row even on the failure path.
