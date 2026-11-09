@@ -92,7 +92,9 @@ def test_resolve_payload_permissions(monkeypatch: pytest.MonkeyPatch) -> None:
     assert payload["~mergecraft"] is True
     assert payload["prompt"] == "do work"
     assert payload["shell"] == "restricted"  # input made it stricter
-    assert payload["push"] == "enabled"
+    # No event means no known collaborator: the push floor applies like the
+    # shell floor (#1238). The collaborator case is pinned separately.
+    assert payload["push"] == "restricted"
     assert payload["statusChecks"] is True
     assert payload["model"] == "anthropic/claude-opus"
     assert payload["event"]["trigger"] == "unknown"
@@ -213,7 +215,8 @@ def test_resolve_native_event_workflow_dispatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_event(tmp_path, monkeypatch, "workflow_dispatch", {})
-    assert resolve_native_event() == {"trigger": "workflow_dispatch"}
+    # Dispatching a workflow needs write access, so the run is a collaborator's (#1238).
+    assert resolve_native_event() == {"trigger": "workflow_dispatch", "authorPermission": "write"}
 
 
 def test_resolve_payload_uses_native_pull_request_event(
@@ -948,12 +951,16 @@ def test_resolve_payload_lowercases_the_permission_inputs(
     name: str,
     raw: str,
     expected: object,
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The permission inputs keep today's lower-casing on the public payload."""
     monkeypatch.setenv("INPUT_PROMPT", "do work")
     monkeypatch.delenv("INPUT_PROMPT_FILE", raising=False)
     monkeypatch.setenv(name, raw)
+    # A collaborator-triggered run, so the non-collaborator push floor (#1238)
+    # does not mask the lower-casing this test pins.
+    _write_event(tmp_path, monkeypatch, "workflow_dispatch", {})
 
     payload = resolve_payload(repo_settings=default_settings())
 
@@ -998,3 +1005,143 @@ def test_custom_provider_inputs_still_export_the_singleton_pair(
 
     assert os.environ["MERGECRAFT_CUSTOM_PROVIDER_BASE_URL"] == "https://gateway.example/v1"
     assert os.environ["MERGECRAFT_CUSTOM_PROVIDER_API_KEY"] == "sk-not-a-real-key"
+
+
+# --- #1238: native events carry author permission; push has a collaborator floor
+
+
+def _permissive_payload(monkeypatch: pytest.MonkeyPatch, **settings: object) -> dict[str, Any]:
+    """Resolve with no shell/push inputs and a repo that enables both."""
+    monkeypatch.setenv("INPUT_PROMPT", "do work")
+    for var in ("INPUT_PROMPT_FILE", "INPUT_SHELL", "INPUT_PUSH"):
+        monkeypatch.delenv(var, raising=False)
+    repo = default_settings().model_copy(update={"shell": "enabled", "push": "enabled", **settings})
+    return resolve_payload(repo_settings=repo)
+
+
+def _pull_request_event(association: str | None) -> dict[str, object]:
+    pull_request: dict[str, object] = {"number": 5, "head": {"ref": "b"}}
+    if association is not None:
+        pull_request["author_association"] = association
+    return {"action": "synchronize", "number": 5, "pull_request": pull_request}
+
+
+@pytest.mark.parametrize("association", _TRUSTED_ASSOCIATIONS)
+def test_native_pull_request_from_a_collaborator_keeps_enabled_shell_and_push(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, association: str
+) -> None:
+    _write_event(tmp_path, monkeypatch, "pull_request", _pull_request_event(association))
+    payload = _permissive_payload(monkeypatch)
+    assert payload["event"]["authorPermission"] == "write"
+    assert payload["shell"] == "enabled"
+    assert payload["push"] == "enabled"
+
+
+@pytest.mark.parametrize("association", [*_REFUSED_ASSOCIATIONS, None])
+def test_native_pull_request_from_a_non_collaborator_floors_shell_and_push(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, association: str | None
+) -> None:
+    _write_event(tmp_path, monkeypatch, "pull_request", _pull_request_event(association))
+    payload = _permissive_payload(monkeypatch)
+    assert payload["event"]["authorPermission"] == (None if association is None else "read")
+    assert payload["shell"] == "restricted"
+    assert payload["push"] == "restricted"
+
+
+@pytest.mark.parametrize("association", _TRUSTED_ASSOCIATIONS)
+def test_native_comment_from_a_collaborator_carries_write_permission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, association: str
+) -> None:
+    _write_event(
+        tmp_path, monkeypatch, "issue_comment", _comment_event(author_association=association)
+    )
+    payload = _permissive_payload(monkeypatch)
+    assert payload["event"]["authorPermission"] == "write"
+    assert payload["shell"] == "enabled"
+    assert payload["push"] == "enabled"
+
+
+def test_native_review_comment_from_a_collaborator_carries_write_permission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_event(
+        tmp_path,
+        monkeypatch,
+        "pull_request_review_comment",
+        _review_comment_event(author_association="COLLABORATOR"),
+    )
+    event = resolve_native_event()
+    assert event is not None
+    assert event["authorPermission"] == "write"
+
+
+def test_allowlisted_non_collaborator_comment_still_gets_the_floor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The login allowlist admits the invocation, not collaborator permissions."""
+    event = _comment_event(author_association="NONE")
+    comment = event["comment"]
+    assert isinstance(comment, dict)
+    comment["user"] = {"login": "friendly-bot"}
+    _write_event(tmp_path, monkeypatch, "issue_comment", event)
+    payload = _permissive_payload(monkeypatch, comment_invocation_allowlist="friendly-bot")
+    assert payload["event"]["trigger"] == "issue_comment_created"
+    assert payload["event"]["authorPermission"] == "read"
+    assert payload["shell"] == "restricted"
+    assert payload["push"] == "restricted"
+
+
+def test_workflow_dispatch_keeps_enabled_shell_and_push(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_event(tmp_path, monkeypatch, "workflow_dispatch", {"inputs": {}})
+    payload = _permissive_payload(monkeypatch)
+    assert payload["event"]["trigger"] == "workflow_dispatch"
+    assert payload["shell"] == "enabled"
+    assert payload["push"] == "enabled"
+
+
+def test_native_push_event_resolves_without_association_and_floors_push(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``push`` event has no author association: no crash, unknown trigger, floors apply."""
+    _write_event(tmp_path, monkeypatch, "push", {"ref": "refs/heads/main", "after": "abc"})
+    payload = _permissive_payload(monkeypatch)
+    assert payload["event"]["trigger"] == "unknown"
+    assert payload["event"]["authorPermission"] is None
+    assert payload["push"] == "restricted"
+
+
+@pytest.mark.parametrize(
+    ("permission", "expected_push"), [("read", "restricted"), ("write", "enabled")]
+)
+def test_json_payload_author_permission_floors_an_enabled_push_input(
+    monkeypatch: pytest.MonkeyPatch, permission: str, expected_push: str
+) -> None:
+    monkeypatch.setenv(
+        "INPUT_PROMPT",
+        json.dumps(
+            {
+                "~mergecraft": True,
+                "version": "0.1.0",
+                "prompt": "hi",
+                "event": {"trigger": "issues_opened", "authorPermission": permission},
+            }
+        ),
+    )
+    monkeypatch.delenv("INPUT_PROMPT_FILE", raising=False)
+    monkeypatch.setenv("INPUT_PUSH", "enabled")
+    payload = resolve_payload(repo_settings=default_settings())
+    assert payload["push"] == expected_push
+
+
+def test_collaborator_push_input_still_tightens_an_enabled_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The floor only lowers ``enabled``; a stricter input still wins for a collaborator."""
+    _write_event(tmp_path, monkeypatch, "pull_request", _pull_request_event("OWNER"))
+    monkeypatch.setenv("INPUT_PROMPT", "do work")
+    monkeypatch.delenv("INPUT_PROMPT_FILE", raising=False)
+    monkeypatch.setenv("INPUT_PUSH", "disabled")
+    repo = default_settings().model_copy(update={"push": "enabled"})
+    assert resolve_payload(repo_settings=repo)["push"] == "disabled"

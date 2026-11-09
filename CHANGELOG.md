@@ -435,6 +435,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads stay global for path resolution. Toolchains installed under `$HOME`
   (for example `~/.cargo`, `~/.pyenv`) are no longer readable from the
   sandboxed shell (#1237).
+- Native GitHub Actions events now carry the triggering author's permission.
+  `pull_request`, `issue_comment` and `pull_request_review_comment` runs derive
+  it from `author_association` (`OWNER` / `MEMBER` / `COLLABORATOR` count as
+  collaborators) and `workflow_dispatch` counts as a collaborator, so a
+  collaborator's `shell: enabled` is no longer always downgraded to
+  `restricted`. `push` gains the same non-collaborator floor as `shell`:
+  `enabled` becomes `restricted` when the author is not a collaborator or is
+  unknown (including runs with no event, such as `push`-triggered or local
+  runs) (#1238).
 - actionlint now lints workflow files only. Action manifests (root `action.yml`
   and `.github/actions/**/action.yml`, composite or not) were linted against the
   workflow schema, producing false Major `syntax-check` blockers; zizmor still

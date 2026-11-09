@@ -262,6 +262,35 @@ def _comment_association(data: dict[str, Any]) -> str | None:
     return None
 
 
+def _association_permission(association: object) -> AuthorPermission | None:
+    """Map a GitHub ``author_association`` to the permission ``is_collaborator`` reads.
+
+    The native Actions event never carries a repository permission, so without
+    this every native run read as a non-collaborator and the shell and push
+    floors always applied (#1238). ``OWNER`` / ``MEMBER`` / ``COLLABORATOR`` (the
+    same set the comment gate trusts) map to ``"write"``; any other association
+    maps to ``"read"``; a missing one stays ``None``. Both non-trusted outcomes
+    keep the floors.
+
+    Args:
+        association (object): The raw ``author_association`` value, if any.
+
+    Returns:
+        AuthorPermission | None: ``"write"``, ``"read"`` or ``None``.
+
+    Examples:
+        >>> _association_permission("MEMBER")
+        'write'
+        >>> _association_permission("CONTRIBUTOR")
+        'read'
+        >>> _association_permission(None) is None
+        True
+    """
+    if not isinstance(association, str) or not association:
+        return None
+    return "write" if association in TRUSTED_AUTHOR_ASSOCIATIONS else "read"
+
+
 def _comment_login(data: dict[str, Any]) -> str | None:
     """Read ``comment.user.login`` from the raw GitHub event payload, if present."""
     comment = _extract_comment(data)
@@ -321,6 +350,11 @@ def resolve_native_event(*, allowlist: tuple[str, ...] = ()) -> dict[str, Any] |
     or its login must appear in ``allowlist``. Under ``pull_request_target`` the
     comment-driven path is refused unless the opt-in input is set. The refusal
     is logged at warning level; the comment body is never logged.
+
+    Each event carries ``authorPermission`` derived from the triggering
+    author's ``author_association`` (``workflow_dispatch``: ``"write"``, since
+    only a writer can dispatch), so ``is_collaborator`` sees the real author
+    instead of treating every native run as a non-collaborator (#1238).
     """
     event_name = os.environ.get("GITHUB_EVENT_NAME") or ""
     if not event_name:
@@ -356,6 +390,7 @@ def resolve_native_event(*, allowlist: tuple[str, ...] = ()) -> dict[str, Any] |
                 "branch": _head_ref(pr),
                 "comment_id": comment.get("id"),
                 "body": comment.get("body"),
+                "authorPermission": _association_permission(comment.get("author_association")),
             }
         # issue_comment (canonical) and pull_request_target + comment-shaped both
         # surface as ``issue_comment_created`` so downstream dispatch treats them
@@ -370,6 +405,7 @@ def resolve_native_event(*, allowlist: tuple[str, ...] = ()) -> dict[str, Any] |
                 "title": issue.get("title"),
                 "comment_id": comment.get("id"),
                 "body": comment.get("body"),
+                "authorPermission": _association_permission(comment.get("author_association")),
             }
         return None
 
@@ -388,6 +424,7 @@ def resolve_native_event(*, allowlist: tuple[str, ...] = ()) -> dict[str, Any] |
             "title": pr.get("title"),
             "body": pr.get("body"),
             "before_sha": data.get("before"),
+            "authorPermission": _association_permission(pr.get("author_association")),
         }
 
     if event_name == "pull_request_review_comment":
@@ -402,6 +439,7 @@ def resolve_native_event(*, allowlist: tuple[str, ...] = ()) -> dict[str, Any] |
             "branch": _head_ref(pr),
             "comment_id": comment.get("id"),
             "body": comment.get("body"),
+            "authorPermission": _association_permission(comment.get("author_association")),
         }
 
     if event_name == "issue_comment":
@@ -416,10 +454,12 @@ def resolve_native_event(*, allowlist: tuple[str, ...] = ()) -> dict[str, Any] |
             "title": issue.get("title"),
             "comment_id": comment.get("id"),
             "body": comment.get("body"),
+            "authorPermission": _association_permission(comment.get("author_association")),
         }
 
     if event_name == "workflow_dispatch":
-        return {"trigger": "workflow_dispatch"}
+        # GitHub only lets an actor with write access dispatch a workflow.
+        return {"trigger": "workflow_dispatch", "authorPermission": "write"}
 
     return None
 
@@ -611,6 +651,33 @@ def _stricter_shell(
     return resolved
 
 
+def _floored_push(resolved: PushPermission, *, non_collaborator: bool) -> PushPermission:
+    """Apply the non-collaborator floor to the resolved ``push`` permission.
+
+    Mirrors the shell floor in ``_stricter_shell``: a run a non-collaborator
+    triggered may push branches but never gets ``enabled`` (default-branch)
+    push, whatever the input or repo setting says (#1238).
+
+    Args:
+        resolved (PushPermission): Push permission after input / repo precedence.
+        non_collaborator (bool): True when the triggering author is not a
+            collaborator (or is unknown).
+
+    Returns:
+        PushPermission: ``resolved``, lowered from ``enabled`` to ``restricted``
+        for a non-collaborator.
+
+    Examples:
+        >>> _floored_push("enabled", non_collaborator=True)
+        'restricted'
+        >>> _floored_push("enabled", non_collaborator=False)
+        'enabled'
+    """
+    if non_collaborator and resolved == "enabled":
+        return "restricted"
+    return resolved
+
+
 def _resolve_model_pin(
     inputs: ActionInputs,
     json_payload: JsonPayload | None,
@@ -671,11 +738,16 @@ def resolve_payload(
 
     model = (json_payload.model if json_payload else None) or inputs.model or settings.model or None
 
+    non_collaborator = not is_collaborator(event)
     repo_shell: ShellPermission = settings.shell or "restricted"
     resolved_shell = _stricter_shell(
         repo_shell,
         inputs.shell,
-        non_collaborator=not is_collaborator(event),
+        non_collaborator=non_collaborator,
+    )
+    resolved_push = _floored_push(
+        inputs.push or settings.push or "restricted",
+        non_collaborator=non_collaborator,
     )
 
     timeout_raw = inputs.timeout or (json_payload.timeout if json_payload else None)
@@ -720,7 +792,7 @@ def resolve_payload(
             else None
         ),
         "generateSummary": json_payload.generate_summary if json_payload else None,
-        "push": inputs.push or settings.push or "restricted",
+        "push": resolved_push,
         "shell": resolved_shell,
         "statusChecks": inputs.status_checks == "enabled",
         "suggestEvalAdd": inputs.suggest_eval_add == "enabled",
