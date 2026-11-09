@@ -27,6 +27,9 @@ RulesetSource = Literal["repo", "default"]
 PATTERN_SCANNER_IDS: frozenset[str] = frozenset({"semgrep", "opengrep"})
 PATTERN_TOOL_IDS: frozenset[str] = frozenset({"semgrep", "opengrep", "ast-grep"})
 PATTERN_EXCLUSIVE_GROUP = "pattern-scanner"
+# Bound on a ``uv pip install``: it runs while holding the shared cache lock, so a
+# hung resolver must not block every other worker on the machine indefinitely.
+_PIP_INSTALL_TIMEOUT_S = 600
 
 
 @dataclass(frozen=True, slots=True)
@@ -402,21 +405,27 @@ def _install_pip_script(
         staging,
         pip_python,
     )
-    completed = subprocess.run(
-        [
-            "uv",
-            "pip",
-            "install",
-            f"{package}=={version}",
-            "--python",
-            pip_python,
-            "--target",
-            str(staging),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            [
+                "uv",
+                "pip",
+                "install",
+                f"{package}=={version}",
+                "--python",
+                pip_python,
+                "--target",
+                str(staging),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_PIP_INSTALL_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as exc:
+        shutil.rmtree(staging, ignore_errors=True)
+        msg = f"pip install timed out after {_PIP_INSTALL_TIMEOUT_S}s for {package}=={version}"
+        raise OSError(msg) from exc
     if completed.returncode != 0:
         shutil.rmtree(staging, ignore_errors=True)
         detail = (completed.stderr or completed.stdout or "").strip().splitlines()
