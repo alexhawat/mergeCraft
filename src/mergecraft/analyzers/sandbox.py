@@ -1172,7 +1172,8 @@ def process_limit_for_drop(
     bound is accepted — the drop must not be attempted with a cap that cannot
     carry it. When the probe cannot run at all (no ``setpriv``) the drop path
     already fails closed with a named configuration error, so this falls back to
-    the first candidate rather than masking that error. ``target_gid`` may be
+    the current candidate plus the same ``max_processes`` fork headroom (step 4)
+    rather than masking that error; so does the no-gid defensive branch. ``target_gid`` may be
     omitted only when no drop applies.
     """
     if target_uid is None:
@@ -1182,13 +1183,16 @@ def process_limit_for_drop(
     if target_gid is None:
         # Without a gid the probe cannot mirror the drop's credential change; the
         # caller always resolves both, so this is a defensive best effort.
-        limit = count + allowance
+        # It gets the same fork headroom as the probed path: the count is only a hint.
+        limit = count + 2 * allowance
         return (limit, limit)
     for step in range(1, _NPROC_PROBE_MAX_STEPS + 1):
         candidate = count + step * allowance
         outcome = _drop_exec_succeeds_at_limit(target_uid, target_gid, limit=candidate)
         if outcome is None:
-            limit = count + allowance
+            # No probe answer: take the first candidate *plus* the fork headroom
+            # the accepted path adds, so a stale hint cannot leave headroom 0.
+            limit = candidate + allowance
             return (limit, limit)
         if outcome:
             # Guarantee the payload real fork headroom: the accepted candidate is
