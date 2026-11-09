@@ -6,6 +6,8 @@ import base64
 import subprocess
 from pathlib import Path
 
+import pytest
+
 _EXPECTED_SAFE_KEYS: tuple[str, ...] = (
     "core.fsmonitor=false",
     "core.hooksPath=/dev/null",
@@ -49,6 +51,30 @@ def test_git_argv_injects_no_ext_diff_for_diff_family() -> None:
     assert "--no-textconv" not in git_argv(["status"])
     assert "--no-ext-diff" not in git_argv(["log", "-1", "--oneline"])
     assert "--no-textconv" not in git_argv(["log", "-1", "--oneline"])
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [["-u"], ["-pu"], ["-uz"], ["-zu"], ["-U3"], ["-W"], ["--unified=5"], ["--cc"], ["-c"]],
+)
+def test_git_argv_hardens_log_patch_spellings(flags: list[str]) -> None:
+    """#1248 - every ``log`` spelling that emits a patch gets the diff protections."""
+    from mergecraft.utils.git_hardening import git_argv
+
+    argv = git_argv(["log", *flags, "-1"])
+    idx = argv.index("log")
+    assert argv[idx + 1 : idx + 3] == ["--no-ext-diff", "--no-textconv"]
+
+    stash = git_argv(["stash", "show", *flags])
+    sidx = stash.index("show")
+    assert stash[sidx + 1 : sidx + 3] == ["--no-ext-diff", "--no-textconv"]
+
+
+def test_git_argv_leaves_non_patch_log_alone() -> None:
+    from mergecraft.utils.git_hardening import git_argv
+
+    for flags in (["-z"], ["-n", "3"], ["--oneline"], ["--stat"]):
+        assert "--no-ext-diff" not in git_argv(["log", *flags])
 
 
 def test_git_authenticated_argv_pins_identity_rewrite_for_remote_url() -> None:
