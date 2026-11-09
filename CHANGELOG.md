@@ -420,6 +420,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Sandbox harness startup failures (`unshare`/`bwrap`/`setpriv` refusing to create
+  a namespace, fork `EAGAIN`, `uid_map` write denied) are now classified as
+  `sandboxed: isolation unavailable` and reported `declared-but-cannot-run`
+  instead of a blocking gate failure (#1240).
 - actionlint now lints workflow files only. Action manifests (root `action.yml`
   and `.github/actions/**/action.yml`, composite or not) were linted against the
   workflow schema, producing false Major `syntax-check` blockers; zizmor still
