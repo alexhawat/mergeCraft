@@ -544,9 +544,43 @@ def _minimal_granting_tier(
     config_root: Path,
     author_gate: _AuthorGateOutcome | None = None,
 ) -> AgentSandboxLevel | None:
+    """Return the tightest ``trust.agentSandbox`` tier that would grant this head.
+
+    Feeds the refusal remedy ("set trust.agentSandbox to ...") and the run
+    manifest, so it must name the least permissive tier that works. Tiers are
+    tried tightest-first; ``same-repo`` natively grants every non-fork head, so
+    trying it first (as this did before #1239) always recommended the loosest
+    tier. ``never`` grants nothing and is skipped.
+
+    Args:
+        event_name (str): GitHub event name for the run.
+        event (dict[str, Any]): The GitHub event payload.
+        head_sha (str): Head commit the run is bound to.
+        default_branch (str): Repository default branch.
+        config_root (Path): Checkout used for the ``merged-only`` ancestry probe.
+        author_gate (_AuthorGateOutcome | None, optional): Author-gate outcome
+            that can veto every tier. Defaults to None (no gate).
+
+    Returns:
+        AgentSandboxLevel | None: The tightest granting tier, or None for a fork
+        head, a refused author gate, or no granting tier.
+
+    Examples:
+        >>> fork_head = {"pull_request": {"head": {}}}  # no base repo: floored as a fork
+        >>> _minimal_granting_tier(
+        ...     event_name="pull_request",
+        ...     event=fork_head,
+        ...     head_sha="abc",
+        ...     default_branch="main",
+        ...     config_root=Path("."),
+        ... ) is None
+        True
+    """
     if _is_fork_pull_request(event):
         return None
-    for tier in reversed(_TIER_LOOSEN_ORDER):
+    for tier in _TIER_LOOSEN_ORDER:
+        if tier == "never":
+            continue
         if _tier_honours_override(
             tier,
             event_name=event_name,
@@ -676,14 +710,22 @@ def resolve_agent_sandbox_decision(
             config_root=repo_root,
         )
 
-    granting_tier = _minimal_granting_tier(
-        event_name=event_name,
-        event=event,
-        head_sha=head_sha,
-        default_branch=default_branch,
-        config_root=repo_root,
-        author_gate=author_gate_outcome if trusted_authors else None,
-    )
+    # The tiers do not nest (``dispatch`` refuses a merged pull_request head that
+    # ``merged-only`` grants), so when the configured tier already grants, name
+    # it rather than a tighter one: the remedy text would otherwise tell the
+    # operator to switch tiers to get what they already have.
+    granting_tier: AgentSandboxLevel | None
+    if configured_native_honour and author_gate_outcome.status != "refused":
+        granting_tier = configured_tier
+    else:
+        granting_tier = _minimal_granting_tier(
+            event_name=event_name,
+            event=event,
+            head_sha=head_sha,
+            default_branch=default_branch,
+            config_root=repo_root,
+            author_gate=author_gate_outcome if trusted_authors else None,
+        )
 
     if trusted_authors:
         author_gate_status: AuthorGateStatus = (

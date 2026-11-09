@@ -444,6 +444,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `enabled` becomes `restricted` when the author is not a collaborator or is
   unknown (including runs with no event, such as `push`-triggered or local
   runs) (#1238).
+- The `trust.agentSandbox` tier named in the Codex sandbox remedy and in the
+  run manifest's `agent_sandbox_granting_tier` is now the tightest tier that
+  would grant the override (`merged-only`, then `dispatch`, then `same-repo`),
+  or the configured tier when it already grants. It was always `same-repo`,
+  the loosest tier, for every non-fork head (#1239).
 - actionlint now lints workflow files only. Action manifests (root `action.yml`
   and `.github/actions/**/action.yml`, composite or not) were linted against the
   workflow schema, producing false Major `syntax-check` blockers; zizmor still
