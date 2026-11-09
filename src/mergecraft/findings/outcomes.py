@@ -1,7 +1,7 @@
 """Deterministic human outcomes for published mergeCraft findings (#1165).
 
 Classifies each mergeCraft-originated review thread into fixed / rejected /
-intentional / ignored from GitHub thread state, human replies, and merge state.
+intentional / ignored / stale from GitHub thread state, human replies, and merge state.
 Advisory only — never feeds :func:`mergecraft.agents.gates.decide_approval`.
 """
 
@@ -21,7 +21,9 @@ from mergecraft.review_resolution import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-FindingOutcomeKind = Literal["fixed", "rejected", "intentional", "ignored", "unknown"]
+FindingOutcomeKind = Literal[
+    "fixed", "rejected", "intentional", "ignored", "stale", "unknown"
+]
 
 _INTENTIONAL_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(won'?t fix|wontfix|by design|intentional)\b",
@@ -66,11 +68,12 @@ class FindingOutcomeReport(BaseModel):
             "rejected": 0,
             "intentional": 0,
             "ignored": 0,
+            "stale": 0,
             "unknown": 0,
         }
         for row in self.rows:
             counts[row.outcome] += 1
-        classified = sum(counts[k] for k in ("fixed", "rejected", "intentional", "ignored"))
+        classified = sum(counts[k] for k in ("fixed", "rejected", "intentional", "ignored", "stale"))
         if classified == 0:
             return {key: 0.0 for key in counts}
         return {key: counts[key] / classified for key in counts if key != "unknown"}
@@ -107,7 +110,9 @@ def classify_thread_outcome(
     if thread.get("isResolved") or thread.get("resolved"):
         return "fixed", "thread resolved"
     if thread.get("isOutdated") or thread.get("outdated"):
-        return "fixed", "thread outdated"
+        # Outdated only means the anchored line changed; it does not prove the
+        # finding was addressed, so it must not inflate the "fixed" rate (#1251).
+        return "stale", "thread outdated (anchor changed; not confirmed fixed)"
     human = _human_replies(comments, publishers)
     combined = "\n".join(human)
     if combined and _REJECT_RE.search(combined):
