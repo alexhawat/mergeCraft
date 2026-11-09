@@ -715,7 +715,9 @@ def resolve_agent_sandbox_decision(
     # it rather than a tighter one: the remedy text would otherwise tell the
     # operator to switch tiers to get what they already have.
     granting_tier: AgentSandboxLevel | None
-    if configured_native_honour and author_gate_outcome.status != "refused":
+    if not operator_override_requested:
+        granting_tier = None
+    elif configured_native_honour and author_gate_outcome.status != "refused":
         granting_tier = configured_tier
     else:
         granting_tier = _minimal_granting_tier(

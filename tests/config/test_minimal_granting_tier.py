@@ -129,3 +129,22 @@ def test_a_configured_tier_that_already_grants_is_the_granting_tier(
     assert decision.honour is True
     assert decision.granting_tier == "same-repo"
     assert probed == []
+
+
+def test_no_override_does_not_probe_for_a_remedy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    probed = _patch_ancestor(monkeypatch, is_ancestor=False)
+    write_trust_config(tmp_path, agent_sandbox="dispatch", self_review="off")
+    snapshot = capture_repo_settings_snapshot(root=tmp_path, load_learnings_files=False)
+    decision = resolve_agent_sandbox_decision(
+        event=deepcopy(SAME_REPO_PULL_REQUEST_EVENT),
+        event_name="pull_request",
+        config_root=tmp_path,
+        settings_snapshot=snapshot,
+        head_sha=_HEAD_SHA,
+        operator_override_requested=False,
+    )
+    assert not decision.honour
+    assert decision.granting_tier is None
+    assert probed == []
