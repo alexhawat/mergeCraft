@@ -94,3 +94,22 @@ def test_distinct_and_repeated_values_are_fine() -> None:
         "b": {"a": 1},
         "c": [{"a": 1}, {"a": 2}],
     }
+
+
+@pytest.mark.parametrize(
+    "body", ["- synthetic-private-value\n", "synthetic-private-value\n", "42\n"]
+)
+@pytest.mark.parametrize("explicit", [True, False])
+def test_non_mapping_root_is_a_configuration_error(
+    tmp_path: Path, body: str, explicit: bool
+) -> None:
+    from mergecraft.main import _classify_error_outcome
+    from mergecraft.run_outcome import RunOutcome
+
+    path = _committed(tmp_path, body)
+    with pytest.raises(ConfigParseError, match="config parse error") as caught:
+        load_repo_settings(
+            path=path if explicit else None, root=tmp_path, load_learnings_files=False
+        )
+    assert "synthetic-private-value" not in str(caught.value)
+    assert _classify_error_outcome(caught.value) == RunOutcome.configuration_error

@@ -43,7 +43,11 @@ class UniqueKeySafeLoader(yaml.SafeLoader):
 
 def safe_load_unique(text: str) -> Any:
     """Parse *text* with :class:`UniqueKeySafeLoader` (YAML 1.1 safe subset)."""
-    return yaml.load(text, Loader=UniqueKeySafeLoader)
+    loader = UniqueKeySafeLoader(text)
+    try:
+        return loader.get_single_data()
+    finally:
+        loader.dispose()
 
 
 __all__ = ["ConfigParseError", "DuplicateKeyError", "UniqueKeySafeLoader", "safe_load_unique"]

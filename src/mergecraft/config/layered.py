@@ -69,7 +69,7 @@ def _read_yaml_mapping(path: Path) -> dict[str, Any]:
         return {}
     if not isinstance(loaded, dict):
         msg = f"config must be a mapping: {path}"
-        raise ValueError(msg)
+        raise config_parse_error(path, ValueError(msg))
     return loaded
 
 

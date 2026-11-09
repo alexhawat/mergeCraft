@@ -1555,7 +1555,7 @@ def load_repo_settings(
                 raw = {}
             elif not isinstance(loaded, dict):
                 msg = f"config must be a mapping, got {type(loaded).__name__}: {candidate}"
-                raise ValueError(msg)
+                raise config_parse_error(candidate, ValueError(msg))
             else:
                 raw = migrate_config(loaded)
     else:
