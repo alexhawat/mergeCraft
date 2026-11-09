@@ -400,3 +400,78 @@ def test_base_collection_never_runs_a_diff_only_analyzer(monkeypatch, tmp_path: 
 
     assert ran == ["ruff"]
     assert result.succeeded_manifest_ids == frozenset({"ruff"})
+
+
+def test_base_worktree_checkout_timeout_is_a_failure_and_cleans_up(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import subprocess
+
+    from mergecraft.analyzers import baseline_suppression as bs
+
+    created: list[Path] = []
+    real_mkdtemp = bs.tempfile.mkdtemp
+
+    def _mkdtemp(**kwargs: object) -> str:
+        path = real_mkdtemp(dir=tmp_path, **kwargs)  # type: ignore[call-overload]
+        created.append(Path(path))
+        return path
+
+    seen: list[object] = []
+
+    def _hung(argv: list[str], **kwargs: object) -> object:
+        seen.append(kwargs.get("timeout"))
+        Path(created[-1], "partial").write_text("x", encoding="utf-8")
+        raise subprocess.TimeoutExpired(cmd=argv, timeout=120)
+
+    monkeypatch.setattr(bs.tempfile, "mkdtemp", _mkdtemp)
+    monkeypatch.setattr(bs.subprocess, "run", _hung)
+
+    assert bs._checkout_base_worktree(tmp_path, "origin/main") is None
+    assert seen == [bs._GIT_WORKTREE_TIMEOUT_S]
+    assert not created[0].exists(), "a timed-out checkout must not leave its temp tree behind"
+
+
+def test_base_worktree_failed_checkout_removes_non_empty_temp_tree(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import subprocess
+
+    from mergecraft.analyzers import baseline_suppression as bs
+
+    created: list[Path] = []
+    real_mkdtemp = bs.tempfile.mkdtemp
+
+    def _mkdtemp(**kwargs: object) -> str:
+        path = real_mkdtemp(dir=tmp_path, **kwargs)  # type: ignore[call-overload]
+        created.append(Path(path))
+        return path
+
+    def _failed(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        Path(created[-1], "partial").write_text("x", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 128, stdout="", stderr="fatal: boom")
+
+    monkeypatch.setattr(bs.tempfile, "mkdtemp", _mkdtemp)
+    monkeypatch.setattr(bs.subprocess, "run", _failed)
+
+    assert bs._checkout_base_worktree(tmp_path, "origin/main") is None
+    assert not created[0].exists()
+
+
+def test_base_worktree_removal_timeout_still_cleans_the_tree(monkeypatch, tmp_path: Path) -> None:
+    import subprocess
+
+    from mergecraft.analyzers import baseline_suppression as bs
+
+    worktree = tmp_path / "mergecraft-base-x"
+    worktree.mkdir()
+    (worktree / "file").write_text("x", encoding="utf-8")
+
+    def _hung(argv: list[str], **kwargs: object) -> None:
+        assert kwargs.get("timeout") == bs._GIT_WORKTREE_TIMEOUT_S
+        raise subprocess.TimeoutExpired(cmd=argv, timeout=120)
+
+    monkeypatch.setattr(bs.subprocess, "run", _hung)
+
+    bs._remove_base_worktree(tmp_path, worktree)
+    assert not worktree.exists()
