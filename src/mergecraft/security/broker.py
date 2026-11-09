@@ -329,10 +329,8 @@ def _redact_stream_chunk(chunk: bytes) -> bytes:
     try:
         text = chunk.decode()
     except UnicodeDecodeError:
-        try:
-            text = chunk.decode("latin-1")
-        except UnicodeDecodeError:
-            return chunk
+        # latin-1 maps every byte, so this decode cannot fail.
+        text = chunk.decode("latin-1")
         redacted = redact_broker_output(text)
         return redacted.encode("latin-1") if redacted != text else chunk
     redacted = redact_broker_output(text)
