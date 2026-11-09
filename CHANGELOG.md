@@ -420,6 +420,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Free-text secret redaction no longer leaks random credentials. The camelCase
+  identifier exemption now requires word-shaped keys (``ruleId``,
+  ``partialFingerprints``) instead of any lowercase-led blob with a capital, the
+  entropy threshold is capped at 4.5 bits per character so long tokens cannot
+  outgrow it, and fine-grained GitHub PATs (``github_pat_``), PyPI tokens and
+  ``Bearer`` credentials are redacted by pattern (the ``Bearer`` word is kept)
+  (#1232).
 - actionlint now lints workflow files only. Action manifests (root `action.yml`
   and `.github/actions/**/action.yml`, composite or not) were linted against the
   workflow schema, producing false Major `syntax-check` blockers; zizmor still
