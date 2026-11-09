@@ -81,9 +81,11 @@ def test_resolve_payload_permissions(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("INPUT_TIMEOUT", raising=False)
     monkeypatch.delenv("INPUT_MODEL", raising=False)
     monkeypatch.delenv("INPUT_CWD", raising=False)
-    # No native GH event — expect the 'unknown' trigger fallback.
+    # No native GH event — expect the 'unknown' trigger fallback. Inside Actions
+    # an unmodelled event is not trusted, so the floors still apply.
     monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
     monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
 
     settings = default_settings()
     settings = settings.model_copy(update={"shell": "enabled", "model": "anthropic/claude-opus"})
@@ -1101,15 +1103,63 @@ def test_workflow_dispatch_keeps_enabled_shell_and_push(
     assert payload["push"] == "enabled"
 
 
-def test_native_push_event_resolves_without_association_and_floors_push(
+@pytest.mark.parametrize("event_name", ["push", "schedule"])
+def test_writer_only_native_events_keep_enabled_shell_and_push(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, event_name: str
+) -> None:
+    """Only a writer can cause a ``push`` or ``schedule`` run, so the floors do not apply."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    _write_event(tmp_path, monkeypatch, event_name, {"ref": "refs/heads/main", "after": "abc"})
+    payload = _permissive_payload(monkeypatch)
+    assert payload["event"]["trigger"] == "unknown"
+    assert payload["event"]["authorPermission"] == "write"
+    assert payload["shell"] == "enabled"
+    assert payload["push"] == "enabled"
+
+
+def test_unmodelled_native_event_in_actions_floors_shell_and_push(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A ``push`` event has no author association: no crash, unknown trigger, floors apply."""
-    _write_event(tmp_path, monkeypatch, "push", {"ref": "refs/heads/main", "after": "abc"})
+    """An event type with no author model (``release``) stays untrusted inside Actions."""
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    _write_event(tmp_path, monkeypatch, "release", {"action": "published"})
     payload = _permissive_payload(monkeypatch)
     assert payload["event"]["trigger"] == "unknown"
     assert payload["event"]["authorPermission"] is None
+    assert payload["shell"] == "restricted"
     assert payload["push"] == "restricted"
+
+
+def test_local_run_outside_actions_is_the_operator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Outside GitHub Actions there is no event author: the operator started the run."""
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
+    payload = _permissive_payload(monkeypatch)
+    assert payload["event"]["trigger"] == "unknown"
+    assert payload["shell"] == "enabled"
+    assert payload["push"] == "enabled"
+
+
+def test_local_run_with_a_read_only_json_author_is_still_floored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit ``read`` author permission is honoured even outside Actions."""
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setenv(
+        "INPUT_PROMPT",
+        json.dumps(
+            {
+                "~mergecraft": True,
+                "version": "0.1.0",
+                "prompt": "hi",
+                "event": {"trigger": "unknown", "authorPermission": "read"},
+            }
+        ),
+    )
+    monkeypatch.delenv("INPUT_PROMPT_FILE", raising=False)
+    monkeypatch.setenv("INPUT_PUSH", "enabled")
+    assert resolve_payload(repo_settings=default_settings())["push"] == "restricted"
 
 
 @pytest.mark.parametrize(

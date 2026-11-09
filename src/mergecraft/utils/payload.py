@@ -28,6 +28,8 @@ ProgressCommentType = Literal["issue", "review"]
 
 COLLABORATOR_PERMISSIONS: frozenset[AuthorPermission] = frozenset({"admin", "maintain", "write"})
 TRUSTED_AUTHOR_ASSOCIATIONS: frozenset[str] = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+# Native events only an actor with write access can cause (#1238).
+_WRITER_ONLY_EVENTS: frozenset[str] = frozenset({"push", "schedule"})
 
 PayloadTrigger = Literal[
     "pull_request_opened",
@@ -185,6 +187,30 @@ def is_mergecraft(actor: str | None) -> bool:
 def is_collaborator(event: PayloadEvent) -> bool:
     perm = event.author_permission
     return perm is not None and perm in COLLABORATOR_PERMISSIONS
+
+
+def _is_operator_run(event: PayloadEvent) -> bool:
+    """True for a run the operator started themselves, outside GitHub Actions.
+
+    A local invocation has no triggering event and no author to check: whoever
+    runs the command is the operator. Inside Actions an unknown event stays
+    untrusted, so an event type mergeCraft does not model never gains the
+    collaborator floors' exemption by accident (#1238).
+
+    Args:
+        event (PayloadEvent): The resolved run event.
+
+    Returns:
+        bool: True only for an ``unknown`` trigger with no author permission,
+        resolved outside GitHub Actions.
+    """
+    from mergecraft.config.layered import running_in_github_actions
+
+    return (
+        event.trigger == "unknown"
+        and event.author_permission is None
+        and not running_in_github_actions()
+    )
 
 
 def is_payload_event(value: object) -> bool:
@@ -460,6 +486,13 @@ def resolve_native_event(*, allowlist: tuple[str, ...] = ()) -> dict[str, Any] |
     if event_name == "workflow_dispatch":
         # GitHub only lets an actor with write access dispatch a workflow.
         return {"trigger": "workflow_dispatch", "authorPermission": "write"}
+
+    if event_name in _WRITER_ONLY_EVENTS:
+        # A ``push`` run exists because someone with write access pushed to this
+        # repository, and a ``schedule`` run comes from the default branch's own
+        # workflow file. Neither can be started by an outside contributor, so the
+        # run keeps the unknown trigger but counts as a writer for the floors.
+        return {"trigger": "unknown", "authorPermission": "write"}
 
     return None
 
@@ -738,7 +771,7 @@ def resolve_payload(
 
     model = (json_payload.model if json_payload else None) or inputs.model or settings.model or None
 
-    non_collaborator = not is_collaborator(event)
+    non_collaborator = not (is_collaborator(event) or _is_operator_run(event))
     repo_shell: ShellPermission = settings.shell or "restricted"
     resolved_shell = _stricter_shell(
         repo_shell,
