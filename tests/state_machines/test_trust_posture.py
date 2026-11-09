@@ -19,3 +19,12 @@ def test_trusted_execution_allows_full_analyzers() -> None:
     ts.trust_tier = "trusted"
     posture = trust_posture_from_tool_state(ts, analyzers_mode="full")
     assert posture.may_run_full_analyzers() is True
+
+
+def test_unknown_manifest_mode_restricts_trusted_execution() -> None:
+    ts = init_tool_state(owner="o", name="n", dir="/tmp/x")
+    ts.trust_tier = "trusted"
+    ts.run_manifest_trust["analyzers_mode"] = "unknown"
+    posture = trust_posture_from_tool_state(ts)
+    assert posture.analyzers_mode == "untrusted-only"
+    assert posture.may_run_full_analyzers() is False

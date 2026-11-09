@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from mergecraft.analyzers.trust import resolve_analyzers_mode
+
 if TYPE_CHECKING:
     from mergecraft.analyzers.trust import AnalyzersMode
     from mergecraft.config.trust_policy import AuthorGateStatus, TrustPolicy
@@ -43,21 +45,17 @@ def trust_posture_from_tool_state(
     authority = (
         authority_trust or tool_state.authority_trust or tool_state.trust_tier or "untrusted"
     ).lower()
-    mode_raw = (
-        analyzers_mode or tool_state.run_manifest_trust.get("analyzers_mode") or "auto"
-    ).lower()
-    analyzers: AnalyzersMode = "auto"
-    if mode_raw in {"off", "auto", "full", "untrusted-only"}:
-        analyzers = mode_raw  # type: ignore[assignment]  # — membership narrows to AnalyzersMode
-    gate = "not-configured"
+    gate: AuthorGateStatus = "not-configured"
     if tool_state.agent_sandbox_decision is not None:
         gate = tool_state.agent_sandbox_decision.author_gate
     return TrustPosture(
         execution_trust="trusted" if tier == "trusted" else "untrusted",
         authority_trust="trusted" if authority == "trusted" else "untrusted",
-        analyzers_mode=analyzers,
+        analyzers_mode=resolve_analyzers_mode(
+            analyzers_mode or tool_state.run_manifest_trust.get("analyzers_mode")
+        ),
         self_review_level=tool_state.trust_self_review_level or "off",
-        author_gate_status=gate,  # type: ignore[arg-type]  # — gate is a runtime string from sandbox decision
+        author_gate_status=gate,
     )
 
 

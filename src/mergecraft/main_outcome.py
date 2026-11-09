@@ -19,6 +19,7 @@ from mergecraft.tracing.event import trace_attrs_for_mode
 if TYPE_CHECKING:
     from mergecraft.action.inputs import SetupFailurePolicy
     from mergecraft.agents.shared import AgentResult
+    from mergecraft.config.settings import GateMode
     from mergecraft.evidence.shadow import VerdictProtocolPrediction
     from mergecraft.mcp.tool_state import ToolState
     from mergecraft.mcp.verdict import VerdictDiagnostic
@@ -105,7 +106,7 @@ def _publication_outcome_inputs(
     tool_state: ToolState,
     *,
     result: AgentResult,
-    verdict_protocol: str | None,
+    verdict_protocol: GateMode | None,
 ) -> tuple[bool | None, tuple[str, str] | None]:
     """Return ``(terminal_publication_receipt, terminal_publication_mismatch)``.
 
@@ -121,7 +122,7 @@ def _publication_outcome_inputs(
     resolution = resolve_terminal_publication(
         tool_state,
         result=result,
-        verdict_protocol=verdict_protocol,  # type: ignore[arg-type]  # — param is str | None at this callsite
+        verdict_protocol=verdict_protocol,
         mode=tool_state.selected_mode,
     )
     return resolution.terminal_publication_receipt, resolution.terminal_publication_mismatch
