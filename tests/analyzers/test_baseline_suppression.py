@@ -412,8 +412,8 @@ def test_base_worktree_checkout_timeout_is_a_failure_and_cleans_up(
     created: list[Path] = []
     real_mkdtemp = bs.tempfile.mkdtemp
 
-    def _mkdtemp(**kwargs: object) -> str:
-        path = real_mkdtemp(dir=tmp_path, **kwargs)  # type: ignore[call-overload]
+    def _mkdtemp(prefix: str = "") -> str:
+        path = real_mkdtemp(dir=tmp_path, prefix=prefix)
         created.append(Path(path))
         return path
 
@@ -442,8 +442,8 @@ def test_base_worktree_failed_checkout_removes_non_empty_temp_tree(
     created: list[Path] = []
     real_mkdtemp = bs.tempfile.mkdtemp
 
-    def _mkdtemp(**kwargs: object) -> str:
-        path = real_mkdtemp(dir=tmp_path, **kwargs)  # type: ignore[call-overload]
+    def _mkdtemp(prefix: str = "") -> str:
+        path = real_mkdtemp(dir=tmp_path, prefix=prefix)
         created.append(Path(path))
         return path
 
