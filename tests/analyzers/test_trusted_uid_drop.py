@@ -19,6 +19,7 @@ import pytest
 from mergecraft.analyzers import sandbox as sandbox_mod
 from mergecraft.analyzers.resolve import AnalyzerPlan
 from mergecraft.analyzers.run import run_plan
+from tests.analyzers.support import patch_analyzer_spawn
 from tests.uid_drop_support import make_traversable_for_dropped_uid
 
 _DROP_UID = 4242
@@ -80,7 +81,7 @@ def pretend_root(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         seen["env"] = kwargs.get("env")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(subprocess, "run", _run)
+    patch_analyzer_spawn(monkeypatch, _run)
     return seen
 
 
@@ -150,7 +151,7 @@ def test_no_drop_is_requested_off_the_root_backend(
         captured["argv"] = list(argv)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(subprocess, "run", _run)
+    patch_analyzer_spawn(monkeypatch, _run)
 
     run_plan(_plan(tmp_path, context.scratch_dir), sandbox_context=context)
 
@@ -177,7 +178,7 @@ def test_unlandable_drop_is_a_named_unavailable_not_a_root_run(
         launched.append(list(argv))
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(subprocess, "run", _run)
+    patch_analyzer_spawn(monkeypatch, _run)
 
     outcome = run_plan(_plan(tmp_path, context.scratch_dir), sandbox_context=context)
 

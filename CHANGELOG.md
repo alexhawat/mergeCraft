@@ -420,6 +420,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An analyzer timeout now kills the analyzer's whole process group. The runner
+  starts analyzers as session leaders and `killpg`s them on timeout, so grandchildren
+  no longer outlive the gate (#1242).
 - ruff diagnostics are no longer all blocking Major: ruff emits `severity: error`
   for every rule, so the parser now keeps Major only for bug-class rule codes
   (syntax errors, undefined names, bugbear, security, pylint errors, async) and
