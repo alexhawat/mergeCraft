@@ -434,6 +434,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MCP shell, trusted analyzers and analyzer fallback environments; the action's
   `INPUT_TOKEN` and hyphenated inputs such as `INPUT_LOGFIRE-TOKEN` count as
   credentials. Non-secret names are still added (#1233).
+- One undecodable TruffleHog output line (a truncated write or a stray banner)
+  no longer discards the whole secret scan: the line is skipped and the
+  findings on every other line are kept. Output with no decodable line is still
+  reported as unparsable rather than as a clean scan (#1234).
 - actionlint now lints workflow files only. Action manifests (root `action.yml`
   and `.github/actions/**/action.yml`, composite or not) were linted against the
   workflow schema, producing false Major `syntax-check` blockers; zizmor still
