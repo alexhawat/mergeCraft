@@ -27,7 +27,7 @@ def config_pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, 
 
 
 @pytest.mark.parametrize("terminal_width", [40, 80])
-def test_malformed_base_is_reported_but_runtime_policy_is_preserved(
+def test_malformed_base_is_reported_and_runtime_fails_closed(
     config_pair: tuple[Path, Path, Path],
     monkeypatch: pytest.MonkeyPatch,
     terminal_width: int,
@@ -43,8 +43,11 @@ def test_malformed_base_is_reported_but_runtime_policy_is_preserved(
     assert result.exit_code != 0
     assert "config parse error" in result.output
     assert str(committed) in result.output.replace("\n", "")
-    assert load_repo_settings(root=root, load_learnings_files=False).shell == "restricted"
-    validate_repo_config_or_raise(cwd=root)
+    # #1249 - runtime must not widen to defaults (`restricted`) on a parse error.
+    with pytest.raises(ValueError, match="config parse error"):
+        load_repo_settings(root=root, load_learnings_files=False)
+    with pytest.raises(ValueError, match="config parse error"):
+        validate_repo_config_or_raise(cwd=root)
 
 
 def test_inherited_schema_error_is_not_hidden_by_local_overlay(

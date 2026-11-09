@@ -8,11 +8,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
-from loguru import logger
 
 from mergecraft.config.compat import migrate_config
 from mergecraft.config.env import ConfigLocatorEnv
 from mergecraft.config.io import config_path_for_root
+from mergecraft.config.yaml_unique import ConfigParseError, DuplicateKeyError, safe_load_unique
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -42,19 +42,29 @@ def merge_config_dicts(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> d
     return merged
 
 
-def _read_yaml_mapping(path: Path, *, strict: bool = False) -> dict[str, Any]:
+def config_parse_error(path: Path, exc: Exception) -> ConfigParseError:
+    """Build the fail-closed parse error for *path* without echoing YAML values.
+
+    Parser exception text can echo source lines (and so credentials); name the
+    file and error type only. A duplicate-key error is the exception: it carries
+    just the key name and line number.
+    """
+    detail = str(exc) if isinstance(exc, DuplicateKeyError) else type(exc).__name__
+    return ConfigParseError(f"config parse error: {path} ({detail})")
+
+
+def _read_yaml_mapping(path: Path) -> dict[str, Any]:
+    """Read one config file; an unreadable, malformed or ambiguous file is an error.
+
+    A config that cannot be parsed must never widen to defaults (#1249), and a
+    duplicated key must never silently keep the last value (#1250).
+    """
     if not path.is_file():
         return {}
     try:
-        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
-        if strict:
-            # Parser exception text can echo source values; name the file and
-            # error type without printing potential credentials from its YAML.
-            msg = f"config parse error: {path} ({type(exc).__name__})"
-            raise ValueError(msg) from exc
-        logger.warning("failed to parse config overlay {}: {}", path, exc)
-        return {}
+        loaded = safe_load_unique(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise config_parse_error(path, exc) from exc
     if loaded is None:
         return {}
     if not isinstance(loaded, dict):
@@ -68,27 +78,32 @@ def load_layered_config_dict(
     root: Path,
     explicit_path: Path | str | None = None,
     include_local: bool | None = None,
-    strict: bool = False,
+    strict: bool = True,
 ) -> dict[str, Any]:
-    """Load merged config; strict parsing is for explicit validation, not runtime."""
+    """Load merged config, failing closed on unparseable or ambiguous files.
+
+    ``strict`` is retained for call-site compatibility; parsing is always strict
+    (``config-failure-policy.md``).
+    """
+    _ = strict
     if explicit_path is not None:
         candidate = Path(explicit_path)
         if not candidate.is_file():
             return {}
-        return migrate_config(_read_yaml_mapping(candidate, strict=strict))
+        return migrate_config(_read_yaml_mapping(candidate))
 
     env_path = ConfigLocatorEnv().config_path
     if env_path:
         candidate = Path(env_path)
         if candidate.is_file():
-            return migrate_config(_read_yaml_mapping(candidate, strict=strict))
+            return migrate_config(_read_yaml_mapping(candidate))
 
-    committed = migrate_config(_read_yaml_mapping(config_path_for_root(root), strict=strict))
+    committed = migrate_config(_read_yaml_mapping(config_path_for_root(root)))
     use_local = include_local if include_local is not None else not running_in_github_actions()
     if not use_local:
         return committed
 
-    local_raw = _read_yaml_mapping(local_config_path(root), strict=strict)
+    local_raw = _read_yaml_mapping(local_config_path(root))
     if not local_raw:
         return committed
     return migrate_config(merge_config_dicts(committed, local_raw))
@@ -150,6 +165,7 @@ def resolved_config_path(root: Path) -> Path | None:
 
 __all__ = [
     "ConfigSources",
+    "config_parse_error",
     "load_layered_config_dict",
     "local_config_path",
     "merge_config_dicts",
