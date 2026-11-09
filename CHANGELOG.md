@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Config: the run-start integrity hash now covers the files the layered loader reads (the `MERGECRAFT_CONFIG` file when set), uses a stable sentinel when no config exists so a file appearing mid-run is detected, and fails closed if a contributing file cannot be hashed ([#1244](https://github.com/alexhawat/mergeCraft/issues/1244))
+- MCP: `get_issue`, `get_issue_comments` and `get_issue_events` no longer rebind the run's issue number, so reading another issue cannot redirect progress comments or review scope ([#1245](https://github.com/alexhawat/mergeCraft/issues/1245))
+- Jev: an unknown question pack now raises `JevError(invalid_pack)` instead of sending the caller's state unfiltered and unfenced ([#1246](https://github.com/alexhawat/mergeCraft/issues/1246))
+- Sandbox: the `RLIMIT_NPROC` fallback when the privilege-drop probe cannot answer keeps the extra fork headroom the probed path adds ([#1247](https://github.com/alexhawat/mergeCraft/issues/1247))
+- Hardening: `git_argv` adds `--no-ext-diff`/`--no-textconv` for `log -u`, `-U<n>`, `-W`, `-L`, `-c` and bundled forms such as `-uz` ([#1248](https://github.com/alexhawat/mergeCraft/issues/1248))
+
+### Security
+
+- Config: a config file that cannot be parsed now fails the run closed (`config parse error: <file> (<ErrorType>)`, no YAML values echoed) instead of warning and loading defaults ([#1249](https://github.com/alexhawat/mergeCraft/issues/1249))
+- Config: duplicate mapping keys at any depth are rejected, naming the key and line, instead of silently keeping the last value ([#1250](https://github.com/alexhawat/mergeCraft/issues/1250))
+
 ## [0.1.0a5] — 2026-11-08
 
 ### Added
