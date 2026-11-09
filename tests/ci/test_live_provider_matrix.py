@@ -123,7 +123,7 @@ def test_run_live_integration_fails_loud_without_creds(monkeypatch: Any) -> None
     monkeypatch.setenv("MERGECRAFT_LIVE_PROVIDER", "github")
     monkeypatch.setenv("MERGECRAFT_LIVE_PYTEST_MARKER", runner.LIVE_PYTEST_MARKER)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-    assert runner.main([]) == 1
+    assert runner.main() == 1
 
 
 def test_suite_is_inert_on_pull_request() -> None:

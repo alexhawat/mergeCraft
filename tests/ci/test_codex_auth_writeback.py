@@ -35,6 +35,10 @@ def _jobs() -> dict[str, dict[str, Any]]:
 
 
 def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
+    if "uses" in job:
+        # A reusable-workflow call cannot contain inline steps.
+        assert "steps" not in job
+        return []
     steps = job.get("steps")
     assert isinstance(steps, list)
     return [step for step in steps if isinstance(step, dict)]

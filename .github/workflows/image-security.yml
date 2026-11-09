@@ -11,7 +11,12 @@ concurrency:
   group: image-security-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  changes:
+    uses: ./.github/workflows/classify-pr.yml
+
   scan:
+    needs: changes
+    if: needs.changes.outputs.image_only != 'true'
     name: Image scan (${{ matrix.image }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -70,6 +75,12 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           trivyignores: .trivyignore
+      - name: List blocking image findings
+        if: failure() && hashFiles('trivy-image.json') != ''
+        run: |
+          jq -r '.Results[] | .Target as $target |
+            (.Vulnerabilities[]? | [$target, .VulnerabilityID, .PkgName, .InstalledVersion, .FixedVersion]),
+            (.Secrets[]? | [$target, .RuleID, .Severity]) | @tsv' trivy-image.json
       - name: Convert scan report
         if: always() && hashFiles('trivy-image.json') != ''
         run: make image-scan-sarif
