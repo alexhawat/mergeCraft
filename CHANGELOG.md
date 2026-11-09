@@ -420,6 +420,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- ruff diagnostics are no longer all blocking Major: ruff emits `severity: error`
+  for every rule, so the parser now keeps Major only for bug-class rule codes
+  (syntax errors, undefined names, bugbear, security, pylint errors, async) and
+  maps style/import/unused-name rules to Minor (#1241).
 - Sandbox harness startup failures (`unshare`/`bwrap`/`setpriv` refusing to create
   a namespace, fork `EAGAIN`, `uid_map` write denied) are now classified as
   `sandboxed: isolation unavailable` and reported `declared-but-cannot-run`
