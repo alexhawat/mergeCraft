@@ -21,6 +21,7 @@ from mergecraft.utils.time_parse import (
     parse_timeout,
     resolve_timeout_ms,
 )
+from mergecraft.utils.workspace import WorkspacePathError
 
 StatusChecksInput = Literal["disabled", "enabled"]
 SuggestEvalAddInput = Literal["disabled", "enabled"]
@@ -434,7 +435,7 @@ def resolve_cwd(cwd: str | None) -> str | None:
     the value passes through unchanged.
 
     Raises:
-        ValueError: ``cwd`` resolves outside ``GITHUB_WORKSPACE``.
+        WorkspacePathError: ``cwd`` resolves outside ``GITHUB_WORKSPACE``.
     """
     workspace = os.environ.get("GITHUB_WORKSPACE")
     if not cwd:
@@ -445,7 +446,7 @@ def resolve_cwd(cwd: str | None) -> str | None:
     candidate = path if path.is_absolute() else Path(workspace) / cwd
     if not candidate.resolve().is_relative_to(Path(workspace).resolve()):
         msg = f"cwd {cwd!r} resolves outside GITHUB_WORKSPACE {workspace!r}; refusing to use it."
-        raise ValueError(msg)
+        raise WorkspacePathError(msg)
     return str(candidate)
 
 

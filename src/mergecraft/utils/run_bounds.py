@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 from loguru import logger
 
 from mergecraft.run_outcome import RunOutcome
-from mergecraft.utils.diff_paths import post_image_path_from_header
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -415,6 +414,8 @@ def outcome_with_scope_reduction(
 
 
 def _diff_file_blocks(diff_text: str) -> list[tuple[str, str]]:
+    from mergecraft.utils.diff_paths import post_image_path_from_header
+
     blocks: list[tuple[str, str]] = []
     current_path: str | None = None
     current_lines: list[str] = []

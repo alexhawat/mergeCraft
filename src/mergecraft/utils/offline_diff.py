@@ -8,7 +8,6 @@ from pathlib import Path
 
 from loguru import logger
 
-from mergecraft.utils.diff_paths import post_image_path_from_header
 from mergecraft.utils.git_hardening import git_argv
 from mergecraft.utils.runtime_artifacts import is_untracked_runtime_artifact
 
@@ -285,6 +284,8 @@ def materialize_diff(
 
 def summarize_diff(text: str) -> str:
     """Return a short TOC-like summary of changed paths in a unified diff."""
+    from mergecraft.utils.diff_paths import post_image_path_from_header
+
     paths: list[str] = []
     for line in text.splitlines():
         if line.startswith("diff --git "):
