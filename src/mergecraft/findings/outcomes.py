@@ -21,9 +21,7 @@ from mergecraft.review_resolution import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-FindingOutcomeKind = Literal[
-    "fixed", "rejected", "intentional", "ignored", "stale", "unknown"
-]
+FindingOutcomeKind = Literal["fixed", "rejected", "intentional", "ignored", "stale", "unknown"]
 
 _INTENTIONAL_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(won'?t fix|wontfix|by design|intentional)\b",
@@ -73,7 +71,9 @@ class FindingOutcomeReport(BaseModel):
         }
         for row in self.rows:
             counts[row.outcome] += 1
-        classified = sum(counts[k] for k in ("fixed", "rejected", "intentional", "ignored", "stale"))
+        classified = sum(
+            counts[k] for k in ("fixed", "rejected", "intentional", "ignored", "stale")
+        )
         if classified == 0:
             return {key: 0.0 for key in counts}
         return {key: counts[key] / classified for key in counts if key != "unknown"}
