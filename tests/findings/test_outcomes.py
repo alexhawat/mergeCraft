@@ -37,6 +37,15 @@ def _production_thread(
     }
 
 
+def test_outdated_unresolved_is_not_fixed() -> None:
+    thread = _production_thread(outdated=True, resolved=False)
+    outcome, reason = classify_thread_outcome(
+        thread, publishers=frozenset({"mergecraft[bot]"}), merged=False
+    )
+    assert outcome == "unknown"
+    assert "stale" in reason
+
+
 def test_resolved_thread_is_fixed() -> None:
     thread = _production_thread(resolved=True)
     outcome, _reason = classify_thread_outcome(

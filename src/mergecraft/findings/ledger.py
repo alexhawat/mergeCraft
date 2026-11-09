@@ -19,6 +19,7 @@ from urllib.parse import quote, unquote
 from loguru import logger
 
 from mergecraft.findings.lifecycle import LifecycleRecord, LifecycleState, validate_lifecycle_state
+from mergecraft.findings.lifecycle_transitions import assert_lifecycle_transition
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
@@ -78,6 +79,8 @@ class FindingLedger:
         recorded_at: str | None = None,
     ) -> LifecycleRecord:
         """Upsert one lifecycle transition for ``fingerprint``."""
+        prior = self._records.get(fingerprint)
+        assert_lifecycle_transition(prior.state if prior is not None else None, state)
         stamp = recorded_at or datetime.now(UTC).replace(microsecond=0).isoformat().replace(
             "+00:00", "Z"
         )
