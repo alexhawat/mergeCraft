@@ -425,15 +425,28 @@ def resolve_native_event(*, allowlist: tuple[str, ...] = ()) -> dict[str, Any] |
 
 
 def resolve_cwd(cwd: str | None) -> str | None:
+    """Resolve the ``cwd`` input, confined to ``GITHUB_WORKSPACE`` when it is set.
+
+    A relative ``cwd`` is joined onto the workspace; an absolute one is taken
+    as given. With a workspace set, the symlink-resolved result must lie inside
+    it, so ``../..`` and absolute paths elsewhere are a configuration error
+    rather than silently widening the run's root (#1259). Without a workspace
+    the value passes through unchanged.
+
+    Raises:
+        ValueError: ``cwd`` resolves outside ``GITHUB_WORKSPACE``.
+    """
     workspace = os.environ.get("GITHUB_WORKSPACE")
     if not cwd:
         return workspace
     path = Path(cwd)
-    if path.is_absolute():
-        return str(path)
-    if workspace:
-        return str(Path(workspace) / cwd)
-    return cwd
+    if not workspace:
+        return str(path) if path.is_absolute() else cwd
+    candidate = path if path.is_absolute() else Path(workspace) / cwd
+    if not candidate.resolve().is_relative_to(Path(workspace).resolve()):
+        msg = f"cwd {cwd!r} resolves outside GITHUB_WORKSPACE {workspace!r}; refusing to use it."
+        raise ValueError(msg)
+    return str(candidate)
 
 
 def resolve_prompt_file(input_path: str) -> str:
