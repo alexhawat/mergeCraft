@@ -420,6 +420,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MCP `shell` and the repository tools (`git`, `git_fetch`, `push_branch`, `push_tags`,
+  `delete_branch`, `commit_changes`) no longer run blocking subprocess calls on the
+  event loop (they run via `asyncio.to_thread`), so a slow command stops stalling every
+  other tool call. A shell command that times out and then also fails the post-kill
+  drain is now reaped and returns the output gathered so far instead of raising (#1243).
 - An analyzer timeout now kills the analyzer's whole process group. The runner
   starts analyzers as session leaders and `killpg`s them on timeout, so grandchildren
   no longer outlive the gate (#1242).
