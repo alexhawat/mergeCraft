@@ -277,6 +277,66 @@ def test_sandbox_exec_policy_denies_network_and_writes_outside_workspace(
     assert "git$" in policy or "/git" in policy
 
 
+def _read_rules(policy: str) -> list[str]:
+    return [
+        line
+        for line in policy.splitlines()
+        if line.startswith(("(allow file-read", "(deny file-read"))
+    ]
+
+
+def test_sandbox_exec_policy_scopes_reads_instead_of_allowing_the_host(tmp_path: Path) -> None:
+    """#1237 — no host-wide read grant; reads are workspace plus a system allowlist."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    policy = sandbox_mod.sandbox_exec_policy(workspace=workspace, home=Path("/Users/me"))
+    rules = _read_rules(policy)
+    assert "(allow file-read*)" not in rules
+    assert "(allow file-read-data)" not in rules
+    # Only metadata (stat / path resolution) is granted without a filter.
+    assert [rule for rule in rules if " (" not in rule] == ["(allow file-read-metadata)"]
+    system_rule = next(rule for rule in rules if '(subpath "/usr")' in rule)
+    for path in ("/bin", "/System", "/Library", "/private/etc", "/opt", "/dev"):
+        assert f'(subpath "{path}")' in system_rule
+    assert '(subpath "/Users")' not in policy
+    assert f'(allow file-read* (subpath "{workspace}")' in policy
+
+
+def test_sandbox_exec_policy_denies_home_but_re_allows_a_workspace_under_it() -> None:
+    """#1237 — ``$HOME`` is denied and the workspace rule is ordered after it (last match wins)."""
+    home = Path("/Users/me")
+    workspace = home / "code" / "repo"
+    rules = _read_rules(sandbox_mod.sandbox_exec_policy(workspace=workspace, home=home))
+    deny_home = rules.index('(deny file-read* (subpath "/Users/me"))')
+    allow_workspace = rules.index('(allow file-read* (subpath "/Users/me/code/repo"))')
+    allow_system = next(i for i, rule in enumerate(rules) if '(subpath "/usr")' in rule)
+    assert allow_system < deny_home < allow_workspace
+
+
+@pytest.mark.parametrize("home", [None, Path("/")])
+def test_sandbox_exec_policy_without_a_usable_home_still_scopes_reads(
+    tmp_path: Path, home: Path | None
+) -> None:
+    """A missing or root ``HOME`` adds no deny rule (denying ``/`` would deny everything)."""
+    policy = sandbox_mod.sandbox_exec_policy(workspace=tmp_path, home=home)
+    assert "(deny file-read*" not in policy
+    assert "(allow file-read*)\n" not in policy
+
+
+def test_build_sandbox_exec_argv_denies_the_invoking_users_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The argv builder passes the real home to the policy, not just the workspace."""
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    argv = sandbox_mod.build_sandbox_exec_argv(("echo", "ok"), workspace=workspace)
+    policy = argv[argv.index("-p") + 1]
+    assert f'(deny file-read* (subpath "{fake_home}")' in policy
+
+
 def test_build_sandbox_exec_argv_invokes_sandbox_exec(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     workspace.mkdir()

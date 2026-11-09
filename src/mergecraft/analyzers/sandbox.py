@@ -277,15 +277,76 @@ def _workspace_git_paths(workspace: Path) -> tuple[str, ...]:
     return tuple(paths)
 
 
-def sandbox_exec_policy(*, workspace: Path) -> str:
-    """Seatbelt profile: workspace writes except ``.git``; git exec denied; network denied."""
-    subpaths = " ".join(
-        f'(subpath "{_sbpl_escape(path)}")' for path in _workspace_write_subpaths(workspace)
-    )
+# System locations a shell and the usual macOS toolchains (Xcode CLT,
+# Homebrew, MacPorts, Nix) read from. ``/etc``, ``/tmp`` and ``/var`` are
+# symlinks into ``/private``; the literals let the link itself resolve.
+_SEATBELT_SYSTEM_READ_SUBPATHS: tuple[str, ...] = (
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/System",
+    "/Library",
+    "/opt",
+    "/nix",
+    "/dev",
+    "/Applications/Xcode.app",
+    "/private/etc",
+    "/private/tmp",
+    "/private/var/folders",
+    "/private/var/select",
+    "/private/var/db/timezone",
+    "/private/var/db/xcode_select_link",
+    "/private/var/db/dyld",
+)
+_SEATBELT_SYSTEM_READ_LITERALS: tuple[str, ...] = ("/", "/etc", "/tmp", "/var", "/private")
+
+
+def sandbox_exec_policy(*, workspace: Path, home: Path | None = None) -> str:
+    r"""Build the Darwin Seatbelt profile for a sandboxed shell or analyzer.
+
+    Reads are limited to the workspace and an allowlist of system paths, not
+    the whole host (#1237): on macOS this profile is the shell's only
+    filesystem boundary, with none of the Linux git binds, binary masks,
+    socket nulling or privilege drop. The user's home is denied outright, so
+    ``~/.ssh``, ``~/.aws`` or ``~/.config/gh`` stay unreadable even when a
+    system path would otherwise cover it; the workspace is re-allowed after
+    that deny because a checkout commonly lives under ``$HOME``. Metadata
+    reads stay global so path resolution and ``stat`` of parent directories
+    keep working. Writes are confined to the workspace minus ``.git``, git is
+    not executable and the network is denied. Seatbelt applies the last
+    matching rule, so rule order is load-bearing.
+
+    Args:
+        workspace (Path): Directory the sandboxed process may read and write.
+        home (Path | None, optional): The user's home directory to deny.
+            Defaults to None (no home rule; the system allowlist still holds).
+
+    Returns:
+        str: A complete SBPL profile for ``sandbox-exec -p``.
+
+    Examples:
+        >>> policy = sandbox_exec_policy(workspace=Path("/ws"), home=Path("/Users/me"))
+        >>> '(deny file-read* (subpath "/Users/me"))' in policy
+        True
+        >>> "(allow file-read*)\n" in policy
+        False
+    """
+    workspace_paths = _workspace_write_subpaths(workspace)
+    subpaths = " ".join(f'(subpath "{_sbpl_escape(path)}")' for path in workspace_paths)
     git_filters = " ".join(
         f'(subpath "{_sbpl_escape(path)}") (literal "{_sbpl_escape(path)}")'
         for path in _workspace_git_paths(workspace)
     )
+    system_reads = " ".join(
+        [f'(literal "{path}")' for path in _SEATBELT_SYSTEM_READ_LITERALS]
+        + [f'(subpath "{path}")' for path in _SEATBELT_SYSTEM_READ_SUBPATHS]
+    )
+    home_deny = ""
+    if home is not None and str(home) not in {"", "/"}:
+        home_filters = " ".join(
+            f'(subpath "{_sbpl_escape(path)}")' for path in _workspace_write_subpaths(home)
+        )
+        home_deny = f"(deny file-read* {home_filters})\n"
     return (
         "(version 1)\n"
         "(deny default)\n"
@@ -295,7 +356,10 @@ def sandbox_exec_policy(*, workspace: Path) -> str:
         "(allow signal)\n"
         "(allow sysctl-read)\n"
         "(allow mach-lookup)\n"
-        "(allow file-read*)\n"
+        f"(allow file-read* {system_reads})\n"
+        f"{home_deny}"
+        f"(allow file-read* {subpaths})\n"
+        "(allow file-read-metadata)\n"
         f"(allow file-write* {subpaths})\n"
         f"(deny file-write* {git_filters})\n"
         '(allow file-write-data (literal "/dev/null") (literal "/dev/dtracehelper"))\n'
@@ -304,9 +368,19 @@ def sandbox_exec_policy(*, workspace: Path) -> str:
     )
 
 
+def _user_home() -> Path | None:
+    """Return the invoking user's home directory, or None when it cannot be resolved."""
+    try:
+        home = Path.home()
+    except (RuntimeError, KeyError):
+        return None
+    return home if home.is_absolute() else None
+
+
 def build_sandbox_exec_argv(argv: tuple[str, ...], *, workspace: Path) -> list[str]:
     """Wrap ``argv`` in ``sandbox-exec`` with the Darwin Seatbelt policy."""
-    return ["sandbox-exec", "-p", sandbox_exec_policy(workspace=workspace), "--", *argv]
+    policy = sandbox_exec_policy(workspace=workspace, home=_user_home())
+    return ["sandbox-exec", "-p", policy, "--", *argv]
 
 
 def _capabilities_without_linux_probe() -> SandboxCapabilities:

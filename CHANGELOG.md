@@ -427,6 +427,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   updates, empty sides and negative refspecs are refused, so the
   repository-read tool can no longer move local branches, tags or the base a
   review diffs against (#1236).
+- The macOS `sandbox-exec` profile for the MCP shell no longer grants
+  `(allow file-read*)` across the host. Reads are limited to the workspace and
+  an allowlist of system and toolchain paths (`/usr`, `/System`, `/Library`,
+  `/opt`, `/private/etc`, temp dirs, Xcode); the user's home directory is
+  denied, with the workspace re-allowed when it lives under `$HOME`. Metadata
+  reads stay global for path resolution. Toolchains installed under `$HOME`
+  (for example `~/.cargo`, `~/.pyenv`) are no longer readable from the
+  sandboxed shell (#1237).
 - actionlint now lints workflow files only. Action manifests (root `action.yml`
   and `.github/actions/**/action.yml`, composite or not) were linted against the
   workflow schema, producing false Major `syntax-check` blockers; zizmor still
