@@ -11,8 +11,8 @@ can run them offline.
 | --- | --- | --- |
 | `vulture` | `2.16` | `pyproject.toml` `[project.optional-dependencies] dev` → `.venv/bin` |
 | `typos` | `1.50.1` | same dev extra → `.venv/bin` |
-| `markdownlint-cli` | `0.49.1` (npm) | `scripts/package.json` → `scripts/node_modules/.bin` |
-| `markdownlint` (engine) | `0.41.1` | resolved via `scripts/package-lock.json` (catalog `version:`) |
+| `markdownlint-cli` | `0.50.0` (npm) | `scripts/package.json` → `scripts/node_modules/.bin` |
+| `markdownlint` (engine) | `0.42.0` | resolved via `scripts/package-lock.json` (catalog `version:`) |
 | `jscpd` | `4.1.0` | same npm tooling package |
 
 Pins match the `version:` fields in `src/mergecraft/analyzers/catalog/*.yaml` and
@@ -22,7 +22,7 @@ when `npm` is missing or `npm ci` fails, setup prints a warning and continues �
 `markdownlint` and `jscpd` are skipped locally until `scripts/node_modules` exists.
 `make npm-lockcheck` (in `make lint`) still enforces lockfile drift when npm is on PATH.
 
-`markdownlint-cli` 0.49.1 requires **Node >= 22** (0.45.0 dropped Node 18, 0.49.0
+`markdownlint-cli` 0.50.0 requires **Node >= 22** (0.45.0 dropped Node 18, 0.49.0
 dropped Node 20, and a transitive dependency wants >= 22.12.0). `docker/Dockerfile`,
 `docker/Dockerfile.analyzers` and `integration.yml` all pin Node 22, so CI and the
 shipped image are fine. Locally, `make setup-local-analyzers` fails soft: on
