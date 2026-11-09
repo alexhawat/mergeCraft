@@ -26,8 +26,10 @@ from mergecraft.findings.agent_adapter import normalize_agent_findings_via_pipel
 def diff(path: str, before: str, after: str, metadata: str = "") -> str:
     return f"diff --git a/{path} b/{path}\n{metadata}" + "".join(
         difflib.unified_diff(
-            before.splitlines(keepends=True), after.splitlines(keepends=True),
-            fromfile=f"a/{path}", tofile=f"b/{path}",
+            before.splitlines(keepends=True),
+            after.splitlines(keepends=True),
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
         )
     )
 
@@ -37,25 +39,47 @@ def main() -> None:
     config = FastPathSettings(enabled=True, skipLlm=["whitespace", "prose"])
     tick = chr(96)
     cases = [
-        ("python_literal_trailing_space", "src/value.py",
-         'TEXT = """first\nsecond  \nthird"""\n',
-         'TEXT = """first\nsecond\nthird"""\n', ""),
-        ("python_literal_blank_line", "src/value.py",
-         'TEXT = """first\n\nthird"""\n',
-         'TEXT = """first\nthird"""\n', ""),
-        ("typescript_template_indentation", "src/value.ts",
-         f"const text = {tick}first\n  second\nthird{tick};\n",
-         f"const text = {tick}first\nsecond\nthird{tick};\n", ""),
-        ("frontmatter_deleted", "docs/page.md",
-         "---\npermalink: /old-url/\npublished: false\n---\n# Body\n",
-         "# Body\n", ""),
-        ("executable_mode_and_whitespace", "src/run.sh",
-         "echo hi   \n", "echo hi\n", "old mode 100755\nnew mode 100644\n"),
+        (
+            "python_literal_trailing_space",
+            "src/value.py",
+            'TEXT = """first\nsecond  \nthird"""\n',
+            'TEXT = """first\nsecond\nthird"""\n',
+            "",
+        ),
+        (
+            "python_literal_blank_line",
+            "src/value.py",
+            'TEXT = """first\n\nthird"""\n',
+            'TEXT = """first\nthird"""\n',
+            "",
+        ),
+        (
+            "typescript_template_indentation",
+            "src/value.ts",
+            f"const text = {tick}first\n  second\nthird{tick};\n",
+            f"const text = {tick}first\nsecond\nthird{tick};\n",
+            "",
+        ),
+        (
+            "frontmatter_deleted",
+            "docs/page.md",
+            "---\npermalink: /old-url/\npublished: false\n---\n# Body\n",
+            "# Body\n",
+            "",
+        ),
+        (
+            "executable_mode_and_whitespace",
+            "src/run.sh",
+            "echo hi   \n",
+            "echo hi\n",
+            "old mode 100755\nnew mode 100644\n",
+        ),
     ]
     for name, path, before, after, metadata in cases:
         decision = triage_diff(
             diff(path, before, after, metadata),
-            config=config, head_files={path: after},
+            config=config,
+            head_files={path: after},
         )
         row = {"tier": decision.tier, "recognizer": decision.recognizer}
         assert decision.tier == "skip", (name, decision)
@@ -81,8 +105,12 @@ def main() -> None:
     out["severity_capping"] = severities
 
     rows = [
-        AgentFinding(path="src/app.py", line=line, severity="Major",
-                     body="The retry loop loses requests after reconnect.")
+        AgentFinding(
+            path="src/app.py",
+            line=line,
+            severity="Major",
+            body="The retry loop loses requests after reconnect.",
+        )
         for line in (10, 90)
     ]
     identity = {}
@@ -94,34 +122,43 @@ def main() -> None:
     out["occurrence_identity"] = identity
 
     common = dict(
-        category="Functional Correctness", confidence="certain",
-        message="Missing timeout on retry loop", path="src/app.py",
-        start_line=1, end_line=1, source="analyzer",
+        category="Functional Correctness",
+        confidence="certain",
+        message="Missing timeout on retry loop",
+        path="src/app.py",
+        start_line=1,
+        end_line=1,
+        source="analyzer",
     )
     major = make_finding(tool="z-scanner", rule_id="new-rule", severity="Major", **common)
     minor = make_finding(tool="a-scanner", rule_id="old-rule", severity="Minor", **common)
     head = introduced_by_base_diff([major, minor], [minor])
     patch = diff("src/app.py", "retry(old)\n", "retry(new)\n")
     reported = suppress_baseline_findings(
-        head_findings=head, base_findings=[minor], diff_text=patch, base_comparison="full",
+        head_findings=head,
+        base_findings=[minor],
+        diff_text=patch,
+        base_comparison="full",
     ).reported
     assert [f.introduced_by_pr for f in reported] == ["true", "false"]
     alone = cluster_findings([reported[0]])
     both = cluster_findings(reported)
     alone_gate = decide_approval(alone, run_succeeded=True, tier="trusted")
     both_gate = decide_approval(both, run_succeeded=True, tier="trusted")
-    assert alone_gate == "failure" and both_gate == "success"
+    assert alone_gate == "failure"
+    assert both_gate == "success"
     out["cluster_causality"] = {
         "input_causality_derived_from_baseline": [f.introduced_by_pr for f in reported],
         "alone": {"gate": alone_gate, "blockers": len(blocking_findings(alone))},
         "with_existing_minor": {
-            "gate": both_gate, "blockers": len(blocking_findings(both)),
-            "severity": both[0].severity, "introduced_by_pr": both[0].introduced_by_pr,
+            "gate": both_gate,
+            "blockers": len(blocking_findings(both)),
+            "severity": both[0].severity,
+            "introduced_by_pr": both[0].introduced_by_pr,
         },
     }
-    print(json.dumps(out, indent=2))
+    print(json.dumps(out, indent=2))  # noqa: T201 -- probe output is the script's purpose
 
 
 if __name__ == "__main__":
     main()
-

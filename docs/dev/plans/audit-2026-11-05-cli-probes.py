@@ -14,15 +14,15 @@ import asyncio
 import importlib.util
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 
 def emit(probe: str, **values: object) -> None:
-    print(json.dumps({"probe": probe, **values}, sort_keys=True))
+    print(json.dumps({"probe": probe, **values}, sort_keys=True))  # noqa: T201 -- probe output is the script's purpose
 
 
 def git(repo: Path, *args: str) -> str:
@@ -44,10 +44,15 @@ def init_repo(repo: Path) -> None:
     git(repo, "add", ".gitignore", "tracked.py")
     git(
         repo,
-        "-c", "user.name=Offline Audit Fixture",
-        "-c", "user.email=offline-audit@example.invalid",
-        "-c", "commit.gpgsign=false",
-        "commit", "-m", "fixture",
+        "-c",
+        "user.name=Offline Audit Fixture",
+        "-c",
+        "user.email=offline-audit@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "fixture",
     )
 
 
@@ -55,6 +60,7 @@ def run_probes(temp_root: Path) -> None:
     # Imports and CLI calls run inside the cleared credential environment.
     from loguru import logger
     from typer.testing import CliRunner
+
     from mergecraft.ci import local_evidence
     from mergecraft.cli.app import app
     from mergecraft.cli.config_surface_cmd import validate_repo_config_or_raise
@@ -128,8 +134,10 @@ def run_probes(temp_root: Path) -> None:
             SimpleNamespace(materialization=materialization, json_path=None, scope_reduction=None)
         )
     )
-    assert materialization.empty and materialization.coverage_limitations == ()
-    assert result.success and str(result.outcome) == "passed"
+    assert materialization.empty
+    assert materialization.coverage_limitations == ()
+    assert result.success
+    assert str(result.outcome) == "passed"
     emit(
         "C2_unstaged_excluded",
         empty=materialization.empty,
@@ -144,33 +152,64 @@ def run_probes(temp_root: Path) -> None:
     for output_format in ("jsonl", "sarif"):
         result = runner.invoke(
             app,
-            ["review", "--cwd", str(repo), "--diff", str(empty_diff),
-             "--output-format", output_format, "--dry-run"],
+            [
+                "review",
+                "--cwd",
+                str(repo),
+                "--diff",
+                str(empty_diff),
+                "--output-format",
+                output_format,
+                "--dry-run",
+            ],
         )
         error_present = "--output is required" in result.stdout + result.stderr
-        assert result.exit_code == 0 and error_present
-        emit("R3_missing_output", output_format=output_format, cli_exit=result.exit_code,
-             error_present=error_present)
+        assert result.exit_code == 0
+        assert error_present
+        emit(
+            "R3_missing_output",
+            output_format=output_format,
+            cli_exit=result.exit_code,
+            error_present=error_present,
+        )
 
     # C4: real runner until the subprocess boundary; no application is launched.
     target = temp_root / "verification-target"
     target.mkdir()
     spec = VerificationInput(
-        mode="verify", repo_path=str(target), startup_command="python app.py",
-        base="other-branch", base_url="http://127.0.0.1:1", issue_or_pr="",
-        acceptance_criteria=[], auth={"strategy": "mock"}, credential_env_names=[],
-        artifacts_dir="", viewport={"width": 1280, "height": 720}, device_targets=[],
-        allowed_network=[], forbidden_network=[], prior_screenshots=[], repro_notes="",
+        mode="verify",
+        repo_path=str(target),
+        startup_command="python app.py",
+        base="other-branch",
+        base_url="http://127.0.0.1:1",
+        issue_or_pr="",
+        acceptance_criteria=[],
+        auth={"strategy": "mock"},
+        credential_env_names=[],
+        artifacts_dir="",
+        viewport={"width": 1280, "height": 720},
+        device_targets=[],
+        allowed_network=[],
+        forbidden_network=[],
+        prior_screenshots=[],
+        repro_notes="",
     )
     spawn = AsyncMock(return_value=SimpleNamespace(returncode=0))
-    with patch("mergecraft.verify.runner.asyncio.create_subprocess_exec", spawn), \
-         patch("mergecraft.verify.runner.asyncio.sleep", new=AsyncMock()):
+    with (
+        patch("mergecraft.verify.runner.asyncio.create_subprocess_exec", spawn),
+        patch("mergecraft.verify.runner.asyncio.sleep", new=AsyncMock()),
+    ):
         result = asyncio.run(run_verify_behavior(spec, offline=True, shell="enabled"))
-    assert spawn.call_count == 1 and "cwd" not in spawn.call_args.kwargs
+    assert spawn.call_count == 1
+    assert "cwd" not in spawn.call_args.kwargs
     assert Path(spec.repo_path) != Path.cwd()
-    emit("C4_verify_repo", supplied_repo=str(target),
-         subprocess_cwd=spawn.call_args.kwargs.get("cwd"),
-         inherited_cwd=str(Path.cwd()), status=result.status)
+    emit(
+        "C4_verify_repo",
+        supplied_repo=str(target),
+        subprocess_cwd=spawn.call_args.kwargs.get("cwd"),
+        inherited_cwd=str(Path.cwd()),
+        status=result.status,
+    )
 
     # C5: record selected toolchain; no sandbox, coverage, or consumer tests run.
     calls: list[list[str]] = []
@@ -182,17 +221,26 @@ def run_probes(temp_root: Path) -> None:
     scratch = temp_root / "coverage-scratch"
     scratch.mkdir()
     logger.remove()
-    with patch("mergecraft.ci.local_evidence.shutil.which", return_value="/consumer/.venv/bin/coverage"), \
-         patch("mergecraft.ci.local_evidence._sandboxed_argv", side_effect=lambda argv, **kwargs: argv), \
-         patch("mergecraft.ci.local_evidence.tempfile.mkdtemp", return_value=str(scratch)), \
-         patch("mergecraft.ci.local_evidence.subprocess.run", side_effect=fake_run):
+    with (
+        patch(
+            "mergecraft.ci.local_evidence.shutil.which", return_value="/consumer/.venv/bin/coverage"
+        ),
+        patch(
+            "mergecraft.ci.local_evidence._sandboxed_argv", side_effect=lambda argv, **kwargs: argv
+        ),
+        patch("mergecraft.ci.local_evidence.tempfile.mkdtemp", return_value=str(scratch)),
+        patch("mergecraft.ci.local_evidence.subprocess.run", side_effect=fake_run),
+    ):
         available = local_evidence._coverage_toolchain_available()
         artifact = local_evidence._execute_coverage(target, timeout_seconds=1)
-    assert available and "/consumer/.venv/bin/coverage" not in calls[0]
+    assert available
+    assert "/consumer/.venv/bin/coverage" not in calls[0]
     assert calls[0][1:4] == ["-m", "coverage", "run"]
     emit(
-        "C5_coverage_interpreter", path_toolchain_available=available,
-        selected_python=calls[0][0], path_coverage_used=False,
+        "C5_coverage_interpreter",
+        path_toolchain_available=available,
+        selected_python=calls[0][0],
+        path_coverage_used=False,
         cli_env_has_coverage=importlib.util.find_spec("coverage") is not None,
         cli_env_has_pytest=importlib.util.find_spec("pytest") is not None,
         artifact=str(artifact),
@@ -210,9 +258,10 @@ def main() -> None:
         "NO_COLOR": "1",
         "TERM": "dumb",
     }
-    with patch.dict(os.environ, safe_env, clear=True), tempfile.TemporaryDirectory(
-        prefix="mergecraft-cli-audit-"
-    ) as temp_dir:
+    with (
+        patch.dict(os.environ, safe_env, clear=True),
+        tempfile.TemporaryDirectory(prefix="mergecraft-cli-audit-") as temp_dir,
+    ):
         run_probes(Path(temp_dir))
 
 

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
-from pathlib import Path
 import sys
+from pathlib import Path
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[3]
@@ -18,7 +18,8 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def load_module(name: str, relative: str):
     spec = importlib.util.spec_from_file_location(name, ROOT / relative)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)
@@ -51,7 +52,7 @@ def mutation_probe() -> None:
             verbose=0,
         )
         assert (result.killed, result.errors, result.survived) == (1, 0, 0)
-        print(
+        print(  # noqa: T201 -- probe output is the script's purpose
             f"T1: pytest exit {exit_code} incorrectly counted as "
             f"killed={result.killed}, errors={result.errors}"
         )
@@ -72,9 +73,7 @@ def action_e2e_probe() -> None:
     )
     original_parse_args = argparse.ArgumentParser.parse_args
     module.argparse.ArgumentParser.parse_args = lambda self: args
-    module._parse_github_output = lambda path: {
-        "result": "E2E review complete: no findings."
-    }
+    module._parse_github_output = lambda path: {"result": "E2E review complete: no findings."}
     module._load_check_runs = lambda path: [
         {
             "body": {
@@ -91,7 +90,7 @@ def action_e2e_probe() -> None:
     finally:
         argparse.ArgumentParser.parse_args = original_parse_args
     assert exit_code == 0
-    print("T2: wrong commit and failure conclusion incorrectly accepted (exit 0)")
+    print("T2: wrong commit and failure conclusion incorrectly accepted (exit 0)")  # noqa: T201 -- probe output is the script's purpose
 
 
 if __name__ == "__main__":
