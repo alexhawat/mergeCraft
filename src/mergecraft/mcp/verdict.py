@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -324,6 +325,31 @@ async def _resolve_pr_head_sha(ctx: ToolContext, *, pull_number: int) -> str:
     return str(head.get("sha") or "").strip().lower()
 
 
+def confine_diff_path(ctx: ToolContext, diff_path: str) -> Path:
+    """Resolve ``diff_path`` and require it under a registered checkout or the run tmpdir.
+
+    ``diff_path`` comes from the reviewing agent, so reading it unconfined would
+    let a crafted path (``/etc/...``, ``../..``, a symlink) be read and echoed
+    through the scope-evidence errors (#1257). Symlinks are followed before the
+    containment check, mirroring ``run_analyzers``.
+
+    Raises:
+        ValueError: The path resolves outside every authorized root.
+    """
+    resolved = Path(diff_path).resolve()
+    roots = [Path(repo.dir).resolve() for repo in ctx.tool_state.repos.values()]
+    for temp in (os.environ.get("MERGECRAFT_TEMP_DIR"), ctx.tmpdir):
+        if temp:
+            roots.append(Path(temp).resolve())
+    if not any(resolved.is_relative_to(root) for root in roots):
+        msg = (
+            f"diff_path {diff_path!r} resolves outside the authorized roots "
+            "(a registered checkout dir or the run tmpdir)"
+        )
+        raise ValueError(msg)
+    return resolved
+
+
 async def validate_review_scope_evidence(
     ctx: ToolContext,
     *,
@@ -331,7 +357,7 @@ async def validate_review_scope_evidence(
     head_sha: str,
 ) -> None:
     """Validate diff evidence and PR-head binding before scope is recorded (D4)."""
-    path = Path(diff_path)
+    path = confine_diff_path(ctx, diff_path)
     if not path.is_file():
         msg = f"diff_path does not exist: {diff_path}"
         raise ValueError(msg)
@@ -370,7 +396,7 @@ async def reject_diff_that_does_not_match_the_pr(
     """
     from mergecraft.mcp.checkout import changed_paths_in_diff, pull_request_path_expectations
 
-    text = Path(diff_path).read_text(encoding="utf-8")
+    text = confine_diff_path(ctx, diff_path).read_text(encoding="utf-8")
     renames: dict[str, str] = {}
     required, allowed = await pull_request_path_expectations(
         ctx, pull_number=pull_number, renames=renames
