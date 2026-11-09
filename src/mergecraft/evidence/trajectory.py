@@ -1590,9 +1590,8 @@ def build_trajectory_record(
             if call.paths:
                 observed_read = True
                 read_paths.extend(call.paths)
-        elif call.intent == "verify":
-            if call.command:
-                tests.append(call.command)
+        elif call.intent == "verify" and call.command:
+            tests.append(call.command)
         if call.intent == "complete" and call.ok:
             completion.append(call.tool)
         if call.outcome_ok is False:
