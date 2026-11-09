@@ -102,6 +102,9 @@ class ClaimJudgeResult(BaseModel):
     scope: Literal["run"] = "run"
     blocking: bool = False
     skipped: bool = False
+    # True when a mid-battery skip left some claims unjudged; ``findings`` then
+    # holds the attestations collected before the skip (#1254).
+    partial: bool = False
     reason: str | None = None
     pin: JevJudgePin = Field(default_factory=JevJudgePin)
     findings: list[Finding] = Field(default_factory=list)
@@ -255,11 +258,15 @@ async def judge_prose_claims(
             questions=build_system_one_questions(pack),
         )
         if result.skipped or result.response is None:
+            # Keep attestations already collected for earlier claims: a skip on
+            # claim N must not erase real evidence from claims 1..N-1 (#1254).
             return ClaimJudgeResult(
                 pack_id=pack.pack_id,
                 skipped=True,
+                partial=bool(backed),
                 reason=result.reason,
                 pin=pin,
+                findings=attestations,
             )
         response = result.response
         backed_by_row = _noul(response, "backed_by_row")
