@@ -60,7 +60,23 @@ def test_bug_class_rules_stay_major(code: str) -> None:
 
 @pytest.mark.parametrize(
     "code",
-    ["F401", "F841", "F541", "E501", "W291", "I001", "D100", "N802", "UP006", "Q000", "COM812"],
+    [
+        "F401",
+        "F841",
+        "F541",
+        "E501",
+        "W291",
+        "I001",
+        "D100",
+        "N802",
+        "UP006",
+        "Q000",
+        "COM812",
+        "SIM101",
+        "SLF001",
+        "SLOT000",
+        "BLE001",
+    ],
 )
 def test_style_rules_are_minor_even_when_ruff_says_error(code: str) -> None:
     assert _parse(code) == "Minor"

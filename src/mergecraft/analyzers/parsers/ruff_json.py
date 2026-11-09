@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING
 
 from mergecraft.analyzers.finding import Finding, make_finding
@@ -27,7 +28,8 @@ if TYPE_CHECKING:
 # import order, unused imports/variables (F401/F841), pycodestyle E/W,
 # docstrings, naming, upgrades, quotes, f-string without placeholders (F541) --
 # is downgraded to Minor. Prefixes match on the rule code start, so ``F82``
-# covers F821/F822/F823 and ``B`` the whole flake8-bugbear family.
+# covers F821/F822/F823. The B/S families are matched separately to avoid
+# treating BLE, SIM, SLF and SLOT style diagnostics as bug-class rules.
 _BUG_CLASS_RULE_PREFIXES: tuple[str, ...] = (
     "E9",  # syntax / IO errors (E902, E999-era)
     "F50",  # invalid %-format
@@ -37,8 +39,6 @@ _BUG_CLASS_RULE_PREFIXES: tuple[str, ...] = (
     "F82",  # undefined names (F821 / F822 / F823)
     "F811",  # redefinition of an unused name
     "F402",  # import shadowed by loop variable
-    "B",  # flake8-bugbear
-    "S",  # flake8-bandit security
     "PLE",  # pylint errors
     "ASYNC",  # flake8-async
     "RUF006",  # dangling asyncio task
@@ -48,7 +48,10 @@ _BUG_CLASS_RULE_PREFIXES: tuple[str, ...] = (
 def _severity_for_rule(manifest: AnalyzerManifest, native_level: str, code: str) -> str:
     """Map the native level, then cap non-bug-class rules at Minor."""
     mapped = map_native_severity(manifest, native_level)
-    if mapped == "Major" and not code.startswith(_BUG_CLASS_RULE_PREFIXES):
+    bug_class = (
+        code.startswith(_BUG_CLASS_RULE_PREFIXES) or re.fullmatch(r"[BS][0-9]{3}", code) is not None
+    )
+    if mapped == "Major" and not bug_class:
         return "Minor"
     return mapped
 
