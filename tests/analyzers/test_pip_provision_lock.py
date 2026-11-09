@@ -11,6 +11,7 @@ Module: tests.analyzers.test_pip_provision_lock
 
 from __future__ import annotations
 
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -134,3 +135,34 @@ def test_a_failed_install_leaves_the_existing_entry_untouched(
     assert not install_root.exists(), "a failed first install must not publish a partial tree"
     staging = [c for c in install_root.parent.iterdir() if c.name.startswith(".")]
     assert staging == [], f"failed staging trees must be cleaned up: {staging}"
+
+
+def test_a_hung_pip_install_is_bounded_and_its_staging_tree_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The install runs under the cache lock, so it must time out, not hang the lock."""
+    cache_dir = tmp_path / "analyzer-cache"
+    install_root = cache_dir / "pip" / "semgrep" / "9.9.9"
+    seen_timeouts: list[object] = []
+
+    class _Hung:
+        TimeoutExpired = subprocess.TimeoutExpired
+
+        def run(self, cmd: list[str], **kwargs: Any) -> Any:
+            seen_timeouts.append(kwargs.get("timeout"))
+            target = Path(cmd[cmd.index("--target") + 1])
+            (target / "partial").mkdir(parents=True)
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs["timeout"])
+
+    monkeypatch.setattr(pattern, "subprocess", _Hung())
+    monkeypatch.setattr(pattern, "_resolve_pip_python", lambda *, package: "python3")
+
+    with pytest.raises(OSError, match=r"pip install timed out after \d+s for semgrep==9\.9\.9"):
+        pattern.provision_pip_script(
+            package="semgrep", version="9.9.9", script="semgrep", cache_dir=cache_dir
+        )
+
+    assert seen_timeouts == [pattern._PIP_INSTALL_TIMEOUT_S]
+    assert not install_root.exists()
+    leftovers = [c.name for c in install_root.parent.iterdir() if c.name.startswith(".")]
+    assert leftovers == [], f"timed-out staging trees must be removed: {leftovers}"
