@@ -37,6 +37,8 @@ _ALLOWLISTED_RUNTIME: Final[dict[str, str]] = {
 # Top-level import roots that ship only under an optional extra (PyPI name).
 _OPTIONAL_EXTRA_IMPORT_ROOTS: Final[dict[str, str]] = {
     "agents": "openai-agents",
+    # logfire 5.4 ships the import in logfire-sdk, installed by the tracing extra.
+    "logfire": "logfire",
     "openai": "openai",
 }
 
@@ -97,16 +99,22 @@ def _third_party_roots() -> dict[str, set[str]]:
 
 def _resolves(root: str, mapping: dict[str, list[str]], declared: set[str]) -> bool:
     """True when a top-level module belongs to a declared distribution."""
+    extra_dist = _OPTIONAL_EXTRA_IMPORT_ROOTS.get(root)
+    if extra_dist is not None and _normalize(extra_dist) in declared:
+        return True
     installed = [_normalize(name) for name in mapping.get(root, [])]
     if installed:
         return any(name in declared for name in installed)
     # An optional extra that is not installed has no metadata to map through;
     # fall back to the distribution name the module ships under.
     normalized = _normalize(root)
-    extra_dist = _OPTIONAL_EXTRA_IMPORT_ROOTS.get(root)
-    if extra_dist is not None and _normalize(extra_dist) in declared:
-        return True
     return normalized in declared or any(name.startswith(f"{normalized}-") for name in declared)
+
+
+def test_logfire_extra_can_supply_its_import_via_logfire_sdk() -> None:
+    mapping = {"logfire": ["logfire-sdk"]}
+    assert _resolves("logfire", mapping, {"logfire"})
+    assert not _resolves("logfire", mapping, set())
 
 
 def test_every_third_party_import_is_declared() -> None:
