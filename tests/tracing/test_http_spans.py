@@ -509,8 +509,38 @@ def test_disabled_tracer_path_emits_no_http_span() -> None:
         client.close()
 
 
+def test_http_error_text_does_not_carry_url_userinfo() -> None:
+    """#1235: the exception text quotes the raw URL; its userinfo must not reach the sink."""
+    from mergecraft.tracing import MemorySink, Tracer
+    from mergecraft.tracing.http import instrument_httpx
+
+    def _unauthorized(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, request=request)
+
+    sink = MemorySink()
+    client = httpx.Client(
+        transport=httpx.MockTransport(_unauthorized),
+        event_hooks={"response": [lambda response: response.raise_for_status()]},
+    )
+    try:
+        instrument_httpx(client, tracer=Tracer(sink=sink, session_id="s", run_id="r"))
+        with pytest.raises(httpx.HTTPStatusError):
+            client.get("https://alice:hunter2pw@api.example.com/v1?api_key=SECRETKEY123456")
+    finally:
+        client.close()
+
+    spans = _http_spans(sink)
+    assert len(spans) == 1
+    attrs = spans[0].attrs
+    assert "401 Unauthorized" in attrs["error"]
+    assert "alice:<redacted>@api.example.com" in attrs["error"]
+    for secret in ("hunter2pw", "SECRETKEY123456"):
+        assert all(secret not in str(value) for value in attrs.values()), secret
+
+
 __all__ = [
     "test_disabled_tracer_path_emits_no_http_span",
+    "test_http_error_text_does_not_carry_url_userinfo",
     "test_http_failure_emits_span_with_status_code_0",
     "test_http_span_attrs_have_method_status_duration",
     "test_http_span_inherits_trace_id_from_mergecraft_run",

@@ -438,6 +438,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer discards the whole secret scan: the line is skipped and the
   findings on every other line are kept. Output with no decodable line is still
   reported as unparsable rather than as a clean scan (#1234).
+- Trace error text no longer carries URL credentials. A failed HTTP request's
+  exception message quotes the raw URL, so `https://user:password@host` reached
+  the span's `error` attribute even though `http.url` was redacted; the
+  `error`, `exception.message` and `tool.error_message` attributes now get the
+  same URL credential redaction before any sink sees them (#1235).
 - actionlint now lints workflow files only. Action manifests (root `action.yml`
   and `.github/actions/**/action.yml`, composite or not) were linted against the
   workflow schema, producing false Major `syntax-check` blockers; zizmor still
