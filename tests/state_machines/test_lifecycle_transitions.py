@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import get_args
+
 import pytest
 
 from mergecraft.findings.ledger import FindingLedger
@@ -13,9 +15,13 @@ from mergecraft.findings.lifecycle_transitions import (
 )
 
 
-@pytest.mark.parametrize("state", list(_ALLOWED_LIFECYCLE_TRANSITIONS))
+@pytest.mark.parametrize("state", get_args(LifecycleState))
 def test_every_state_has_transition_row(state: LifecycleState) -> None:
     assert state in _ALLOWED_LIFECYCLE_TRANSITIONS
+
+
+def test_unpublished_can_be_deferred() -> None:
+    assert lifecycle_transition_allowed("unpublished", "deferred")
 
 
 def test_withdrawn_is_terminal() -> None:

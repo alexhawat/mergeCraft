@@ -22,7 +22,7 @@ _ALLOWED_LIFECYCLE_TRANSITIONS: Final[dict[LifecycleState, frozenset[LifecycleSt
         }
     ),
     "deferred": frozenset({"open", "deferred", "unpublished", "withdrawn"}),
-    "unpublished": frozenset({"open", "unpublished", "withdrawn"}),
+    "unpublished": frozenset({"open", "deferred", "unpublished", "withdrawn"}),
     "withdrawn": frozenset({"withdrawn"}),
     "resolved-by-change": frozenset({"resolved-by-change", "stale", "open"}),
     "stale": frozenset({"stale", "open", "resolved-by-change", "disputed"}),
