@@ -15,6 +15,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,7 +23,7 @@ from unittest.mock import AsyncMock, patch
 
 
 def emit(probe: str, **values: object) -> None:
-    print(json.dumps({"probe": probe, **values}, sort_keys=True))  # noqa: T201 -- probe output is the script's purpose
+    sys.stdout.write(json.dumps({"probe": probe, **values}, sort_keys=True) + "\n")
 
 
 def git(repo: Path, *args: str) -> str:

@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -273,7 +274,7 @@ async def main() -> None:
         "prior_severity_residual_scope_union": analyzer_union_probe(),
     }
     assert result["prior_same_repo_fork_misclassification"] is True
-    print(json.dumps(result, indent=2))  # noqa: T201 -- probe output is the script's purpose
+    sys.stdout.write(json.dumps(result, indent=2) + "\n")
 
 
 if __name__ == "__main__":

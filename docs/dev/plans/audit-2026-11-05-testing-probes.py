@@ -52,9 +52,9 @@ def mutation_probe() -> None:
             verbose=0,
         )
         assert (result.killed, result.errors, result.survived) == (1, 0, 0)
-        print(  # noqa: T201 -- probe output is the script's purpose
+        sys.stdout.write(
             f"T1: pytest exit {exit_code} incorrectly counted as "
-            f"killed={result.killed}, errors={result.errors}"
+            f"killed={result.killed}, errors={result.errors}\n"
         )
 
 
@@ -90,7 +90,7 @@ def action_e2e_probe() -> None:
     finally:
         argparse.ArgumentParser.parse_args = original_parse_args
     assert exit_code == 0
-    print("T2: wrong commit and failure conclusion incorrectly accepted (exit 0)")  # noqa: T201 -- probe output is the script's purpose
+    sys.stdout.write("T2: wrong commit and failure conclusion incorrectly accepted (exit 0)\n")
 
 
 if __name__ == "__main__":

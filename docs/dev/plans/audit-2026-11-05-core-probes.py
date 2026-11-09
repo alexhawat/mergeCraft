@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 import difflib
 import json
+import sys
 
 from mergecraft.agents.gates import blocking_findings, decide_approval
 from mergecraft.agents.verifier import AgentFinding
@@ -157,7 +158,7 @@ def main() -> None:
             "introduced_by_pr": both[0].introduced_by_pr,
         },
     }
-    print(json.dumps(out, indent=2))  # noqa: T201 -- probe output is the script's purpose
+    sys.stdout.write(json.dumps(out, indent=2) + "\n")
 
 
 if __name__ == "__main__":
