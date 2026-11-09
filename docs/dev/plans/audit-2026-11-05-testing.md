@@ -238,6 +238,10 @@ print(dict(stats))
 
 Coverage was downloaded in memory with `gh api --allow-escape-sequences repos/alexhawat/mergeCraft/actions/artifacts/13448484775/zip`; Python's `zipfile.ZipFile(io.BytesIO(...))` read `coverage.json`. Domain rows sum each file's `num_statements`, `covered_lines`, `num_branches`, `covered_branches` before computing percentages. No source files, environment or dependency state were changed.
 
+> **Removed after the 2026-11-09 audit verification (#1273).** The probe scripts asserted the
+> buggy behaviour at the audited commit, so they started failing as the findings were fixed.
+> They remain in git history: `git show 5dbaa2d4:docs/dev/plans/audit-2026-11-05-testing-probes.py`.
+
 Reproduction for T1/T2 (standard library; does not mutate real source files). A runnable, assertion-bearing version is saved as `plans/audit-2026-11-05-testing-probes.py` and was executed with `python3 -B plans/audit-2026-11-05-testing-probes.py`:
 
 ```python

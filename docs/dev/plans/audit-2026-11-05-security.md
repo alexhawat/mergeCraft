@@ -8,6 +8,10 @@ Audited commit: `55cf88e33c318a8b03a251fb0f8b6dad9d999141`. This memo supplement
 
 The retained offline script is `plans/audit-2026-11-05-security-probes.py`. It ran successfully on the existing Python 3.14.6 interpreter, with local source imported through PYTHONPATH; no pytest was installed. The script uses a recording GitHub client, httpx MockTransport, in-memory patch seams, and an isolated disposable Git repository. It creates no source changes and cleans up its fixture repository.
 
+> **Removed after the 2026-11-09 audit verification (#1273).** The probe scripts asserted the
+> buggy behaviour at the audited commit, so they started failing as the findings were fixed.
+> They remain in git history: `git show 5dbaa2d4:docs/dev/plans/audit-2026-11-05-security-probes.py`.
+
 Reproduce from this checkout:
 
 ```sh

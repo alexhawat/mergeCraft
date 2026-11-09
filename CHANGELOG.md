@@ -455,9 +455,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reaches disk (#1271).
 - Removed an unreachable inner `try`/`except` from broker stream redaction; the
   latin-1 decode it guarded cannot fail (#1272).
-- The audit probe scripts under `docs/dev/plans` pass `ruff check`: imports are
-  sorted, the security probe uses the current `require_workflow_untouched`, and
-  printing probes carry a targeted `T201` suppression (#1273).
+- Removed the 2026-11-05 audit probe scripts from `docs/dev/plans`. They sat
+  outside lint scope, had gone stale, and asserted the buggy behaviour the
+  audit found, so they failed once those findings were fixed. The audit memos
+  now point to their copies in git history (#1273).
 - actionlint now lints workflow files only. Action manifests (root `action.yml`
   and `.github/actions/**/action.yml`, composite or not) were linted against the
   workflow schema, producing false Major `syntax-check` blockers; zizmor still
