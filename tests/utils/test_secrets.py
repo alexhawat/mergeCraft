@@ -50,6 +50,7 @@ def test_filter_env_default_deny(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_filter_env_user_allowlist() -> None:
+    """The allowlist adds plain names but never re-admits a credential (#1233)."""
     clear_env_allowlist()
     set_env_allowlist("ANTHROPIC_API_KEY\nMY_CUSTOM\n")
     env = {
@@ -59,10 +60,70 @@ def test_filter_env_user_allowlist() -> None:
         "OPENAI_API_KEY": "sk-openai",
     }
     filtered = filter_env(env)
-    assert filtered["ANTHROPIC_API_KEY"] == "sk-ant"
+    assert "ANTHROPIC_API_KEY" not in filtered
     assert filtered["MY_CUSTOM"] == "yes"
     assert "OPENAI_API_KEY" not in filtered
     clear_env_allowlist()
+
+
+_ALLOWLISTED_CREDENTIALS: dict[str, str] = {
+    "GITHUB_TOKEN": "ghs_planted",
+    "GH_TOKEN": "gho_planted",
+    "GIT_ASKPASS": "/tmp/askpass-planted",
+    "ACTIONS_ID_TOKEN_REQUEST_URL": "https://token.actions.example/planted",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN": "oidc-planted",
+    "INPUT_TOKEN": "ghs_input_planted",
+    "INPUT_LOGFIRE-TOKEN": "logfire-planted",
+    "INPUT_PROVIDER_API_KEY": "provider-planted",
+}
+
+
+def test_env_allowlist_cannot_readmit_credentials_on_any_filter_env_surface(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#1233: restricted shell, trusted analyzers and run fallbacks all use ``filter_env``."""
+    from mergecraft.analyzers.trust import build_analyzer_env
+
+    clear_env_allowlist()
+    try:
+        set_env_allowlist("\n".join([*_ALLOWLISTED_CREDENTIALS, "MY_CUSTOM"]))
+        for name, value in _ALLOWLISTED_CREDENTIALS.items():
+            monkeypatch.setenv(name, value)
+        monkeypatch.setenv("MY_CUSTOM", "kept")
+        surfaces = {
+            "filter_env": filter_env(),
+            "resolve_env(restricted)": resolve_env("restricted"),
+            "build_analyzer_env(trusted)": build_analyzer_env(tier="trusted"),
+            "build_analyzer_env(untrusted)": build_analyzer_env(tier="untrusted"),
+        }
+        for surface, env in surfaces.items():
+            leaked = sorted(set(_ALLOWLISTED_CREDENTIALS) & set(env))
+            assert leaked == [], f"{surface} re-admitted {leaked}"
+            assert env["MY_CUSTOM"] == "kept", surface
+    finally:
+        clear_env_allowlist()
+
+
+def test_env_allowlist_warns_about_ignored_credential_names() -> None:
+    """#1233: an operator who allowlists a credential is told it is ignored."""
+    from loguru import logger
+
+    messages: list[str] = []
+    sink_id = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    clear_env_allowlist()
+    try:
+        set_env_allowlist("GITHUB_TOKEN\nINPUT_TOKEN\nNODE_ENV")
+    finally:
+        logger.remove(sink_id)
+        clear_env_allowlist()
+    assert any("GITHUB_TOKEN, INPUT_TOKEN" in message for message in messages)
+    assert not any("NODE_ENV" in message for message in messages)
+
+
+@pytest.mark.parametrize("name", ["INPUT_TOKEN", "INPUT_LOGFIRE-TOKEN", "INPUT_OPENAI-API-KEY"])
+def test_action_input_credentials_are_sensitive(name: str) -> None:
+    """#1233: the runner exports hyphenated inputs verbatim (``INPUT_LOGFIRE-TOKEN``)."""
+    assert is_sensitive_env_name(name)
 
 
 def test_resolve_env_modes(monkeypatch: pytest.MonkeyPatch) -> None:

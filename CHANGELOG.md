@@ -427,6 +427,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outgrow it, and fine-grained GitHub PATs (``github_pat_``), PyPI tokens and
   ``Bearer`` credentials are redacted by pattern (the ``Bearer`` word is kept)
   (#1232).
+- `envAllowlist` can no longer pass credentials to subprocesses. A
+  credential-shaped name (`*_TOKEN`, `*_KEY`, `*-TOKEN`, …) or one of
+  `GITHUB_TOKEN`, `GH_TOKEN`, `GIT_ASKPASS` and the Actions OIDC request
+  variables is now ignored with a warning instead of reaching the restricted
+  MCP shell, trusted analyzers and analyzer fallback environments; the action's
+  `INPUT_TOKEN` and hyphenated inputs such as `INPUT_LOGFIRE-TOKEN` count as
+  credentials. Non-secret names are still added (#1233).
 - actionlint now lints workflow files only. Action manifests (root `action.yml`
   and `.github/actions/**/action.yml`, composite or not) were linted against the
   workflow schema, producing false Major `syntax-check` blockers; zizmor still
