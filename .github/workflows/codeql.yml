@@ -25,7 +25,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    uses: ./.github/workflows/classify-pr.yml
+
   analyze:
+    needs: changes
+    if: needs.changes.outputs.image_only != 'true'
     name: Analyze (python)
     runs-on: ubuntu-latest
     timeout-minutes: 30
