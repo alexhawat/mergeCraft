@@ -31,7 +31,7 @@ dependencies = [
     # so httpcore is declared directly rather than left to httpx's transitive tree.
     "httpcore==1.0.9",
     "rich==15.0.0",
-    "typer==0.27.3",
+    "typer==0.25.1",
     # cli/interactive.py and cli/typer_group.py import click directly; typer only
     # brings it transitively, so pin it explicitly at the locked resolution.
     "click==8.5.0",

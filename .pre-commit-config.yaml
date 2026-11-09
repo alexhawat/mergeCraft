@@ -1,7 +1,7 @@
 # Sync hook revisions with dev tooling (see pyproject.toml optional dev deps).
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: e8f7d69b957a30acb2c875078d5fd012de24b64c  # v0.16.7
+    rev: c0f278f1254ccc8fb09676bcdb8d847e7db493e5  # v0.17.4
     hooks:
       - id: ruff
         args: [--fix]
