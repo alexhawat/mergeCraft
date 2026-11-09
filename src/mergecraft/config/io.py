@@ -65,6 +65,15 @@ def write_config_dict(path: Path, data: dict[str, Any]) -> None:
         raise ValueError(msg)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
+    _write_text_atomically(path, payload)
+
+
+def _write_text_atomically(path: Path, text: str) -> None:
+    """Replace *path* with *text* via a sibling temp file and an atomic rename.
+
+    The existing file mode is preserved. A reader sees either the old or the new
+    content, never a truncated file.
+    """
     mode = path.stat().st_mode & 0o777 if path.is_file() else None
     tmp_fd, tmp_name = tempfile.mkstemp(
         dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
@@ -72,7 +81,7 @@ def write_config_dict(path: Path, data: dict[str, Any]) -> None:
     tmp_path = Path(tmp_name)
     try:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as handle:
-            handle.write(payload)
+            handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
         if mode is not None:
@@ -176,7 +185,7 @@ def patch_config_dict(path: Path, patch: dict[str, Any]) -> None:
         for key, value in patch.items():
             text = replace_config_block(text, key, value)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        _write_text_atomically(path, text)
         return
     data = load_config_dict(path)
     for key, value in patch.items():
