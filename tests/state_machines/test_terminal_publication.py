@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
-
 from mergecraft.agents.shared import AgentResult
 from mergecraft.mcp.tool_state import ReviewRecord, TerminalSubmission, init_tool_state
 from mergecraft.review.terminal_publication import (
-    PUBLICATION_STATE_TABLE,
     TerminalPublicationState,
     apply_terminal_publication_flags,
     resolve_terminal_publication,
 )
-from mergecraft.run_outcome import RunOutcome
 
 
 def _state(**kwargs: object):
@@ -20,11 +16,6 @@ def _state(**kwargs: object):
     for key, val in kwargs.items():
         setattr(ts, key, val)
     return ts
-
-
-@pytest.mark.parametrize("state", list(TerminalPublicationState))
-def test_publication_table_covers_every_state(state: TerminalPublicationState) -> None:
-    assert state in PUBLICATION_STATE_TABLE
 
 
 def test_apply_flags_are_mutually_exclusive() -> None:
@@ -49,7 +40,7 @@ def test_sticky_only_is_not_applicable_for_receipt() -> None:
     assert res.terminal_publication_receipt is None
 
 
-def test_publish_failed_maps_inconclusive() -> None:
+def test_failed_publication_has_no_receipt() -> None:
     ts = _state(terminal_publication_failed=True)
     ts.terminal_submission = TerminalSubmission(
         id="x",
@@ -67,7 +58,8 @@ def test_publish_failed_maps_inconclusive() -> None:
         mode="Review",
     )
     assert res.state is TerminalPublicationState.publish_failed
-    assert PUBLICATION_STATE_TABLE[res.state] is RunOutcome.inconclusive
+    assert res.terminal_publication_failed is True
+    assert res.terminal_publication_receipt is False
 
 
 def test_published_ok_requires_verdict_on_receipt() -> None:

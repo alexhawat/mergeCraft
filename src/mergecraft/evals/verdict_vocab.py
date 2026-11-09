@@ -4,27 +4,12 @@ from __future__ import annotations
 
 from typing import Final
 
+from mergecraft.evidence.gate_policy import GATE_ACTIONS
+
 # GitHub check-run conclusions from ``decide_approval()`` / completion mapping.
 CHECK_CONCLUSIONS: Final[frozenset[str]] = frozenset({"success", "failure", "neutral", "timed_out"})
 
-# W9 thermostat gate actions — not check conclusions.
-GATE_ACTIONS: Final[frozenset[str]] = frozenset(
-    {
-        "auto_merge",
-        "block",
-        "request_changes",
-        "require_human_review",
-        "require_more_tests",
-        "quarantine",
-        "escalate",
-        "unavailable",
-    }
-)
+# Evals also record an unavailable result when a gate could not be evaluated.
+EXPECTED_VERDICT_VALUES: Final[frozenset[str]] = CHECK_CONCLUSIONS | GATE_ACTIONS | {"unavailable"}
 
-EXPECTED_VERDICT_VALUES: Final[frozenset[str]] = CHECK_CONCLUSIONS | GATE_ACTIONS
-
-__all__ = [
-    "CHECK_CONCLUSIONS",
-    "EXPECTED_VERDICT_VALUES",
-    "GATE_ACTIONS",
-]
+__all__ = ["CHECK_CONCLUSIONS", "EXPECTED_VERDICT_VALUES"]

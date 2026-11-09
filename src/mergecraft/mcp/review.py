@@ -723,11 +723,7 @@ def _receipt_conflict_response(
             apply_terminal_publication_flags,
         )
 
-        apply_terminal_publication_flags(
-            ctx.tool_state,
-            TerminalPublicationState.verdict_mismatch,
-            mismatch=(str(review.verdict), recorded),
-        )
+        apply_terminal_publication_flags(ctx.tool_state, TerminalPublicationState.verdict_mismatch)
         reason = (
             f"review {review.id} on sha {commit_id} already shows verdict {review.verdict}; "
             f"the recorded verdict {recorded} was not published (no second review is posted)"

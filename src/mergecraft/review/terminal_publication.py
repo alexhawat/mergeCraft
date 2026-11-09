@@ -12,8 +12,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
-from mergecraft.run_outcome import RunOutcome
-
 if TYPE_CHECKING:
     from mergecraft.agents.shared import AgentResult
     from mergecraft.mcp.tool_state import ToolState
@@ -26,7 +24,6 @@ class TerminalPublicationState(StrEnum):
 
     not_applicable = "not_applicable"
     sticky_progress_only = "sticky_progress_only"
-    submission_missing = "submission_missing"
     publish_failed = "publish_failed"
     verdict_mismatch = "verdict_mismatch"
     no_receipt = "no_receipt"
@@ -159,7 +156,6 @@ def apply_terminal_publication_flags(
     tool_state: ToolState,
     state: TerminalPublicationState,
     *,
-    mismatch: tuple[str, str] | None = None,
     publication_incomplete: tuple[str, ...] = (),
 ) -> None:
     """Set legacy flags from a canonical publication state (mutually exclusive)."""
@@ -169,35 +165,9 @@ def apply_terminal_publication_flags(
     tool_state.terminal_publication_failed = state is TerminalPublicationState.publish_failed
     tool_state.terminal_publication_mismatch = state is TerminalPublicationState.verdict_mismatch
     tool_state.publication_incomplete = list(publication_incomplete)
-    if state is TerminalPublicationState.verdict_mismatch and mismatch is not None:
-        _ = mismatch  # mismatch detail lives on ReviewRecord; flag only signals presence
-
-
-# Total map: publication state -> run outcome contribution when enforce applies.
-# ``submission_missing`` is handled separately via ``terminal_submission_received``.
-PUBLICATION_STATE_TABLE: dict[TerminalPublicationState, RunOutcome | None] = {}
-
-
-def _init_publication_table() -> None:
-    global PUBLICATION_STATE_TABLE
-    PUBLICATION_STATE_TABLE = {
-        TerminalPublicationState.not_applicable: None,
-        TerminalPublicationState.sticky_progress_only: None,
-        TerminalPublicationState.submission_missing: RunOutcome.inconclusive,
-        TerminalPublicationState.publish_failed: RunOutcome.inconclusive,
-        TerminalPublicationState.verdict_mismatch: RunOutcome.inconclusive,
-        TerminalPublicationState.no_receipt: RunOutcome.inconclusive,
-        TerminalPublicationState.unproven_receipt: RunOutcome.inconclusive,
-        TerminalPublicationState.published_incomplete: None,
-        TerminalPublicationState.published_ok: None,
-    }
-
-
-_init_publication_table()
 
 
 __all__ = [
-    "PUBLICATION_STATE_TABLE",
     "TerminalPublicationResolution",
     "TerminalPublicationState",
     "apply_terminal_publication_flags",
