@@ -8,6 +8,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from mergecraft.utils.diff_paths import post_image_path_from_header
 from mergecraft.utils.git_hardening import git_argv
 from mergecraft.utils.runtime_artifacts import is_untracked_runtime_artifact
 
@@ -287,7 +288,11 @@ def summarize_diff(text: str) -> str:
     paths: list[str] = []
     for line in text.splitlines():
         if line.startswith("diff --git "):
-            # diff --git a/foo b/foo
+            # diff --git a/foo b/foo (paths may contain spaces or be quoted)
+            path = post_image_path_from_header(line)
+            if path is not None:
+                paths.append(path)
+                continue
             parts = line.split()
             if len(parts) >= 4:
                 paths.append(parts[3].removeprefix("b/"))
