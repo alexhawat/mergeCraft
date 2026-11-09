@@ -420,6 +420,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `git_fetch` validates the whole refspec, not just its source. A refspec may
+  name one branch on `origin` and store it only in that branch's own
+  remote-tracking ref (`main:refs/remotes/origin/main`); destinations under
+  `refs/heads/`, `refs/tags/` or another branch's tracking ref, forced (`+`)
+  updates, empty sides and negative refspecs are refused, so the
+  repository-read tool can no longer move local branches, tags or the base a
+  review diffs against (#1236).
 - actionlint now lints workflow files only. Action manifests (root `action.yml`
   and `.github/actions/**/action.yml`, composite or not) were linted against the
   workflow schema, producing false Major `syntax-check` blockers; zizmor still

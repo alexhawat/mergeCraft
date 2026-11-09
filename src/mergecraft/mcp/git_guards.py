@@ -28,6 +28,7 @@ Exports:
     reject_if_leading_dash -- raise if value starts with a dash.
     reject_special_ref -- raise if value is a special/symbolic ref.
     validate_tag_name -- raise if tag contains refspec/flag characters.
+    validate_fetch_refspec -- refuse git_fetch refspecs that write outside origin's tracking refs.
     _is_config_flag -- true when token is a git config-flag spelling.
     _subcommand_declares_shorts -- true when subcommand owns every letter in token.
     _reject_config_flags -- raise on config flags or unrecognised short bundles.
@@ -516,6 +517,58 @@ def validate_tag_name(tag: str) -> None:
     if not re.fullmatch(r"[A-Za-z0-9._/-]+", tag):
         msg = f"Blocked: tag '{tag}' contains characters that could be parsed as a refspec or flag."
         raise ToolRefusedError(msg)
+
+
+_REMOTE_TRACKING_PREFIX = "refs/remotes/origin/"
+
+
+def validate_fetch_refspec(refspec: str) -> str:
+    """Return *refspec* when ``git_fetch`` may run it, else raise ``ToolRefusedError``.
+
+    ``git_fetch`` is a repository-read tool, so a refspec may only name a
+    branch on ``origin`` and, optionally, store it in that branch's own
+    remote-tracking ref. Validating the source alone let ``main:main``,
+    ``x:refs/tags/v1`` or ``feature:refs/remotes/origin/main`` rewrite local
+    branches, tags or the base the reviewer diffs against (#1236). A forced
+    (``+``) update, an empty side, a negative (``^``) refspec and any second
+    refspec are refused rather than parsed.
+
+    Args:
+        refspec (str): The ``refspec`` argument the agent passed.
+
+    Returns:
+        str: The refspec, unchanged, ready to append to the ``git fetch`` argv.
+
+    Raises:
+        ToolRefusedError: When the refspec is forced, empty on either side, or
+            writes anywhere but ``refs/remotes/origin/<source>``.
+
+    Examples:
+        >>> validate_fetch_refspec("main:refs/remotes/origin/main")
+        'main:refs/remotes/origin/main'
+
+        >>> validate_fetch_refspec("main")
+        'main'
+    """
+    if refspec.startswith("+"):
+        msg = f"Blocked: refspec '{refspec}' requests a forced update; drop the leading '+'."
+        raise ToolRefusedError(msg)
+    source, sep, destination = refspec.partition(":")
+    if not source:
+        msg = f"Blocked: refspec '{refspec}' has an empty source; name a branch on origin."
+        raise ToolRefusedError(msg)
+    reject_special_ref(source, "refspec")
+    if not sep:
+        return refspec
+    expected = f"{_REMOTE_TRACKING_PREFIX}{source}"
+    if destination != expected:
+        msg = (
+            f"Blocked: refspec destination '{destination}' is not '{expected}'. "
+            "git_fetch only stores a branch in its own remote-tracking ref; "
+            f"use '{source}:{expected}' or omit the destination."
+        )
+        raise ToolRefusedError(msg)
+    return refspec
 
 
 # ---------------------------------------------------------------------------
@@ -1035,5 +1088,6 @@ __all__ = [
     "reject_special_ref",
     "resolve_grep_long_option",
     "shell_command_denies_credential_paths",
+    "validate_fetch_refspec",
     "validate_tag_name",
 ]
