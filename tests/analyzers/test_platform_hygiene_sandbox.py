@@ -5,6 +5,7 @@ Contracts: plan decisions 1-4. H2 xfails removed after the impl landed.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -311,6 +312,41 @@ def test_sandbox_exec_policy_denies_home_but_re_allows_a_workspace_under_it() ->
     allow_workspace = rules.index('(allow file-read* (subpath "/Users/me/code/repo"))')
     allow_system = next(i for i, rule in enumerate(rules) if '(subpath "/usr")' in rule)
     assert allow_system < deny_home < allow_workspace
+
+
+def test_sandbox_exec_policy_re_allows_home_toolchains_but_not_their_credentials() -> None:
+    """#1237 — per-user toolchains stay readable after the home deny; their secrets do not."""
+    home = Path("/Users/me")
+    rules = _read_rules(sandbox_mod.sandbox_exec_policy(workspace=Path("/ws"), home=home))
+    deny_home = rules.index('(deny file-read* (subpath "/Users/me"))')
+    allow_tools = next(i for i, rule in enumerate(rules) if "/Users/me/.cargo" in rule)
+    deny_secrets = next(i for i, rule in enumerate(rules) if "credentials.toml" in rule)
+    assert deny_home < allow_tools < deny_secrets
+    tools_rule = rules[allow_tools]
+    assert tools_rule.startswith("(allow file-read*")
+    for rel in (".cargo", ".rustup", ".pyenv", ".nvm", "go", ".local/bin", ".local/share/uv"):
+        assert f'(subpath "/Users/me/{rel}")' in tools_rule
+    secrets_rule = rules[deny_secrets]
+    assert secrets_rule.startswith("(deny file-read*")
+    assert '(literal "/Users/me/.cargo/credentials")' in secrets_rule
+    assert '(literal "/Users/me/.cargo/credentials.toml")' in secrets_rule
+
+
+@pytest.mark.parametrize(
+    "secret_dir", [".ssh", ".aws", ".gnupg", ".config", ".local/share", ".docker", ".kube"]
+)
+def test_sandbox_exec_policy_keeps_credential_dirs_under_home_denied(secret_dir: str) -> None:
+    """Nothing re-allowed after the home deny covers a credential directory."""
+    home = Path("/Users/me")
+    rules = _read_rules(sandbox_mod.sandbox_exec_policy(workspace=Path("/ws"), home=home))
+    deny_home = rules.index('(deny file-read* (subpath "/Users/me"))')
+    target = f"/Users/me/{secret_dir}"
+    for rule in rules[deny_home + 1 :]:
+        if not rule.startswith("(allow file-read*"):
+            continue
+        for allowed in re.findall(r'\(subpath "([^"]+)"\)', rule):
+            assert target != allowed
+            assert not target.startswith(allowed.rstrip("/") + "/")
 
 
 @pytest.mark.parametrize("home", [None, Path("/")])

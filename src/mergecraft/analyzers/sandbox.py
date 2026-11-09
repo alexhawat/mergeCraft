@@ -299,6 +299,28 @@ _SEATBELT_SYSTEM_READ_SUBPATHS: tuple[str, ...] = (
     "/private/var/db/dyld",
 )
 _SEATBELT_SYSTEM_READ_LITERALS: tuple[str, ...] = ("/", "/etc", "/tmp", "/var", "/private")
+# Per-user toolchain directories under ``$HOME`` that stay readable after the
+# home deny, so rustup/cargo, pyenv, nvm, Go, SDKMAN, Bun, pipx and uv installs
+# keep working (#1237). ``~/.local`` is narrowed to its tool subdirectories:
+# ``~/.local/share`` also holds credentials such as opencode's ``auth.json``.
+_SEATBELT_HOME_TOOLCHAIN_DIRS: tuple[str, ...] = (
+    ".cargo",
+    ".rustup",
+    ".pyenv",
+    ".nvm",
+    "go",
+    ".sdkman",
+    ".bun",
+    ".local/bin",
+    ".local/lib",
+    ".local/pipx",
+    ".local/share/uv",
+)
+# Credential files inside those toolchain directories, denied again afterwards.
+_SEATBELT_HOME_TOOLCHAIN_SECRETS: tuple[str, ...] = (
+    ".cargo/credentials",
+    ".cargo/credentials.toml",
+)
 
 
 def sandbox_exec_policy(*, workspace: Path, home: Path | None = None) -> str:
@@ -309,8 +331,11 @@ def sandbox_exec_policy(*, workspace: Path, home: Path | None = None) -> str:
     filesystem boundary, with none of the Linux git binds, binary masks,
     socket nulling or privilege drop. The user's home is denied outright, so
     ``~/.ssh``, ``~/.aws`` or ``~/.config/gh`` stay unreadable even when a
-    system path would otherwise cover it; the workspace is re-allowed after
-    that deny because a checkout commonly lives under ``$HOME``. Metadata
+    system path would otherwise cover it. A fixed list of per-user toolchain
+    directories (``~/.cargo``, ``~/.rustup``, ``~/.pyenv``, ``~/.nvm``,
+    ``~/go``, …) is re-allowed after that deny, minus known credential files
+    inside them, and the workspace is re-allowed last because a checkout
+    commonly lives under ``$HOME``. Metadata
     reads stay global so path resolution and ``stat`` of parent directories
     keep working. Writes are confined to the workspace minus ``.git``, git is
     not executable and the network is denied. Seatbelt applies the last
@@ -343,10 +368,23 @@ def sandbox_exec_policy(*, workspace: Path, home: Path | None = None) -> str:
     )
     home_deny = ""
     if home is not None and str(home) not in {"", "/"}:
-        home_filters = " ".join(
-            f'(subpath "{_sbpl_escape(path)}")' for path in _workspace_write_subpaths(home)
+        home_bases = _workspace_write_subpaths(home)
+        home_filters = " ".join(f'(subpath "{_sbpl_escape(path)}")' for path in home_bases)
+        toolchain_filters = " ".join(
+            f'(subpath "{_sbpl_escape(base.rstrip("/") + "/" + rel)}")'
+            for base in home_bases
+            for rel in _SEATBELT_HOME_TOOLCHAIN_DIRS
         )
-        home_deny = f"(deny file-read* {home_filters})\n"
+        secret_filters = " ".join(
+            f'(literal "{_sbpl_escape(base.rstrip("/") + "/" + rel)}")'
+            for base in home_bases
+            for rel in _SEATBELT_HOME_TOOLCHAIN_SECRETS
+        )
+        home_deny = (
+            f"(deny file-read* {home_filters})\n"
+            f"(allow file-read* {toolchain_filters})\n"
+            f"(deny file-read* {secret_filters})\n"
+        )
     return (
         "(version 1)\n"
         "(deny default)\n"

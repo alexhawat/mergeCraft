@@ -432,9 +432,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an allowlist of system and toolchain paths (`/usr`, `/System`, `/Library`,
   `/opt`, `/private/etc`, temp dirs, Xcode); the user's home directory is
   denied, with the workspace re-allowed when it lives under `$HOME`. Metadata
-  reads stay global for path resolution. Toolchains installed under `$HOME`
-  (for example `~/.cargo`, `~/.pyenv`) are no longer readable from the
-  sandboxed shell (#1237).
+  reads stay global for path resolution. Common per-user toolchain directories
+  stay readable after the home deny (`~/.cargo`, `~/.rustup`, `~/.pyenv`,
+  `~/.nvm`, `~/go`, `~/.sdkman`, `~/.bun`, `~/.local/bin`, `~/.local/lib`,
+  `~/.local/pipx`, `~/.local/share/uv`), except Cargo's credentials file;
+  anything else under `$HOME` (`~/.ssh`, `~/.aws`, `~/.config`,
+  `~/.local/share`) stays unreadable (#1237).
 - Native GitHub Actions events now carry the triggering author's permission.
   `pull_request`, `issue_comment` and `pull_request_review_comment` runs derive
   it from `author_association` (`OWNER` / `MEMBER` / `COLLABORATOR` count as
