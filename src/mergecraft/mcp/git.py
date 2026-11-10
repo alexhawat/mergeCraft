@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -720,7 +721,9 @@ def git_tool(ctx: ToolContext):
             identity = immutable_show_ids.get(lookup) if immutable else None
             if identity is None:
                 try:
-                    identity = _git_show_cache_identity(cwd=cwd, global_opts=global_opts, args=args)
+                    identity = await asyncio.to_thread(
+                        _git_show_cache_identity, cwd=cwd, global_opts=global_opts, args=args
+                    )
                 except RuntimeError:
                     # Let git show report its own path/ref diagnostic. A cache
                     # optimization must not replace the command's semantics.
@@ -744,11 +747,17 @@ def git_tool(ctx: ToolContext):
             args, context_dropped = _normalize_grep_args(args)
         try:
             if command == "grep":
-                output, matched = _run_grep([*global_opts, command, *args], cwd=cwd)
+                output, matched = await asyncio.to_thread(
+                    _run_grep, [*global_opts, command, *args], cwd=cwd
+                )
             elif command == "merge-base":
-                output, merge_base_found = _run_merge_base([*global_opts, command, *args], cwd=cwd)
+                output, merge_base_found = await asyncio.to_thread(
+                    _run_merge_base, [*global_opts, command, *args], cwd=cwd
+                )
             else:
-                output = _run_git([*global_opts, command, *run_args], cwd=cwd)
+                output = await asyncio.to_thread(
+                    _run_git, [*global_opts, command, *run_args], cwd=cwd
+                )
         except RuntimeError as err:
             raise RuntimeError(redact_secrets(str(err))) from err
         if show_target is not None:
@@ -820,8 +829,8 @@ def git_fetch_tool(ctx: ToolContext):
             reject_special_ref(str(refspec).split(":")[0], "refspec")
             args.append(str(refspec))
         trusted = primary_repo_state(ctx.tool_state).push_url
-        output = _run_authenticated_git(
-            args, cwd=cwd, token=ctx.git_token, trusted_remote_url=trusted
+        output = await asyncio.to_thread(
+            _run_authenticated_git, args, cwd=cwd, token=ctx.git_token, trusted_remote_url=trusted
         )
         return {"success": True, "output": output}
 
@@ -878,7 +887,9 @@ def push_branch_tool(ctx: ToolContext):
         cwd = primary_repo_state(ctx.tool_state).dir
         branch = params.get("branchName")
         if not branch:
-            branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd).strip()
+            branch = (
+                await asyncio.to_thread(_run_git, ["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd)
+            ).strip()
         reject_special_ref(str(branch), "branch")
         _require_push_allowed(ctx, branch=str(branch), action="push")
         force = bool(params.get("force", False))
@@ -886,8 +897,8 @@ def push_branch_tool(ctx: ToolContext):
         if force:
             args.insert(1, "--force-with-lease")
         trusted = primary_repo_state(ctx.tool_state).push_url
-        output = _run_authenticated_git(
-            args, cwd=cwd, token=ctx.git_token, trusted_remote_url=trusted
+        output = await asyncio.to_thread(
+            _run_authenticated_git, args, cwd=cwd, token=ctx.git_token, trusted_remote_url=trusted
         )
         logger.info("pushed branch {}", branch)
         return {"success": True, "branch": branch, "output": output}
@@ -923,7 +934,8 @@ def push_tags_tool(ctx: ToolContext):
             validate_tag_name(str(tag))
         refspecs = [f"refs/tags/{tag}" for tag in tags]
         trusted = primary_repo_state(ctx.tool_state).push_url
-        output = _run_authenticated_git(
+        output = await asyncio.to_thread(
+            _run_authenticated_git,
             ["push", "origin", *refspecs],
             cwd=cwd,
             token=ctx.git_token,
@@ -959,14 +971,15 @@ def delete_branch_tool(ctx: ToolContext):
         if remote:
             _require_push_allowed(ctx, branch=branch, action="delete")
             trusted = primary_repo_state(ctx.tool_state).push_url
-            output = _run_authenticated_git(
+            output = await asyncio.to_thread(
+                _run_authenticated_git,
                 ["push", "origin", "--delete", branch],
                 cwd=cwd,
                 token=ctx.git_token,
                 trusted_remote_url=trusted,
             )
         else:
-            output = _run_git(["branch", "-D", branch], cwd=cwd)
+            output = await asyncio.to_thread(_run_git, ["branch", "-D", branch], cwd=cwd)
         return {"success": True, "branch": branch, "remote": remote, "output": output}
 
     repo_class = repository_mutation_class_for_push(ctx.payload.push)
@@ -993,10 +1006,12 @@ def commit_changes_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         message = str(params["message"])
         cwd = primary_repo_state(ctx.tool_state).dir
-        branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd).strip()
+        branch = (
+            await asyncio.to_thread(_run_git, ["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd)
+        ).strip()
         # Local commit is always allowed; push policy gates only the remote ref
         # update (W4.2 — same local-vs-remote split as ``delete_branch``).
-        status = _run_git(["status", "--porcelain"], cwd=cwd)
+        status = await asyncio.to_thread(_run_git, ["status", "--porcelain"], cwd=cwd)
         if not status.strip():
             return {
                 "success": True,
@@ -1004,9 +1019,9 @@ def commit_changes_tool(ctx: ToolContext):
                 "pushed": False,
                 "reason": "nothing to commit",
             }
-        _run_git(["add", "-A"], cwd=cwd)
-        _run_git(["commit", "-m", message], cwd=cwd)
-        sha = _run_git(["rev-parse", "HEAD"], cwd=cwd).strip()
+        await asyncio.to_thread(_run_git, ["add", "-A"], cwd=cwd)
+        await asyncio.to_thread(_run_git, ["commit", "-m", message], cwd=cwd)
+        sha = (await asyncio.to_thread(_run_git, ["rev-parse", "HEAD"], cwd=cwd)).strip()
         # The commit is local either way — the push policy decides nothing about
         # the response, it only records why no remote update was attempted.
         try:

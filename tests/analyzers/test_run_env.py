@@ -20,6 +20,7 @@ from mergecraft.analyzers import sandbox as sandbox_mod
 from mergecraft.analyzers.resolve import AnalyzerPlan
 from mergecraft.analyzers.run import run_plan
 from mergecraft.mcp import shell as shell_mod
+from tests.analyzers.support import patch_analyzer_spawn
 
 if TYPE_CHECKING:
     import pytest
@@ -63,7 +64,7 @@ def test_bare_run_plan_with_empty_env_does_not_inherit_os_environ(
         captured.update(kwargs)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(subprocess, "run", _run)
+    patch_analyzer_spawn(monkeypatch, _run)
     plan = AnalyzerPlan(
         manifest_id="probe",
         argv=(sys.executable, "-c", "pass"),
@@ -100,7 +101,7 @@ def test_sandboxed_run_plan_with_empty_env_does_not_inherit_os_environ(
             captured["payload"] = os.read(descriptors[0], 65536).decode("utf-8", errors="replace")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(subprocess, "run", _run)
+    patch_analyzer_spawn(monkeypatch, _run)
     plan = AnalyzerPlan(manifest_id="probe", argv=("true",), cwd=tmp_path, mode="native")
 
     run_plan(plan, sandbox_context=_sandbox_context(tmp_path))

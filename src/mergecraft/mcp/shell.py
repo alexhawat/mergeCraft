@@ -7,6 +7,8 @@ TERM → grace → KILL), matching agent CLI teardown (W9 / ``#14``).
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import os
 import re
 import shutil
@@ -417,6 +419,50 @@ def _spawn_shell(
     )
 
 
+def _run_foreground(
+    command: str,
+    *,
+    env: dict[str, str],
+    cwd: str,
+    timeout_s: float,
+    isolate_network: bool,
+) -> tuple[bytes | None, bytes | None, int | None, bool]:
+    """Run ``command`` to completion or timeout; always reap the process group.
+
+    Returns ``(stdout, stderr, returncode, timed_out)``. After a timeout the
+    group is killed and reaped; if even that wait times out the process is
+    killed again and whatever output was gathered so far is returned, rather
+    than letting a second ``TimeoutExpired`` escape with the child unreaped.
+    """
+    proc = _spawn_shell(
+        command,
+        env=env,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        isolate_network=isolate_network,
+    )
+    stdout_b: bytes | None
+    stderr_b: bytes | None
+    try:
+        stdout_b, stderr_b = proc.communicate(timeout=timeout_s)
+        return stdout_b, stderr_b, proc.returncode, False
+    except subprocess.TimeoutExpired as first:
+        kill_process_group(proc.pid)
+        stdout_b, stderr_b = first.stdout, first.stderr
+        try:
+            stdout_b, stderr_b = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired as second:
+            # A descendant escaped the group and holds the pipes open.
+            stdout_b = second.stdout if second.stdout is not None else stdout_b
+            stderr_b = second.stderr if second.stderr is not None else stderr_b
+            with contextlib.suppress(OSError):
+                proc.kill()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=2)
+        return stdout_b, stderr_b, proc.returncode, True
+
+
 def shell_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         command = str(params["command"])
@@ -474,21 +520,16 @@ def shell_tool(ctx: ToolContext):
                 "message": f"started background process {handle} (pid {proc.pid})",
             }
 
-        proc = _spawn_shell(
+        # Spawn + wait are blocking; run them off the event loop so a slow
+        # command does not stall every other MCP request on this loop.
+        stdout_b, stderr_b, returncode, timed_out = await asyncio.to_thread(
+            _run_foreground,
             command,
             env=env,
             cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            timeout_s=timeout_ms / 1000,
             isolate_network=isolate_network,
         )
-        try:
-            stdout_b, stderr_b = proc.communicate(timeout=timeout_ms / 1000)
-            timed_out = False
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            kill_process_group(proc.pid)
-            stdout_b, stderr_b = proc.communicate(timeout=5)
         stdout = (stdout_b or b"").decode("utf-8", errors="replace")
         stderr = (stderr_b or b"").decode("utf-8", errors="replace")
         output = f"{stdout}\n{stderr}".strip() if stderr else stdout.strip()
@@ -498,7 +539,7 @@ def shell_tool(ctx: ToolContext):
                 if output
                 else f"[timed out after {timeout_ms}ms]"
             )
-        exit_code = proc.returncode if proc.returncode is not None else (124 if timed_out else -1)
+        exit_code = returncode if returncode is not None else (124 if timed_out else -1)
         return {
             "output": _cap_output(output, tmpdir),
             "exit_code": exit_code,
