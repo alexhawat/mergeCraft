@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import functools
 import os
 import re
@@ -9,6 +10,7 @@ import resource
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -582,6 +584,48 @@ def build_sandbox_context(
         unavailable_capabilities=tuple(probed.unavailable_reasons),
         copy_on_write_repo=copy_on_write_repo,
     )
+
+
+_RUN_ROOT: tuple[int, Path] | None = None
+_SCRATCH_NAME_RE = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def analyzer_run_root() -> Path:
+    """Per-process directory for orchestrator-side analyzer files, outside the checkout.
+
+    Scratch directories and persisted analyzer output are written by the
+    orchestrator itself, outside any namespace. Keeping them under a fresh
+    ``mkdtemp`` root rather than ``<checkout>/.mergecraft`` means no path the
+    reviewed tree supplies is ever part of a host-side write, and nothing from
+    an earlier run (or committed to the tree) can be read back as current
+    output. The root is ``0711`` — traversable by a dropped payload, not
+    listable — and is removed when the process exits.
+    """
+    global _RUN_ROOT
+    pid = os.getpid()
+    if _RUN_ROOT is not None and _RUN_ROOT[0] == pid and _RUN_ROOT[1].is_dir():
+        return _RUN_ROOT[1]
+    root = Path(tempfile.mkdtemp(prefix="mergecraft-analyzers-")).resolve()
+    root.chmod(0o711)
+    atexit.register(shutil.rmtree, root, True)
+    _RUN_ROOT = (pid, root)
+    return root
+
+
+def fresh_analyzer_scratch_dir(name: str) -> Path:
+    """Return an empty scratch directory for one analyzer run, outside the checkout.
+
+    Any directory left by an earlier run under the same name is removed first,
+    so a report file can only be read if this run wrote it.
+    """
+    safe = _SCRATCH_NAME_RE.sub("_", name).lstrip(".") or "analyzer"
+    path = analyzer_run_root() / "scratch" / safe
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.exists():
+        shutil.rmtree(path)
+    path.mkdir(parents=True, mode=0o755)
+    return path
 
 
 def plan_sandbox(
@@ -1520,6 +1564,7 @@ __all__ = [
     "SandboxPlan",
     "analyzer_egress_skip_reason",
     "analyzer_isolation_mount_fragment",
+    "analyzer_run_root",
     "analyzer_socket_mask_fragment",
     "build_analyzer_sandbox_argv",
     "build_analyzer_sandbox_argv_for_run",
@@ -1529,6 +1574,7 @@ __all__ = [
     "build_sandbox_exec_argv",
     "egress_trusted_for_host_networking",
     "evaluate_analyzer_egress_policy",
+    "fresh_analyzer_scratch_dir",
     "hand_tree_to_drop_target",
     "plan_sandbox",
     "probe_capabilities",

@@ -371,15 +371,18 @@ def _candidate_bin_dirs(repo_root: Path) -> list[Path]:
 
 
 def _tool_version(path: str, binary: str) -> str | None:
-    try:
-        completed = subprocess.run(
-            [path, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except OSError:
+    """Read ``<path> --version`` through the analyzer spawn path.
+
+    Reached only on the trusted tier (``resolve_analyzer`` never detects repo
+    tools on the untrusted tier). The probe goes through the same spawn a
+    trusted analyzer gets — scrubbed environment, its own process group, the
+    identity drop on a root orchestrator — never a bare ``subprocess.run``.
+    """
+    from mergecraft.analyzers.run import run_version_probe
+
+    _ = binary
+    completed = run_version_probe([path, "--version"], timeout_s=10)
+    if completed is None:
         return None
     output = (completed.stdout or completed.stderr or "").strip()
     if not output or completed.returncode != 0:

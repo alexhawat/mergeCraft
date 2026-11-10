@@ -24,7 +24,7 @@ from mergecraft.analyzers.resolve import (
     resolve_analyzer,
 )
 from mergecraft.analyzers.run import run_plan
-from mergecraft.analyzers.sandbox import plan_sandbox
+from mergecraft.analyzers.sandbox import fresh_analyzer_scratch_dir, plan_sandbox
 from mergecraft.analyzers.trust import build_analyzer_env
 
 if TYPE_CHECKING:
@@ -130,7 +130,86 @@ def finalize_plan(
     env = build_analyzer_env(tier=tier, repo_env=None)
     if plan.env:
         env = {**env, **plan.env}
+    if tier == "untrusted":
+        argv, env = untrusted_config_overrides(manifest.id, argv, env)
     return replace(plan, argv=tuple(argv), cwd=repo_root, env=env)
+
+
+#: Neutral config files the untrusted tier points scanners at, so the config,
+#: ignore lists and plugins a scanner would otherwise discover in the reviewed
+#: tree play no part in the scan of that tree.
+_NEUTRAL_CONFIG_FILES: dict[str, str] = {
+    "empty.yaml": "",
+    "empty.toml": "",
+    "empty.ignore": "",
+    "empty.hcl": "",
+    "hadolint.yaml": "ignored: []\n",
+}
+
+
+def neutral_config_dir() -> Path:
+    """Directory of neutral scanner config, under the analyzer run root (outside the tree)."""
+    from mergecraft.analyzers.sandbox import analyzer_run_root
+
+    root = analyzer_run_root() / "neutral-config"
+    root.mkdir(mode=0o755, exist_ok=True)
+    for name, text in _NEUTRAL_CONFIG_FILES.items():
+        path = root / name
+        if not path.is_file() or path.read_text(encoding="utf-8") != text:
+            path.write_text(text, encoding="utf-8")
+    (root / "tflint-plugins").mkdir(mode=0o755, exist_ok=True)
+    return root
+
+
+def _insert_after(argv: list[str], index: int, extra: list[str]) -> list[str]:
+    return [*argv[: index + 1], *extra, *argv[index + 1 :]]
+
+
+def untrusted_config_overrides(
+    manifest_id: str, argv: list[str], env: dict[str, str]
+) -> tuple[list[str], dict[str, str]]:
+    """Pin an untrusted scan's config to mergeCraft's neutral defaults.
+
+    Each listed scanner otherwise reads config, ignore lists or plugins from its
+    working directory or from beside the scanned files, i.e. from the reviewed
+    tree. On the untrusted tier those are replaced with explicit neutral files
+    (or the tool's own "no config" switch), so a change to them in the PR head
+    does not change what the scan of that PR reports. Semgrep-family rules are
+    handled by :func:`mergecraft.analyzers.pattern.resolve_pattern_ruleset`.
+    """
+    if not argv:
+        return argv, env
+    neutral = neutral_config_dir()
+    updated_env = dict(env)
+    if manifest_id == "actionlint":
+        argv = _insert_after(argv, 0, ["-config-file", str(neutral / "empty.yaml")])
+    elif manifest_id == "hadolint":
+        argv = _insert_after(argv, 0, ["--config", str(neutral / "hadolint.yaml")])
+    elif manifest_id == "shellcheck":
+        argv = _insert_after(argv, 0, ["--norc"])
+    elif manifest_id == "zizmor":
+        argv = _insert_after(argv, 0, ["--no-config"])
+    elif manifest_id == "yamllint":
+        argv = _insert_after(argv, 0, ["-d", "default"])
+    elif manifest_id == "squawk":
+        argv = _insert_after(argv, 0, ["--config", str(neutral / "empty.toml")])
+    elif manifest_id == "osv-scanner" and len(argv) > 1 and argv[1] == "scan":
+        argv = _insert_after(argv, 1, ["--config", str(neutral / "empty.toml")])
+    elif manifest_id == "trivy" and len(argv) > 1 and argv[1] in {"fs", "config"}:
+        argv = _insert_after(
+            argv,
+            1,
+            [
+                "--config",
+                str(neutral / "empty.yaml"),
+                "--ignorefile",
+                str(neutral / "empty.ignore"),
+            ],
+        )
+    elif manifest_id == "tflint":
+        updated_env["TFLINT_CONFIG_FILE"] = str(neutral / "empty.hcl")
+        updated_env["TFLINT_PLUGIN_DIR"] = str(neutral / "tflint-plugins")
+    return argv, updated_env
 
 
 #: TruffleHog ships a self-updater that rewrites its own binary in place, which
@@ -266,7 +345,9 @@ def run_argv(
     """Provision, sandbox, run, and return raw analyzer output."""
     from mergecraft.analyzers.sandbox import sandbox_skip_findings
 
-    plan = resolve_analyzer(manifest=manifest, repo_root=repo_root, managed_available=True)
+    plan = resolve_analyzer(
+        manifest=manifest, repo_root=repo_root, managed_available=True, tier=tier
+    )
     try:
         provisioned = provision_resolved_plan(plan, manifest=manifest, repo_root=repo_root)
     except ProvisionError as exc:
@@ -284,8 +365,7 @@ def run_argv(
     if finalized.mode == "skip":
         return None, finalized.reason or f"skipped {manifest.id}", []
 
-    scratch = repo_root / ".mergecraft" / "analyzer-scratch" / f"{manifest.id}{scratch_suffix}"
-    scratch.mkdir(parents=True, exist_ok=True)
+    scratch = fresh_analyzer_scratch_dir(f"{manifest.id}{scratch_suffix}")
     sandbox = plan_sandbox(
         manifest=manifest,
         tier=tier,

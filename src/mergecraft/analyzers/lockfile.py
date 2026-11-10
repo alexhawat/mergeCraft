@@ -23,24 +23,87 @@ LockMode = Literal["repo-native", "ci-result", "managed", "container"]
 _REQUIRED_ENTRY_KEYS = ("tool_id", "version", "sha256")
 
 
+_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+
+
+class LockPathRefusedError(OSError):
+    """The lock record's directory or file is a symbolic link, so it is not used."""
+
+
+def _open_record_dir(path: Path, *, create: bool) -> int | None:
+    """Open the directory holding ``path`` without following a link in its place.
+
+    The lock record sits at ``<checkout>/.mergecraft/analyzers.lock``, inside the
+    tree under review, so the ``.mergecraft`` component may be anything a PR
+    committed. It is opened relative to its parent with ``O_NOFOLLOW``; a link
+    there raises :class:`LockPathRefusedError` instead of being followed. Every
+    later open, rename and unlink is relative to the returned descriptor, so no
+    path is re-resolved. Returns ``None`` when the directory is absent and
+    ``create`` is false.
+    """
+    parent = path.parent
+    if create:
+        parent.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        anchor = os.open(parent.parent, os.O_RDONLY | os.O_DIRECTORY | _CLOEXEC)
+    except FileNotFoundError:
+        return None
+    try:
+        if create:
+            with contextlib.suppress(FileExistsError):
+                os.mkdir(parent.name, 0o755, dir_fd=anchor)
+        try:
+            return os.open(
+                parent.name, os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW | _CLOEXEC, dir_fd=anchor
+            )
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            msg = f"refusing analyzer lock record directory {parent}: not a plain directory ({exc})"
+            raise LockPathRefusedError(msg) from exc
+    finally:
+        os.close(anchor)
+
+
+def _open_in(dir_fd: int, name: str, flags: int, mode: int = 0o644) -> int:
+    """``open`` ``name`` relative to ``dir_fd``, refusing a symbolic link."""
+    try:
+        return os.open(name, flags | _NOFOLLOW | _CLOEXEC, mode, dir_fd=dir_fd)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        msg = f"refusing analyzer lock record file {name}: not a regular file ({exc})"
+        raise LockPathRefusedError(msg) from exc
+
+
 @contextlib.contextmanager
-def _lockfile_transaction(path: Path) -> Iterator[None]:
+def _lockfile_transaction(path: Path) -> Iterator[int]:
     """Serialize lockfile read/modify/write across parallel analyzer runs.
 
     The lock is a sidecar file, never the data file itself: the write path
     replaces the data file atomically, and a ``flock`` held on the file being
-    replaced would orphan every waiter onto the old inode.
+    replaced would orphan every waiter onto the old inode. Yields the record
+    directory's descriptor; nothing under it is reached through a link.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = path.with_name(f"{path.name}.lock")
-    with lock_path.open("a+", encoding="utf-8") as handle:
-        if sys.platform != "win32":
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    dir_fd = _open_record_dir(path, create=True)
+    if dir_fd is None:  # pragma: no cover - created above
+        msg = f"analyzer lock record directory {path.parent} could not be created"
+        raise LockPathRefusedError(msg)
+    try:
+        lock_fd = _open_in(dir_fd, f"{path.name}.lock", os.O_RDWR | os.O_CREAT)
         try:
-            yield
-        finally:
             if sys.platform != "win32":
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            try:
+                yield dir_fd
+            finally:
+                if sys.platform != "win32":
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        finally:
+            os.close(lock_fd)
+    finally:
+        os.close(dir_fd)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,17 +147,42 @@ def _coerce_entries(raws: Any) -> list[LockEntry]:
     return entries
 
 
-def read_lock(path: Path) -> list[LockEntry]:
-    """Read ``.mergecraft/analyzers.lock`` entries."""
-    if not path.is_file():
-        return []
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+def _parse_lock_text(text: str) -> list[LockEntry]:
+    data = yaml.safe_load(text)
     if not isinstance(data, dict):
         return []
     tools = data.get("tools")
     if not isinstance(tools, list):
         return []
     return _coerce_entries(tools)
+
+
+def _read_in(dir_fd: int, name: str) -> list[LockEntry]:
+    try:
+        fd = _open_in(dir_fd, name, os.O_RDONLY)
+    except FileNotFoundError:
+        return []
+    with os.fdopen(fd, encoding="utf-8") as handle:
+        return _parse_lock_text(handle.read())
+
+
+def read_lock(path: Path) -> list[LockEntry]:
+    """Read ``.mergecraft/analyzers.lock`` entries.
+
+    A record directory or file that is a symbolic link is refused with a
+    warning and reads as empty: it is never followed.
+    """
+    try:
+        dir_fd = _open_record_dir(path, create=False)
+        if dir_fd is None:
+            return []
+        try:
+            return _read_in(dir_fd, path.name)
+        finally:
+            os.close(dir_fd)
+    except LockPathRefusedError as exc:
+        logger.warning("{}", exc)
+        return []
 
 
 def write_lock(
@@ -107,35 +195,47 @@ def write_lock(
 
     The payload is staged to a sibling temp file and moved into place with
     ``os.replace`` while the sidecar lock is held, so a failure part-way through
-    leaves the previous record intact instead of a truncated one.
+    leaves the previous record intact instead of a truncated one. Every file is
+    opened relative to the record directory without following links; when that
+    directory, the record, its sidecar or the staging file is a symbolic link the
+    write is refused with a warning and nothing is written.
     """
     normalized = [
         entry if isinstance(entry, LockEntry) else _coerce_entry(entry) for entry in entries
     ]
-    with _lockfile_transaction(path):
-        if merge:
-            by_id = {entry.tool_id: entry for entry in read_lock(path)}
-            for entry in normalized:
-                by_id[entry.tool_id] = entry
-            normalized = list(by_id.values())
+    try:
+        with _lockfile_transaction(path) as dir_fd:
+            if merge:
+                by_id = {entry.tool_id: entry for entry in _read_in(dir_fd, path.name)}
+                for entry in normalized:
+                    by_id[entry.tool_id] = entry
+                normalized = list(by_id.values())
 
-        payload = {
-            "version": 1,
-            "tools": [
-                {
-                    "tool_id": entry.tool_id,
-                    "version": entry.version,
-                    "mode": entry.mode,
-                    "source": entry.source,
-                    "sha256": entry.sha256,
-                }
-                for entry in normalized
-            ],
-        }
-        text = yaml.safe_dump(payload, sort_keys=False)
-        staging = path.with_name(f".{path.name}.staging")
-        staging.write_text(text, encoding="utf-8")
-        os.replace(staging, path)
+            payload = {
+                "version": 1,
+                "tools": [
+                    {
+                        "tool_id": entry.tool_id,
+                        "version": entry.version,
+                        "mode": entry.mode,
+                        "source": entry.source,
+                        "sha256": entry.sha256,
+                    }
+                    for entry in normalized
+                ],
+            }
+            text = yaml.safe_dump(payload, sort_keys=False)
+            staging = f".{path.name}.staging"
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(staging, dir_fd=dir_fd)
+            fd = _open_in(dir_fd, staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(text)
+            os.replace(staging, path.name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    except LockPathRefusedError as exc:
+        # The record is never an authenticator (binaries are verified against
+        # pin-bound receipts), so a refused record skips the write, not the run.
+        logger.warning("{}; lock record not written", exc)
 
 
 def lock_digest(path: Path) -> str:
@@ -149,4 +249,11 @@ def lock_digest(path: Path) -> str:
     return hashlib.sha256(joined.encode()).hexdigest()[:16]
 
 
-__all__ = ["LockEntry", "LockMode", "lock_digest", "read_lock", "write_lock"]
+__all__ = [
+    "LockEntry",
+    "LockMode",
+    "LockPathRefusedError",
+    "lock_digest",
+    "read_lock",
+    "write_lock",
+]

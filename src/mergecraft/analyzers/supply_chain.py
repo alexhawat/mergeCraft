@@ -26,7 +26,7 @@ from mergecraft.analyzers.provision import ProvisionError
 from mergecraft.analyzers.registry import get_manifest
 from mergecraft.analyzers.resolve import AnalyzerPlan, expand_analyzer_argv
 from mergecraft.analyzers.run import run_plan
-from mergecraft.analyzers.sandbox import plan_sandbox
+from mergecraft.analyzers.sandbox import fresh_analyzer_scratch_dir, plan_sandbox
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -293,8 +293,7 @@ def _run_osv_scan(
         tier=tier,
     )
 
-    scratch = repo_root / ".mergecraft" / "analyzer-scratch" / manifest.id
-    scratch.mkdir(parents=True, exist_ok=True)
+    scratch = fresh_analyzer_scratch_dir(manifest.id)
     sandbox = plan_sandbox(
         manifest=manifest,
         tier=tier,
@@ -419,8 +418,7 @@ def _run_trivy_fs(
         tier=tier,
     )
 
-    scratch = repo_root / ".mergecraft" / "analyzer-scratch" / manifest.id
-    scratch.mkdir(parents=True, exist_ok=True)
+    scratch = fresh_analyzer_scratch_dir(manifest.id)
     sandbox = plan_sandbox(
         manifest=manifest,
         tier=tier,
@@ -504,8 +502,7 @@ def _run_trivy_config(
         tier=tier,
     )
 
-    scratch = repo_root / ".mergecraft" / "analyzer-scratch" / f"{manifest.id}-config"
-    scratch.mkdir(parents=True, exist_ok=True)
+    scratch = fresh_analyzer_scratch_dir(f"{manifest.id}-config")
     sandbox = plan_sandbox(
         manifest=manifest,
         tier=tier,

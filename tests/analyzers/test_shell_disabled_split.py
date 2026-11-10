@@ -59,9 +59,9 @@ def _evaluate_manifest_for_shell(*, manifest: AnalyzerManifest, shell: str) -> A
     return trust.evaluate_manifest_for_shell(manifest=manifest, shell=shell)
 
 
-def _allow_repo_provided_binaries(*, shell: str) -> Any:
+def _allow_repo_provided_binaries(*, shell: str, tier: str = "trusted") -> Any:
     trust = import_module("mergecraft.analyzers.trust")
-    return trust.allow_repo_provided_binaries(shell=shell)
+    return trust.allow_repo_provided_binaries(shell=shell, tier=tier)
 
 
 # Real PR triggers — everything that is not the operator-owned offline path.
@@ -239,6 +239,12 @@ def test_repo_provided_binaries_are_refused_when_shell_disabled() -> None:
     assert _allow_repo_provided_binaries(shell="disabled") is False
     assert _allow_repo_provided_binaries(shell="restricted") is True
     assert _allow_repo_provided_binaries(shell="enabled") is True
+
+
+@pytest.mark.parametrize("shell", ["disabled", "restricted", "enabled"])
+def test_repo_provided_binaries_are_refused_on_the_untrusted_tier(shell: str) -> None:
+    """The untrusted tier uses managed binaries only, at every shell level."""
+    assert _allow_repo_provided_binaries(shell=shell, tier="untrusted") is False
 
 
 def _plant_fake_binary(repo_root: Path, name: str) -> Path:

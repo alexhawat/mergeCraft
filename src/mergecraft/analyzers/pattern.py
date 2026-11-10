@@ -14,7 +14,7 @@ from loguru import logger
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
-    from mergecraft.analyzers.manifest import AnalyzerManifest
+    from mergecraft.analyzers.manifest import AnalyzerManifest, TrustTier
     from mergecraft.analyzers.resolve import AnalyzerPlan
 
 _CATALOG_DIR = Path(__file__).resolve().parent / "catalog"
@@ -161,8 +161,11 @@ def detect_astgrep_repo_config(repo_root: Path) -> PatternRulesetSelection | Non
     return None
 
 
-def resolve_semgrep_ruleset(repo_root: Path) -> PatternRulesetSelection:
-    repo_rules = detect_semgrep_repo_config(repo_root)
+def resolve_semgrep_ruleset(
+    repo_root: Path, *, tier: TrustTier = "trusted"
+) -> PatternRulesetSelection:
+    """Pick the Semgrep-family ruleset; the untrusted tier always gets the shipped one."""
+    repo_rules = detect_semgrep_repo_config(repo_root) if tier == "trusted" else None
     if repo_rules is not None:
         return repo_rules
     return PatternRulesetSelection(
@@ -172,8 +175,11 @@ def resolve_semgrep_ruleset(repo_root: Path) -> PatternRulesetSelection:
     )
 
 
-def resolve_astgrep_ruleset(repo_root: Path) -> PatternRulesetSelection:
-    repo_rules = detect_astgrep_repo_config(repo_root)
+def resolve_astgrep_ruleset(
+    repo_root: Path, *, tier: TrustTier = "trusted"
+) -> PatternRulesetSelection:
+    """Pick the ast-grep ruleset; the untrusted tier always gets the shipped one."""
+    repo_rules = detect_astgrep_repo_config(repo_root) if tier == "trusted" else None
     if repo_rules is not None:
         return repo_rules
     return PatternRulesetSelection(
@@ -217,10 +223,24 @@ def pattern_tool_enabled(
     return True
 
 
-def resolve_pattern_ruleset(tool_id: str, repo_root: Path) -> PatternRulesetSelection:
+def resolve_pattern_ruleset(
+    tool_id: str, repo_root: Path, *, tier: TrustTier = "trusted"
+) -> PatternRulesetSelection:
+    """Resolve the ruleset for one pattern scan.
+
+    On the untrusted tier the rules come from the shipped default ruleset, never
+    from the reviewed tree: rules the PR head carries cannot decide what the scan
+    of that same PR looks for.
+    """
     if tool_id == "ast-grep":
-        return resolve_astgrep_ruleset(repo_root)
-    return resolve_semgrep_ruleset(repo_root)
+        return resolve_astgrep_ruleset(repo_root, tier=tier)
+    return resolve_semgrep_ruleset(repo_root, tier=tier)
+
+
+def _repo_ruleset_present(tool_id: str, repo_root: Path) -> bool:
+    if tool_id == "ast-grep":
+        return detect_astgrep_repo_config(repo_root) is not None
+    return detect_semgrep_repo_config(repo_root) is not None
 
 
 def build_pattern_scan_argv(
@@ -229,10 +249,11 @@ def build_pattern_scan_argv(
     binary: str,
     repo_root: Path,
     file_paths: list[str],
+    tier: TrustTier = "trusted",
 ) -> tuple[tuple[str, ...], PatternRulesetSelection]:
     """Build argv for one pattern scan and return ruleset metadata."""
     repo_root = repo_root.resolve()
-    ruleset = resolve_pattern_ruleset(tool_id, repo_root)
+    ruleset = resolve_pattern_ruleset(tool_id, repo_root, tier=tier)
     if tool_id == "ast-grep":
         argv = (
             binary,
@@ -286,8 +307,13 @@ def prepare_pattern_plan(
     manifest: AnalyzerManifest,
     repo_root: Path,
     file_paths: list[str],
+    tier: TrustTier,
 ) -> tuple[AnalyzerPlan, PatternRulesetSelection]:
-    """Replace manifest argv with a resolved pattern scan command."""
+    """Replace manifest argv with a resolved pattern scan command.
+
+    ``tier`` is required so no caller can forget it: on the untrusted tier the
+    shipped default ruleset is used whatever rules the reviewed tree carries.
+    """
     from mergecraft.analyzers.resolve import AnalyzerPlan as Plan
 
     if not plan.argv:
@@ -299,8 +325,11 @@ def prepare_pattern_plan(
         binary=binary,
         repo_root=repo_root,
         file_paths=file_paths,
+        tier=tier,
     )
     config_note = f"ruleset: {ruleset.name} ({ruleset.source})"
+    if tier == "untrusted" and _repo_ruleset_present(manifest.id, repo_root):
+        config_note = f"{config_note}; repository rules not applied on the untrusted tier"
     version_note = f"{plan.version_note}; {config_note}" if plan.version_note else config_note
     return (
         Plan(

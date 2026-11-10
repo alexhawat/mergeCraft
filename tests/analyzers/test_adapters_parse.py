@@ -169,7 +169,9 @@ def test_jscpd_parses_scratch_report_when_stdout_has_no_output_path(
 
     def _run_plan(received: AnalyzerPlan, **_kwargs):
         captured.append(received)
-        report = tmp_path / ".mergecraft" / "analyzer-scratch" / tool_id / "jscpd-report.json"
+        # The adapter points jscpd at its per-run scratch via ``--output``.
+        output_dir = Path(received.argv[received.argv.index("--output") + 1])
+        report = output_dir / "jscpd-report.json"
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text(report_json.read_text(encoding="utf-8"), encoding="utf-8")
         return AnalyzerOutcome(
@@ -199,7 +201,10 @@ def test_jscpd_parses_scratch_report_when_stdout_has_no_output_path(
     assert captured, "run_plan must receive the jscpd argv patch"
     argv = captured[0].argv
     assert "--output" in argv
-    assert str(tmp_path / ".mergecraft" / "analyzer-scratch" / tool_id) in argv
+    output_dir = Path(argv[argv.index("--output") + 1])
+    # Scratch lives under the per-run root, outside the reviewed tree.
+    assert tmp_path.resolve() not in output_dir.parents
+    assert output_dir.name == tool_id
     assert result.skipped is False, result.skip_reason
     assert result.findings, "jscpd-report.json must parse through the generic output_path path"
     assert result.findings[0].rule_id == "clone"

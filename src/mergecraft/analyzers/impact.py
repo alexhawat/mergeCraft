@@ -118,13 +118,12 @@ def _run_ast_grep(
     from mergecraft.analyzers.registry import get_manifest
     from mergecraft.analyzers.resolve import AnalyzerPlan
     from mergecraft.analyzers.run import run_plan
-    from mergecraft.analyzers.sandbox import plan_sandbox
+    from mergecraft.analyzers.sandbox import fresh_analyzer_scratch_dir, plan_sandbox
     from mergecraft.analyzers.trust import build_analyzer_env
 
     manifest = get_manifest("ast-grep")
     repo_root = Path(cwd)
-    scratch_dir = repo_root / ".mergecraft" / "analyzer-scratch" / "ast-grep-impact"
-    scratch_dir.mkdir(parents=True, exist_ok=True)
+    scratch_dir = fresh_analyzer_scratch_dir("ast-grep-impact")
 
     sandbox_decision = plan_sandbox(
         manifest=manifest, tier=tier, repo_root=repo_root, scratch_dir=scratch_dir
