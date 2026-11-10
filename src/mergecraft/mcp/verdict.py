@@ -444,8 +444,13 @@ def ensure_review_scope_for_terminal(tool_state: ToolState, tool_name: str) -> N
     ``REPOSITORY_READ`` and its patch is an inspection artifact only.
     """
     mode = tool_state.selected_mode
-    if not tool_state.checkout_scope_invalidated and (
-        mode not in _REVIEW_MODES or _current_review_phase(tool_state) != ReviewPhase.INIT
+    # A run with no selected mode is adopted as ``Review`` once its terminal
+    # verdict is accepted (``_adopt_review_mode_for_accepted_verdict``), so it
+    # needs review scope exactly as a Review run does, whatever its phase.
+    if (
+        not tool_state.checkout_scope_invalidated
+        and mode is not None
+        and (mode not in _REVIEW_MODES or _current_review_phase(tool_state) != ReviewPhase.INIT)
     ):
         return
     if primary_repo_state(tool_state).diff_path:
