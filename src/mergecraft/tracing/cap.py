@@ -20,8 +20,8 @@ TRACE_ATTRS_JSON_MAX_BYTES = 64 * 1024
 
 
 def attrs_json_bytes(attrs: dict[str, Any]) -> int:
-    """UTF-8 byte length of ``attrs`` as JSON (``ensure_ascii=False``, ``default=str``)."""
-    return len(json.dumps(attrs, ensure_ascii=False, default=str).encode("utf-8"))
+    """UTF-8 byte length of ``attrs`` as JSON written by the JSONL sink."""
+    return len(json.dumps(attrs).encode("utf-8"))
 
 
 def cap_event_attrs(event_data: dict[str, Any]) -> dict[str, Any]:

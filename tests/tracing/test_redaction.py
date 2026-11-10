@@ -122,8 +122,10 @@ def test_attrs_cap_keeps_small_attrs_and_survives_unencodable(
 ) -> None:
     from mergecraft.tracing import cap_event_attrs
 
-    trace_event_data["attrs"] = {"a": 1, "b": "ok", "c": object()}
+    trace_event_data["attrs"] = {"a": 1, "b": "ok"}
     assert cap_event_attrs(trace_event_data) is trace_event_data
+    trace_event_data["attrs"] = {"c": object()}
+    assert cap_event_attrs(trace_event_data)["attrs"] == {"truncated": True}
     circular: dict[str, Any] = {}
     circular["self"] = circular
     trace_event_data["attrs"] = circular
