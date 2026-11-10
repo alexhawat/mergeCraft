@@ -1,22 +1,31 @@
 # SPDX-License-Identifier: MIT
 name: Image security
+# Blocking Trivy scan of the Action images. On pull requests and pushes CI calls
+# this workflow (ci.yml `image-scan-slim` / `image-scan-analyzers`), and the
+# required `Verify (static + build)` check needs both, so a HIGH or CRITICAL
+# finding without an unexpired `.trivyignore` waiver fails the PR. The slim leg
+# scans the image CI already built (`slim-artifact`); the analyzers image is
+# built here. The nightly run builds and scans both from main, so a CVE
+# published after the last code change still turns a run red.
 on:
-  pull_request:
-    branches: [main, pre-0.0.1, codex/audit-remediation]
-    # Always evaluate PRs: source, entrypoint, build hooks and future COPY
-    # inputs all affect the shipped image, not just dependency manifests.
+  workflow_call:
+    inputs:
+      image:
+        description: "Which image to scan: slim or analyzers"
+        required: true
+        type: string
+      slim-artifact:
+        description: Artifact holding the slim image tarball (tag mergecraft:scan-slim); empty builds it
+        required: false
+        default: ""
+        type: string
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
 permissions:
   contents: read
-concurrency:
-  group: image-security-${{ github.ref }}
-  cancel-in-progress: true
 jobs:
-  changes:
-    uses: ./.github/workflows/classify-pr.yml
-
   scan:
-    needs: changes
-    if: needs.changes.outputs.image_only != 'true'
     name: Image scan (${{ matrix.image }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -25,11 +34,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - image: slim
-            dockerfile: docker/Dockerfile
-          - image: analyzers
-            dockerfile: docker/Dockerfile.analyzers
+        # Called with one image; scheduled and dispatched runs scan both.
+        image: ${{ fromJSON(inputs.image && format('["{0}"]', inputs.image) || '["slim","analyzers"]') }}
+    env:
+      SHARED_SLIM: ${{ matrix.image == 'slim' && inputs.slim-artifact != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,17 +49,28 @@ jobs:
           df -h /
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           df -h /
+      - name: Download shared slim image
+        if: env.SHARED_SLIM == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.slim-artifact }}
+          path: ${{ runner.temp }}/slim-image
+      - name: Load shared slim image
+        if: env.SHARED_SLIM == 'true'
+        run: docker load --input "${{ runner.temp }}/slim-image/mergecraft-slim.tar"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: env.SHARED_SLIM != 'true'
       - name: Build without publishing
+        if: env.SHARED_SLIM != 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          file: ${{ matrix.image == 'slim' && 'docker/Dockerfile' || 'docker/Dockerfile.analyzers' }}
           load: true
           tags: mergecraft:scan-${{ matrix.image }}
           build-args: SOURCE_REVISION=${{ github.sha }}
-          cache-from: type=gha,scope=image-security-${{ matrix.image }}
-          cache-to: type=gha,mode=max,scope=image-security-${{ matrix.image }}
+          cache-from: type=gha,scope=${{ matrix.image == 'slim' && 'mergeCraft-slim' || 'mergeCraft-analyzers' }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image == 'slim' && 'mergeCraft-slim' || 'mergeCraft-analyzers' }}
       - name: Runtime toolchain smoke test
         env:
           IMAGE_SCAN_REF: mergecraft:scan-${{ matrix.image }}
@@ -59,6 +78,7 @@ jobs:
       - name: Release build cache before scanning
         # The cache is already exported to GHA; the loaded, tagged Docker image
         # survives pruning the separate BuildKit cache.
+        if: env.SHARED_SLIM != 'true'
         run: |
           docker buildx prune --all --force
           df -h /

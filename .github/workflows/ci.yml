@@ -10,7 +10,7 @@ on:
   push:
     branches: [main, pre-0.0.1, "release/**"]
   schedule:
-    # Nightly mutation advisory (non-blocking); PRs skip this job.
+    # Nightly mutation advisory (non-blocking); runs on schedule only.
     - cron: "17 6 * * *"
   workflow_dispatch:
 
@@ -19,7 +19,11 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Only PR pushes supersede each other. A main push must finish: its
+  # coverage-gate publishes the `mergecraft-coverage-json` artifact that every
+  # later PR reads as its base, so cancelling it forced each PR to re-measure
+  # base coverage in a worktree (about 15 minutes).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   changes:
@@ -81,6 +85,11 @@ jobs:
         run: make lockcheck
 
   test:
+    # py3.14 is measured by `Verify (coverage gate py3.14)`, which runs a
+    # superset of this selection (`-m "not integration"` vs this job's
+    # `not integration and not coverage`). Running both ran the unit suite twice
+    # on 3.14. The two 3.14 shard check names stay so the required contexts keep
+    # reporting; those legs do no work and the coverage gate is the proof.
     name: Verify (tests py${{ matrix.python }} ${{ matrix.group }}/2)
     needs: changes
     runs-on: ubuntu-latest
@@ -91,11 +100,14 @@ jobs:
         python: ["3.11", "3.14"]
         group: [1, 2]
     steps:
+      - name: Covered by the coverage gate (py3.14)
+        if: matrix.python == '3.14'
+        run: echo "::notice title=Verify covered::py3.14 unit tests run inside Verify (coverage gate py3.14); this shard does not repeat them."
       - name: Docs-only skip
-        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
+        if: matrix.python != '3.14' && github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
         run: echo "::notice title=Verify skipped::Docs or verified separately as an image pin — unit test shard skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+        if: matrix.python != '3.14' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
         with:
           # Ref-resolution checks ask git whether a tag or branch exists
           # (README Action pin D25, tests/docs/support.py). A shallow fetch
@@ -104,7 +116,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/bootstrap
-        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+        if: matrix.python != '3.14' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
         with:
           python-version: ${{ matrix.python }}
         env:
@@ -112,7 +124,7 @@ jobs:
           # installed, but static/toolchain jobs must not pay the sync cost (D14 / TH8).
           MERGECRAFT_UV_EXTRAS: tracing
       - name: Unit tests (shard ${{ matrix.group }} of 2)
-        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+        if: matrix.python != '3.14' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
         env:
           MERGECRAFT_TEST_SPLITS: "2"
           MERGECRAFT_TEST_GROUP: ${{ matrix.group }}
@@ -161,7 +173,9 @@ jobs:
 
   deterministic-integration:
     needs: changes
-    if: needs.changes.outputs.image_only != 'true'
+    # The one keyless integration run per PR: integration.yml no longer repeats
+    # `make test-integration`. Docs-only PRs skip it.
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     name: Required integration (py${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 55
@@ -182,16 +196,74 @@ jobs:
       - name: Keyless integration acceptance
         run: make test-integration
 
-  action-e2e:
+  # The slim Action image is built once per run and handed to the jobs below as
+  # an artifact (privilege-root, action-e2e, image-scan-slim). Each used to run
+  # its own build under its own GHA cache scope. Docs-only PRs build nothing.
+  slim-image:
+    name: Build slim image (shared)
     needs: changes
-    if: needs.changes.outputs.image_only != 'true'
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build slim image once
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          # One image, three local names: the consumers load the tarball and use
+          # the tag their scripts already expect.
+          tags: |
+            mergecraft:e2e
+            mergecraft:lane-a
+            mergecraft:scan-slim
+          build-args: SOURCE_REVISION=${{ github.sha }}
+          outputs: type=docker,dest=${{ runner.temp }}/mergecraft-slim.tar
+          cache-from: type=gha,scope=mergeCraft-slim
+          cache-to: type=gha,mode=max,scope=mergeCraft-slim
+      - name: Upload slim image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: mergecraft-slim-image
+          path: ${{ runner.temp }}/mergecraft-slim.tar
+          retention-days: 1
+          compression-level: 1
+          if-no-files-found: error
+
+  action-e2e:
+    needs: [changes, slim-image]
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     uses: ./.github/workflows/e2e.yml
     with:
       required-security: true
+      image-artifact: mergecraft-slim-image
+
+  # Trivy over both Action images, blocking: `static` needs these, so a HIGH or
+  # CRITICAL finding that has no unexpired `.trivyignore` waiver fails the
+  # required Verify (static) check. Same skip rule as the image builds above.
+  image-scan-slim:
+    needs: [changes, slim-image]
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
+    uses: ./.github/workflows/image-security.yml
+    with:
+      image: slim
+      slim-artifact: mergecraft-slim-image
+
+  image-scan-analyzers:
+    needs: changes
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
+    uses: ./.github/workflows/image-security.yml
+    with:
+      image: analyzers
 
   static:
     name: Verify (static + build py${{ matrix.python }})
-    needs: [changes, toolchain, deployment-candidate, eval-gate, privilege-root, deterministic-integration, action-e2e]
+    needs: [changes, toolchain, deployment-candidate, eval-gate, privilege-root, deterministic-integration, action-e2e, image-scan-slim, image-scan-analyzers]
     # Keep the named matrix checks visible to branch protection on every PR.
     if: always()
     runs-on: ubuntu-latest
@@ -204,15 +276,21 @@ jobs:
       - name: Require successful deterministic prerequisites
         env:
           REQUIRED_JOB_RESULTS: ${{ toJSON(needs) }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           python3 - <<'PYCODE'
           import json, os, sys
           jobs = json.loads(os.environ["REQUIRED_JOB_RESULTS"])
-          image_only = jobs.get("changes", {}).get("outputs", {}).get("image_only") == "true"
-          skipped = {"toolchain", "eval-gate", "privilege-root", "deterministic-integration", "action-e2e"}
+          outputs = jobs.get("changes", {}).get("outputs", {})
+          image_only = outputs.get("image_only") == "true"
+          docs_only = os.environ.get("EVENT_NAME") == "pull_request" and outputs.get("code") != "true"
+          image_skipped = {"toolchain", "eval-gate", "privilege-root", "deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers"}
+          docs_skipped = {"eval-gate", "privilege-root", "deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers"}
+          def may_skip(name):
+              return (image_only and name in image_skipped) or (docs_only and name in docs_skipped)
           failed = {
               name: job.get("result") for name, job in jobs.items()
-              if job.get("result") != ("skipped" if image_only and name in skipped else "success")
+              if job.get("result") != ("skipped" if may_skip(name) else "success")
           }
           if not jobs or failed:
               print(f"Required checks did not succeed: {failed or 'no prerequisite results'}", file=sys.stderr)
@@ -246,6 +324,12 @@ jobs:
       - name: Static, typecheck, build tier
         if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         run: make ci-static
+      # Blocking: actionlint (any finding) and zizmor (high severity, per
+      # .github/zizmor.yml). The SARIF step further down is evidence only. This
+      # used to run solely in integration.yml's unrequired security-scope job.
+      - name: Workflow lint (actionlint + zizmor, blocking)
+        if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
+        run: make workflow-lint
       - name: Installed wheel acceptance (runtime dependencies only)
         if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         run: make test-wheel-corpus
@@ -372,6 +456,18 @@ jobs:
           key: analyzer-cache-${{ runner.os }}-py${{ matrix.python }}-${{ hashFiles('uv.lock') }}
           restore-keys: |
             analyzer-cache-${{ runner.os }}-py${{ matrix.python }}-
+      - name: Scanner waivers are well-formed and unexpired
+        if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
+        run: python3 scripts/scanner_waivers.py
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
+        with:
+          node-version: "22"
+      # Blocking: high/critical advisories in the agent-CLI lockfile with no
+      # unexpired waiver in .github/scanner-waivers.toml.
+      - name: npm audit (agent-clis lockfile)
+        if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
+        run: make npm-audit
       - name: bandit + pip-audit (OSV.dev)
         if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         env:
@@ -397,11 +493,14 @@ jobs:
           if-no-files-found: warn
       # W5 extended SARIF (lane D / #600): semgrep for sandbox-blocked pattern scan.
       # Python 3.14 matrix leg only — one canonical semgrep-sarif artifact per PR.
+      # The SARIF is always written and uploaded; --fail-on-findings then fails
+      # the step (and this required job) on any result without an unexpired
+      # waiver in .github/scanner-waivers.toml.
       - name: Emit semgrep SARIF
         if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         env:
           UV_PROJECT_ENVIRONMENT: .venv-dev
-        run: uv run python scripts/ci_extended_sarif.py .sarif/semgrep.sarif
+        run: uv run python scripts/ci_extended_sarif.py --fail-on-findings .sarif/semgrep.sarif
       - name: Upload semgrep SARIF
         if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         continue-on-error: true
@@ -416,7 +515,7 @@ jobs:
         if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         env:
           UV_PROJECT_ENVIRONMENT: .venv-dev
-        run: uv run python scripts/ci_extended_sarif.py trufflehog .sarif/trufflehog.sarif
+        run: uv run python scripts/ci_extended_sarif.py --fail-on-findings trufflehog .sarif/trufflehog.sarif
       - name: Upload trufflehog SARIF
         if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         continue-on-error: true
@@ -427,42 +526,32 @@ jobs:
           if-no-files-found: warn
 
   privilege-root:
-    if: needs.changes.outputs.image_only != 'true'
+    needs: [changes, slim-image]
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     name: Verify (root container privilege py3.14)
-    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Docs-only skip
-        if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
-        run: echo "::notice title=Verify skipped::Docs or verified separately as an image pin — container privilege check skipped."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
-      - name: Build action image
-        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      - name: Download shared slim image
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          context: .
-          file: docker/Dockerfile
-          push: false
-          load: true
-          tags: mergecraft:lane-a
-          cache-from: type=gha,scope=mergeCraft-slim-privilege
-          cache-to: type=gha,mode=max,scope=mergeCraft-slim-privilege
+          name: mergecraft-slim-image
+          path: ${{ runner.temp }}/slim-image
+      - name: Load shared slim image
+        run: docker load --input "${{ runner.temp }}/slim-image/mergecraft-slim.tar"
       - name: Privilege identity + trust-ordering (root and uid 65534)
-        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         run: |
           chmod +x docker/e2e/run_in_image_privilege.sh
           docker/e2e/run_in_image_privilege.sh mergecraft:lane-a
 
   mutation-advisory:
     name: Verify (mutation advisory py3.14)
-    if: github.event_name != 'pull_request'
+    # Nightly, as its comment says: it ran for 45 minutes on every push before.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     continue-on-error: true
@@ -484,7 +573,7 @@ jobs:
   # that this proves structural replay, not live detection quality.
   eval-gate:
     needs: changes
-    if: needs.changes.outputs.image_only != 'true'
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     name: Eval gate (structural replay, not live detection)
     runs-on: ubuntu-latest
     timeout-minutes: 15

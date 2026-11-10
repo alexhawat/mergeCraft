@@ -17,6 +17,7 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       GH_EVENT_NAME: ${{ github.event_name }}
     steps:

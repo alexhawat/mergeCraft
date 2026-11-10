@@ -37,7 +37,20 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
           EVENT: ${{ github.event_name }}
-        run: python3 scripts/ci_pr_touches_code.py --event "$EVENT" --base "${BASE_REF:-main}"
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # On a PR, run the classifier from the base blob, as the image-only
+          # decision below does: a PR that edits this script must not be able to
+          # classify itself as docs-only. A base without the script fails safe.
+          if [ "$EVENT" = "pull_request" ]; then
+            if git show "$BASE_SHA:scripts/ci_pr_touches_code.py" > "$RUNNER_TEMP/ci-pr-touches-code.py"; then
+              python3 -I "$RUNNER_TEMP/ci-pr-touches-code.py" --event "$EVENT" --base "${BASE_REF:-main}"
+            else
+              echo "code=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            python3 scripts/ci_pr_touches_code.py --event "$EVENT" --base "${BASE_REF:-main}"
+          fi
       - name: Prove the image-only diff from the trusted base
         id: image
         if: env.CHECK_IMAGE == 'true'

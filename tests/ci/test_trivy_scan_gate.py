@@ -280,18 +280,21 @@ def test_release_scans_both_images_and_retains_attribution_after_findings() -> N
 
 
 def test_pr_image_scan_has_no_release_authority_and_is_blocking() -> None:
-    """Untrusted PR image builds cannot publish; both matrix legs retain a hard gate."""
+    """Untrusted PR image builds cannot publish; both images keep a hard gate.
+
+    CI calls image-security.yml for both images (and ``static`` needs both jobs), so the
+    scan is reachable from every code PR without a path filter that source-only or
+    entrypoint changes could slip past; only a docs-only PR skips it.
+    """
     doc = load_workflow("image-security.yml")
-    trigger = workflow_on(doc)["pull_request"]
-    assert set(trigger["branches"]) == {"main", "pre-0.0.1", "codex/audit-remediation"}
-    assert not {"paths", "paths-ignore"}.intersection(trigger), (
-        "source-only or entrypoint PRs must not bypass the image gate"
-    )
+    trigger = workflow_on(doc)
+    assert "pull_request" not in trigger, "CI calls this workflow; a second trigger builds twice"
+    assert {"workflow_call", "schedule", "workflow_dispatch"} <= set(trigger)
     assert doc["permissions"] == {"contents": "read"}
     scan = job(doc, "scan")
     assert scan["permissions"] == {"contents": "read"}
     assert scan["strategy"]["fail-fast"] is False
-    assert {row["image"] for row in scan["strategy"]["matrix"]["include"]} == {"slim", "analyzers"}
+    assert '"slim","analyzers"' in scan["strategy"]["matrix"]["image"]
     build = _step(scan, "Build without publishing")
     assert build["with"].get("push", False) is False
     assert "ghcr.io" not in build["with"]["tags"]
@@ -300,3 +303,10 @@ def test_pr_image_scan_has_no_release_authority_and_is_blocking() -> None:
     assert check["with"]["severity"] == "CRITICAL,HIGH"
     assert not check.get("continue-on-error", False)
     assert not any("login-action" in step.get("uses", "") for step in scan["steps"])
+    ci = load_workflow("ci.yml")
+    assert {job(ci, n)["with"]["image"] for n in ("image-scan-slim", "image-scan-analyzers")} == {
+        "slim",
+        "analyzers",
+    }
+    for name in ("image-scan-slim", "image-scan-analyzers"):
+        assert job(ci, name)["uses"] == "./.github/workflows/image-security.yml"

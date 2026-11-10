@@ -35,13 +35,14 @@ def test_integration_reuses_coverage_artifacts() -> None:
     assert "mergecraft-coverage-main-${{ github.event.pull_request.base.sha }}" in text
 
 
-def test_integration_runs_before_waiting_for_coverage() -> None:
+def test_integration_waits_for_head_coverage_before_the_ratchet() -> None:
     steps = job(load_workflow("integration.yml"), "integration-pr")["steps"]
     names = [step.get("name") for step in steps]
-    suite = names.index("Integration suite")
-    assert suite < names.index("Fetch base coverage (cache or ci-cd artifact)")
-    assert suite < names.index("Fetch head coverage from ci.yml artifact")
-    assert names.index("Coverage ratchet") > names.index("Fetch head coverage from ci.yml artifact")
+    assert "Integration suite" not in names, "ci.yml deterministic-integration runs it once"
+    assert names.index("Fetch base coverage (cache or ci-cd artifact)") < names.index(
+        "Coverage ratchet"
+    )
+    assert names.index("Fetch head coverage from ci.yml artifact") < names.index("Coverage ratchet")
 
 
 def test_delivery_gate_enables_complete_parallel_coverage() -> None:

@@ -1,20 +1,18 @@
 # SPDX-License-Identifier: MIT
-.git
-.github
-.mypy_cache
-.pytest_cache
-.ruff_cache
-.venv
-__pycache__
-*.pyc
-.coverage
-htmlcov
-dist
-build
-.cache
-tests
-docs
-*.md
+# Allow-list: the build context is exactly what docker/Dockerfile and
+# docker/Dockerfile.analyzers COPY. Everything else (dev venvs, coverage and
+# shard output, local analyzer caches, .env files, .ignorelocal) never reaches
+# the builder. Add a path here when a Dockerfile starts COPYing it.
+*
+!pyproject.toml
+!uv.lock
 !README.md
-.pre-commit-config.yaml
-.editorconfig
+!scripts/hatch_build.py
+!src/**
+!evals/corpora/recall_pass_corpus.json
+!integrations/opencode/**
+!docker/**
+# Local installs under allowed trees.
+**/node_modules
+**/__pycache__
+**/*.pyc

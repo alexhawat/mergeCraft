@@ -297,24 +297,66 @@ _EMITTERS: dict[str, Callable[..., None]] = {
 }
 
 
+def unwaived_findings(
+    document: object, *, scanner: str, waivers_path: Path | None = None
+) -> list[str]:
+    """Return ``rule path`` labels for SARIF results with no unexpired waiver.
+
+    Raises:
+        ValueError: A waiver entry is malformed, lacks a justification, or expired.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from scanner_waivers import DEFAULT_PATH, is_waived, load_waivers
+
+    waivers = load_waivers(waivers_path or _repo_root() / DEFAULT_PATH)
+    remaining: list[str] = []
+    runs = document.get("runs") if isinstance(document, dict) else None
+    for run in runs if isinstance(runs, list) else []:
+        results = run.get("results") if isinstance(run, dict) else None
+        for result in results if isinstance(results, list) else []:
+            rule = str(result.get("ruleId", "")) if isinstance(result, dict) else ""
+            uri = _sarif_result_uri(result)
+            if not is_waived(waivers, scanner=scanner, rule=rule, path=uri):
+                remaining.append(f"{rule or '<no rule id>'} {uri}".strip())
+    return remaining
+
+
 def main(argv: list[str] | None = None) -> int:
-    """CLI: ``ci_extended_sarif.py [semgrep|trufflehog] OUTPUT.sarif``.
+    """CLI: ``ci_extended_sarif.py [--fail-on-findings] [semgrep|trufflehog] OUTPUT.sarif``.
 
     One positional argument remains semgrep (W5) so existing CI steps stay valid.
+    With ``--fail-on-findings`` the SARIF is still written, then the exit status is
+    1 when any result lacks an unexpired waiver in ``.github/scanner-waivers.toml``.
     """
     args = list(sys.argv[1:] if argv is None else argv)
+    fail_on_findings = "--fail-on-findings" in args
+    args = [arg for arg in args if arg != "--fail-on-findings"]
     if len(args) == 1:
         tool, out_arg = "semgrep", args[0]
     elif len(args) == 2 and args[0] in _EMITTERS:
         tool, out_arg = args[0], args[1]
     else:
-        sys.stderr.write("usage: ci_extended_sarif.py [semgrep|trufflehog] OUTPUT.sarif\n")
+        sys.stderr.write(
+            "usage: ci_extended_sarif.py [--fail-on-findings] [semgrep|trufflehog] OUTPUT.sarif\n"
+        )
         return 2
     out = Path(out_arg)
     try:
         _EMITTERS[tool](out=out)
     except (EmitError, OSError) as exc:
         sys.stderr.write(f"ci_extended_sarif: {exc}\n")
+        return 1
+    if not fail_on_findings:
+        return 0
+    try:
+        remaining = unwaived_findings(json.loads(out.read_text(encoding="utf-8")), scanner=tool)
+    except (ValueError, OSError) as exc:
+        sys.stderr.write(f"ci_extended_sarif: {exc}\n")
+        return 1
+    if remaining:
+        sys.stderr.write(f"ci_extended_sarif: {len(remaining)} unwaived {tool} finding(s):\n")
+        for label in remaining:
+            sys.stderr.write(f"  {label}\n")
         return 1
     return 0
 

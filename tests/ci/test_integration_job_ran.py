@@ -25,13 +25,15 @@ from tests.ci.workflow_support import (
 
 
 def test_integration_job_runs_supported_python_matrix() -> None:
-    """The minimum supported Python must execute the non-live integration suite."""
-    integration = job(load_workflow("integration.yml"), "integration-pr")
+    """The minimum supported Python must execute the non-live integration suite.
+
+    The suite runs once per PR, in ci.yml ``deterministic-integration``;
+    integration.yml's PR job only gates the coverage delta.
+    """
+    integration = job(load_workflow("ci.yml"), "deterministic-integration")
     matrix = integration["strategy"]["matrix"]
     assert {"3.11", "3.14"} <= set(matrix["python"])
     assert not matrix.get("exclude"), "supported integration runtimes must not be excluded"
-    for event in ("pull_request", "push", "workflow_dispatch"):
-        assert f"github.event_name == '{event}'" in integration["if"]
     doc = load_workflow("integration.yml")
     triggers = doc.get("on", doc.get(True))
     assert {"main", "pre-0.0.1", "release/**"} <= set(triggers["push"]["branches"])
@@ -40,9 +42,9 @@ def test_integration_job_runs_supported_python_matrix() -> None:
     bootstrap = next(step for step in steps if step.get("uses") == "./.github/actions/bootstrap")
     assert bootstrap["with"]["python-version"] == "${{ matrix.python }}"
     execution = next(step for step in steps if step.get("run") == "make test-integration")
-    docs_only_if = "github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'"
-    assert execution.get("if") in (None, docs_only_if), (
-        "integration suite may skip only for docs-only PRs via the path classifier"
+    assert not execution.get("if"), "the integration suite step itself never skips"
+    assert "needs.changes.outputs.code == 'true'" in integration["if"], (
+        "the job may skip only for docs-only PRs via the path classifier"
     )
     assert not execution.get("continue-on-error"), "integration failures must block CI"
     assert not integration.get("continue-on-error")

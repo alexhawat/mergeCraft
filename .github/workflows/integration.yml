@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: MIT
 # W12.1 / #21 — integration gate + W12.3 workflow-lint / npm-audit.
 #
-# PR: mocked / self-skipping ``@pytest.mark.integration`` suite + coverage
-# ratchet + npm audit + actionlint/zizmor.
+# PR: coverage delta against main's published base coverage. The mocked /
+# self-skipping ``@pytest.mark.integration`` suite itself runs once per PR, in
+# ci.yml ``deterministic-integration`` (it used to run again here). npm audit
+# and actionlint/zizmor are blocking steps of ci.yml's required jobs.
 # Schedule / dispatch: live-provider integration with secrets (release
 # precondition — see .github/CONTRIBUTING.md §Cut a release), plus a non-blocking
 # unit-suite run with a per-run random seed (#776 / F9): a pinned seed fixes
@@ -39,11 +41,14 @@ jobs:
       classify-code: true
 
   integration-pr:
-    name: Integration (PR / mocked + self-skip / py${{ matrix.python }})
+    name: Integration (PR / coverage delta / py${{ matrix.python }})
     needs: changes
+    # PR only. A push to main is already gated by ci.yml coverage-gate and
+    # ci-cd.yml `make ci`; running the gate here a third time on every push
+    # bought nothing and delayed the base artifact PRs read.
     if: >-
       needs.changes.outputs.image_only != 'true' &&
-      (github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 55
     permissions:
@@ -52,7 +57,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.11", "3.14"]
+        python: ["3.14"]
     steps:
       - name: Docs-only skip
         if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
@@ -78,10 +83,6 @@ jobs:
         env:
           # Exporter unit tests run in coverage-measure (D14 / TH8).
           MERGECRAFT_UV_EXTRAS: tracing
-      # Exercise the independent suite while CI is producing coverage artifacts.
-      - name: Integration suite
-        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
-        run: make test-integration
       - name: Restore base coverage from main cache
         id: base_coverage_cache
         if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14' && github.event_name == 'pull_request'
@@ -94,6 +95,8 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          # Only a push run (main's CI or CI/CD) may supply the baseline.
+          MERGECRAFT_COVERAGE_ARTIFACT_EVENT: push
         run: |
           set -euo pipefail
           dest="${{ runner.temp }}/coverage-base.json"
@@ -112,13 +115,17 @@ jobs:
             echo "Base coverage artifact not ready for ${base_sha} (attempt ${attempt}/12); sleeping 5s…" >&2
             sleep 5
           done
-          echo "Base coverage cache/artifact miss — coverage ratchet will measure base in a worktree" >&2
+          echo "Base coverage cache/artifact miss — the delta check is skipped; floors still gate in ci.yml coverage-gate" >&2
           exit 1
       - name: Fetch head coverage from ci.yml artifact
         if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14' && github.event_name == 'pull_request'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          MERGECRAFT_COVERAGE_ARTIFACT_EVENT: pull_request
+          # Read the artifact as soon as coverage-gate uploads it; do not wait
+          # for the rest of the CI run (image scans, e2e) to complete.
+          MERGECRAFT_COVERAGE_ARTIFACT_STATUS: any
         run: |
           set -euo pipefail
           chmod +x scripts/ci_fetch_coverage_artifact.sh
@@ -144,16 +151,6 @@ jobs:
           MERGECRAFT_BASE_COVERAGE_PATH: ${{ runner.temp }}/coverage-base.json
           MERGECRAFT_HEAD_COVERAGE_PATH: ${{ runner.temp }}/coverage-head.json
         run: bash scripts/ci_coverage_delta_gate.sh
-      - name: Seed main base coverage cache
-        if: >-
-          (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') &&
-          matrix.python == '3.14' &&
-          github.event_name == 'pull_request' &&
-          steps.base_coverage_cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: coverage.json
-          key: mergecraft-coverage-main-${{ github.event.pull_request.base.sha }}
 
   filtered-egress:
     needs: changes
@@ -200,9 +197,12 @@ jobs:
         # skip here.
         run: sudo env MERGECRAFT_DISPOSABLE_LINUX=1 make test-uid-drop-privileged
 
+  # npm audit and actionlint/zizmor are blocking steps of ci.yml's required
+  # jobs now (`Verify (security audit py3.14)` and `Verify (static + build
+  # py3.14)`); this job keeps only the advisory ruff families.
   security-scope:
     needs: changes
-    name: npm audit + workflow lint
+    name: Ruff advisory families (non-blocking)
     if: needs.changes.outputs.image_only != 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -210,17 +210,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: |
-            docker/agent-clis/package-lock.json
-            scripts/package-lock.json
-      - name: npm audit (agent-clis lockfile)
-        run: make npm-audit
-      - name: actionlint + zizmor
-        run: make workflow-lint
+      - uses: ./.github/actions/bootstrap
       - name: Ruff advisory families (non-blocking)
         continue-on-error: true
         run: make lint-ruff-advisory

@@ -1,10 +1,11 @@
-# SPDX-License-Identifier: MIT
 # syntax=docker/dockerfile:1.7
+# SPDX-License-Identifier: MIT
 # Full analyzer toolchain image (W6 managed binaries baked at pinned checksums).
 # Pins (W7 / D7 / D9): same base/uv/node/gh/agent-CLI treatment as Dockerfile;
 # analyzer tool binaries remain SHA256-pinned below.
 #
-# Reproducible rebuilds: pass SOURCE_DATE_EPOCH and build with
+# Timestamp-normalised rebuilds (not bit-for-bit reproducible: apt packages outside
+# the pinned set resolve from live mirrors): pass SOURCE_DATE_EPOCH and build with
 #   docker buildx build --provenance=false --sbom=false \
 #     --output type=docker,dest=out.tar,rewrite-timestamp=true ...
 ARG SOURCE_DATE_EPOCH=1700000000

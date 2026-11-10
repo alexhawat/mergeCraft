@@ -60,6 +60,7 @@ jobs:
     # This job only ever speaks for main, so it only ever runs on main.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       issues: write

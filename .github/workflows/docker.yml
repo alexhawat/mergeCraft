@@ -15,17 +15,10 @@ name: Docker
 # vs ci-cd-*-<ref>) means "harmless because same commit" does not hold.
 # Enforced by tests/ci/test_trivy_scan_gate.py::test_docker_yml_never_pushes_to_the_registry;
 # ci-cd.yml remains the only workflow with `packages: write` at all.
+# No push trigger: ci-cd.yml builds both images on every main push and the PR
+# jobs in ci.yml build and scan them, so a push build here was a sixth copy.
+# Kept as a manual smoke for the build-and-run path.
 on:
-  push:
-    branches: [main, pre-0.0.1]
-    paths:
-      - docker/Dockerfile
-      - docker/Dockerfile.analyzers
-      - docker/docker-entrypoint.sh
-      - pyproject.toml
-      - uv.lock
-      - src/**
-      - .github/workflows/docker.yml
   workflow_dispatch:
 
 permissions:
