@@ -146,11 +146,40 @@ def _triage_lines(packet: MergeEvidencePacket | None) -> list[str]:
         return lines
     if triage.tier != "skip":
         return []
+    if triage.reapproval is not None:
+        return _reapproval_lines(triage.reapproval)
     lines = [f"Tier: skip ({triage.recognizer}) — no LLM review ran"]
     if triage.relied_on_checks:
         lines.append("Verified by: " + ", ".join(triage.relied_on_checks))
     lines.append("Approval is left to a human.")
     return lines
+
+
+def _reapproval_lines(section: Any) -> list[str]:
+    """The lines a re-approval (#1284) states: what was reused, compared, run and skipped."""
+    from mergecraft.classify.reapproval import ReapprovalRecord
+
+    record = ReapprovalRecord(
+        prior_url=section.prior_url,
+        prior_check_id=section.prior_check_id,
+        prior_head_sha=section.prior_head_sha,
+        head_sha=section.head_sha,
+        prior_merge_base=section.prior_merge_base,
+        merge_base=section.merge_base,
+        qualifying_paths=tuple(section.qualifying_paths),
+        preserved_paths=tuple(section.preserved_paths),
+        inherited_paths=tuple(section.inherited_paths),
+        skipped=tuple(section.skipped),
+    )
+    return record.summary_lines()
+
+
+def _review_stamp_lines(ctx: ToolContext) -> list[str]:
+    """The review stamp a later re-approval reads back from ``mergecraft-approval``."""
+    from mergecraft.classify.reapproval import ReviewStamp
+
+    stamp = getattr(ctx.tool_state, "review_stamp", None)
+    return stamp.lines() if isinstance(stamp, ReviewStamp) else []
 
 
 def _build_completion_summary(
@@ -222,6 +251,7 @@ def _build_approval_summary(
     reviewed_sha: str | None,
     coverage_line: str | None = None,
     triage_lines: list[str] | None = None,
+    stamp_lines: list[str] | None = None,
 ) -> str:
     from mergecraft.agents.gates import decision_summary_lines
 
@@ -232,6 +262,7 @@ def _build_approval_summary(
     if coverage_line:
         lines.append(coverage_line)
     _append_run_metadata(lines, run_url=run_url, reviewed_sha=reviewed_sha)
+    lines.extend(stamp_lines or [])
     lines.append("Decision inputs:")
     lines.extend(decision_summary_lines(decision_inputs))
     if catalog_banner:
@@ -497,6 +528,7 @@ async def report_status_checks(
             reviewed_sha=reviewed_sha,
             coverage_line=coverage_line,
             triage_lines=_triage_lines(packet),
+            stamp_lines=_review_stamp_lines(ctx),
         )
 
         await _create_check_run(

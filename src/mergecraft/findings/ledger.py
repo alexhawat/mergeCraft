@@ -1330,6 +1330,13 @@ def render_deterministic_review_block(
     triage = getattr(packet, "triage", None)
     if triage is not None and triage.tier == "skip":
         header_lines.append(f"- **Tier:** skip ({triage.recognizer}) — no LLM review ran")
+        reapproval = getattr(triage, "reapproval", None)
+        if reapproval is not None:
+            header_lines.append(
+                f"- **Re-approved from:** `{reapproval.prior_head_sha}` "
+                f"({reapproval.prior_url}); qualifying path: "
+                + ", ".join(f"`{path}`" for path in reapproval.qualifying_paths)
+            )
     elif triage is not None and triage.tier == "lite":
         used = getattr(triage, "tokens_used", None)
         usage = "" if used is None else f"; {used} tokens used"

@@ -235,6 +235,45 @@ Critical or Major finding, and usage over the cap or a malformed answer is
 failure, truncated listing or file without a patch is a full review. The PR
 title, body and labels are never inputs.
 
+**Re-approval over changelog prose (`review.fastPath.reapproval`).** Off by
+default; needs `review.fastPath.enabled` in the operator's base-side config.
+When mergeCraft already passed the pull request on an earlier head `P` and the
+only PR-authored change since is prose in a `reapproval.paths` file (the root
+`CHANGELOG.md` by default) — a one-line changelog fix, or a merge of the base
+branch whose only conflict resolution was the changelog — the run issues the
+prior verdict for the new head `H` with zero LLM calls and skips the full-diff
+reads, the agents, the analyzers and the static checks. The prior pass counts
+only as the newest `mergecraft-approval` check run on `P` that concluded
+`success` from a GitHub App named in `reapproval.trustedCheckApps`
+(`github-actions` is refused), and `P` must be the head of the newest
+mergeCraft review (a review of `H` itself is never replaced). Its summary must
+carry the review stamp every run with `reapproval` enabled writes — `Pull
+request: #N`, `Target branch: <ref>` and `Review policy: sha256:<digest>` — and
+all three must match this run. The policy digest covers the base side's
+`.mergecraft` directory, the running workflow file and the mergeCraft version,
+so a changed config, learnings, rules, Action pin or version is a changed
+policy. Three comparisons are read: the PR's changes at `P` (`base...P`), at
+`H` (`base...H`) and everything since the review (`P...H`, whose merge base
+must be `P`). Every path changed since the review is accounted for, or the run
+is the normal review: a qualifying path whose change is an in-place edit proven
+prose against the head text (no code fence, front matter or indented code), or
+a path inherited from the base that the pull request does not touch at `P` or
+`H`. Every other PR-authored change at `H` must equal the reviewed one exactly
+— status, rename source, blob and patch — which also proves the base side of
+each reviewed file is unchanged, so a clean merge whose upstream edit overlaps
+a reviewed file is reviewed. File modes, which the compare API omits, must
+match at `P`/`H` and at both merge bases. A source edit hidden in a merge
+resolution, a new or deleted file, a mode change, a changed policy or target
+branch, a force-push that rewrote `P`, a 300-file compare listing, or any read
+failure is the normal review. The result is published on the exact new head:
+both checks state `Tier: skip (reapproval)`, the prior review link, the
+compared SHAs and merge bases, the qualifying path, how every changed path was
+accounted for, what ran on this head, what was reused and what was skipped;
+`mergecraft-approval` carries the prior `success` over (only with approval
+authority, and a blocker still fails it). Other required checks are not reused
+and must pass on the new head. The packet records the reuse in
+`triage.reapproval`.
+
 **Ignored paths (`ignore_paths`, `review.ignorePaths`).** Changed files whose
 repo-relative path matches an ignore glob are cut from the diff the reviewer
 reads (`diffPath`, `incrementalDiffPath`) and from the changed-line coverage

@@ -410,6 +410,38 @@ class FastPathLiteSettings(BaseModel):
     max_output_tokens: int = Field(default=4_000, ge=1, alias="maxOutputTokens")
 
 
+def _default_reapproval_paths() -> list[str]:
+    return ["CHANGELOG.md"]
+
+
+class FastPathReapprovalSettings(BaseModel):
+    """``review.fastPath.reapproval``: carry a trusted pass forward over changelog prose.
+
+    Off by default, and only honoured with ``review.fastPath.enabled`` from the
+    operator's base-side config. When the newest mergeCraft review of the pull request
+    passed on an earlier head, and every PR-authored change since then is a prose edit
+    to one of ``paths`` (a merge of the base branch included, as long as the base's own
+    changes do not touch a reviewed file), the run issues the prior verdict for the new
+    head with no LLM call. The prior pass only counts as a ``mergecraft-approval`` check
+    run on that head published by a GitHub App named in ``trustedCheckApps``, for the
+    same pull request, target branch and review policy. ``github-actions`` is refused:
+    a ``pull_request`` workflow on the head ref can publish under that name.
+
+    Args:
+        enabled: Turn re-approval on. Default ``False``.
+        paths: Exact repository-relative paths whose prose edit may be carried over.
+            Default ``["CHANGELOG.md"]`` (the root changelog only).
+        trusted_check_apps: GitHub App slugs whose ``mergecraft-approval`` check runs
+            are a trusted prior pass. Empty means re-approval never applies.
+    """
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    enabled: bool = False
+    paths: list[str] = Field(default_factory=_default_reapproval_paths)
+    trusted_check_apps: list[str] = Field(default_factory=list, alias="trustedCheckApps")
+
+
 class FastPathSettings(BaseModel):
     """Deterministic pre-dispatch triage (``review.fastPath``), off by default.
 
@@ -431,6 +463,7 @@ class FastPathSettings(BaseModel):
         default_factory=FastPathPinBumpSettings, alias="pinBump"
     )
     lite: FastPathLiteSettings = Field(default_factory=FastPathLiteSettings)
+    reapproval: FastPathReapprovalSettings = Field(default_factory=FastPathReapprovalSettings)
 
 
 class FileGroupFanoutSettings(BaseModel):
