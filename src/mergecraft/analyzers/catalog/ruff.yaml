@@ -19,6 +19,8 @@ version: "0.15.12"
 runtime: repo-native
 timeout_s: 120
 trust: trusted
+# ruff reports "error" for every diagnostic; parsers/ruff_json.py caps non-bug-class
+# rule codes at Minor, so "error" -> Major applies only to bug-class rules.
 severity_map:
   error: Major
   warning: Minor

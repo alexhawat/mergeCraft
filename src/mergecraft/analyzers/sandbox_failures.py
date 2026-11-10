@@ -7,12 +7,15 @@ diff, so reporting it as ``failed`` invents a code defect (P-8). This module is
 the single table that names those failures by the stderr they carry, and the
 classifier the gate runner uses to turn them into ``declared-but-cannot-run``.
 
-Two reasons, spelled exactly once:
+Three reasons, spelled exactly once:
 
 * :data:`NETWORK_DISABLED_REASON` — the gate could not reach the network
   (package download, registry lookup).
 * :data:`PATH_NOT_WRITABLE_REASON` — the gate tried to write outside the scratch
   view and the kernel refused.
+* :data:`ISOLATION_UNAVAILABLE_REASON` — the sandbox harness itself (``unshare``,
+  ``bwrap``, ``setpriv``) could not start, e.g. user namespaces are denied on
+  the host. The gate never ran, so there is no verdict about the diff.
 
 A signature matches only *sandbox* shapes. Ordinary tool output that happens to
 mention ``network`` in a message about the user's code is left unclassified, so
@@ -26,6 +29,18 @@ from dataclasses import dataclass
 
 NETWORK_DISABLED_REASON = "sandboxed: network is disabled"
 PATH_NOT_WRITABLE_REASON = "sandboxed: path not writable"
+ISOLATION_UNAVAILABLE_REASON = "sandboxed: isolation unavailable"
+
+# Harness startup failures. Anchored to the harness program prefix at the start
+# of the line (``unshare: ...`` / ``bwrap: ...`` / ``setpriv: ... failed``) so
+# code output that merely mentions these words is not matched. The ``uid_map`` /
+# ``setgroups`` write failures are ``unshare: write failed ...`` lines, printed
+# when user namespaces are denied.
+_ISOLATION_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^\s*unshare:\s"),
+    re.compile(r"^\s*bwrap:\s"),
+    re.compile(r"^\s*setpriv:\s.*\b(?:failed|cannot|unable|not permitted)\b", re.IGNORECASE),
+)
 
 # Network shapes. A DNS failure, an unreachable network, or a name-resolution
 # error is the sandbox's ``--net`` with no route. ``connection refused`` is
@@ -128,6 +143,9 @@ def _refused_target_is_loopback(text: str) -> bool:
 
 
 def _reason_for_line(line: str) -> str | None:
+    for pattern in _ISOLATION_PATTERNS:
+        if pattern.search(line):
+            return ISOLATION_UNAVAILABLE_REASON
     for pattern in _NETWORK_PATTERNS:
         if pattern.search(line):
             return NETWORK_DISABLED_REASON
@@ -198,6 +216,7 @@ def classify_sandbox_failure(text: str) -> str | None:
 
 
 __all__ = [
+    "ISOLATION_UNAVAILABLE_REASON",
     "NETWORK_DISABLED_REASON",
     "PATH_NOT_WRITABLE_REASON",
     "SandboxFailure",
