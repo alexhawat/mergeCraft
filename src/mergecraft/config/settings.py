@@ -1315,6 +1315,20 @@ def apply_trust_tier_to_repo_settings(
             update={"https_proxy": "", "no_proxy": "", "ca_file": None}
         )
 
+    from mergecraft.tracing.sink_trust import scrub_sink_destinations
+
+    # Remote trace sink credentials and destinations are not executable config,
+    # so they are logged here rather than reported in ``drops`` (which feeds the
+    # agent's setup-skip reason).
+    scrubbed_tracing, tracing_drops = scrub_sink_destinations(settings.tracing)
+    if tracing_drops:
+        logger.warning(
+            "ignored repository tracing sink {} on untrusted tier ({})",
+            ", ".join(tracing_drops),
+            source_label,
+        )
+        updates["tracing"] = scrubbed_tracing
+
     if settings.review.mcp_servers:
         drops["review.mcp_servers"] = _executable_drop_reason("review.mcp_servers", source_label)
         review_update = updates.get("review", settings.review)

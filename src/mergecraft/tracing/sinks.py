@@ -318,9 +318,19 @@ def sink_factory(tracing_settings: Any) -> Any:
             # W8 / D6 — delegated to the lazy exporters module. The module
             # degrades to ``NullSink`` with a clear warning when the
             # ``[tracing]`` extra is uninstalled (convention 5).
-            from mergecraft.enterprise.runtime import remote_export_allowed
+            from mergecraft.enterprise.runtime import (
+                remote_export_allowed,
+                trace_export_residency_refusal,
+            )
 
             if not remote_export_allowed():
+                continue
+            from mergecraft.tracing.sink_trust import restrict_sink_entry
+
+            entry = restrict_sink_entry(entry)
+            refusal = trace_export_residency_refusal(entry)
+            if refusal is not None:
+                logger.warning("tracing {} sink refused: {}", sink_type, refusal)
                 continue
             from mergecraft.tracing.exporters import build_remote_sink
 
