@@ -21,7 +21,12 @@ from mergecraft.mcp.context import (
     ResolvedPayload,
     ToolContext,
 )
-from mergecraft.mcp.git import _GitCommandError, commit_changes_tool, git_tool
+from mergecraft.mcp.git import (
+    _GitCommandError,
+    commit_changes_tool,
+    git_fetch_tool,
+    git_tool,
+)
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
@@ -1706,3 +1711,69 @@ async def test_content_filter_disabling_spellings_still_allowed(
     result = await git_tool(_ctx(tmp_path)).execute({"command": "show", "args": [flag, "HEAD"]})
     assert result.is_error is not True, result.content[0]["text"]
     assert recorder.calls, "a disabling spelling must reach git"
+
+
+class _AuthGitRecorder:
+    """Captures the argv passed to _run_authenticated_git."""
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def __call__(
+        self, args: list[str], *, cwd: str, token: str, trusted_remote_url: str | None = None
+    ) -> str:
+        self.calls.append([str(a) for a in args])
+        return ""
+
+
+@pytest.mark.parametrize(
+    "refspec",
+    [
+        "main",
+        "feature/x",
+        "main:refs/remotes/origin/main",
+        "feature/x:refs/remotes/origin/feature/x",
+    ],
+)
+async def test_fetch_forwards_branch_and_own_tracking_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refspec: str
+) -> None:
+    """A bare branch, or a branch stored in its own tracking ref, reaches the fetch (#1236)."""
+    recorder = _AuthGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_authenticated_git", recorder)
+
+    result = await git_fetch_tool(_ctx(tmp_path)).execute({"refspec": refspec, "deepen": 1000})
+    assert result.is_error is not True, result.content[0]["text"]
+    assert recorder.calls == [["fetch", "--no-tags", "--deepen", "1000", "origin", refspec]]
+
+
+@pytest.mark.parametrize(
+    "refspec",
+    [
+        "main:main",
+        "feature:refs/heads/main",
+        "feature:refs/tags/v1.0.0",
+        "feature:refs/remotes/origin/main",
+        "main:refs/remotes/upstream/main",
+        "+main:refs/remotes/origin/main",
+        "+main",
+        ":refs/heads/main",
+        "main:",
+        "^main",
+        "refs/heads/main:refs/remotes/origin/refs/heads/main",
+        "main:refs/remotes/origin/main other:refs/heads/other",
+        "HEAD:refs/remotes/origin/HEAD",
+        "--upload-pack=evil",
+    ],
+)
+async def test_fetch_refuses_writes_outside_the_matching_tracking_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refspec: str
+) -> None:
+    """A read-class fetch must not move local branches, tags or another tracking ref (#1236)."""
+    recorder = _AuthGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_authenticated_git", recorder)
+
+    result = await git_fetch_tool(_ctx(tmp_path)).execute({"refspec": refspec})
+    assert result.is_error is True, result.content[0]["text"]
+    assert "Blocked" in result.content[0]["text"]
+    assert recorder.calls == []

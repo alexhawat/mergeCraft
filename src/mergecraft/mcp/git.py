@@ -42,6 +42,7 @@ from mergecraft.mcp.git_guards import (
     reject_if_leading_dash,
     reject_special_ref,
     resolve_grep_long_option,
+    validate_fetch_refspec,
     validate_tag_name,
 )
 from mergecraft.mcp.shared import (
@@ -826,8 +827,7 @@ def git_fetch_tool(ctx: ToolContext):
             args.extend(["--deepen", str(params["deepen"])])
         args.append("origin")
         if refspec:
-            reject_special_ref(str(refspec).split(":")[0], "refspec")
-            args.append(str(refspec))
+            args.append(validate_fetch_refspec(str(refspec)))
         trusted = primary_repo_state(ctx.tool_state).push_url
         output = await asyncio.to_thread(
             _run_authenticated_git, args, cwd=cwd, token=ctx.git_token, trusted_remote_url=trusted
@@ -837,7 +837,10 @@ def git_fetch_tool(ctx: ToolContext):
     return tool(
         name="git_fetch",
         tool_class=ToolClass.REPOSITORY_READ,
-        description="Fetch from the remote (handles authentication).",
+        description=(
+            "Fetch from the remote (handles authentication). `refspec` names one "
+            "branch on origin, optionally stored as `<branch>:refs/remotes/origin/<branch>`."
+        ),
         input_schema={
             "type": "object",
             "properties": {

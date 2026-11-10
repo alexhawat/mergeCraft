@@ -504,6 +504,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sandbox: the `RLIMIT_NPROC` fallback when the privilege-drop probe cannot answer keeps the extra fork headroom the probed path adds ([#1247](https://github.com/alexhawat/mergeCraft/issues/1247))
 - Hardening: `git_argv` adds `--no-ext-diff`/`--no-textconv` for `log -u`, `-U<n>`, `-W`, `-L`, `-c` and bundled forms such as `-uz` ([#1248](https://github.com/alexhawat/mergeCraft/issues/1248))
 
+- `git_fetch` validates the whole refspec, not just its source. A refspec may
+  name one branch on `origin` and store it only in that branch's own
+  remote-tracking ref (`main:refs/remotes/origin/main`); destinations under
+  `refs/heads/`, `refs/tags/` or another branch's tracking ref, forced (`+`)
+  updates, empty sides and negative refspecs are refused, so the
+  repository-read tool can no longer move local branches, tags or the base a
+  review diffs against (#1236).
+- The macOS `sandbox-exec` profile for the MCP shell no longer grants
+  `(allow file-read*)` across the host. Reads are limited to the workspace and
+  an allowlist of system and toolchain paths (`/usr`, `/System`, `/Library`,
+  `/opt`, `/private/etc`, temp dirs, Xcode); the user's home directory is
+  denied, with the workspace re-allowed when it lives under `$HOME`. Metadata
+  reads stay global for path resolution. Common per-user toolchain directories
+  stay readable after the home deny (`~/.cargo`, `~/.rustup`, `~/.pyenv`,
+  `~/.nvm`, `~/go`, `~/.sdkman`, `~/.bun`, `~/.local/bin`, `~/.local/lib`,
+  `~/.local/pipx`, `~/.local/share/uv`), except Cargo's credentials file;
+  anything else under `$HOME` (`~/.ssh`, `~/.aws`, `~/.config`,
+  `~/.local/share`) stays unreadable (#1237).
+- Native GitHub Actions events now carry the triggering author's permission.
+  `pull_request`, `issue_comment` and `pull_request_review_comment` runs derive
+  it from `author_association` (`OWNER` / `MEMBER` / `COLLABORATOR` count as
+  collaborators). `workflow_dispatch`, `push` and `schedule` runs, which only
+  someone with write access can cause, count as collaborators too, as do local
+  runs outside GitHub Actions. A collaborator's `shell: enabled` is therefore no
+  longer always downgraded to `restricted`. `push` gains the same
+  non-collaborator floor as `shell`: `enabled` becomes `restricted` when a pull
+  request or comment author is not a collaborator, or when an event type
+  mergeCraft does not model runs inside Actions (#1238).
+- The `trust.agentSandbox` tier named in the Codex sandbox remedy and in the
+  run manifest's `agent_sandbox_granting_tier` is now the tightest tier that
+  would grant the override (`merged-only`, then `dispatch`, then `same-repo`),
+  or the configured tier when it already grants. It was always `same-repo`,
+  the loosest tier, for every non-fork head (#1239).
 - actionlint now lints workflow files only. Action manifests (root `action.yml`
   and `.github/actions/**/action.yml`, composite or not) were linted against the
   workflow schema, producing false Major `syntax-check` blockers; zizmor still
