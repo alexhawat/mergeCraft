@@ -1874,7 +1874,7 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
         ctx.run_start_instructions[other_agent_id] = _render_agent_instructions(
             ctx,
             agent_id=other_agent_id,
-            modes=_render_run_modes(ctx, other_agent_id),  # type: ignore[arg-type]
+            modes=_render_run_modes(ctx, other_agent_id),  # type: ignore[arg-type]  # — str from Agent.name is an AgentId at runtime
             repo_root=repo_root,
         )
     tool_state.review_skill_paths = tuple(

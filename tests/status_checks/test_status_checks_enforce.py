@@ -388,6 +388,10 @@ async def test_in_repo_pr_with_pr_approve_enabled_can_self_approve(
         trust_tier="trusted",
     )
 
+    # A review publication needs review scope, whatever the selected mode.
+    from tests.support.tool_context import give_review_scope
+
+    give_review_scope(ctx)
     spec = create_pull_request_review_tool(ctx)
     await spec.execute(
         {"pull_number": 7, "body": "Looks good.", "approved": True},
