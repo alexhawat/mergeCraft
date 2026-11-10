@@ -18,6 +18,7 @@ if str(_ROOT) not in sys.path:
 pytest_plugins = [
     "tests.orchestrator.conftest",
     "tests.support.hermetic",
+    "tests.support.tracing",
     "tests.support.provider_harness.pytest_plugin",
     "tests.tracing.streaming.conftest",
 ]

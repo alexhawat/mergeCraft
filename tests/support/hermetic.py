@@ -43,9 +43,9 @@ _LOOPBACK_NAMES = frozenset({"localhost", "localhost.localdomain", "ip6-localhos
 _NETWORK_MARKERS = ("network", "integration", "live")
 
 # Exact variable names and prefixes removed before every test.
+# CI is runner metadata: the sandbox capability probe needs it to try sudo unshare.
 _SCRUB_EXACT = frozenset(
     {
-        "CI",
         "GH_TOKEN",
         "GH_HOST",
         "GH_ENTERPRISE_TOKEN",
@@ -166,7 +166,7 @@ LEGACY_NETWORK_FILES: frozenset[str] = frozenset(
 )
 
 # Test files whose doubles still fall through to a real host (partial GitHubClient
-# subclasses, installation-token revoke, remote OTLP exporter). The attempt is still
+# subclasses, installation-token revoke). The attempt is still
 # blocked and raises inside the test; only the teardown failure for a swallowed
 # attempt is waived. Shrink this list (give the double the method its test reaches,
 # or move to a shared strict fake); do not add to it.
@@ -185,12 +185,6 @@ LEGACY_SWALLOWED_NETWORK_FILES: frozenset[str] = frozenset(
         "tests/cli/test_review_failed_output.py",
         "tests/mcp/test_git_tool.py",
         "tests/mcp/test_public_stdio.py",
-        "tests/tracing/exporters/test_claim_sink_handoff.py",
-        "tests/tracing/exporters/test_otlp_pipeline.py",
-        "tests/tracing/exporters/test_otlp_sink_endpoint_dedupe.py",
-        "tests/tracing/exporters/test_otlp_sink_parent_context.py",
-        "tests/tracing/exporters/test_cli_precedence.py",
-        "tests/tracing/streaming/test_driver_degradation.py",
         "tests/analyzers/test_userspace_egress_runtime.py",
         "tests/mcp/test_checkout.py",
         "tests/mcp/test_checkout_ignore_paths.py",
@@ -201,7 +195,6 @@ LEGACY_SWALLOWED_NETWORK_FILES: frozenset[str] = frozenset(
         "tests/mcp/test_review_deferred_append.py",
         "tests/mcp/test_review_scope_binding.py",
         "tests/mcp/test_reviewer_resilience_ergonomics.py",
-        "tests/tracing/exporters/test_integration.py",
         "tests/utils/test_token.py",
     }
 )
