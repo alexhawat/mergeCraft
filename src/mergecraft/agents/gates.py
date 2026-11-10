@@ -357,35 +357,19 @@ def _decide_approval_from_packet(
 ) -> PacketDecision:
     """Packet-aware structural approval decision (#41, W2.2, W2.3).
 
-    Returns a :class:`mergecraft.evidence.packet.Decision` row. When the packet
-    carries an explicit ``decision`` row, that row is accepted only when
-    ``decided_by`` matches :data:`TRUSTED_PACKET_DECIDED_BY` and the verdict
-    is consistent with typed findings; otherwise a :class:`ValueError` is
-    raised. When the packet does not carry an explicit verdict, the legacy
-    blocker logic runs against :func:`_packet_attested_findings` (change-scoped
-    rows block; ``run_health`` rows attest only per D2) and the ``Conclusion``
-    literal is wrapped in a ``Decision`` with a stable ``decided_by`` and a
-    reason that names the signal the verdict came from.
+    Returns a :class:`mergecraft.evidence.packet.Decision` row. Any
+    ``decision`` row the packet already carries is ignored: the legacy blocker
+    logic always runs against :func:`_packet_attested_findings` (change-scoped
+    rows block; ``run_health`` rows attest only per D2), with ``run_succeeded``
+    and ``tier`` applied, and the ``Conclusion`` literal is wrapped in a
+    ``Decision`` with a stable ``decided_by`` and a reason that names the
+    signal the verdict came from.
 
     The function is pure: no I/O, no logging, no module state.
     """
-    # #41 hard rule — if the packet already carries an explicit decision
-    # (set by an upstream layer, e.g. a W9 thermostat overlay), honour it
-    # only when the row is trusted and consistent with the typed findings.
-    # ``MergeEvidencePacket`` validates from dicts; this guard keeps a forged
-    # row from becoming a permissive gate input (D9 / LR-1).
-    if packet.decision is not None:
-        if packet.decision.decided_by != TRUSTED_PACKET_DECIDED_BY:
-            msg = (
-                f"packet decision refused: decided_by {packet.decision.decided_by!r} "
-                f"is not the trusted decider {TRUSTED_PACKET_DECIDED_BY!r}"
-            )
-            raise ValueError(msg)
-        if packet.decision.verdict == "success" and not _trusted_positive_decision(packet):
-            msg = "packet decision refused: blocker finding present; success verdict cannot stand"
-            raise ValueError(msg)
-        return packet.decision
-
+    # The gate is the single authority for the decision, so a ``decision`` row
+    # already on the packet is never an input: it is recomputed from the typed
+    # findings, the run state and the tier every time (D9 / D13 / D14).
     conclusion = _decide_approval_from_findings(
         _packet_attested_findings(packet), run_succeeded=run_succeeded, tier=tier
     )
