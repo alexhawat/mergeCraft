@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL
+from mergecraft.config.yaml_unique import safe_load_unique
 
 
 def config_path_for_root(root: Path) -> Path:
@@ -22,7 +23,7 @@ def load_config_dict(path: Path) -> dict[str, Any]:
     """Load a YAML mapping from *path*; return ``{}`` when the file is absent."""
     if not path.is_file():
         return {}
-    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    loaded = safe_load_unique(path.read_text(encoding="utf-8"))
     if loaded is None:
         return {}
     if not isinstance(loaded, dict):

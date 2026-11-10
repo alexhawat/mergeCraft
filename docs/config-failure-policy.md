@@ -23,6 +23,17 @@ Surfaces in this class (Pydantic `extra="forbid"`):
 | `trust.agentSandbox` | An unrecognised tier is a configuration error, never a silent fall-back. A value written to *remove* privilege (`off`, `false`, a typo) must not be read as the more permissive default tier. Only `never` / `merged-only` / `dispatch` / `same-repo` validate; the error names all four |
 | Tracing environment variables and tracing Action inputs | A malformed value on `MERGECRAFT_TRACING`, `MERGECRAFT_TRACING_REGION`, `MERGECRAFT_TRACING_CONTENT` or `MERGECRAFT_TRACING_EXPORT_UNTRUSTED_CONTENT` — and on their `INPUT_TRACING` / `INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT` Action-input twins — is a configuration error instead of being ignored. Ignoring a typo in the enable flag, the region, the capture level or the untrusted-content export would let a lower-precedence layer's more permissive value stand |
 
+A config file that exists but cannot be read or parsed (a YAML syntax error,
+an undecodable file, a non-mapping root) is **hard-fail** too: loading raises a
+`config parse error: <file> (<ErrorType>)` that aborts the run as
+`RunOutcome.configuration_error`. It never falls back to `default_settings()`,
+because a syntax error after a hardened setting would otherwise silently load
+the defaults instead of the operator's intent. The message names the file and
+the parser error type, never YAML values (which may hold credentials). A
+**duplicate mapping key** (at any depth) is rejected the same way, naming the
+key and line, instead of silently keeping the last value. This covers the
+committed file, `config.local.yaml`, `MERGECRAFT_CONFIG` and `--config`.
+
 Invalid enum values on `push` / `shell`, unknown keys on those models, and
 unparseable Action inputs that drive runtime (`timeout`) all fail closed.
 `allowFallback: false` with an unavailable primary model also fails closed
@@ -39,16 +50,22 @@ Examples:
 
 | Surface | Behaviour |
 |---------|-----------|
-| Syntactically broken `.mergecraft/config.yaml` | Warn, fall back to `default_settings()` (broken YAML is **not** fail-closed) |
 | Learnings seed / bundled-skills install failure | Warn and continue without that feature |
 
-`mergecraft config validate` is the strict diagnostic surface: it parses every
-contributing configuration file and validates the migrated, merged result. A
-valid local overlay does not hide malformed committed YAML. Files replaced by
-an explicit `--config` or existing `MERGECRAFT_CONFIG` are not contributors;
-local overlays do not contribute in GitHub Actions. Runtime loading and review
-preflight retain the warn/default syntax policy above, while validating the
-effective merged settings for schema errors.
+`mergecraft config validate` parses every contributing configuration file and
+validates the migrated, merged result. A valid local overlay does not hide
+malformed committed YAML. Files replaced by an explicit `--config` or existing
+`MERGECRAFT_CONFIG` are not contributors; local overlays do not contribute in
+GitHub Actions. Runtime loading and review preflight apply the same strict
+parsing (see the hard-fail section above) and validate the effective merged
+settings for schema errors.
+
+The run-start config integrity hash covers exactly those contributing files
+(the `MERGECRAFT_CONFIG` file when set, otherwise the committed file plus, off
+CI, the local overlay). An edit to a contributing file mid-run, a switch of the
+selected file, or a config file appearing where none existed all fail closed;
+edits to a file the loader ignores do not. A contributing file that cannot be
+read for hashing also fails closed.
 
 > Trusted-tier `setupScript` failures are **not** in this table: see the
 > dedicated section below — S1 changed the default from warn-only to
@@ -163,7 +180,8 @@ Both checks fail closed: no `file://` URI is emitted and no bytes are read from 
 
 1. Unknown key on a security/runtime model → fix the typo; the Action will
    not run with a softened config.
-2. Broken YAML → fix the file; until then defaults apply (restricted push/shell).
+2. Broken YAML or a duplicate key → fix the file; the run fails closed as
+   `configuration_error` until then (no silent fallback to defaults).
 3. Bad `timeout` input → use a duration (`10m`, `1h30m`) or `--notimeout`.
 4. Bad `setup_timeout` input → use a duration (`10m`, `1h30m`); the default
    (`10m`) is set even when `timeout` is unset or `--notimeout`.

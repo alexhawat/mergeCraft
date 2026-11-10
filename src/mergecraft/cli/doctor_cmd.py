@@ -25,6 +25,7 @@ from mergecraft.config.compat import migrate_config
 from mergecraft.config.env import ConfigLocatorEnv
 from mergecraft.config.layered import merge_config_dicts, resolve_config_sources
 from mergecraft.config.settings import RepoSettings
+from mergecraft.config.yaml_unique import ConfigParseError, safe_load_unique
 from mergecraft.evidence.run_manifest import runtime_tool_stamp
 from mergecraft.mcp.ports import port_available, read_env_port
 from mergecraft.models import MODEL_ALIASES
@@ -87,11 +88,16 @@ def _git_probe(cwd: Path) -> ProbeResult:
 
 def _provider_probe() -> ProbeResult:
     detected: list[str] = []
-    for alias in MODEL_ALIASES:
-        if alias.hidden:
-            continue
-        if has_credentials_for_slug(alias.slug):
-            detected.append(alias.slug)
+    try:
+        for alias in MODEL_ALIASES:
+            if alias.hidden:
+                continue
+            if has_credentials_for_slug(alias.slug):
+                detected.append(alias.slug)
+    except ConfigParseError:
+        # The config probe reports the unparseable file as the hard failure;
+        # doctor stays a diagnostic instead of crashing on the same error.
+        return ProbeResult("provider", "warn", "config unreadable; credentials not evaluated")
     if detected:
         return ProbeResult("provider", "ok", f"{len(detected)} model(s) with credentials")
     return ProbeResult("provider", "warn", "no provider credentials detected")
@@ -131,9 +137,10 @@ def _config_probe(cwd: Path) -> ProbeResult:
     merged: dict[str, Any] = {}
     for path in sources.files:
         try:
-            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
-        except yaml.YAMLError as exc:
-            return ProbeResult("config", "fail", f"parse error: {exc}", hard_failure=True)
+            loaded = safe_load_unique(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            detail = f"config parse error: {path} ({type(exc).__name__})"
+            return ProbeResult("config", "fail", detail, hard_failure=True)
         if loaded is None:
             continue
         if not isinstance(loaded, dict):
