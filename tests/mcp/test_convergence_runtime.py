@@ -196,3 +196,70 @@ async def test_withdrawn_agent_finding_not_reappears_in_deferred_on_publish(
     inline_paths = {str(row.get("path") or "") for row in inline_comments}
     assert "src/app.py" not in inline_paths
     assert any(inline_body in str(row.get("body") or "") for row in inline_comments)
+
+
+@pytest.mark.asyncio
+async def test_over_budget_finding_is_deferred_on_publish(tmp_path: Path) -> None:
+    config_dir = tmp_path / ".mergecraft"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text("review:\n  verificationBudget: 1\n", encoding="utf-8")
+    ctx = _tool_ctx(tmp_path)
+    ctx.tool_state.analyzer_run = AnalyzerRunState(ran=True)
+    overflow_body = "Retry skips the timeout check."
+    overflow_fp = finding_fingerprint(path="src/retry.py", body=overflow_body)
+
+    await verify_agent_findings_tool(ctx).execute(
+        {
+            "findings": [
+                {
+                    "path": "src/auth.py",
+                    "line": 1,
+                    "severity": "Critical",
+                    "body": "Missing guard.",
+                },
+                {"path": "src/retry.py", "line": 2, "severity": "Major", "body": overflow_body},
+            ]
+        }
+    )
+    ledger = ctx.tool_state.finding_ledger
+    assert ledger is not None
+    skipped = ledger.get_record(overflow_fp)
+    assert skipped is not None
+    assert skipped.state == "unpublished"
+
+    result = await create_pull_request_review_tool(ctx).execute(
+        {"pull_number": 7, "body": "Review summary."}
+    )
+    assert result.is_error is False
+
+    published_body = github_client_from_ctx(ctx).review_payload["body"]
+    assert overflow_body in published_body
+    published = FindingLedger.from_comment_body(published_body).get_record(overflow_fp)
+    assert published is not None
+    assert published.state == "deferred"
+
+
+@pytest.mark.asyncio
+async def test_hydrated_withdrawn_finding_does_not_abort_publish(tmp_path: Path) -> None:
+    """A fingerprint withdrawn in an earlier run must not fail this run's publish."""
+    body = "Retry loop never resets the backoff."
+    fingerprint = finding_fingerprint(path="src/retry.py", body=body)
+    ctx = _tool_ctx(tmp_path)
+    hydrated = FindingLedger()
+    hydrated.record(fingerprint, "withdrawn", source="verifier-drop", round_index=1)
+    ctx.tool_state.finding_ledger = hydrated
+    ctx.tool_state.finding_ledger_loaded = True
+    ctx.tool_state.review_round_index = 2
+
+    result = await create_pull_request_review_tool(ctx).execute(
+        {
+            "pull_number": 7,
+            "body": "Review summary.",
+            "comments": [{"path": "src/retry.py", "line": 3, "body": body}],
+        }
+    )
+
+    assert result.is_error is False
+    record = hydrated.get_record(fingerprint)
+    assert record is not None
+    assert record.state == "withdrawn"

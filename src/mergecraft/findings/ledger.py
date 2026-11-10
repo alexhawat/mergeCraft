@@ -19,6 +19,10 @@ from urllib.parse import quote, unquote
 from loguru import logger
 
 from mergecraft.findings.lifecycle import LifecycleRecord, LifecycleState, validate_lifecycle_state
+from mergecraft.findings.lifecycle_transitions import (
+    assert_lifecycle_transition,
+    lifecycle_transition_allowed,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
@@ -78,6 +82,8 @@ class FindingLedger:
         recorded_at: str | None = None,
     ) -> LifecycleRecord:
         """Upsert one lifecycle transition for ``fingerprint``."""
+        prior = self._records.get(fingerprint)
+        assert_lifecycle_transition(prior.state if prior is not None else None, state)
         stamp = recorded_at or datetime.now(UTC).replace(microsecond=0).isoformat().replace(
             "+00:00", "Z"
         )
@@ -91,6 +97,36 @@ class FindingLedger:
         )
         self._records[fingerprint] = record
         return record
+
+    def record_if_allowed(
+        self,
+        fingerprint: str,
+        state: LifecycleState,
+        *,
+        source: str,
+        round_index: int,
+        reason: str | None = None,
+    ) -> LifecycleRecord | None:
+        """Record ``state`` unless the transition is illegal; then keep the prior row.
+
+        Runtime writers use this because the ledger is hydrated from earlier
+        runs: a fingerprint withdrawn in a previous round must not abort this
+        round's publish or verify call when the agent raises it again.
+        """
+        prior = self._records.get(fingerprint)
+        prior_state = prior.state if prior is not None else None
+        if not lifecycle_transition_allowed(prior_state, state):
+            logger.warning(
+                "finding ledger: skipping illegal transition {!r} -> {!r} for {} (source={})",
+                prior_state,
+                state,
+                fingerprint,
+                source,
+            )
+            return None
+        return self.record(
+            fingerprint, state, source=source, round_index=round_index, reason=reason
+        )
 
     def promote(
         self,
@@ -803,7 +839,7 @@ def record_over_budget_verifications(
 ) -> None:
     """Record fingerprints the verifier budget skipped as ``unpublished``."""
     for fingerprint in skipped_over_budget:
-        book.record(
+        book.record_if_allowed(
             fingerprint,
             "unpublished",
             source="verification-budget",
@@ -825,7 +861,7 @@ def record_deferred_from_analyzer_run(
         fingerprint = str(row.get("fingerprint") or "").strip()
         if fingerprint and fingerprint not in withdrawn:
             path = str(row.get("path") or "").strip()
-            ledger.record(
+            ledger.record_if_allowed(
                 fingerprint,
                 "deferred",
                 source="overflow",
@@ -853,7 +889,7 @@ def record_published_findings_in_ledger(
             if path and body:
                 fingerprint = finding_fingerprint(path=path, body=body)
         if fingerprint:
-            ledger.record(
+            ledger.record_if_allowed(
                 fingerprint,
                 "open",
                 source="inline",
@@ -866,7 +902,7 @@ def record_withdrawn_in_ledger(tool_state: ToolState, *, round_index: int | None
     resolved_round = ledger_round_index(tool_state) if round_index is None else round_index
     ledger = ensure_finding_ledger(tool_state)
     for fingerprint in tool_state.withdrawn_fingerprints:
-        ledger.record(
+        ledger.record_if_allowed(
             fingerprint,
             "withdrawn",
             source="verifier-drop",
