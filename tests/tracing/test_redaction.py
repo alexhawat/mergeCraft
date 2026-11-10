@@ -77,10 +77,13 @@ def test_no_deny_key_value_reaches_any_sink(
 def test_attrs_payload_capped_with_truncation_marker(
     payload_bytes: int, is_truncated: bool, trace_event_data: dict[str, Any]
 ) -> None:
+    """The boundary is the JSON byte size of the whole ``attrs`` dict (#1252)."""
     from mergecraft.tracing import TRACE_ATTRS_JSON_MAX_BYTES, cap_event_attrs
 
     assert TRACE_ATTRS_JSON_MAX_BYTES == 64 * 1024
-    trace_event_data["attrs"] = {"payload": "x" * payload_bytes}
+    overhead = len(json.dumps({"payload": ""}).encode())
+    trace_event_data["attrs"] = {"payload": "x" * (payload_bytes - overhead)}
+    assert len(json.dumps(trace_event_data["attrs"]).encode()) == payload_bytes
     capped = cap_event_attrs(trace_event_data)
     encoded = json.dumps(capped["attrs"], separators=(",", ":")).encode()
     if is_truncated:
@@ -89,6 +92,44 @@ def test_attrs_payload_capped_with_truncation_marker(
         assert capped["span_id"] == trace_event_data["span_id"]
     else:
         assert capped["attrs"] == trace_event_data["attrs"]
+
+
+def test_attrs_cap_counts_utf8_bytes_not_characters(trace_event_data: dict[str, Any]) -> None:
+    from mergecraft.tracing import cap_event_attrs
+
+    # 20,000 four-byte emoji: 20k characters, 80k UTF-8 bytes.
+    trace_event_data["attrs"] = {"payload": "\U0001f600" * 20_000}
+    assert cap_event_attrs(trace_event_data)["attrs"] == {"truncated": True}
+
+
+def test_attrs_cap_counts_nested_values(trace_event_data: dict[str, Any]) -> None:
+    from mergecraft.tracing import cap_event_attrs
+
+    trace_event_data["attrs"] = {"outer": {"inner": ["x" * 100_000]}}
+    assert cap_event_attrs(trace_event_data)["attrs"] == {"truncated": True}
+
+
+def test_attrs_cap_counts_many_small_values(trace_event_data: dict[str, Any]) -> None:
+    from mergecraft.tracing import cap_event_attrs
+
+    # Each value is far below the cap; together they exceed it.
+    trace_event_data["attrs"] = {f"k{i}": "y" * 1000 for i in range(100)}
+    assert cap_event_attrs(trace_event_data)["attrs"] == {"truncated": True}
+
+
+def test_attrs_cap_keeps_small_attrs_and_survives_unencodable(
+    trace_event_data: dict[str, Any],
+) -> None:
+    from mergecraft.tracing import cap_event_attrs
+
+    trace_event_data["attrs"] = {"a": 1, "b": "ok"}
+    assert cap_event_attrs(trace_event_data) is trace_event_data
+    trace_event_data["attrs"] = {"c": object()}
+    assert cap_event_attrs(trace_event_data)["attrs"] == {"truncated": True}
+    circular: dict[str, Any] = {}
+    circular["self"] = circular
+    trace_event_data["attrs"] = circular
+    assert cap_event_attrs(trace_event_data)["attrs"] == {"truncated": True}
 
 
 def test_identifier_attrs_skip_the_entropy_heuristic() -> None:
@@ -111,3 +152,16 @@ def test_identifier_attrs_skip_the_entropy_heuristic() -> None:
     assert out["review.id"] == run_id
     assert "sk-abcdefghijklmnop1234" not in out["gen_ai.response.model"]
     assert out["note"] != run_id
+
+
+@pytest.mark.parametrize("key", ["error", "exception.message", "tool.error_message"])
+def test_error_text_attrs_get_url_credential_redaction(key: str) -> None:
+    """#1235: exception text quoting ``https://user:pw@host`` loses the password, not the host."""
+    from mergecraft.tracing.redaction import redact_attrs
+
+    text = "ConnectError: failed to reach https://deploy:pw0rd@git.example.com/repo.git"
+    out = redact_attrs({key: text, "note": "plain words stay readable"})
+
+    assert "pw0rd" not in out[key]
+    assert "https://deploy:<redacted>@git.example.com" in out[key]
+    assert out["note"] == "plain words stay readable"

@@ -34,33 +34,16 @@ concurrency:
 
 jobs:
   changes:
-    name: Classify PR diff
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      code: ${{ steps.classify.outputs.code }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Docs-only vs code paths
-        id: classify
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          set -euo pipefail
-          python3 scripts/ci_pr_touches_code.py \
-            --event "${{ github.event_name }}" \
-            --base "${BASE_REF:-main}"
+    uses: ./.github/workflows/classify-pr.yml
+    with:
+      classify-code: true
 
   integration-pr:
     name: Integration (PR / mocked + self-skip / py${{ matrix.python }})
     needs: changes
     if: >-
-      github.event_name == 'pull_request' ||
-      github.event_name == 'push' ||
-      github.event_name == 'workflow_dispatch'
+      needs.changes.outputs.image_only != 'true' &&
+      (github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 55
     permissions:
@@ -173,6 +156,7 @@ jobs:
           key: mergecraft-coverage-main-${{ github.event.pull_request.base.sha }}
 
   filtered-egress:
+    needs: changes
     name: Integration (filtered egress / privileged)
     # The netns + veth + iptables enforcement in
     # ``mergecraft.analyzers.egress`` needs CAP_NET_ADMIN and CAP_SYS_ADMIN,
@@ -181,9 +165,8 @@ jobs:
     # ``AllowlistConnectProxy``, a userspace stand-in production never uses
     # (#606 finding 2).
     if: >-
-      github.event_name == 'pull_request' ||
-      github.event_name == 'push' ||
-      github.event_name == 'workflow_dispatch'
+      needs.changes.outputs.image_only != 'true' &&
+      (github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -218,8 +201,9 @@ jobs:
         run: sudo env MERGECRAFT_DISPOSABLE_LINUX=1 make test-uid-drop-privileged
 
   security-scope:
+    needs: changes
     name: npm audit + workflow lint
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -242,8 +226,9 @@ jobs:
         run: make lint-ruff-advisory
 
   otlp-collector-e2e:
+    needs: changes
     name: OTLP collector e2e (#143)
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

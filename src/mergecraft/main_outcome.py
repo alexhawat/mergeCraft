@@ -19,6 +19,7 @@ from mergecraft.tracing.event import trace_attrs_for_mode
 if TYPE_CHECKING:
     from mergecraft.action.inputs import SetupFailurePolicy
     from mergecraft.agents.shared import AgentResult
+    from mergecraft.config.settings import GateMode
     from mergecraft.evidence.shadow import VerdictProtocolPrediction
     from mergecraft.mcp.tool_state import ToolState
     from mergecraft.mcp.verdict import VerdictDiagnostic
@@ -105,7 +106,7 @@ def _publication_outcome_inputs(
     tool_state: ToolState,
     *,
     result: AgentResult,
-    verdict_protocol: str | None,
+    verdict_protocol: GateMode | None,
 ) -> tuple[bool | None, tuple[str, str] | None]:
     """Return ``(terminal_publication_receipt, terminal_publication_mismatch)``.
 
@@ -116,26 +117,15 @@ def _publication_outcome_inputs(
     sha, no verdict) is never a receipt, and neither is a review on this head
     that proves no verdict (see :func:`_publication_unproven`).
     """
-    if getattr(tool_state, "review_publication_sticky_only", False):
-        # A non-terminal neutral rung deliberately posts no formal review; the
-        # fallback rung owns it, so this run owes GitHub no publication receipt
-        # and must not be classified as an unpublished verdict (#1078).
-        return None, None
-    if (
-        not _is_review_mode(tool_state.selected_mode)
-        or verdict_protocol == "shadow"
-        or not result.terminal_submission_received
-    ):
-        return None, None
-    review = tool_state.review
-    receipt = review is not None and review.verdict is not None
-    mismatch: tuple[str, str] | None = None
-    if tool_state.terminal_publication_mismatch:
-        submission = tool_state.terminal_submission
-        published = review.verdict if review is not None else None
-        recorded = submission.verdict if submission is not None else None
-        mismatch = (published or "an unknown verdict", recorded or "an unknown verdict")
-    return receipt, mismatch
+    from mergecraft.review.terminal_publication import resolve_terminal_publication
+
+    resolution = resolve_terminal_publication(
+        tool_state,
+        result=result,
+        verdict_protocol=verdict_protocol,
+        mode=tool_state.selected_mode,
+    )
+    return resolution.terminal_publication_receipt, resolution.terminal_publication_mismatch
 
 
 def _publication_unproven(tool_state: ToolState) -> bool:

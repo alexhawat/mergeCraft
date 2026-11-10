@@ -16,6 +16,7 @@ tracing-specific additions are:
 Exports:
     DENY_KEYS -- tuple of attr keys whose values are dropped wholesale.
     IDENTIFIER_KEYS -- attr keys redacted by explicit secret patterns only (no entropy).
+    ERROR_TEXT_KEYS -- exception-text attr keys that also get URL credential redaction.
     REDACTED -- sentinel literal ``"<redacted>"`` used by URL + tool-payload redaction.
     redact_attrs -- recursively redact an ``attrs`` dict, returning a new dict.
     redact_event -- return a deep-copied ``TraceEvent`` with redacted attrs.
@@ -98,6 +99,13 @@ IDENTIFIER_KEYS: frozenset[str] = frozenset(
 )
 
 
+# Top-level attrs that carry exception text. Exception messages quote URLs
+# verbatim -- httpx: ``Client error '401' for url 'https://user:pw@host/…'`` --
+# and :func:`redact_secrets` has no userinfo rule, so these also pass through
+# :func:`redact_url` first (#1235). ``http.url`` is redacted at the source.
+ERROR_TEXT_KEYS: frozenset[str] = frozenset({"error", "exception.message", "tool.error_message"})
+
+
 def redact_attrs(attrs: dict[str, Any] | None) -> dict[str, Any]:
     """Return a redacted copy of ``attrs`` (never the input dict)."""
     if not attrs:
@@ -107,11 +115,20 @@ def redact_attrs(attrs: dict[str, Any] | None) -> dict[str, Any]:
         for key, value in attrs.items()
         if key in IDENTIFIER_KEYS and isinstance(value, str)
     }
-    rest = {key: value for key, value in attrs.items() if key not in identifiers}
+    error_texts = {
+        key: redact_secrets(redact_url(value))
+        for key, value in attrs.items()
+        if key in ERROR_TEXT_KEYS and isinstance(value, str)
+    }
+    rest = {
+        key: value
+        for key, value in attrs.items()
+        if key not in identifiers and key not in error_texts
+    }
     redacted = redact_structured_value(rest, redact_string=redact_secrets)
     if not isinstance(redacted, dict):
         return {}
-    return {**redacted, **identifiers}
+    return {**redacted, **identifiers, **error_texts}
 
 
 def redact_event(event: TraceEvent) -> TraceEvent:
@@ -301,6 +318,7 @@ def _truncate_utf8_payload(text: str, encoded: bytes, max_bytes: int) -> str:
 
 __all__ = [
     "DENY_KEYS",
+    "ERROR_TEXT_KEYS",
     "IDENTIFIER_KEYS",
     "REDACTED",
     "redact_attrs",

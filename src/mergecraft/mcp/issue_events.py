@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.mcp.shared import ToolClass, execute, tool
-from mergecraft.mcp.tool_state import primary_repo_state
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -16,7 +15,6 @@ _RELEVANT = frozenset({"cross_referenced", "referenced"})
 def get_issue_events_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         issue_number = int(params["issue_number"])
-        primary_repo_state(ctx.tool_state).issue_number = issue_number
         raw = await ctx.scm.get(
             f"/repos/{ctx.repo.owner}/{ctx.repo.name}/issues/{issue_number}/timeline",
             headers={"Accept": "application/vnd.github+json"},

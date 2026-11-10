@@ -1543,16 +1543,19 @@ def load_repo_settings(
     if path is not None:
         candidate = Path(path)
         if candidate.is_file():
+            from mergecraft.config.layered import config_parse_error
+            from mergecraft.config.yaml_unique import safe_load_unique
+
             try:
-                loaded = yaml.safe_load(candidate.read_text(encoding="utf-8"))
-            except (OSError, yaml.YAMLError) as exc:
-                logger.warning("failed to parse config {}: {}", candidate, exc)
-                loaded = None
+                loaded = safe_load_unique(candidate.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+                # Fail closed: a config that cannot be parsed must not widen to defaults.
+                raise config_parse_error(candidate, exc) from exc
             if loaded is None:
                 raw = {}
             elif not isinstance(loaded, dict):
                 msg = f"config must be a mapping, got {type(loaded).__name__}: {candidate}"
-                raise ValueError(msg)
+                raise config_parse_error(candidate, ValueError(msg))
             else:
                 raw = migrate_config(loaded)
     else:

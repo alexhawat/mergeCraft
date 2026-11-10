@@ -216,9 +216,14 @@ def _hand_xdg_data_home_to_agent(data_home: Path) -> None:
         return
     for path in (data_home, *data_home.rglob("*")):
         with contextlib.suppress(OSError):
+            if path.is_symlink():
+                # Re-own the link itself, never its target, and never chmod through it:
+                # a link planted in the tree must not re-own a file outside it.
+                os.chown(path, pw.pw_uid, pw.pw_gid, follow_symlinks=False)
+                continue
             if path.is_dir():
                 os.chmod(path, 0o755)  # nosec B103 — agent must traverse the auth tree
-            os.chown(path, pw.pw_uid, pw.pw_gid)
+            os.chown(path, pw.pw_uid, pw.pw_gid, follow_symlinks=False)
 
 
 def _setup_opencode_auth(

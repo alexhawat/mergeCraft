@@ -16,7 +16,7 @@ docker run --rm \
   -lc '
 set -euo pipefail
 uv pip install --python /opt/mergecraft/.venv/bin/python \
-  "pytest==9.1.1" "pytest-asyncio==1.4.0"
+  "pytest==9.2.0" "pytest-asyncio==1.4.1.post1"
 export PYTHONPATH=/workspace
 export PYTEST_ADDOPTS="-p no:cacheprovider"
 PYTEST=(/opt/mergecraft/.venv/bin/python -m pytest)

@@ -42,8 +42,8 @@ def test_outdated_unresolved_is_not_fixed() -> None:
     outcome, reason = classify_thread_outcome(
         thread, publishers=frozenset({"mergecraft[bot]"}), merged=False
     )
-    assert outcome == "unknown"
-    assert "stale" in reason
+    assert outcome == "stale"
+    assert "outdated" in reason
 
 
 def test_resolved_thread_is_fixed() -> None:
@@ -115,3 +115,32 @@ def test_report_preserves_production_thread_id() -> None:
     assert len(report.rows) == 1
     assert report.rows[0].thread_id == "PRRT_kwDOExample456"
     assert report.rows[0].outcome == "unknown"
+
+
+def test_outdated_unresolved_thread_is_stale_not_fixed() -> None:
+    thread = _production_thread(outdated=True)
+    outcome, reason = classify_thread_outcome(
+        thread, publishers=frozenset({"mergecraft[bot]"}), merged=True
+    )
+    assert outcome == "stale"
+    assert "outdated" in reason
+
+
+def test_resolved_and_outdated_thread_is_still_fixed() -> None:
+    thread = _production_thread(resolved=True, outdated=True)
+    outcome, _reason = classify_thread_outcome(
+        thread, publishers=frozenset({"mergecraft[bot]"}), merged=True
+    )
+    assert outcome == "fixed"
+
+
+def test_stale_counts_in_rates_without_inflating_fixed() -> None:
+    report = classify_pull_request_outcomes(
+        pull_number=7,
+        threads=[_production_thread(outdated=True)],
+        publishers=frozenset({"mergecraft[bot]"}),
+        merged=True,
+    )
+    rates = report.rates()
+    assert rates["stale"] == 1.0
+    assert rates["fixed"] == 0.0

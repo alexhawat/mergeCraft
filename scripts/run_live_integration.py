@@ -26,8 +26,7 @@ from mergecraft.integrations.live_providers import (  # noqa: E402
 LIVE_PYTEST_MARKER = "live"
 
 
-def main(argv: list[str] | None = None) -> int:
-    _ = argv
+def main() -> int:
     os.environ.setdefault("MERGECRAFT_LIVE", "1")
     marker = os.environ.get("MERGECRAFT_LIVE_PYTEST_MARKER", LIVE_PYTEST_MARKER)
     if marker != LIVE_PYTEST_MARKER:

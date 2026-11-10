@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 from mergecraft.jev.pack_registry import DEFAULT_THRESHOLDS, state_fields_for
-from mergecraft.jev.types import NOUL_ACT_FLOOR
+from mergecraft.jev.types import NOUL_ACT_FLOOR, JevError
 from mergecraft.utils.fence import Fence, render_untrusted
 
 if TYPE_CHECKING:
@@ -128,10 +128,16 @@ def filter_state_for_pack(
 
     Returns:
         dict[str, Any]: Filtered (and optionally fenced) state for ``system_one``.
+
+    Raises:
+        JevError: ``invalid_pack`` when ``pack_id`` has no registered state-field
+            allowlist.
     """
     allowed = state_fields_for(pack_id)
     if not allowed:
-        return dict(state)
+        # Fail closed: a pack with no registered field allowlist must never
+        # ship the caller's raw (possibly untrusted, unfenced) state upstream.
+        raise JevError(f"unknown question pack {pack_id!r}", code="invalid_pack")
     filtered: dict[str, Any] = {}
     for key in allowed:
         if key not in state:

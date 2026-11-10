@@ -1,0 +1,51 @@
+name: Classify PR changes
+on:
+  workflow_call:
+    inputs:
+      classify-code:
+        type: boolean
+        default: false
+    outputs:
+      code:
+        value: ${{ jobs.changes.outputs.code }}
+      image_only:
+        value: ${{ jobs.changes.outputs.image_only }}
+permissions:
+  contents: read
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.image.outputs.image_only != 'true' && steps.classify.outputs.code || 'false' }}
+      image_only: ${{ steps.image.outputs.image_only || 'false' }}
+    env:
+      CHECK_IMAGE: >-
+        ${{ (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') &&
+        github.event.pull_request.base.ref == 'main' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        !github.event.pull_request.draft && github.event.pull_request.user.login != 'dependabot[bot]' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: inputs.classify-code || env.CHECK_IMAGE == 'true'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Docs-only vs code paths
+        id: classify
+        if: inputs.classify-code
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          EVENT: ${{ github.event_name }}
+        run: python3 scripts/ci_pr_touches_code.py --event "$EVENT" --base "${BASE_REF:-main}"
+      - name: Prove the image-only diff from the trusted base
+        id: image
+        if: env.CHECK_IMAGE == 'true'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Reading the base blob keeps PR-authored classifiers out of the decision.
+          if git show "$BASE:scripts/action_image_only.py" > "$RUNNER_TEMP/image-only.py"; then
+            python3 -I "$RUNNER_TEMP/image-only.py" "$BASE" "$HEAD" >> "$GITHUB_OUTPUT"
+          fi

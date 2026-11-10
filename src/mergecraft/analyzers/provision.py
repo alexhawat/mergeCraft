@@ -487,9 +487,8 @@ def resolve_baked_binary(manifest: AnalyzerManifest) -> Path | None:
     candidate = BAKED_ANALYZER_ROOT / binary
     if candidate.is_file():
         return candidate
-    discovered = shutil.which(binary)
-    if discovered:
-        return Path(discovered)
+    # No PATH fallback: a same-named host binary is unpinned and unverified, and
+    # callers skip lock/hash verification when this returns a path.
     return None
 
 

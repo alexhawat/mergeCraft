@@ -49,7 +49,6 @@ from mergecraft.mcp.verdict import (
     record_validated_terminal_submission,
     recorded_submission_payload,
     revalidate_recorded_submission,
-    stamp_review_phase_on_active_span,
     validate_submission,
     validation_state_from_tool_context,
 )
@@ -697,7 +696,12 @@ def _receipt_conflict_response(
         return None
     recorded = str(submission.verdict)
     if review.verdict is None:
-        ctx.tool_state.terminal_publication_failed = False
+        from mergecraft.review.terminal_publication import (
+            TerminalPublicationState,
+            apply_terminal_publication_flags,
+        )
+
+        apply_terminal_publication_flags(ctx.tool_state, TerminalPublicationState.unproven_receipt)
         reason = (
             f"review {review.id} on sha {commit_id} shows neither an approval nor a change "
             f"request, so it proves no verdict; the recorded verdict {recorded} is not "
@@ -714,7 +718,12 @@ def _receipt_conflict_response(
             "publicationUnproven": True,
         }
     if review.verdict != recorded:
-        ctx.tool_state.terminal_publication_mismatch = True
+        from mergecraft.review.terminal_publication import (
+            TerminalPublicationState,
+            apply_terminal_publication_flags,
+        )
+
+        apply_terminal_publication_flags(ctx.tool_state, TerminalPublicationState.verdict_mismatch)
         reason = (
             f"review {review.id} on sha {commit_id} already shows verdict {review.verdict}; "
             f"the recorded verdict {recorded} was not published (no second review is posted)"
@@ -767,9 +776,22 @@ def _existing_publication_response(
     # Callers establish the current PR scope and head before reaching this
     # idempotent match. A receipt for the recorded verdict therefore resolves
     # any stale failure or mismatch state without creating a duplicate review.
-    ctx.tool_state.terminal_publication_failed = False
-    ctx.tool_state.terminal_publication_mismatch = False
+    from mergecraft.review.terminal_publication import (
+        TerminalPublicationState,
+        apply_terminal_publication_flags,
+    )
+
     missing = _record_publication_gap(ctx, review)
+    pub_state = (
+        TerminalPublicationState.published_incomplete
+        if missing
+        else TerminalPublicationState.published_ok
+    )
+    apply_terminal_publication_flags(
+        ctx.tool_state,
+        pub_state,
+        publication_incomplete=tuple(ctx.tool_state.publication_incomplete),
+    )
     response: dict[str, Any] = {
         "success": True,
         "skipped": True,
@@ -1654,7 +1676,12 @@ async def _publish_github_review(
         # some other reason entirely. ``main_outcome.py`` reads this flag to
         # map the run to ``RunOutcome.inconclusive`` instead of ``passed`` —
         # a recorded-but-unpublished verdict must never read as a clean run.
-        ctx.tool_state.terminal_publication_failed = True
+        from mergecraft.review.terminal_publication import (
+            TerminalPublicationState,
+            apply_terminal_publication_flags,
+        )
+
+        apply_terminal_publication_flags(ctx.tool_state, TerminalPublicationState.publish_failed)
         raise
     review_id = int(result["id"])
     if recovered is not None:
@@ -1688,9 +1715,22 @@ async def _publish_github_review(
     # Clear only after the response has yielded a parseable id and the local
     # receipt has been stored. Failed or malformed retry responses remain
     # unresolved and continue to fail closed in final outcome classification.
-    ctx.tool_state.terminal_publication_failed = False
-    ctx.tool_state.terminal_publication_mismatch = False
+    from mergecraft.review.terminal_publication import (
+        TerminalPublicationState,
+        apply_terminal_publication_flags,
+    )
+
     publication_gap = _record_publication_gap(ctx, receipt)
+    pub_state = (
+        TerminalPublicationState.published_incomplete
+        if publication_gap
+        else TerminalPublicationState.published_ok
+    )
+    apply_terminal_publication_flags(
+        ctx.tool_state,
+        pub_state,
+        publication_incomplete=tuple(ctx.tool_state.publication_incomplete),
+    )
     _maybe_suggest_eval_add(ctx)
     ctx.tool_state.approval = ApprovalRecord(
         would_approve=approved,
@@ -1793,8 +1833,9 @@ async def publish_pull_request_review(ctx: ToolContext) -> dict[str, Any]:
         pending = dict(pending)
         pending["commit_id"] = commit_id
 
-    ctx.tool_state.review_phase = ReviewPhase.PUBLISH.value
-    stamp_review_phase_on_active_span(ReviewPhase.PUBLISH)
+    from mergecraft.mcp.review_phase_machine import advance_review_phase
+
+    advance_review_phase(ctx.tool_state, ReviewPhase.PUBLISH)
     from mergecraft.mcp.verification import emit_published_findings
 
     emit_published_findings(ctx)
@@ -1803,8 +1844,7 @@ async def publish_pull_request_review(ctx: ToolContext) -> dict[str, Any]:
         pending,
         entrypoint="publish_pull_request_review",
     )
-    ctx.tool_state.review_phase = ReviewPhase.COMPLETE.value
-    stamp_review_phase_on_active_span(ReviewPhase.COMPLETE)
+    advance_review_phase(ctx.tool_state, ReviewPhase.COMPLETE)
     return result
 
 
@@ -1826,7 +1866,15 @@ def _normalize_review_params(params: dict[str, Any]) -> dict[str, Any]:
 def create_pull_request_review_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         params = _normalize_review_params(params)
-        if _wants_approve_review(params) and ctx.authority_trust != "trusted":
+        from mergecraft.analyzers.trust_posture import trust_posture_from_tool_state
+
+        posture = trust_posture_from_tool_state(
+            ctx.tool_state,
+            analyzers_mode=getattr(ctx, "analyzers_mode", None),
+            execution_trust=ctx.trust_tier,
+            authority_trust=ctx.authority_trust,
+        )
+        if _wants_approve_review(params) and not posture.may_approve_on_github():
             msg = (
                 "APPROVE is not permitted on this run: authority trust is untrusted "
                 "(trust.selfReview must be full with explicit operator confirmation)"
@@ -1888,8 +1936,9 @@ def create_pull_request_review_tool(ctx: ToolContext):
             publication_params["body"] = submission.summary
         ctx.tool_state.pending_review_publication = publication_params
 
-        ctx.tool_state.review_phase = ReviewPhase.PUBLISH.value
-        stamp_review_phase_on_active_span(ReviewPhase.PUBLISH)
+        from mergecraft.mcp.review_phase_machine import advance_review_phase
+
+        advance_review_phase(ctx.tool_state, ReviewPhase.PUBLISH)
         from mergecraft.mcp.verification import emit_published_findings
 
         emit_published_findings(ctx)
@@ -1898,8 +1947,7 @@ def create_pull_request_review_tool(ctx: ToolContext):
             publication_params,
             entrypoint="create_pull_request_review",
         )
-        ctx.tool_state.review_phase = ReviewPhase.COMPLETE.value
-        stamp_review_phase_on_active_span(ReviewPhase.COMPLETE)
+        advance_review_phase(ctx.tool_state, ReviewPhase.COMPLETE)
         return result
 
     return tool(

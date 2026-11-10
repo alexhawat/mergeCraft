@@ -420,6 +420,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MCP `shell` and the repository tools (`git`, `git_fetch`, `push_branch`, `push_tags`,
+  `delete_branch`, `commit_changes`) no longer run blocking subprocess calls on the
+  event loop (they run via `asyncio.to_thread`), so a slow command stops stalling every
+  other tool call. A shell command that times out and then also fails the post-kill
+  drain is now reaped and returns the output gathered so far instead of raising (#1243).
+- An analyzer timeout now kills the analyzer's whole process group. The runner
+  starts analyzers as session leaders and `killpg`s them on timeout, so grandchildren
+  no longer outlive the gate (#1242).
+- ruff diagnostics are no longer all blocking Major: ruff emits `severity: error`
+  for every rule, so the parser now keeps Major only for bug-class rule codes
+  (syntax errors, undefined names, bugbear, security, pylint errors, async) and
+  maps style/import/unused-name rules to Minor (#1241).
+- Sandbox harness startup failures (`unshare`/`bwrap`/`setpriv` refusing to create
+  a namespace, fork `EAGAIN`, `uid_map` write denied) are now classified as
+  `sandboxed: isolation unavailable` and reported `declared-but-cannot-run`
+  instead of a blocking gate failure (#1240).
+- Free-text secret redaction no longer leaks random credentials. The camelCase
+  identifier exemption now requires word-shaped keys (``ruleId``,
+  ``partialFingerprints``) instead of any lowercase-led blob with a capital, the
+  entropy threshold is capped at 4.5 bits per character so long tokens cannot
+  outgrow it, and fine-grained GitHub PATs (``github_pat_``), PyPI tokens and
+  ``Bearer`` credentials are redacted by pattern (the ``Bearer`` word is kept)
+  (#1232).
+- `envAllowlist` can no longer pass credentials to subprocesses. A
+  credential-shaped name (`*_TOKEN`, `*_KEY`, `*-TOKEN`, …) or one of
+  `GITHUB_TOKEN`, `GH_TOKEN`, `GIT_ASKPASS` and the Actions OIDC request
+  variables is now ignored with a warning instead of reaching the restricted
+  MCP shell, trusted analyzers and analyzer fallback environments; the action's
+  `INPUT_TOKEN` and hyphenated inputs such as `INPUT_LOGFIRE-TOKEN` count as
+  credentials. Non-secret names are still added (#1233).
+- One undecodable TruffleHog output line (a truncated write or a stray banner)
+  no longer discards the whole secret scan: the line is skipped and the
+  findings on every other line are kept. Output with no decodable line is still
+  reported as unparsable rather than as a clean scan (#1234).
+- Trace error text no longer carries URL credentials. A failed HTTP request's
+  exception message quotes the raw URL, so `https://user:password@host` reached
+  the span's `error` attribute even though `http.url` was redacted; the
+  `error`, `exception.message` and `tool.error_message` attributes now get the
+  same URL credential redaction before any sink sees them (#1235).
+- Managed pip analyzer provisioning bounds `uv pip install` at 600 seconds. It
+  runs while holding the shared cache lock, so a hung install used to block every
+  other worker; a timeout now removes the staging tree and fails the install
+  cleanly (#1261).
+- Baseline suppression bounds the base-worktree `git worktree add` and `remove`
+  calls. A timed-out or failed checkout now removes its temp tree and disables
+  suppression for that run instead of raising (#1262).
+- Contract base-ref probes (`git rev-parse` and `git show`) are bounded. A timeout
+  reads as "base unavailable" and skips the contract check rather than hanging the
+  review (#1263).
+- A baked analyzer binary that is missing no longer falls back to a same-named
+  binary on `PATH`. Callers skip lock and hash verification for a returned path,
+  so the fallback could run an unpinned tool; the managed resolver provisions it
+  instead (#1264).
+- Malformed ast-grep rows (a missing or non-numeric line, a non-object entry) are
+  skipped during change-impact declaration extraction instead of aborting the
+  batch (#1265).
+- The comment-preserving config patch (`patch_config_dict`) writes through the
+  same temp-file and atomic `os.replace` path as the full rewrite, so a failure
+  mid-write can no longer leave a truncated `config.yaml` (#1266).
+- The temporary findings sink for `mergecraft review` no longer leaks a file
+  descriptor per run (#1267).
+- The egress bridge bounds its `/etc/hosts` bind mount at 10 seconds and removes
+  its staging directory once the mount call returns, so one directory no longer
+  leaks per run (#1268).
+- Handing the isolated opencode data tree to the agent user no longer follows
+  symlinks: a link planted in the tree cannot re-own or chmod a file outside it
+  (#1269).
+- Killed background shell processes are reaped after the kill, so they no longer
+  linger as zombies until the MCP server exits (#1270).
+- The JSONL trace file sink redacts and caps events before writing, as the memory
+  and redacting sinks already did, so a credential in a span attribute no longer
+  reaches disk (#1271).
+- Removed an unreachable inner `try`/`except` from broker stream redaction; the
+  latin-1 decode it guarded cannot fail (#1272).
+- Removed the 2026-11-05 audit probe scripts from `docs/dev/plans`. They sat
+  outside lint scope, had gone stale, and asserted the buggy behaviour the
+  audit found, so they failed once those findings were fixed. The audit memos
+  now point to their copies in git history (#1273).
+- Config: the run-start integrity hash now covers the files the layered loader reads (the `MERGECRAFT_CONFIG` file when set), uses a stable sentinel when no config exists so a file appearing mid-run is detected, and fails closed if a contributing file cannot be hashed ([#1244](https://github.com/alexhawat/mergeCraft/issues/1244))
+- MCP: `get_issue`, `get_issue_comments` and `get_issue_events` no longer rebind the run's issue number, so reading another issue cannot redirect progress comments or review scope ([#1245](https://github.com/alexhawat/mergeCraft/issues/1245))
+- Jev: an unknown question pack now raises `JevError(invalid_pack)` instead of sending the caller's state unfiltered and unfenced ([#1246](https://github.com/alexhawat/mergeCraft/issues/1246))
+- Sandbox: the `RLIMIT_NPROC` fallback when the privilege-drop probe cannot answer keeps the extra fork headroom the probed path adds ([#1247](https://github.com/alexhawat/mergeCraft/issues/1247))
+- Hardening: `git_argv` adds `--no-ext-diff`/`--no-textconv` for `log -u`, `-U<n>`, `-W`, `-L`, `-c` and bundled forms such as `-uz` ([#1248](https://github.com/alexhawat/mergeCraft/issues/1248))
+
+- `git_fetch` validates the whole refspec, not just its source. A refspec may
+  name one branch on `origin` and store it only in that branch's own
+  remote-tracking ref (`main:refs/remotes/origin/main`); destinations under
+  `refs/heads/`, `refs/tags/` or another branch's tracking ref, forced (`+`)
+  updates, empty sides and negative refspecs are refused, so the
+  repository-read tool can no longer move local branches, tags or the base a
+  review diffs against (#1236).
+- The macOS `sandbox-exec` profile for the MCP shell no longer grants
+  `(allow file-read*)` across the host. Reads are limited to the workspace and
+  an allowlist of system and toolchain paths (`/usr`, `/System`, `/Library`,
+  `/opt`, `/private/etc`, temp dirs, Xcode); the user's home directory is
+  denied, with the workspace re-allowed when it lives under `$HOME`. Metadata
+  reads stay global for path resolution. Common per-user toolchain directories
+  stay readable after the home deny (`~/.cargo`, `~/.rustup`, `~/.pyenv`,
+  `~/.nvm`, `~/go`, `~/.sdkman`, `~/.bun`, `~/.local/bin`, `~/.local/lib`,
+  `~/.local/pipx`, `~/.local/share/uv`), except Cargo's credentials file;
+  anything else under `$HOME` (`~/.ssh`, `~/.aws`, `~/.config`,
+  `~/.local/share`) stays unreadable (#1237).
+- Native GitHub Actions events now carry the triggering author's permission.
+  `pull_request`, `issue_comment` and `pull_request_review_comment` runs derive
+  it from `author_association` (`OWNER` / `MEMBER` / `COLLABORATOR` count as
+  collaborators). `workflow_dispatch`, `push` and `schedule` runs, which only
+  someone with write access can cause, count as collaborators too, as do local
+  runs outside GitHub Actions. A collaborator's `shell: enabled` is therefore no
+  longer always downgraded to `restricted`. `push` gains the same
+  non-collaborator floor as `shell`: `enabled` becomes `restricted` when a pull
+  request or comment author is not a collaborator, or when an event type
+  mergeCraft does not model runs inside Actions (#1238).
+- The `trust.agentSandbox` tier named in the Codex sandbox remedy and in the
+  run manifest's `agent_sandbox_granting_tier` is now the tightest tier that
+  would grant the override (`merged-only`, then `dispatch`, then `same-repo`),
+  or the configured tier when it already grants. It was always `same-repo`,
+  the loosest tier, for every non-fork head (#1239).
 - actionlint now lints workflow files only. Action manifests (root `action.yml`
   and `.github/actions/**/action.yml`, composite or not) were linted against the
   workflow schema, producing false Major `syntax-check` blockers; zizmor still
@@ -615,6 +732,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the run record names it (`finalize_failed: <Type>`) instead of reading as a
   missing verdict; the run still fails closed (#903).
 - A review thread whose comments were not all read is never auto-resolved (#902).
+- Finding outcomes: an outdated but unresolved review thread is now `stale`, not
+  `fixed`, so the advisory fixed rate is no longer inflated by lines that merely
+  moved; resolved threads still count as fixed (#1251).
+- The trace `attrs` cap now measures the whole payload as UTF-8 JSON bytes
+  (64 KiB) instead of the character length of top-level strings, so multibyte,
+  nested and many-small-value payloads are truncated too (#1252).
+- Line-budget scope reduction and the offline diff summary read `diff --git`
+  paths that contain spaces or quotes correctly instead of splitting on
+  whitespace (#1253).
+- A mid-battery skip in the Jev claim judge keeps the attestations collected for
+  earlier claims and marks the result `partial` (#1254).
+- Entropy redaction no longer turns absolute CI paths with ordinary segments
+  (`/home/runner/work/repo/src/app/module.py:12`) into `<redacted>.py`; a
+  segment that looks like a secret is still redacted (#1255). Word-shaped
+  camelCase directory names such as `mergeCraft` count as ordinary segments
+  again after the camelCase rule moved out of the identifier pattern (#1232).
+- `mergecraft review` restores its telemetry, tracing and trust-tier environment
+  overrides even when loading repository settings raises (#1256).
+- The git tools that advertised an unused `repo` argument no longer do: the
+  read-only `git` tool now honours it (registered checkouts only, unknown repo
+  is an error) and the fetch, push, tag, delete-branch and commit tools drop it
+  from their schemas and always act on the primary checkout (#1258).
+
+### Security
+
+- `establish_review_scope` only reads a `diff_path` that resolves, symlinks
+  followed, under a registered checkout, the run tmpdir or
+  `MERGECRAFT_TEMP_DIR` (#1257).
+- The Action `cwd` input is confined to `GITHUB_WORKSPACE`: `../..` or an
+  absolute path outside it is a configuration error (#1259).
+- The git askpass helper writes the token single-quoted via `printf '%s\n'` and
+  rejects tokens with control characters, so shell metacharacters in a token are
+  never interpreted (#1260).
 
 ### Breaking
 
@@ -626,6 +776,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pre-submit nudge names the unread ranges so the reviewer can read them and submit
   again. **Fix:** set `review.coverage.onIncomplete: warn` to keep the verdict and
   only report the gap (#940).
+
+### Security
+
+- Config: a config file that cannot be parsed now fails the run closed (`config parse error: <file> (<ErrorType>)`, no YAML values echoed) instead of warning and loading defaults ([#1249](https://github.com/alexhawat/mergeCraft/issues/1249))
+- Config: duplicate mapping keys at any depth are rejected, naming the key and line, instead of silently keeping the last value ([#1250](https://github.com/alexhawat/mergeCraft/issues/1250))
 
 ## [0.1.0a4] — 2026-10-29
 

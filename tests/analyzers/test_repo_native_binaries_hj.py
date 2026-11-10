@@ -286,8 +286,8 @@ def test_catalog_versions_are_pinned_for_installed_tools() -> None:
     """W20 pins must match these catalog ``version:`` fields."""
     expected = {
         "vulture": "2.16",
-        "typos": "1.50.1",
-        "markdownlint": "0.41.1",
+        "typos": "1.52.0",
+        "markdownlint": "0.42.0",
         "jscpd": "4.1.0",
     }
     for tool_id, version in expected.items():
