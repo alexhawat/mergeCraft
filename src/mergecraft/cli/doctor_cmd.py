@@ -138,8 +138,9 @@ def _config_probe(cwd: Path) -> ProbeResult:
     for path in sources.files:
         try:
             loaded = safe_load_unique(path.read_text(encoding="utf-8"))
-        except yaml.YAMLError as exc:
-            return ProbeResult("config", "fail", f"parse error: {exc}", hard_failure=True)
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            detail = f"config parse error: {path} ({type(exc).__name__})"
+            return ProbeResult("config", "fail", detail, hard_failure=True)
         if loaded is None:
             continue
         if not isinstance(loaded, dict):

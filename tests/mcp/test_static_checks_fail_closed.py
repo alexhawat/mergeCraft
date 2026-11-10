@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.analyzers.support import patch_analyzer_spawn
 
 from mergecraft.analyzers import sandbox as sandbox_mod
 from mergecraft.mcp import shell as shell_mod
@@ -73,7 +74,7 @@ async def test_untrusted_gates_never_launch_a_subprocess_without_isolation(
         launched.append(list(argv))
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(subprocess, "run", _forbidden)
+    patch_analyzer_spawn(monkeypatch, _forbidden)
 
     ctx = _ctx(tmp_path, shell=shell, tier="untrusted")
     result = await run_static_checks_tool(ctx).execute({})
@@ -95,7 +96,7 @@ def test_run_checks_refuses_an_untrusted_gate_without_a_sandbox_context(
         launched.append(list(argv))
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(subprocess, "run", _forbidden)
+    patch_analyzer_spawn(monkeypatch, _forbidden)
     check = StaticCheck(name="lint", argv=("python", "-c", "pass"))
 
     outcomes = run_checks([check], root=tmp_path, tier="untrusted", sandbox_context=None)

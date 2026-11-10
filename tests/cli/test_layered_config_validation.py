@@ -116,3 +116,20 @@ def test_missing_requested_file_is_not_reported_as_valid(
     else:
         args.extend(["--config", str(missing)])
     assert CliRunner().invoke(app, args).exit_code != 0
+
+
+@pytest.mark.parametrize(
+    ("payload", "error_type"),
+    [(b"secret-canary: [\xff", "UnicodeDecodeError"), (b"secret-canary: [", "ParserError")],
+)
+def test_doctor_reports_config_error_without_values(
+    config_pair: tuple[Path, Path, Path], payload: bytes, error_type: str
+) -> None:
+    from mergecraft.cli.doctor_cmd import _config_probe
+
+    root, committed, _local = config_pair
+    committed.write_bytes(payload)
+    result = _config_probe(root)
+    assert result.hard_failure
+    assert result.status == "fail"
+    assert result.detail == f"config parse error: {committed} ({error_type})"
