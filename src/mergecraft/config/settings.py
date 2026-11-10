@@ -302,6 +302,14 @@ class AgentBindingOverride(BaseModel):
     timeout_s: int | None = Field(default=None, alias="timeoutS")
     dispatch: DispatchMode | None = None
     triggers: LensTriggerOverride | None = None
+    required: bool = Field(
+        default=False,
+        description=(
+            "Mark a secondary reviewer as required. Read only when "
+            "``review.rosterRequired`` is ``marked``: a required reviewer that fails "
+            "or times out makes the run inconclusive."
+        ),
+    )
 
     @field_validator("role", mode="before")
     @classmethod
@@ -521,6 +529,16 @@ class ReviewSettings(BaseModel):
     # Bounded read-only file-group fan-out on large diffs (default off).
     file_group_fanout: FileGroupFanoutSettings = Field(
         default_factory=FileGroupFanoutSettings, alias="fileGroupFanout"
+    )
+    roster_required: Literal["all", "marked"] = Field(
+        default="all",
+        alias="rosterRequired",
+        description=(
+            "Which secondary reviewers the run needs. ``all`` (default): every configured "
+            "reviewer is required, and any one that fails or times out makes the run "
+            "inconclusive. ``marked``: only reviewers with ``required: true`` under "
+            "``agents:`` count; any other failure is recorded as a degradation note."
+        ),
     )
     # Globs whose changed files are kept out of the reviewer's diff (#1109). Read only
     # from the operator's side of a pull request (``mergecraft.review.ignore_paths``),

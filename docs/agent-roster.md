@@ -109,6 +109,36 @@ findings from two reviewers list both agent ids; unknown provenance reads
 `unknown`, never the primary reviewer. The field is display-only on the
 published review and run record; it does not change verdict, severity, or dedup.
 
+**Required reviewers (`review.rosterRequired`).** By default (`all`) every
+configured reviewer is required: if any secondary reviewer fails, times out or
+cannot be dispatched, the run is `inconclusive` (or `infra_error` when the
+failure names an infrastructure reason such as an expired login), even when the
+primary reviewer's verdict was accepted. Set `rosterRequired: marked` to require
+only the reviewers whose entry sets `required: true`; a failure of any other
+reviewer is recorded as a degradation note and the remaining reviewers still run.
+
+```yaml
+review:
+  rosterRequired: marked     # all (default) | marked
+agents:
+  reviewer2:
+    role: reviewer
+    modelChain: [openai/gpt-5.3-codex]
+    required: true           # read only under rosterRequired: marked
+```
+
+**Deadline.** Each secondary reviewer runs under its own budget — its
+`timeoutS`, at most 900 s — not under whatever the primary reviewer left of the
+run deadline, so a primary that used its whole deadline still leaves the second
+provider a real run. Keep the job's `timeout-minutes` above the primary deadline
+plus the secondaries' budgets.
+
+**Secondary findings reach the review.** Findings a secondary reviewer or a file
+group records after the primary submitted are merged into the run's verdict
+before it is published: they appear as inline comments, and a blocking one turns
+an `approve` into `request_changes`. `mergecraft review` adds them to `--json`
+and to the exit code the same way.
+
 **One verdict** is submitted by the orchestrator as today. Terminal-verdict
 cardinality is unchanged: `mergecraft-approval` stays a single hardcoded check
 name because there is only ever one submission.
@@ -131,16 +161,16 @@ last review. If that diff is empty or its path is absent (including checkout's
 `empty` and `unavailable` statuses), there is no fan-out even on a large pull
 request; it never falls back to the full diff.
 
-**Budget.** The fan-out and the secondary roster draw on the same remaining
-run budget. When the fan-out starts it takes `budgetShare` of the budget left
-(default half), and every group's cap counts against that slice, including
+**Budget.** When the fan-out starts it takes `budgetShare` of the run budget
+left (default half), and every group's cap counts against that slice, including
 fractional seconds. Once the slice is exhausted, queued groups are recorded as
-run-health failures without starting another reviewer. There is no one-second
-minimum that can consume the secondary roster's remaining share.
+run-health failures without starting another reviewer. The secondary roster
+does not draw on this budget: each secondary reviewer has its own deadline
+(see **Deadline** above).
 
 **What you can observe.** The groups run after the primary reviewer has
-submitted and published, so `raised_by` on the posted review never names a
-group. Group findings reach the evidence packet and the checks the way
+submitted and before the run publishes the review; their findings are merged
+into the published review with the group named in their packet evidence. Group findings reach the evidence packet and the checks the way
 secondary roster findings do. When mergeCraft records a group's run under
 `file-group/<group-id>` (`group-1`, `group-2`, …), every finding row that group
 raised gains one packet evidence entry `reviewer: file-group/<group-id>
