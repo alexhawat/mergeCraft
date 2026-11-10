@@ -201,6 +201,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `failure` on a Critical or Major finding, and usage over the cap or a
   malformed answer is `inconclusive`. Off by default (#1010).
 
+- `review.fastPath.reapproval` carries a trusted mergeCraft pass over to a new
+  head whose only PR-authored change since the review is changelog prose — a
+  one-line `CHANGELOG.md` fix, or a merge of the base branch whose only conflict
+  resolution was the changelog — with zero LLM calls and no repeated full-diff
+  reads, agents, analyzers or static checks. The prior pass must be the newest
+  `mergecraft-approval` success on the reviewed head from an App in
+  `reapproval.trustedCheckApps` (never `github-actions`), for the same pull
+  request, target branch and review policy (a digest of `.mergecraft`, the
+  workflow file and the mergeCraft version, stamped on every approval check while
+  the option is on). Every path changed since the review must be a qualifying
+  prose edit or inherited from the base untouched by the pull request, every
+  other PR-authored change must equal the reviewed one, and file modes must match;
+  anything else, or any read failure, is the normal review. Both checks name the
+  prior review, the compared SHAs, the qualifying path, what ran, what was reused
+  and what was skipped; other required checks are not reused. The packet records
+  it in `triage.reapproval` (schema `1.20.0`). Off by default (#1284).
+
 - A `commentOnly` fast-path recognizer matches diffs that only edit `//` line
   comments in `.ts .go .java .kt .c .h .cc .cpp .hpp .cs .swift` files. JavaScript
   (`.js`, which can hold JSX), `.jsx` / `.tsx`, Rust, `Package.swift`, Go

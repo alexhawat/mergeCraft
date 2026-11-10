@@ -45,6 +45,7 @@ from mergecraft.evidence.packet import (
     DispositionSection,
     MergeEvidencePacket,
     ModePromptVersion,
+    ReapprovalSection,
     RunMetrics,
     TriageSection,
 )
@@ -605,7 +606,30 @@ def _finalize_packet_with_gate(
     gate_policy = _resolve_gate_policy(ctx, pinned=pinned)
     decision = decide_approval(packet, run_succeeded=run_succeeded, tier=ctx.authority_trust)
     triage_tier = packet.triage.tier if packet.triage is not None else None
-    if triage_tier in {"skip", "lite"} and decision.verdict == "success":
+    reapproval = packet.triage.reapproval if packet.triage is not None else None
+    if (
+        triage_tier == "skip"
+        and reapproval is not None
+        and decision.verdict != "failure"
+        and run_succeeded
+        and ctx.authority_trust == "trusted"
+        and packet.reviewed_head_sha == reapproval.head_sha
+    ):
+        # A re-approval (#1284) reuses a trusted pass on a head whose only PR-authored
+        # change since is proven changelog prose. No new finding exists to attest to,
+        # so the verdict is the prior one, carried over and stated as such. A
+        # ``failure`` (any blocker) is never softened, and an untrusted, crashed or
+        # unbound run falls through to the skip clamp below.
+        decision = decision.model_copy(
+            update={
+                "verdict": "success",
+                "reason": (
+                    f"re-approved: the mergeCraft pass on {reapproval.prior_head_sha} "
+                    f"carries over ({reapproval.prior_url})"
+                ),
+            }
+        )
+    elif triage_tier in {"skip", "lite"} and decision.verdict == "success":
         # No full review ran (none at all for ``skip``, one capped call for ``lite``), so
         # mergeCraft never grants approval for it; a human does. A ``failure`` is kept.
         lead = TRIAGE_SKIP_REASON if triage_tier == "skip" else TRIAGE_LITE_REASON
@@ -790,7 +814,13 @@ def _run_bound_reviewed_head_sha(state: ToolState) -> str | None:
     """
     from mergecraft.mcp.tool_state import primary_repo_state
 
-    return primary_repo_state(state).checkout_sha or None
+    checkout_sha = primary_repo_state(state).checkout_sha
+    if checkout_sha:
+        return checkout_sha
+    # A re-approval (#1284) checks nothing out; the head its proof was made on is the
+    # orchestrator-written identity it publishes on.
+    section = _reapproval_section(state)
+    return section.head_sha if section is not None else None
 
 
 def _run_bound_progress_comment_id(state: ToolState) -> int | None:
@@ -946,6 +976,30 @@ def _triage_section(state: ToolState) -> TriageSection | None:
         usage_estimated=bool(getattr(lite, "usage_estimated", False)),
         cap_hit=bool(getattr(lite, "cap_hit", False)),
         prompt_version=getattr(lite, "prompt_version", None),
+        reapproval=_reapproval_section(state) if decision.tier == "skip" else None,
+    )
+
+
+def _reapproval_section(state: ToolState) -> ReapprovalSection | None:
+    """Project a carried-over prior pass (#1284) into the packet, or ``None``."""
+    from mergecraft.classify.reapproval import REAPPROVAL_RECOGNIZER, ReapprovalRecord
+
+    record = getattr(state, "reapproval", None)
+    if getattr(state.triage, "recognizer", None) != REAPPROVAL_RECOGNIZER:
+        return None
+    if not isinstance(record, ReapprovalRecord):
+        return None
+    return ReapprovalSection(
+        prior_url=record.prior_url,
+        prior_check_id=record.prior_check_id,
+        prior_head_sha=record.prior_head_sha,
+        head_sha=record.head_sha,
+        prior_merge_base=record.prior_merge_base,
+        merge_base=record.merge_base,
+        qualifying_paths=list(record.qualifying_paths),
+        preserved_paths=list(record.preserved_paths),
+        inherited_paths=list(record.inherited_paths),
+        skipped=list(record.skipped),
     )
 
 

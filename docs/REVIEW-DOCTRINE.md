@@ -381,6 +381,11 @@ record, never grants approval, only counts a pin bump when its verifying check
 passed on the head SHA from a `pinBump.trustedCheckApps` GitHub App (a check
 name alone is set by its creator), reads its config from the base ref only, and
 treats any failure to read the pull request as a reason to review.
+`review.fastPath.reapproval` is the one triage outcome that carries a verdict:
+it reuses a trusted earlier pass, never invents one. It applies only when the new
+head's PR-authored changes are the reviewed ones byte for byte plus changelog
+prose, proven against the base, the reviewed head and the new head, and it says
+on the check which pass it reused and what it skipped.
 An agent failure that is the reviewer's infrastructure rather than the review is
 `infra_error`, not `failed`: a driver marks it with the `infra_reason` result
 metadata key (`mergecraft.agents.shared.INFRA_REASON_KEY`) and
