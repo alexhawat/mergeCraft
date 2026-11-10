@@ -244,3 +244,32 @@ FORK_PULL_REQUEST_EVENT: dict[str, Any] = {
 def import_module(dotted: str) -> Any:
     """Lazy import so collection succeeds before W2 lands ``src/mergecraft/analyzers/``."""
     return importlib.import_module(dotted)
+
+
+def patch_analyzer_spawn(monkeypatch: Any, run_like: Any) -> None:
+    """Route the analyzer runner's spawn through a ``subprocess.run``-style fake.
+
+    The runner starts analyzers with ``Popen(start_new_session=True)`` so a
+    timeout can kill the whole process group; tests that only care about the
+    argv/env/kwargs of the spawn keep their ``run``-shaped fake and install it
+    here. ``run_like(argv, **kwargs)`` returns a ``CompletedProcess``.
+    """
+    import subprocess
+
+    class _FakePopen:
+        def __init__(self, argv: Any, **kwargs: Any) -> None:
+            self.pid = 0
+            self._completed = run_like(argv, **kwargs)
+            self.returncode = self._completed.returncode
+
+        def __enter__(self) -> _FakePopen:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+        def communicate(self, timeout: float | None = None) -> tuple[Any, Any]:
+            _ = timeout
+            return self._completed.stdout, self._completed.stderr
+
+    monkeypatch.setattr(subprocess, "Popen", _FakePopen)
