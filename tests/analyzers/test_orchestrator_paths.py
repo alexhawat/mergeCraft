@@ -146,6 +146,78 @@ def test_non_regular_record_is_refused_on_read_and_write(
     assert warnings_sink
 
 
+@pytest.mark.parametrize("merge", [False, True])
+@pytest.mark.parametrize("existing_record", [False, True])
+def test_staging_directory_skips_write_without_changing_record(
+    tmp_path: Path, warnings_sink: list[str], merge: bool, existing_record: bool
+) -> None:
+    lock_path = tmp_path / ".mergecraft" / "analyzers.lock"
+    lock_path.parent.mkdir()
+    if existing_record:
+        write_lock(lock_path, [_ENTRY])
+    before = lock_path.read_bytes() if existing_record else None
+    staging = lock_path.parent / ".analyzers.lock.staging"
+    staging.mkdir()
+    marker = staging / "keep.txt"
+    marker.write_text("untouched\n", encoding="utf-8")
+    replacement = LockEntry(
+        tool_id="ruff", version="1.0.0", mode="managed", source="cache", sha256="b" * 64
+    )
+
+    write_lock(lock_path, [replacement], merge=merge)
+
+    assert marker.read_text(encoding="utf-8") == "untouched\n"
+    assert list(staging.iterdir()) == [marker]
+    if existing_record:
+        assert lock_path.read_bytes() == before
+        assert read_lock(lock_path) == [_ENTRY]
+    else:
+        assert not lock_path.exists()
+        assert read_lock(lock_path) == []
+        assert lock_digest(lock_path) == "empty"
+    assert any("lock record not written" in line for line in warnings_sink)
+
+
+def test_record_read_io_error_is_treated_as_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, warnings_sink: list[str]
+) -> None:
+    import mergecraft.analyzers.lockfile as lockfile
+
+    lock_path = tmp_path / ".mergecraft" / "analyzers.lock"
+    write_lock(lock_path, [_ENTRY])
+
+    def fail_read(dir_fd: int, name: str) -> list[LockEntry]:
+        raise OSError("simulated read failure")
+
+    monkeypatch.setattr(lockfile, "_read_in", fail_read)
+
+    assert read_lock(lock_path) == []
+    assert lock_digest(lock_path) == "empty"
+    assert any("simulated read failure" in line for line in warnings_sink)
+
+
+def test_record_replace_io_error_preserves_previous_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, warnings_sink: list[str]
+) -> None:
+    import os
+
+    lock_path = tmp_path / ".mergecraft" / "analyzers.lock"
+    write_lock(lock_path, [_ENTRY])
+    before = lock_path.read_bytes()
+
+    def fail_replace(*args: object, **kwargs: object) -> None:
+        raise PermissionError("simulated replace failure")
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+
+    write_lock(lock_path, [])
+
+    assert lock_path.read_bytes() == before
+    assert read_lock(lock_path) == [_ENTRY]
+    assert any("simulated replace failure" in line for line in warnings_sink)
+    assert any("lock record not written" in line for line in warnings_sink)
+
+
 @pytest.mark.parametrize("name", ["analyzers.lock", "analyzers.lock.lock"])
 def test_fifo_record_is_refused_without_blocking(
     tmp_path: Path, warnings_sink: list[str], name: str

@@ -201,7 +201,8 @@ def read_lock(path: Path) -> list[LockEntry]:
     """Read ``.mergecraft/analyzers.lock`` entries.
 
     A record directory or file that is a symbolic link, or a record that is not
-    a regular file, is refused with a warning and reads as empty.
+    a regular file, is refused with a warning and reads as empty. Other I/O
+    failures also warn and read as empty; this record is only informational.
     """
     try:
         dir_fd = _open_record_dir(path, create=False)
@@ -211,7 +212,7 @@ def read_lock(path: Path) -> list[LockEntry]:
             return _read_in(dir_fd, path.name)
         finally:
             os.close(dir_fd)
-    except LockPathRefusedError as exc:
+    except OSError as exc:
         logger.warning("{}", exc)
         return []
 
@@ -229,7 +230,9 @@ def write_lock(
     leaves the previous record intact instead of a truncated one. Every file is
     opened relative to the record directory without following links; when that
     directory, the record, its sidecar or the staging file is a symbolic link the
-    write is refused with a warning and nothing is written.
+    write is refused with a warning and nothing is written. Other I/O failures,
+    including a directory occupying the staging path, also warn and skip the
+    record write rather than aborting the analyzer run.
     """
     normalized = [
         entry if isinstance(entry, LockEntry) else _coerce_entry(entry) for entry in entries
@@ -264,7 +267,7 @@ def write_lock(
                 handle.write(text)
             _require_regular_or_absent(dir_fd, path.name)
             os.replace(staging, path.name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
-    except LockPathRefusedError as exc:
+    except OSError as exc:
         # The record is never an authenticator (binaries are verified against
         # pin-bound receipts), so a refused record skips the write, not the run.
         logger.warning("{}; lock record not written", exc)
