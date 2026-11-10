@@ -11,6 +11,24 @@ from mergecraft.analyzers.scope import (
 _HEADER = "diff --git "
 
 
+def post_image_path_from_header(line: str) -> str | None:
+    """Return the post-image path of one ``diff --git`` header line.
+
+    Handles unquoted paths containing spaces and quoted (C-style escaped)
+    paths. Returns ``None`` when the header is not a ``diff --git`` line or
+    its paths are ambiguous (an unquoted rename whose names contain `` b/``);
+    callers then fall back to their own heuristic.
+
+    Examples:
+        >>> post_image_path_from_header("diff --git a/my file.txt b/my file.txt")
+        'my file.txt'
+    """
+    if not line.startswith(_HEADER):
+        return None
+    pair = split_diff_git_paths(line[len(_HEADER) :].rstrip("\r\n"))
+    return pair[1] if pair is not None else None
+
+
 def paths_from_diff_headers(diff_text: str) -> set[str]:
     """Return every path a ``diff --git`` header names, pre-image and post-image.
 
@@ -115,4 +133,4 @@ def changed_paths_from_diff(diff_text: str) -> list[str]:
     return sorted(paths)
 
 
-__all__ = ["changed_paths_from_diff", "paths_from_diff_headers"]
+__all__ = ["changed_paths_from_diff", "paths_from_diff_headers", "post_image_path_from_header"]

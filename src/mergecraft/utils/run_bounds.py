@@ -414,6 +414,8 @@ def outcome_with_scope_reduction(
 
 
 def _diff_file_blocks(diff_text: str) -> list[tuple[str, str]]:
+    from mergecraft.utils.diff_paths import post_image_path_from_header
+
     blocks: list[tuple[str, str]] = []
     current_path: str | None = None
     current_lines: list[str] = []
@@ -421,8 +423,10 @@ def _diff_file_blocks(diff_text: str) -> list[tuple[str, str]]:
         if line.startswith("diff --git "):
             if current_path is not None:
                 blocks.append((current_path, "".join(current_lines)))
-            parts = line.split()
-            current_path = parts[3].removeprefix("b/") if len(parts) >= 4 else "unknown"
+            current_path = post_image_path_from_header(line)
+            if current_path is None:
+                parts = line.split()
+                current_path = parts[3].removeprefix("b/") if len(parts) >= 4 else "unknown"
             current_lines = [line]
             continue
         if current_path is not None:

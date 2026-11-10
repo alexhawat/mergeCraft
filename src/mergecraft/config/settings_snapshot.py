@@ -14,8 +14,6 @@ if TYPE_CHECKING:
     from mergecraft.policy.review import PolicySnapshot
 
 
-_CONFIG_REL = Path(".mergecraft") / "config.yaml"
-
 _RUN_SCOPE_SNAPSHOT: ContextVar[RepoSettingsSnapshot | None] = ContextVar(
     "mergecraft_run_scope_settings_snapshot",
     default=None,
@@ -59,32 +57,44 @@ class RepoSettingsSnapshot:
     policy: PolicySnapshot | None = None
 
 
+_NO_CONFIG_MARKER = b"mergecraft:no-config-files"
+
+
 def config_yaml_hash(*, root: Path) -> str:
-    """Return a SHA-256 digest of layered config inputs pinned at snapshot time.
+    """Return a SHA-256 digest of the config inputs the layered loader reads.
 
-    Always includes committed ``.mergecraft/config.yaml``. When a local overlay
-    is active (off-CI), ``.mergecraft/config.local.yaml`` is hashed too so
-    mid-run edits to either file are detected (D2 / W4).
+    The inputs come from :func:`mergecraft.config.layered.resolve_config_sources`,
+    the same resolver the loader's precedence mirrors: an existing
+    ``MERGECRAFT_CONFIG`` file is the sole contributor; otherwise the committed
+    ``.mergecraft/config.yaml`` plus, off CI, ``.mergecraft/config.local.yaml``.
+    Each contributing file is hashed with its resolved path, so switching the
+    selected file or editing it mid-run is detected, while edits to a file the
+    loader ignores are not.
+
+    When no file contributes, a stable sentinel digest is returned (never the
+    empty string) so a config file appearing later is a detectable change.
+    Raises :class:`ValueError` when a contributing file cannot be read — callers
+    must treat that as fail-closed.
     """
-    from mergecraft.config.layered import local_config_path, running_in_github_actions
+    from mergecraft.config.layered import resolve_config_sources
 
-    repo_root = root.resolve()
+    sources = resolve_config_sources(root.resolve())
     digest = sha256()
-    saw_bytes = False
-
-    committed = repo_root / _CONFIG_REL
-    if committed.is_file():
-        digest.update(committed.read_bytes())
-        saw_bytes = True
-
-    if not running_in_github_actions():
-        local_path = local_config_path(repo_root)
-        if local_path.is_file():
-            digest.update(local_path.read_bytes())
-            saw_bytes = True
-
-    if not saw_bytes:
-        return ""
+    if not sources.files:
+        digest.update(_NO_CONFIG_MARKER)
+        if sources.env_config_missing:
+            digest.update(b":env-config-missing")
+        return digest.hexdigest()
+    for path in sources.files:
+        try:
+            body = path.read_bytes()
+        except OSError as exc:
+            msg = f"cannot hash config file {path} ({type(exc).__name__}); refusing to proceed"
+            raise ValueError(msg) from exc
+        digest.update(str(path).encode("utf-8", "surrogateescape"))
+        digest.update(b"\0")
+        digest.update(body)
+        digest.update(b"\0")
     return digest.hexdigest()
 
 
@@ -202,12 +212,14 @@ def assert_config_unchanged(snapshot: RepoSettingsSnapshot) -> None:
     """Refuse when pinned config inputs changed after the snapshot was taken."""
     baseline = snapshot.config_hash
     if not baseline:
+        # Hand-built snapshots (tests, offline callers) carry no baseline.
         return
     current = config_yaml_hash(root=snapshot.repo_root)
     if current != baseline:
         msg = (
             ".mergecraft/config.yaml changed after settings were snapshotted "
-            "(including any active local overlay); refusing to proceed"
+            "(including any active local overlay or MERGECRAFT_CONFIG file); "
+            "refusing to proceed"
         )
         raise ValueError(msg)
 

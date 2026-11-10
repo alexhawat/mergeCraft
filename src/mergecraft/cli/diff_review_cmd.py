@@ -202,6 +202,13 @@ def _persist_completed_cli_review(
         logger.warning("skipped durable review persistence: {}", exc)
 
 
+def _allocate_findings_sink() -> Path:
+    """Create the temp JSON sink for a run and return its path, keeping no fd open."""
+    fd, sink_name = tempfile.mkstemp(prefix="mergecraft-review-findings-", suffix=".json")
+    os.close(fd)
+    return Path(sink_name)
+
+
 def cleanup_review_subprocesses() -> None:
     """Kill agent and analyzer process groups after a cancelled review (#378)."""
     from mergecraft.reliability.recovery import cleanup_on_failure
@@ -720,9 +727,7 @@ def run(
         # Allocate a temp sink under our own ``tmpdir`` so cleanup is
         # straightforward; the file is removed at end of run regardless of
         # the text-format branch taken below.
-        json_path_for_run = Path(
-            tempfile.mkstemp(prefix="mergecraft-review-findings-", suffix=".json")[1]
-        )
+        json_path_for_run = _allocate_findings_sink()
 
     internal_json_sink = json_output is None and not (
         output is not None and effective_output_format in {"json", "jsonl", "sarif"}

@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers._common import (
     coerce_line,
@@ -67,13 +69,28 @@ def detector_name(item: dict[str, Any]) -> str:
 def parse_trufflehog_jsonl(
     raw: str, *, manifest: AnalyzerManifest, repo_root: Path
 ) -> list[Finding]:
+    """Parse TruffleHog ``-j`` JSONL, one JSON document per line.
+
+    A single undecodable line (a truncated write, a stray banner) is skipped so
+    the findings on every other line survive (#1234). Output where *no*
+    non-empty line decodes is still unparsable and raises ``ValueError``, so
+    the adapter reports a skipped scan rather than a clean one.
+    """
     category = taxonomy_category(manifest)
     findings: list[Finding] = []
-    for line in raw.splitlines():
+    decoded_lines = 0
+    invalid_lines = 0
+    for index, line in enumerate(raw.splitlines(), start=1):
         stripped = line.strip()
         if not stripped:
             continue
-        item = json.loads(stripped)
+        try:
+            item = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            invalid_lines += 1
+            logger.debug("trufflehog: skipping undecodable JSONL line {}: {}", index, exc.msg)
+            continue
+        decoded_lines += 1
         if not isinstance(item, dict):
             continue
         if item.get("level") and item.get("msg"):
@@ -102,6 +119,9 @@ def parse_trufflehog_jsonl(
                 remediation=_ROTATION_FIRST_REMEDIATION,
             )
         )
+    if invalid_lines and not decoded_lines:
+        msg = f"trufflehog output has no decodable JSONL line ({invalid_lines} invalid)"
+        raise ValueError(msg)
     return findings
 
 

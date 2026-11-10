@@ -131,7 +131,11 @@ from mergecraft.evidence.trajectory import TrajectoryRecord
 #   provider's reported usage, or an estimate), ``usage_estimated``, ``cap_hit``
 #   and ``prompt_version``. Additive; every new field has a default, so a packet
 #   built before this version still validates.
-PACKET_SCHEMA_VERSION = "1.19.0"
+# - 1.20.0 — #1284 adds ``triage.reapproval``: when a trusted prior mergeCraft pass
+#   carried over to a new head whose only PR-authored change is changelog prose, the
+#   prior review link, the compared SHAs, the qualifying, preserved and inherited
+#   paths, and the work that was skipped. Additive; ``None`` everywhere else.
+PACKET_SCHEMA_VERSION = "1.20.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
@@ -345,12 +349,33 @@ class CoverageSection(BaseModel):
     complete: bool
 
 
+class ReapprovalSection(BaseModel):
+    """A trusted prior pass that carried over to this head (#1284).
+
+    Written by the orchestrator from the re-approval proof, never by an agent.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    prior_url: str
+    prior_check_id: int
+    prior_head_sha: str
+    head_sha: str
+    prior_merge_base: str
+    merge_base: str
+    qualifying_paths: list[str]
+    preserved_paths: list[str] = Field(default_factory=list)
+    inherited_paths: list[str] = Field(default_factory=list)
+    skipped: list[str] = Field(default_factory=list)
+
+
 class TriageSection(BaseModel):
     """The tier the deterministic pre-dispatch triage chose.
 
     ``skip`` runs no LLM review; ``lite`` runs one capped LLM call whose cap and usage
     are recorded here; ``full`` is the normal review. Neither ``skip`` nor ``lite``
-    ever carries a ``success`` decision.
+    ever carries a ``success`` decision of its own; a ``reapproval`` skip carries the
+    prior pass it reused, recorded in ``reapproval``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -364,6 +389,7 @@ class TriageSection(BaseModel):
     usage_estimated: bool = False
     cap_hit: bool = False
     prompt_version: str | None = None
+    reapproval: ReapprovalSection | None = None
 
 
 class DispositionSection(BaseModel):
@@ -512,6 +538,7 @@ __all__ = [
     "DispositionSection",
     "MergeEvidencePacket",
     "ModePromptVersion",
+    "ReapprovalSection",
     "RunHealth",
     "RunMetrics",
     "SelfAssessment",

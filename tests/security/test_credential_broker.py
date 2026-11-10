@@ -692,3 +692,17 @@ def test_credential_broker_client_disconnect_closes_upstream(
     assert client.is_closed
     assert any("client disconnected" in line for line in logs)
     assert_credential_absent("\n".join(logs))
+
+
+def test_redact_stream_chunk_handles_non_utf8_bytes() -> None:
+    """F9: a non-UTF-8 chunk is decoded as latin-1, redacted, and re-encoded."""
+    module = load_broker_module()
+    redact = module._redact_stream_chunk
+    clean = b"\xff\xfe plain \xe9"
+    assert redact(clean) is clean, "a chunk with nothing to redact is returned unchanged"
+
+    token = "ghp_abcdefghijklmnop1234567890ABCDEFGHIJ"
+    dirty = b"\xff " + token.encode() + b" \xe9"
+    out = redact(dirty)
+    assert isinstance(out, bytes)
+    assert token.encode() not in out

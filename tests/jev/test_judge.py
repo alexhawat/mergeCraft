@@ -219,6 +219,46 @@ async def test_judge_prose_claims_skip_does_not_raise(
     assert_honest_skip(result, logs, reason="credential_absent")
 
 
+async def test_mid_battery_skip_keeps_attestations_from_earlier_claims() -> None:
+    """#1254: a skip on claim N must not drop attestations collected for claims 1..N-1."""
+    from types import SimpleNamespace
+
+    module = _client()
+    transport = RecordedTransport.from_fixture(TRANSPORT_DIR / "claim_blocker_without_row.json")
+    real = module.AsyncJevClient(api_key="mc-test-jev-key", transport=transport)
+    calls = 0
+
+    class _SkipSecondCall:
+        async def call(self, **kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return await real.call(**kwargs)
+            return SimpleNamespace(skipped=True, response=None, reason="rate_limited")
+
+    result = await _judge().judge_prose_claims(
+        "The change is approved even though the summary request_changes it.\n\n"
+        "This change introduces an authorization bypass and must block the merge.\n",
+        findings=[],
+        client=_SkipSecondCall(),
+    )
+    assert calls >= 2
+    assert result.skipped is True
+    assert result.partial is True
+    assert result.reason == "rate_limited"
+    assert "jev-claim-unbacked-blocker" in _attestation_ids(result)
+
+
+async def test_full_skip_is_not_partial(monkeypatch: pytest.MonkeyPatch) -> None:
+    client, _transport = skipping_jev_client(monkeypatch, "claim_blocker_without_row.json")
+    result = await _judge().judge_prose_claims(
+        load_review("blocker_summary_no_findings.md"), findings=[], client=client
+    )
+    assert result.skipped is True
+    assert result.partial is False
+    assert result.findings == []
+
+
 def test_record_parallel_judge_writes_jev_judge_row(tmp_path: Path) -> None:
     """D6 apply site: ``record_parallel_judge`` appends ``policy_id='jev-judge'``."""
     from mergecraft.evidence.shadow import load_shadow_records

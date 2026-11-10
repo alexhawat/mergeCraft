@@ -278,58 +278,117 @@ def _render_ledger_markdown(records: list[LifecycleRecord], *, pull_number: int)
 @app.command("outcomes")
 def outcomes(
     ctx: typer.Context,
-    pr: Annotated[int, typer.Option("--pr", help="Pull request number.")],
+    pr: Annotated[
+        list[int],
+        typer.Option("--pr", help="Pull request number. Repeat to aggregate several PRs."),
+    ],
     repo: Annotated[str | None, typer.Option("--repo", help=_REPO_HELP)] = None,
     merged: Annotated[
-        bool, typer.Option("--merged/--not-merged", help="Whether the PR merged.")
-    ] = False,
+        bool | None,
+        typer.Option(
+            "--merged/--not-merged",
+            help="Override the merge state read from GitHub (applies to every --pr).",
+        ),
+    ] = None,
+    known_clean: Annotated[
+        list[int] | None,
+        typer.Option(
+            "--known-clean",
+            help=(
+                "A PR known to need no findings (for example a golden clean case). "
+                "Every finding published on it counts as a false positive. Repeatable; "
+                "each one is also fetched."
+            ),
+        ),
+    ] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON.")] = False,
 ) -> None:
     """Advisory human outcomes for published mergeCraft findings (#1165)."""
-    from mergecraft.findings.outcomes import classify_pull_request_outcomes
+    from mergecraft.findings.outcomes import (
+        FindingOutcomeReport,
+        classify_pull_request_outcomes,
+        summarize_outcomes,
+    )
     from mergecraft.findings.sweep import carryover_publishers
-    from mergecraft.findings.threads import ReviewThreadPage
 
     owner, name = _resolve_repo(repo)
+    clean = list(dict.fromkeys(known_clean or []))
+    pulls = list(dict.fromkeys([*pr, *clean]))
 
-    async def _run() -> tuple[ReviewThreadPage, frozenset[str]]:
+    async def _one(adapter: GitHubScmAdapter, client: GitHubClient, number: int) -> Any:
+        page = await fetch_review_threads(adapter, owner, name, number, include_resolved=True)
+        publishers = await carryover_publishers(client, owner, name, number)
+        if merged is None:
+            pull = await adapter.get_pull(owner, name, number)
+            is_merged = bool(pull.get("merged") or pull.get("merged_at"))
+        else:
+            is_merged = merged
+        return classify_pull_request_outcomes(
+            pull_number=number,
+            threads=page.threads,
+            publishers=publishers,
+            merged=is_merged,
+            incomplete=page.incomplete,
+        )
+
+    async def _run() -> list[FindingOutcomeReport]:
         client = _client()
         try:
-            page = await fetch_review_threads(
-                GitHubScmAdapter(client), owner, name, pr, include_resolved=True
-            )
-            publishers = await carryover_publishers(client, owner, name, pr)
-            return page, publishers
+            adapter = GitHubScmAdapter(client)
+            return [await _one(adapter, client, number) for number in pulls]
         finally:
             await client.aclose()
 
-    page, publishers = asyncio.run(_run())
-    report = classify_pull_request_outcomes(
-        pull_number=pr,
-        threads=page.threads,
-        publishers=publishers,
-        merged=merged,
-        incomplete=page.incomplete,
-    )
+    reports = asyncio.run(_run())
+    summary = summarize_outcomes(reports, known_clean_pulls=clean)
     if wants_json_output(ctx, json_flag=json_output):
+        if len(reports) == 1 and not clean:
+            report = reports[0]
+            emit_cli_json(
+                {
+                    "pull_number": report.pull_number,
+                    "merged": report.merged,
+                    "incomplete": report.incomplete,
+                    "rates": report.rates(),
+                    "rows": [row.model_dump() for row in report.rows],
+                }
+            )
+            return
         emit_cli_json(
             {
-                "pull_number": report.pull_number,
-                "merged": report.merged,
-                "incomplete": report.incomplete,
-                "rates": report.rates(),
-                "rows": [row.model_dump() for row in report.rows],
+                "summary": summary.model_dump(),
+                "reports": [
+                    {
+                        "pull_number": report.pull_number,
+                        "merged": report.merged,
+                        "incomplete": report.incomplete,
+                        "rates": report.rates(),
+                        "rows": [row.model_dump() for row in report.rows],
+                    }
+                    for report in reports
+                ],
             }
         )
         return
-    typer.echo(f"# Finding outcomes — #{pr}")
-    for row in report.rows:
-        typer.echo(f"- {row.fingerprint[:12]}… → **{row.outcome}** ({row.reason})")
-    rates = report.rates()
+    for report in reports:
+        marker = " (known clean)" if report.pull_number in clean else ""
+        typer.echo(f"# Finding outcomes — #{report.pull_number}{marker}")
+        if report.incomplete:
+            typer.echo("_Thread list incomplete; rates are a lower bound._")
+        for row in report.rows:
+            typer.echo(f"- {row.fingerprint[:12]}… → **{row.outcome}** ({row.reason})")
+    rates = summary.rates
     typer.echo(
         f"Rates (classified): fixed={rates['fixed']:.0%} rejected={rates['rejected']:.0%} "
-        f"intentional={rates['intentional']:.0%} ignored={rates['ignored']:.0%}"
+        f"intentional={rates['intentional']:.0%} ignored={rates['ignored']:.0%} "
+        f"stale={rates['stale']:.0%}"
     )
+    if summary.known_clean_pulls:
+        typer.echo(
+            f"Known-clean check: {summary.clean_pull_findings} finding(s) published on "
+            f"{len(summary.known_clean_pulls)} known-clean PR(s) — each is a false positive."
+        )
+    typer.echo("Advisory only: these outcomes never move a review verdict.")
 
 
 @app.command("ledger")

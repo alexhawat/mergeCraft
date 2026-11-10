@@ -242,3 +242,15 @@ def test_multi_line_all_sandbox_output_classifies_and_keeps_the_matched_line() -
     assert detail is not None
     assert detail.reason == NETWORK_REASON
     assert detail.line == lines[0]
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "unshare: fork failed: Resource temporarily unavailable",
+        "bwrap: Creating new namespace failed: Operation not permitted",
+        "setpriv: setresuid failed: Operation not permitted",
+    ],
+)
+def test_isolation_startup_failure_is_classified(stderr: str) -> None:
+    assert _classifier()(stderr) == "sandboxed: isolation unavailable"

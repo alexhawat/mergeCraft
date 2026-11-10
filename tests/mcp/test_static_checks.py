@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.analyzers.support import patch_analyzer_spawn
 
 from mergecraft.analyzers import sandbox as sandbox_mod
 from mergecraft.mcp import shell as shell_mod
@@ -310,7 +311,7 @@ def _capture_child(
             captured["payload_env"] = parsed
         return subprocess.CompletedProcess(argv, returncode, stdout, stderr)
 
-    monkeypatch.setattr(subprocess, "run", _run)
+    patch_analyzer_spawn(monkeypatch, _run)
     return captured
 
 
@@ -395,6 +396,10 @@ async def test_untrusted_gates_never_run_bare_when_isolation_is_missing(
             "sandboxed: network is disabled",
         ),
         ("Network is unreachable", "sandboxed: network is disabled"),
+        (
+            "unshare: fork failed: Resource temporarily unavailable",
+            "sandboxed: isolation unavailable",
+        ),
         ("getaddrinfo EAI_AGAIN registry.npmjs.org", "sandboxed: network is disabled"),
         ("EROFS: read-only file system", "sandboxed: path not writable"),
         (
@@ -557,7 +562,7 @@ async def test_sandboxed_gate_write_never_reaches_the_real_checkout(
         (target / "build-output.txt").write_text("built\n", encoding="utf-8")
         return subprocess.CompletedProcess(argv, 0, "ok", "")
 
-    monkeypatch.setattr(subprocess, "run", _fake_subprocess_run)
+    patch_analyzer_spawn(monkeypatch, _fake_subprocess_run)
     ctx = _ctx(
         repo,
         static_checks=[StaticCheckConfig(name="lint", command="gate")],

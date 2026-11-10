@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -41,6 +42,7 @@ from mergecraft.mcp.git_guards import (
     reject_if_leading_dash,
     reject_special_ref,
     resolve_grep_long_option,
+    validate_fetch_refspec,
     validate_tag_name,
 )
 from mergecraft.mcp.shared import (
@@ -50,7 +52,7 @@ from mergecraft.mcp.shared import (
     repository_mutation_class_for_push,
     tool,
 )
-from mergecraft.mcp.tool_state import primary_repo_state
+from mergecraft.mcp.tool_state import primary_repo_state, require_repo_state
 from mergecraft.utils.git_hardening import git_argv, git_authenticated_argv, read_remote_origin_url
 
 if TYPE_CHECKING:
@@ -672,6 +674,24 @@ def _validate_git_invocation(
     _validate_path_confinement(global_opts, cwd)
 
 
+def _repo_dir_for(ctx: ToolContext, repo: object) -> str:
+    """Working directory for the optional ``repo`` argument of the read-only ``git`` tool.
+
+    ``repo`` is ``name`` (same owner as the run) or ``owner/name`` and must be a
+    checkout already registered in ``tool_state`` (primary, or via
+    ``checkout_repo``); omitted means the primary checkout. An unknown repo is an
+    error, never a silent fall-back to the primary checkout (#1258).
+    """
+    if repo is None or repo == "":
+        return primary_repo_state(ctx.tool_state).dir
+    if not isinstance(repo, str):
+        msg = "repo must be a string"
+        raise ValueError(msg)
+    owner, _, name = repo.strip().rpartition("/")
+    state = require_repo_state(ctx.tool_state, owner or ctx.repo.owner, name)
+    return state.dir
+
+
 def git_tool(ctx: ToolContext):
     # Only immutable revision/path resolutions are reusable. Symbolic refs must
     # still be resolved each time because they can move outside this tool.
@@ -705,7 +725,7 @@ def git_tool(ctx: ToolContext):
             # Agent redundantly repeated the subcommand as the first arg; honor
             # the call rather than rejecting it.
             args.pop(0)
-        cwd = primary_repo_state(ctx.tool_state).dir
+        cwd = _repo_dir_for(ctx, params.get("repo"))
         tmpdir = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
         _validate_git_invocation(command, args, global_opts, cwd, tmpdir=tmpdir)
         show_target = _parse_show_rev_path(args) if command == "show" else None
@@ -720,7 +740,9 @@ def git_tool(ctx: ToolContext):
             identity = immutable_show_ids.get(lookup) if immutable else None
             if identity is None:
                 try:
-                    identity = _git_show_cache_identity(cwd=cwd, global_opts=global_opts, args=args)
+                    identity = await asyncio.to_thread(
+                        _git_show_cache_identity, cwd=cwd, global_opts=global_opts, args=args
+                    )
                 except RuntimeError:
                     # Let git show report its own path/ref diagnostic. A cache
                     # optimization must not replace the command's semantics.
@@ -744,11 +766,17 @@ def git_tool(ctx: ToolContext):
             args, context_dropped = _normalize_grep_args(args)
         try:
             if command == "grep":
-                output, matched = _run_grep([*global_opts, command, *args], cwd=cwd)
+                output, matched = await asyncio.to_thread(
+                    _run_grep, [*global_opts, command, *args], cwd=cwd
+                )
             elif command == "merge-base":
-                output, merge_base_found = _run_merge_base([*global_opts, command, *args], cwd=cwd)
+                output, merge_base_found = await asyncio.to_thread(
+                    _run_merge_base, [*global_opts, command, *args], cwd=cwd
+                )
             else:
-                output = _run_git([*global_opts, command, *run_args], cwd=cwd)
+                output = await asyncio.to_thread(
+                    _run_git, [*global_opts, command, *run_args], cwd=cwd
+                )
         except RuntimeError as err:
             raise RuntimeError(redact_secrets(str(err))) from err
         if show_target is not None:
@@ -797,7 +825,13 @@ def git_tool(ctx: ToolContext):
             "properties": {
                 "command": {"type": "string"},
                 "args": {"type": "array", "items": {"type": "string"}},
-                "repo": {"type": "string"},
+                "repo": {
+                    "type": "string",
+                    "description": (
+                        "Registered checkout to run in: `name` or `owner/name`. "
+                        "Defaults to the primary repo."
+                    ),
+                },
             },
             "required": ["command"],
             "additionalProperties": False,
@@ -817,25 +851,26 @@ def git_fetch_tool(ctx: ToolContext):
             args.extend(["--deepen", str(params["deepen"])])
         args.append("origin")
         if refspec:
-            reject_special_ref(str(refspec).split(":")[0], "refspec")
-            args.append(str(refspec))
+            args.append(validate_fetch_refspec(str(refspec)))
         trusted = primary_repo_state(ctx.tool_state).push_url
-        output = _run_authenticated_git(
-            args, cwd=cwd, token=ctx.git_token, trusted_remote_url=trusted
+        output = await asyncio.to_thread(
+            _run_authenticated_git, args, cwd=cwd, token=ctx.git_token, trusted_remote_url=trusted
         )
         return {"success": True, "output": output}
 
     return tool(
         name="git_fetch",
         tool_class=ToolClass.REPOSITORY_READ,
-        description="Fetch from the remote (handles authentication).",
+        description=(
+            "Fetch from the remote (handles authentication). `refspec` names one "
+            "branch on origin, optionally stored as `<branch>:refs/remotes/origin/<branch>`."
+        ),
         input_schema={
             "type": "object",
             "properties": {
                 "refspec": {"type": "string"},
                 "depth": {"type": "number"},
                 "deepen": {"type": "number"},
-                "repo": {"type": "string"},
             },
             "additionalProperties": False,
         },
@@ -878,7 +913,9 @@ def push_branch_tool(ctx: ToolContext):
         cwd = primary_repo_state(ctx.tool_state).dir
         branch = params.get("branchName")
         if not branch:
-            branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd).strip()
+            branch = (
+                await asyncio.to_thread(_run_git, ["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd)
+            ).strip()
         reject_special_ref(str(branch), "branch")
         _require_push_allowed(ctx, branch=str(branch), action="push")
         force = bool(params.get("force", False))
@@ -886,8 +923,8 @@ def push_branch_tool(ctx: ToolContext):
         if force:
             args.insert(1, "--force-with-lease")
         trusted = primary_repo_state(ctx.tool_state).push_url
-        output = _run_authenticated_git(
-            args, cwd=cwd, token=ctx.git_token, trusted_remote_url=trusted
+        output = await asyncio.to_thread(
+            _run_authenticated_git, args, cwd=cwd, token=ctx.git_token, trusted_remote_url=trusted
         )
         logger.info("pushed branch {}", branch)
         return {"success": True, "branch": branch, "output": output}
@@ -903,7 +940,6 @@ def push_branch_tool(ctx: ToolContext):
             "properties": {
                 "branchName": {"type": "string"},
                 "force": {"type": "boolean"},
-                "repo": {"type": "string"},
             },
             "additionalProperties": False,
         },
@@ -923,7 +959,8 @@ def push_tags_tool(ctx: ToolContext):
             validate_tag_name(str(tag))
         refspecs = [f"refs/tags/{tag}" for tag in tags]
         trusted = primary_repo_state(ctx.tool_state).push_url
-        output = _run_authenticated_git(
+        output = await asyncio.to_thread(
+            _run_authenticated_git,
             ["push", "origin", *refspecs],
             cwd=cwd,
             token=ctx.git_token,
@@ -941,7 +978,6 @@ def push_tags_tool(ctx: ToolContext):
             "type": "object",
             "properties": {
                 "tags": {"type": "array", "items": {"type": "string"}, "minItems": 1},
-                "repo": {"type": "string"},
             },
             "required": ["tags"],
             "additionalProperties": False,
@@ -959,14 +995,15 @@ def delete_branch_tool(ctx: ToolContext):
         if remote:
             _require_push_allowed(ctx, branch=branch, action="delete")
             trusted = primary_repo_state(ctx.tool_state).push_url
-            output = _run_authenticated_git(
+            output = await asyncio.to_thread(
+                _run_authenticated_git,
                 ["push", "origin", "--delete", branch],
                 cwd=cwd,
                 token=ctx.git_token,
                 trusted_remote_url=trusted,
             )
         else:
-            output = _run_git(["branch", "-D", branch], cwd=cwd)
+            output = await asyncio.to_thread(_run_git, ["branch", "-D", branch], cwd=cwd)
         return {"success": True, "branch": branch, "remote": remote, "output": output}
 
     repo_class = repository_mutation_class_for_push(ctx.payload.push)
@@ -980,7 +1017,6 @@ def delete_branch_tool(ctx: ToolContext):
             "properties": {
                 "branchName": {"type": "string"},
                 "remote": {"type": "boolean"},
-                "repo": {"type": "string"},
             },
             "required": ["branchName"],
             "additionalProperties": False,
@@ -993,10 +1029,12 @@ def commit_changes_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         message = str(params["message"])
         cwd = primary_repo_state(ctx.tool_state).dir
-        branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd).strip()
+        branch = (
+            await asyncio.to_thread(_run_git, ["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd)
+        ).strip()
         # Local commit is always allowed; push policy gates only the remote ref
         # update (W4.2 — same local-vs-remote split as ``delete_branch``).
-        status = _run_git(["status", "--porcelain"], cwd=cwd)
+        status = await asyncio.to_thread(_run_git, ["status", "--porcelain"], cwd=cwd)
         if not status.strip():
             return {
                 "success": True,
@@ -1004,9 +1042,9 @@ def commit_changes_tool(ctx: ToolContext):
                 "pushed": False,
                 "reason": "nothing to commit",
             }
-        _run_git(["add", "-A"], cwd=cwd)
-        _run_git(["commit", "-m", message], cwd=cwd)
-        sha = _run_git(["rev-parse", "HEAD"], cwd=cwd).strip()
+        await asyncio.to_thread(_run_git, ["add", "-A"], cwd=cwd)
+        await asyncio.to_thread(_run_git, ["commit", "-m", message], cwd=cwd)
+        sha = (await asyncio.to_thread(_run_git, ["rev-parse", "HEAD"], cwd=cwd)).strip()
         # The commit is local either way — the push policy decides nothing about
         # the response, it only records why no remote update was attempted.
         try:
@@ -1027,7 +1065,6 @@ def commit_changes_tool(ctx: ToolContext):
             "type": "object",
             "properties": {
                 "message": {"type": "string"},
-                "repo": {"type": "string"},
             },
             "required": ["message"],
             "additionalProperties": False,

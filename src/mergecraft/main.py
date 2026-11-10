@@ -366,11 +366,19 @@ def _classify_error_outcome(error: BaseException) -> RunOutcome:
     """
     from pydantic import ValidationError
 
+    from mergecraft.config.yaml_unique import ConfigParseError
+
     if isinstance(error, (_AgentTimeoutError, TimeoutError, asyncio.TimeoutError)):
         return RunOutcome.timed_out
     if isinstance(
         error,
-        (_ConfigurationError, ModelFallbackPolicyError, WorkspacePathError, ValidationError),
+        (
+            _ConfigurationError,
+            ConfigParseError,
+            ModelFallbackPolicyError,
+            WorkspacePathError,
+            ValidationError,
+        ),
     ):
         return RunOutcome.configuration_error
     return RunOutcome.infra_error
@@ -2154,7 +2162,9 @@ async def _triage_gate(ctx: RunContext) -> SkipAgentReview | LiteAgentReview | N
     driver gets exactly the diff the decision was made from. The decision is
     recorded on the run (packet, check summaries, shadow log) whenever the gate was
     evaluated, and any doubt is ``full``. The PR's title, body, labels and head-side
-    config are never read.
+    config are never read. With ``review.fastPath.reapproval`` enabled, the
+    re-approval proof (:func:`_reapproval_gate`) runs first and may return a
+    ``SkipAgentReview`` that carries a trusted prior pass over to this head.
     """
     assert ctx.settings is not None
     assert ctx.tool_state is not None
@@ -2169,6 +2179,10 @@ async def _triage_gate(ctx: RunContext) -> SkipAgentReview | LiteAgentReview | N
     head_sha = str(head.get("sha") or "") if isinstance(head, dict) else ""
     assert ctx.tool_context is not None
     repo = ctx.tool_context.repo
+    if config.reapproval.enabled and ctx.settings_snapshot_operator_owned:
+        reapproved = await _reapproval_gate(ctx, int(pull["number"]), head_sha)
+        if reapproved is not None:
+            return reapproved
     decision, inputs = await triage_pull_request(
         ctx.tool_context.scm,
         repo.owner,
@@ -2186,6 +2200,61 @@ async def _triage_gate(ctx: RunContext) -> SkipAgentReview | LiteAgentReview | N
         return None
     logger.warning("» {} — {}", decision.record_line(), decision.reason)
     gha_log.warning(decision.record_line())
+    return SkipAgentReview(reason=decision.reason)
+
+
+async def _reapproval_gate(
+    ctx: RunContext, pull_number: int, head_sha: str
+) -> SkipAgentReview | None:
+    """Carry a trusted prior pass over to this head when only changelog prose moved (#1284).
+
+    Returns ``SkipAgentReview`` when :func:`mergecraft.reapproval.evaluate_reapproval`
+    proves the prior pass applies, and records the ``skip`` / ``reapproval`` tier and
+    its record so the checks publish the reused verdict on this exact head. ``None``
+    otherwise: the normal triage and review run. Either way the run's review stamp
+    (pull request, target branch, review-policy digest) is recorded, so this run's own
+    approval check can seed a later re-approval.
+    """
+    assert ctx.settings is not None
+    assert ctx.tool_state is not None
+    assert ctx.tool_context is not None
+    from mergecraft import __version__
+    from mergecraft.classify.reapproval import APPROVAL_CHECK_NAME, REAPPROVAL_RECOGNIZER
+    from mergecraft.mcp.checkout import list_mergecraft_reviews
+    from mergecraft.reapproval import evaluate_reapproval, workflow_path_from_ref
+
+    tool_context = ctx.tool_context
+    repo = tool_context.repo
+
+    async def _reviews() -> list[dict[str, Any]]:
+        return await list_mergecraft_reviews(tool_context, pull_number=pull_number)
+
+    outcome = await evaluate_reapproval(
+        tool_context.scm,
+        repo.owner,
+        repo.name,
+        pull_number,
+        head_sha,
+        config=ctx.settings.review.fast_path.reapproval,
+        list_reviews=_reviews,
+        workflow_path=workflow_path_from_ref(os.environ.get("GITHUB_WORKFLOW_REF")),
+        version=__version__,
+    )
+    ctx.tool_state.review_stamp = outcome.stamp
+    record = outcome.verdict.record
+    if record is None:
+        logger.info("» re-approval: normal review — {}", outcome.verdict.reason)
+        return None
+    ctx.tool_state.reapproval = record
+    decision = TriageDecision(
+        tier="skip",
+        recognizer=REAPPROVAL_RECOGNIZER,
+        reason=record.reason(),
+        relied_on_checks=(f"{APPROVAL_CHECK_NAME}@{record.prior_head_sha}",),
+    )
+    ctx.tool_state.triage = decision
+    logger.warning("» {} — {}", decision.record_line(), decision.reason)
+    gha_log.notice(f"mergeCraft: {decision.reason} (prior review: {record.prior_url})")
     return SkipAgentReview(reason=decision.reason)
 
 
@@ -3175,9 +3244,9 @@ async def _finalize(
         failure_reason = post_emission_sink[0]
     # #1014 — the same open-ledger rule ``_publish`` applied to the checks, so
     # this run's own result agrees with the completion check it posted.
-    outcome, ledger_reason = outcome_with_disposition_ledger(
-        outcome, tool_state.prepared_run_packet
-    )
+    from mergecraft.review.outcome_resolution import finalize_run_outcome
+
+    outcome, ledger_reason = finalize_run_outcome(outcome, tool_state.prepared_run_packet)
     failure_reason = ledger_reason or failure_reason
 
     # O9 (OB4) — the verdict span at the publish convergence point. Emitted

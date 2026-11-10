@@ -4,22 +4,12 @@ from __future__ import annotations
 
 from typing import Final
 
-# Check-run conclusions — what ``decide_approval()`` emits today.
-# Lane verdicts — the W9 thermostat action vocabulary (#46, W9.1).
-EXPECTED_VERDICT_VALUES: Final[frozenset[str]] = frozenset(
-    {
-        "success",
-        "failure",
-        "auto_merge",
-        "block",
-        "request_changes",
-        "require_human_review",
-        "require_more_tests",
-        "quarantine",
-        "escalate",
-        "unavailable",
-        "neutral",
-    }
-)
+from mergecraft.evidence.gate_policy import GATE_ACTIONS
 
-__all__ = ["EXPECTED_VERDICT_VALUES"]
+# GitHub check-run conclusions from ``decide_approval()`` / completion mapping.
+CHECK_CONCLUSIONS: Final[frozenset[str]] = frozenset({"success", "failure", "neutral", "timed_out"})
+
+# Evals also record an unavailable result when a gate could not be evaluated.
+EXPECTED_VERDICT_VALUES: Final[frozenset[str]] = CHECK_CONCLUSIONS | GATE_ACTIONS | {"unavailable"}
+
+__all__ = ["CHECK_CONCLUSIONS", "EXPECTED_VERDICT_VALUES"]

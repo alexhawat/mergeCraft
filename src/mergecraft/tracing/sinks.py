@@ -150,10 +150,14 @@ class JSONLFileSink:
         """Append ``event`` to today's JSONL file (best-effort)."""
         day_str = self.clock().strftime("%Y-%m-%d")
         path = self.trace_dir / f"{day_str}.jsonl"
+        # Same redact-then-cap pass as MemorySink: nothing reaches disk unredacted.
+        redacted = redact_event(event)
+        capped_attrs = cap_event_attrs(redacted.model_dump())["attrs"]
+        persisted = redacted.model_copy(update={"attrs": capped_attrs})
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(event.model_dump()) + "\n")
+                handle.write(json.dumps(persisted.model_dump()) + "\n")
             self.purge_expired()
         except OSError as exc:
             logger.warning("trace sink JSONLFileSink write failed: {}", exc)

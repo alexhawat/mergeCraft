@@ -223,31 +223,20 @@ def test_valid_optional_config_still_loads(tmp_path: Path, monkeypatch: pytest.M
 
 
 # ---------------------------------------------------------------------------
-# 4. D9 — broken YAML still falls back to defaults
+# 4. D9 — broken YAML fails closed (#1249)
 # ---------------------------------------------------------------------------
 
 
-def test_broken_yaml_still_falls_back_to_defaults(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """D9 — a syntactically unparseable ``.mergecraft/config.yaml`` warns and
-    falls back to ``default_settings()``.
+def test_broken_yaml_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#1249 - a syntactically unparseable ``.mergecraft/config.yaml`` fails closed.
 
-    D8 flips *unknown keys within a parsed model*. An unparseable file is a
-    different shape: the loader catches ``yaml.YAMLError`` at
-    ``settings.py`` and warns, returning the restrictive defaults so the
-    run can still proceed. This test pins that path so a future refactor
-    cannot silently turn a syntax error into a hard failure.
+    It used to warn and return defaults, which could widen a stricter
+    committed setting. Unknown keys and parse errors now both abort.
     """
-    from mergecraft.config.settings import default_settings
-
     cfg_dir = tmp_path / ".mergecraft"
     cfg_dir.mkdir()
     (cfg_dir / "config.yaml").write_text("push: [not, a, scalar\n", encoding="utf-8")
 
     monkeypatch.delenv("MERGECRAFT_CONFIG", raising=False)
-    settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
-
-    defaults = default_settings()
-    assert settings.push == defaults.push, "broken YAML must fall back to default push"
-    assert settings.shell == defaults.shell, "broken YAML must fall back to default shell"
+    with pytest.raises(ValueError, match="config parse error"):
+        load_repo_settings(root=tmp_path, load_learnings_files=False)

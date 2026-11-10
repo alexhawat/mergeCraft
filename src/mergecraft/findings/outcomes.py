@@ -1,7 +1,7 @@
 """Deterministic human outcomes for published mergeCraft findings (#1165).
 
 Classifies each mergeCraft-originated review thread into fixed / rejected /
-intentional / ignored from GitHub thread state, human replies, and merge state.
+intentional / ignored / stale from GitHub thread state, human replies, and merge state.
 Advisory only — never feeds :func:`mergecraft.agents.gates.decide_approval`.
 """
 
@@ -19,9 +19,9 @@ from mergecraft.review_resolution import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
-FindingOutcomeKind = Literal["fixed", "rejected", "intentional", "ignored", "unknown"]
+FindingOutcomeKind = Literal["fixed", "rejected", "intentional", "ignored", "stale", "unknown"]
 
 _INTENTIONAL_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(won'?t fix|wontfix|by design|intentional)\b",
@@ -66,14 +66,89 @@ class FindingOutcomeReport(BaseModel):
             "rejected": 0,
             "intentional": 0,
             "ignored": 0,
+            "stale": 0,
             "unknown": 0,
         }
         for row in self.rows:
             counts[row.outcome] += 1
-        classified = sum(counts[k] for k in ("fixed", "rejected", "intentional", "ignored"))
+        classified = sum(
+            counts[k] for k in ("fixed", "rejected", "intentional", "ignored", "stale")
+        )
         if classified == 0:
             return {key: 0.0 for key in counts}
         return {key: counts[key] / classified for key in counts if key != "unknown"}
+
+
+_CLASSIFIED_KINDS: Final[tuple[FindingOutcomeKind, ...]] = (
+    "fixed",
+    "rejected",
+    "intentional",
+    "ignored",
+    "stale",
+)
+
+
+class FindingOutcomeSummary(BaseModel):
+    """Advisory outcome rates across several pull requests, with a clean-PR check.
+
+    ``known_clean_pulls`` are pull requests a human has already established carry
+    nothing worth flagging (the PRs behind the golden ``clean`` cases, or any
+    operator-declared clean change). Every mergeCraft finding published on one is
+    a false positive by construction, whatever a human later did with its thread,
+    so they are counted on their own (``clean_pull_findings``) instead of being
+    left to the reply classifier. The summary is evidence only: nothing here is
+    read by :func:`mergecraft.agents.gates.decide_approval`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    advisory: Literal[True] = True
+    pulls: list[int] = Field(default_factory=list)
+    counts: dict[FindingOutcomeKind, int] = Field(default_factory=dict)
+    rates: dict[FindingOutcomeKind, float] = Field(default_factory=dict)
+    known_clean_pulls: list[int] = Field(default_factory=list)
+    clean_pull_findings: int = 0
+    clean_pull_findings_per_pull: float | None = None
+    incomplete_pulls: list[int] = Field(default_factory=list)
+
+
+def summarize_outcomes(
+    reports: Sequence[FindingOutcomeReport],
+    *,
+    known_clean_pulls: Iterable[int] = (),
+) -> FindingOutcomeSummary:
+    """Aggregate per-PR reports into advisory rates and the known-clean FP check.
+
+    Rates are over classified rows (``unknown`` excluded) on every PR, so a clean
+    PR's findings still count toward their reply-derived outcome as well. The
+    clean-PR check divides by the number of known-clean PRs that were actually
+    reported, so a PR that was declared clean but not fetched cannot dilute it.
+    """
+    counts: dict[FindingOutcomeKind, int] = dict.fromkeys((*_CLASSIFIED_KINDS, "unknown"), 0)
+    clean = frozenset(known_clean_pulls)
+    clean_reported: list[int] = []
+    clean_findings = 0
+    for report in reports:
+        for row in report.rows:
+            counts[row.outcome] += 1
+        if report.pull_number in clean:
+            clean_reported.append(report.pull_number)
+            clean_findings += len(report.rows)
+    classified = sum(counts[kind] for kind in _CLASSIFIED_KINDS)
+    rates: dict[FindingOutcomeKind, float] = {
+        kind: (counts[kind] / classified if classified else 0.0) for kind in _CLASSIFIED_KINDS
+    }
+    return FindingOutcomeSummary(
+        pulls=[report.pull_number for report in reports],
+        counts=counts,
+        rates=rates,
+        known_clean_pulls=sorted(clean_reported),
+        clean_pull_findings=clean_findings,
+        clean_pull_findings_per_pull=(
+            clean_findings / len(clean_reported) if clean_reported else None
+        ),
+        incomplete_pulls=[report.pull_number for report in reports if report.incomplete],
+    )
 
 
 def _human_replies(comments: Sequence[dict[str, Any]], publishers: frozenset[str]) -> list[str]:
@@ -107,7 +182,9 @@ def classify_thread_outcome(
     if thread.get("isResolved") or thread.get("resolved"):
         return "fixed", "thread resolved"
     if thread.get("isOutdated") or thread.get("outdated"):
-        return "fixed", "thread outdated"
+        # Outdated only means the anchored line changed; it does not prove the
+        # finding was addressed, so it must not inflate the "fixed" rate (#1251).
+        return "stale", "thread outdated (anchor changed; not confirmed fixed)"
     human = _human_replies(comments, publishers)
     combined = "\n".join(human)
     if combined and _REJECT_RE.search(combined):
@@ -192,7 +269,9 @@ __all__ = [
     "FindingOutcomeKind",
     "FindingOutcomeReport",
     "FindingOutcomeRow",
+    "FindingOutcomeSummary",
     "classify_pull_request_outcomes",
     "classify_thread_outcome",
     "flywheel_candidate_from_outcome",
+    "summarize_outcomes",
 ]

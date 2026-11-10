@@ -499,6 +499,34 @@ def test_process_limit_for_drop_bounds_the_payload_allowance(
     )
 
 
+def test_process_limit_for_drop_keeps_fork_headroom_when_the_probe_cannot_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#1247 - an unanswered probe still leaves the payload ``max_processes`` of fork headroom.
+
+    ``count + allowance`` would be the probe's *first candidate*, whose acceptance
+    leaves headroom 0 on a stale hint - the silent-hang shape. The fallback must
+    add the same extra allowance the accepted path does.
+    """
+    sandbox = import_module("mergecraft.analyzers.sandbox")
+    monkeypatch.setattr(sandbox, "process_count_for_uid", _visible_count(40), raising=False)
+    monkeypatch.setattr(sandbox, "_drop_exec_succeeds_at_limit", lambda *_a, **_k: None)
+
+    soft, hard = sandbox.process_limit_for_drop(16, target_uid=1001, target_gid=1001)
+
+    assert (soft, hard) == (40 + 2 * 16, 40 + 2 * 16)
+
+
+def test_process_limit_for_drop_without_a_gid_keeps_fork_headroom(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sandbox = import_module("mergecraft.analyzers.sandbox")
+    monkeypatch.setattr(sandbox, "process_count_for_uid", _visible_count(40), raising=False)
+    refuse_probe(monkeypatch, sandbox)
+
+    assert sandbox.process_limit_for_drop(16, target_uid=1001, target_gid=None) == (72, 72)
+
+
 def test_process_limit_for_drop_keeps_headroom_when_the_hint_under_reports(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

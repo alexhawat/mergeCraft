@@ -88,7 +88,7 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.19.0`.
+The current version is `1.20.0`.
 
 Wiring a consumer is **not** a shape change: #96 gave these models their first
 runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
@@ -161,6 +161,10 @@ not move.
 - `1.19.0` — the `triage` section gains the `lite` tier (one capped LLM call)
   and its accounting: `token_cap`, `tokens_used`, `usage_estimated`, `cap_hit`
   and `prompt_version`. Additive; every new field has a default.
+- `1.20.0` — the `triage` section gains `reapproval` (#1284): when a trusted
+  prior mergeCraft pass carried over to a head whose only PR-authored change is
+  changelog prose, the prior review link, the compared SHAs, the qualifying,
+  preserved and inherited paths, and the skipped work. Additive; `null` otherwise.
 
 ## Top-level fields
 
@@ -280,9 +284,25 @@ off, so a run with no `review.fastPath` config is unchanged.
 | `usage_estimated` | `bool` | `tokens_used` is an estimate because the provider reported no usage. (Added in 1.19.0.) |
 | `cap_hit` | `bool` | `tokens_used` exceeded `token_cap`; the run is `inconclusive`. (Added in 1.19.0.) |
 | `prompt_version` | `str \| null` | The version of the `lite` system prompt. (Added in 1.19.0.) |
+| `reapproval` | `ReapprovalSection \| null` | A `skip (reapproval)` run's carried-over pass (`review.fastPath.reapproval`); `null` otherwise. (Added in 1.20.0.) |
 
-Neither a `skip` nor a `lite` run ever carries a `success` decision: approval is
-left to a human. A `lite` run with a Critical or Major finding still carries
+`ReapprovalSection` fields, all orchestrator-written:
+
+| Field | Type | Notes |
+|------|------|-------|
+| `prior_url` | `str` | The prior review run (`details_url` of the trusted `mergecraft-approval` check). |
+| `prior_check_id` | `int` | That check run's id. |
+| `prior_head_sha` / `head_sha` | `str` | The reviewed head and the new head the result is published on. |
+| `prior_merge_base` / `merge_base` | `str` | The merge base of the PR's changes at each head. |
+| `qualifying_paths` | `list[str]` | Paths whose PR-authored change was proven prose (`CHANGELOG.md` by default). |
+| `preserved_paths` | `list[str]` | PR-authored paths identical to the reviewed change (status, blob, patch and mode). |
+| `inherited_paths` | `list[str]` | Paths that changed only because the base branch did. |
+| `skipped` | `list[str]` | Work the run did not repeat (LLM review, agents, analyzers, static checks, full-diff reads). |
+
+Neither a `skip` nor a `lite` run ever carries a `success` decision of its own:
+approval is left to a human. The one exception is a `skip (reapproval)` run on a
+trusted authority, which carries the prior `success` over to the new head and says
+so in `decision.reason`. A `lite` run with a Critical or Major finding still carries
 `failure`.
 ### `run_metrics` — `RunMetrics | None` (added in `1.15.0`)
 
