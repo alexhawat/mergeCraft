@@ -604,7 +604,7 @@ docs/                 # ANALYZERS, CONTRIBUTING-ANALYZERS, REVIEW-DOCTRINE, test
 - Optional features as extras: `[dev]`.
 - Never add a dependency for something achievable in <20 lines of stdlib code.
 - Prefer well-maintained libraries with async support and no heavyweight transitive tree.
-- **No proprietary SaaS clients.** mergeCraft is BYOK and talks only to the provider the user configured and to GitHub.
+- **BYOK with an explicit Jev exception.** mergeCraft talks to the provider the user configured and to GitHub. When `jev.enabled: true` and `TYPESAFE_API_KEY` are set, Jev also sends review content to TypeSafe without redaction; see [Data sent to TypeSafe](../jev-gate-patterns.md#data-sent-to-typesafe). Keep other proprietary SaaS clients out of the dependency set.
 
 ```toml
 [project]

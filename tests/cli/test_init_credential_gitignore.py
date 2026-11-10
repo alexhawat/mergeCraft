@@ -19,6 +19,7 @@ from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
 from mergecraft.cli.auth_cmd import _write_env_value
+from mergecraft.cli.startup_env import implicit_env_is_tracked
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -87,10 +88,13 @@ def test_similar_existing_entry_does_not_count_as_env(repo: Path) -> None:
     assert _git(repo, "check-ignore", "-q", ".env").returncode == 0
 
 
-def test_init_warns_when_env_is_already_tracked(repo: Path) -> None:
+@pytest.mark.parametrize("deleted", [False, True])
+def test_init_warns_when_env_is_already_tracked(repo: Path, deleted: bool) -> None:
     (repo / ".env").write_text("SOME_KEY=1\n", encoding="utf-8")
     _git(repo, "add", ".env")
     _git(repo, "commit", "-q", "-m", "track env")
+    if deleted:
+        (repo / ".env").unlink()
     result = runner.invoke(app, ["init"])
     assert result.exit_code == 0, result.output
     output = _flat(result.output)
@@ -98,32 +102,44 @@ def test_init_warns_when_env_is_already_tracked(repo: Path) -> None:
     assert "git rm --cached .env" in output
 
 
-def test_writer_refuses_a_tracked_env(repo: Path) -> None:
+@pytest.mark.parametrize("deleted", [False, True])
+def test_writer_refuses_a_tracked_env(repo: Path, deleted: bool) -> None:
     env_path = repo / ".env"
     env_path.write_text("OTHER=1\n", encoding="utf-8")
     _git(repo, "add", ".env")
     _git(repo, "commit", "-q", "-m", "track env")
+    if deleted:
+        env_path.unlink()
 
     with pytest.raises(typer.Exit) as excinfo:
         _write_env_value(env_path, "ANTHROPIC_API_KEY", "sk-test-value")
 
     assert excinfo.value.exit_code != 0
-    assert env_path.read_text(encoding="utf-8") == "OTHER=1\n", "a refused write must not land"
+    if deleted:
+        assert not env_path.exists(), "a refused write must not recreate a tracked file"
+    else:
+        assert env_path.read_text(encoding="utf-8") == "OTHER=1\n", "a refused write must not land"
 
 
-def test_cli_local_scope_refuses_a_tracked_env(repo: Path) -> None:
+@pytest.mark.parametrize("deleted", [False, True])
+def test_cli_local_scope_refuses_a_tracked_env(repo: Path, deleted: bool) -> None:
     """The refusal reaches the operator through a real ``--scope local`` command."""
     env_path = repo / ".env"
     env_path.write_text("OTHER=1\n", encoding="utf-8")
     _git(repo, "add", ".env")
     _git(repo, "commit", "-q", "-m", "track env")
+    if deleted:
+        env_path.unlink()
 
     result = runner.invoke(app, ["tracing", "logfire", "disable", "--scope", "local"])
 
     assert result.exit_code != 0, result.output
     assert "refusing to write" in _flat(result.output)
     assert "tracked by Git" in _flat(result.output)
-    assert env_path.read_text(encoding="utf-8") == "OTHER=1\n"
+    if deleted:
+        assert not env_path.exists()
+    else:
+        assert env_path.read_text(encoding="utf-8") == "OTHER=1\n"
 
 
 def test_writer_accepts_an_untracked_env_in_a_repo(repo: Path) -> None:
@@ -137,3 +153,18 @@ def test_writer_creates_a_new_env_in_a_repo(repo: Path) -> None:
     env_path = repo / ".env"
     assert _write_env_value(env_path, "ANTHROPIC_API_KEY", "sk-test-value") is True
     assert dotenv_values(env_path)["ANTHROPIC_API_KEY"] == "sk-test-value"
+
+
+@pytest.mark.parametrize("tracked", [False, True])
+@pytest.mark.parametrize("symlink", [False, True])
+def test_missing_env_tracking_uses_git_index(repo: Path, tracked: bool, symlink: bool) -> None:
+    env_path = repo / ".env"
+    target = repo / "credentials" if symlink else env_path
+    target.write_text("OTHER=1\n", encoding="utf-8")
+    if symlink:
+        env_path.symlink_to(target.name)
+    if tracked:
+        assert _git(repo, "add", target.name).returncode == 0
+    target.unlink()
+
+    assert implicit_env_is_tracked(env_path) is tracked

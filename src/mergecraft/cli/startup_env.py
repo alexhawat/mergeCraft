@@ -23,10 +23,17 @@ def implicit_env_is_tracked(path: Path) -> bool:
     """Reject implicit repository credentials, including links to tracked files.
 
     Explicit MERGECRAFT_ENV overrides are an operator choice and do not use
-    this guard. Probe the link itself as well as its resolved destination.
+    this guard. Probe the link itself as well as its resolved destination,
+    even when a tracked file has been deleted from the worktree.
     """
     try:
-        candidates = {path, path.resolve(strict=True)}
+        try:
+            resolved = path.resolve(strict=True)
+        except FileNotFoundError:
+            # Missing worktree files can still have an index entry. Resolve
+            # existing links too, including links to a deleted tracked target.
+            resolved = path.resolve()
+        candidates = {path.absolute(), resolved}
     except (OSError, RuntimeError):
         return True
     for candidate in candidates:

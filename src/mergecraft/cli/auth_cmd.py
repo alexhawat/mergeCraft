@@ -737,11 +737,9 @@ def _refuse_tracked_env(env_path: Path, key: str) -> None:
     no longer protects it. The startup loader already skips such a file
     (``cli/app.py``), so a write there would also never be read back. The check
     reuses the loader's probe, which also refuses when a repository is found
-    but its index cannot be read. A file that does not exist yet is not
-    tracked, so a first write needs no ``git`` call.
+    but its index cannot be read. Probe absent paths too: deleting a tracked
+    file from the worktree does not remove its index entry.
     """
-    if not env_path.exists():
-        return
     from mergecraft.cli.startup_env import implicit_env_is_tracked
 
     if implicit_env_is_tracked(env_path):

@@ -179,8 +179,11 @@ issues-showcase-readiness follow-up. -->
 
 ## 🔒 Security model
 
-- **BYOK by design** — credentials and repo content never leave GitHub
-  Actions / your machine and this repo's code.
+- **BYOK by design** — reviews call your configured model provider directly,
+  with no mergeCraft-operated service in the path. If `jev.enabled: true` and
+  `TYPESAFE_API_KEY` are set, Jev also sends review content to TypeSafe without
+  redaction; see [Data sent to TypeSafe](jev-gate-patterns.md#data-sent-to-typesafe).
+  The GitHub Action's PR review does not call Jev in this release.
 - **Comment triggers are authorized, not authenticated-by-content** — only
   `OWNER`/`MEMBER`/`COLLABORATOR` associations can invoke; the body is never
   consulted. Two opt-in knobs (`allow_pr_target_comments`,

@@ -192,7 +192,7 @@ def _ensure_local_credentials_gitignore(root: Path) -> None:
     _ensure_gitignore_line(root, _local_env_gitignore_line())
     _ensure_gitignore_line(root, _local_config_gitignore_line())
     env_path = root / ".env"
-    if env_path.is_file() and implicit_env_is_tracked(env_path):
+    if implicit_env_is_tracked(env_path):
         console.print(
             "[yellow]warning:[/yellow] .env is tracked by Git (or its tracking status "
             "could not be verified); the new ignore rule does not untrack it. Run "
