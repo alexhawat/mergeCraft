@@ -504,3 +504,58 @@ def test_resolve_ast_grep_binary_uses_cache_outside_any_checkout(
     assert str(seen["lock_path"]).startswith(str(fake_cache_home))
     assert "checkout" not in str(seen["cache_dir"])
     assert "checkout" not in str(seen["lock_path"])
+
+
+def test_malformed_ast_grep_rows_are_skipped_not_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One malformed ast-grep row must not abort declaration extraction for the batch."""
+    from mergecraft.analyzers import impact
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "x.py").write_text("def ok():\n    pass\n", encoding="utf-8")
+
+    good = {
+        "file": "src/x.py",
+        "metaVariables": {"single": {"NAME": {"text": "ok"}}},
+        "range": {"start": {"line": 0}},
+    }
+    malformed: list[object] = [
+        "not-a-dict",
+        {"file": "src/x.py", "metaVariables": "oops", "range": {"start": {"line": 0}}},
+        {"file": "src/x.py", "metaVariables": {"single": None}, "range": {}},
+        {"file": "src/x.py", "metaVariables": {"single": {"NAME": {"text": 7}}}},
+        {
+            "file": "src/x.py",
+            "metaVariables": {"single": {"NAME": {"text": "bad"}}},
+            "range": {"start": {"line": "3"}},
+        },
+        {
+            "file": "src/x.py",
+            "metaVariables": {"single": {"NAME": {"text": "bool"}}},
+            "range": {"start": {"line": True}},
+        },
+        {
+            "file": 42,
+            "metaVariables": {"single": {"NAME": {"text": "nofile"}}},
+            "range": {"start": {"line": 1}},
+        },
+        {
+            "file": "src/x.py",
+            "metaVariables": {"single": {"NAME": {"text": "noline"}}},
+            "range": {"start": None},
+        },
+    ]
+
+    def _fake(*_args: object, **_kwargs: object) -> list[object]:
+        return [*malformed, good]
+
+    monkeypatch.setattr(impact, "_run_ast_grep", _fake)
+
+    results = impact._find_declarations_batch(
+        ["src/x.py"], str(tmp_path), "ast-grep", tier="trusted"
+    )
+
+    assert results == {
+        "src/x.py": [{"name": "ok", "language": results["src/x.py"][0]["language"], "line": 1}]
+    }

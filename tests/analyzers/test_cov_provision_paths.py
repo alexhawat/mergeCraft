@@ -683,14 +683,13 @@ def test_baked_binary_is_used_in_the_full_image(
     assert provision.resolve_baked_binary(_manifest()) == baked / "faketool"
 
 
-def test_full_image_falls_back_to_path_then_gives_up(
+def test_full_image_never_falls_back_to_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When the baked path is empty, ``PATH`` is consulted, then ``None`` is returned.
+    """A missing baked binary resolves to ``None`` even when ``PATH`` has one.
 
-    The fallback is what lets an apt/pip-installed analyzer serve the full image;
-    returning a path when nothing was found would send an unrunnable command to
-    the sandbox.
+    Callers treat a returned path as trusted and skip lock/hash verification, so
+    a same-named host binary must never be picked up here.
     """
     monkeypatch.setattr(provision, "BAKED_ANALYZER_ROOT", tmp_path / "empty")
     monkeypatch.setenv("MERGECRAFT_ANALYZERS", "full")
@@ -698,10 +697,11 @@ def test_full_image_falls_back_to_path_then_gives_up(
     on_path = tmp_path / "bin" / "faketool"
     on_path.parent.mkdir()
     on_path.write_bytes(_PAYLOAD)
-    monkeypatch.setattr(provision.shutil, "which", lambda name: str(on_path))
-    assert provision.resolve_baked_binary(_manifest()) == on_path
 
-    monkeypatch.setattr(provision.shutil, "which", lambda name: None)
+    def _which(name: str) -> str:
+        raise AssertionError("PATH must not be consulted for a baked analyzer")
+
+    monkeypatch.setattr(provision.shutil, "which", _which)
     assert provision.resolve_baked_binary(_manifest()) is None
 
 

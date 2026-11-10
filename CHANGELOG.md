@@ -459,6 +459,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the span's `error` attribute even though `http.url` was redacted; the
   `error`, `exception.message` and `tool.error_message` attributes now get the
   same URL credential redaction before any sink sees them (#1235).
+- Managed pip analyzer provisioning bounds `uv pip install` at 600 seconds. It
+  runs while holding the shared cache lock, so a hung install used to block every
+  other worker; a timeout now removes the staging tree and fails the install
+  cleanly (#1261).
+- Baseline suppression bounds the base-worktree `git worktree add` and `remove`
+  calls. A timed-out or failed checkout now removes its temp tree and disables
+  suppression for that run instead of raising (#1262).
+- Contract base-ref probes (`git rev-parse` and `git show`) are bounded. A timeout
+  reads as "base unavailable" and skips the contract check rather than hanging the
+  review (#1263).
+- A baked analyzer binary that is missing no longer falls back to a same-named
+  binary on `PATH`. Callers skip lock and hash verification for a returned path,
+  so the fallback could run an unpinned tool; the managed resolver provisions it
+  instead (#1264).
+- Malformed ast-grep rows (a missing or non-numeric line, a non-object entry) are
+  skipped during change-impact declaration extraction instead of aborting the
+  batch (#1265).
+- The comment-preserving config patch (`patch_config_dict`) writes through the
+  same temp-file and atomic `os.replace` path as the full rewrite, so a failure
+  mid-write can no longer leave a truncated `config.yaml` (#1266).
+- The temporary findings sink for `mergecraft review` no longer leaks a file
+  descriptor per run (#1267).
+- The egress bridge bounds its `/etc/hosts` bind mount at 10 seconds and removes
+  its staging directory once the mount call returns, so one directory no longer
+  leaks per run (#1268).
+- Handing the isolated opencode data tree to the agent user no longer follows
+  symlinks: a link planted in the tree cannot re-own or chmod a file outside it
+  (#1269).
+- Killed background shell processes are reaped after the kill, so they no longer
+  linger as zombies until the MCP server exits (#1270).
+- The JSONL trace file sink redacts and caps events before writing, as the memory
+  and redacting sinks already did, so a credential in a span attribute no longer
+  reaches disk (#1271).
+- Removed an unreachable inner `try`/`except` from broker stream redaction; the
+  latin-1 decode it guarded cannot fail (#1272).
+- Removed the 2026-11-05 audit probe scripts from `docs/dev/plans`. They sat
+  outside lint scope, had gone stale, and asserted the buggy behaviour the
+  audit found, so they failed once those findings were fixed. The audit memos
+  now point to their copies in git history (#1273).
 - actionlint now lints workflow files only. Action manifests (root `action.yml`
   and `.github/actions/**/action.yml`, composite or not) were linted against the
   workflow schema, producing false Major `syntax-check` blockers; zizmor still

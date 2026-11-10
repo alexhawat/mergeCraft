@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -32,6 +33,9 @@ TrustTier = Literal["trusted", "untrusted"]
 DIFF_ONLY_ANALYZER_IDS: frozenset[str] = frozenset({"self-silencing"})
 
 _MIN_CHANGED_LINES_FOR_BASELINE = 12
+# Bound on the base-worktree ``git worktree add``/``remove`` calls, so a stuck git
+# cannot hang the review run. Matches the order of the other git helpers' bounds.
+_GIT_WORKTREE_TIMEOUT_S = 120
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,19 +92,31 @@ def should_run_baseline_suppression(*, diff_text: str, base_comparison: str) -> 
 
 def _checkout_base_worktree(repo_root: Path, base_ref: str) -> Path | None:
     worktree = Path(tempfile.mkdtemp(prefix="mergecraft-base-"))
-    result = subprocess.run(
-        git_argv(["-C", str(repo_root), "worktree", "add", "--detach", str(worktree), base_ref]),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            git_argv(
+                ["-C", str(repo_root), "worktree", "add", "--detach", str(worktree), base_ref]
+            ),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_GIT_WORKTREE_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        logger.info(
+            "baseline suppression: timed out materializing base worktree at {} after {}s",
+            base_ref,
+            _GIT_WORKTREE_TIMEOUT_S,
+        )
+        shutil.rmtree(worktree, ignore_errors=True)
+        return None
     if result.returncode != 0:
         logger.info(
             "baseline suppression: could not materialize base worktree at {}: {}",
             base_ref,
             (result.stderr or result.stdout or "").strip(),
         )
-        worktree.rmdir()
+        shutil.rmtree(worktree, ignore_errors=True)
         return None
     return worktree
 
@@ -132,12 +148,17 @@ def _hand_worktree_to_drop_target(worktree: Path) -> None:
 
 
 def _remove_base_worktree(repo_root: Path, worktree: Path) -> None:
-    subprocess.run(
-        git_argv(["-C", str(repo_root), "worktree", "remove", "--force", str(worktree)]),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        subprocess.run(
+            git_argv(["-C", str(repo_root), "worktree", "remove", "--force", str(worktree)]),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_GIT_WORKTREE_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        logger.info("baseline suppression: timed out removing base worktree {}", worktree)
+        shutil.rmtree(worktree, ignore_errors=True)
 
 
 def collect_base_analyzer_findings(

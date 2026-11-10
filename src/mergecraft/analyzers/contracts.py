@@ -31,6 +31,8 @@ TrustTier = Literal["trusted", "untrusted"]
 
 DIFFERENTIAL_CONTRACT_TOOLS: frozenset[str] = frozenset({"oasdiff", "squawk", "buf"})
 _FIXTURE_BASE_REF = "fixture-base"
+# Bound on the ref-probe and ``git show`` calls; a timeout reads as "base unavailable".
+_GIT_TIMEOUT_S = 30
 
 
 def _scope_changed_files(manifest: AnalyzerManifest, changed_files: list[str]) -> list[str]:
@@ -66,12 +68,16 @@ def _fixture_base_rel(head_path: str) -> str:
 
 
 def _git_ref_available(repo_root: Path, base_ref: str) -> bool:
-    result = subprocess.run(
-        git_argv(["-C", str(repo_root), "rev-parse", "--verify", f"{base_ref}^{{commit}}"]),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            git_argv(["-C", str(repo_root), "rev-parse", "--verify", f"{base_ref}^{{commit}}"]),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_GIT_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return False
     return result.returncode == 0
 
 
@@ -83,12 +89,16 @@ def _resolve_base_file(repo_root: Path, head_path: str, base_ref: str) -> Path |
         return candidate if candidate.is_file() else None
     if not _git_ref_available(repo_root, base_ref):
         return None
-    result = subprocess.run(
-        git_argv(["-C", str(repo_root), "show", f"{base_ref}:{head_path}"]),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            git_argv(["-C", str(repo_root), "show", f"{base_ref}:{head_path}"]),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_GIT_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return None
     if result.returncode != 0:
         return None
     scratch_rel = f".mergecraft/analyzer-scratch/base/{base_ref}/{head_path}"
