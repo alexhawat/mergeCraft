@@ -127,3 +127,38 @@ def test_unwrapped_run_persists_output_outside_the_checkout(tmp_path: Path) -> N
     persisted = Path(outcome.output_path)
     assert analyzer_run_root() in persisted.parents
     assert not (tmp_path / "outside").exists()
+
+
+def test_non_regular_record_is_refused_on_read_and_write(
+    tmp_path: Path, warnings_sink: list[str]
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / ".mergecraft" / "analyzers.lock").mkdir(parents=True)
+    lock_path = repo / ".mergecraft" / "analyzers.lock"
+
+    assert read_lock(lock_path) == []
+    assert lock_digest(lock_path) == "empty"
+    write_lock(lock_path, [_ENTRY], merge=True)
+    write_lock(lock_path, [_ENTRY], merge=False)
+
+    assert lock_path.is_dir()
+    assert list(lock_path.iterdir()) == []
+    assert warnings_sink
+
+
+@pytest.mark.parametrize("name", ["analyzers.lock", "analyzers.lock.lock"])
+def test_fifo_record_is_refused_without_blocking(
+    tmp_path: Path, warnings_sink: list[str], name: str
+) -> None:
+    import os
+
+    repo = tmp_path / "repo"
+    (repo / ".mergecraft").mkdir(parents=True)
+    os.mkfifo(repo / ".mergecraft" / name)
+    lock_path = repo / ".mergecraft" / "analyzers.lock"
+
+    if name == "analyzers.lock":
+        assert read_lock(lock_path) == []
+    write_lock(lock_path, [_ENTRY], merge=True)
+
+    assert warnings_sink

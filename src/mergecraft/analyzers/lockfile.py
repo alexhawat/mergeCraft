@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import os
+import stat
 import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
@@ -25,6 +26,7 @@ _REQUIRED_ENTRY_KEYS = ("tool_id", "version", "sha256")
 
 _CLOEXEC = getattr(os, "O_CLOEXEC", 0)
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 
 
 class LockPathRefusedError(OSError):
@@ -67,14 +69,43 @@ def _open_record_dir(path: Path, *, create: bool) -> int | None:
 
 
 def _open_in(dir_fd: int, name: str, flags: int, mode: int = 0o644) -> int:
-    """``open`` ``name`` relative to ``dir_fd``, refusing a symbolic link."""
+    """``open`` ``name`` relative to ``dir_fd``; refuse anything but a regular file.
+
+    ``O_NONBLOCK`` keeps the open from waiting on a FIFO; the opened descriptor
+    is then checked with ``fstat`` so a directory, FIFO, socket or device is
+    refused the same way a symbolic link is.
+    """
     try:
-        return os.open(name, flags | _NOFOLLOW | _CLOEXEC, mode, dir_fd=dir_fd)
+        fd = os.open(name, flags | _NOFOLLOW | _CLOEXEC | _NONBLOCK, mode, dir_fd=dir_fd)
     except FileNotFoundError:
         raise
     except OSError as exc:
         msg = f"refusing analyzer lock record file {name}: not a regular file ({exc})"
         raise LockPathRefusedError(msg) from exc
+    try:
+        is_regular = stat.S_ISREG(os.fstat(fd).st_mode)
+        if is_regular and _NONBLOCK:
+            os.set_blocking(fd, True)
+    except OSError as exc:
+        os.close(fd)
+        msg = f"refusing analyzer lock record file {name}: cannot inspect it ({exc})"
+        raise LockPathRefusedError(msg) from exc
+    if not is_regular:
+        os.close(fd)
+        msg = f"refusing analyzer lock record file {name}: not a regular file"
+        raise LockPathRefusedError(msg)
+    return fd
+
+
+def _require_regular_or_absent(dir_fd: int, name: str) -> None:
+    """Refuse to replace ``name`` unless it is absent or a regular file."""
+    try:
+        info = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    if not stat.S_ISREG(info.st_mode):
+        msg = f"refusing analyzer lock record file {name}: not a regular file"
+        raise LockPathRefusedError(msg)
 
 
 @contextlib.contextmanager
@@ -169,8 +200,8 @@ def _read_in(dir_fd: int, name: str) -> list[LockEntry]:
 def read_lock(path: Path) -> list[LockEntry]:
     """Read ``.mergecraft/analyzers.lock`` entries.
 
-    A record directory or file that is a symbolic link is refused with a
-    warning and reads as empty: it is never followed.
+    A record directory or file that is a symbolic link, or a record that is not
+    a regular file, is refused with a warning and reads as empty.
     """
     try:
         dir_fd = _open_record_dir(path, create=False)
@@ -231,6 +262,7 @@ def write_lock(
             fd = _open_in(dir_fd, staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(text)
+            _require_regular_or_absent(dir_fd, path.name)
             os.replace(staging, path.name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
     except LockPathRefusedError as exc:
         # The record is never an authenticator (binaries are verified against

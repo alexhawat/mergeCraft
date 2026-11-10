@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import stat
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -16,6 +17,9 @@ from mergecraft.analyzers.execution import finalize_plan, neutral_config_dir
 from mergecraft.analyzers.pattern import prepare_pattern_plan
 from mergecraft.analyzers.registry import get_manifest
 from mergecraft.analyzers.resolve import AnalyzerPlan, resolve_analyzer
+
+if TYPE_CHECKING:
+    from mergecraft.analyzers.manifest import TrustTier
 
 _CATALOG = Path(__file__).resolve().parents[2] / "src" / "mergecraft" / "analyzers" / "catalog"
 
@@ -78,7 +82,7 @@ _EXPECTED_ARGV_OVERRIDES: dict[str, tuple[str, ...]] = {
 }
 
 
-def _finalized(tool_id: str, repo: Path, *, tier: str, argv: tuple[str, ...]) -> AnalyzerPlan:
+def _finalized(tool_id: str, repo: Path, *, tier: TrustTier, argv: tuple[str, ...]) -> AnalyzerPlan:
     manifest = get_manifest(tool_id)
     plan = AnalyzerPlan(manifest_id=tool_id, mode="managed", argv=argv, cwd=repo)
     return finalize_plan(
@@ -86,7 +90,7 @@ def _finalized(tool_id: str, repo: Path, *, tier: str, argv: tuple[str, ...]) ->
         manifest=manifest,
         repo_root=repo,
         changed_files=["target.txt"],
-        tier=tier,  # type: ignore[arg-type]
+        tier=tier,
     )
 
 
