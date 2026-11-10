@@ -420,6 +420,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MCP `shell` and the repository tools (`git`, `git_fetch`, `push_branch`, `push_tags`,
+  `delete_branch`, `commit_changes`) no longer run blocking subprocess calls on the
+  event loop (they run via `asyncio.to_thread`), so a slow command stops stalling every
+  other tool call. A shell command that times out and then also fails the post-kill
+  drain is now reaped and returns the output gathered so far instead of raising (#1243).
+- An analyzer timeout now kills the analyzer's whole process group. The runner
+  starts analyzers as session leaders and `killpg`s them on timeout, so grandchildren
+  no longer outlive the gate (#1242).
+- ruff diagnostics are no longer all blocking Major: ruff emits `severity: error`
+  for every rule, so the parser now keeps Major only for bug-class rule codes
+  (syntax errors, undefined names, bugbear, security, pylint errors, async) and
+  maps style/import/unused-name rules to Minor (#1241).
+- Sandbox harness startup failures (`unshare`/`bwrap`/`setpriv` refusing to create
+  a namespace, fork `EAGAIN`, `uid_map` write denied) are now classified as
+  `sandboxed: isolation unavailable` and reported `declared-but-cannot-run`
+  instead of a blocking gate failure (#1240).
 - Managed pip analyzer provisioning bounds `uv pip install` at 600 seconds. It
   runs while holding the shared cache lock, so a hung install used to block every
   other worker; a timeout now removes the staging tree and fails the install

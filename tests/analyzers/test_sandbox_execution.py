@@ -14,6 +14,7 @@ from mergecraft.analyzers import sandbox as sandbox_mod
 from mergecraft.analyzers.run import _sandboxed_argv
 from mergecraft.analyzers.sandbox import SandboxContext, SandboxLimits, build_sandbox_context
 from mergecraft.mcp import shell as shell_mod
+from tests.analyzers.support import patch_analyzer_spawn
 
 
 @pytest.fixture(autouse=True)
@@ -231,7 +232,7 @@ def test_privileged_bootstrap_never_inherits_payload_environment(
         captured.update(kwargs)
         return subprocess.CompletedProcess([], 0, "", "")
 
-    monkeypatch.setattr(subprocess, "run", run)
+    patch_analyzer_spawn(monkeypatch, run)
     _run_subprocess(
         ["unshare", "true"],
         plan=plan,
@@ -272,7 +273,7 @@ def test_payload_environment_values_use_private_fd_not_argv(
         assert os.read(descriptor, 8192) == f"OPAQUE={secret}\0".encode()
         return subprocess.CompletedProcess([], 0, "", "")
 
-    monkeypatch.setattr(subprocess, "run", run)
+    patch_analyzer_spawn(monkeypatch, run)
     _run_subprocess(
         ["true"],
         plan=plan,

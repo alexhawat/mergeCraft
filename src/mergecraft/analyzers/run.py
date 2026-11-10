@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 from mergecraft.analyzers.redact import redact_analyzer_output
+from mergecraft.utils.process_group import kill_process_group
 from mergecraft.utils.secrets import filter_env
 
 if TYPE_CHECKING:
@@ -319,6 +320,50 @@ def _sandboxed_argv(
     )
 
 
+def _run_in_own_session(
+    run_argv: list[str],
+    *,
+    cwd: Path | None,
+    timeout_s: int,
+    env: dict[str, str],
+    pass_fds: tuple[int, ...],
+    preexec_fn: Callable[[], None] | None,
+) -> subprocess.CompletedProcess[str]:
+    """``subprocess.run`` that heads its own session and reaps the whole group.
+
+    ``subprocess.run`` kills only the direct child on timeout, so a grandchild
+    (a language server, a watcher, a forked test runner) outlives the analyzer
+    and keeps the stdout/stderr pipes -- and the runner -- busy. Start the child
+    as a session leader (``setsid`` runs before ``preexec_fn``, so the sandbox
+    privilege drop is unaffected) and ``killpg`` the group on timeout.
+    """
+    with subprocess.Popen(
+        run_argv,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        pass_fds=pass_fds,
+        preexec_fn=preexec_fn,
+        start_new_session=True,
+    ) as proc:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout_s)
+        except BaseException:
+            # TimeoutExpired, KeyboardInterrupt, ...: take the whole tree down.
+            kill_process_group(proc.pid)
+            try:
+                proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                with contextlib.suppress(OSError):
+                    proc.kill()
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    proc.wait(timeout=1)
+            raise
+        return subprocess.CompletedProcess(run_argv, proc.returncode, stdout, stderr)
+
+
 def _run_subprocess(
     run_argv: list[str],
     *,
@@ -373,13 +418,10 @@ def _run_subprocess(
                     **_SANDBOX_BOOTSTRAP_ENV,
                     "MERGECRAFT_PAYLOAD_ENV_FD": str(descriptor),
                 }
-            return subprocess.run(
+            return _run_in_own_session(
                 run_argv,
                 cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
-                check=False,
+                timeout_s=timeout_s,
                 env=environment,
                 pass_fds=pass_fds,
                 preexec_fn=preexec_fn,

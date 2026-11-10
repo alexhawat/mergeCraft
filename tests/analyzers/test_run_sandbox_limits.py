@@ -32,6 +32,7 @@ from mergecraft.analyzers import sandbox as sandbox_mod
 from mergecraft.analyzers.resolve import AnalyzerPlan
 from mergecraft.analyzers.run import run_plan
 from mergecraft.mcp import shell as shell_mod
+from tests.analyzers.support import patch_analyzer_spawn
 from tests.analyzers.support_sandbox_limits import (
     ProbeAttempt,
     install_probe,
@@ -132,7 +133,7 @@ def _drive_sandboxed_spawn(
         captured.update(kwargs)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(subprocess, "run", _run)
+    patch_analyzer_spawn(monkeypatch, _run)
     plan = AnalyzerPlan(manifest_id="probe", argv=("true",), cwd=tmp_path, mode="native")
     run_plan(plan, sandbox_context=_sandbox_context(tmp_path, max_processes=max_processes))
     preexec = captured.get("preexec_fn")
