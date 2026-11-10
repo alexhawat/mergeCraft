@@ -11,11 +11,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+
 from mergecraft.utils.fence import SAFETY_NOTE
 
 if TYPE_CHECKING:
-    import pytest
-
+    from collections.abc import Iterator
 from tests.context.support import (
     REPO_INSTRUCTIONS_HEADER,
     STANDING_INSTRUCTIONS_HEADER,
@@ -383,3 +384,122 @@ def test_instruction_repointed_outside_after_discovery_is_not_read(
     assert _OUT_OF_REPO_MARKER not in rendered, (
         "a link swapped outside after discovery must not be read"
     )
+
+
+# ── Discovery scope: excluded directories and repo-root extra filenames ──────
+
+_SCOPED_MARKER = "OUT_OF_SCOPE_INSTRUCTION_MARKER"
+_EXCLUDED_DIRS = (
+    ".venv",
+    "venv",
+    "node_modules",
+    "vendor",
+    "third_party",
+    "dist",
+    "build",
+    "site-packages",
+    "tests/fixtures",
+    "tests/unit/fixtures",
+    "pkg/testdata",
+)
+
+
+def _write_root_and_scoped(repo_root: Path, rel_dir: str, name: str = "AGENTS.md") -> None:
+    repo_root.mkdir(parents=True, exist_ok=True)
+    (repo_root / "AGENTS.md").write_text("# Root guidance\n", encoding="utf-8")
+    nested = repo_root / rel_dir
+    nested.mkdir(parents=True, exist_ok=True)
+    (nested / name).write_text(f"# Nested\n\n{_SCOPED_MARKER}\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("rel_dir", _EXCLUDED_DIRS)
+def test_discovery_excludes_dependency_build_and_fixture_dirs(tmp_path: Path, rel_dir: str) -> None:
+    """Instruction files under excluded directories are not discovered or rendered."""
+    repo_root = tmp_path / "repo"
+    _write_root_and_scoped(repo_root, rel_dir)
+
+    rels = _instruction_rels(repo_root)
+
+    assert "AGENTS.md" in rels
+    assert f"{rel_dir}/AGENTS.md" not in rels
+    assert _SCOPED_MARKER not in _render(repo_root)
+
+
+@pytest.mark.parametrize("rel_dir", ["vendor/pkg/review", "tests/fixtures/code-review"])
+def test_discovery_excludes_skills_under_excluded_dirs(tmp_path: Path, rel_dir: str) -> None:
+    """Review-named skills under excluded directories are not injected."""
+    repo_root = tmp_path / "repo"
+    _write_root_and_scoped(repo_root, rel_dir, name="SKILL.md")
+
+    discovery_mod = import_context_module("instruction_discovery")
+    record = discovery_mod.build_review_skill_record(
+        repo_root=repo_root,
+        trust_tier="trusted",
+        repo="acme/demo",
+        commit_sha="0" * 40,
+    )
+
+    assert f"{rel_dir}/SKILL.md" not in record.injected
+    assert _SCOPED_MARKER not in _render(repo_root)
+
+
+def test_discovery_keeps_ordinary_nested_instruction_files(tmp_path: Path) -> None:
+    """Guard: nested instruction files outside excluded directories are kept."""
+    repo_root = tmp_path / "repo"
+    _write_root_and_scoped(repo_root, "services/api")
+
+    assert "services/api/AGENTS.md" in _instruction_rels(repo_root)
+    assert _SCOPED_MARKER in _render(repo_root)
+
+
+def test_discovery_walk_does_not_enter_excluded_dirs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The walk prunes excluded directories instead of filtering after descent."""
+    import os
+
+    repo_root = tmp_path / "repo"
+    _write_root_and_scoped(repo_root, "node_modules/pkg/deep")
+    _write_root_and_scoped(repo_root, ".venv/lib")
+
+    scanned: list[str] = []
+    real_scandir = os.scandir
+
+    def _recording_scandir(path: str = ".") -> Iterator[os.DirEntry[str]]:
+        scanned.append(Path(path).as_posix())
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", _recording_scandir)
+    _instruction_rels(repo_root)
+
+    assert scanned, "discovery should walk the tree with os.walk/scandir"
+    assert not [p for p in scanned if "/node_modules" in p or "/.venv" in p]
+
+
+def test_extra_filenames_match_at_repo_root_only(tmp_path: Path) -> None:
+    """``instructionExtraFilenames`` names repo-root files; nested copies are ignored."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "TEAM.md").write_text("# Team\n", encoding="utf-8")
+    nested = repo_root / "docs" / "sub"
+    nested.mkdir(parents=True)
+    (nested / "TEAM.md").write_text(f"# Nested\n\n{_SCOPED_MARKER}\n", encoding="utf-8")
+
+    discovery_mod = import_context_module("instruction_discovery")
+    rels = [
+        path.relative_to(repo_root).as_posix()
+        for path in discovery_mod.discover_instruction_paths(
+            repo_root, extra_filenames=("TEAM.md",)
+        )
+    ]
+    rendered = discovery_mod.render_review_context(
+        repo_root=repo_root,
+        trust_tier="trusted",
+        repo="acme/demo",
+        commit_sha="0" * 40,
+        extra_filenames=("TEAM.md",),
+    )
+
+    assert "TEAM.md" in rels
+    assert "docs/sub/TEAM.md" not in rels
+    assert _SCOPED_MARKER not in rendered
