@@ -328,7 +328,8 @@ def outcomes(
     rates = report.rates()
     typer.echo(
         f"Rates (classified): fixed={rates['fixed']:.0%} rejected={rates['rejected']:.0%} "
-        f"intentional={rates['intentional']:.0%} ignored={rates['ignored']:.0%}"
+        f"intentional={rates['intentional']:.0%} ignored={rates['ignored']:.0%} "
+        f"stale={rates['stale']:.0%}"
     )
 
 

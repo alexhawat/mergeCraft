@@ -1060,129 +1060,134 @@ async def _run_offline_diff_review(
     # overrides so the agent stream tracers (which resolve from
     # ``os.environ``) honor CLI > env precedence. Restored in the ``finally``
     # block so the override never leaks into the caller's environment.
-    from mergecraft.evidence.run_manifest import apply_local_telemetry_defaults
-
-    telemetry_env_previous = apply_local_telemetry_defaults(private_repo=True, cwd=cwd)
-    tracing_env_previous = _apply_tracing_cli_overrides(tracing_cli)
-    trust_tier = resolve_offline_review_trust_tier(
-        cwd=cwd,
-        invocation_root=review_root,
-        trust_override=trust_override,
-        cloned=cloned,
-    )
-    trust_env_previous = apply_cli_trust_tier_env(trust_tier)
-    settings = load_repo_settings(root=cwd, load_learnings_files=False)
-    run_bounds = resolve_run_bounds(settings=settings)
-    from mergecraft.agents.token_budget import (
-        bind_run_budget,
-        current_run_budget,
-        token_budget_for,
-    )
-
-    provider_budget = current_run_budget() or token_budget_for(
-        model=settings.jev.model,
-        max_tokens=run_bounds.token_budget,
-    )
-
-    out_dir = Path(tempfile.mkdtemp(prefix="mergecraft-diff-review-"))
-    from mergecraft.utils.git_setup import register_run_owned_directory
-
-    # The diff and the agent's scratch live here; only a run-owned directory is
-    # opened to the reviewing agent.
-    register_run_owned_directory(str(out_dir))
-    from mergecraft.review.engine import ReviewEngine
-    from mergecraft.review.snapshot import canonical_review_snapshot
-    from mergecraft.utils.process_group import kill_all_active_process_groups
-
-    runner: ReviewEngine[OfflineReviewResult] = engine or ReviewEngine(
-        snapshot=canonical_review_snapshot(entry="cli", source=str(cwd))
-    )
-    runner.set_on_timeout(lambda _name: kill_all_active_process_groups())
-    driver = _OfflineDiffReviewRun(
-        cwd=cwd,
-        workspace=workspace,
-        spec=spec,
-        out_dir=out_dir,
-        diff_file=diff_file,
-        trust_tier=trust_tier,
-        shell=shell,
-        run_bounds=run_bounds,
-        settings=settings,
-        analyzers_enabled=settings.analyzers.enabled,
-        json_path=json_path,
-        prompt_extra=prompt_extra,
-        dry_run=dry_run,
-        model=model,
-        evidence_packet_path=evidence_packet_path,
-        on_finding=on_finding,
-        read_cache=use_cache,
-        verification_report_path=verification_report_path,
-        with_coverage=with_coverage,
-        with_mutation=with_mutation,
-    )
-
-    async def _execute_lifecycle() -> OfflineReviewResult:
-        if with_coverage or with_mutation:
-            from mergecraft.ci.local_evidence import checkout_is_fork_pr
-
-            if shell != "enabled":
-                return _offline_failure(
-                    error="--with-coverage/--with-mutation require --shell enabled",
-                    outcome=RunOutcome.configuration_error,
-                )
-            if trust_tier == "untrusted" or checkout_is_fork_pr(cwd):
-                return _offline_failure(
-                    error="--with-coverage/--with-mutation require a trusted review source",
-                    outcome=RunOutcome.configuration_error,
-                )
-        with bind_run_budget(provider_budget):
-            jev_client, jev_skip_reason = _construct_review_jev(settings)
-            try:
-                staged = await runner.run(driver)
-                published = staged.published_or(
-                    _offline_failure(
-                        error="review engine returned no result",
-                        outcome=RunOutcome.infra_error,
-                    )
-                )
-                if (
-                    jev_client is not None
-                    and jev_skip_reason is None
-                    and not dry_run
-                    and driver.materialization is not None
-                ):
-                    await _run_shadow_jev_review(
-                        client=jev_client,
-                        driver=driver,
-                        review_out=published,
-                        settings=settings,
-                    )
-                return _append_jev_review_section(
-                    _stamp_jev_skip(published, jev_skip_reason), settings=settings
-                )
-            except TimeoutError:
-                return _stamp_jev_skip(
-                    _offline_failure(
-                        error="review timed out",
-                        outcome=RunOutcome.timed_out,
-                    ),
-                    jev_skip_reason,
-                )
-            except BudgetExhausted as exc:
-                return _stamp_jev_skip(
-                    _offline_failure(
-                        error=str(exc),
-                        outcome=budget_exhaustion_outcome(exc),
-                    ),
-                    jev_skip_reason,
-                )
-            except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
-                return _stamp_jev_skip(
-                    _offline_failure(error=str(exc), outcome=_offline_error_outcome(exc)),
-                    jev_skip_reason,
-                )
-
+    # Env overrides are applied inside this ``try`` so the ``finally`` below
+    # restores them on every exit path, including a raising settings load.
+    telemetry_env_previous: dict[str, str | None] = {}
+    tracing_env_previous: dict[str, str | None] = {}
+    trust_env_previous: dict[str, str | None] = {}
     try:
+        from mergecraft.evidence.run_manifest import apply_local_telemetry_defaults
+
+        telemetry_env_previous = apply_local_telemetry_defaults(private_repo=True, cwd=cwd)
+        tracing_env_previous = _apply_tracing_cli_overrides(tracing_cli)
+        trust_tier = resolve_offline_review_trust_tier(
+            cwd=cwd,
+            invocation_root=review_root,
+            trust_override=trust_override,
+            cloned=cloned,
+        )
+        trust_env_previous = apply_cli_trust_tier_env(trust_tier)
+        settings = load_repo_settings(root=cwd, load_learnings_files=False)
+        run_bounds = resolve_run_bounds(settings=settings)
+        from mergecraft.agents.token_budget import (
+            bind_run_budget,
+            current_run_budget,
+            token_budget_for,
+        )
+
+        provider_budget = current_run_budget() or token_budget_for(
+            model=settings.jev.model,
+            max_tokens=run_bounds.token_budget,
+        )
+
+        out_dir = Path(tempfile.mkdtemp(prefix="mergecraft-diff-review-"))
+        from mergecraft.utils.git_setup import register_run_owned_directory
+
+        # The diff and the agent's scratch live here; only a run-owned directory is
+        # opened to the reviewing agent.
+        register_run_owned_directory(str(out_dir))
+        from mergecraft.review.engine import ReviewEngine
+        from mergecraft.review.snapshot import canonical_review_snapshot
+        from mergecraft.utils.process_group import kill_all_active_process_groups
+
+        runner: ReviewEngine[OfflineReviewResult] = engine or ReviewEngine(
+            snapshot=canonical_review_snapshot(entry="cli", source=str(cwd))
+        )
+        runner.set_on_timeout(lambda _name: kill_all_active_process_groups())
+        driver = _OfflineDiffReviewRun(
+            cwd=cwd,
+            workspace=workspace,
+            spec=spec,
+            out_dir=out_dir,
+            diff_file=diff_file,
+            trust_tier=trust_tier,
+            shell=shell,
+            run_bounds=run_bounds,
+            settings=settings,
+            analyzers_enabled=settings.analyzers.enabled,
+            json_path=json_path,
+            prompt_extra=prompt_extra,
+            dry_run=dry_run,
+            model=model,
+            evidence_packet_path=evidence_packet_path,
+            on_finding=on_finding,
+            read_cache=use_cache,
+            verification_report_path=verification_report_path,
+            with_coverage=with_coverage,
+            with_mutation=with_mutation,
+        )
+
+        async def _execute_lifecycle() -> OfflineReviewResult:
+            if with_coverage or with_mutation:
+                from mergecraft.ci.local_evidence import checkout_is_fork_pr
+
+                if shell != "enabled":
+                    return _offline_failure(
+                        error="--with-coverage/--with-mutation require --shell enabled",
+                        outcome=RunOutcome.configuration_error,
+                    )
+                if trust_tier == "untrusted" or checkout_is_fork_pr(cwd):
+                    return _offline_failure(
+                        error="--with-coverage/--with-mutation require a trusted review source",
+                        outcome=RunOutcome.configuration_error,
+                    )
+            with bind_run_budget(provider_budget):
+                jev_client, jev_skip_reason = _construct_review_jev(settings)
+                try:
+                    staged = await runner.run(driver)
+                    published = staged.published_or(
+                        _offline_failure(
+                            error="review engine returned no result",
+                            outcome=RunOutcome.infra_error,
+                        )
+                    )
+                    if (
+                        jev_client is not None
+                        and jev_skip_reason is None
+                        and not dry_run
+                        and driver.materialization is not None
+                    ):
+                        await _run_shadow_jev_review(
+                            client=jev_client,
+                            driver=driver,
+                            review_out=published,
+                            settings=settings,
+                        )
+                    return _append_jev_review_section(
+                        _stamp_jev_skip(published, jev_skip_reason), settings=settings
+                    )
+                except TimeoutError:
+                    return _stamp_jev_skip(
+                        _offline_failure(
+                            error="review timed out",
+                            outcome=RunOutcome.timed_out,
+                        ),
+                        jev_skip_reason,
+                    )
+                except BudgetExhausted as exc:
+                    return _stamp_jev_skip(
+                        _offline_failure(
+                            error=str(exc),
+                            outcome=budget_exhaustion_outcome(exc),
+                        ),
+                        jev_skip_reason,
+                    )
+                except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+                    return _stamp_jev_skip(
+                        _offline_failure(error=str(exc), outcome=_offline_error_outcome(exc)),
+                        jev_skip_reason,
+                    )
+
         from mergecraft.tracing.tracer import (
             get_tracer_from_settings,
             resolve_correlation_from_env,

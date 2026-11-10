@@ -732,6 +732,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the run record names it (`finalize_failed: <Type>`) instead of reading as a
   missing verdict; the run still fails closed (#903).
 - A review thread whose comments were not all read is never auto-resolved (#902).
+- Finding outcomes: an outdated but unresolved review thread is now `stale`, not
+  `fixed`, so the advisory fixed rate is no longer inflated by lines that merely
+  moved; resolved threads still count as fixed (#1251).
+- The trace `attrs` cap now measures the whole payload as UTF-8 JSON bytes
+  (64 KiB) instead of the character length of top-level strings, so multibyte,
+  nested and many-small-value payloads are truncated too (#1252).
+- Line-budget scope reduction and the offline diff summary read `diff --git`
+  paths that contain spaces or quotes correctly instead of splitting on
+  whitespace (#1253).
+- A mid-battery skip in the Jev claim judge keeps the attestations collected for
+  earlier claims and marks the result `partial` (#1254).
+- Entropy redaction no longer turns absolute CI paths with ordinary segments
+  (`/home/runner/work/repo/src/app/module.py:12`) into `<redacted>.py`; a
+  segment that looks like a secret is still redacted (#1255).
+- `mergecraft review` restores its telemetry, tracing and trust-tier environment
+  overrides even when loading repository settings raises (#1256).
+- The git tools that advertised an unused `repo` argument no longer do: the
+  read-only `git` tool now honours it (registered checkouts only, unknown repo
+  is an error) and the fetch, push, tag, delete-branch and commit tools drop it
+  from their schemas and always act on the primary checkout (#1258).
+
+### Security
+
+- `establish_review_scope` only reads a `diff_path` that resolves, symlinks
+  followed, under a registered checkout, the run tmpdir or
+  `MERGECRAFT_TEMP_DIR` (#1257).
+- The Action `cwd` input is confined to `GITHUB_WORKSPACE`: `../..` or an
+  absolute path outside it is a configuration error (#1259).
+- The git askpass helper writes the token single-quoted via `printf '%s\n'` and
+  rejects tokens with control characters, so shell metacharacters in a token are
+  never interpreted (#1260).
 
 ### Breaking
 

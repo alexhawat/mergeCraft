@@ -58,7 +58,7 @@ _ENTROPY_ABSOLUTE_CEILING = 4.5
 # and code lines that carry no secret.
 _DENSE_TOKEN_MAX_LENGTH = 64
 _ENTROPY_TOKEN_RE = re.compile(r"[A-Za-z0-9+/=_-]{16,}")
-_REPO_PATH_TOKEN_RE = re.compile(r"^[\w.-]+(?:/[\w.-]+)+$")
+_REPO_PATH_TOKEN_RE = re.compile(r"^/?[\w.-]+(?:/[\w.-]+)+$")
 
 _BENIGN_HEX_40_RE = re.compile(r"^[a-f0-9]{40}$")
 _BENIGN_HEX_64_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -263,11 +263,11 @@ def _is_benign_path_stem_segment(segment: str) -> bool:
     """Recognize bounded ordinary path segments before a filename suffix."""
     if re.fullmatch(r"[a-z_][a-z0-9_-]{0,14}", segment):
         return True
-    return (
-        len(segment) <= 32
-        and segment == segment.upper()
-        and _BENIGN_IDENTIFIER_RE.fullmatch(segment) is not None
-    )
+    if len(segment) > 32 or _BENIGN_IDENTIFIER_RE.fullmatch(segment) is None:
+        return False
+    # SCREAMING_SNAKE, or an ordinary word/camelCase directory name (``mergeCraft``)
+    # with only a few capitals; a mixed-case random blob has many (#1255).
+    return segment == segment.upper() or sum(char.isupper() for char in segment) <= 3
 
 
 def _entropy_redact(text: str) -> str:
@@ -281,7 +281,9 @@ def _entropy_redact(text: str) -> str:
             r"\.(?:py|js|ts|md|json|yaml|yml|toml|sh|txt)(?![\w.])", text[match.end() :]
         )
         if suffix and "/" in token:
-            segments = token.split("/")
+            # An absolute path's leading "/" yields one empty segment (#1255);
+            # every real segment must still be an ordinary, bounded word.
+            segments = token.removeprefix("/").split("/")
             if all(_is_benign_path_stem_segment(part) for part in segments):
                 return token
         if _looks_like_repo_path_token(token):

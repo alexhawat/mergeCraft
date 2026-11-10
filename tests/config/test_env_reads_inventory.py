@@ -273,6 +273,12 @@ ALLOWED_KINDS: Final = frozenset(
 #: unclassified read. Stale rows (a read that has moved) are pruned by the test
 #: owner, never by an implementation wave.
 ALLOWED_READS: Final[tuple[AllowedRead, ...]] = (
+    AllowedRead(
+        "src/mergecraft/mcp/verdict.py",
+        "MERGECRAFT_TEMP_DIR",
+        "message bus",
+        "written by git setup and read back to confine review diff files",
+    ),
     # ── message bus: mergeCraft wrote the key, so it reads its own value back ──
     AllowedRead(
         "src/mergecraft/agents/claude.py",

@@ -52,7 +52,7 @@ from mergecraft.mcp.shared import (
     repository_mutation_class_for_push,
     tool,
 )
-from mergecraft.mcp.tool_state import primary_repo_state
+from mergecraft.mcp.tool_state import primary_repo_state, require_repo_state
 from mergecraft.utils.git_hardening import git_argv, git_authenticated_argv, read_remote_origin_url
 
 if TYPE_CHECKING:
@@ -674,6 +674,24 @@ def _validate_git_invocation(
     _validate_path_confinement(global_opts, cwd)
 
 
+def _repo_dir_for(ctx: ToolContext, repo: object) -> str:
+    """Working directory for the optional ``repo`` argument of the read-only ``git`` tool.
+
+    ``repo`` is ``name`` (same owner as the run) or ``owner/name`` and must be a
+    checkout already registered in ``tool_state`` (primary, or via
+    ``checkout_repo``); omitted means the primary checkout. An unknown repo is an
+    error, never a silent fall-back to the primary checkout (#1258).
+    """
+    if repo is None or repo == "":
+        return primary_repo_state(ctx.tool_state).dir
+    if not isinstance(repo, str):
+        msg = "repo must be a string"
+        raise ValueError(msg)
+    owner, _, name = repo.strip().rpartition("/")
+    state = require_repo_state(ctx.tool_state, owner or ctx.repo.owner, name)
+    return state.dir
+
+
 def git_tool(ctx: ToolContext):
     # Only immutable revision/path resolutions are reusable. Symbolic refs must
     # still be resolved each time because they can move outside this tool.
@@ -707,7 +725,7 @@ def git_tool(ctx: ToolContext):
             # Agent redundantly repeated the subcommand as the first arg; honor
             # the call rather than rejecting it.
             args.pop(0)
-        cwd = primary_repo_state(ctx.tool_state).dir
+        cwd = _repo_dir_for(ctx, params.get("repo"))
         tmpdir = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
         _validate_git_invocation(command, args, global_opts, cwd, tmpdir=tmpdir)
         show_target = _parse_show_rev_path(args) if command == "show" else None
@@ -807,7 +825,13 @@ def git_tool(ctx: ToolContext):
             "properties": {
                 "command": {"type": "string"},
                 "args": {"type": "array", "items": {"type": "string"}},
-                "repo": {"type": "string"},
+                "repo": {
+                    "type": "string",
+                    "description": (
+                        "Registered checkout to run in: `name` or `owner/name`. "
+                        "Defaults to the primary repo."
+                    ),
+                },
             },
             "required": ["command"],
             "additionalProperties": False,
@@ -847,7 +871,6 @@ def git_fetch_tool(ctx: ToolContext):
                 "refspec": {"type": "string"},
                 "depth": {"type": "number"},
                 "deepen": {"type": "number"},
-                "repo": {"type": "string"},
             },
             "additionalProperties": False,
         },
@@ -917,7 +940,6 @@ def push_branch_tool(ctx: ToolContext):
             "properties": {
                 "branchName": {"type": "string"},
                 "force": {"type": "boolean"},
-                "repo": {"type": "string"},
             },
             "additionalProperties": False,
         },
@@ -956,7 +978,6 @@ def push_tags_tool(ctx: ToolContext):
             "type": "object",
             "properties": {
                 "tags": {"type": "array", "items": {"type": "string"}, "minItems": 1},
-                "repo": {"type": "string"},
             },
             "required": ["tags"],
             "additionalProperties": False,
@@ -996,7 +1017,6 @@ def delete_branch_tool(ctx: ToolContext):
             "properties": {
                 "branchName": {"type": "string"},
                 "remote": {"type": "boolean"},
-                "repo": {"type": "string"},
             },
             "required": ["branchName"],
             "additionalProperties": False,
@@ -1045,7 +1065,6 @@ def commit_changes_tool(ctx: ToolContext):
             "type": "object",
             "properties": {
                 "message": {"type": "string"},
-                "repo": {"type": "string"},
             },
             "required": ["message"],
             "additionalProperties": False,
