@@ -12,7 +12,7 @@ import re
 from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, unquote
 
@@ -42,6 +42,10 @@ _VIA_MERGECRAFT_MARKER = "*via mergecraft*"
 
 _LEDGER_MARKER_RE = re.compile(r"<!-- mergecraft-ledger:v1:([0-9a-f]+):([a-z-]+)(?::([^>]*?))? -->")
 _LEDGER_MARKER_V2_RE = re.compile(r"<!-- mergecraft-ledger:v2:([0-9a-f]+):([a-z-]+):([^>]+) -->")
+# Every ledger marker version starts with this; the stripper removes any left over.
+_LEDGER_MARKER_FAMILY_PREFIX = "<!-- mergecraft-ledger:"
+# A parsed row may carry a ``recorded_at`` this far past the reader's clock.
+_RECORDED_AT_CLOCK_SKEW = timedelta(minutes=5)
 # Agent prose: the block must end at a real terminator. Falling back to ``\Z``
 # here meant a marker the agent merely quoted — plausible in a repo that reviews
 # its own reviewer — swallowed every finding after it. A bare marker with no
@@ -179,8 +183,14 @@ class FindingLedger:
         return "\n".join(lines)
 
     @classmethod
-    def from_comment_body(cls, body: str) -> FindingLedger:
-        """Parse ledger markers from a progress-comment body."""
+    def from_comment_body(cls, body: str, *, now: datetime | None = None) -> FindingLedger:
+        """Parse ledger markers from a progress-comment or review body.
+
+        A v2 row whose ``recorded_at`` does not parse, or lies more than
+        ``_RECORDED_AT_CLOCK_SKEW`` after ``now`` (default: the current time),
+        is skipped.
+        """
+        reference = now or datetime.now(UTC)
         records: dict[str, LifecycleRecord] = {}
         for match in _LEDGER_MARKER_V2_RE.finditer(body):
             fingerprint, raw_state, encoded_meta = (
@@ -188,7 +198,7 @@ class FindingLedger:
                 match.group(2),
                 match.group(3),
             )
-            record = _record_from_v2_marker(fingerprint, raw_state, encoded_meta)
+            record = _record_from_v2_marker(fingerprint, raw_state, encoded_meta, now=reference)
             if record is not None:
                 records[fingerprint] = record
         for match in _LEDGER_MARKER_RE.finditer(body):
@@ -753,10 +763,23 @@ def _record_from_v1_marker(
     )
 
 
+def _parse_recorded_at(raw: str) -> datetime | None:
+    """Return ``raw`` as an aware UTC datetime, or ``None`` when it is not ISO 8601."""
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
 def _record_from_v2_marker(
     fingerprint: str,
     raw_state: str,
     encoded_meta: str,
+    *,
+    now: datetime,
 ) -> LifecycleRecord | None:
     try:
         state = validate_lifecycle_state(raw_state)
@@ -789,6 +812,20 @@ def _record_from_v2_marker(
             fingerprint,
         )
         return None
+    if recorded_at:
+        stamp = _parse_recorded_at(str(recorded_at))
+        if stamp is None:
+            logger.warning(
+                "finding ledger: skipping v2 marker with invalid recorded_at for fingerprint {}",
+                fingerprint,
+            )
+            return None
+        if stamp > now + _RECORDED_AT_CLOCK_SKEW:
+            logger.warning(
+                "finding ledger: skipping v2 marker with future recorded_at for fingerprint {}",
+                fingerprint,
+            )
+            return None
     return LifecycleRecord(
         fingerprint=fingerprint,
         state=state,
@@ -819,9 +856,26 @@ def _marker_lines(record: LifecycleRecord) -> list[str]:
     return [f"{LEDGER_MARKER_PREFIX}{record.fingerprint}:{record.state}{path_suffix} -->"]
 
 
+def _strip_ledger_markers(body: str) -> str:
+    """Remove every ledger marker and marker prefix from ``body``, to a fixed point.
+
+    Removing one marker can join the text around it into another, so the
+    passes repeat until nothing changes. The result contains no ledger marker
+    prefix at all, so no marker parses from it and none can form with text
+    appended after it.
+    """
+    current = body
+    while True:
+        stripped = _LEDGER_MARKER_V2_RE.sub("", _LEDGER_MARKER_RE.sub("", current))
+        stripped = stripped.replace(_LEDGER_MARKER_FAMILY_PREFIX, "")
+        if stripped == current:
+            return stripped
+        current = stripped
+
+
 def merge_ledger_into_comment(body: str, *, records: Iterable[LifecycleRecord]) -> str:
     """Strip prior ledger markers and append the supplied record set."""
-    cleaned = _LEDGER_MARKER_V2_RE.sub("", _LEDGER_MARKER_RE.sub("", body)).rstrip()
+    cleaned = _strip_ledger_markers(body).rstrip()
     markers = [line for record in records for line in _marker_lines(record)]
     if not markers:
         return cleaned
@@ -932,7 +986,9 @@ async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> Find
             comment = await ctx.scm.get_issue_comment(
                 ctx.repo.owner, ctx.repo.name, int(progress.id)
             )
-            legacy = str(comment.get("body") or "")
+            # HS1 step 1: the run-bound id names the comment, and a bot must
+            # still have written it before its rows are read.
+            legacy = str(comment.get("body") or "") if _comment_author_is_bot(comment) else ""
         elif issue_number is not None:
             with _run_sticky_scope(ctx):
                 legacy = await fetch_sticky_progress_comment_body(
@@ -1047,13 +1103,21 @@ async def persist_finding_ledger_to_progress_comment(ctx: ToolContext) -> None:
 
 
 def _strip_deterministic_record_markers(body: str) -> str:
-    """Remove forged or stale deterministic-record markers from agent prose."""
-    without_block = _DETERMINISTIC_RECORD_BLOCK_RE.sub("", body)
-    return (
-        without_block.replace(DETERMINISTIC_RECORD_MARKER, "")
-        .replace(REVIEW_BODY_MARKER, "")
-        .strip()
-    )
+    """Remove forged or stale deterministic-record markers from agent prose.
+
+    The passes repeat until nothing changes, so a marker rebuilt by removing
+    another one is removed too.
+    """
+    current = body
+    while True:
+        stripped = (
+            _DETERMINISTIC_RECORD_BLOCK_RE.sub("", current)
+            .replace(DETERMINISTIC_RECORD_MARKER, "")
+            .replace(REVIEW_BODY_MARKER, "")
+        )
+        if stripped == current:
+            return stripped.strip()
+        current = stripped
 
 
 def merge_deterministic_record_into_comment(body: str, *, record_block: str) -> str:
