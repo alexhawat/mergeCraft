@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.mcp.shared import ToolClass, execute, tool
-from mergecraft.mcp.tool_state import primary_repo_state
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -20,7 +19,6 @@ def get_issue_tool(ctx: ToolContext):
             issue_number,
             headers={"Accept": "application/vnd.github.full+json"},
         )
-        primary_repo_state(ctx.tool_state).issue_number = issue_number
         hints: list[str] = []
         if int(data.get("comments") or 0) > 0:
             hints.append("use get_issue_comments to retrieve all comments for this issue")

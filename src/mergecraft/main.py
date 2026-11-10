@@ -366,11 +366,19 @@ def _classify_error_outcome(error: BaseException) -> RunOutcome:
     """
     from pydantic import ValidationError
 
+    from mergecraft.config.yaml_unique import ConfigParseError
+
     if isinstance(error, (_AgentTimeoutError, TimeoutError, asyncio.TimeoutError)):
         return RunOutcome.timed_out
     if isinstance(
         error,
-        (_ConfigurationError, ModelFallbackPolicyError, WorkspacePathError, ValidationError),
+        (
+            _ConfigurationError,
+            ConfigParseError,
+            ModelFallbackPolicyError,
+            WorkspacePathError,
+            ValidationError,
+        ),
     ):
         return RunOutcome.configuration_error
     return RunOutcome.infra_error
@@ -3236,9 +3244,9 @@ async def _finalize(
         failure_reason = post_emission_sink[0]
     # #1014 — the same open-ledger rule ``_publish`` applied to the checks, so
     # this run's own result agrees with the completion check it posted.
-    outcome, ledger_reason = outcome_with_disposition_ledger(
-        outcome, tool_state.prepared_run_packet
-    )
+    from mergecraft.review.outcome_resolution import finalize_run_outcome
+
+    outcome, ledger_reason = finalize_run_outcome(outcome, tool_state.prepared_run_packet)
     failure_reason = ledger_reason or failure_reason
 
     # O9 (OB4) — the verdict span at the publish convergence point. Emitted

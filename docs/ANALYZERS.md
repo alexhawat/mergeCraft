@@ -142,7 +142,9 @@ appears as an `unavailable` row in the Analyzers pre-merge summary.
   untrusted-only`. Enforced by `evaluate_manifest_for_mode()` plus
   `resolve_selection_tier()`.
 
-On macOS, `sandbox-exec` is the MCP-shell backend (workspace-only writes,
+On macOS, `sandbox-exec` is the MCP-shell backend (reads limited to the
+workspace, system paths and common toolchain directories, with the rest
+of `$HOME` denied; workspace-only writes,
 `.git` write denied, network denied). It is not an analyzer isolation
 backend: Linux capability probes are skipped, untrusted analyzers are
 refused before launch, and trusted analyzer argv is not wrapped.

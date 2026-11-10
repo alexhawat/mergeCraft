@@ -515,6 +515,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outside lint scope, had gone stale, and asserted the buggy behaviour the
   audit found, so they failed once those findings were fixed. The audit memos
   now point to their copies in git history (#1273).
+- Config: the run-start integrity hash now covers the files the layered loader reads (the `MERGECRAFT_CONFIG` file when set), uses a stable sentinel when no config exists so a file appearing mid-run is detected, and fails closed if a contributing file cannot be hashed ([#1244](https://github.com/alexhawat/mergeCraft/issues/1244))
+- MCP: `get_issue`, `get_issue_comments` and `get_issue_events` no longer rebind the run's issue number, so reading another issue cannot redirect progress comments or review scope ([#1245](https://github.com/alexhawat/mergeCraft/issues/1245))
+- Jev: an unknown question pack now raises `JevError(invalid_pack)` instead of sending the caller's state unfiltered and unfenced ([#1246](https://github.com/alexhawat/mergeCraft/issues/1246))
+- Sandbox: the `RLIMIT_NPROC` fallback when the privilege-drop probe cannot answer keeps the extra fork headroom the probed path adds ([#1247](https://github.com/alexhawat/mergeCraft/issues/1247))
+- Hardening: `git_argv` adds `--no-ext-diff`/`--no-textconv` for `log -u`, `-U<n>`, `-W`, `-L`, `-c` and bundled forms such as `-uz` ([#1248](https://github.com/alexhawat/mergeCraft/issues/1248))
+
+- `git_fetch` validates the whole refspec, not just its source. A refspec may
+  name one branch on `origin` and store it only in that branch's own
+  remote-tracking ref (`main:refs/remotes/origin/main`); destinations under
+  `refs/heads/`, `refs/tags/` or another branch's tracking ref, forced (`+`)
+  updates, empty sides and negative refspecs are refused, so the
+  repository-read tool can no longer move local branches, tags or the base a
+  review diffs against (#1236).
+- The macOS `sandbox-exec` profile for the MCP shell no longer grants
+  `(allow file-read*)` across the host. Reads are limited to the workspace and
+  an allowlist of system and toolchain paths (`/usr`, `/System`, `/Library`,
+  `/opt`, `/private/etc`, temp dirs, Xcode); the user's home directory is
+  denied, with the workspace re-allowed when it lives under `$HOME`. Metadata
+  reads stay global for path resolution. Common per-user toolchain directories
+  stay readable after the home deny (`~/.cargo`, `~/.rustup`, `~/.pyenv`,
+  `~/.nvm`, `~/go`, `~/.sdkman`, `~/.bun`, `~/.local/bin`, `~/.local/lib`,
+  `~/.local/pipx`, `~/.local/share/uv`), except Cargo's credentials file;
+  anything else under `$HOME` (`~/.ssh`, `~/.aws`, `~/.config`,
+  `~/.local/share`) stays unreadable (#1237).
+- Native GitHub Actions events now carry the triggering author's permission.
+  `pull_request`, `issue_comment` and `pull_request_review_comment` runs derive
+  it from `author_association` (`OWNER` / `MEMBER` / `COLLABORATOR` count as
+  collaborators). `workflow_dispatch`, `push` and `schedule` runs, which only
+  someone with write access can cause, count as collaborators too, as do local
+  runs outside GitHub Actions. A collaborator's `shell: enabled` is therefore no
+  longer always downgraded to `restricted`. `push` gains the same
+  non-collaborator floor as `shell`: `enabled` becomes `restricted` when a pull
+  request or comment author is not a collaborator, or when an event type
+  mergeCraft does not model runs inside Actions (#1238).
+- The `trust.agentSandbox` tier named in the Codex sandbox remedy and in the
+  run manifest's `agent_sandbox_granting_tier` is now the tightest tier that
+  would grant the override (`merged-only`, then `dispatch`, then `same-repo`),
+  or the configured tier when it already grants. It was always `same-repo`,
+  the loosest tier, for every non-fork head (#1239).
 - actionlint now lints workflow files only. Action manifests (root `action.yml`
   and `.github/actions/**/action.yml`, composite or not) were linted against the
   workflow schema, producing false Major `syntax-check` blockers; zizmor still
@@ -710,6 +749,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the run record names it (`finalize_failed: <Type>`) instead of reading as a
   missing verdict; the run still fails closed (#903).
 - A review thread whose comments were not all read is never auto-resolved (#902).
+- Finding outcomes: an outdated but unresolved review thread is now `stale`, not
+  `fixed`, so the advisory fixed rate is no longer inflated by lines that merely
+  moved; resolved threads still count as fixed (#1251).
+- The trace `attrs` cap now measures the whole payload as UTF-8 JSON bytes
+  (64 KiB) instead of the character length of top-level strings, so multibyte,
+  nested and many-small-value payloads are truncated too (#1252).
+- Line-budget scope reduction and the offline diff summary read `diff --git`
+  paths that contain spaces or quotes correctly instead of splitting on
+  whitespace (#1253).
+- A mid-battery skip in the Jev claim judge keeps the attestations collected for
+  earlier claims and marks the result `partial` (#1254).
+- Entropy redaction no longer turns absolute CI paths with ordinary segments
+  (`/home/runner/work/repo/src/app/module.py:12`) into `<redacted>.py`; a
+  segment that looks like a secret is still redacted (#1255).
+- `mergecraft review` restores its telemetry, tracing and trust-tier environment
+  overrides even when loading repository settings raises (#1256).
+- The git tools that advertised an unused `repo` argument no longer do: the
+  read-only `git` tool now honours it (registered checkouts only, unknown repo
+  is an error) and the fetch, push, tag, delete-branch and commit tools drop it
+  from their schemas and always act on the primary checkout (#1258).
+
+### Security
+
+- `establish_review_scope` only reads a `diff_path` that resolves, symlinks
+  followed, under a registered checkout, the run tmpdir or
+  `MERGECRAFT_TEMP_DIR` (#1257).
+- The Action `cwd` input is confined to `GITHUB_WORKSPACE`: `../..` or an
+  absolute path outside it is a configuration error (#1259).
+- The git askpass helper writes the token single-quoted via `printf '%s\n'` and
+  rejects tokens with control characters, so shell metacharacters in a token are
+  never interpreted (#1260).
 
 ### Breaking
 
@@ -721,6 +791,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pre-submit nudge names the unread ranges so the reviewer can read them and submit
   again. **Fix:** set `review.coverage.onIncomplete: warn` to keep the verdict and
   only report the gap (#940).
+
+### Security
+
+- Config: a config file that cannot be parsed now fails the run closed (`config parse error: <file> (<ErrorType>)`, no YAML values echoed) instead of warning and loading defaults ([#1249](https://github.com/alexhawat/mergeCraft/issues/1249))
+- Config: duplicate mapping keys at any depth are rejected, naming the key and line, instead of silently keeping the last value ([#1250](https://github.com/alexhawat/mergeCraft/issues/1250))
 
 ## [0.1.0a4] — 2026-10-29
 

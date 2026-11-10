@@ -182,7 +182,7 @@ def _validate_effective_config(
 
 
 def validate_repo_config_or_raise(*, cwd: Path) -> None:
-    """Validate runtime's merged settings, retaining documented YAML fallback."""
+    """Validate runtime's merged settings; unparseable YAML fails closed (#1249)."""
     _validate_effective_config(cwd=cwd)
 
 
