@@ -854,6 +854,10 @@ def validation_state_from_tool_state(
     ``policy_findings`` defaults to the population cached on the state, so a
     caller that already evaluated policy (or that has only a ``ToolState`` to
     hand) reads the same rows the terminal submission saw.
+
+    The asserted population includes every finding a reviewer run recorded
+    (:func:`reviewer_dispatch_finding_rows`), after the primary's confirmed
+    rows, so the approve re-validation reads the same reviewers the packet does.
     """
     analyzer_run = tool_state.analyzer_run
     verified: set[str] = set(tool_state.verified_ids)
@@ -862,7 +866,10 @@ def validation_state_from_tool_state(
     return build_validation_state(
         terminal_submission=tool_state.terminal_submission,
         terminal_submission_conflict=tool_state.terminal_submission_conflict,
-        asserted_findings=tool_state.confirmed_findings,
+        asserted_findings=[
+            *tool_state.confirmed_findings,
+            *reviewer_dispatch_finding_rows(tool_state),
+        ],
         analyzer_findings=analyzer_run.findings if analyzer_run is not None else (),
         verified_fingerprints=verified,
         static_checks=tool_state.static_checks,
@@ -1145,6 +1152,164 @@ def _backfill_agent_findings_from_terminal_submission(
         existing.add(fingerprint)
         backfilled.append(fingerprint)
     return backfilled
+
+
+def _latest_agent_rows(tool_state: ToolState) -> dict[str, dict[str, Any]]:
+    """Map fingerprint to the stored ``agent_findings`` row (downgrades live there)."""
+    rows: dict[str, dict[str, Any]] = {}
+    for row in tool_state.agent_findings:
+        if isinstance(row, dict):
+            fingerprint = row.get("fingerprint")
+            if isinstance(fingerprint, str) and fingerprint:
+                rows[fingerprint] = row
+    return rows
+
+
+def reviewer_dispatch_finding_rows(tool_state: ToolState) -> list[dict[str, Any]]:
+    """Return every finding a server-side or subagent reviewer run recorded.
+
+    Rows come from ``reviewer_dispatch_runs`` (secondary reviewers and file
+    groups), each stamped with the reviewer that raised it. When the same
+    fingerprint is stored in ``agent_findings``, that stored row wins, so a
+    ``record_finding_verdict`` downgrade is honoured. Run-scoped rows (run
+    health, never a change finding) are left out.
+
+    Args:
+        tool_state (ToolState): The run's tool state.
+
+    Returns:
+        list[dict[str, Any]]: The rows, in dispatch order.
+
+    Examples:
+        >>> from mergecraft.mcp.tool_state import init_tool_state
+        >>> reviewer_dispatch_finding_rows(init_tool_state(owner="a", name="b", dir="."))
+        []
+    """
+    latest = _latest_agent_rows(tool_state)
+    rows: list[dict[str, Any]] = []
+    for run in tool_state.reviewer_dispatch_runs:
+        for raw in run.findings:
+            if not isinstance(raw, dict):
+                continue
+            fingerprint = raw.get("fingerprint")
+            stored = latest.get(fingerprint) if isinstance(fingerprint, str) else None
+            row = dict(stored if stored is not None else raw)
+            if row.get("scope") == "run":
+                continue
+            row.setdefault("raised_by", run.agent_id)
+            if run.model_slug and not row.get("raised_by_model"):
+                row["raised_by_model"] = run.model_slug
+            rows.append(row)
+    return rows
+
+
+def _dispatch_row_as_agent_finding(row: dict[str, Any]) -> Any | None:
+    """Coerce a dispatch-run row (``Finding`` or ``AgentFinding`` shaped) to a draft."""
+    from mergecraft.agents.verifier import AgentFinding
+    from mergecraft.analyzers.finding import Finding, FindingValidationError
+
+    raised_by = row.get("raised_by")
+    raised_by_model = row.get("raised_by_model")
+    provenance: dict[str, Any] = {
+        "raised_by": raised_by if isinstance(raised_by, (str, list)) else None,
+        "raised_by_model": raised_by_model if isinstance(raised_by_model, str) else None,
+    }
+    try:
+        typed = Finding.model_validate(
+            {k: v for k, v in row.items() if k not in {"raised_by", "raised_by_model"}}
+        )
+    except (FindingValidationError, ValueError, TypeError):  # fmt: skip
+        typed = None
+    if typed is not None:
+        return AgentFinding(
+            path=typed.path,
+            body=typed.message,
+            severity=typed.severity,
+            line=typed.start_line,
+            fingerprint=typed.fingerprint,
+            **provenance,
+        )
+    allowed = {"path", "body", "severity", "line", "fingerprint"}
+    try:
+        return AgentFinding.model_validate(
+            {k: v for k, v in row.items() if k in allowed} | provenance
+        )
+    except (ValueError, TypeError):  # fmt: skip
+        return None
+
+
+def fold_reviewer_dispatch_findings_into_submission(ctx: ToolContext) -> list[str]:
+    """Merge reviewer-run findings recorded after the verdict into the verdict.
+
+    Server-side secondary reviewers and file groups run after the primary
+    reviewer recorded its terminal verdict, so their findings reached only the
+    evidence packet. This folds every such finding the recorded submission
+    does not already carry into it, before publication: the published review
+    shows them inline, and a blocking one turns an ``approve`` into
+    ``request_changes`` (strictest wins, as for findings merged at submit
+    time). Withdrawn fingerprints stay out. The rows are also back-filled into
+    ``agent_findings`` so the packet and the approval gate read them.
+
+    Args:
+        ctx (ToolContext): The run's tool context.
+
+    Returns:
+        list[str]: Fingerprints that were added to the submission.
+    """
+    from mergecraft.findings.agent_adapter import blocking_agent_findings
+
+    tool_state = ctx.tool_state
+    submission = tool_state.terminal_submission
+    if submission is None or not tool_state.reviewer_dispatch_runs:
+        return []
+    withdrawn = withdrawn_fingerprints_for_state(tool_state, tmpdir=ctx.tmpdir)
+    present: set[str] = set()
+    for item in submission.findings:
+        fingerprint = str(item.identity()) if hasattr(item, "identity") else ""
+        present.add(fingerprint or _finding_fingerprint(item))
+    added: list[Any] = []
+    for row in reviewer_dispatch_finding_rows(tool_state):
+        draft = _dispatch_row_as_agent_finding(row)
+        if draft is None:
+            continue
+        fingerprint = str(draft.identity())
+        if not fingerprint or fingerprint in present or fingerprint in withdrawn:
+            continue
+        present.add(fingerprint)
+        added.append(draft.model_copy(update={"fingerprint": fingerprint}))
+    if not added:
+        return []
+    verdict = submission.verdict
+    summary = (
+        f"{submission.summary.rstrip()}\n\n"
+        f"Other reviewers on this run raised {len(added)} more finding(s) after this "
+        "verdict was recorded; they are part of this review."
+    )
+    if verdict == "approve" and blocking_agent_findings(added, rule_id="agent:terminal"):
+        verdict = "request_changes"
+        summary += " At least one is blocking, so the verdict is `request_changes`."
+    findings = [*submission.findings, *added]
+    payload_hash = _canonical_payload_hash(
+        _submission_dict_for_hash({"verdict": verdict, "summary": summary, "findings": findings})
+    )
+    tool_state.terminal_submission = TerminalSubmission(
+        id=submission.id,
+        verdict=verdict,
+        summary=summary,
+        findings=findings,
+        payload_hash=payload_hash,
+        submitted_at=submission.submitted_at,
+        attempt_id=submission.attempt_id,
+    )
+    _backfill_agent_findings_from_terminal_submission(tool_state, added)
+    fingerprints = [str(item.fingerprint) for item in added]
+    logger.info(
+        "» folded {} reviewer finding(s) into the recorded verdict ({}): {}",
+        len(added),
+        verdict,
+        ", ".join(fingerprints),
+    )
+    return fingerprints
 
 
 def revalidate_recorded_submission(ctx: ToolContext) -> None:

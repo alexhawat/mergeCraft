@@ -68,6 +68,7 @@ class RecordingReviewGitHub(GitHubClient):
         self.review_updates: list[tuple[int, str]] = []
         self.resolved: list[str] = []
         self.graphql_calls: list[str] = []
+        self.dismissals: list[tuple[str, dict[str, Any]]] = []
         self._threads = list(threads or [])
         self._reviewer_login = reviewer_login
         self._create_failures = create_failures
@@ -123,6 +124,11 @@ class RecordingReviewGitHub(GitHubClient):
     async def get(self, path: str, **kwargs: Any) -> Any:
         del path, kwargs
         return {}
+
+    async def put(self, path: str, **kwargs: Any) -> Any:
+        """Record a review dismissal (``PUT .../reviews/<id>/dismissals``)."""
+        self.dismissals.append((path, dict(kwargs)))
+        return {"state": "DISMISSED"}
 
     async def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         self.graphql_calls.append(query)

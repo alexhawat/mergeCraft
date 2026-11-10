@@ -58,10 +58,99 @@ from mergecraft.utils.skills import install_bundled_skills
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from mergecraft.mcp.tool_state import AnalyzerRunState
+    from mergecraft.mcp.tool_state import AnalyzerRunState, ToolState
+    from mergecraft.review.outcome_resolution import OutcomeInputs
     from mergecraft.types import ShellPermission
     from mergecraft.utils.offline_diff import DiffMaterialization
     from mergecraft.utils.run_bounds import RunBounds
+
+
+def offline_outcome_inputs(
+    result: AgentResult,
+    *,
+    budget_tracker: BudgetTracker | None,
+) -> OutcomeInputs:
+    """Build the shared resolver's inputs for an offline review (one ``Review`` attempt).
+
+    The offline path has no publication, setup script or dependency prep, so
+    those inputs stay "not applicable"; everything else — the driver result,
+    a required reviewer's failure, and a budget the MCP tool handler exhausted
+    after the last attempt — is read exactly as the Action reads it.
+
+    Args:
+        result (AgentResult): The chain result after the roster fold.
+        budget_tracker (BudgetTracker | None): The run's budget tracker.
+
+    Returns:
+        OutcomeInputs: The inputs ``resolve_run_outcome`` maps.
+
+    Examples:
+        >>> from mergecraft.agents.shared import AgentResult
+        >>> offline_outcome_inputs(AgentResult(success=True), budget_tracker=None).mode
+        'Review'
+    """
+    from mergecraft.review.outcome_resolution import OutcomeInputs, roster_failure_from_result
+
+    roster_failure, roster_infra_reason = roster_failure_from_result(result)
+    return OutcomeInputs(
+        result=result,
+        mode="Review",
+        verdict_protocol="enforce",
+        budget_exhaustion=budget_tracker.last_exhausted if budget_tracker is not None else None,
+        roster_failure=roster_failure,
+        roster_infra_reason=roster_infra_reason,
+    )
+
+
+def merge_dispatch_findings_into_output(tool_state: ToolState) -> int:
+    """Fold reviewer-run findings into the structured output the CLI reports.
+
+    Secondary reviewers and file groups record findings after the primary's
+    ``set_output``; without this the ``--json`` findings and the exit code
+    would miss them while the packet beside them carries them. A missing or
+    unparsable payload is left alone (the finalize step reports it).
+
+    Args:
+        tool_state (ToolState): The offline run's tool state.
+
+    Returns:
+        int: How many findings were added.
+    """
+    from mergecraft.analyzers.finding import (
+        Finding,
+        FindingsPayload,
+        FindingValidationError,
+        parse_findings_payload,
+    )
+    from mergecraft.findings.agent_adapter import agent_finding_to_finding
+    from mergecraft.mcp.verdict import (
+        _dispatch_row_as_agent_finding,
+        reviewer_dispatch_finding_rows,
+        withdrawn_fingerprints_for_state,
+    )
+
+    raw = tool_state.output
+    if not raw:
+        return 0
+    try:
+        existing = [Finding.model_validate(row) for row in parse_findings_payload(raw)]
+    except (FindingValidationError, ValueError):
+        return 0
+    withdrawn = withdrawn_fingerprints_for_state(tool_state, tmpdir=None)
+    seen = {row.fingerprint for row in existing}
+    added: list[Finding] = []
+    for row in reviewer_dispatch_finding_rows(tool_state):
+        draft = _dispatch_row_as_agent_finding(row)
+        if draft is None:
+            continue
+        typed = agent_finding_to_finding(draft, rule_id="agent:reviewer")
+        if typed.fingerprint in seen or typed.fingerprint in withdrawn:
+            continue
+        seen.add(typed.fingerprint)
+        added.append(typed)
+    if added:
+        tool_state.output = FindingsPayload(findings=[*existing, *added]).model_dump_json()
+    return len(added)
 
 
 async def run_offline_agent_review(
@@ -344,8 +433,11 @@ async def run_offline_agent_review(
                 },
                 repo_root=cwd,
             )
-            if roster_summary.hard_error:
-                result = apply_roster_failure(result, roster_summary)
+            result = apply_roster_failure(result, roster_summary)
+            from mergecraft.mcp.verdict import fold_reviewer_dispatch_findings_into_submission
+
+            fold_reviewer_dispatch_findings_into_submission(tool_context)
+            merge_dispatch_findings_into_output(tool_state)
         promote_model_evidence(
             tool_state,
             requested_model=chain[0] if chain else model,
@@ -354,15 +446,10 @@ async def run_offline_agent_review(
             else None,
             fallback_index=int(result.metadata.get("fallback_index", 0)),
         )
-        from mergecraft.main_outcome import _classify_outcome
+        from mergecraft.review.outcome_resolution import resolve_run_outcome
 
-        outcome, failure_reason = _classify_outcome(
-            result=result,
-            setup_reason="",
-            setup_policy="warn",
-            prep_reason=None,
-            mode="Review",
-            verdict_protocol="enforce",
+        outcome, failure_reason = resolve_run_outcome(
+            offline_outcome_inputs(result, budget_tracker=budget_tracker)
         )
         structured_output = tool_state.output
         markdown_output = result.output
