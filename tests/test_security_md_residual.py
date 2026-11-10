@@ -22,6 +22,7 @@ from mergecraft.mcp.git import _run_git
 from tests.ci.workflow_support import REPO_ROOT
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
     import pytest
@@ -62,8 +63,10 @@ def test_run_git_spawns_with_the_hardened_environment(
     """
     captured: dict[str, str] = {}
 
-    def _fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        captured.update(kwargs["env"])  # type: ignore[arg-type]
+    def _fake_run(
+        argv: list[str], *, env: Mapping[str, str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        captured.update(env)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     monkeypatch.setenv("MC_RESIDUAL_PROBE", "kept")
