@@ -17,6 +17,8 @@ import pytest
 
 from tests.analyzers.support import import_module
 
+pytestmark = pytest.mark.usefixtures("offline_upstream_resolution")
+
 
 def _source_resolve_mod() -> Any:
     return import_module("mergecraft.utils.source_resolve")

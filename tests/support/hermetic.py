@@ -172,6 +172,13 @@ LEGACY_NETWORK_FILES: frozenset[str] = frozenset(
 # or move to a shared strict fake); do not add to it.
 LEGACY_SWALLOWED_NETWORK_FILES: frozenset[str] = frozenset(
     {
+        "tests/security/test_hostile_corpus.py",
+        "tests/policy/test_evidence_writer_seams.py",
+        "tests/status_checks/test_status_checks_enforce.py",
+        "tests/review/test_terminal_verdict_policy.py",
+        "tests/review/test_phase_guards.py",
+        "tests/review_record/test_w16_anchor_422_recovery.py",
+        "tests/test_main_phases.py",
         "tests/agents/test_claude_read_log_check.py",
         "tests/analyzers/test_dispositions.py",
         "tests/cli/test_auth_scope_cmd.py",
@@ -184,7 +191,6 @@ LEGACY_SWALLOWED_NETWORK_FILES: frozenset[str] = frozenset(
         "tests/tracing/exporters/test_otlp_sink_parent_context.py",
         "tests/tracing/exporters/test_cli_precedence.py",
         "tests/tracing/streaming/test_driver_degradation.py",
-        "tests/agents/test_codex_credential_broker.py",
         "tests/analyzers/test_userspace_egress_runtime.py",
         "tests/mcp/test_checkout.py",
         "tests/mcp/test_checkout_ignore_paths.py",
@@ -199,6 +205,22 @@ LEGACY_SWALLOWED_NETWORK_FILES: frozenset[str] = frozenset(
         "tests/utils/test_token.py",
     }
 )
+
+
+@pytest.fixture
+def offline_upstream_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Resolve upstream hosts (SSRF pre-resolve) to a public address without DNS.
+
+    Use with ``pytestmark = pytest.mark.usefixtures("offline_upstream_resolution")``
+    for tests that exercise the credential broker or clone path.
+    """
+    from mergecraft.security import egress
+
+    monkeypatch.setattr(
+        egress,
+        "_resolve_host_addresses",
+        lambda _host: (ipaddress.ip_address("93.184.216.34"),),
+    )
 
 
 def _network_allowed(request: pytest.FixtureRequest) -> bool:

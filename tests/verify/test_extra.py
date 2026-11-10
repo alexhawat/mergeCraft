@@ -56,7 +56,8 @@ def test_require_browser_stack_fails_closed() -> None:
 def test_playwright_is_not_a_default_or_dev_dependency() -> None:
     from pathlib import Path
 
-    text = Path("pyproject.toml").read_text(encoding="utf-8")
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "pyproject.toml").read_text(encoding="utf-8")
     assert "playwright" not in text.lower()
     assert "[browser]" not in text
 

@@ -35,19 +35,7 @@ from tests.security.support_agent_isolation import (
 
 from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME
 
-
-@pytest.fixture(autouse=True)
-def _offline_upstream_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Resolve the broker's upstream host without DNS (TST-F1)."""
-    import ipaddress
-
-    from mergecraft.security import egress
-
-    monkeypatch.setattr(
-        egress,
-        "_resolve_host_addresses",
-        lambda _host: (ipaddress.ip_address("93.184.216.34"),),
-    )
+pytestmark = pytest.mark.usefixtures("offline_upstream_resolution")
 
 
 def _simulate_root_chown(monkeypatch: pytest.MonkeyPatch, codex_module: Any) -> None:

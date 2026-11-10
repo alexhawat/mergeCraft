@@ -278,7 +278,7 @@ filterwarnings = [
     "ignore:This process .* is multi-threaded, use of fork:DeprecationWarning",
     # Third-party deprecations raised while importing fastapi / hypothesis.
     "ignore::DeprecationWarning:fastapi.*",
-    "ignore::hypothesis.errors.HypothesisDeprecationWarning",
+    "ignore:Do not use the `random` module inside strategies",
     # FastAPI ``on_event`` used by tests/mcp/test_ports_identity.py to force a startup failure.
     "ignore:\\s*on_event is deprecated:DeprecationWarning",
     # Unclosed sockets/files/loops in tests are reported when the garbage collector runs,
