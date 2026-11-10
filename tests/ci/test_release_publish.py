@@ -61,6 +61,28 @@ def test_a_missing_version_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
         module.release_notes(_CHANGELOG, "9.9.9")
 
 
+def test_craft_unbracketed_heading_is_extractable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Craft's prepare writes ``## <version>``; the notes must still be found (#1226)."""
+    module = _module(monkeypatch)
+    text = (
+        "# Changelog\n\n## Unreleased\n\n- next\n\n"
+        "## 0.1.0a6\n\n### Added\n\n- craft wrote this\n\n"
+        "## [0.1.0a5] — 2026-11-08\n\n- older\n"
+    )
+    body = module.release_notes(text, "0.1.0a6")
+    assert "craft wrote this" in body
+    assert "older" not in body
+    assert "next" not in module.release_notes(text, "0.1.0a5")
+    assert "older" in module.release_notes(text, "0.1.0a5")
+
+
+def test_unbracketed_heading_with_a_date_is_extractable(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module(monkeypatch)
+    text = "## 0.2.0 — 2026-12-01\n\n- shipped\n\n## [0.1.0] — 2026-08-14\n\n- old\n"
+    body = module.release_notes(text, "0.2.0")
+    assert body.strip() == "- shipped"
+
+
 def test_an_empty_section_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _module(monkeypatch)
     text = "## [0.2.0]\n\n## [0.1.0]\n- old\n"

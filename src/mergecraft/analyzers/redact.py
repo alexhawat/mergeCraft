@@ -123,6 +123,25 @@ _CREDENTIAL_KEY_WORD_RE = re.compile(
 # unchanged for every value that is not literally one of these strings.
 _KNOWN_SAFE_LITERALS: frozenset[str] = frozenset({"--remote-debugging-port"})
 
+# GitHub permalinks (#1281). With an embedded 40/64-hex SHA or run id, a link
+# scores ~4.5-4.6 bits/char once the entropy pass sees ``com/<owner>/<repo>/…``
+# as one token, and every one of them rendered as ``<redacted>``. Only these
+# exact shapes are exempt, and only when the owner, repo and every path segment
+# would survive redaction on their own, so a token pasted into the path still
+# blanks the link. Query strings and fragments are never part of the match:
+# they stay subject to the normal passes.
+_GITHUB_PERMALINK_RE = re.compile(
+    r"(?<![\w.+/-])https://github\.com/"
+    r"(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/"
+    r"(?P<repo>[\w.-]{1,100})/"
+    r"(?:"
+    r"(?:blob|tree|commit)/(?:[a-f0-9]{64}|[a-f0-9]{40})(?![\w-])"
+    r"(?P<path>(?:/[\w.-]+)+)?"
+    r"|actions/runs/[0-9]{1,20}(?:/job/[0-9]{1,20})?(?![\w-])"
+    r"|(?:pull|issues)/[0-9]{1,10}(?![\w-])"
+    r")"
+)
+
 
 def _shannon_entropy(value: str) -> float:
     if not value:
@@ -270,6 +289,47 @@ def _is_benign_path_stem_segment(segment: str) -> bool:
     return segment == segment.upper() or sum(char.isupper() for char in segment) <= 3
 
 
+def _is_ordinary_permalink_segment(segment: str) -> bool:
+    """A permalink owner/repo/path segment that would survive redaction on its own."""
+    if not segment or segment in {".", ".."}:
+        return False
+    return _entropy_redact(segment) == segment and (
+        _maybe_redact_entire_string(segment, segment) == segment
+    )
+
+
+def _is_exempt_github_permalink(match: re.Match[str]) -> bool:
+    segments = [match.group("owner"), match.group("repo")]
+    path = match.group("path")
+    if path:
+        segments.extend(path.removeprefix("/").split("/"))
+    return all(_is_ordinary_permalink_segment(segment) for segment in segments)
+
+
+def _strip_exempt_github_permalinks(text: str) -> str:
+    if "https://github.com/" not in text:
+        return text
+    return _GITHUB_PERMALINK_RE.sub(
+        lambda match: "" if _is_exempt_github_permalink(match) else match.group(0), text
+    )
+
+
+def _entropy_redact_outside_permalinks(text: str) -> str:
+    """Run the entropy pass on everything except exempt GitHub permalinks (#1281)."""
+    if "https://github.com/" not in text:
+        return _entropy_redact(text)
+    parts: list[str] = []
+    cursor = 0
+    for match in _GITHUB_PERMALINK_RE.finditer(text):
+        if not _is_exempt_github_permalink(match):
+            continue
+        parts.append(_entropy_redact(text[cursor : match.start()]))
+        parts.append(match.group(0))
+        cursor = match.end()
+    parts.append(_entropy_redact(text[cursor:]))
+    return "".join(parts)
+
+
 def _entropy_redact(text: str) -> str:
     def replacer(match: re.Match[str]) -> str:
         token = match.group(0)
@@ -344,6 +404,13 @@ def _maybe_redact_entire_string(text: str, redacted: str) -> str:
         return redacted
     if len(text) < _MIN_ENTROPY_LENGTH or any(char.isspace() for char in text):
         return redacted
+    residual = _strip_exempt_github_permalinks(text)
+    if residual != text:
+        # ``(https://github.com/o/r/pull/1).``: only what surrounds the exempt
+        # permalink decides; the link itself already passed its segment checks.
+        if residual and _maybe_redact_entire_string(residual, residual) == REDACTION_SENTINEL:
+            return REDACTION_SENTINEL
+        return redacted
     if _BENIGN_HEX_40_RE.match(text) or _BENIGN_HEX_64_RE.match(text):
         return redacted
     if _looks_like_repo_path_token(text):
@@ -383,7 +450,7 @@ def redact_secrets(text: str) -> str:
     """Redact secret-like values from arbitrary text by pattern and entropy."""
     if not text:
         return text
-    redacted = _entropy_redact(_pattern_redact(text))
+    redacted = _entropy_redact_outside_permalinks(_pattern_redact(text))
     return _maybe_redact_entire_string(text, redacted)
 
 

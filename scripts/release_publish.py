@@ -18,18 +18,24 @@ import re
 import sys
 from pathlib import Path
 
-_HEADING = re.compile(r"^## \[(?P<version>[^\]]+)\](?:[ \t]+[—-][ \t]+(?P<date>.+))?[ \t]*$", re.M)
+# Craft's ``prepare`` writes the released heading unbracketed (``## 0.1.0a5``);
+# the repository's released history uses ``## [0.1.0a5] — <date>``. Accept both.
+_HEADING = re.compile(
+    r"^## (?:\[(?P<bracketed>[^\]]+)\]|(?P<bare>[^\s\[\]]+))"
+    r"(?:[ \t]+[—-][ \t]+(?P<date>.+))?[ \t]*$",
+    re.M,
+)
 
 
 def release_notes(changelog: str, version: str) -> str:
-    """Return the ``## [version]`` section body, without the heading.
+    """Return the ``## [version]`` (or ``## version``) section body, without the heading.
 
     Raises:
         ValueError: The changelog has no section for ``version``.
     """
     headings = list(_HEADING.finditer(changelog))
     for index, heading in enumerate(headings):
-        if heading.group("version") != version:
+        if (heading.group("bracketed") or heading.group("bare")) != version:
             continue
         end = headings[index + 1].start() if index + 1 < len(headings) else len(changelog)
         body = changelog[heading.end() : end].strip("\n")

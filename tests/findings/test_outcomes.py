@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from mergecraft.findings.outcomes import (
+    FindingOutcomeReport,
     classify_pull_request_outcomes,
     classify_thread_outcome,
+    summarize_outcomes,
 )
 
 _MERGEcraft_MARKER = "<!-- mergecraft-finding:v1:abc123def456 -->\n*via mergecraft*"
@@ -135,3 +137,67 @@ def test_stale_counts_in_rates_without_inflating_fixed() -> None:
     rates = report.rates()
     assert rates["stale"] == 1.0
     assert rates["fixed"] == 0.0
+
+
+def _report(pull: int, *threads: dict[str, object], merged: bool = True) -> FindingOutcomeReport:
+    return classify_pull_request_outcomes(
+        pull_number=pull,
+        threads=list(threads),
+        publishers=frozenset({"mergecraft[bot]"}),
+        merged=merged,
+    )
+
+
+def test_summary_aggregates_rates_across_pull_requests() -> None:
+    summary = summarize_outcomes(
+        [
+            _report(1, _production_thread(resolved=True)),
+            _report(2, _production_thread(human_reply="false positive")),
+            _report(3, _production_thread(), merged=False),
+        ]
+    )
+    assert summary.advisory is True
+    assert summary.pulls == [1, 2, 3]
+    assert summary.counts["fixed"] == 1
+    assert summary.counts["rejected"] == 1
+    assert summary.counts["unknown"] == 1
+    assert summary.rates["fixed"] == 0.5
+    assert summary.rates["rejected"] == 0.5
+    assert "unknown" not in summary.rates
+    assert summary.known_clean_pulls == []
+    assert summary.clean_pull_findings_per_pull is None
+
+
+def test_every_finding_on_a_known_clean_pr_is_a_false_positive() -> None:
+    """A clean PR's finding counts even when the thread was resolved, not rejected."""
+    summary = summarize_outcomes(
+        [
+            _report(10, _production_thread(resolved=True), _production_thread(thread_id="t2")),
+            _report(11),
+            _report(12, _production_thread(resolved=True)),
+        ],
+        known_clean_pulls=[10, 11],
+    )
+    assert summary.known_clean_pulls == [10, 11]
+    assert summary.clean_pull_findings == 2
+    assert summary.clean_pull_findings_per_pull == 1.0
+
+
+def test_a_declared_clean_pr_that_was_not_reported_does_not_dilute_the_check() -> None:
+    summary = summarize_outcomes(
+        [_report(10, _production_thread(resolved=True))],
+        known_clean_pulls=[10, 99],
+    )
+    assert summary.known_clean_pulls == [10]
+    assert summary.clean_pull_findings_per_pull == 1.0
+
+
+def test_summary_lists_incomplete_pulls() -> None:
+    report = classify_pull_request_outcomes(
+        pull_number=4,
+        threads=[_production_thread()],
+        publishers=frozenset({"mergecraft[bot]"}),
+        merged=True,
+        incomplete=True,
+    )
+    assert summarize_outcomes([report]).incomplete_pulls == [4]

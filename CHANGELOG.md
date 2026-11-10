@@ -157,6 +157,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mergecraft findings outcomes` aggregates several pull requests (repeat `--pr`)
+  and runs a known-clean false-positive check: `--known-clean N` fetches a PR known
+  to need no findings (for example a golden `clean` case) and counts every finding
+  published on it as a false positive. The merge state is now read from GitHub
+  unless `--merged/--not-merged` overrides it. Advisory only; it never moves a
+  verdict (#1165).
+
 - Incident-derived eval cases: ``mergecraft eval add-incident`` seeds the structural
   bank from an incident PR plus revert/fix-forward PR with a confirmed bug location
   and mandatory provenance (fail-closed without either) (#1163).
@@ -437,6 +444,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- GitHub permalinks stay readable in analyzer output, PR comments and traces.
+  `blob`/`tree`/`commit` links with a 40- or 64-hex SHA, `actions/runs/<id>(/job/<id>)`
+  and `pull`/`issues/<n>` links are exempt from the entropy pass, but only when
+  the owner, repo and every path segment would survive redaction on their own;
+  query strings and fragments are still redacted, and a token pasted into the path
+  still blanks the link (#1281).
+- The release publish step accepts Craft's unbracketed `## <version>` changelog
+  heading as well as `## [<version>] — <date>`, so the GitHub release is no longer
+  left half-done after PyPI publishes (#1226).
+- Two URL-credential redaction canaries no longer trip TruffleHog's `URI` detector
+  on a full-tree scan: the test assembles its synthetic userinfo at runtime and the
+  changelog prose uses a `<password>` placeholder (#1217).
+
 - MCP `shell` and the repository tools (`git`, `git_fetch`, `push_branch`, `push_tags`,
   `delete_branch`, `commit_changes`) no longer run blocking subprocess calls on the
   event loop (they run via `asyncio.to_thread`), so a slow command stops stalling every
@@ -472,7 +492,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   findings on every other line are kept. Output with no decodable line is still
   reported as unparsable rather than as a clean scan (#1234).
 - Trace error text no longer carries URL credentials. A failed HTTP request's
-  exception message quotes the raw URL, so `https://user:password@host` reached
+  exception message quotes the raw URL, so `https://user:<password>@host` reached
   the span's `error` attribute even though `http.url` was redacted; the
   `error`, `exception.message` and `tool.error_message` attributes now get the
   same URL credential redaction before any sink sees them (#1235).
