@@ -366,11 +366,19 @@ def _classify_error_outcome(error: BaseException) -> RunOutcome:
     """
     from pydantic import ValidationError
 
+    from mergecraft.config.yaml_unique import ConfigParseError
+
     if isinstance(error, (_AgentTimeoutError, TimeoutError, asyncio.TimeoutError)):
         return RunOutcome.timed_out
     if isinstance(
         error,
-        (_ConfigurationError, ModelFallbackPolicyError, WorkspacePathError, ValidationError),
+        (
+            _ConfigurationError,
+            ConfigParseError,
+            ModelFallbackPolicyError,
+            WorkspacePathError,
+            ValidationError,
+        ),
     ):
         return RunOutcome.configuration_error
     return RunOutcome.infra_error

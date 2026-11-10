@@ -16,6 +16,7 @@ import argparse
 import contextlib
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -29,6 +30,7 @@ from mergecraft.analyzers.egress_userspace import relay_request_allowed
 
 _SO_ORIGINAL_DST = 80
 _REDIRECT_PORT = 17999
+_HOSTS_MOUNT_TIMEOUT_S = 10
 
 
 def unshare_reexec_argv(extra_args: list[str]) -> list[str]:
@@ -126,11 +128,21 @@ def host_for_ip(ip: str, host_ips: dict[str, list[str]]) -> str:
 
 
 def _write_hosts(host_ips: dict[str, list[str]]) -> None:
-    hosts_path = Path(tempfile.mkdtemp(prefix="mc-eg-hosts-")) / "hosts"
-    hosts_path.write_text("".join(hosts_file_lines(host_ips)), encoding="utf-8")
-    subprocess.run(
-        ["mount", "--bind", str(hosts_path), "/etc/hosts"], check=False, capture_output=True
-    )
+    staging = Path(tempfile.mkdtemp(prefix="mc-eg-hosts-"))
+    try:
+        hosts_path = staging / "hosts"
+        hosts_path.write_text("".join(hosts_file_lines(host_ips)), encoding="utf-8")
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            subprocess.run(
+                ["mount", "--bind", str(hosts_path), "/etc/hosts"],
+                check=False,
+                capture_output=True,
+                timeout=_HOSTS_MOUNT_TIMEOUT_S,
+            )
+    finally:
+        # A bind mount holds the inode, not the directory entry, so the staging
+        # tree can be removed as soon as the mount call has returned.
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def _original_destination(conn: socket.socket) -> tuple[str, int]:

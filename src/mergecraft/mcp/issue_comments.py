@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 
 from mergecraft.mcp.list_pages import collect_list_pages
 from mergecraft.mcp.shared import ToolClass, execute, tool
-from mergecraft.mcp.tool_state import primary_repo_state
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -15,7 +14,6 @@ if TYPE_CHECKING:
 def get_issue_comments_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         issue_number = int(params["issue_number"])
-        primary_repo_state(ctx.tool_state).issue_number = issue_number
 
         async def _page(query: dict[str, Any]) -> list[dict[str, Any]]:
             return await ctx.scm.list_issue_comments(

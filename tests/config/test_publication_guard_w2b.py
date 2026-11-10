@@ -84,19 +84,17 @@ def test_config_edit_after_rebaseline_refuses(tmp_path: Path) -> None:
         repo_settings_from_context(ctx)
 
 
-def test_snapshot_without_config_file_does_not_fail_closed(tmp_path: Path) -> None:
-    """An absent config at snapshot time is not treated as a mismatch when config appears later."""
+def test_snapshot_without_config_file_detects_later_creation(tmp_path: Path) -> None:
+    """#1244 - absent config hashes to a stable sentinel, so a file created mid-run is caught."""
     snapshot = capture_repo_settings_snapshot(root=tmp_path, load_learnings_files=False)
-    assert snapshot.config_hash == ""
-
-    _write_gate_config(tmp_path, "enforce")
-    assert config_yaml_hash(root=tmp_path) != ""
-
+    assert snapshot.config_hash != ""
+    assert snapshot.config_hash == config_yaml_hash(root=tmp_path)
     assert_config_unchanged(snapshot)
 
-    ctx = _tool_context(tmp_path, snapshot=snapshot)
-    publish_gate = repo_settings_from_context(ctx).gates.gate_action
-    assert publish_gate == snapshot.settings.gates.gate_action
+    _write_gate_config(tmp_path, "enforce")
+    assert config_yaml_hash(root=tmp_path) != snapshot.config_hash
+    with pytest.raises(ValueError, match="changed after settings were snapshotted"):
+        assert_config_unchanged(snapshot)
 
 
 def test_pr_config_edit_in_diff_publishes_with_pinned_settings(tmp_path: Path) -> None:

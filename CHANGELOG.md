@@ -436,6 +436,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a namespace, fork `EAGAIN`, `uid_map` write denied) are now classified as
   `sandboxed: isolation unavailable` and reported `declared-but-cannot-run`
   instead of a blocking gate failure (#1240).
+- Free-text secret redaction no longer leaks random credentials. The camelCase
+  identifier exemption now requires word-shaped keys (``ruleId``,
+  ``partialFingerprints``) instead of any lowercase-led blob with a capital, the
+  entropy threshold is capped at 4.5 bits per character so long tokens cannot
+  outgrow it, and fine-grained GitHub PATs (``github_pat_``), PyPI tokens and
+  ``Bearer`` credentials are redacted by pattern (the ``Bearer`` word is kept)
+  (#1232).
+- `envAllowlist` can no longer pass credentials to subprocesses. A
+  credential-shaped name (`*_TOKEN`, `*_KEY`, `*-TOKEN`, …) or one of
+  `GITHUB_TOKEN`, `GH_TOKEN`, `GIT_ASKPASS` and the Actions OIDC request
+  variables is now ignored with a warning instead of reaching the restricted
+  MCP shell, trusted analyzers and analyzer fallback environments; the action's
+  `INPUT_TOKEN` and hyphenated inputs such as `INPUT_LOGFIRE-TOKEN` count as
+  credentials. Non-secret names are still added (#1233).
+- One undecodable TruffleHog output line (a truncated write or a stray banner)
+  no longer discards the whole secret scan: the line is skipped and the
+  findings on every other line are kept. Output with no decodable line is still
+  reported as unparsable rather than as a clean scan (#1234).
+- Trace error text no longer carries URL credentials. A failed HTTP request's
+  exception message quotes the raw URL, so `https://user:password@host` reached
+  the span's `error` attribute even though `http.url` was redacted; the
+  `error`, `exception.message` and `tool.error_message` attributes now get the
+  same URL credential redaction before any sink sees them (#1235).
+- Managed pip analyzer provisioning bounds `uv pip install` at 600 seconds. It
+  runs while holding the shared cache lock, so a hung install used to block every
+  other worker; a timeout now removes the staging tree and fails the install
+  cleanly (#1261).
+- Baseline suppression bounds the base-worktree `git worktree add` and `remove`
+  calls. A timed-out or failed checkout now removes its temp tree and disables
+  suppression for that run instead of raising (#1262).
+- Contract base-ref probes (`git rev-parse` and `git show`) are bounded. A timeout
+  reads as "base unavailable" and skips the contract check rather than hanging the
+  review (#1263).
+- A baked analyzer binary that is missing no longer falls back to a same-named
+  binary on `PATH`. Callers skip lock and hash verification for a returned path,
+  so the fallback could run an unpinned tool; the managed resolver provisions it
+  instead (#1264).
+- Malformed ast-grep rows (a missing or non-numeric line, a non-object entry) are
+  skipped during change-impact declaration extraction instead of aborting the
+  batch (#1265).
+- The comment-preserving config patch (`patch_config_dict`) writes through the
+  same temp-file and atomic `os.replace` path as the full rewrite, so a failure
+  mid-write can no longer leave a truncated `config.yaml` (#1266).
+- The temporary findings sink for `mergecraft review` no longer leaks a file
+  descriptor per run (#1267).
+- The egress bridge bounds its `/etc/hosts` bind mount at 10 seconds and removes
+  its staging directory once the mount call returns, so one directory no longer
+  leaks per run (#1268).
+- Handing the isolated opencode data tree to the agent user no longer follows
+  symlinks: a link planted in the tree cannot re-own or chmod a file outside it
+  (#1269).
+- Killed background shell processes are reaped after the kill, so they no longer
+  linger as zombies until the MCP server exits (#1270).
+- The JSONL trace file sink redacts and caps events before writing, as the memory
+  and redacting sinks already did, so a credential in a span attribute no longer
+  reaches disk (#1271).
+- Removed an unreachable inner `try`/`except` from broker stream redaction; the
+  latin-1 decode it guarded cannot fail (#1272).
+- Removed the 2026-11-05 audit probe scripts from `docs/dev/plans`. They sat
+  outside lint scope, had gone stale, and asserted the buggy behaviour the
+  audit found, so they failed once those findings were fixed. The audit memos
+  now point to their copies in git history (#1273).
+- Config: the run-start integrity hash now covers the files the layered loader reads (the `MERGECRAFT_CONFIG` file when set), uses a stable sentinel when no config exists so a file appearing mid-run is detected, and fails closed if a contributing file cannot be hashed ([#1244](https://github.com/alexhawat/mergeCraft/issues/1244))
+- MCP: `get_issue`, `get_issue_comments` and `get_issue_events` no longer rebind the run's issue number, so reading another issue cannot redirect progress comments or review scope ([#1245](https://github.com/alexhawat/mergeCraft/issues/1245))
+- Jev: an unknown question pack now raises `JevError(invalid_pack)` instead of sending the caller's state unfiltered and unfenced ([#1246](https://github.com/alexhawat/mergeCraft/issues/1246))
+- Sandbox: the `RLIMIT_NPROC` fallback when the privilege-drop probe cannot answer keeps the extra fork headroom the probed path adds ([#1247](https://github.com/alexhawat/mergeCraft/issues/1247))
+- Hardening: `git_argv` adds `--no-ext-diff`/`--no-textconv` for `log -u`, `-U<n>`, `-W`, `-L`, `-c` and bundled forms such as `-uz` ([#1248](https://github.com/alexhawat/mergeCraft/issues/1248))
+
 - `git_fetch` validates the whole refspec, not just its source. A refspec may
   name one branch on `origin` and store it only in that branch's own
   remote-tracking ref (`main:refs/remotes/origin/main`); destinations under
@@ -675,6 +743,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pre-submit nudge names the unread ranges so the reviewer can read them and submit
   again. **Fix:** set `review.coverage.onIncomplete: warn` to keep the verdict and
   only report the gap (#940).
+
+### Security
+
+- Config: a config file that cannot be parsed now fails the run closed (`config parse error: <file> (<ErrorType>)`, no YAML values echoed) instead of warning and loading defaults ([#1249](https://github.com/alexhawat/mergeCraft/issues/1249))
+- Config: duplicate mapping keys at any depth are rejected, naming the key and line, instead of silently keeping the last value ([#1250](https://github.com/alexhawat/mergeCraft/issues/1250))
 
 ## [0.1.0a4] — 2026-10-29
 

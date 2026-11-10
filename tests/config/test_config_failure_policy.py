@@ -59,21 +59,24 @@ def test_security_surface_unknown_keys_fail_closed(bad_config: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_unparseable_config_file_disables_repo_config(tmp_path) -> None:
-    """D4 — a syntactically broken config.yaml warns and falls back to defaults.
+def test_unparseable_config_file_fails_closed(tmp_path) -> None:
+    """#1249 - a syntactically broken config.yaml aborts instead of widening to defaults.
 
-    Repo-settings *syntax* is the optional-feature surface here: the file may
-    not exist or parse; what must fail closed is invalid *security content*
-    (covered above).
+    A parse error after ``shell: disabled`` would otherwise load ``shell:
+    restricted``; the error names the file and error type, never YAML values.
     """
-    from mergecraft.config.settings import default_settings, load_repo_settings
+    from mergecraft.config.settings import load_repo_settings
 
     config_dir = tmp_path / ".mergecraft"
     config_dir.mkdir()
-    (config_dir / "config.yaml").write_text("push: [not, a, scalar\n", encoding="utf-8")
-    settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
-    assert settings is not None
-    assert settings.push == default_settings().push
+    (config_dir / "config.yaml").write_text(
+        "shell: disabled\npush: [not, a, scalar\n", encoding="utf-8"
+    )
+    with pytest.raises(
+        ValueError, match=r"config parse error: .*config\.yaml \(ParserError\)"
+    ) as ei:
+        load_repo_settings(root=tmp_path, load_learnings_files=False)
+    assert "disabled" not in str(ei.value)
 
 
 def test_output_schema_invalid_json_is_rejected() -> None:

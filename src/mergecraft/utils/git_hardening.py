@@ -33,8 +33,24 @@ _PATCH_SUBCOMMANDS: Final[frozenset[str]] = frozenset(
     {"diff", "show", "range-diff", "format-patch"}
 )
 _LOG_PATCH_FLAGS: Final[frozenset[str]] = frozenset(
-    {"-p", "--patch", "-U", "--unified", "-W", "--function-context"}
+    {
+        "-p",
+        "-u",
+        "--patch",
+        "-U",
+        "--unified",
+        "-W",
+        "--function-context",
+        "--cc",
+        "--patch-with-stat",
+        "--patch-with-raw",
+    }
 )
+# Short letters that make ``log``/``stash show`` emit a patch when bundled or
+# glued to a value: ``-p``/``-u`` (patch), ``-U<n>`` (context), ``-W`` (function
+# context), ``-L`` (line-log, always a patch) and ``-c`` (combined diff). A
+# false positive (``-Sfoo`` containing one of these) only adds the safe flags.
+_LOG_PATCH_SHORT_LETTERS: Final[frozenset[str]] = frozenset("puUWLc")
 _DIFF_HARDENING_FLAGS: Final[tuple[str, ...]] = ("--no-ext-diff", "--no-textconv")
 
 
@@ -60,7 +76,13 @@ def _has_patch_flags(args: Sequence[str], start: int) -> bool:
     for tok in args[start:]:
         if tok in _LOG_PATCH_FLAGS:
             return True
-        if tok.startswith("-") and not tok.startswith("--") and "p" in tok[1:]:
+        if tok.startswith("--unified="):
+            return True
+        if (
+            tok.startswith("-")
+            and not tok.startswith("--")
+            and any(letter in _LOG_PATCH_SHORT_LETTERS for letter in tok[1:])
+        ):
             return True
     return False
 
