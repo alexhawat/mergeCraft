@@ -66,6 +66,7 @@ from mergecraft.config.env import CODEX_AUTH_EXPORT_ENV, AgentRuntimeEnv, Provid
 from mergecraft.config.trust_policy import AgentSandboxDecision
 from mergecraft.mcp.endpoints import MCP_VERIFIER_ENDPOINT
 from mergecraft.security.broker import CodexBrokerPosture, subscription_auth_usable
+from mergecraft.security.private_files import write_private_file
 from mergecraft.tracing.genai import resolve_capture_policy
 from mergecraft.types import (
     MERGECRAFT_MCP_NAME,
@@ -284,14 +285,12 @@ def _setup_codex_auth(
     raw = source.get(CODEX_AUTH_ENV, "").strip()
     if raw and subscription_auth_usable(raw):
         codex_home.mkdir(parents=True, exist_ok=True)
-        auth_path = codex_home / "auth.json"
-        auth_path.write_text(raw, encoding="utf-8")
-        # HS4 — the subscription credential must not be group/world-readable.
-        # The run home is chowned to the agent user after this write so the Codex
-        # CLI (dropped via setpriv) can still read its own ``auth.json`` as
-        # ``0600`` root-owned; the mode, not the owner, is what keeps other
-        # processes and the agent's ``Read`` tool out of it.
-        os.chmod(auth_path, 0o600)
+        # HS4 — the subscription credential must not be group/world-readable,
+        # not even briefly: it is created ``0600``. The run home is chowned to the
+        # agent user after this write so the Codex CLI (dropped via setpriv) can
+        # still read its own ``auth.json``; the mode, not the owner, is what keeps
+        # other processes and the agent's ``Read`` tool out of it.
+        write_private_file(codex_home / "auth.json", raw)
         return
     if raw:
         logger.warning(

@@ -133,7 +133,7 @@ def _assert_in_checkout_scratch(ctx: object, tracked: Path) -> None:
     rel = evidence.relative_to(checkout).as_posix()
     assert rel != "evidence"
     assert not rel.startswith("evidence/")
-    written = evidence / "opencode.json"
+    written = oc._opencode_run_config_dir(ctx) / "opencode.json"  # type: ignore[arg-type]
     assert written.is_file()
     assert written.resolve().is_relative_to(checkout)
 

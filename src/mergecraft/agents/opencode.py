@@ -46,7 +46,6 @@ from mergecraft.agents.shared import (
     AgentUsage,
     agent,
     log_token_table,
-    mcp_auth_headers,
     resolve_cache_read,
     spawn_agent_cli,
     start_stderr_drain,
@@ -54,6 +53,7 @@ from mergecraft.agents.shared import (
 )
 from mergecraft.config.env import AgentRuntimeEnv
 from mergecraft.mcp.tool_state import primary_repo_state
+from mergecraft.security.private_files import write_private_file
 from mergecraft.security.review_integrity import TreeBaseline, hash_tree
 from mergecraft.tracing import current_tracer
 from mergecraft.tracing.genai import (
@@ -128,6 +128,13 @@ _OPENCODE_READ_HEADER_RE: Final[re.Pattern[str]] = re.compile(
     r"^Read file .*, lines (?P<start>\d+)-(?P<end>\d+)$", re.MULTILINE
 )
 
+# Credentials never appear in the run config: it names env vars as ``{env:NAME}``,
+# which OpenCode substitutes at load, and the values ride the child env only
+# (the same convention as the Codex driver's ``env_key`` / ``bearer_token_env_var``).
+_OPENCODE_MCP_TOKEN_ENV: Final[str] = "MERGECRAFT_MCP_TOKEN"
+_ENV_NAME_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_ENV_REFERENCE_RE: Final[re.Pattern[str]] = re.compile(r"\{env:([A-Za-z_][A-Za-z0-9_]*)\}")
+
 
 def _opencode_provider_http_timeout_s() -> float:
     """Return the httpx timeout for OpenCode provider HTTP session calls."""
@@ -150,8 +157,56 @@ class ProviderTimeoutError(RuntimeError):
 
 
 def _api_key_from_env(api_key_env: str) -> str:
-    """Read a provider API key from the environment at emit time (HA1 / D16)."""
+    """Read a provider API key from the environment at launch time (HA1 / D16)."""
     return os.environ.get(api_key_env, "").strip()
+
+
+def _env_reference(env_name: str) -> str:
+    """Return OpenCode's ``{env:NAME}`` reference, or ``""`` for an invalid name."""
+    return f"{{env:{env_name}}}" if _ENV_NAME_RE.fullmatch(env_name) else ""
+
+
+def _config_credential_env(ctx: AgentRunContext, config_json: str) -> dict[str, str]:
+    """Return the credential env vars the run config references by name.
+
+    Each provider ``apiKey`` reference resolves to the parent process's value
+    (what the config used to carry inline); the MCP header reference resolves to
+    the per-run bearer. Unset values are left out, so the reference expands to
+    an empty string exactly as an empty inline key did.
+    """
+    env: dict[str, str] = {}
+    try:
+        config = json.loads(config_json)
+    except json.JSONDecodeError:
+        config = {}
+    providers = config.get("provider") if isinstance(config, dict) else None
+    for block in providers.values() if isinstance(providers, dict) else ():
+        options = block.get("options") if isinstance(block, dict) else None
+        api_key = options.get("apiKey") if isinstance(options, dict) else None
+        match = _ENV_REFERENCE_RE.fullmatch(api_key) if isinstance(api_key, str) else None
+        if match is not None:
+            value = _api_key_from_env(match.group(1))
+            if value:
+                env[match.group(1)] = value
+    if ctx.mcp_auth_token:
+        env[_OPENCODE_MCP_TOKEN_ENV] = ctx.mcp_auth_token
+    return env
+
+
+def _opencode_mcp_headers(ctx: AgentRunContext) -> dict[str, str]:
+    """``Authorization`` header naming the per-run bearer's env var, not its value."""
+    if not ctx.mcp_auth_token:
+        return {}
+    return {"Authorization": f"Bearer {_env_reference(_OPENCODE_MCP_TOKEN_ENV)}"}
+
+
+def _opencode_run_config_dir(ctx: AgentRunContext) -> Path:
+    """Private run-temp child holding the generated ``opencode.json``.
+
+    Outside the evidence directory (which workflows upload) and denied to the
+    reviewer by ``_TEMP_DIR_PRIVATE_CHILDREN``.
+    """
+    return Path(ctx.tmpdir) / "opencode-run-config"
 
 
 def _opencode_data_home(ctx: AgentRunContext) -> Path:
@@ -186,7 +241,7 @@ def _with_flat_opencode_auth(env: dict[str, str], *, model: str | None) -> dict[
 
 
 def _hand_xdg_data_home_to_agent(data_home: Path) -> None:
-    """Chown the isolated XDG data tree to the setpriv-dropped agent user (W3.4).
+    """Chown an isolated run tree (XDG data home, run config) to the agent user (W3.4).
 
     ``_setup_opencode_auth`` runs inside the still-root action entrypoint, so the
     ``opencode/`` directory and its ``auth.json`` are created root-owned even
@@ -240,9 +295,7 @@ def _setup_opencode_auth(
     if raw and opencode_auth_usable(raw):
         auth_dir = data_home / "opencode"
         auth_dir.mkdir(parents=True, exist_ok=True)
-        auth_path = auth_dir / "auth.json"
-        auth_path.write_text(raw, encoding="utf-8")
-        os.chmod(auth_path, 0o600)
+        write_private_file(auth_dir / "auth.json", raw)
         _hand_xdg_data_home_to_agent(data_home)
         return
     if raw:
@@ -276,7 +329,7 @@ def _opencode_provider_options(config: ProviderConfig) -> dict[str, object]:
     """Build OpenCode provider ``options`` (transport only — no generation knobs)."""
     options: dict[str, object] = {
         "baseURL": config.base_url,
-        "apiKey": _api_key_from_env(config.api_key_env),
+        "apiKey": _env_reference(config.api_key_env),
     }
     for key in _OPENCODE_PROVIDER_OPTION_KEYS:
         value = config.extra_options.get(key)
@@ -634,11 +687,15 @@ def _build_review_mode_read_allowlist(checkout: Path, evidence: Path) -> dict[st
 
 
 # Run temp-dir children the agent must never read: the isolated auth store, the
-# empty per-run config dir, and the scratch HOME.
+# empty per-run config dir, the generated run config, the scratch HOME, and the
+# other harnesses' run homes (a mixed-harness chain shares the temp dir).
 _TEMP_DIR_PRIVATE_CHILDREN: Final[tuple[str, ...]] = (
     "opencode-xdg-data",
     "opencode-xdg-config",
+    "opencode-run-config",
     "home",
+    ".codex",
+    ".claude",
 )
 
 # Where OpenCode spills a tool result too large to return inline; the truncated
@@ -707,7 +764,7 @@ def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
                 "type": "remote",
                 "url": ctx.mcp_server_url,
                 "timeout": 300_000,
-                **({"headers": mcp_auth_headers(ctx)} if ctx.mcp_auth_token else {}),
+                **({"headers": _opencode_mcp_headers(ctx)} if ctx.mcp_auth_token else {}),
             }
         },
         "agent": agent_block,
@@ -1269,10 +1326,11 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     )
     if otel_plugin is not None:
         config_json = apply_otel_plugin(config_json, otel_plugin)
-    config_dir = _evidence_dir(ctx)
+    config_dir = _opencode_run_config_dir(ctx)
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "opencode.json"
-    config_path.write_text(config_json, encoding="utf-8")
+    write_private_file(config_path, config_json)
+    _hand_xdg_data_home_to_agent(config_dir)
 
     credential_env = _resolved_opencode_credentials(ctx)
     data_home = _opencode_data_home(ctx)
@@ -1283,8 +1341,8 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     # Baseline AFTER our own writes, before the agent runs. ``_evidence_dir``
     # falls back to ``<tmpdir>/evidence`` when neither MERGECRAFT_EVIDENCE_DIR
     # nor RUNNER_TEMP is set (evidence/run_packet.py:71); when that tmpdir sits
-    # inside the checkout, hashing first would make ``opencode.json`` and the
-    # isolated ``auth.json`` under ``opencode-xdg-data`` — files mergeCraft
+    # inside the checkout, hashing first would make ``opencode-run-config/opencode.json``
+    # and the isolated ``auth.json`` under ``opencode-xdg-data`` — files mergeCraft
     # itself just wrote — read as tampering, and every review would fail closed.
     # The gate still covers the whole agent session, which is the mutation this
     # check exists to catch.
@@ -1313,6 +1371,9 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         extras["CLAUDE_CODE_USE_VERTEX"] = "1"
     env = build_agent_env("opencode", extras, model=model)
     env.update({k: v for k, v in credential_env.items() if k not in env})
+    # Values the config references as ``{env:NAME}``; added after the allowlist
+    # filter, which strips credential-shaped names.
+    env.update(_config_credential_env(ctx, config_json))
     if otel_plugin is not None:
         # Header values the plugin entry references as ``{env:NAME}``; added after
         # the allowlist filter, which would otherwise drop them.

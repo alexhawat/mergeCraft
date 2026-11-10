@@ -94,9 +94,12 @@ def test_opencode_build_security_config_includes_bearer_when_token_set(tmp_path:
         mcp_server_url=_LOOPBACK_MCP_URL,
     )
 
-    config = json.loads(opencode_module.build_security_config(ctx, "anthropic/claude-sonnet"))
-    headers = config["mcp"][MERGECRAFT_MCP_NAME].get("headers")
-    assert _authorization_header(headers) == f"Bearer {_PER_RUN_TOKEN}"
+    raw = opencode_module.build_security_config(ctx, "anthropic/claude-sonnet")
+    headers = json.loads(raw)["mcp"][MERGECRAFT_MCP_NAME].get("headers")
+    # OpenCode expands the env reference at load; the token itself never lands
+    # in the config (the driver passes it in ``MERGECRAFT_MCP_TOKEN``).
+    assert _authorization_header(headers) == "Bearer {env:MERGECRAFT_MCP_TOKEN}"
+    assert _PER_RUN_TOKEN not in raw
 
 
 def test_opencode_build_security_config_omits_headers_when_token_empty(tmp_path: Path) -> None:

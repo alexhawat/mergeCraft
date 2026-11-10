@@ -86,7 +86,7 @@ _BYTE_IDENTITY_CASES: tuple[tuple[str, str, dict[str, str], object], ...] = (
                 "name": "provider_1",
                 "options": {
                     "baseURL": "https://provider-1.example.test/v1",
-                    "apiKey": "key-1",
+                    "apiKey": "{env:MERGECRAFT_CUSTOM_PROVIDER_API_KEY_1}",
                 },
                 "models": {"some-model": {"name": "some-model"}},
             },
@@ -95,7 +95,7 @@ _BYTE_IDENTITY_CASES: tuple[tuple[str, str, dict[str, str], object], ...] = (
                 "name": "provider_2",
                 "options": {
                     "baseURL": "https://provider-2.example.test/v1",
-                    "apiKey": "key-2",
+                    "apiKey": "{env:MERGECRAFT_CUSTOM_PROVIDER_API_KEY_2}",
                 },
                 "models": {},
             },
@@ -114,7 +114,7 @@ _BYTE_IDENTITY_CASES: tuple[tuple[str, str, dict[str, str], object], ...] = (
                 "name": "default",
                 "options": {
                     "baseURL": "https://custom.example.test/v1",
-                    "apiKey": "custom-key",
+                    "apiKey": "{env:MERGECRAFT_CUSTOM_PROVIDER_API_KEY}",
                 },
                 "models": {"some-model": {"name": "some-model"}},
             }
@@ -141,7 +141,7 @@ _BYTE_IDENTITY_CASES: tuple[tuple[str, str, dict[str, str], object], ...] = (
                 "name": "provider_1",
                 "options": {
                     "baseURL": "https://provider-1.example.test/v1",
-                    "apiKey": "key-1",
+                    "apiKey": "{env:MERGECRAFT_CUSTOM_PROVIDER_API_KEY_1}",
                 },
                 "models": {"some-model": {"name": "some-model"}},
             },
@@ -150,7 +150,7 @@ _BYTE_IDENTITY_CASES: tuple[tuple[str, str, dict[str, str], object], ...] = (
                 "name": "provider_3",
                 "options": {
                     "baseURL": "https://provider-3.example.test/v1",
-                    "apiKey": "key-3",
+                    "apiKey": "{env:MERGECRAFT_CUSTOM_PROVIDER_API_KEY_3}",
                 },
                 "models": {},
             },
@@ -171,7 +171,7 @@ _BYTE_IDENTITY_CASES: tuple[tuple[str, str, dict[str, str], object], ...] = (
                 "name": "provider_1",
                 "options": {
                     "baseURL": "https://provider-1.example.test/v1",
-                    "apiKey": "key-1",
+                    "apiKey": "{env:MERGECRAFT_CUSTOM_PROVIDER_API_KEY_1}",
                 },
                 "models": {"some-model": {"name": "some-model"}},
             }
@@ -319,7 +319,7 @@ def test_named_presets_still_resolve_via_registry(
         "nous": {
             "npm": "@ai-sdk/openai-compatible",
             "name": "nous",
-            "options": {"baseURL": NOUS_BASE_URL, "apiKey": "nous-key"},
+            "options": {"baseURL": NOUS_BASE_URL, "apiKey": "{env:LLM_PROVIDER_1_API_KEY}"},
             "models": {"deepseek/deepseek-v4-flash": {"name": "deepseek/deepseek-v4-flash"}},
         }
     }
@@ -339,7 +339,7 @@ def test_named_presets_still_resolve_via_registry(
         "tokenhub": {
             "npm": "@ai-sdk/openai-compatible",
             "name": "tokenhub",
-            "options": {"baseURL": TOKENHUB_BASE_URL, "apiKey": "th-key"},
+            "options": {"baseURL": TOKENHUB_BASE_URL, "apiKey": "{env:LLM_PROVIDER_2_API_KEY}"},
             "models": {"hy3": {"name": "hy3"}},
         }
     }
@@ -557,7 +557,7 @@ def test_litellm_shaped_base_url_is_accepted_by_provider_config(
             "name": SINGLETON_PROVIDER_ID,
             "options": {
                 "baseURL": litellm_base_url,
-                "apiKey": "litellm-proxy-key-placeholder",
+                "apiKey": "{env:MERGECRAFT_CUSTOM_PROVIDER_API_KEY}",
             },
             "models": {"gpt-4o": {"name": "gpt-4o"}},
         }

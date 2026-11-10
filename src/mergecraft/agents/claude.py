@@ -46,6 +46,7 @@ from mergecraft.agents.verifier import (
     pinned_judge_model,
 )
 from mergecraft.config.env import AgentRuntimeEnv
+from mergecraft.security.private_files import write_private_file
 from mergecraft.tracing._tool_attrs import (
     emit_verb_subevent,
     enrich_tool_request,
@@ -198,7 +199,9 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
     extra: dict[str, dict[str, object]] = (
         consumer_mcp_stdio_entries(list(resolved)) if resolved else {}
     )
-    config_path.write_text(
+    # The entries carry the per-run MCP bearer: owner-only from creation.
+    write_private_file(
+        config_path,
         json.dumps(
             {
                 "mcpServers": {
@@ -208,7 +211,6 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
                 }
             }
         ),
-        encoding="utf-8",
     )
     # write_mcp_config runs in the root orchestrator, before the privilege
     # drop wraps the actual claude subprocess in setpriv — a plain mkdir()
