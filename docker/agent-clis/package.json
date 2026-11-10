@@ -3,9 +3,9 @@
   "private": true,
   "description": "Pinned agent CLI dependencies for mergeCraft Docker images (W7 / D7).",
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.317",
-    "@openai/codex": "0.166.0",
-    "@google/gemini-cli": "0.66.0",
-    "@opencode/cli": "2.2.5"
+    "@anthropic-ai/claude-code": "2.1.319",
+    "@openai/codex": "0.167.0",
+    "@google/gemini-cli": "0.67.0",
+    "@opencode/cli": "2.2.6"
   }
 }
