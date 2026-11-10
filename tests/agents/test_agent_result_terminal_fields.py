@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from tests.support.tool_context import give_review_scope
 
 from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import AgentResult, AgentRunContext, ResolvedInstructions
@@ -28,22 +29,24 @@ if TYPE_CHECKING:
 
 
 def _tool_ctx(tmp_path: Path) -> ToolContext:
-    return ToolContext(
-        agent_id="claude",
-        repo=RepoIdentity(owner="acme", name="demo"),
-        payload=ResolvedPayload(
-            event=PayloadEvent(trigger="pull_request"),
-            shell="restricted",
-        ),
-        github=GitHubClient(token=""),
-        github_installation_token="",
-        git_token="",
-        api_token="",
-        modes=compute_modes("claude"),
-        tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
-        mcp_server_url="",
-        tmpdir=str(tmp_path),
-        trust_tier="trusted",
+    return give_review_scope(
+        ToolContext(
+            agent_id="claude",
+            repo=RepoIdentity(owner="acme", name="demo"),
+            payload=ResolvedPayload(
+                event=PayloadEvent(trigger="pull_request"),
+                shell="restricted",
+            ),
+            github=GitHubClient(token=""),
+            github_installation_token="",
+            git_token="",
+            api_token="",
+            modes=compute_modes("claude"),
+            tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
+            mcp_server_url="",
+            tmpdir=str(tmp_path),
+            trust_tier="trusted",
+        )
     )
 
 

@@ -119,3 +119,22 @@ def bind_review_publication_scope(
     diff_path = Path(ctx.tmpdir) / "diff.patch"
     diff_path.write_text("diff --git a/x b/x\n", encoding="utf-8")
     primary.diff_path = str(diff_path)
+
+
+def give_review_scope(ctx: ToolContext) -> ToolContext:
+    """Record a materialized (hunk-free) diff as the run's review scope.
+
+    A terminal verdict needs review scope even when no mode was selected, so a
+    fixture that submits one without a checkout records the diff path here.
+    """
+    from pathlib import Path
+
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    primary = primary_repo_state(ctx.tool_state)
+    if not primary.diff_path:
+        diff_path = Path(ctx.tmpdir) / "scope.diff"
+        diff_path.parent.mkdir(parents=True, exist_ok=True)
+        diff_path.write_text("diff --git a/x b/x\n", encoding="utf-8")
+        primary.diff_path = str(diff_path)
+    return ctx

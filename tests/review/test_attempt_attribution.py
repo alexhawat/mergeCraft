@@ -30,28 +30,31 @@ from mergecraft.mcp.context import (
 from mergecraft.mcp.tool_state import TerminalSubmission, init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
+from tests.support.tool_context import give_review_scope
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
-    return ToolContext(
-        agent_id="claude",
-        repo=RepoIdentity(owner="acme", name="demo"),
-        payload=ResolvedPayload(
-            event=PayloadEvent(trigger="pull_request", issue_number=7, is_pr=True),
-            shell="restricted",
-        ),
-        github=GitHubClient(token=""),
-        github_installation_token="",
-        git_token="",
-        api_token="",
-        modes=compute_modes("claude"),
-        tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
-        mcp_server_url="",
-        tmpdir=str(tmp_path),
-        trust_tier="trusted",
+    return give_review_scope(
+        ToolContext(
+            agent_id="claude",
+            repo=RepoIdentity(owner="acme", name="demo"),
+            payload=ResolvedPayload(
+                event=PayloadEvent(trigger="pull_request", issue_number=7, is_pr=True),
+                shell="restricted",
+            ),
+            github=GitHubClient(token=""),
+            github_installation_token="",
+            git_token="",
+            api_token="",
+            modes=compute_modes("claude"),
+            tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
+            mcp_server_url="",
+            tmpdir=str(tmp_path),
+            trust_tier="trusted",
+        )
     )
 
 

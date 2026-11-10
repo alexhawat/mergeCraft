@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from pydantic import ValidationError
+from tests.support.tool_context import give_review_scope
 
 from mergecraft.agents.gates import (
     TERMINAL_PROTOCOL_DENIED_TOOL_NAMES,
@@ -44,22 +45,24 @@ _UNEXPECTED_FIELD = "unexpected_field"
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
-    return ToolContext(
-        agent_id="claude",
-        repo=RepoIdentity(owner="acme", name="demo"),
-        payload=ResolvedPayload(
-            event=PayloadEvent(trigger="pull_request"),
-            shell="restricted",
-        ),
-        github=GitHubClient(token=""),
-        github_installation_token="",
-        git_token="",
-        api_token="",
-        modes=compute_modes("claude"),
-        tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
-        mcp_server_url="",
-        tmpdir=str(tmp_path),
-        trust_tier="trusted",
+    return give_review_scope(
+        ToolContext(
+            agent_id="claude",
+            repo=RepoIdentity(owner="acme", name="demo"),
+            payload=ResolvedPayload(
+                event=PayloadEvent(trigger="pull_request"),
+                shell="restricted",
+            ),
+            github=GitHubClient(token=""),
+            github_installation_token="",
+            git_token="",
+            api_token="",
+            modes=compute_modes("claude"),
+            tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
+            mcp_server_url="",
+            tmpdir=str(tmp_path),
+            trust_tier="trusted",
+        )
     )
 
 
@@ -745,8 +748,10 @@ def _one_finding_payload() -> dict[str, Any]:
 def _explicit_ctx(tmp_path: Path) -> ToolContext:
     from tests.support.tool_context import make_tool_context
 
-    return make_tool_context(
-        tmp_path, trust_tier="trusted", event=PayloadEvent(trigger="pull_request")
+    return give_review_scope(
+        make_tool_context(
+            tmp_path, trust_tier="trusted", event=PayloadEvent(trigger="pull_request")
+        )
     )
 
 

@@ -39,6 +39,7 @@ from tests.review_record.test_w15_deterministic_record import (
     _sample_packet,
     _Scm,
 )
+from tests.support.tool_context import give_review_scope
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -78,7 +79,7 @@ def _blocked_modeless_context(tmp_path: Path, scm: _Scm) -> Any:
         verified_ids=set(),
     )
     assert ctx.tool_state.selected_mode is None
-    return ctx
+    return give_review_scope(ctx)
 
 
 async def _call(ctx: Any, spec: Any, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -355,7 +356,7 @@ async def test_record_never_shows_approved_beside_a_refused_verdict(
     else demotes the diagnostic; it must still not read ``approved``."""
     monkeypatch.delenv("MERGECRAFT_STICKY_ONLY_NEUTRAL", raising=False)
     scm = _Scm()
-    ctx = _context(tmp_path, scm)
+    ctx = give_review_scope(_context(tmp_path, scm))
     ctx.run_id = 42211929360
     response = await _call(
         ctx,

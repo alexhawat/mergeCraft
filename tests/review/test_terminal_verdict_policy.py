@@ -46,7 +46,7 @@ from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.review_taxonomy import FINDING_MARKER_PREFIX, finding_fingerprint
 from mergecraft.run_outcome import RunOutcome, run_succeeded_for_outcome
 from mergecraft.utils.github import GitHubClient
-from tests.support.tool_context import bind_github_client
+from tests.support.tool_context import bind_github_client, give_review_scope
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -82,25 +82,27 @@ def _ctx(
     static_checks: list[StaticCheckConfig] | None = None,
     static_checks_enabled: bool = False,
 ) -> ToolContext:
-    return ToolContext(
-        agent_id="claude",
-        repo=RepoIdentity(owner="acme", name="demo"),
-        payload=ResolvedPayload(
-            event=PayloadEvent(trigger="pull_request", issue_number=issue_number, is_pr=True),
-            shell="restricted",
-        ),
-        github=GitHubClient(token=""),
-        github_installation_token="",
-        git_token="",
-        api_token="",
-        modes=compute_modes("claude"),
-        tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
-        mcp_server_url="",
-        tmpdir=str(tmp_path),
-        pr_approve_enabled=True,
-        static_checks=list(static_checks or []),
-        static_checks_enabled=static_checks_enabled,
-        trust_tier="trusted",
+    return give_review_scope(
+        ToolContext(
+            agent_id="claude",
+            repo=RepoIdentity(owner="acme", name="demo"),
+            payload=ResolvedPayload(
+                event=PayloadEvent(trigger="pull_request", issue_number=issue_number, is_pr=True),
+                shell="restricted",
+            ),
+            github=GitHubClient(token=""),
+            github_installation_token="",
+            git_token="",
+            api_token="",
+            modes=compute_modes("claude"),
+            tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),
+            mcp_server_url="",
+            tmpdir=str(tmp_path),
+            pr_approve_enabled=True,
+            static_checks=list(static_checks or []),
+            static_checks_enabled=static_checks_enabled,
+            trust_tier="trusted",
+        )
     )
 
 
