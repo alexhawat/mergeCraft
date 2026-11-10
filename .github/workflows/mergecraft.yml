@@ -99,15 +99,12 @@
 # MERGECRAFT_REVIEWER_PAT, provider credentials, OIDC, and a write-scoped token to
 # PR-controlled code — any same-repo collaborator could edit this file on their
 # branch to self-approve or exfiltrate the PAT. Do not re-add a `pull_request`
-# trigger to this workflow for that purpose. The actual fix lives in the sibling
-# `mergecraft-approve.yml` workflow: a `workflow_run` trigger, which (like
-# pull_request_target, and more unconditionally so) always resolves its
-# definition from the default branch, runs on its own runner with no PR checkout
-# at all, and — via `workflow_run.pull_requests` being empty for forks by
-# GitHub's own documented behavior — naturally never fires for fork PRs. It only
-# reads the already-posted `mergecraft-approval` check-run conclusion (a pure
-# function of Finding severities, immune to the agent's own narrative) and, if
-# it is "success", submits the PAT-backed APPROVE itself.
+# trigger to this workflow for that purpose. Approval is not automated: the
+# sibling `mergecraft-approve.yml` is `workflow_dispatch` only. A maintainer
+# supplies the accepted run id and the exact PR head SHA, and a separate approval
+# App (never this workflow's credentials) posts the APPROVE after re-checking
+# that run and head. There is no `workflow_run` trigger. An App review does not
+# satisfy a CODEOWNERS rule, so it cannot stand in for a code-owner approval.
 #
 # Same-repo guard below keeps fork PRs from receiving secrets (prior pull_request
 # behavior). mergeCraft uses checkout_pr + API with push/shell disabled — no

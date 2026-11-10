@@ -11,6 +11,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -173,12 +174,18 @@ def approve_dispatch(
     )
 
 
-def main() -> None:
-    """Read trusted workflow context and fail closed on API/validation errors."""
+def main() -> int:
+    """Read trusted workflow context; return a non-zero exit status on failure.
+
+    Returns:
+        0 when the event is not a dispatch (nothing to do) or the head was
+        approved; 1 when validation rejected the dispatch, so the workflow run
+        fails instead of reporting a green no-op.
+    """
     if os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
-        return
+        return 0
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
-    approve_dispatch(
+    approved = approve_dispatch(
         _api,
         repo=os.environ["GITHUB_REPOSITORY"],
         event=event,
@@ -186,7 +193,16 @@ def main() -> None:
         approval_app_id=os.environ["APPROVAL_APP_ID"],
         server=os.environ["GITHUB_SERVER_URL"],
     )
+    if not approved:
+        print(
+            "approve_app_review: dispatch rejected; no approval was submitted "
+            "(check the run id, the head SHA, the run's workflow path, and that the "
+            "reviewing and approval App ids are distinct).",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

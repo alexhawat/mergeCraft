@@ -21,24 +21,14 @@ rules:
       # number reaches the CLI via `env:`, not a `run:` interpolation.
       # Authorization = the merge itself.
       - findings-carryover.yml
-      # Submits a privileged PR approval as the distinct @sevn-one identity
-      # (D14 gate 3, PR #200). No checkout of any kind — only a read of the
-      # already-posted mergecraft-approval check-run conclusion (a pure
-      # function of Finding severities, not the reviewing agent's narrative)
-      # and, if it is "success", a `gh api` POST to /pulls/{n}/reviews pinned
-      # to that exact commit_id. pull_requests[0] is empty for fork PRs by
-      # GitHub's own documented behavior, so this never fires for them.
+      # Maintainer-dispatched approval (`workflow_dispatch` only; no
+      # `workflow_run`). Checks out only the trusted default-branch helper, then
+      # re-reads the selected mergecraft run and posts an APPROVE as a separate
+      # approval App, pinned to the exact head SHA the maintainer supplied.
+      # Runs no PR-controlled code. See docs/trust-policy.md.
       - mergecraft-approve.yml
   cache-poisoning:
     ignore:
       # security job analyzer-cache: step runs only on push (not pull_request);
       # caches dev-tooling under .mergecraft/, not release artifacts.
       - ci.yml
-      # security-scope job (npm audit + workflow lint): the flagged
-      # actions/setup-node step's job-level `if:` restricts it to
-      # pull_request/workflow_dispatch only; it never runs on the `push`
-      # trigger this workflow's sibling integration-pr job needs (#647).
-      # zizmor's audit reads the workflow-level `on:` block, not per-job
-      # `if:` guards. Caches agent-clis/tools npm lockfiles, not release
-      # artifacts.
-      - integration.yml

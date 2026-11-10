@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -326,3 +327,55 @@ def test_workflow_run_event_cannot_invoke_approval(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_run")
     monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
     helper.main()
+
+
+def _dispatch_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, inputs: dict[str, str]) -> None:
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"inputs": inputs}))
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_dispatch")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+    monkeypatch.setenv("GITHUB_REPOSITORY", REPO)
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("EXPECTED_APP_ID", "42")
+    monkeypatch.setenv("APPROVAL_APP_ID", "84")
+
+
+@pytest.mark.parametrize(
+    "inputs",
+    [
+        {"review-run-id": "not-a-run", "reviewed-head": HEAD},
+        {"review-run-id": "123", "reviewed-head": "short"},
+    ],
+)
+def test_main_exits_nonzero_when_dispatch_validation_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    inputs: dict[str, str],
+) -> None:
+    from scripts import approve_app_review as helper
+
+    _dispatch_env(monkeypatch, tmp_path, inputs)
+    assert helper.main() == 1
+    assert "dispatch rejected" in capsys.readouterr().err
+
+
+def test_main_exits_nonzero_for_mismatched_run_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from scripts import approve_app_review as helper
+
+    _dispatch_env(monkeypatch, tmp_path, {"review-run-id": "123", "reviewed-head": HEAD})
+    monkeypatch.setattr(
+        helper,
+        "_api",
+        lambda path, body: {**RUN, "path": ".github/workflows/unrelated.yml"},
+    )
+    assert helper.main() == 1
+
+
+def test_main_ignores_non_dispatch_events(monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import approve_app_review as helper
+
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_run")
+    assert helper.main() == 0
