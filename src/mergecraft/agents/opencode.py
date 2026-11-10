@@ -51,7 +51,7 @@ from mergecraft.agents.shared import (
     start_stderr_drain,
     with_prompt,
 )
-from mergecraft.config.env import AgentRuntimeEnv
+from mergecraft.config.env import AgentRuntimeEnv, McpEnv
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.security.private_files import write_private_file
 from mergecraft.security.review_integrity import TreeBaseline, hash_tree
@@ -131,7 +131,8 @@ _OPENCODE_READ_HEADER_RE: Final[re.Pattern[str]] = re.compile(
 # Credentials never appear in the run config: it names env vars as ``{env:NAME}``,
 # which OpenCode substitutes at load, and the values ride the child env only
 # (the same convention as the Codex driver's ``env_key`` / ``bearer_token_env_var``).
-_OPENCODE_MCP_TOKEN_ENV: Final[str] = "MERGECRAFT_MCP_TOKEN"
+# The bearer's env var name comes from the model that owns it (``McpEnv``).
+_OPENCODE_MCP_TOKEN_ENV: Final[str] = str(McpEnv.model_fields["mcp_token"].validation_alias)
 _ENV_NAME_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _ENV_REFERENCE_RE: Final[re.Pattern[str]] = re.compile(r"\{env:([A-Za-z_][A-Za-z0-9_]*)\}")
 
