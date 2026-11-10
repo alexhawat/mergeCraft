@@ -12,12 +12,14 @@ from mergecraft.config.runtime_provider_registry import provider_credential_env_
 OPENCODE_AUTH_ENV = "OPENCODE_AUTH_JSON"
 
 # Patterns for sensitive env var names (used by normalize_env / redaction).
+# ``-`` counts as a separator too: the runner exports a hyphenated action input
+# such as ``logfire-token`` as ``INPUT_LOGFIRE-TOKEN`` (#1233).
 SENSITIVE_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"_KEY$", re.IGNORECASE),
-    re.compile(r"_SECRET$", re.IGNORECASE),
-    re.compile(r"_TOKEN$", re.IGNORECASE),
-    re.compile(r"_PASSWORD$", re.IGNORECASE),
-    re.compile(r"_CREDENTIAL$", re.IGNORECASE),
+    re.compile(r"[_-]KEY$", re.IGNORECASE),
+    re.compile(r"[_-]SECRET$", re.IGNORECASE),
+    re.compile(r"[_-]TOKEN$", re.IGNORECASE),
+    re.compile(r"[_-]PASSWORD$", re.IGNORECASE),
+    re.compile(r"[_-]CREDENTIAL$", re.IGNORECASE),
 )
 
 # Prefixes whose vars are safe to pass through. Only versioned toolchain homes
@@ -170,6 +172,14 @@ def set_env_allowlist(raw: str) -> None:
     """Set the user allowlist from a newline-separated string (repo ``envAllowlist``)."""
     global _user_allowlist
     names = {line.strip() for line in raw.splitlines() if line.strip()}
+    refused = sorted(
+        name for name in names if name in ALWAYS_STRIP_FROM_AGENT_ENV or is_sensitive_env_name(name)
+    )
+    if refused:
+        logger.warning(
+            "» envAllowlist cannot pass credential-shaped names to subprocesses; ignoring {}",
+            ", ".join(refused),
+        )
     _user_allowlist = names
 
 
@@ -187,14 +197,22 @@ def is_safe_env_var(key: str) -> bool:
 
 
 def filter_env(environ: dict[str, str] | None = None) -> dict[str, str]:
-    """Filter env vars using default-deny allowlist: safe set + user allowlist."""
+    """Filter env vars using default-deny allowlist: safe set + user allowlist.
+
+    The repo ``envAllowlist`` only *adds* non-sensitive names. It never
+    re-admits a credential-shaped name or one in
+    :data:`ALWAYS_STRIP_FROM_AGENT_ENV`: the restricted MCP shell, analyzer
+    and fallback envs all build on this function without the agent-env strip,
+    so an allowlisted ``GITHUB_TOKEN`` or ``INPUT_TOKEN`` would reach them
+    (#1233). Callers that need a credential inject it explicitly afterwards
+    (as :func:`build_agent_env` does for the active provider key).
+    """
     source: dict[str, str] = dict(os.environ) if environ is None else environ
     filtered: dict[str, str] = {}
     for key, value in source.items():
-        user_allowed = bool(_user_allowlist and key in _user_allowlist)
-        if is_sensitive_env_name(key) and not user_allowed:
+        if key in ALWAYS_STRIP_FROM_AGENT_ENV or is_sensitive_env_name(key):
             continue
-        if is_safe_env_var(key) or user_allowed:
+        if is_safe_env_var(key) or (_user_allowlist is not None and key in _user_allowlist):
             filtered[key] = value
     return filtered
 

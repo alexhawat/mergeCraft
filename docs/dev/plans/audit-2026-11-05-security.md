@@ -6,22 +6,7 @@ Audited commit: `55cf88e33c318a8b03a251fb0f8b6dad9d999141`. This memo supplement
 
 ## Validation
 
-The retained offline script is `plans/audit-2026-11-05-security-probes.py`. It ran successfully on the existing Python 3.14.6 interpreter, with local source imported through PYTHONPATH; no pytest was installed. The script uses a recording GitHub client, httpx MockTransport, in-memory patch seams, and an isolated disposable Git repository. It creates no source changes and cleans up its fixture repository.
-
-> **Removed after the 2026-11-09 audit verification (#1273).** The probe scripts asserted the
-> buggy behaviour at the audited commit, so they started failing as the findings were fixed.
-> They remain in git history: `git show 5dbaa2d4:docs/dev/plans/audit-2026-11-05-security-probes.py`.
-
-Reproduce from this checkout:
-
-```sh
-make --no-print-directory -f - audit-readonly <<'AUDIT_MAKE'
-audit-readonly:
-	@PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:. python -B plans/audit-2026-11-05-security-probes.py
-AUDIT_MAKE
-```
-
-The assertions deliberately capture current incorrect behavior; passing these probes confirms the findings, not product correctness. This is not a full test suite, real Action execution, live GHES integration or model-quality test.
+The [security probe](https://github.com/alexhawat/mergeCraft/blob/5dbaa2d4f59f321ec675b499e6a16e2421711d07/docs/dev/plans/audit-2026-11-05-security-probes.py) ran under Python 3.14.6 against the audited checkout. It used a recording GitHub client, httpx MockTransport, in-memory patch seams and a disposable Git repository. Passing assertions confirmed the defects at that revision. The script was removed after verification in #1273.
 
 ## New findings
 

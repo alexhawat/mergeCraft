@@ -436,6 +436,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a namespace, fork `EAGAIN`, `uid_map` write denied) are now classified as
   `sandboxed: isolation unavailable` and reported `declared-but-cannot-run`
   instead of a blocking gate failure (#1240).
+- Free-text secret redaction no longer leaks random credentials. The camelCase
+  identifier exemption now requires word-shaped keys (``ruleId``,
+  ``partialFingerprints``) instead of any lowercase-led blob with a capital, the
+  entropy threshold is capped at 4.5 bits per character so long tokens cannot
+  outgrow it, and fine-grained GitHub PATs (``github_pat_``), PyPI tokens and
+  ``Bearer`` credentials are redacted by pattern (the ``Bearer`` word is kept)
+  (#1232).
+- `envAllowlist` can no longer pass credentials to subprocesses. A
+  credential-shaped name (`*_TOKEN`, `*_KEY`, `*-TOKEN`, …) or one of
+  `GITHUB_TOKEN`, `GH_TOKEN`, `GIT_ASKPASS` and the Actions OIDC request
+  variables is now ignored with a warning instead of reaching the restricted
+  MCP shell, trusted analyzers and analyzer fallback environments; the action's
+  `INPUT_TOKEN` and hyphenated inputs such as `INPUT_LOGFIRE-TOKEN` count as
+  credentials. Non-secret names are still added (#1233).
+- One undecodable TruffleHog output line (a truncated write or a stray banner)
+  no longer discards the whole secret scan: the line is skipped and the
+  findings on every other line are kept. Output with no decodable line is still
+  reported as unparsable rather than as a clean scan (#1234).
+- Trace error text no longer carries URL credentials. A failed HTTP request's
+  exception message quotes the raw URL, so `https://user:password@host` reached
+  the span's `error` attribute even though `http.url` was redacted; the
+  `error`, `exception.message` and `tool.error_message` attributes now get the
+  same URL credential redaction before any sink sees them (#1235).
 - Managed pip analyzer provisioning bounds `uv pip install` at 600 seconds. It
   runs while holding the shared cache lock, so a hung install used to block every
   other worker; a timeout now removes the staging tree and fails the install
