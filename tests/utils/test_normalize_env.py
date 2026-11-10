@@ -33,6 +33,22 @@ def test_normalize_env_conflict_keeps_uppercase() -> None:
     assert "foo" not in env
 
 
+def test_normalize_env_keeps_lowercase_proxy_variables() -> None:
+    env = {"http_proxy": "http://p:3128", "no_proxy": "localhost,.corp"}
+    normalize_env(env)
+    assert env["http_proxy"] == "http://p:3128"
+    assert env["no_proxy"] == "localhost,.corp"
+    assert env["HTTP_PROXY"] == "http://p:3128"
+    assert env["NO_PROXY"] == "localhost,.corp"
+
+
+def test_normalize_env_lowercase_proxy_does_not_override_uppercase() -> None:
+    env = {"HTTPS_PROXY": "http://upper:1", "https_proxy": "http://lower:2"}
+    normalize_env(env)
+    assert env["HTTPS_PROXY"] == "http://upper:1"
+    assert env["https_proxy"] == "http://lower:2"
+
+
 def test_sanitize_secret_return_contract() -> None:
     assert sanitize_secret("K", "  a  ") == "a"
     assert sanitize_secret("K", "\n\t") is None
