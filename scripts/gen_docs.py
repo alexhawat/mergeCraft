@@ -2,11 +2,14 @@
 """Unified docs regeneration and drift gate for mergeCraft.
 
 Module: scripts.gen_docs
-Depends: scripts.gen_reference_docs, scripts.gen_docs_index
+Depends: scripts.gen_reference_docs, scripts.gen_docs_index, scripts.gen_provider_docs,
+    scripts.gen_env_example
 
 Runs reference-doc splicing (``docs/cli.md``, ``docs/action-reference.md``),
-manifest-driven index generation (``docs/README.md``), the ``llms-full.txt``
-bundle, and the six-axis support matrix (``docs/support-matrix.md``).
+manifest-driven index generation (``docs/README.md``), the provider tables and
+install requirements (``scripts/gen_provider_docs.py``), ``.env.example``
+(``scripts/gen_env_example.py``), the ``llms-full.txt`` bundle, and the six-axis
+support matrix (``docs/support-matrix.md``).
 ``make docs`` / ``make docs-check`` call this entry point.
 
 Exports:
@@ -90,12 +93,20 @@ def main(argv: list[str] | None = None) -> int:
     support_matrix = _load_module(
         "gen_support_matrix", REPO_ROOT / "scripts" / "gen_support_matrix.py"
     )
+    provider_docs = _load_module(
+        "gen_provider_docs", REPO_ROOT / "scripts" / "gen_provider_docs.py"
+    )
+    env_example = _load_module("gen_env_example", REPO_ROOT / "scripts" / "gen_env_example.py")
 
+    # Order matters: provider tables and .env.example are spliced into pages that
+    # the llms-full bundle concatenates, so the bundle regenerates last.
     for label, module in (
         ("reference docs", reference),
+        ("provider docs", provider_docs),
+        ("env example", env_example),
         ("docs index", index),
-        ("llms-full bundle", llms_full),
         ("support matrix", support_matrix),
+        ("llms-full bundle", llms_full),
     ):
         exit_code = module.main(check_args)
         if exit_code != 0:

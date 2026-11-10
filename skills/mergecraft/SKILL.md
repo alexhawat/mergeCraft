@@ -14,8 +14,19 @@ a read-only verifier; typed findings drive inline comments and the
 
 ## Setup checklist (new consumer repo)
 
-1. **Prereqs:** Python **3.11+**, uv, authenticated `gh` CLI. If no Python 3.11+
-   locally → use the Docker Action only ([`docs/install.md`](../../docs/install.md)).
+1. **Prereqs:**
+   <!-- BEGIN:requirements -->
+   **Requirements:** [uv](https://docs.astral.sh/uv/) is the only prerequisite for the
+   install; it downloads a compatible Python (3.11+) itself, so no system Python is
+   needed. The [GitHub CLI](https://cli.github.com) (`gh auth login`) is needed only
+   for `provider auth --scope github` (the default), which stores the secret
+   with `gh secret set`; `mergecraft init` and `--scope local` need neither `gh` nor a
+   network. Two providers need one more CLI at the credential step: the Codex CLI for `openai`
+   and Claude Code for `anthropic`
+   ([provider table](../../docs/authentication.md)).
+   <!-- END:requirements -->
+   If uv cannot be installed, use the Docker Action only
+   ([`docs/install.md`](../../docs/install.md)).
 2. **Install:**
 
    ```bash
@@ -51,10 +62,9 @@ a read-only verifier; typed findings drive inline comments and the
 
 Install the generated `skills/<harness>/mergecraft/SKILL.md` package. The raw
 `skills/mergecraft/SKILL.md` is a generator template; replace a copied template
-with the generated package to repair relative links. Documentation currently
-uses verified commit `09d441236e80a10758d4058b64e7ac60fe52925e`, because Action tag
-`v0.1.0a1` predates the MCP documentation. Release maintainers can set
-`MERGECRAFT_AGENT_PACKAGES_REF` when generating packages for another verified ref.
+with the generated package to repair relative links. Documentation links use the
+`{{DOCUMENTATION_REF}}` release tag, the release this checklist installs. Release
+maintainers can set `MERGECRAFT_AGENT_PACKAGES_REF` when generating packages for another verified ref.
 Fetch that ref first: an unresolved explicit override fails instead of silently
 substituting a branch.
 

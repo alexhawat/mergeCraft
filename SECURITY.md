@@ -16,7 +16,7 @@ When a private advisory is opened, maintainers follow this process:
 2. **Triage** severity and affected versions; confirm a reproduction privately.
 3. **Patch** on a private fork or embargoed branch; do not discuss the
    vulnerability in a public issue until disclosure.
-4. **Release** a fix on the supported branch (`main` / `pre-0.0.1`) and
+4. **Release** a fix on `main` and in a new pre-release, and
    credit the reporter unless they ask otherwise.
 5. **Disclose** on the agreed date (see coordinated vulnerability disclosure
    below).
@@ -37,8 +37,8 @@ reporter and maintainers agree no fix is required):
 
 ## Supported Versions
 
-This project is under active early development; only the latest `main` /
-`pre-0.0.1` branch is supported.
+This project is under active early development; only the latest published
+pre-release (currently `0.1.0a5`) and `main` are supported.
 
 ## Review-only product boundary
 

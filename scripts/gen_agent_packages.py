@@ -40,7 +40,17 @@ _RELATIVE_LINK = re.compile(r"\(\.\./\.\./([^)]+)\)")
 _FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 DEFAULT_BLOB_REF = "pre-0.0.1"
-DOCUMENTATION_REF = "a0cbc782b19cb6447eb566fd34edc0329567d548"
+CONSUMER_RELEASE_PATH = REPO_ROOT / "docs" / "consumer-release.json"
+_REF_TOKEN = "{{DOCUMENTATION_REF}}"
+
+
+def _release_documentation_ref() -> str:
+    """Return the release tag the consumer install pins (``v<consumer-release version>``)."""
+    version = json.loads(CONSUMER_RELEASE_PATH.read_text(encoding="utf-8"))["version"]
+    return f"v{version}"
+
+
+DOCUMENTATION_REF = _release_documentation_ref()
 
 
 def _blob_ref() -> str:
@@ -51,10 +61,9 @@ def _blob_ref() -> str:
         raise ValueError(
             f"documentation ref {env_ref!r} does not resolve; fetch it before generating packages"
         )
-    # Documentation and Action releases have separate lifecycles. The old
-    # Action tag predates docs/mcp.md. This verified source commit contains all
-    # package targets and the canonical provider command. Keep this deterministic
-    # in shallow clones; a release may explicitly override it with its own ref.
+    # Package links point at the release tag the consumer install pins, so the docs
+    # a skill links to match the CLI it installs. Deterministic in shallow clones;
+    # a release may explicitly override it with its own ref.
     return DOCUMENTATION_REF
 
 
@@ -119,7 +128,7 @@ def _render_frontmatter(data: dict[str, Any]) -> str:
 def _render_skill(harness_row: dict[str, Any], *, ref: str) -> str:
     source_text = SOURCE_SKILL.read_text(encoding="utf-8")
     frontmatter, body = _parse_frontmatter(source_text)
-    body = _rewrite_links(body, ref=ref)
+    body = _rewrite_links(body, ref=ref).replace(_REF_TOKEN, ref)
 
     env_vars = harness_row.get("required_environment_variables")
     if isinstance(env_vars, list):

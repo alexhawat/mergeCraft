@@ -28,22 +28,38 @@ run on `pull_request_target` (opened / synchronize).
 
 ## Provider reference
 
-| Provider | Subscription (recommended) | API key | Recommended model | Inferred harness |
-|----------|-----------------------------|---------|-------------------|------------------|
-| Anthropic Claude | `mergecraft provider auth anthropic --scope github` → indexed credentials (Claude Pro/Max) | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet` | `claude` |
-| OpenAI Codex | `mergecraft provider auth openai --scope github` → indexed credentials (ChatGPT Plus/Pro/Team/Enterprise) | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` | `codex` |
-| OpenCode Zen / Go | `mergecraft provider auth opencode --scope github` → `OPENCODE_AUTH_JSON` (billing-backed API key from [opencode.ai/auth](https://opencode.ai/auth)) | `OPENCODE_API_KEY` | Zen: `opencode/gpt-5.6-sol`; Go: `opencode-go/deepseek-v4-pro` (cheaper: `opencode-go/deepseek-v4.1-flash`) — [OpenCode Go models](https://opencode.ai/docs/go/) | `opencode` |
-| Google Gemini | `mergecraft provider auth google --scope github` → indexed credentials (AI Studio) | `GEMINI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` | `google/gemini-3.1-pro-preview` | `gemini` |
-| Tencent TokenHub | — (API key) | `mergecraft provider auth tokenhub --scope github` → indexed credentials | `tokenhub/hy3` | `opencode` |
-| MiniMax | — (API key) | `mergecraft provider auth minimax --scope github` → indexed credentials | `minimax/MiniMax-M3` | `opencode` |
-| DeepSeek | — (API key) | `mergecraft provider auth deepseek --scope github` → indexed credentials | `deepseek/deepseek-chat` | `opencode` |
-| Cursor Cloud | `mergecraft auth cursor --scope github` (legacy shim) | `CURSOR_API_KEY` | `cursor/cloud-agent` | `cursor` |
-| OpenRouter | — (API key) | `mergecraft provider auth openrouter --scope github` → indexed credentials | any OpenRouter slug | `opencode` |
-| xAI | — (API key) | `mergecraft provider auth xai --scope github` → indexed credentials | `xai/grok` | `opencode` |
-| Moonshot AI | — (API key) | `mergecraft provider auth moonshotai --scope github` → indexed credentials | `moonshotai/kimi-k2` | `opencode` |
-| Bedrock / Vertex | cloud credential chain (`AWS_*` / `GOOGLE_APPLICATION_CREDENTIALS`), no `--api-key` | `mergecraft provider auth bedrock --scope github` / `… vertex …` | — | `opencode` |
-| OpenAI-compatible (custom) | — | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` (indexed `_1`/`_2` …) | `<your-prefix>/<your-model>` — see [Custom OpenAI-compatible provider](#custom-openai-compatible-provider) | `opencode` |
-| Logfire tracing | `mergecraft auth logfire` → `MERGECRAFT_LOGFIRE_TOKEN` + `MERGECRAFT_TRACING_PROJECT` (local) and `LOGFIRE_TOKEN` (Actions) | see [`docs/TRACING.md`](TRACING.md) | — | — |
+<!-- BEGIN:provider-table -->
+| Provider | Command | Needs | Secret stored | Recommended model (seeded) | Harness |
+|----------|---------|-------|---------------|----------------------------|---------|
+| Anthropic | `mergecraft provider auth anthropic` | Claude Code (`claude setup-token`) to mint the token | `LLM_PROVIDER_<N>_CLAUDE_CODE_OAUTH_TOKEN`; flat: `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` | `anthropic/claude-opus` | `claude` |
+| Amazon Bedrock | `mergecraft provider auth bedrock` | cloud credentials (no `--api-key`) | `LLM_PROVIDER_<N>_AWS_ACCESS_KEY_ID` + `LLM_PROVIDER_<N>_AWS_SECRET_ACCESS_KEY`; flat: `AWS_BEARER_TOKEN_BEDROCK` | none — name a model explicitly | `opencode` |
+| DeepSeek | `mergecraft provider auth deepseek` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `DEEPSEEK_API_KEY` | `deepseek/deepseek-pro` | `opencode` |
+| Google | `mergecraft provider auth google` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` | `google/gemini-pro` | `gemini` |
+| MiniMax (OpenAI-compatible) | `mergecraft provider auth minimax` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `minimax/MiniMax-M3` | `opencode` |
+| Moonshot AI | `mergecraft provider auth moonshotai` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `MOONSHOT_API_KEY` | `moonshotai/kimi-k2` | `opencode` |
+| OpenAI | `mergecraft provider auth openai` | the Codex CLI on `PATH` (`npm i -g @openai/codex`; needs Node.js) | `LLM_PROVIDER_<N>_CODEX_AUTH_JSON`; flat: `OPENAI_API_KEY`, `CODEX_AUTH_JSON` | `openai/gpt` | `codex` |
+| OpenCode | `mergecraft provider auth opencode` | a billing-backed key from [opencode.ai/auth](https://opencode.ai/auth) | `LLM_PROVIDER_<N>_OPENCODE_AUTH_JSON`; flat: `OPENCODE_API_KEY`, `OPENCODE_AUTH_JSON` | `opencode/big-pickle` | `opencode` |
+| OpenCode Go | `mergecraft provider auth opencode-go` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `OPENCODE_GO_API_KEY` | `opencode-go/glm-5.1` | `opencode` |
+| OpenRouter | `mergecraft provider auth openrouter` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `OPENROUTER_API_KEY` | `openrouter/claude-opus` | `opencode` |
+| Paper Instruments | `mergecraft provider auth paperinstruments` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `paperinstruments/ultramarine-1-flash` | `opencode` |
+| Tencent TokenHub | `mergecraft provider auth tokenhub` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `TOKENHUB_API_KEY` | `tokenhub/hy3` | `opencode` |
+| Google Vertex AI | `mergecraft provider auth vertex` | cloud credentials (no `--api-key`) | `LLM_PROVIDER_<N>_GOOGLE_APPLICATION_CREDENTIALS`; flat: `VERTEX_SERVICE_ACCOUNT_JSON` | none — name a model explicitly | `opencode` |
+| xAI | `mergecraft provider auth xai` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `XAI_API_KEY` | `xai/grok` | `opencode` |
+
+<!-- END:provider-table -->
+
+Not in the provider catalog:
+
+| Integration | Credential | Recommended model |
+|-------------|------------|-------------------|
+| Cursor Cloud | `mergecraft auth cursor --scope github` (legacy shim) → `CURSOR_API_KEY` (harness `cursor`) | `cursor/cloud-agent` |
+| OpenAI-compatible (custom) | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` (indexed `_1`/`_2` …); harness `opencode` | `<your-prefix>/<your-model>` — see [Custom OpenAI-compatible provider](#custom-openai-compatible-provider) |
+| Logfire tracing | `mergecraft auth logfire` → `MERGECRAFT_LOGFIRE_TOKEN` + `MERGECRAFT_TRACING_PROJECT` (local) and `LOGFIRE_TOKEN` (Actions) — see [`docs/TRACING.md`](TRACING.md) | — |
+
+The recommended model is the one `provider auth` writes into `agents.reviewer` when that
+chain is empty (the catalog's preferred model for the label). The Action's `model:` input,
+when set, becomes the head of the chain and overrides repo settings
+([action reference](action-reference.md)).
 
 When `harness:` is unset in `.mergecraft/config.yaml`, mergeCraft infers the harness
 from the model slug (the **Inferred harness** column). Set `harness:` explicitly to

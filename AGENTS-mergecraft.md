@@ -9,9 +9,18 @@ for a compact setup checklist and CLI reference.
 
 Use this when asked to add AI PR review to another repository.
 
-1. **Prerequisites** — Python **3.11+** ([`docs/dev/python-version-floor.md`](docs/dev/python-version-floor.md)),
-   [uv](https://docs.astral.sh/uv/), and an authenticated [`gh`](https://cli.github.com)
-   CLI. If Python 3.11+ is unavailable locally, use the Docker Action path only
+1. **Prerequisites.**
+   <!-- BEGIN:requirements -->
+   **Requirements:** [uv](https://docs.astral.sh/uv/) is the only prerequisite for the
+   install; it downloads a compatible Python (3.11+) itself, so no system Python is
+   needed. The [GitHub CLI](https://cli.github.com) (`gh auth login`) is needed only
+   for `provider auth --scope github` (the default), which stores the secret
+   with `gh secret set`; `mergecraft init` and `--scope local` need neither `gh` nor a
+   network. Two providers need one more CLI at the credential step: the Codex CLI for `openai`
+   and Claude Code for `anthropic`
+   ([provider table](docs/authentication.md)).
+   <!-- END:requirements -->
+   If you cannot install uv, use the Docker Action path only
    ([`docs/install.md`](docs/install.md)) — no local CLI install required for CI.
 2. **Install the CLI.** PyPI carries the pre-release `mergecraft-action`; the
    CLI binary is still `mergecraft`:
@@ -93,7 +102,7 @@ only (see [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md) and
 ```bash
 make setup      # uv sync --extra dev + pre-commit
 make lint       # ruff + format + loguru-only
-make typecheck  # mypy strict + pyright pass
+make typecheck  # mypy strict (make pyright runs the supplemental Pyright pass)
 make test       # unit tests (not integration)
 make ci         # full pre-merge gate
 ```
@@ -123,5 +132,4 @@ Do not set these in CI or production workflows.
 
 - Do not weaken trust-tier or fail-closed security behaviour
   ([`docs/workflows.md`](docs/workflows.md), [`SECURITY.md`](SECURITY.md)).
-- Do not add entries to `evidence/` (slated for deletion).
 - Conventional Commits; subject ≤ 72 characters; no `--no-verify` unless the operator allows it.

@@ -82,10 +82,9 @@ def register_gate_command(app: typer.Typer) -> None:
         This gate is **structural, not behavioural**. It proves every durable case
         still parses against the current schema and provenance model, that ids are
         unique, and (optionally) that each case has been promoted into a permanent
-        test. It deliberately does **not** replay verdicts: ``replay_case()`` is a
-        pure function that takes the current decision as an *input*, so replaying in
-        CI would require a live agent run per case — non-deterministic, key-bearing,
-        and far too slow for a per-PR gate.
+        test. It deliberately does **not** replay verdicts: that is ``mergecraft eval replay-bank``,
+        which recomputes each case's decision from its recorded findings (no live agent
+        run) and which CI runs separately.
 
         It also runs the **adversarial corpora** gate (prompt injection, malicious
         repository, malicious ticket/comment). A regression there blocks the

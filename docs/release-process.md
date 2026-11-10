@@ -19,7 +19,7 @@ changelog section.
    into the generated section by hand before pushing, then put an empty
    `## [Unreleased]` back as the first block. `tests/docs/test_changelog_structure.py`
    fails when `[Unreleased]` is not first, when a block repeats a heading type, or
-   when an entry appears under both `[Unreleased]` and a released version. It also bumps
+   when an entry appears under both `[Unreleased]` and a released version. Craft also bumps
    `pyproject.toml`, `server.json`, and `uv.lock` in step. The same transaction
    updates `docs/consumer-release.json`, consumer install pins, matching release
    documentation links, generated skill copies/hashes, and `llms-full.txt`.
