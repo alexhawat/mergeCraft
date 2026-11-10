@@ -39,3 +39,23 @@ def test_ledger_rejects_illegal_transition() -> None:
 
 def test_assert_transition_accepts_first_record() -> None:
     assert_lifecycle_transition(None, "open")
+
+
+def test_record_if_allowed_keeps_prior_row_on_illegal_transition() -> None:
+    book = FindingLedger()
+    fp = "def" * 8
+    book.record(fp, "withdrawn", source="verifier-drop", round_index=1)
+    assert book.record_if_allowed(fp, "open", source="inline", round_index=2) is None
+    kept = book.get_record(fp)
+    assert kept is not None
+    assert kept.state == "withdrawn"
+    assert kept.round_index == 1
+
+
+def test_record_if_allowed_records_legal_transition() -> None:
+    book = FindingLedger()
+    fp = "fed" * 8
+    book.record(fp, "unpublished", source="verification-budget", round_index=1)
+    recorded = book.record_if_allowed(fp, "deferred", source="overflow", round_index=1)
+    assert recorded is not None
+    assert recorded.state == "deferred"

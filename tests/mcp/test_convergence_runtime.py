@@ -237,3 +237,29 @@ async def test_over_budget_finding_is_deferred_on_publish(tmp_path: Path) -> Non
     published = FindingLedger.from_comment_body(published_body).get_record(overflow_fp)
     assert published is not None
     assert published.state == "deferred"
+
+
+@pytest.mark.asyncio
+async def test_hydrated_withdrawn_finding_does_not_abort_publish(tmp_path: Path) -> None:
+    """A fingerprint withdrawn in an earlier run must not fail this run's publish."""
+    body = "Retry loop never resets the backoff."
+    fingerprint = finding_fingerprint(path="src/retry.py", body=body)
+    ctx = _tool_ctx(tmp_path)
+    hydrated = FindingLedger()
+    hydrated.record(fingerprint, "withdrawn", source="verifier-drop", round_index=1)
+    ctx.tool_state.finding_ledger = hydrated
+    ctx.tool_state.finding_ledger_loaded = True
+    ctx.tool_state.review_round_index = 2
+
+    result = await create_pull_request_review_tool(ctx).execute(
+        {
+            "pull_number": 7,
+            "body": "Review summary.",
+            "comments": [{"path": "src/retry.py", "line": 3, "body": body}],
+        }
+    )
+
+    assert result.is_error is False
+    record = hydrated.get_record(fingerprint)
+    assert record is not None
+    assert record.state == "withdrawn"
