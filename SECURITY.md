@@ -51,9 +51,29 @@ capabilities` prints this manifest.
 
 ## Security model
 
-mergeCraft is BYOK (bring-your-own-key/subscription): it talks directly to
-the provider you configure (Anthropic, OpenAI, etc.) and never routes your
-code, prompts, or credentials through a third-party SaaS backend.
+mergeCraft is BYOK (bring-your-own-key/subscription): the review talks
+directly to the model provider you configure (Anthropic, OpenAI, etc.), and
+there is no mergeCraft-operated service in the path.
+
+One optional feature sends review content to a second vendor. **Jev** calls
+TypeSafe's hosted System One API (`https://api.typesafe.ai`) with your
+`TYPESAFE_API_KEY`. It is off unless `jev.enabled: true` is set in
+`.mergecraft/config.yaml` (`mergecraft jev enable` writes it) **and**
+`TYPESAFE_API_KEY` is available. When both hold:
+
+- a local review that is not a dry run (`mergecraft review`, or the
+  `mergecraft mcp serve` review tool) sends the changed hunks with their paths,
+  the full diff, each finding's message, path, lines and cited code, and the
+  claims in the rendered review;
+- `mergecraft verify-behavior` sends each acceptance criterion and the
+  reproduction claim together with the page text it observed.
+
+mergeCraft keeps only the fields each question pack needs, but it does not
+redact that content, so secrets in the diff go too. The PR review that the
+GitHub Action runs does not call Jev in this release. Leave `jev.enabled` off
+if your code may only go to your model provider. The full list of what is sent
+per call is in
+[docs/jev-gate-patterns.md](docs/jev-gate-patterns.md#data-sent-to-typesafe).
 
 - Provider credentials (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`,
   `OPENAI_API_KEY`, `CODEX_AUTH_JSON`, …) live only in your repo's GitHub

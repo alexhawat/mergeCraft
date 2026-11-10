@@ -8,6 +8,12 @@ pack registry in [`pack_registry.py`](../src/mergecraft/jev/pack_registry.py).
 See also [`jev-gate-patterns.md`](jev-gate-patterns.md) for funnel design and
 calibration status.
 
+Every call site sends its filtered `state` to TypeSafe's hosted API. A new
+call site or a new field in `PACK_REGISTRY` changes what leaves the machine,
+so update
+[Data sent to TypeSafe](jev-gate-patterns.md#data-sent-to-typesafe) and the
+Jev paragraph in [`SECURITY.md`](../SECURITY.md) in the same change.
+
 ## Patterns (apply at every call site)
 
 1. **Fan-out questions, route in code** — One `system_one` call carries every
