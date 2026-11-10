@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import secrets
 import threading
+import time
 from typing import TYPE_CHECKING, Any
 
 import uvicorn
@@ -411,9 +413,43 @@ async def _kill_background_processes(ctx: ToolContext) -> None:
     if not procs:
         return
     pids = {proc.pid for proc in list(procs.values()) if isinstance(proc.pid, int)}
-    # Off-loop: batch TERM -> one grace -> KILL (avoids N-times sleep on the event loop).
-    await asyncio.to_thread(kill_process_groups, pids)
+    # Off-loop: batch TERM -> one grace -> KILL, then reap (avoids N-times sleep on the event loop).
+    await asyncio.to_thread(_kill_and_reap_background_pids, pids)
     procs.clear()
+
+
+_REAP_ATTEMPTS = 20
+_REAP_INTERVAL_S = 0.05
+
+
+def _kill_and_reap_background_pids(pids: set[int]) -> None:
+    """Kill background session leaders, then reap them so none linger as zombies.
+
+    ``kill_process_groups`` only signals. The children are ours (spawned by
+    ``Popen``), so after the kill each pid is collected with a non-blocking
+    ``waitpid`` in a short bounded retry loop. A pid we cannot wait on (already
+    reaped, or not our child) is dropped without error.
+    """
+    kill_process_groups(pids)
+    _reap_background_pids(pids)
+
+
+def _reap_background_pids(pids: set[int]) -> None:
+    """Collect exited background children with a bounded, non-blocking wait loop."""
+    remaining = set(pids)
+    for _ in range(_REAP_ATTEMPTS):
+        for pid in list(remaining):
+            try:
+                reaped, _status = os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                remaining.discard(pid)
+                continue
+            if reaped:
+                remaining.discard(pid)
+        if not remaining:
+            return
+        time.sleep(_REAP_INTERVAL_S)
+    logger.debug("background process reap gave up on pids {}", sorted(remaining))
 
 
 def _serve_in_thread(

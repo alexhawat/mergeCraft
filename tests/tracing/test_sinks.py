@@ -45,6 +45,25 @@ def test_jsonl_sink_writes_rotating_daily_files(
     ]
 
 
+def test_jsonl_sink_redacts_secrets_before_writing(
+    trace_dir: Path, trace_event_data: dict[str, Any]
+) -> None:
+    """F44: the on-disk trace must not carry a raw credential from an attr."""
+    from mergecraft.tracing import JSONLFileSink, TraceEvent
+
+    token = "ghp_abcdefghijklmnop1234567890ABCDEFGHIJ"
+    day = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
+    attrs = dict(trace_event_data.get("attrs") or {}) | {"note": f"use token {token} now"}
+    sink = JSONLFileSink(trace_dir, clock=lambda: day)
+
+    sink.write(TraceEvent.model_validate(trace_event_data | {"attrs": attrs}))
+
+    raw = (trace_dir / "2026-08-09.jsonl").read_text(encoding="utf-8")
+    assert token not in raw
+    assert "ghp_abcdefghijklmnop" not in raw
+    assert json.loads(raw.splitlines()[0])["attrs"]["note"] != f"use token {token} now"
+
+
 def test_jsonl_reader_skips_malformed_lines(trace_dir: Path) -> None:
     from mergecraft.tracing import read_jsonl_events
 

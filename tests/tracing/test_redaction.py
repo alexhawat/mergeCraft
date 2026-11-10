@@ -111,3 +111,16 @@ def test_identifier_attrs_skip_the_entropy_heuristic() -> None:
     assert out["review.id"] == run_id
     assert "sk-abcdefghijklmnop1234" not in out["gen_ai.response.model"]
     assert out["note"] != run_id
+
+
+@pytest.mark.parametrize("key", ["error", "exception.message", "tool.error_message"])
+def test_error_text_attrs_get_url_credential_redaction(key: str) -> None:
+    """#1235: exception text quoting ``https://user:pw@host`` loses the password, not the host."""
+    from mergecraft.tracing.redaction import redact_attrs
+
+    text = "ConnectError: failed to reach https://deploy:pw0rd@git.example.com/repo.git"
+    out = redact_attrs({key: text, "note": "plain words stay readable"})
+
+    assert "pw0rd" not in out[key]
+    assert "https://deploy:<redacted>@git.example.com" in out[key]
+    assert out["note"] == "plain words stay readable"

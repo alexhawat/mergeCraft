@@ -204,13 +204,27 @@ def _find_declarations_batch(
         matches = _run_ast_grep(ast_grep_binary, rule_path, files, cwd, tier=tier)
         label = labels[rule_name]
         for m in matches:
-            name_mv = m.get("metaVariables", {}).get("single", {}).get("NAME")
-            name = name_mv.get("text") if name_mv else None
-            file_field = m.get("file")
-            if not name or file_field not in results:
+            # Skip malformed rows rather than letting one bad match abort the whole run.
+            if not isinstance(m, dict):
                 continue
-            line = int(m["range"]["start"]["line"]) + 1
-            results[file_field].append({"name": name, "language": label, "line": line})
+            meta = m.get("metaVariables")
+            single = meta.get("single") if isinstance(meta, dict) else None
+            name_mv = single.get("NAME") if isinstance(single, dict) else None
+            name = name_mv.get("text") if isinstance(name_mv, dict) else None
+            file_field = m.get("file")
+            rng = m.get("range")
+            start = rng.get("start") if isinstance(rng, dict) else None
+            line_raw = start.get("line") if isinstance(start, dict) else None
+            if (
+                not isinstance(name, str)
+                or not name
+                or not isinstance(file_field, str)
+                or file_field not in results
+                or isinstance(line_raw, bool)
+                or not isinstance(line_raw, int)
+            ):
+                continue
+            results[file_field].append({"name": name, "language": label, "line": line_raw + 1})
     return results
 
 
