@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import os
+import stat
+from typing import TYPE_CHECKING
 
 from tests.analyzers.support import C5_AGENTSEC_TARGETS, import_module
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import pytest
 
 
 def _run_agentsec(repo_root: Path, changed_files: list[str]):
@@ -58,3 +65,21 @@ def test_agentsec_findings_are_security_category(adapter_fixture_repo: Path) -> 
     result = _run_agentsec(adapter_fixture_repo, [path])
     assert result.findings
     assert all(f.category == "Security & Privacy" for f in result.findings)
+
+
+def test_scan_runs_in_process_without_spawning_external_scanners(
+    adapter_fixture_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The agent-security scan spawns nothing, even with other scanners on PATH."""
+    marker = tmp_path / "external-scanner-ran"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    scanner = bin_dir / "skillspector"
+    scanner.write_text(f"#!/bin/sh\ntouch '{marker}'\necho '{{}}'\n", encoding="utf-8")
+    scanner.chmod(scanner.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    result = _run_agentsec(adapter_fixture_repo, [C5_AGENTSEC_TARGETS["mcp-exfil"]])
+
+    assert result.findings
+    assert not marker.exists()

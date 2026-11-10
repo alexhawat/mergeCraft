@@ -15,7 +15,6 @@ from mergecraft.analyzers.agentsec.policy import (
     load_native_rules,
 )
 from mergecraft.analyzers.agentsec.skill_manifest import discover_skill_documents
-from mergecraft.analyzers.agentsec.skillspector import scan_with_skillspector
 from mergecraft.analyzers.cluster import cluster_findings
 from mergecraft.analyzers.finding import Finding, make_finding
 
@@ -81,11 +80,7 @@ def scan_manifests(
     rules = load_native_rules()
     native_matches = apply_rules(documents=documents, rules=rules)
     findings = [_finding_from_match(match) for match in native_matches]
-
-    corroboration_paths = [repo_root / document.path for document in documents]
-    findings.extend(
-        scan_with_skillspector(repo_root=repo_root, paths=corroboration_paths),
-    )
+    # In-process only: no external scanner is spawned on the changed files.
     return AgentSecScanResult(findings=cluster_findings(findings))
 
 
