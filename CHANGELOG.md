@@ -745,7 +745,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   earlier claims and marks the result `partial` (#1254).
 - Entropy redaction no longer turns absolute CI paths with ordinary segments
   (`/home/runner/work/repo/src/app/module.py:12`) into `<redacted>.py`; a
-  segment that looks like a secret is still redacted (#1255).
+  segment that looks like a secret is still redacted (#1255). Word-shaped
+  camelCase directory names such as `mergeCraft` count as ordinary segments
+  again after the camelCase rule moved out of the identifier pattern (#1232).
 - `mergecraft review` restores its telemetry, tracing and trust-tier environment
   overrides even when loading repository settings raises (#1256).
 - The git tools that advertised an unused `repo` argument no longer do: the

@@ -263,7 +263,7 @@ def _is_benign_path_stem_segment(segment: str) -> bool:
     """Recognize bounded ordinary path segments before a filename suffix."""
     if re.fullmatch(r"[a-z_][a-z0-9_-]{0,14}", segment):
         return True
-    if len(segment) > 32 or _BENIGN_IDENTIFIER_RE.fullmatch(segment) is None:
+    if len(segment) > 32 or not _is_benign_identifier(segment):
         return False
     # SCREAMING_SNAKE, or an ordinary word/camelCase directory name (``mergeCraft``)
     # with only a few capitals; a mixed-case random blob has many (#1255).
