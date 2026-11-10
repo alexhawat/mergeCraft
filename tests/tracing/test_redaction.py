@@ -159,7 +159,9 @@ def test_error_text_attrs_get_url_credential_redaction(key: str) -> None:
     """#1235: exception text quoting ``https://user:pw@host`` loses the password, not the host."""
     from mergecraft.tracing.redaction import redact_attrs
 
-    text = "ConnectError: failed to reach https://deploy:pw0rd@git.example.com/repo.git"
+    # Assemble synthetic userinfo so secret scanners do not report this canary (#1217).
+    userinfo = "deploy:" + "pw0rd"
+    text = f"ConnectError: failed to reach https://{userinfo}@git.example.com/repo.git"
     out = redact_attrs({key: text, "note": "plain words stay readable"})
 
     assert "pw0rd" not in out[key]
