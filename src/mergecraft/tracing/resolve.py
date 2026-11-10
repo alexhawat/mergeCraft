@@ -15,9 +15,12 @@ Exports:
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any, Literal
 
-from mergecraft.cli.tracing_precedence import resolve_tracing_settings
+from mergecraft.cli.tracing_precedence import _resolve_cli_layer, resolve_tracing_settings
+from mergecraft.config.env import ActionInputEnv
+from mergecraft.config.env.tracing import TracingEnv
 from mergecraft.config.settings import (
     TraceSinkEntry,
     TracingSettings,
@@ -95,6 +98,28 @@ def _overlay_logfire_region(
     ]
 
 
+def _explicit_operator_enabled(
+    cli_args: list[str] | None,
+    env: dict[str, str] | None,
+) -> bool | None:
+    """Return the operator's explicit enable/disable decision, or ``None`` when unset.
+
+    ``--tracing`` / ``--no-tracing`` win; otherwise ``MERGECRAFT_TRACING``. An
+    explicit ``false`` is distinct from an unset variable: it must beat a
+    repository config ``enabled: true``. On the Action path ``INPUT_TRACING``
+    is already folded into the settings by
+    :func:`mergecraft.action.inputs.apply_tracing_overrides` (Action input over
+    env), so when it is set this returns ``None`` and the settings decide.
+    """
+    cli_enabled = _resolve_cli_layer(cli_args or []).get("enabled")
+    if isinstance(cli_enabled, bool):
+        return cli_enabled
+    source = env or {**os.environ}
+    if ActionInputEnv.from_env(source).tracing_enabled is not None:
+        return None
+    return TracingEnv.from_env(source).tracing_enabled
+
+
 def resolve_active_tracing(
     *,
     cli_args: list[str] | None = None,
@@ -149,12 +174,17 @@ def resolve_active_tracing(
         config_path=config_path,
         cwd=cwd,
     )
+    if _explicit_operator_enabled(cli_args, env) is False:
+        # ``--no-tracing`` / ``MERGECRAFT_TRACING=false`` is the operator's kill
+        # switch: it wins over a repository config ``enabled: true`` on every
+        # path (the in-memory block below and the on-disk config layer alike).
+        return TracingSettings(enabled=False, sinks=_build_sinks(merged))
     if config is not None and not merged.get("enabled"):
         # No env/CLI layer enabled tracing (and no config file on disk was
         # consulted) — adopt the already-resolved YAML block's enablement and
-        # sinks so a settings-driven run emits. Env/CLI override takes
-        # precedence: when ``merged["enabled"]`` is already True/False from a
-        # higher layer, that decision stands and ``_build_sinks`` applies.
+        # sinks so a settings-driven run emits. An explicit env/CLI ``false``
+        # already returned above; an env/CLI ``true`` skips this branch and
+        # ``_build_sinks`` applies.
         #
         # Region is special: Action enablement arrives via ``INPUT_TRACING``,
         # so ``MERGECRAFT_TRACING`` is often unset even when tracing is on.
