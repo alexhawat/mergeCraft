@@ -4,11 +4,21 @@ Discovers CLAUDE.md / AGENTS.md / SKILL.md plus GEMINI.md, Copilot instructions,
 Windsurf rules, and a configurable extra filename list. Untrusted
 sources render through the nonce fence as data, never into the instruction bundle.
 Does not author mergeCraft's own AGENTS-mergecraft.md / skill (file 7).
+
+Discovery scope: the walk covers the repository tree but never descends
+version-control metadata, dependency and virtualenv directories, vendored
+third-party code, build output, tool caches or test-fixture directories (the
+names in ``_SKIP_DIR_NAMES``, at any depth, plus ``*.egg-info``), nor agent
+config skill directories or nested worktrees. Copies there are not this
+repository's own guidance, so they stay out of the prompt. Names listed in
+``instructionExtraFilenames`` match at the repository root only. Symlinked
+directories are not descended. ``.gitignore`` is not consulted.
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,19 +39,51 @@ _FENCE_OPEN = "<<<UNTRUSTED-MERGECRAFT-CONTENT"
 _FENCE_CLOSE = "<<<END-UNTRUSTED-MERGECRAFT-CONTENT"
 _INSTRUCTION_FILENAMES = frozenset({"CLAUDE.md", "AGENTS.md", "SKILL.md", "GEMINI.md"})
 _COPILOT_NAME = "copilot-instructions.md"
+# Directory names discovery never descends, at any depth.
 _SKIP_DIR_NAMES = frozenset(
     {
+        # version control
         ".git",
         ".hg",
         ".svn",
+        # dependencies and virtualenvs
         "node_modules",
-        "__pycache__",
+        "bower_components",
+        "jspm_packages",
         ".venv",
+        "venv",
+        ".virtualenv",
+        "site-packages",
+        ".tox",
+        ".nox",
+        ".eggs",
+        # vendored third-party code
+        "vendor",
+        "vendored",
+        "third_party",
+        "third-party",
+        # build output
+        "dist",
+        "build",
+        "target",
+        ".next",
+        ".nuxt",
+        # tool caches
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        # test fixtures
+        "fixtures",
+        "__fixtures__",
+        "testdata",
+        # agent config directories (installed tooling, not repo guidance)
         ".claude",
         ".agents",
         ".opencode",
     }
 )
+_SKIP_DIR_SUFFIXES = (".egg-info",)
 _AGENT_CONFIG_SKILL_MARKERS = (
     ".cursor/skills/",
     ".claude/skills/",
@@ -126,15 +168,16 @@ def _scan_instruction_candidates(
 ) -> tuple[list[tuple[Path, str]], list[str]]:
     """Walk *repo_root* for instruction candidates, splitting accepted from refusals.
 
-    ``Path.rglob`` descends symlinked directories on the 3.11/3.12 floor, so a
-    candidate can be reached through a link. A candidate whose resolved location
-    left the resolved root is refused and recorded, never read.
+    The walk prunes excluded directories (``_SKIP_DIR_NAMES``, nested
+    worktrees) before descending them and does not follow symlinked
+    directories. A symlinked *file* is still a candidate: one whose resolved
+    location left the resolved root is refused and recorded, never read.
     """
     root = repo_root.resolve()
     extras = frozenset(extra_filenames)
     accepted: list[tuple[Path, str]] = []
     refusals: list[str] = []
-    for path in sorted(root.rglob("*")):
+    for path in _walk_files(root):
         if not path.is_file() or _is_skipped(path, root):
             continue
         rel = path.relative_to(root).as_posix()
@@ -748,7 +791,8 @@ def _is_instruction_rel(rel: str, *, extras: frozenset[str]) -> bool:
         return True
     if "/.windsurf/rules/" in f"/{rel}" and rel.casefold().endswith(".md"):
         return True
-    return name in extras
+    # ``instructionExtraFilenames`` names repo-root files only.
+    return "/" not in rel and name in extras
 
 
 def _is_excluded_product_skill(rel: str) -> bool:
@@ -764,11 +808,34 @@ def _is_skipped(path: Path, repo_root: Path) -> bool:
     except ValueError:
         return True
     parts = Path(rel).parts
-    if any(part in _SKIP_DIR_NAMES for part in parts):
+    if any(_is_skipped_dir_name(part) for part in parts[:-1]):
         return True
     if _is_agent_config_skill_path(rel):
         return True
     return _is_nested_worktree_path(path, repo_root)
+
+
+def _is_skipped_dir_name(name: str) -> bool:
+    return name in _SKIP_DIR_NAMES or name.endswith(_SKIP_DIR_SUFFIXES)
+
+
+def _walk_files(root: Path) -> list[Path]:
+    """Return every file under *root*, sorted, pruning excluded directories.
+
+    Excluded directory names and nested worktrees (a ``.git`` file in a
+    subdirectory) are removed before ``os.walk`` descends them, so a large
+    dependency tree costs one directory entry rather than a full walk.
+    """
+    files: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        current = Path(dirpath)
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if not _is_skipped_dir_name(name) and not (current / name / ".git").is_file()
+        ]
+        files.extend(current / name for name in filenames)
+    return sorted(files)
 
 
 def _is_agent_config_skill_path(rel: str) -> bool:
