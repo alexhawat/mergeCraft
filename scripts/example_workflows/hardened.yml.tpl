@@ -6,8 +6,12 @@
 # `mergecraft-approval` concluded "would not approve", so a branch ruleset can
 # require this job and block merges with outstanding review feedback.
 #
-# It ALWAYS fails open when the review cannot run — fork PR without secrets,
-# provider session limit, no approval posted. A required check that can go
+# When NO review runs — a fork PR (secrets are withheld) or no provider
+# credential configured — the job FAILS by default, so a required check can
+# never go green on a PR nobody reviewed. Set `SKIPPED_REVIEW: pass` on the
+# review job to let those PRs through with a warning instead (see the comment
+# there). A review that started but could not finish — provider session limit,
+# no approval posted — still fails open: a required check that can go
 # permanently missing is a permanent merge block, which is worse than no gate.
 #
 # ---------------------------------------------------------------------------
@@ -225,6 +229,13 @@ jobs:
       # ``uses:`` step walks them in the order `.mergecraft/config.yaml`
       # declares under ``models:``.
       HAS_AUTH: ${{ (secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' || secrets.OPENAI_API_KEY != '' || secrets.CODEX_AUTH_JSON != '' || secrets.GEMINI_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      # What this job concludes when HAS_AUTH is false and no review runs (fork
+      # PR, or no provider credential). `fail` (default): the job fails, so a
+      # required check never passes unreviewed; fork PRs then need a maintainer
+      # review and a bypass to merge. `pass`: the job passes with a warning —
+      # only for repos that do not require this job, or that accept merging
+      # fork PRs without a mergeCraft review. Any other value fails.
+      SKIPPED_REVIEW: fail
       # Forward wait-for-ci outputs for action-side SARIF ingest (D9). Dual
       # MERGECRAFT_* / CI_* aliases match dogfood mergecraft.yml for older templates.
       MERGECRAFT_CI_WAIT_STATE: ${{ needs.wait-for-ci.outputs.state }}
@@ -267,14 +278,23 @@ jobs:
             git branch -f "${base}" "origin/${base}"
           fi
 
-      - name: Skip when provider auth is not configured
+      # Every later step is gated on HAS_AUTH, so without this step a run that
+      # reviewed nothing would conclude success. SKIPPED_REVIEW (job env above)
+      # decides whether it fails or passes with a warning.
+      - name: Report review skipped
         if: env.HAS_AUTH != 'true'
         run: |
-          if [ "${{ env.IS_SAME_REPO }}" != "true" ]; then
-            echo "::notice title=mergeCraft skipped::Fork PR — secrets are withheld, review skipped."
+          if [ "${IS_SAME_REPO}" != "true" ]; then
+            reason="Fork PR — secrets are withheld, so no review ran."
           else
-            echo "::notice title=mergeCraft skipped::Set a credential for at least one provider in the chain (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY / OPENAI_API_KEY / CODEX_AUTH_JSON / GEMINI_API_KEY) to enable reviews."
+            reason="No provider credential is set, so no review ran. Set one for at least one provider in the chain (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY / OPENAI_API_KEY / CODEX_AUTH_JSON / GEMINI_API_KEY)."
           fi
+          if [ "${SKIPPED_REVIEW:-fail}" = "pass" ]; then
+            echo "::warning title=mergeCraft skipped::${reason} SKIPPED_REVIEW=pass, so this job passes without a review."
+            exit 0
+          fi
+          echo "::error title=mergeCraft skipped::${reason} Failing so a required check cannot pass unreviewed (set SKIPPED_REVIEW: pass on the review job to allow)."
+          exit 1
 
       # Composed in a step rather than inline in `with:` so the CI-context clause
       # stays readable. Every interpolated value is repo-controlled (PR number,
