@@ -730,6 +730,30 @@ def _restrict_env_permissions(env_path: Path) -> None:
         logger.warning("could not restrict permissions on {}: {}", env_path, exc)
 
 
+def _refuse_tracked_env(env_path: Path, key: str) -> None:
+    """Bail before writing ``key`` into a ``.env`` that Git tracks.
+
+    A committed ``.env`` is published with the next push, and an ignore rule
+    no longer protects it. The startup loader already skips such a file
+    (``cli/app.py``), so a write there would also never be read back. The check
+    reuses the loader's probe, which also refuses when a repository is found
+    but its index cannot be read. A file that does not exist yet is not
+    tracked, so a first write needs no ``git`` call.
+    """
+    if not env_path.exists():
+        return
+    from mergecraft.cli.startup_env import implicit_env_is_tracked
+
+    if implicit_env_is_tracked(env_path):
+        cli_bail(
+            f"refusing to write {key} to {env_path}: the file is tracked by Git "
+            "(or its tracking status could not be verified), so the credential "
+            "would be committed. Run `git rm --cached .env`, add `.env` to "
+            ".gitignore (`mergecraft init` does this), and rotate any credential "
+            "the file already held — or point MERGECRAFT_ENV at an untracked file."
+        )
+
+
 def _write_env_value(env_path: Path, key: str, value: str) -> bool:
     """Write ``key=value`` into ``env_path`` idempotently via ``python-dotenv``.
 
@@ -748,6 +772,7 @@ def _write_env_value(env_path: Path, key: str, value: str) -> bool:
     anything else — ``CODEX_AUTH_JSON`` is raw JSON, with spaces, braces and
     double quotes — is quoted so the line survives ``source .env``.
     """
+    _refuse_tracked_env(env_path, key)
     quote_mode = "never" if _ENV_WORD_SAFE.match(value) else "always"
     if env_path.exists():
         # Narrow first: tightening afterwards still publishes the credential at
