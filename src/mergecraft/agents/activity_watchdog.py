@@ -143,7 +143,7 @@ class AgentDiagnostic:
 class IdleWatchdog:
     """Per-attempt activity monitor.
 
-    ``clock`` and ``kill`` are injectable so the state machine is testable
+    ``clock`` and ``kill`` are injectable so the watchdog is testable
     without a real process or a real 15-minute wait. Production drivers use the
     :meth:`start` helper, which runs :meth:`check` on a daemon thread and kills
     the process group when it returns true.

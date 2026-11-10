@@ -301,8 +301,9 @@ def register_review_scope(
         if review_scope is not None
         else (API_ONLY_SCOPE if provenance == "api" else None)
     )
-    tool_state.review_phase = ReviewPhase.ESTABLISH_SCOPE.value
-    stamp_review_phase_on_active_span(ReviewPhase.ESTABLISH_SCOPE)
+    from mergecraft.mcp.review_phase_machine import advance_review_phase
+
+    advance_review_phase(tool_state, ReviewPhase.ESTABLISH_SCOPE)
 
 
 def establish_offline_review_scope(tool_state: ToolState, *, diff_path: str) -> None:
@@ -616,6 +617,11 @@ def _coerce_confirmed_finding(item: Any) -> Finding | None:
 @dataclass(frozen=True, slots=True)
 class ValidationState:
     """The graded consultation inputs ``validate_submission`` reads (D5, D12).
+
+    Finding rows rejected as ungradable still block approve. Ledger lifecycle
+    states (``findings.lifecycle``) are orthogonal and enforced at
+    ``FindingLedger.record``. Advisory thread outcomes are classified separately
+    by ``findings.outcomes.classify_thread_outcome``.
 
     Every analyzer and agent row this run knows about is graded exactly once,
     by ``build_validation_state``, into one of three populations. Producer and
@@ -1328,8 +1334,9 @@ def submit_review_verdict_tool(ctx: ToolContext):
         replayed = existing_id is not None and recorded.id == existing_id
         _adopt_review_mode_for_accepted_verdict(ctx)
         after_terminal_submission_recorded(ctx, recorded, replayed=replayed)
-        ctx.tool_state.review_phase = ReviewPhase.SUBMIT.value
-        stamp_review_phase_on_active_span(ReviewPhase.SUBMIT)
+        from mergecraft.mcp.review_phase_machine import advance_review_phase
+
+        advance_review_phase(ctx.tool_state, ReviewPhase.SUBMIT)
         return {
             "recorded": True,
             "id": recorded.id,
