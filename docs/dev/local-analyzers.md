@@ -10,7 +10,7 @@ can run them offline.
 | Analyzer | Catalog version | Install path |
 | --- | --- | --- |
 | `vulture` | `2.16` | `pyproject.toml` `[project.optional-dependencies] dev` → `.venv/bin` |
-| `typos` | `1.50.1` | same dev extra → `.venv/bin` |
+| `typos` | `1.52.0` | same dev extra → `.venv/bin` |
 | `markdownlint-cli` | `0.50.0` (npm) | `scripts/package.json` → `scripts/node_modules/.bin` |
 | `markdownlint` (engine) | `0.42.0` | resolved via `scripts/package-lock.json` (catalog `version:`) |
 | `jscpd` | `4.1.0` | same npm tooling package |

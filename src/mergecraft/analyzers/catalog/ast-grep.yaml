@@ -23,7 +23,7 @@ scope: diff
 parser: sarif
 supports_fix: false
 default_enabled: auto
-version: "0.44.1"
+version: "0.51.1"
 runtime: managed
 timeout_s: 300
 trust: untrusted
@@ -33,13 +33,13 @@ severity_map:
   note: Trivial
 provenance:
   linux-amd64:
-    url: https://github.com/ast-grep/ast-grep/releases/download/0.44.1/app-x86_64-unknown-linux-gnu.zip
-    sha256: "611f9e5e76f2611ecea1a35dd3468ceedf600641a11224b80341d79c6ee7b9dd"
+    url: https://github.com/ast-grep/ast-grep/releases/download/0.51.1/app-x86_64-unknown-linux-gnu.zip
+    sha256: "42514f77ae0c8a25d7d32154d31d3e7e16f3ab894f8ce76ce417de234ee49157"
   linux-arm64:
-    url: https://github.com/ast-grep/ast-grep/releases/download/0.44.1/app-aarch64-unknown-linux-gnu.zip
-    sha256: "077a4ab0c628154ef3cb79fecaf11dabca7f8a41f2c7260c022f263a52c1b021"
+    url: https://github.com/ast-grep/ast-grep/releases/download/0.51.1/app-aarch64-unknown-linux-gnu.zip
+    sha256: "db02fae2d8eace5fc40c55242068882452dd03eab38a1d950d5fd981cf112926"
   darwin-arm64:
-    url: https://github.com/ast-grep/ast-grep/releases/download/0.44.1/app-aarch64-apple-darwin.zip
-    sha256: "0a2fef273b0ff1238b8307add911714f92021d25b919fa3ec9b6b2e046bb29cf"
+    url: https://github.com/ast-grep/ast-grep/releases/download/0.51.1/app-aarch64-apple-darwin.zip
+    sha256: "a95772097b4d02bd9d45ed63b300c37041ae3c36632b3bf19250cc7c10187dc4"
 network_allowlist: []
 exclusive_group: pattern-scanner
