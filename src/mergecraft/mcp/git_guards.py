@@ -49,12 +49,21 @@ from __future__ import annotations
 import re
 import shlex
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from mergecraft.mcp.shared import ToolRefusedError
 from mergecraft.utils.git_setup import (
     reviewer_askpass_credentials_dir,
     reviewer_denied_relative_paths,
 )
+from mergecraft.utils.path_confinement import (
+    expand_operand,
+    is_denied_credential_path,
+    resolve_tool_path,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # ---------------------------------------------------------------------------
 # Q1 — Which subcommands are read-only? (#257 / D7)
@@ -758,44 +767,11 @@ def _path_from_git_operand(operand: str) -> str:
     return operand
 
 
-def _path_matches_denied_relative(resolved: Path, denied_rel: str) -> bool:
-    denied_parts = Path(denied_rel).parts
-    return (
-        len(resolved.parts) >= len(denied_parts)
-        and resolved.parts[-len(denied_parts) :] == denied_parts
-    )
-
-
-def _resolve_operand_path(path: str, *, cwd: str) -> Path | None:
-    candidate = Path(path)
-    try:
-        if candidate.is_absolute():
-            return candidate.resolve()
-        return (Path(cwd) / candidate).resolve()
-    except OSError:
-        return None
-
-
-def _is_denied_credential_path(path: str, *, cwd: str, tmpdir: str) -> bool:
-    resolved = _resolve_operand_path(path, cwd=cwd)
-    if resolved is None:
-        return False
-    for rel in reviewer_denied_relative_paths():
-        if _path_matches_denied_relative(resolved, rel):
-            return True
-    if tmpdir:
-        askpass_root = reviewer_askpass_credentials_dir(tmpdir)
-        try:
-            askpass_resolved = askpass_root.resolve()
-        except OSError:
-            return False
-        try:
-            resolved.relative_to(askpass_resolved)
-        except ValueError:
-            return False
-        else:
-            return True
-    return False
+def _is_denied_credential_path(
+    path: str, *, cwd: str, tmpdir: str, checkout_roots: Sequence[str] = ()
+) -> bool:
+    """Delegate to the shared resolve-then-match denylist (one rule for every tool)."""
+    return is_denied_credential_path(path, cwd=cwd, tmpdir=tmpdir, checkout_roots=checkout_roots)
 
 
 def _credential_path_message(path: str) -> str:
@@ -806,45 +782,83 @@ def _credential_path_message(path: str) -> str:
     )
 
 
-def _reject_credential_path_operands(args: list[str], *, cwd: str, tmpdir: str) -> None:
+def _reject_credential_path_operands(
+    args: list[str], *, cwd: str, tmpdir: str, checkout_roots: Sequence[str] = ()
+) -> None:
     """Refuse operands that name git credential stores or the askpass tree (D10)."""
     for operand in _operands_for_credential_scan(args):
         path = _path_from_git_operand(operand)
-        if _is_denied_credential_path(path, cwd=cwd, tmpdir=tmpdir):
+        if _is_denied_credential_path(path, cwd=cwd, tmpdir=tmpdir, checkout_roots=checkout_roots):
             raise ToolRefusedError(_credential_path_message(path))
+
+
+_SHELL_CHDIR_WORDS: frozenset[str] = frozenset({"cd", "pushd"})
+_SHELL_SEPARATORS: frozenset[str] = frozenset({"&&", "||", ";", "|", "&", "(", ")"})
+
+
+def _shell_tokens(command: str) -> list[str]:
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()")
+        lexer.whitespace_split = True
+        lexer.commenters = "#"
+        return list(lexer)
+    except ValueError:
+        return command.split()
 
 
 def _command_path_operands(command: str) -> list[str]:
     """Best-effort operand extraction from a shell command line."""
-    try:
-        tokens = shlex.split(command, comments=True)
-    except ValueError:
-        tokens = command.split()
     operands: list[str] = []
-    for token in tokens:
+    for token in _shell_tokens(command):
+        if token in _SHELL_SEPARATORS:
+            continue
         candidate = token
         if candidate.startswith("-") and "=" in candidate:
             candidate = candidate.split("=", 1)[1]
+        elif "=" in candidate and not candidate.startswith("-"):
+            # ``VAR=value`` assignments and ``if=<path>``-style operands.
+            operands.append(candidate.split("=", 1)[1].strip("\"'"))
         candidate = candidate.strip("\"'")
         if candidate and not candidate.startswith("-"):
             operands.append(candidate)
     return operands
 
 
+def _command_chdir_bases(command: str, *, cwd: str) -> list[str]:
+    """Return *cwd* plus every directory a ``cd``/``pushd`` in *command* names."""
+    bases = [cwd]
+    current = cwd
+    tokens = _shell_tokens(command)
+    for idx, token in enumerate(tokens[:-1]):
+        if token in _SHELL_CHDIR_WORDS:
+            target = tokens[idx + 1]
+            if target in _SHELL_SEPARATORS or target.startswith("-"):
+                continue
+            resolved = resolve_tool_path(target, base=current)
+            if resolved is not None:
+                current = str(resolved)
+                bases.append(current)
+    return bases
+
+
 def shell_command_denies_credential_paths(
-    command: str, *, tmpdir: str, cwd: str | None = None
+    command: str, *, tmpdir: str, cwd: str | None = None, checkout_roots: Sequence[str] = ()
 ) -> str | None:
     """Return a refusal reason when *command* names a denied credential path.
 
-    Literal containment alone does not hold: ``.git//config`` and
-    ``.git/objects/../config`` name the same file without containing the
-    substring being matched. When *cwd* is known each operand is resolved the
-    way the git tool's own ``_is_denied_credential_path`` resolves it, so the
-    two tools refuse the same set of files rather than the same set of
-    spellings.
+    Best-effort: this inspects the command text, so shell indirection it cannot
+    evaluate (variables, command substitution) is outside what it can see. The
+    checks it does make resolve before matching, through the same
+    :func:`~mergecraft.utils.path_confinement.is_denied_credential_path` rule
+    the git and ``upload_file`` tools use: each operand is resolved against the
+    working directory and every directory a ``cd``/``pushd`` in the command
+    names, and a glob operand is expanded first, so ``.git//config``,
+    ``.git/conf*`` and ``cd .git; cat config`` get the same answer as the
+    literal spelling.
     """
+    lowered = command.casefold()
     for rel in reviewer_denied_relative_paths():
-        if rel in command:
+        if rel.casefold() in lowered:
             return _credential_path_message(rel)
     if tmpdir:
         askpass_root = reviewer_askpass_credentials_dir(tmpdir)
@@ -852,9 +866,14 @@ def shell_command_denies_credential_paths(
         if askpass_text in command or "git-askpass" in command:
             return _credential_path_message("askpass")
     if cwd:
+        bases = _command_chdir_bases(command, cwd=cwd)
         for operand in _command_path_operands(command):
-            if _is_denied_credential_path(operand, cwd=cwd, tmpdir=tmpdir):
-                return _credential_path_message(operand)
+            for base in bases:
+                for candidate in expand_operand(operand, base=base):
+                    if _is_denied_credential_path(
+                        candidate, cwd=base, tmpdir=tmpdir, checkout_roots=(cwd, *checkout_roots)
+                    ):
+                        return _credential_path_message(operand)
     return None
 
 

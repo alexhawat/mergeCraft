@@ -53,9 +53,21 @@ from mergecraft.mcp.shared import (
     tool,
 )
 from mergecraft.mcp.tool_state import primary_repo_state, require_repo_state
-from mergecraft.utils.git_hardening import git_argv, git_authenticated_argv, read_remote_origin_url
+from mergecraft.utils.git_hardening import (
+    absolute_git_dir,
+    hardened_git_command,
+    read_remote_origin_url,
+)
+from mergecraft.utils.path_confinement import (
+    checkout_identity_paths,
+    is_denied_credential_path,
+    resolve_tool_path,
+)
+from mergecraft.utils.workspace import registered_safe_directories
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from mergecraft.mcp.context import ToolContext
 
 __all__ = [
@@ -103,32 +115,136 @@ def _confine_to_repo_root(value: str, flag: str, base: str) -> Path:
         raise ToolRefusedError(msg) from exc
 
 
-def _validate_path_confinement(global_opts: list[str], cwd: str) -> None:
-    """Confine -C / --git-dir / --work-tree in *global_opts* to an allowed root.
+def _checkout_refusal(flag: str, value: str) -> ToolRefusedError:
+    return ToolRefusedError(
+        f"Blocked: '{flag}' '{value}' must name a registered checkout "
+        "(its root or its own git directory)"
+    )
+
+
+def _names_registered_checkout(
+    path: Path, *, work_trees: set[Path], git_dirs: set[Path], safe_roots: list[str]
+) -> bool:
+    """Whether running git in *path* selects one of the registered checkouts.
+
+    A registered root or git dir matches outright. A subdirectory of a
+    registered root matches only when git's own discovery from it lands on
+    that checkout's git dir, so a nested repository inside the tree does not.
+    """
+    if path in work_trees or path in git_dirs:
+        return True
+    if not any(_is_within(path, root) for root in work_trees):
+        return False
+    discovered = absolute_git_dir(str(path), safe_directories=safe_roots)
+    return discovered is not None and discovered in git_dirs
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _validate_path_confinement(
+    global_opts: list[str], cwd: str, *, checkout_roots: Sequence[str] = ()
+) -> None:
+    """Bind -C / --git-dir / --work-tree in *global_opts* to a registered checkout.
+
+    ``-C`` must land in a registered checkout root, or in a directory of it
+    from which git discovers that same checkout; ``--git-dir`` must be a
+    registered checkout's own git directory and ``--work-tree`` a registered
+    checkout root. Being inside the workspace is not enough: the selected
+    repository's config is honoured, so it has to be one this run registered.
 
     git applies successive ``-C`` options **cumulatively** and resolves each
     relative to the previous one, so the walk carries the accumulated directory
     forward rather than validating every value against the starting cwd — which
     would accept a pair whose combined effect escapes.
     """
+    if not global_opts:
+        return
+    roots = [root for root in (*checkout_roots, cwd) if root]
+    work_trees, git_dirs = checkout_identity_paths(roots)
     current = cwd
     idx = 0
     while idx < len(global_opts):
         tok = global_opts[idx]
-        if tok == "-C":
-            if idx + 1 < len(global_opts):
-                current = str(_confine_to_repo_root(global_opts[idx + 1], "-C", current))
-            idx += 2
-        elif tok in {"--git-dir", "--work-tree"}:
-            if idx + 1 < len(global_opts):
-                _confine_to_repo_root(global_opts[idx + 1], tok, current)
-            idx += 2
-        elif tok.startswith(("--git-dir=", "--work-tree=")):
+        if tok.startswith(("--git-dir=", "--work-tree=")):
             flag, _, value = tok.partition("=")
-            _confine_to_repo_root(value, flag, current)
             idx += 1
+        elif tok in {"-C", "--git-dir", "--work-tree"} and idx + 1 < len(global_opts):
+            flag, value = tok, global_opts[idx + 1]
+            idx += 2
         else:
             idx += 1
+            continue
+        if flag == "-C":
+            target = _confine_to_repo_root(value, "-C", current)
+            if not _names_registered_checkout(
+                target, work_trees=work_trees, git_dirs=git_dirs, safe_roots=roots
+            ):
+                raise _checkout_refusal(flag, value)
+            current = str(target)
+            continue
+        resolved = resolve_tool_path(value, base=current)
+        allowed = git_dirs if flag == "--git-dir" else work_trees
+        if resolved is None or resolved not in allowed:
+            raise _checkout_refusal(flag, value)
+
+
+# ``ls-remote`` options that take their value as the next token.
+_LS_REMOTE_VALUE_OPTIONS = frozenset({"--sort", "-o", "--server-option", "--upload-pack", "--exec"})
+
+
+def _ls_remote_repository(args: list[str]) -> str | None:
+    """Return the repository operand of an ``ls-remote`` invocation, if any."""
+    idx = 0
+    options_done = False
+    while idx < len(args):
+        tok = args[idx]
+        if not options_done:
+            if tok == "--":
+                options_done = True
+                idx += 1
+                continue
+            if tok in _LS_REMOTE_VALUE_OPTIONS:
+                idx += 2
+                continue
+            if tok.startswith("-"):
+                idx += 1
+                continue
+        return tok
+    return None
+
+
+def _validate_ls_remote_operand(
+    args: list[str], cwd: str, *, tmpdir: str, checkout_roots: Sequence[str] = ()
+) -> None:
+    """Keep ``ls-remote`` to ``origin`` or a registered checkout.
+
+    No repository operand, ``origin``, or a local path / ``file://`` URL that
+    resolves to a registered checkout (root or git dir) is accepted; any other
+    remote or path is refused.
+    """
+    repository = _ls_remote_repository(args)
+    if repository is None or repository == "origin":
+        return
+    value = repository[len("file://") :] if repository.startswith("file://") else repository
+    refusal = ToolRefusedError(
+        f"Blocked: 'ls-remote {repository}' — only 'origin' or a registered checkout "
+        "may be queried through this tool"
+    )
+    if "://" in value or not value:
+        raise refusal
+    roots = [root for root in (*checkout_roots, cwd) if root]
+    if is_denied_credential_path(value, cwd=cwd, tmpdir=tmpdir, checkout_roots=roots):
+        raise refusal
+    resolved = resolve_tool_path(value, base=cwd)
+    work_trees, git_dirs = checkout_identity_paths(roots)
+    if resolved is None or (resolved not in work_trees and resolved not in git_dirs):
+        raise refusal
 
 
 def _validate_positional_path_confinement(args: list[str], cwd: str) -> None:
@@ -472,16 +588,24 @@ def _run_git(
     env: dict[str, str] | None = None,
     remote_url: str | None = None,
 ) -> str:
-    resolved_env = env or os.environ.copy()
+    # Every spawn runs on the hardened tier: no system/global config, inert
+    # helper programs, and the registered checkouts restated as safe.directory.
+    safe_dirs = (cwd, *registered_safe_directories())
     if env is not None and env.get("GIT_CONFIG_COUNT"):
         resolved_remote = remote_url or _origin_remote_url(cwd)
-        argv = git_authenticated_argv(args, remote_url=resolved_remote)
+        argv, child_env = hardened_git_command(
+            args,
+            env=env,
+            keep_config_pairs=True,
+            safe_directories=safe_dirs,
+            remote_url=resolved_remote,
+        )
     else:
-        argv = git_argv(args)
+        argv, child_env = hardened_git_command(args, env=env, safe_directories=safe_dirs)
     result = subprocess.run(
         argv,
         cwd=cwd,
-        env=resolved_env,
+        env=child_env,
         capture_output=True,
         text=True,
         timeout=600,
@@ -613,7 +737,13 @@ def _extract_global_opts(
 
 
 def _validate_git_invocation(
-    command: str, args: list[str], global_opts: list[str], cwd: str, *, tmpdir: str = ""
+    command: str,
+    args: list[str],
+    global_opts: list[str],
+    cwd: str,
+    *,
+    tmpdir: str = "",
+    checkout_roots: Sequence[str] = (),
 ) -> None:
     """Run every guard a normalized git invocation must pass, in order.
 
@@ -667,11 +797,13 @@ def _validate_git_invocation(
     _reject_content_filter_exec(global_opts)
     _reject_content_filter_exec(args)
     _reject_file_writing_flags(command, args)
-    _reject_credential_path_operands(args, cwd=cwd, tmpdir=tmpdir)
+    _reject_credential_path_operands(args, cwd=cwd, tmpdir=tmpdir, checkout_roots=checkout_roots)
+    if command == "ls-remote":
+        _validate_ls_remote_operand(args, cwd, tmpdir=tmpdir, checkout_roots=checkout_roots)
     _validate_positional_path_confinement(args, cwd)
-    # Confine -C / --git-dir / --work-tree to an allowed workspace root, with
-    # relative values resolved against the cwd git will run in (#257 / D7).
-    _validate_path_confinement(global_opts, cwd)
+    # Bind -C / --git-dir / --work-tree to a registered checkout, with relative
+    # values resolved against the cwd git will run in (#257 / D7).
+    _validate_path_confinement(global_opts, cwd, checkout_roots=checkout_roots)
 
 
 def _repo_dir_for(ctx: ToolContext, repo: object) -> str:
@@ -727,7 +859,10 @@ def git_tool(ctx: ToolContext):
             args.pop(0)
         cwd = _repo_dir_for(ctx, params.get("repo"))
         tmpdir = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
-        _validate_git_invocation(command, args, global_opts, cwd, tmpdir=tmpdir)
+        checkout_roots = [state.dir for state in ctx.tool_state.repos.values()]
+        _validate_git_invocation(
+            command, args, global_opts, cwd, tmpdir=tmpdir, checkout_roots=checkout_roots
+        )
         show_target = _parse_show_rev_path(args) if command == "show" else None
         cache_key: str | None = None
         run_args = args

@@ -11,6 +11,7 @@ from tests.mcp.test_git_tool import _ctx
 from tests.support.policy_fixtures import commit_all, init_git_repo
 
 from mergecraft.mcp.git import git_tool
+from mergecraft.mcp.tool_state import ensure_repo_state
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -42,7 +43,11 @@ async def test_show_cache_separates_authorized_repositories(
     first, second = tmp_path / "first", tmp_path / "second"
     await asyncio.to_thread(_repo, first, "first\n")
     await asyncio.to_thread(_repo, second, "second\n")
-    tool = git_tool(_ctx(tmp_path))
+    ctx = _ctx(tmp_path)
+    # -C / --git-dir select only checkouts this run registered.
+    for name, path in (("first", first), ("second", second)):
+        ensure_repo_state(ctx.tool_state, owner="acme", name=name, dir=str(path), access="read")
+    tool = git_tool(ctx)
 
     def args(path: Path) -> list[str]:
         options = (

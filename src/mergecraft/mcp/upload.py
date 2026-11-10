@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin
@@ -18,23 +19,39 @@ if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
 
 
-def _check_upload_path(path: Path, resolved_repo_root: str, resolved_tmpdir: str) -> None:
-    """Raise ToolRefusedError when *path* is a symlink or escapes the allowed roots (#258 / D8).
+def _check_upload_path(
+    path: Path,
+    resolved_repo_root: str,
+    resolved_tmpdir: str,
+    *,
+    checkout_roots: tuple[str, ...] = (),
+    run_tmpdir: str = "",
+) -> None:
+    """Raise ToolRefusedError when *path* may not be uploaded (#258 / D8).
 
-    A path must be a regular file (not a symlink) and must resolve into the repo
-    checkout, a registered cross-repo checkout, or the session tmpdir — the same
-    containment rule the git tool and shell cwd use. No file:// URI is emitted
-    for a rejected path: the caller raises before reaching URI creation.
+    A path must be a regular file (not a symlink), must not be credential
+    material (the same resolve-then-match denylist the git and shell tools
+    apply: ``.git/config``, ``.git/credentials``, the askpass tree under the
+    session tmpdir and under *run_tmpdir*), and must resolve into the repo checkout, a registered
+    cross-repo checkout, or the session tmpdir. No file:// URI is emitted for a
+    rejected path: the caller raises before reaching URI creation.
     """
-    from mergecraft.utils.workspace import WorkspacePathError, confine_to_workspace
+    from mergecraft.utils.path_confinement import ToolPathError, confine_tool_path
 
     if path.is_symlink():
         msg = f"Blocked: '{path}' is a symlink — symlink escapes are not permitted."
         raise ToolRefusedError(msg)
     try:
-        confine_to_workspace(str(path), base=resolved_repo_root, extra_roots=(resolved_tmpdir,))
-    except WorkspacePathError as exc:
-        msg = f"Blocked: '{path}' resolves outside the allowed upload roots — {exc}"
+        for credentials_tmpdir in dict.fromkeys((resolved_tmpdir, run_tmpdir)):
+            confine_tool_path(
+                str(path),
+                base=resolved_repo_root,
+                tmpdir=credentials_tmpdir,
+                checkout_roots=(resolved_repo_root, *checkout_roots),
+                extra_roots=(resolved_tmpdir,),
+            )
+    except ToolPathError as exc:
+        msg = f"Blocked: '{path}' is not an allowed upload path — {exc}"
         raise ToolRefusedError(msg) from exc
 
 
@@ -43,7 +60,14 @@ def upload_file_tool(ctx: ToolContext):
         path = Path(str(params["path"]))
         resolved_repo_root = str(Path(primary_repo_state(ctx.tool_state).dir).resolve())
         resolved_tmpdir = str(Path(ctx.tmpdir).resolve()) if ctx.tmpdir else ""
-        _check_upload_path(path, resolved_repo_root, resolved_tmpdir)
+        checkout_roots = tuple(state.dir for state in ctx.tool_state.repos.values())
+        _check_upload_path(
+            path,
+            resolved_repo_root,
+            resolved_tmpdir,
+            checkout_roots=checkout_roots,
+            run_tmpdir=os.environ.get("MERGECRAFT_TEMP_DIR") or "",
+        )
         if not path.is_file():
             msg = f"file not found: {path}"
             raise FileNotFoundError(msg)
