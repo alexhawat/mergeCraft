@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
@@ -165,7 +165,7 @@ def test_expiry_checker_accepts_future_dated_entry(tmp_path: Path) -> None:
     """Happy path: a future expiry is not an error."""
     module = _load_expiry_checker()
     today = datetime.now(tz=UTC).date()
-    future = today.replace(year=today.year + 1).isoformat()
+    future = (today + timedelta(days=365)).isoformat()
     fresh = tmp_path / ".trivyignore"
     fresh.write_text(
         f"# justification: still investigating upstream\n# expiry: {future}\nCVE-2099-0001\n",
@@ -195,7 +195,7 @@ def test_expiry_checker_rejects_bare_cve_after_documented_neighbor(tmp_path: Pat
     """A fully documented CVE must not lend justification/expiry to the next line."""
     module = _load_expiry_checker()
     today = datetime.now(tz=UTC).date()
-    future = today.replace(year=today.year + 1).isoformat()
+    future = (today + timedelta(days=365)).isoformat()
     adjacent = tmp_path / ".trivyignore"
     adjacent.write_text(
         f"# justification: acceptable, mitigated by X\n# expiry: {future}\n"
@@ -209,7 +209,7 @@ def test_expiry_checker_accepts_two_separately_documented_entries(tmp_path: Path
     """Each CVE with its own comment block still passes."""
     module = _load_expiry_checker()
     today = datetime.now(tz=UTC).date()
-    future = today.replace(year=today.year + 1).isoformat()
+    future = (today + timedelta(days=365)).isoformat()
     paired = tmp_path / ".trivyignore"
     paired.write_text(
         f"# justification: first finding, mitigated by X\n# expiry: {future}\n"

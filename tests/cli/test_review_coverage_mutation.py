@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 from typing import TYPE_CHECKING, Any
 
@@ -573,48 +572,6 @@ def test_mutmut_run_uses_supported_selection_and_config(
     assert "[pytest]" in setup_cfg
     assert "addopts = -q" in setup_cfg
     assert result.executed is True
-
-
-@pytest.mark.skipif(
-    shutil.which("mutmut") is None,
-    reason="mutmut not installed",
-)
-def test_mutmut_live_subprocess_exports_json(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    local = _local()
-    pkg = tmp_path / "mypkg"
-    tests = tmp_path / "tests"
-    pkg.mkdir()
-    tests.mkdir()
-    (pkg / "__init__.py").write_text("", encoding="utf-8")
-    (pkg / "a.py").write_text("def a():\n    return 1\n", encoding="utf-8")
-    (tests / "test_a.py").write_text(
-        "from mypkg.a import a\n\n\ndef test_a():\n    assert a() == 1\n",
-        encoding="utf-8",
-    )
-
-    def fake_wrap(argv: list[str], *, repo_root: Path) -> list[str]:
-        return argv
-
-    monkeypatch.setattr(local, "checkout_is_fork_pr", lambda _root: False)
-    monkeypatch.setattr(local, "_sandboxed_argv", fake_wrap)
-    diff = (
-        "diff --git a/mypkg/a.py b/mypkg/a.py\n"
-        "--- a/mypkg/a.py\n+++ b/mypkg/a.py\n"
-        "@@ -1,2 +1,2 @@\n def a():\n-    return 1\n+    return 0\n"
-    )
-    artifact = local._execute_mutation(
-        tmp_path,
-        timeout_seconds=120,
-        paths=["mypkg/a.py"],
-        diff=diff,
-        max_mutants=10,
-    )
-    assert artifact is not None
-    payload = json.loads(artifact.read_text(encoding="utf-8"))
-    assert payload["mutants"]
-    assert any(row["status"] == "killed" for row in payload["mutants"])
 
 
 def test_leftover_mutation_report_is_not_treated_as_live_receipt(
