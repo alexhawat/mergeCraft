@@ -29,8 +29,8 @@ run on `pull_request_target` (opened / synchronize).
 ## Provider reference
 
 <!-- BEGIN:provider-table -->
-| Provider | Command | Needs | Secret stored | Recommended model (seeded) | Harness |
-|----------|---------|-------|---------------|----------------------------|---------|
+| Provider | Command | Needs | Secret stored | Recommended model (seeded) | Inferred harness |
+|----------|---------|-------|---------------|----------------------------|------------------|
 | Anthropic | `mergecraft provider auth anthropic` | Claude Code (`claude setup-token`) to mint the token | `LLM_PROVIDER_<N>_CLAUDE_CODE_OAUTH_TOKEN`; flat: `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` | `anthropic/claude-opus` | `claude` |
 | Amazon Bedrock | `mergecraft provider auth bedrock` | cloud credentials (no `--api-key`) | `LLM_PROVIDER_<N>_AWS_ACCESS_KEY_ID` + `LLM_PROVIDER_<N>_AWS_SECRET_ACCESS_KEY`; flat: `AWS_BEARER_TOKEN_BEDROCK` | none — name a model explicitly | `opencode` |
 | DeepSeek | `mergecraft provider auth deepseek` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `DEEPSEEK_API_KEY` | `deepseek/deepseek-pro` | `opencode` |

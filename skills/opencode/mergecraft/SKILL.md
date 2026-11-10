@@ -73,9 +73,10 @@ a read-only verifier; typed findings drive inline comments and the
    **Requirements:** [uv](https://docs.astral.sh/uv/) is the only prerequisite for the
    install; it downloads a compatible Python (3.11+) itself, so no system Python is
    needed. The [GitHub CLI](https://cli.github.com) (`gh auth login`) is needed only
-   for `provider auth --scope github` (the default), which stores the secret
-   with `gh secret set`; `mergecraft init` and `--scope local` need neither `gh` nor a
-   network. Two providers need one more CLI at the credential step: the Codex CLI for `openai`
+   for `provider auth --scope github` (the default) or `--scope both`, which stores the secret
+   with `gh secret set`. `mergecraft init` needs neither `gh` nor a network;
+   `--scope local` needs no `gh`, but provider-specific authentication may need a network.
+   Two providers need one more CLI at the credential step: the Codex CLI for `openai`
    and Claude Code for `anthropic`
    ([provider table](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a5/docs/authentication.md)).
    <!-- END:requirements -->

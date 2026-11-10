@@ -106,8 +106,8 @@ def _harness(label: str) -> str:
 def render_provider_table() -> str:
     """Render the provider table from the catalog and the auth/seeding registries."""
     lines = [
-        "| Provider | Command | Needs | Secret stored | Recommended model (seeded) | Harness |",
-        "|----------|---------|-------|---------------|----------------------------|---------|",
+        "| Provider | Command | Needs | Secret stored | Recommended model (seeded) | Inferred harness |",
+        "|----------|---------|-------|---------------|----------------------------|------------------|",
     ]
     for label in sorted(PROVIDERS):
         provider = PROVIDERS[label]
@@ -149,9 +149,10 @@ def render_requirements(link_prefix: str) -> list[str]:
         "**Requirements:** [uv](https://docs.astral.sh/uv/) is the only prerequisite for the",
         "install; it downloads a compatible Python (3.11+) itself, so no system Python is",
         "needed. The [GitHub CLI](https://cli.github.com) (`gh auth login`) is needed only",
-        "for `provider auth --scope github` (the default), which stores the secret",
-        "with `gh secret set`; `mergecraft init` and `--scope local` need neither `gh` nor a",
-        f"network. Two providers need one more CLI at the credential step: the Codex CLI for {codex}",
+        "for `provider auth --scope github` (the default) or `--scope both`, which stores the secret",
+        "with `gh secret set`. `mergecraft init` needs neither `gh` nor a network;",
+        "`--scope local` needs no `gh`, but provider-specific authentication may need a network.",
+        f"Two providers need one more CLI at the credential step: the Codex CLI for {codex}",
         f"and Claude Code for {claude}",
         f"([provider table]({link_prefix}authentication.md)).",
     ]
