@@ -1053,9 +1053,9 @@ def test_review_checks_says_receipts_never_run_tests() -> None:
     )
 
 
-def test_the_changelog_adds_the_receipts_under_unreleased() -> None:
+def test_the_changelog_adds_the_receipts_under_0_1_0a5() -> None:
     text = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    unreleased = text.split("## [Unreleased]", 1)[1].split("\n## [", 1)[0]
+    unreleased = text.split("## [0.1.0a5]", 1)[1].split("\n## [", 1)[0]
     added = unreleased.split("### Added", 1)[1].split("\n### ", 1)[0]
 
     assert "redGreen" in added
