@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from mergecraft.scm.protocol import ScmProvider
 
 _SHA: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{40}")
+_WORKFLOW_PATH: Final[re.Pattern[str]] = re.compile(r"\.github/workflows/[^/]+\.ya?ml")
 # The compare API lists at most 300 files; a listing that reaches the cap may be cut.
 _COMPARE_FILE_CAP: Final[int] = 300
 _MAX_TREES: Final[int] = 256
@@ -147,19 +148,30 @@ async def review_policy_digest(
 
     It covers the base side's ``.mergecraft`` directory (config, learnings, rules —
     its Git tree id changes with any file in it), the workflow file that runs the
-    review (``GITHUB_WORKFLOW_REF``; its Action pin and inputs) and the mergeCraft
-    version. Any change to them is a changed review policy.
+    review (``GITHUB_WORKFLOW_REF``; its Action pin, permissions and inputs) and the
+    mergeCraft version. Any change to them is a changed review policy.
+
+    Raises:
+        ReapprovalUnavailableError: The running workflow is unnamed, or it is not a
+            file at the base revision. Without its blob in the digest a base-side
+            edit to the workflow could not invalidate a stamp, so no digest exists.
     """
+    if not workflow_path:
+        msg = "the running workflow is unknown (GITHUB_WORKFLOW_REF is missing or malformed)"
+        raise ReapprovalUnavailableError(msg)
     trees = _Trees(scm, f"/repos/{owner}/{repo}")
     _sha(base_sha, "the base revision")
     policy = await trees.entry(base_sha, POLICY_DIRECTORY)
+    workflow = await trees.entry(base_sha, workflow_path)
+    workflow_sha = workflow.get("sha") if workflow is not None else None
+    if workflow is None or workflow.get("type") != "blob" or not isinstance(workflow_sha, str):
+        msg = f"the running workflow {workflow_path} is not a file at the base revision"
+        raise ReapprovalUnavailableError(msg)
     payload: dict[str, Any] = {
         "mergecraft": version,
         POLICY_DIRECTORY: policy.get("sha") if policy is not None else None,
+        "workflow": [workflow_path, _sha(workflow_sha, "the workflow blob")],
     }
-    if workflow_path:
-        workflow = await trees.entry(base_sha, workflow_path)
-        payload["workflow"] = [workflow_path, workflow.get("sha") if workflow else None]
     blob = json.dumps(payload, sort_keys=True).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
 
@@ -427,12 +439,19 @@ def workflow_path_from_ref(workflow_ref: str | None) -> str | None:
     """The repository path of the running workflow, from ``GITHUB_WORKFLOW_REF``.
 
     ``owner/repo/.github/workflows/x.yml@refs/heads/main`` → ``.github/workflows/x.yml``.
+    ``None`` for anything else (absent, no ``@ref``, not a workflow file), which
+    :func:`review_policy_digest` refuses, so re-approval fails closed.
     """
     if not workflow_ref:
         return None
-    location, _, _ref = workflow_ref.partition("@")
+    location, at, ref = workflow_ref.partition("@")
     parts = location.split("/", 2)
-    return parts[2] if len(parts) == 3 and parts[2] else None
+    if not at or not ref or len(parts) != 3 or not parts[0] or not parts[1]:
+        return None
+    path = parts[2]
+    if _WORKFLOW_PATH.fullmatch(path) is None:
+        return None
+    return path
 
 
 __all__ = [

@@ -417,26 +417,35 @@ def _pull_request_changes(
 
 
 def _since_review(
-    interdiff: dict[str, ChangedFile], pr_names: set[str], allowed: set[str]
+    interdiff: dict[str, ChangedFile],
+    pr_names: set[str],
+    allowed: set[str],
+    authored: set[str],
 ) -> tuple[set[str], set[str]]:
-    """Account for every path changed since the review: qualifying, or inherited."""
+    """Account for every path changed since the review: qualifying, or inherited.
+
+    A path is qualifying only when the pull request authors a change to it at the new
+    head (``authored``, every one of which is prose-proven). A qualifying-named path
+    the PR does not change at the new head holds the base's version there, so it is
+    inherited, never reported as a PR-authored prose edit.
+    """
     qualifying: set[str] = set()
     inherited: set[str] = set()
     for path, entry in sorted(interdiff.items()):
         names = entry.names()
-        if allowed.intersection(names):
+        if authored.intersection(names):
             if entry.path not in allowed or entry.previous_path or entry.status != "modified":
                 msg = f"{path} changed since the review other than by an in-place edit"
                 raise _RefusedError(msg)
             qualifying.add(path)
             continue
-        touched = pr_names.intersection(names)
+        touched = pr_names.difference(allowed).intersection(names)
         if touched:
             msg = f"the PR-authored path {sorted(touched)[0]} changed since the review"
             raise _RefusedError(msg)
         inherited.update(names)
     if not qualifying:
-        raise _RefusedError("no qualifying path changed since the review")
+        raise _RefusedError("no PR-authored change to a qualifying path since the review")
     return qualifying, inherited
 
 
@@ -466,12 +475,15 @@ def _decide(evidence: ReapprovalEvidence, allowed: set[str]) -> ReapprovalRecord
     interdiff = _index(evidence.interdiff, "since-review", need_patches=False)
     preserved, prose = _pull_request_changes(reviewed, current, allowed)
     pr_names = {name for entry in (*current.values(), *reviewed.values()) for name in entry.names()}
-    qualifying, inherited = _since_review(interdiff, pr_names, allowed)
-    if prose:
-        diff_text = "".join(_section(entry) for entry in prose)
-        if not recognize_prose_only(diff_text, head_files=evidence.head_files):
-            changed = ", ".join(entry.path for entry in prose)
-            raise _RefusedError(f"the change to {changed} is not proven prose")
+    qualifying, inherited = _since_review(
+        interdiff, pr_names, allowed, {entry.path for entry in prose}
+    )
+    # Every qualifying path is a PR-authored change at the new head, so ``prose`` is
+    # never empty here and the proof always runs for what the record calls prose.
+    diff_text = "".join(_section(entry) for entry in prose)
+    if not recognize_prose_only(diff_text, head_files=evidence.head_files):
+        changed = ", ".join(entry.path for entry in prose)
+        raise _RefusedError(f"the change to {changed} is not proven prose")
     _check_modes(evidence, allowed)
     return ReapprovalRecord(
         prior_url=evidence.prior.url,
@@ -498,8 +510,9 @@ def decide_reapproval(
        review stamp naming this pull request, target branch and review policy;
     2. the PR's own changes — every non-qualifying change identical to the reviewed
        one, every qualifying change an in-place edit;
-    3. accounting — every path changed since the review is qualifying or inherited
-       from the base, and at least one is qualifying;
+    3. accounting — every path changed since the review is qualifying (a change the
+       PR authors at the new head) or inherited from the base, and at least one is
+       qualifying;
     4. prose — the qualifying change at the new head is proven prose;
     5. modes — unchanged on both sides of both comparisons.
     """

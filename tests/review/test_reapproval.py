@@ -9,7 +9,7 @@ policy, and missing or ambiguous evidence all get the normal review.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -30,6 +30,9 @@ from tests.review.reapproval_repo import (
     approval_check,
     review,
 )
+
+if TYPE_CHECKING:
+    from mergecraft.scm.protocol import ScmProvider
 
 VERSION = "0.1.0a5"
 WORKFLOW = ".github/workflows/mergecraft.yml"
@@ -97,7 +100,12 @@ class Scenario:
     async def stamp_prior(self, *, digest: str | None = None, **check: Any) -> None:
         """Publish the trusted pass on ``P`` with the stamp of the policy at ``B0``."""
         digest = digest or await review_policy_digest(
-            self.repo, OWNER, REPO, self.b0, workflow_path=WORKFLOW, version=VERSION
+            cast("ScmProvider", self.repo),
+            OWNER,
+            REPO,
+            self.b0,
+            workflow_path=WORKFLOW,
+            version=VERSION,
         )
         stamp = ReviewStamp(pull_number=PULL, base_ref="main", policy_digest=digest)
         summary = "\n".join(["mergeCraft approved this PR.", *stamp.lines()])
@@ -149,7 +157,9 @@ class Scenario:
         self.repo.head_sha = head
         return head
 
-    async def evaluate(self, **config: Any) -> Any:
+    async def evaluate(
+        self, *, head: str | None = None, workflow_path: str | None = WORKFLOW, **config: Any
+    ) -> Any:
         settings = FastPathReapprovalSettings.model_validate(
             {"enabled": True, "trustedCheckApps": [REVIEWER_APP], **config}
         )
@@ -157,15 +167,16 @@ class Scenario:
         async def _reviews() -> list[dict[str, Any]]:
             return list(self.reviews)
 
+        # ``Repo`` answers only the reads a re-approval makes, not the whole protocol.
         return await evaluate_reapproval(
-            self.repo,  # type: ignore[arg-type]
+            cast("ScmProvider", self.repo),
             OWNER,
             REPO,
             PULL,
-            self.repo.head_sha,
+            head or self.repo.head_sha,
             config=settings,
             list_reviews=_reviews,
-            workflow_path=WORKFLOW,
+            workflow_path=workflow_path,
             version=VERSION,
         )
 
@@ -285,7 +296,12 @@ async def test_a_changed_workflow_or_version_is_a_changed_policy() -> None:
     scenario = Scenario()
     await scenario.stamp_prior(
         digest=await review_policy_digest(
-            scenario.repo, OWNER, REPO, scenario.b0, workflow_path=WORKFLOW, version="0.0.9"
+            cast("ScmProvider", scenario.repo),
+            OWNER,
+            REPO,
+            scenario.b0,
+            workflow_path=WORKFLOW,
+            version="0.0.9",
         )
     )
     scenario.changelog_edit()
@@ -463,22 +479,7 @@ async def test_a_moved_head_is_reviewed() -> None:
     await scenario.stamp_prior()
     scenario.changelog_edit()
 
-    async def _reviews() -> list[dict[str, Any]]:
-        return list(scenario.reviews)
-
-    outcome = await evaluate_reapproval(
-        scenario.repo,  # type: ignore[arg-type]
-        OWNER,
-        REPO,
-        PULL,
-        "f" * 40,
-        config=FastPathReapprovalSettings.model_validate(
-            {"enabled": True, "trustedCheckApps": [REVIEWER_APP]}
-        ),
-        list_reviews=_reviews,
-        workflow_path=WORKFLOW,
-        version=VERSION,
-    )
+    outcome = await scenario.evaluate(head="f" * 40)
 
     assert not outcome.verdict.eligible
     assert "head moved" in outcome.verdict.reason
@@ -532,5 +533,104 @@ def test_the_workflow_path_comes_from_the_workflow_ref() -> None:
     ref = "acme/demo/.github/workflows/mergecraft.yml@refs/heads/main"
 
     assert workflow_path_from_ref(ref) == WORKFLOW
-    assert workflow_path_from_ref(None) is None
-    assert workflow_path_from_ref("garbage") is None
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        None,
+        "",
+        "garbage",
+        "acme/demo/.github/workflows/mergecraft.yml",
+        "acme/demo/.github/workflows/mergecraft.yml@",
+        "acme/demo/scripts/run.sh@refs/heads/main",
+        "acme/demo/.github/workflows/nested/x.yml@refs/heads/main",
+        "/demo/.github/workflows/mergecraft.yml@refs/heads/main",
+    ],
+)
+def test_a_missing_or_malformed_workflow_ref_names_no_workflow(ref: str | None) -> None:
+    assert workflow_path_from_ref(ref) is None
+
+
+# ── the workflow identity (MC-79284e) ─────────────────────────────────────────
+
+
+async def test_an_unknown_workflow_never_reapproves_or_stamps() -> None:
+    scenario = Scenario()
+    await scenario.stamp_prior()
+    scenario.changelog_edit()
+
+    outcome = await scenario.evaluate(workflow_path=None)
+
+    assert not outcome.verdict.eligible
+    assert "GITHUB_WORKFLOW_REF" in outcome.verdict.reason
+    assert outcome.stamp is None, "a stamp without the workflow could outlive a workflow edit"
+
+
+async def test_a_workflow_missing_at_the_base_never_reapproves_or_stamps() -> None:
+    scenario = Scenario()
+    await scenario.stamp_prior()
+    scenario.changelog_edit()
+
+    outcome = await scenario.evaluate(workflow_path=".github/workflows/other.yml")
+
+    assert not outcome.verdict.eligible
+    assert "not a file at the base revision" in outcome.verdict.reason
+    assert outcome.stamp is None
+
+
+async def test_a_base_side_workflow_edit_is_a_changed_policy() -> None:
+    scenario = Scenario()
+    await scenario.stamp_prior()
+    scenario.base_merge(upstream={WORKFLOW: ("on: pull_request_target\n# new pin\n", "100644")})
+
+    outcome = await scenario.evaluate()
+
+    assert not outcome.verdict.eligible
+    assert outcome.verdict.reason == "the review policy changed since the prior pass"
+
+
+# ── qualifying vs inherited (MC-dbcf5c) ───────────────────────────────────────
+
+
+async def test_a_base_only_changelog_change_is_inherited_not_reported_as_prose() -> None:
+    """The PR never touches the changelog; only the merged base does."""
+    scenario = Scenario()
+    scenario.pr_files = dict(scenario.pr_files)
+    scenario.pr_files["CHANGELOG.md"] = scenario.base_files["CHANGELOG.md"]
+    scenario.p = scenario.repo.commit("reviewed-head-no-changelog", scenario.pr_files)
+    scenario.repo.merge_bases[(scenario.b0, scenario.p)] = scenario.b0
+    scenario.reviews = [review(scenario.p)]
+    await scenario.stamp_prior()
+    b1_changelog = _with_line(CHANGELOG, "### Added", "\n- An upstream entry from main.")
+    scenario.base_merge(resolution={"CHANGELOG.md": (b1_changelog, "100644")})
+
+    outcome = await scenario.evaluate()
+
+    assert not outcome.verdict.eligible
+    assert "no PR-authored change to a qualifying path" in outcome.verdict.reason
+
+
+async def test_a_merge_that_drops_the_prs_own_changelog_entry_is_reviewed() -> None:
+    """At the new head the changelog is the base's: nothing PR-authored is prose-proven."""
+    scenario = Scenario()
+    await scenario.stamp_prior()
+    b1_changelog = _with_line(CHANGELOG, "### Added", "\n- An upstream entry from main.")
+    scenario.base_merge(resolution={"CHANGELOG.md": (b1_changelog, "100644")})
+
+    outcome = await scenario.evaluate()
+
+    assert not outcome.verdict.eligible
+    assert "no PR-authored change to a qualifying path" in outcome.verdict.reason
+
+
+async def test_every_reported_qualifying_path_was_prose_proven() -> None:
+    scenario = Scenario()
+    await scenario.stamp_prior()
+    scenario.base_merge()
+
+    outcome = await scenario.evaluate()
+
+    assert outcome.verdict.eligible, outcome.verdict.reason
+    assert outcome.verdict.record.qualifying_paths == ("CHANGELOG.md",)
+    assert any("/contents/CHANGELOG.md" in path for path in scenario.repo.requests)
