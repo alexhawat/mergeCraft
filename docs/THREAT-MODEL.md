@@ -45,9 +45,12 @@ helper, but no product code path calls it; it is not an enforced control.
 ## SSRF on external retrieval
 
 `guard_external_url` refuses loopback, IPv6 localhost, link-local / cloud
-metadata (`169.254.169.254`), and `file:` URLs before any fetch. Callers:
-`utils/source_resolve.py`, `mcp/upload.py`, and `analyzers/provision.py` (which
-then pins the connection to the validated addresses). Tests live in
+metadata (`169.254.169.254`), and `file:` URLs before any fetch. It is called by
+`utils/source_resolve.py` and `mcp/upload.py`. `analyzers/provision.py` and
+`security/broker.py` use `inspect_external_url` and `pinned_http_transport` to
+validate destinations and pin connections to the validated addresses. The
+broker's `_upstream_client` explicitly permits loopback upstreams for test
+fixtures; those connections bypass the SSRF guard. Tests live in
 `tests/security/test_cd_egress.py` (`test_ssrf_protections_block_link_local_and_metadata_urls`).
 
 ## Vulnerability scanning

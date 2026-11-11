@@ -1,12 +1,26 @@
 {
   "ref": "v0.1.0a5",
   "blobs": {
-    "README.md": "5078584e9058f09e939db648d04723cdab69d03f",
-    "AGENTS-mergecraft.md": "9bacab2c7e34e71ff9d480ede5804b0130356bf6",
-    "docs/REVIEW-CHECKS.md": "ba2a8d115cd41acc24c02ff62f8b41b045ef72f8",
-    "docs/README.md": "feb93e37a8ff6bf5e41e41427fc85cd9898e5b66",
-    "docs/install.md": "672145c7063acde0d57d1ec4fd18c255d4d50924",
-    "docs/mcp.md": "6d5e516f12f019fffb5439fb3a7f14265d32ece5",
-    "docs/authentication.md": "733243e9eca43c1d42e3f06f0b16baeff62450a3"
+    "README.md": {
+      "git_blob_oid": "5078584e9058f09e939db648d04723cdab69d03f"
+    },
+    "AGENTS-mergecraft.md": {
+      "git_blob_oid": "9bacab2c7e34e71ff9d480ede5804b0130356bf6"
+    },
+    "docs/REVIEW-CHECKS.md": {
+      "git_blob_oid": "ba2a8d115cd41acc24c02ff62f8b41b045ef72f8"
+    },
+    "docs/README.md": {
+      "git_blob_oid": "feb93e37a8ff6bf5e41e41427fc85cd9898e5b66"
+    },
+    "docs/install.md": {
+      "git_blob_oid": "672145c7063acde0d57d1ec4fd18c255d4d50924"
+    },
+    "docs/mcp.md": {
+      "git_blob_oid": "6d5e516f12f019fffb5439fb3a7f14265d32ece5"
+    },
+    "docs/authentication.md": {
+      "git_blob_oid": "733243e9eca43c1d42e3f06f0b16baeff62450a3"
+    }
   }
 }

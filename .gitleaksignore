@@ -22,6 +22,3 @@ tests/tracing/test_llm_payloads.py:github-pat:44
 tests/tracing/test_redact_cli_argv.py:gitlab-pat:13
 tests/tracing/test_sentinel_unified.py:generic-api-key:12
 tests/tracing/test_thinking.py:github-pat:50
-# Public Git blob ID, not a credential: git rev-parse v0.1.0a5:docs/authentication.md
-# The fixture records the released documentation tree for standalone skill links.
-tests/docs/fixtures/agent_package_documentation.json:generic-api-key:10
