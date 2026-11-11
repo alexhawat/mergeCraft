@@ -194,7 +194,7 @@ async def test_a_publication_that_raised_is_still_an_ignored_tool_error(
 
     ctx = await _state_with_a_recorded_verdict(tmp_path)
 
-    async def _failing_publish(tool_context: Any) -> dict[str, Any]:
+    async def _failing_publish(tool_context: Any, **_kwargs: Any) -> dict[str, Any]:
         raise RuntimeError("GitHub returned an error")
 
     monkeypatch.setattr("mergecraft.mcp.review.publish_pull_request_review", _failing_publish)
@@ -240,7 +240,7 @@ async def test_a_received_submission_is_still_published(
     ctx = await _state_with_a_recorded_verdict(tmp_path)
     published: list[Any] = []
 
-    async def _fake_publish(tool_context: Any) -> dict[str, Any]:
+    async def _fake_publish(tool_context: Any, **_kwargs: Any) -> dict[str, Any]:
         published.append(tool_context)
         return {"success": True}
 

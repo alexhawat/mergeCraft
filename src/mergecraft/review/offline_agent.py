@@ -69,6 +69,8 @@ def offline_outcome_inputs(
     result: AgentResult,
     *,
     budget_tracker: BudgetTracker | None,
+    structured_output: str | None = None,
+    output_schema: dict[str, Any] | None = None,
 ) -> OutcomeInputs:
     """Build the shared resolver's inputs for an offline review (one ``Review`` attempt).
 
@@ -80,6 +82,10 @@ def offline_outcome_inputs(
     Args:
         result (AgentResult): The chain result after the roster fold.
         budget_tracker (BudgetTracker | None): The run's budget tracker.
+        structured_output (str | None): ``tool_state.output`` after the run.
+        output_schema (dict[str, Any] | None): The findings schema the run was
+            asked to fill; when set, a missing or invalid ``set_output`` payload
+            is an input (the Action reads the same gap the same way).
 
     Returns:
         OutcomeInputs: The inputs ``resolve_run_outcome`` maps.
@@ -89,7 +95,11 @@ def offline_outcome_inputs(
         >>> offline_outcome_inputs(AgentResult(success=True), budget_tracker=None).mode
         'Review'
     """
-    from mergecraft.review.outcome_resolution import OutcomeInputs, roster_failure_from_result
+    from mergecraft.review.outcome_resolution import (
+        OutcomeInputs,
+        roster_failure_from_result,
+        structured_output_error,
+    )
 
     roster_failure, roster_infra_reason = roster_failure_from_result(result)
     return OutcomeInputs(
@@ -99,6 +109,11 @@ def offline_outcome_inputs(
         budget_exhaustion=budget_tracker.last_exhausted if budget_tracker is not None else None,
         roster_failure=roster_failure,
         roster_infra_reason=roster_infra_reason,
+        structured_output_error=(
+            structured_output_error(structured_output, findings=True)
+            if output_schema is not None
+            else None
+        ),
     )
 
 
@@ -449,7 +464,12 @@ async def run_offline_agent_review(
         from mergecraft.review.outcome_resolution import resolve_run_outcome
 
         outcome, failure_reason = resolve_run_outcome(
-            offline_outcome_inputs(result, budget_tracker=budget_tracker)
+            offline_outcome_inputs(
+                result,
+                budget_tracker=budget_tracker,
+                structured_output=tool_state.output,
+                output_schema=output_schema,
+            )
         )
         structured_output = tool_state.output
         markdown_output = result.output
@@ -533,7 +553,5 @@ async def run_offline_agent_review(
             stop_mcp()
         if github is not None:
             await github.aclose()
-        from mergecraft.config.env import PathsEnv
-
-        if not PathsEnv().keep_tmp:
-            logger.debug("offline review artifacts retained at {}", tmpdir)
+        # ``tmpdir`` belongs to the caller, which schedules its removal
+        # (``utils.git_setup.schedule_directory_cleanup``, ``MERGECRAFT_KEEP_TMP``).

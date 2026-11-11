@@ -108,7 +108,8 @@ def test_finish_does_not_store_when_structured_output_missing(
         cache_key="review-result:should-not-store",
     )
     assert finished.success is False
-    assert finished.outcome is RunOutcome.configuration_error
+    # #1293: the model not producing findings is inconclusive, not a setup error.
+    assert finished.outcome is RunOutcome.inconclusive
     assert STRUCTURED_OUTPUT_REQUIRED_MSG in (finished.error or "")
     assert stores == []
     assert not json_path.exists()
@@ -240,7 +241,7 @@ async def test_offline_run_does_not_cache_empty_structured_output(
     )
     assert first.success is False
     assert stores == []
-    assert first.outcome is RunOutcome.configuration_error
+    assert first.outcome is RunOutcome.inconclusive
 
     async def _agent_must_not_be_skipped(**kwargs: object) -> OfflineReviewResult:
         return OfflineReviewResult(

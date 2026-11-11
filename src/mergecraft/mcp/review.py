@@ -1410,8 +1410,13 @@ async def _publish_github_review(
     params: dict[str, Any],
     *,
     entrypoint: str = "create_pull_request_review",
+    run_not_passing_reason: str | None = None,
 ) -> dict[str, Any]:
-    """Post a GitHub review after a validated terminal submission exists (V6)."""
+    """Post a GitHub review after a validated terminal submission exists (V6).
+
+    ``run_not_passing_reason`` (see :func:`publish_pull_request_review`) keeps an
+    APPROVE off the pull request and skips resolving earlier finding threads.
+    """
     primary = primary_repo_state(ctx.tool_state)
     pull_number = _resolve_bound_pull_number(ctx, params)
     commit_id = _resolve_bound_commit_id(ctx, params)
@@ -1448,6 +1453,7 @@ async def _publish_github_review(
     if (
         approved
         and ctx.pr_approve_enabled
+        and run_not_passing_reason is None
         and ctx.authority_trust == "trusted"
         and not triage_skipped  # nothing was in review scope; a human approves (#1109)
     ):
@@ -1754,15 +1760,25 @@ async def _publish_github_review(
         response["bodyTruncated"] = True
     if publication_gap:
         response["publicationIncomplete"] = publication_gap
-    resolved = await _resolve_fixed_finding_threads(
-        ctx,
-        pull_number=pull_number,
-        still_raised=_still_raised_fingerprints(
+    if run_not_passing_reason is not None:
+        # The run will not pass (its approval, if any, was withheld): what this
+        # review left out is no proof the earlier findings are fixed.
+        logger.info(
+            "finding resolution: skipped on PR #{} because the run does not pass: {}",
+            pull_number,
+            run_not_passing_reason,
+        )
+        resolved = 0
+    else:
+        resolved = await _resolve_fixed_finding_threads(
             ctx,
-            posted=accepted_payloads[-1] if accepted_payloads else payload,
-            inline=inline,
-        ),
-    )
+            pull_number=pull_number,
+            still_raised=_still_raised_fingerprints(
+                ctx,
+                posted=accepted_payloads[-1] if accepted_payloads else payload,
+                inline=inline,
+            ),
+        )
     if resolved:
         response["resolvedThreads"] = resolved
     return response
@@ -1795,8 +1811,16 @@ def _comments_from_submission_findings(submission: Any) -> list[dict[str, Any]]:
     return comments
 
 
-async def publish_pull_request_review(ctx: ToolContext) -> dict[str, Any]:
-    """Publish the validated terminal submission to GitHub (internal, not an MCP tool)."""
+async def publish_pull_request_review(
+    ctx: ToolContext, *, run_not_passing_reason: str | None = None
+) -> dict[str, Any]:
+    """Publish the validated terminal submission to GitHub (internal, not an MCP tool).
+
+    ``run_not_passing_reason`` is why the run's outcome would not be ``passed``
+    (resolved before publication). When set, an ``approve`` verdict is never
+    posted as an APPROVE, and no earlier finding thread is resolved as fixed:
+    a run that does not pass is no evidence that a finding is gone.
+    """
     if ctx.tool_state.terminal_submission is None:
         msg = "no validated terminal submission available for publication"
         raise ValueError(msg)
@@ -1843,6 +1867,7 @@ async def publish_pull_request_review(ctx: ToolContext) -> dict[str, Any]:
         ctx,
         pending,
         entrypoint="publish_pull_request_review",
+        run_not_passing_reason=run_not_passing_reason,
     )
     advance_review_phase(ctx.tool_state, ReviewPhase.COMPLETE)
     return result

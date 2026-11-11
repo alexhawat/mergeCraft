@@ -228,8 +228,10 @@ class TestProviderErrorNotSchemaFailure:
             payload={},
         )
         ok = AgentResult(success=True, output="review text")
-        with pytest.raises(RuntimeError, match="set_output"):
-            _promote_and_finalize_agent_result(ctx, None, ok)
+        _promote_and_finalize_agent_result(ctx, None, ok)
+        # Recorded for the shared outcome resolver (inconclusive), not raised.
+        assert ctx.structured_output_error is not None
+        assert "set_output" in ctx.structured_output_error
 
 
 def test_provider_failure_class_is_not_owned_by_http_retry_module() -> None:

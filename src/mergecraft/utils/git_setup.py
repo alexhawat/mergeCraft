@@ -35,6 +35,8 @@ _created_paths: set[str] = set()
 _run_owned_dirs: set[str] = set()
 _temp_dir: str | None = None
 _atexit_registered = False
+_cleanup_at_exit: dict[str, tuple[str, ...]] = {}
+_cleanup_registered = False
 
 
 def _is_under_forbidden_temp(path: Path) -> bool:
@@ -200,10 +202,67 @@ def register_run_owned_directory(path: str) -> None:
 
     Only such a directory may be opened to a reviewing agent wholesale: an
     operator-chosen or shared directory can hold credentials and other runs'
-    files. Unlike :func:`register_created_path`, this does not schedule a wipe,
-    so a review's output directory survives the run.
+    files. Unlike :func:`register_created_path`, this does not schedule a wipe;
+    :func:`schedule_directory_cleanup` removes a review's directory at exit.
     """
     _run_owned_dirs.add(str(Path(path).resolve()))
+
+
+def _remove_scheduled_directories() -> None:
+    """``atexit`` hook: remove every directory :func:`schedule_directory_cleanup` queued.
+
+    Entries named in that call's ``keep`` survive, with the directory holding them.
+    """
+    while _cleanup_at_exit:
+        target, keep = _cleanup_at_exit.popitem()
+        if not os.path.lexists(target):
+            continue
+        root = Path(target)
+        kept = [root / name for name in keep if os.path.lexists(root / name)]
+        if not kept:
+            shutil.rmtree(target, onerror=_warn_rmtree_error)
+            continue
+        for child in root.iterdir():
+            if child.name in keep:
+                continue
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child, onerror=_warn_rmtree_error)
+            else:
+                try:
+                    child.unlink()
+                except OSError as exc:
+                    if not _is_already_absent(exc, str(child)):
+                        logger.warning("» could not remove {}: {}", child, _describe_exc(exc))
+        logger.info("» kept review artifact(s): {}", ", ".join(str(path) for path in kept))
+
+
+def schedule_directory_cleanup(path: str, *, keep: tuple[str, ...] = ()) -> bool:
+    """Remove a run-owned review directory at process exit, unless ``MERGECRAFT_KEEP_TMP`` is set.
+
+    The removal waits for exit because the caller still reads and prints paths
+    inside the directory (the materialized diff, the evidence packet) after the
+    review returns. Any non-empty ``MERGECRAFT_KEEP_TMP`` keeps all of it.
+
+    Args:
+        path (str): A directory this run created with ``mkdtemp``.
+        keep (tuple[str, ...]): Top-level entry names that hold durable
+            artifacts (the evidence directory, the Jev shadow log). When any of
+            them exists at exit, only the other entries are removed.
+
+    Returns:
+        bool: ``True`` when the removal was scheduled, ``False`` when kept.
+    """
+    from mergecraft.config.env import PathsEnv
+
+    global _cleanup_registered
+    if PathsEnv().keep_tmp:
+        logger.info("» MERGECRAFT_KEEP_TMP is set; keeping {}", path)
+        return False
+    _cleanup_at_exit[str(Path(path).resolve())] = tuple(keep)
+    if not _cleanup_registered:
+        atexit.register(_remove_scheduled_directories)
+        _cleanup_registered = True
+    return True
 
 
 def is_run_owned_directory(path: str) -> bool:

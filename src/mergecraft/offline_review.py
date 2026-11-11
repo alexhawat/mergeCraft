@@ -102,12 +102,11 @@ def merge_analyzer_findings_into_result(
         try:
             parse_findings_payload(result.structured_output)
         except ValueError as exc:
-            return _offline_failure(
-                error=str(exc),
-                outcome=RunOutcome.configuration_error,
-                diff_path=result.diff_path,
-                evidence_packet_path=result.evidence_packet_path,
-            )
+            if not result.success:
+                # The run already failed and resolved its own outcome
+                # (``offline_outcome_inputs`` reads this payload); keep it.
+                return result
+            return _structured_output_failure(result, str(exc))
     if not extra:
         return result
     if result.structured_output:
@@ -246,6 +245,27 @@ def _render_offline_extra_block(extra: str) -> str:
     )
 
 
+def _structured_output_failure(result: OfflineReviewResult, reason: str) -> OfflineReviewResult:
+    """Fail ``result`` whose required ``set_output`` payload is missing or invalid.
+
+    The outcome comes from the shared resolver, so this offline fallback reads
+    the gap exactly as ``run_offline_agent_review`` and the Action do
+    (``inconclusive``: the run did not produce the findings it was asked for).
+    """
+    from mergecraft.agents.shared import AgentResult
+    from mergecraft.review.outcome_resolution import OutcomeInputs, resolve_run_outcome
+
+    outcome, resolved_reason = resolve_run_outcome(
+        OutcomeInputs(result=AgentResult(success=True), structured_output_error=reason)
+    )
+    return _offline_failure(
+        error=resolved_reason or reason,
+        outcome=outcome,
+        diff_path=result.diff_path,
+        evidence_packet_path=result.evidence_packet_path,
+    )
+
+
 def _finalize_structured_findings(
     result: OfflineReviewResult,
     json_path: Path,
@@ -254,24 +274,13 @@ def _finalize_structured_findings(
     if not result.success:
         return result
 
-    structured_raw = result.structured_output
-    if not structured_raw:
-        return _offline_failure(
-            error=STRUCTURED_OUTPUT_REQUIRED_MSG,
-            outcome=RunOutcome.configuration_error,
-            diff_path=result.diff_path,
-            evidence_packet_path=result.evidence_packet_path,
-        )
+    from mergecraft.review.outcome_resolution import structured_output_error
 
-    try:
-        findings = parse_findings_payload(structured_raw)
-    except ValueError as exc:
-        return _offline_failure(
-            error=str(exc),
-            outcome=RunOutcome.configuration_error,
-            diff_path=result.diff_path,
-            evidence_packet_path=result.evidence_packet_path,
-        )
+    structured_raw = result.structured_output
+    unusable = structured_output_error(structured_raw, findings=True)
+    if unusable is not None or not structured_raw:
+        return _structured_output_failure(result, unusable or STRUCTURED_OUTPUT_REQUIRED_MSG)
+    findings = parse_findings_payload(structured_raw)
 
     try:
         write_findings_json(json_path, findings)
@@ -562,6 +571,13 @@ def _shadow_provider_skip_code(exc: BaseException) -> str:
     if isinstance(code, str) and code:
         return code
     return "transport_error"
+
+
+#: Top-level entries of the offline review's temp dir that outlive it: the
+#: evidence directory (``resolve_evidence_dir`` falls back to ``<tmpdir>/evidence``
+#: for the packet, its Jev shadow sibling and ``--capture-verdicts`` output) and
+#: the packet-less Jev shadow log (:func:`_jev_shadow_artifact_path`).
+DURABLE_REVIEW_ARTIFACTS: tuple[str, ...] = ("evidence", "jev-shadow.jsonl")
 
 
 def _jev_shadow_artifact_path(
@@ -975,8 +991,9 @@ class _OfflineDiffReviewRun:
             )
             cached = load_review_result(self.cache_key) if self.cache_key is not None else None
             if cached is not None:
-                if cached.diff_path is None:
-                    cached.diff_path = str(self.materialization.path)
+                # A cached result's diff lived in an earlier run's temp dir, which
+                # is removed at that run's exit; point at this run's copy.
+                cached.diff_path = str(self.materialization.path)
                 self.from_cache = True
                 return merge_analyzer_findings_into_result(
                     cached,
@@ -1091,11 +1108,17 @@ async def _run_offline_diff_review(
         )
 
         out_dir = Path(tempfile.mkdtemp(prefix="mergecraft-diff-review-"))
-        from mergecraft.utils.git_setup import register_run_owned_directory
+        from mergecraft.utils.git_setup import (
+            register_run_owned_directory,
+            schedule_directory_cleanup,
+        )
 
         # The diff and the agent's scratch live here; only a run-owned directory is
-        # opened to the reviewing agent.
+        # opened to the reviewing agent. Its scratch is removed at exit (after the
+        # CLI has printed and persisted the result) unless ``MERGECRAFT_KEEP_TMP``
+        # is set; the durable artifacts a result points to are kept.
         register_run_owned_directory(str(out_dir))
+        schedule_directory_cleanup(str(out_dir), keep=DURABLE_REVIEW_ARTIFACTS)
         from mergecraft.review.engine import ReviewEngine
         from mergecraft.review.snapshot import canonical_review_snapshot
         from mergecraft.utils.process_group import kill_all_active_process_groups

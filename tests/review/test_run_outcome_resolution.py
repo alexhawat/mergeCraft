@@ -58,6 +58,7 @@ async def _finalize(
     budget_exhaustion: BudgetExhausted | None = None,
     budget_tracker: BudgetTracker | None = None,
     sink: str | None = None,
+    structured_output_error: str | None = None,
 ) -> main_mod.MainResult:
     async def _record(_ctx: Any, **_kwargs: Any) -> None:
         return None
@@ -73,6 +74,7 @@ async def _finalize(
     )
     run.budget_exhaustion = budget_exhaustion
     run.budget_tracker = budget_tracker
+    run.structured_output_error = structured_output_error
     return await main_mod._finalize(run, result)
 
 
@@ -369,7 +371,9 @@ def offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             return None
 
         async def run(self, ctx: Any) -> AgentResult:
-            ctx.tool_state.output = FindingsPayload(findings=[]).model_dump_json()
+            ctx.tool_state.output = seen.get(
+                "output", FindingsPayload(findings=[]).model_dump_json()
+            )
             if seen.get("exhaust"):
                 # The MCP ``tools/call`` handler records this and answers with an error.
                 seen["tracker"].last_exhausted = BudgetExhausted(
@@ -400,6 +404,7 @@ def offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 async def _run_offline(offline: dict[str, Any], tmp_path: Path) -> Any:
+    from mergecraft.analyzers.finding import findings_output_schema
     from mergecraft.review import offline_agent
 
     return await offline_agent.run_offline_agent_review(
@@ -408,6 +413,8 @@ async def _run_offline(offline: dict[str, Any], tmp_path: Path) -> Any:
         prompt="review",
         model=None,
         tmpdir=tmp_path,
+        # What ``mergecraft review`` always passes: the findings schema.
+        output_schema=findings_output_schema(),
     )
 
 
@@ -424,6 +431,8 @@ _PARITY_CASES: dict[str, dict[str, Any]] = {
         )
     },
     "driver_failed": {"failed": True},
+    # The model finished without calling ``set_output`` (#1293).
+    "missing_output": {"output": None},
 }
 
 
@@ -437,6 +446,8 @@ async def test_the_same_inputs_resolve_to_the_same_outcome_online_and_offline(
     # Offline: the stub harness either submits (received) or fails.
     offline["exhaust"] = spec.get("exhaust", False)
     offline["roster"] = spec.get("roster")
+    if "output" in spec:
+        offline["output"] = spec["output"]
     offline["result"] = (
         failed
         if spec.get("failed")
@@ -456,11 +467,21 @@ async def test_the_same_inputs_resolve_to_the_same_outcome_online_and_offline(
         result = await _driver_result(ctx)
     if spec.get("roster") is not None:
         result = apply_roster_failure(result, spec["roster"])
+    if "output" in spec:
+        # The Action's own schema check, on the same missing payload.
+        run = main_mod.RunContext(
+            tool_state=ctx.tool_state, tool_context=ctx, output_schema={"type": "object"}
+        )
+        ctx.tool_state.output = spec["output"]
+        result = main_mod._promote_and_finalize_agent_result(run, None, result)
+    else:
+        run = None
     online_out = await _finalize(
         ctx,
         result,
         monkeypatch,
         budget_tracker=_tool_call_tracker() if spec.get("exhaust") else None,
+        structured_output_error=run.structured_output_error if run is not None else None,
     )
 
     assert offline_out.outcome is online_out.outcome
@@ -468,6 +489,35 @@ async def test_the_same_inputs_resolve_to_the_same_outcome_online_and_offline(
         assert online_out.outcome is RunOutcome.passed
     else:
         assert online_out.outcome is not RunOutcome.passed
+    if case == "missing_output":
+        assert online_out.outcome is RunOutcome.inconclusive
+
+
+@pytest.mark.parametrize("output", [None, "not json", '{"findings": [{"bogus": 1}]}'])
+async def test_an_offline_missing_or_invalid_set_output_is_inconclusive_not_a_config_error(
+    output: str | None, offline: dict[str, Any], tmp_path: Path
+) -> None:
+    """#1293: the model not producing its findings is not a setup error (exit 20, not 30)."""
+    from mergecraft.offline_review import (
+        _finish_offline_result,
+        findings_from_analyzer_run,
+        merge_analyzer_findings_into_result,
+        parse_offline_review_findings,
+    )
+
+    offline["result"] = AgentResult(success=True, terminal_submission_received=True)
+    offline["output"] = output
+
+    reviewed = await _run_offline(offline, tmp_path)
+    # The rest of the CLI lifecycle: analyzer fold, then the JSON finalize step.
+    merged = merge_analyzer_findings_into_result(reviewed, findings_from_analyzer_run(None))
+    finished = _finish_offline_result(
+        merged, json_path=tmp_path / "findings.json", scope_reduction=None, cache_key=None
+    )
+
+    assert finished.outcome is RunOutcome.inconclusive
+    assert finished.success is False
+    assert cli_exit_code_for_review(finished.outcome, parse_offline_review_findings(finished)) == 20
 
 
 async def test_an_offline_blocking_secondary_finding_reaches_the_json_and_exit_code(
@@ -509,3 +559,67 @@ def test_a_blocker_does_not_mask_an_outcome_the_review_did_not_reach(outcome: Ru
             RunOutcome.inconclusive: 20,
         }[outcome]
     )
+
+
+# ------------------------------------------------------- re-review thread resolution
+
+
+def _rereview_ctx(tmp_path: Path, github: RecordingReviewGitHub) -> ToolContext:
+    """An approving IncrementalReview re-review whose new commits touched ``src/app.py``."""
+    from mergecraft.mcp.tool_state import primary_repo_state
+    from tests.support.publication import unified_diff
+
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted", mode="IncrementalReview")
+    ctx.pr_approve_enabled = True
+    ctx.authority_trust = "trusted"
+    primary = primary_repo_state(ctx.tool_state)
+    primary.incremental_changed_paths = ["src/app.py"]
+    incremental = tmp_path / "incremental.patch"
+    incremental.write_text(unified_diff("src/app.py", start=1, count=5), encoding="utf-8")
+    primary.incremental_diff_path = str(incremental)
+    ctx.publisher_logins = frozenset({"mergecraft-app[bot]"})
+    return ctx
+
+
+def _stale_finding_github() -> RecordingReviewGitHub:
+    """A PR with one open mergeCraft thread whose finding the new commits removed."""
+    from mergecraft.review_taxonomy import stamp_finding_fingerprint
+    from tests.support.publication import review_thread
+
+    stale = stamp_finding_fingerprint(path="src/app.py", body="Old finding.")
+    return RecordingReviewGitHub(
+        threads=[
+            review_thread(
+                thread_id="T-stale", body=stale, author="mergecraft-app[bot]", outdated=True
+            )
+        ]
+    )
+
+
+async def test_a_passing_rereview_resolves_the_threads_whose_findings_are_gone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    github = _stale_finding_github()
+    ctx = _rereview_ctx(tmp_path, github)
+    await submit_verdict(ctx, "approve", [])
+
+    outcome = await _finalize(ctx, await _driver_result(ctx), monkeypatch)
+
+    assert outcome.outcome is RunOutcome.passed
+    assert _events(github) == ["APPROVE"]
+    assert github.resolved == ["T-stale"]
+
+
+@pytest.mark.parametrize("gate", ["coverage", "prep", "token_budget", "roster"])
+async def test_a_withheld_approval_resolves_no_threads_as_fixed(
+    gate: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    github = _stale_finding_github()
+    ctx = _rereview_ctx(tmp_path, github)
+    await submit_verdict(ctx, "approve", [])
+
+    outcome = await _run_gate(gate, ctx, monkeypatch)
+
+    assert outcome.outcome is not RunOutcome.passed
+    assert _events(github) == ["COMMENT"]
+    assert github.resolved == []
