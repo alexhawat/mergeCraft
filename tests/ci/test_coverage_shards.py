@@ -667,3 +667,52 @@ def test_orchestrated_child_failure_never_combines(
             seed="424242",
         )
     assert combined is False
+
+
+def test_failed_shard_log_tail_and_failures_reach_stderr_and_step_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The log stays on the runner, so a failure must print what failed (TST-F7)."""
+    module = _load_module()
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+
+    def fake_run(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        group = command[command.index("--group") + 1]
+        if group == "2":
+            kwargs["stdout"].write(
+                "noise\n" * 300
+                + "FAILED tests/x/test_y.py::test_boom - AssertionError: expected 1\n"
+                + "ERROR tests/x/test_z.py - ImportError\n"
+                + "final line\n"
+            )
+        return SimpleNamespace(returncode=1 if group == "2" else 0)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    monkeypatch.setattr(module, "combine_and_gate", lambda *a, **k: None)
+    with pytest.raises(module.ShardError, match="group 2 failed"):
+        module.orchestrate(REPO_ROOT, tmp_path / "run", splits=2, jobs="0", seed="1")
+
+    err = capsys.readouterr().err
+    assert "FAILED tests/x/test_y.py::test_boom - AssertionError: expected 1" in err
+    assert "ERROR tests/x/test_z.py - ImportError" in err
+    assert "final line" in err
+    assert err.count("noise") < 300, "only the tail is printed"
+    text = summary.read_text(encoding="utf-8")
+    assert "Coverage shard 2 failed" in text
+    assert "FAILED tests/x/test_y.py::test_boom" in text
+
+
+def test_passing_shards_print_no_failure_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_module()
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(module, "combine_and_gate", lambda *a, **k: None)
+    module.orchestrate(REPO_ROOT, tmp_path / "run", splits=2, jobs="0", seed="1")
+    assert "failure" not in capsys.readouterr().err

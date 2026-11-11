@@ -14,7 +14,10 @@ on:
 permissions: {}
 
 concurrency:
-  group: ci-cd-${{ github.workflow }}-${{ github.ref }}
+  # One group per commit: a shared group let a newer push cancel the *pending*
+  # run of an older merge, so its verify and coverage artifact never completed.
+  # Image publication is serialised per ref at job level (build-images).
+  group: ci-cd-${{ github.workflow }}-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: false
 
 env:
@@ -61,6 +64,14 @@ jobs:
         env:
           MERGECRAFT_TEST_SPLITS: "2"
         run: make ci
+      - name: Upload coverage shard logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: coverage-shard-logs
+          path: .coverage-shards/**/group-*.log
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Upload main coverage for PR delta reuse
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -128,6 +139,9 @@ jobs:
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1' || startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    concurrency:
+      group: ci-cd-publish-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
