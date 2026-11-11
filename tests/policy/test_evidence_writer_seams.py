@@ -33,6 +33,7 @@ import pytest
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.scm.github import create_github_scm
 from mergecraft.utils.github import GitHubClient
+from tests.support.github_fakes import StrictGitHubClient
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -43,7 +44,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-class _GraphQL(GitHubClient):
+class _GraphQL(StrictGitHubClient):
     """A client whose GraphQL answers with a canned ``data`` object, or raises."""
 
     def __init__(self, answer: Any = None, error: Exception | None = None) -> None:
@@ -163,7 +164,7 @@ async def test_run_start_without_a_pull_request_reads_nothing() -> None:
     assert client.calls == []
 
 
-class _CredentialPhaseGitHub(GitHubClient):
+class _CredentialPhaseGitHub(StrictGitHubClient):
     """The client ``_resolve_credentials`` installs: binds the PR, answers closing issues."""
 
     def __init__(self) -> None:

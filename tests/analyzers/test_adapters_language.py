@@ -89,6 +89,8 @@ def test_review_names_tool_version(tool_id: str, adapter_fixture_repo: Path) -> 
     )
 
 
+@pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.parametrize(
     ("tool_id", "path", "line"),
     [(tid, loc[0], loc[1]) for tid, loc in C1_LANGUAGE_TOOLS.items()],

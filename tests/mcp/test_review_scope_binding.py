@@ -5,19 +5,19 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from tests.support.github_fakes import StrictGitHubClient
 from tests.support.tool_context import bind_github_client, github_client_from_ctx
 
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.review import create_pull_request_review_tool
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
-from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-class _RecordingGitHub(GitHubClient):
+class _RecordingGitHub(StrictGitHubClient):
     """Capture review payloads and count SCM create_review calls."""
 
     def __init__(self) -> None:

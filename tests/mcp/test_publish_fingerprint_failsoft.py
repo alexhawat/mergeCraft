@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from tests.support.github_fakes import StrictGitHubClient
 from tests.support.tool_context import bind_review_publication_scope, github_client_from_ctx
 
 from mergecraft.analyzers.finding import make_finding, resolve_finding_short_ids
@@ -17,7 +18,6 @@ from mergecraft.mcp.context import (
 from mergecraft.mcp.review import create_pull_request_review_tool
 from mergecraft.mcp.tool_state import AnalyzerRunState, init_tool_state
 from mergecraft.modes import compute_modes
-from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -26,7 +26,7 @@ _NON_HEX_FINGERPRINT = "zzzzzzzzzzzzzzzzzzzzzzzzzz"
 _HEX_FINGERPRINT = "a83f91c2d4e5f6a7b8c9d0e1"
 
 
-class _RecordingGitHub(GitHubClient):
+class _RecordingGitHub(StrictGitHubClient):
     """Captures the review payload instead of sending it."""
 
     def __init__(self) -> None:

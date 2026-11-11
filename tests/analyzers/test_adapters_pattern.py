@@ -53,6 +53,8 @@ def test_exactly_one_pattern_backend_runs(adapter_fixture_repo: Path) -> None:
     )
 
 
+@pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.parametrize("tool_id", list(C3_PATTERN_TOOLS))
 def test_pattern_scanner_catches_planted_sink(tool_id: str, adapter_fixture_repo: Path) -> None:
     if tool_id not in _catalog_ids():
@@ -65,6 +67,8 @@ def test_pattern_scanner_catches_planted_sink(tool_id: str, adapter_fixture_repo
     assert matches, f"{tool_id} must catch taint-style sink at {path}:{line}"
 
 
+@pytest.mark.integration
+@pytest.mark.network
 def test_semgrep_default_ruleset_catches_action_yml_expression_footgun(
     adapter_fixture_repo: Path,
 ) -> None:
@@ -91,6 +95,8 @@ def test_semgrep_default_ruleset_catches_action_yml_expression_footgun(
     )
 
 
+@pytest.mark.integration
+@pytest.mark.network
 def test_taint_finding_requires_verification_before_review(adapter_fixture_repo: Path) -> None:
     pipeline = import_module("mergecraft.analyzers.pipeline")
     verifier = import_module("mergecraft.agents.verifier")

@@ -55,6 +55,8 @@ def _fail_if_skipped(result: AdapterRunResult, tool_id: str) -> None:
         pytest.fail(f"{tool_id} did not run: {result.skip_reason}")
 
 
+@pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.parametrize("tool_id", list(PLANTED))
 def test_adapter_catches_planted_finding(tool_id: str, adapter_fixture_repo: Path) -> None:
     adapters = import_module("mergecraft.analyzers.adapters")

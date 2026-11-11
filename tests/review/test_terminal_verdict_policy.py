@@ -45,7 +45,7 @@ from mergecraft.modes import compute_modes
 from mergecraft.review_checks import StaticCheckConfig
 from mergecraft.review_taxonomy import FINDING_MARKER_PREFIX, finding_fingerprint
 from mergecraft.run_outcome import RunOutcome, run_succeeded_for_outcome
-from mergecraft.utils.github import GitHubClient
+from tests.support.github_fakes import StrictGitHubClient
 from tests.support.tool_context import bind_github_client, give_review_scope
 
 if TYPE_CHECKING:
@@ -90,7 +90,7 @@ def _ctx(
                 event=PayloadEvent(trigger="pull_request", issue_number=issue_number, is_pr=True),
                 shell="restricted",
             ),
-            github=GitHubClient(token=""),
+            github=StrictGitHubClient(token=""),
             github_installation_token="",
             git_token="",
             api_token="",
@@ -258,7 +258,7 @@ async def _submit_verdict(ctx: ToolContext, payload: dict[str, Any]) -> ToolResu
     return await submit_review_verdict_tool(ctx).execute(payload)
 
 
-class _RecordingGitHub(GitHubClient):
+class _RecordingGitHub(StrictGitHubClient):
     """Captures review and comment payloads instead of sending them."""
 
     def __init__(self) -> None:

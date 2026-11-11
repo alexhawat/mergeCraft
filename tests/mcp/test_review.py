@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 import pytest
 import yaml
+from tests.support.github_fakes import StrictGitHubClient
 from tests.support.publication import (
     RecordingReviewGitHub,
     finding,
@@ -44,7 +45,7 @@ from mergecraft.run_outcome import RunOutcome
 from mergecraft.utils.github import GitHubClient
 
 
-class _RecordingGitHub(GitHubClient):
+class _RecordingGitHub(StrictGitHubClient):
     """GitHub client that captures the review payload instead of sending it."""
 
     def __init__(self, *, approve_rejected: bool = False) -> None:

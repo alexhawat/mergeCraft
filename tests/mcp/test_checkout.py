@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import pytest
+from tests.support.github_fakes import StrictGitHubClient
 
 from mergecraft.mcp.checkout import (
     changed_paths_in_diff,
@@ -278,7 +279,7 @@ def test_app_publisher_still_advances_the_checkpoint_and_round(
     assert review_round_index(reviews, publishers=publishers) == 2
 
 
-class _PagedReviewsGitHub(GitHubClient):
+class _PagedReviewsGitHub(StrictGitHubClient):
     """Serves review history page by page, recording the pages requested."""
 
     def __init__(self, *, pages: dict[int, list[dict[str, Any]]]) -> None:
@@ -382,7 +383,7 @@ def test_changed_paths_in_diff_reads_post_image_paths() -> None:
     assert changed_paths_in_diff(diff) == ["src/a.py", "new.py"]
 
 
-class _StubGitHub(GitHubClient):
+class _StubGitHub(StrictGitHubClient):
     """Serves one PR and its prior reviews without touching the network."""
 
     def __init__(self, *, head_sha: str, reviews: list[dict[str, Any]]) -> None:

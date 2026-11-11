@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from tests.support.github_fakes import StrictGitHubClient
 from tests.support.tool_context import bind_review_publication_scope, github_client_from_ctx
 
 from mergecraft.mcp.context import (
@@ -20,7 +21,6 @@ from mergecraft.review_taxonomy import (
     FINDING_MARKER_PREFIX,
     finding_fingerprint,
 )
-from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -29,7 +29,7 @@ DEFERRED_SECTION_HEADING = "### 🗂 Deferred findings"
 FIX_ALL_DEFERRED_HEADING = "## Deferred (non-blocking)"
 
 
-class _RecordingGitHub(GitHubClient):
+class _RecordingGitHub(StrictGitHubClient):
     """Captures the review payload instead of sending it."""
 
     def __init__(self) -> None:

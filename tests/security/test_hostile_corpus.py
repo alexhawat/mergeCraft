@@ -208,6 +208,7 @@ def test_repo_cannot_declare_itself_trusted(hostile_repo: Path, tmp_path: Path) 
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("offline_analyzer_provisioning")
 async def test_review_still_produces_a_usable_verdict_on_the_hostile_repo(
     hostile_repo: Path,
     tmp_path: Path,
