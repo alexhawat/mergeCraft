@@ -74,6 +74,8 @@ def test_adapter_catches_planted_finding(tool_id: str, adapter_fixture_repo: Pat
     assert matches, f"{tool_id} must catch planted finding at {path}:{line}"
 
 
+@pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.parametrize("tool_id", list(PLANTED))
 def test_adapter_invents_no_unplanted_findings_on_untouched_files(
     tool_id: str, adapter_fixture_repo: Path
@@ -94,6 +96,8 @@ def test_adapter_invents_no_unplanted_findings_on_untouched_files(
         assert untouched not in reported_paths
 
 
+@pytest.mark.integration
+@pytest.mark.network
 def test_actionlint_ignores_composite_action_but_catches_invalid_workflow(
     adapter_fixture_repo: Path,
 ) -> None:
