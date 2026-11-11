@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import re
 import subprocess
 from pathlib import Path
@@ -22,12 +23,21 @@ _FENCE_FOOTER_RE = re.compile(r"<<<END-UNTRUSTED-MERGECRAFT-CONTENT\b")
 
 
 def require_hostile_repo() -> Path:
-    """Return the corpus path, building it on demand when missing."""
-    if not (HOSTILE_REPO / ".git").exists():
-        if not BUILD_SCRIPT.is_file():
-            msg = f"hostile-repo build script missing: {BUILD_SCRIPT}"
-            raise AssertionError(msg)
-        subprocess.run([str(BUILD_SCRIPT)], check=True)
+    """Build the corpus once across workers, retrying incomplete builds."""
+    # The builder deletes HOSTILE_REPO, so the lock must live beside it and
+    # remain in place after unlocking for all workers to share the same inode.
+    lock_path = HOSTILE_REPO.with_suffix(".lock")
+    ready_path = HOSTILE_REPO / ".git" / "mergecraft-corpus-ready"
+    with lock_path.open("a") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        # git init creates .git before commits and attack fixtures are ready.
+        # Check completion only under the lock, including for existing repos.
+        if not ready_path.is_file():
+            if not BUILD_SCRIPT.is_file():
+                msg = f"hostile-repo build script missing: {BUILD_SCRIPT}"
+                raise AssertionError(msg)
+            subprocess.run([str(BUILD_SCRIPT)], check=True)
+            ready_path.touch()
     return HOSTILE_REPO
 
 

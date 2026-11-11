@@ -13,3 +13,6 @@ tests/security/fixtures/build_hostile_repo.sh
 ```
 
 `make test` auto-builds the corpus when missing via `require_hostile_repo()`.
+The helper serializes builds across pytest workers with a sibling lock file and
+records completion inside `.git` only after the builder succeeds. Incomplete
+builds (including an existing `.git` without the completion marker) are rebuilt.
