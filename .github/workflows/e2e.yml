@@ -54,8 +54,9 @@ permissions:
 concurrency:
   # Include event_name so a workflow_call release gate (ci-cd push/tag) does not
   # cancel a simultaneous standalone PR e2e run that shares github.ref.
-  group: e2e-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Non-PR runs (main pushes, the release gate) key on the SHA and never cancel.
+  group: e2e-${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   E2E_IMAGE: mergecraft:e2e

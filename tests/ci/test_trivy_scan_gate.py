@@ -59,21 +59,13 @@ def test_promote_latest_channel_is_main_only() -> None:
     """
     promote = job(load_workflow("ci-cd.yml"), "promote")
 
-    latest = str(_step(promote, "Retag slim digest → :latest").get("if", ""))
-    assert "refs/heads/main" in latest
-    assert "refs/heads/pre-0.0.1" not in latest
+    main = str(_step(promote, "Promote main digests → :latest and :analyzers").get("if", ""))
+    assert "refs/heads/main" in main
+    assert "refs/heads/pre-0.0.1" not in main
 
-    analyzers = str(_step(promote, "Retag analyzers digest → :analyzers").get("if", ""))
-    assert "refs/heads/main" in analyzers
-    assert "refs/heads/pre-0.0.1" not in analyzers
-
-    rc = str(_step(promote, "Retag slim digest → :rc").get("if", ""))
+    rc = str(_step(promote, "Promote pre-0.0.1 digests → :rc and :analyzers-rc").get("if", ""))
     assert "refs/heads/pre-0.0.1" in rc
     assert "refs/heads/main" not in rc
-
-    analyzers_rc = str(_step(promote, "Retag analyzers digest → :analyzers-rc").get("if", ""))
-    assert "refs/heads/pre-0.0.1" in analyzers_rc
-    assert "refs/heads/main" not in analyzers_rc
 
 
 def test_docker_yml_never_pushes_to_the_registry() -> None:

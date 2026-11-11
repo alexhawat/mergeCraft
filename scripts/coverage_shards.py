@@ -8,6 +8,7 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -526,6 +527,44 @@ def _bounded_jobs(jobs: str, *, splits: int) -> tuple[int, str]:
     return group_workers, str(min(requested, per_group_limit))
 
 
+_LOG_TAIL_LINES = 200
+_FAILURE_LINE = re.compile(r"^(FAILED|ERROR)\b")
+
+
+def _report_failed_log(group: int, log_path: Path) -> None:
+    """Print a failed shard's log tail and FAILED/ERROR lines, and add them to the step summary.
+
+    The shard log lives on the runner, so without this a CI failure names a path nobody can
+    open. Reporting must never mask the shard failure, so I/O errors are swallowed.
+    """
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return
+    failures = [line for line in lines if _FAILURE_LINE.match(line)]
+    tail = lines[-_LOG_TAIL_LINES:]
+    out = [f"::group::coverage shard {group} failure (last {len(tail)} lines of {log_path.name})"]
+    out.extend(tail)
+    out.append("::endgroup::")
+    if failures:
+        out.append(f"coverage shard {group}: {len(failures)} FAILED/ERROR line(s):")
+        out.extend(failures)
+    print("\n".join(out), file=sys.stderr)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary:
+        return
+    block = [f"### Coverage shard {group} failed", ""]
+    if failures:
+        block += ["```text", *failures[:100], "```", ""]
+    block += [f"<details><summary>Last {len(tail)} log lines</summary>", "", "```text", *tail]
+    block += ["```", "", "</details>", ""]
+    try:
+        with open(summary, "a", encoding="utf-8") as handle:
+            handle.write("\n".join(block))
+    except OSError:
+        return
+
+
 def orchestrate(root: Path, run_dir: Path, *, splits: int, jobs: str, seed: str) -> None:
     run_dir.mkdir(parents=True, exist_ok=False)
     failures: list[str] = []
@@ -555,6 +594,7 @@ def orchestrate(root: Path, run_dir: Path, *, splits: int, jobs: str, seed: str)
                 command, cwd=root, stdout=log, stderr=subprocess.STDOUT, check=False
             )
         if result.returncode != 0:
+            _report_failed_log(group, log_path)
             raise ShardError(f"group {group} failed; see {log_path}")
 
     with ThreadPoolExecutor(max_workers=group_workers) as executor:

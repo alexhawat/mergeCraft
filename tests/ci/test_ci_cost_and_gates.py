@@ -305,3 +305,88 @@ def test_seeded_workflow_defects_fail_workflow_lint(tmp_path: Path) -> None:
     )
     (workflows / "t.yml").write_text(injected, encoding="utf-8")
     assert lint() != 0
+
+
+_PUBLISHERS = ("ci.yml", "ci-cd.yml", "integration.yml", "e2e.yml", "codeql.yml")
+
+
+def _uploads_artifact(doc: dict[str, Any]) -> bool:
+    return "actions/upload-artifact" in str(doc.get("jobs"))
+
+
+@pytest.mark.parametrize("workflow", _PUBLISHERS)
+def test_main_push_runs_of_artifact_publishers_are_never_cancelled(workflow: str) -> None:
+    """A cancelled main run publishes no coverage artifact; a shared group also drops pending runs.
+
+    Non-PR runs must sit in a group of their own (keyed on the SHA) and never cancel;
+    PR runs keep one group per ref and cancel superseded pushes.
+    """
+    group = load_workflow(workflow)["concurrency"]
+    key = group["group"]
+    assert "github.sha" in key, f"{workflow}: non-PR runs must not share a concurrency group"
+    cancel = group["cancel-in-progress"]
+    if workflow == "ci-cd.yml":
+        assert cancel is False
+        assert "github.sha" in key
+    else:
+        assert cancel == "${{ github.event_name == 'pull_request' }}"
+        assert "github.event_name == 'pull_request' && github.ref || github.sha" in key
+
+
+def test_artifact_publishing_workflows_are_all_covered() -> None:
+    for path in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        doc = load_workflow(path.name)
+        triggers = workflow_on(doc)
+        if path.name in _PUBLISHERS or "concurrency" not in doc or "push" not in triggers:
+            continue  # PR-only workflows have no main push run to cancel
+        cancels = str(doc["concurrency"].get("cancel-in-progress"))
+        if cancels != "False" and _uploads_artifact(doc):
+            pytest.fail(f"{path.name} uploads artifacts under a cancelling group; pin it above")
+
+
+def test_image_publication_stays_serialised_per_ref() -> None:
+    group = job(load_workflow("ci-cd.yml"), "build-images")["concurrency"]
+    assert group == {"group": "ci-cd-publish-${{ github.ref }}", "cancel-in-progress": False}
+
+
+@pytest.mark.parametrize(
+    ("workflow", "job_name"), [("ci.yml", "coverage-gate"), ("ci-cd.yml", "verify")]
+)
+def test_coverage_jobs_upload_shard_logs_on_failure(workflow: str, job_name: str) -> None:
+    step = next(
+        s for s in _steps(workflow, job_name) if s.get("name") == "Upload coverage shard logs"
+    )
+    assert step["if"] == "failure()"
+    assert step["with"]["path"] == ".coverage-shards/**/group-*.log"
+
+
+_MUTABLE_TAGS = (":latest", ":analyzers", ":rc", ":analyzers-rc")
+
+
+def test_every_mutable_tag_writer_is_serialised_and_guarded_against_stale_commits() -> None:
+    """Runs of different commits overlap now, so tags must only move forward, together."""
+    ci_cd = load_workflow("ci-cd.yml")
+    writers = [
+        name
+        for name, spec in ci_cd["jobs"].items()
+        if any(
+            "imagetools create" in str(step.get("run", ""))
+            and any(f'{tag}"' in str(step.get("run", "")) for tag in _MUTABLE_TAGS)
+            for step in spec.get("steps", [])
+        )
+    ]
+    assert writers == ["promote"], "only promote may write a mutable tag"
+    promote = job(ci_cd, "promote")
+    assert promote["concurrency"] == {
+        "group": "ci-cd-promote-${{ github.ref }}",
+        "cancel-in-progress": False,
+    }
+    steps = [s for s in promote["steps"] if "imagetools create" in str(s.get("run", ""))]
+    assert len(steps) == 2, "one step per channel, each retagging both images"
+    for step in steps:
+        run = step["run"]
+        assert run.count("imagetools create") == 2, "slim and analyzers move as one step"
+        assert "set -euo pipefail" in run
+        guard = run.index('"${tip}" != "${GITHUB_SHA}"')
+        assert guard < run.index("imagetools create"), "tip check precedes any retag"
+        assert "Promotion skipped" in run

@@ -18,7 +18,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Non-PR runs get a group of their own (keyed on the SHA). `cancel-in-progress:
+  # false` alone is not enough: a *pending* run in a shared group is still
+  # replaced by the next one, so back-to-back merges cancelled main runs.
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   # Only PR pushes supersede each other. A main push must finish: its
   # coverage-gate publishes the `mergecraft-coverage-json` artifact that every
   # later PR reads as its base, so cancelling it forced each PR to re-measure
@@ -163,6 +166,14 @@ jobs:
           GITHUB_BASE_REF: ${{ github.base_ref }}
           MERGECRAFT_TEST_SPLITS: "2"
         run: make coverage-gate
+      - name: Upload coverage shard logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: coverage-shard-logs
+          path: .coverage-shards/**/group-*.log
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Upload coverage.json for integration delta reuse
         if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
