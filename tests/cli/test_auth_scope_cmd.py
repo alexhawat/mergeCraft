@@ -189,8 +189,12 @@ class CodexLoginStub:
 
         monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/codex")
 
-        def _run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        def _run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[Any]:
+            # ``subprocess`` is one shared module, so this patch also sees the
+            # ``.env`` writer's ``git`` tracking probe; only the codex login is faked.
             env = kwargs.get("env") or {}
+            if "CODEX_HOME" not in env:
+                return _REAL_SUBPROCESS_RUN(cmd, **kwargs)
             home = _Path(env["CODEX_HOME"])
             self.homes.append(home)
             (home / "auth.json").write_text(self.payload, encoding="utf-8")

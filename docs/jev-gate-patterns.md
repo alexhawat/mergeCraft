@@ -4,9 +4,12 @@ Design patterns for the pre-LLM screening gate in `src/mergecraft/jev/`. This
 records the intended shapes for question packs, thresholds, and layering so they
 are implemented deliberately rather than rediscovered.
 
-These are mergeCraft-owned patterns with no external product dependency. The
-gate ranks and filters units before (or alongside) the generative reviewer; it
-does not replace any existing stage.
+The patterns are mergeCraft's own, but the judgments are not computed locally:
+every Jev question is a call to TypeSafe's hosted System One API, so enabling
+Jev sends review content to TypeSafe — see
+[Data sent to TypeSafe](#data-sent-to-typesafe). The gate ranks and filters
+units before (or alongside) the generative reviewer; it does not replace any
+existing stage.
 
 ## Where this sits
 
@@ -24,6 +27,45 @@ PR / local diff
 Unit segmentation is implemented in `jev/segment.py`; question construction in
 `jev/questions.py`; scoring and routing policy in `jev/judge.py` and
 `jev/policy.py`.
+
+## Data sent to TypeSafe
+
+Jev is off by default. A call leaves the machine only when `jev.enabled: true`
+is set in `.mergecraft/config.yaml` (`mergecraft jev enable` writes it) **and**
+`TYPESAFE_API_KEY` is set in the environment or the local `.env`. Without the
+key, Jev records `credential_absent` and makes no call. The client
+(`jev/client.py`) sends each call to TypeSafe's System One endpoint
+(`https://api.typesafe.ai`, the `typesafe-sdk` default) with that key.
+
+Each call carries the pack's question set plus a `state` object.
+`filter_state_for_pack` drops every field the pack does not list in
+`pack_registry.PACK_REGISTRY`. On the untrusted tier, string fields are wrapped
+in a nonce fence before they are sent. The content is still sent, and nothing
+is redacted, so a secret in the diff or the page reaches TypeSafe.
+
+| Pack | Fields sent | Sent by | How often |
+| --- | --- | --- | --- |
+| `unit/v1` | `path`, `hunk` (the hunk text), `unit_id` | local review | once per changed hunk that no analyzer finding already covers |
+| `evidence/v1` | `claim` (finding message), `section` (the finding's first cited evidence), `path`, `start_line`, `end_line` | local review | once per review and analyzer finding |
+| `claim/v1` | `claim` (one prose claim from the rendered review), `findings_table`, `terminal_verdict` | local review | once per extracted claim |
+| `lens/v1` | `diff` (the whole review diff) | local review | once per review |
+| `criterion/v1` | `criterion`, `page` (observed page text) | `mergecraft verify-behavior` | once per acceptance criterion |
+| `repro/v1` | `claim` (reproduction claim), `page` | `mergecraft verify-behavior` | once per run with a reproduction claim |
+
+"Local review" means the offline review engine behind `mergecraft review` and
+the `mergecraft mcp serve` review tool. A dry run makes no Jev call. The four
+local-review packs run after the generative review has finished. `align/v1` is
+registered, but no production path calls it.
+
+The PR review that the GitHub Action runs (`mergecraft gha`) makes no Jev call
+in this release, even when the workflow passes `TYPESAFE_API_KEY`. A workflow
+step calls Jev only when it runs `mergecraft review` or `mergecraft
+verify-behavior` with Jev enabled and the key in its environment.
+
+To limit what is sent, turn off single packs with `jev.packs` (for example
+`mergecraft jev set packs.lens/v1 false` keeps the full diff local), lower
+`jev.budgetTokens` (the run stops calling Jev once the budget is spent), or run
+`mergecraft jev disable`.
 
 ## 1. Dimension question pack
 

@@ -11,6 +11,7 @@ from loguru import logger
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.provider_cmd import seed_builtin_providers
+from mergecraft.cli.startup_env import implicit_env_is_tracked
 from mergecraft.config.io import load_config_dict, patch_config_dict
 from mergecraft.enterprise.audit import DEFAULT_AUDIT_REL
 from mergecraft.pins import action_pin_minimal, action_sha_minimal, checkout_sha
@@ -138,12 +139,24 @@ def _analyzers_lock_gitignore_line() -> str:
     return ".mergecraft/analyzers.lock"
 
 
+def _local_env_gitignore_line() -> str:
+    return ".env"
+
+
+def _local_config_gitignore_line() -> str:
+    return ".mergecraft/config.local.yaml"
+
+
 def _ensure_gitignore_line(root: Path, line: str) -> None:
-    """Ensure consumer ``.gitignore`` contains ``line`` once."""
+    """Ensure consumer ``.gitignore`` contains ``line`` once, as a whole line.
+
+    Matched per line, not as a substring: ``.envrc`` or ``!.env.example``
+    contain the text ``.env`` but do not ignore ``.env``.
+    """
     gitignore_path = root / ".gitignore"
     if gitignore_path.is_file():
         text = gitignore_path.read_text(encoding="utf-8")
-        if line in text:
+        if line in (existing.strip() for existing in text.splitlines()):
             return
         suffix = "" if not text or text.endswith("\n") else "\n"
         gitignore_path.write_text(f"{text}{suffix}{line}\n", encoding="utf-8")
@@ -166,6 +179,25 @@ def _ensure_analyzer_runtime_gitignore(root: Path) -> None:
     """Ensure generated managed analyzer state stays out of consumer worktrees."""
     _ensure_gitignore_line(root, _analyzer_cache_gitignore_line())
     _ensure_gitignore_line(root, _analyzers_lock_gitignore_line())
+
+
+def _ensure_local_credentials_gitignore(root: Path) -> None:
+    """Keep ``provider auth --scope local`` output and local overrides out of Git.
+
+    The documented flow is ``init`` → ``provider auth`` → commit and push, so
+    the ignore rules must exist before the first ``git add .``. An ignore rule
+    does not untrack a file that is already committed, so a tracked ``.env``
+    gets an explicit warning.
+    """
+    _ensure_gitignore_line(root, _local_env_gitignore_line())
+    _ensure_gitignore_line(root, _local_config_gitignore_line())
+    env_path = root / ".env"
+    if implicit_env_is_tracked(env_path):
+        console.print(
+            "[yellow]warning:[/yellow] .env is tracked by Git (or its tracking status "
+            "could not be verified); the new ignore rule does not untrack it. Run "
+            "[cyan]git rm --cached .env[/cyan] and rotate any credential it held."
+        )
 
 
 def _parse_git_remote() -> tuple[str, str] | None:
@@ -247,6 +279,7 @@ def run(
     _ensure_audit_jsonl_gitignore(root)
     _ensure_reviews_gitignore(root)
     _ensure_analyzer_runtime_gitignore(root)
+    _ensure_local_credentials_gitignore(root)
 
     if config_path.is_file():
         seed_builtin_providers(config_path)

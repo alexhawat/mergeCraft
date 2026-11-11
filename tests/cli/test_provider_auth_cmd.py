@@ -11,6 +11,7 @@ import getpass
 import importlib
 import json
 import re
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -448,11 +449,16 @@ def test_legacy_auth_commands_warn_and_write_indexed_secret(
 
     if legacy_cmd == "codex":
         monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/codex")
-        monkeypatch.setattr(
-            module.subprocess,
-            "run",
-            lambda *_a, **_kw: None,
-        )
+        real_run = subprocess.run
+
+        # ``subprocess`` is one shared module: fake only the codex login and let
+        # the ``.env`` writer's ``git`` tracking probe run for real.
+        def _fake_codex_run(cmd: Any, *args: Any, **kwargs: Any) -> Any:
+            if list(cmd)[:1] == ["codex"]:
+                return None
+            return real_run(cmd, *args, **kwargs)
+
+        monkeypatch.setattr(module.subprocess, "run", _fake_codex_run)
         monkeypatch.setattr(
             module.tempfile,
             "TemporaryDirectory",
