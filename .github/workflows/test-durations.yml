@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: MIT
+# Weekly regeneration of `.test_durations` (least-duration CI sharding input).
+# Read-only on purpose: the refreshed file is uploaded as an artifact for a
+# maintainer to commit; this workflow never pushes or opens PRs.
+name: Test durations
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: test-durations
+  cancel-in-progress: false
+
+jobs:
+  durations:
+    name: Regenerate .test_durations
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: "3.14"
+        env:
+          MERGECRAFT_UV_EXTRAS: tracing
+      - name: Measure coverage of the committed file
+        id: before
+        run: |
+          uv run --extra dev --extra tracing pytest tests -q --collect-only -p no:randomly \
+            -m "not integration" | grep '::' > collected-ids.txt
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          ids = {line.strip() for line in open("collected-ids.txt")}
+          known = set(json.load(open(".test_durations")))
+          print(f"covered={len(ids & known)}")
+          PY
+      - name: Regenerate durations
+        # Test failures must not stop the timing run; pytest-split still stores
+        # every executed case's duration.
+        continue-on-error: true
+        run: make test-durations
+      - name: Summarise coverage
+        env:
+          COVERED_BEFORE: ${{ steps.before.outputs.covered }}
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, os
+          ids = {line.strip() for line in open("collected-ids.txt")}
+          new = json.load(open(".test_durations"))
+          before = int(os.environ["COVERED_BEFORE"])
+          total = len(ids)
+          after = len(ids & set(new))
+          print("## Test durations refresh")
+          print(f"- Collected ids: {total}")
+          print(f"- Covered by committed file: {before} ({before / total:.1%})")
+          print(f"- Covered by regenerated file: {after} ({after / total:.1%})")
+          print(f"- Recorded time: {sum(new.values()):.0f}s")
+          if before / total < 0.95:
+              print()
+              print("> The committed `.test_durations` covers under 95% of collected ids.")
+              print("> Download the artifact and commit it to rebalance the CI shards.")
+          PY
+      - name: Upload regenerated durations
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: test-durations
+          path: .test_durations
+          if-no-files-found: error
