@@ -35,6 +35,8 @@ _created_paths: set[str] = set()
 _run_owned_dirs: set[str] = set()
 _temp_dir: str | None = None
 _atexit_registered = False
+_cleanup_at_exit: set[str] = set()
+_cleanup_registered = False
 
 
 def _is_under_forbidden_temp(path: Path) -> bool:
@@ -200,10 +202,44 @@ def register_run_owned_directory(path: str) -> None:
 
     Only such a directory may be opened to a reviewing agent wholesale: an
     operator-chosen or shared directory can hold credentials and other runs'
-    files. Unlike :func:`register_created_path`, this does not schedule a wipe,
-    so a review's output directory survives the run.
+    files. Unlike :func:`register_created_path`, this does not schedule a wipe;
+    :func:`schedule_directory_cleanup` removes a review's directory at exit.
     """
     _run_owned_dirs.add(str(Path(path).resolve()))
+
+
+def _remove_scheduled_directories() -> None:
+    """``atexit`` hook: remove every directory :func:`schedule_directory_cleanup` queued."""
+    while _cleanup_at_exit:
+        target = _cleanup_at_exit.pop()
+        if os.path.lexists(target):
+            shutil.rmtree(target, onerror=_warn_rmtree_error)
+
+
+def schedule_directory_cleanup(path: str) -> bool:
+    """Remove a run-owned review directory at process exit, unless ``MERGECRAFT_KEEP_TMP`` is set.
+
+    The removal waits for exit because the caller still reads and prints paths
+    inside the directory (the materialized diff, the default evidence packet)
+    after the review returns. Any non-empty ``MERGECRAFT_KEEP_TMP`` keeps it.
+
+    Args:
+        path (str): A directory this run created with ``mkdtemp``.
+
+    Returns:
+        bool: ``True`` when the removal was scheduled, ``False`` when kept.
+    """
+    from mergecraft.config.env import PathsEnv
+
+    global _cleanup_registered
+    if PathsEnv().keep_tmp:
+        logger.info("» MERGECRAFT_KEEP_TMP is set; keeping {}", path)
+        return False
+    _cleanup_at_exit.add(str(Path(path).resolve()))
+    if not _cleanup_registered:
+        atexit.register(_remove_scheduled_directories)
+        _cleanup_registered = True
+    return True
 
 
 def is_run_owned_directory(path: str) -> bool:

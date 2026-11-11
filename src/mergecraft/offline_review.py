@@ -984,8 +984,9 @@ class _OfflineDiffReviewRun:
             )
             cached = load_review_result(self.cache_key) if self.cache_key is not None else None
             if cached is not None:
-                if cached.diff_path is None:
-                    cached.diff_path = str(self.materialization.path)
+                # A cached result's diff lived in an earlier run's temp dir, which
+                # is removed at that run's exit; point at this run's copy.
+                cached.diff_path = str(self.materialization.path)
                 self.from_cache = True
                 return merge_analyzer_findings_into_result(
                     cached,
@@ -1100,11 +1101,16 @@ async def _run_offline_diff_review(
         )
 
         out_dir = Path(tempfile.mkdtemp(prefix="mergecraft-diff-review-"))
-        from mergecraft.utils.git_setup import register_run_owned_directory
+        from mergecraft.utils.git_setup import (
+            register_run_owned_directory,
+            schedule_directory_cleanup,
+        )
 
         # The diff and the agent's scratch live here; only a run-owned directory is
-        # opened to the reviewing agent.
+        # opened to the reviewing agent. It is removed at exit (after the CLI has
+        # printed and persisted the result) unless ``MERGECRAFT_KEEP_TMP`` is set.
         register_run_owned_directory(str(out_dir))
+        schedule_directory_cleanup(str(out_dir))
         from mergecraft.review.engine import ReviewEngine
         from mergecraft.review.snapshot import canonical_review_snapshot
         from mergecraft.utils.process_group import kill_all_active_process_groups

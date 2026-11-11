@@ -553,7 +553,5 @@ async def run_offline_agent_review(
             stop_mcp()
         if github is not None:
             await github.aclose()
-        from mergecraft.config.env import PathsEnv
-
-        if not PathsEnv().keep_tmp:
-            logger.debug("offline review artifacts retained at {}", tmpdir)
+        # ``tmpdir`` belongs to the caller, which schedules its removal
+        # (``utils.git_setup.schedule_directory_cleanup``, ``MERGECRAFT_KEEP_TMP``).
