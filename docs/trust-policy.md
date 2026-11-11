@@ -14,7 +14,7 @@ replace the maintainer-dispatched approval lane in `mergecraft-approve.yml`.
 | **Execution trust** | May trusted-tier analyzers and repo-executable config run against this checkout? | Analyzer provisioning, sandbox posture |
 | **Authority trust** | May the agent's own terminal output unlock approval semantics on this run? | `create_pull_request_review`, gate-facing verdict tools |
 
-Before plan 13, both questions were conflated in a single `trust_tier` from
+Earlier versions conflated both questions in a single `trust_tier` from
 `derive_trust_tier()`. That function's `pull_request_target → untrusted`
 return **still applies to authority** unless the operator explicitly opts into
 `full`. Execution trust is derived beside it — never by editing that return.
@@ -29,7 +29,7 @@ Configured in `.mergecraft/config.yaml` (default when absent: `off`).
 ```yaml
 trust:
   selfReview: "off"   # quote — YAML 1.1 coerces bare off/on to booleans
-  agentSandbox: "dispatch"  # lane B / #553 — see agentSandbox ladder below
+  agentSandbox: "dispatch"  # see the agentSandbox ladder below
 ```
 
 Valid levels: `off`, `analyzers`, `full` (default when absent: `off`).
@@ -43,12 +43,12 @@ Valid levels: `off`, `analyzers`, `full` (default when absent: `off`).
 **Fork PRs are unaffected at every level** — both axes stay untrusted regardless
 of `selfReview`.
 
-## `trust.agentSandbox` — Codex sandbox override ladder (#553)
+## `trust.agentSandbox` — Codex sandbox override ladder
 
 The Action input `codex_sandbox` (env `MERGECRAFT_CODEX_SANDBOX`) is a **request**
 to skip Codex's nested bubblewrap/Landlock sandbox. Whether that request is
 honoured is decided by `trust.agentSandbox` in the **base snapshot** at run
-start — the same snapshot rule as `selfReview` (D1d). A PR-head edit cannot
+start — the same snapshot rule as `selfReview` A PR-head edit cannot
 raise its own tier mid-run.
 
 Valid tiers (tightest first): `never`, `merged-only`, `dispatch` (default),
@@ -62,12 +62,12 @@ Valid tiers (tightest first): `never`, `merged-only`, `dispatch` (default),
 | `same-repo` | Any non-fork head (`workflow_dispatch`, `pull_request`, `pull_request_target`) |
 
 **Fork floor (hard):** a fork head refuses in **every** tier. No config value,
-Action input, or event name reaches it. This is the amended #553 boundary:
+Action input, or event name reaches it. This is the boundary:
 the override cannot take effect on a fork head (not merely on
 `pull_request_target` — same-repo `pull_request_target` may grant at
 `same-repo`).
 
-**`merged-only` caveat (D1e):** an open PR's head is not yet on the default
+**`merged-only` caveat:** an open PR's head is not yet on the default
 branch, so this tier does **not** give a working shell during PR review. It
 exists for scheduled audits and post-merge sweeps on the default branch. "On the
 default branch" only implies "reviewed" where merging requires review (for
@@ -90,8 +90,8 @@ mergecraft trust set-agent-sandbox same-repo --i-understand-same-repo-sandbox
 
 Upgrade the pinned Action image **before** writing `agentSandbox` in config —
 `TrustSettings` is `extra="forbid"`, so an unknown key against an older pin
-fails the whole config load (D1f). The same ordering applies to
-`sandboxTrustedAuthors` below — see its own D1f note.
+fails the whole config load. The same ordering applies to
+`sandboxTrustedAuthors` below.
 
 Run manifest fields (`agent_sandbox_tier`, `agent_sandbox_honoured`, …) land in
 the evidence packet alongside the `trust_*` keys.
@@ -136,7 +136,7 @@ Run manifest fields carry the outcome: `agent_sandbox_author_gate` is one of
 itself already refused, so the gate was never the deciding factor), plus
 `agent_sandbox_author_gate_offending_email` when a specific commit tripped it.
 
-**D1f applies here too:** `TrustSettings` is `extra="forbid"`, so writing
+**The same applies here:** `TrustSettings` is `extra="forbid"`, so writing
 `sandboxTrustedAuthors` against a pinned Action image that predates this field
 fails the whole config load. Upgrade the pin first, confirm the new schema is
 live, **then** write the key.
@@ -145,7 +145,7 @@ live, **then** write the key.
 
 `pull_request_target` runs read PR-authored content as part of reviewing it.
 The agent's own `approved: true` narrative cannot be the thing that unlocks a
-real merge approval on that trigger — that is the lesson of PR #200 and the
+real merge approval on that trigger — that is the reason for the
 authority/execution separation. Default `off` preserves today's posture byte-for-byte.
 
 `full` is an explicit operator opt-out of that separation for **their own**
@@ -171,13 +171,11 @@ not a token permission boundary; a compromised reviewer can forge its own checks
 - Output: the separate approval App posts APPROVE for that head only after the
   current head is checked again. Missing or identical App IDs fail closed.
 
-This repository sets `prApproveEnabled: false` even with `selfReview: full`.
-Consumer configurations can choose different publication behavior; the trust
-levels above are not GitHub token permission restrictions.
+The trust levels above are not GitHub token permission restrictions.
 
 The reviewing workflow (`mergecraft.yml`) stays on `pull_request_target` only.
-Do not re-add a `pull_request` trigger to earn "trusted" tier — PR #200 reverted
-that same day because it hands credentials to PR-controlled workflow definitions.
+Do not add a `pull_request` trigger to earn "trusted" tier: it hands credentials
+to PR-controlled workflow definitions.
 
 Read more: [`.github/workflows/mergecraft-approve.yml`](../.github/workflows/mergecraft-approve.yml),
 [Security model — structural approval](workflows.md#security-model).
@@ -192,7 +190,7 @@ its own tier** during that run.
 
 Implementation:
 
-- Lane C / MCB-19 `RepoSettingsSnapshot` carries `config_hash` at snapshot time.
+- `RepoSettingsSnapshot` carries `config_hash` at snapshot time.
 - `resolve_trust_policy()` reads `trust.selfReview` only from that snapshot.
 - A mismatch during the run fails closed (same primitive as other snapshot guards).
 
@@ -206,8 +204,7 @@ mergecraft trust set-self-review full --i-understand-this-grants-approval-author
 # a second --gh-apply reuses the same branch/PR instead of failing on 422
 ```
 
-`--cwd` selects every target — both the `.mergecraft/` path and git resolution
-(see PR #521).
+`--cwd` selects every target — both the `.mergecraft/` path and git resolution.
 
 ## A PR's own analyzer config never applies to its own review
 
@@ -234,29 +231,6 @@ PR that edits `.mergecraft/**` or analyzer/linter config out of the auto-merge l
 the review of that same PR still runs the base's analyzers. To change analyzer
 configuration, land it in its own PR; it applies from the next PR on.
 
-## Dogfood posture (mergeCraft repository)
-
-The mergeCraft repository's committed
-[`.mergecraft/config.yaml`](../.mergecraft/config.yaml) dogfoods same-repo
-self-review at:
-
-| Knob | Level | Effect on this repo |
-|------|-------|---------------------|
-| `trust.selfReview` | `analyzers` | Trusted-tier analyzers run on same-repo `pull_request_target` PRs; the agent still cannot APPROVE — structural approval stays in `mergecraft-approve.yml` |
-| `trust.agentSandbox` | `same-repo` | `MERGECRAFT_CODEX_SANDBOX=danger-full-access` is honoured on any non-fork head |
-
-Those knobs are read from the **base-branch config snapshot** at run start.
-`pull_request_target` resolves the workflow from the default branch, so a
-self-review PR cannot enable them until the config lands on base after merge.
-
-`same-repo` rests on "a branch in this repository was written by someone I
-trust" — it cannot catch pulling a fork PR onto a local branch to run CI on its
-own. `trust.sandboxTrustedAuthors` mitigates that (additive-only, default
-off — not currently set in this repo's committed config; see D1f above). See
-the residual risks in the scaffolded config comment and
-[`trust.agentSandbox`](#trustagentsandbox--codex-sandbox-override-ladder-553)
-above.
-
 Run manifest fields (`trust_self_review`, `trust_execution`, `trust_authority`,
 `trust_resolved_from`, `trust_config_hash`) land in the evidence packet so
 readers of a review can see the posture it was produced under.
@@ -276,14 +250,14 @@ bearer; the real key never enters the agent environment or `$CODEX_HOME/auth.jso
 | `OPENAI_API_KEY` only | Active | Throwaway bearer only — a stolen token is useless after the run |
 | `CODEX_AUTH_JSON` (subscription) | **Inactive** | Raw subscription bundle remains agent-readable at `$CODEX_HOME/auth.json` |
 
-### Subscription vs API-key trade (D3a)
+### Subscription vs API-key trade
 
 Clearing `CODEX_AUTH_JSON` and running Codex on `OPENAI_API_KEY` **enables**
 broker coverage. The cost is billing: per-token API usage instead of ChatGPT
 subscription pricing. The broker does not broker subscription auth — deleting
 `auth.json` ends the subscription session for that run.
 
-### What this lane does not build
+### What the broker does not cover
 
 - **Outbound egress stays open.** A hijacked agent can still send whatever it
   can read; for a private repo the tree itself remains a real residual.

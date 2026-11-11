@@ -154,13 +154,13 @@ the six-tool **public** profile above.
 
 Install surface: [`docs/mcp.md`](mcp.md) (runtime harness vs public stdio).
 
-## Git tool — read-only verbs and guards (W2 / W3)
+## Git tool — read-only verbs and guards
 
 The `git` MCP tool (`ToolClass.REPOSITORY_READ`) enforces fail-closed restrictions
 regardless of `payload.shell`. Full guard tables:
 [`config-failure-policy.md` — MCP git tool](config-failure-policy.md#mcp-git-tool--reviewer-surface-enforcement-257).
 
-**Added read-only subcommands (W3):**
+**Added read-only subcommands:**
 
 | Subcommand | Typical use |
 |------------|-------------|
@@ -172,7 +172,7 @@ regardless of `payload.shell`. Full guard tables:
 Credential-bearing `config` keys (`credential.*`, `url.*`) are refused. Writes
 (`--set`, `--unset`, …) are refused.
 
-**Containment hardening (W2):**
+**Containment hardening:**
 
 | Guard | Behaviour |
 |-------|-----------|
@@ -257,7 +257,7 @@ when findings warrant it — transport failure is not an automatic merge block.
 Auth-class fetch failures degrade immediately with **no retry**. Transient
 failures may retry once before degradation.
 
-## Parameter aliases (W3)
+## Parameter aliases
 
 `checkout_pr` accepts `pull_number`, `pr_number`, and `issue_number` as aliases
 for the PR number parameter.

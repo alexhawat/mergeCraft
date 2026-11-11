@@ -205,6 +205,18 @@ pages:
     generator: null
     purpose: Provider harness notes for OpenCode, Codex, and OpenAI-compatible gateways.
 
+  - path: docs/dev/self-review.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: How this repository reviews its own PRs - Action pin guards, App tokens, approval lifecycle, and Codex login write-back.
+
+  - path: docs/dev/verify-behavior-provenance.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: Which GitHub issue asked for each verify-behavior input and report field.
+
   - path: docs/assets/README.md
     audience: satellite
     template: satellite

@@ -539,7 +539,7 @@ More patterns — comment triggers, fork-safe `pull_request_target`, SARIF:
 | 🔍 **Deep PR review** | Correctness, risk, [blast radius](docs/glossary.md#blast-radius) and hygiene lenses; inline findings + narrative verdict |
 | 🧰 **Deterministic [analyzers](docs/glossary.md#analyzer)** | actionlint, zizmor, ShellCheck, Hadolint and more — verified hits only |
 | ✅ **[Structural approval gate](docs/glossary.md#structural-approval-gate)** | `mergecraft-approval` is a pure function of [typed findings](docs/glossary.md#typed-finding) |
-| 🔁 **Model fallback chains** | Ordered `models:` with per-slug fallbacks — see [`docs/authentication.md`](docs/authentication.md#chain-semantics--model-37--w4) |
+| 🔁 **Model fallback chains** | Ordered `models:` with per-slug fallbacks — see [`docs/authentication.md`](docs/authentication.md#chain-semantics--model) |
 | 🛡️ **[Trust tiers](docs/glossary.md#trust-tier)** | Fork PRs and `pull_request_target` degrade to untrusted: no secrets, read-only analyzers |
 | 🤖 **Agent-native** | `--agent` JSONL protocol, contractual exit codes, MCP server, shipped skill + plugin |
 | 📡 **[SARIF](docs/glossary.md#sarif) upload (opt-in)** | Publish analyzer findings to GitHub code scanning |
@@ -589,11 +589,10 @@ scaffold's `model:` line decides what runs first.
 
 A ChatGPT-subscription login (`CODEX_AUTH_JSON`) rotates its refresh token on
 use: each run that refreshes it spends the stored token, and a secret nobody
-writes back fails a few days later with "refresh token was already used". This
-repository's self-review writes the refreshed login back to `CODEX_AUTH_JSON`
-after every Codex run, from a dedicated App token whose only permission is
-repository secrets — the reviewer App needs **Secrets: Read and write** for the
-write-back to run; see [`docs/authentication.md`](docs/authentication.md#repository-self-review-app-identity).
+writes back fails a few days later with "refresh token was already used". The
+Action does not write the refreshed login back; a workflow step has to store it
+(for example with `gh secret set` under a token that has only repository-secrets
+permission).
 `OPENAI_API_KEY` remains the alternative that never expires.
 
 Custom OpenAI-compatible endpoints (including [LiteLLM](https://docs.litellm.ai/)
@@ -1842,7 +1841,7 @@ Inline review comments from analyzers and the reviewing agent share a single cap
 
 `Critical` and `Major` findings are hypotheses until the read-only `mergecraft-verifier` subagent reads the cited code. That gate applies to analyzer, CI, and agent-authored findings.
 
-Verification depth is **independent** of inline placement (`analyzers.inlineBudget`, default 8). The verifier dispatch cap is `review.verificationBudget` (default **24**), **scaled per round by `review.roundBudgets`**. Set it to **`0`** to verify every eligible finding with no cap. Three filters run in order: severity (skip `Minor`/`Trivial`), withdrawn memory (skip fingerprints already refuted under `## Withdrawn review findings`), then the verification budget — so pre-budget skips never consume slots. Over-budget fingerprints surface in `skippedOverBudget` for the open-PR ledger (W3).
+Verification depth is **independent** of inline placement (`analyzers.inlineBudget`, default 8). The verifier dispatch cap is `review.verificationBudget` (default **24**), **scaled per round by `review.roundBudgets`**. Set it to **`0`** to verify every eligible finding with no cap. Three filters run in order: severity (skip `Minor`/`Trivial`), withdrawn memory (skip fingerprints already refuted under `## Withdrawn review findings`), then the verification budget — so pre-budget skips never consume slots. Over-budget fingerprints surface in `skippedOverBudget` for the open-PR ledger.
 
 ## Execution preference
 
@@ -3524,8 +3523,18 @@ separate from the published alpha above:
 uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft@<full-commit-sha>"
 ```
 
-Then authenticate and open a pull request — details in the README install steps
-and [`docs/authentication.md`](authentication.md).
+Then store a provider credential, make sure the workflow passes it, and open a
+pull request:
+
+```bash
+mergecraft provider auth <provider> --scope github
+mergecraft workflow sync --check   # --apply to wire any provider the workflow lacks
+```
+
+Commit `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml`. The
+secret names per provider are in the
+[provider table](authentication.md#provider-reference); details in
+[`docs/authentication.md`](authentication.md).
 
 ## Docker-only consumers
 
@@ -3562,7 +3571,7 @@ Commit `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml` after
 auth. Run `mergecraft workflow sync --check` before pushing if you assign roster
 models whose providers are not yet wired in the workflow.
 
-This repository's workflow does not listen for `@mergecraft review` — reviews
+The default workflow does not listen for `@mergecraft review` — reviews
 run on `pull_request_target` (opened / synchronize).
 
 ## Provider reference
@@ -3650,8 +3659,7 @@ whose secret is missing.
 > **Codex on container runners:** Codex CLI's nested bubblewrap sandbox fails
 > inside namespaced containers. On an already-isolated ephemeral runner, pass
 > `codex_sandbox: danger-full-access`. mergeCraft never sets this itself —
-> its own `shell`/`push` controls remain the security boundary
-> ([issue #70](https://github.com/alexhawat/mergeCraft/issues/70)).
+> its own `shell`/`push` controls remain the security boundary.
 > Whether the override is honoured is decided by `trust.agentSandbox` — see
 > [`docs/trust-policy.md`](trust-policy.md).
 
@@ -3715,7 +3723,7 @@ Four detection routes are consulted in order (first match wins):
 When a roster slot is skipped for missing credentials, the run record and PR
 summary name the agent, slot, provider, and the env vars from `looked_for`.
 "Not wired in the workflow" and "env var empty" stay distinct messages —
-workflow wiring is `mergecraft workflow sync`; detection is this probe (#552).
+workflow wiring is `mergecraft workflow sync`; detection is this probe.
 
 ### Custom OpenAI-compatible provider
 
@@ -3725,12 +3733,8 @@ vLLM, etc.), mergeCraft exposes one mechanism that both harnesses consume.
 LiteLLM has no first-class provider id — point
 `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` at `https://<litellm-host>/v1` and
 `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` at your proxy key; see
-[`examples/config-litellm.yaml`](../examples/config-litellm.yaml). Issue
-[#71](https://github.com/alexhawat/mergeCraft/issues/71) closes on this
-surface — the **Codex half** is new in `v0.0.x`; the OpenCode half
-shipped earlier in PR
-[#79](https://github.com/alexhawat/mergeCraft/pull/79) and is
-regression-tested.
+[`examples/config-litellm.yaml`](../examples/config-litellm.yaml). Both the
+Codex and OpenCode harnesses accept this surface.
 
 #### Env-var convention
 
@@ -3878,18 +3882,11 @@ the right harness via the existing chain logic. OpenAI-compatible
 models route to the OpenCode harness (no first-party Codex provider);
 "true" OpenAI models route to Codex.
 
-> PR [#79](https://github.com/alexhawat/mergeCraft/pull/79) shipped the
-> OpenCode side of this feature; the Codex side, the `with:` input
-> surface, and the env-var multi-provider extension all land together in
-> this release — see issue
-> [#71](https://github.com/alexhawat/mergeCraft/issues/71).
-
-### Chain semantics — `model:` (#37 / W4)
+### Chain semantics — `model:`
 
 The `with: model:` input is the **chain head**, not a chain kill-switch.
 The configured `models:` / `modelFallbacks:` tail is preserved and walked
-on credential miss or retryable failure. Issue
-[#37](https://github.com/alexhawat/mergeCraft/issues/37) closes on this.
+on credential miss or retryable failure.
 
 ```yaml
 # .mergecraft/config.yaml — the configured chain
@@ -3952,9 +3949,9 @@ A workflow that used to dual-step (`if: HAS_CLAUDE` → one review, else
 
 **See also:** [`docs/action-reference.md`](action-reference.md) · [`README.md`](../README.md)
 
-## Repository self-review App identity
+## Reviewer and approval App identity
 
-The repository's self-review workflows support `MERGECRAFT_APP_ID` and
+The mergeCraft workflows support `MERGECRAFT_APP_ID` and
 `MERGECRAFT_APP_PRIVATE_KEY` as GitHub Actions secrets. Install the App only on
 repositories it should review. Runtime-minted tokens request only the permissions
 and repository scopes needed by their role:
@@ -3967,18 +3964,6 @@ and repository scopes needed by their role:
 | Git fetch with push disabled | Current repository plus configured cross-repository write targets | `contents: read` |
 | Git fetch/push with push restricted or enabled | Current repository plus configured cross-repository write targets | `contents: write`, `workflows: write` |
 | Cross-repository read checkout | Configured read repositories only | `contents: read` |
-| `CODEX_AUTH_JSON` write-back (self-review workflow) | Current repository only | `secrets: write` |
-
-The `CODEX_AUTH_JSON` write-back is a workflow step, not something the action
-does: Codex rotates the ChatGPT-subscription login's refresh token on use, so
-the self-review's Codex rung exports the refreshed `auth.json` (the driver
-copies it to `MERGECRAFT_CODEX_AUTH_EXPORT` only when the refresh token
-changed) and a post-step stores it with `gh secret set CODEX_AUTH_JSON` under
-a token minted with only `secrets: write`. **Operator step:** grant the
-reviewer App the *Secrets: Read and write* repository permission and accept
-the permission update on the installation; until then the mint fails and the
-write-back is skipped with a notice, leaving the secret as it was.
-`OPENAI_API_KEY` is the alternative that never expires.
 
 The reviewer, Git, and cross-repository read credentials are minted separately
 when their permissions or repository scopes differ. The current repository

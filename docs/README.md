@@ -33,6 +33,8 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [config-failure-policy](config-failure-policy.md) | contributor | setup_failure_policy and setup_timeout runtime behaviour. |
 | [provider-harness](dev/provider-harness.md) | contributor | Provider harness notes for OpenCode, Codex, and OpenAI-compatible gateways. |
 | [python-version-floor](dev/python-version-floor.md) | contributor | ADR for the Python 3.11 install floor and PEP 758 parenthesize-now strategy. |
+| [self-review](dev/self-review.md) | contributor | How this repository reviews its own PRs - Action pin guards, App tokens, approval lifecycle, and Codex login write-back. |
+| [verify-behavior-provenance](dev/verify-behavior-provenance.md) | contributor | Which GitHub issue asked for each verify-behavior input and report field. |
 | [distribution](distribution.md) | consumer | How mergeCraft is packaged — PyPI, Docker, and git install paths. |
 | [eval-bank](eval-bank.md) | contributor | Eval bank layout, promotion, and CI gate semantics. |
 | [eval-methodology](eval-methodology.md) | contributor | Eval quality metrics and corpus methodology (#384). Never README; issue 140 owns precision/recall/F1 publication. |

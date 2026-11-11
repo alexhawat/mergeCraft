@@ -239,7 +239,7 @@ Inline review comments from analyzers and the reviewing agent share a single cap
 
 `Critical` and `Major` findings are hypotheses until the read-only `mergecraft-verifier` subagent reads the cited code. That gate applies to analyzer, CI, and agent-authored findings.
 
-Verification depth is **independent** of inline placement (`analyzers.inlineBudget`, default 8). The verifier dispatch cap is `review.verificationBudget` (default **24**), **scaled per round by `review.roundBudgets`**. Set it to **`0`** to verify every eligible finding with no cap. Three filters run in order: severity (skip `Minor`/`Trivial`), withdrawn memory (skip fingerprints already refuted under `## Withdrawn review findings`), then the verification budget — so pre-budget skips never consume slots. Over-budget fingerprints surface in `skippedOverBudget` for the open-PR ledger (W3).
+Verification depth is **independent** of inline placement (`analyzers.inlineBudget`, default 8). The verifier dispatch cap is `review.verificationBudget` (default **24**), **scaled per round by `review.roundBudgets`**. Set it to **`0`** to verify every eligible finding with no cap. Three filters run in order: severity (skip `Minor`/`Trivial`), withdrawn memory (skip fingerprints already refuted under `## Withdrawn review findings`), then the verification budget — so pre-budget skips never consume slots. Over-budget fingerprints surface in `skippedOverBudget` for the open-PR ledger.
 
 ## Execution preference
 

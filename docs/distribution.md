@@ -3,7 +3,7 @@
 Operator runbook for the agent-owned and operator-owned boxes in
 [#141](https://github.com/alexhawat/mergeCraft/issues/141). Release gating
 (E2E on publish SHA, blocking Trivy on promoting refs, live-provider matrix) is
-documented in [`docs/supply-chain.md`](supply-chain.md) and the linked wave plan.
+documented in [`docs/supply-chain.md`](supply-chain.md).
 
 ## CI delivery configuration (verify live execution before release)
 

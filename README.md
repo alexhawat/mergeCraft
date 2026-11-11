@@ -535,7 +535,7 @@ More patterns — comment triggers, fork-safe `pull_request_target`, SARIF:
 | 🔍 **Deep PR review** | Correctness, risk, [blast radius](docs/glossary.md#blast-radius) and hygiene lenses; inline findings + narrative verdict |
 | 🧰 **Deterministic [analyzers](docs/glossary.md#analyzer)** | actionlint, zizmor, ShellCheck, Hadolint and more — verified hits only |
 | ✅ **[Structural approval gate](docs/glossary.md#structural-approval-gate)** | `mergecraft-approval` is a pure function of [typed findings](docs/glossary.md#typed-finding) |
-| 🔁 **Model fallback chains** | Ordered `models:` with per-slug fallbacks — see [`docs/authentication.md`](docs/authentication.md#chain-semantics--model-37--w4) |
+| 🔁 **Model fallback chains** | Ordered `models:` with per-slug fallbacks — see [`docs/authentication.md`](docs/authentication.md#chain-semantics--model) |
 | 🛡️ **[Trust tiers](docs/glossary.md#trust-tier)** | Fork PRs and `pull_request_target` degrade to untrusted: no secrets, read-only analyzers |
 | 🤖 **Agent-native** | `--agent` JSONL protocol, contractual exit codes, MCP server, shipped skill + plugin |
 | 📡 **[SARIF](docs/glossary.md#sarif) upload (opt-in)** | Publish analyzer findings to GitHub code scanning |
@@ -585,11 +585,10 @@ scaffold's `model:` line decides what runs first.
 
 A ChatGPT-subscription login (`CODEX_AUTH_JSON`) rotates its refresh token on
 use: each run that refreshes it spends the stored token, and a secret nobody
-writes back fails a few days later with "refresh token was already used". This
-repository's self-review writes the refreshed login back to `CODEX_AUTH_JSON`
-after every Codex run, from a dedicated App token whose only permission is
-repository secrets — the reviewer App needs **Secrets: Read and write** for the
-write-back to run; see [`docs/authentication.md`](docs/authentication.md#repository-self-review-app-identity).
+writes back fails a few days later with "refresh token was already used". The
+Action does not write the refreshed login back; a workflow step has to store it
+(for example with `gh secret set` under a token that has only repository-secrets
+permission).
 `OPENAI_API_KEY` remains the alternative that never expires.
 
 Custom OpenAI-compatible endpoints (including [LiteLLM](https://docs.litellm.ai/)
