@@ -455,7 +455,6 @@ permissions:
   issues: write
   checks: write
   actions: read
-  id-token: write
 
 concurrency:
   # Serialize runs per pull request so two reviews cannot race the same PR.

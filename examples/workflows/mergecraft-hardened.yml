@@ -102,8 +102,6 @@ permissions:
   # template changes nothing until you decide to opt in; without the permission
   # GitHub answers 403 and mergeCraft logs a warning rather than failing.
   # security-events: write
-  # Only needed if mergeCraft mints short-lived tokens via OIDC.
-  id-token: write
 
 concurrency:
   # pull_request_target resolves github.ref to the default branch, so keying on
@@ -267,9 +265,11 @@ jobs:
 
       - name: Ensure PR base ref exists locally
         if: github.event_name == 'pull_request_target'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
-          base="${{ github.event.pull_request.base.ref }}"
+          base="${BASE_REF}"
           git fetch --no-tags origin "${base}:refs/remotes/origin/${base}"
           # pull_request_target checks out the DEFAULT branch. When the PR targets
           # that same branch, `git branch -f` fails because it is the active

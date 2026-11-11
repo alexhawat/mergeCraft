@@ -11,11 +11,11 @@ Exports:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Final
 
+from mergecraft.example_workflows import MINIMAL_TEMPLATE_RESOURCE, substitute
 from mergecraft.pins import load_example_defaults
 
 REPO = Path(__file__).resolve().parents[1]
@@ -26,7 +26,8 @@ OUTPUTS: Final[dict[str, Path]] = {
     "hardened": REPO / "examples" / "workflows" / "mergecraft-hardened.yml",
 }
 TEMPLATES: Final[dict[str, Path]] = {
-    "minimal": TEMPLATE_DIR / "minimal.yml.tpl",
+    # One source: the minimal template ships in the package so `mergecraft init` renders it too.
+    "minimal": REPO / "src" / "mergecraft" / "data" / MINIMAL_TEMPLATE_RESOURCE,
     "hardened": TEMPLATE_DIR / "hardened.yml.tpl",
 }
 
@@ -36,36 +37,16 @@ def _load_defaults() -> dict[str, str]:
     return load_example_defaults()
 
 
-def _substitute(template_text: str, *, variant: str, defaults: dict[str, str]) -> str:
-    """Apply shared placeholders to a template body."""
-    pin_key = "action_pin_hardened" if variant == "hardened" else "action_pin_minimal"
-    replacements = {
-        "__ACTION_REPO__": defaults["action_repo"],
-        "__ACTION_PIN__": defaults[pin_key],
-        "__ACTION_SHA__": defaults["action_sha_minimal"],
-        "__CHECKOUT_SHA__": defaults["checkout_sha"],
-        "__CI_JOB_PREFIX__": json.dumps(defaults["ci_job_prefix"]),
-        "__BASE_BRANCHES__": defaults["base_branches"],
-    }
-    rendered = template_text
-    for token, value in replacements.items():
-        rendered = rendered.replace(token, value)
-    missing = [token for token in replacements if token in rendered]
-    if missing:
-        msg = f"{TEMPLATES[variant]}: unresolved placeholders: {', '.join(missing)}"
-        raise ValueError(msg)
-    if not rendered.endswith("\n"):
-        rendered += "\n"
-    return rendered
-
-
 def render_all(defaults: dict[str, str] | None = None) -> dict[str, str]:
     """Render every example workflow variant."""
     values = defaults if defaults is not None else _load_defaults()
     rendered: dict[str, str] = {}
     for variant, template_path in TEMPLATES.items():
-        body = _substitute(
-            template_path.read_text(encoding="utf-8"), variant=variant, defaults=values
+        body = substitute(
+            template_path.read_text(encoding="utf-8"),
+            variant=variant,
+            defaults=values,
+            source=str(template_path),
         )
         rendered[variant] = body
     return rendered

@@ -24,7 +24,6 @@ permissions:
   issues: write
   checks: write
   actions: read
-  id-token: write
 
 concurrency:
   # Serialize runs per pull request so two reviews cannot race the same PR
@@ -45,14 +44,6 @@ jobs:
           # its own Authorization header, and git sends both on one request.
           persist-credentials: false
 
-      # Optional: mint a short-lived installation token for elevated API access
-      # - name: Get installation token
-      #   id: token
-      #   uses: ./get-installation-token
-      #   env:
-      #     GITHUB_APP_ID: ${{ secrets.MERGECRAFT_APP_ID }}
-      #     GITHUB_APP_PRIVATE_KEY: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
-
       - name: Run mergeCraft
         uses: __ACTION_REPO__@__ACTION_SHA__ # __ACTION_PIN__
         with:
@@ -69,7 +60,6 @@ jobs:
           # model_pin: enabled   # uncomment to suppress fallbacks (legacy semantics)
           # Post mergecraft / mergecraft-approval commit-status checks (gate on approval).
           status_checks: enabled
-          # token: ${{ steps.token.outputs.token }}
         env:
           # The pin this job runs (#641). The container cannot read the
           # `uses:` line above, so it learns the pin only from here — omit it and

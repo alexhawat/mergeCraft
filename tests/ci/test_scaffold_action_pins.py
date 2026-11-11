@@ -137,7 +137,9 @@ def test_scaffold_serializes_runs_per_pull_request() -> None:
 
 def test_minimal_template_serializes_runs_per_pull_request() -> None:
     template = yaml.safe_load(
-        (REPO_ROOT / "scripts/example_workflows/minimal.yml.tpl").read_text(encoding="utf-8")
+        (REPO_ROOT / "src/mergecraft/data/example_workflows/minimal.yml.tpl").read_text(
+            encoding="utf-8"
+        )
     )
     concurrency = template.get("concurrency")
     assert isinstance(concurrency, dict), "the minimal template must declare a concurrency group"
