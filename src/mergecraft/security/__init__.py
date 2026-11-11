@@ -1,30 +1,3 @@
-"""Network-boundary and publication security surfaces (#362).
-
-Exports:
-    DEFAULT_EGRESS_ALLOWLIST: Hosts allowed when deployment applies egress.
-    VulnerabilityGateReport: Named dependency or image scan outcome.
-    allow_egress: Host allow-list check.
-    container_image_vulnerability_gate: Image scan distinct from make security.
-    dependency_vulnerability_gate: Dependency advisory gate.
-    guard_external_url: SSRF refusal for untrusted retrieval URLs.
-"""
+"""Network-boundary and publication security surfaces (#362)."""
 
 from __future__ import annotations
-
-from mergecraft.security.egress import (
-    DEFAULT_EGRESS_ALLOWLIST,
-    VulnerabilityGateReport,
-    allow_egress,
-    container_image_vulnerability_gate,
-    dependency_vulnerability_gate,
-    guard_external_url,
-)
-
-__all__ = [
-    "DEFAULT_EGRESS_ALLOWLIST",
-    "VulnerabilityGateReport",
-    "allow_egress",
-    "container_image_vulnerability_gate",
-    "dependency_vulnerability_gate",
-    "guard_external_url",
-]
