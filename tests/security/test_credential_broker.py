@@ -438,9 +438,15 @@ def test_broker_run_record_fields_serializes_posture(
     assert record["broker_reason"]
 
 
-def test_broker_survives_slow_upstream_beyond_thirty_seconds() -> None:
-    """PR #594 — upstream silent >30s must not trip a 30s read timeout (no 502)."""
+def test_broker_survives_slow_upstream_beyond_httpx_default_timeout() -> None:
+    """PR #594 — a silent upstream must not trip a default-sized read timeout (no 502).
+
+    The configured read timeout is asserted directly (it is far above 30 s); the
+    slow upstream is silent just past httpx's 5 s default, so a fallback to that
+    default would 502.
+    """
     module = load_broker_module()
+    assert module._upstream_timeout().read > 30.0
     client_timeout = UPSTREAM_SLOW_RESPONSE_SECONDS + 15.0
     with (
         SlowModelUpstream() as upstream,

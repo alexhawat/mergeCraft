@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -61,19 +63,63 @@ def worktree_path(repo_root: Path) -> Path:
     return repo_root / _WORKTREE_SUFFIX
 
 
-def clone_local_repo(tmp_path: Path) -> Path:
-    """Clone the checkout under test into an isolated scratch repo."""
-    dest = tmp_path / "scratch"
-    subprocess.run(
-        # Protected source worktrees may forbid incrementing object hard-link
-        # counts. Copy objects while preserving the real Git clone semantics.
-        ["git", "clone", "--local", "--no-hardlinks", str(REPO_ROOT), str(dest)],
+_SYNTHETIC_PYPROJECT = """\
+[project]
+name = "ci-gate-fixture"
+version = "0"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+dev = []
+tracing = []
+
+[tool.coverage.report]
+fail_under = {fail_under}
+"""
+
+
+def _tracked_gate_files() -> list[str]:
+    """Repo-relative files the delta gate needs: the Makefile and ``scripts/``."""
+    listing = subprocess.run(
+        ["git", "ls-files", "Makefile", "scripts"],
+        cwd=REPO_ROOT,
         check=True,
         capture_output=True,
         text=True,
+    ).stdout.splitlines()
+    # package*.json would make ``make setup-local-analyzers`` run ``npm ci``.
+    return [
+        name
+        for name in listing
+        if not Path(name).name.startswith("package") and (REPO_ROOT / name).is_file()
+    ]
+
+
+def clone_local_repo(tmp_path: Path) -> Path:
+    """Build a small synthetic scratch repo holding only what the gate script reads.
+
+    Replaces a full ``git clone`` of the checkout (a ~180 MiB object store per
+    test). The scratch repo has one commit with the Makefile, ``scripts/`` and a
+    minimal ``pyproject.toml``.
+    """
+    dest = tmp_path / "scratch"
+    dest.mkdir()
+    for name in _tracked_gate_files():
+        target = dest / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO_ROOT / name, target)
+    # The ratchet reads the real floor, so the scratch repo carries the same value.
+    fail_under = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"][
+        "coverage"
+    ]["report"]["fail_under"]
+    (dest / "pyproject.toml").write_text(
+        _SYNTHETIC_PYPROJECT.format(fail_under=fail_under), encoding="utf-8"
     )
+    git(dest, "init", "-q", "-b", "main")
     git(dest, "config", "user.email", "ci-gate@test.local")
     git(dest, "config", "user.name", "CI Gate Test")
+    git(dest, "add", "-A")
+    git(dest, "commit", "-q", "-m", "synthetic ci-gate scratch repo")
     return dest
 
 
@@ -120,7 +166,10 @@ def install_bare_origin(scratch: Path, tmp_path: Path) -> None:
         capture_output=True,
         text=True,
     )
-    git(scratch, "remote", "set-url", "origin", str(bare))
+    if "origin" in git(scratch, "remote").split():
+        git(scratch, "remote", "set-url", "origin", str(bare))
+    else:
+        git(scratch, "remote", "add", "origin", str(bare))
     branch = resolve_push_branch(scratch)
     git(scratch, "push", "-u", "origin", branch)
 
