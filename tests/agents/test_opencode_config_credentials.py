@@ -134,6 +134,42 @@ def _assert_private_config_on_disk(ctx: AgentRunContext, env: dict[str, str]) ->
             _no_secret(item.read_text(encoding="utf-8", errors="replace"))
 
 
+@pytest.mark.parametrize("major", [1, None])
+async def test_pre_2x_path_launches_with_the_same_reference_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, major: int | None
+) -> None:
+    """The 1.x serve / ``run`` path gets the reference config, not values.
+
+    OpenCode 1.x runs ``{env:NAME}`` substitution over the raw text of both the
+    ``OPENCODE_CONFIG`` file and ``OPENCODE_CONFIG_CONTENT`` before parsing them
+    (``ConfigVariable.substitute``, read in the 1.18.30 build), as 2.x does.
+    """
+    monkeypatch.setattr(oc, "_OPENCODE_MAJOR_CACHE", {})
+    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/opencode")
+    monkeypatch.setattr(oc, "_opencode_major_version", lambda _cli: major)
+
+    def _no_serve(**_kw: Any) -> Any:
+        raise RuntimeError("serve unavailable")
+
+    seen: dict[str, Any] = {}
+
+    async def _fallback(*, cli: str, ctx: Any, env: dict[str, str]) -> AgentResult:
+        seen["env"] = env
+        return AgentResult(success=True, output="ok")
+
+    monkeypatch.setattr(oc, "_boot_opencode_server", _no_serve)
+    monkeypatch.setattr(oc, "_run_cli_fallback", _fallback)
+    ctx = _ctx(tmp_path)
+
+    await oc._run(ctx)
+
+    env = seen["env"]
+    _no_secret(env["OPENCODE_CONFIG_CONTENT"])
+    assert env[_KEY_ENV] == _PROVIDER_KEY
+    assert env["MERGECRAFT_MCP_TOKEN"] == _MCP_TOKEN
+    await asyncio.to_thread(_assert_private_config_on_disk, ctx, env)
+
+
 async def test_config_file_sits_where_review_permissions_deny(
     tmp_path: Path, launched: dict[str, Any]
 ) -> None:
