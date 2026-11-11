@@ -99,6 +99,10 @@ def _build_stub_agent(monkeypatch: MonkeyPatch, capture_path: Path) -> None:
 
         prompt = getattr(ctx.instructions, "full", "") or str(ctx.instructions)
         await asyncio.to_thread(capture_path.write_text, prompt, encoding="utf-8")
+        # What a compliant model's ``set_output`` call leaves: an empty findings payload.
+        from mergecraft.analyzers.finding import FindingsPayload
+
+        ctx.tool_state.output = FindingsPayload(findings=[]).model_dump_json()
         return AgentResult(
             success=True,
             output="",
