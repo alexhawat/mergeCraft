@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote
 
 import pytest
@@ -13,8 +13,11 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from mergecraft.findings import ledger
-from mergecraft.findings.lifecycle import LifecycleRecord
+from mergecraft.findings.lifecycle import LifecycleRecord, LifecycleState
 from mergecraft.mcp.review import merge_deterministic_preamble_into_review_body
+
+if TYPE_CHECKING:
+    from mergecraft.scm.protocol import ScmProvider
 
 _NOW = datetime(2026, 11, 10, 12, 0, 0, tzinfo=UTC)
 _FP = "ab12cd34"
@@ -44,10 +47,10 @@ def _published_review_body(agent_body: str, records: list[LifecycleRecord]) -> s
     return ledger.merge_ledger_into_comment(with_preamble, records=records)
 
 
-def _record(fingerprint: str, state: str, recorded_at: str) -> LifecycleRecord:
+def _record(fingerprint: str, state: LifecycleState, recorded_at: str) -> LifecycleRecord:
     return LifecycleRecord(
         fingerprint=fingerprint,
-        state=state,  # type: ignore[arg-type]
+        state=state,
         round_index=1,
         recorded_at=recorded_at,
         source="inline",
@@ -205,8 +208,10 @@ async def test_review_ledger_keeps_the_real_row_over_a_future_dated_one() -> Non
         async def list_issue_comments(self, *_a: object, **_k: object) -> list[dict[str, object]]:
             return []
 
-        async def list_reviews(self, *_a: object, **kwargs: object) -> list[dict[str, object]]:
-            if int(kwargs["params"]["page"]) != 1:  # type: ignore[index]
+        async def list_reviews(
+            self, *_a: object, params: dict[str, int], **_k: object
+        ) -> list[dict[str, object]]:
+            if params["page"] != 1:
                 return []
             bot = {"login": "github-actions[bot]", "type": "Bot"}
             return [
@@ -218,7 +223,9 @@ async def test_review_ledger_keeps_the_real_row_over_a_future_dated_one() -> Non
                 },
             ]
 
-    found = await ledger.fetch_review_ledger(_Scm(), "acme", "demo", 7)  # type: ignore[arg-type]
+    # The stand-in serves only the two list calls this read path makes.
+    scm = cast("ScmProvider", _Scm())
+    found = await ledger.fetch_review_ledger(scm, "acme", "demo", 7)
 
     kept = found.get_record(_FP)
     assert kept is not None
