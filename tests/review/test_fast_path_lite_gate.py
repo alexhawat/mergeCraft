@@ -979,7 +979,7 @@ def test_review_checks_lists_exactly_the_recognised_comment_only_suffixes() -> N
 
 def test_the_changelog_records_the_finding_line_format_under_changed() -> None:
     text = (_REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    unreleased = text.split("## [Unreleased]", 1)[1].split("\n## [", 1)[0]
+    unreleased = text.split("## [0.1.0a5]", 1)[1].split("\n## [", 1)[0]
     changed = unreleased.split("### Changed", 1)[1].split("\n### ", 1)[0]
 
     assert "path:line" in changed

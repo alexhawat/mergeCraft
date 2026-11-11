@@ -68,8 +68,20 @@ a read-only verifier; typed findings drive inline comments and the
 
 ## Setup checklist (new consumer repo)
 
-1. **Prereqs:** Python **3.11+**, uv, authenticated `gh` CLI. If no Python 3.11+
-   locally → use the Docker Action only ([`docs/install.md`](https://github.com/alexhawat/mergeCraft/blob/a0cbc782b19cb6447eb566fd34edc0329567d548/docs/install.md)).
+1. **Prereqs:**
+   <!-- BEGIN:requirements -->
+   **Requirements:** [uv](https://docs.astral.sh/uv/) is the only prerequisite for the
+   install; it downloads a compatible Python (3.11+) itself, so no system Python is
+   needed. The [GitHub CLI](https://cli.github.com) (`gh auth login`) is needed only
+   for `provider auth --scope github` (the default) or `--scope both`, which stores the secret
+   with `gh secret set`. `mergecraft init` needs neither `gh` nor a network;
+   `--scope local` needs no `gh`, but provider-specific authentication may need a network.
+   Two providers need one more CLI at the credential step: the Codex CLI for `openai`
+   and Claude Code for `anthropic`
+   ([provider table](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a5/docs/authentication.md)).
+   <!-- END:requirements -->
+   If uv cannot be installed, use the Docker Action only
+   ([`docs/install.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a5/docs/install.md)).
 2. **Install:**
 
    ```bash
@@ -105,10 +117,9 @@ a read-only verifier; typed findings drive inline comments and the
 
 Install the generated `skills/<harness>/mergecraft/SKILL.md` package. The raw
 `skills/mergecraft/SKILL.md` is a generator template; replace a copied template
-with the generated package to repair relative links. Documentation currently
-uses verified commit `09d441236e80a10758d4058b64e7ac60fe52925e`, because Action tag
-`v0.1.0a1` predates the MCP documentation. Release maintainers can set
-`MERGECRAFT_AGENT_PACKAGES_REF` when generating packages for another verified ref.
+with the generated package to repair relative links. Documentation links use the
+`v0.1.0a5` release tag, the release this checklist installs. Release
+maintainers can set `MERGECRAFT_AGENT_PACKAGES_REF` when generating packages for another verified ref.
 Fetch that ref first: an unresolved explicit override fails instead of silently
 substituting a branch.
 
@@ -142,7 +153,7 @@ Two profiles — do not confuse them:
 | **Runtime harness** | `mergecraft mcp serve` (default `--role reviewer`) | HTTP on ephemeral port | Per-serve Bearer required |
 
 **Public install (Cursor, Claude Desktop, Codex, Gemini CLI, OpenCode):** see
-[`docs/mcp.md`](https://github.com/alexhawat/mergeCraft/blob/a0cbc782b19cb6447eb566fd34edc0329567d548/docs/mcp.md) for copy-paste `mcpServers` JSON. Six tools only
+[`docs/mcp.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a5/docs/mcp.md) for copy-paste `mcpServers` JSON. Six tools only
 (`review_change`, `get_review`, `inspect_finding`, `explain_finding`,
 `get_capabilities`, `get_policy`). Registry: `mcp-name: io.github.alexhawat/mergecraft`.
 
@@ -172,5 +183,5 @@ Optional HTTP public (`--role public` without `--transport stdio`) also requires
   commenters are authorized; authorization reads `author_association` from the
   event payload, never the comment body.
 - **Model skipped** — no credential for that provider; run `mergecraft models list`.
-- **Full docs:** [`README.md`](https://github.com/alexhawat/mergeCraft/blob/a0cbc782b19cb6447eb566fd34edc0329567d548/README.md), [`AGENTS-mergecraft.md`](https://github.com/alexhawat/mergeCraft/blob/a0cbc782b19cb6447eb566fd34edc0329567d548/AGENTS-mergecraft.md),
-  [`docs/REVIEW-CHECKS.md`](https://github.com/alexhawat/mergeCraft/blob/a0cbc782b19cb6447eb566fd34edc0329567d548/docs/REVIEW-CHECKS.md), [`docs/`](https://github.com/alexhawat/mergeCraft/blob/a0cbc782b19cb6447eb566fd34edc0329567d548/docs/README.md).
+- **Full docs:** [`README.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a5/README.md), [`AGENTS-mergecraft.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a5/AGENTS-mergecraft.md),
+  [`docs/REVIEW-CHECKS.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a5/docs/REVIEW-CHECKS.md), [`docs/`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a5/docs/README.md).

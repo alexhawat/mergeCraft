@@ -797,7 +797,7 @@ def test_review_checks_describes_the_scope_gate_under_blast_radius_lanes() -> No
 
 def test_the_changelog_says_an_undeclared_scope_cannot_reach_eligible() -> None:
     text = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    unreleased = text.split("## [Unreleased]", 1)[1].split("\n## [", 1)[0]
+    unreleased = text.split("## [0.1.0a5]", 1)[1].split("\n## [", 1)[0]
     changed = unreleased.split("### Changed", 1)[1].split("\n### ", 1)[0]
     bullets = [chunk for chunk in changed.split("\n- ") if "eligible" in chunk]
 
@@ -806,10 +806,10 @@ def test_the_changelog_says_an_undeclared_scope_cannot_reach_eligible() -> None:
 
 def test_the_changelog_says_changed_paths_predicates_now_cross_directories() -> None:
     text = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    unreleased = text.split("## [Unreleased]", 1)[1].split("\n## [", 1)[0]
+    unreleased = text.split("## [0.1.0a5]", 1)[1].split("\n## [", 1)[0]
     bullets = [chunk for chunk in unreleased.split("\n- ") if "changed_paths matches" in chunk]
 
-    assert bullets, "no Unreleased bullet names the `changed_paths matches` predicate"
+    assert bullets, "no 0.1.0a5 bullet names the `changed_paths matches` predicate"
     assert any("director" in chunk.casefold() and "**" in chunk for chunk in bullets)
 
 

@@ -133,7 +133,7 @@ def test_hermes_required_env_var(
 
 def test_hermes_env_names_match_authentication_doc() -> None:
     """Hermes manifest and SKILL.md env vars must include the auth-doc Gemini name."""
-    gemini_envs = _auth_doc_env_names_for_provider("Google Gemini")
+    gemini_envs = _auth_doc_env_names_for_provider("Google")
     assert _GEMINI_ENV in gemini_envs, "docs/authentication.md must document GEMINI_API_KEY"
     for source, getter in _ENV_GETTERS.items():
         env_vars = set(getter())

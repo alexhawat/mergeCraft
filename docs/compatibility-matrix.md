@@ -12,7 +12,7 @@ scheduled nightly job covers the **broad slice** plus live providers
 |------|------------------|-------|
 | **Events** | `pull_request`, `pull_request_target`, `issue_comment` (trusted authors), `workflow_dispatch` | `pull_request_target` is always **untrusted** tier; comment triggers under target require `allow_pr_target_comments` |
 | **Agents** | `claude`, `codex`, `gemini`, `opencode`, `cursor` (API harness) | Local CLIs are lockfile-pinned in the Action image (`docker/agent-clis/`); Cursor is Cloud-only |
-| **Providers** | `anthropic`, `openai`, `google`, `tokenhub`, custom OpenAI-compatible | BYOK — credentials via Action secrets / env allowlist (W2) |
+| **Providers** | <!-- BEGIN:providers-inline -->`anthropic`, `bedrock`, `deepseek`, `google`, `minimax`, `moonshotai`, `openai`, `opencode`, `opencode-go`, `openrouter`, `paperinstruments`, `tokenhub`, `vertex`, `xai`<!-- END:providers-inline -->, custom OpenAI-compatible (every catalog label; see the [auth reference](authentication.md#provider-reference)) | BYOK — credentials via Action secrets / env allowlist (W2) |
 | **Shell** | `disabled`, `restricted`, `enabled` | MCP `shell` tool only under `restricted`; hooks off unless `enabled` |
 | **Push** | `disabled`, `restricted`, `enabled` | Production modes are **review-only**: mergeCraft refuses commit and push whatever the value, so no value grants write access. Default runtime resolve is `restricted`; default branch protected under `restricted` |
 | **Arch** | `linux/amd64`, `linux/arm64` | Runtime/provisioning choices; inspect the selected OCI manifest before use. PR E2E runs on `ubuntu-latest` (amd64); ARM64 execution/publication is not established by that job. |
@@ -25,21 +25,30 @@ TokenHub = provider · DeepSeek = model family. When `harness:` is unset in
 Explicit `harness:` wins over inference; unsupported combinations are
 configuration errors naming both halves.
 
-| Model slug | Recommended model | `harness` unset (inferred) | Explicit override / error |
-|------------|-------------------|----------------------------|---------------------------|
-| `tokenhub/hy3` (registered provider) | `tokenhub/hy3` | `opencode` | `harness: claude` → configuration error |
-| `openai/gpt-5.3-codex` | `openai/gpt-5.3-codex` | `codex` | `harness: opencode` → `opencode` |
-| `anthropic/claude-sonnet` | `anthropic/claude-sonnet` | `claude` | `harness: opencode` → `opencode` |
-| `google/gemini-3.1-pro-preview` | `google/gemini-3.1-pro-preview` | `gemini` | — |
-| `cursor/cloud-agent` | `cursor/cloud-agent` | `cursor` | — |
-| `tokenhub/hy3` | `tokenhub/hy3` | `opencode` | — |
-| `minimax/MiniMax-M3` | `minimax/MiniMax-M3` | `opencode` | — |
-| `opencode/gpt-5.6-sol` | `opencode/gpt-5.6-sol` | `opencode` | — |
-| `opencode-go/deepseek-v4-pro` | `opencode-go/deepseek-v4-pro` | `opencode` | — |
-| `opencode-go/deepseek-v4.1-flash` | `opencode-go/deepseek-v4.1-flash` | `opencode` | — |
-| `deepseek/deepseek-chat` | `deepseek/deepseek-chat` | `opencode` | — |
-| `xai/grok` | `xai/grok` (resolves `xai/grok-4.3`) | `opencode` | — |
-| `moonshotai/kimi-k2` | `moonshotai/kimi-k2` | `opencode` | — |
+<!-- BEGIN:harness-table -->
+| Provider label | Recommended model (seeded) | `harness` unset (inferred) |
+|----------------|----------------------------|----------------------------|
+| `anthropic` | `anthropic/claude-opus` | `claude` |
+| `bedrock` | none — name a model explicitly | `opencode` |
+| `deepseek` | `deepseek/deepseek-pro` | `opencode` |
+| `google` | `google/gemini-pro` | `gemini` |
+| `minimax` | `minimax/MiniMax-M3` | `opencode` |
+| `moonshotai` | `moonshotai/kimi-k2` | `opencode` |
+| `openai` | `openai/gpt` | `codex` |
+| `opencode` | `opencode/big-pickle` | `opencode` |
+| `opencode-go` | `opencode-go/glm-5.1` | `opencode` |
+| `openrouter` | `openrouter/claude-opus` | `opencode` |
+| `paperinstruments` | `paperinstruments/ultramarine-1-flash` | `opencode` |
+| `tokenhub` | `tokenhub/hy3` | `opencode` |
+| `vertex` | none — name a model explicitly | `opencode` |
+| `xai` | `xai/grok` | `opencode` |
+
+<!-- END:harness-table -->
+
+Explicit `harness:` examples: `harness: claude` on a `tokenhub/…` slug is a configuration
+error; `harness: opencode` on an `openai/…` or `anthropic/…` slug is accepted and runs
+through `opencode`. The `cursor/cloud-agent` slug infers `cursor` (Cursor Cloud is not a
+catalog provider).
 
 ## Security-relevant slice (PR gate — `.github/workflows/e2e.yml`)
 

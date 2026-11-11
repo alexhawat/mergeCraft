@@ -68,6 +68,14 @@ DOCUMENT: tuple[str, ...] = (
     "MERGECRAFT_TRACING_TO",
 )
 
+#: The control-weakening switches. They are documented in their own
+#: ``### Control switches`` subsection of ``docs/cli.md`` (exact ``1`` only) and
+#: never in the operator-knob table, so they are also kept out of ``.env.example``.
+CONTROL_SWITCHES: tuple[str, ...] = (
+    "MERGECRAFT_ALLOW_ROOT",
+    "MERGECRAFT_ALLOW_UNSANDBOXED_SHELL",
+)
+
 #: Secrets, internal IPC, test seams, generated values, identity constants and
 #: control-weakening switches. Never documented as operator knobs (PD-D8).
 NEVER_DOCUMENT: tuple[str, ...] = (
@@ -75,8 +83,6 @@ NEVER_DOCUMENT: tuple[str, ...] = (
     "MERGECRAFT_AGENT_ID",
     "MERGECRAFT_AGENT_PROTOCOL",
     "MERGECRAFT_AGENT_USER",
-    "MERGECRAFT_ALLOW_ROOT",
-    "MERGECRAFT_ALLOW_UNSANDBOXED_SHELL",
     "MERGECRAFT_ANALYZERS",
     "MERGECRAFT_API_URL",
     "MERGECRAFT_APP_ID",
@@ -153,6 +159,15 @@ def _src_names() -> set[str]:
     return names
 
 
+def _cli_knob_table_section() -> str | None:
+    """The knob table only: the ``## Environment variables`` text before any ``###`` heading."""
+    section = _cli_environment_section()
+    if section is None:
+        return None
+    sub = re.search(r"^###\s", section, re.MULTILINE)
+    return section if sub is None else section[: sub.start()]
+
+
 def _cli_environment_section() -> str | None:
     text = _CLI_DOC.read_text(encoding="utf-8")
     heading = _SECTION_RE.search(text)
@@ -164,8 +179,10 @@ def _cli_environment_section() -> str | None:
 
 
 def test_document_and_never_document_partition_src_names() -> None:
-    assert not set(DOCUMENT) & set(NEVER_DOCUMENT), "the two lists overlap"
-    assert set(DOCUMENT) | set(NEVER_DOCUMENT) == _src_names(), (
+    names = (set(DOCUMENT), set(CONTROL_SWITCHES), set(NEVER_DOCUMENT))
+    for left, right in ((0, 1), (0, 2), (1, 2)):
+        assert not names[left] & names[right], "the classification lists overlap"
+    assert set(DOCUMENT) | set(CONTROL_SWITCHES) | set(NEVER_DOCUMENT) == _src_names(), (
         "the two lists must classify exactly the MERGECRAFT_* names read by src/"
     )
 
@@ -187,7 +204,26 @@ def test_environment_section_lists_no_internal_or_control_name() -> None:
     section = _cli_environment_section()
     assert section is not None, "docs/cli.md must gain an `## Environment variables` section"
     offenders = sorted(name for name in NEVER_DOCUMENT if name in section)
+    knob_table = _cli_knob_table_section() or ""
+    offenders += sorted(name for name in CONTROL_SWITCHES if name in knob_table)
     assert not offenders, (
         "docs/cli.md §Environment variables must not present secrets, IPC, test "
         f"seams, generated values or control-weakening switches: {offenders}"
     )
+
+
+def test_control_switches_have_their_own_subsection() -> None:
+    section = _cli_environment_section()
+    assert section is not None
+    assert "### Control switches" in section
+    missing = sorted(name for name in CONTROL_SWITCHES if name not in section)
+    assert not missing, f"docs/cli.md §Control switches omits: {missing}"
+
+
+def test_environment_table_lists_only_variables_src_reads() -> None:
+    """A documented knob that nothing reads is drift (W2.3-3)."""
+    section = _cli_environment_section()
+    assert section is not None
+    documented = set(_NAME_RE.findall(section))
+    unread = sorted(documented - _src_names())
+    assert not unread, f"docs/cli.md §Environment variables names variables nothing reads: {unread}"

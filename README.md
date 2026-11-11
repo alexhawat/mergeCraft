@@ -241,8 +241,9 @@ skills/copilot/mergecraft/ into .github/skills/mergecraft/ so Copilot keeps the
 knowledge.
 ```
 
-**OpenClaw / Hermes / any autonomous shell agent** — these have no mergeCraft
-package; give them the machine-readable entry point and let them plan:
+**Any other autonomous shell agent** — OpenClaw and Hermes have generated packages
+under `skills/openclaw/mergecraft/` and `skills/hermes/mergecraft/`; for agents with
+no package, give them the machine-readable entry point and let them plan:
 
 ```text
 Read https://raw.githubusercontent.com/alexhawat/mergeCraft/main/llms.txt —
@@ -251,7 +252,9 @@ docs/authentication.md. Goal: install mergeCraft as the PR reviewer for the
 repo in the current working directory.
 
 Constraints:
-  - `uv` is your only prerequisite; it provisions Python itself.
+  - `uv` is your only install prerequisite; it provisions Python itself. `provider auth
+    openai` also needs the Codex CLI and `provider auth anthropic` needs Claude Code
+    (`claude setup-token`) — escalate those to a human too.
   - `mergecraft init` is non-interactive and safe to run unattended.
   - `mergecraft provider auth * --scope github` is interactive and MUST be escalated to a human.
     Never fabricate, log, or commit a credential.
@@ -271,7 +274,7 @@ Produce a plan, execute it, then open a PR and report the escalation you need.
 | | Why | How long |
 |---|---|---|
 | **One provider credential** | `mergecraft provider auth … --scope github` is an interactive login (or a key paste). A well-behaved agent stops here rather than touching your secrets. | ~1 minute, once |
-| **`gh` logged in** *(optional)* | Lets `mergecraft provider auth` store the secret for you via `gh secret set`. Without it, use explicit `--scope local` for local evaluation. | ~1 minute, once |
+| **`gh` logged in** *(only for `--scope github`)* | `--scope github` (the default) stores the secret via `gh secret set`. Without `gh`, use explicit `--scope local` for local evaluation. | ~1 minute, once |
 
 Everything else — install, scaffold, config, commit, PR — is unattended.
 `mergecraft init` writes no secrets and needs no network.
@@ -379,11 +382,18 @@ For the GitHub Action path, see [How it works in GitHub Action](#how-it-works-in
 
 *Prefer to let an agent do this? [Jump back up.](#for-agents)*
 
-> **Requirements:** [uv](https://docs.astral.sh/uv/) and one provider credential.
-> uv provisions its own Python (3.11+) — you do not need a system Python.
-> An authenticated [GitHub CLI](https://cli.github.com) is optional, and only
-> makes `mergecraft provider auth` store the secret for you.
-> Other paths (Docker-only, no local install at all): [`docs/install.md`](docs/install.md).
+<!-- BEGIN:requirements -->
+**Requirements:** [uv](https://docs.astral.sh/uv/) is the only prerequisite for the
+install; it downloads a compatible Python (3.11+) itself, so no system Python is
+needed. The [GitHub CLI](https://cli.github.com) (`gh auth login`) is needed only
+for `provider auth --scope github` (the default) or `--scope both`, which stores the secret
+with `gh secret set`. `mergecraft init` needs neither `gh` nor a network;
+`--scope local` needs no `gh`, but provider-specific authentication may need a network.
+Two providers need one more CLI at the credential step: the Codex CLI for `openai`
+and Claude Code for `anthropic`
+([provider table](docs/authentication.md)).
+<!-- END:requirements -->
+Other paths (Docker-only, no local install at all): [`docs/install.md`](docs/install.md).
 
 1. **Install the published alpha CLI and scaffold the repo:**
 
@@ -516,8 +526,8 @@ config is read from the base branch only, so a pull request cannot opt its own
 files out of review. If `mergecraft` or `mergecraft-approval` is a required check,
 rely on `ignore_paths` alone: a run that `paths-ignore` skips never reports either check.
 
-More patterns — comment triggers, fork-safe `pull_request_target`, SARIF,
-scheduled runs: [`docs/workflows.md`](docs/workflows.md).
+More patterns — comment triggers, fork-safe `pull_request_target`, SARIF:
+[`docs/workflows.md`](docs/workflows.md).
 
 ## Features
 
@@ -540,22 +550,39 @@ in `.mergecraft/config.yaml` to log diagnostics only.
 
 ## Authentication
 
-| Provider | Subscription (recommended) | API key | Recommended model |
-|----------|-----------------------------|---------|-------------------|
-| Anthropic Claude | `mergecraft provider auth anthropic --scope github` → indexed credentials | `ANTHROPIC_API_KEY` | `anthropic/claude-sonnet` |
-| OpenAI Codex | `mergecraft provider auth openai --scope github` → indexed credentials | `OPENAI_API_KEY` | `openai/gpt-5.3-codex` |
-| OpenCode Zen / Go | `mergecraft provider auth opencode --scope github` → `OPENCODE_AUTH_JSON` | `OPENCODE_API_KEY` | Zen: `opencode/gpt-5.6-sol`; Go: `opencode-go/deepseek-v4-pro` (cheaper: `opencode-go/deepseek-v4.1-flash`) |
-| Google Gemini | `mergecraft provider auth google --scope github` → indexed credentials | `GEMINI_API_KEY` | `google/gemini-3.1-pro-preview` |
-| Tencent TokenHub | — | `mergecraft provider auth tokenhub --scope github` → indexed credentials | `tokenhub/hy3` |
-| MiniMax | — | `mergecraft provider auth minimax --scope github` → indexed credentials | `minimax/MiniMax-M3` |
-| DeepSeek | — | `mergecraft provider auth deepseek --scope github` → indexed credentials | `deepseek/deepseek-chat` |
-| Cursor Cloud | `mergecraft auth cursor --scope github` (legacy shim) | `CURSOR_API_KEY` | `cursor/cloud-agent` |
-| OpenRouter | — | `mergecraft provider auth openrouter --scope github` → indexed credentials | any OpenRouter slug |
-| xAI | — | `mergecraft provider auth xai --scope github` → indexed credentials | `xai/grok` |
-| Moonshot AI | — | `mergecraft provider auth moonshotai --scope github` → indexed credentials | `moonshotai/kimi-k2` |
-| OpenAI-compatible (custom) | — | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `<your-prefix>/<your-model>` |
-| [LiteLLM](https://docs.litellm.ai/) proxy | — | same custom-provider env pair — [`examples/config-litellm.yaml`](examples/config-litellm.yaml) | `default/<model>` or `<label>/<model>` |
-| Logfire tracing | `mergecraft auth logfire` | see [`docs/TRACING.md`](docs/TRACING.md) | — |
+<!-- BEGIN:provider-table -->
+| Provider | Command | Needs | Secret stored | Recommended model (seeded) | Inferred harness |
+|----------|---------|-------|---------------|----------------------------|------------------|
+| Anthropic | `mergecraft provider auth anthropic` | Claude Code (`claude setup-token`) to mint the token | `LLM_PROVIDER_<N>_CLAUDE_CODE_OAUTH_TOKEN`; flat: `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` | `anthropic/claude-opus` | `claude` |
+| Amazon Bedrock | `mergecraft provider auth bedrock` | cloud credentials (no `--api-key`) | `LLM_PROVIDER_<N>_AWS_ACCESS_KEY_ID` + `LLM_PROVIDER_<N>_AWS_SECRET_ACCESS_KEY`; flat: `AWS_BEARER_TOKEN_BEDROCK` | none — name a model explicitly | `opencode` |
+| DeepSeek | `mergecraft provider auth deepseek` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `DEEPSEEK_API_KEY` | `deepseek/deepseek-pro` | `opencode` |
+| Google | `mergecraft provider auth google` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` | `google/gemini-pro` | `gemini` |
+| MiniMax (OpenAI-compatible) | `mergecraft provider auth minimax` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `minimax/MiniMax-M3` | `opencode` |
+| Moonshot AI | `mergecraft provider auth moonshotai` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `MOONSHOT_API_KEY` | `moonshotai/kimi-k2` | `opencode` |
+| OpenAI | `mergecraft provider auth openai` | the Codex CLI on `PATH` (`npm i -g @openai/codex`; needs Node.js) | `LLM_PROVIDER_<N>_CODEX_AUTH_JSON`; flat: `OPENAI_API_KEY`, `CODEX_AUTH_JSON` | `openai/gpt` | `codex` |
+| OpenCode | `mergecraft provider auth opencode` | a billing-backed key from [opencode.ai/auth](https://opencode.ai/auth) | `LLM_PROVIDER_<N>_OPENCODE_AUTH_JSON`; flat: `OPENCODE_API_KEY`, `OPENCODE_AUTH_JSON` | `opencode/big-pickle` | `opencode` |
+| OpenCode Go | `mergecraft provider auth opencode-go` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `OPENCODE_GO_API_KEY` | `opencode-go/glm-5.1` | `opencode` |
+| OpenRouter | `mergecraft provider auth openrouter` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `OPENROUTER_API_KEY` | `openrouter/claude-opus` | `opencode` |
+| Paper Instruments | `mergecraft provider auth paperinstruments` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `paperinstruments/ultramarine-1-flash` | `opencode` |
+| Tencent TokenHub | `mergecraft provider auth tokenhub` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `TOKENHUB_API_KEY` | `tokenhub/hy3` | `opencode` |
+| Google Vertex AI | `mergecraft provider auth vertex` | cloud credentials (no `--api-key`) | `LLM_PROVIDER_<N>_GOOGLE_APPLICATION_CREDENTIALS`; flat: `VERTEX_SERVICE_ACCOUNT_JSON` | none — name a model explicitly | `opencode` |
+| xAI | `mergecraft provider auth xai` | an API key | `LLM_PROVIDER_<N>_API_KEY`; flat: `XAI_API_KEY` | `xai/grok` | `opencode` |
+
+<!-- END:provider-table -->
+
+Not in the provider catalog:
+
+| Integration | Credential | Model |
+|-------------|------------|-------|
+| Cursor Cloud | `mergecraft auth cursor --scope github` (legacy shim) → `CURSOR_API_KEY` | `cursor/cloud-agent` |
+| OpenAI-compatible (custom) | `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL` + `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` | `<your-prefix>/<your-model>` |
+| [LiteLLM](https://docs.litellm.ai/) proxy | same custom-provider env pair — [`examples/config-litellm.yaml`](examples/config-litellm.yaml) | `default/<model>` or `<label>/<model>` |
+| Logfire tracing | `mergecraft auth logfire` — see [`docs/TRACING.md`](docs/TRACING.md) | — |
+
+`provider auth` seeds the recommended model into `agents.reviewer` only when that chain
+is empty. The Action's `model:` input, when set, becomes the head of the chain and
+overrides repo settings ([action reference](docs/action-reference.md)), so the
+scaffold's `model:` line decides what runs first.
 
 A ChatGPT-subscription login (`CODEX_AUTH_JSON`) rotates its refresh token on
 use: each run that refreshes it spends the stored token, and a secret nobody

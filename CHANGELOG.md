@@ -5,154 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0a5] — 2026-11-08
-
-### Added
-
-#### Ci
-
-- Automate the manifest-to-pin cycle with an App token by @alexhawat in [#1218](https://github.com/alexhawat/mergeCraft/pull/1218)
-- Fail-then-pass receipts gate fix pull requests by @alexhawat and @claude in [#1170](https://github.com/alexhawat/mergeCraft/pull/1170)
-
-#### Classify
-
-- Declared scope paths drive the scope gate by @alexhawat and @claude in [#1160](https://github.com/alexhawat/mergeCraft/pull/1160)
-- Coded lane reasons and a true/false/unknown checklist by @alexhawat and @claude in [#1149](https://github.com/alexhawat/mergeCraft/pull/1149)
-
-#### Policy
-
-- In-run producers for required-rule evidence keys by @alexhawat and @claude in [#1158](https://github.com/alexhawat/mergeCraft/pull/1158)
-- Enforce the repository rules file in review by @alexhawat in [#1116](https://github.com/alexhawat/mergeCraft/pull/1116)
-
-#### Review
-
-- Wire bounded file-group fan-out into roster dispatch by @alexhawat and @claude in [#1157](https://github.com/alexhawat/mergeCraft/pull/1157)
-- Ignore_paths and eval-methodology budget by @alexhawat and @claude in [#1123](https://github.com/alexhawat/mergeCraft/pull/1123)
-
-#### Other
-
-- Embed mergeCraft review via OpenAI Agents SDK by @alexhawat in [#1161](https://github.com/alexhawat/mergeCraft/pull/1161)
-- Publish from the workflow with PyPI OIDC by @alexhawat in [#1220](https://github.com/alexhawat/mergeCraft/pull/1220)
-- Lite review tier and a comment-only recognizer by @alexhawat and @claude in [#1156](https://github.com/alexhawat/mergeCraft/pull/1156)
-- Incident evals, rescore delta, finding outcomes, review round cap (#1163–#1166) by @alexhawat in [#1167](https://github.com/alexhawat/mergeCraft/pull/1167)
-
-### Fixed
-
-#### Agents
-
-- Stop the stall report blaming the kill's own socket error by @alexhawat and @claude in [#1147](https://github.com/alexhawat/mergeCraft/pull/1147)
-- Cascade failover and gate unknowns by @alexhawat and @claude in [#1125](https://github.com/alexhawat/mergeCraft/pull/1125)
-
-#### Ci
-
-- Place a lone earlier-rung packet downloaded flat by @alexhawat and @claude in [#1135](https://github.com/alexhawat/mergeCraft/pull/1135)
-- Docs-only pytest uses bootstrap venv by @alexhawat in [#1108](https://github.com/alexhawat/mergeCraft/pull/1108)
-- Run docs-only pytest in bootstrap venv by @alexhawat in [#1139](https://github.com/alexhawat/mergeCraft/pull/1139)
-- Give the live smoke a token budget that fits one turn by @alexhawat and @claude in [#1101](https://github.com/alexhawat/mergeCraft/pull/1101)
-
-#### Mcp
-
-- Record refused tool calls and honest run timing by @alexhawat and @Copilot in [#1085](https://github.com/alexhawat/mergeCraft/pull/1085)
-- Allowlist merge-base and treat grep no-match as success by @alexhawat in [#1091](https://github.com/alexhawat/mergeCraft/pull/1091)
-
-#### Opencode
-
-- Estimate missing Go costs from published token rates by @alexhawat in [#1111](https://github.com/alexhawat/mergeCraft/pull/1111)
-- Record token usage from the 2.x stream by @alexhawat in [#1099](https://github.com/alexhawat/mergeCraft/pull/1099)
-
-#### Review
-
-- Strip internal metadata at the GitHub HTTP boundary by @alexhawat in [#1150](https://github.com/alexhawat/mergeCraft/pull/1150)
-- Make the run record describe the run by @alexhawat and @claude in [#1013](https://github.com/alexhawat/mergeCraft/pull/1013)
-- Send only GitHub-accepted fields in inline comments by @alexhawat and @claude in [#1104](https://github.com/alexhawat/mergeCraft/pull/1104)
-- Publish neutral non-terminal rungs to sticky only by @alexhawat in [#1094](https://github.com/alexhawat/mergeCraft/pull/1094)
-
-#### Other
-
-- Serialize managed pip provisioning by @alexhawat in [#1100](https://github.com/alexhawat/mergeCraft/pull/1100)
-- Stop run-bound checkpoint 404 and httpx hint leak by @alexhawat and @Copilot in [#1092](https://github.com/alexhawat/mergeCraft/pull/1092)
-- Record platform sandbox capability loss honestly by @alexhawat in [#1093](https://github.com/alexhawat/mergeCraft/pull/1093)
-- Pin apt 2.6.2 for CVE-2026-109518 in both images by @alexhawat and @claude in [#1159](https://github.com/alexhawat/mergeCraft/pull/1159)
-- Run-health and trajectory correctness by @alexhawat and @claude in [#1124](https://github.com/alexhawat/mergeCraft/pull/1124)
-- Name a rename's source in the triage diff by @alexhawat and @claude in [#1146](https://github.com/alexhawat/mergeCraft/pull/1146)
-- Attest clean reviews via terminal verdict + read coverage by @alexhawat and @Copilot in [#1086](https://github.com/alexhawat/mergeCraft/pull/1086)
-- Let an accepted verdict outrank the driver's exit status by @alexhawat and @claude in [#1148](https://github.com/alexhawat/mergeCraft/pull/1148)
-- Fail closed when the review diff cannot show a workflow untouched by @alexhawat and @claude in [#1168](https://github.com/alexhawat/mergeCraft/pull/1168)
-- Upload only the wheel and sdist by @alexhawat in [#1223](https://github.com/alexhawat/mergeCraft/pull/1223)
-- Actionlint action-manifest false blockers and honest refused-verdict records by @sevn-one in [#1212](https://github.com/alexhawat/mergeCraft/pull/1212)
-- Make CLI source, workspace and output behavior consistent by @alexhawat in [#1198](https://github.com/alexhawat/mergeCraft/pull/1198)
-- Bind Action reviews to trusted repository and revision identities by @alexhawat in [#1197](https://github.com/alexhawat/mergeCraft/pull/1197)
-- Preserve finding identity and prove safe triage skips by @alexhawat in [#1199](https://github.com/alexhawat/mergeCraft/pull/1199)
-
-### Changed
-
-- Read every setting through one typed model by @alexhawat in [#1127](https://github.com/alexhawat/mergeCraft/pull/1127)
-- Consolidate root files into existing directories by @alexhawat in [#1202](https://github.com/alexhawat/mergeCraft/pull/1202)
-
-### Docs
-
-- Lead provider examples with OpenCode by @alexhawat in [#1219](https://github.com/alexhawat/mergeCraft/pull/1219)
-- Document the published mergecraft-action 0.1.0a4 by @alexhawat in [#1096](https://github.com/alexhawat/mergeCraft/pull/1096)
-- Publish audit remediation and accurate consumer support contracts by @alexhawat in [#1201](https://github.com/alexhawat/mergeCraft/pull/1201)
-
-### Internal
-
-#### Action
-
-- Pin self-review to verified manifest ee042005 by @alexhawat in [#1214](https://github.com/alexhawat/mergeCraft/pull/1214)
-- Prepare verified image manifest 965c7346 by @alexhawat in [#1213](https://github.com/alexhawat/mergeCraft/pull/1213)
-- Pin self-review to verified manifest c6a97521 by @alexhawat in [#1155](https://github.com/alexhawat/mergeCraft/pull/1155)
-- Prepare verified image manifest bf82fb33 by @alexhawat in [#1153](https://github.com/alexhawat/mergeCraft/pull/1153)
-- Pin self-review to verified manifest f312aa81 by @alexhawat in [#1144](https://github.com/alexhawat/mergeCraft/pull/1144)
-- Prepare verified image manifest 37b3b068 by @alexhawat in [#1143](https://github.com/alexhawat/mergeCraft/pull/1143)
-- Pin self-review to verified manifest 9e4318a8 by @alexhawat in [#1122](https://github.com/alexhawat/mergeCraft/pull/1122)
-- Prepare verified image manifest d103e90c by @alexhawat in [#1121](https://github.com/alexhawat/mergeCraft/pull/1121)
-- Pin self-review to verified manifest 3971cbee by @alexhawat in [#1115](https://github.com/alexhawat/mergeCraft/pull/1115)
-- Prepare verified image manifest 4417257a by @alexhawat in [#1113](https://github.com/alexhawat/mergeCraft/pull/1113)
-- Pin self-review to verified manifest 60176a83 by @alexhawat in [#1107](https://github.com/alexhawat/mergeCraft/pull/1107)
-- Prepare verified image manifest 5aaef7c3 by @alexhawat in [#1106](https://github.com/alexhawat/mergeCraft/pull/1106)
-- Prepare verified image manifest b98d66b1 by @alexhawat and @claude in [#1102](https://github.com/alexhawat/mergeCraft/pull/1102)
-- Pin self-review to the released image 7e2707ab by @alexhawat in [#1089](https://github.com/alexhawat/mergeCraft/pull/1089)
-- Prepare verified image manifest 7080e962 by @alexhawat in [#1088](https://github.com/alexhawat/mergeCraft/pull/1088)
-
-#### Deps
-
-- Bump getsentry/craft from 2.35.1 to 3.9.0 by @dependabot in [#1206](https://github.com/alexhawat/mergeCraft/pull/1206)
-- Bump getsentry/craft/.github/workflows/changelog-preview.yml from 2.35.1 to 3.9.0 by @dependabot in [#1205](https://github.com/alexhawat/mergeCraft/pull/1205)
-- Bump @anthropic-ai/claude-code from 2.1.316 to 2.1.317 in /docker/agent-clis in the agent-clis-patch-minor group by @dependabot in [#1204](https://github.com/alexhawat/mergeCraft/pull/1204)
-- Bump docker/login-action from 4.6.0 to 4.7.0 in the github-actions-patch-minor group across 1 directory by @dependabot in [#1064](https://github.com/alexhawat/mergeCraft/pull/1064)
-- Bump the agent-clis-patch-minor group across 1 directory with 4 updates by @dependabot in [#1062](https://github.com/alexhawat/mergeCraft/pull/1062)
-- Bump golang from `972b411` to `d9b6a1b` by @dependabot in [#1134](https://github.com/alexhawat/mergeCraft/pull/1134)
-- Bump litellm from 1.95.1 to 1.100.4 by @dependabot in [#1080](https://github.com/alexhawat/mergeCraft/pull/1080)
-
-#### Integrations
-
-- D47 drop swallowed kwargs from CursorCloudClient by @alexhawat and @claude in [#1154](https://github.com/alexhawat/mergeCraft/pull/1154)
-- D48 drop unused CursorCloudClient package re-export by @alexhawat in [#1203](https://github.com/alexhawat/mergeCraft/pull/1203)
-
-#### Other
-
-- D39 drop test-only review_includes_path by @alexhawat in [#1053](https://github.com/alexhawat/mergeCraft/pull/1053)
-- D38 drop unused diff_coverage helpers by @alexhawat in [#1044](https://github.com/alexhawat/mergeCraft/pull/1044)
-- D43 drop test-only \_analyze_log re-export by @alexhawat in [#1095](https://github.com/alexhawat/mergeCraft/pull/1095)
-- D42 drop private names from python.py \__all__ by @alexhawat in [#1079](https://github.com/alexhawat/mergeCraft/pull/1079)
-- D32 drop unused RequirementSource by @alexhawat in [#968](https://github.com/alexhawat/mergeCraft/pull/968)
-- Raise the self-review token budget to 8M by @alexhawat and @claude in [#1130](https://github.com/alexhawat/mergeCraft/pull/1130)
-- D45 drop test-only worktree index_contracts by @alexhawat in [#1118](https://github.com/alexhawat/mergeCraft/pull/1118)
-- D44 drop dead range_n and unused OpOptions.max_items by @alexhawat in [#1117](https://github.com/alexhawat/mergeCraft/pull/1117)
-- Strengthen mutation, packaging and Action acceptance gates by @alexhawat in [#1200](https://github.com/alexhawat/mergeCraft/pull/1200)
-- Write the refreshed Codex login back to CODEX_AUTH_JSON by @alexhawat and @claude in [#1128](https://github.com/alexhawat/mergeCraft/pull/1128)
-- D46 drop unused short_commit re-export by @alexhawat in [#1136](https://github.com/alexhawat/mergeCraft/pull/1136)
-- Workflows, scheduled advisories, flaky lanes by @alexhawat and @claude in [#1126](https://github.com/alexhawat/mergeCraft/pull/1126)
-- Parallelize coverage and release gates and cache mypy by @alexhawat in [#1110](https://github.com/alexhawat/mergeCraft/pull/1110)
-- Faster PR gates via coverage reuse, sharding, and path skips by @alexhawat in [#1105](https://github.com/alexhawat/mergeCraft/pull/1105)
-
-### Other
-
-- Integrate audit remediation for Action, CLI, findings, testing, and docs by @alexhawat in [#1209](https://github.com/alexhawat/mergeCraft/pull/1209)
-- deps: bump litellm to 1.106.4, keep filelock 4.x by @alexhawat and @claude in [#1141](https://github.com/alexhawat/mergeCraft/pull/1141)
-- coverage: count OpenCode native reads as read evidence by @alexhawat and @claude in [#1145](https://github.com/alexhawat/mergeCraft/pull/1145)
-
 ## [Unreleased]
 
 ### Added
@@ -164,15 +16,267 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unless `--merged/--not-merged` overrides it. Advisory only; it never moves a
   verdict (#1165).
 
+- `review.fastPath.reapproval` carries a trusted mergeCraft pass over to a new
+  head whose only PR-authored change since the review is changelog prose — a
+  one-line `CHANGELOG.md` fix, or a merge of the base branch whose only conflict
+  resolution was the changelog — with zero LLM calls and no repeated full-diff
+  reads, agents, analyzers or static checks. The prior pass must be the newest
+  `mergecraft-approval` success on the reviewed head from an App in
+  `reapproval.trustedCheckApps` (never `github-actions`), for the same pull
+  request, target branch and review policy (a digest of `.mergecraft`, the
+  workflow file and the mergeCraft version, stamped on every approval check while
+  the option is on). Every path changed since the review must be a qualifying
+  prose edit or inherited from the base untouched by the pull request, every
+  other PR-authored change must equal the reviewed one, and file modes must match;
+  anything else, or any read failure, is the normal review. Both checks name the
+  prior review, the compared SHAs, the qualifying path, what ran, what was reused
+  and what was skipped; other required checks are not reused. The packet records
+  it in `triage.reapproval` (schema `1.20.0`). Off by default (#1284).
+
+### Fixed
+
+- GitHub permalinks stay readable in analyzer output, PR comments and traces.
+  `blob`/`tree`/`commit` links with a 40- or 64-hex SHA, `actions/runs/<id>(/job/<id>)`
+  and `pull`/`issues/<n>` links are exempt from the entropy pass, but only when
+  the owner, repo and every path segment would survive redaction on their own;
+  query strings and fragments are still redacted, and a token pasted into the path
+  still blanks the link (#1281).
+
+- The release publish step accepts Craft's unbracketed `## <version>` changelog
+  heading as well as `## [<version>] — <date>`, so the GitHub release is no longer
+  left half-done after PyPI publishes (#1226).
+
+- Two URL-credential redaction canaries no longer trip TruffleHog's `URI` detector
+  on a full-tree scan: the test assembles its synthetic userinfo at runtime and the
+  changelog prose uses a `<password>` placeholder (#1217).
+
+- MCP `shell` and the repository tools (`git`, `git_fetch`, `push_branch`, `push_tags`,
+  `delete_branch`, `commit_changes`) no longer run blocking subprocess calls on the
+  event loop (they run via `asyncio.to_thread`), so a slow command stops stalling every
+  other tool call. A shell command that times out and then also fails the post-kill
+  drain is now reaped and returns the output gathered so far instead of raising (#1243).
+
+- An analyzer timeout now kills the analyzer's whole process group. The runner
+  starts analyzers as session leaders and `killpg`s them on timeout, so grandchildren
+  no longer outlive the gate (#1242).
+
+- ruff diagnostics are no longer all blocking Major: ruff emits `severity: error`
+  for every rule, so the parser now keeps Major only for bug-class rule codes
+  (syntax errors, undefined names, bugbear, security, pylint errors, async) and
+  maps style/import/unused-name rules to Minor (#1241).
+
+- Sandbox harness startup failures (`unshare`/`bwrap`/`setpriv` refusing to create
+  a namespace, fork `EAGAIN`, `uid_map` write denied) are now classified as
+  `sandboxed: isolation unavailable` and reported `declared-but-cannot-run`
+  instead of a blocking gate failure (#1240).
+
+- Free-text secret redaction no longer leaks random credentials. The camelCase
+  identifier exemption now requires word-shaped keys (``ruleId``,
+  ``partialFingerprints``) instead of any lowercase-led blob with a capital, the
+  entropy threshold is capped at 4.5 bits per character so long tokens cannot
+  outgrow it, and fine-grained GitHub PATs (``github_pat_``), PyPI tokens and
+  ``Bearer`` credentials are redacted by pattern (the ``Bearer`` word is kept)
+  (#1232).
+
+- `envAllowlist` can no longer pass credentials to subprocesses. A
+  credential-shaped name (`*_TOKEN`, `*_KEY`, `*-TOKEN`, …) or one of
+  `GITHUB_TOKEN`, `GH_TOKEN`, `GIT_ASKPASS` and the Actions OIDC request
+  variables is now ignored with a warning instead of reaching the restricted
+  MCP shell, trusted analyzers and analyzer fallback environments; the action's
+  `INPUT_TOKEN` and hyphenated inputs such as `INPUT_LOGFIRE-TOKEN` count as
+  credentials. Non-secret names are still added (#1233).
+
+- One undecodable TruffleHog output line (a truncated write or a stray banner)
+  no longer discards the whole secret scan: the line is skipped and the
+  findings on every other line are kept. Output with no decodable line is still
+  reported as unparsable rather than as a clean scan (#1234).
+
+- Trace error text no longer carries URL credentials. A failed HTTP request's
+  exception message quotes the raw URL, so `https://user:<password>@host` reached
+  the span's `error` attribute even though `http.url` was redacted; the
+  `error`, `exception.message` and `tool.error_message` attributes now get the
+  same URL credential redaction before any sink sees them (#1235).
+
+- Managed pip analyzer provisioning bounds `uv pip install` at 600 seconds. It
+  runs while holding the shared cache lock, so a hung install used to block every
+  other worker; a timeout now removes the staging tree and fails the install
+  cleanly (#1261).
+
+- Baseline suppression bounds the base-worktree `git worktree add` and `remove`
+  calls. A timed-out or failed checkout now removes its temp tree and disables
+  suppression for that run instead of raising (#1262).
+
+- Contract base-ref probes (`git rev-parse` and `git show`) are bounded. A timeout
+  reads as "base unavailable" and skips the contract check rather than hanging the
+  review (#1263).
+
+- A baked analyzer binary that is missing no longer falls back to a same-named
+  binary on `PATH`. Callers skip lock and hash verification for a returned path,
+  so the fallback could run an unpinned tool; the managed resolver provisions it
+  instead (#1264).
+
+- Malformed ast-grep rows (a missing or non-numeric line, a non-object entry) are
+  skipped during change-impact declaration extraction instead of aborting the
+  batch (#1265).
+
+- The comment-preserving config patch (`patch_config_dict`) writes through the
+  same temp-file and atomic `os.replace` path as the full rewrite, so a failure
+  mid-write can no longer leave a truncated `config.yaml` (#1266).
+
+- The temporary findings sink for `mergecraft review` no longer leaks a file
+  descriptor per run (#1267).
+
+- The egress bridge bounds its `/etc/hosts` bind mount at 10 seconds and removes
+  its staging directory once the mount call returns, so one directory no longer
+  leaks per run (#1268).
+
+- Handing the isolated opencode data tree to the agent user no longer follows
+  symlinks: a link planted in the tree cannot re-own or chmod a file outside it
+  (#1269).
+
+- Killed background shell processes are reaped after the kill, so they no longer
+  linger as zombies until the MCP server exits (#1270).
+
+- The JSONL trace file sink redacts and caps events before writing, as the memory
+  and redacting sinks already did, so a credential in a span attribute no longer
+  reaches disk (#1271).
+
+- Removed an unreachable inner `try`/`except` from broker stream redaction; the
+  latin-1 decode it guarded cannot fail (#1272).
+
+- Removed the 2026-11-05 audit probe scripts from `docs/dev/plans`. They sat
+  outside lint scope, had gone stale, and asserted the buggy behaviour the
+  audit found, so they failed once those findings were fixed. The audit memos
+  now point to their copies in git history (#1273).
+
+- Config: the run-start integrity hash now covers the files the layered loader reads (the `MERGECRAFT_CONFIG` file when set), uses a stable sentinel when no config exists so a file appearing mid-run is detected, and fails closed if a contributing file cannot be hashed ([#1244](https://github.com/alexhawat/mergeCraft/issues/1244))
+- MCP: `get_issue`, `get_issue_comments` and `get_issue_events` no longer rebind the run's issue number, so reading another issue cannot redirect progress comments or review scope ([#1245](https://github.com/alexhawat/mergeCraft/issues/1245))
+- Jev: an unknown question pack now raises `JevError(invalid_pack)` instead of sending the caller's state unfiltered and unfenced ([#1246](https://github.com/alexhawat/mergeCraft/issues/1246))
+- Sandbox: the `RLIMIT_NPROC` fallback when the privilege-drop probe cannot answer keeps the extra fork headroom the probed path adds ([#1247](https://github.com/alexhawat/mergeCraft/issues/1247))
+- Hardening: `git_argv` adds `--no-ext-diff`/`--no-textconv` for `log -u`, `-U<n>`, `-W`, `-L`, `-c` and bundled forms such as `-uz` ([#1248](https://github.com/alexhawat/mergeCraft/issues/1248))
+- `git_fetch` validates the whole refspec, not just its source. A refspec may
+  name one branch on `origin` and store it only in that branch's own
+  remote-tracking ref (`main:refs/remotes/origin/main`); destinations under
+  `refs/heads/`, `refs/tags/` or another branch's tracking ref, forced (`+`)
+  updates, empty sides and negative refspecs are refused, so the
+  repository-read tool can no longer move local branches, tags or the base a
+  review diffs against (#1236).
+
+- The macOS `sandbox-exec` profile for the MCP shell no longer grants
+  `(allow file-read*)` across the host. Reads are limited to the workspace and
+  an allowlist of system and toolchain paths (`/usr`, `/System`, `/Library`,
+  `/opt`, `/private/etc`, temp dirs, Xcode); the user's home directory is
+  denied, with the workspace re-allowed when it lives under `$HOME`. Metadata
+  reads stay global for path resolution. Common per-user toolchain directories
+  stay readable after the home deny (`~/.cargo`, `~/.rustup`, `~/.pyenv`,
+  `~/.nvm`, `~/go`, `~/.sdkman`, `~/.bun`, `~/.local/bin`, `~/.local/lib`,
+  `~/.local/pipx`, `~/.local/share/uv`), except Cargo's credentials file;
+  anything else under `$HOME` (`~/.ssh`, `~/.aws`, `~/.config`,
+  `~/.local/share`) stays unreadable (#1237).
+
+- Native GitHub Actions events now carry the triggering author's permission.
+  `pull_request`, `issue_comment` and `pull_request_review_comment` runs derive
+  it from `author_association` (`OWNER` / `MEMBER` / `COLLABORATOR` count as
+  collaborators). `workflow_dispatch`, `push` and `schedule` runs, which only
+  someone with write access can cause, count as collaborators too, as do local
+  runs outside GitHub Actions. A collaborator's `shell: enabled` is therefore no
+  longer always downgraded to `restricted`. `push` gains the same
+  non-collaborator floor as `shell`: `enabled` becomes `restricted` when a pull
+  request or comment author is not a collaborator, or when an event type
+  mergeCraft does not model runs inside Actions (#1238).
+
+- The `trust.agentSandbox` tier named in the Codex sandbox remedy and in the
+  run manifest's `agent_sandbox_granting_tier` is now the tightest tier that
+  would grant the override (`merged-only`, then `dispatch`, then `same-repo`),
+  or the configured tier when it already grants. It was always `same-repo`,
+  the loosest tier, for every non-fork head (#1239).
+
+- Finding outcomes: an outdated but unresolved review thread is now `stale`, not
+  `fixed`, so the advisory fixed rate is no longer inflated by lines that merely
+  moved; resolved threads still count as fixed (#1251).
+
+- The trace `attrs` cap now measures the whole payload as UTF-8 JSON bytes
+  (64 KiB) instead of the character length of top-level strings, so multibyte,
+  nested and many-small-value payloads are truncated too (#1252).
+
+- Line-budget scope reduction and the offline diff summary read `diff --git`
+  paths that contain spaces or quotes correctly instead of splitting on
+  whitespace (#1253).
+
+- A mid-battery skip in the Jev claim judge keeps the attestations collected for
+  earlier claims and marks the result `partial` (#1254).
+
+- Entropy redaction no longer turns absolute CI paths with ordinary segments
+  (`/home/runner/work/repo/src/app/module.py:12`) into `<redacted>.py`; a
+  segment that looks like a secret is still redacted (#1255). Word-shaped
+  camelCase directory names such as `mergeCraft` count as ordinary segments
+  again after the camelCase rule moved out of the identifier pattern (#1232).
+
+- `mergecraft review` restores its telemetry, tracing and trust-tier environment
+  overrides even when loading repository settings raises (#1256).
+
+- The git tools that advertised an unused `repo` argument no longer do: the
+  read-only `git` tool now honours it (registered checkouts only, unknown repo
+  is an error) and the fetch, push, tag, delete-branch and commit tools drop it
+  from their schemas and always act on the primary checkout (#1258).
+
+### Security
+
+- `establish_review_scope` only reads a `diff_path` that resolves, symlinks
+  followed, under a registered checkout, the run tmpdir or
+  `MERGECRAFT_TEMP_DIR` (#1257).
+
+- The Action `cwd` input is confined to `GITHUB_WORKSPACE`: `../..` or an
+  absolute path outside it is a configuration error (#1259).
+
+- The git askpass helper writes the token single-quoted via `printf '%s\n'` and
+  rejects tokens with control characters, so shell metacharacters in a token are
+  never interpreted (#1260).
+
+- Config: a config file that cannot be parsed now fails the run closed (`config parse error: <file> (<ErrorType>)`, no YAML values echoed) instead of warning and loading defaults ([#1249](https://github.com/alexhawat/mergeCraft/issues/1249))
+- Config: duplicate mapping keys at any depth are rejected, naming the key and line, instead of silently keeping the last value ([#1250](https://github.com/alexhawat/mergeCraft/issues/1250))
+
+## [0.1.0a5] — 2026-11-08
+
+### Breaking — action required
+
+- A review run whose agent submitted a terminal verdict now ends `inconclusive` (a
+  `neutral` `mergecraft` check) when any changed hunk never reached the reviewer —
+  a files-API diff over the page cap, a file GitHub sent no patch for, or a hunk
+  absent from the delivered diff — where it used to read `success`. A Critical or
+  Major finding still makes `mergecraft-approval` conclude `failure`, and one
+  pre-submit nudge names the unread ranges so the reviewer can read them and submit
+  again. **Fix:** set `review.coverage.onIncomplete: warn` to keep the verdict and
+  only report the gap (#940).
+
+**Migration (a4 to a5).** The `mergecraft` check used to read `success` for a
+review whose agent submitted a terminal verdict even when part of the diff was
+never read. It now reads `neutral` (`inconclusive`) in that case. To keep the
+previous verdict and only report the gap, add this to `.mergecraft/config.yaml`:
+
+```yaml
+review:
+  coverage:
+    onIncomplete: warn
+```
+
+Automation that reads the `mergecraft` check conclusion as `success` will see
+`neutral` until the unread ranges are reviewed or the setting above is applied.
+
+### Added
+
 - Incident-derived eval cases: ``mergecraft eval add-incident`` seeds the structural
   bank from an incident PR plus revert/fix-forward PR with a confirmed bug location
   and mandatory provenance (fail-closed without either) (#1163).
+
 - Advisory base-vs-head structural replay delta: ``mergecraft eval rescore-delta``,
   ``make eval-rescore-delta``, and a CI job on PRs that touch the reviewer surface
   (#1164). Not live detection scores; nothing added to the landing README (RD4).
+
 - Deterministic human outcome tracking for published mergeCraft findings
   (fixed/rejected/intentional/ignored) via ``mergecraft findings outcomes`` — advisory
   only, never moves the verdict (#1165).
+
 - Configurable review round cap ``review.maxReviewRounds`` (default 3): after the cap,
   mergeCraft injects one Major finding asking the author to reconsider the approach;
   the cap never auto-approves (#1166).
@@ -208,23 +312,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `failure` on a Critical or Major finding, and usage over the cap or a
   malformed answer is `inconclusive`. Off by default (#1010).
 
-- `review.fastPath.reapproval` carries a trusted mergeCraft pass over to a new
-  head whose only PR-authored change since the review is changelog prose — a
-  one-line `CHANGELOG.md` fix, or a merge of the base branch whose only conflict
-  resolution was the changelog — with zero LLM calls and no repeated full-diff
-  reads, agents, analyzers or static checks. The prior pass must be the newest
-  `mergecraft-approval` success on the reviewed head from an App in
-  `reapproval.trustedCheckApps` (never `github-actions`), for the same pull
-  request, target branch and review policy (a digest of `.mergecraft`, the
-  workflow file and the mergeCraft version, stamped on every approval check while
-  the option is on). Every path changed since the review must be a qualifying
-  prose edit or inherited from the base untouched by the pull request, every
-  other PR-authored change must equal the reviewed one, and file modes must match;
-  anything else, or any read failure, is the normal review. Both checks name the
-  prior review, the compared SHAs, the qualifying path, what ran, what was reused
-  and what was skipped; other required checks are not reused. The packet records
-  it in `triage.reapproval` (schema `1.20.0`). Off by default (#1284).
-
 - A `commentOnly` fast-path recognizer matches diffs that only edit `//` line
   comments in `.ts .go .java .kt .c .h .cc .cpp .hpp .cs .swift` files. JavaScript
   (`.js`, which can hold JSX), `.jsx` / `.tsx`, Rust, `Package.swift`, Go
@@ -237,6 +324,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carry tool directives (lint, coverage, fallthrough, generator pragmas) are
   refused on a best-effort word list. Opt in through `skipLlm` like the other recognizers
   (#1010).
+
 - A fix pull request now has to prove the fix with a fail-then-pass receipt
   before it can reach the `eligible` lane (#1056). Declare the receipt in
   `ciEvidence.redGreen` (`artifact`, and the `workflow` that uploads it; read
@@ -335,6 +423,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pin bump needs its `pinBump.requireChecks` to have passed on the head SHA from a
   GitHub App named in `pinBump.trustedCheckApps`, because a check-run name alone is
   set by whoever created it (#890).
+
 - The evidence packet carries a `coverage` section (schema `1.17.0`): how many
   changed hunks and lines reached the reviewer, each uncovered range with its cause
   (`diff_truncated`, `no_inline_patch`, `excluded_generated`, `not_delivered`,
@@ -342,9 +431,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mergecraft-approval` checks and the run record state it, for example
   `Coverage: 41/44 hunks, 3 uncovered → inconclusive` (#940). The packet also
   carries a `triage` section (schema `1.17.0`).
+
 - `get_review_comments` and the findings sweep report `incomplete` when a pull
   request has more review threads or comments than the page cap, instead of
   silently dropping the rest (#902).
+
 - Review now enforces `.mergecraft/policy/rules.yaml`: a blocking rule on the
   base ref becomes a policy finding that turns an `approve` into
   `request_changes` and fails `mergecraft-approval`, and the same row appears in
@@ -364,7 +455,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ignored files and untracked mergeCraft runtime artifacts remain excluded.
 
 - Consolidate container files under `docker/`, documentation and assets under `docs/`, community guidelines under `.github/`, and build/analyzer tooling under `scripts/`; preserve published Action and plugin paths (#1151).
-
 - A pull request without a declared scope can no longer reach the `eligible`
   lane (#1056). End the pull request body, or an issue it closes, with a
   `Scope paths:` block listing the globs the change is expected to touch; the
@@ -401,6 +491,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   package `__init__.py` stays `medium`. A generated sibling no longer hides an
   untested source change. The merge evidence packet schema moves to
   `1.18.0`; older packets without the fields still validate and decide as before.
+
 - Change-scoped findings in the deterministic review record now read
   `` `path:line` — message `` (they named only the path), so each finding in the
   record points at the line it is about (#1010).
@@ -419,13 +510,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `1.2.0` (optional `diff_read_path`, `diff_read`, `duration_ms` on a tool-call
   row, all omitted while unset; `"refused"` joins the `failure_class`
   vocabulary).
+
 - The IncrementalReview prompt no longer tells the agent to reply to and resolve
   threads, which a review session refuses; it says the run retires addressed
   threads itself, and defines a mergeCraft-originated thread by the
   expected-publisher rule rather than `author=mergecraft[bot]` (#904).
+
 - The learnings-migration read of the old progress comment follows the
   run-bound-id-then-expected-publisher rule. With neither, the read is skipped and
   the run record says `Earlier progress comment not read` (#914).
+
 - The carry-over sweep (`mergecraft findings carryover`) now treats a thread as
   mergeCraft's only when its root comment carries a mergeCraft marker **and** its
   author is an expected publisher (the configured reviewer App, or the app behind
@@ -433,9 +527,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counts. A repository that publishes as `github-actions[bot]` and configures no
   reviewer App sweeps nothing and the sweep says why. **Fix:** configure the
   reviewer App (`MERGECRAFT_REVIEWER_BOT_LOGIN` / `reviewerBotLogin`) (#905).
+
 - `mergecraft policy --help` and `mergecraft policy effective` now say that review
   enforces the repository's rules file; `policy effective` also says when it is
   showing the shipped example packs because the repository has no rules file.
+
 - Environment settings for run budgets, timeouts, Action inputs and the
   operational knobs are read through one validated model: a malformed numeric
   value names the variable instead of failing with a bare parse error, an empty
@@ -444,140 +540,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- GitHub permalinks stay readable in analyzer output, PR comments and traces.
-  `blob`/`tree`/`commit` links with a 40- or 64-hex SHA, `actions/runs/<id>(/job/<id>)`
-  and `pull`/`issues/<n>` links are exempt from the entropy pass, but only when
-  the owner, repo and every path segment would survive redaction on their own;
-  query strings and fragments are still redacted, and a token pasted into the path
-  still blanks the link (#1281).
-- The release publish step accepts Craft's unbracketed `## <version>` changelog
-  heading as well as `## [<version>] — <date>`, so the GitHub release is no longer
-  left half-done after PyPI publishes (#1226).
-- Two URL-credential redaction canaries no longer trip TruffleHog's `URI` detector
-  on a full-tree scan: the test assembles its synthetic userinfo at runtime and the
-  changelog prose uses a `<password>` placeholder (#1217).
-
-- MCP `shell` and the repository tools (`git`, `git_fetch`, `push_branch`, `push_tags`,
-  `delete_branch`, `commit_changes`) no longer run blocking subprocess calls on the
-  event loop (they run via `asyncio.to_thread`), so a slow command stops stalling every
-  other tool call. A shell command that times out and then also fails the post-kill
-  drain is now reaped and returns the output gathered so far instead of raising (#1243).
-- An analyzer timeout now kills the analyzer's whole process group. The runner
-  starts analyzers as session leaders and `killpg`s them on timeout, so grandchildren
-  no longer outlive the gate (#1242).
-- ruff diagnostics are no longer all blocking Major: ruff emits `severity: error`
-  for every rule, so the parser now keeps Major only for bug-class rule codes
-  (syntax errors, undefined names, bugbear, security, pylint errors, async) and
-  maps style/import/unused-name rules to Minor (#1241).
-- Sandbox harness startup failures (`unshare`/`bwrap`/`setpriv` refusing to create
-  a namespace, fork `EAGAIN`, `uid_map` write denied) are now classified as
-  `sandboxed: isolation unavailable` and reported `declared-but-cannot-run`
-  instead of a blocking gate failure (#1240).
-- Free-text secret redaction no longer leaks random credentials. The camelCase
-  identifier exemption now requires word-shaped keys (``ruleId``,
-  ``partialFingerprints``) instead of any lowercase-led blob with a capital, the
-  entropy threshold is capped at 4.5 bits per character so long tokens cannot
-  outgrow it, and fine-grained GitHub PATs (``github_pat_``), PyPI tokens and
-  ``Bearer`` credentials are redacted by pattern (the ``Bearer`` word is kept)
-  (#1232).
-- `envAllowlist` can no longer pass credentials to subprocesses. A
-  credential-shaped name (`*_TOKEN`, `*_KEY`, `*-TOKEN`, …) or one of
-  `GITHUB_TOKEN`, `GH_TOKEN`, `GIT_ASKPASS` and the Actions OIDC request
-  variables is now ignored with a warning instead of reaching the restricted
-  MCP shell, trusted analyzers and analyzer fallback environments; the action's
-  `INPUT_TOKEN` and hyphenated inputs such as `INPUT_LOGFIRE-TOKEN` count as
-  credentials. Non-secret names are still added (#1233).
-- One undecodable TruffleHog output line (a truncated write or a stray banner)
-  no longer discards the whole secret scan: the line is skipped and the
-  findings on every other line are kept. Output with no decodable line is still
-  reported as unparsable rather than as a clean scan (#1234).
-- Trace error text no longer carries URL credentials. A failed HTTP request's
-  exception message quotes the raw URL, so `https://user:<password>@host` reached
-  the span's `error` attribute even though `http.url` was redacted; the
-  `error`, `exception.message` and `tool.error_message` attributes now get the
-  same URL credential redaction before any sink sees them (#1235).
-- Managed pip analyzer provisioning bounds `uv pip install` at 600 seconds. It
-  runs while holding the shared cache lock, so a hung install used to block every
-  other worker; a timeout now removes the staging tree and fails the install
-  cleanly (#1261).
-- Baseline suppression bounds the base-worktree `git worktree add` and `remove`
-  calls. A timed-out or failed checkout now removes its temp tree and disables
-  suppression for that run instead of raising (#1262).
-- Contract base-ref probes (`git rev-parse` and `git show`) are bounded. A timeout
-  reads as "base unavailable" and skips the contract check rather than hanging the
-  review (#1263).
-- A baked analyzer binary that is missing no longer falls back to a same-named
-  binary on `PATH`. Callers skip lock and hash verification for a returned path,
-  so the fallback could run an unpinned tool; the managed resolver provisions it
-  instead (#1264).
-- Malformed ast-grep rows (a missing or non-numeric line, a non-object entry) are
-  skipped during change-impact declaration extraction instead of aborting the
-  batch (#1265).
-- The comment-preserving config patch (`patch_config_dict`) writes through the
-  same temp-file and atomic `os.replace` path as the full rewrite, so a failure
-  mid-write can no longer leave a truncated `config.yaml` (#1266).
-- The temporary findings sink for `mergecraft review` no longer leaks a file
-  descriptor per run (#1267).
-- The egress bridge bounds its `/etc/hosts` bind mount at 10 seconds and removes
-  its staging directory once the mount call returns, so one directory no longer
-  leaks per run (#1268).
-- Handing the isolated opencode data tree to the agent user no longer follows
-  symlinks: a link planted in the tree cannot re-own or chmod a file outside it
-  (#1269).
-- Killed background shell processes are reaped after the kill, so they no longer
-  linger as zombies until the MCP server exits (#1270).
-- The JSONL trace file sink redacts and caps events before writing, as the memory
-  and redacting sinks already did, so a credential in a span attribute no longer
-  reaches disk (#1271).
-- Removed an unreachable inner `try`/`except` from broker stream redaction; the
-  latin-1 decode it guarded cannot fail (#1272).
-- Removed the 2026-11-05 audit probe scripts from `docs/dev/plans`. They sat
-  outside lint scope, had gone stale, and asserted the buggy behaviour the
-  audit found, so they failed once those findings were fixed. The audit memos
-  now point to their copies in git history (#1273).
-- Config: the run-start integrity hash now covers the files the layered loader reads (the `MERGECRAFT_CONFIG` file when set), uses a stable sentinel when no config exists so a file appearing mid-run is detected, and fails closed if a contributing file cannot be hashed ([#1244](https://github.com/alexhawat/mergeCraft/issues/1244))
-- MCP: `get_issue`, `get_issue_comments` and `get_issue_events` no longer rebind the run's issue number, so reading another issue cannot redirect progress comments or review scope ([#1245](https://github.com/alexhawat/mergeCraft/issues/1245))
-- Jev: an unknown question pack now raises `JevError(invalid_pack)` instead of sending the caller's state unfiltered and unfenced ([#1246](https://github.com/alexhawat/mergeCraft/issues/1246))
-- Sandbox: the `RLIMIT_NPROC` fallback when the privilege-drop probe cannot answer keeps the extra fork headroom the probed path adds ([#1247](https://github.com/alexhawat/mergeCraft/issues/1247))
-- Hardening: `git_argv` adds `--no-ext-diff`/`--no-textconv` for `log -u`, `-U<n>`, `-W`, `-L`, `-c` and bundled forms such as `-uz` ([#1248](https://github.com/alexhawat/mergeCraft/issues/1248))
-
-- `git_fetch` validates the whole refspec, not just its source. A refspec may
-  name one branch on `origin` and store it only in that branch's own
-  remote-tracking ref (`main:refs/remotes/origin/main`); destinations under
-  `refs/heads/`, `refs/tags/` or another branch's tracking ref, forced (`+`)
-  updates, empty sides and negative refspecs are refused, so the
-  repository-read tool can no longer move local branches, tags or the base a
-  review diffs against (#1236).
-- The macOS `sandbox-exec` profile for the MCP shell no longer grants
-  `(allow file-read*)` across the host. Reads are limited to the workspace and
-  an allowlist of system and toolchain paths (`/usr`, `/System`, `/Library`,
-  `/opt`, `/private/etc`, temp dirs, Xcode); the user's home directory is
-  denied, with the workspace re-allowed when it lives under `$HOME`. Metadata
-  reads stay global for path resolution. Common per-user toolchain directories
-  stay readable after the home deny (`~/.cargo`, `~/.rustup`, `~/.pyenv`,
-  `~/.nvm`, `~/go`, `~/.sdkman`, `~/.bun`, `~/.local/bin`, `~/.local/lib`,
-  `~/.local/pipx`, `~/.local/share/uv`), except Cargo's credentials file;
-  anything else under `$HOME` (`~/.ssh`, `~/.aws`, `~/.config`,
-  `~/.local/share`) stays unreadable (#1237).
-- Native GitHub Actions events now carry the triggering author's permission.
-  `pull_request`, `issue_comment` and `pull_request_review_comment` runs derive
-  it from `author_association` (`OWNER` / `MEMBER` / `COLLABORATOR` count as
-  collaborators). `workflow_dispatch`, `push` and `schedule` runs, which only
-  someone with write access can cause, count as collaborators too, as do local
-  runs outside GitHub Actions. A collaborator's `shell: enabled` is therefore no
-  longer always downgraded to `restricted`. `push` gains the same
-  non-collaborator floor as `shell`: `enabled` becomes `restricted` when a pull
-  request or comment author is not a collaborator, or when an event type
-  mergeCraft does not model runs inside Actions (#1238).
-- The `trust.agentSandbox` tier named in the Codex sandbox remedy and in the
-  run manifest's `agent_sandbox_granting_tier` is now the tightest tier that
-  would grant the override (`merged-only`, then `dispatch`, then `same-repo`),
-  or the configured tier when it already grants. It was always `same-repo`,
-  the loosest tier, for every non-fork head (#1239).
 - actionlint now lints workflow files only. Action manifests (root `action.yml`
   and `.github/actions/**/action.yml`, composite or not) were linted against the
   workflow schema, producing false Major `syntax-check` blockers; zizmor still
   covers them (#1210).
+
 - A terminal review verdict refused by validation (for example
   `approve_with_confirmed_blocker`) no longer reads as a completed review. The
   refused call is recorded on the trajectory as `ok: false`,
@@ -585,13 +552,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deterministic record naming the rejection and the remaining blockers even
   when no mode was selected, and it classifies `inconclusive` instead of
   `passed` when the provider exits 0 (#1211).
+
 - Audit remediation hardens revision-bound approvals, checkout recovery, fork
   trust, CLI workspace and cache identity, finding attribution and severity.
   Checkout retries also discard fail-then-pass evidence from the old revision;
   malformed diffs cannot establish artifact provenance. Includes regression
   coverage, real Action-image acceptance, pinned consumer installation docs and
   release-pin maintenance (#1197, #1198, #1199, #1200, #1201).
-
 
 - A review whose verdict was accepted no longer ends `failed` with
   `provider_failure` and `action failed: opencode failed` when the agent CLI then
@@ -760,64 +727,167 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has not stamped it yet (its stamp lands after the record renders), and
   sub-second phases render with one decimal (`0.1s`) — or `<0.1s` — instead of
   rounding to `0s`.
+
 - A re-review after a change request now resumes from its checkpoint: the run-bound
   identity accepts completed `success` and `failure` runs that carry an evidence
   artefact, so the next review no longer starts from round 0 and reads the whole
   pull request again. Cancelled, skipped, unfinished and artefact-less runs are
   still ignored (#926).
+
 - A post-run finalize failure is logged at `warning` with the exception type and
   the run record names it (`finalize_failed: <Type>`) instead of reading as a
   missing verdict; the run still fails closed (#903).
+
 - A review thread whose comments were not all read is never auto-resolved (#902).
-- Finding outcomes: an outdated but unresolved review thread is now `stale`, not
-  `fixed`, so the advisory fixed rate is no longer inflated by lines that merely
-  moved; resolved threads still count as fixed (#1251).
-- The trace `attrs` cap now measures the whole payload as UTF-8 JSON bytes
-  (64 KiB) instead of the character length of top-level strings, so multibyte,
-  nested and many-small-value payloads are truncated too (#1252).
-- Line-budget scope reduction and the offline diff summary read `diff --git`
-  paths that contain spaces or quotes correctly instead of splitting on
-  whitespace (#1253).
-- A mid-battery skip in the Jev claim judge keeps the attestations collected for
-  earlier claims and marks the result `partial` (#1254).
-- Entropy redaction no longer turns absolute CI paths with ordinary segments
-  (`/home/runner/work/repo/src/app/module.py:12`) into `<redacted>.py`; a
-  segment that looks like a secret is still redacted (#1255). Word-shaped
-  camelCase directory names such as `mergeCraft` count as ordinary segments
-  again after the camelCase rule moved out of the identifier pattern (#1232).
-- `mergecraft review` restores its telemetry, tracing and trust-tier environment
-  overrides even when loading repository settings raises (#1256).
-- The git tools that advertised an unused `repo` argument no longer do: the
-  read-only `git` tool now honours it (registered checkouts only, unknown repo
-  is an error) and the fetch, push, tag, delete-branch and commit tools drop it
-  from their schemas and always act on the primary checkout (#1258).
 
-### Security
+### Merged pull requests
 
-- `establish_review_scope` only reads a `diff_path` that resolves, symlinks
-  followed, under a registered checkout, the run tmpdir or
-  `MERGECRAFT_TEMP_DIR` (#1257).
-- The Action `cwd` input is confined to `GITHUB_WORKSPACE`: `../..` or an
-  absolute path outside it is a configuration error (#1259).
-- The git askpass helper writes the token single-quoted via `printf '%s\n'` and
-  rejects tokens with control characters, so shell metacharacters in a token are
-  never interpreted (#1260).
 
-### Breaking
+#### Added
 
-- A review run whose agent submitted a terminal verdict now ends `inconclusive` (a
-  `neutral` `mergecraft` check) when any changed hunk never reached the reviewer —
-  a files-API diff over the page cap, a file GitHub sent no patch for, or a hunk
-  absent from the delivered diff — where it used to read `success`. A Critical or
-  Major finding still makes `mergecraft-approval` conclude `failure`, and one
-  pre-submit nudge names the unread ranges so the reviewer can read them and submit
-  again. **Fix:** set `review.coverage.onIncomplete: warn` to keep the verdict and
-  only report the gap (#940).
+##### Ci
 
-### Security
+- Automate the manifest-to-pin cycle with an App token by @alexhawat in [#1218](https://github.com/alexhawat/mergeCraft/pull/1218)
+- Fail-then-pass receipts gate fix pull requests by @alexhawat and @claude in [#1170](https://github.com/alexhawat/mergeCraft/pull/1170)
 
-- Config: a config file that cannot be parsed now fails the run closed (`config parse error: <file> (<ErrorType>)`, no YAML values echoed) instead of warning and loading defaults ([#1249](https://github.com/alexhawat/mergeCraft/issues/1249))
-- Config: duplicate mapping keys at any depth are rejected, naming the key and line, instead of silently keeping the last value ([#1250](https://github.com/alexhawat/mergeCraft/issues/1250))
+##### Classify
+
+- Declared scope paths drive the scope gate by @alexhawat and @claude in [#1160](https://github.com/alexhawat/mergeCraft/pull/1160)
+- Coded lane reasons and a true/false/unknown checklist by @alexhawat and @claude in [#1149](https://github.com/alexhawat/mergeCraft/pull/1149)
+
+##### Policy
+
+- In-run producers for required-rule evidence keys by @alexhawat and @claude in [#1158](https://github.com/alexhawat/mergeCraft/pull/1158)
+- Enforce the repository rules file in review by @alexhawat in [#1116](https://github.com/alexhawat/mergeCraft/pull/1116)
+
+##### Review
+
+- Wire bounded file-group fan-out into roster dispatch by @alexhawat and @claude in [#1157](https://github.com/alexhawat/mergeCraft/pull/1157)
+- Ignore_paths and eval-methodology budget by @alexhawat and @claude in [#1123](https://github.com/alexhawat/mergeCraft/pull/1123)
+
+##### Other
+
+- Embed mergeCraft review via OpenAI Agents SDK by @alexhawat in [#1161](https://github.com/alexhawat/mergeCraft/pull/1161)
+- Publish from the workflow with PyPI OIDC by @alexhawat in [#1220](https://github.com/alexhawat/mergeCraft/pull/1220)
+- Lite review tier and a comment-only recognizer by @alexhawat and @claude in [#1156](https://github.com/alexhawat/mergeCraft/pull/1156)
+- Incident evals, rescore delta, finding outcomes, review round cap (#1163–#1166) by @alexhawat in [#1167](https://github.com/alexhawat/mergeCraft/pull/1167)
+
+#### Fixed
+
+##### Agents
+
+- Stop the stall report blaming the kill's own socket error by @alexhawat and @claude in [#1147](https://github.com/alexhawat/mergeCraft/pull/1147)
+- Cascade failover and gate unknowns by @alexhawat and @claude in [#1125](https://github.com/alexhawat/mergeCraft/pull/1125)
+
+##### Ci
+
+- Place a lone earlier-rung packet downloaded flat by @alexhawat and @claude in [#1135](https://github.com/alexhawat/mergeCraft/pull/1135)
+- Docs-only pytest uses bootstrap venv by @alexhawat in [#1108](https://github.com/alexhawat/mergeCraft/pull/1108)
+- Run docs-only pytest in bootstrap venv by @alexhawat in [#1139](https://github.com/alexhawat/mergeCraft/pull/1139)
+- Give the live smoke a token budget that fits one turn by @alexhawat and @claude in [#1101](https://github.com/alexhawat/mergeCraft/pull/1101)
+
+##### Mcp
+
+- Record refused tool calls and honest run timing by @alexhawat and @Copilot in [#1085](https://github.com/alexhawat/mergeCraft/pull/1085)
+- Allowlist merge-base and treat grep no-match as success by @alexhawat in [#1091](https://github.com/alexhawat/mergeCraft/pull/1091)
+
+##### Opencode
+
+- Estimate missing Go costs from published token rates by @alexhawat in [#1111](https://github.com/alexhawat/mergeCraft/pull/1111)
+- Record token usage from the 2.x stream by @alexhawat in [#1099](https://github.com/alexhawat/mergeCraft/pull/1099)
+
+##### Review
+
+- Strip internal metadata at the GitHub HTTP boundary by @alexhawat in [#1150](https://github.com/alexhawat/mergeCraft/pull/1150)
+- Make the run record describe the run by @alexhawat and @claude in [#1013](https://github.com/alexhawat/mergeCraft/pull/1013)
+- Send only GitHub-accepted fields in inline comments by @alexhawat and @claude in [#1104](https://github.com/alexhawat/mergeCraft/pull/1104)
+- Publish neutral non-terminal rungs to sticky only by @alexhawat in [#1094](https://github.com/alexhawat/mergeCraft/pull/1094)
+
+##### Other
+
+- Serialize managed pip provisioning by @alexhawat in [#1100](https://github.com/alexhawat/mergeCraft/pull/1100)
+- Stop run-bound checkpoint 404 and httpx hint leak by @alexhawat and @Copilot in [#1092](https://github.com/alexhawat/mergeCraft/pull/1092)
+- Record platform sandbox capability loss honestly by @alexhawat in [#1093](https://github.com/alexhawat/mergeCraft/pull/1093)
+- Pin apt 2.6.2 for CVE-2026-109518 in both images by @alexhawat and @claude in [#1159](https://github.com/alexhawat/mergeCraft/pull/1159)
+- Run-health and trajectory correctness by @alexhawat and @claude in [#1124](https://github.com/alexhawat/mergeCraft/pull/1124)
+- Name a rename's source in the triage diff by @alexhawat and @claude in [#1146](https://github.com/alexhawat/mergeCraft/pull/1146)
+- Attest clean reviews via terminal verdict + read coverage by @alexhawat and @Copilot in [#1086](https://github.com/alexhawat/mergeCraft/pull/1086)
+- Let an accepted verdict outrank the driver's exit status by @alexhawat and @claude in [#1148](https://github.com/alexhawat/mergeCraft/pull/1148)
+- Fail closed when the review diff cannot show a workflow untouched by @alexhawat and @claude in [#1168](https://github.com/alexhawat/mergeCraft/pull/1168)
+- Upload only the wheel and sdist by @alexhawat in [#1223](https://github.com/alexhawat/mergeCraft/pull/1223)
+- Actionlint action-manifest false blockers and honest refused-verdict records by @sevn-one in [#1212](https://github.com/alexhawat/mergeCraft/pull/1212)
+- Make CLI source, workspace and output behavior consistent by @alexhawat in [#1198](https://github.com/alexhawat/mergeCraft/pull/1198)
+- Bind Action reviews to trusted repository and revision identities by @alexhawat in [#1197](https://github.com/alexhawat/mergeCraft/pull/1197)
+- Preserve finding identity and prove safe triage skips by @alexhawat in [#1199](https://github.com/alexhawat/mergeCraft/pull/1199)
+
+#### Changed
+
+- Read every setting through one typed model by @alexhawat in [#1127](https://github.com/alexhawat/mergeCraft/pull/1127)
+- Consolidate root files into existing directories by @alexhawat in [#1202](https://github.com/alexhawat/mergeCraft/pull/1202)
+
+#### Docs
+
+- Lead provider examples with OpenCode by @alexhawat in [#1219](https://github.com/alexhawat/mergeCraft/pull/1219)
+- Document the published mergecraft-action 0.1.0a4 by @alexhawat in [#1096](https://github.com/alexhawat/mergeCraft/pull/1096)
+- Publish audit remediation and accurate consumer support contracts by @alexhawat in [#1201](https://github.com/alexhawat/mergeCraft/pull/1201)
+
+#### Internal
+
+##### Action
+
+- Pin self-review to verified manifest ee042005 by @alexhawat in [#1214](https://github.com/alexhawat/mergeCraft/pull/1214)
+- Prepare verified image manifest 965c7346 by @alexhawat in [#1213](https://github.com/alexhawat/mergeCraft/pull/1213)
+- Pin self-review to verified manifest c6a97521 by @alexhawat in [#1155](https://github.com/alexhawat/mergeCraft/pull/1155)
+- Prepare verified image manifest bf82fb33 by @alexhawat in [#1153](https://github.com/alexhawat/mergeCraft/pull/1153)
+- Pin self-review to verified manifest f312aa81 by @alexhawat in [#1144](https://github.com/alexhawat/mergeCraft/pull/1144)
+- Prepare verified image manifest 37b3b068 by @alexhawat in [#1143](https://github.com/alexhawat/mergeCraft/pull/1143)
+- Pin self-review to verified manifest 9e4318a8 by @alexhawat in [#1122](https://github.com/alexhawat/mergeCraft/pull/1122)
+- Prepare verified image manifest d103e90c by @alexhawat in [#1121](https://github.com/alexhawat/mergeCraft/pull/1121)
+- Pin self-review to verified manifest 3971cbee by @alexhawat in [#1115](https://github.com/alexhawat/mergeCraft/pull/1115)
+- Prepare verified image manifest 4417257a by @alexhawat in [#1113](https://github.com/alexhawat/mergeCraft/pull/1113)
+- Pin self-review to verified manifest 60176a83 by @alexhawat in [#1107](https://github.com/alexhawat/mergeCraft/pull/1107)
+- Prepare verified image manifest 5aaef7c3 by @alexhawat in [#1106](https://github.com/alexhawat/mergeCraft/pull/1106)
+- Prepare verified image manifest b98d66b1 by @alexhawat and @claude in [#1102](https://github.com/alexhawat/mergeCraft/pull/1102)
+- Pin self-review to the released image 7e2707ab by @alexhawat in [#1089](https://github.com/alexhawat/mergeCraft/pull/1089)
+- Prepare verified image manifest 7080e962 by @alexhawat in [#1088](https://github.com/alexhawat/mergeCraft/pull/1088)
+
+##### Deps
+
+- Bump getsentry/craft from 2.35.1 to 3.9.0 by @dependabot in [#1206](https://github.com/alexhawat/mergeCraft/pull/1206)
+- Bump getsentry/craft/.github/workflows/changelog-preview.yml from 2.35.1 to 3.9.0 by @dependabot in [#1205](https://github.com/alexhawat/mergeCraft/pull/1205)
+- Bump @anthropic-ai/claude-code from 2.1.316 to 2.1.317 in /docker/agent-clis in the agent-clis-patch-minor group by @dependabot in [#1204](https://github.com/alexhawat/mergeCraft/pull/1204)
+- Bump docker/login-action from 4.6.0 to 4.7.0 in the github-actions-patch-minor group across 1 directory by @dependabot in [#1064](https://github.com/alexhawat/mergeCraft/pull/1064)
+- Bump the agent-clis-patch-minor group across 1 directory with 4 updates by @dependabot in [#1062](https://github.com/alexhawat/mergeCraft/pull/1062)
+- Bump golang from `972b411` to `d9b6a1b` by @dependabot in [#1134](https://github.com/alexhawat/mergeCraft/pull/1134)
+- Bump litellm from 1.95.1 to 1.100.4 by @dependabot in [#1080](https://github.com/alexhawat/mergeCraft/pull/1080)
+
+##### Integrations
+
+- D47 drop swallowed kwargs from CursorCloudClient by @alexhawat and @claude in [#1154](https://github.com/alexhawat/mergeCraft/pull/1154)
+- D48 drop unused CursorCloudClient package re-export by @alexhawat in [#1203](https://github.com/alexhawat/mergeCraft/pull/1203)
+
+##### Other
+
+- D39 drop test-only review_includes_path by @alexhawat in [#1053](https://github.com/alexhawat/mergeCraft/pull/1053)
+- D38 drop unused diff_coverage helpers by @alexhawat in [#1044](https://github.com/alexhawat/mergeCraft/pull/1044)
+- D43 drop test-only \_analyze_log re-export by @alexhawat in [#1095](https://github.com/alexhawat/mergeCraft/pull/1095)
+- D42 drop private names from python.py \__all__ by @alexhawat in [#1079](https://github.com/alexhawat/mergeCraft/pull/1079)
+- D32 drop unused RequirementSource by @alexhawat in [#968](https://github.com/alexhawat/mergeCraft/pull/968)
+- Raise the self-review token budget to 8M by @alexhawat and @claude in [#1130](https://github.com/alexhawat/mergeCraft/pull/1130)
+- D45 drop test-only worktree index_contracts by @alexhawat in [#1118](https://github.com/alexhawat/mergeCraft/pull/1118)
+- D44 drop dead range_n and unused OpOptions.max_items by @alexhawat in [#1117](https://github.com/alexhawat/mergeCraft/pull/1117)
+- Strengthen mutation, packaging and Action acceptance gates by @alexhawat in [#1200](https://github.com/alexhawat/mergeCraft/pull/1200)
+- Write the refreshed Codex login back to CODEX_AUTH_JSON by @alexhawat and @claude in [#1128](https://github.com/alexhawat/mergeCraft/pull/1128)
+- D46 drop unused short_commit re-export by @alexhawat in [#1136](https://github.com/alexhawat/mergeCraft/pull/1136)
+- Workflows, scheduled advisories, flaky lanes by @alexhawat and @claude in [#1126](https://github.com/alexhawat/mergeCraft/pull/1126)
+- Parallelize coverage and release gates and cache mypy by @alexhawat in [#1110](https://github.com/alexhawat/mergeCraft/pull/1110)
+- Faster PR gates via coverage reuse, sharding, and path skips by @alexhawat in [#1105](https://github.com/alexhawat/mergeCraft/pull/1105)
+
+#### Other
+
+- Integrate audit remediation for Action, CLI, findings, testing, and docs by @alexhawat in [#1209](https://github.com/alexhawat/mergeCraft/pull/1209)
+- deps: bump litellm to 1.106.4, keep filelock 4.x by @alexhawat and @claude in [#1141](https://github.com/alexhawat/mergeCraft/pull/1141)
+- coverage: count OpenCode native reads as read evidence by @alexhawat and @claude in [#1145](https://github.com/alexhawat/mergeCraft/pull/1145)
 
 ## [0.1.0a4] — 2026-10-29
 

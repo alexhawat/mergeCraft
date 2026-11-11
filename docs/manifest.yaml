@@ -49,6 +49,12 @@ pages:
     generator: null
     purpose: Runnable mergecraft review CLI example trees under examples/cli/.
 
+  - path: docs/verify-behavior.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: "mergecraft verify-behavior and review --verification-report: flags, trust rule, artifact layout."
+
   - path: docs/action-reference.md
     audience: consumer
     template: generated-ref

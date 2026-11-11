@@ -9,7 +9,8 @@ regenerated from the manifest so RD2-RD4 can append rows without hand-editing
 the index table.
 
 Exports:
-    main — regenerate (default) or ``--check`` the docs index.
+    main — regenerate (default) or ``--check`` the docs index; fails on an orphan page.
+    find_orphans — top-level ``docs/*.md`` pages the manifest does not list.
 """
 
 from __future__ import annotations
@@ -53,6 +54,17 @@ def _manifest_pages(manifest: dict[str, Any]) -> list[dict[str, Any]]:
             raise TypeError(msg)
         rows.append(row)
     return rows
+
+
+def find_orphans(pages: list[dict[str, Any]]) -> list[str]:
+    """Return top-level ``docs/*.md`` pages (not ``_``-prefixed partials) missing from the manifest."""
+    listed = {str(row["path"]) for row in pages}
+    found = sorted(
+        f"docs/{path.name}"
+        for path in (REPO_ROOT / "docs").glob("*.md")
+        if not path.name.startswith("_")
+    )
+    return [path for path in found if path not in listed]
 
 
 def _page_label(path: str) -> str:
@@ -116,6 +128,14 @@ def main(argv: list[str] | None = None) -> int:
 
     manifest = _load_manifest()
     pages = _manifest_pages(manifest)
+    orphans = find_orphans(pages)
+    if orphans:
+        print(
+            "docs pages missing from docs/manifest.yaml (add a row, or prefix a partial "
+            f"with `_`): {', '.join(orphans)}",
+            file=sys.stderr,
+        )
+        return 1
     generated = _render_index(pages)
     current = INDEX_PATH.read_text(encoding="utf-8") if INDEX_PATH.is_file() else ""
 
