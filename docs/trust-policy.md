@@ -3,7 +3,8 @@
 mergeCraft separates **what may run** against a checkout from **what the
 agent's own output may unlock**. The operator knob `trust.selfReview` adjusts
 the first axis for same-repo `pull_request_target` runs only. It does **not**
-replace the maintainer-dispatched approval lane in `mergecraft-approve.yml`.
+make the agent's own output a formal approval; see
+[Approval and the merge gate](#approval-and-the-merge-gate).
 
 **Audience:** consumer (operators wiring self-review on their own repository)
 
@@ -36,9 +37,9 @@ Valid levels: `off`, `analyzers`, `full` (default when absent: `off`).
 
 | Level | Execution trust (same-repo `pull_request_target`) | Authority trust | Real GitHub APPROVE |
 |-------|--------------------------------------------------|-----------------|---------------------|
-| `off` | Untrusted (today's default) | Untrusted | Maintainer dispatch of `mergecraft-approve.yml` after checking the run/head |
-| `analyzers` | Trusted — trusted-tier analyzers may run | Untrusted — agent cannot APPROVE | Only via `mergecraft-approve.yml` |
-| `full` | Trusted | Trusted — agent may unlock approval semantics on this run | Agent path **or** `mergecraft-approve.yml` |
+| `off` | Untrusted (today's default) | Untrusted | None from the agent (COMMENT review plus the `mergecraft review` check) |
+| `analyzers` | Trusted — trusted-tier analyzers may run | Untrusted — agent cannot APPROVE | None from the agent (COMMENT plus the check) |
+| `full` | Trusted | Trusted — agent may unlock approval semantics on this run | Agent path, only when `prApproveEnabled` is true |
 
 **Fork PRs are unaffected at every level** — both axes stay untrusted regardless
 of `selfReview`.
@@ -156,20 +157,13 @@ repository. It requires:
 
 It must not appear as the happy-path recommendation in consumer docs.
 
-## Why `mergecraft-approve.yml` exists
+## Approval and the merge gate
 
-The repository's privileged approval credential belongs to a distinct App and
-never enters the review action. Normal COMMENT-only publication is behavior,
-not a token permission boundary; a compromised reviewer can forge its own checks.
-
-- Trigger: a maintainer explicitly dispatches the workflow on the default branch
-  with the accepted review run ID and exact PR head SHA. There is no automatic
-  `workflow_run` approval trigger.
-- Input: the selected run and App/run/head-attributable structural check, fetched
-  from GitHub. These consistency checks do not prove reviewer honesty; the
-  maintainer's dispatch supplies the independent approval decision.
-- Output: the separate approval App posts APPROVE for that head only after the
-  current head is checked again. Missing or identical App IDs fail closed.
+mergeCraft publishes a COMMENT review plus the `mergecraft review` status check,
+and that check is the merge gate. There is no separate App approval workflow: a
+formal APPROVE is posted only when `prApproveEnabled` is true and the run's own
+terminal verdict allows it. Normal COMMENT-only publication is behavior, not a
+token permission boundary; a compromised reviewer can forge its own checks.
 
 The trust levels above are not GitHub token permission restrictions. At
 `selfReview: full`, `prApproveEnabled: false` is what keeps normal publication at
@@ -180,8 +174,7 @@ The reviewing workflow (`mergecraft.yml`) stays on `pull_request_target` only.
 Do not add a `pull_request` trigger to earn "trusted" tier: it hands credentials
 to PR-controlled workflow definitions.
 
-Read more: [`.github/workflows/mergecraft-approve.yml`](../.github/workflows/mergecraft-approve.yml),
-[Security model — structural approval](workflows.md#security-model).
+Read more: [Security model — structural approval](workflows.md#security-model).
 
 ## Base-snapshot rule
 

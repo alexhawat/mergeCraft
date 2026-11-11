@@ -190,9 +190,7 @@ def collect_breaks() -> list[LinkBreak]:
 _PD4_FIX_LINKS: tuple[tuple[str, str], ...] = (
     ("docs/trust-policy.md", "../src/mergecraft/config/trust_policy.py"),
     ("docs/trust-policy.md", "../src/mergecraft/analyzers/trust.py"),
-    ("docs/trust-policy.md", "../.github/workflows/mergecraft-approve.yml"),
     ("docs/trust-policy.md", "../.mergecraft/config.yaml"),
-    ("docs/workflows.md", "../.github/workflows/mergecraft-approve.yml"),
     ("docs/dev/changelog-archive.md", "../findings-carryover.md"),
     ("README.md", "docs/glossary.md#trust-tier"),
     ("docs/trust-policy.md", "glossary.md#trust-tier"),

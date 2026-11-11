@@ -263,7 +263,7 @@ pages:
     audience: consumer
     template: consumer
     generator: null
-    purpose: Two-axis trust policy — execution vs authority, selfReview levels, mergecraft-approve.yml, base snapshot rule.
+    purpose: Two-axis trust policy — execution vs authority, selfReview levels, approval and the merge gate, base snapshot rule.
 
   - path: docs/assets/diagrams/README.md
     audience: satellite

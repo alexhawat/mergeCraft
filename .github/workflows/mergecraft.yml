@@ -1,5 +1,4 @@
 # Reviewer credentials can publish PR reviews/checks; they are not an approval boundary.
-# Distinct approval credentials live only in the maintainer-dispatched approval workflow.
 # mergeCraft PR review (BYOK; https://github.com/alexhawat/mergeCraft).
 #
 # === THIS IS THE mergeCraft REPO'S OWN CONSUMER WORKFLOW ===
@@ -99,11 +98,8 @@
 # MERGECRAFT_REVIEWER_PAT, provider credentials, OIDC, and a write-scoped token to
 # PR-controlled code — any same-repo collaborator could edit this file on their
 # branch to self-approve or exfiltrate the PAT. Do not re-add a `pull_request`
-# trigger to this workflow for that purpose. Approval is not automated: the
-# sibling `mergecraft-approve.yml` is `workflow_dispatch` only. A maintainer
-# supplies the accepted run id and the exact PR head SHA, and a separate approval
-# App (never this workflow's credentials) posts the APPROVE after re-checking
-# that run and head. There is no `workflow_run` trigger. An App review does not
+# trigger to this workflow for that purpose. Review publication stays COMMENT; the
+# `mergecraft review` check below is the merge gate. An App review does not
 # satisfy a CODEOWNERS rule, so it cannot stand in for a code-owner approval.
 #
 # Same-repo guard below keeps fork PRs from receiving secrets (prior pull_request

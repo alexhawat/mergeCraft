@@ -51,9 +51,9 @@ def test_image_only_diff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra:
 @pytest.mark.parametrize(
     ("job_result", "step_result", "current", "event"),
     [
-        ("success", "success", True, "APPROVE"),
-        ("failure", "failure", True, "REQUEST_CHANGES"),
-        ("success", "skipped", True, "REQUEST_CHANGES"),
+        ("success", "success", True, "COMMENT-pass"),
+        ("failure", "failure", True, "COMMENT"),
+        ("success", "skipped", True, "COMMENT"),
         ("success", "success", False, None),
     ],
 )
@@ -92,7 +92,7 @@ def test_review_event(
         ]
     )
     monkeypatch.setattr(image_candidate_review, "api", api)
-    if event == "APPROVE":
+    if event == "COMMENT-pass":
         image_candidate_review.main()
     else:
         with pytest.raises(SystemExit):
@@ -100,7 +100,9 @@ def test_review_event(
     assert api.call_args_list[1].args[0].endswith("/runs/11/attempts/2/jobs?per_page=100")
     if event:
         assert api.call_args.args[0].endswith("/pulls/7/reviews")
-        assert f"event={event}" in api.call_args.args
+        assert "event=COMMENT" in api.call_args.args
+        assert "event=APPROVE" not in api.call_args.args
+        assert "event=REQUEST_CHANGES" not in api.call_args.args
         assert "commit_id=head" in api.call_args.args
     else:
         assert api.call_count == 3
