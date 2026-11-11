@@ -156,6 +156,7 @@ artifacts = [
     "src/mergecraft/evals/cases/**/*.json",
     "src/mergecraft/evals/fixtures/**/*.json",
     "src/mergecraft/data/**/*.yaml",
+    "src/mergecraft/data/**/*.tpl",
 ]
 
 [tool.hatch.build.targets.wheel.force-include]

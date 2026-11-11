@@ -34,7 +34,7 @@ _WORKFLOWS = (
     "examples/workflows/mergecraft-hardened.yml",
     "examples/workflows/mergecraft.yml",
     "scripts/example_workflows/hardened.yml.tpl",
-    "scripts/example_workflows/minimal.yml.tpl",
+    "src/mergecraft/data/example_workflows/minimal.yml.tpl",
     "docs/artifacts/dogfood-mergecraft.yml",
 )
 
@@ -84,7 +84,7 @@ _PIN_EXAMPLES = (
 )
 
 _PIN_TEMPLATES = (
-    "scripts/example_workflows/minimal.yml.tpl",
+    "src/mergecraft/data/example_workflows/minimal.yml.tpl",
     "scripts/example_workflows/hardened.yml.tpl",
 )
 
@@ -213,7 +213,7 @@ def test_readme_examples_honour_a_dispatch_prompt_they_declare() -> None:
 
 _MINIMAL_SURFACES = (
     "examples/workflows/mergecraft.yml",
-    "scripts/example_workflows/minimal.yml.tpl",
+    "src/mergecraft/data/example_workflows/minimal.yml.tpl",
 )
 
 

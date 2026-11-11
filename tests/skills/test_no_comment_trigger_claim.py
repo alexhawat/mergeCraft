@@ -1,6 +1,6 @@
 """No consumer doc may advertise a comment trigger the default workflow lacks.
 
-`scripts/example_workflows/minimal.yml.tpl` documents on-demand runs "without a
+`src/mergecraft/data/example_workflows/minimal.yml.tpl` documents on-demand runs "without a
 comment trigger" and the hardened template declares no comment trigger by
 design (issue #72 / D5-D6). Ten `SKILL.md` files, `AGENTS-mergecraft.md`, `README.md` and
 the generated `llms-full.txt` nevertheless told users to trigger a review by
