@@ -3153,7 +3153,9 @@ async def _publish_recorded_verdict(
         tool_context.pr_approve_enabled = False
     try:
         publish_started = time.perf_counter()
-        response = await publish_pull_request_review(tool_context)
+        response = await publish_pull_request_review(
+            tool_context, run_not_passing_reason=approval_withheld
+        )
         tool_state.phase_elapsed_s["publish"] = round(time.perf_counter() - publish_started, 3)
     except Exception as exc:
         logger.warning("» the run could not publish the recorded review verdict: {}", exc)

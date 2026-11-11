@@ -559,3 +559,67 @@ def test_a_blocker_does_not_mask_an_outcome_the_review_did_not_reach(outcome: Ru
             RunOutcome.inconclusive: 20,
         }[outcome]
     )
+
+
+# ------------------------------------------------------- re-review thread resolution
+
+
+def _rereview_ctx(tmp_path: Path, github: RecordingReviewGitHub) -> ToolContext:
+    """An approving IncrementalReview re-review whose new commits touched ``src/app.py``."""
+    from mergecraft.mcp.tool_state import primary_repo_state
+    from tests.support.publication import unified_diff
+
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted", mode="IncrementalReview")
+    ctx.pr_approve_enabled = True
+    ctx.authority_trust = "trusted"
+    primary = primary_repo_state(ctx.tool_state)
+    primary.incremental_changed_paths = ["src/app.py"]
+    incremental = tmp_path / "incremental.patch"
+    incremental.write_text(unified_diff("src/app.py", start=1, count=5), encoding="utf-8")
+    primary.incremental_diff_path = str(incremental)
+    ctx.publisher_logins = frozenset({"mergecraft-app[bot]"})
+    return ctx
+
+
+def _stale_finding_github() -> RecordingReviewGitHub:
+    """A PR with one open mergeCraft thread whose finding the new commits removed."""
+    from mergecraft.review_taxonomy import stamp_finding_fingerprint
+    from tests.support.publication import review_thread
+
+    stale = stamp_finding_fingerprint(path="src/app.py", body="Old finding.")
+    return RecordingReviewGitHub(
+        threads=[
+            review_thread(
+                thread_id="T-stale", body=stale, author="mergecraft-app[bot]", outdated=True
+            )
+        ]
+    )
+
+
+async def test_a_passing_rereview_resolves_the_threads_whose_findings_are_gone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    github = _stale_finding_github()
+    ctx = _rereview_ctx(tmp_path, github)
+    await submit_verdict(ctx, "approve", [])
+
+    outcome = await _finalize(ctx, await _driver_result(ctx), monkeypatch)
+
+    assert outcome.outcome is RunOutcome.passed
+    assert _events(github) == ["APPROVE"]
+    assert github.resolved == ["T-stale"]
+
+
+@pytest.mark.parametrize("gate", ["coverage", "prep", "token_budget", "roster"])
+async def test_a_withheld_approval_resolves_no_threads_as_fixed(
+    gate: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    github = _stale_finding_github()
+    ctx = _rereview_ctx(tmp_path, github)
+    await submit_verdict(ctx, "approve", [])
+
+    outcome = await _run_gate(gate, ctx, monkeypatch)
+
+    assert outcome.outcome is not RunOutcome.passed
+    assert _events(github) == ["COMMENT"]
+    assert github.resolved == []

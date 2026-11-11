@@ -505,7 +505,7 @@ async def test_recorded_verdict_the_run_could_not_publish_is_not_passed(
     from tests.support.finalize_harness import run_finalize
     from tests.support.publication import RecordingReviewGitHub, publication_ctx, submit_verdict
 
-    async def _publisher_unavailable(_ctx: Any) -> dict[str, Any]:
+    async def _publisher_unavailable(_ctx: Any, **_kwargs: Any) -> dict[str, Any]:
         msg = "publisher unavailable"
         raise RuntimeError(msg)
 
