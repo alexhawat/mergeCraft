@@ -329,6 +329,12 @@ ALLOWED_READS: Final[tuple[AllowedRead, ...]] = (
         "written by git setup and read back by every child-facing module",
     ),
     AllowedRead(
+        "src/mergecraft/mcp/upload.py",
+        "MERGECRAFT_TEMP_DIR",
+        "message bus",
+        "written by git setup and read back to locate the run's askpass tree",
+    ),
+    AllowedRead(
         "src/mergecraft/utils/agent_resolve.py",
         "MERGECRAFT_TEMP_DIR",
         "message bus",

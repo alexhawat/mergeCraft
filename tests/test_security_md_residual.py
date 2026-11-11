@@ -2,8 +2,9 @@
 
 ``SECURITY.md`` (historically lines 24-26) still says sensitive env vars are
 filtered before they reach any shell/MCP tool the agent can call.
-``mcp/git.py`` ``_run_git`` still defaults to ``os.environ.copy()`` (D12
-restore path is off), so that broad sentence is false.
+``mcp/git.py`` ``_run_git`` still passes the process environment through
+(filtered only of git-specific variables by the hardened tier), so that
+broad sentence is false.
 
 W10 must drop or narrow the claim to the agent subprocess
 (``build_agent_env`` / ``filter_env``) and the sandboxed ``shell`` tool
@@ -12,11 +13,19 @@ W10 must drop or narrow the claim to the agent subprocess
 
 from __future__ import annotations
 
-import inspect
+import os
 import re
+import subprocess
+from typing import TYPE_CHECKING
 
 from mergecraft.mcp.git import _run_git
 from tests.ci.workflow_support import REPO_ROOT
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from pathlib import Path
+
+    import pytest
 
 _SECURITY_MD = REPO_ROOT / "SECURITY.md"
 
@@ -44,10 +53,30 @@ def _collapsed(text: str) -> str:
     return re.sub(r"\s+", " ", normalised)
 
 
-def test_run_git_still_defaults_to_os_environ_copy() -> None:
-    """D12 restore path is off: git MCP still inherits the process environment."""
-    body = inspect.getsource(_run_git)
-    assert "os.environ.copy()" in body
+def test_run_git_spawns_with_the_hardened_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """git MCP children inherit the process env, filtered through the hardened tier.
+
+    It is still the process environment minus git-specific variables, not the
+    secret-stripped agent env, so SECURITY.md must keep not claiming ``git``.
+    """
+    captured: dict[str, str] = {}
+
+    def _fake_run(
+        argv: list[str], *, env: Mapping[str, str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        captured.update(env)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setenv("MC_RESIDUAL_PROBE", "kept")
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'a.b'='c'")
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    _run_git(["status"], cwd=str(tmp_path))
+    assert captured["MC_RESIDUAL_PROBE"] == "kept"
+    assert captured["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert captured["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert "GIT_CONFIG_PARAMETERS" not in captured
 
 
 def test_security_md_does_not_claim_stripping_for_any_mcp_tool() -> None:

@@ -485,7 +485,12 @@ def shell_tool(ctx: ToolContext):
             raise ToolRefusedError(str(exc)) from exc
         # Checked once the working directory is known, so a relative operand
         # resolves against the directory the command will actually run in.
-        credential_refusal = shell_command_denies_credential_paths(command, tmpdir=tmpdir, cwd=cwd)
+        credential_refusal = shell_command_denies_credential_paths(
+            command,
+            tmpdir=tmpdir,
+            cwd=cwd,
+            checkout_roots=[state.dir for state in ctx.tool_state.repos.values()],
+        )
         if credential_refusal:
             raise ToolRefusedError(credential_refusal)
         env = resolve_env("inherit" if ctx.payload.shell == "enabled" else "restricted")

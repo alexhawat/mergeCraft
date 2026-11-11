@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import pytest
+from tests.support.policy_fixtures import init_git_repo
 from tests.support.tool_context import write_capable_mcp_mode
 
 from mergecraft.mcp.context import (
@@ -299,6 +300,7 @@ async def test_nested_path_inside_repo_root_still_accepted(
     monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
 
     root, _evil = _repo_and_evil_sibling(tmp_path)
+    init_git_repo(root)
     nested = root / "src" / "pkg"
     nested.mkdir(parents=True)
 
@@ -1059,6 +1061,7 @@ async def test_relative_c_is_resolved_against_the_repo_checkout(
     """
     recorder = _RunGitRecorder()
     monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+    init_git_repo(tmp_path)
     nested = tmp_path / "pkg"
     nested.mkdir()
     monkeypatch.chdir(tmp_path.parent)
@@ -1090,18 +1093,22 @@ async def test_cumulative_c_options_that_escape_are_rejected(
 async def test_a_registered_cross_repo_checkout_is_reachable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """M4: a secondary checkout is registered as a workspace root, so -C must allow it."""
+    """M4: a registered secondary checkout is reachable through -C."""
+    from mergecraft.mcp.tool_state import ensure_repo_state
     from mergecraft.utils.workspace import register_workspace_root
 
     recorder = _RunGitRecorder()
     monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
     secondary = tmp_path.parent / "secondary-checkout"
     secondary.mkdir(exist_ok=True)
+    init_git_repo(secondary)
     register_workspace_root(str(secondary))
-
-    result = await git_tool(_ctx(tmp_path)).execute(
-        {"command": "status", "args": ["-C", str(secondary)]}
+    ctx = _ctx(tmp_path)
+    ensure_repo_state(
+        ctx.tool_state, owner="acme", name="secondary", dir=str(secondary), access="read"
     )
+
+    result = await git_tool(ctx).execute({"command": "status", "args": ["-C", str(secondary)]})
 
     assert result.is_error is False, result.content[0]["text"]
     assert recorder.calls == [["-C", str(secondary), "status"]]

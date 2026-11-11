@@ -145,3 +145,83 @@ def test_read_remote_origin_url_ignores_insteadof(tmp_path: Path) -> None:
     ).stdout.strip()
     assert "attacker.example" in expanded
     assert read_remote_origin_url(str(repo)) == remote
+
+
+def test_hardened_git_env_disables_config_files_and_ambient_injection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+
+    from mergecraft.utils.git_hardening import hardened_git_env
+
+    for name, value in {
+        "GIT_CONFIG_PARAMETERS": "'core.pager'='x'",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "a.b",
+        "GIT_CONFIG_VALUE_0": "c",
+        "GIT_CONFIG_SYSTEM": "/nonexistent/system.gitconfig",
+        "GIT_DIR": "/nonexistent/elsewhere",
+        "GIT_EXTERNAL_DIFF": "x",
+        "GIT_TRACE": "1",
+    }.items():
+        monkeypatch.setenv(name, value)
+    env = hardened_git_env()
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert env["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert env["GIT_ATTR_NOSYSTEM"] == "1"
+    for dropped in (
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_KEY_0",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_DIR",
+        "GIT_EXTERNAL_DIFF",
+        "GIT_TRACE",
+    ):
+        assert dropped not in env
+
+    own = hardened_git_env(
+        {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "k", "GIT_CONFIG_VALUE_0": "v"},
+        keep_config_pairs=True,
+    )
+    assert own["GIT_CONFIG_COUNT"] == "1"
+    assert own["GIT_CONFIG_KEY_0"] == "k"
+
+
+def test_hardened_git_command_pins_helpers_and_safe_directories(tmp_path: Path) -> None:
+    from mergecraft.utils.git_hardening import hardened_git_command
+
+    argv, _env = hardened_git_command(["status"], safe_directories=[str(tmp_path)])
+    flat = " ".join(argv)
+    for pin in (
+        "safe.bareRepository=explicit",
+        "credential.helper=",
+        "core.attributesFile=/dev/null",
+        "core.askPass=",
+        f"safe.directory={tmp_path.resolve()}",
+    ):
+        assert pin in flat
+    assert argv[-1] == "status"
+
+
+def test_textconv_is_disabled_for_blame_and_log_pickaxe() -> None:
+    from mergecraft.utils.git_hardening import git_argv
+
+    blame = git_argv(["blame", "f"])
+    assert blame[blame.index("blame") + 1] == "--no-textconv"
+    for flags in (["-Sfoo"], ["-G", "foo"], ["--pickaxe-all", "-Sx"]):
+        assert "--no-textconv" in git_argv(["log", *flags])
+
+
+def test_nested_bare_layout_is_not_discovered(tmp_path: Path) -> None:
+    from mergecraft.utils.git_hardening import absolute_git_dir
+
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=outer, check=True, capture_output=True)
+    nested = outer / "data"
+    nested.mkdir()
+    subprocess.run(["git", "init", "-q", "--bare"], cwd=nested, check=True, capture_output=True)
+    # Discovery refuses to enter the bare layout implicitly; it never selects it.
+    assert absolute_git_dir(str(nested)) != nested.resolve()
+    assert absolute_git_dir(str(outer)) == (outer / ".git").resolve()

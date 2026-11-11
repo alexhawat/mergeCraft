@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from mergecraft.utils.git_hardening import git_argv, git_global_config_argv
+from mergecraft.utils.git_hardening import git_global_config_argv, run_hardened_git
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -53,6 +53,17 @@ def add_safe_directory(path: str) -> None:
     _safe_directories_added.add(resolved)
 
 
+def registered_safe_directories() -> list[str]:
+    """Return every path this process marked safe for git, plus the workspace roots.
+
+    The hardened git tier does not read the global config these entries were
+    written to, so its spawns restate them as ``-c safe.directory`` pins.
+    """
+    entries = [str(root) for root in allowed_workspace_roots()]
+    entries.extend(sorted(_safe_directories_added))
+    return list(dict.fromkeys(entries))
+
+
 def ensure_github_workspace_registered() -> None:
     """Register ``$GITHUB_WORKSPACE`` when present (W3.1)."""
     workspace = os.environ.get("GITHUB_WORKSPACE", "").strip()
@@ -90,12 +101,10 @@ def git_repo_root(start: str | None = None) -> Path | None:
     collapses to ``None`` so callers decide whether a missing root is fatal.
     """
     try:
-        completed = subprocess.run(
-            git_argv(["rev-parse", "--show-toplevel"]),
+        completed = run_hardened_git(
+            ["rev-parse", "--show-toplevel"],
             cwd=start,
-            check=False,
-            capture_output=True,
-            text=True,
+            safe_directories=(*registered_safe_directories(), start or ""),
             timeout=5,
         )
     except (OSError, subprocess.SubprocessError):  # fmt: skip
@@ -208,5 +217,6 @@ __all__ = [
     "ensure_github_workspace_registered",
     "git_repo_root",
     "register_workspace_root",
+    "registered_safe_directories",
     "resolve_allowed_working_directory",
 ]
