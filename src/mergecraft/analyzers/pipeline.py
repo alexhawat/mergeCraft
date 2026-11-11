@@ -312,7 +312,7 @@ def run_analyzer_pipeline(
 
     from mergecraft.utils.payload import read_github_event
 
-    repo_binaries_allowed = allow_repo_provided_binaries(shell=shell)
+    repo_binaries_allowed = allow_repo_provided_binaries(shell=shell, tier=tier)
     resolved_event_name = (
         event_name if event_name is not None else os.environ.get("GITHUB_EVENT_NAME", "")
     )

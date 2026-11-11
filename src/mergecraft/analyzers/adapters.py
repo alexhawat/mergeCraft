@@ -20,7 +20,7 @@ from mergecraft.analyzers.provision import ProvisionError
 from mergecraft.analyzers.registry import filter_changed_files_for_manifest, get_manifest
 from mergecraft.analyzers.resolve import AnalyzerPlan, expand_analyzer_argv, resolve_analyzer
 from mergecraft.analyzers.run import run_plan
-from mergecraft.analyzers.sandbox import plan_sandbox
+from mergecraft.analyzers.sandbox import fresh_analyzer_scratch_dir, plan_sandbox
 from mergecraft.analyzers.trust import (
     IN_PROCESS_ANALYZER_IDS,
     IN_PROCESS_CONFIG_NOTE,
@@ -382,6 +382,8 @@ def run_adapter(
     """
     repo_root = repo_root.resolve()
     manifest = get_manifest(tool_id)
+    # The untrusted tier never prefers (or probes) a binary from the reviewed tree.
+    allow_repo_binaries = allow_repo_binaries and tier == "trusted"
 
     import os
 
@@ -467,6 +469,7 @@ def run_adapter(
         repo_root=repo_root,
         managed_available=True,
         allow_repo_binaries=allow_repo_binaries,
+        tier=tier,
     )
     if plan.mode == "skip":
         logger.info("{}", plan.reason)
@@ -488,8 +491,7 @@ def run_adapter(
         logger.info("{}", reason)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
-    scratch_dir = repo_root / ".mergecraft" / "analyzer-scratch" / tool_id
-    scratch_dir.mkdir(parents=True, exist_ok=True)
+    scratch_dir = fresh_analyzer_scratch_dir(tool_id)
     sandbox_decision = plan_sandbox(
         manifest=manifest,
         tier=tier,
@@ -540,6 +542,7 @@ def run_adapter(
             manifest=manifest,
             repo_root=repo_root,
             file_paths=absolute_files,
+            tier=tier,
         )
         config_note = plan.config_note or f"ruleset: {ruleset.name} ({ruleset.source})"
         plan = replace(plan, env=augment_pattern_env(dict(plan.env), scratch_dir=scratch_dir))

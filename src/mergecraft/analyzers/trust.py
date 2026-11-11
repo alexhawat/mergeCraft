@@ -361,17 +361,19 @@ def evaluate_manifest_for_mode(
     return _withhold_for_repo_tooling(manifest, because="analyzers: untrusted-only")
 
 
-def allow_repo_provided_binaries(*, shell: str) -> bool:
+def allow_repo_provided_binaries(*, shell: str, tier: TrustTier) -> bool:
     """Whether a repo-provided binary may stand in for a pinned one (#35, D5).
 
     ``resolve_analyzer()`` prefers ``<repo>/.venv/bin/<tool>``,
     ``<repo>/node_modules/.bin/<tool>`` and friends over mergeCraft's pinned
     managed binary for *every* manifest, regardless of declared ``runtime``.
     That preference is what makes an otherwise-safe ``managed`` analyzer
-    steerable by PR content, so under ``shell: disabled`` it is refused and
-    only the pinned binary may run — D5's "constructs no PR-authored command".
+    steerable by PR content, so it is refused on the untrusted tier at every
+    shell level, and under ``shell: disabled`` on any tier: only the pinned
+    binary from the managed cache may run, and nothing in the reviewed tree is
+    probed or executed — D5's "constructs no PR-authored command".
     """
-    return shell != "disabled"
+    return tier == "trusted" and shell != "disabled"
 
 
 def allow_repo_command_overrides(tier: TrustTier) -> bool:

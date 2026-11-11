@@ -133,7 +133,8 @@ def test_analyzer_runtime_files_written_mid_review_keep_the_tree_unchanged(tmp_p
         checkout / ".mergecraft" / "analyzers.lock",
         [LockEntry("actionlint", "1.7.12", "managed", "cache", "abc123")],
     )
-    assert runs == checkout / ".mergecraft" / "analyzer-runs"
+    # Unsandboxed output now persists outside the checkout entirely.
+    assert checkout.resolve() not in runs.resolve().parents
     assert (checkout / ".mergecraft" / "analyzers.lock.lock").exists()
     verify_tree_unchanged(checkout, before)
 

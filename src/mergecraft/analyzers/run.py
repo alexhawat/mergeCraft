@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
@@ -20,7 +21,6 @@ from mergecraft.utils.secrets import filter_env
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from mergecraft.analyzers.resolve import AnalyzerPlan
     from mergecraft.analyzers.sandbox import SandboxContext
@@ -110,15 +110,16 @@ def _run_tmpdir(plan: AnalyzerPlan, *, output_dir: Path | None = None) -> Path:
 
     A sandboxed run passes ``output_dir`` — the sandbox/run tmpdir — so the
     persisted output never lands in the real checkout. The unsandboxed path
-    keeps the historical ``<cwd>/.mergecraft/analyzer-runs`` location (SX-D13).
+    persists under the per-process analyzer run root, also outside the checkout,
+    so no host-side write goes through a path the reviewed tree supplies.
     """
-    from pathlib import Path
-
+    _ = plan
     if output_dir is not None:
         tmpdir = output_dir
     else:
-        base = plan.cwd or Path.cwd()
-        tmpdir = base / ".mergecraft" / "analyzer-runs"
+        from mergecraft.analyzers.sandbox import analyzer_run_root
+
+        tmpdir = analyzer_run_root() / "analyzer-runs"
     tmpdir.mkdir(parents=True, exist_ok=True)
     return tmpdir
 
@@ -222,10 +223,10 @@ def _trusted_identity_drop(
     if uid is None or gid is None:
         return plan, "identity drop unavailable, analyzer not run as root: no drop target"
     scratch = sandbox_context.scratch_dir
+    run_root = sandbox_mod.analyzer_run_root()
+    boundary = run_root if run_root in scratch.parents else sandbox_context.repo_root
     try:
-        sandbox_mod.hand_tree_to_drop_target(
-            scratch, boundary=sandbox_context.repo_root, uid=uid, gid=gid
-        )
+        sandbox_mod.hand_tree_to_drop_target(scratch, boundary=boundary, uid=uid, gid=gid)
     except OSError as exc:
         return plan, f"analyzer scratch cannot be handed to the agent user: {exc}"
     env = dict(plan.env or filter_env())
@@ -264,9 +265,17 @@ def _sandboxed_argv(
     netns_name: str | None = None,
     egress_session: Any | None = None,
 ) -> tuple[list[str], Callable[[], None] | None]:
-    """Wrap ``plan.argv`` in namespace isolation when the sandbox context requires it."""
+    """Wrap ``plan.argv`` in namespace isolation when the sandbox context requires it.
+
+    The untrusted (read-only source) context is always wrapped. A trusted context
+    is wrapped too whenever filtered egress applies (``egress_session`` or
+    ``netns_name`` given): the filter and the resource limits are part of the
+    egress decision, so they hold on every tier the policy reaches.
+    """
     run_argv = list(plan.argv)
-    if sandbox_context is None or not sandbox_context.read_only_source:
+    if sandbox_context is None or not _requires_wrapping(
+        sandbox_context, egress_session=egress_session, netns_name=netns_name
+    ):
         return run_argv, None
     if sys.platform == "win32":
         from mergecraft.analyzers.egress import FilteredEgressSetupError
@@ -318,6 +327,16 @@ def _sandboxed_argv(
         ),
         preexec_fn,
     )
+
+
+def _requires_wrapping(
+    sandbox_context: SandboxContext,
+    *,
+    egress_session: Any | None = None,
+    netns_name: str | None = None,
+) -> bool:
+    """Whether this run goes through the namespace wrapper and its limits."""
+    return sandbox_context.read_only_source or egress_session is not None or netns_name is not None
 
 
 def _run_in_own_session(
@@ -499,21 +518,7 @@ def run_plan(
     timeout_s = plan.timeout_s or CHECK_TIMEOUT_S
     if sandbox_context is not None:
         timeout_s = min(timeout_s, sandbox_context.timeout_s)
-    # F2-b: a sandboxed gate's output is persisted into the sandbox/run tmpdir,
-    # never the real checkout. A gate presented a disposable copy-on-write view
-    # must not leave `.mergecraft/analyzer-runs/*.out` in the tree the view was
-    # carved from, or the "real checkout is byte-identical" guarantee breaks.
-    # The non-sandboxed/catalog path keeps its historical location (SX-D13).
-    output_dir: Path | None = None
-    if sandbox_context is not None and sandbox_context.read_only_source:
-        output_dir = sandbox_context.scratch_dir / "analyzer-runs"
     command = _command_string(plan.argv)
-    plan_to_run, drop_refusal = _trusted_identity_drop(plan, sandbox_context)
-    if drop_refusal is not None:
-        logger.info("analyzer {}: {}", plan.manifest_id, drop_refusal)
-        return AnalyzerOutcome(
-            name=plan.manifest_id, command=command, status="unavailable", output=drop_refusal
-        )
     from mergecraft.analyzers.egress import (
         EgressSession,
         FilteredEgressSetupError,
@@ -521,7 +526,14 @@ def run_plan(
     )
 
     session: EgressSession | None = None
-    if sandbox_context is not None:
+    # A trusted run with no GitHub event is a local CLI run: its egress is the
+    # operator's own (the same rule ``analyzer_egress_skip_reason`` applies).
+    local_trusted = (
+        sandbox_context is not None
+        and not sandbox_context.read_only_source
+        and resolved_event is None
+    )
+    if sandbox_context is not None and not local_trusted:
         from mergecraft.analyzers.sandbox import evaluate_analyzer_egress_policy
 
         event_payload = resolved_event if resolved_event is not None else {}
@@ -532,6 +544,16 @@ def run_plan(
             event=event_payload,
             self_review_level=self_review_level,
         )
+        if outcome.status == "skipped":
+            # Fail closed: an allowlist the policy cannot filter never falls
+            # through to host networking, whatever the execution tier.
+            logger.info("{}", outcome.reason)
+            return AnalyzerOutcome(
+                name=plan.manifest_id,
+                command=command,
+                status="unavailable",
+                output=outcome.reason,
+            )
         if outcome.status == "filtered":
             try:
                 session = start_filtered_egress_session(list(sandbox_context.network_allowlist))
@@ -547,6 +569,26 @@ def run_plan(
                     status="unavailable",
                     output=reason,
                 )
+    wrapped = sandbox_context is not None and _requires_wrapping(
+        sandbox_context, egress_session=session
+    )
+    # F2-b: a wrapped run's output is persisted into the sandbox/run tmpdir; an
+    # unwrapped run's into the per-process run root. Neither is in the checkout.
+    output_dir: Path | None = None
+    if sandbox_context is not None and wrapped:
+        output_dir = sandbox_context.scratch_dir / "analyzer-runs"
+    plan_to_run = plan
+    if not wrapped:
+        # A wrapped payload drops identity inside the namespace script; only an
+        # unwrapped trusted payload takes the identity-drop prefix here.
+        plan_to_run, drop_refusal = _trusted_identity_drop(plan, sandbox_context)
+        if drop_refusal is not None:
+            logger.info("analyzer {}: {}", plan.manifest_id, drop_refusal)
+            if session is not None:  # pragma: no cover - session implies wrapped
+                session.close()
+            return AnalyzerOutcome(
+                name=plan.manifest_id, command=command, status="unavailable", output=drop_refusal
+            )
     try:
         run_argv, preexec_fn = _sandboxed_argv(
             plan_to_run,
@@ -581,6 +623,46 @@ def run_plan(
             session.close()
 
 
+def run_version_probe(
+    argv: list[str], *, timeout_s: int = 10
+) -> subprocess.CompletedProcess[str] | None:
+    """Run a trusted-tier tool ``--version`` probe through the analyzer spawn path.
+
+    The probe gets what a trusted analyzer payload gets: the scrubbed analyzer
+    environment (never the orchestrator's own), its own process group reaped on
+    timeout, a neutral empty working directory, and on a root orchestrator the
+    same identity drop — a probe that cannot be dropped is not run. Returns
+    ``None`` instead of raising when the probe cannot run or times out.
+    """
+    from mergecraft.analyzers.trust import build_analyzer_env
+
+    prefix: list[str] = []
+    if sys.platform != "win32" and os.geteuid() == 0:
+        from mergecraft.analyzers.sandbox import build_privilege_drop_argv
+        from mergecraft.main import _ConfigurationError
+
+        try:
+            prefix = build_privilege_drop_argv()
+        except _ConfigurationError as exc:
+            logger.info(
+                "version probe for {} not run: identity drop unavailable ({})", argv[0], exc
+            )
+            return None
+    try:
+        with tempfile.TemporaryDirectory(prefix="mergecraft-probe-") as workdir:
+            return _run_in_own_session(
+                [*prefix, *argv],
+                cwd=Path(workdir),
+                timeout_s=timeout_s,
+                env=build_analyzer_env(tier="trusted"),
+                pass_fds=(),
+                preexec_fn=None,
+            )
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        logger.info("version probe for {} did not complete: {}", argv[0], exc)
+        return None
+
+
 def run_plans(
     plans: list[AnalyzerPlan],
     *,
@@ -596,4 +678,5 @@ __all__ = [
     "CheckStatus",
     "run_plan",
     "run_plans",
+    "run_version_probe",
 ]

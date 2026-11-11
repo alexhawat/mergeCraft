@@ -25,7 +25,7 @@ from mergecraft.analyzers.trust import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from mergecraft.analyzers.manifest import AnalyzerManifest
+    from mergecraft.analyzers.manifest import AnalyzerManifest, TrustTier
 
 _CATALOG_DIR = Path(__file__).resolve().parent / "catalog"
 _CATALOG_PREFIX = "@catalog:"
@@ -370,6 +370,7 @@ def resolve_analyzer(
     repo_tool_version: str | None = None,
     managed_version: str | None = None,
     allow_repo_binaries: bool = True,
+    tier: TrustTier | None = None,
 ) -> AnalyzerPlan:
     """Resolve D4's preference chain for one manifest.
 
@@ -378,6 +379,9 @@ def resolve_analyzer(
     manifest regardless of declared ``runtime``. ``allow_repo_binaries=False``
     removes that step so only the pinned binary can run — what ``shell:
     disabled`` requires, since the working tree is then PR-authored (#35, D5).
+    ``tier="untrusted"`` forces the same, whatever ``allow_repo_binaries``
+    says: on the untrusted tier nothing under ``repo_root`` is probed or used
+    as the analyzer binary.
 
     The ladder is a small ordered dispatch of per-source resolvers —
     declared-unavailable → sqlfluff-no-dialect → in-process native analyzers →
@@ -386,7 +390,7 @@ def resolve_analyzer(
     patches (phpstan ``--level=0``, prisma-lint fallback ``--config``) apply
     once after the ladder, for any plan that already has argv.
     """
-    if not allow_repo_binaries:
+    if not allow_repo_binaries or tier == "untrusted":
         repo_has_tool = False
 
     plan = _declared_unavailable_plan(manifest)
