@@ -492,6 +492,12 @@ jobs:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # The only job that writes a mutable tag. Its own group (build-images has a
+    # different one) so a queued promote is only ever replaced by a newer
+    # promote, never by another job; the tip check below makes that safe.
+    concurrency:
+      group: ci-cd-promote-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -509,42 +515,51 @@ jobs:
       # version releases retag :latest separately via Craft (.craft.yml,
       # triggered off refs/tags/v*), which is a distinct promotion path, not
       # this branch-push one.
-      - name: Retag slim digest → :latest
+      # Both retags of a channel run in one step, behind a tip check, so the
+      # channel's slim and analyzers tags move together and only forward. Runs of
+      # different commits are no longer serialised by the workflow group, so an
+      # older commit whose pipeline finishes late would otherwise move the tags
+      # back past a newer one.
+      - name: Promote main digests → :latest and :analyzers
         if: github.ref == 'refs/heads/main'
         env:
+          GH_TOKEN: ${{ github.token }}
           SLIM_DIGEST: ${{ needs.build-images.outputs.slim_digest }}
+          ANALYZERS_DIGEST: ${{ needs.build-images.outputs.analyzers_digest }}
+          BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          tip="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${BRANCH}" --jq .sha)"
+          if [[ "${tip}" != "${GITHUB_SHA}" ]]; then
+            echo "::notice title=Promotion skipped::${GITHUB_SHA} is no longer the tip of ${BRANCH} (${tip}); the newer commit promotes :latest and :analyzers."
+            exit 0
+          fi
           docker buildx imagetools create --prefer-index=false \
             --tag "${IMAGE_SLIM}:latest" \
             "${IMAGE_SLIM}@${SLIM_DIGEST}"
-      - name: Retag analyzers digest → :analyzers
-        if: github.ref == 'refs/heads/main'
-        env:
-          ANALYZERS_DIGEST: ${{ needs.build-images.outputs.analyzers_digest }}
-        run: |
-          set -euo pipefail
           docker buildx imagetools create --prefer-index=false \
             --tag "${IMAGE_ANALYZERS}:analyzers" \
             "${IMAGE_ANALYZERS}@${ANALYZERS_DIGEST}"
       # pre-0.0.1 (the active pre-release/staging branch) gets its own mutable
       # channel instead, so pre-release testers have a moving tag to pull
       # without ever touching the production :latest / :analyzers.
-      - name: Retag slim digest → :rc
+      - name: Promote pre-0.0.1 digests → :rc and :analyzers-rc
         if: github.ref == 'refs/heads/pre-0.0.1'
         env:
+          GH_TOKEN: ${{ github.token }}
           SLIM_DIGEST: ${{ needs.build-images.outputs.slim_digest }}
+          ANALYZERS_DIGEST: ${{ needs.build-images.outputs.analyzers_digest }}
+          BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          tip="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${BRANCH}" --jq .sha)"
+          if [[ "${tip}" != "${GITHUB_SHA}" ]]; then
+            echo "::notice title=Promotion skipped::${GITHUB_SHA} is no longer the tip of ${BRANCH} (${tip}); the newer commit promotes :rc and :analyzers-rc."
+            exit 0
+          fi
           docker buildx imagetools create --prefer-index=false \
             --tag "${IMAGE_SLIM}:rc" \
             "${IMAGE_SLIM}@${SLIM_DIGEST}"
-      - name: Retag analyzers digest → :analyzers-rc
-        if: github.ref == 'refs/heads/pre-0.0.1'
-        env:
-          ANALYZERS_DIGEST: ${{ needs.build-images.outputs.analyzers_digest }}
-        run: |
-          set -euo pipefail
           docker buildx imagetools create --prefer-index=false \
             --tag "${IMAGE_ANALYZERS}:analyzers-rc" \
             "${IMAGE_ANALYZERS}@${ANALYZERS_DIGEST}"

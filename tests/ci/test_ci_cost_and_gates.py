@@ -358,3 +358,35 @@ def test_coverage_jobs_upload_shard_logs_on_failure(workflow: str, job_name: str
     )
     assert step["if"] == "failure()"
     assert step["with"]["path"] == ".coverage-shards/**/group-*.log"
+
+
+_MUTABLE_TAGS = (":latest", ":analyzers", ":rc", ":analyzers-rc")
+
+
+def test_every_mutable_tag_writer_is_serialised_and_guarded_against_stale_commits() -> None:
+    """Runs of different commits overlap now, so tags must only move forward, together."""
+    ci_cd = load_workflow("ci-cd.yml")
+    writers = [
+        name
+        for name, spec in ci_cd["jobs"].items()
+        if any(
+            "imagetools create" in str(step.get("run", ""))
+            and any(f'{tag}"' in str(step.get("run", "")) for tag in _MUTABLE_TAGS)
+            for step in spec.get("steps", [])
+        )
+    ]
+    assert writers == ["promote"], "only promote may write a mutable tag"
+    promote = job(ci_cd, "promote")
+    assert promote["concurrency"] == {
+        "group": "ci-cd-promote-${{ github.ref }}",
+        "cancel-in-progress": False,
+    }
+    steps = [s for s in promote["steps"] if "imagetools create" in str(s.get("run", ""))]
+    assert len(steps) == 2, "one step per channel, each retagging both images"
+    for step in steps:
+        run = step["run"]
+        assert run.count("imagetools create") == 2, "slim and analyzers move as one step"
+        assert "set -euo pipefail" in run
+        guard = run.index('"${tip}" != "${GITHUB_SHA}"')
+        assert guard < run.index("imagetools create"), "tip check precedes any retag"
+        assert "Promotion skipped" in run
