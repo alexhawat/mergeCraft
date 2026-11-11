@@ -573,6 +573,13 @@ def _shadow_provider_skip_code(exc: BaseException) -> str:
     return "transport_error"
 
 
+#: Top-level entries of the offline review's temp dir that outlive it: the
+#: evidence directory (``resolve_evidence_dir`` falls back to ``<tmpdir>/evidence``
+#: for the packet, its Jev shadow sibling and ``--capture-verdicts`` output) and
+#: the packet-less Jev shadow log (:func:`_jev_shadow_artifact_path`).
+DURABLE_REVIEW_ARTIFACTS: tuple[str, ...] = ("evidence", "jev-shadow.jsonl")
+
+
 def _jev_shadow_artifact_path(
     review_out: OfflineReviewResult,
     driver: _OfflineDiffReviewRun,
@@ -1107,10 +1114,11 @@ async def _run_offline_diff_review(
         )
 
         # The diff and the agent's scratch live here; only a run-owned directory is
-        # opened to the reviewing agent. It is removed at exit (after the CLI has
-        # printed and persisted the result) unless ``MERGECRAFT_KEEP_TMP`` is set.
+        # opened to the reviewing agent. Its scratch is removed at exit (after the
+        # CLI has printed and persisted the result) unless ``MERGECRAFT_KEEP_TMP``
+        # is set; the durable artifacts a result points to are kept.
         register_run_owned_directory(str(out_dir))
-        schedule_directory_cleanup(str(out_dir))
+        schedule_directory_cleanup(str(out_dir), keep=DURABLE_REVIEW_ARTIFACTS)
         from mergecraft.review.engine import ReviewEngine
         from mergecraft.review.snapshot import canonical_review_snapshot
         from mergecraft.utils.process_group import kill_all_active_process_groups

@@ -412,7 +412,8 @@ def run(
         "--capture-verdicts",
         help=(
             "Capture every saved verifier verdict — confirm, downgrade and drop — to "
-            "<evidence-dir>/judge-verdicts.jsonl for offline judge calibration. "
+            "<evidence-dir>/judge-verdicts.jsonl for offline judge calibration "
+            "(kept when the review's temp dir is cleaned up). "
             "Off by default; ordinary reviews write nothing new."
         ),
         rich_help_panel=_PANEL_AGENT,

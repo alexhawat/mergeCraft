@@ -30,11 +30,14 @@ from tests.offline_review.test_result_cache import (
 
 
 async def _review(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    write_artifacts: Callable[[Path], OfflineReviewResult] | None = None,
 ) -> tuple[OfflineReviewResult, Path, Path, list[Callable[[], None]]]:
     """Run the real offline lifecycle with a stub agent; return the result and its temp dir."""
     hooks: list[Callable[[], None]] = []
-    monkeypatch.setattr(git_setup, "_cleanup_at_exit", set())
+    monkeypatch.setattr(git_setup, "_cleanup_at_exit", {})
     monkeypatch.setattr(git_setup, "_cleanup_registered", False)
     monkeypatch.setattr(git_setup.atexit, "register", hooks.append)
     _isolate_cache(tmp_path, monkeypatch)
@@ -55,6 +58,8 @@ async def _review(
 
     async def _agent(**kwargs: Any) -> OfflineReviewResult:
         seen.update(kwargs)
+        if write_artifacts is not None:
+            return write_artifacts(Path(kwargs["tmpdir"]))
         return OfflineReviewResult(
             success=True, structured_output=_valid_structured_output(), outcome=RunOutcome.passed
         )
@@ -107,4 +112,65 @@ async def test_keep_tmp_keeps_the_review_temp_dir(
     assert out_dir.is_dir()
     assert diff.is_file()
     assert diff.is_relative_to(out_dir)
+    shutil.rmtree(out_dir)
+
+
+def _write_run_artifacts(tmpdir: Path, *, packet: bool) -> OfflineReviewResult:
+    """Write what a real run leaves, at the paths the production resolvers return."""
+    from types import SimpleNamespace
+
+    from mergecraft.evidence.run_packet import resolve_packet_path
+    from mergecraft.evidence.verdict_capture import resolve_capture_dir
+
+    scratch = tmpdir / "home" / "agent-scratch.txt"
+    scratch.parent.mkdir(parents=True)
+    scratch.write_text("scratch", encoding="utf-8")
+    capture = resolve_capture_dir(tmpdir=str(tmpdir)) / "judge-verdicts.jsonl"
+    capture.parent.mkdir(parents=True, exist_ok=True)
+    capture.write_text("{}\n", encoding="utf-8")
+    result = OfflineReviewResult(
+        success=True, structured_output=_valid_structured_output(), outcome=RunOutcome.passed
+    )
+    if packet:
+        packet_path = resolve_packet_path(tmpdir=str(tmpdir), change_slug="local-repo")
+        packet_path.write_text("{}", encoding="utf-8")
+        result.evidence_packet_path = str(packet_path)
+    shadow = offline_mod._jev_shadow_artifact_path(
+        result,
+        SimpleNamespace(out_dir=tmpdir),  # type: ignore[arg-type]
+    )
+    shadow.write_text("{}\n", encoding="utf-8")
+    result.jev_shadow_path = str(shadow)
+    return result
+
+
+def _missing(paths: list[str]) -> list[str]:
+    return [path for path in paths if not Path(path).is_file()]
+
+
+@pytest.mark.parametrize("packet", [True, False], ids=["with_packet", "without_packet"])
+@pytest.mark.asyncio
+async def test_default_cleanup_keeps_the_artifacts_a_result_points_to(
+    packet: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The packet, the Jev shadow log and captured verdicts outlive the exit hook."""
+    monkeypatch.delenv("MERGECRAFT_KEEP_TMP", raising=False)
+    monkeypatch.delenv("MERGECRAFT_EVIDENCE_DIR", raising=False)
+    monkeypatch.delenv("RUNNER_TEMP", raising=False)
+
+    result, out_dir, diff, hooks = await _review(
+        tmp_path,
+        monkeypatch,
+        write_artifacts=lambda tmpdir: _write_run_artifacts(tmpdir, packet=packet),
+    )
+    for hook in hooks:
+        hook()
+
+    durable = [result.jev_shadow_path, out_dir / "evidence" / "judge-verdicts.jsonl"]
+    if packet:
+        durable.append(result.evidence_packet_path)
+    assert all(path is not None for path in durable)
+    assert _missing([str(path) for path in durable]) == []
+    assert not diff.exists()
+    assert not (out_dir / "home").exists()
     shutil.rmtree(out_dir)
