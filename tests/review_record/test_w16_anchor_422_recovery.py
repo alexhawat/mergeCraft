@@ -12,14 +12,14 @@ from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, 
 from mergecraft.mcp.review import create_pull_request_review_tool
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
-from mergecraft.utils.github import GitHubClient
+from tests.support.github_fakes import StrictGitHubClient
 from tests.support.tool_context import bind_review_publication_scope, github_client_from_ctx
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-class _RecordingGitHub(GitHubClient):
+class _RecordingGitHub(StrictGitHubClient):
     def __init__(
         self, *, reject_all_comments: bool = False, approve_rejected: bool = False
     ) -> None:

@@ -97,6 +97,8 @@ def _userspace_egress_skip_reason(result: Any) -> str | None:
     return reason
 
 
+@pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.parametrize("tool_id", ["osv-scanner", "trivy"])
 def test_newly_introduced_cve_reported_with_fix_and_transitive_status(
     tool_id: str, adapter_fixture_repo: Path
@@ -276,6 +278,8 @@ def test_a_successful_run_is_not_excused_by_the_userspace_egress_gate() -> None:
     assert _userspace_egress_skip_reason(_cve_result("trivy")) is None
 
 
+@pytest.mark.integration
+@pytest.mark.network
 def test_trufflehog_reports_secret_by_type_and_location(adapter_fixture_repo: Path) -> None:
     tool_id = "trufflehog"
     if tool_id not in _catalog_ids():
@@ -292,6 +296,8 @@ def test_trufflehog_reports_secret_by_type_and_location(adapter_fixture_repo: Pa
     assert finding.start_line >= 1
 
 
+@pytest.mark.integration
+@pytest.mark.network
 def test_trufflehog_remediation_is_rotation_first(adapter_fixture_repo: Path) -> None:
     tool_id = "trufflehog"
     if tool_id not in _catalog_ids():
@@ -308,6 +314,8 @@ def test_trufflehog_remediation_is_rotation_first(adapter_fixture_repo: Path) ->
         assert rotate_idx < remove_idx, "rotation must precede removal guidance"
 
 
+@pytest.mark.integration
+@pytest.mark.network
 def test_trufflehog_never_emits_secret_value(adapter_fixture_repo: Path) -> None:
     tool_id = "trufflehog"
     if tool_id not in _catalog_ids():

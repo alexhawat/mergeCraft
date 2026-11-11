@@ -54,6 +54,8 @@ def test_lockfile_records_resolved_tool_and_checksum(tmp_path: Path) -> None:
     assert loaded[0].sha256 == "abc123"
 
 
+@pytest.mark.integration
+@pytest.mark.network
 def test_two_runs_at_same_lock_resolve_identically(tmp_path: Path) -> None:
     provision = import_module("mergecraft.analyzers.provision")
     manifest = import_module("mergecraft.analyzers.manifest")

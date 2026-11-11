@@ -19,6 +19,7 @@ from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.scm.github import GitHubScmAdapter, github_client_from_scm
 from mergecraft.utils.github import GitHubClient
+from tests.support.github_fakes import StrictGitHubClient
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -66,7 +67,7 @@ def make_tool_context(
     if scm is not None:
         kwargs["scm"] = scm
     else:
-        kwargs["github"] = github or GitHubClient(token="")
+        kwargs["github"] = github or StrictGitHubClient(token="")
     kwargs.update(overrides)
     return ToolContext(**kwargs)
 

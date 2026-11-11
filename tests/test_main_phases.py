@@ -264,6 +264,7 @@ def _reset_token_module_state(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(key, raising=False)
 
 
+@pytest.mark.usefixtures("offline_token_revoke")
 async def test_resolve_credentials_matches_current_precedence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

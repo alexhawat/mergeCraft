@@ -162,11 +162,11 @@ async def test_report_status_checks_surfaces_neutral_for_crashed_run(
     from mergecraft.evidence.run_packet import prepare_run_packet
     from mergecraft.mcp.tool_state import ApprovalRecord, init_tool_state
     from mergecraft.modes import compute_modes
-    from mergecraft.utils.github import GitHubClient
+    from tests.support.github_fakes import StrictGitHubClient
 
     sc = _status_checks_module()
 
-    class _RecordingGitHub(GitHubClient):
+    class _RecordingGitHub(StrictGitHubClient):
         def __init__(self) -> None:
             super().__init__(token="test-token")
             self.check_runs: list[dict[str, Any]] = []
@@ -289,11 +289,11 @@ async def test_fork_pr_cannot_self_approve_at_tool_layer(
     from mergecraft.mcp.review import create_pull_request_review_tool
     from mergecraft.mcp.tool_state import init_tool_state
     from mergecraft.modes import compute_modes
-    from mergecraft.utils.github import GitHubClient
+    from tests.support.github_fakes import StrictGitHubClient
 
     ToolContext, PayloadEvent, RepoIdentity, ResolvedPayload = _context_factory()
 
-    class _RecordingGitHub(GitHubClient):
+    class _RecordingGitHub(StrictGitHubClient):
         def __init__(self) -> None:
             super().__init__(token="test-token")
             self.review_payloads: list[dict[str, Any]] = []
@@ -354,11 +354,11 @@ async def test_in_repo_pr_with_pr_approve_enabled_can_self_approve(
     from mergecraft.mcp.review import create_pull_request_review_tool
     from mergecraft.mcp.tool_state import init_tool_state
     from mergecraft.modes import compute_modes
-    from mergecraft.utils.github import GitHubClient
+    from tests.support.github_fakes import StrictGitHubClient
 
     ToolContext, PayloadEvent, RepoIdentity, ResolvedPayload = _context_factory()
 
-    class _RecordingGitHub(GitHubClient):
+    class _RecordingGitHub(StrictGitHubClient):
         def __init__(self) -> None:
             super().__init__(token="test-token")
             self.review_payloads: list[dict[str, Any]] = []

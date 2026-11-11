@@ -27,7 +27,7 @@ from mergecraft.mcp.context import (
 )
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
-from mergecraft.utils.github import GitHubClient
+from tests.support.github_fakes import StrictGitHubClient
 from tests.support.tool_context import bind_github_client
 
 _PHASES: tuple[str, ...] = (
@@ -46,7 +46,7 @@ _PHASES: tuple[str, ...] = (
 _SPAN_PHASE_KEYS: tuple[str, ...] = ("review.phase", "mergecraft.review.phase")
 
 
-class _RecordingGitHub(GitHubClient):
+class _RecordingGitHub(StrictGitHubClient):
     """GitHub client that captures review payloads instead of sending them."""
 
     def __init__(self) -> None:
@@ -61,7 +61,7 @@ class _RecordingGitHub(GitHubClient):
         return {"id": 1, "node_id": "n1", "html_url": "https://x/1", "state": "COMMENTED"}
 
 
-class _StubGitHub(GitHubClient):
+class _StubGitHub(StrictGitHubClient):
     """Serves one PR without touching the network."""
 
     def __init__(self, *, head_sha: str) -> None:
@@ -126,7 +126,7 @@ def _ctx(tmp_path: Path, *, repo_dir: Path | None = None) -> ToolContext:
             event=PayloadEvent(trigger="pull_request", issue_number=1, is_pr=True),
             shell="restricted",
         ),
-        github=GitHubClient(token=""),
+        github=StrictGitHubClient(token=""),
         github_installation_token="",
         git_token="",
         api_token="",

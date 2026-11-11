@@ -412,6 +412,7 @@ async def test_resolve_tokens_app_mint_wins_and_revokes_on_close(
     assert token_mod._mcp_token_value is None
 
 
+@pytest.mark.usefixtures("offline_token_revoke")
 async def test_resolve_tokens_disabled_push_requests_read_only_contents(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -470,6 +471,7 @@ async def test_resolve_tokens_job_token_with_xrepo_sets_read_token(
         await ref.aclose()
 
 
+@pytest.mark.usefixtures("offline_token_revoke")
 async def test_resolve_tokens_xrepo_object_uses_its_write_list(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

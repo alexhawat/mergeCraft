@@ -111,6 +111,8 @@ def fixture_repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
+@pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.asyncio
 async def test_per_analyzer_status_returned(tmp_path: Path, fixture_repo: Path) -> None:
     payload = await _run(
@@ -231,6 +233,8 @@ def _snapshot_tree(root: Path) -> dict[str, bytes]:
     }
 
 
+@pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.asyncio
 async def test_analyzer_run_leaves_the_tracked_fixture_tree_unchanged(
     tmp_path: Path, fixture_repo: Path

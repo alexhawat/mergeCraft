@@ -11,6 +11,7 @@ from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, 
 from mergecraft.mcp.tool_state import TerminalSubmission, init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
+from tests.support.github_fakes import StrictGitHubClient
 from tests.support.tool_context import bind_github_client, bind_review_publication_scope
 
 if TYPE_CHECKING:
@@ -37,7 +38,7 @@ def anchor_422_error(*, index: int | None) -> httpx.HTTPStatusError:
     return httpx.HTTPStatusError("422", request=request, response=response)
 
 
-class RecordingGitHub(GitHubClient):
+class RecordingGitHub(StrictGitHubClient):
     """GitHub client that records review payloads and simulates 422 recovery."""
 
     def __init__(

@@ -8,7 +8,7 @@ Four autouse guards keep unit tests independent of the machine they run on
   attempt is also recorded and the test is failed at teardown, so a product
   ``except Exception`` cannot turn an accidental call into a silent pass.
   Opt in per test with ``@pytest.mark.network`` (``integration`` and ``live``
-  tests are opted in too).
+  tests are opted in too). There is no per-file allow-list.
 * **Environment scrub** - ``MERGECRAFT_*``, provider keys, ``GITHUB_*``, proxy,
   ``OTEL_*`` and similar variables are removed before each test. A test opts a
   value back in with ``monkeypatch.setenv``. ``live`` tests keep their
@@ -151,55 +151,6 @@ def _install_network_guard(mp: pytest.MonkeyPatch) -> None:
     mp.setattr(socket, "getaddrinfo", guarded_getaddrinfo)
 
 
-# Test files that legitimately need the network today: they download pinned analyzer
-# binaries from github.com (via provision_managed_binary). Lifts the guard entirely.
-LEGACY_NETWORK_FILES: frozenset[str] = frozenset(
-    {
-        "tests/analyzers/test_adapters_contract.py",
-        "tests/analyzers/test_adapters_github.py",
-        "tests/analyzers/test_adapters_language.py",
-        "tests/analyzers/test_adapters_pattern.py",
-        "tests/analyzers/test_adapters_supply_chain.py",
-        "tests/analyzers/test_provision.py",
-        "tests/mcp/test_analyzers.py",
-    }
-)
-
-# Test files whose doubles still fall through to a real host (partial GitHubClient
-# subclasses, installation-token revoke). The attempt is still
-# blocked and raises inside the test; only the teardown failure for a swallowed
-# attempt is waived. Shrink this list (give the double the method its test reaches,
-# or move to a shared strict fake); do not add to it.
-LEGACY_SWALLOWED_NETWORK_FILES: frozenset[str] = frozenset(
-    {
-        "tests/security/test_hostile_corpus.py",
-        "tests/policy/test_evidence_writer_seams.py",
-        "tests/status_checks/test_status_checks_enforce.py",
-        "tests/review/test_terminal_verdict_policy.py",
-        "tests/review/test_phase_guards.py",
-        "tests/review_record/test_w16_anchor_422_recovery.py",
-        "tests/test_main_phases.py",
-        "tests/agents/test_claude_read_log_check.py",
-        "tests/analyzers/test_dispositions.py",
-        "tests/cli/test_auth_scope_cmd.py",
-        "tests/cli/test_review_failed_output.py",
-        "tests/mcp/test_git_tool.py",
-        "tests/mcp/test_public_stdio.py",
-        "tests/analyzers/test_userspace_egress_runtime.py",
-        "tests/mcp/test_checkout.py",
-        "tests/mcp/test_checkout_ignore_paths.py",
-        "tests/mcp/test_convergence_runtime.py",
-        "tests/mcp/test_publication_body_integrity.py",
-        "tests/mcp/test_publish_fingerprint_failsoft.py",
-        "tests/mcp/test_review.py",
-        "tests/mcp/test_review_deferred_append.py",
-        "tests/mcp/test_review_scope_binding.py",
-        "tests/mcp/test_reviewer_resilience_ergonomics.py",
-        "tests/utils/test_token.py",
-    }
-)
-
-
 @pytest.fixture
 def offline_upstream_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
     """Resolve upstream hosts (SSRF pre-resolve) to a public address without DNS.
@@ -216,9 +167,25 @@ def offline_upstream_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.fixture
+def offline_analyzer_provisioning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make managed-analyzer binary downloads fail fast and offline.
+
+    Tests that run the analyzer pipeline without caring about the tools see each
+    managed binary as unavailable (a ``ProvisionError``) instead of reaching
+    the release host. Tests that need the real tools are marked ``integration``
+    and ``network`` instead.
+    """
+    from mergecraft.analyzers import provision
+
+    def _refuse(url: str, dest: object) -> None:
+        msg = f"managed analyzer download blocked in offline unit tests: {url}"
+        raise provision.ProvisionError(msg)
+
+    monkeypatch.setattr(provision, "_download_pinned_url", _refuse)
+
+
 def _network_allowed(request: pytest.FixtureRequest) -> bool:
-    if request.node.nodeid.split("::", 1)[0] in LEGACY_NETWORK_FILES:
-        return True
     return any(request.node.get_closest_marker(name) for name in _NETWORK_MARKERS)
 
 
@@ -233,8 +200,6 @@ def _block_network(
     _VIOLATIONS.clear()
     _install_network_guard(monkeypatch)
     yield
-    if request.node.nodeid.split("::", 1)[0] in LEGACY_SWALLOWED_NETWORK_FILES:
-        _VIOLATIONS.clear()
     if _VIOLATIONS:
         attempts = "; ".join(sorted(set(_VIOLATIONS)))
         _VIOLATIONS.clear()

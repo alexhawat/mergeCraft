@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from tests.support.github_fakes import StrictGitHubClient
 from tests.support.tool_context import bind_review_publication_scope, github_client_from_ctx
 
 from mergecraft.analyzers.budget import DEFERRED_SECTION_HEADING
@@ -22,13 +23,12 @@ from mergecraft.mcp.tool_state import AnalyzerRunState, init_tool_state
 from mergecraft.mcp.verification import record_finding_verdict_tool, verify_agent_findings_tool
 from mergecraft.modes import compute_modes
 from mergecraft.review_taxonomy import finding_fingerprint
-from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-class _RecordingGitHub(GitHubClient):
+class _RecordingGitHub(StrictGitHubClient):
     """Captures the review payload instead of sending it."""
 
     def __init__(self) -> None:

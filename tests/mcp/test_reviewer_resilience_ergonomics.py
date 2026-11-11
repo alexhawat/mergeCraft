@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 from tests.mcp.reviewer_resilience_support import git_ctx, init_git_repo, tool_error_text
+from tests.support.github_fakes import StrictGitHubClient
 
 from mergecraft.mcp.checkout import checkout_pr_tool
 from mergecraft.mcp.git import git_tool
 from mergecraft.mcp.git_guards import _is_denied_config_key
-from mergecraft.utils.github import GitHubClient
 
 
 class _RunGitRecorder:
@@ -221,7 +221,7 @@ async def test_config_write_forms_refused(
     assert recorder.calls == []
 
 
-class _AliasCheckoutStub(GitHubClient):
+class _AliasCheckoutStub(StrictGitHubClient):
     """Records alias-normalized pull_number via ctx.scm → GitHubScmAdapter."""
 
     async def get_pull(self, owner: str, repo: str, pull_number: int) -> dict[str, object]:

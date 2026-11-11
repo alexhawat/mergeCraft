@@ -32,6 +32,8 @@ def _run(
     )
 
 
+@pytest.mark.integration
+@pytest.mark.network
 @pytest.mark.parametrize("tool_id", ["oasdiff", "buf"])
 def test_breaking_api_change_reported_once(tool_id: str, adapter_fixture_repo: Path) -> None:
     if tool_id not in _catalog_ids():
@@ -47,6 +49,8 @@ def test_breaking_api_change_reported_once(tool_id: str, adapter_fixture_repo: P
     assert len(breaking) == 1, f"{tool_id} must report exactly one breaking API change"
 
 
+@pytest.mark.integration
+@pytest.mark.network
 def test_unsafe_migration_reported_once(adapter_fixture_repo: Path) -> None:
     tool_id = "squawk"
     if tool_id not in _catalog_ids():
