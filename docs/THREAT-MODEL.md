@@ -27,7 +27,7 @@ product is not a control.
 | SSRF guard on external retrieval (loopback, link-local, metadata, `file:`, odd IP forms; unresolvable names fail closed) | `mergecraft.security.egress:guard_external_url`, `mergecraft.security.egress:inspect_external_url` | `tests/security/test_cd_egress.py::test_ssrf_protections_block_link_local_and_metadata_urls` |
 | Analyzer downloads connect only to the addresses the SSRF check validated | `mergecraft.security.egress:pinned_http_transport` (used by `analyzers/provision.py`) | `tests/security/test_egress_pinned_failover.py::test_first_address_unreachable_falls_over_to_the_second` |
 | Analyzer network isolation: an untrusted-tier analyzer that declares a network allowlist runs only when a filtered-egress backend can be set up; otherwise it does not run (a named skip, or an `unavailable` row) | `mergecraft.analyzers.sandbox:analyzer_egress_skip_reason`, `mergecraft.analyzers.sandbox:build_analyzer_sandbox_argv_for_run` | `tests/analyzers/test_analyzer_egress_policy.py` |
-| Untrusted-tier analyzers run only inside a pid/net/mount namespace with the source read-only and capabilities dropped; on a root orchestrator the userspace egress bridge is refused, so allowlisted network analyzers (`osv-scanner`, `trivy`) do not run on untrusted PRs in the root Action container | `mergecraft.analyzers.sandbox:build_analyzer_sandbox_argv_for_run` | `tests/analyzers/test_sandbox.py::test_root_analyzer_argv_omits_map_root_user_and_drops_identity` |
+| Untrusted-tier analyzers run only inside a pid/net/mount namespace with the source read-only and capabilities dropped; on a root orchestrator the userspace egress bridge is refused, so allowlisted network analyzers (`osv-scanner`, `trivy`) do not run on untrusted PRs in the root Action container | `mergecraft.analyzers.sandbox:build_analyzer_sandbox_argv_for_run` | `tests/analyzers/test_sandbox.py::test_root_orchestrator_refuses_the_userspace_egress_bridge` |
 | Untrusted-tier analyzers use only mergeCraft's managed binaries; nothing under the checkout is probed or executed | `mergecraft.analyzers.resolve:resolve_analyzer` | `tests/analyzers/test_untrusted_scanner_config.py::test_untrusted_resolution_never_probes_the_tree` |
 | Untrusted-tier scanners take configuration only from bundled files or the base revision; a PR that changes a scanner config, ignore or plugin file produces a `scanner-config-changed` finding | `mergecraft.analyzers.execution:scanner_config_change_findings` | `tests/analyzers/test_untrusted_scanner_config.py::test_scanner_config_changes_become_findings` |
 | Secrets are redacted from analyzer output before it becomes a finding | `mergecraft.analyzers.redact:redact_analyzer_output` (called from `analyzers/run.py`) | `tests/analyzers/test_redact_entropy.py` |
@@ -56,8 +56,9 @@ event (`mergecraft.analyzers.sandbox` and `mergecraft.analyzers.run`):
   allowlist need a filtered-egress backend; in the root Action container the
   only available backend is refused, so they do not run there.
 - **Trusted** (`workflow_dispatch`, same-repo `pull_request`): analyzers run in
-  the orchestrator's own process context, without a namespace, network
-  isolation or resource limits, and may execute repo-authored tool
+  the orchestrator's trust domain, without a namespace, network isolation or
+  resource limits (on a root orchestrator the payload still drops to the agent
+  user with capabilities cleared), and may execute repo-authored tool
   configuration. This tier is not a sandbox; it relies on the head being
   trusted. Namespace wrapping applies to a trusted run only when a
   filtered-egress session is in use.

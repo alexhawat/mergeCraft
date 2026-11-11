@@ -127,6 +127,37 @@ def test_root_analyzer_argv_omits_map_root_user_and_drops_identity(
     assert "--inh-caps=-all" in joined, argv
 
 
+def test_root_orchestrator_refuses_the_userspace_egress_bridge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bridge maps root to root, so the identity drop cannot land: refuse it."""
+    sandbox = import_module("mergecraft.analyzers.sandbox")
+    egress = import_module("mergecraft.analyzers.egress")
+    _fake_drop_tools(monkeypatch, uid=0)
+    monkeypatch.setattr(sandbox, "probe_capabilities", _full_caps_with_user_namespace)
+    context = sandbox.build_sandbox_context(
+        repo_root=tmp_path,
+        scratch_dir=tmp_path / "scratch",
+        limits=sandbox.SandboxLimits(timeout_s=30, memory_mb=256, max_processes=8),
+        network_allowlist=["osv.dev"],
+        read_only_source=True,
+        caps=_full_caps_with_user_namespace(),
+    )
+
+    class _BridgeSession:
+        def wrap_argv(self, argv: list[str]) -> list[str]:
+            return ["python", "-m", "mergecraft.analyzers.egress_bridge", *argv]
+
+    with pytest.raises(egress.FilteredEgressSetupError, match="cannot carry the privilege drop"):
+        sandbox.build_analyzer_sandbox_argv_for_run(
+            ("echo", "probe"),
+            context=context,
+            event_name="pull_request_target",
+            event={},
+            egress_session=_BridgeSession(),
+        )
+
+
 def test_non_root_analyzer_argv_keeps_map_root_user_and_no_reuid(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
