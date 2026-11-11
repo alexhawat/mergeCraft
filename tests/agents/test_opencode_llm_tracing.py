@@ -175,7 +175,7 @@ def test_opencode_provider_config_applies_generation_options_on_model_entry(
     model_entry = provider["models"]["deepseek-v4-flash"]
     assert provider["options"] == {
         "baseURL": "https://inference.example/v1",
-        "apiKey": "test-key",
+        "apiKey": "{env:MERGECRAFT_CUSTOM_PROVIDER_API_KEY}",
     }
     assert model_entry["limit"] == {"context": 128_000, "output": 4096}
     assert model_entry["options"] == {"temperature": 0.2, "top_p": 0.9}
@@ -196,7 +196,7 @@ def test_opencode_provider_config_forwards_extra_options(
     provider = config["provider"]["nous"]
     assert provider["options"] == {
         "baseURL": "https://inference.example/v1",
-        "apiKey": "test-key",
+        "apiKey": "{env:MERGECRAFT_CUSTOM_PROVIDER_API_KEY}",
     }
     assert "limit" not in provider["models"]["deepseek-v4-flash"]
     assert "options" not in provider["models"]["deepseek-v4-flash"]

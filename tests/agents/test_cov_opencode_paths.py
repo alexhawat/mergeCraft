@@ -120,7 +120,7 @@ def test_provider_options_carry_transport_keys_only() -> None:
 
     assert options == {
         "baseURL": _BASE_URL,
-        "apiKey": "",
+        "apiKey": "{env:GW_KEY}",
         "timeout": 900,
         "headerTimeout": 30,
     }
@@ -319,16 +319,20 @@ def test_mcp_entry_omits_headers_without_a_run_token(tmp_path: Path) -> None:
 
 
 def test_mcp_entry_carries_the_bearer_header_when_a_token_is_issued(tmp_path: Path) -> None:
-    """A per-run token becomes the MCP ``Authorization`` header."""
+    """A per-run token becomes the MCP ``Authorization`` header, by env reference."""
     from dataclasses import replace
 
     ctx = replace(
         make_agent_run_context(tmp_path, resolved_model=None),
         mcp_auth_token="run-token",
     )
-    config = json.loads(oc.build_security_config(ctx, None))
+    raw = oc.build_security_config(ctx, None)
+    config = json.loads(raw)
 
-    assert config["mcp"][MERGECRAFT_MCP_NAME]["headers"] == {"Authorization": "Bearer run-token"}
+    assert config["mcp"][MERGECRAFT_MCP_NAME]["headers"] == {
+        "Authorization": "Bearer {env:MERGECRAFT_MCP_TOKEN}"
+    }
+    assert "run-token" not in raw
 
 
 def _render_result(agent_block: dict[str, Any]) -> Any:
@@ -985,7 +989,7 @@ async def test_run_reports_a_missing_cli_without_touching_the_server(
     assert result.success is False
     assert result.error is not None
     assert "opencode CLI not found" in result.error
-    assert not (tmp_path / "opencode.json").exists()
+    assert not (oc._opencode_run_config_dir(ctx) / "opencode.json").exists()
 
 
 async def test_run_falls_back_to_the_cli_when_serve_cannot_boot(
@@ -1014,8 +1018,7 @@ async def test_run_falls_back_to_the_cli_when_serve_cannot_boot(
     assert result.success is True
     assert result.output == "cli fallback output"
     # The config file is still written before the boot attempt.
-    evidence_dir = oc._evidence_dir(ctx)
-    assert (evidence_dir / "opencode.json").is_file()
+    assert (oc._opencode_run_config_dir(ctx) / "opencode.json").is_file()
 
 
 async def test_run_reports_a_session_creation_failure(

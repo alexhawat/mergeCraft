@@ -48,4 +48,4 @@ def test_build_custom_provider_reads_llm_provider_workflow_env(
     assert emitted is not None
     nous_block = emitted["nous"]
     assert nous_block["options"]["baseURL"] == NOUS_BASE_URL
-    assert nous_block["options"]["apiKey"] == "workflow-registry-key"
+    assert nous_block["options"]["apiKey"] == "{env:LLM_PROVIDER_1_API_KEY}"

@@ -228,7 +228,9 @@ def test_minimax_routes_via_opencode_with_singleton_env(
 
     block = _config_block_for_minimax(config, expected_provider_id="minimax")
     options = block["options"]
-    assert options["apiKey"] == SENTINEL_MINIMAX_KEY
+    # The env-var NAME as an OpenCode ``{env:...}`` reference, never the key.
+    assert options["apiKey"] == f"{{env:{SINGLETON_API_KEY_ENV}}}"
+    assert SENTINEL_MINIMAX_KEY not in json.dumps(config)
     # The block must register the MiniMax model id so the harness can
     # resolve ``minimax/MiniMax-M3`` to the right runtime model.
     models = block.get("models")
@@ -291,7 +293,8 @@ def test_minimax_routes_via_indexed_provider_pair(
     options = block.get("options")
     assert isinstance(options, dict)
     assert options.get("baseURL") == MINIMAX_BASE_URL
-    assert options.get("apiKey") == SENTINEL_MINIMAX_KEY
+    assert options.get("apiKey") == f"{{env:{INDEXED_API_KEY_FMT.format(n=1)}}}"
+    assert SENTINEL_MINIMAX_KEY not in json.dumps(config)
 
 
 # ── W5.2 — Missing-credential fail-loud (convention 5) ─────────────────────

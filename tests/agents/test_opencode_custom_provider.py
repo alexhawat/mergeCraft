@@ -65,7 +65,7 @@ def test_custom_provider_is_registered_from_env(
         "nous": {
             "npm": "@ai-sdk/openai-compatible",
             "name": "nous",
-            "options": {"baseURL": NOUS_BASE_URL, "apiKey": "nous-key"},
+            "options": {"baseURL": NOUS_BASE_URL, "apiKey": "{env:LLM_PROVIDER_1_API_KEY}"},
             "models": {"deepseek/deepseek-v4-flash": {"name": "deepseek/deepseek-v4-flash"}},
         }
     }
@@ -120,7 +120,7 @@ def test_nous_api_key_alone_registers_preset(
         "nous": {
             "npm": "@ai-sdk/openai-compatible",
             "name": "nous",
-            "options": {"baseURL": NOUS_BASE_URL, "apiKey": "nous-key"},
+            "options": {"baseURL": NOUS_BASE_URL, "apiKey": "{env:LLM_PROVIDER_1_API_KEY}"},
             "models": {"deepseek/deepseek-v4-flash": {"name": "deepseek/deepseek-v4-flash"}},
         }
     }
@@ -144,7 +144,7 @@ def test_tokenhub_api_key_registers_hy3(tmp_path: Path, monkeypatch: pytest.Monk
             "name": "tokenhub",
             "options": {
                 "baseURL": "https://tokenhub-intl.tencentcloudmaas.com/v1",
-                "apiKey": "th-key",
+                "apiKey": "{env:LLM_PROVIDER_1_API_KEY}",
             },
             "models": {"hy3": {"name": "hy3"}},
         }
@@ -166,7 +166,7 @@ def test_custom_provider_env_overrides_named_preset(
 
     assert config["provider"]["nous"]["options"] == {
         "baseURL": "https://example.test/v1",
-        "apiKey": "custom-key",
+        "apiKey": "{env:MERGECRAFT_CUSTOM_PROVIDER_API_KEY}",
     }
 
 
@@ -212,8 +212,14 @@ def test_opencode_emits_provider_blocks_for_each_indexed_pair(
     assert isinstance(provider, dict)
     assert "provider_1" in provider
     assert "provider_2" in provider
-    assert config["provider"]["provider_1"]["options"]["apiKey"] == "key-1"
-    assert config["provider"]["provider_2"]["options"]["apiKey"] == "key-2"
+    assert (
+        config["provider"]["provider_1"]["options"]["apiKey"]
+        == "{env:MERGECRAFT_CUSTOM_PROVIDER_API_KEY_1}"
+    )
+    assert (
+        config["provider"]["provider_2"]["options"]["apiKey"]
+        == "{env:MERGECRAFT_CUSTOM_PROVIDER_API_KEY_2}"
+    )
     assert "provider_1" in config["enabled_providers"]
     assert "provider_2" in config["enabled_providers"]
 
@@ -266,7 +272,10 @@ def test_opencode_singleton_alone_emits_default_provider_block(
     provider = config.get("provider")
     assert isinstance(provider, dict)
     assert "default" in provider
-    assert config["provider"]["default"]["options"]["apiKey"] == "default-key"
+    assert (
+        config["provider"]["default"]["options"]["apiKey"]
+        == "{env:MERGECRAFT_CUSTOM_PROVIDER_API_KEY}"
+    )
 
 
 def test_opencode_indexed_wins_singleton_ignored(
