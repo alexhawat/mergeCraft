@@ -543,6 +543,7 @@ def run_adapter(
             repo_root=repo_root,
             file_paths=absolute_files,
             tier=tier,
+            event=resolved_event,
         )
         config_note = plan.config_note or f"ruleset: {ruleset.name} ({ruleset.source})"
         plan = replace(plan, env=augment_pattern_env(dict(plan.env), scratch_dir=scratch_dir))

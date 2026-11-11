@@ -438,6 +438,15 @@ def run_analyzer_pipeline(
                     (time.perf_counter() - run_started) * 1000
                 )
 
+        if tier == "untrusted":
+            from mergecraft.analyzers.execution import scanner_config_change_findings
+
+            raw_findings.extend(
+                scanner_config_change_findings(
+                    changed_files=changed_files, diff_text=diff_text or adapter_diff_text
+                )
+            )
+
         # #941 — every raw hit gets a stable id before any stage can remove it; each
         # stage records what it removes, and ``ledger.close`` below marks survivors.
         ledger = DispositionLedger()
