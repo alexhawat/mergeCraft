@@ -207,6 +207,62 @@ jobs:
       - name: Keyless integration acceptance
         run: make test-integration
 
+  # The privileged boundary proofs (filtered egress, sandbox write/network
+  # block, analyzer UID drop) need a disposable root Linux runner. This job is a
+  # prerequisite of the required `Verify (static + build ...)` checks, so a failing
+  # proof blocks the merge without adding a required check. It always runs and
+  # passes cheaply when the diff touches nothing the proofs protect; the
+  # classifier is read from the base blob so a PR cannot classify itself out.
+  privileged-proofs:
+    name: Privileged boundary proofs
+    needs: changes
+    if: needs.changes.outputs.image_only != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Does the diff touch the privileged surface?
+        id: surface
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            if git show "$BASE_SHA:scripts/ci_touches_privileged_surface.py" > "$RUNNER_TEMP/ci-touches-privileged.py"; then
+              python3 -I "$RUNNER_TEMP/ci-touches-privileged.py" --event "$EVENT" --base "${BASE_REF:-main}"
+            else
+              echo "run=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            python3 scripts/ci_touches_privileged_surface.py --event "$EVENT"
+          fi
+      - name: Skipped (no privileged surface touched)
+        if: steps.surface.outputs.run != 'true'
+        run: echo "::notice title=Privileged proofs skipped::No file this PR changes is covered by the egress, sandbox or UID-drop proofs."
+      - uses: ./.github/actions/bootstrap
+        if: steps.surface.outputs.run == 'true'
+        with:
+          python-version: "3.14"
+      - name: Real firewall boundary in a disposable network namespace
+        if: steps.surface.outputs.run == 'true'
+        # The hosted runner is disposable. The inner namespace additionally
+        # keeps forwarding and firewall changes off the runner's own network.
+        run: sudo env MERGECRAFT_DISPOSABLE_LINUX=1 make test-filtered-egress
+      - name: Sandbox write/network block on the disposable host lane
+        if: steps.surface.outputs.run == 'true'
+        # A hosted runner cannot create the namespace unprivileged; this root
+        # process on a disposable host is the lane the test is written for. With
+        # the privileged-lane flag set it fails rather than skips.
+        run: sudo env MERGECRAFT_DISPOSABLE_LINUX=1 make test-sandbox-privileged
+      - name: Analyzer UID-drop proofs on the disposable host lane
+        if: steps.surface.outputs.run == 'true'
+        # Self-skip in every other lane (#1015); here they fail rather than skip.
+        run: sudo env MERGECRAFT_DISPOSABLE_LINUX=1 make test-uid-drop-privileged
+
   # The slim Action image is built once per run and handed to the jobs below as
   # an artifact (privilege-root, action-e2e, image-scan-slim). Each used to run
   # its own build under its own GHA cache scope. Docs-only PRs build nothing.
@@ -274,7 +330,7 @@ jobs:
 
   static:
     name: Verify (static + build py${{ matrix.python }})
-    needs: [changes, toolchain, deployment-candidate, eval-gate, privilege-root, deterministic-integration, action-e2e, image-scan-slim, image-scan-analyzers]
+    needs: [changes, toolchain, deployment-candidate, eval-gate, privilege-root, privileged-proofs, deterministic-integration, action-e2e, image-scan-slim, image-scan-analyzers]
     # Keep the named matrix checks visible to branch protection on every PR.
     if: always()
     runs-on: ubuntu-latest
@@ -295,7 +351,7 @@ jobs:
           outputs = jobs.get("changes", {}).get("outputs", {})
           image_only = outputs.get("image_only") == "true"
           docs_only = os.environ.get("EVENT_NAME") == "pull_request" and outputs.get("code") != "true"
-          image_skipped = {"toolchain", "eval-gate", "privilege-root", "deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers"}
+          image_skipped = {"toolchain", "eval-gate", "privilege-root", "privileged-proofs", "deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers"}
           docs_skipped = {"eval-gate", "privilege-root", "deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers"}
           def may_skip(name):
               return (image_only and name in image_skipped) or (docs_only and name in docs_skipped)

@@ -68,5 +68,13 @@ for run_id in ${run_ids}; do
   exit 0
 done
 
+# Exit 3 is a definitive miss: runs exist for the SHA and none is still going, so
+# waiting longer cannot produce the artifact. Exit 1 means "not yet" (no run listed,
+# or one is still in progress) and callers may poll.
+unfinished="$(printf '%s' "${runs_json}" | jq '[.workflow_runs[]? | select(.status != "completed")] | length')"
+listed="$(printf '%s' "${runs_json}" | jq '[.workflow_runs[]?] | length')"
 echo "ci_fetch_coverage_artifact: no ${artifact_name} artifact for ${commit_sha}" >&2
+if [[ "${listed}" -gt 0 && "${unfinished}" -eq 0 ]]; then
+  exit 3
+fi
 exit 1

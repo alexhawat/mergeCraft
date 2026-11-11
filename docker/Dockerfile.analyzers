@@ -40,7 +40,9 @@ RUN tar -xzf /tmp/actionlint-source.tar.gz --strip-components=1 -C /src/actionli
 FROM python:3.14-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f
 
 ARG SOURCE_DATE_EPOCH
+ARG SOURCE_REVISION=""
 ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
+LABEL org.opencontainers.image.revision=${SOURCE_REVISION}
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.29@sha256:eb2843a1e56fd9e30c7276ce1a52cba86e64c7b385f5e3279a0e08e02dd058fc \
     /uv /usr/local/bin/uv
@@ -116,12 +118,15 @@ RUN apt-get update -qq \
         ca-certificates \
         curl \
         git \
+        iproute2 \
+        iptables \
         jq \
         libapt-pkg6.0=2.6.2 \
         libpcre2-8-0=10.42-1+deb12u2 \
         libssl3=3.0.22-1~deb12u2 \
         openssh-client \
         openssl=3.0.22-1~deb12u2 \
+        procps \
         sudo \
         unzip \
         xz-utils \
@@ -136,6 +141,9 @@ RUN cd /opt/agent-clis \
     && ln -sf /opt/agent-clis/node_modules/.bin/gemini /usr/local/bin/gemini \
     && ln -sf /opt/agent-clis/node_modules/.bin/opencode /usr/local/bin/opencode \
     && claude --version \
+    && codex --version \
+    && gemini --version \
+    && opencode --version \
     && rm -rf /tmp/npm-cache /root/.npm /root/.codex /root/.gemini \
         /tmp/node-compile-cache /tmp/* /var/cache/ldconfig
 
@@ -168,13 +176,31 @@ COPY evals/corpora/recall_pass_corpus.json ./evals/corpora/recall_pass_corpus.js
 # the build context must carry it or `uv sync` cannot resolve the Hatch path.
 COPY integrations/opencode ./integrations/opencode
 
-RUN uv sync --frozen --no-dev \
+# ``--extra tracing`` installs logfire + the OpenTelemetry SDK/exporter; without it
+# ``tracing-to: logfire`` silently exports nothing (same as docker/Dockerfile).
+RUN uv sync --frozen --no-dev --extra tracing \
     && useradd -m -u 10001 -s /bin/bash mergecraft \
     && python -m compileall -q /opt/mergecraft \
     && rm -f /opt/mergecraft/.venv/lib/python3.14/site-packages/mergecraft_action-*.dist-info/uv_cache.json \
     && sed -i '/uv_cache\.json/d' \
         /opt/mergecraft/.venv/lib/python3.14/site-packages/mergecraft_action-*.dist-info/RECORD \
-    && rm -rf /root/.cache/uv /tmp/*
+    && rm -rf /root/.cache/uv /tmp/* \
+    && { command -v setpriv >/dev/null && getent passwd mergecraft >/dev/null || { echo "FATAL: privilege drop unavailable (setpriv or mergecraft user missing)"; exit 1; }; }
+
+# The container build has no .git directory. Stamp only the source S, never
+# the future manifest commit C or this image's own digest D.
+RUN SOURCE_REVISION="${SOURCE_REVISION}" python - <<'PYTHON'
+import os
+import pathlib
+import re
+
+value = os.environ["SOURCE_REVISION"]
+if value and not re.fullmatch("[0-9a-f]{40}", value):
+    raise ValueError("invalid source revision")
+pathlib.Path("src/mergecraft/_build_metadata.py").write_text(
+    "__commit__: str | None = " + repr(value or None) + "\n"
+)
+PYTHON
 
 COPY docker/docker-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

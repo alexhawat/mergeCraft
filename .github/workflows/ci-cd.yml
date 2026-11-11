@@ -139,9 +139,10 @@ jobs:
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1' || startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    concurrency:
-      group: ci-cd-publish-${{ github.ref }}
-      cancel-in-progress: false
+    # No concurrency group: builds are keyed on the commit (staging tag per run),
+    # so they can overlap. A shared group made a queued build of an older merge
+    # show as `cancelled` whenever a newer merge landed. Mutable tags move only in
+    # `promote`, which is serialised and tip-guarded.
     permissions:
       contents: read
       packages: write
@@ -190,6 +191,7 @@ jobs:
         with:
           context: .
           file: docker/Dockerfile.analyzers
+          build-args: SOURCE_REVISION=${{ github.sha }}
           labels: org.opencontainers.image.revision=${{ github.sha }}
           push: true
           tags: ${{ env.IMAGE_ANALYZERS }}:staging-${{ github.run_id }}-${{ github.run_attempt }}-analyzers
