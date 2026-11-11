@@ -34,8 +34,11 @@ RESPONSES_PATH = "/v1/responses"
 CODEX_WIRE_API_SUFFIX = "responses"
 NON_MODEL_PATHS = ("/v1/files", "/admin", "/healthz")
 
-# PR #594 — broker upstream read timeout must exceed httpx's default 30s ceiling.
-UPSTREAM_SLOW_RESPONSE_SECONDS = 31.0
+# PR #594 — the broker's upstream read timeout must not fall back to httpx's default.
+# 5.5 s is just past that 5 s default, so a regression to it still returns a 502, while
+# the test no longer sleeps 31 s. The configured (3600 s) timeout is asserted directly.
+HTTPX_DEFAULT_TIMEOUT_SECONDS = 5.0
+UPSTREAM_SLOW_RESPONSE_SECONDS = HTTPX_DEFAULT_TIMEOUT_SECONDS + 0.5
 
 LANE_B_SANDBOX_SYMBOLS = (
     "_operator_sandbox_override",
@@ -215,7 +218,7 @@ class MockModelUpstream:
 
 
 class SlowModelUpstream:
-    """Loopback upstream that stays silent longer than httpx's 30s default timeout."""
+    """Loopback upstream that stays silent longer than httpx's 5 s default timeout."""
 
     def __init__(
         self,
