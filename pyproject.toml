@@ -263,12 +263,37 @@ warn_required_dynamic_aliases = true
 addopts = "-ra --strict-markers"
 xfail_strict = true
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+asyncio_default_test_loop_scope = "function"
 testpaths = ["tests"]
+# Warnings are errors, except the known entries below. Each ignore names its source;
+# remove an entry when the cause is fixed, and do not add new ones to hide a regression.
+filterwarnings = [
+    "error",
+    # src/mergecraft/utils/retry_policy.py passes tenacity's deprecated ``initial=``.
+    "ignore:The 'initial' parameter is deprecated:DeprecationWarning",
+    # Legacy-provider-key notice the CLI deliberately emits; several tests exercise it.
+    "ignore:LLM_PROVIDER_1_API_KEY wins over legacy:DeprecationWarning",
+    # os.fork() from the egress bridge in a threaded test process (CPython 3.12+).
+    "ignore:This process .* is multi-threaded, use of fork:DeprecationWarning",
+    # Third-party deprecations raised while importing fastapi / hypothesis.
+    "ignore::DeprecationWarning:fastapi.*",
+    "ignore:Do not use the `random` module inside strategies",
+    # FastAPI ``on_event`` used by tests/mcp/test_ports_identity.py to force a startup failure.
+    "ignore:\\s*on_event is deprecated:DeprecationWarning",
+    # Unclosed sockets/files/loops in tests are reported when the garbage collector runs,
+    # so they surface in whichever test is running then. Known debt: fix the leaks, then
+    # drop these two entries.
+    "ignore::ResourceWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]
 markers = [
     "integration: opt-in tests that need network, credentials, or real binaries",
     "hermetic_integration: keyless integration tests selected by make test-integration",
     "live: real-provider / live-credential integration (scheduled + release precondition)",
     "coverage: branch-walking tests that inflate coverage; excluded from the default make test read",
+    "network: test may reach non-loopback hosts (the autouse network guard is lifted)",
+    "timeout(seconds): per-test time budget (default 180 s, 0 disables); see tests/support/hermetic.py",
 ]
 
 [tool.coverage.run]

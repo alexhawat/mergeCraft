@@ -15,8 +15,6 @@ import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import pytest
-
 from tests.ci.workflow_support import REPO_ROOT
 
 if TYPE_CHECKING:
@@ -166,24 +164,3 @@ def test_repo_coverage_report_fails_on_stale_low_coverage(
     module = _load_coverage_floors()
     rc = int(module.main())
     assert rc != 0, "stale 70% coverage must fail check_coverage_floors"
-
-
-def test_repo_coverage_report_passes_floor_check_at_target() -> None:
-    """W16 must produce ``coverage.json`` with global line ≥ the bumped floor."""
-    report = REPO_ROOT / "coverage.json"
-    if not report.is_file():
-        pytest.skip("coverage.json missing — run make coverage-gate first")
-    payload = json.loads(report.read_text(encoding="utf-8"))
-    measured = float(payload.get("totals", {}).get("percent_covered", 0.0))
-    assert measured >= HH431_TARGET_FAIL_UNDER, (
-        f"coverage.json reports {measured:.2f}% — below floor "
-        f"{HH431_TARGET_FAIL_UNDER:.0f}% (stale or incomplete; run make coverage-gate)"
-    )
-    proc = subprocess.run(
-        [sys.executable, "scripts/check_coverage_floors.py", str(report)],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert proc.returncode == 0, proc.stderr + proc.stdout

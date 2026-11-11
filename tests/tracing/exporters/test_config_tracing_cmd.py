@@ -55,6 +55,9 @@ def test_config_tracing_renders_resolved_sinks(
         encoding="utf-8",
     )
     monkeypatch.setenv("MERGECRAFT_CONFIG", str(config))
+    # The autouse isolation fixture redirects the default trace dir; this test
+    # pins the config-declared sink, so drop the override.
+    monkeypatch.delenv("MERGECRAFT_TRACE_DIR", raising=False)
 
     from mergecraft.cli.app import app
 

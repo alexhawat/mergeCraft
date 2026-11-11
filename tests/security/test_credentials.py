@@ -38,6 +38,8 @@ from mergecraft.utils.git_setup import (
 )
 from tests.support.run_main_harness import FakeAgent, run_main_for_test
 
+pytestmark = pytest.mark.usefixtures("offline_upstream_resolution")
+
 
 def _path_exists(path: str) -> bool:
     """Sync helper — keeps blocking FS calls out of async test bodies."""

@@ -6,6 +6,7 @@ import json
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -23,6 +24,12 @@ def _isolate_github_event_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
     monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _run_in_scratch_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Relative ``repo_path``/``artifacts_dir`` inputs must not land in the checkout."""
+    monkeypatch.chdir(tmp_path)
 
 
 def _json_body(payload: object) -> bytes:

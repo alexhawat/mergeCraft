@@ -35,6 +35,8 @@ from tests.security.support_agent_isolation import (
 
 from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME
 
+pytestmark = pytest.mark.usefixtures("offline_upstream_resolution")
+
 
 def _simulate_root_chown(monkeypatch: pytest.MonkeyPatch, codex_module: Any) -> None:
     from mergecraft.utils import privilege as privilege_module

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import pwd
 import shutil
 import stat
 import subprocess
@@ -139,7 +140,10 @@ def test_cleanup_temp_directory_removes_askpass_and_tmpdir(
 
 def _safe_staging_root(label: str) -> Path:
     """Stage outside pytest's /tmp tree so Codex-forbidden-root checks apply."""
-    root = Path.home() / ".cache" / "mergecraft-test" / f"{label}-{os.getpid()}"
+    # The autouse isolation fixture moves HOME under pytest's tmp tree (forbidden on
+    # Linux), so use the invoking user's real home, and clean it up in each test.
+    real_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    root = real_home / ".cache" / "mergecraft-test" / f"{label}-{os.getpid()}"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
