@@ -1,6 +1,7 @@
 """Plan 26 H3 / P7 — trufflehog excludes virtualenvs; fixtures suppressed by name.
 
 Decision 9a: no blanket ``tests/**`` skip. A newly committed secret in a test still fires.
+The URL-redaction canary is suppressed only for URI, not as a named fixture.
 """
 
 from __future__ import annotations
@@ -14,15 +15,11 @@ import pytest
 
 from tests.analyzers.support import import_module
 
-# Observed noise on run 34542726646 — each exemption names why, not a path glob.
+# Path-level exemptions name a reason; the URI canary uses a finding-level pair.
 _NAMED_FIXTURES: tuple[tuple[str, str], ...] = (
     (
         "tests/analyzers/fixtures/repo/config/planted-secret.env",
         "planted-secret",
-    ),
-    (
-        "tests/tracing/test_redact_url.py",
-        "redact",
     ),
     (
         "tests/security/test_credentials.py",
@@ -104,11 +101,11 @@ def _named_fixture_paths() -> tuple[str, ...]:
     return tuple(path for path, _needle in _NAMED_FIXTURES)
 
 
-def _thog_finding_line(path: str) -> str:
+def _thog_finding_line(path: str, detector: str) -> str:
     return json.dumps(
         {
             "SourceMetadata": {"Data": {"Filesystem": {"file": path, "line": 1}}},
-            "DetectorName": "AWSAccessKey",
+            "DetectorName": detector,
             "Verified": False,
             "Raw": "PLANTED_NOT_A_REAL_SECRET",
         }
@@ -124,9 +121,11 @@ def _emit_trufflehog_with_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     paths: tuple[str, ...],
+    *,
+    detector: str = "AWSAccessKey",
 ) -> dict[str, Any]:
     module = _ci_sarif()
-    stdout = "\n".join(_thog_finding_line(path) for path in paths) + "\n"
+    stdout = "\n".join(_thog_finding_line(path, detector) for path in paths) + "\n"
     monkeypatch.setattr(module, "_trufflehog_scan_argv", lambda **_kwargs: ["trufflehog"])
     monkeypatch.setattr(
         module.subprocess,
@@ -140,6 +139,25 @@ def _emit_trufflehog_with_paths(
     loaded = json.loads(out.read_text(encoding="utf-8"))
     assert isinstance(loaded, dict)
     return loaded
+
+
+@pytest.mark.parametrize(
+    ("path", "detector", "reported"),
+    [
+        ("tests/tracing/test_redact_url.py", "URI", False),
+        ("tests/tracing/test_redact_url.py", "AWSAccessKey", True),
+        ("src/mergecraft/tracing/redaction.py", "URI", True),
+    ],
+)
+def test_emit_trufflehog_sarif_suppresses_only_the_canary_uri_pair(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    detector: str,
+    reported: bool,
+) -> None:
+    doc = _emit_trufflehog_with_paths(tmp_path, monkeypatch, (path,), detector=detector)
+    assert _sarif_uris(doc) == ({path} if reported else set())
 
 
 def test_emit_trufflehog_sarif_drops_named_fixture_findings(

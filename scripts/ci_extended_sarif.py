@@ -45,9 +45,8 @@ _TRUFFLEHOG_EXCLUDE_REGEXES = (
 # detector anywhere else, still reaches the review (#885). A directory or glob is
 # never an entry.
 TRUFFLEHOG_ALLOWED_FINDINGS: dict[tuple[str, str], str] = {
-    ("src/mergecraft/tracing/redaction.py", "URI"): (
-        "The URL-redaction patterns and doctests spell scheme://user:pass@host on "
-        "purpose; the module exists to mask that shape"
+    ("tests/tracing/test_redact_url.py", "URI"): (
+        "Deliberately fake basic-auth canary used to test URL-userinfo redaction; only the URI detector should match this fixture."
     ),
 }
 

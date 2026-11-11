@@ -3,9 +3,9 @@
 The path-level fixture table exempts a file from every detector. The
 finding-level allowlist is keyed on (path, detector), the same shape as the CI
 SARIF emitter's ``TRUFFLEHOG_ALLOWED_FINDINGS``, so
-``src/mergecraft/tracing/redaction.py`` is exempt from the URI detector (its
-redaction patterns spell ``scheme://user:pass@host`` on purpose) and still
-reported for every other detector.
+``tests/tracing/test_redact_url.py`` is exempt from the URI detector for its
+intentional basic-auth canary and still reported for every other detector.
+The production redaction module has no exemption.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from mergecraft.analyzers.config import (
 from mergecraft.analyzers.finding import Finding, make_finding
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_CANARY = "tests/tracing/test_redact_url.py"
 _REDACTION = "src/mergecraft/tracing/redaction.py"
 _PLANTED_FIXTURE = "tests/analyzers/fixtures/repo/config/planted-secret.env"
 
@@ -45,20 +46,22 @@ def _hit(path: str, detector: str) -> Finding:
     )
 
 
-def test_the_redaction_module_is_allowed_for_the_uri_detector_only() -> None:
+def test_the_redaction_canary_is_allowed_for_the_uri_detector_only() -> None:
     allowed = trufflehog_allowed_findings()
 
-    assert (_REDACTION, "URI") in allowed
-    assert allowed[(_REDACTION, "URI")].strip()
+    assert (_CANARY, "URI") in allowed
+    assert allowed[(_CANARY, "URI")].strip()
+    assert _CANARY not in trufflehog_named_fixture_suppressions()
+    assert (_REDACTION, "URI") not in allowed
     assert _REDACTION not in trufflehog_named_fixture_suppressions()
 
 
 def test_a_suppressed_path_detector_pair_is_not_reported() -> None:
-    assert is_trufflehog_path_suppressed(_REDACTION, detector="URI") is True
-    assert is_trufflehog_path_suppressed(f"./{_REDACTION}", detector="URI") is True
+    assert is_trufflehog_path_suppressed(_CANARY, detector="URI") is True
+    assert is_trufflehog_path_suppressed(f"./{_CANARY}", detector="URI") is True
     assert (
         is_trufflehog_path_suppressed(
-            str(_REPO_ROOT / _REDACTION), detector="URI", repo_root=_REPO_ROOT
+            str(_REPO_ROOT / _CANARY), detector="URI", repo_root=_REPO_ROOT
         )
         is True
     )
@@ -66,10 +69,11 @@ def test_a_suppressed_path_detector_pair_is_not_reported() -> None:
 
 @pytest.mark.parametrize("detector", ["AWS", "Github", "PrivateKey", "uri", None])
 def test_the_same_path_is_still_reported_for_any_other_detector(detector: str | None) -> None:
-    assert is_trufflehog_path_suppressed(_REDACTION, detector=detector) is False
+    assert is_trufflehog_path_suppressed(_CANARY, detector=detector) is False
 
 
 def test_the_pair_does_not_leak_to_another_file() -> None:
+    assert is_trufflehog_path_suppressed(_REDACTION, detector="URI") is False
     assert (
         is_trufflehog_path_suppressed("src/mergecraft/tracing/tracer.py", detector="URI") is False
     )
@@ -84,6 +88,8 @@ def test_path_level_fixture_suppressions_are_unchanged(detector: str | None) -> 
 
 def test_the_in_review_finalizer_drops_only_the_allowed_pair() -> None:
     findings = [
+        _hit(_CANARY, "URI"),
+        _hit(_CANARY, "AWS"),
         _hit(_REDACTION, "URI"),
         _hit(_REDACTION, "AWS"),
         _hit(_PLANTED_FIXTURE, "AWS"),
@@ -93,6 +99,8 @@ def test_the_in_review_finalizer_drops_only_the_allowed_pair() -> None:
     kept = _finalize_trufflehog_findings(findings, repo_root=_REPO_ROOT)
 
     assert [(f.path, f.rule_id) for f in kept] == [
+        (_CANARY, "AWS"),
+        (_REDACTION, "URI"),
         (_REDACTION, "AWS"),
         ("src/mergecraft/utils/new_source.py", "URI"),
     ]
