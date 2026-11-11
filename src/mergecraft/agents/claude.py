@@ -45,7 +45,7 @@ from mergecraft.agents.verifier import (
     VERIFIER_SYSTEM_PROMPT,
     pinned_judge_model,
 )
-from mergecraft.config.env import AgentRuntimeEnv
+from mergecraft.config.env import AgentRuntimeEnv, McpEnv
 from mergecraft.security.private_files import write_private_file
 from mergecraft.tracing._tool_attrs import (
     emit_verb_subevent,
@@ -174,8 +174,29 @@ def _strip_provider_prefix(specifier: str) -> str:
     return specifier[slash + 1 :] if slash > 0 else specifier
 
 
+# The MCP config names the per-run bearer's env var; Claude Code expands
+# ``${NAME}`` in ``--mcp-config`` server headers at load, and the value rides the
+# child env only (``_build_env``). The name comes from the model that owns it
+# (``McpEnv``), the same variable the Codex and OpenCode drivers use.
+_CLAUDE_MCP_TOKEN_ENV: str = str(McpEnv.model_fields["mcp_token"].validation_alias)
+
+
+def _claude_mcp_config_dir(ctx: AgentRunContext) -> Path:
+    """Run-temp child holding ``mcp.json``; denied to Claude's read and edit tools."""
+    return Path(ctx.tmpdir) / ".claude"
+
+
+def _claude_mcp_server_entry(ctx: AgentRunContext, agent_id: str) -> dict[str, Any]:
+    """MCP ``http`` entry whose ``Authorization`` header names the bearer's env var."""
+    entry = mcp_http_server_entry(ctx, agent_id)
+    headers = entry.get("headers")
+    if ctx.mcp_auth_token and isinstance(headers, dict):
+        headers["Authorization"] = f"Bearer ${{{_CLAUDE_MCP_TOKEN_ENV}}}"
+    return entry
+
+
 def write_mcp_config(ctx: AgentRunContext) -> str:
-    config_dir = Path(ctx.tmpdir) / ".claude"
+    config_dir = _claude_mcp_config_dir(ctx)
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "mcp.json"
     # Always write both role URLs at startup. This function runs once in the
@@ -186,8 +207,8 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
     # server; their disallowedTools list gates the reviewer-surface entries.
     # D10 (OB4): forward the orchestrator agent id on the reviewer entry so
     # the server can attribute the primary reviewer's tool.call spans.
-    reviewer_entry = mcp_http_server_entry(ctx, "claude")
-    verifier_entry = mcp_http_server_entry(ctx, VERIFIER_AGENT_NAME)
+    reviewer_entry = _claude_mcp_server_entry(ctx, "claude")
+    verifier_entry = _claude_mcp_server_entry(ctx, VERIFIER_AGENT_NAME)
     from mergecraft.review.consumer_mcp import consumer_mcp_stdio_entries
 
     # Single source of truth: main.py resolves these once, through
@@ -199,7 +220,7 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
     extra: dict[str, dict[str, object]] = (
         consumer_mcp_stdio_entries(list(resolved)) if resolved else {}
     )
-    # The entries carry the per-run MCP bearer: owner-only from creation.
+    # Owner-only from creation, like the drivers' other run config files.
     write_private_file(
         config_path,
         json.dumps(
@@ -298,9 +319,10 @@ def _claude_unmovable_secret_paths(ctx: AgentRunContext) -> list[str]:
     The static set is the runner's mounts and kernel state the image cannot
     move. The run-specific Codex ``auth.json`` is appended because the image
     controls that file's mode and a ``Read`` would otherwise expose the
-    subscription token to the reviewer.
+    subscription token to the reviewer. The run's own MCP config directory is
+    appended too: the CLI loads it, and the reviewer has no reason to read it.
     """
-    paths = list(_CLAUDE_UNMOVABLE_SECRET_PATHS)
+    paths = [*_CLAUDE_UNMOVABLE_SECRET_PATHS, str(_claude_mcp_config_dir(ctx))]
     try:
         from mergecraft.agents.codex import _codex_home
 
@@ -412,6 +434,9 @@ def _build_claude_failure_error(
 
 def _build_env(ctx: AgentRunContext) -> dict[str, str]:
     extras: dict[str, str] = {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    if ctx.mcp_auth_token:
+        # The value ``mcp.json`` references by name (``_claude_mcp_server_entry``).
+        extras[_CLAUDE_MCP_TOKEN_ENV] = ctx.mcp_auth_token
     model = (ctx.resolved_model or "").strip()
     bedrock_id = os.environ.get("BEDROCK_MODEL_ID", "").strip()
     vertex_id = os.environ.get("VERTEX_MODEL_ID", "").strip()
