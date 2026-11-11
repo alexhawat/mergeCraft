@@ -243,6 +243,19 @@ def _repo_ruleset_present(tool_id: str, repo_root: Path) -> bool:
     return detect_semgrep_repo_config(repo_root) is not None
 
 
+#: Untrusted-tier Semgrep-family flags: no ``.semgrepignore`` and no VCS ignore
+#: files from the reviewed tree decide which targets are scanned. Both flags are
+#: in Semgrep 1.170.0 and OpenGrep 1.26.0 (the catalog pins).
+_UNTRUSTED_SEMGREP_FLAGS: tuple[str, ...] = ("--x-ignore-semgrepignore-files", "--no-git-ignore")
+
+
+def _untrusted_astgrep_config_argv() -> tuple[str, ...]:
+    """``-c`` to mergeCraft's empty root config, replacing ``sgconfig.yml`` discovery."""
+    from mergecraft.analyzers.execution import neutral_config_dir
+
+    return ("-c", str(neutral_config_dir() / "sgconfig.yml"))
+
+
 def build_pattern_scan_argv(
     *,
     tool_id: str,
@@ -251,27 +264,84 @@ def build_pattern_scan_argv(
     file_paths: list[str],
     tier: TrustTier = "trusted",
 ) -> tuple[tuple[str, ...], PatternRulesetSelection]:
-    """Build argv for one pattern scan and return ruleset metadata."""
+    """Build argv for one pattern scan and return ruleset metadata.
+
+    On the untrusted tier the argv also pins the tool's own config discovery:
+    ast-grep reads mergeCraft's empty root config instead of an ``sgconfig.yml``
+    in its working directory, and Semgrep-family scans apply no ignore files.
+    """
     repo_root = repo_root.resolve()
     ruleset = resolve_pattern_ruleset(tool_id, repo_root, tier=tier)
     if tool_id == "ast-grep":
+        pinned = _untrusted_astgrep_config_argv() if tier == "untrusted" else ()
         argv = (
             binary,
             "scan",
             "--format",
             "sarif",
+            *pinned,
             *ruleset.config_argv,
             *file_paths,
         )
         return argv, ruleset
 
     adapter = _pattern_adapter(tool_id)
+    config_argv = ruleset.config_argv
+    if tier == "untrusted":
+        config_argv = (*config_argv, *_UNTRUSTED_SEMGREP_FLAGS)
     argv = adapter.build_scan_argv(
         binary=binary,
-        config_argv=ruleset.config_argv,
+        config_argv=config_argv,
         files=tuple(file_paths),
     )
     return argv, ruleset
+
+
+def _event_base_revision(repo_root: Path, event: dict[str, object] | None) -> str | None:
+    """The PR base commit named by ``event`` when it resolves in ``repo_root``."""
+    from mergecraft.analyzers.settings_pin import _event_base, _resolvable_base
+
+    sha, ref = _event_base(event)
+    if not (sha or ref):
+        return None
+    try:
+        return _resolvable_base(repo_root, sha, ref)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def astgrep_config_in_base(repo_root: Path, event: dict[str, object] | None) -> bool:
+    """Whether the PR's base revision carries ``sgconfig.yml`` (ast-grep opt-in)."""
+    from mergecraft.utils.git_hardening import git_argv
+
+    base = _event_base_revision(repo_root, event)
+    if base is None:
+        return False
+    try:
+        probe = subprocess.run(
+            git_argv(["-C", str(repo_root), "cat-file", "-e", f"{base}:sgconfig.yml"]),
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return probe.returncode == 0
+
+
+def _untrusted_astgrep_skip_reason(repo_root: Path, event: dict[str, object] | None) -> str | None:
+    """Why ast-grep does not run on this untrusted scan, or ``None`` when it does.
+
+    ast-grep is enabled by an ``sgconfig.yml``. On the untrusted tier that opt-in
+    is read from the base revision, so a config file added in the reviewed tree
+    alone does not turn the scanner on.
+    """
+    if astgrep_config_in_base(repo_root, event):
+        return None
+    return (
+        "skipped ast-grep: enabled only by an sgconfig.yml the base revision does not "
+        "carry; on the untrusted tier the opt-in is read from the base revision"
+    )
 
 
 def pattern_home_dir(scratch_dir: Path) -> Path:
@@ -308,12 +378,18 @@ def prepare_pattern_plan(
     repo_root: Path,
     file_paths: list[str],
     tier: TrustTier,
+    event: dict[str, object] | None = None,
 ) -> tuple[AnalyzerPlan, PatternRulesetSelection]:
     """Replace manifest argv with a resolved pattern scan command.
 
     ``tier`` is required so no caller can forget it: on the untrusted tier the
-    shipped default ruleset is used whatever rules the reviewed tree carries.
+    shipped default ruleset is used whatever rules the reviewed tree carries,
+    and ast-grep runs only when the base revision (``event``'s PR base; the
+    run's GitHub event when omitted) carries the ``sgconfig.yml`` that enables it.
+    A plan that may not run comes back as ``mode="skip"`` with the reason.
     """
+    from dataclasses import replace
+
     from mergecraft.analyzers.resolve import AnalyzerPlan as Plan
 
     if not plan.argv:
@@ -328,6 +404,17 @@ def prepare_pattern_plan(
         tier=tier,
     )
     config_note = f"ruleset: {ruleset.name} ({ruleset.source})"
+    if tier == "untrusted" and manifest.id == "ast-grep":
+        if event is None:
+            from mergecraft.utils.payload import read_github_event
+
+            event = read_github_event()
+        skip_reason = _untrusted_astgrep_skip_reason(repo_root.resolve(), event)
+        if skip_reason is not None:
+            return (
+                replace(plan, mode="skip", argv=(), reason=skip_reason, config_note=config_note),
+                ruleset,
+            )
     if tier == "untrusted" and _repo_ruleset_present(manifest.id, repo_root):
         config_note = f"{config_note}; repository rules not applied on the untrusted tier"
     version_note = f"{plan.version_note}; {config_note}" if plan.version_note else config_note
@@ -494,6 +581,7 @@ __all__ = [
     "PatternRulesetSelection",
     "PatternScanner",
     "SemgrepAdapter",
+    "astgrep_config_in_base",
     "augment_pattern_env",
     "build_pattern_scan_argv",
     "detect_astgrep_repo_config",

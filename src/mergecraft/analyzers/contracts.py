@@ -416,6 +416,18 @@ def run_differential_adapter(
             skip_reason=_missing_base_skip_reason(tool_id, base_ref),
         )
 
+    if tier == "untrusted" and base_ref == _FIXTURE_BASE_REF and tool_id != "squawk":
+        # Companion ``*.base.*`` files live in the reviewed tree; on the untrusted
+        # tier the comparison side must come from the base revision itself.
+        return AdapterRunResult(
+            findings=[],
+            skipped=True,
+            skip_reason=(
+                f"skipped {tool_id}: base revision unavailable; companion base files in "
+                "the reviewed tree are not used on the untrusted tier (D6)"
+            ),
+        )
+
     manifest = get_manifest(tool_id)
     if tool_id == "oasdiff":
         return _run_oasdiff(
