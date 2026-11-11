@@ -216,20 +216,20 @@ positives below; `test_slug_rules_match_github` and
   workflow, `.mergecraft/config.yaml`; `docs/workflows.md` ×1);
   `docs/dev/changelog-archive.md` → `../findings-carryover.md`; two glossary
   `#trust-tier` anchors (`README.md`, `docs/trust-policy.md`); the two
-  `config-failure-policy.md#mcp-git-tool--reviewer-surface-enforcement-257`
+  `config-failure-policy.md#mcp-git-tool--reviewer-surface-enforcement`
   anchors; and `docs/agent-roster.md` →
   `authentication.md#quick-start--init--auth--review`. Nine resolve now; the two
   glossary anchors stay RED until PD4.3. PD4.1–PD4.4 green them.
 - **The two originally-named red cases dropped as false positives:**
-  `docs/test-plans/open-issues-sweep-2026-08-22b-gd.md`'s
+  `docs/dev/test-plans/open-issues-sweep-2026-08-22b-gd.md`'s
   `[Agent skill](skills/mergecraft/SKILL.md)` is quoted **in inline code**, so
-  GitHub renders no link; and `docs/test-plans/audit-r2-p1-review-integrity.md`'s
+  GitHub renders no link; and `docs/dev/test-plans/audit-r2-p1-review-integrity.md`'s
   `.ignorelocal/…` link is de-linked (plain code span) — it never resolved in CI.
   They are replaced by the `.ignorelocal/` guard test, which is the real
   invariant.
 - **Named green cases (6):** `#how-it-works`, `#for-agents`, `#security-model`,
-  `SECURITY.md#agent-credential-broker-codex-553`,
-  `docs/trust-policy.md#agent-credential-broker-553`,
+  `SECURITY.md#agent-credential-broker-codex`,
+  `docs/trust-policy.md#agent-credential-broker`,
   `README.md#example-1--auto-review-every-pr`.
 
 ### PD4 escalation — the self-contradictory red list (2026-09-26)
@@ -247,7 +247,7 @@ gitignored path.
 **Fixes.** (1) Renderer-faithful extraction (above). (2) `_RED_LINKS` replaced by
 `_PD4_FIX_LINKS` / `test_pd4_fix_targets_resolve` — the **post-fix** target list,
 so each case proves the fix resolves. (3) The `.ignorelocal/` de-link in
-`docs/test-plans/audit-r2-p1-review-integrity.md` plus the new
+`docs/dev/test-plans/audit-r2-p1-review-integrity.md` plus the new
 `test_no_in_scope_link_enters_the_gitignored_wave_directory` guard.
 
 **Deviation from the escalation's fix list (recorded).** The escalation gave the
@@ -258,7 +258,7 @@ against `github-slugger@2.0.0`:
 
 ```text
 "Quick start — init → auth → review"              => "quick-start--init--auth--review"
-"MCP git tool — reviewer-surface enforcement (#257)" => "mcp-git-tool--reviewer-surface-enforcement-257"
+"MCP git tool — reviewer-surface enforcement " => "mcp-git-tool--reviewer-surface-enforcement"
 "Example 1 — auto-review every PR"                => "example-1--auto-review-every-pr"
 ```
 

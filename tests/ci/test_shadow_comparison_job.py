@@ -1,7 +1,7 @@
 """R4 RED suite — the shadow-comparison CI job is optional and keyless (R-D10).
 
 Wave plan: the verification/evals/receipts wave plan (R4). Test-plan doc:
-``docs/test-plans/30-verification-evals-receipts.md``.
+``docs/dev/test-plans/30-verification-evals-receipts.md``.
 
 The shadow fixture replay ships as an **optional, keyless** workflow job: a
 record step writes two hard-coded packets and a publish step reads that file.

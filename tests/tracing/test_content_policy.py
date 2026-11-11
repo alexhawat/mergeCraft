@@ -1,7 +1,7 @@
 """Content-capture policy for model payloads — OB2.1 RED suite.
 
 Wave plan: ``.ignorelocal/waves/04-observability-eval-wave-plan.md`` (PR OB2,
-sub-wave OB2.1). Test-plan doc: ``docs/test-plans/04-observability-eval.md``.
+sub-wave OB2.1). Test-plan doc: ``docs/dev/test-plans/04-observability-eval.md``.
 
 Pins the OB2 contracts against the OB2.2 target API, which does not exist yet:
 

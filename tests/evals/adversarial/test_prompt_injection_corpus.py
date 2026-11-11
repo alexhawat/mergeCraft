@@ -3,7 +3,7 @@
 Authored RED for PR EV3 (sub-wave EV3.1; implementation EV3.2 landed in
 ``0aff25c``; xfail markers reconciled post-EV3.2). Wave plan:
 ``.ignorelocal/waves/04-observability-eval-wave-plan.md``; test-plan doc:
-``docs/test-plans/04-observability-eval.md``.
+``docs/dev/test-plans/04-observability-eval.md``.
 
 The injection fence shipped in W4 (``mergecraft.utils.fence``: nonce-bound
 ``render_untrusted`` / ``fence_unless_trusted`` with delimiter neutralization)

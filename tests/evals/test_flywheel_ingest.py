@@ -1,7 +1,7 @@
 """R5 RED suite — golden-flywheel ingest with mandatory provenance (#738).
 
 Wave plan: the verification/evals/receipts wave plan (R5). Test-plan doc:
-``docs/test-plans/30-verification-evals-receipts.md``.
+``docs/dev/test-plans/30-verification-evals-receipts.md``.
 
 This wave ingests production false positives and human dismissals into the
 versioned structural bank (``evals/cases``), each entry carrying an explicit

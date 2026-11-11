@@ -11,7 +11,7 @@ Locked decisions covered: **E-D2** (keyless structural PR gate), **E-D3**
 **E-D10** (`tests/` has one writer). E0 fallout: ablation product and its
 suite are gone — do not restore `AblationConfig` / `run_ablation` /
 `ABLATION_DIMENSIONS`. The W10.2 mapping in
-`docs/test-plans/open-issues-sweep-2026-08-20d-b-runtime.md` is superseded.
+`docs/dev/test-plans/open-issues-sweep-2026-08-20d-b-runtime.md` is superseded.
 
 ## E0 fallout (green)
 

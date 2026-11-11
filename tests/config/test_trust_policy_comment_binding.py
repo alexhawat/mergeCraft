@@ -2,7 +2,7 @@
 
 Wave plan: ``.ignorelocal/waves/40-trust-boundaries-wave-plan.md`` (TB1).
 
-Locked contracts exercised here (test-plan ``docs/test-plans/trust-boundaries.md``):
+Locked contracts exercised here (test-plan ``docs/dev/test-plans/trust-boundaries.md``):
 
 * **TB-D1** — ``is_fork_pull_request`` returns True when ``pull_request`` is absent
   and ``issue.pull_request`` is present, or when a ``workflow_dispatch`` payload

@@ -2,7 +2,7 @@
 
 RED suite for PR EV2 (sub-wave EV2.1; implementation EV2.2). Wave plan:
 ``.ignorelocal/waves/04-observability-eval-wave-plan.md``; test-plan doc:
-``docs/test-plans/04-observability-eval.md``.
+``docs/dev/test-plans/04-observability-eval.md``.
 
 Merge gating deserves its own number (plan §EV2.1): a review that is precise
 overall but wrong on blocker-severity findings is a materially worse gate than

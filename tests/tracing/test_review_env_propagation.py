@@ -1,7 +1,7 @@
 """Review identity crosses the agent subprocess boundary — OB1.1 RED suite (part 2 of 3).
 
 Wave plan: ``.ignorelocal/waves/04-observability-eval-wave-plan.md`` (PR OB1,
-sub-wave OB1.1, finding O2). Test-plan doc: ``docs/test-plans/04-observability-eval.md``.
+sub-wave OB1.1, finding O2). Test-plan doc: ``docs/dev/test-plans/04-observability-eval.md``.
 
 O2: subagents run in spawned CLI subprocesses, and
 ``agents/shared.py::spawn_agent_cli`` is the single choke point for all five

@@ -35,7 +35,6 @@ _ALLOWLIST_PATHS = frozenset(
     }
 )
 _ALLOWLIST_PREFIXES = (
-    "docs/test-plans/",
     "docs/dev/test-plans/",
     "evals/",
     ".github/agents/",

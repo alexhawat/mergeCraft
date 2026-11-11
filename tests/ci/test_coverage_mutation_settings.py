@@ -37,7 +37,7 @@ def test_finding_source_is_unchanged_by_this_plan() -> None:
 
 def test_docs_state_what_green_does_not_prove() -> None:
     """C-D10: a surviving mutant is evidence; zero survivors is not proof."""
-    text = (REPO_ROOT / "docs" / "test-plans" / "crap-mutation-evidence.md").read_text(
+    text = (REPO_ROOT / "docs" / "dev" / "test-plans" / "crap-mutation-evidence.md").read_text(
         encoding="utf-8"
     )
     assert C_D10_WEAK_TEST in text

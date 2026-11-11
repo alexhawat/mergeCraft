@@ -1,7 +1,7 @@
 """Reasoning / thinking capture — OB3.1 RED suite (part 3 of 4).
 
 Wave plan: ``.ignorelocal/waves/04-observability-eval-wave-plan.md`` (PR OB3,
-sub-wave OB3.1, finding O6). Test-plan doc: ``docs/test-plans/04-observability-eval.md``.
+sub-wave OB3.1, finding O6). Test-plan doc: ``docs/dev/test-plans/04-observability-eval.md``.
 
 Pins the OB3.2 builder ``thinking_attrs`` in ``mergecraft.tracing.genai``
 (new). **D9 is the load-bearing decision: reasoning inherits the prompt gate,

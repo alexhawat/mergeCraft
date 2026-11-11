@@ -208,7 +208,7 @@ def _apply_non_blocking_downgrade(
     transaction and no record of whether a row's severity is the original or a
     rewrite. The overlay design that would make it one write is declined and
     written up under "Deferred designs the review rounds declined" in
-    ``docs/test-plans/open-issues-sweep-2026-08-19.md``.
+    ``docs/dev/test-plans/open-issues-sweep-2026-08-19.md``.
     """
     ctx.tool_state.verified_ids.discard(fingerprint)
     if ctx.tool_state.analyzer_run is not None:

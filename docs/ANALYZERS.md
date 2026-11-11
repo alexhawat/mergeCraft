@@ -101,9 +101,15 @@ appears as an `unavailable` row in the Analyzers pre-merge summary.
   `MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME=1` in its parent environment.
   It is not a repo config field or an Action input. The GitHub Action
   image typically lacks `CAP_NET_ADMIN` / `CAP_SYS_ADMIN` for that host
-  path; it instead uses a userspace backend (user+net namespace plus a
-  parent TCP relay) so untrusted allowlisted analyzers can reach declared
-  hosts and cannot reach undeclared ones without those capabilities.
+  path, so it falls back to a userspace backend (user+net namespace plus a
+  parent TCP relay). That backend is refused when mergeCraft runs as root,
+  because its user namespace maps root to root and the analyzer's
+  privilege drop could not take effect (`build_analyzer_sandbox_argv_for_run()`
+  raises, and the analyzer ends as `unavailable`). The Action image runs
+  mergeCraft as root, so **in the Action container allowlisted network
+  analyzers such as `osv-scanner` and `trivy` do not run on untrusted
+  pull requests**; they run on trusted events, and on a non-root runner
+  where the userspace backend is available.
   The host-FORWARD opt-in asserts external filesystem isolation; the
   network backend does not provide host filesystem confidentiality.
   Within either backend, untrusted allowlisted analyzers are confined to
@@ -141,6 +147,27 @@ appears as an `unavailable` row in the Analyzers pre-merge summary.
 - **mode** (`analyzers:` in the workflow) — `off | auto | full |
   untrusted-only`. Enforced by `evaluate_manifest_for_mode()` plus
   `resolve_selection_tier()`.
+
+### What untrusted and trusted runs get
+
+- **Untrusted tier** (fork heads, `pull_request_target`): analyzers run in a
+  pid + net + mount namespace with the source read-only, a private tmpfs,
+  capabilities dropped, memory and process limits, and a timeout that kills
+  the whole namespace. If the runner cannot provide that isolation, the
+  analyzer does not run: it is a named skip, or an `unavailable` row.
+  Binaries come only from mergeCraft's pinned managed cache or a container;
+  nothing under the checkout is probed or executed (`resolve_analyzer()`).
+  Scanners read rules and configuration from mergeCraft's bundled files or
+  the base revision, never from the PR head, and a PR that changes a scanner
+  config, ignore or plugin file produces a `scanner-config-changed` finding
+  (`scanner_config_change_findings()`).
+- **Trusted tier** (`workflow_dispatch`, same-repo `pull_request`): analyzers
+  run in the orchestrator's trust domain, with no namespace, no network
+  isolation and no resource limits (on a root orchestrator the payload still
+  drops to the agent user with capabilities cleared), and may execute
+  repo-authored tool configuration (for example linter plugins). The tier is a statement that
+  the head is trusted, not a sandbox. Namespace wrapping and limits apply to
+  a trusted run only when a filtered-egress session is in use.
 
 On macOS, `sandbox-exec` is the MCP-shell backend (reads limited to the
 workspace, system paths and common toolchain directories, with the rest
@@ -250,7 +277,7 @@ For any given gate, in order — the first that can produce a verdict wins:
 3. **A managed pinned binary**, then **a container**.
 4. **Skip, with a named reason.** A skip is never a finding.
 
-## CI evidence (#36)
+## CI evidence
 
 The Action image usually lacks `make`, the repo's venv, and its pinned toolchains, so a repo-native gate reports `unavailable` even when the consumer's own CI just proved the same thing. Declaring the mapping lets that finished CI stand in:
 
@@ -272,7 +299,7 @@ ciEvidence:
 - **Reported, not blamed.** Bare check-run findings start non-blocking; SARIF `error` from declared `sarifArtifacts` keeps Major/Critical. `introduced_by_pr` stays `unknown` until `ci/blame.py` / `ci/flaky.py` attribute a finding to this PR.
 - **Redacted.** Log excerpts are truncated and passed through `analyzers/redact.py` before they enter a finding.
 
-## SARIF upload to code scanning (#39)
+## SARIF upload to code scanning
 
 Opt-in, off by default. When enabled, mergeCraft exports the analyzer findings of a pull-request run as SARIF 2.1.0 and uploads them to GitHub code scanning, so mechanical findings stay readable when the review narrative is thin or when findings overflowed the inline comment budget.
 

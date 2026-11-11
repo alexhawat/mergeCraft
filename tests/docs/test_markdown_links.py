@@ -196,11 +196,11 @@ _PD4_FIX_LINKS: tuple[tuple[str, str], ...] = (
     ("docs/trust-policy.md", "glossary.md#trust-tier"),
     (
         "docs/_mcp_reviewer_tools.md",
-        "config-failure-policy.md#mcp-git-tool--reviewer-surface-enforcement-257",
+        "config-failure-policy.md#mcp-git-tool--reviewer-surface-enforcement",
     ),
     (
         "docs/mcp-tools.md",
-        "config-failure-policy.md#mcp-git-tool--reviewer-surface-enforcement-257",
+        "config-failure-policy.md#mcp-git-tool--reviewer-surface-enforcement",
     ),
     # True GitHub slug of `## Quick start — init → auth → review`: github-slugger
     # 2.0.0 strips both the em dash and the arrow, leaving a double hyphen (the same
@@ -213,8 +213,8 @@ _GREEN_LINKS: tuple[tuple[str, str], ...] = (
     ("README.md", "#how-it-works"),
     ("README.md", "#for-agents"),
     ("docs/workflows.md", "#security-model"),
-    ("docs/trust-policy.md", "../SECURITY.md#agent-credential-broker-codex-553"),
-    ("SECURITY.md", "docs/trust-policy.md#agent-credential-broker-553"),
+    ("docs/trust-policy.md", "../SECURITY.md#agent-credential-broker-codex"),
+    ("SECURITY.md", "docs/trust-policy.md#agent-credential-broker"),
     ("docs/install.md", "../README.md#example-1--auto-review-every-pr"),
 )
 

@@ -2,7 +2,7 @@
 
 RED suite for PR EV2 (sub-wave EV2.1; implementation EV2.2). Wave plan:
 ``.ignorelocal/waves/04-observability-eval-wave-plan.md``; test-plan doc:
-``docs/test-plans/04-observability-eval.md``.
+``docs/dev/test-plans/04-observability-eval.md``.
 
 A review that reports the same defect three times in three phrasings reads as
 thorough and scores as noisy. EV2.2 extends :class:`ScoreReport` with a

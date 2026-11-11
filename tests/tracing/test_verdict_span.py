@@ -1,7 +1,7 @@
 """Verdict span — OB4.1 RED suite (part 4 of 5).
 
 Wave plan: ``.ignorelocal/waves/04-observability-eval-wave-plan.md`` (PR OB4,
-sub-wave OB4.1, finding O9). Test-plan doc: ``docs/test-plans/04-observability-eval.md``.
+sub-wave OB4.1, finding O9). Test-plan doc: ``docs/dev/test-plans/04-observability-eval.md``.
 
 Pins the OB4.2 point-span emitter ``emit_verdict`` in
 ``mergecraft.tracing.signals`` (new), emitted where the publish path already

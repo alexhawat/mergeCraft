@@ -1,7 +1,7 @@
 """R5 structural guard — flywheel ingest adds no required PR check (R-D10).
 
 Wave plan: the verification/evals/receipts wave plan (R5). Test-plan doc:
-``docs/test-plans/30-verification-evals-receipts.md``.
+``docs/dev/test-plans/30-verification-evals-receipts.md``.
 
 #738 says ingested cases participate in the **keyless** ``eval replay-bank`` /
 ``eval-gate`` path as structural cases only, and the wave plan pins that the

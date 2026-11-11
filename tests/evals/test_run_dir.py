@@ -2,7 +2,7 @@
 
 RED suite for PR EV1 (sub-wave EV1.1; implementation EV1.2). Wave plan:
 ``.ignorelocal/waves/04-observability-eval-wave-plan.md``; test-plan doc:
-``docs/test-plans/04-observability-eval.md``.
+``docs/dev/test-plans/04-observability-eval.md``.
 
 ``run_live_detection`` builds its run id as ``f"{provider}-{model}-{stamp}-{suffix}"``
 and joins it onto ``results_dir / "raw-findings"`` — a routed model slug such as

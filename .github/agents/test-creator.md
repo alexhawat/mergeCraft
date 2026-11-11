@@ -5,7 +5,7 @@ description: >-
   `test-creator` sub-wave, right after the plan's design/contract gate) under the tests-first
   (red→green) model. Single owner of `tests/` — writes unit, integration, and functional/E2E
   tests covering happy path, edge cases, and error handling against the locked contracts,
-  documents them in a `docs/test-plans/<slug>.md`, and leaves the suite RED (collects + lints +
+  documents them in a `docs/dev/test-plans/<slug>.md`, and leaves the suite RED (collects + lints +
   typechecks clean, assertions fail pending implementation). Other agents are FORBIDDEN from
   editing tests; implementation waves only make the suite green. Use when a wave plan names a
   `test-creator` sub-wave, or when the user asks to author the test suite for a plan before
@@ -129,7 +129,7 @@ A test for a contract a **later** wave will satisfy must use a **non-strict** xf
 ## Deliverables
 
 1. The full test suite under the package's `tests/` directory.
-2. A **test-plan doc** at `docs/test-plans/<plan-slug>.md` mapping **each contract → the test
+2. A **test-plan doc** at `docs/dev/test-plans/<plan-slug>.md` mapping **each contract → the test
    files/classes that cover it** across the matrix above. Keep it current as you reconcile markers.
 3. **Update the wave plan file** (mandatory close-out — a `test-creator` sub-wave is NOT done
    without this):
@@ -156,8 +156,8 @@ one-line rationale appended to the test-plan doc. **No other agent may change a 
 
 ## You MUST NOT
 
-- Edit any non-test file (`src/…`, `Makefile` logic, schemas) — tests + `docs/test-plans/` +
+- Edit any non-test file (`src/…`, `Makefile` logic, schemas) — tests + `docs/dev/test-plans/` +
   the plan file's checkboxes only.
 - Use `strict=True` on a cross-wave xfail.
 - Claim a test passes that is red.
-- Commit anything outside `tests/`, `docs/test-plans/`, and the plan file.
+- Commit anything outside `tests/`, `docs/dev/test-plans/`, and the plan file.

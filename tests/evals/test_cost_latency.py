@@ -2,7 +2,7 @@
 
 RED suite for PR EV2 (sub-wave EV2.1; implementation EV2.2). Wave plan:
 ``.ignorelocal/waves/04-observability-eval-wave-plan.md``; test-plan doc:
-``docs/test-plans/04-observability-eval.md``.
+``docs/dev/test-plans/04-observability-eval.md``.
 
 A benchmark run's latency story is its tail, not its mean — so the published
 result set reports percentiles (plan §EV2.1: ``test_p50_and_p95_reported``).

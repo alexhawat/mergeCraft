@@ -51,7 +51,7 @@ severities (`Critical`, `Major`, `Minor`, `Trivial`). CI calls `severity_map_com
 - Untrusted fork PRs: no secret verification, no network unless allowlisted.
 - Container-only heavy tools: `runtime: container`, `default_enabled: false`.
 
-## Eligibility under `shell: disabled` (#35)
+## Eligibility under `shell: disabled`
 
 Hardened consumers run `pull_request_target` with `shell: disabled`, meaning
 mergeCraft must execute nothing the PR could have written. Your manifest runs on

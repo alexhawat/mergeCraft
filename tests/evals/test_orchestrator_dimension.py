@@ -2,7 +2,7 @@
 
 RED suite for PR EV2 (sub-wave EV2.1; implementation EV2.2). Wave plan:
 ``.ignorelocal/waves/04-observability-eval-wave-plan.md``; test-plan doc:
-``docs/test-plans/04-observability-eval.md``.
+``docs/dev/test-plans/04-observability-eval.md``.
 
 File 3's W-23 asks whether ``hybrid`` actually beats ``llm`` on this corpus —
 that question is unanswerable until the benchmark scores **per orchestrator
