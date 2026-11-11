@@ -279,9 +279,11 @@ running with secrets in scope rather than treating it as decisive.
 ## Action pin and evidence artifacts
 
 Pin `uses: alexhawat/mergeCraft@…` to a full commit SHA or a release tag
-([distribution](distribution.md)). If a workflow uses the Action in several
-steps, hoist the ref to one workflow-level `env:` variable so a bump is a single
-edit, and gate the copies against each other in CI.
+([distribution](distribution.md)). `uses:` accepts no expressions, so it cannot
+read an `env:` value; write the literal ref on every step. If a workflow uses
+the Action in several steps, you can record the canonical ref in a
+workflow-level `env:` entry and have a CI check compare each literal `uses:`
+against it.
 
 After each review rung, the workflow persists the `evidence_packet` action output
 to disk and uploads it as an artifact (`if: always()`):

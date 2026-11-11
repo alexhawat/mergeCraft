@@ -171,7 +171,10 @@ not a token permission boundary; a compromised reviewer can forge its own checks
 - Output: the separate approval App posts APPROVE for that head only after the
   current head is checked again. Missing or identical App IDs fail closed.
 
-The trust levels above are not GitHub token permission restrictions.
+The trust levels above are not GitHub token permission restrictions. At
+`selfReview: full`, `prApproveEnabled: false` is what keeps normal publication at
+COMMENT; enabling `prApproveEnabled` lets the run's own terminal verdict post
+APPROVE.
 
 The reviewing workflow (`mergecraft.yml`) stays on `pull_request_target` only.
 Do not add a `pull_request` trigger to earn "trusted" tier: it hands credentials

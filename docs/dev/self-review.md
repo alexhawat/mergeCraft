@@ -10,17 +10,20 @@ Consumers wiring mergeCraft into their own repositories want
 
 ## Action pin
 
-This repository's `.github/workflows/mergecraft.yml` hoists the review Action SHA to a
-single workflow-level variable:
+This repository's `.github/workflows/mergecraft.yml` records the review Action SHA
+in a single workflow-level variable, the canonical ref:
 
 ```yaml
 env:
   MERGECRAFT_ACTION_SHA: "<40-char-sha>"
 ```
 
-All three review rungs (`uses: alexhawat/mergeCraft@…`) derive from that value,
-with a `# env.MERGECRAFT_ACTION_SHA` comment suffix on each line. A bump is one
-edit, and two targets guard it (#532):
+`uses:` accepts no expressions, so each of the three review rungs
+(`uses: alexhawat/mergeCraft@…`) carries the literal SHA with a
+`# env.MERGECRAFT_ACTION_SHA` comment suffix. Nothing interpolates the variable.
+A bump rewrites the variable and every literal together
+(`scripts/bump_action_pin.py`), and two targets compare each literal against
+the variable (`scripts/check_action_pin_freshness.py`):
 
 | Target | Rules | Where it runs |
 | --- | --- | --- |
@@ -114,7 +117,8 @@ this repository's own self-review at:
 
 | Knob | Level | Effect on this repo |
 |------|-------|---------------------|
-| `trust.selfReview` | `analyzers` | Trusted-tier analyzers run on same-repo `pull_request_target` PRs; the agent still cannot APPROVE, and structural approval stays in `mergecraft-approve.yml` |
+| `trust.selfReview` | `full` | Execution and authority trust are both trusted on same-repo `pull_request_target` PRs, so trusted-tier analyzers run and the run's own verdict could unlock approval semantics |
+| `prApproveEnabled` | `false` | The switch that keeps publication at COMMENT. Enabling it with `selfReview: full` would let the agent's own terminal verdict post APPROVE; real approval stays in `mergecraft-approve.yml` |
 | `trust.agentSandbox` | `same-repo` | `MERGECRAFT_CODEX_SANDBOX=danger-full-access` is honoured on any non-fork head |
 
 Those knobs are read from the base-branch config snapshot at run start, so a
