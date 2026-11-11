@@ -1,11 +1,9 @@
-"""Documentation URIs and the redaction patterns stop flagging themselves (#885).
+"""The URI detector exception is scoped to the real URL-redaction test canary (#1217).
 
-TruffleHog's ``URI`` detector matches ``scheme://user:password@host``. The
-redaction module is *about* that shape — its patterns and doctests spell it out
-on purpose — and the tracing doc shows the same example, so every self-review
-reported them as "URI secret detected". The allowlist is finding-level, not
-path-level: one file, one detector. A different detector in the same file, or
-the same detector in any other file, still reaches the review.
+TruffleHog's ``URI`` detector matches basic-auth userinfo. The actual
+canary is ``tests/tracing/test_redact_url.py``; it must be exempt for URI only.
+The file remains scanned by other detectors, and the same detector in every
+other file still reaches the review.
 """
 
 from __future__ import annotations
@@ -23,7 +21,7 @@ from tests.ci.workflow_support import REPO_ROOT, read_text
 if TYPE_CHECKING:
     from pathlib import Path
 
-_REDACTION = "src/mergecraft/tracing/redaction.py"
+_CANARY = "tests/tracing/test_redact_url.py"
 
 
 def _module() -> Any:
@@ -66,10 +64,10 @@ def _emit(
     ]
 
 
-def test_the_redaction_modules_own_uri_patterns_no_longer_flag(
+def test_the_real_url_redaction_canary_is_suppressed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    emitted = _emit(tmp_path, monkeypatch, [(_REDACTION, "URI", line) for line in range(1, 8)])
+    emitted = _emit(tmp_path, monkeypatch, [(_CANARY, "URI", line) for line in range(1, 8)])
     assert emitted == []
 
 
@@ -79,23 +77,24 @@ def test_a_real_secret_in_the_same_file_still_flags(
     emitted = _emit(
         tmp_path,
         monkeypatch,
-        [(_REDACTION, "URI", 62), (_REDACTION, "AWS", 70), (_REDACTION, "Github", 71)],
+        [(_CANARY, "URI", 62), (_CANARY, "AWS", 70), (_CANARY, "Github", 71)],
     )
-    assert emitted == [(_REDACTION, "AWS"), (_REDACTION, "Github")]
+    assert emitted == [(_CANARY, "AWS"), (_CANARY, "Github")]
 
 
 def test_a_uri_secret_in_any_other_file_still_flags(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     other = "src/mergecraft/utils/new_secret_source.py"
-    emitted = _emit(tmp_path, monkeypatch, [(other, "URI", 3), (_REDACTION, "URI", 4)])
+    emitted = _emit(tmp_path, monkeypatch, [(other, "URI", 3), (_CANARY, "URI", 4)])
     assert emitted == [(other, "URI")]
 
 
 def test_the_allowlist_is_finding_level_and_every_entry_is_reasoned() -> None:
     module = _module()
     allowed = dict(module.TRUFFLEHOG_ALLOWED_FINDINGS)
-    assert (_REDACTION, "URI") in allowed
+    assert (_CANARY, "URI") in allowed
+    assert ("src/mergecraft/tracing/redaction.py", "URI") not in allowed
     for (path, detector), reason in allowed.items():
         assert detector, f"{path}: an allowlist entry must name the detector, not just a path"
         assert (REPO_ROOT / path).is_file(), f"stale allowlist entry: {path}"

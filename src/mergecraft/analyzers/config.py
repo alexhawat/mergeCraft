@@ -16,9 +16,6 @@ _TRUFFLEHOG_NAMED_FIXTURE_SUPPRESSIONS: dict[str, str] = {
     "tests/analyzers/fixtures/repo/config/planted-secret.env": (
         "Intentional planted-secret fixture for detector wiring"
     ),
-    "tests/tracing/test_redact_url.py": (
-        "Contains secret-shaped strings so URL redaction can be tested"
-    ),
     "tests/security/test_credentials.py": (
         "Credential-shaped fixtures used by the credentials test suite"
     ),
@@ -42,9 +39,8 @@ _TRUFFLEHOG_NAMED_FIXTURE_SUPPRESSIONS: dict[str, str] = {
 # ``TRUFFLEHOG_ALLOWED_FINDINGS`` in ``scripts/ci_extended_sarif.py`` (a test
 # pins the two equal) so the review and the CI emitter allow the same pairs.
 _TRUFFLEHOG_ALLOWED_FINDINGS: dict[tuple[str, str], str] = {
-    ("src/mergecraft/tracing/redaction.py", "URI"): (
-        "The URL-redaction patterns and doctests spell scheme://user:pass@host on "
-        "purpose; the module exists to mask that shape"
+    ("tests/tracing/test_redact_url.py", "URI"): (
+        "Deliberately fake basic-auth canary used to test URL-userinfo redaction; only the URI detector should match this fixture."
     ),
 }
 _TRUFFLEHOG_VENV_MARKERS = frozenset({".venv", ".venv-dev", "venv", "site-packages"})
