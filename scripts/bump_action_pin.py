@@ -107,9 +107,7 @@ def prepare_pin(repo: Path, manifest: str, base_branch: str = "pre-0.0.1") -> di
     expected: dict[str, str] = {}
     changed = False
     consumer_pins = 0
-    candidates = [
-        f".github/workflows/{name}" for name in ("mergecraft.yml", "mergecraft-approve.yml")
-    ]
+    candidates = [".github/workflows/mergecraft.yml"]
     tracked = _git(repo, "ls-tree", "--name-only", head, "--", *candidates).splitlines()
     for name in tracked:
         content = _git(repo, "show", f"{head}:{name}")

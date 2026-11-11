@@ -1,7 +1,7 @@
 # mergeCraft repo-config for this repo's self-review consumer workflow.
 # See docs/trust-policy.md for trust knobs and docs/REVIEW-DOCTRINE.md for review posture.
-# Review publication remains COMMENT; the isolated App approval job is the
-# only self-review path that should submit APPROVE.
+# Review publication remains COMMENT; the `mergecraft review` status check is
+# the merge gate. There is no separate App APPROVE.
 # G5 (#775): the reviewer roster must name a model whose provider the workflow
 # actually wires a credential for. Left unset, the registry default falls back to
 # the synthetic `auto/efficient` AutoTier, whose `auto` provider has no credential

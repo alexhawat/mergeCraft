@@ -194,10 +194,8 @@ issues-showcase-readiness follow-up. -->
 - **The approval check is structural** — `success` requires a completed trusted
   run with no Critical/Major findings; `failure` on any blocker; `neutral` for
   crashes, timeouts, and untrusted tiers. The agent's narrative approval is
-  advisory only. This check cannot independently authorize privileged approval.
-  A maintainer explicitly dispatches
-  [`mergecraft-approve.yml`](../.github/workflows/mergecraft-approve.yml)
-  with the accepted run/head and a distinct approval App — see
+  advisory only. This check is the merge gate; a formal APPROVE review needs
+  `trust.selfReview: full` plus `prApproveEnabled` — see
   [trust policy](trust-policy.md).
 - **Analyzers under low trust run untrusted-only** — no secrets, no network, no
   PR-authored command construction; exclusions are reported as named skips.
@@ -324,14 +322,11 @@ scope.
 Full rationale in the collapsible sections of
 [documentation index](README.md).
 
-### Approval workflow
+### Approval
 
-Approval runs in a separate `mergecraft-approve` workflow that a maintainer
-dispatches by hand on the default branch with a reviewed run ID and the full PR
-head SHA. It uses a distinct approval App whose credentials never enter the
-reviewer Action, and it approves only when the run's own evidence-packet verdict
-is `success` and a matching check was issued for that run and head. See
-[trust policy](trust-policy.md#why-mergecraft-approveyml-exists) and
-[App setup](authentication.md#reviewer-and-approval-app-identity). How this
+mergeCraft posts a COMMENT review plus the `mergecraft review` status check; the
+check is the merge gate. A formal APPROVE needs both authority trust (`trust.selfReview: full`) and
+`prApproveEnabled: true`. See [trust policy](trust-policy.md#approval-and-the-merge-gate)
+and [App setup](authentication.md#reviewer-app-identity). How this
 repository runs its own self-review is in
 [`docs/dev/self-review.md`](dev/self-review.md).

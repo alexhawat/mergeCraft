@@ -21,12 +21,6 @@ rules:
       # number reaches the CLI via `env:`, not a `run:` interpolation.
       # Authorization = the merge itself.
       - findings-carryover.yml
-      # Maintainer-dispatched approval (`workflow_dispatch` only; no
-      # `workflow_run`). Checks out only the trusted default-branch helper, then
-      # re-reads the selected mergecraft run and posts an APPROVE as a separate
-      # approval App, pinned to the exact head SHA the maintainer supplied.
-      # Runs no PR-controlled code. See docs/trust-policy.md.
-      - mergecraft-approve.yml
   cache-poisoning:
     ignore:
       # security job analyzer-cache: step runs only on push (not pull_request);

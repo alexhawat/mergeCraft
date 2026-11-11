@@ -1,8 +1,7 @@
 # Every path requires review from the owner before merge.
 # The ruleset "protect-main" enforces code-owner review on the default branch.
 # @sevn-one is a second code owner (a user account). GitHub Apps cannot be named
-# in CODEOWNERS, so an App's APPROVE (mergecraft-approve.yml, dispatched by a
-# maintainer) does not satisfy code-owner review.
+# in CODEOWNERS, so an App review cannot satisfy code-owner review.
 #
 # Both owners MUST stay on one line: CODEOWNERS resolves each file to only
 # its LAST matching pattern, so two separate `*` lines (as briefly landed

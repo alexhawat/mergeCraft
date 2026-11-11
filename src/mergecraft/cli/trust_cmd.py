@@ -351,8 +351,9 @@ def set_self_review_cmd(
             )
         console.print(
             "WARNING: trust.selfReview=full grants approval authority to self-review "
-            "on same-repo pull_request_target. Real GitHub APPROVE for merge still "
-            "flows through mergecraft-approve.yml when configured."
+            "on same-repo pull_request_target. Self-review still posts a COMMENT "
+            "review unless prApproveEnabled is also true; the `mergecraft review` status "
+            "check is the merge gate."
         )
 
     if gh_apply:

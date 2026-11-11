@@ -102,10 +102,11 @@ The `trust.selfReview` knob adjusts **execution trust** for same-repo
 - **Default `off`** — byte-identical to pre-knob behaviour; `derive_trust_tier()`
   still returns untrusted for `pull_request_target` on the authority axis.
 - **`analyzers`** — trusted-tier analyzers only; authority trust stays untrusted;
-  real GitHub APPROVE still flows through `mergecraft-approve.yml`.
+  the agent cannot post APPROVE.
 - **`full`** — explicit operator opt-out of the authority/execution
   separation from PR #200; requires CLI confirmation and run-start warning;
-  documented as exceptional.
+  documented as exceptional. Only here can the agent post a formal APPROVE, and
+  only when `prApproveEnabled` is also true.
 - **Fork PRs** — both axes stay untrusted at every level.
 - **Base snapshot** — policy is read from the default-branch config snapshot
   at run start; a PR-head edit to `.mergecraft/config.yaml` cannot raise its own

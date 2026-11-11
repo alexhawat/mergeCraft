@@ -72,7 +72,10 @@ def main() -> None:
         or pr["base"]["sha"] != base
     ):
         raise SystemExit("PR snapshot changed; the image verdict is stale")
-    event = "APPROVE" if passed else "REQUEST_CHANGES"
+    # A COMMENT review, never APPROVE/REQUEST_CHANGES: the reviewer App often authored
+    # the manifest PR, and GitHub rejects an approval by the PR author. The job's own
+    # exit status (the SystemExit below) is what the merge gate reads.
+    event = "COMMENT"
     api(
         f"repos/{repo}/pulls/{number}/reviews",
         "-f",

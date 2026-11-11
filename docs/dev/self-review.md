@@ -56,14 +56,11 @@ A failed mint preserves the existing job-token review path. Per-attempt minting
 avoids reusing a one-hour token throughout the 95-minute fallback cascade.
 Tokens have real post-job revocation through the pinned official token action.
 
-The separate `mergecraft-approve` workflow runs only when a maintainer explicitly
-dispatches it on the default branch with a reviewed run ID and full PR head SHA.
-It uses a distinct approval App; its credentials never enter the reviewer action.
-Identical or missing App IDs disable approval. The reviewer can publish reviews
-and checks, so COMMENT-only configuration and check provenance are not an
-independent approval boundary. A forged reviewer check cannot trigger this
-workflow: automatic `workflow_run` approval is removed and reviewer tokens have
-no Actions write permission.
+This repository has no separate App approval workflow. Self-review publishes a
+COMMENT review and the `mergecraft review` status check; that check is the merge
+gate, and code-owner review stays a human decision. The reviewer can publish
+reviews and checks, so COMMENT-only configuration and check provenance are not an
+independent approval boundary.
 
 **Gate provenance.** The approval gate trusts **this run's own evidence-packet
 verdict** — the review job exposes the final `decision.verdict` (`success` /
@@ -78,17 +75,9 @@ output verdict. A missing or empty verdict, a conclusion that disagrees, or a
 check that cannot be attributed to this run all fail closed with a named reason;
 the only thing that passes is output `success` plus a corroborating check.
 
-The helper executes only trusted default-branch code, fetches the selected
-mergecraft run from GitHub, and verifies its workflow path, App-authenticated
-check, run/attempt and explicitly accepted current PR head. Missing configuration,
-API failures, unrelated checks and moved heads do not approve. It rechecks the
-head before posting an explicit `commit_id`; stale-approval repository rules
-remain necessary for racing or later pushes. See
-[App setup and acceptance](../authentication.md#reviewer-and-approval-app-identity).
-
 The structural check also carries `external_id=<run ID>:<run attempt>`.
-The approval helper requires that exact attempt identity, so an older image
-that does not emit it cannot authorize approval. Deploy the updated image and
+The approval gate requires that exact attempt identity, so an older image
+that does not emit it cannot pass the gate. Deploy the updated image and
 workflow together; a matching run URL alone is insufficient after a rerun.
 
 ## Codex login write-back
@@ -118,7 +107,7 @@ this repository's own self-review at:
 | Knob | Level | Effect on this repo |
 |------|-------|---------------------|
 | `trust.selfReview` | `full` | Execution and authority trust are both trusted on same-repo `pull_request_target` PRs, so trusted-tier analyzers run and the run's own verdict could unlock approval semantics |
-| `prApproveEnabled` | `false` | The switch that keeps publication at COMMENT. Enabling it with `selfReview: full` would let the agent's own terminal verdict post APPROVE; real approval stays in `mergecraft-approve.yml` |
+| `prApproveEnabled` | `false` | The switch that keeps publication at COMMENT. Enabling it with `selfReview: full` would let the agent's own terminal verdict post APPROVE; this repository does not enable it |
 | `trust.agentSandbox` | `same-repo` | `MERGECRAFT_CODEX_SANDBOX=danger-full-access` is honoured on any non-fork head |
 
 Those knobs are read from the base-branch config snapshot at run start, so a
