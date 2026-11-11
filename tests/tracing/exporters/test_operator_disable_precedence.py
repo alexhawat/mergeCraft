@@ -126,3 +126,18 @@ def test_env_false_writes_no_trace_file(tmp_path: Path, monkeypatch: pytest.Monk
 
     assert isinstance(tracer, NullTracer)
     assert not trace_dir.exists() or not any(trace_dir.iterdir())
+
+
+def test_config_tracing_view_matches_live_resolver(tmp_path: Path) -> None:
+    """``mergecraft config tracing`` reports the same disabled state as the live sink."""
+    from mergecraft.cli.tracing_precedence import resolve_tracing_settings
+
+    config = tmp_path / "config.yaml"
+    config.write_text("tracing:\n  enabled: true\n", encoding="utf-8")
+    env = {"MERGECRAFT_TRACING": "false"}
+
+    view = resolve_tracing_settings(env=env, config_path=str(config), cwd=tmp_path)
+    live = resolve_active_tracing(env=env, config_path=str(config), cwd=tmp_path)
+
+    assert view["enabled"] is False
+    assert live.enabled is view["enabled"]

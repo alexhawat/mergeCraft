@@ -235,8 +235,9 @@ def test_malformed_control_value_maps_through_the_env_model() -> None:
 
 # ── the ``enabled`` matrix: config x env x CLI ──────────────────────────────
 
-# Frozen from the current resolver. ``true`` propagates upward from any layer;
-# only the CLI's ``--no-tracing`` can turn it off.
+# The highest layer that sets ``enabled`` wins (CLI > env > config). An
+# explicit env ``false`` beats a config ``true``, the same answer the live
+# resolver gives; an unset layer defers to the next one.
 _ENABLED_MATRIX: list[tuple[str, str, str, bool]] = [
     ("unset", "unset", "unset", False),
     ("unset", "unset", "true", True),
@@ -253,7 +254,7 @@ _ENABLED_MATRIX: list[tuple[str, str, str, bool]] = [
     ("true", "true", "unset", True),
     ("true", "true", "true", True),
     ("true", "true", "false", False),
-    ("true", "false", "unset", True),
+    ("true", "false", "unset", False),
     ("true", "false", "true", True),
     ("true", "false", "false", False),
     ("false", "unset", "unset", False),
@@ -280,7 +281,7 @@ def test_enabled_matrix(
     expected: bool,
     tmp_path: Path,
 ) -> None:
-    """The ``enabled`` precedence arithmetic is frozen and unchanged."""
+    """The ``enabled`` precedence arithmetic follows the CLI > env > config contract."""
     from mergecraft.cli.tracing_precedence import resolve_tracing_settings
 
     env = dict(_SENTINEL)

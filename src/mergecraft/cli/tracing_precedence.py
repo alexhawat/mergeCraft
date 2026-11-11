@@ -215,11 +215,10 @@ def resolve_tracing_settings(
     Secrets (``logfire_token``) are returned verbatim; the CLI layer is
     responsible for redacting them on render.
 
-    ``enabled`` is special: a lower-precedence layer's ``true`` is preserved
-    when a higher-precedence layer says ``false``. CLI's ``--no-tracing``
-    can disable any combination of env/config truthy values. This matches
-    the W7.6 parametrisation: each test case sets every layer except the
-    one under test to ``false`` and asserts the under-test layer wins.
+    ``enabled`` takes the highest layer that sets it: an explicit ``false``
+    from the CLI (``--no-tracing``) or the env (``MERGECRAFT_TRACING=false``)
+    disables tracing even when a lower layer says ``true``; an unset layer
+    defers to the next one.
 
     ``config_root`` opts the YAML layer into shared config discovery for a read
     view (``mergecraft config tracing``): with no explicit ``config_path`` the
@@ -242,21 +241,16 @@ def resolve_tracing_settings(
 
     merged: dict[str, Any] = {**defaults, **cfg, **env_layer, **cli}
 
-    # ``enabled`` precedence (W7.6): propagate ``true`` upward; CLI can
-    # explicitly disable via ``--no-tracing``. ``false`` from a lower
-    # precedence layer does NOT override ``true`` from a higher one.
-    cfg_enabled = cfg.get("enabled")
-    env_enabled = env_layer.get("enabled")
-    cli_enabled = cli.get("enabled")
+    # ``enabled`` precedence (W7.6): the highest layer that sets a value wins.
+    # An explicit ``false`` (``--no-tracing`` / ``MERGECRAFT_TRACING=false``)
+    # is not the same as unset: it beats a lower layer's ``true``, matching the
+    # live resolver (``mergecraft.tracing.resolve.resolve_active_tracing``).
     enabled: bool = False
-    if cfg_enabled is True:
-        enabled = True
-    if env_enabled is True:
-        enabled = True
-    if cli_enabled is True:
-        enabled = True
-    if cli_enabled is False:
-        enabled = False
+    for layer in (cli, env_layer, cfg):
+        value = layer.get("enabled")
+        if isinstance(value, bool):
+            enabled = value
+            break
     merged["enabled"] = enabled
 
     # The sink selector is control-carrying: a typo must not silently fall through
