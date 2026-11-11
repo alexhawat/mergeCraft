@@ -61,57 +61,64 @@ def _scan(repo: Path, diff: str, *, tier: str = "trusted") -> list[Any]:
 # --------------------------------------------------------------------------- markers
 
 
+_MARKER_CASES = [
+    ("app.py", "run(cmd)  # nosec B603", "nosec", ["B603"], "Major"),
+    ("app.py", "import os  # noqa: E501, F401", "noqa", ["E501", "F401"], "Minor"),
+    ("app.py", "x = f()  # type: ignore[arg-type]", "type: ignore", ["arg-type"], "Minor"),
+    (
+        "app.py",
+        "x = f()  # pylint: disable=unused-import",
+        "pylint: disable",
+        ["unused-import"],
+        "Minor",
+    ),
+    (
+        "web.ts",
+        "// eslint-disable-next-line no-eval",
+        "eslint-disable-next-line",
+        ["no-eval"],
+        "Minor",
+    ),
+    ("web.ts", "// @ts-ignore", "@ts-ignore", [], "Minor"),
+    ("web.ts", "// @ts-expect-error", "@ts-expect-error", [], "Minor"),
+    ("lib.rs", "#[allow(clippy::unwrap_used)]", "allow", ["clippy::unwrap_used"], "Minor"),
+    ("main.go", "x := run() //nolint:gosec", "nolint", ["gosec"], "Major"),
+    ("core.cpp", "int x = f(); // NOLINT(bugprone-foo)", "NOLINT", ["bugprone-foo"], "Minor"),
+    (
+        "lib.rb",
+        "eval(x) # rubocop:disable Security/Eval",
+        "rubocop:disable",
+        ["Security/Eval"],
+        "Major",
+    ),
+    ("Svc.java", '@SuppressWarnings("unchecked")', "SuppressWarnings", ["unchecked"], "Minor"),
+    ("run.sh", "# shellcheck disable=SC2086", "shellcheck disable", ["SC2086"], "Minor"),
+    ("app.py", "token = 'x'  # gitleaks:allow", "gitleaks:allow", [], "Major"),
+    (
+        "docs/TRACING.md",
+        "<!-- trufflehog:ignore -->",
+        "trufflehog:ignore",
+        [],
+        "Major",
+    ),
+    ("app.py", "token = 'x'  # trufflehog:ignore", "trufflehog:ignore", [], "Major"),
+    (
+        "app.py",
+        "q = build(sql)  # nosemgrep: python.lang.security.audit",
+        "nosemgrep",
+        [],
+        "Major",
+    ),
+]
+
+# Short index ids: the marker text itself must never reach pytest node IDs, which
+# end up in `.test_durations` and would trip the secret scanners' own markers.
+
+
 @pytest.mark.parametrize(
     ("path", "line", "marker", "codes", "severity"),
-    [
-        ("app.py", "run(cmd)  # nosec B603", "nosec", ["B603"], "Major"),
-        ("app.py", "import os  # noqa: E501, F401", "noqa", ["E501", "F401"], "Minor"),
-        ("app.py", "x = f()  # type: ignore[arg-type]", "type: ignore", ["arg-type"], "Minor"),
-        (
-            "app.py",
-            "x = f()  # pylint: disable=unused-import",
-            "pylint: disable",
-            ["unused-import"],
-            "Minor",
-        ),
-        (
-            "web.ts",
-            "// eslint-disable-next-line no-eval",
-            "eslint-disable-next-line",
-            ["no-eval"],
-            "Minor",
-        ),
-        ("web.ts", "// @ts-ignore", "@ts-ignore", [], "Minor"),
-        ("web.ts", "// @ts-expect-error", "@ts-expect-error", [], "Minor"),
-        ("lib.rs", "#[allow(clippy::unwrap_used)]", "allow", ["clippy::unwrap_used"], "Minor"),
-        ("main.go", "x := run() //nolint:gosec", "nolint", ["gosec"], "Major"),
-        ("core.cpp", "int x = f(); // NOLINT(bugprone-foo)", "NOLINT", ["bugprone-foo"], "Minor"),
-        (
-            "lib.rb",
-            "eval(x) # rubocop:disable Security/Eval",
-            "rubocop:disable",
-            ["Security/Eval"],
-            "Major",
-        ),
-        ("Svc.java", '@SuppressWarnings("unchecked")', "SuppressWarnings", ["unchecked"], "Minor"),
-        ("run.sh", "# shellcheck disable=SC2086", "shellcheck disable", ["SC2086"], "Minor"),
-        ("app.py", "token = 'x'  # gitleaks:allow", "gitleaks:allow", [], "Major"),
-        (
-            "docs/TRACING.md",
-            "<!-- trufflehog:ignore -->",
-            "trufflehog:ignore",
-            [],
-            "Major",
-        ),
-        ("app.py", "token = 'x'  # trufflehog:ignore", "trufflehog:ignore", [], "Major"),
-        (
-            "app.py",
-            "q = build(sql)  # nosemgrep: python.lang.security.audit",
-            "nosemgrep",
-            [],
-            "Major",
-        ),
-    ],
+    _MARKER_CASES,
+    ids=[f"marker-{n}" for n in range(len(_MARKER_CASES))],
 )
 def test_each_added_marker_produces_a_finding_naming_marker_codes_and_severity(
     tmp_path: Path, path: str, line: str, marker: str, codes: list[str], severity: str

@@ -49,14 +49,14 @@ def test_fragment_is_not_part_of_the_exemption_but_a_line_anchor_is_harmless() -
     assert redact_secrets(link) == link
 
 
-@pytest.mark.parametrize("secret", [_GHP, _PAT])
+@pytest.mark.parametrize("secret", [_GHP, _PAT], ids=["classic-token", "fine-grained-token"])
 def test_token_in_the_path_is_still_redacted(secret: str) -> None:
     out = redact_secrets(f"https://github.com/o/r/blob/{_SHA40}/{secret}/x.py")
     assert secret not in out
     assert REDACTION_SENTINEL in out
 
 
-@pytest.mark.parametrize("secret", [_GHP, _PAT])
+@pytest.mark.parametrize("secret", [_GHP, _PAT], ids=["classic-token", "fine-grained-token"])
 def test_token_in_the_query_is_still_redacted(secret: str) -> None:
     for link in (
         f"https://github.com/o/r/blob/{_SHA40}/x.py?token={secret}",
