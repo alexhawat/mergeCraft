@@ -62,8 +62,11 @@ def test_default_is_off() -> None:
     [
         ("cli_only", lambda env, config: None),  # CLI flag wins (set below)
         ("env_only", lambda env, config: env.setenv("MERGECRAFT_TRACING", "true")),
-        ("config_only", lambda env, config: config.write_text("tracing:\n  enabled: true\n")),
+        # The env layer is unset (not ``false``) so the config layer is the
+        # highest one that speaks: an explicit env ``false`` would win.
+        ("config_only", lambda env, config: env.delenv("MERGECRAFT_TRACING")),
         ("default_only", lambda env, config: None),
+        ("env_false_over_config_true", lambda env, config: None),
     ],
 )
 def test_cli_env_config_precedence(
@@ -71,8 +74,9 @@ def test_cli_env_config_precedence(
 ) -> None:
     """Parametrised precedence table — CLI > env > config > default.
 
-    Each case asserts the resolution order by setting every layer *except*
-    the one under test and confirming the under-test layer wins.
+    Each case sets every other layer to ``false`` (or unset) and confirms the
+    under-test layer wins. An explicit env ``false`` beats a config ``true``
+    (``env_false_over_config_true``), the same answer the live resolver gives.
     """
     from mergecraft.cli.app import app
 
@@ -90,7 +94,7 @@ def test_cli_env_config_precedence(
     args = ["diff-review", "--diff", str(patch), "--cwd", str(tmp_path), "--dry-run"]
     if layer == "cli_only":
         args.extend(["--tracing"])
-    if layer == "config_only":
+    if layer in {"config_only", "env_false_over_config_true"}:
         # Replace the default-off config with enabled=true via a fresh config.
         config.write_text("tracing:\n  enabled: true\n", encoding="utf-8")
 

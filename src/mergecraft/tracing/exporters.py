@@ -176,8 +176,22 @@ def resolve_token_ref(token_ref: str | None) -> str | None:
     value is returned to the caller but is **never** stashed in module state
     (D5) — a subsequent read with the env var cleared returns ``None``,
     which is the structural guarantee tests pin.
+
+    Only tracing token names resolve (see
+    :func:`mergecraft.tracing.sink_trust.token_ref_allowed`): any other name
+    returns ``None`` with a warning that names the reference, never a value.
     """
     if not token_ref:
+        return None
+    from mergecraft.tracing.sink_trust import token_ref_allowed
+
+    if not token_ref_allowed(token_ref):
+        logger.warning(
+            "tracing tokenRef {!r} is not a tracing token name (allowed: "
+            "MERGECRAFT_LOGFIRE_TOKEN, LOGFIRE_TOKEN, MERGECRAFT_TRACING_TOKEN_*); "
+            "it is not resolved",
+            token_ref,
+        )
         return None
     return os.environ.get(token_ref)
 
@@ -900,8 +914,20 @@ def _build_logfire_sink(
     entry: Any,
     logfire_module: Any | None,
 ) -> Any:
-    """Construct a Logfire sink, or a no-op when no token resolves."""
-    token = resolve_token_ref(getattr(entry, "token_ref", None))
+    """Construct a Logfire sink, or a no-op when no token resolves.
+
+    A ``tokenRef`` that names a variable outside the tracing token allow-list
+    makes the sink a no-op; it does not fall back to ``MERGECRAFT_LOGFIRE_TOKEN``.
+    """
+    from mergecraft.tracing.sink_trust import token_ref_allowed
+
+    token_ref = getattr(entry, "token_ref", None)
+    if token_ref and not token_ref_allowed(token_ref):
+        resolve_token_ref(token_ref)  # logs the refusal
+        from mergecraft.tracing.sinks import NullSink
+
+        return NullSink()
+    token = resolve_token_ref(token_ref)
     if token is None:
         token = resolve_token_ref("MERGECRAFT_LOGFIRE_TOKEN")
     if token is None:

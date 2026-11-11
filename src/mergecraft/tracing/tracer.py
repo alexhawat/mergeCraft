@@ -313,6 +313,7 @@ class Span:
         # spans. Precedence: tracer baseline → review context → lazy
         # ``attrs_source`` → explicit ``set_attribute``.
         attrs: dict[str, Any] = dict(self.tracer.baseline_attrs)
+        review_ctx = None
         try:
             review_ctx = current_review_context()
             if review_ctx is not None:
@@ -327,6 +328,20 @@ class Span:
             except Exception as attrs_exc:
                 logger.warning("trace span {} attributes failed: {}", self.kind, attrs_exc)
         attrs.update(self._attrs)
+        # Tool payload bodies follow the run's content-capture level (untrusted
+        # runs cap at ``metadata``) whichever driver stamped them.
+        from mergecraft.tracing.tool_payload import TOOL_PAYLOAD_ATTRS, cap_tool_payload_attrs
+
+        review_tier: str | None = None
+        if review_ctx is not None:
+            review_tier = review_ctx.trust_tier or review_ctx.raw_event_trust_floor or "untrusted"
+        try:
+            attrs = cap_tool_payload_attrs(attrs, trust_tier=review_tier)
+        except Exception as cap_exc:
+            logger.warning("trace span {} tool payload cap failed: {}", self.kind, cap_exc)
+            if review_tier not in (None, "trusted"):
+                for key in TOOL_PAYLOAD_ATTRS:
+                    attrs.pop(key, None)
         if self.error is not None:
             attrs.setdefault("error", self.error)
 

@@ -2693,13 +2693,15 @@ tracing:
 | ------------- | ------------------- | ----------------------------------------------- |
 | `type`        | string (required)   | One of `jsonl_file`, `memory`, `logfire`, `otel`. |
 | `path`        | string              | Directory for `jsonl_file` (default `.mergecraft/traces/`). |
-| `tokenRef`    | string              | Reference to a secret (Batch D resolves the value). |
+| `tokenRef`    | string              | Name of the env var holding the token: `MERGECRAFT_LOGFIRE_TOKEN`, `LOGFIRE_TOKEN`, or `MERGECRAFT_TRACING_TOKEN_<NAME>`. |
 | `project`     | string              | Project / namespace for `logfire`.              |
-| `endpoint`    | string              | OTLP / collector endpoint.                      |
+| `endpoint`    | string              | OTLP / collector endpoint (see [Remote sink destinations](#remote-sink-destinations-and-trust-tiers)). |
 | `headers`     | map[string]string   | Optional headers for OTLP / collectors.         |
 
 `tokenRef` is never inlined. `path` is repo-relative when the sink
-operates inside the Action container.
+operates inside the Action container. An `otel` entry may also set `region`
+(`us` / `eu`) to declare where its endpoint stores data; a
+[residency allow-list](#enterprise-controls-on-trace-export) needs it.
 
 ## Sink types
 
@@ -2757,7 +2759,29 @@ record.
 
 `retentionDays` (default `30`) governs `JSONLFileSink.purge_expired()`. Files
 whose mtime is older than the cap are removed on the next write (or
-explicit purge).
+explicit purge). A bound `enterprise.retentionDays` overrides it.
+
+## Enterprise controls on trace export
+
+The `enterprise:` block's `telemetry`, `allowedRegions` and `retentionDays`
+apply to trace export:
+
+- `telemetry: off` / `opt-out` builds no `logfire` / `otel` sink.
+- A non-empty `allowedRegions` refuses a remote sink whose destination region
+  is not allowed (the sink is skipped with a warning; the review continues).
+  A `logfire` sink exports to its `region` (`us` by default), so the default
+  sink is refused under `allowedRegions: [eu]`; a region is allowed when an
+  entry equals it or starts with `<region>-` (`eu` matches `eu-west-1`). A
+  `logfire` sink with an `endpoint` override, and an `otel` sink that does not
+  declare `region`, have no known region and are refused under any
+  allow-list. Model routing keeps its own residency check; analyzer and SCM
+  traffic are not covered by this control.
+- On an untrusted run these three values come from the operator side, never
+  from the checkout under review: the PR base's `.mergecraft/config.yaml`
+  (`git show <base>:.mergecraft/config.yaml`), the run-start tree on a
+  `pull_request_target` run, or built-in defaults when there is no PR base. If
+  the PR base exists but its config cannot be read, remote telemetry is off
+  for the run. Proxy and CA settings are never applied on an untrusted run.
 
 ## Limits
 
@@ -2800,9 +2824,35 @@ does hit it, raise the `Final` constant; it is a single line to change.
 > (`if: github.event.pull_request.head.repo.fork == false`) when the
 > reviewer should not exfiltrate fork-PR content.
 
-There is no config-level trust gate. The hard requirement is that the
-statement above appears plainly in this document, so the operator sees
-it the first time they reach for a remote sink.
+The hard requirement is that the statement above appears plainly in this
+document, so the operator sees it the first time they reach for a remote
+sink. Repository config can still enable a remote sink, but it cannot choose
+the credential or, on an untrusted run, the destination — see below.
+
+## Remote sink destinations and trust tiers
+
+- **`tokenRef` allow-list (every tier).** A `tokenRef` may only name
+  `MERGECRAFT_LOGFIRE_TOKEN`, `LOGFIRE_TOKEN`, or a variable in the
+  `MERGECRAFT_TRACING_TOKEN_*` family (case-insensitive). Any other name is
+  not resolved: the sink logs a warning naming the reference and becomes a
+  no-op (it does not fall back to `MERGECRAFT_LOGFIRE_TOKEN`).
+- **Untrusted runs.** On any tier other than `trusted` (fork PRs,
+  `pull_request_target`, offline review of a clone), `endpoint` and
+  `tokenRef` from `.mergecraft/config.yaml` are ignored, as is an `otel`
+  sink's `region`. Destinations the operator supplies outside repository
+  config are kept: `MERGECRAFT_OTEL_ENDPOINT`, `--otel-endpoint`, and the
+  `otel-endpoint` Action input. A Logfire sink then exports to its region's
+  ingest host with the operator's `MERGECRAFT_LOGFIRE_TOKEN`.
+- **Trusted runs on a PR head.** When the run-start tree is the PR head (a
+  same-repository `pull_request` run), a sink's `endpoint` / `tokenRef` is
+  kept only when the PR base's `.mergecraft/config.yaml` declares a sink of
+  the same type with the same values; otherwise it is ignored as above. A
+  PR cannot introduce a new destination for its own review.
+
+The settings scrub runs in `apply_trust_tier_to_repo_settings`, and sink
+construction applies the same policy from the bound review context
+(`mergecraft.tracing.sink_trust`), so an Action run that builds its tracer
+before trust resolution is covered too.
 
 ## Content-capture policy for model payloads
 
@@ -2871,7 +2921,18 @@ tracing:
 
 `content: full` alone still does not lift the cap — shipping a fork PR's
 prompt text to a remote sink is the exfiltration path trust tiers exist
-to close. Codex/Claude/Gemini CLI traces stamp the prompt mergeCraft
+to close.
+
+**Tool payloads follow the same level.** On a run whose review context
+reports a non-trusted tier, tool span bodies from every driver (claude,
+codex, gemini, and the MCP `tools/call` handler) — `tool.arguments`,
+`tool.input`, `tool.output`, `tool.error_message`, `gen_ai.tool.input`,
+`gen_ai.tool.output`, `gen_ai.tool.call.arguments`,
+`gen_ai.tool.call.result` — are reduced at span close
+(`mergecraft.tracing.tool_payload`): at `metadata` each is replaced by
+`<key>.bytes` and `<key>.sha256` of the original, at `off` it is dropped. The
+same operator-owned sources lift the cap. Trusted runs keep the bodies
+(redacted as described under *Cap and redaction behaviour*). Codex/Claude/Gemini CLI traces stamp the prompt mergeCraft
 already built (the wire request is not visible to those harnesses);
 OpenCode HTTP still sees the live request.
 
@@ -3176,7 +3237,7 @@ the row's `attrs` to `{"truncated": True}` so the JSONL line stays
 parseable. `tool.output` is stringified + redacted via
 `mergecraft.tracing.redaction.redact_tool_payload(payload)` — the helper
 runs `json.dumps(default=str)` on non-str values, caps at 64 KiB
-(returning `"<truncated>"` on overflow), and pipes the result through
+(keeping a head slice followed by `… <truncated N bytes>` on overflow), and pipes the result through
 `redact_secrets` so embedded tokens (`ghp_…` / `sk-…` / bearer headers)
 cannot escape onto the span. The same helper replaces the local
 `_truncate_tool_payload` copies in `agents/claude.py` and
@@ -3318,7 +3379,9 @@ resolution* below.
 `logfire` tokens are referenced by name, never inlined. The factory
 resolves a `tokenRef` against `os.environ` at run time; when the
 reference is unset, the resolver falls back to the canonical
-`MERGECRAFT_LOGFIRE_TOKEN` env var. The resolved value is held in
+`MERGECRAFT_LOGFIRE_TOKEN` env var. Only tracing token names resolve
+(`MERGECRAFT_LOGFIRE_TOKEN`, `LOGFIRE_TOKEN`, `MERGECRAFT_TRACING_TOKEN_*`);
+a `tokenRef` naming any other variable makes the sink a no-op. The resolved value is held in
 runtime memory only — it never appears in config dumps, YAML
 round-trips, or the `mergecraft config tracing` output. The CLI
 renders the value as `*** (redacted)` even in the table form.
@@ -3377,7 +3440,12 @@ mergecraft traces <run-id>    # read back local JSONL spans for a run id
 
 The precedence order is **CLI flag > env var > `.mergecraft/config.yaml`
 > default (off)**. `--no-tracing` wins over any lower-precedence
-`true`. The full table is asserted by `tests/tracing/exporters/test_cli_precedence.py`.
+`true`, and so does an explicit `MERGECRAFT_TRACING=false` when no CLI flag
+is given: an explicit `false` is not the same as unset, and the live sink
+never re-enables from a repository `enabled: true` (on the Action path the
+`tracing` input still sits above the env var). The full table is asserted by
+`tests/tracing/exporters/test_cli_precedence.py` and
+`tests/tracing/exporters/test_operator_disable_precedence.py`.
 
 `mergecraft config tracing` does **not** require the `tracing` extra
 — it operates on resolved settings, not on the live exporters.

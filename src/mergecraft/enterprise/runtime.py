@@ -10,6 +10,7 @@ Exports:
     scoped_enterprise_binding: Bind ``settings.enterprise`` for a block only when unbound.
     current_enterprise_settings: Return the bound block (or inert defaults).
     remote_export_allowed: Whether Logfire/OTLP export may run.
+    trace_export_residency_refusal: Why a remote trace sink is outside the allow-list.
     effective_retention_days: Optional enterprise override for JSONL retention.
     enforce_routed_model_residency: Fail closed when a routed model is out of region.
     agent_network_env: Proxy/CA vars to copy into provider subprocess env.
@@ -27,7 +28,11 @@ from typing import TYPE_CHECKING, Any
 from mergecraft.enterprise.certificates import load_custom_ca
 from mergecraft.enterprise.controls import EnterpriseSettings
 from mergecraft.enterprise.proxy import ProxyConfig, apply_enterprise_proxy
-from mergecraft.enterprise.residency import DataResidencyPolicy, enforce_data_residency
+from mergecraft.enterprise.residency import (
+    DataResidencyPolicy,
+    enforce_data_residency,
+    trace_export_refusal,
+)
 from mergecraft.enterprise.telemetry import (
     is_telemetry_export_enabled,
     resolve_telemetry_mode,
@@ -48,6 +53,7 @@ __all__ = [
     "remote_export_allowed",
     "reset_enterprise_runtime",
     "scoped_enterprise_binding",
+    "trace_export_residency_refusal",
 ]
 
 _AGENT_NETWORK_ENV: tuple[str, ...] = (
@@ -78,7 +84,10 @@ def current_enterprise_settings() -> EnterpriseSettings:
 
 def reset_enterprise_runtime() -> None:
     """Clear bound enterprise controls (test isolation)."""
+    from mergecraft.enterprise.trusted_base import reset_trusted_base_cache
+
     _BOUND.set(None)
+    reset_trusted_base_cache()
 
 
 def bind_enterprise_from_settings(
@@ -126,7 +135,9 @@ def scoped_enterprise_binding(
     * **Unbound** — ``settings.enterprise`` (or *settings* itself when it is an
       :class:`EnterpriseSettings` block) is bound for the body via a
       :class:`ContextVar` token and reset by that token on exit, so the block
-      never leaks past the call.
+      never leaks past the call. When the bound review context reports a
+      non-trusted tier, the operator-side block is bound instead (see
+      :func:`bind_enterprise_after_trust`).
 
     No proxy / CA side effects run — a default-constructed caller must not
     mutate process network state.
@@ -139,11 +150,19 @@ def scoped_enterprise_binding(
         yield
         return
 
-    block = (
-        settings
-        if isinstance(settings, EnterpriseSettings)
-        else getattr(settings, "enterprise", EnterpriseSettings())
-    )
+    from mergecraft.enterprise.trusted_base import context_trust_tier
+
+    tier = context_trust_tier()
+    if tier is not None and tier != "trusted":
+        # A review context says this run is not trusted: the checkout's own
+        # ``enterprise:`` block must not choose the controls that constrain it.
+        block = _untrusted_block(settings, tier)
+    else:
+        block = (
+            settings
+            if isinstance(settings, EnterpriseSettings)
+            else getattr(settings, "enterprise", EnterpriseSettings())
+        )
     token = _BOUND.set(block)
     try:
         yield
@@ -151,12 +170,62 @@ def scoped_enterprise_binding(
         _BOUND.reset(token)
 
 
-def bind_enterprise_after_trust(settings: RepoSettings, tier: str) -> None:
+def _untrusted_block(
+    settings: RepoSettings | EnterpriseSettings,
+    tier: str | None,
+    *,
+    event: dict[str, Any] | None = None,
+    event_name: str | None = None,
+    repo_root: Path | None = None,
+) -> EnterpriseSettings:
+    """The enterprise block an untrusted run binds: operator-side config, never the checkout."""
+    from mergecraft.config.settings import RepoSettings
+    from mergecraft.enterprise.trusted_base import read_trusted_base, trusted_enterprise_block
+
+    if isinstance(settings, EnterpriseSettings):
+        run_start = RepoSettings(enterprise=settings)
+    else:
+        run_start = settings
+    base = read_trusted_base(
+        run_start,
+        trust_tier=tier,
+        event=event,
+        event_name=event_name,
+        repo_root=repo_root,
+    )
+    return trusted_enterprise_block(base)
+
+
+def bind_enterprise_after_trust(
+    settings: RepoSettings,
+    tier: str,
+    *,
+    event: dict[str, Any] | None = None,
+    event_name: str | None = None,
+    repo_root: Path | None = None,
+) -> None:
     """Bind enterprise controls after trust resolution.
 
-    Untrusted checkouts never mutate ``HTTPS_PROXY`` / CA env vars.
+    A trusted run binds ``settings.enterprise`` and applies proxy / CA. Any other
+    tier binds telemetry, residency allow-list and retention from the operator-side
+    config (:func:`mergecraft.enterprise.trusted_base.read_trusted_base`: the PR
+    base, or built-in defaults when there is none) and never mutates
+    ``HTTPS_PROXY`` / CA env vars.
+
+    Args:
+        settings: The run-start settings (already trust-scrubbed).
+        tier: The run's execution trust tier.
+        event: The bound event payload; ``None`` reads it from the review context.
+        event_name: The event name; ``None`` reads it from the review context.
+        repo_root: Checkout holding the PR base commit (default: the cwd).
     """
-    bind_enterprise_from_settings(settings, apply_network=(tier == "trusted"))
+    if tier == "trusted":
+        bind_enterprise_from_settings(settings, apply_network=True)
+        return
+    block = _untrusted_block(
+        settings, tier, event=event, event_name=event_name, repo_root=repo_root
+    )
+    bind_enterprise_from_settings(block, apply_network=False)
 
 
 def agent_network_env() -> dict[str, str]:
@@ -177,6 +246,18 @@ def remote_export_allowed() -> bool:
     """Return whether remote tracing export (Logfire / OTLP) is permitted."""
     mode = resolve_telemetry_mode(explicit=current_enterprise_settings().telemetry)
     return is_telemetry_export_enabled(mode)
+
+
+def trace_export_residency_refusal(entry: Any) -> str | None:
+    """Return why the bound residency allow-list refuses a remote trace sink, or ``None``.
+
+    Args:
+        entry: A ``TraceSinkEntry`` of type ``logfire`` or ``otel``.
+
+    Returns:
+        str | None: The refusal reason, or ``None`` when export is permitted.
+    """
+    return trace_export_refusal(entry, current_enterprise_settings().allowed_regions)
 
 
 def effective_retention_days() -> int | None:
