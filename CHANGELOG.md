@@ -31,8 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a required reviewer, or a failure while finalizing) is now published as a comment
   that names the reason, an approval the same run posted earlier is dismissed, and
   earlier finding threads are not resolved as fixed. Automation that expected an
-  `APPROVE` review in those cases must read the `mergecraft` check instead (#1288,
-  #1399, #1406).
+  `APPROVE` review in those cases must read the `mergecraft` check instead (#1399,
+  #1406).
 - Instruction discovery now covers only repository-authored files: it skips
   dependency, virtualenv, vendored, build-output, tool-cache and test-fixture
   directories (`fixtures`, `__fixtures__`, `testdata`, `*.egg-info`), and
@@ -60,7 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writers (`provider auth --scope local|both`, `auth`, `jev enable`,
   `tracing logfire`) refuse to write into a `.env` that Git tracks. **Fix:** stop
   tracking the file (`git rm --cached .env`) and rotate any credential it already
-  held (#1292, #1296, #1297, #1393).
+  held (#1296, #1393).
 - The optional external SkillSpector backend for the agent-security analyzer is
   removed; the scan now runs fully in process. **Fix:** none needed unless you
   installed SkillSpector for it; its corroboration pass no longer runs (#1397).
@@ -76,6 +76,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   template. Both drop the unused `id-token: write` permission and the installation
   token step that could not work outside this repository, and the hardened template
   passes the PR base ref to its shell step through `env:` (#1348, #1403).
+- Analyzer documentation now states what runs on untrusted pull requests and what
+  isolation each trust tier gets. In the root Action container the userspace egress
+  backend is refused, so allowlisted network analyzers (osv-scanner, trivy) do not
+  run on untrusted pull requests there (#1349, #1416).
+- Documentation moved and renamed: contributor test plans now live under
+  `docs/dev/test-plans/` (was `docs/test-plans/`), the App approval path is no
+  longer described (self-review posts a `COMMENT` review and the `mergecraft review`
+  check is the merge gate; `prApproveEnabled` still controls a formal `APPROVE` for
+  consumers and is unchanged), and issue numbers were removed from headings such as
+  "Agent credential broker (Codex)", "CI evidence" and "SARIF upload to code
+  scanning". Links to those headings, and to `docs/test-plans/`, need updating
+  (#1350, #1415, #1416).
+- The `:analyzers` image now matches the slim image: it ships `iptables` and
+  `iproute2`, so filtered egress is available in it, plus the tracing extra, the
+  `SOURCE_REVISION` stamp and the `setpriv` guard (#1419).
+- `mergecraft trust show` describes self-review as a `COMMENT` review with the
+  `mergecraft review` status check as the merge gate, instead of pointing at an
+  approval workflow (#1415).
 
 ### Added
 
@@ -112,6 +130,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The optional SkillSpector backend of the agent-security analyzer (see Breaking
   above) (#1397).
+- This repository's separate App approval workflow (`mergecraft-approve.yml`) and
+  its `approve_app_review.py` helper; the `mergecraft review` check remains the
+  merge gate (#1415).
 
 ### Fixed
 
@@ -308,6 +329,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   infra or timeout exit code into `10` or `11` (#1399).
 - `normalize_env` keeps lowercase `*_proxy` environment variables instead of
   deleting them (#1396).
+- The image-only manifest review posts a `COMMENT` review and gates on its job
+  status, so it no longer fails on pull requests authored by the reviewer App
+  (#1415).
 
 ### Security
 
