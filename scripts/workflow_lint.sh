@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Download the same SHA256-pinned actionlint + zizmor binaries the analyzers
-# image ships (docker/Dockerfile.analyzers) and lint .github/workflows (W12.3 / #27).
+# Download SHA256-pinned actionlint + zizmor release binaries and lint
+# .github/workflows (W12.3 / #27). The analyzers image builds actionlint from
+# source with a patched Go toolchain, so the same version number is a different
+# binary there; zizmor is the same pinned release.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

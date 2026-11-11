@@ -189,6 +189,9 @@ def run_coverage_delta_gate(
             "GITHUB_BASE_REF": base_ref,
             "GITHUB_WORKSPACE": str(repo_root),
             "CI": "true",
+            # These tests exercise the base-worktree measurement itself; the
+            # workflow leaves it off (a missing base is a skipped delta).
+            "MERGECRAFT_MEASURE_BASE_FALLBACK": "1",
         }
     )
     # This helper models the standalone integration workflow. Outer coverage

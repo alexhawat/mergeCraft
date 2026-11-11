@@ -42,7 +42,25 @@ if [[ -n "${MERGECRAFT_BASE_COVERAGE_PATH:-}" && -f "${MERGECRAFT_BASE_COVERAGE_
   echo "Reusing base coverage.json from cache/artifact (skipping base worktree measure)."
 fi
 
-if [[ ! -f "${GITHUB_WORKSPACE}/coverage-base.json" ]]; then
+# A missing published base is a skipped delta, not a reason to re-measure main
+# inside every PR (about 15 minutes): the floors are still enforced by ci.yml's
+# coverage-gate. Set MERGECRAFT_MEASURE_BASE_FALLBACK=1 to measure the base in a
+# worktree anyway (local runs, or a base branch that publishes no coverage).
+if [[ ! -f "${GITHUB_WORKSPACE}/coverage-base.json" && "${MERGECRAFT_MEASURE_BASE_FALLBACK:-0}" != "1" ]]; then
+  skip_msg="Coverage delta skipped: no published base coverage for ${GITHUB_BASE_REF}; floors are enforced by the coverage gate."
+  echo "warning: ${skip_msg}" >&2
+  if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    echo "::warning title=Coverage delta skipped::${skip_msg}" >&2
+  fi
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    {
+      echo "### Coverage delta skipped"
+      echo "${skip_msg}"
+    } >>"$GITHUB_STEP_SUMMARY"
+  fi
+fi
+
+if [[ ! -f "${GITHUB_WORKSPACE}/coverage-base.json" && "${MERGECRAFT_MEASURE_BASE_FALLBACK:-0}" == "1" ]]; then
   # Drop a stale worktree left by a prior failed integration run before re-adding.
   git worktree remove "$worktree" --force 2>/dev/null || true
   git worktree prune 2>/dev/null || true

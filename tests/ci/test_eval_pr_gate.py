@@ -38,7 +38,8 @@ def test_ci_yml_has_blocking_eval_gate_job() -> None:
     if_expr = gate.get("if")
     if isinstance(if_expr, str):
         lowered = if_expr.casefold()
-        assert "pull_request" not in lowered or "!= 'pull_request'" not in lowered
+        # Only a docs-only PR (code != 'true') may skip the gate.
+        assert "needs.changes.outputs.code == 'true'" in lowered or "pull_request" not in lowered
 
 
 def test_removing_eval_gate_job_fails() -> None:
@@ -93,7 +94,9 @@ def test_mutation_advisory_is_not_the_eval_gate() -> None:
 def test_mutation_advisory_skips_pull_request_runs() -> None:
     """Mutation harness runs on main/nightly only — not on the PR critical path."""
     advisory = job(load_workflow("ci.yml"), "mutation-advisory")
-    assert advisory.get("if") == "github.event_name != 'pull_request'"
+    condition = advisory.get("if")
+    assert "pull_request" not in condition
+    assert "schedule" in condition
 
 
 def test_eval_gate_pr_check_summary_states_structural_not_live_scope() -> None:

@@ -242,7 +242,7 @@ mutation-test-decisions: ## Decision-module mutation harness (advisory; D15 / §
 
 npm-audit: ## npm audit over docker/agent-clis lockfile (W12.3 / #27)
 	@command -v npm >/dev/null 2>&1 || { echo "npm not found on PATH" >&2; exit 2; }
-	cd docker/agent-clis && npm ci --ignore-scripts && npm audit --audit-level=high
+	cd docker/agent-clis && npm ci --ignore-scripts && python3 ../../scripts/ci_npm_audit_gate.py
 
 workflow-lint: ## actionlint + zizmor over .github/workflows (W12.3 / #27)
 	@chmod +x scripts/workflow_lint.sh

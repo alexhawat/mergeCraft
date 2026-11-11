@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 # Download mergecraft-coverage-json from a completed workflow run for COMMIT_SHA.
+# MERGECRAFT_COVERAGE_ARTIFACT_EVENT (optional) restricts the runs considered to one
+# trigger event: the base lookup passes ``push`` so a fork's pull_request run for the
+# same SHA can never supply the baseline; the head lookup passes ``pull_request``.
+# MERGECRAFT_COVERAGE_ARTIFACT_STATUS=any also considers runs that are still in
+# progress: the head lookup uses it so Integration reads the artifact as soon as the
+# coverage gate uploads it, not when every other CI job has finished.
 set -euo pipefail
 
 usage() {
@@ -23,8 +29,18 @@ fi
 repo="${GITHUB_REPOSITORY}"
 artifact_name="mergecraft-coverage-json"
 
+event_filter=""
+if [[ -n "${MERGECRAFT_COVERAGE_ARTIFACT_EVENT:-}" ]]; then
+  event_filter="&event=${MERGECRAFT_COVERAGE_ARTIFACT_EVENT}"
+fi
+
+status_filter="&status=completed"
+if [[ "${MERGECRAFT_COVERAGE_ARTIFACT_STATUS:-}" == "any" ]]; then
+  status_filter=""
+fi
+
 runs_json="$(gh api \
-  "/repos/${repo}/actions/runs?head_sha=${commit_sha}&status=completed&per_page=20")"
+  "/repos/${repo}/actions/runs?head_sha=${commit_sha}&per_page=20${status_filter}${event_filter}")"
 
 run_ids="$(printf '%s' "${runs_json}" | jq -r '.workflow_runs[]? | .id')"
 

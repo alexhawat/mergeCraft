@@ -279,3 +279,31 @@ def test_reused_head_coverage_must_be_valid_json(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0
+
+
+def test_missing_published_base_skips_delta_without_measuring_base(tmp_path: Path) -> None:
+    """W3.4-1 — no published base means a skipped delta, never a base re-measure."""
+    seed_passing_coverage_json(tmp_path / "head.json")
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    marker = tmp_path / "make-called"
+    (stub / "make").write_text(f'#!/bin/sh\necho "$*" >> "{marker}"\n', encoding="utf-8")
+    (stub / "make").chmod(0o755)
+
+    result = run_coverage_delta_gate(
+        tmp_path,
+        base_ref="main",
+        extra_env={
+            "MERGECRAFT_MEASURE_BASE_FALLBACK": "0",
+            "MERGECRAFT_HEAD_COVERAGE_PATH": str(tmp_path / "head.json"),
+            "PATH": f"{stub}:{os.environ.get('PATH', '')}",
+        },
+        timeout=_INTEGRATION_TIMEOUT,
+    )
+    combined = result.stdout + result.stderr
+
+    assert result.returncode == 0, combined
+    assert "Coverage delta skipped" in combined
+    assert not worktree_path(tmp_path).exists()
+    assert not marker.exists(), "no make target (base measure or gate) should have run"
+    assert not (tmp_path / "coverage-base.json").exists()

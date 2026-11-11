@@ -79,7 +79,7 @@ provider fails the job.
 ## Out of scope / dogfood
 
 - `docker.yml` remains the advisory/manual image smoke (`--help`) on
-  `workflow_dispatch` / path-filtered push — unchanged by W11.
+  `workflow_dispatch` only; it has no push trigger.
 - `mergecraft.yml` continues to dogfood a **SHA-pinned published** Action; it
   does **not** consume the PR-built image (explicitly out of scope).
 

@@ -18,6 +18,8 @@ _PREREQUISITES = {
     "privilege-root",
     "deterministic-integration",
     "action-e2e",
+    "image-scan-slim",
+    "image-scan-analyzers",
 }
 
 
@@ -48,7 +50,7 @@ def test_required_artifact_lane_is_reusable_keyless_and_not_duplicated() -> None
     ci = load_workflow("ci.yml")
     e2e = job(ci, "action-e2e")
     assert e2e["uses"] == "./.github/workflows/e2e.yml"
-    assert e2e["with"] == {"required-security": True}
+    assert e2e["with"] == {"required-security": True, "image-artifact": "mergecraft-slim-image"}
     assert "secrets" not in e2e
     assert "pull_request" not in workflow_on(load_workflow("e2e.yml"))
     integration = job(ci, "deterministic-integration")

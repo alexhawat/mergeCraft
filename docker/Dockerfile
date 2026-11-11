@@ -1,10 +1,11 @@
-# SPDX-License-Identifier: MIT
 # syntax=docker/dockerfile:1.7
+# SPDX-License-Identifier: MIT
 # Production Action image for mergeCraft (standalone BYOK runtime).
 # Pins (W7 / D7): base + uv + node by digest; gh source + dependency patch by checksum;
 # agent CLIs via docker/agent-clis lockfile (npm ci).
 #
-# Reproducible rebuilds: pass SOURCE_DATE_EPOCH and build with
+# Timestamp-normalised rebuilds (not bit-for-bit reproducible: apt packages outside
+# the pinned set resolve from live mirrors): pass SOURCE_DATE_EPOCH and build with
 #   docker buildx build --provenance=false --sbom=false \
 #     --output type=docker,dest=out.tar,rewrite-timestamp=true ...
 ARG SOURCE_DATE_EPOCH=1700000000

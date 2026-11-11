@@ -118,6 +118,18 @@ as the nightly E2E live slice on the provider named by
 no longer consumes the ChatGPT/Codex subscription, so it cannot retire the
 self-review's session.
 
+### Blocking PR scanners and waivers
+
+On a code PR these fail the required checks, not just a side job:
+actionlint and zizmor (`Verify (static + build py3.14)`), npm audit, semgrep
+and trufflehog (`Verify (security audit py3.14)`), and the Trivy image scans
+(`static` needs `image-scan-slim` and `image-scan-analyzers`). Docs-only PRs skip
+the image builds and scans. To accept a semgrep, trufflehog or npm-audit finding,
+add a `[[waiver]]` entry to `.github/scanner-waivers.toml` with a justification
+and an expiry at most 90 days out; image CVEs go in `.trivyignore` as before.
+Expired or incomplete entries fail the PR. zizmor and actionlint findings are
+fixed or ignored in `.github/zizmor.yml` (those ignores do not expire).
+
 ### Scheduled security sweep (#1069)
 
 `security-sweep.yml` runs daily (and on `workflow_dispatch`) on `main`:

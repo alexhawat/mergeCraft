@@ -1,0 +1,13 @@
+# Expiring waivers for blocking CI scanners (semgrep, trufflehog, npm-audit).
+# Validated by scripts/scanner_waivers.py in the required `security` job.
+# Image-scan CVEs are waived in .trivyignore instead (same rules, own check).
+#
+# Each entry needs a justification and an expiry no more than 90 days out; an
+# expired or malformed entry fails the PR. Prefer fixing the finding.
+#
+# [[waiver]]
+# scanner = "semgrep"            # semgrep | trufflehog | npm-audit
+# rule = "python.lang.security.audit.example"   # SARIF ruleId, detector or GHSA id
+# path = "src/mergecraft/example.py"            # optional glob; omit for any path
+# justification = "why this is accepted and what mitigates it"
+# expires = 2026-12-31
