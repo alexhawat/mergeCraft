@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -31,15 +33,37 @@ OUTPUT_SCHEMA = {
 }
 
 
+# Claude Code expands ``${VAR}`` and ``${VAR:-default}`` in an MCP server's
+# ``url`` and ``headers`` from its own environment; an unset variable with no
+# default is a config error.
+_ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+
+
+def expand_env(value: str) -> str:
+    def _sub(match: re.Match[str]) -> str:
+        name, default = match.group(1), match.group(2)
+        resolved = os.environ.get(name)
+        if resolved is None:
+            if default is None:
+                raise RuntimeError(f"MCP config references unset variable {name}")
+            return default
+        return resolved
+
+    return _ENV_REF.sub(_sub, value)
+
+
 def review(config_path: Path) -> dict[str, Any]:
     config = json.loads(config_path.read_text())
     entries = config["mcpServers"].values()
     entry = next(row for row in entries if row.get("url", "").endswith("/mcp/reviewer"))
-    url = entry["url"]
+    url = expand_env(entry["url"])
     parsed = urlparse(url)
     if parsed.scheme != "http" or parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
         raise RuntimeError("the E2E client only calls the local MCP server")
-    headers = {**entry.get("headers", {}), "Content-Type": "application/json"}
+    headers = {
+        **{key: expand_env(value) for key, value in entry.get("headers", {}).items()},
+        "Content-Type": "application/json",
+    }
     if not headers.get("Authorization"):
         raise RuntimeError("MCP bearer header missing")
     sequence = 0
