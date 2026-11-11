@@ -7,6 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking — action required
+
+- A review run that returns no structured output (the model never calls
+  `set_output`, or its findings payload does not parse) now ends `inconclusive`,
+  exit code `20`, on both the Action and the CLI. The CLI used to exit `30`, the
+  Action classified the run `infra_error` (`40`), and a CLI run without `--json`
+  could pass silently. **Fix:** treat `20` as "no verdict, re-run"; scripts that
+  branched on `30` or `40` for this case need to accept `20` (#1293, #1406).
+- The hardened consumer workflow template, and this repository's `mergecraft review`
+  gate, now fail the job when the review was skipped (a fork pull request or no
+  provider credential), so a required check can no longer pass unreviewed.
+  **Fix:** to keep the old behaviour, set `SKIPPED_REVIEW: pass` on the review job
+  (the skip is then a warning); otherwise re-run `mergecraft workflow sync` to pick
+  up the template (#1292, #1393, #1403).
+- New `review.rosterRequired` setting (`all` | `marked`), default `all`: when any
+  configured secondary reviewer fails, times out or cannot be dispatched, the run is
+  `inconclusive` even though the primary verdict was accepted, and each secondary
+  reviewer now runs under its own deadline. **Fix:** set `review.rosterRequired:
+  marked` and `required: true` on the reviewers that must succeed to keep the other
+  reviewers best-effort (#1399).
+- An `approve` verdict on a run that does not pass (coverage, prep, token budget,
+  a required reviewer, or a failure while finalizing) is now published as a comment
+  that names the reason, an approval the same run posted earlier is dismissed, and
+  earlier finding threads are not resolved as fixed. Automation that expected an
+  `APPROVE` review in those cases must read the `mergecraft` check instead (#1399,
+  #1406).
+- Instruction discovery now covers only repository-authored files: it skips
+  dependency, virtualenv, vendored, build-output, tool-cache and test-fixture
+  directories (`fixtures`, `__fixtures__`, `testdata`, `*.egg-info`), and
+  `instructionExtraFilenames` matches at the repository root only, as documented.
+  **Fix:** move an instruction file that lived in a skipped directory, or a nested
+  extra instruction file, to a path the walk reads or to the repository root (#1384).
+- The MCP `git` tool and its child processes no longer read system or global git
+  config, and `-C`, `--git-dir` and `--work-tree` are accepted only for checkouts
+  registered for the run, so `-C` into a nested repository or a submodule is
+  refused. **Fix:** a self-hosted runner that relied on `http.proxy` or `sslCAInfo`
+  in the global git config for `git_fetch` should set the proxy environment
+  variables instead (#1394).
+- `MERGECRAFT_TRACING=false` and `--no-tracing` now always disable tracing, even
+  when `.mergecraft/config.yaml` enables it. A sink `tokenRef` may name only
+  `MERGECRAFT_LOGFIRE_TOKEN`, `LOGFIRE_TOKEN` or `MERGECRAFT_TRACING_TOKEN_*`, and
+  on untrusted runs a sink `endpoint` or `tokenRef` from repository config is
+  ignored. **Fix:** supply the endpoint through `MERGECRAFT_OTEL_ENDPOINT`,
+  `--otel-endpoint` or the `otel-endpoint` input, and rename any other `tokenRef`
+  to a tracing token name (#1295, #1402).
+- Offline review temporary directories (`mergecraft-diff-review-*`) are removed when
+  the process exits; the evidence folder is kept. **Fix:** set `MERGECRAFT_KEEP_TMP`
+  to keep the directories (#1406).
+- `mergecraft init` now adds `.env` and `.mergecraft/config.local.yaml` to
+  `.gitignore` and warns when `.env` is already tracked, and the local credential
+  writers (`provider auth --scope local|both`, `auth`, `jev enable`,
+  `tracing logfire`) refuse to write into a `.env` that Git tracks. **Fix:** stop
+  tracking the file (`git rm --cached .env`) and rotate any credential it already
+  held (#1296, #1393).
+- The optional external SkillSpector backend for the agent-security analyzer is
+  removed; the scan now runs fully in process. **Fix:** none needed unless you
+  installed SkillSpector for it; its corroboration pass no longer runs (#1397).
+
+### Changed
+
+- On untrusted runs, a tracing sink's enterprise telemetry, `allowedRegions` and
+  `retentionDays` come from the PR base config, `enterprise.allowedRegions` also
+  applies to Logfire and OTLP trace export (an `otel` sink must declare `region`),
+  and tool span arguments and outputs follow the run's content-capture level
+  (#1402).
+- `mergecraft init` and `examples/workflows/mergecraft.yml` now render from one
+  template. Both drop the unused `id-token: write` permission and the installation
+  token step that could not work outside this repository, and the hardened template
+  passes the PR base ref to its shell step through `env:` (#1348, #1403).
+- Analyzer documentation now states what runs on untrusted pull requests and what
+  isolation each trust tier gets. In the root Action container the userspace egress
+  backend is refused, so allowlisted network analyzers (osv-scanner, trivy) do not
+  run on untrusted pull requests there (#1349, #1416).
+- Documentation moved and renamed: contributor test plans now live under
+  `docs/dev/test-plans/` (was `docs/test-plans/`), the App approval path is no
+  longer described (self-review posts a `COMMENT` review and the `mergecraft review`
+  check is the merge gate; `prApproveEnabled` still controls a formal `APPROVE` for
+  consumers and is unchanged), and issue numbers were removed from headings such as
+  "Agent credential broker (Codex)", "CI evidence" and "SARIF upload to code
+  scanning". Links to those headings, and to `docs/test-plans/`, need updating
+  (#1350, #1415, #1416).
+- The `:analyzers` image now matches the slim image: it ships `iptables` and
+  `iproute2`, so filtered egress is available in it, plus the tracing extra, the
+  `SOURCE_REVISION` stamp and the `setpriv` guard (#1419).
+- `mergecraft trust show` describes self-review as a `COMMENT` review with the
+  `mergecraft review` status check as the merge gate, instead of pointing at an
+  approval workflow (#1415).
+
 ### Added
 
 - `mergecraft findings outcomes` aggregates several pull requests (repeat `--pr`)
@@ -32,6 +120,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prior review, the compared SHAs, the qualifying path, what ran, what was reused
   and what was skipped; other required checks are not reused. The packet records
   it in `triage.reapproval` (schema `1.20.0`). Off by default (#1284).
+
+- The analyzer pipeline adds a `scanner-config-changed` finding (Minor, tool
+  `scanner-config`) on untrusted runs for each changed file that a catalog scanner
+  reads as configuration, an ignore list or a plugin, so a pull request that edits
+  scanner configuration is visible in the review (#1407).
+
+### Removed
+
+- The optional SkillSpector backend of the agent-security analyzer (see Breaking
+  above) (#1397).
+- This repository's separate App approval workflow (`mergecraft-approve.yml`) and
+  its `approve_app_review.py` helper; the `mergecraft review` check remains the
+  merge gate (#1415).
 
 ### Fixed
 
@@ -220,6 +321,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is an error) and the fetch, push, tag, delete-branch and commit tools drop it
   from their schemas and always act on the primary checkout (#1258).
 
+- `mergecraft review` includes findings from secondary reviewers and file groups in
+  `--json`, the published review (inline comments; a blocking one turns `approve`
+  into `request_changes`) and the exit code. A finalize failure after the run
+  makes it `inconclusive` and publishes no verdict, an exhausted tool-call budget
+  marks the run `inconclusive`, and findings no longer turn an inconclusive,
+  infra or timeout exit code into `10` or `11` (#1399).
+- `normalize_env` keeps lowercase `*_proxy` environment variables instead of
+  deleting them (#1396).
+- The image-only manifest review posts a `COMMENT` review and gates on its job
+  status, so it no longer fails on pull requests authored by the reviewer App
+  (#1415).
+
 ### Security
 
 - `establish_review_scope` only reads a `diff_path` that resolves, symlinks
@@ -236,6 +349,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Config: a config file that cannot be parsed now fails the run closed (`config parse error: <file> (<ErrorType>)`, no YAML values echoed) instead of warning and loading defaults ([#1249](https://github.com/alexhawat/mergeCraft/issues/1249))
 - Config: duplicate mapping keys at any depth are rejected, naming the key and line, instead of silently keeping the last value ([#1250](https://github.com/alexhawat/mergeCraft/issues/1250))
 
+- Untrusted runs use only mergeCraft's pinned managed analyzer binaries and shipped
+  rules with a neutral scanner configuration. Filtered egress, namespace wrapping
+  and resource limits apply on every trust tier whenever egress is filtered, and
+  analyzer scratch and output live outside the checkout and are cleared per run.
+  On untrusted runs, Semgrep-family scans ignore `.semgrepignore` and VCS ignore
+  files, buf, oasdiff and ast-grep read bundled configuration (ast-grep runs only
+  when the PR base carries `sgconfig.yml`), and checkov runs outside the checkout
+  (#1397, #1407).
+- The OpenCode and Claude driver run configs refer to the provider API key and
+  the per-run MCP bearer by environment variable name instead of holding the value.
+  The OpenCode run config is written owner-only into a private run directory,
+  agent credential files (`auth.json`, `mcp.json`) are created with mode `0600`,
+  and the Claude config directory is denied to Claude's read and edit tools
+  (#1395, #1405).
+- The MCP `upload_file`, `git ls-remote` and shell tools share one credential-path
+  check that resolves paths before matching, and `ls-remote` queries only `origin`
+  or a registered checkout (#1394).
+- Finding-ledger rows read back from review bodies are limited to markers
+  mergeCraft wrote, with timestamps no later than the current time (#1401).
 ## [0.1.0a5] — 2026-11-08
 
 ### Breaking — action required
