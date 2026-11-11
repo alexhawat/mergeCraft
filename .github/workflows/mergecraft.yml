@@ -1608,12 +1608,39 @@ jobs:
       # `mergecraft-approval=success` anywhere). When adding a provider, update
       # both copies. `tests/ci/test_approval_gate_auth_predicate.py` pins them.
       HAS_AUTH: ${{ (secrets.CODEX_AUTH_JSON != '' || secrets.OPENAI_API_KEY != '' || secrets.OPENCODE_GO_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '') && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      IS_SAME_REPO: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+      # What this job (the required `mergecraft review` check) concludes when
+      # HAS_AUTH is false and no review ran (fork PR, or no provider credential).
+      # `fail` (default): the job fails, so the required check never goes green
+      # without a verdict; a fork PR then needs a maintainer review and a bypass
+      # to merge. `pass`: the job passes with a warning — only for a repo that
+      # accepts merging unreviewed fork PRs. Any other value fails. The same
+      # setting exists on the hardened consumer template's review job.
+      SKIPPED_REVIEW: fail
     steps:
       - name: Require a successful deterministic image review
         if: needs.changes.outputs.image_only == 'true'
         env:
           RESULT: ${{ needs.image-review.result }}
         run: test "$RESULT" = success
+      # The step below is gated on HAS_AUTH, so a run that reviewed nothing (fork
+      # PR, or every provider secret removed) would otherwise conclude success.
+      # SKIPPED_REVIEW (job env above) decides whether it fails or passes with a
+      # warning. Same behaviour as the hardened consumer template.
+      - name: Report review skipped
+        if: needs.changes.outputs.image_only != 'true' && env.HAS_AUTH != 'true'
+        run: |
+          if [ "${IS_SAME_REPO}" != "true" ]; then
+            reason="Fork PR — secrets are withheld, so no review ran."
+          else
+            reason="No provider credential is set, so no review ran. Set CODEX_AUTH_JSON, OPENAI_API_KEY, OPENCODE_GO_API_KEY, CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY."
+          fi
+          if [ "${SKIPPED_REVIEW:-fail}" = "pass" ]; then
+            echo "::warning title=mergeCraft skipped::${reason} SKIPPED_REVIEW=pass, so this job passes without a review."
+            exit 0
+          fi
+          echo "::error title=mergeCraft skipped::${reason} Failing so a required check cannot pass unreviewed (set SKIPPED_REVIEW: pass on the approval-gate job to allow)."
+          exit 1
       - name: Fail when mergeCraft would not approve
         # The verdict comes from this run's own review job output, which no other
         # workflow can write. A `mergecraft-approval` check-run only corroborates

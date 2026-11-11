@@ -32,10 +32,13 @@ from tests.ci.workflow_support import REPO_ROOT, job
 _HAS_AUTH_FALSE_GATE = "env.HAS_AUTH != 'true'"
 _HAS_AUTH_TRUE_GATE = "env.HAS_AUTH == 'true'"
 
+_SELF_WORKFLOW = ".github/workflows/mergecraft.yml"
+
 _GATED_TEMPLATES = (
     "scripts/example_workflows/hardened.yml.tpl",
     "examples/workflows/mergecraft-hardened.yml",
     "docs/artifacts/dogfood-mergecraft.yml",
+    _SELF_WORKFLOW,
 )
 
 
@@ -46,6 +49,9 @@ def _load(relative: str) -> dict[str, Any]:
 
 
 def _review_job(relative: str) -> dict[str, Any]:
+    if relative == _SELF_WORKFLOW:
+        # This repository's required `mergecraft review` check is the approval-gate job.
+        return job(_load(relative), "approval-gate")
     return job(_load(relative), "review")
 
 
@@ -114,8 +120,24 @@ def test_unknown_value_fails_closed(relative: str, tmp_path: Path) -> None:
 def test_review_and_gate_steps_stay_gated_on_has_auth(relative: str) -> None:
     """Premise: the skip step is the only enforcing step left when HAS_AUTH is false."""
     by_name = {step.get("name"): step for step in _review_job(relative)["steps"]}
-    for name in ("mergeCraft PR review", "Fail when mergeCraft would not approve"):
+    names = ["Fail when mergeCraft would not approve"]
+    if relative != _SELF_WORKFLOW:
+        names.append("mergeCraft PR review")
+    for name in names:
         assert _HAS_AUTH_TRUE_GATE in by_name[name]["if"], name
+
+
+def test_self_workflow_keeps_required_check_names() -> None:
+    """The gate job keeps the `mergecraft review` check name that rulesets depend on."""
+    doc = _load(_SELF_WORKFLOW)
+    assert job(doc, "approval-gate")["name"] == "mergecraft review"
+    assert job(doc, "review")["name"] == "mergecraft review attempts"
+
+
+def test_self_workflow_skip_step_does_not_run_for_image_only_prs() -> None:
+    """Image-only PRs are judged by the deterministic image review, not provider auth."""
+    step = _skip_step(_review_job(_SELF_WORKFLOW))
+    assert "needs.changes.outputs.image_only != 'true'" in step["if"]
 
 
 def _single_action_step(doc: dict[str, Any]) -> dict[str, Any]:
