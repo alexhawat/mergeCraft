@@ -25,7 +25,7 @@ jobs:
     # advisory because it is not in `require-ci-on-main`'s required contexts.
     # Pins: the reusable workflow is getsentry/craft v3.9.0 (SHA below) and the
     # Craft binary it installs is 2.30.1 (`craft-version`); dependabot owns bumps.
-    uses: getsentry/craft/.github/workflows/changelog-preview.yml@2e29b0819113d334c15da3d8cac2138cb9dc111a # v3.9.0
+    uses: getsentry/craft/.github/workflows/changelog-preview.yml@9567926a606072678ef367b02445c4f99f374795 # v3.11.2
     # Pin the craft binary too: the upstream default ("latest") queries
     # api.github.com unauthenticated, which 403s on rate-limit and fails the job.
     with:
