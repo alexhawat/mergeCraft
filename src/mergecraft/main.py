@@ -39,7 +39,6 @@ from mergecraft.config.env import ActionInputEnv, EnvSettingsError, validate_env
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.fast_path import load_triage_inputs, triage_pull_request
 from mergecraft.main_outcome import (
-    _classify_outcome,
     _is_review_mode,
     _publication_outcome_inputs,
     _publication_unproven,
@@ -251,6 +250,12 @@ class RunContext:
     run_bounds: Any = None
     budget_tracker: Any = None
     budget_exhaustion: Any = None
+    # Instructions rendered at run start, per harness, for every attempt and
+    # server-side reviewer; never re-rendered from the post-checkout tree.
+    run_start_instructions: dict[str, Any] = field(default_factory=dict)
+    # -- populated by ``_finalize`` -------------------------------------------
+    # Why this run's formal review was not posted as an APPROVE, if it was not.
+    approval_withheld_reason: str | None = None
 
     async def materialize(self) -> None:
         with gha_log.group("setup"):
@@ -475,8 +480,12 @@ async def publish_deterministic_record(
     ctx: ToolContext | None = None,
     run_outcome: RunOutcome | None = None,
     verdict_diagnostic: Any | None = None,
+    approval_withheld_reason: str | None = None,
 ) -> None:
     """Complete the formal review with the final deterministic run record.
+
+    ``approval_withheld_reason`` names why an ``approve`` verdict was published
+    as a comment rather than an approval; the record states it.
 
     Plan 13 ``run_post_run_retry_loop`` routes non-retryable rejections here.
     Stable signature for cross-plan callers::
@@ -567,6 +576,12 @@ async def publish_deterministic_record(
         review_body_truncated=tool_state.review_body_truncated,
     )
     publication_lines = _publication_record_lines(tool_state)
+    if approval_withheld_reason:
+        publication_lines += [
+            "",
+            "**Approval withheld:** the recorded verdict is `approve`, but this run did "
+            f"not pass ({approval_withheld_reason}), so it was published as a comment.",
+        ]
     if publication_lines:
         block = "\n".join([block.rstrip(), *publication_lines]) + "\n"
     from mergecraft.mcp.review import should_publish_sticky_only
@@ -849,6 +864,7 @@ async def _publish(
                     ctx=tool_context,
                     run_outcome=effective_outcome,
                     verdict_diagnostic=verdict_diagnostic,
+                    approval_withheld_reason=ctx.approval_withheld_reason,
                 )
             except Exception as err:
                 if lite_run:
@@ -1851,6 +1867,16 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
         trust_tier=trust_tier,
         review_mcp_names=list(tool_state.review_mcp_names),
     )
+    ctx.run_start_instructions = {str(ctx.agent_id): instructions}
+    for other_agent_id in _run_start_harnesses(ctx):
+        if other_agent_id in ctx.run_start_instructions:
+            continue
+        ctx.run_start_instructions[other_agent_id] = _render_agent_instructions(
+            ctx,
+            agent_id=other_agent_id,
+            modes=_render_run_modes(ctx, other_agent_id),  # type: ignore[arg-type]  # — str from Agent.name is an AgentId at runtime
+            repo_root=repo_root,
+        )
     tool_state.review_skill_paths = tuple(
         str(item) for item in instructions.extra.get("review_skills") or []
     )
@@ -1873,6 +1899,88 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
         resolved_model=ctx.resolved_model,
         idle_timeout_s=float(settings.agent_idle_timeout_s),
     )
+
+
+def _render_agent_instructions(
+    ctx: RunContext,
+    *,
+    agent_id: str,
+    modes: list[Mode],
+    repo_root: Path,
+) -> Any:
+    """Render one harness's instructions with this run's run-start inputs."""
+    assert ctx.settings is not None
+    assert ctx.run_context is not None
+    assert ctx.tool_state is not None
+    settings = ctx.settings
+    tool_state = ctx.tool_state
+    return resolve_instructions(
+        payload=ctx.payload,
+        repo=ctx.run_context.repo,
+        modes=modes,
+        agent_id=agent_id,
+        output_schema=ctx.output_schema,
+        signed_commits=settings.signed_commits,
+        learnings_file_path=tool_state.learnings_file_path,
+        learnings_headings=settings.learnings_headings,
+        setup_hook_failure=ctx.setup_hook_failure,
+        setup_script_skip_reason=ctx.setup_script_skip_reason,
+        xrepo_brief=settings.xrepo_brief,
+        xrepo_learnings_file_path=tool_state.xrepo_learnings_file_path,
+        xrepo_learnings_headings=settings.xrepo_learnings_headings,
+        repo_root=repo_root,
+        trust_tier=str(tool_state.trust_tier or "untrusted"),
+        review_mcp_names=list(tool_state.review_mcp_names),
+    )
+
+
+def _run_start_harnesses(ctx: RunContext) -> list[str]:
+    """Harness names any attempt or server-side reviewer of this run may run under.
+
+    Resolved at run start, before the first attempt can check the reviewed
+    head out into the workspace, so each harness's instructions are rendered
+    from the tree the run started on. A slug or binding that cannot be resolved
+    here is skipped: an attempt on it would fail to resolve its agent anyway,
+    and a reviewer on it is refused for want of run-start instructions.
+    """
+    assert ctx.settings is not None
+    settings = ctx.settings
+    harnesses: list[str] = []
+
+    def _add(model: str | None) -> None:
+        try:
+            agent = resolve_runtime_agent(
+                model=resolve_model(slug=model, respect_env_override=False) if model else None,
+                settings=settings,
+            )
+        except Exception as exc:  # an unresolvable rung renders nothing; it cannot run
+            logger.debug("run-start instructions: no harness for {!r}: {}", model, exc)
+            return
+        if agent.name not in harnesses:
+            harnesses.append(str(agent.name))
+
+    if ctx.use_model_chain:
+        for slug in ctx.chain_for_decision:
+            _add(slug)
+    if ctx.tool_context is not None and ctx.tool_state is not None:
+        try:
+            from mergecraft.agents.registry import AgentRole, load_registry, resolve_agent_model
+            from mergecraft.config.settings_snapshot import repo_settings_from_context
+
+            roster_settings = repo_settings_from_context(ctx.tool_context)
+            registry = load_registry(settings=roster_settings, repo_root=Path.cwd())
+            reviewers = registry.resolve_roles(AgentRole.reviewer)
+        except Exception as exc:  # no roster to render for
+            logger.debug("run-start instructions: roster unavailable: {}", exc)
+            reviewers = ()
+        for binding in reviewers:
+            try:
+                slug = resolve_agent_model(binding, settings=roster_settings).dispatched_model
+            except Exception as exc:  # an unresolvable binding is refused at dispatch
+                logger.debug("run-start instructions: binding {}: {}", binding.agent_id, exc)
+                continue
+            _add(slug)
+    return harnesses
 
 
 def _promote_and_finalize_agent_result(
@@ -1966,11 +2074,9 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
     assert ctx.agent is not None
 
     settings = ctx.settings
-    run_context = ctx.run_context
     tool_state = ctx.tool_state
     tool_context = ctx.tool_context
     run_ctx = ctx.run_ctx
-    payload = ctx.payload
     agent = ctx.agent
     agent_id = ctx.agent_id
     model_head = ctx.model_head
@@ -1978,8 +2084,6 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
     use_model_chain = ctx.use_model_chain
     selected_slug = ctx.selected_slug
     output_schema = ctx.output_schema
-    setup_hook_failure = ctx.setup_hook_failure
-    setup_script_skip_reason = ctx.setup_script_skip_reason
 
     if tool_state.selected_mode in {"Review", "IncrementalReview"}:
         from mergecraft.utils.llm_review_timing import bind_llm_review_timing_tracker
@@ -1995,32 +2099,28 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
             attempt_ctx = replace(run_ctx, resolved_model=attempt_model)
         else:
             attempt_modes = _render_run_modes(ctx, attempt_agent_id)
-            attempt_instructions = resolve_instructions(
-                payload=payload,
-                repo=run_context.repo,
-                modes=attempt_modes,
-                agent_id=attempt_agent_id,
-                output_schema=output_schema,
-                signed_commits=settings.signed_commits,
-                learnings_file_path=tool_state.learnings_file_path,
-                learnings_headings=settings.learnings_headings,
-                setup_hook_failure=setup_hook_failure,
-                setup_script_skip_reason=setup_script_skip_reason,
-                xrepo_brief=settings.xrepo_brief,
-                xrepo_learnings_file_path=tool_state.xrepo_learnings_file_path,
-                xrepo_learnings_headings=settings.xrepo_learnings_headings,
-                repo_root=Path.cwd(),
-                trust_tier=str(tool_state.trust_tier or "untrusted"),
-                review_mcp_names=list(tool_state.review_mcp_names),
-            )
-            attempt_denied = subagent_denied_tool_names(
-                replace(tool_context, agent_id=attempt_agent_id),
-                output_schema,
-            )
-            attempt_verifier_denied = verifier_denied_tool_names(
-                replace(tool_context, agent_id=attempt_agent_id),
-                output_schema,
-            )
+            # Every attempt reuses the instructions resolved at run start; an
+            # earlier attempt may have checked the reviewed head out into the
+            # workspace, so nothing is re-rendered from the tree now.
+            attempt_instructions = ctx.run_start_instructions.get(str(attempt_agent_id))
+            if attempt_instructions is None:
+                return AgentResult(
+                    success=False,
+                    error=(
+                        f"no instructions were resolved at run start for harness "
+                        f"{attempt_agent_id!r}; the attempt does not run"
+                    ),
+                    metadata={"retryable": True},
+                )
+            # ``ToolContext`` has a custom ``__init__``, so ``dataclasses.replace``
+            # cannot copy it; evaluate the denied sets under the attempt's id.
+            previous_agent_id = tool_context.agent_id
+            tool_context.agent_id = attempt_agent_id
+            try:
+                attempt_denied = subagent_denied_tool_names(tool_context, output_schema)
+                attempt_verifier_denied = verifier_denied_tool_names(tool_context, output_schema)
+            finally:
+                tool_context.agent_id = previous_agent_id
             attempt_ctx = replace(
                 run_ctx,
                 resolved_model=attempt_model,
@@ -2704,6 +2804,7 @@ async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecu
             payload=ctx.payload,
             repo_root=Path(primary_repo_state_dir(ctx.tool_state)),
             remaining_timeout_s=_remaining_roster_timeout_s,
+            instructions_for=ctx.run_start_instructions.get,
         )
         if fanout.degraded:
             logger.warning(
@@ -2711,12 +2812,14 @@ async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecu
                 len(fanout.failures),
             )
 
+    # Each secondary reviewer runs under its own deadline budget, never the
+    # remainder of the primary's (``secondary_reviewer_timeout_s``).
     return await run_pending_roster_reviewers(
         tool_context=ctx.tool_context,
         base_run_ctx=ctx.run_ctx,
         settings=ctx.settings,
         payload=ctx.payload,
-        remaining_timeout_s=_remaining_roster_timeout_s,
+        instructions_for=ctx.run_start_instructions.get,
     )
 
 
@@ -2959,11 +3062,26 @@ def publication_skip_reason(
     return None
 
 
+def _approve_event_eligible(tool_context: ToolContext) -> bool:
+    """Whether an ``approve`` verdict on this run is posted as a GitHub APPROVE.
+
+    Mirrors the publisher's event rule: approvals enabled, trusted authority,
+    and a run that had something in review scope (a triage skip never approves).
+    """
+    triage_skipped = getattr(tool_context.tool_state.triage, "tier", None) == "skip"
+    return (
+        bool(tool_context.pr_approve_enabled)
+        and tool_context.authority_trust == "trusted"
+        and not triage_skipped
+    )
+
+
 async def _publish_recorded_verdict(
     tool_context: ToolContext,
     agent_result: AgentResult,
     *,
     verdict_protocol: str | None,
+    approval_withheld: str | None = None,
 ) -> None:
     """Phase 4 — publish the accepted terminal submission once (the run owns publication).
 
@@ -2983,6 +3101,11 @@ async def _publish_recorded_verdict(
     does not publish (:func:`publication_skip_reason`) is recorded as a not-ok
     step stamped ``failure_class="declined"`` with the reason in ``error``, so
     the trajectory auditor reads it as a decision, not a failed call.
+
+    ``approval_withheld`` is the reason the run's outcome would not be
+    ``passed`` (resolved before publication). When it is set, an ``approve``
+    verdict is published as a ``COMMENT`` review rather than an ``APPROVE``:
+    a run that does not pass never leaves an approval on the pull request.
     """
     tool_state = tool_context.tool_state
     if not owes_a_terminal_review(tool_state):
@@ -3012,6 +3135,20 @@ async def _publish_recorded_verdict(
     from mergecraft.evidence.trajectory import record_tool_call
     from mergecraft.mcp.review import publish_pull_request_review
 
+    submission = tool_state.terminal_submission
+    withhold = (
+        approval_withheld is not None
+        and submission is not None
+        and submission.verdict == "approve"
+        and _approve_event_eligible(tool_context)
+    )
+    approve_enabled = tool_context.pr_approve_enabled
+    if withhold:
+        logger.warning(
+            "» the approve verdict is published as a comment, not an approval: {}",
+            approval_withheld,
+        )
+        tool_context.pr_approve_enabled = False
     try:
         publish_started = time.perf_counter()
         response = await publish_pull_request_review(tool_context)
@@ -3026,6 +3163,8 @@ async def _publish_recorded_verdict(
             error=f"{type(exc).__name__}: {exc}",
         )
         return
+    finally:
+        tool_context.pr_approve_enabled = approve_enabled
     # A same-verdict skip (the agent already published this verdict) is
     # recorded too: the receipt is present, and this row is where its hash and
     # any inline gap are read. A skipped *mismatch* (``success: false``) is
@@ -3041,6 +3180,64 @@ async def _publish_recorded_verdict(
         payload_hash=receipt.payload_hash if receipt is not None else None,
         publication_incomplete=list(tool_state.publication_incomplete) if published else None,
     )
+
+
+async def _dismiss_unpassed_approval(
+    ctx: RunContext,
+    *,
+    reason: str,
+    review_before_publication: Any,
+) -> bool:
+    """Dismiss this run's APPROVE review when the run did not pass; return whether it did.
+
+    The formal review is published with an APPROVE only when every gate known
+    before publication passed, but some inputs resolve only afterwards (the
+    disposition ledger, the post-emission sink scan, a publication mismatch),
+    and an agent can publish mid-run. When the final outcome is not ``passed``
+    and the review this run holds was posted as an APPROVE, it is dismissed
+    with the reason, so the pull request never keeps an approval from a run
+    that did not pass. Total: a failed dismissal is logged and recorded in the
+    trajectory, never raised.
+    """
+    tool_context = ctx.tool_context
+    if tool_context is None:
+        return False
+    tool_state = tool_context.tool_state
+    review = tool_state.review
+    if review is None or review.verdict != "approve" or review.reviewed_sha is None:
+        return False
+    if not _approve_event_eligible(tool_context):
+        return False
+    if review is not review_before_publication and ctx.approval_withheld_reason is not None:
+        # Published at finalize as a comment: there is no approval to dismiss.
+        return False
+    pull_number = tool_state.pr_number
+    if pull_number is None and tool_context.payload.event.issue_number is not None:
+        pull_number = int(tool_context.payload.event.issue_number)
+    if pull_number is None:
+        return False
+    from mergecraft.evidence.trajectory import record_tool_call
+
+    owner, repo = tool_context.repo.owner, tool_context.repo.name
+    message = f"mergeCraft: this run did not pass, so its approval is withdrawn — {reason}"
+    try:
+        await tool_context.scm.put(
+            f"/repos/{owner}/{repo}/pulls/{int(pull_number)}/reviews/{review.id}/dismissals",
+            json={"message": message[:1000], "event": "DISMISS"},
+        )
+    except Exception as exc:  # dismissal is best effort; the checks already fail closed
+        logger.warning("» could not dismiss this run's approval review {}: {}", review.id, exc)
+        record_tool_call(
+            tool_state,
+            tool="orchestrator.dismiss_approval",
+            arguments=None,
+            ok=False,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return False
+    logger.warning("» dismissed this run's approval review {}: {}", review.id, reason)
+    record_tool_call(tool_state, tool="orchestrator.dismiss_approval", arguments=None, ok=True)
+    return True
 
 
 def _coverage_gate_reason(tool_context: ToolContext, settings: RepoSettings) -> str | None:
@@ -3083,14 +3280,19 @@ async def _finalize(
         agent_result = AgentResult(success=True)
     else:
         agent_result = result
+        from mergecraft.mcp.verdict import fold_reviewer_dispatch_findings_into_submission
+
+        # Secondary reviewers and file groups ran after the primary recorded its
+        # verdict; their findings join it before it is re-validated and published.
+        fold_reviewer_dispatch_findings_into_submission(tool_context)
         if ctx.run_ctx is not None:
             try:
                 agent_result = await finalize_agent_result(ctx.run_ctx, agent_result)
             except Exception as exc:  # finalize validates arbitrary recorded state
                 # ``finalize_agent_result`` re-validates the recorded submission, which
                 # can raise whatever that state makes it raise, so the catch stays broad
-                # but is never silent: the run cannot confirm its terminal verdict, fails
-                # closed (a Review run classifies ``inconclusive``), and says why.
+                # but is never silent: the run cannot confirm its terminal verdict, so the
+                # verdict is not published as one and the run is ``inconclusive``.
                 finalize_failure = f"finalize_failed: {type(exc).__name__}"
                 tool_state.finalize_failure = finalize_failure
                 logger.warning(
@@ -3099,37 +3301,89 @@ async def _finalize(
                     type(exc).__name__,
                     exc,
                 )
-        await _publish_recorded_verdict(
-            tool_context,
-            agent_result,
-            verdict_protocol=settings.gates.terminal_verdict,
-        )
+                # A driver result is already finalized (``received=True``), so the
+                # unconfirmed verdict is withdrawn from publication explicitly.
+                agent_result = replace(
+                    agent_result,
+                    terminal_submission_received=False,
+                    diagnostics={
+                        **(agent_result.diagnostics or {}),
+                        "rejection_reason": finalize_failure,
+                    },
+                )
 
     # SX-D10 / F2=A — post-run sink scan of the run temp dir *and* every
-    # artifact source the evidence uploads read. It runs here: after the agent
-    # finished (``finalize_agent_result`` above), before the outcome is
-    # classified and published, and before the ``finally`` block's
-    # ``cleanup_temp_directory()`` would remove the sinks. A hit means the
-    # credential already left the agent's process, so the response is to stop
-    # the run, name the sink path — never its contents — force the approval
-    # conclusion to ``failure`` and delete the sink before artifact upload.
+    # artifact source the evidence uploads read. It runs after the agent
+    # finished (``finalize_agent_result`` above), before the formal review is
+    # published and the outcome is classified, and before the ``finally``
+    # block's ``cleanup_temp_directory()`` would remove the sinks. A hit means
+    # the credential already left the agent's process, so the response is to
+    # stop the run, name the sink path — never its contents — force the
+    # approval conclusion to ``failure`` and delete the sink before artifact
+    # upload.
     #
     # This scan sees only what exists *before* publication; ``_publish`` emits
     # the packet afterwards, so it is re-scanned post-emission (below) before
     # the approval/status report and the workflow's upload.
     sink_scan_error: str | None = _scan_sinks_after_run(ctx)
 
-    # D3/W5.2 + W6.1 + S1/D5/D10 — a completed run is ``passed`` / ``failed``,
-    # ``inconclusive`` when review-relevant dependency prep failed OR a
-    # trusted-tier ``setup_script`` failed under the default policy, or
-    # ``configuration_error`` when the operator opted into ``fail``. Agent
-    # failure wins over both prep and setup-script failure (the agent
-    # genuinely couldn't do its job). S1 also adds D10's
-    # ``setup_failure_policy`` to the resolution.
+    # Every run-level gate is resolved before the formal review is published:
+    # one shared resolver (``review.outcome_resolution``) maps them, and an
+    # ``approve`` verdict is posted as an APPROVE only when the run passes.
     prep_reason = await _prep_failure_reason(tool_context)
     setup_reason = tool_state.setup_hook_failure or ""
     if ctx.budget_tracker is not None:
         ctx.run_bounds = ctx.budget_tracker.bounds
+    from mergecraft.review.outcome_resolution import (
+        OutcomeInputs,
+        approval_withheld_reason,
+        resolve_run_outcome,
+        roster_failure_from_result,
+    )
+
+    # D12 / PR #242 finding ``aeb5d964c1d35e5a41784ded`` — tool-call budget
+    # exhaustion surfaces only from the MCP ``tools/call`` handler (which
+    # catches ``BudgetExhausted`` to return a JSON-RPC error). The tracker
+    # itself records the exception, so the run is still tagged at finalize.
+    budget_exhaustion = ctx.budget_exhaustion
+    if budget_exhaustion is None and ctx.budget_tracker is not None:
+        budget_exhaustion = getattr(ctx.budget_tracker, "last_exhausted", None)
+    roster_failure, roster_infra_reason = roster_failure_from_result(agent_result)
+    outcome_inputs = OutcomeInputs(
+        result=agent_result,
+        # A lite run owes no terminal verdict and delivers no checkout coverage:
+        # it is classified on its own reason below, not as a review-mode run.
+        mode=None if lite is not None else tool_state.selected_mode,
+        verdict_protocol=settings.gates.terminal_verdict,
+        setup_reason=setup_reason,
+        setup_policy=settings.setup_failure_policy,
+        prep_reason=prep_reason,
+        final_summary_written=tool_state.final_summary_written,
+        coverage_incomplete_reason=_coverage_gate_reason(tool_context, settings),
+        terminal_rejection=tool_state.last_terminal_rejection,
+        budget_exhaustion=budget_exhaustion,
+        finalize_failure=finalize_failure,
+        roster_failure=roster_failure,
+        roster_infra_reason=roster_infra_reason,
+        lite_reason=_lite_inconclusive_reason(lite.outcome) if lite is not None else None,
+        sink_scan_error=sink_scan_error,
+    )
+    review_before_publication = tool_state.review
+    if not isinstance(result, (SkipAgentReview, LiteAgentReview)):
+        withheld = approval_withheld_reason(outcome_inputs)
+        if (
+            withheld is not None
+            and tool_state.terminal_submission is not None
+            and tool_state.terminal_submission.verdict == "approve"
+            and _approve_event_eligible(tool_context)
+        ):
+            ctx.approval_withheld_reason = withheld
+        await _publish_recorded_verdict(
+            tool_context,
+            agent_result,
+            verdict_protocol=settings.gates.terminal_verdict,
+            approval_withheld=withheld,
+        )
     publication_receipt, publication_mismatch = _publication_outcome_inputs(
         tool_state,
         result=agent_result,
@@ -3137,59 +3391,15 @@ async def _finalize(
     )
     outcome: RunOutcome
     failure_reason: str | None
-    coverage_reason = _coverage_gate_reason(tool_context, settings)
-    if ctx.budget_exhaustion is not None:
-        from mergecraft.utils.run_bounds import budget_exhaustion_outcome
-
-        outcome = budget_exhaustion_outcome(ctx.budget_exhaustion)
-        failure_reason = str(ctx.budget_exhaustion)
-    elif (
-        ctx.budget_tracker is not None
-        and getattr(ctx.budget_tracker, "last_exhausted", None) is not None
-    ):
-        # D12 / PR #242 finding ``aeb5d964c1d35e5a41784ded`` — tool-call
-        # budget exhaustion surfaces only from the MCP ``tools/call`` handler
-        # (which catches ``BudgetExhausted`` to return a JSON-RPC error). The
-        # tracker itself records the exception, so the orchestrator still
-        # tags the run ``inconclusive`` at finalize time rather than
-        # approving on a partial signal.
-        from mergecraft.utils.run_bounds import budget_exhaustion_outcome
-
-        outcome = budget_exhaustion_outcome(ctx.budget_tracker.last_exhausted)
-        failure_reason = str(ctx.budget_tracker.last_exhausted)
-    else:
-        outcome, failure_reason = _classify_outcome(
-            result=agent_result,
-            setup_reason=setup_reason,
-            setup_policy=settings.setup_failure_policy,
-            prep_reason=prep_reason,
-            # A lite run owes no terminal verdict and delivers no checkout coverage:
-            # it is classified on its own call below, not as a review-mode run.
-            mode=None if lite is not None else tool_state.selected_mode,
-            verdict_protocol=settings.gates.terminal_verdict,
-            final_summary_written=tool_state.final_summary_written,
+    outcome, failure_reason = resolve_run_outcome(
+        replace(
+            outcome_inputs,
             terminal_publication_failed=tool_state.terminal_publication_failed,
             terminal_publication_receipt=publication_receipt,
             terminal_publication_mismatch=publication_mismatch,
             terminal_publication_unproven=_publication_unproven(tool_state),
-            coverage_incomplete_reason=coverage_reason,
-            terminal_rejection=tool_state.last_terminal_rejection,
         )
-        if finalize_failure is not None and outcome is RunOutcome.inconclusive:
-            failure_reason = (
-                f"{finalize_failure} — the post-run finalize step raised, so the terminal "
-                "verdict could not be confirmed"
-            )
-        lite_reason = _lite_inconclusive_reason(lite.outcome) if lite is not None else None
-        if lite_reason is not None and outcome is RunOutcome.passed:
-            logger.warning("» {}", lite_reason)
-            outcome, failure_reason = RunOutcome.inconclusive, lite_reason
-    if sink_scan_error is not None:
-        # A sink hit outranks the published verdict: the run failed, whatever
-        # the review said, and ``failure_reason`` names the sink path so the
-        # operator knows what to rotate. The matched contents never appear.
-        outcome = RunOutcome.failed
-        failure_reason = sink_scan_error
+    )
     verdict_publish = _verdict_protocol_publish(
         result=agent_result,
         mode=tool_state.selected_mode,
@@ -3248,6 +3458,12 @@ async def _finalize(
 
     outcome, ledger_reason = finalize_run_outcome(outcome, tool_state.prepared_run_packet)
     failure_reason = ledger_reason or failure_reason
+    if outcome is not RunOutcome.passed:
+        await _dismiss_unpassed_approval(
+            ctx,
+            reason=failure_reason or f"the run outcome is {outcome.value}",
+            review_before_publication=review_before_publication,
+        )
 
     # O9 (OB4) — the verdict span at the publish convergence point. Emitted
     # only when the agent actually submitted a terminal verdict: a run that

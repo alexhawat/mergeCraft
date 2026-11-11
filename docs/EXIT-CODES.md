@@ -33,6 +33,11 @@ These codes apply to `mergecraft review` and the hidden `diff-review` alias.
 | `40` | `CLI_INFRA_EXIT_CODE` | `infra_error` | Provider / credential / runtime infrastructure failure. |
 | `50` | `CLI_TIMEOUT_EXIT_CODE` | `timed_out` | Run exceeded its budget or wall-clock timeout. |
 
+Findings refine only an outcome the review reached: `10` and `11` apply when the
+outcome is `passed` or `failed`. An `inconclusive`, `configuration_error`,
+`infra_error` or `timed_out` run keeps its own code even when analyzer or
+reviewer findings include blockers.
+
 ## Other commands
 
 Non-review commands that fail after argument parsing typically exit

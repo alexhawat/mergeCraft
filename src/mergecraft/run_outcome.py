@@ -168,8 +168,16 @@ def cli_exit_code_for_review(
     outcome: RunOutcome,
     findings: Sequence[Finding] | None = None,
 ) -> int:
-    """Resolve the CLI exit code for a completed offline review (CC1)."""
+    """Resolve the CLI exit code for a completed offline review (CC1).
+
+    Findings refine only an outcome the review itself reached (``passed`` or
+    ``failed``): blockers give 11, other findings on a pass give 10. An
+    ``inconclusive``, error or ``timed_out`` outcome keeps its own code, so an
+    analyzer blocker never masks an infrastructure failure or a timeout.
+    """
     rows = list(findings or [])
+    if outcome not in {RunOutcome.passed, RunOutcome.failed}:
+        return exit_code_for_outcome(outcome)
     if rows and any(row.severity in BLOCKING_SEVERITIES for row in rows):
         return exit_code_for_outcome(RunOutcome.failed, blocked=True)
     if rows and outcome is RunOutcome.passed:

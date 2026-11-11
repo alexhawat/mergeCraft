@@ -961,6 +961,8 @@ def _main_ctx(env: _Env) -> Any:
         run_ctx=env.base_ctx,
         payload=dict(_PAYLOAD),
         agent_deadline_monotonic=time.monotonic() + 120.0,
+        # ``_prepare_agent_dispatch`` renders these at run start in production.
+        run_start_instructions={"opencode": env.base_ctx.instructions},
     )
 
 

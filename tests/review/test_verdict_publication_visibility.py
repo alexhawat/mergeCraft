@@ -19,6 +19,7 @@ from mergecraft.evidence.trajectory import build_trajectory_record
 from mergecraft.evidence.trajectory_audit import audit_trajectory
 from mergecraft.mcp.verdict import submit_review_verdict_tool
 from tests.review_record.test_w15_deterministic_record import _context, _Scm
+from tests.support.tool_context import give_review_scope
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -34,7 +35,7 @@ _SUBMISSION = {
 
 async def _state_with_a_recorded_verdict(tmp_path: Path) -> Any:
     """A run that recorded a terminal verdict and never called ``select_mode``."""
-    ctx = _context(tmp_path, _Scm())
+    ctx = give_review_scope(_context(tmp_path, _Scm()))
     assert ctx.tool_state.selected_mode is None
 
     result = await submit_review_verdict_tool(ctx).execute(dict(_SUBMISSION))

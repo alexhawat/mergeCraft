@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     from mergecraft.config.settings import RepoSettings
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import RepoToolState, ToolState
+    from mergecraft.utils.instructions import ResolvedInstructions
 
 _ROSTER_SUBMIT_INSTRUCTIONS = """
 You are a secondary reviewer on this run. Review the diff and record your outcome
@@ -72,6 +73,18 @@ class RosterExecutionSummary:
     infra_reason: str | None = None
 
 
+ROSTER_FAILURE_KEY = "roster_failure"
+"""``AgentResult.metadata`` key naming a required reviewer's dispatch failure.
+
+The roster failure travels on its own key, apart from the driver's own exit
+status, so an accepted primary verdict cannot hide it: the outcome resolver
+reads it whatever the primary's ``terminal_submission_received`` says.
+"""
+
+ROSTER_INFRA_REASON_KEY = "roster_infra_reason"
+"""``AgentResult.metadata`` key for the infrastructure reason of a roster failure."""
+
+
 class _SecondaryOutcome(NamedTuple):
     """One secondary dispatch's hard error and its infrastructure reason, if any."""
 
@@ -90,15 +103,47 @@ def apply_roster_failure(
     of its own — the failure happened in another binding — so the roster's named
     reason is merged onto the result the primary produced, leaving whatever
     metadata the primary already carried intact.
+
+    The failure is also stamped under :data:`ROSTER_FAILURE_KEY` (and
+    :data:`ROSTER_INFRA_REASON_KEY`), because a primary verdict that was
+    accepted outranks the driver's own exit status (#1132) but must not outrank
+    a required reviewer that never finished.
     """
     if summary is None or not summary.hard_error:
         return result
     from mergecraft.agents.shared import INFRA_REASON_KEY
 
     metadata = dict(result.metadata or {})
+    metadata[ROSTER_FAILURE_KEY] = summary.hard_error
     if summary.infra_reason:
         metadata[INFRA_REASON_KEY] = summary.infra_reason
+        metadata[ROSTER_INFRA_REASON_KEY] = summary.infra_reason
     return replace(result, success=False, error=summary.hard_error, metadata=metadata)
+
+
+def reviewer_is_required(settings: RepoSettings, agent_id: str) -> bool:
+    """Whether a failure of secondary reviewer ``agent_id`` makes the run inconclusive.
+
+    ``review.rosterRequired: all`` (the default) requires every configured
+    reviewer. ``marked`` requires only the reviewers whose ``agents:`` entry
+    sets ``required: true``.
+
+    Args:
+        settings (RepoSettings): The run-scope repo settings.
+        agent_id (str): The secondary reviewer's registry agent id.
+
+    Returns:
+        bool: True when the reviewer is required.
+
+    Examples:
+        >>> from mergecraft.config.settings import RepoSettings
+        >>> reviewer_is_required(RepoSettings(), "reviewer2")
+        True
+    """
+    if settings.review.roster_required == "all":
+        return True
+    override = settings.agents.get(agent_id)
+    return bool(override is not None and override.required)
 
 
 def secondary_reviewer_agent_ids(registry: object) -> tuple[str, ...]:
@@ -115,13 +160,23 @@ def secondary_reviewer_agent_ids(registry: object) -> tuple[str, ...]:
     return tuple(binding.agent_id for binding in reviewers if binding.agent_id != primary_id)
 
 
-def roster_dispatch_gaps(registry: object, tool_state: ToolState) -> tuple[str, ...]:
+def roster_dispatch_gaps(
+    registry: object,
+    tool_state: ToolState,
+    *,
+    settings: RepoSettings | None = None,
+) -> tuple[str, ...]:
     """Reviewer ids configured but neither recorded nor marked degraded.
 
     Only registry reviewer bindings can be gaps: ``file-group/<group-id>`` runs
-    and errors from the file-group fan-out neither satisfy nor create one.
+    and errors from the file-group fan-out neither satisfy nor create one. With
+    ``settings``, only reviewers :func:`reviewer_is_required` names count.
     """
     required = secondary_reviewer_agent_ids(registry)
+    if settings is not None:
+        required = tuple(
+            agent_id for agent_id in required if reviewer_is_required(settings, agent_id)
+        )
     if not required:
         return ()
     recorded = {run.agent_id for run in tool_state.reviewer_dispatch_runs}
@@ -221,6 +276,7 @@ async def _dispatch_reviewer(
     submit_instructions: str = _ROSTER_SUBMIT_INSTRUCTIONS,
     owns_finding: Callable[[dict[str, Any]], bool] | None = None,
     stamp_reviewer_evidence: bool = False,
+    instructions_for: Callable[[str], ResolvedInstructions | None] | None = None,
 ) -> _SecondaryOutcome:
     """Run one reviewer binding server-side and record its outcome under ``record_as``.
 
@@ -229,8 +285,8 @@ async def _dispatch_reviewer(
     plus ``submit_instructions`` (the roster submit block by default), run
     the agent under ``timeout_s``, then record either the new findings
     (``record_reviewer_dispatch_run``) or the reason it produced none
-    (``record_reviewer_dispatch_error``). An exception the agent runtime raises
-    other than a timeout propagates to the caller unrecorded.
+    (``record_reviewer_dispatch_error``). A timeout or any other exception the
+    agent runtime raises is recorded as this dispatch's error, never raised.
 
     Args:
         binding: The registry binding whose model reviews.
@@ -248,6 +304,10 @@ async def _dispatch_reviewer(
         stamp_reviewer_evidence: Append ``reviewer: <record_as> (<model>)`` to
             the evidence of every row the run claims, in the run's findings and
             in the stored rows the evidence packet reads.
+        instructions_for: When given, maps the reviewer's harness name to the
+            instructions resolved at run start; they are used instead of
+            rendering new ones from ``repo_root``. A harness it has no entry
+            for is recorded as this dispatch's error.
 
     Returns:
         The dispatch's hard error and infrastructure reason, both ``None`` on success.
@@ -284,23 +344,34 @@ async def _dispatch_reviewer(
     )
     from mergecraft.config.settings import RepoInfo
 
-    instructions = resolve_instructions(
-        payload=payload,
-        repo=RepoInfo(owner=tool_context.repo.owner, name=tool_context.repo.name),
-        modes=attempt_modes,
-        agent_id=binding.agent_id,
-        signed_commits=settings.signed_commits,
-        learnings_file_path=tool_state.learnings_file_path,
-        learnings_headings=settings.learnings_headings,
-        setup_hook_failure=tool_state.setup_hook_failure or "",
-        setup_script_skip_reason=tool_state.setup_script_skip_reason or "",
-        xrepo_brief=settings.xrepo_brief,
-        xrepo_learnings_file_path=tool_state.xrepo_learnings_file_path,
-        xrepo_learnings_headings=settings.xrepo_learnings_headings,
-        repo_root=repo_root,
-        trust_tier=str(tool_state.trust_tier or "untrusted"),
-        review_mcp_names=list(tool_state.review_mcp_names),
-    )
+    if instructions_for is not None:
+        run_start = instructions_for(attempt_agent.name)
+        if run_start is None:
+            reason = (
+                f"{label} {record_as!r}: no instructions were resolved at run start for "
+                f"harness {attempt_agent.name!r}"
+            )
+            record_reviewer_dispatch_error(tool_state, agent_id=record_as, reason=reason)
+            return _SecondaryOutcome(reason)
+        instructions = run_start
+    else:
+        instructions = resolve_instructions(
+            payload=payload,
+            repo=RepoInfo(owner=tool_context.repo.owner, name=tool_context.repo.name),
+            modes=attempt_modes,
+            agent_id=binding.agent_id,
+            signed_commits=settings.signed_commits,
+            learnings_file_path=tool_state.learnings_file_path,
+            learnings_headings=settings.learnings_headings,
+            setup_hook_failure=tool_state.setup_hook_failure or "",
+            setup_script_skip_reason=tool_state.setup_script_skip_reason or "",
+            xrepo_brief=settings.xrepo_brief,
+            xrepo_learnings_file_path=tool_state.xrepo_learnings_file_path,
+            xrepo_learnings_headings=settings.xrepo_learnings_headings,
+            repo_root=repo_root,
+            trust_tier=str(tool_state.trust_tier or "untrusted"),
+            review_mcp_names=list(tool_state.review_mcp_names),
+        )
     tail = submit_instructions.strip()
     system = (instructions.system or "").strip()
     instructions = replace(
@@ -349,6 +420,10 @@ async def _dispatch_reviewer(
         reason = f"{label} {record_as!r} timed out after {timeout_s:.1f}s"
         record_reviewer_dispatch_error(tool_state, agent_id=record_as, reason=reason)
         return _SecondaryOutcome(reason)
+    except Exception as exc:  # any runtime failure is this reviewer's outcome, not the run's
+        reason = f"{label} {record_as!r} failed: {type(exc).__name__}: {exc}"
+        record_reviewer_dispatch_error(tool_state, agent_id=record_as, reason=reason)
+        return _SecondaryOutcome(reason)
 
     if not result.success:
         from mergecraft.agents.shared import INFRA_REASON_KEY
@@ -387,6 +462,7 @@ async def _run_one_secondary_reviewer(
     payload: dict[str, Any],
     repo_root: Path,
     timeout_s: float | None,
+    instructions_for: Callable[[str], ResolvedInstructions | None] | None = None,
 ) -> _SecondaryOutcome:
     """Dispatch one secondary reviewer; return its hard error, if any."""
     return await _dispatch_reviewer(
@@ -399,7 +475,45 @@ async def _run_one_secondary_reviewer(
         payload=payload,
         repo_root=repo_root,
         timeout_s=timeout_s,
+        instructions_for=instructions_for,
     )
+
+
+_SECONDARY_TIMEOUT_CEILING_S = 900.0
+
+
+def secondary_reviewer_timeout_s(
+    binding: AgentBinding,
+    *,
+    per_reviewer_timeout_s: float | None = None,
+) -> float:
+    """Return the deadline one secondary reviewer runs under.
+
+    Each secondary has its own budget — its binding's ``timeoutS``, at most
+    900 s, optionally capped by the caller's ``per_reviewer_timeout_s`` — and
+    never the remainder of the primary's deadline: a primary that used its
+    whole deadline must not leave the second provider a one-second run.
+
+    Args:
+        binding (AgentBinding): The secondary reviewer's registry binding.
+        per_reviewer_timeout_s (float | None, optional): An explicit caller cap.
+            Defaults to None.
+
+    Returns:
+        float: Seconds the reviewer may run.
+
+    Examples:
+        >>> from mergecraft.agents.registry import AgentBinding, AgentRole
+        >>> binding = AgentBinding(agent_id="reviewer2", role=AgentRole.reviewer,
+        ...     model_chain=("m",), prompt_id="p", prompt_version="1",
+        ...     tool_classes=frozenset(), budget=1, timeout_s=1200)
+        >>> secondary_reviewer_timeout_s(binding)
+        900.0
+    """
+    timeout = min(float(binding.timeout_s), _SECONDARY_TIMEOUT_CEILING_S)
+    if per_reviewer_timeout_s is not None:
+        timeout = min(timeout, per_reviewer_timeout_s)
+    return timeout
 
 
 async def run_pending_roster_reviewers(
@@ -410,9 +524,20 @@ async def run_pending_roster_reviewers(
     payload: dict[str, Any],
     repo_root: Path | None = None,
     per_reviewer_timeout_s: float | None = None,
-    remaining_timeout_s: Callable[[], float | None] | None = None,
+    instructions_for: Callable[[str], ResolvedInstructions | None] | None = None,
 ) -> RosterExecutionSummary:
-    """Dispatch every secondary reviewer that has not yet recorded an outcome."""
+    """Dispatch every secondary reviewer that has not yet recorded an outcome.
+
+    Each reviewer runs under :func:`secondary_reviewer_timeout_s`. A required
+    reviewer (:func:`reviewer_is_required`) that fails or times out is the
+    summary's ``hard_error`` and stops the dispatch; a reviewer that is not
+    required is recorded as a dispatch error (a degradation note) and the
+    remaining reviewers still run.
+
+    ``instructions_for`` maps a harness name to the instructions resolved at run
+    start. When it is given, every reviewer uses those instead of rendering new
+    ones from ``repo_root``, which may hold the reviewed head by now.
+    """
     from mergecraft.config.settings_snapshot import repo_settings_from_context
 
     root = repo_root or Path(primary_repo_state_dir(tool_context.tool_state))
@@ -435,21 +560,20 @@ async def run_pending_roster_reviewers(
         for agent_id in batch:
             if agent_id == primary_id:
                 continue
+            required = reviewer_is_required(effective_settings, agent_id)
             try:
                 binding = registry.resolve_agent_ref(agent_id)
             except KeyError:
-                hard_error = f"no registry binding for secondary reviewer {agent_id!r}"
+                reason = f"no registry binding for secondary reviewer {agent_id!r}"
+                if not required:
+                    record_reviewer_dispatch_error(
+                        tool_context.tool_state, agent_id=agent_id, reason=reason
+                    )
+                    continue
+                hard_error = reason
                 break
             if _binding_already_recorded(tool_context.tool_state, binding.agent_id):
                 continue
-            timeout = float(binding.timeout_s)
-            timeout = min(timeout, 900.0)
-            if remaining_timeout_s is not None:
-                remaining = remaining_timeout_s()
-                if remaining is not None:
-                    timeout = min(timeout, max(1.0, remaining))
-            elif per_reviewer_timeout_s is not None:
-                timeout = min(timeout, per_reviewer_timeout_s)
             outcome = await _run_one_secondary_reviewer(
                 binding=binding,
                 base_ctx=base_run_ctx,
@@ -457,9 +581,19 @@ async def run_pending_roster_reviewers(
                 settings=effective_settings,
                 payload=payload,
                 repo_root=root,
-                timeout_s=timeout,
+                timeout_s=secondary_reviewer_timeout_s(
+                    binding, per_reviewer_timeout_s=per_reviewer_timeout_s
+                ),
+                instructions_for=instructions_for,
             )
             if outcome.error:
+                if not required:
+                    logger.warning(
+                        "» secondary reviewer {} is not required; recorded as degraded: {}",
+                        binding.agent_id,
+                        outcome.error,
+                    )
+                    continue
                 hard_error = outcome.error
                 infra_reason = outcome.infra_reason
                 break
@@ -467,7 +601,7 @@ async def run_pending_roster_reviewers(
         if hard_error:
             break
 
-    gaps = roster_dispatch_gaps(registry, tool_context.tool_state)
+    gaps = roster_dispatch_gaps(registry, tool_context.tool_state, settings=effective_settings)
     if gaps and hard_error is None:
         hard_error = roster_dispatch_failure_message(gaps)
     return RosterExecutionSummary(
@@ -618,6 +752,7 @@ async def run_file_group_reviewers(
     payload: dict[str, Any],
     repo_root: Path,
     remaining_timeout_s: Callable[[], float | None] | None = None,
+    instructions_for: Callable[[str], ResolvedInstructions | None] | None = None,
 ) -> FanoutSummary:
     """Dispatch one read-only reviewer per file group of a large diff.
 
@@ -653,6 +788,8 @@ async def run_file_group_reviewers(
         payload: The resolved run payload used to render instructions.
         repo_root: The checkout root.
         remaining_timeout_s: Optional callable returning the run budget left.
+        instructions_for: Optional map from harness name to the instructions
+            resolved at run start (see :func:`run_pending_roster_reviewers`).
 
     Returns:
         The fan-out summary; ``failures`` rows carry the bare group id.
@@ -731,6 +868,7 @@ async def run_file_group_reviewers(
                     ),
                     owns_finding=_owns,
                     stamp_reviewer_evidence=True,
+                    instructions_for=instructions_for,
                 )
         except Exception as exc:
             reason = str(exc) or exc.__class__.__name__
@@ -762,11 +900,15 @@ def primary_repo_state_dir(tool_state: ToolState) -> str:
 
 
 __all__ = [
+    "ROSTER_FAILURE_KEY",
+    "ROSTER_INFRA_REASON_KEY",
     "RosterExecutionSummary",
     "apply_roster_failure",
+    "reviewer_is_required",
     "roster_dispatch_failure_message",
     "roster_dispatch_gaps",
     "run_file_group_reviewers",
     "run_pending_roster_reviewers",
     "secondary_reviewer_agent_ids",
+    "secondary_reviewer_timeout_s",
 ]
