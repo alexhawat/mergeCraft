@@ -28,7 +28,9 @@ def _run(run_id: int, status: str, path: str = _CI, artifact: bool = False) -> d
     return {"id": run_id, "status": status, "path": path, "artifact": artifact}
 
 
-def _fetch(tmp_path: Path, runs: list[dict[str, object]]) -> subprocess.CompletedProcess[str]:
+def _fetch(
+    tmp_path: Path, runs: list[dict[str, object]], attempt: str | None = None
+) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     api = {"workflow_runs": [{k: v for k, v in r.items() if k != "artifact"} for r in runs]}
@@ -58,6 +60,7 @@ def _fetch(tmp_path: Path, runs: list[dict[str, object]]) -> subprocess.Complete
             "GH_TOKEN": "fixture",
             "GITHUB_RUN_ID": str(_SELF_RUN),
             "MERGECRAFT_COVERAGE_ARTIFACT_STATUS": "any",
+            **({"MERGECRAFT_COVERAGE_ATTEMPT": attempt} if attempt else {}),
         },
         capture_output=True,
         text=True,
@@ -107,3 +110,28 @@ def test_head_wait_outlasts_a_busy_runner_pool_and_stops_when_ci_has_finished() 
     assert '"${rc}" -eq 3' in base["run"]
     assert head["env"]["MERGECRAFT_COVERAGE_ARTIFACT_STATUS"] == "any"
     assert base["env"]["MERGECRAFT_COVERAGE_ARTIFACT_STATUS"] == "any"
+
+
+@pytest.mark.parametrize("status", ["queued", "waiting", "requested", "pending", "in_progress"])
+def test_every_unfinished_publisher_status_keeps_the_wait_going(
+    tmp_path: Path, status: str
+) -> None:
+    assert _fetch(tmp_path, [_run(1, status)], attempt="999").returncode == 1
+
+
+@pytest.mark.parametrize(
+    ("runs", "attempt", "expected"),
+    [
+        ([], "1", 1),
+        ([], "36", 1),
+        ([], "37", 3),
+        ([_run(_SELF_RUN, "in_progress", _INTEGRATION)], "2", 1),
+        ([_run(_SELF_RUN, "in_progress", _INTEGRATION)], "40", 3),
+        ([_run(1, "completed")], "1", 3),
+    ],
+)
+def test_an_unlisted_publisher_gets_a_grace_period(
+    tmp_path: Path, runs: list[dict[str, object]], attempt: str, expected: int
+) -> None:
+    """A fresh push may poll before GitHub has registered ci.yml's run for the SHA."""
+    assert _fetch(tmp_path, runs, attempt=attempt).returncode == expected

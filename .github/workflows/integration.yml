@@ -110,7 +110,7 @@ jobs:
           chmod +x scripts/ci_fetch_coverage_artifact.sh
           for attempt in $(seq 1 12); do
             rc=0
-            scripts/ci_fetch_coverage_artifact.sh "${base_sha}" "${dest}" || rc=$?
+            MERGECRAFT_COVERAGE_ATTEMPT="${attempt}" scripts/ci_fetch_coverage_artifact.sh "${base_sha}" "${dest}" || rc=$?
             if [[ "${rc}" -eq 0 ]]; then
               echo "Base coverage artifact ready for ${base_sha} (attempt ${attempt})"
               exit 0
@@ -145,7 +145,7 @@ jobs:
           # once when every ci.yml run for the SHA has finished without publishing.
           for attempt in $(seq 1 300); do
             rc=0
-            scripts/ci_fetch_coverage_artifact.sh "${head_sha}" "${dest}" || rc=$?
+            MERGECRAFT_COVERAGE_ATTEMPT="${attempt}" scripts/ci_fetch_coverage_artifact.sh "${head_sha}" "${dest}" || rc=$?
             if [[ "${rc}" -eq 0 ]]; then
               echo "Head coverage artifact ready for ${head_sha} (attempt ${attempt})"
               exit 0
