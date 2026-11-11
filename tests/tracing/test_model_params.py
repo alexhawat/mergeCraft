@@ -1,7 +1,7 @@
 """Model parameters on the span — OB3.1 RED suite (part 1 of 4).
 
 Wave plan: ``.ignorelocal/waves/04-observability-eval-wave-plan.md`` (PR OB3,
-sub-wave OB3.1, finding O4). Test-plan doc: ``docs/test-plans/04-observability-eval.md``.
+sub-wave OB3.1, finding O4). Test-plan doc: ``docs/dev/test-plans/04-observability-eval.md``.
 
 Pins the OB3.2 target API in ``mergecraft.tracing.genai`` (new): a frozen
 ``ModelParams`` value type and the ``request_attrs`` / ``response_attrs``
@@ -30,7 +30,7 @@ unimplemented; the markers were removed in the post-OB3.2 reconciliation
 pass. Post-OB3.2 amendment: ``test_request_params_reach_the_span``'s fixture
 model id was shortened to ``claude-opus-test`` — the sink path routes string
 attrs through the pre-existing entropy redactor, and the original realistic
-slug collided with it (see ``docs/test-plans/04-observability-eval.md``).
+slug collided with it (see ``docs/dev/test-plans/04-observability-eval.md``).
 
 Acceptance (plan §OB3.1, post-reconciliation): 16 collected; 16 passed;
 0 xfail/xpass.

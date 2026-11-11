@@ -239,7 +239,7 @@ config names; on a pull request those are commands the PR author controls. Offli
 
 Recorded from the review-triage and mechanical-gates work (PR #20).
 
-## Green is evidence, not proof (#41, W2)
+## Green is evidence, not proof
 
 A passing check-run is **evidence**, never a **proof**. The merge decision
 is a function of durable, structured evidence — never of an agent's
@@ -260,7 +260,7 @@ self-report. Two consequences follow:
   `mergecraft.agents.gates.decide_approval` and
   `tests/status_checks/test_decide_approval.py`.
 
-### Attestation: what proves the review ran (#1072, #1076)
+### Attestation: what proves the review ran
 
 The structural verdict needs *attestation* — non-prose evidence that the
 review actually ran — before it may read `success`. Two forms count:

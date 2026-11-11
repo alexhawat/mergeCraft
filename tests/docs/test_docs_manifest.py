@@ -31,7 +31,7 @@ _REQUIRED_MANIFEST_PATHS = (
 
 _TEMPLATE_NAMES = ("consumer", "generated-ref", "contributor", "satellite")
 
-_EXCLUDED_MANIFEST_PREFIXES = ("docs/test-plans/", "docs/artifacts/")
+_EXCLUDED_MANIFEST_PREFIXES = ("docs/dev/test-plans/", "docs/artifacts/")
 
 
 def _load_manifest() -> dict[str, Any]:

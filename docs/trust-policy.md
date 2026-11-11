@@ -238,7 +238,7 @@ Run manifest fields (`trust_self_review`, `trust_execution`, `trust_authority`,
 `trust_resolved_from`, `trust_config_hash`) land in the evidence packet so
 readers of a review can see the posture it was produced under.
 
-## Agent credential broker (#553)
+## Agent credential broker
 
 Separate from `trust.selfReview` — this addresses what credentials the Codex
 agent subprocess can read during a review run.
@@ -268,7 +268,7 @@ subscription pricing. The broker does not broker subscription auth — deleting
   configure or document them as a wall.
 
 The run record (`broker_active`, auth mode fields) states whether the broker
-covered each Codex run. Read more: [SECURITY.md — agent credential broker](../SECURITY.md#agent-credential-broker-codex-553).
+covered each Codex run. Read more: [SECURITY.md — agent credential broker](../SECURITY.md#agent-credential-broker-codex).
 
 ## Related pages
 

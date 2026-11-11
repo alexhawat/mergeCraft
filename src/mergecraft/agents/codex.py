@@ -248,7 +248,7 @@ def _render_toml(table: TomlTable, path: tuple[str, ...] = ()) -> list[str]:
     ``tomli_w.dumps`` produces byte-identical output on the real config shape;
     this stays hand-rolled on dependency grounds, written up under "Deferred
     designs the review rounds declined" in
-    ``docs/test-plans/open-issues-sweep-2026-08-19.md``.
+    ``docs/dev/test-plans/open-issues-sweep-2026-08-19.md``.
     """
     scalars = {key: value for key, value in table.items() if not isinstance(value, dict)}
     tables = {key: value for key, value in table.items() if isinstance(value, dict)}

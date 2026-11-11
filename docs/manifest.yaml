@@ -1,5 +1,5 @@
 # Consumer and contributor documentation inventory for mergeCraft.
-# Per-wave working trees (docs/test-plans/, docs/artifacts/) are intentionally excluded.
+# Per-wave working trees (docs/dev/test-plans/, docs/artifacts/) are intentionally excluded.
 pages:
   - path: README.md
     audience: consumer

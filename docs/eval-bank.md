@@ -378,7 +378,7 @@ The following rules are pinned:
    function of the case and the current verdict. The CLI does not
    invoke the agent; the caller supplies the verdict.
 
-### Incident-derived cases (#1163)
+### Incident-derived cases
 
 Use `mergecraft eval add-incident` after a postmortem to capture the incident PR,
 the revert or fix-forward PR, and the confirmed bug location (`path:start-end` in

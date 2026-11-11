@@ -1,7 +1,7 @@
 """Tool-call detail enrichment — OB3.1 RED suite (part 4 of 4).
 
 Wave plan: ``.ignorelocal/waves/04-observability-eval-wave-plan.md`` (PR OB3,
-sub-wave OB3.1). Test-plan doc: ``docs/test-plans/04-observability-eval.md``.
+sub-wave OB3.1). Test-plan doc: ``docs/dev/test-plans/04-observability-eval.md``.
 
 Pins the OB3.2 File 3 additions to ``tracing/_tool_attrs.py``:
 

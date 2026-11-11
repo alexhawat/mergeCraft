@@ -1,7 +1,7 @@
 """Review-phase spans — OB4.1 RED suite (part 1 of 5).
 
 Wave plan: ``.ignorelocal/waves/04-observability-eval-wave-plan.md`` (PR OB4,
-sub-wave OB4.1, finding O9). Test-plan doc: ``docs/test-plans/04-observability-eval.md``.
+sub-wave OB4.1, finding O9). Test-plan doc: ``docs/dev/test-plans/04-observability-eval.md``.
 
 Pins the OB4.2 phase emitter in ``mergecraft.tracing.signals`` (new):
 ``emit_phase(tracer, phase=...)`` opens, decorates and immediately closes a

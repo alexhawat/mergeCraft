@@ -1,7 +1,7 @@
 """LLM input/output message capture — OB3.1 RED suite (part 2 of 4).
 
 Wave plan: ``.ignorelocal/waves/04-observability-eval-wave-plan.md`` (PR OB3,
-sub-wave OB3.1, finding O5). Test-plan doc: ``docs/test-plans/04-observability-eval.md``.
+sub-wave OB3.1, finding O5). Test-plan doc: ``docs/dev/test-plans/04-observability-eval.md``.
 
 Pins the OB3.2 builders ``input_messages_attrs`` / ``output_messages_attrs`` in
 ``mergecraft.tracing.genai`` (new): messages serialize to the OTel GenAI attrs

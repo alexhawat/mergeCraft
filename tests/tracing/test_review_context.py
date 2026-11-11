@@ -1,7 +1,7 @@
 """Review-wide correlation on every span — OB1.1 RED suite (part 1 of 3).
 
 Wave plan: ``.ignorelocal/waves/04-observability-eval-wave-plan.md`` (PR OB1,
-sub-wave OB1.1). Test-plan doc: ``docs/test-plans/04-observability-eval.md``.
+sub-wave OB1.1). Test-plan doc: ``docs/dev/test-plans/04-observability-eval.md``.
 
 Pins the OB1 contracts against the OB1.2 target API, which does not exist yet:
 

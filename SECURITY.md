@@ -92,7 +92,7 @@ per call is in
   [docs/REVIEW-CHECKS.md](docs/REVIEW-CHECKS.md) for the full list of what a review
   checks and what it deliberately never reports.
 
-## Agent credential broker (Codex, #553)
+## Agent credential broker (Codex)
 
 When Codex runs on `OPENAI_API_KEY` without a usable `CODEX_AUTH_JSON`
 subscription bundle, mergeCraft starts a loopback credential broker in the
@@ -124,4 +124,4 @@ outside the container and after the run ends.
   as one.
 
 The run record states whether the broker was active for each Codex run. See
-also [Operator trust policy — agent credential broker](docs/trust-policy.md#agent-credential-broker-553).
+also [Operator trust policy — agent credential broker](docs/trust-policy.md#agent-credential-broker).

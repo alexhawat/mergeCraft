@@ -2,7 +2,7 @@
 
 RED suite for PR EV1 (sub-wave EV1.1; implementation EV1.2). Wave plan:
 ``.ignorelocal/waves/04-observability-eval-wave-plan.md``; test-plan doc:
-``docs/test-plans/04-observability-eval.md``.
+``docs/dev/test-plans/04-observability-eval.md``.
 
 Two contracts block #140's "publish reproducible numbers":
 

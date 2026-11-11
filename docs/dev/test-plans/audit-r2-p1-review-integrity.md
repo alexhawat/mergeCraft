@@ -121,7 +121,7 @@ diff runner, because the defect is in what `git diff` omits.
 - Severity corpus: `tests/findings/fixtures/severity_pairs.py` (`SEVERITY_PAIRS`,
   `IMPACT_STATEMENTS`, `INCIDENTAL_TOKENS`, and the RA1.2 follow-up
   `AUTHOR_FAMILY_PAIRS` / `AuthorFamilyPair`).
-- `docs/test-plans/audit-r2-p1-review-integrity.md` (this file).
+- `docs/dev/test-plans/audit-r2-p1-review-integrity.md` (this file).
 
 ### Pre-existing tests whose expectation was inverted
 

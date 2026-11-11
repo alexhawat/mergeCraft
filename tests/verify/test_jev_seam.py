@@ -3,7 +3,7 @@
 This module pins the seam's public surface because the plan names the seam but
 not its symbol: ``mergecraft.verify.jev_seam`` exposes ``judge_criteria`` and
 ``judge_repro_claim``. These are real passes now that the seam exists — see
-``docs/test-plans/30-verification-evals-receipts.md``.
+``docs/dev/test-plans/30-verification-evals-receipts.md``.
 
 The property under test in the last section is the "Jev scores, Python counts"
 decision: the seam asks Jev one qualitative question per criterion and maps the

@@ -1,7 +1,7 @@
 """CLI / Action parity for review correlation — OB1.1 RED suite (part 3 of 3).
 
 Wave plan: ``.ignorelocal/waves/04-observability-eval-wave-plan.md`` (PR OB1,
-sub-wave OB1.1). Test-plan doc: ``docs/test-plans/04-observability-eval.md``.
+sub-wave OB1.1). Test-plan doc: ``docs/dev/test-plans/04-observability-eval.md``.
 
 The CLI (``src/mergecraft/offline_review.py``) and the Action
 (``src/mergecraft/main.py``) are separate entry points that build their

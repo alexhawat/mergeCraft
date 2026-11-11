@@ -1,7 +1,7 @@
 """R4 RED suite — a second shadow target through the existing recorder (#737).
 
 Wave plan: the verification/evals/receipts wave plan (R4). Test-plan doc:
-``docs/test-plans/30-verification-evals-receipts.md``.
+``docs/dev/test-plans/30-verification-evals-receipts.md``.
 
 This wave adds a **second shadow target** — a different pinned model id and/or
 prompt version — to the recorder that already exists in

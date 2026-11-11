@@ -22,7 +22,7 @@ Authoring wave: **RD1.1** (RED) · Implementation: **RD1.2** (manifest, template
 | RD1e | Generator `--check` fails on `docs/action-reference.md` sentinel drift | integration | `test_generator_check_fails_on_action_doc_drift` |
 | RD1f | Landing README links to generated reference pages | functional | `test_readme_links_to_generated_reference_pages` |
 | RD1g | `docs/manifest.yaml` lists required consumer/contributor pages | unit | `test_manifest_lists_required_pages` |
-| RD1h | Manifest excludes `docs/test-plans/**` and `docs/artifacts/**` | unit | `test_manifest_lists_required_pages` |
+| RD1h | Manifest excludes `docs/dev/test-plans/**` and `docs/artifacts/**` | unit | `test_manifest_lists_required_pages` |
 | RD1i | `docs/README.md` links every manifest `path` | functional | `test_generated_docs_index_lists_every_manifest_row` |
 | RD1j | Four `docs/_templates/*.md.tpl` files with purpose + see-also slots | unit | `test_templates_exist` |
 | RD1k | `Makefile` `CI_STEPS` / `ci-static` includes `docs-check` | integration | `test_make_docs_check_is_in_ci_steps` |

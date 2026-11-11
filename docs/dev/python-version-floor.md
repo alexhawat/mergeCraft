@@ -57,4 +57,4 @@ batch commit message.
 ## References
 
 - Tests: `tests/test_python_version_floor_af.py`
-- Test plan: `docs/test-plans/open-issues-sweep-2026-08-20-af.md`
+- Test plan: `docs/dev/test-plans/open-issues-sweep-2026-08-20-af.md`

@@ -143,7 +143,7 @@ reason is recorded on `tool_state.setup_script_skip_reason` and threaded
 into the agent prompt as a `SETUP SCRIPT SKIPPED` section so the agent
 knows the setup did not run.
 
-## MCP git tool — reviewer-surface enforcement (#257)
+## MCP git tool — reviewer-surface enforcement
 
 The `git` MCP tool (``ToolClass.REPOSITORY_READ``) is on the reviewer surface
 and enforces fail-closed restrictions regardless of ``payload.shell``:
@@ -165,7 +165,7 @@ Runtime reviewer scope tools (`establish_review_scope`, degraded `checkout_pr`)
 are documented in [`docs/mcp-tools.md`](mcp-tools.md#runtime-reviewer-mcp-tools-mcpreviewer)
 and [`docs/trust-policy.md`](trust-policy.md).
 
-## MCP upload tool — orchestrator-surface enforcement (#258)
+## MCP upload tool — orchestrator-surface enforcement
 
 The `upload_file` MCP tool (`ToolClass.GITHUB_MUTATION`) is on the orchestrator surface.  It enforces fail-closed path confinement before reading any bytes:
 
