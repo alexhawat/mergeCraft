@@ -97,6 +97,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # Only a push run (main's CI or CI/CD) may supply the baseline.
           MERGECRAFT_COVERAGE_ARTIFACT_EVENT: push
+          MERGECRAFT_COVERAGE_ARTIFACT_STATUS: any
         run: |
           set -euo pipefail
           dest="${{ runner.temp }}/coverage-base.json"
@@ -108,9 +109,15 @@ jobs:
           fi
           chmod +x scripts/ci_fetch_coverage_artifact.sh
           for attempt in $(seq 1 12); do
-            if scripts/ci_fetch_coverage_artifact.sh "${base_sha}" "${dest}"; then
+            rc=0
+            MERGECRAFT_COVERAGE_ATTEMPT="${attempt}" scripts/ci_fetch_coverage_artifact.sh "${base_sha}" "${dest}" || rc=$?
+            if [[ "${rc}" -eq 0 ]]; then
               echo "Base coverage artifact ready for ${base_sha} (attempt ${attempt})"
               exit 0
+            fi
+            if [[ "${rc}" -eq 3 ]]; then
+              echo "Base ${base_sha} finished without publishing coverage; not waiting" >&2
+              break
             fi
             echo "Base coverage artifact not ready for ${base_sha} (attempt ${attempt}/12); sleeping 5s…" >&2
             sleep 5
@@ -132,12 +139,22 @@ jobs:
           dest="${{ runner.temp }}/coverage-head.json"
           # integration-pr often starts before ci.yml finishes; poll for the artifact.
           head_sha="${{ github.event.pull_request.head.sha }}"
-          for attempt in $(seq 1 72); do
-            if scripts/ci_fetch_coverage_artifact.sh "${head_sha}" "${dest}"; then
+          # Wait up to 25 minutes: ci.yml's coverage-gate can start late when the
+          # runner pool is busy, and giving up early meant a full coverage re-run
+          # here (10-13 minutes, measured on 6 of 14 PR runs after #1392). Stop at
+          # once when every ci.yml run for the SHA has finished without publishing.
+          for attempt in $(seq 1 300); do
+            rc=0
+            MERGECRAFT_COVERAGE_ATTEMPT="${attempt}" scripts/ci_fetch_coverage_artifact.sh "${head_sha}" "${dest}" || rc=$?
+            if [[ "${rc}" -eq 0 ]]; then
               echo "Head coverage artifact ready for ${head_sha} (attempt ${attempt})"
               exit 0
             fi
-            echo "Head coverage artifact not ready for ${head_sha} (attempt ${attempt}/72); sleeping 5s…" >&2
+            if [[ "${rc}" -eq 3 ]]; then
+              echo "CI finished for ${head_sha} without publishing coverage; not waiting" >&2
+              break
+            fi
+            echo "Head coverage artifact not ready for ${head_sha} (attempt ${attempt}/300); sleeping 5s…" >&2
             sleep 5
           done
           echo "Head coverage artifact never appeared — coverage ratchet will fall back to make coverage-gate" >&2
@@ -151,51 +168,6 @@ jobs:
           MERGECRAFT_BASE_COVERAGE_PATH: ${{ runner.temp }}/coverage-base.json
           MERGECRAFT_HEAD_COVERAGE_PATH: ${{ runner.temp }}/coverage-head.json
         run: bash scripts/ci_coverage_delta_gate.sh
-
-  filtered-egress:
-    needs: changes
-    name: Integration (filtered egress / privileged)
-    # The netns + veth + iptables enforcement in
-    # ``mergecraft.analyzers.egress`` needs CAP_NET_ADMIN and CAP_SYS_ADMIN,
-    # which ``integration-pr`` does not have — its run of this test self-skips.
-    # Without this job the only evidence for the filter would be
-    # ``AllowlistConnectProxy``, a userspace stand-in production never uses
-    # (#606 finding 2).
-    if: >-
-      needs.changes.outputs.image_only != 'true' &&
-      (github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          # #432 / D6 — score the merge result, not the PR head branch alone.
-          ref: >-
-            ${{ github.event_name == 'pull_request'
-                && format('refs/pull/{0}/merge', github.event.pull_request.number)
-                || github.ref }}
-      - uses: ./.github/actions/bootstrap
-        with:
-          python-version: "3.14"
-      - name: Real firewall boundary in a disposable network namespace
-        # The hosted runner is disposable. The inner namespace additionally
-        # keeps forwarding and firewall changes off the runner's own network.
-        run: sudo env MERGECRAFT_DISPOSABLE_LINUX=1 make test-filtered-egress
-      - name: Sandbox write/network block on the disposable host lane
-        # A default ``docker run`` lacks the namespace capability the sandbox
-        # test needs, and a hosted runner cannot create the namespace
-        # unprivileged. This root process on a disposable host is the lane the
-        # test is written for; with the privileged-lane flag set it fails
-        # rather than skips.
-        run: sudo env MERGECRAFT_DISPOSABLE_LINUX=1 make test-sandbox-privileged
-      - name: Analyzer UID-drop proofs on the disposable host lane
-        # The trusted-tier and untrusted-sandbox identity-drop tests need euid
-        # 0 on Linux with setpriv and unshare, and self-skip in every other
-        # lane (#1015). With the privileged-lane flag set they fail rather than
-        # skip here.
-        run: sudo env MERGECRAFT_DISPOSABLE_LINUX=1 make test-uid-drop-privileged
 
   # npm audit and actionlint/zizmor are blocking steps of ci.yml's required
   # jobs now (`Verify (security audit py3.14)` and `Verify (static + build

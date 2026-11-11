@@ -344,9 +344,14 @@ def test_artifact_publishing_workflows_are_all_covered() -> None:
             pytest.fail(f"{path.name} uploads artifacts under a cancelling group; pin it above")
 
 
-def test_image_publication_stays_serialised_per_ref() -> None:
-    group = job(load_workflow("ci-cd.yml"), "build-images")["concurrency"]
-    assert group == {"group": "ci-cd-publish-${{ github.ref }}", "cancel-in-progress": False}
+def test_commit_keyed_image_builds_are_not_cancelled_by_a_newer_merge() -> None:
+    """A shared group cancelled queued builds of older merges (run 43027933983, #1363)."""
+    ci_cd = load_workflow("ci-cd.yml")
+    for name, spec in ci_cd["jobs"].items():
+        group = spec.get("concurrency")
+        if group is not None:
+            assert group["cancel-in-progress"] is False, name
+            assert "github.sha" in group["group"] or name == "promote", name
 
 
 @pytest.mark.parametrize(

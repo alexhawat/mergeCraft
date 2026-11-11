@@ -16,6 +16,7 @@ _PREREQUISITES = {
     "deployment-candidate",
     "eval-gate",
     "privilege-root",
+    "privileged-proofs",
     "deterministic-integration",
     "action-e2e",
     "image-scan-slim",

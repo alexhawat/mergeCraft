@@ -68,5 +68,25 @@ for run_id in ${run_ids}; do
   exit 0
 done
 
+# Exit 3 is a definitive miss: no publishing run is still going, so waiting longer
+# cannot produce the artifact. Exit 1 means a publishing run is still in progress and
+# callers may poll.
+# Only runs of a workflow that uploads the artifact count, and never the run that is
+# executing this script: the Integration run polling here is itself in progress, so
+# counting it would make "nothing can still publish" unreachable.
+# shellcheck disable=SC2016
+publishers='[.workflow_runs[]? | select((.path // "" | test("^\\.github/workflows/(ci|ci-cd)\\.yml")) and ((.id | tostring) != $self))]'
+unfinished="$(printf '%s' "${runs_json}" | jq --arg self "${GITHUB_RUN_ID:-}" "${publishers} | map(select(.status != \"completed\")) | length")"
 echo "ci_fetch_coverage_artifact: no ${artifact_name} artifact for ${commit_sha}" >&2
+# Any status other than "completed" (queued, waiting, requested, pending,
+# in_progress) can still publish. When no publisher run is listed at all, give GitHub
+# time to create it: the caller passes MERGECRAFT_COVERAGE_ATTEMPT (1-based) and an
+# empty list only counts as a definitive miss after the grace attempts
+# (MERGECRAFT_COVERAGE_EMPTY_GRACE_ATTEMPTS, default 36 = about 3 minutes at 5 s).
+listed="$(printf '%s' "${runs_json}" | jq --arg self "${GITHUB_RUN_ID:-}" "${publishers} | length")"
+attempt="${MERGECRAFT_COVERAGE_ATTEMPT:-999}"
+grace="${MERGECRAFT_COVERAGE_EMPTY_GRACE_ATTEMPTS:-36}"
+if [[ "${unfinished}" -eq 0 && ( "${listed}" -gt 0 || "${attempt}" -gt "${grace}" ) ]]; then
+  exit 3
+fi
 exit 1

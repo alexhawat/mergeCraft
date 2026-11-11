@@ -84,7 +84,7 @@ def test_in_image_scripts_pin_the_project_test_runner(relative: str) -> None:
 
 def _privileged_lane_texts() -> list[str]:
     """Every workflow step, plus any Make target its ``run:`` calls."""
-    doc = load_workflow("integration.yml")
+    doc = load_workflow("ci.yml")
     makefile = read_text("Makefile")
     texts: list[str] = []
     for job in (doc.get("jobs") or {}).values():
@@ -110,7 +110,7 @@ def test_disposable_host_lane_runs_the_sandbox_test_in_the_privileged_lane() -> 
         if "tests/analyzers/test_sandbox_execution.py" in text and _LANE_SET.search(text)
     ]
     assert hits, (
-        "no integration.yml step (or Make target it calls) runs "
+        "no ci.yml step (or Make target it calls) runs "
         f"tests/analyzers/test_sandbox_execution.py with {_LANE_ENV}=1"
     )
 
@@ -125,7 +125,7 @@ def test_disposable_host_lane_runs_the_uid_drop_proofs_in_the_privileged_lane(
         if relative in text and _LANE_SET.search(text) and "sudo" in text
     ]
     assert hits, (
-        f"no integration.yml step (or Make target it calls) runs {relative} "
+        f"no ci.yml step (or Make target it calls) runs {relative} "
         f"under sudo with {_LANE_ENV}=1 (#1015)"
     )
 
