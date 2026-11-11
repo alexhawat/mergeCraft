@@ -288,7 +288,10 @@ async def test_hydrate_merges_pre_checkout_ledger_records(tmp_path: Path) -> Non
             self, owner: str, repo: str, comment_id: int
         ) -> dict[str, object]:
             assert comment_id == 42
-            return {"body": progress_body}
+            return {
+                "body": progress_body,
+                "user": {"login": "github-actions[bot]", "type": "Bot"},
+            }
 
     state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
     pre_checkout = ledger.ensure_finding_ledger(state)
@@ -356,7 +359,10 @@ async def test_hydrate_collision_prefers_newer_recorded_at(tmp_path: Path) -> No
             self, owner: str, repo: str, comment_id: int
         ) -> dict[str, object]:
             assert comment_id == 42
-            return {"body": progress_body}
+            return {
+                "body": progress_body,
+                "user": {"login": "github-actions[bot]", "type": "Bot"},
+            }
 
     state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
     pre_checkout = ledger.ensure_finding_ledger(state)
