@@ -168,8 +168,10 @@ test: ## Unit tests
 # Least-duration sharding is only honest when the timings exist. This refreshes
 # the committed `.test_durations` from one full unit-suite run, so the selector
 # above balances by real durations instead of advertising an algorithm it lacks.
+# The selector is `not integration` (the coverage lane's), a superset of the unit
+# lane's `not integration and not coverage`, so both lanes' cases get timings.
 test-durations: ## Regenerate the committed .test_durations used by least-duration sharding
-	$(PYTEST) tests -q --tb=short --strict-markers -m "not integration and not coverage" $(PYTEST_XDIST) \
+	$(UV) run --extra dev --extra tracing pytest tests -q --tb=short --strict-markers -m "not integration" $(PYTEST_XDIST) \
 		--store-durations --durations-path=.test_durations \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
 
