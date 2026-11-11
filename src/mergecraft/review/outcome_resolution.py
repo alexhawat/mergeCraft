@@ -9,6 +9,7 @@ Exports:
     Functions:
         resolve_run_outcome — Map one run's ``OutcomeInputs`` to a ``RunOutcome`` and reason.
         roster_failure_from_result — Read a required reviewer's failure off a result.
+        structured_output_error — Why a required ``set_output`` payload is unusable.
         approval_withheld_reason — Why a formal APPROVE must not be posted for a run.
         finalize_run_outcome — Apply the disposition-ledger downgrade after publication.
 """
@@ -61,6 +62,8 @@ class OutcomeInputs:
         roster_infra_reason: That failure's infrastructure reason, if any.
         lite_reason: Why a lite run cannot pass, if it cannot.
         sink_scan_error: A credential found in a local sink, if any.
+        structured_output_error: Why a required ``set_output`` payload is
+            missing or invalid, if it is (see :func:`structured_output_error`).
     """
 
     result: AgentResult
@@ -82,6 +85,45 @@ class OutcomeInputs:
     roster_infra_reason: str | None = None
     lite_reason: str | None = None
     sink_scan_error: str | None = None
+    structured_output_error: str | None = None
+
+
+def structured_output_error(raw: str | None, *, findings: bool = False) -> str | None:
+    """Return why a required structured output is unusable, or ``None`` when it is usable.
+
+    A run that was asked for structured output (an ``output_schema``) and never
+    called ``set_output`` did not reach the result its caller asked for, the same
+    as a review that never submitted a verdict. With ``findings=True`` the payload
+    must also parse as a findings payload (the offline review's schema).
+
+    Args:
+        raw (str | None): ``tool_state.output`` after the run.
+        findings (bool): Whether the payload must parse as findings.
+
+    Returns:
+        str | None: The reason, else ``None``.
+
+    Examples:
+        >>> structured_output_error(None) is not None
+        True
+        >>> structured_output_error('{"findings": []}', findings=True) is None
+        True
+        >>> structured_output_error("not json", findings=True) is not None
+        True
+    """
+    from mergecraft.analyzers.finding import STRUCTURED_OUTPUT_REQUIRED_MSG
+
+    if not raw:
+        return STRUCTURED_OUTPUT_REQUIRED_MSG
+    if not findings:
+        return None
+    from mergecraft.analyzers.finding import parse_findings_payload
+
+    try:
+        parse_findings_payload(raw)
+    except ValueError as exc:
+        return str(exc)
+    return None
 
 
 def roster_failure_from_result(result: AgentResult) -> tuple[str | None, str | None]:
@@ -128,7 +170,10 @@ def resolve_run_outcome(inputs: OutcomeInputs) -> tuple[RunOutcome, str | None]:
     or ``inconclusive`` run ``inconclusive`` naming the finalize error; a
     required reviewer's failure makes a ``passed`` run ``inconclusive`` (or
     ``infra_error`` when it carried an infrastructure reason); a lite run's own
-    reason makes a ``passed`` run ``inconclusive``.
+    reason makes a ``passed`` run ``inconclusive``; a missing or invalid required
+    structured output makes a ``passed`` run ``inconclusive`` (the run did not
+    produce the result it was asked for — never ``configuration_error`` or
+    ``infra_error``).
 
     Args:
         inputs (OutcomeInputs): Everything the run's outcome depends on.
@@ -188,6 +233,9 @@ def resolve_run_outcome(inputs: OutcomeInputs) -> tuple[RunOutcome, str | None]:
         if inputs.lite_reason is not None and outcome is RunOutcome.passed:
             logger.warning("» {}", inputs.lite_reason)
             outcome, reason = RunOutcome.inconclusive, inputs.lite_reason
+        if inputs.structured_output_error is not None and outcome is RunOutcome.passed:
+            logger.warning("» {}", inputs.structured_output_error)
+            outcome, reason = RunOutcome.inconclusive, inputs.structured_output_error
     if inputs.sink_scan_error is not None:
         # A sink hit outranks the published verdict: the run failed, whatever
         # the review said, and the reason names the sink path, never its contents.
@@ -245,4 +293,5 @@ __all__ = [
     "finalize_run_outcome",
     "resolve_run_outcome",
     "roster_failure_from_result",
+    "structured_output_error",
 ]

@@ -102,12 +102,11 @@ def merge_analyzer_findings_into_result(
         try:
             parse_findings_payload(result.structured_output)
         except ValueError as exc:
-            return _offline_failure(
-                error=str(exc),
-                outcome=RunOutcome.configuration_error,
-                diff_path=result.diff_path,
-                evidence_packet_path=result.evidence_packet_path,
-            )
+            if not result.success:
+                # The run already failed and resolved its own outcome
+                # (``offline_outcome_inputs`` reads this payload); keep it.
+                return result
+            return _structured_output_failure(result, str(exc))
     if not extra:
         return result
     if result.structured_output:
@@ -246,6 +245,27 @@ def _render_offline_extra_block(extra: str) -> str:
     )
 
 
+def _structured_output_failure(result: OfflineReviewResult, reason: str) -> OfflineReviewResult:
+    """Fail ``result`` whose required ``set_output`` payload is missing or invalid.
+
+    The outcome comes from the shared resolver, so this offline fallback reads
+    the gap exactly as ``run_offline_agent_review`` and the Action do
+    (``inconclusive``: the run did not produce the findings it was asked for).
+    """
+    from mergecraft.agents.shared import AgentResult
+    from mergecraft.review.outcome_resolution import OutcomeInputs, resolve_run_outcome
+
+    outcome, resolved_reason = resolve_run_outcome(
+        OutcomeInputs(result=AgentResult(success=True), structured_output_error=reason)
+    )
+    return _offline_failure(
+        error=resolved_reason or reason,
+        outcome=outcome,
+        diff_path=result.diff_path,
+        evidence_packet_path=result.evidence_packet_path,
+    )
+
+
 def _finalize_structured_findings(
     result: OfflineReviewResult,
     json_path: Path,
@@ -254,24 +274,13 @@ def _finalize_structured_findings(
     if not result.success:
         return result
 
-    structured_raw = result.structured_output
-    if not structured_raw:
-        return _offline_failure(
-            error=STRUCTURED_OUTPUT_REQUIRED_MSG,
-            outcome=RunOutcome.configuration_error,
-            diff_path=result.diff_path,
-            evidence_packet_path=result.evidence_packet_path,
-        )
+    from mergecraft.review.outcome_resolution import structured_output_error
 
-    try:
-        findings = parse_findings_payload(structured_raw)
-    except ValueError as exc:
-        return _offline_failure(
-            error=str(exc),
-            outcome=RunOutcome.configuration_error,
-            diff_path=result.diff_path,
-            evidence_packet_path=result.evidence_packet_path,
-        )
+    structured_raw = result.structured_output
+    unusable = structured_output_error(structured_raw, findings=True)
+    if unusable is not None or not structured_raw:
+        return _structured_output_failure(result, unusable or STRUCTURED_OUTPUT_REQUIRED_MSG)
+    findings = parse_findings_payload(structured_raw)
 
     try:
         write_findings_json(json_path, findings)

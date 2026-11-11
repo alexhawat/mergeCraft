@@ -250,6 +250,8 @@ class RunContext:
     run_bounds: Any = None
     budget_tracker: Any = None
     budget_exhaustion: Any = None
+    # Why a required ``set_output`` payload is missing, if it is (resolver input).
+    structured_output_error: str | None = None
     # Instructions rendered at run start, per harness, for every attempt and
     # server-side reviewer; never re-rendered from the post-checkout tree.
     run_start_instructions: dict[str, Any] = field(default_factory=dict)
@@ -2047,12 +2049,12 @@ def _promote_and_finalize_agent_result(
     if timing_snapshot is not None:
         tool_state.llm_review_timing = timing_snapshot
 
-    if output_schema and not tool_state.output and result.success:
-        msg = (
-            "output_schema was provided but agent did not call set_output — "
-            "structured output is required"
-        )
-        raise RuntimeError(msg)
+    if output_schema and result.success:
+        # Classified by the shared resolver (inconclusive), the same way the
+        # offline review reads a missing ``set_output`` — not as a crash.
+        from mergecraft.review.outcome_resolution import structured_output_error
+
+        ctx.structured_output_error = structured_output_error(tool_state.output)
 
     return result
 
@@ -3367,6 +3369,7 @@ async def _finalize(
         roster_infra_reason=roster_infra_reason,
         lite_reason=_lite_inconclusive_reason(lite.outcome) if lite is not None else None,
         sink_scan_error=sink_scan_error,
+        structured_output_error=ctx.structured_output_error,
     )
     review_before_publication = tool_state.review
     if not isinstance(result, (SkipAgentReview, LiteAgentReview)):
