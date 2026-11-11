@@ -20,7 +20,7 @@ inputs:
       MERGECRAFT_CUSTOM_PROVIDER_*), or register the provider under
       `providers:` and set LLM_PROVIDER_<N>_API_KEY.
 
-      Default behaviour (#37 / W4): the supplied `model:` becomes the **head**
+      Default behaviour: the supplied `model:` becomes the **head**
       of the configured chain — the repo's `models:` list (and any
       `modelFallbacks:`) is retained as the tail and walked on credential
       miss or retryable failure. To restore the legacy "use exactly this

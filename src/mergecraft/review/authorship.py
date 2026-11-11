@@ -1,7 +1,7 @@
 """mergeCraft authorship is the marker AND an expected publisher.
 
-The rule and its threat model: ``docs/workflows.md`` § Self-review App token
-and approval lifecycle.
+The rule and its threat model: ``docs/dev/self-review.md`` § Self-review App
+token and approval lifecycle.
 
 A review body that carries ``*via mergecraft*`` (or a ``mergecraft-finding:v1:``
 marker) proves nothing on its own: anyone who can leave a PR review can paste

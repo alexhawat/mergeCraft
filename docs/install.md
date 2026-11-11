@@ -64,8 +64,18 @@ separate from the published alpha above:
 uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft@<full-commit-sha>"
 ```
 
-Then authenticate and open a pull request — details in the README install steps
-and [`docs/authentication.md`](authentication.md).
+Then store a provider credential, make sure the workflow passes it, and open a
+pull request:
+
+```bash
+mergecraft provider auth <provider> --scope github
+mergecraft workflow sync --check   # --apply to wire any provider the workflow lacks
+```
+
+Commit `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml`. The
+secret names per provider are in the
+[provider table](authentication.md#provider-reference); details in
+[`docs/authentication.md`](authentication.md).
 
 ## Docker-only consumers
 

@@ -419,7 +419,7 @@ def _verification_gate_lines() -> list[str]:
         "`Minor`/`Trivial`), withdrawn memory (skip fingerprints already refuted under "
         "`## Withdrawn review findings`), then the verification budget — so pre-budget "
         "skips never consume slots. Over-budget fingerprints surface in "
-        "`skippedOverBudget` for the open-PR ledger (W3).",
+        "`skippedOverBudget` for the open-PR ledger.",
     ]
 
 
