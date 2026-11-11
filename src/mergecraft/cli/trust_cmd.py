@@ -352,7 +352,7 @@ def set_self_review_cmd(
         console.print(
             "WARNING: trust.selfReview=full grants approval authority to self-review "
             "on same-repo pull_request_target. Self-review still posts a COMMENT "
-            "review unless prApproveEnabled is true; the `mergecraft review` status "
+            "review unless prApproveEnabled is also true; the `mergecraft review` status "
             "check is the merge gate."
         )
 

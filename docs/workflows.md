@@ -194,8 +194,8 @@ issues-showcase-readiness follow-up. -->
 - **The approval check is structural** — `success` requires a completed trusted
   run with no Critical/Major findings; `failure` on any blocker; `neutral` for
   crashes, timeouts, and untrusted tiers. The agent's narrative approval is
-  advisory only. This check is the merge gate; a consumer that wants a formal
-  APPROVE review opts in with `prApproveEnabled` — see
+  advisory only. This check is the merge gate; a formal APPROVE review needs
+  `trust.selfReview: full` plus `prApproveEnabled` — see
   [trust policy](trust-policy.md).
 - **Analyzers under low trust run untrusted-only** — no secrets, no network, no
   PR-authored command construction; exclusions are reported as named skips.
@@ -325,7 +325,7 @@ Full rationale in the collapsible sections of
 ### Approval
 
 mergeCraft posts a COMMENT review plus the `mergecraft review` status check; the
-check is the merge gate. A formal APPROVE is posted only when a consumer sets
+check is the merge gate. A formal APPROVE needs both authority trust (`trust.selfReview: full`) and
 `prApproveEnabled: true`. See [trust policy](trust-policy.md#approval-and-the-merge-gate)
 and [App setup](authentication.md#reviewer-app-identity). How this
 repository runs its own self-review is in

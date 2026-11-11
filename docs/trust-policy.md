@@ -161,8 +161,8 @@ It must not appear as the happy-path recommendation in consumer docs.
 
 mergeCraft publishes a COMMENT review plus the `mergecraft review` status check,
 and that check is the merge gate. There is no separate App approval workflow: a
-formal APPROVE is posted only when `prApproveEnabled` is true and the run's own
-terminal verdict allows it. Normal COMMENT-only publication is behavior, not a
+formal APPROVE is posted only at `selfReview: full` (authority trust) with
+`prApproveEnabled` true, and only when the run's own terminal verdict allows it. Normal COMMENT-only publication is behavior, not a
 token permission boundary; a compromised reviewer can forge its own checks.
 
 The trust levels above are not GitHub token permission restrictions. At
