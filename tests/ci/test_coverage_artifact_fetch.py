@@ -24,12 +24,24 @@ _INTEGRATION = ".github/workflows/integration.yml"
 _SELF_RUN = 900
 
 
-def _run(run_id: int, status: str, path: str = _CI, artifact: bool = False) -> dict[str, object]:
-    return {"id": run_id, "status": status, "path": path, "artifact": artifact}
+def _run(
+    run_id: int,
+    status: str,
+    path: str = _CI,
+    artifact: bool = False,
+    conclusion: str | None = None,
+) -> dict[str, object]:
+    row: dict[str, object] = {"id": run_id, "status": status, "path": path, "artifact": artifact}
+    if conclusion is not None:
+        row["conclusion"] = conclusion
+    return row
 
 
 def _fetch(
-    tmp_path: Path, runs: list[dict[str, object]], attempt: str | None = None
+    tmp_path: Path,
+    runs: list[dict[str, object]],
+    attempt: str | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -46,7 +58,7 @@ def _fetch(
     gh.write_text(
         "#!/bin/sh\n"
         'case "$2" in\n'
-        f'  */actions/runs\\?*) cat "{tmp_path}/runs.json" ;;\n'
+        f'  */actions/runs\\?*) echo "$2" >> "{tmp_path}/queries.log"; cat "{tmp_path}/runs.json" ;;\n'
         f'  */artifacts/7/zip) cat "{tmp_path}/cov.zip" ;;\n' + cases + "esac\n",
         encoding="utf-8",
     )
@@ -61,6 +73,7 @@ def _fetch(
             "GITHUB_RUN_ID": str(_SELF_RUN),
             "MERGECRAFT_COVERAGE_ARTIFACT_STATUS": "any",
             **({"MERGECRAFT_COVERAGE_ATTEMPT": attempt} if attempt else {}),
+            **(extra_env or {}),
         },
         capture_output=True,
         text=True,
@@ -135,3 +148,58 @@ def test_an_unlisted_publisher_gets_a_grace_period(
 ) -> None:
     """A fresh push may poll before GitHub has registered ci.yml's run for the SHA."""
     assert _fetch(tmp_path, runs, attempt=attempt).returncode == expected
+
+
+_ANOTHER = ".github/workflows/some-other-workflow.yml"
+
+
+def test_an_artifact_uploaded_by_another_workflow_is_never_trusted(tmp_path: Path) -> None:
+    """CIR-F19: only ci.yml and ci-cd.yml runs may supply a coverage baseline."""
+    result = _fetch(tmp_path, [_run(1, "completed", _ANOTHER, artifact=True)])
+    assert result.returncode != 0, "a foreign workflow's artifact was reused"
+    assert not (tmp_path / "out.json").exists()
+
+
+def test_a_trusted_workflow_run_wins_over_an_earlier_foreign_one(tmp_path: Path) -> None:
+    runs = [_run(1, "completed", _ANOTHER, artifact=True), _run(2, "completed", artifact=True)]
+    result = _fetch(tmp_path, runs)
+    assert result.returncode == 0, result.stderr
+    assert "from run 2" in result.stdout
+
+
+def test_the_polling_run_is_never_its_own_baseline(tmp_path: Path) -> None:
+    result = _fetch(tmp_path, [_run(_SELF_RUN, "in_progress", artifact=True)])
+    assert result.returncode != 0
+
+
+def test_the_base_lookup_can_require_a_successful_main_run(tmp_path: Path) -> None:
+    env = {
+        "MERGECRAFT_COVERAGE_ARTIFACT_BRANCH": "main",
+        "MERGECRAFT_COVERAGE_ARTIFACT_REQUIRE_SUCCESS": "1",
+    }
+    failed = _fetch(
+        tmp_path, [_run(1, "completed", artifact=True, conclusion="failure")], extra_env=env
+    )
+    assert failed.returncode == 3, failed.stderr
+    assert "branch=main" in (tmp_path / "queries.log").read_text(encoding="utf-8")
+
+
+def test_a_successful_or_still_running_base_run_is_accepted(tmp_path: Path) -> None:
+    env = {"MERGECRAFT_COVERAGE_ARTIFACT_REQUIRE_SUCCESS": "1"}
+    ok = _fetch(
+        tmp_path, [_run(1, "completed", artifact=True, conclusion="success")], extra_env=env
+    )
+    assert ok.returncode == 0, ok.stderr
+
+
+def test_a_failed_run_is_still_accepted_when_success_is_not_required(tmp_path: Path) -> None:
+    """The head lookup keeps working for a PR whose other jobs failed."""
+    result = _fetch(tmp_path, [_run(1, "completed", artifact=True, conclusion="failure")])
+    assert result.returncode == 0, result.stderr
+
+
+def test_integration_base_lookup_passes_the_branch_and_success_filters() -> None:
+    steps = job(load_workflow("integration.yml"), "integration-pr")["steps"]
+    base = next(s for s in steps if str(s.get("name", "")).startswith("Fetch base coverage"))
+    assert base["env"]["MERGECRAFT_COVERAGE_ARTIFACT_BRANCH"] == "${{ github.base_ref }}"
+    assert base["env"]["MERGECRAFT_COVERAGE_ARTIFACT_REQUIRE_SUCCESS"] == "1"

@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -23,7 +24,7 @@ from tests.ci.workflow_support import REPO_ROOT
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
-_DEFAULT_MARGIN = 5.0
+_DEFAULT_MARGIN = 2.0
 
 
 def _load_ratchet_module() -> Any:
@@ -121,6 +122,8 @@ def test_lowering_fail_under_without_baseline_commit_fails(
 
     module = _load_ratchet_module()
     monkeypatch.setattr(module, "_fail_under_from_pyproject", lambda repo_root=None: lowered)
+    # The merge base declares the real floor; this PR's pyproject declares less.
+    monkeypatch.setattr(module, "_fail_under_from_merge_base", lambda *a, **k: (floor, None))
     rc = int(module.check_coverage_ratchet(report, floor=lowered))
 
     assert rc != 0, (
@@ -129,23 +132,23 @@ def test_lowering_fail_under_without_baseline_commit_fails(
     )
 
 
-def test_raising_coverage_above_ceiling_warns_not_fails(tmp_path: Path) -> None:
-    """``measured > floor + margin`` should warn, not fail, unless hard ceiling is opted in (D12)."""
+def test_raising_coverage_above_ceiling_warns_not_fails_on_every_event(
+    tmp_path: Path,
+) -> None:
+    """``measured > floor + margin`` warns with the new floor, even on a pull request."""
     floor = _fail_under_from_pyproject()
-    measured = floor + _DEFAULT_MARGIN + 2.0
-    report = _coverage_json(tmp_path, measured)
+    report = _coverage_json(tmp_path, floor + _DEFAULT_MARGIN + 2.0)
 
-    proc = subprocess.run(
-        [sys.executable, "scripts/check_coverage_ratchet.py", str(report)],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    combined = proc.stdout + proc.stderr
-    assert proc.returncode == 0, (
-        f"coverage above the soft ceiling should warn, not fail (D12 — TH6)\n{combined}"
-    )
-    assert re.search(r"warn", combined, re.IGNORECASE), (
-        "expected a warning when measured exceeds floor + margin (D12)"
-    )
+    for event in ("pull_request", "push"):
+        proc = subprocess.run(
+            [sys.executable, "scripts/check_coverage_ratchet.py", str(report)],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            env={**os.environ, "GITHUB_EVENT_NAME": event},
+        )
+        combined = proc.stdout + proc.stderr
+        assert proc.returncode == 0, combined
+        assert re.search(r"warn", combined, re.IGNORECASE)
+        assert "fail_under can be raised to" in combined

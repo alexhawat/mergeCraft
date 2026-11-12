@@ -342,3 +342,39 @@ pages:
     template: contributor
     generator: null
     purpose: Language coverage matrix, sourced public pull requests per language, and the prioritized fixture work list (research, not a corpus).
+
+  - path: docs/troubleshooting.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Symptom-first fixes for a missing check, empty secrets, skipped fork runs, and non-zero exit codes.
+
+  - path: docs/upgrade.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Move the CLI and the GitHub Action pin to a new release together, and roll back.
+
+  - path: docs/cost.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: What a review spends, which settings change it, and where provider prices are recorded.
+
+  - path: docs/architecture.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: A review run end to end, mapped to the packages under src/mergecraft/.
+
+  - path: docs/uninstall.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Pause reviews or remove mergeCraft, its credentials and its integrations from a repository.
+
+  - path: docs/agents.md
+    audience: consumer
+    template: consumer
+    generator: null
+    purpose: Copy-paste prompts that let a coding agent install mergeCraft and learn to use it.

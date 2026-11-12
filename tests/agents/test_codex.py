@@ -90,7 +90,9 @@ def test_codex_harness_invokes_cli_and_parses_agent_result(
     assert captured, "expected codex harness to invoke subprocess.Popen"
     cmd = captured[0]
     assert cmd[0] == "/usr/bin/codex"
-    assert "review this diff" in cmd
+    # The prompt goes on stdin (``-``), never as one argv string (#1329).
+    assert cmd[-1] == "-"
+    assert "review this diff" not in cmd
     assert any("--model" in arg or "gpt-5.3-codex" in arg for arg in cmd)
 
     assert result.success is True

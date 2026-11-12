@@ -95,8 +95,11 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-          # Only a push run (main's CI or CI/CD) may supply the baseline.
+          # Only a successful push run of the base branch (main's CI or CI/CD) may
+          # supply the baseline; the script also ignores every other workflow.
           MERGECRAFT_COVERAGE_ARTIFACT_EVENT: push
+          MERGECRAFT_COVERAGE_ARTIFACT_BRANCH: ${{ github.base_ref }}
+          MERGECRAFT_COVERAGE_ARTIFACT_REQUIRE_SUCCESS: "1"
           MERGECRAFT_COVERAGE_ARTIFACT_STATUS: any
         run: |
           set -euo pipefail

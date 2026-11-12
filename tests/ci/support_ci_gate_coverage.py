@@ -213,9 +213,13 @@ def seed_passing_coverage_json(path: Path) -> None:
         files[f"src/mergecraft/{suffix}"] = {"summary": summary}
     for needle in _PREFIX_NEEDLES:
         files[f"src/mergecraft{needle}module.py"] = {"summary": summary}
+    # Combined metric just above the declared floor: the ratchet fails a report that
+    # sits more than its margin above it, so a literal 100.0 would not pass.
+    declared = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    floor = float(declared["tool"]["coverage"]["report"]["fail_under"])
     payload = {
         "totals": {
-            "percent_covered": 100.0,
+            "percent_covered": floor + 0.5,
             "num_statements": 100,
             "covered_lines": 100,
         },

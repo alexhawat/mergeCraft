@@ -39,7 +39,8 @@ def _readme_agent_region() -> str:
     # collapsed ``<details>`` spelling alike.
     region = readme_agent_section_region(read_text("README.md"))
     assert region is not None, "README agent section missing"
-    return region
+    # The long prompts live in docs/agents.md; both surfaces must name real paths only.
+    return region + "\n" + read_text("docs/agents.md")
 
 
 def test_every_declared_harness_has_a_package_or_fallback() -> None:

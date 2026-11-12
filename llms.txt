@@ -36,7 +36,13 @@
 - docs/agent-roster.md — agent roster, slots, multi-reviewer, trust snapshot
 - docs/workflows.md — workflow examples, trust tiers, pull_request_target
 - docs/trust-policy.md — operator trust knob (execution vs authority, selfReview levels)
-- docs/glossary.md — plain-language definitions for landing-page jargon
+- docs/glossary.md — plain-language definitions for mergeCraft terms (Jev, roster, lens, lane, receipts, evidence packet)
+- docs/troubleshooting.md — symptom-first fixes: missing check, empty secret, fork skips, exit codes
+- docs/upgrade.md — move the CLI and the Action pin to a new release together
+- docs/cost.md — what a review spends and which settings change it
+- docs/architecture.md — a review run end to end, mapped to src/mergecraft/ packages
+- docs/uninstall.md — pause or remove mergeCraft from a repository
+- docs/agents.md — copy-paste prompts for coding agents
 - docs/REVIEW-CHECKS.md — every check a review applies
 - docs/ANALYZERS.md — shipped analyzer catalog
 - docs/REVIEW-DOCTRINE.md — review philosophy and grading

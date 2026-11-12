@@ -78,7 +78,9 @@ your merge policy.
 **Residual risks** (documented in the scaffolded config comment):
 
 - A fork PR checked out onto a local branch looks like a same-repo head. —
-  mitigated by `trust.sandboxTrustedAuthors` below.
+  `trust.sandboxTrustedAuthors` below narrows this to commits carrying
+  allow-listed emails, but it does not authenticate the author (see its
+  [limits](#what-the-author-gate-does-and-does-not-establish)).
 - Adding a collaborator widens `same-repo` to anyone with write access.
 
 Inspect and configure:
@@ -103,9 +105,12 @@ the evidence packet alongside the `trust_*` keys.
 in this repository was written by someone I trust." They cannot tell that from
 "a branch in this repository exists" — a fork PR checked out with `gh pr
 checkout` and pushed to `origin` on a local branch looks identical to a
-same-repo head, and the override is then granted over content the operator did
-not write. `trust.sandboxTrustedAuthors` closes that gap: it lets "same-repo"
-mean "same-repo **and** authored by someone I named."
+same-repo head. `trust.sandboxTrustedAuthors` adds a second condition:
+"same-repo **and** every commit in the PR head range carries an author and
+committer email I listed." It is a consistency check on commit metadata, not
+a proof of who wrote the commits; read
+[what it does and does not establish](#what-the-author-gate-does-and-does-not-establish)
+before relying on it.
 
 ```yaml
 trust:
@@ -126,6 +131,31 @@ trust:
   it can **never** grant an override the tier itself refuses. The fork floor
   still runs first and still wins — an all-trusted commit range on a fork head
   changes nothing.
+
+### What the author gate does and does not establish
+
+The gate reads the author and committer emails that `git log` reports and
+compares them with the list. Both are free-form fields that whoever creates a
+commit sets, for example with `git -c user.email=<address> commit`. A commit
+whose emails match the list therefore shows that the metadata matches, not that
+the listed person wrote or approved the content. mergeCraft does not check
+commit signatures or GitHub's commit verification status.
+
+In practice:
+
+- It catches accidental mixing: a branch that picked up commits from an
+  unlisted contributor, a bot, or an unrelated fork without anyone rewriting
+  the metadata.
+- It does not stop an author who chooses to put a listed address on their own
+  commits. If a fork author can get a branch pushed to `origin`, the author
+  gate does not separate that branch from a trusted one.
+- The controls that bound that case are the ones outside this setting: the
+  fork floor above, who can push branches to the repository (write access), and
+  your merge policy.
+
+Do not treat an `agentSandbox` value other than `never` as safe against a
+hostile author on the strength of this list alone. Requiring verified commit
+signatures would be a stronger check; it is not implemented.
 
 **Fail closed.** If the commit range cannot be computed — no base sha resolves
 from the event or `origin/<default-branch>`, the `git log` call fails, or it

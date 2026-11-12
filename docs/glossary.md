@@ -101,8 +101,95 @@ example withdrawn false positives — so later reviews do not repeat the same mi
 
 Read more: [Eval bank — learnings](eval-bank.md).
 
+<span id="jev"></span>
+
+### Jev
+
+**Jev** is an optional screening gate that ranks and filters the changed code units
+before the generative reviewer reads them. It is advisory (shadow-only) today and never
+replaces the reviewer. Each Jev question is a call to TypeSafe's hosted service, so
+enabling it sends review content to TypeSafe; it is off unless you set `jev.enabled`.
+
+Read more: [Jev gate patterns](jev-gate-patterns.md),
+[Data sent to TypeSafe](jev-gate-patterns.md#data-sent-to-typesafe).
+
+<span id="roster"></span>
+
+### Roster
+
+The **roster** is the list of reviewer agents in `.mergecraft/config.yaml` and the
+ordered model chain each one uses (`agents.reviewer`, with `p0` as the first slot and
+later slots as backups). The workflow file separately says which providers CI can
+authenticate with.
+
+Read more: [Agent roster](agent-roster.md).
+
+<span id="lens"></span>
+
+### Lens
+
+A **lens** is a focused review rubric — security, concurrency, API compatibility, data
+integrity and others — that the reviewer applies to the parts of a change it fits.
+`mergecraft lens list` shows the bundled set.
+
+Read more: [REVIEW-CHECKS](REVIEW-CHECKS.md).
+
+<span id="lane"></span>
+
+### Lane
+
+A **lane** is the blast-radius class a change lands in: `low` (eligible for auto-merge
+once required checks pass), `medium` (assisted review) or `high` (automatic merge is
+forbidden). The lane is a signal in the evidence packet, not an instruction to merge.
+
+Read more: [Blast-radius classifier](blast-radius.md),
+[Blast-radius merge lanes](REVIEW-CHECKS.md#blast-radius-merge-lanes).
+
+<span id="receipts"></span>
+
+### Receipts
+
+A **receipt** (fail-then-pass receipt) is a small JSON file your own CI uploads to show
+that a test failed on the base commit and passes on the head commit. A pull request
+that calls itself a fix needs one; mergeCraft reads it but never runs your tests.
+
+Read more: [Fail-then-pass receipts](red-green-receipts.md).
+
+<span id="evidence-packet"></span>
+
+### Evidence packet
+
+The **evidence packet** is the versioned, structured record a run writes for each pull
+request it reviews: findings, deterministic checks, the blast-radius lane and what was
+read. It lets a person or a later tool reconstruct why a change was blocked or allowed.
+
+Read more: [The Merge Evidence Packet](evidence-packet.md).
+
+<span id="terminal-verdict"></span>
+
+### Terminal verdict
+
+The **terminal verdict** is the `approve` or `request_changes` choice the reviewing
+agent records through the typed `submit_review_verdict` tool. A run without one is
+`inconclusive`, however fluent its prose. It is distinct from the structural verdict,
+which is computed from typed findings.
+
+Read more: [Terminal verdict vs structural verdict](REVIEW-CHECKS.md#terminal-verdict-vs-structural-verdict-vp2).
+
+<span id="checks"></span>
+
+### `mergecraft` and `mergecraft-approval` checks
+
+With `status_checks: enabled` (the scaffold sets it), two GitHub checks appear on a reviewed pull request. **`mergecraft`** reports how the
+run ended (passed, failed, inconclusive, timed out and so on). **`mergecraft-approval`**
+is the [structural approval gate](#structural-approval-gate): it passes or fails from
+typed findings and run state alone.
+
+Read more: [REVIEW-CHECKS](REVIEW-CHECKS.md), [Troubleshooting](troubleshooting.md).
+
 ## See also
 
 - [Landing README](../README.md) — links here on first use of each term
 - [docs/workflows.md](workflows.md) — trust tiers and workflow examples
 - [docs/REVIEW-CHECKS.md](REVIEW-CHECKS.md) — every check a review applies
+- [Troubleshooting](troubleshooting.md) · [Cost](cost.md) · [Architecture](architecture.md)

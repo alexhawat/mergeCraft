@@ -198,6 +198,7 @@ class _RecordingAgent:
         self.events: list[tuple[str, str]] = []
         self.in_flight = 0
         self.max_in_flight = 0
+        self.entered: list[str] = []
 
     async def install(self) -> None:
         return None
@@ -228,6 +229,7 @@ class _RecordingAgent:
             )
             return AgentResult(success=True, output="ok")
         self.events.append(("start", group_id))
+        self.entered.append(group_id)
         self.in_flight += 1
         self.max_in_flight = max(self.max_in_flight, self.in_flight)
         try:
@@ -246,6 +248,68 @@ class _RecordingAgent:
         finally:
             self.in_flight -= 1
             self.events.append(("finish", group_id))
+
+
+class _Overlay:
+    """Read-through view of a module with a few attributes replaced."""
+
+    def __init__(self, real: Any, **overrides: Any) -> None:
+        self._real = real
+        self._overrides = overrides
+
+    def __getattr__(self, name: str) -> Any:
+        if name in self._overrides:
+            return self._overrides[name]
+        return getattr(self._real, name)
+
+
+class _VirtualBudget:
+    """Deterministic clock and group cap for the fan-out, so no test races real time.
+
+    The fan-out measures its budget with ``time.monotonic`` and caps each group with
+    ``asyncio.wait_for`` (both looked up in ``roster_execution``). Here the clock only
+    moves when a cap fires, and a cap fires only after ``wave`` groups have entered the
+    fake agent's ``run``. Setup cost on a slow runner therefore cannot consume the
+    budget, and the caps the code computed are recorded for exact assertions.
+    """
+
+    def __init__(self, agent: _RecordingAgent, *, wave: int) -> None:
+        self.agent = agent
+        self.wave = wave
+        self.now = 1000.0
+        self.caps: list[float] = []
+        self.cancelled = 0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    async def wait_for(self, awaitable: Any, timeout: float) -> Any:  # noqa: ASYNC109
+        self.caps.append(timeout)
+        fires_at = self.now + timeout
+        task = asyncio.ensure_future(awaitable)
+        real_deadline = time.monotonic() + 120.0  # safety net only; never asserted on
+        while len(self.agent.entered) < self.wave and not task.done():
+            assert time.monotonic() < real_deadline, "groups never entered run()"
+            await asyncio.sleep(0.001)
+        if task.done():
+            return task.result()
+        self.now = max(self.now, fires_at)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        self.cancelled += 1
+        raise TimeoutError
+
+    def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(roster_execution, "time", _Overlay(time, monotonic=self.monotonic))
+        monkeypatch.setattr(roster_execution, "asyncio", _Overlay(asyncio, wait_for=self.wait_for))
+
+
+def _virtual_budget(
+    monkeypatch: pytest.MonkeyPatch, agent: _RecordingAgent, *, wave: int = 1
+) -> _VirtualBudget:
+    budget = _VirtualBudget(agent, wave=wave)
+    budget.install(monkeypatch)
+    return budget
 
 
 @dataclass
@@ -907,21 +971,24 @@ async def test_missing_credential_is_a_recorded_error_per_group(
 
 
 @pytest.mark.parametrize(
-    ("config", "remaining"),
+    ("config", "remaining", "cap"),
     [
         pytest.param(
             _single_reviewer_config(enabled=True, maxGroups=1, perGroupTimeoutS=1),
             None,
+            1.0,
             id="per-group-timeout",
         ),
         pytest.param(
             _single_reviewer_config(reviewer_timeout_s=1, enabled=True, maxGroups=1),
             None,
+            1.0,
             id="binding-timeout",
         ),
         pytest.param(
             _single_reviewer_config(enabled=True, maxGroups=1),
             lambda: 1.0,
+            0.5,
             id="remaining-run-budget",
         ),
     ],
@@ -931,17 +998,18 @@ async def test_group_timeout_is_the_smallest_of_its_three_bounds(
     monkeypatch: pytest.MonkeyPatch,
     config: str,
     remaining: Any,
+    cap: float,
 ) -> None:
     """``min(perGroupTimeoutS, binding timeout, remaining run budget)`` caps a group."""
     groups = _group_paths(_LARGE_DIFF, max_groups=1)
     agent = _RecordingAgent(groups, hang_s=15.0)
     env = _build_env(tmp_path, monkeypatch, config=config, diff=_LARGE_DIFF, agent=agent)
+    budget = _virtual_budget(monkeypatch, agent)
 
-    started = time.monotonic()
     summary = await _fan_out(env, remaining_timeout_s=remaining)
-    elapsed = time.monotonic() - started
 
-    assert elapsed < 8.0
+    assert budget.caps == [cap]
+    assert budget.cancelled == 1
     assert _failed_group_ids(summary) == {"group-1"}
     assert "timed out" in env.tool_state.reviewer_dispatch_errors["file-group/group-1"].lower()
     assert len(_run_scoped_rows(env.tool_state)) == 1
@@ -1440,11 +1508,12 @@ async def test_a_group_stamp_survives_a_later_group_re_verifying_the_row(
 
 
 @pytest.mark.parametrize(
-    ("config", "remaining"),
+    ("config", "remaining", "cap"),
     [
         pytest.param(
             _single_reviewer_config(reviewer_timeout_s=0, enabled=True, maxGroups=1),
             lambda: 1.5,
+            0.75,
             id="zero-binding-timeout-with-remaining-budget",
         ),
         pytest.param(
@@ -1452,6 +1521,7 @@ async def test_a_group_stamp_survives_a_later_group_re_verifying_the_row(
                 reviewer_timeout_s=0, enabled=True, maxGroups=1, perGroupTimeoutS=1
             ),
             None,
+            1.0,
             id="zero-binding-timeout-with-per-group-timeout",
         ),
     ],
@@ -1461,17 +1531,18 @@ async def test_no_bound_can_disable_the_group_timeout(
     monkeypatch: pytest.MonkeyPatch,
     config: str,
     remaining: Any,
+    cap: float,
 ) -> None:
     """A zero binding timeout still caps the group; it never means "no timeout"."""
     groups = _group_paths(_LARGE_DIFF, max_groups=1)
     agent = _RecordingAgent(groups, hang_s=4.0)
     env = _build_env(tmp_path, monkeypatch, config=config, diff=_LARGE_DIFF, agent=agent)
+    budget = _virtual_budget(monkeypatch, agent)
 
-    started = time.monotonic()
     summary = await _fan_out(env, remaining_timeout_s=remaining)
-    elapsed = time.monotonic() - started
 
-    assert elapsed < 3.0
+    assert budget.caps == [cap]
+    assert budget.cancelled == 1
     assert _failed_group_ids(summary) == {"group-1"}
     assert "timed out" in env.tool_state.reviewer_dispatch_errors["file-group/group-1"]
 
@@ -1504,6 +1575,7 @@ async def test_group_timeout_reason_renders_one_decimal(
     groups = _group_paths(_LARGE_DIFF, max_groups=1)
     agent = _RecordingAgent(groups, hang_s=4.0)
     env = _build_env(tmp_path, monkeypatch, config=config, diff=_LARGE_DIFF, agent=agent)
+    _virtual_budget(monkeypatch, agent)
 
     summary = await _fan_out(env, remaining_timeout_s=remaining)
 
@@ -1558,10 +1630,10 @@ async def test_tool_context_agent_id_is_restored_after_a_group_raises(
 
 
 @pytest.mark.parametrize(
-    ("share", "remaining", "hang_s", "ceiling_s"),
+    ("share", "remaining", "cap"),
     [
-        pytest.param(None, 4.0, 3.0, 2.7, id="default-half-of-4s"),
-        pytest.param(0.25, 8.0, 6.0, 2.7, id="quarter-of-8s"),
+        pytest.param(None, 4.0, 2.0, id="default-half-of-4s"),
+        pytest.param(0.25, 8.0, 2.0, id="quarter-of-8s"),
     ],
 )
 async def test_fanout_spends_at_most_its_share_of_the_remaining_budget(
@@ -1569,12 +1641,11 @@ async def test_fanout_spends_at_most_its_share_of_the_remaining_budget(
     monkeypatch: pytest.MonkeyPatch,
     share: float | None,
     remaining: float,
-    hang_s: float,
-    ceiling_s: float,
+    cap: float,
 ) -> None:
     """A group that would finish inside the whole budget is cut off at the share."""
     groups = _group_paths(_LARGE_DIFF, max_groups=1)
-    agent = _RecordingAgent(groups, hang_s=hang_s)
+    agent = _RecordingAgent(groups, hang_s=remaining)
     fanout: dict[str, object] = {"enabled": True, "maxGroups": 1}
     if share is not None:
         fanout["budgetShare"] = share
@@ -1585,12 +1656,12 @@ async def test_fanout_spends_at_most_its_share_of_the_remaining_budget(
         diff=_LARGE_DIFF,
         agent=agent,
     )
+    budget = _virtual_budget(monkeypatch, agent)
 
-    started = time.monotonic()
     summary = await _fan_out(env, remaining_timeout_s=lambda: remaining)
-    elapsed = time.monotonic() - started
 
-    assert elapsed < ceiling_s
+    assert budget.caps == [cap]
+    assert budget.cancelled == 1
     assert _failed_group_ids(summary) == {"group-1"}
     assert "timed out" in env.tool_state.reviewer_dispatch_errors["file-group/group-1"]
 
@@ -1599,7 +1670,12 @@ async def test_fanout_spends_at_most_its_share_of_the_remaining_budget(
 async def test_fanout_fractional_share_caps_all_groups(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, concurrency: int
 ) -> None:
-    """A subsecond slice caps active groups and prevents queued groups starting."""
+    """A subsecond slice caps active groups and prevents queued groups starting.
+
+    No assertion reads the real clock: the cap fires once every group the concurrency
+    allows is inside ``run``, and it advances a virtual clock past the whole budget, so
+    the queued groups see an exhausted budget however slow the machine is.
+    """
     groups = _group_paths(_LARGE_DIFF, max_groups=6)
     agent = _RecordingAgent(groups, hang_s=3.0)
     env = _build_env(
@@ -1609,15 +1685,19 @@ async def test_fanout_fractional_share_caps_all_groups(
         diff=_LARGE_DIFF,
         agent=agent,
     )
+    budget = _virtual_budget(monkeypatch, agent, wave=concurrency)
 
-    started = time.monotonic()
     summary = await _fan_out(env, remaining_timeout_s=lambda: 1.0)
-    elapsed = time.monotonic() - started
 
-    assert 0.4 <= elapsed < 0.95
-    assert _failed_group_ids(summary) == set(groups)
+    # share 0.5 of the 1.0 s left, identical for every active group (the clock was frozen)
+    assert budget.caps == [0.5] * concurrency
     assert len(agent.group_calls()) == concurrency
+    assert budget.cancelled == concurrency
+    assert agent.in_flight == 0
+    assert _failed_group_ids(summary) == set(groups)
     errors = env.tool_state.reviewer_dispatch_errors
+    for group_id in list(groups)[:concurrency]:
+        assert "timed out after 0.5s" in errors[_group_agent_id(group_id)]
     for group_id in list(groups)[concurrency:]:
         assert "budget exhausted before dispatch" in errors[_group_agent_id(group_id)]
     assert len(env.tool_state.agent_findings) == 6

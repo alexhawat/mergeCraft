@@ -86,8 +86,8 @@ def test_landing_has_outline_b_headings() -> None:
         missing.append("Problem or Why")
     if not _anchor_present(text, "how-it-works", "how it works"):
         missing.append("How it works")
-    if not _anchor_present(text, "install"):
-        missing.append("Install")
+    if not _anchor_present(text, "install", "quickstart"):
+        missing.append("Quickstart or Install")
     if not _anchor_present(text, "features"):
         missing.append("Features")
     if not _anchor_present(text, "documentation", "docs"):
@@ -143,8 +143,8 @@ def test_landing_omits_broken_demo_image() -> None:
 
 def test_landing_has_numbered_install() -> None:
     text = _readme_text()
-    region = _section_body(text, r"Install\b")
-    assert region is not None, "README needs an Install section with numbered steps (RD2.2)"
+    region = _section_body(text, r"(?:Quickstart|Install)\b")
+    assert region is not None, "README needs a Quickstart section with numbered steps (RD2.2)"
     numbered = re.search(r"(?:^|\n)\s*1\.\s+", region)
     assert numbered, "Install section must use ordered steps"
     lowered = region.lower()

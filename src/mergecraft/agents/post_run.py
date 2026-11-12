@@ -312,6 +312,12 @@ async def run_post_run_retry_loop(
     from mergecraft.mcp.verdict import record_scope_rejection_if_blocked
 
     record_scope_rejection_if_blocked(ctx.tool_state)
+    if not initial.success:
+        # #1328 — a failed attempt (a stall, a timeout, an expired login, a
+        # rate limit) goes to the chain classifier as it is. Resuming it would
+        # wait on the same dead provider again and replace its error and its
+        # ``retryable`` / ``infra_reason`` metadata with the resume's.
+        return await finalize_agent_result(ctx, initial)
     for attempt in range(MAX_POST_RUN_RETRIES):
         issues = await collect_post_run_issues(ctx, skip_summary_stale=skip_summary)
         if not has_post_run_issues(issues):

@@ -96,9 +96,14 @@ def test_auto_approve_flag_follows_ci(
     captured: dict[str, list[str]] = {}
 
     def _fake_streaming(
-        *, cmd: list[str], ctx: Any, model: str | None, prompt: str | None = None
+        *,
+        cmd: list[str],
+        ctx: Any,
+        model: str | None,
+        prompt: str | None = None,
+        stdin_text: str | None = None,
     ) -> Any:
-        del ctx, model, prompt
+        del ctx, model, prompt, stdin_text
         captured["cmd"] = cmd
         return gemini_mod.AgentResult(success=True)
 

@@ -932,11 +932,19 @@ async def test_cli_fallback_prepends_the_system_prompt_and_passes_the_model(
 
     captured: dict[str, Any] = {}
 
-    def _fake_streaming(*, cmd: list[str], ctx: Any, env: dict[str, str]) -> AgentResult:
+    def _fake_streaming(
+        *, cmd: list[str], ctx: Any, env: dict[str, str], **_kw: Any
+    ) -> AgentResult:
         captured["cmd"] = cmd
         return AgentResult(success=True, output="ok")
 
     monkeypatch.setattr(oc, "_run_opencode_cli_streaming", _fake_streaming)
+
+    async def _no_retry(_ctx: Any, *, initial: AgentResult, resume: Any) -> AgentResult:
+        return initial
+
+    # The fallback now runs the post-run retry loop; this case pins argv only.
+    monkeypatch.setattr(oc, "run_post_run_retry_loop", _no_retry)
     ctx = replace(
         make_agent_run_context(tmp_path, resolved_model="nous/deepseek-v4"),
         instructions=ResolvedInstructions(system="SYSTEM", user="USER"),
@@ -946,7 +954,8 @@ async def test_cli_fallback_prepends_the_system_prompt_and_passes_the_model(
 
     cmd = captured["cmd"]
     assert cmd[:4] == ["/usr/bin/opencode", "run", "--format", "json"]
-    assert cmd[4] == "SYSTEM\n\nUSER"
+    # Flags precede the positional prompt (#1329).
+    assert cmd[-1] == "SYSTEM\n\nUSER"
     assert cmd[cmd.index("--model") + 1] == "nous/deepseek-v4"
     assert result.output == "ok"
 
@@ -959,7 +968,9 @@ async def test_cli_fallback_omits_the_model_flag_when_none_is_resolved(
 
     captured: dict[str, Any] = {}
 
-    def _fake_streaming(*, cmd: list[str], ctx: Any, env: dict[str, str]) -> AgentResult:
+    def _fake_streaming(
+        *, cmd: list[str], ctx: Any, env: dict[str, str], **_kw: Any
+    ) -> AgentResult:
         captured["cmd"] = cmd
         return AgentResult(success=True)
 

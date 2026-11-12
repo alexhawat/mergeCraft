@@ -29,10 +29,33 @@ _RETRYABLE_CLI_NEEDLES: Final[tuple[str, ...]] = (
     "rate_limit",
     "too many requests",
     "overloaded",
-    "429",
     "usage limit",
     "quota",
     "insufficient_quota",
+    # Provider outages and transport failures (#1328): the next model, often on
+    # another vendor, is unaffected, which is the case the chain exists for.
+    "internal server error",
+    "service unavailable",
+    "bad gateway",
+    "gateway timeout",
+    "connection error",
+    "connection reset",
+    "connection refused",
+    "econnreset",
+    "econnrefused",
+    "etimedout",
+    "stream disconnected",
+)
+
+# An HTTP status in provider prose. Anchored to a status-like word so a bare
+# number elsewhere in the text (``PR #1429``, a line number, an id) never reads
+# as a rate limit or an outage (#1328).
+_RETRYABLE_STATUS_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:http(?:/\d(?:\.\d)?)?|status(?:[ _-]?code)?|api[ _-]?error|error(?:[ _-]?code)?)"
+    r"\s*[:=]?\s*\(?(?:429|5\d\d)\b"
+    r"|\b(?:429|5\d\d)\s+(?:too many requests|internal server error|service unavailable"
+    r"|bad gateway|gateway timeout|overloaded)",
+    re.IGNORECASE,
 )
 
 # Billing *class* markers only — a generic HTTP 404 is retryable without them
@@ -114,6 +137,10 @@ def classify_provider_failure(
     if http_404:
         return ProviderFailureClass.PERMANENT
     if any(needle in lowered for needle in _RETRYABLE_CLI_NEEDLES):
+        return ProviderFailureClass.RETRYABLE
+    if status_code == 429 or (status_code is not None and 500 <= status_code <= 599):
+        return ProviderFailureClass.RETRYABLE
+    if _RETRYABLE_STATUS_RE.search(haystack):
         return ProviderFailureClass.RETRYABLE
     return ProviderFailureClass.PERMANENT
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -42,7 +43,15 @@ def _summary(
     }
 
 
-def _complete_report(*, combined: float = 82.0) -> dict[str, Any]:
+def _live_floor() -> float:
+    """The declared global floor, so these tests follow the ratchet rather than a literal."""
+    data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    return float(data["tool"]["coverage"]["report"]["fail_under"])
+
+
+def _complete_report(*, combined: float | None = None) -> dict[str, Any]:
+    if combined is None:
+        combined = _live_floor()
     files = {
         "src/mergecraft/utils/token.py": {"summary": _summary()},
         "src/mergecraft/utils/git_setup.py": {"summary": _summary()},
@@ -135,7 +144,11 @@ def test_global_floor_remains_native_combined_coverage(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    report = _complete_report(combined=81.99)
+    floor = _live_floor()
+    report = _complete_report(combined=floor - 0.01)
 
     assert _run(tmp_path, monkeypatch, report) == 1
-    assert "global combined coverage 81.99% < floor 82.00%" in capsys.readouterr().err
+    assert (
+        f"global combined coverage {floor - 0.01:.2f}% < floor {floor:.2f}%"
+        in capsys.readouterr().err
+    )
