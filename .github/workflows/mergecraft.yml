@@ -113,7 +113,11 @@
 # (OpenCode Go), `mergecraft review attempts (Codex)` and
 # `mergecraft review attempts (Claude backstop)`.
 # The gate fails closed on every non-success `mergecraft-approval` outcome (no
-# fail-open path remains).
+# fail-open path remains), with one exception: a `neutral` verdict whose
+# evidence packet records that every changed file is ignored by the review
+# ignore paths (`triage.tier=skip`, `triage.recognizer=ignorePaths`) passes with
+# a notice, unreviewed. That neutral is final, so it does not start the Codex
+# fallback either.
 #
 # === ACTION PIN ===
 # The action is pinned to a FULL SHA on both review steps. This is MANDATORY,
@@ -1237,6 +1241,10 @@ jobs:
     outputs:
       approval_verdict: ${{ steps.approval_verdict.outputs.approval_verdict }}
       approval_rung: ${{ steps.approval_verdict.outputs.approval_rung }}
+      # `ignore_paths` when the verdict is a neutral whose packet records that
+      # every changed file was ignored and no review ran; empty otherwise.
+      approval_reason: ${{ steps.approval_verdict.outputs.approval_reason }}
+      approval_ignored_count: ${{ steps.approval_verdict.outputs.approval_ignored_count }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1568,14 +1576,26 @@ jobs:
           elif [ -s "${OPENCODE_GO_PACKET_FILE}" ]; then
             packet_file="${OPENCODE_GO_PACKET_FILE}"; rung="opencode-go"
           fi
-          verdict=""
+          verdict=""; reason=""; ignored_count=""
           if [ -n "${packet_file}" ]; then
             verdict="$(jq -r '.decision.verdict // empty' "${packet_file}" 2>/dev/null || true)"
+            # The orchestrator records a `skip` triage tier with the
+            # `ignorePaths` recognizer only when every changed file matched the
+            # ignore paths resolved from base configuration and no review ran.
+            # The approval gate passes that neutral, and no other.
+            if jq -e '.decision.verdict == "neutral" and .triage.tier == "skip" and .triage.recognizer == "ignorePaths"' \
+              "${packet_file}" >/dev/null 2>&1; then
+              reason="ignore_paths"
+              ignored_count="$(jq -r '(.triage.reason // "") | (capture("all (?<n>[0-9]+) changed file") | .n) // empty' \
+                "${packet_file}" 2>/dev/null || true)"
+            fi
           fi
-          echo "approval verdict from rung=${rung:-none} verdict=${verdict:-none}"
+          echo "approval verdict from rung=${rung:-none} verdict=${verdict:-none} reason=${reason:-none}"
           {
             echo "approval_verdict=${verdict}"
             echo "approval_rung=${rung}"
+            echo "approval_reason=${reason}"
+            echo "approval_ignored_count=${ignored_count}"
           } >> "${GITHUB_OUTPUT}"
 
 
@@ -1659,6 +1679,11 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           APPROVAL_VERDICT: ${{ needs.review-backstop.outputs.approval_verdict }}
           APPROVAL_RUNG: ${{ needs.review-backstop.outputs.approval_rung }}
+          # Set by the verdict recorder from the same packet, never from PR
+          # content: `ignore_paths` only when that neutral means every changed
+          # file was ignored and no review ran.
+          APPROVAL_REASON: ${{ needs.review-backstop.outputs.approval_reason }}
+          APPROVAL_IGNORED_COUNT: ${{ needs.review-backstop.outputs.approval_ignored_count }}
           EXPECTED_APP_ID: ${{ secrets.MERGECRAFT_APP_ID }}
         run: |
           set -euo pipefail
@@ -1717,6 +1742,21 @@ jobs:
           if [ "${check}" != "${verdict}" ]; then
             echo "::error title=mergecraft requested changes::mergecraft-approval corroboration disagrees with this run's verdict (verdict=${verdict}, check=${check}, rung=${rung}). Failing closed."
             exit 1
+          fi
+          # Every changed file is ignored by the review ignore paths (resolved
+          # from base configuration), so no review ran and the product left
+          # approval to a human. Reached only after the neutral check above was
+          # attributed to this run and head; every other neutral still fails.
+          if [ "${verdict}" = "neutral" ] && [ "${APPROVAL_REASON:-}" = "ignore_paths" ]; then
+            files="all ${APPROVAL_IGNORED_COUNT:-} changed files"
+            [ -n "${APPROVAL_IGNORED_COUNT:-}" ] || files="all changed files"
+            echo "::notice title=mergecraft not reviewed::nothing to review: ${files} are ignored by review.ignorePaths; passing without a review (rung=${rung})."
+            {
+              echo "### mergecraft review: not reviewed"
+              echo ""
+              echo "Nothing to review: ${files} on ${HEAD_SHA} are ignored by the review ignore paths (\`review.ignorePaths\`, the \`ignore_paths\` input and the built-in defaults, read from base configuration). No review ran; this check passes without one, and approval is left to a human."
+            } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            exit 0
           fi
           if [ "${verdict}" != "success" ]; then
             echo "::error title=mergecraft requested changes::mergecraft review verdict is ${verdict} (rung=${rung}) — address the review feedback on this PR."
