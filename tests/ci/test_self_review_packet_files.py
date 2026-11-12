@@ -132,7 +132,12 @@ def test_the_verdict_recorder_reads_the_last_rung_from_its_file(tmp_path: Path) 
     recorded = dict(
         line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines() if line
     )
-    assert recorded == {"approval_verdict": "success", "approval_rung": "codex"}
+    assert recorded == {
+        "approval_verdict": "success",
+        "approval_rung": "codex",
+        "approval_reason": "",
+        "approval_ignored_count": "",
+    }
 
 
 def test_the_codex_fallback_decision_reads_a_large_packet_file(tmp_path: Path) -> None:
