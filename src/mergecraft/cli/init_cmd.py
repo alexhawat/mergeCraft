@@ -228,9 +228,12 @@ def run(
     console.print("\n[bold]next steps[/bold]")
     console.print(
         "  1. authenticate a provider: [cyan]mergecraft provider auth <label>[/cyan] "
-        "(seeds reviewer p0 automatically)"
+        "(stores the secret, wires it into the workflow, seeds reviewer p0)"
     )
-    console.print("  2. inspect the roster: [cyan]mergecraft agent list[/cyan]")
+    console.print(
+        "  2. check CI can authenticate: [cyan]mergecraft doctor[/cyan] "
+        "(the workflow auth row must be ok)"
+    )
     console.print("  3. commit and push the workflow + config")
     console.print("  4. open a PR or run workflow_dispatch")
     logger.debug("init complete at {}", root)

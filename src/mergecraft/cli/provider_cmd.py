@@ -535,7 +535,12 @@ def _persist_indexed_credentials(
                 "retry with --scope local or --scope github to isolate the failure."
             )
         if wrote_any_github:
+            from mergecraft.cli.target_dir import implicit_repo_root
+            from mergecraft.cli.workflow_cmd import wire_authenticated_provider
+
             seed_reviewer_p0_after_auth(cwd=cwd or Path.cwd(), provider_label=label)
+            # The stored secret only reaches CI once the workflow passes it on.
+            wire_authenticated_provider((cwd or implicit_repo_root()).resolve(), entry)
         return
 
     if not any_local_written:

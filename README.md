@@ -75,10 +75,13 @@ Do all of this yourself, without asking me, except where step 4 says STOP:
      mergecraft provider auth xai --scope github          # xAI key
    Any other OpenAI-compatible endpoint also works — if I say "something else",
    read docs/authentication.md and set up the custom-provider env pair instead.
-   Each command stores a GitHub Actions secret for me via `gh secret set`.
+   Each command stores a GitHub Actions secret for me via `gh secret set` and
+   rewrites .github/workflows/mergecraft.yml so the workflow passes that secret.
 
-5. After I confirm the credential is stored, run `mergecraft doctor` and fix
-   anything it reports that is not the credential itself. The first
+5. After I confirm the credential is stored, run `mergecraft doctor`. Its
+   `workflow auth` row must be ok: if it fails, run
+   `mergecraft workflow sync --apply`, or ask me to re-run the auth command.
+   Fix anything else it reports that is not the credential itself. The first
    `provider auth` after `init` seeds `agents.reviewer` and `models:` — only
    edit `models:` if you want a fallback chain.
 
@@ -290,7 +293,7 @@ Everything else — install, scaffold, config, commit, PR — is unattended.
 | `mergecraft review --agent` | Versioned JSONL event stream (`run_started` · `phase` · `finding` · `verdict` · `run_finished`) for orchestrators |
 | `mergecraft review --json out.json` | Structured findings on disk |
 | [`docs/EXIT-CODES.md`](docs/EXIT-CODES.md) | Contractual exit codes — branch on them instead of parsing text |
-| `mergecraft doctor` | Self-diagnosis of git, providers, analyzers, auth, config and MCP wiring |
+| `mergecraft doctor` | Self-diagnosis of git, providers, analyzers, auth, config, CI workflow credentials and MCP wiring |
 | `mergecraft provider status` | Roster inspection — what CI will run, credential and wiring state, optional `--github` secret check |
 | [`docs/mcp.md`](docs/mcp.md) | **Public MCP install** — six review-only tools over stdio for Cursor, Claude Desktop, Codex, Gemini CLI, OpenCode |
 | [`docs/agents-sdk.md`](docs/agents-sdk.md) | **OpenAI Agents SDK** optional extra — embed `review_agent` as a review step (`pip install mergecraft-action[agents]`) |
@@ -418,8 +421,10 @@ mergecraft provider auth google --scope github       # Google AI Studio
 # or pick any configured label from: mergecraft provider list
 ```
 
-The credential is stored as a GitHub Actions secret via `gh secret set`. Add
-`--scope local` to write a local `.env` instead, for offline `mergecraft review`.
+The credential is stored as a GitHub Actions secret via `gh secret set`, and
+`.github/workflows/mergecraft.yml` is updated to pass that secret to the Action;
+commit the workflow change. Add `--scope local` to write a local `.env` instead,
+for offline `mergecraft review`, or `--scope both` for both.
 More providers, custom gateways and model chains:
 [`docs/authentication.md`](docs/authentication.md).
 
@@ -429,7 +434,7 @@ More providers, custom gateways and model chains:
    [`docs/workflows.md`](docs/workflows.md)).
 
 ```bash
-mergecraft doctor   # optional: verify git, providers, analyzers, auth, config, MCP
+mergecraft doctor   # verify git, providers, analyzers, auth, config, workflow auth, MCP
 ```
 
 ### Example 1 — auto-review every PR

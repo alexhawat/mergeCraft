@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,9 +22,17 @@ from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
 )
+from mergecraft.cli.workflow_wf_yaml import DEFAULT_WORKFLOW_RELATIVE_PATH
+from mergecraft.config.agent_roster import load_roster
 from mergecraft.config.compat import migrate_config
 from mergecraft.config.env import ConfigLocatorEnv
+from mergecraft.config.io import config_path_for_root, load_config_dict
 from mergecraft.config.layered import merge_config_dicts, resolve_config_sources
+from mergecraft.config.roster_unwired import iter_roster_model_slots
+from mergecraft.config.runtime_provider_registry import (
+    credential_env_keys_for_entry,
+    lookup_registry_entry,
+)
 from mergecraft.config.settings import RepoSettings
 from mergecraft.config.yaml_unique import ConfigParseError, safe_load_unique
 from mergecraft.evidence.run_manifest import runtime_tool_stamp
@@ -31,6 +40,12 @@ from mergecraft.mcp.ports import port_available, read_env_port
 from mergecraft.models import MODEL_ALIASES
 from mergecraft.utils.agent_resolve import has_credentials_for_slug
 from mergecraft.utils.git_hardening import git_argv
+from mergecraft.workflow.auth_manifest import (
+    WorkflowAuthManifestError,
+    flat_credential_env_keys,
+    iter_mergecraft_action_steps,
+    workflow_secret_bindings,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -158,6 +173,142 @@ def _config_probe(cwd: Path) -> ProbeResult:
     return ProbeResult("config", "ok", contributing)
 
 
+def repository_secret_names(root: Path) -> frozenset[str] | None:
+    """Return the Actions secret names the repository can read, or ``None``.
+
+    Repository secrets and, when ``gh`` may read them, the organization secrets
+    shared with the repository. ``None`` means the list could not be read (no
+    ``gh``, not authenticated, no GitHub remote): the caller must not guess.
+
+    Args:
+        root (Path): Repository root; ``gh`` infers the repository from it.
+
+    Returns:
+        frozenset[str] | None: Secret names, or ``None`` when unreadable.
+    """
+    if shutil.which("gh") is None:
+        return None
+    names: set[str] = set()
+    for endpoint, required in (
+        ("repos/{owner}/{repo}/actions/secrets", True),
+        ("repos/{owner}/{repo}/actions/organization-secrets", False),
+    ):
+        try:
+            completed = subprocess.run(
+                ["gh", "api", "--paginate", endpoint, "--jq", ".secrets[].name"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            completed = None
+        if completed is None or completed.returncode != 0:
+            if required:
+                return None
+            continue
+        names.update(line.strip() for line in completed.stdout.splitlines() if line.strip())
+    return frozenset(names)
+
+
+def _probe_slugs(raw: dict[str, Any], workflow: Path) -> tuple[list[str], bool]:
+    """Return the model slugs CI needs credentials for, and whether all are required.
+
+    A committed ``agents:`` roster is checked slot by slot at run start, so every
+    roster provider needs its secret. Without a roster the run walks the
+    ``models:`` chain and the workflow's ``with.model``, so one usable provider
+    is enough.
+
+    Args:
+        raw (dict[str, Any]): Committed config mapping.
+        workflow (Path): Consumer workflow file.
+
+    Returns:
+        tuple[list[str], bool]: Slugs in order, and ``True`` when all are required.
+    """
+    roster_slugs = [slug for _agent, _slot, slug in iter_roster_model_slots(load_roster(raw))]
+    if roster_slugs:
+        return roster_slugs, True
+    models = raw.get("models")
+    slugs = [str(item) for item in models] if isinstance(models, list) else []
+    for step in iter_mergecraft_action_steps(workflow):
+        model = step.get("model")
+        if isinstance(model, str) and model.strip() and "${{" not in model:
+            slugs.append(model.strip())
+    return slugs, False
+
+
+def _workflow_auth_probe(root: Path) -> ProbeResult:
+    """Check that the consumer workflow passes a stored credential to the Action.
+
+    ``provider auth --scope github`` stores ``LLM_PROVIDER_<N>_*`` secrets; a
+    workflow that passes other names (or none) gives the CI review no
+    credential, and the run fails or is skipped while the check stays green.
+
+    Args:
+        root (Path): Repository root.
+
+    Returns:
+        ProbeResult: ``fail`` (hard) when CI would have no usable credential.
+    """
+    name = "workflow auth"
+    workflow = root / DEFAULT_WORKFLOW_RELATIVE_PATH
+    if not workflow.is_file():
+        return ProbeResult(
+            name, "ok", f"no {DEFAULT_WORKFLOW_RELATIVE_PATH} (CI review not set up)"
+        )
+    try:
+        # CI runs with the committed config only, never config.local.yaml.
+        raw = load_config_dict(config_path_for_root(root))
+        settings = RepoSettings.model_validate(migrate_config(raw)) if raw else None
+        slugs, require_all = _probe_slugs(raw, workflow)
+        bindings = workflow_secret_bindings(workflow)
+    except (OSError, ValueError, ValidationError, yaml.YAMLError, WorkflowAuthManifestError) as exc:
+        return ProbeResult(name, "warn", f"not evaluated ({type(exc).__name__})")
+
+    providers: list[str] = []
+    for slug in slugs:
+        provider = slug.partition("/")[0].strip().lower()
+        if provider and provider not in providers:
+            providers.append(provider)
+    if not providers:
+        return ProbeResult(name, "warn", "no model configured; nothing to authenticate")
+
+    stored = repository_secret_names(root)
+    usable: list[str] = []
+    unverified: list[str] = []
+    problems: list[str] = []
+    for provider in providers:
+        entry = lookup_registry_entry(settings, provider)
+        keys = set(credential_env_keys_for_entry(entry)) if entry is not None else set()
+        if entry is None or not require_all:
+            keys.update(flat_credential_env_keys(provider))
+        bound = sorted({secret for env_key, secret in bindings if env_key in keys})
+        fix = f"run mergecraft provider auth {provider} --scope github"
+        if not bound:
+            problems.append(f"{provider}: the workflow passes no credential ({fix})")
+        elif stored is None:
+            unverified.append(provider)
+        elif not stored.intersection(bound):
+            problems.append(
+                f"{provider}: the workflow reads {', '.join(bound)}, which the repository "
+                f"does not have ({fix})"
+            )
+        else:
+            usable.append(provider)
+
+    if (require_all and problems) or (not usable and not unverified):
+        return ProbeResult(name, "fail", "; ".join(problems), hard_failure=True)
+    if unverified:
+        return ProbeResult(
+            name,
+            "warn",
+            f"repository secrets not verified (gh cannot list them) for {', '.join(unverified)}",
+        )
+    return ProbeResult(name, "ok", f"CI credential stored for {', '.join(usable)}")
+
+
 def _mcp_probe() -> ProbeResult:
     try:
         port = read_env_port()
@@ -179,6 +330,7 @@ def run_doctor_probes(cwd: Path) -> list[ProbeResult]:
         _analyzer_probe(root),
         _auth_probe(),
         _config_probe(root),
+        _workflow_auth_probe(root),
         _mcp_probe(),
     ]
 
@@ -315,7 +467,7 @@ def run(
         help="Run supply-chain provenance, pinning, and reproducibility probes.",
     ),
 ) -> None:
-    """Diagnose git, providers, analyzers, auth, config, and MCP wiring."""
+    """Diagnose git, providers, analyzers, auth, config, workflow auth, and MCP wiring."""
     root = cwd.resolve()
     results = run_doctor_probes(root)
     title = "mergecraft doctor"
@@ -350,6 +502,7 @@ __all__ = [
     "ProbeResult",
     "assert_output_contains_no_secrets",
     "render_doctor_table",
+    "repository_secret_names",
     "run",
     "run_doctor_probes",
     "run_supply_chain_probes",

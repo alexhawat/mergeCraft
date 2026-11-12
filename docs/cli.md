@@ -113,7 +113,7 @@ needs a new review.
 | `mergecraft context inspect` | Report sources, scope, provenance citations, and token totals. |
 | `mergecraft context search <query>` | Search retrieved review context for a query. |
 | `mergecraft describe` | Print a PR title, summary, walkthrough, risk areas, and testing notes. |
-| `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, and MCP wiring. |
+| `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, workflow auth, and MCP wiring. |
 | `mergecraft eval add` | Add a case to the bank. |
 | `mergecraft eval add-incident` | Add an incident-derived structural case (postmortem PR + revert/fix) (#1163). |
 | `mergecraft eval adjudicate <baseline>` | Record who adjudicated one baseline label, enforcing repo policy. |
