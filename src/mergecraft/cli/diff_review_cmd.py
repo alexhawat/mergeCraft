@@ -294,13 +294,19 @@ def run(
     staged: bool = typer.Option(
         False,
         "--staged",
-        help="Review only staged changes (`git diff --cached`). Optional.",
+        help=(
+            "Review staged changes (`git diff --cached`). With --unstaged, review "
+            "every uncommitted change. Optional."
+        ),
         rich_help_panel=_PANEL_DIFF,
     ),
     unstaged: bool = typer.Option(
         False,
         "--unstaged",
-        help="Review only unstaged working-tree changes. Optional.",
+        help=(
+            "Review unstaged working-tree changes, including untracked files. "
+            "With --staged, review every uncommitted change. Optional."
+        ),
         rich_help_panel=_PANEL_DIFF,
     ),
     commit_range: str | None = typer.Option(

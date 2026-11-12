@@ -224,6 +224,30 @@ def git_unstaged_diff_with_limitations(*, cwd: Path) -> tuple[str, tuple[str, ..
     return result.stdout + untracked_text, limitations
 
 
+def git_uncommitted_diff_with_limitations(*, cwd: Path) -> tuple[str, tuple[str, ...]]:
+    """Return staged plus unstaged changes against ``HEAD``, with untracked adds.
+
+    This is the union of ``--staged`` and ``--unstaged``: one patch per file at
+    its working-tree content. Before the first commit the empty tree stands in
+    for ``HEAD``.
+    """
+    head = _run_git(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], cwd=cwd)
+    if head.returncode == 0:
+        base = "HEAD"
+    else:
+        empty = _run_git(["hash-object", "-t", "tree", "/dev/null"], cwd=cwd)
+        if empty.returncode != 0:
+            msg = f"failed to resolve the empty tree: {empty.stderr.strip()}"
+            raise RuntimeError(msg)
+        base = empty.stdout.strip()
+    result = _run_git(["diff", base], cwd=cwd)
+    if result.returncode != 0:
+        msg = f"failed to compute uncommitted diff: {result.stderr.strip()}"
+        raise RuntimeError(msg)
+    untracked_text, limitations = _discover_untracked_additions(cwd)
+    return result.stdout + untracked_text, limitations
+
+
 def git_range_diff(*, cwd: Path, range_spec: str) -> str:
     """Return unified diff for an explicit ``left..right`` range."""
     result = _run_git(["diff", range_spec], cwd=cwd)
