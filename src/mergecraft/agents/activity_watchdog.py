@@ -21,6 +21,12 @@ The diagnostic is advisory: the driver returns ``success=False`` with
 treats as an environment/provider fault (``infra_error``), not a failed review.
 Nothing here changes a gate, a trust tier, or a verdict.
 
+The same monitor thread enforces the per-attempt wall-clock cap
+(``MERGECRAFT_AGENT_TIMEOUT``, passed as ``deadline_s``). The cap counts from
+spawn, not from stdout EOF: a CLI that keeps streaming events (a tool loop,
+heartbeats) is never idle, so only a deadline checked while the stream is still
+open can bound it. A capped attempt reports ``metadata={"timeout": True, ...}``.
+
 Module: mergecraft.agents.activity_watchdog
 Depends: mergecraft.utils.process_group
 
@@ -47,6 +53,12 @@ if TYPE_CHECKING:
 DEFAULT_IDLE_TIMEOUT_S: Final[float] = 900.0
 """Fifteen minutes with no parsed event is a stall, not a slow review."""
 
+WALL_CLOCK_TIMEOUT_KIND: Final[str] = "wall-clock cap"
+"""``AgentDiagnostic.timeout_kind`` for an attempt killed at its wall-clock cap."""
+
+IDLE_TIMEOUT_KIND: Final[str] = "no-output watchdog"
+"""``AgentDiagnostic.timeout_kind`` for an attempt killed by the idle watchdog."""
+
 _MAX_STDERR_CHARS: Final[int] = 3000
 _MIN_POLL_S: Final[float] = 0.05
 _MAX_POLL_S: Final[float] = 5.0
@@ -70,6 +82,11 @@ class AgentDiagnostic:
     # Killing the process closes its transport, so this is an effect of the
     # kill and is never offered as the cause.
     error_after_kill: str | None = None
+    # Which limit killed the attempt: the idle watchdog or the wall-clock cap.
+    timeout_kind: str = IDLE_TIMEOUT_KIND
+    # Wall-clock cap only: how long the attempt ran, and the cap it hit.
+    elapsed_seconds: float | None = None
+    cap_seconds: float | None = None
 
     def __post_init__(self) -> None:
         """Redact provider/stderr text before it can reach a packet or record.
@@ -93,28 +110,46 @@ class AgentDiagnostic:
             tuple(redact_secrets(line) for line in self.stderr_tail),
         )
 
-    def render(self, *, timeout_kind: str = "no-output watchdog") -> str:
+    @property
+    def wall_clock(self) -> bool:
+        """Return whether the wall-clock cap, not the idle watchdog, killed the attempt."""
+        return self.timeout_kind == WALL_CLOCK_TIMEOUT_KIND
+
+    def render(self, *, timeout_kind: str | None = None) -> str:
         """Render the operator-facing one-block diagnosis."""
+        kind = timeout_kind or self.timeout_kind
+        capped = kind == WALL_CLOCK_TIMEOUT_KIND
         cause = f" — likely cause: `{self.last_provider_error}`" if self.last_provider_error else ""
-        verb = "stalled" if timeout_kind != "wall-clock cap" else "hit the wall-clock cap"
-        lines = [
-            f"{self.label} {verb}{cause}",
-            (
-                f"No model event arrived for {self.idle_seconds:.0f}s "
-                f"({self.event_count} event(s) processed before the stall)."
-            ),
-        ]
+        if capped:
+            elapsed = self.elapsed_seconds if self.elapsed_seconds is not None else 0.0
+            cap = f" of {self.cap_seconds:.0f}s" if self.cap_seconds is not None else ""
+            lines = [
+                f"{self.label} timed out: it hit the wall-clock cap{cap}{cause}",
+                (
+                    f"The attempt ran for {elapsed:.0f}s and was killed at "
+                    f"MERGECRAFT_AGENT_TIMEOUT ({self.event_count} event(s) processed)."
+                ),
+            ]
+        else:
+            lines = [
+                f"{self.label} stalled{cause}",
+                (
+                    f"No model event arrived for {self.idle_seconds:.0f}s "
+                    f"({self.event_count} event(s) processed before the stall)."
+                ),
+            ]
         if self.last_event_type:
+            what = "the kill" if capped else "the silence"
             when = f" at {self.last_event_at}" if self.last_event_at else ""
-            lines.append(f"Last event before the silence: `{self.last_event_type}`{when}.")
-        if not self.last_provider_error:
+            lines.append(f"Last event before {what}: `{self.last_event_type}`{when}.")
+        if not self.last_provider_error and not capped:
             lines.append("No provider error was seen before the stall, so the cause is not known.")
         if self.error_after_kill:
             lines.append(
                 "A provider error arrived after the kill and is an effect of it, not the "
                 f"cause: `{self.error_after_kill}`"
             )
-        if not self.saw_model_output and not self.last_provider_error:
+        if not self.saw_model_output and not self.last_provider_error and not capped:
             lines.append(
                 "The model produced no output at all — the request was sent but nothing "
                 "came back. This is usually transient; re-running often succeeds."
@@ -126,8 +161,20 @@ class AgentDiagnostic:
 
     def as_metadata(self) -> dict[str, Any]:
         """Return the diagnostic as JSON-safe metadata for ``AgentResult``."""
+        kind_keys: dict[str, Any]
+        if self.wall_clock:
+            kind_keys = {
+                "timeout": True,
+                "wall_clock_timeout": True,
+                "elapsed_seconds": (
+                    round(self.elapsed_seconds, 3) if self.elapsed_seconds is not None else None
+                ),
+                "cap_seconds": self.cap_seconds,
+            }
+        else:
+            kind_keys = {"idle_timeout": True}
         return {
-            "idle_timeout": True,
+            **kind_keys,
             "idle_seconds": round(self.idle_seconds, 3),
             "event_count": self.event_count,
             "saw_model_output": self.saw_model_output,
@@ -160,9 +207,12 @@ class IdleWatchdog:
         wall_clock: Callable[[], float] = time.time,
         kill: Callable[[int | None], None] | None = None,
         process: Any | None = None,
+        deadline_s: float | None = None,
     ) -> None:
         self.label = label
         self.interval_s = max(float(interval_s), 0.0)
+        # Wall-clock cap counted from construction (spawn); ``None``/``<= 0`` is no cap.
+        self.deadline_s = float(deadline_s) if deadline_s and deadline_s > 0 else None
         self._accumulator = accumulator
         self._stderr_text = stderr_text
         self._clock = clock
@@ -170,6 +220,9 @@ class IdleWatchdog:
         self._kill = kill
         self._process = process
         self._last_activity = clock()
+        self._started = self._last_activity
+        self._deadline_hit = False
+        self._stalled_elapsed_seconds: float | None = None
         self._event_count = 0
         self._saw_model_output = False
         self._last_event_type: str | None = None
@@ -185,6 +238,11 @@ class IdleWatchdog:
     def stalled(self) -> bool:
         """Return whether the watchdog has declared this attempt stalled."""
         return self._stalled
+
+    @property
+    def deadline_hit(self) -> bool:
+        """Return whether the wall-clock cap (not idleness) ended this attempt."""
+        return self._deadline_hit
 
     @property
     def event_count(self) -> int:
@@ -210,19 +268,31 @@ class IdleWatchdog:
         """Return seconds since the last activity marker."""
         return max((now if now is not None else self._clock()) - self._last_activity, 0.0)
 
+    def elapsed_seconds(self, *, now: float | None = None) -> float:
+        """Return seconds since the attempt started (the watchdog was built at spawn)."""
+        return max((now if now is not None else self._clock()) - self._started, 0.0)
+
     def check(self, *, now: float | None = None) -> bool:
-        """Return true when the attempt has been idle past the interval."""
-        if self.interval_s <= 0:
-            return False
+        """Return true when the attempt is idle past the interval or past its cap."""
         if self._stalled:
             return True
-        if self.idle_seconds(now=now) < self.interval_s:
+        current = now if now is not None else self._clock()
+        if self.deadline_s is not None and self.elapsed_seconds(now=current) >= self.deadline_s:
+            self._deadline_hit = True
+            self._mark_stalled(current)
+            logger.warning(
+                "agent wall-clock cap: {} ran {:.0f}s (cap {:.0f}s, {} event(s)); killing attempt",
+                self.label,
+                self.elapsed_seconds(now=current),
+                self.deadline_s,
+                self._event_count,
+            )
+            return True
+        if self.interval_s <= 0:
             return False
-        self._stalled = True
-        self._stalled_idle_seconds = self.idle_seconds(now=now)
-        # Snapshot before the monitor kills the process: the kill closes the
-        # transport, and the error that reports it must not become the cause.
-        self._error_at_stall = self._current_stream_error()
+        if self.idle_seconds(now=current) < self.interval_s:
+            return False
+        self._mark_stalled(current)
         logger.warning(
             "agent idle watchdog: {} produced no event for {:.0f}s ({} event(s)); killing attempt",
             self.label,
@@ -230,6 +300,14 @@ class IdleWatchdog:
             self._event_count,
         )
         return True
+
+    def _mark_stalled(self, now: float) -> None:
+        self._stalled = True
+        self._stalled_idle_seconds = self.idle_seconds(now=now)
+        self._stalled_elapsed_seconds = self.elapsed_seconds(now=now)
+        # Snapshot before the monitor kills the process: the kill closes the
+        # transport, and the error that reports it must not become the cause.
+        self._error_at_stall = self._current_stream_error()
 
     def diagnostic(self) -> AgentDiagnostic:
         """Build the diagnostic for the current (stalled) attempt."""
@@ -257,6 +335,9 @@ class IdleWatchdog:
             last_event_type=self._last_event_type,
             last_event_at=self._last_event_at,
             error_after_kill=after_kill,
+            timeout_kind=WALL_CLOCK_TIMEOUT_KIND if self._deadline_hit else IDLE_TIMEOUT_KIND,
+            elapsed_seconds=self._stalled_elapsed_seconds if self._deadline_hit else None,
+            cap_seconds=self.deadline_s if self._deadline_hit else None,
         )
 
     def _current_stream_error(self) -> str | None:
@@ -264,9 +345,12 @@ class IdleWatchdog:
 
     def start(self) -> IdleWatchdog:
         """Start the monitor thread for a real attempt."""
-        if self.interval_s <= 0 or self._thread is not None:
+        if (self.interval_s <= 0 and self.deadline_s is None) or self._thread is not None:
             return self
-        poll = max(_MIN_POLL_S, min(self.interval_s / 2.0, _MAX_POLL_S))
+        spans = [self.interval_s / 2.0] if self.interval_s > 0 else []
+        if self.deadline_s is not None:
+            spans.append(self.deadline_s / 4.0)
+        poll = max(_MIN_POLL_S, min(*spans, _MAX_POLL_S))
         self._thread = threading.Thread(
             target=self._monitor, args=(poll,), name=f"agent-idle-{self.label}", daemon=True
         )
@@ -329,8 +413,13 @@ def watchdog_for_process(
     interval_s: float,
     accumulator: StreamSpanAccumulator | None = None,
     stderr_text: Callable[[], str] | None = None,
+    deadline_s: float | None = None,
 ) -> IdleWatchdog:
-    """Build and start the production watchdog for ``process``."""
+    """Build and start the production watchdog for ``process``.
+
+    ``deadline_s`` is the attempt's wall-clock cap counted from now (spawn);
+    drivers pass ``MERGECRAFT_AGENT_TIMEOUT``. ``None`` disables the cap.
+    """
     from mergecraft.utils.process_group import kill_process_group
 
     def _kill(pid: int | None) -> None:
@@ -343,11 +432,14 @@ def watchdog_for_process(
         stderr_text=stderr_text,
         kill=_kill,
         process=process,
+        deadline_s=deadline_s,
     ).start()
 
 
 __all__ = [
     "DEFAULT_IDLE_TIMEOUT_S",
+    "IDLE_TIMEOUT_KIND",
+    "WALL_CLOCK_TIMEOUT_KIND",
     "AgentDiagnostic",
     "IdleWatchdog",
     "event_has_model_output",
