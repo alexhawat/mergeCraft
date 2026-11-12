@@ -22,7 +22,8 @@ matches and hides one real change matches nothing and gets a full review.
   ambiguous multiline lexical constructs. Normalized file text must also match.
   Missing context, executable-mode changes and unsupported syntax get full review.
 * ``generated`` — only lockfiles or generated paths changed, and no dependency
-  manifest or generator config changed with them.
+  manifest or generator config changed with them. A ``generated/`` path also needs a
+  generated-file marker in its head text; mode-only and binary entries never count.
 * ``commentOnly`` — only ``//`` comment lines changed, in a closed list of
   ``//``-comment languages chosen by suffix (no JavaScript, JSX/TSX or Rust;
   ``Package.swift`` and Go ``_test.go`` / ``DO NOT EDIT`` files refused; a Java unicode
@@ -66,7 +67,7 @@ from typing import TYPE_CHECKING, Final, Literal
 
 from mergecraft.analyzers.scope import changed_paths_from_scope, parse_diff_scope
 from mergecraft.classify.change_classifier import _HIGH_STAKES_PATH_PARTS
-from mergecraft.classify.generated_files import FileKind, classify_path
+from mergecraft.classify.generated_files import FileKind, classify_path, has_generated_marker
 from mergecraft.context.instruction_discovery import is_instruction_path
 from mergecraft.review_policy.manifest_names import (
     DEPENDENCY_MANIFEST_NAMES,
@@ -178,6 +179,7 @@ class _File:
     previous_path: str
     binary: bool = False
     metadata_changed: bool = False
+    mode_changed: bool = False
     hunks: list[_Hunk] = field(default_factory=list)
 
 
@@ -200,6 +202,8 @@ def _parse(diff_text: str, *, newline_only: bool = False) -> list[_File]:
             ("old mode ", "new mode ", "new file mode ", "deleted file mode ", "\\ No newline")
         ):
             current.metadata_changed = True
+            if raw.startswith(("old mode ", "new mode ")):
+                current.mode_changed = True
             continue
         if hunk is None:
             if raw.startswith("+++ b/"):
@@ -521,20 +525,36 @@ def _normalize(lines: list[str], *, strict: bool) -> list[str]:
     return [line.strip() for line in lines if line.strip()]
 
 
-def recognize_generated(diff_text: str) -> bool:
-    """Only lockfiles or generated paths changed, with no manifest or generator config."""
+def recognize_generated(diff_text: str, *, head_files: Mapping[str, str] | None = None) -> bool:
+    """Only lockfiles or marked generated files changed, with no manifest or generator config.
+
+    A path under a ``generated/`` directory counts only when its head text in
+    ``head_files`` carries a generated-file marker
+    (:func:`~mergecraft.classify.generated_files.has_generated_marker`): the
+    directory name alone proves nothing. A mode change or a binary entry never
+    counts, whatever the path.
+    """
     files = _parse(diff_text)
-    if not files:
+    if not files or any(f.binary or f.mode_changed for f in files):
         return False
+    heads = head_files or {}
     paths = {path for f in files for path in (f.previous_path, f.path)}
     paths.update(changed_paths_from_scope(parse_diff_scope(diff_text)))
     names = {_basename(p) for p in paths}
     if names & DEPENDENCY_MANIFEST_NAMES or names & GENERATOR_CONFIG_NAMES:
         return False
-    return all(
+    if not all(
         _basename(path) in LOCKFILE_NAMES or classify_path(path) == FileKind.GENERATED
         for path in paths
-    )
+    ):
+        return False
+    for file in files:
+        if _basename(file.path) in LOCKFILE_NAMES:
+            continue
+        head = heads.get(file.path)
+        if head is None or not has_generated_marker(head):
+            return False
+    return True
 
 
 # ── comment-only ──────────────────────────────────────────────────────────────
@@ -820,7 +840,7 @@ def triage_diff(
         matched.append("prose")
     if recognize_whitespace_only(diff_text, head_files=heads):
         matched.append("whitespace")
-    if recognize_generated(diff_text):
+    if recognize_generated(diff_text, head_files=heads):
         matched.append("generated")
     if recognize_comment_only(diff_text, head_files=heads):
         matched.append("commentOnly")

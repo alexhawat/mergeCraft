@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
 
+from mergecraft.classify.generated_files import FileKind, classify_path
 from mergecraft.classify.triage import (
     COMMENT_ONLY_SUFFIXES,
     TriageDecision,
@@ -132,11 +133,12 @@ async def _read_head_files(
     paths: list[str],
     *,
     read_code_head: bool = False,
+    any_suffix: bool = False,
 ) -> dict[str, str]:
     if not paths or len(paths) > _MAX_PROSE_FILES:
         return {}
     suffixes = _HEAD_TEXT_SUFFIXES if read_code_head else _PROSE_SUFFIXES
-    if not all(path.lower().endswith(suffixes) for path in paths):
+    if not any_suffix and not all(path.lower().endswith(suffixes) for path in paths):
         return {}
     texts: dict[str, str] = {}
     for path in paths:
@@ -278,14 +280,17 @@ async def load_triage_inputs(
     *,
     trusted_apps: Collection[str] = (),
     read_code_head: bool = False,
+    read_generated_head: bool = False,
 ) -> TriageInputs:
     """Read the diff, the head-side prose/comment text and the trusted Apps' passed checks.
 
     ``trusted_apps`` is the operator's ``pinBump.trustedCheckApps``: a check run
     only counts when its ``app.slug`` is in it. ``read_code_head`` also reads the head
     text needed by comment-only and whitespace proofs. The caller sets it when either
-    recognizer is opted in or ``lite`` is enabled. The caller verifies file modes
-    after classification and before acting on a whitespace match.
+    recognizer is opted in or ``lite`` is enabled. ``read_generated_head`` also reads
+    the head text of every ``generated/`` path, whatever its suffix, so the
+    ``generated`` recognizer can check it for a generated-file marker. The caller
+    verifies file modes after classification and before acting on a whitespace match.
 
     Raises:
         TriageUnavailableError: The diff could not be read completely.
@@ -295,6 +300,15 @@ async def load_triage_inputs(
     head_files = await _read_head_files(
         scm, owner, repo, head_sha, paths, read_code_head=read_code_head
     )
+    if read_generated_head:
+        generated = [
+            path
+            for path in paths
+            if path not in head_files and classify_path(path) == FileKind.GENERATED
+        ]
+        head_files.update(
+            await _read_head_files(scm, owner, repo, head_sha, generated, any_suffix=True)
+        )
     passed = await _passed_checks(scm, owner, repo, head_sha, trusted_apps=trusted_apps)
     return TriageInputs(
         diff_text=diff_text,
@@ -355,6 +369,7 @@ async def triage_pull_request(
             trusted_apps=config.pin_bump.trusted_check_apps,
             read_code_head=bool({"commentOnly", "whitespace"} & set(config.skip_llm))
             or config.lite.enabled,
+            read_generated_head="generated" in config.skip_llm or config.lite.enabled,
         )
         decision = triage_diff(
             inputs.diff_text,

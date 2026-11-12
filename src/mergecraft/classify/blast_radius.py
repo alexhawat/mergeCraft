@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Literal, NamedTuple, NotRequired, cast
+import re
+from typing import Final, Literal, NamedTuple, NotRequired, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import TypedDict
 
 from mergecraft.classify.path_globs import path_full_matches_glob
 from mergecraft.classify.review_config import is_review_config_path
+from mergecraft.review_policy.manifest_names import (
+    BUILD_MANIFEST_NAMES,
+    is_dependency_manifest_path,
+)
 
 Lane = Literal["low", "medium", "high"]
 AutoMergeLane = Literal["eligible", "assisted", "human_review", "forbidden"]
@@ -166,20 +171,45 @@ _NEXT_ACTION: dict[Lane, str] = {
     "medium": "Use assisted review and verify the affected behavior.",
     "high": "Require human review; automatic merge is forbidden.",
 }
-_DEPENDENCY_FILES = {
-    "package.json",
-    "package-lock.json",
-    "pnpm-lock.yaml",
-    "yarn.lock",
-    "pyproject.toml",
-    "uv.lock",
-    "requirements.txt",
-    "poetry.lock",
-    "go.mod",
-    "go.sum",
-    "cargo.toml",
-    "cargo.lock",
-}
+# Paths that are not hand-written source: documentation, tests, binary assets.
+_DOC_SUFFIXES: Final[tuple[str, ...]] = (".md", ".markdown", ".rst", ".adoc", ".txt")
+_DOC_DIRS: Final[tuple[str, ...]] = ("docs", "doc")
+_ASSET_SUFFIXES: Final[tuple[str, ...]] = (
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".ico",
+    ".webp",
+    ".pdf",
+)
+# Declarative config is not code that needs a test; the deployment, secrets and
+# review-config reasons judge the config paths that matter.
+_CONFIG_SUFFIXES: Final[tuple[str, ...]] = (
+    ".toml",
+    ".yaml",
+    ".yml",
+    ".json",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".lock",
+)
+_TEST_DIRS: Final[frozenset[str]] = frozenset({"tests", "test", "__tests__", "spec", "specs"})
+_TEST_NAME: Final[re.Pattern[str]] = re.compile(
+    r"^test_|_test\.[a-z0-9]+$|\.(?:test|spec)\.[a-z0-9]+$|_spec\.[a-z0-9]+$"
+)
+_DEPLOYMENT_DIRS: Final[tuple[str, ...]] = ("deploy", "k8s", "kubernetes", "helm")
+_DESTRUCTIVE_SQL: Final[re.Pattern[str]] = re.compile(r"\b(?:drop|alter|create)\s+table\b")
+_IRREVERSIBLE_COMMAND: Final[re.Pattern[str]] = re.compile(
+    r"\brm\s+(?:-[a-z]*r[a-z]*f[a-z]*|-[a-z]*f[a-z]*r[a-z]*"
+    r"|(?:--recursive\s+--force|--force\s+--recursive)|-r\s+-f|-f\s+-r)\b"
+    r"|\bterraform\s+destroy\b"
+)
+_SECRET_ASSIGNMENT: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:password|secret_key|private_key)\s*=|aws_secret_access_key"
+)
 _DIFF_SIGNAL_KEYS = ("diff", "diff_text", "patch", "text")
 
 SIGNAL_MISSING_CATEGORY = "signal_missing"
@@ -202,11 +232,54 @@ def _is_generated(path: str) -> bool:
     return _contains_path_part(path, ("generated",))
 
 
-def _has_hand_written_source(paths: list[str]) -> bool:
-    """Whether any changed path is under ``src/`` and is not generated output."""
-    return any(
-        path.lower().strip("/").startswith("src/") and not _is_generated(path) for path in paths
+def _is_test_path(path: str) -> bool:
+    """A path under a test directory, or a file named like a test in any language."""
+    segments = path.lower().strip("/").split("/")
+    return bool(_TEST_DIRS & set(segments[:-1])) or _TEST_NAME.search(segments[-1]) is not None
+
+
+def _is_doc_path(path: str) -> bool:
+    lowered = path.lower().strip("/")
+    if is_dependency_manifest_path(lowered) or lowered.rsplit("/", 1)[-1] in {
+        name.lower() for name in BUILD_MANIFEST_NAMES
+    }:
+        return False
+    return lowered.endswith(_DOC_SUFFIXES) or _contains_path_part(lowered, _DOC_DIRS)
+
+
+def _is_hand_written_source(path: str) -> bool:
+    """Any path that is not documentation, a test, an asset, config, generated output or a manifest.
+
+    Repositories keep code in ``app/``, ``lib/``, ``cmd/``, ``scripts/`` or the root,
+    not only ``src/``, so source is what is left once the known non-source kinds are
+    removed. Dependency manifests and lockfiles have their own ``deps.changed`` reason;
+    declarative config (``.toml``, ``.yaml``, ``.json`` and dotfiles) is judged by the
+    deployment, secrets and review-config reasons instead.
+    """
+    lowered = path.lower().strip("/")
+    return not (
+        _is_doc_path(lowered)
+        or _is_test_path(lowered)
+        or _is_generated(lowered)
+        or lowered.endswith((*_ASSET_SUFFIXES, *_CONFIG_SUFFIXES))
+        or lowered.rsplit("/", 1)[-1].startswith(".")
+        or is_dependency_manifest_path(lowered)
     )
+
+
+def _has_hand_written_source(paths: list[str]) -> bool:
+    """Whether any changed path is hand-written source (see :func:`_is_hand_written_source`)."""
+    return any(_is_hand_written_source(path) for path in paths)
+
+
+def _is_deployment_path(path: str) -> bool:
+    """A Dockerfile, a composite action, or a path under a deploy / Kubernetes / Helm tree."""
+    name = path.rsplit("/", 1)[-1]
+    if name.startswith("dockerfile") or name.endswith(".dockerfile"):
+        return True
+    if path.startswith(".github/actions/"):
+        return True
+    return _contains_path_part(path, _DEPLOYMENT_DIRS)
 
 
 def _diff_text(diff_stats: dict[str, object]) -> str:
@@ -363,7 +436,7 @@ def _detect(paths: list[str], diff_text: str) -> tuple[list[str], dict[str, str]
     lowered = [path.lower().strip("/") for path in paths]
     if any(_contains_path_part(path, ("migration", "migrations")) for path in lowered):
         add("paths.migrations", "a changed path is under a migrations directory", "migrations")
-    if any(token in diff_text for token in ("drop table", "alter table", "create table")):
+    if _DESTRUCTIVE_SQL.search(diff_text):
         add(
             "diff.destructive_sql",
             "the diff text contains a schema-changing SQL statement",
@@ -400,22 +473,26 @@ def _detect(paths: list[str], diff_text: str) -> tuple[list[str], dict[str, str]
                 "permissions",
             )
 
-    secret_diff = any(
-        token in diff_text
-        for token in ("password =", "aws_secret_access_key", "secret_key =", "private_key =")
-    )
+    secret_diff = _SECRET_ASSIGNMENT.search(diff_text) is not None
     workflow_path = any(path.startswith(".github/workflows/") for path in lowered)
+    deployment_path = any(_is_deployment_path(path) for path in lowered)
     secrets_config_path = any(
         path.startswith("config/") or path == ".env.example" for path in lowered
     )
-    if secret_diff or workflow_path or secrets_config_path:
+    if secret_diff or workflow_path or deployment_path or secrets_config_path:
         labels = ["secrets_config_deployment"]
-        if workflow_path:
+        if workflow_path or deployment_path:
             labels.append("deployment")
         if secrets_config_path:
             labels.append("secrets_config")
         if workflow_path:
             add("paths.deployment", "a GitHub Actions workflow changed", *labels)
+        if deployment_path:
+            add(
+                "paths.deployment",
+                "a Dockerfile, composite action, or deploy / Kubernetes / Helm path changed",
+                *labels,
+            )
         if secrets_config_path:
             add(
                 "paths.secrets_config",
@@ -435,16 +512,16 @@ def _detect(paths: list[str], diff_text: str) -> tuple[list[str], dict[str, str]
     if any(path.endswith("/__init__.py") for path in lowered):
         add("paths.public_api", "a package __init__.py changed", "public_api_changes")
 
-    if any(path.rsplit("/", 1)[-1] in _DEPENDENCY_FILES for path in lowered):
+    if any(is_dependency_manifest_path(path) for path in lowered):
         add("deps.changed", "a dependency manifest or lockfile changed", "dependency_changes")
 
-    # A generated path exempts only itself: a non-generated src/ path beside it
+    # A generated path exempts only itself: a hand-written source path beside it
     # still needs a test change.
-    test_paths = [path for path in lowered if path.startswith("tests/") or "/test_" in path]
+    test_paths = [path for path in lowered if _is_test_path(path)]
     if _has_hand_written_source(lowered) and not test_paths:
         add(
             "tests.missing",
-            "source under src/ changed without a test change",
+            "source changed without a test change",
             "source_without_tests",
         )
 
@@ -461,7 +538,7 @@ def _detect(paths: list[str], diff_text: str) -> tuple[list[str], dict[str, str]
             "a path under infra/terraform/ changed",
             "irreversible_infra",
         )
-    if any(token in diff_text for token in ("rm -rf", "terraform destroy")):
+    if _IRREVERSIBLE_COMMAND.search(diff_text):
         add(
             "diff.irreversible_command",
             "the diff text contains an irreversible command",
@@ -491,7 +568,7 @@ def _override_lanes(rule_set: RuleSet | None) -> dict[Category, Lane]:
 
 
 def _is_small_isolated_source(paths: list[str], diff_stats: dict[str, object]) -> bool:
-    if len(paths) != 1 or not paths[0].lower().startswith("src/"):
+    if len(paths) != 1 or not _is_hand_written_source(paths[0]):
         return False
     added = diff_stats.get("lines_added")
     deleted = diff_stats.get("lines_deleted")
@@ -578,13 +655,13 @@ def _lane_reasons(
     measured = [_apply_override(code, message, overrides) for code, message in hits.items()]
 
     rule_categories = {spec.rule for code in hits if (spec := _REASON_SPECS[code]).rule}
-    # A generated path exempts only itself; any hand-written src/ path is a source change.
+    # A generated path exempts only itself; any hand-written path is a source change.
     if _has_hand_written_source(paths):
         measured.append(
             LaneReason(
                 code="source.changed",
                 lane=LANE_REASON_CATALOGUE["source.changed"],
-                message="source under src/ changed",
+                message="hand-written source changed",
             )
         )
 
@@ -621,7 +698,7 @@ def _lane_reasons(
                 code="source.small_isolated",
                 lane=LANE_REASON_CATALOGUE["source.small_isolated"],
                 message=(
-                    "one src/ file with at most "
+                    "one source file with at most "
                     f"{_SMALL_SOURCE_MAX_LINES} changed lines: the small isolated-source "
                     "carve-out applies"
                 ),
