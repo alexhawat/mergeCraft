@@ -180,7 +180,7 @@ Read more: [Terminal verdict vs structural verdict](REVIEW-CHECKS.md#terminal-ve
 
 ### `mergecraft` and `mergecraft-approval` checks
 
-Two GitHub checks appear on a reviewed pull request. **`mergecraft`** reports how the
+With `status_checks: enabled` (the scaffold sets it), two GitHub checks appear on a reviewed pull request. **`mergecraft`** reports how the
 run ended (passed, failed, inconclusive, timed out and so on). **`mergecraft-approval`**
 is the [structural approval gate](#structural-approval-gate): it passes or fails from
 typed findings and run state alone.

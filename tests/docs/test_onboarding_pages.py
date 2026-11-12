@@ -174,3 +174,15 @@ def test_trust_policy_states_the_author_gate_limit() -> None:
     for needle in ("free-form", "does not check commit signatures", "does not stop an author"):
         assert needle in body, f"limits section must state: {needle}"
     assert "sandboxTrustedAuthors" in text.split("**Residual risks**", 1)[1][:600]
+
+
+def test_documented_check_names_are_produced_by_the_scaffold() -> None:
+    """`mergecraft` / `mergecraft-approval` are posted when the scaffold's `status_checks` is on."""
+    from mergecraft.utils import status_checks
+
+    assert status_checks.APPROVAL_CHECK == "mergecraft-approval"
+    scaffold = read_text("src/mergecraft/data/example_workflows/minimal.yml.tpl")
+    assert "status_checks: enabled" in scaffold
+    for page in ("docs/glossary.md", "docs/uninstall.md", "docs/troubleshooting.md"):
+        for name in set(re.findall(r"`(mergecraft(?:-approval)?)`", read_text(page))):
+            assert name in {"mergecraft", status_checks.APPROVAL_CHECK}, name
