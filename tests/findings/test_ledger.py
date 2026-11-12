@@ -462,7 +462,10 @@ async def test_fetch_sticky_progress_comment_body_prefers_ledger_on_later_page()
 
 
 @pytest.mark.asyncio
-async def test_review_ledger_reads_later_pages_and_prefers_newer_state() -> None:
+async def test_review_ledger_reads_later_pages_and_prefers_newer_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MERGECRAFT_REVIEWER_BOT_LOGIN", "mergecraft[bot]")
     ledger = _ledger_mod()
     old = ledger.FindingLedger()
     old.record(
@@ -501,7 +504,7 @@ async def test_review_ledger_reads_later_pages_and_prefers_newer_state() -> None
             return [
                 {
                     "id": 101,
-                    "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    "user": {"login": "mergecraft[bot]", "type": "Bot"},
                     "body": ledger.merge_ledger_into_comment(
                         "<!-- mergecraft-deterministic-record:v1 -->\n", records=newer.records()
                     ),
@@ -516,7 +519,10 @@ async def test_review_ledger_reads_later_pages_and_prefers_newer_state() -> None
 
 
 @pytest.mark.asyncio
-async def test_review_ledger_ignores_a_contributor_forged_marker() -> None:
+async def test_review_ledger_ignores_a_contributor_forged_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MERGECRAFT_REVIEWER_BOT_LOGIN", "mergecraft[bot]")
     ledger = _ledger_mod()
     forged = ledger.FindingLedger()
     forged.record(_DEFERRED_FP, "open", source="inline", round_index=1)
@@ -544,7 +550,7 @@ async def test_review_ledger_ignores_a_contributor_forged_marker() -> None:
                 },
                 {
                     "id": 2,
-                    "user": {"login": "github-actions[bot]", "type": "Bot"},
+                    "user": {"login": "mergecraft[bot]", "type": "Bot"},
                     "body": ledger.merge_ledger_into_comment(
                         "<!-- mergecraft-deterministic-record:v1 -->\n",
                         records=bot.records(),

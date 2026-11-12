@@ -384,3 +384,37 @@ async def test_the_pr_state_is_not_read_when_no_finding_has_a_ledger_row() -> No
 
     assert [f.fingerprint for f in plan.to_file] == [_FP]
     assert github.pull_reads == 0
+
+
+def _graphql_bot_thread(login: str) -> dict[str, Any]:
+    """A thread whose author is in GitHub's GraphQL shape: ``Bot`` with a bare slug."""
+    thread = _graphql_thread()
+    thread["comments"]["nodes"][0]["author"] = {"__typename": "Bot", "login": login}
+    return thread
+
+
+async def test_a_graphql_bot_author_matches_its_rest_style_publisher_login() -> None:
+    """GraphQL names an App bot ``slug``; the publisher set holds ``slug[bot]``."""
+    github = FakeGitHub(threads=[_graphql_bot_thread("mergecraft")])
+
+    page = await fetch_review_threads(github, "o", "r", 7)  # type: ignore[arg-type]
+    plan = await plan_carryover(github, "o", "r", 7)  # type: ignore[arg-type]
+
+    assert page.threads[0]["comments"][0]["author"] == "mergecraft[bot]"
+    assert [f.fingerprint for f in plan.to_file] == [_FP]
+
+
+async def test_a_graphql_user_author_is_not_given_a_bot_suffix() -> None:
+    thread = _graphql_thread()
+    thread["comments"]["nodes"][0]["author"] = {"__typename": "User", "login": "mergecraft"}
+
+    page = await fetch_review_threads(FakeGitHub(threads=[thread]), "o", "r", 7)  # type: ignore[arg-type]
+
+    assert page.threads[0]["comments"][0]["author"] == "mergecraft"
+
+
+def test_the_thread_query_asks_for_the_author_type() -> None:
+    from mergecraft.findings.threads import THREAD_COMMENTS_QUERY, THREADS_QUERY
+
+    assert "author { __typename login }" in THREADS_QUERY
+    assert "author { __typename login }" in THREAD_COMMENTS_QUERY

@@ -690,10 +690,45 @@ async def fetch_sticky_progress_comment_body(
     return str(sticky.get("body") or "") if sticky is not None else ""
 
 
+def _review_author_login(review: Mapping[str, object]) -> str:
+    user = review.get("user")
+    if not isinstance(user, Mapping):
+        return ""
+    return str(user.get("login") or "")
+
+
 async def fetch_review_record_bodies(
-    scm: ScmProvider, owner: str, repo: str, pull_number: int
+    scm: ScmProvider,
+    owner: str,
+    repo: str,
+    pull_number: int,
+    *,
+    publishers: frozenset[str] | None = None,
 ) -> list[str]:
-    """Read mergeCraft review bodies in publication order across GitHub pages."""
+    """Read mergeCraft review bodies in publication order across GitHub pages.
+
+    A review contributes only when its body is a deterministic record **and**
+    its author is an expected publisher — the same rule as
+    ``review/authorship.py``: the reviewer App's bot or the PAT the run
+    publishes with (a PAT review is ``type == "User"``, so the account type is
+    not consulted), never the shared ``github-actions[bot]``. ``publishers``
+    defaults to the read-side identity (``MERGECRAFT_REVIEWER_BOT_LOGIN``,
+    ``reviewerBotLogin`` or the approval-check slug). An empty set folds in
+    nothing (fail-closed) and says so once.
+    """
+    from mergecraft.review_resolution import effective_publishers, is_publisher_login
+
+    trusted = effective_publishers(
+        publishers if publishers is not None else _allowed_publisher_logins()
+    )
+    if not trusted:
+        logger.warning(
+            "finding ledger: no expected publisher identity for PR #{}, so no earlier "
+            "review's ledger rows are trusted; configure the reviewer App "
+            "(MERGECRAFT_REVIEWER_BOT_LOGIN / reviewerBotLogin) or publish with a PAT",
+            pull_number,
+        )
+        return []
     bodies: list[str] = []
     for page in range(1, _MAX_REVIEW_PAGES + 1):
         reviews = await scm.list_reviews(
@@ -701,8 +736,8 @@ async def fetch_review_record_bodies(
         )
         for review in reviews:
             body = str(review.get("body") or "")
-            if body.lstrip().startswith(DETERMINISTIC_RECORD_MARKER) and _is_trusted_sticky_author(
-                review
+            if body.lstrip().startswith(DETERMINISTIC_RECORD_MARKER) and is_publisher_login(
+                _review_author_login(review), trusted
             ):
                 bodies.append(body)
         if len(reviews) < _REVIEW_PAGE_SIZE:
@@ -1000,8 +1035,14 @@ async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> Find
             for record in FindingLedger.from_comment_body(legacy).records():
                 ledger.upsert_if_newer(record)
         if issue_number is not None and hasattr(ctx.scm, "list_reviews"):
+            from mergecraft.review.authorship import expected_publisher_logins
+
             for body in await fetch_review_record_bodies(
-                ctx.scm, ctx.repo.owner, ctx.repo.name, int(issue_number)
+                ctx.scm,
+                ctx.repo.owner,
+                ctx.repo.name,
+                int(issue_number),
+                publishers=expected_publisher_logins(ctx),
             ):
                 for record in FindingLedger.from_comment_body(body).records():
                     ledger.upsert_if_newer(record)
