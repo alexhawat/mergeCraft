@@ -60,7 +60,8 @@ Structured findings use ``ReviewFinding``: ``severity``, ``file``, ``line``,
 2. Registry / ``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}`` via
    ``resolve_gateway_endpoint`` when ``MERGECRAFT_AGENTS_SDK_MODEL`` (or an explicit
    ``model=`` argument) is a ``provider/model-id`` slug.
-3. ``OPENAI_API_KEY`` (default model ``gpt-4o-mini``).
+3. ``OPENAI_API_KEY`` (default model: the catalog's ``openai/gpt-mini`` alias). A
+   ``provider/model`` slug for a provider other than OpenAI is refused on this path.
 4. ``OPENCODE_GO_API_KEY`` with OpenCode Zen ``https://opencode.ai/zen/v1`` and
    ``opencode-go/deepseek-v4.1-flash``.
 

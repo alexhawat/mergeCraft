@@ -7,16 +7,16 @@ Exports:
     add_broker_openai_config: Point built-in OpenAI routing at the broker.
     begin_broker_session: Resolve posture and start the loopback broker.
     broker_config_for_api_key: Build broker config for an OpenAI API key.
-    current_broker_session: Active session for this process, if any.
+    current_broker_session: Active session for this run context, if any.
     prepare_codex_brokered_run: Start broker, MCP config, and agent env.
-    set_broker_session: Install or replace the process-wide broker session.
+    set_broker_session: Bind or clear the broker session for this run context.
     stop_broker_session: Stop a broker session context manager.
 """
 
 from __future__ import annotations
 
 import os
-import threading
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -50,16 +50,14 @@ class CodexBrokeredRun:
     _session: CodexBrokerSession | None = field(default=None, repr=False)
 
     def close(self) -> None:
-        """Stop the loopback broker and clear the module session when owned."""
-        global _active_broker_session
+        """Stop the loopback broker and clear the context's session when owned."""
         if self._session is None:
             return
         session = self._session
         self._session = None
         stop_broker_session(session)
-        with _broker_session_lock:
-            if _active_broker_session is session:
-                _active_broker_session = None
+        if _active_broker_session.get() is session:
+            _active_broker_session.set(None)
 
     def __enter__(self) -> CodexBrokeredRun:
         return self
@@ -79,13 +77,19 @@ class CodexBrokerSession:
         return self.posture.active and self.handle is not None
 
 
-_active_broker_session: CodexBrokerSession | None = None
-_broker_session_lock = threading.Lock()
+# #1327 — the session is bound per run context, not per process. Concurrent
+# Codex runs (roster or file-group fan-out) each see their own broker, and a
+# second run's start no longer stops the first run's broker mid-request.
+# ``asyncio`` tasks and ``asyncio.to_thread`` workers copy the context, so the
+# driver's ``_build_env`` in the worker thread sees its own run's session.
+_active_broker_session: ContextVar[CodexBrokerSession | None] = ContextVar(
+    "mergecraft_codex_broker_session", default=None
+)
 
 
 def current_broker_session() -> CodexBrokerSession | None:
-    with _broker_session_lock:
-        return _active_broker_session
+    """Return the broker session bound to the current run context, if any."""
+    return _active_broker_session.get()
 
 
 def active_broker_handle() -> CredentialBrokerHandle | None:
@@ -94,15 +98,15 @@ def active_broker_handle() -> CredentialBrokerHandle | None:
 
 
 def set_broker_session(session: CodexBrokerSession | None) -> None:
-    global _active_broker_session
-    with _broker_session_lock:
-        if (
-            session is not None
-            and _active_broker_session is not None
-            and _active_broker_session is not session
-        ):
-            stop_broker_session(_active_broker_session)
-        _active_broker_session = session
+    """Bind ``session`` to the current run context (``None`` clears it).
+
+    A different session already bound in *this* context is stopped first; a
+    session bound by another, concurrent run is never touched.
+    """
+    previous = _active_broker_session.get()
+    if session is not None and previous is not None and previous is not session:
+        stop_broker_session(previous)
+    _active_broker_session.set(session)
 
 
 def broker_config_for_api_key(api_key: str) -> CredentialBrokerConfig:

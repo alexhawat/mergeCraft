@@ -337,9 +337,15 @@ def test_argv_omits_model_and_yes_flag_and_adds_resume_for_a_session_continuatio
     captured: dict[str, Any] = {}
 
     def _fake_streaming(
-        *, cmd: list[str], ctx: Any, model: str | None, prompt: str | None = None
+        *,
+        cmd: list[str],
+        ctx: Any,
+        model: str | None,
+        prompt: str | None = None,
+        stdin_text: str | None = None,
     ) -> Any:
         captured["cmd"] = cmd
+        captured["stdin"] = stdin_text
         captured["model"] = model
         return gemini_mod.AgentResult(success=True, output="ok")
 
@@ -360,7 +366,9 @@ def test_argv_omits_model_and_yes_flag_and_adds_resume_for_a_session_continuatio
     assert "-y" not in cmd
     assert cmd[cmd.index("--resume") + 1] == "latest"
     assert cmd[cmd.index("--output-format") + 1] == "stream-json"
-    assert "follow up please" in cmd[cmd.index("-p") + 1]
+    # The prompt rides on stdin, never as one argv string (#1329).
+    assert "follow up please" in captured["stdin"]
+    assert "follow up please" not in cmd
     assert result.success is True
 
 
@@ -372,9 +380,15 @@ def test_argv_strips_the_provider_prefix_from_the_model_flag(
     captured: dict[str, Any] = {}
 
     def _fake_streaming(
-        *, cmd: list[str], ctx: Any, model: str | None, prompt: str | None = None
+        *,
+        cmd: list[str],
+        ctx: Any,
+        model: str | None,
+        prompt: str | None = None,
+        stdin_text: str | None = None,
     ) -> Any:
         captured["cmd"] = cmd
+        captured["stdin"] = stdin_text
         return gemini_mod.AgentResult(success=True)
 
     monkeypatch.setattr(gemini_mod, "_run_gemini_streaming", _fake_streaming)
@@ -395,9 +409,15 @@ def test_empty_prompt_falls_back_to_the_context_user_instruction(
     captured: dict[str, Any] = {}
 
     def _fake_streaming(
-        *, cmd: list[str], ctx: Any, model: str | None, prompt: str | None = None
+        *,
+        cmd: list[str],
+        ctx: Any,
+        model: str | None,
+        prompt: str | None = None,
+        stdin_text: str | None = None,
     ) -> Any:
         captured["cmd"] = cmd
+        captured["stdin"] = stdin_text
         return gemini_mod.AgentResult(success=True)
 
     monkeypatch.setattr(gemini_mod, "_run_gemini_streaming", _fake_streaming)
@@ -405,7 +425,7 @@ def test_empty_prompt_falls_back_to_the_context_user_instruction(
 
     gemini_mod._run_gemini_once(cli="gemini", prompt="", ctx=ctx, mcp_config="")
 
-    assert "review this diff" in captured["cmd"][captured["cmd"].index("-p") + 1]
+    assert "review this diff" in captured["stdin"]
 
 
 # ---------------------------------------------------------------------------

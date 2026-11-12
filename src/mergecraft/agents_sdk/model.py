@@ -18,8 +18,24 @@ if TYPE_CHECKING:
 
 OPENCODE_GO_API_KEY_ENV = "OPENCODE_GO_API_KEY"
 OPENCODE_ZEN_BASE_URL = "https://opencode.ai/zen/v1"
-DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
-DEFAULT_OPENCODE_GO_MODEL = "opencode-go/deepseek-v4.1-flash"
+# Catalog aliases, resolved through ``models.py`` so the SDK reviewer runs the
+# same models as every other surface (#1330); no model id is spelled here.
+DEFAULT_OPENAI_MODEL_ALIAS = "openai/gpt-mini"
+DEFAULT_OPENCODE_GO_MODEL_ALIAS = "opencode-go/deepseek-v4.1-flash"
+
+
+def _catalog_model(alias: str) -> str:
+    from mergecraft.models import resolve_model_slug
+
+    resolved = resolve_model_slug(alias)
+    if not resolved:
+        msg = f"model catalog has no {alias!r} alias for the Agents SDK default"
+        raise RuntimeError(msg)
+    return resolved
+
+
+DEFAULT_OPENAI_MODEL = _catalog_model(DEFAULT_OPENAI_MODEL_ALIAS)
+DEFAULT_OPENCODE_GO_MODEL = _catalog_model(DEFAULT_OPENCODE_GO_MODEL_ALIAS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +87,9 @@ def resolve_model_config(
     1. Explicit ``model``, ``base_url``, and ``api_key`` / ``api_key_env``.
     2. ``resolve_gateway_endpoint`` for ``provider/model`` slugs (registry or
        ``MERGECRAFT_CUSTOM_PROVIDER_*``).
-    3. ``OPENAI_API_KEY`` with ``DEFAULT_OPENAI_MODEL``.
+    3. ``OPENAI_API_KEY`` with ``DEFAULT_OPENAI_MODEL`` (the catalog's
+       ``openai/gpt-mini``). A ``provider/model`` slug for another provider is
+       refused here rather than sent to OpenAI under its bare model id.
     4. ``OPENCODE_GO_API_KEY`` with OpenCode Zen base URL and
        ``DEFAULT_OPENCODE_GO_MODEL``.
 
@@ -115,7 +133,9 @@ def resolve_model_config(
         raise ValueError(msg)
 
     openai_key = api_key or _read_key(api_key_env or "OPENAI_API_KEY")
-    if openai_key:
+    provider, sep, _rest = slug.partition("/")
+    foreign_slug = bool(sep) and provider != "openai"
+    if openai_key and not foreign_slug:
         resolved_model = slug or DEFAULT_OPENAI_MODEL
         return AgentsSdkModelConfig(
             model=resolved_model,
@@ -134,6 +154,12 @@ def resolve_model_config(
             api_key=go_key,
         )
 
+    if openai_key and foreign_slug:
+        msg = (
+            f"model {slug!r} is not an OpenAI model and no gateway is configured for "
+            f"provider {provider!r}; configure that provider or pick an openai/... model"
+        )
+        raise ValueError(msg)
     msg = (
         "No model credentials found. Set OPENAI_API_KEY, OPENCODE_GO_API_KEY, "
         f"{CUSTOM_PROVIDER_API_KEY_ENV} and {CUSTOM_PROVIDER_BASE_URL_ENV} "
@@ -164,7 +190,9 @@ def agents_sdk_model_from_config(config: AgentsSdkModelConfig) -> Model:
 
 __all__ = [
     "DEFAULT_OPENAI_MODEL",
+    "DEFAULT_OPENAI_MODEL_ALIAS",
     "DEFAULT_OPENCODE_GO_MODEL",
+    "DEFAULT_OPENCODE_GO_MODEL_ALIAS",
     "OPENCODE_GO_API_KEY_ENV",
     "OPENCODE_ZEN_BASE_URL",
     "AgentsSdkModelConfig",

@@ -30,6 +30,7 @@ from mergecraft.agents.shared import (
     mcp_auth_headers,
     spawn_agent_cli,
     start_stderr_drain,
+    stderr_tail_for_error,
     with_prompt,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
@@ -252,6 +253,10 @@ def _parse_gemini_payload(data: dict[str, Any]) -> tuple[str, AgentUsage | None]
     return output, usage
 
 
+# Appended by ``gemini -p`` to the prompt it reads from stdin.
+GEMINI_STDIN_PROMPT_TRAILER = "Follow the instructions above."
+
+
 def _run_gemini_once(
     *,
     cli: str,
@@ -266,10 +271,13 @@ def _run_gemini_once(
         model = _strip_provider_prefix(ctx.resolved_model)
 
     user_prompt = _build_gemini_prompt(ctx, prompt)
+    # #1329 — the prompt goes on stdin; ``-p`` (headless mode) only carries a
+    # short trailer, which the CLI appends to the stdin input. One argv string
+    # past 128 KiB cannot be passed to ``execve`` at all.
     cmd = [
         cli,
         "-p",
-        user_prompt,
+        GEMINI_STDIN_PROMPT_TRAILER,
         "--output-format",
         "stream-json",
     ]
@@ -290,6 +298,7 @@ def _run_gemini_once(
         ctx=ctx,
         model=model,
         prompt=user_prompt,
+        stdin_text=user_prompt,
     )
 
 
@@ -299,6 +308,7 @@ def _run_gemini_streaming(
     ctx: AgentRunContext,
     model: str | None,
     prompt: str | None = None,
+    stdin_text: str | None = None,
 ) -> AgentResult:
     """Streaming read loop for ``gemini --output-format stream-json`` (W6)."""
     from mergecraft.agents._stream_consumer import (
@@ -327,7 +337,7 @@ def _run_gemini_streaming(
     )
 
     try:
-        process = spawn_agent_cli(cmd, env=_build_env(ctx))
+        process = spawn_agent_cli(cmd, env=_build_env(ctx), stdin_text=stdin_text)
     except FileNotFoundError as err:
         return with_prompt(AgentResult(success=False, error=str(err)), prompt)
 
@@ -367,7 +377,15 @@ def _run_gemini_streaming(
                     timeout=AgentRuntimeEnv().agent_timeout,
                 )
             except subprocess.TimeoutExpired:
-                return with_prompt(AgentResult(success=False, error="gemini CLI timed out"), prompt)
+                return with_prompt(
+                    AgentResult(
+                        success=False,
+                        error="gemini CLI timed out",
+                        metadata={"timeout": True, "retryable": True},
+                        usage=accumulator.to_usage(),
+                    ),
+                    prompt,
+                )
             finally:
                 # The process group is gone; collect the drained tail so the
                 # reader thread never outlives it.
@@ -388,6 +406,7 @@ def _run_gemini_streaming(
                 success=False,
                 error=diagnostic.render(),
                 metadata=diagnostic.as_metadata(),
+                usage=accumulator.to_usage(),
             ),
             prompt,
         )
@@ -405,7 +424,7 @@ def _run_gemini_streaming(
             AgentResult(
                 success=False,
                 output=output or None,
-                error=stderr_text.strip() or f"gemini exited {returncode}",
+                error=stderr_tail_for_error(stderr_text) or f"gemini exited {returncode}",
                 usage=usage,
                 metadata={"retryable": True} if retryable else {},
             ),
@@ -677,4 +696,4 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     return merge_manifest_metadata(finalized, render_result)
 
 
-gemini = agent(name="gemini", install=_install, run=_run, build_env=_build_env)
+gemini = agent(name="gemini", install=_install, run=_run, build_env=_build_env, integrity_gate=True)

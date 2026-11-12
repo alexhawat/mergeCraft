@@ -413,7 +413,7 @@ def _run_once(
     captured: list[list[str]] = []
 
     def _fake_spawn(cmd: list[str], **kwargs: object) -> Any:
-        captured.append(list(cmd))
+        captured.append([*cmd, f"<stdin:{kwargs.get('stdin_text')}>"])
         if isinstance(process, Exception):
             raise process
         return process
@@ -575,7 +575,10 @@ def test_resume_argv_omits_model_and_carries_the_sandbox_flag(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """Without a resolved model and without MCP, argv resumes the last session bare."""
+    """Without a resolved model, MCP or a recorded thread id, argv resumes the last session.
+
+    The prompt is never an argv string: ``-`` reads it from stdin (#1329).
+    """
     monkeypatch.delenv(codex_module.CODEX_SANDBOX_ENV, raising=False)
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
     ctx.mcp_server_url = ""
@@ -596,8 +599,41 @@ def test_resume_argv_omits_model_and_carries_the_sandbox_flag(
         "read-only",
         "resume",
         "--last",
-        "fallback prompt",
+        "-",
+        "<stdin:fallback prompt>",
     ]
+
+
+def test_resume_names_the_recorded_thread_not_the_last_session(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """#1327 — a resume targets this run's own thread, so concurrent runs never cross."""
+    monkeypatch.delenv(codex_module.CODEX_SANDBOX_ENV, raising=False)
+    ctx = make_agent_run_context(tmp_path, resolved_model=None)
+    ctx.mcp_server_url = ""
+    session: dict[str, str] = {}
+    started = '{"type": "thread.started", "thread_id": "0199-thread-a"}\n'
+    captured: list[list[str]] = []
+
+    def _fake_spawn(cmd: list[str], **_kwargs: object) -> Any:
+        captured.append(list(cmd))
+        return _FakeProcess(stdout=started, stderr="", returncode=0)
+
+    monkeypatch.setattr(codex_module, "spawn_agent_cli", _fake_spawn)
+    for continue_session in (False, True):
+        codex_module._run_codex_once(
+            cli="/usr/bin/codex",
+            prompt="go",
+            ctx=ctx,
+            mcp_config="unused",
+            continue_session=continue_session,
+            session=session,
+        )
+
+    assert session == {"thread_id": "0199-thread-a"}
+    assert captured[1][-3:] == ["resume", "0199-thread-a", "-"]
+    assert "--last" not in captured[1]
 
 
 def test_permission_profile_runs_omit_the_sandbox_flag(
@@ -617,7 +653,7 @@ def test_permission_profile_runs_omit_the_sandbox_flag(
         "--json",
         "--model",
         "gpt-5.3-codex",
-        "review this diff",
+        "-",
     ]
 
 

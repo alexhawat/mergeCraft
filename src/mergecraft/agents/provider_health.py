@@ -46,7 +46,7 @@ _CAPABILITY_CATALOG: Final[tuple[dict[str, Any], ...]] = (
         "data_residency": "us-east-1",
     },
     {
-        "id": "openai/gpt-5.3-codex",
+        "id": "openai/gpt-codex",
         "context_size": 128_000,
         "reasoning": True,
         "tool_support": True,

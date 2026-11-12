@@ -182,6 +182,9 @@ class AgentDiagnostic:
         else:
             kind_keys = {"idle_timeout": True}
         return {
+            # A stall or a capped attempt is the provider's or the transport's
+            # fault, not the review's: the next chain entry may succeed (#1328).
+            "retryable": True,
             **kind_keys,
             "idle_seconds": round(self.idle_seconds, 3),
             "event_count": self.event_count,
