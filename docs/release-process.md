@@ -22,7 +22,14 @@ changelog section.
    when an entry appears under both `[Unreleased]` and a released version. Craft also bumps
    `pyproject.toml`, `server.json`, and `uv.lock` in step. The same transaction
    updates `docs/consumer-release.json`, consumer install pins, matching release
-   documentation links, generated skill copies/hashes, and `llms-full.txt`.
+   documentation links, and `llms-full.txt`. It does **not** regenerate the
+   per-harness agent packages. The bump rewrites the install pins and the
+   `tree/v<release>/docs` links, while `scripts/gen_agent_packages.py` also
+   resolves the `{{DOCUMENTATION_REF}}` prose and every `blob/v<release>/` docs
+   link, so a prepared branch keeps the previous tag there and fails its own
+   `agent-packages-check`. Run `make agent-packages` and commit the result before
+   pushing; the Release workflow's `prepare` job does the same and pushes the
+   regeneration commit before it dispatches CI/CD.
    Candidate-branch docs name the release being prepared; publish that candidate
    before recommending its install version. The post-release development bump
    retains the published release pin, never the next unpublished `.dev` version.
@@ -53,8 +60,10 @@ The two ways of cutting a release reach the same artifact:
   credentials. A push by a person starts CI/CD, which builds the dist.
 - **Workflow path.** The Release workflow's `prepare` job pushes the branch with the
   workflow's own `GITHUB_TOKEN`. GitHub does not start workflows from a
-  `GITHUB_TOKEN` push, so CI/CD would never run. The workflow's `dispatch-build` job
-  therefore dispatches CI/CD on the branch it just prepared (a `workflow_dispatch`
+  `GITHUB_TOKEN` push, so CI/CD would never run. `prepare` first regenerates the
+  per-harness agent packages on that branch and pushes the commit (see step 1), then
+  reports the regenerated head as the release SHA. The workflow's `dispatch-build`
+  job therefore dispatches CI/CD on that branch (a `workflow_dispatch`
   event created with `GITHUB_TOKEN` is the one event GitHub does start). It holds
   only `actions: write` and reads no secret.
 
