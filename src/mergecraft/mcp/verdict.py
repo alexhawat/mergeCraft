@@ -395,7 +395,8 @@ async def reject_diff_that_does_not_match_the_pr(
     set; it does not authenticate hunk contents, so a diff naming the right
     files with altered bodies is still out of reach of this check.
     """
-    from mergecraft.mcp.checkout import changed_paths_in_diff, pull_request_path_expectations
+    from mergecraft.diff import changed_paths_in_diff
+    from mergecraft.mcp.checkout import pull_request_path_expectations
 
     text = confine_diff_path(ctx, diff_path).read_text(encoding="utf-8")
     renames: dict[str, str] = {}

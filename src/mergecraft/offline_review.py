@@ -25,8 +25,8 @@ from mergecraft.analyzers.trust import (
     derive_source_trust_tier,
 )
 from mergecraft.config import load_repo_settings
+from mergecraft.diff import changed_paths_in_diff
 from mergecraft.jev.client import AsyncJevClient, TypeSafeAPIError
-from mergecraft.mcp.checkout import changed_paths_in_diff
 from mergecraft.review.offline_agent import run_offline_agent_review
 from mergecraft.review.offline_result import (
     OfflineReviewResult as OfflineReviewResult,

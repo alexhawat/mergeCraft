@@ -18,6 +18,7 @@ from loguru import logger
 from mergecraft.analyzers.impact import resolve_ast_grep_binary, write_impact
 from mergecraft.analyzers.trust import analyzers_enabled
 from mergecraft.config.trust_policy import is_fork_pull_request
+from mergecraft.diff import changed_paths_in_diff
 from mergecraft.mcp.checkout_state import invalidate_checkout_review_state
 from mergecraft.mcp.git import _git_env, _is_auth_failure, _run_git
 from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
@@ -168,7 +169,6 @@ _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 # API after a successful checkout. Not ``api-only``: the head *is* checked out,
 # so head-side file reads work; only the local diff failed.
 FILES_API_DIFF_SCOPE = "files-api-diff"
-_DIFF_FILE_RE = re.compile(r"^diff --git a/(?P<path>.+?) b/(?P<to>.+)$", re.MULTILINE)
 _CHECKOUT_PR_INPUT_SCHEMA: JsonSchema = {
     "type": "object",
     "properties": {"pull_number": {"type": "number"}},
@@ -716,14 +716,6 @@ def _round_index(
     if run_bound.round_index > 0:
         return run_bound.round_index + 1
     return review_round_index(prior_reviews, publishers=publishers)
-
-
-def changed_paths_in_diff(diff_text: str) -> list[str]:
-    """Return the post-image paths named by a unified diff, in first-seen order."""
-    seen: dict[str, None] = {}
-    for match in _DIFF_FILE_RE.finditer(diff_text):
-        seen.setdefault(match.group("to"), None)
-    return list(seen)
 
 
 def _remote_url_for_cwd(cwd: str) -> str:

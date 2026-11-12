@@ -9,11 +9,12 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
+from mergecraft.diff import parse_diff
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
-_DIFF_FILE_RE = re.compile(r"^diff --git a/(.+?) b/(.+?)$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,10 +45,10 @@ def build_inline_anchor_index(diff_text: str) -> InlineAnchorIndex:
     old_line = 0
     new_line = 0
 
+    sections = iter(parse_diff(diff_text).files)
     for raw_line in diff_text.splitlines():
-        file_match = _DIFF_FILE_RE.match(raw_line)
-        if file_match:
-            current_path = file_match.group(2)
+        if raw_line.startswith("diff --git "):
+            current_path = next(sections).path
             continue
 
         if current_path is None:
