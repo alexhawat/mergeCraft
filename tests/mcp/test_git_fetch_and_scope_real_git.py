@@ -22,6 +22,7 @@ from tests.mcp.test_git_tool import _ctx
 from mergecraft.mcp import checkout as checkout_module
 from mergecraft.mcp.analyzers import run_analyzers_tool
 from mergecraft.mcp.git import git_fetch_tool
+from mergecraft.mcp.tool_state import primary_repo_state
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -179,3 +180,58 @@ async def test_successful_base_fetch_records_no_degradation(tmp_path: Path) -> N
     assert is_error is False, payload
     assert isinstance(payload, dict)
     assert "degraded" not in payload
+
+
+def _deepen_base(tmp_path: Path, clone: Path, extra: int = 1100) -> None:
+    """Put more than 1000 commits on origin's ``base`` and fetch them in full."""
+    work = tmp_path / "work"
+    head = "from refs/heads/base^0\n"
+    body = "".join(
+        f"commit refs/heads/base\ncommitter T <t@example.com> {1700000001 + i} +0000\n"
+        f"data 1\nx\n{head if i == 0 else ''}\n"
+        for i in range(extra)
+    )
+    subprocess.run(
+        ["git", "fast-import", "--quiet"],
+        cwd=work,
+        input=body,
+        text=True,
+        check=True,
+    )
+    _git(work, "push", "-q", str(tmp_path / "origin.git"), "base:refs/heads/base")
+    _git(clone, "fetch", "-q", "origin", "base:refs/remotes/origin/base")
+
+
+def _shallow_flag(repo: Path) -> str:
+    return _git(repo, "rev-parse", "--is-shallow-repository")
+
+
+async def test_checkout_pr_keeps_a_full_clone_full(tmp_path: Path) -> None:
+    repo = _pr_repo(tmp_path)
+    _deepen_base(tmp_path, repo)
+    assert _shallow_flag(repo) == "false"
+    # A URL remote, as in production: a plain path would ignore --depth.
+    _git(repo, "remote", "set-url", "origin", f"file://{_git(repo, 'remote', 'get-url', 'origin')}")
+    ctx = _ctx_for(repo, _StubGitHub(), tmp_path)
+
+    is_error, payload = await _checkout(ctx)
+
+    assert is_error is False, payload
+    assert _shallow_flag(repo) == "false"
+    assert not (repo / ".git" / "shallow").exists()
+
+
+async def test_checkout_pr_keeps_a_shallow_clone_working(tmp_path: Path) -> None:
+    full = _pr_repo(tmp_path)
+    shallow = tmp_path / "shallow"
+    origin = _git(full, "remote", "get-url", "origin")
+    _git(tmp_path, "clone", "-q", "--depth", "1", f"file://{origin}", str(shallow))
+    assert _shallow_flag(shallow) == "true"
+    github = _StubGitHub()
+    ctx = _ctx_for(full, github, tmp_path)
+    primary_repo_state(ctx.tool_state).dir = str(shallow)
+
+    is_error, payload = await _checkout(ctx)
+
+    assert is_error is False, payload
+    assert _shallow_flag(shallow) == "true"

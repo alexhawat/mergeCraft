@@ -19,7 +19,7 @@ from mergecraft.analyzers.impact import resolve_ast_grep_binary, write_impact
 from mergecraft.analyzers.trust import analyzers_enabled
 from mergecraft.config.trust_policy import is_fork_pull_request
 from mergecraft.mcp.checkout_state import invalidate_checkout_review_state
-from mergecraft.mcp.git import _git_env, _is_auth_failure, _run_git
+from mergecraft.mcp.git import _git_env, _is_auth_failure, _is_shallow_repository, _run_git
 from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
 from mergecraft.mcp.tool_call import normalize_pull_number_aliases
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
@@ -924,6 +924,11 @@ def _files_api_diff_reason(
     return _append_diff_degradations(reason, truncated=truncated, unreviewable=unreviewable)
 
 
+def _depth_flags(cwd: str) -> list[str]:
+    """``--depth=1000`` for a shallow clone only; a full clone must stay full."""
+    return ["--depth=1000"] if _is_shallow_repository(cwd) else []
+
+
 def _stale_base_reason(base_fetch_failure: str) -> str:
     """Reason for a local diff taken against a base ref that could not be refreshed."""
     return (
@@ -997,7 +1002,7 @@ def _write_incremental_diff(
         env, remote_url = _git_env_for_cwd(cwd, git_token)
         try:
             _run_git(
-                ["fetch", "--no-tags", "--depth=1000", "origin", prior_sha],
+                ["fetch", "--no-tags", *_depth_flags(cwd), "origin", prior_sha],
                 cwd=cwd,
                 env=env,
                 remote_url=remote_url or None,
@@ -1367,7 +1372,7 @@ def checkout_pr_tool(ctx: ToolContext):
                 [
                     "fetch",
                     "--no-tags",
-                    "--depth=1000",
+                    *_depth_flags(cwd),
                     "origin",
                     f"{base_ref}:refs/remotes/origin/{base_ref}",
                 ],
