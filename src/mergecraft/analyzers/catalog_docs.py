@@ -499,8 +499,8 @@ def _sarif_upload_lines() -> list[str]:
         "`source: agent` findings carry narrative; neither is uploaded, and raw logs "
         "never leave the process.",
         "- **The clustered, placed set.** The upload reuses the findings the pipeline "
-        "already clustered and placed, not the raw analyzer output, so cross-tool "
-        "duplicates arrive as one alert. It is *not* truncated at the inline "
+        "already clustered and placed, not the raw analyzer output, so identical "
+        "findings arrive as one alert. It is *not* truncated at the inline "
         "comment budget — the overflow is exactly what this surface exists to show.",
         "- **Trust-gated.** Each finding's analyzer must still pass this run's "
         "`trust` x `shell` x `analyzers:` selection chain — the same predicates the "

@@ -106,8 +106,31 @@ def changed_functions_from_diff(
     return ordered
 
 
+#: Skip reason when every changed file is in a language with no resolver.
+SKIP_CHANGED_LANGUAGE_UNSUPPORTED = "changed_function_language_unsupported"
+# Enclosing-symbol resolution parses Python only (``ast``).
+_RESOLVABLE_SUFFIXES = (".py", ".pyi")
+
+
+def unsupported_language_skip(diff: str) -> str | None:
+    """Return a named skip when no changed file is in a resolvable language.
+
+    Coverage (lcov, Cobertura) and mutation (Stryker) reports for JS/TS, Java,
+    Go and other languages parse, but nothing here can map their changed hunks
+    to a function. Callers report this reason instead of an empty result.
+    """
+    if not diff.strip():
+        return None
+    paths = list(parse_diff_scope(diff).hunk_ranges)
+    if paths and not any(path.endswith(_RESOLVABLE_SUFFIXES) for path in paths):
+        return SKIP_CHANGED_LANGUAGE_UNSUPPORTED
+    return None
+
+
 __all__ = [
+    "SKIP_CHANGED_LANGUAGE_UNSUPPORTED",
     "ChangedFunction",
     "changed_functions_from_diff",
     "resolve_enclosing_symbol",
+    "unsupported_language_skip",
 ]

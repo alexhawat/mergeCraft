@@ -42,7 +42,7 @@ from loguru import logger
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.scope import parse_diff_scope
 from mergecraft.ci.archive_bounds import extract_zip_texts
-from mergecraft.ci.changed_functions import changed_functions_from_diff
+from mergecraft.ci.changed_functions import changed_functions_from_diff, unsupported_language_skip
 from mergecraft.ci.crap import (
     DEFAULT_CRAP_BANDS,
     CrapBands,
@@ -480,7 +480,7 @@ def coverage_findings(
 
     if diff.strip() and not symbols:
         return CoverageIngestResult(
-            skip_reason=SKIP_ENCLOSING_SYMBOL_UNRESOLVED,
+            skip_reason=unsupported_language_skip(diff) or SKIP_ENCLOSING_SYMBOL_UNRESOLVED,
             run_notes=notes,
         )
 

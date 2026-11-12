@@ -330,7 +330,7 @@ analyzers:
 What is and is not uploaded:
 
 - **Catalog analyzers only.** Only `source: analyzer` findings are eligible. `source: ci` findings carry truncated pipeline log excerpts and `source: agent` findings carry narrative; neither is uploaded, and raw logs never leave the process.
-- **The clustered, placed set.** The upload reuses the findings the pipeline already clustered and placed, not the raw analyzer output, so cross-tool duplicates arrive as one alert. It is *not* truncated at the inline comment budget — the overflow is exactly what this surface exists to show.
+- **The clustered, placed set.** The upload reuses the findings the pipeline already clustered and placed, not the raw analyzer output, so identical findings arrive as one alert. It is *not* truncated at the inline comment budget — the overflow is exactly what this surface exists to show.
 - **Trust-gated.** Each finding's analyzer must still pass this run's `trust` x `shell` x `analyzers:` selection chain — the same predicates the pipeline calls, re-evaluated at upload time. A finding from a tool with no catalog manifest cannot be gated, so it is refused.
 - **Redacted before serialization.** `message`, `evidence`, `remediation` and `autofix` pass through `analyzers/redact.py` while still typed `Finding`s, before SARIF is built. `path` is left intact: it becomes `artifactLocation.uri`, and mangling it would detach the alert from its file.
 - **Never a gate.** A rejected upload — missing permission, code scanning unavailable, transport error — is logged at `warning` and the run continues.
