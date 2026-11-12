@@ -22,7 +22,8 @@ def test_missing_explicit_bank_exits_30(command: tuple[str, ...], tmp_path: Path
     result = CliRunner().invoke(app, ["eval", *command, "--bank", str(missing), "--json"], env=_ENV)
 
     assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE, result.output
-    assert "no-such-bank" in result.stderr
+    # Rich wraps the long temp path at the terminal width, even mid-name.
+    assert "no-such-bank" in result.stderr.replace("\n", "")
 
 
 def test_existing_empty_explicit_bank_still_passes(tmp_path: Path) -> None:
