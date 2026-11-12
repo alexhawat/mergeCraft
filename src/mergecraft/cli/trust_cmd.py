@@ -272,8 +272,17 @@ def _write_local_self_review(config_path: Path, data: dict[str, Any], level: str
 
 
 def _effective_event_for_cli() -> dict[str, Any]:
-    """Same-repo ``pull_request_target`` is the knob's primary surface."""
-    return {"pull_request": {"head": {"repo": {"fork": False, "full_name": "local/repo"}}}}
+    """A simulated same-repo ``pull_request_target``, the knob's primary surface.
+
+    Head and base name the same repository so the preview shows what the
+    configured tier decides there. With no base repository the policy treats
+    the head as a fork, and every tier would print the fork floor.
+    """
+    repo = {"id": 1, "fork": False, "full_name": "local/repo"}
+    return {
+        "repository": dict(repo),
+        "pull_request": {"head": {"repo": dict(repo)}, "base": {"repo": dict(repo)}},
+    }
 
 
 def _operator_override_requested() -> bool:
@@ -315,7 +324,10 @@ def show_cmd(
     console.print(f"agentSandbox tier: {sandbox.configured_tier}")
     console.print(f"agentSandbox resolved from: {sandbox.resolved_from}")
     honoured = "granted" if sandbox.honour else "refused"
-    console.print(f"agentSandbox resolved answer for this run: {honoured} ({sandbox.reason})")
+    console.print(
+        "agentSandbox answer for a simulated same-repo pull_request_target: "
+        f"{honoured} ({sandbox.reason})"
+    )
 
 
 @app.command("set-self-review")

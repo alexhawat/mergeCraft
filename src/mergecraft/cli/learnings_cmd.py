@@ -99,7 +99,7 @@ def influence(
     """List active + staging learning entries with their provenance.
 
     The output names every entry's heading and its originating run
-    id (D11). Use ``--json`` for machine-readable audit logs.
+    id. Use ``--json`` for machine-readable audit logs.
     """
     learn_path = _resolve_learnings_path(repo)
     if not learn_path.is_file():

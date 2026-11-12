@@ -734,6 +734,8 @@ def test_logfire_warns_when_the_tracing_extra_is_missing_but_still_saves(
     combined = result.stdout + result.stderr
     assert result.exit_code == 0, combined
     assert "the [tracing] extra is not installed" in combined
+    assert "[yellow]" not in combined
+    assert "uv tool install 'mergecraft-action[tracing]'" in combined
     values = dotenv_values(env_path)
     assert values["MERGECRAFT_LOGFIRE_TOKEN"] == "pylf_v1_eu_token"
     assert values["MERGECRAFT_TRACING_PROJECT"] == "mergecraft"

@@ -104,7 +104,7 @@ from mergecraft.utils.learnings import LearningProvenance
 app = mergecraft_typer(
     help=(
         "Manage the file-backed Failure Memory and Eval Bank. "
-        "Cases live under evals/cases/ by default (D13)."
+        "Cases live under evals/cases/ by default."
     ),
     no_args_is_help=True,
 )
@@ -310,8 +310,8 @@ def add(
 ) -> None:
     """Add a case to the bank.
 
-    Validates the front-matter against the schema (D13) and the
-    embedded :class:`LearningProvenance` (D5). Prompts are not used:
+    Validates the front-matter against the schema and the
+    embedded :class:`LearningProvenance`. Prompts are not used:
     every flag is supplied so the add flow is non-interactive and
     automatable.
 
@@ -499,7 +499,7 @@ def promote(
         help="Overwrite an existing permanent test for the same case.",
     ),
 ) -> None:
-    """Promote a case into a permanent pytest test file (#44).
+    """Promote a case into a permanent pytest test file.
 
     The promoted test re-runs the case against the current code via
     ``mergecraft.evals.store.replay_case`` and fails when the replay
@@ -566,7 +566,7 @@ def replay_bank_cmd(
         help="Also print the directional gate matrix (unsafe-approval / clean-block rates).",
     ),
 ) -> None:
-    """Replay the eval bank and write a versioned benchmark result set (#140).
+    """Replay the eval bank and write a versioned benchmark result set.
 
     Structural replay is deterministic and keyless — every replayable case is
     re-decided by the current ``decide_approval`` gate. Finding-location
@@ -634,9 +634,9 @@ def convergence_cmd(
         help="Emit the result set as JSON on stdout.",
     ),
 ) -> None:
-    """Score multi-round convergence scenarios and write a versioned result set (RC6).
+    """Score multi-round convergence scenarios and write a versioned result set.
 
-    Runs built-in ledger-only scenarios (including the pre-W1 overflow-leakage
+    Runs built-in ledger-only scenarios (including the overflow-leakage
     baseline) via :func:`mergecraft.evals.convergence.score_convergence`. No live
     GitHub or review runs are required.
     """
@@ -699,7 +699,7 @@ def bench_cmd(
         help="Emit the joined result set as JSON on stdout.",
     ),
 ) -> None:
-    """Join structural decision replay with a live finding-location run (#140, B3).
+    """Join structural decision replay with a live finding-location run.
 
     Structural replay (keyless) always runs. Live detection additionally runs
     ``diff-review`` against the patch-bearing detection corpus, if credentials
@@ -710,15 +710,14 @@ def bench_cmd(
     ``--model`` is resolved the same way ``diff-review`` resolves its own
     ``--model`` — never hardcoded to a specific vendor here (a prior
     hardcoded default silently broke the credential check entirely and
-    presumed every operator wants the same provider; mergeCraft self-review,
-    PR #216). The provider is derived from the resolved model slug, not
+    presumed every operator wants the same provider). The provider is derived from the resolved model slug, not
     asked for separately, so the two can never disagree.
 
     One invocation's ``detection`` section covers exactly the one resolved
-    model — it is **not** the full ≥2-provider comparison D12 requires for a
+    model — it is **not** the full ≥2-provider comparison required for a
     published report. Run this once per provider (each writes its own
-    timestamped result set and raw-findings directory, per D9) and combine
-    the separate files at publication time (B7); a single-provider result
+    timestamped result set and raw-findings directory) and combine
+    the separate files at publication time; a single-provider result
     set is a valid, honestly-partial artifact, not a stand-in for the
     complete comparison.
     """
@@ -1309,7 +1308,7 @@ def add_incident_cmd(
     bank: Path | None = typer.Option(None, "--bank", help="Bank directory (default evals/cases/)."),
     expected_decision: str = typer.Option("block", "--expected-decision"),
 ) -> None:
-    """Add an incident-derived structural case (postmortem PR + revert/fix) (#1163)."""
+    """Add an incident-derived structural case (postmortem PR + revert/fix)."""
     from mergecraft.evals.incident import IncidentCaseInput, add_incident_case
 
     spec = IncidentCaseInput(
@@ -1344,7 +1343,7 @@ def rescore_delta_cmd(
     tolerance: float = typer.Option(0.02, "--tolerance"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
-    """Compare two structural replay result sets (base vs head) (#1164, advisory)."""
+    """Compare two structural replay result sets (base vs head); advisory."""
     from mergecraft.evals.gate import load_result_set
     from mergecraft.evals.rescore_delta import (
         compare_result_sets,

@@ -867,8 +867,8 @@ def auth_logfire(
     config tracing`` shows the project and a redacted token.
 
     The ``\[tracing]`` extra must be installed for spans to actually leave
-    the runner — install with ``uv pip install 'mergecraft-action' --extra tracing``
-    (or ``uv sync --extra tracing``) when the warning fires.
+    the runner — install with ``uv tool install 'mergecraft-action[tracing]'``
+    (or ``uv sync --extra tracing`` in a checkout) when the warning fires.
 
     NOTE: the ``\[tracing]`` above is literal text, not a Rich markup tag.
     """
@@ -916,15 +916,14 @@ def auth_logfire(
     # may want to set the secret first and install later — but print a clear
     # one-liner so the failure mode is not "nothing happens".
     if not _logfire_extra_installed():
-        # The literal `[tracing]` would be parsed as Rich markup inside the
-        # `[cyan]` spans, so render the warning in two passes: the colored
-        # prefix via markup, then the bracketed install command as plain text.
+        # The literal `[tracing]` would be parsed as Rich markup, so the text
+        # is printed with markup off and the colour applied as a style.
         console.print(
-            "[yellow]warning:[/yellow] the [tracing] extra is not installed.", markup=False
+            "warning: the [tracing] extra is not installed.", markup=False, style="yellow"
         )
         console.print(
             "Spans will not leave the runner until you run "
-            "`uv pip install 'mergecraft-action' --extra tracing`.",
+            "`uv tool install 'mergecraft-action[tracing]'`.",
             markup=False,
         )
         console.print(
@@ -998,8 +997,8 @@ def auth_minimax(scope: str = _SCOPE_OPTION) -> None:
     """Save a MiniMax API key as MERGECRAFT_CUSTOM_PROVIDER_API_KEY.
 
     MiniMax is reachable through the existing custom-provider helper
-    (D10 / option ii) — no first-party ``mmx-cli`` install is required.
-    The key is stored under the D7 singleton secret name so it pairs with
+    — no first-party ``mmx-cli`` install is required.
+    The key is stored under the singleton secret name so it pairs with
     the singleton ``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`` (which the
     operator may override, or rely on the preset's default
     ``https://api.minimax.io/v1``).
