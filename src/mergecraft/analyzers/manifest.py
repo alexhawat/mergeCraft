@@ -26,6 +26,8 @@ _PARSER_NATIVE_SEVERITIES: dict[str, frozenset[str]] = {
     "ruff_json": frozenset({"error", "warning"}),
     "shellcheck_json": frozenset({"error", "warning", "info", "style"}),
     "eslint_json": frozenset({"error", "warning"}),
+    "biome_json": frozenset({"fatal", "error", "warning", "information", "hint"}),
+    "oxlint_json": frozenset({"error", "warning", "advice"}),
     "mypy_json": frozenset({"error", "warning", "note"}),
     "pyright_json": frozenset({"error", "warning", "information"}),
     "oasdiff_json": frozenset({"breaking", "warning", "info"}),
