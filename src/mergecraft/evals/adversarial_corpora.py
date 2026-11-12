@@ -183,23 +183,97 @@ def discover_adversarial_corpora(
     return [AdversarialCorpus(kind=kind, cases=grouped[kind]) for kind in sorted(grouped)]
 
 
-def _fence_regressions(corpora: Sequence[AdversarialCorpus]) -> list[str]:
+#: Fence vector each corpus kind is rendered under. A hostile README or ticket
+#: reaches the reviewer as context, so it must be fenced as untrusted content.
+_FENCE_VECTOR: Final[dict[str, Literal["pr_body", "poisoned_context", "review_comment"]]] = {
+    "prompt_injection": "pr_body",
+    "malicious_repository": "poisoned_context",
+    "malicious_ticket_comment": "review_comment",
+}
+
+_HOOK_MARKER: Final[str] = "hook-ran"
+
+
+def _fence_holds(case: AdversarialCorpusCase) -> bool:
+    check = check_fence(
+        AdversarialCase(
+            case_id=case.case_id,
+            vector=_FENCE_VECTOR[case.kind],
+            payload=case.payload,
+            author="external-contributor",
+            author_association="NONE",
+            legit_marker=case.legit_marker,
+        )
+    )
+    return check.fenced and check.forged_delimiters_neutralized and check.legit_content_preserved
+
+
+def _hook_stays_inert(case: AdversarialCorpusCase) -> bool:
+    """A hostile ``post-checkout`` hook must not run under the hardened git argv."""
+    import os
+    import stat
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    from mergecraft.utils.git_hardening import git_argv
+
+    with tempfile.TemporaryDirectory(prefix="mergecraft-adv-hook-") as raw:
+        repo = Path(raw)
+        marker = repo / _HOOK_MARKER
+        env = {
+            **os.environ,
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+        }
+
+        def run(*args: str) -> None:
+            subprocess.run(
+                git_argv(["-C", str(repo), *args]),
+                check=True,
+                capture_output=True,
+                env=env,
+                timeout=30,
+            )
+
+        try:
+            run("init", "-q")
+            hook = repo / ".git" / "hooks" / "post-checkout"
+            hook.parent.mkdir(parents=True, exist_ok=True)
+            hook.write_text(
+                f"{case.payload.rstrip()}\ntouch '{marker}'\n",
+                encoding="utf-8",
+            )
+            hook.chmod(hook.stat().st_mode | stat.S_IXUSR)
+            run(
+                "-c",
+                "user.name=gate",
+                "-c",
+                "user.email=gate@example.invalid",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "seed",
+            )
+            run("checkout", "-q", "-b", "adversarial-probe")
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return not marker.exists()
+
+
+def _corpus_regressions(corpora: Sequence[AdversarialCorpus]) -> list[str]:
+    """Evaluate every case of every corpus (not just the prompt-injection one)."""
     failed: list[str] = []
     for corpus in corpora:
-        if corpus.kind != "prompt_injection":
-            continue
         for case in corpus.cases:
-            check = check_fence(
-                AdversarialCase(
-                    case_id=case.case_id,
-                    vector="pr_body",
-                    payload=case.payload,
-                    author="external-contributor",
-                    author_association="NONE",
-                    legit_marker=case.legit_marker,
-                )
+            holds = (
+                _hook_stays_inert(case)
+                if case.case_id == "malicious_repository:git-hook"
+                else _fence_holds(case)
             )
-            if not (check.fenced and check.forged_delimiters_neutralized):
+            if not holds:
                 failed.append(case.case_id)
     return failed
 
@@ -211,14 +285,15 @@ def eval_adversarial_gate(
     """Fail the release when an adversarial case regresses.
 
     ``candidate_failures`` are case ids (``kind:name``) that already failed
-    in the candidate run. An empty tuple still runs the prompt-injection
-    fence harness so a silent corpus rot cannot pass.
+    in the candidate run. The harness always runs over all three corpora, so a
+    reported failure never suppresses it and a silent corpus rot cannot pass:
+    prompt-injection, ticket and README content must be fenced as untrusted,
+    and a hostile repository hook must stay inert under the hardened git argv.
     """
     corpora = discover_adversarial_corpora(bank=bank)
-    reported = tuple(item for item in candidate_failures if item)
-    failed: list[str] = list(reported)
-    if not reported:
-        failed.extend(_fence_regressions(corpora))
+    failed: list[str] = [item for item in candidate_failures if item]
+    if True:
+        failed.extend(_corpus_regressions(corpora))
     unique = tuple(dict.fromkeys(failed))
     return AdversarialGateReport(passed=not unique, failed_cases=unique)
 

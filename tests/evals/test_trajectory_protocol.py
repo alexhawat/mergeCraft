@@ -205,7 +205,10 @@ def test_non_independent_labels_are_not_quality_eligible_even_with_a_protocol(
 
 def _report_with_rule_delta(*, rule_id: str, false_positive_delta: int) -> tuple[Any, Any]:
     """Return ``(baseline, candidate)`` reports differing only in one check's counts."""
-    baseline = score_trajectory_labels([_independent_label_set(_independent_case("one"))])
+    protocol = scoring.TrajectoryProtocol.model_validate(_protocol_payload())
+    baseline = score_trajectory_labels(
+        [_independent_label_set(_independent_case("one"))], protocol=protocol
+    )
     rows = list(baseline.per_check)
     for index, row in enumerate(rows):
         if row.rule_id != rule_id:
@@ -315,3 +318,89 @@ def test_gate_fails_outside_tolerance_naming_the_check(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     assert RULE_IDS[0] in result.output
+
+
+# ── direction, input identity, eligibility, missing inputs (W3.3-4) ──────────
+
+
+def _loaded(tmp_path: Path, tolerance: float = 0.0) -> Any:
+    return scoring.load_trajectory_protocol(
+        _write_protocol(tmp_path, _protocol_payload(tolerance=tolerance))
+    )
+
+
+def test_an_improvement_does_not_fail_the_gate(tmp_path: Path) -> None:
+    protocol = _loaded(tmp_path)
+    baseline, candidate = _report_with_rule_delta(rule_id=RULE_IDS[0], false_positive_delta=3)
+
+    # Candidate has *fewer* false positives than the baseline.
+    result = scoring.compare_trajectory_report(baseline, candidate, protocol=protocol)
+
+    assert result.passed is True
+
+
+def test_a_true_positive_drop_fails_but_a_gain_passes(tmp_path: Path) -> None:
+    protocol = _loaded(tmp_path)
+    baseline, _ = _report_with_rule_delta(rule_id=RULE_IDS[0], false_positive_delta=0)
+    rows = list(baseline.per_check)
+    index = next(i for i, row in enumerate(rows) if row.rule_id == RULE_IDS[0])
+    gained = baseline.model_copy(
+        update={
+            "per_check": [
+                *rows[:index],
+                rows[index].model_copy(update={"true_positive": rows[index].true_positive + 2}),
+                *rows[index + 1 :],
+            ]
+        }
+    )
+
+    assert scoring.compare_trajectory_report(gained, baseline, protocol=protocol).passed is True
+    dropped = scoring.compare_trajectory_report(baseline, gained, protocol=protocol)
+    assert dropped.passed is False
+    assert dropped.failures == [RULE_IDS[0]]
+
+
+def test_candidate_scored_on_different_labels_fails(tmp_path: Path) -> None:
+    protocol = _loaded(tmp_path, tolerance=1.0)
+    baseline, candidate = _report_with_rule_delta(rule_id=RULE_IDS[0], false_positive_delta=0)
+    other = candidate.inputs[0].model_copy(update={"label_set_sha256": "f" * 64})
+    candidate = candidate.model_copy(update={"inputs": [other]})
+
+    result = scoring.compare_trajectory_report(candidate, baseline, protocol=protocol)
+
+    assert result.passed is False
+    assert scoring.INPUT_DIGEST_FAILURE in result.failures
+
+
+def test_candidate_that_is_not_quality_eligible_fails(tmp_path: Path) -> None:
+    protocol = _loaded(tmp_path, tolerance=1.0)
+    baseline, candidate = _report_with_rule_delta(rule_id=RULE_IDS[0], false_positive_delta=0)
+    ineligible = candidate.eligibility.model_copy(update={"quality_eligible": False})
+    candidate = candidate.model_copy(update={"eligibility": ineligible})
+
+    result = scoring.compare_trajectory_report(candidate, baseline, protocol=protocol)
+
+    assert result.passed is False
+    assert scoring.ELIGIBILITY_FAILURE in result.failures
+
+
+def test_gate_fails_when_a_protocol_exists_but_the_candidate_is_missing(tmp_path: Path) -> None:
+    protocol_path = _write_protocol(tmp_path, _protocol_payload())
+    baseline_path, _ = _write_reports(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "eval",
+            "trajectory-gate",
+            "--protocol",
+            str(protocol_path),
+            "--baseline",
+            str(baseline_path),
+            "--candidate",
+            str(tmp_path / "absent.json"),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "requires both" in result.output

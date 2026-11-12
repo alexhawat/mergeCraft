@@ -20,17 +20,20 @@ stub at the same seam instead.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
+import os
 import re
 import shutil
 import tempfile
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, TypeVar
 
 from loguru import logger
 
@@ -47,8 +50,11 @@ from mergecraft.evals.benchmark import (
     DetectionExecutionReceipt,
     DetectionMetrics,
     DetectionRunIdentity,
+    git_tree_id,
     run_structural_replay,
+    summarize_latencies,
 )
+from mergecraft.evals.quality_metrics import compute_quality_metrics
 from mergecraft.evals.scoring import (
     DEFAULT_LINE_SLACK,
     fold_score_reports,
@@ -84,7 +90,37 @@ _RUN_ID_UNSAFE_CHARS: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9._-]+")
 SKIP_REASON_NO_CREDENTIAL: Final[str] = "no live credential"
 SKIP_REASON_NO_CASES: Final[str] = "no patch-bearing cases"
 
-ReviewFn = Callable[[DetectionCase], list[dict[str, Any]]]
+
+@dataclass(frozen=True)
+class ReviewBudget:
+    """Per-review and campaign bounds a detection run enforces and records (W3.3-5).
+
+    Mirrors the campaign manifest's ``per_review_*`` and
+    ``total_campaign_spend_ceiling_usd`` fields. ``None`` leaves that bound
+    unenforced (the ad-hoc ``eval bench`` default).
+    """
+
+    per_review_timeout_seconds: float | None = None
+    per_review_token_limit: int | None = None
+    per_review_cost_budget_usd: float | None = None
+    campaign_cost_ceiling_usd: float | None = None
+
+
+@dataclass(frozen=True)
+class ReviewOutcome:
+    """A review's findings plus the usage it reported, when the runner knows it.
+
+    A ``ReviewFn`` may return this instead of a bare findings list so the
+    campaign can record (and bound) cost and tokens. ``None`` means the runner
+    did not report that figure; it is never recorded as zero.
+    """
+
+    findings: list[dict[str, Any]]
+    cost_usd: float | None = None
+    total_tokens: int | None = None
+
+
+ReviewFn = Callable[[DetectionCase], "list[dict[str, Any]] | ReviewOutcome"]
 
 
 class ReviewRunFailed(RuntimeError):
@@ -161,6 +197,50 @@ def materialize_case_repo(case: DetectionCase, dest: Path) -> Path:
     return dest
 
 
+JOURNAL_FILENAME: Final[str] = "journal.jsonl"
+
+
+def _append_journal(path: Path, row: dict[str, Any]) -> None:
+    """Append one outcome row; best-effort so a journal fault never aborts a run."""
+    try:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
+    except OSError as exc:
+        logger.debug("detection journal write failed: {}", exc)
+
+
+def _record_failure(
+    case_id: str,
+    error: str,
+    failed_case_ids: list[str],
+    failed_case_errors: dict[str, str],
+    journal_path: Path,
+) -> None:
+    failed_case_ids.append(case_id)
+    failed_case_errors[case_id] = error
+    _append_journal(journal_path, {"case_id": case_id, "status": "failed", "error": error})
+
+
+def _budget_overrun(
+    budget: ReviewBudget,
+    *,
+    elapsed_seconds: float,
+    cost_usd: float | None,
+    tokens: int | None,
+) -> str | None:
+    """Describe the first per-review bound a finished review exceeded, or ``None``."""
+    limit = budget.per_review_timeout_seconds
+    if limit is not None and elapsed_seconds > limit:
+        return f"TimeoutError: review took {elapsed_seconds:.1f}s (limit {limit}s)"
+    token_limit = budget.per_review_token_limit
+    if token_limit is not None and tokens is not None and tokens > token_limit:
+        return f"BudgetExceeded: review used {tokens} tokens (limit {token_limit})"
+    cost_limit = budget.per_review_cost_budget_usd
+    if cost_limit is not None and cost_usd is not None and cost_usd > cost_limit:
+        return f"BudgetExceeded: review cost ${cost_usd:.4f} (limit ${cost_limit:.4f})"
+    return None
+
+
 def run_live_detection(
     cases: list[DetectionCase],
     *,
@@ -171,6 +251,7 @@ def run_live_detection(
     slack: int = DEFAULT_LINE_SLACK,
     required_provenance: IndependenceTier = "independent",
     immutable_model_pin: str | None = None,
+    budget: ReviewBudget | None = None,
 ) -> DetectionMetrics:
     """Drive every case through ``review_fn``, score it, and fold the results.
 
@@ -185,6 +266,16 @@ def run_live_detection(
     it as "reviewed, zero findings" would misrepresent both the case and the
     aggregate metrics. Failed cases are reported separately via
     ``cases_failed``/``failed_case_ids``, never silently dropped.
+
+    Any other ``Exception`` from a case (a timeout, a malformed findings file, a
+    provider error) is isolated the same way and recorded in
+    ``failed_case_errors`` with its class, so one flaky case cannot abort the
+    campaign and orphan the raw findings already paid for. Each outcome is also
+    appended to ``<raw dir>/journal.jsonl`` as it happens. ``budget`` bounds are
+    enforced: a case over its timeout, token or cost bound is recorded as
+    failed, and once the campaign cost ceiling is reached the remaining cases
+    are recorded as failed without running. Reported cost is recorded on each
+    receipt (``cost_known``) and folded into ``total_cost_usd``.
     """
     # A timestamp alone collides for two runs of the same provider/model
     # within the same second (concurrent or rapid repeated invocations) —
@@ -201,6 +292,12 @@ def run_live_detection(
     reports = []
     case_results: list[DetectionCaseResult] = []
     failed_case_ids: list[str] = []
+    failed_case_errors: dict[str, str] = {}
+    case_elapsed_ms: list[float] = []
+    case_costs: list[float | None] = []
+    campaign_cost_usd = 0.0
+    budget = budget or ReviewBudget()
+    journal_path = raw_dir / JOURNAL_FILENAME
     # Provenance of every scored label, folded into one corpus verdict below.
     all_provenances: list[str] = []
     for case in cases:
@@ -215,14 +312,64 @@ def run_live_detection(
         issues = load_baseline_issues(baseline_payload)
         all_provenances.extend(issue.provenance for issue in issues)
 
+        if (
+            budget.campaign_cost_ceiling_usd is not None
+            and campaign_cost_usd >= budget.campaign_cost_ceiling_usd
+        ):
+            _record_failure(
+                case.case_id,
+                "BudgetExceeded: campaign cost ceiling reached before this case ran",
+                failed_case_ids,
+                failed_case_errors,
+                journal_path,
+            )
+            continue
+
+        started_at = time.monotonic()
         try:
-            started_at = time.monotonic()
-            raw_rows = review_fn(case)
+            outcome = review_fn(case)
         except ReviewRunFailed as exc:
             logger.warning("detection case {} review failed: {}", case.case_id, exc)
-            failed_case_ids.append(case.case_id)
+            _record_failure(
+                case.case_id,
+                f"ReviewRunFailed: {exc}",
+                failed_case_ids,
+                failed_case_errors,
+                journal_path,
+            )
+            continue
+        except Exception as exc:
+            # One case's timeout, malformed output or provider error must not
+            # abort the campaign and orphan the paid-for raw findings of the
+            # cases that already ran (W3.3-5): record it and move on.
+            logger.warning("detection case {} raised {}: {}", case.case_id, type(exc).__name__, exc)
+            _record_failure(
+                case.case_id,
+                f"{type(exc).__name__}: {exc}",
+                failed_case_ids,
+                failed_case_errors,
+                journal_path,
+            )
             continue
         elapsed_seconds = time.monotonic() - started_at
+        if isinstance(outcome, ReviewOutcome):
+            raw_rows = outcome.findings
+            case_cost_usd = outcome.cost_usd
+            case_tokens = outcome.total_tokens
+        else:
+            raw_rows = outcome
+            case_cost_usd = None
+            case_tokens = None
+        if case_cost_usd is not None:
+            campaign_cost_usd += case_cost_usd
+        overrun = _budget_overrun(
+            budget, elapsed_seconds=elapsed_seconds, cost_usd=case_cost_usd, tokens=case_tokens
+        )
+        if overrun is not None:
+            _record_failure(
+                case.case_id, overrun, failed_case_ids, failed_case_errors, journal_path
+            )
+            continue
         if (
             hashlib.sha256(case.patch_path.read_bytes()).hexdigest() != patch_sha256
             or hashlib.sha256(case.baseline_path.read_bytes()).hexdigest() != baseline_sha256
@@ -232,7 +379,13 @@ def run_live_detection(
                 "refusing an execution receipt",
                 case.case_id,
             )
-            failed_case_ids.append(case.case_id)
+            _record_failure(
+                case.case_id,
+                "InputsChanged: patch or baseline changed during review",
+                failed_case_ids,
+                failed_case_errors,
+                journal_path,
+            )
             continue
 
         raw_path = raw_dir / f"{case.case_id}.json"
@@ -289,10 +442,22 @@ def run_live_detection(
                     raw_findings_path=str(raw_path),
                     raw_findings_sha256=hashlib.sha256(raw_bytes).hexdigest(),
                     elapsed_seconds=elapsed_seconds,
-                    cost_known=False,
-                    cost_usd=None,
+                    cost_known=case_cost_usd is not None,
+                    cost_usd=case_cost_usd,
+                ),
+                quality=compute_quality_metrics(
+                    findings=findings,
+                    baseline=issues,
+                    latencies_ms=[elapsed_seconds * 1000.0],
+                    cost_usd=case_cost_usd,
+                    time_to_first_useful_finding_ms=None,
                 ),
             )
+        )
+        case_elapsed_ms.append(elapsed_seconds * 1000.0)
+        case_costs.append(case_cost_usd)
+        _append_journal(
+            journal_path, {"case_id": case.case_id, "status": "scored", "cost_usd": case_cost_usd}
         )
 
     return DetectionMetrics(
@@ -301,6 +466,13 @@ def run_live_detection(
         cases_run=len(case_results),
         cases_failed=len(failed_case_ids),
         failed_case_ids=failed_case_ids,
+        failed_case_errors=failed_case_errors,
+        latency=summarize_latencies(case_elapsed_ms) if case_elapsed_ms else None,
+        total_cost_usd=(
+            sum(cost for cost in case_costs if cost is not None)
+            if case_costs and all(cost is not None for cost in case_costs)
+            else None
+        ),
         aggregate=fold_score_reports(reports),
         case_results=case_results,
         raw_findings_dir=str(raw_dir),
@@ -317,7 +489,41 @@ def run_live_detection(
     )
 
 
-def _default_review_fn(model: str) -> ReviewFn:
+_T = TypeVar("_T")
+
+
+async def _run_with_timeout(awaitable: Awaitable[_T], timeout_seconds: float | None) -> _T:
+    """Await ``awaitable``, raising ``TimeoutError`` past ``timeout_seconds``."""
+    return await asyncio.wait_for(awaitable, timeout=timeout_seconds)
+
+
+@contextlib.contextmanager
+def _bounded_environment(budget: ReviewBudget | None) -> Iterator[None]:
+    """Pass the per-review token/cost bounds to the in-process review run.
+
+    ``run_offline_diff_review`` resolves its run bounds from settings and the
+    existing ``MERGECRAFT_TOKEN_BUDGET`` / ``MERGECRAFT_COST_BUDGET_USD``
+    variables; the campaign runs cases sequentially, so scoping those for one
+    review and restoring them afterwards is race-free.
+    """
+    overrides: dict[str, str] = {}
+    if budget is not None and budget.per_review_token_limit is not None:
+        overrides["MERGECRAFT_TOKEN_BUDGET"] = str(budget.per_review_token_limit)
+    if budget is not None and budget.per_review_cost_budget_usd is not None:
+        overrides["MERGECRAFT_COST_BUDGET_USD"] = str(budget.per_review_cost_budget_usd)
+    previous = {key: os.environ.get(key) for key in overrides}
+    os.environ.update(overrides)
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _default_review_fn(model: str, budget: ReviewBudget | None = None) -> ReviewFn:
     """Production ``ReviewFn``: run ``diff-review`` in-process for real.
 
     Not exercised by the RED suite (needs a live provider) — the seam this
@@ -343,14 +549,18 @@ def _default_review_fn(model: str) -> ReviewFn:
         with tempfile.TemporaryDirectory(prefix="mergecraft-detect-") as tmp:
             scratch = materialize_case_repo(case, Path(tmp))
             json_path = scratch / "findings.json"
-            result = asyncio.run(
-                run_offline_diff_review(
-                    cwd=scratch,
-                    diff_file=case.patch_path,
-                    model=model,
-                    json_path=json_path,
+            with _bounded_environment(budget):
+                result = asyncio.run(
+                    _run_with_timeout(
+                        run_offline_diff_review(
+                            cwd=scratch,
+                            diff_file=case.patch_path,
+                            model=model,
+                            json_path=json_path,
+                        ),
+                        budget.per_review_timeout_seconds if budget else None,
+                    )
                 )
-            )
             if not result.success:
                 msg = f"{case.case_id}: {result.error or 'diff-review did not succeed'}"
                 raise ReviewRunFailed(msg)
@@ -375,6 +585,7 @@ def run_detection(
     review_fn: ReviewFn | None = None,
     required_provenance: IndependenceTier = "independent",
     immutable_model_pin: str | None = None,
+    budget: ReviewBudget | None = None,
 ) -> tuple[DetectionMetrics | None, str | None]:
     """Run detection if possible, or report exactly why it was skipped.
 
@@ -388,7 +599,7 @@ def run_detection(
     if not has_credentials_for_slug(model):
         return None, SKIP_REASON_NO_CREDENTIAL
 
-    resolved_review_fn = review_fn if review_fn is not None else _default_review_fn(model)
+    resolved_review_fn = review_fn if review_fn is not None else _default_review_fn(model, budget)
     metrics = run_live_detection(
         cases,
         provider=provider,
@@ -397,6 +608,7 @@ def run_detection(
         results_dir=results_dir,
         required_provenance=required_provenance,
         immutable_model_pin=immutable_model_pin,
+        budget=budget,
     )
     return metrics, None
 
@@ -412,6 +624,7 @@ def run_full_benchmark(
     review_fn: ReviewFn | None = None,
     required_provenance: IndependenceTier = "independent",
     detection_model_pin: str | None = None,
+    budget: ReviewBudget | None = None,
 ) -> BenchmarkResultSet:
     """Join structural decision replay with the live detection run.
 
@@ -438,21 +651,30 @@ def run_full_benchmark(
         review_fn=review_fn,
         required_provenance=required_provenance,
         immutable_model_pin=detection_model_pin,
+        budget=budget,
     )
-    return structural.model_copy(update={"detection": metrics, "skipped_reason": skipped_reason})
+    pins = structural.pins.model_copy(
+        update={"detection_corpus_tree": git_tree_id(detection_corpus_dir)}
+    )
+    return structural.model_copy(
+        update={"pins": pins, "detection": metrics, "skipped_reason": skipped_reason}
+    )
 
 
 __all__ = [
     "BASELINE_FILENAME",
     "CASE_REPO_DIRNAME",
     "DEFAULT_DETECTION_CORPUS_DIR",
+    "JOURNAL_FILENAME",
     "PATCH_CANDIDATES",
     "SKIP_REASON_NO_CASES",
     "SKIP_REASON_NO_CREDENTIAL",
     "DetectionCase",
     "DetectionCaseResult",
     "DetectionMetrics",
+    "ReviewBudget",
     "ReviewFn",
+    "ReviewOutcome",
     "discover_detection_cases",
     "materialize_case_repo",
     "run_detection",

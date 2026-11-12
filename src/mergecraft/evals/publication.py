@@ -387,6 +387,11 @@ def _provider_metrics(
         raise ValueError(f"result identity does not match manifest model {expected_model}")
     if result.pins.corpus_commit != manifest.corpus_commit:
         raise ValueError(f"result corpus commit mismatch for {expected_model}")
+    if result.pins.working_tree_clean is False:
+        raise ValueError(
+            f"result for {expected_model} was produced from a working tree with uncommitted "
+            "changes; mergecraft_commit does not describe the code that ran"
+        )
     identity = detection.execution_identity
     if identity is None or not identity.fully_pinned:
         raise ValueError(f"result has no immutable detection execution identity: {expected_model}")
