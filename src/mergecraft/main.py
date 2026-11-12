@@ -258,6 +258,9 @@ class RunContext:
     # -- populated by ``_finalize`` -------------------------------------------
     # Why this run's formal review was not posted as an APPROVE, if it was not.
     approval_withheld_reason: str | None = None
+    # The publish stage began: the review finished, so a failure from here on
+    # (a publish-stage timeout) still owes the run its evidence packet.
+    publish_started: bool = False
 
     async def materialize(self) -> None:
         with gha_log.group("setup"):
@@ -473,6 +476,12 @@ def _publication_record_lines(tool_state: ToolState) -> list[str]:
     return lines
 
 
+def _record_attempt_marker(ctx: ToolContext) -> str:
+    """Hidden marker naming the Actions run attempt that wrote a deterministic record."""
+    attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "").strip() or "1"
+    return f"<!-- mergecraft-record-attempt: {ctx.run_id or 'local'}:{attempt} -->"
+
+
 async def publish_deterministic_record(
     *,
     pull_number: int,
@@ -602,25 +611,33 @@ async def publish_deterministic_record(
     review = tool_state.review
     existing_body = ""
     run_url = _run_url(resolved_ctx)
+    attempt_marker = _record_attempt_marker(resolved_ctx)
     if review is None and run_url:
         # A publish response can be lost after GitHub accepted the review.
-        # Reuse the review for this exact Actions run on retry.
-        from mergecraft.mcp.tool_state import ReviewRecord
+        # Reuse the record this attempt created on this head on retry. The run
+        # URL is the same on every attempt of a run, so the match also needs
+        # this attempt's marker: a re-run never rewrites an earlier attempt's
+        # review (which may be an approval).
+        from mergecraft.mcp.tool_state import ReviewRecord, primary_repo_state
+
+        bound_sha = primary_repo_state(tool_state).checkout_sha
+
+        def _is_this_attempts_record(item: dict[str, Any]) -> bool:
+            item_body = str(item.get("body") or "")
+            item_sha = str(item.get("commit_id") or "")
+            return (
+                _is_trusted_sticky_author(item)
+                and item_body.lstrip().startswith(DETERMINISTIC_RECORD_MARKER)
+                and f"- **Run:** {run_url}" in item_body
+                and attempt_marker in item_body
+                and (not bound_sha or not item_sha or item_sha == bound_sha)
+            )
 
         for page in range(1, 11):
             reviews = await resolved_ctx.scm.list_reviews(
                 owner, repo, pull_number, params={"per_page": 100, "page": page}
             )
-            matched = next(
-                (
-                    item
-                    for item in reviews
-                    if _is_trusted_sticky_author(item)
-                    and str(item.get("body") or "").lstrip().startswith(DETERMINISTIC_RECORD_MARKER)
-                    and f"- **Run:** {run_url}" in str(item.get("body") or "")
-                ),
-                None,
-            )
+            matched = next((item for item in reviews if _is_this_attempts_record(item)), None)
             if matched is not None:
                 review = ReviewRecord(
                     id=int(matched["id"]),
@@ -669,7 +686,7 @@ async def publish_deterministic_record(
     if legacy_delta is not None and "### Learnings delta" not in tail:
         tail = f"{tail}\n\n{legacy_delta.group(0).strip()}".strip()
     tail = merge_learnings_delta_into_review_body(tool_state, tail)
-    body = f"{block.rstrip()}\n{REVIEW_BODY_MARKER}\n"
+    body = f"{block.rstrip()}\n{attempt_marker}\n{REVIEW_BODY_MARKER}\n"
     if tail:
         body += f"\n{tail}\n"
     body = merge_ledger_into_comment(body, records=ensure_finding_ledger(tool_state).records())
@@ -974,10 +991,29 @@ async def _publish(
         return str(written) if written else None
 
 
-async def _prep_failure_reason(tool_context: ToolContext) -> str | None:
+_PREP_PUBLISH_WAIT_S: float = 30.0
+"""How long publication waits for a still-running dependency install.
+
+A fraction of the publish stage's budget: an install that has not finished by
+the time the review did is stopped rather than allowed to hold publication
+(and the evidence packet) until the stage times out.
+"""
+
+
+async def _await_prep(promise: Any) -> object:
+    return await promise
+
+
+async def _prep_failure_reason(
+    tool_context: ToolContext, *, wait_s: float | None = None
+) -> str | None:
     """Return a reason string when review-relevant dependency prep failed (W6.1).
 
-    Awaits an in-progress install before inspecting status.
+    Awaits an in-progress install before inspecting status, for at most
+    ``wait_s`` seconds (``None`` waits until the install's own deadline). An
+    install still running then is stopped (its process groups are killed) and
+    reported as a reason, so the run is ``inconclusive``: the review ran
+    without its dependencies.
 
     Trusted-tier ``setup_script`` failures are **not** included here. They
     resolve through ``setup_failure_policy`` (S1 / D10 — closed vocabulary
@@ -996,7 +1032,15 @@ async def _prep_failure_reason(tool_context: ToolContext) -> str | None:
         return None
     if state.status == "in_progress" and state.promise is not None:
         try:
-            await state.promise
+            await asyncio.wait_for(_await_prep(state.promise), timeout=wait_s)
+        except TimeoutError:
+            cancel = getattr(state.promise, "cancel", None)
+            if callable(cancel):
+                cancel()
+            return (
+                f"dependency installation was still running {wait_s:g}s after the review "
+                "finished and was stopped"
+            )
         except Exception as exc:
             return f"dependency installation failed: {exc}"
     if state.status != "failed":
@@ -3277,6 +3321,7 @@ async def _finalize(
     tool_context = ctx.tool_context
     tool_state = ctx.tool_state
     settings = ctx.settings
+    ctx.publish_started = True
 
     finalize_failure: str | None = None
     lite = result if isinstance(result, LiteAgentReview) else None
@@ -3289,6 +3334,11 @@ async def _finalize(
         # Secondary reviewers and file groups ran after the primary recorded its
         # verdict; their findings join it before it is re-validated and published.
         fold_reviewer_dispatch_findings_into_submission(tool_context)
+        # A primary that published mid-run assembled (and cached) the evidence
+        # packet before the fan-out and the roster recorded their findings.
+        # Drop that snapshot so publication, the approval decision, the checks
+        # and the emitted packet are all built from the complete run.
+        tool_state.prepared_run_packet = None
         if ctx.run_ctx is not None:
             try:
                 agent_result = await finalize_agent_result(ctx.run_ctx, agent_result)
@@ -3334,7 +3384,7 @@ async def _finalize(
     # Every run-level gate is resolved before the formal review is published:
     # one shared resolver (``review.outcome_resolution``) maps them, and an
     # ``approve`` verdict is posted as an APPROVE only when the run passes.
-    prep_reason = await _prep_failure_reason(tool_context)
+    prep_reason = await _prep_failure_reason(tool_context, wait_s=_PREP_PUBLISH_WAIT_S)
     setup_reason = tool_state.setup_hook_failure or ""
     if ctx.budget_tracker is not None:
         ctx.run_bounds = ctx.budget_tracker.bounds
@@ -3730,24 +3780,79 @@ async def _close_superseded_scm(scm: ScmProvider) -> None:
         )
 
 
+_FAILURE_PUBLISH_TIMEOUT_S: float = 120.0
+"""Bound on the failure path's record and status publication (the publish stage's budget)."""
+
+
+async def _emit_packet_after_publish_failure(
+    ctx: RunContext, outcome: RunOutcome
+) -> tuple[str | None, str | None]:
+    """Write the evidence packet for a run that failed during publication.
+
+    Local work only, so it runs before any failure-path network call. The
+    written packet is sink-scanned like the normal path's; on a hit the packet
+    is removed and the scan's reason is returned. Returns ``(path, sink_error)``.
+    """
+    tool_context = ctx.tool_context
+    if tool_context is None:
+        return None, None
+    prepared = resolve_prepared_run_packet(
+        tool_context, run_succeeded=run_succeeded_for_outcome(outcome)
+    )
+    written = await asyncio.to_thread(emit_run_packet, tool_context, packet=prepared)
+    sink_error = _scan_sinks_after_run(ctx, extra_paths=[Path(written)] if written else [])
+    if sink_error is not None or not written:
+        return None, sink_error
+    return str(written), None
+
+
 async def _action_failure_result(ctx: RunContext, error: Exception) -> MainResult:
-    """Map one Action failure and run best-effort failure publication."""
+    """Map one Action failure and run best-effort failure publication.
+
+    A failure after the publish stage began (a publish-stage timeout, after the
+    verdict may already be on GitHub) still writes the evidence packet first,
+    before the bounded record and status publication below.
+    """
     error_message = str(error) if error else "unknown error occurred"
     logger.error("{}", error_message)
     error_outcome = _classify_error_outcome(error)
     if isinstance(error, (TimeoutError, asyncio.TimeoutError, _AgentTimeoutError)):
         kill_all_active_process_groups()
+    packet_path: str | None = None
+    sink_error: str | None = None
+    if ctx.tool_context and ctx.publish_started:
+        try:
+            packet_path, sink_error = await _emit_packet_after_publish_failure(ctx, error_outcome)
+        except Exception as emit_exc:
+            logger.warning("post-failure evidence packet emission failed: {}", emit_exc)
+        if sink_error is not None:
+            error_outcome = RunOutcome.failed
+            error_message = sink_error
     if ctx.tool_context:
         try:
-            await _publish(
-                ctx,
-                outcome=error_outcome,
-                failure_reason=error_message,
-                emit=False,
+            await asyncio.wait_for(
+                _publish(
+                    ctx,
+                    outcome=error_outcome,
+                    failure_reason=error_message,
+                    emit=False,
+                    sink_scan_error=sink_error,
+                ),
+                timeout=_FAILURE_PUBLISH_TIMEOUT_S,
+            )
+        except TimeoutError:
+            logger.warning(
+                "post-failure learnings/status publication timed out after {:g}s",
+                _FAILURE_PUBLISH_TIMEOUT_S,
             )
         except Exception as cleanup_exc:
             logger.warning("post-failure learnings/status cleanup failed: {}", cleanup_exc)
-    return MainResult(success=False, error=error_message, outcome=error_outcome)
+    return MainResult(
+        success=False,
+        error=error_message,
+        outcome=error_outcome,
+        evidence_packet_path=packet_path,
+    )
 
 
 __all__ = [

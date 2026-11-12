@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.mcp.checkout import changed_paths_in_diff
+from mergecraft.diff import changed_paths_in_diff
 from mergecraft.scm.protocol import ScmCapability
 
 if TYPE_CHECKING:

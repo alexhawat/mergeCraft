@@ -54,6 +54,9 @@ _EPHEMERAL_XREPO_LEARNINGS_WARNING = (
 # change without updating the wave plan and the influence CLI.
 STAGING_SECTION_HEADING = "Staging"
 ACTIVE_SECTION_HEADING = "Active"
+# The body line ``mergecraft init`` scaffolds under the ``# Learnings`` title.
+# It is boilerplate, not an operational note, so it is never listed as an entry.
+LEARNINGS_SCAFFOLD_PLACEHOLDER = "Operational notes accumulated across agent runs."
 
 # D10 — GitHub author_association values that may bypass quarantine.
 # Mirrors the existing `COLLABORATOR_PERMISSIONS` vocabulary at
@@ -488,11 +491,63 @@ def route_learnings_for_persist(
         active_block = ""
         staging_block = new_block
 
-    seed_text = (seed or "# Learnings").rstrip()
-    return (
+    # Rewrite the one Active / Staging pair in place: the seed already carries
+    # both headings from earlier persists, and appending a fresh pair each run
+    # hid every later entry behind the first (empty) pair.
+    prefix, active_body, staging_body, tail = collapse_learnings_sections(seed or "")
+    seed_text = prefix.rstrip() or "# Learnings"
+    active_text = _append_section_block(active_body, active_block)
+    staging_text = _append_section_block(staging_body, staging_block)
+    body = (
         f"{seed_text}\n\n"
-        f"## {ACTIVE_SECTION_HEADING}\n\n{active_block}\n\n"
-        f"## {STAGING_SECTION_HEADING}\n\n{staging_block}\n"
+        f"## {ACTIVE_SECTION_HEADING}\n\n{active_text}\n\n"
+        f"## {STAGING_SECTION_HEADING}\n\n{staging_text}\n"
+    )
+    if tail.strip():
+        body += f"\n{tail.strip()}\n"
+    return body
+
+
+def _append_section_block(existing: str, block: str) -> str:
+    """Return ``existing`` section content with ``block`` appended after it."""
+    kept = existing.strip()
+    if not block:
+        return kept
+    return f"{kept}\n{block}" if kept else block
+
+
+def collapse_learnings_sections(text: str) -> tuple[str, str, str, str]:
+    """Split ``text`` into ``(prefix, active, staging, tail)``, merging repeated sections.
+
+    Unlike :func:`split_learnings_by_section`, which reads only the first
+    ``## Active`` / ``## Staging`` heading, every section with one of those
+    titles contributes its body, in file order. That heals a file earlier
+    persists left with several pairs. ``prefix`` is the text before the first
+    section; ``tail`` is any other section that follows one of them (for
+    example ``## Withdrawn review findings``).
+    """
+    regions: dict[str, list[str]] = {"prefix": [], "active": [], "staging": [], "tail": []}
+    region = "prefix"
+    depth = 0
+    for line in text.splitlines():
+        match = _heading_re().match(line)
+        if match is not None:
+            title = match.group(2).strip().lower()
+            level = len(match.group(1))
+            if title == ACTIVE_SECTION_HEADING.lower():
+                region, depth = "active", level
+                continue
+            if title == STAGING_SECTION_HEADING.lower():
+                region, depth = "staging", level
+                continue
+            if region in {"active", "staging"} and level <= depth:
+                region = "tail"
+        regions[region].append(line)
+    return (
+        "\n".join(regions["prefix"]),
+        "\n".join(regions["active"]).strip(),
+        "\n".join(regions["staging"]).strip(),
+        "\n".join(regions["tail"]).strip(),
     )
 
 
@@ -524,20 +579,35 @@ def list_active_entries(text: str) -> list[dict[str, object | None]]:
     persistence path always emits an ``## Active`` heading (even if
     empty), so a missing heading is a legacy-layout signal.
     """
-    active_start, active_body, _ = _section_starts(text)
+    active_start, _, _ = _section_starts(text)
     if active_start is None:
         # Legacy flat layout — treat the whole file as the active
         # section so pre-W6 audit callers still find curated entries.
-        return _parse_section_entries(text)
+        # The ``# Learnings`` title and the init scaffold's placeholder line
+        # are not learnings.
+        return _parse_section_entries(_strip_flat_layout_boilerplate(text))
+    _, active_body, _, _ = collapse_learnings_sections(text)
     return _parse_section_entries(active_body)
 
 
 def list_staging_entries(text: str) -> list[dict[str, object | None]]:
-    """List staging (quarantined) entries with their provenance records."""
-    staging_start, _, staging_body = _section_starts(text)
-    if staging_start is None:
-        return _parse_section_entries(text)
+    """List staging (quarantined) entries with their provenance records.
+
+    A file with no ``## Staging`` heading has nothing quarantined: only a
+    persist writes that section, and it writes every untrusted entry there.
+    """
+    _, _, staging_body, _ = collapse_learnings_sections(text)
     return _parse_section_entries(staging_body)
+
+
+def _strip_flat_layout_boilerplate(text: str) -> str:
+    """Drop H1 title lines and the init placeholder line from a flat learnings file."""
+    kept = [
+        line
+        for line in text.splitlines()
+        if not re.match(r"^#\s", line) and line.strip() != LEARNINGS_SCAFFOLD_PLACEHOLDER
+    ]
+    return "\n".join(kept)
 
 
 def _section_starts(text: str) -> tuple[int | None, str, str]:
@@ -922,6 +992,7 @@ def load_weighted_active_memories(
 __all__ = [
     "ACTIVE_SECTION_HEADING",
     "LEARNINGS_FILE_NAME",
+    "LEARNINGS_SCAFFOLD_PLACEHOLDER",
     "MAX_LEARNINGS_LENGTH",
     "STAGING_SECTION_HEADING",
     "TRUSTED_AUTHOR_ASSOCIATIONS",
@@ -930,6 +1001,7 @@ __all__ = [
     "apply_repo_memory_to_findings",
     "build_learnings_review_delta",
     "build_provenance_record",
+    "collapse_learnings_sections",
     "ensure_learnings_review_delta",
     "is_trusted_association",
     "learnings_file_path",
