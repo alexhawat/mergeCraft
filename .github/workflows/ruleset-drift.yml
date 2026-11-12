@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: MIT
+# Repository rulesets live in settings, not in the tree, so no PR reviews a
+# change to them. A dropped required check, strict turned off, or a ruleset
+# flipped to `evaluate` is silent until a bad merge shows it (#1298). This
+# workflow diffs the live rulesets against `.github/rulesets.expected.json`
+# (`scripts/check_ruleset_drift.py --check`) and fails with the diff in the job
+# summary. After an intentional ruleset change, run the script with `--write`
+# and commit the file (docs: .github/CONTRIBUTING.md, "Operator: branch
+# protection").
+#
+# It is deliberately not a PR check and not a required context: the thing it
+# measures is repository settings, not a PR's diff, and a required check that
+# reads settings could wedge every merge the moment settings and file disagree.
+#
+# Safety: no PR code is checked out or executed. Reachable from `push` (main
+# only), `schedule` and `workflow_dispatch`. GitHub documents the ruleset read
+# endpoints as needing only Metadata read and as usable without authentication
+# for public resources; anonymous reads of this public repository are verified.
+# Whether the default GITHUB_TOKEN (`contents: read`) is accepted is not
+# verified before merge, so the script sends it, retries once anonymously on
+# 401/403/404 and logs which path worked. Exit 1 means drift; exit 2 means the
+# rulesets could not be read (rate limit or permission), which is not drift. No
+# write-capable or admin secret is ever used. The job skips on forks, whose
+# rulesets are not this repository's.
+name: Ruleset drift
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Daily backstop: settings change without any push. GitHub's cron is
+    # best-effort, so this is the safety net, not the only trigger.
+    - cron: "41 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ruleset-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    if: github.repository == 'alexhawat/mergeCraft'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: "3.14"
+
+      - name: Compare live rulesets with the committed expectation
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          status=0
+          uv run python scripts/check_ruleset_drift.py --check > drift.log 2>&1 || status=$?
+          cat drift.log
+          {
+            echo "### Ruleset drift"
+            echo
+            echo '```'
+            cat drift.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"

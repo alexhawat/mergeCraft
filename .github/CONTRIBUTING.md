@@ -233,6 +233,39 @@ required contexts must block merges too. Workflow changes do not install or
 replace GitHub branch-protection rules; maintain those required context names
 in the repository ruleset.
 
+### Ruleset drift check (#1298)
+
+`.github/rulesets.expected.json` is the committed expectation of the repository
+rulesets (`protect-main`, `require-ci-on-main`): per ruleset its enforcement,
+target, ref include/exclude, and every rule with its parameters (required
+status-check contexts, the strict up-to-date policy, pull-request review
+settings, `deletion`, `non_fast_forward`). Lists are sorted, so ordering never
+counts as drift; ids, timestamps, links and bypass actors are left out
+(bypass actors are only returned to callers with write access).
+
+`.github/workflows/ruleset-drift.yml` runs
+`scripts/check_ruleset_drift.py --check` on push to `main`, daily, and on
+demand. It is not a PR check and not a required context. It fails with the
+diff in the job summary when the live rulesets differ from the file, and when a
+required context names a job no workflow produces (such a check would block
+every PR). GitHub documents the ruleset read endpoints as needing only Metadata
+read and as usable anonymously for public resources; anonymous reads of this
+repository are verified. Whether the default `GITHUB_TOKEN` (`contents: read`) is
+accepted is not verified before merge, so the script sends it, retries once
+anonymously on 401/403/404, and logs which path worked. Exit code 1 is drift;
+exit code 2 means the rulesets could not be read (rate limit or permission), not
+drift. No admin secret is involved.
+
+After an intentional ruleset change, update the expectation in the same breath:
+
+```bash
+uv run python scripts/check_ruleset_drift.py --write   # anonymous read works on this public repo
+git add .github/rulesets.expected.json && git commit
+```
+
+Also update `scripts/ci_required_verify_checks.txt` if the Verify contexts
+changed.
+
 `make lint` now includes ``scripts/check_called_workflow_permissions.py`` to catch
 the permissions mismatch at authoring time.
 

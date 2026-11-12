@@ -41,6 +41,20 @@ def test_required_verify_checks_file_matches_frozen_ruleset() -> None:
     assert listed == _EXPECTED
 
 
+def _verify_contexts(contexts: set[str]) -> set[str]:
+    """The CI contexts of a ruleset; other required checks are not in the wait list."""
+    return {context for context in contexts if context.startswith("Verify (")}
+
+
+def test_required_verify_checks_file_matches_expected_ruleset_file() -> None:
+    expected = json.loads(read_text(".github/rulesets.expected.json"))
+    rule = expected["rulesets"]["require-ci-on-main"]["rules"]["required_status_checks"]
+    contexts = {check["context"] for check in rule["required_status_checks"]}
+    assert _verify_contexts(contexts) == _listed_checks()
+    # The review check is required too, and the wait-for-CI job must not wait on it.
+    assert "mergecraft review" in contexts - _listed_checks()
+
+
 def test_mergecraft_wait_script_uses_required_list() -> None:
     workflow = read_text(".github/workflows/mergecraft.yml")
     assert "ci_required_verify_checks.txt" in workflow
@@ -48,7 +62,7 @@ def test_mergecraft_wait_script_uses_required_list() -> None:
 
 @pytest.mark.skipif(
     os.environ.get("GITHUB_ACTIONS") == "true",
-    reason="GITHUB_TOKEN on PR runners cannot read organization rulesets",
+    reason="runner-token ruleset reads are unverified here; ruleset-drift.yml covers live drift",
 )
 def test_required_verify_checks_file_matches_live_ruleset() -> None:
     if shutil.which("gh") is None:
@@ -68,7 +82,9 @@ def test_required_verify_checks_file_matches_live_ruleset() -> None:
     )
     if result.returncode != 0:
         pytest.skip(f"gh rulesets API unavailable: {result.stderr.strip()}")
-    ruleset = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    ruleset = _verify_contexts(
+        {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    )
     listed = _listed_checks()
     assert listed == ruleset, json.dumps(
         {"listed_only": sorted(listed - ruleset), "ruleset_only": sorted(ruleset - listed)},
