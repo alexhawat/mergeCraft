@@ -21,10 +21,12 @@ changelog section.
    `tests/docs/test_gen_agent_packages_blob_ref.py` requires
    `tests/docs/fixtures/agent_package_documentation.json` to name the tag being
    released, because it records the documentation blob ids. `make release-normalize`
-   does both. That structure test also fails when a block repeats a heading type, or
-   when an entry appears under both `[Unreleased]` and a released version, so
-   normalizing moves blocks and never rewrites an entry; folding hand-written entries
-   into the generated section stays an editorial choice.
+   does both. It also folds the hand-written `[Unreleased]` entries into the section
+   being released and leaves `[Unreleased]` empty: `scripts/release_publish.py`
+   builds the GitHub release notes from that section alone, so entries left under
+   `[Unreleased]` never reach the release. The fold merges same-named `###`
+   sections and rewrites no entry, which keeps one heading per type and stops a
+   change being listed as both unreleased and released.
    Craft also bumps
    `pyproject.toml`, `server.json`, and `uv.lock` in step. The same transaction
    updates `docs/consumer-release.json`, consumer install pins, matching release

@@ -79,6 +79,64 @@ def test_release_ref_is_the_tag_the_packages_link_to() -> None:
     assert _MODULE.release_ref("0.1.0a6") == "v0.1.0a6"
 
 
+_CHANGELOG = (
+    "# Changelog\n\nIntro.\n\n"
+    "## 0.1.0a6\n\n"
+    "### Added\n\n- cut by craft\n\n"
+    "### Fixed\n\n- generated fix\n\n"
+    "## [Unreleased]\n\n"
+    "### Breaking — action required\n\n- read this first\n\n"
+    "### Fixed\n\n- hand written fix\n\n"
+    "## [0.1.0a5] — 2026-11-08\n\n- shipped\n"
+)
+
+
+def test_fold_moves_unreleased_entries_into_the_cut_section() -> None:
+    folded = _MODULE.fold_unreleased(_CHANGELOG, "0.1.0a6")
+    cut = folded.split("## [Unreleased]")[0]
+    assert "- read this first" in cut, "breaking-change notes must reach the release section"
+    assert "- hand written fix" in cut
+    assert "- cut by craft" in cut
+    # [Unreleased] is emptied, so nothing ships as both released and unreleased
+    unreleased = folded.split("## [Unreleased]")[1].split("## [0.1.0a5]")[0]
+    assert "- " not in unreleased
+
+
+def test_fold_keeps_one_heading_per_type_and_puts_curated_sections_first() -> None:
+    folded = _MODULE.fold_unreleased(_CHANGELOG, "0.1.0a6")
+    cut = folded.split("## [Unreleased]")[0]
+    headings = [line for line in cut.splitlines() if line.startswith("### ")]
+    assert headings[0] == "### Breaking — action required"
+    assert headings.count("### Fixed") == 1
+    assert len(headings) == len(set(headings))
+
+
+def test_fold_is_idempotent() -> None:
+    once = _MODULE.fold_unreleased(_CHANGELOG, "0.1.0a6")
+    assert _MODULE.fold_unreleased(once, "0.1.0a6") == once
+
+
+def test_fold_refuses_entries_when_the_version_has_no_section() -> None:
+    with pytest.raises(_MODULE.NormalizeError, match=r"release block for 0\.9\.9"):
+        _MODULE.fold_unreleased(_CHANGELOG, "0.9.9")
+
+
+def test_normalize_folds_then_puts_unreleased_first() -> None:
+    normalized = _MODULE.normalize_changelog(_CHANGELOG, "0.1.0a6")
+    headings = [line for line in normalized.splitlines() if line.startswith("## ")]
+    assert headings == ["## [Unreleased]", "## 0.1.0a6", "## [0.1.0a5] — 2026-11-08"]
+    assert "- read this first" in normalized.split("## [Unreleased]")[1]
+
+
+def test_folded_section_is_what_the_github_release_notes_carry() -> None:
+    publish = load_script_module(Path("scripts/release_publish.py"))
+    normalized = _MODULE.normalize_changelog(_CHANGELOG, "0.1.0a6")
+    notes = publish.release_notes(normalized, "0.1.0a6")
+    assert "read this first" in notes, "curated breaking-change notes must reach the release"
+    assert "hand written fix" in notes
+    assert "cut by craft" in notes
+
+
 def _prepare() -> dict[str, Any]:
     return job(load_workflow("release.yml"), "prepare")
 
