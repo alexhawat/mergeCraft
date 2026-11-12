@@ -11,6 +11,7 @@ import typer
 from loguru import logger
 
 from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
 from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.memory.store import MemoryStoreError, validate_memory_store
@@ -118,7 +119,7 @@ def show_cmd(
     """Show one memory entry by id."""
     entry = _find_entry(_load_entries(repo), memory_id)
     if entry is None:
-        cli_bail(f"unknown memory id {memory_id}")
+        cli_bail(f"unknown memory id {memory_id}", code=CLI_USAGE_EXIT_CODE)
     if wants_json_output(ctx, json_flag=json_output):
         emit_cli_json(entry)
     else:
@@ -144,7 +145,7 @@ def forget_cmd(
     if not path.is_file():
         cli_bail(f"no learnings file at {path}")
     if _find_entry(_load_entries(repo), memory_id) is None:
-        cli_bail(f"unknown memory id {memory_id}")
+        cli_bail(f"unknown memory id {memory_id}", code=CLI_USAGE_EXIT_CODE)
     text = path.read_text(encoding="utf-8")
     path.write_text(remove_memory_entry_from_learnings(text, memory_id), encoding="utf-8")
     typer.echo(f"forgot {memory_id}")

@@ -18,6 +18,7 @@ from mergecraft.analyzers.registry import detect_enabled, load_catalog
 from mergecraft.analyzers.sarif import export_sarif
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.utils.git_hardening import git_argv
@@ -52,7 +53,7 @@ def _manifest_by_id(analyzer_id: str) -> AnalyzerManifest:
     for manifest in load_catalog():
         if manifest.id == analyzer_id:
             return manifest
-    cli_bail(f"unknown analyzer id: {analyzer_id!r}")
+    cli_bail(f"unknown analyzer id: {analyzer_id!r}", code=CLI_USAGE_EXIT_CODE)
     raise AssertionError("unreachable")
 
 

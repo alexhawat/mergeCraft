@@ -13,7 +13,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from mergecraft.analyzers.scope import changed_paths_from_scope, parse_diff_scope
-from mergecraft.modes._pr_summary_format import PR_SUMMARY_FORMAT
 
 
 class DescribeOutput(BaseModel):
@@ -62,10 +61,6 @@ def build_describe_output(
     )
     if pr_body:
         body = f"{body}\n\nAuthor intent: {pr_body}"
-    body = (
-        f"{body}\n\nDescribe output follows mergeCraft's review summary discipline "
-        f"(see PR summary format — {len(PR_SUMMARY_FORMAT)} chars of guidance)."
-    )
 
     walkthrough_lines = [
         f"- `{path}` — inspect added/changed hunks in the unified diff." for path in paths[:8]

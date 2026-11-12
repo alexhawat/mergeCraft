@@ -9,9 +9,6 @@ from tests.analyzers.support import import_module
 _UPDATE_CMD_MOD = "mergecraft.cli.update_cmd"
 _VERSION_MOD = "mergecraft"
 
-# D7 default git ref when ``--branch`` is omitted.
-DEFAULT_UPDATE_REF = "main"
-
 # README / AGENTS install spec shape (``uv tool install --reinstall`` target).
 MERGECRAFT_UV_INSTALL_PACKAGE = "mergecraft-action"
 MERGECRAFT_GIT_ORIGIN = "https://github.com/alexhawat/mergeCraft"
@@ -51,7 +48,6 @@ def uv_install_spec(ref: str) -> str:
 
 
 __all__ = [
-    "DEFAULT_UPDATE_REF",
     "MERGECRAFT_GIT_ORIGIN",
     "MERGECRAFT_UV_INSTALL_PACKAGE",
     "require_update_attr",

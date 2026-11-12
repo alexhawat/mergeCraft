@@ -16,6 +16,7 @@ from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.global_surface import get_cli_globals
 from mergecraft.utils.git_hardening import git_argv
 from mergecraft.utils.github import _default_api_base_url, _default_server_url
 from mergecraft.yes import OpOptions, op
@@ -158,6 +159,7 @@ def _format_pretty(event: dict[str, Any]) -> str:
 
 
 def run(
+    ctx: typer.Context,
     repo: str | None = typer.Argument(
         None, help="Target repo as owner/name (defaults to git remote)."
     ),
@@ -173,6 +175,9 @@ def run(
     pretty: bool = typer.Option(False, "--pretty", "-p", help="Human-readable output."),
 ) -> None:
     """Stream a PR/issue timeline as one JSON line per new event."""
+    # JSON lines are the default; root --format json also overrides --pretty.
+    if get_cli_globals(ctx).format == "json":
+        pretty = False
     if pr <= 0:
         cli_bail("--pr <number> is required")
     owner, name = _resolve_repo(repo)

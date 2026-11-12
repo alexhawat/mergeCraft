@@ -34,6 +34,9 @@ class MergecraftTyperGroup(TyperGroup):
         **extra: Any,
     ) -> click.Context:
         bootstrap_cli_surface_from_argv(args, env=os.environ)
+        from mergecraft.cli.help_text import install_terminal_help
+
+        install_terminal_help(self)
         return super().make_context(info_name, args, parent=parent, **extra)
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
@@ -41,11 +44,20 @@ class MergecraftTyperGroup(TyperGroup):
         if command is None:
             return None
         from mergecraft.cli.interactive import install_missing_param_prompts
+        from mergecraft.cli.machine_output import install_root_format_guard
         from mergecraft.cli.target_dir import install_implicit_repo_root
 
         install_missing_param_prompts(command)
         install_implicit_repo_root(command)
+        install_root_format_guard(command)
         return command
+
+    def resolve_command(
+        self, ctx: click.Context, args: list[str]
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        # Click 8.4's NoSuchCommand already suggests close matches; Typer's
+        # override appends the same "Did you mean ...?" again, so skip it.
+        return super(TyperGroup, self).resolve_command(ctx, args)
 
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
         # Click 8.4 raises NoArgsIsHelpError in parse_args before invoke.

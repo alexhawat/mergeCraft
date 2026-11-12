@@ -155,7 +155,9 @@ def _nul_paths(data: str) -> list[str]:
     return [item for item in data.split("\0") if item]
 
 
-def _discover_untracked_additions(cwd: Path) -> tuple[str, tuple[str, ...]]:
+def _discover_untracked_additions(
+    cwd: Path, *, skip: frozenset[str] = frozenset()
+) -> tuple[str, tuple[str, ...]]:
     """Return unified patches for eligible untracked files and their exclusions.
 
     This is the discovery half of :func:`git_unstaged_diff`, reused by the
@@ -164,7 +166,8 @@ def _discover_untracked_additions(cwd: Path) -> tuple[str, tuple[str, ...]]:
     limitation as well as logged. Gitignored untracked paths are outside the
     source scope, not omitted changes: their existence must not make an
     otherwise clean checkout incomplete. Tracked paths still enter via Git's
-    diff even when an ignore pattern matches them.
+    diff even when an ignore pattern matches them. Paths in ``skip`` are
+    already covered by the caller's patch and are left out.
     """
     listing = _run_git(["ls-files", "--others", "--exclude-standard", "-z"], cwd=cwd)
     patches: list[str] = []
@@ -173,7 +176,7 @@ def _discover_untracked_additions(cwd: Path) -> tuple[str, tuple[str, ...]]:
         for rel in _nul_paths(listing.stdout):
             # Runtime output must not become input to the next review. Tracked
             # paths at these locations still arrive through the ordinary diff.
-            if is_untracked_runtime_artifact(rel):
+            if is_untracked_runtime_artifact(rel) or rel in skip:
                 continue
             path = cwd / rel
             if path.is_symlink():
@@ -222,6 +225,71 @@ def git_unstaged_diff_with_limitations(*, cwd: Path) -> tuple[str, tuple[str, ..
         raise RuntimeError(msg)
     untracked_text, limitations = _discover_untracked_additions(cwd)
     return result.stdout + untracked_text, limitations
+
+
+def _git_names(args: list[str], *, cwd: Path, what: str) -> set[str]:
+    """Return the NUL-separated path list of one ``git diff --name-only -z`` call."""
+    result = _run_git(["diff", "--no-renames", "--name-only", "-z", *args], cwd=cwd)
+    if result.returncode != 0:
+        msg = f"failed to list {what} paths: {result.stderr.strip()}"
+        raise RuntimeError(msg)
+    return set(_nul_paths(result.stdout))
+
+
+def git_uncommitted_diff_with_limitations(*, cwd: Path) -> tuple[str, tuple[str, ...]]:
+    """Return staged plus unstaged changes against ``HEAD``, with untracked adds.
+
+    This is the union of ``--staged`` and ``--unstaged``, one patch per path:
+
+    * a path whose work-tree file differs from ``HEAD`` and exists gets the
+      ``HEAD``-to-work-tree patch (its newest content, staged edits included);
+    * a path changed in the index (``HEAD``-to-index) whose work-tree file is
+      missing, or matches ``HEAD`` again (restored, a mode-only change), or
+      that the index deletes (also when the file is back in the work tree
+      untracked, as after a rename put back), gets its staged patch: what a
+      commit would record;
+    * untracked files are added as for ``--unstaged``, except a path that
+      already took its staged patch (deleted in the index, put back in the
+      work tree).
+
+    Rename detection is off, so a rename is a deletion plus an addition and
+    every path is classified on its own. Before the first commit the empty
+    tree stands in for ``HEAD``.
+    """
+    head = _run_git(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], cwd=cwd)
+    if head.returncode == 0:
+        base = "HEAD"
+    else:
+        empty = _run_git(["hash-object", "-t", "tree", "/dev/null"], cwd=cwd)
+        if empty.returncode != 0:
+            msg = f"failed to resolve the empty tree: {empty.stderr.strip()}"
+            raise RuntimeError(msg)
+        base = empty.stdout.strip()
+    staged = _git_names(["--cached", base], cwd=cwd, what="staged")
+    deleted_in_index = _git_names(
+        ["--cached", "--diff-filter=D", base], cwd=cwd, what="staged deletion"
+    )
+    in_work_tree = _git_names([base], cwd=cwd, what="changed")
+    missing = {rel for rel in staged if not (cwd / rel).exists() and not (cwd / rel).is_symlink()}
+    from_index = sorted((staged - in_work_tree) | missing | deleted_in_index)
+
+    excluded = [f":(exclude,literal){rel}" for rel in from_index]
+    result = _run_git(["diff", "--no-renames", base, "--", ".", *excluded], cwd=cwd)
+    if result.returncode != 0:
+        msg = f"failed to compute uncommitted diff: {result.stderr.strip()}"
+        raise RuntimeError(msg)
+    text = result.stdout
+    if from_index:
+        literal = [f":(literal){rel}" for rel in from_index]
+        kept = _run_git(["diff", "--no-renames", "--cached", base, "--", *literal], cwd=cwd)
+        if kept.returncode != 0:
+            msg = f"failed to compute staged diff: {kept.stderr.strip()}"
+            raise RuntimeError(msg)
+        text += kept.stdout
+    # A path the index deletes can reappear untracked (a rename put back);
+    # its staged patch already stands for it.
+    untracked_text, limitations = _discover_untracked_additions(cwd, skip=frozenset(from_index))
+    return text + untracked_text, limitations
 
 
 def git_range_diff(*, cwd: Path, range_spec: str) -> str:

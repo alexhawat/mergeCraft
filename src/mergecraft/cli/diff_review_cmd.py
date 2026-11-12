@@ -113,7 +113,7 @@ Examples — output:
   mergecraft review --output-format jsonl --output stream.jsonl
   mergecraft review --output-format hunk
   mergecraft review --agent
-  mergecraft review 2> review.md              # human text lives on stderr (D14)
+  mergecraft review 2> review.md              # human text lives on stderr
 
 Human-readable review text (default ``--output-format text``) is written to stderr
 so stdout stays free for ``--agent`` JSONL. Shell redirects like ``> review.md``
@@ -294,13 +294,19 @@ def run(
     staged: bool = typer.Option(
         False,
         "--staged",
-        help="Review only staged changes (`git diff --cached`). Optional.",
+        help=(
+            "Review staged changes (`git diff --cached`). With --unstaged, review "
+            "every uncommitted change. Optional."
+        ),
         rich_help_panel=_PANEL_DIFF,
     ),
     unstaged: bool = typer.Option(
         False,
         "--unstaged",
-        help="Review only unstaged working-tree changes. Optional.",
+        help=(
+            "Review unstaged working-tree changes, including untracked files. "
+            "With --staged, review every uncommitted change. Optional."
+        ),
         rich_help_panel=_PANEL_DIFF,
     ),
     commit_range: str | None = typer.Option(
@@ -370,7 +376,7 @@ def run(
             "Review payload format: text (default), json, jsonl, sarif, or hunk. "
             "Root --format json selects json when this flag is omitted; "
             "explicit --output-format text always renders human markdown on stderr. "
-            "Default text mode writes human-readable review text to stderr (D14); "
+            "Default text mode writes human-readable review text to stderr; "
             "redirect with 2> to capture it. "
             "hunk writes Hunk comment JSON to stdout (stdout-only; no --output)."
         ),
@@ -443,7 +449,7 @@ def run(
         "--tracing/--no-tracing",
         help=(
             "Override tracing enablement for this invocation. "
-            "Wins over MERGECRAFT_TRACING and .mergecraft/config.yaml (W8.4 / W7.6)."
+            "Wins over MERGECRAFT_TRACING and .mergecraft/config.yaml."
         ),
         rich_help_panel=_PANEL_TRACING,
     ),
@@ -452,14 +458,14 @@ def run(
         "--tracing-to",
         help=(
             "Override the tracing shorthand: local_files, logfire, or otel. "
-            "Wins over MERGECRAFT_TRACING_TO and the config block (W8.4 / W7.6)."
+            "Wins over MERGECRAFT_TRACING_TO and the config block."
         ),
         rich_help_panel=_PANEL_TRACING,
     ),
     trace_dir: Path | None = typer.Option(
         None,
         "--trace-dir",
-        help="Override the jsonl_file sink path for local traces (W8.4 / W7.6).",
+        help="Override the jsonl_file sink path for local traces.",
         rich_help_panel=_PANEL_TRACING,
     ),
     logfire_token: str | None = typer.Option(
@@ -467,7 +473,7 @@ def run(
         "--logfire-token",
         help=(
             "Resolve the logfire token directly. Wins over MERGECRAFT_LOGFIRE_TOKEN "
-            "and the config block (W8.4 / W7.6)."
+            "and the config block."
         ),
         rich_help_panel=_PANEL_TRACING,
     ),
@@ -476,7 +482,7 @@ def run(
         "--otel-endpoint",
         help=(
             "Override the OTLP collector endpoint. Wins over MERGECRAFT_OTEL_ENDPOINT "
-            "and the config block (W8.4 / W7.6)."
+            "and the config block."
         ),
         rich_help_panel=_PANEL_TRACING,
     ),
@@ -520,7 +526,7 @@ def run(
         "--trust",
         help=(
             "Explicit trust tier override for this review source (trusted or untrusted). "
-            "Never read from repo config — operator flag only (TS1 / D3)."
+            "Never read from repo config — operator flag only."
         ),
         rich_help_panel=_PANEL_TRUST,
     ),
@@ -539,7 +545,7 @@ def run(
         "--use-cache/--no-use-cache",
         help=(
             "Read and write the local review result cache for this diff "
-            "(same policy as --resume; distinct from the `mergecraft cache` typer)."
+            "(same policy as --resume; distinct from `mergecraft cache`)."
         ),
         rich_help_panel=_PANEL_OUTPUT,
     ),

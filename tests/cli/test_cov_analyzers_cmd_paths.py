@@ -28,7 +28,7 @@ from mergecraft.analyzers.finding import make_finding
 from mergecraft.analyzers.lockfile import LockEntry
 from mergecraft.cli import analyzers_cmd
 from mergecraft.cli.app import app
-from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
+from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE, CLI_USAGE_EXIT_CODE
 
 pytestmark = pytest.mark.coverage
 
@@ -260,7 +260,7 @@ def test_run_prints_at_most_twenty_findings(monkeypatch: MonkeyPatch, tmp_path: 
 
 def test_explain_rejects_an_unknown_analyzer_id() -> None:
     result = runner.invoke(app, ["analyzers", "explain", "not-a-tool"], env=_WIDE)
-    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE
+    assert result.exit_code == CLI_USAGE_EXIT_CODE
     assert "unknown analyzer id: 'not-a-tool'" in _plain(result)
 
 

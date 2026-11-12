@@ -51,13 +51,13 @@ _VALID_REGIONS = ("us", "eu")
 
 app = mergecraft_typer(
     name="tracing",
-    help="Trace export configuration (Logfire). Mirrors ``sevn tracing logfire``.",
+    help="Trace export configuration (Logfire).",
     no_args_is_help=True,
 )
 
 logfire_app = mergecraft_typer(
     name="logfire",
-    help="Logfire trace export. Mirrors ``sevn tracing logfire``.",
+    help="Logfire trace export.",
     no_args_is_help=True,
 )
 app.add_typer(logfire_app, name="logfire")
@@ -173,7 +173,7 @@ def logfire_enable(
 ) -> None:
     r"""Enable Logfire tracing by writing the token + project locally and on GitHub.
 
-    Mirrors ``sevn tracing logfire enable --token X --project Y``. Per-key
+    Per-key
     precedence (flag > ``$MERGECRAFT_LOGFIRE_TOKEN`` / ``$MERGECRAFT_TRACING_PROJECT``
     in the local ``.env`` — already loaded by ``main()`` — > interactive
     prompt). Each key is resolved independently, so a partial ``.env``
@@ -313,7 +313,7 @@ def logfire_disable(
 ) -> None:
     """Disable Logfire tracing by removing the token + project locally and on GitHub.
 
-    Mirrors ``sevn tracing logfire disable``. The local ``.env`` keys are
+    The local ``.env`` keys are
     cleared via :func:`python_dotenv.set_key` with an empty value so the
     operator can re-enable without first re-installing the package. The
     GitHub secret is removed via ``gh secret delete``; a missing secret is

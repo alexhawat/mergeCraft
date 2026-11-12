@@ -25,6 +25,7 @@ from mergecraft.cli.agents_cmd import (
 )
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.init_cmd import _ensure_gitignore_line
 from mergecraft.cli.provider_cmd import load_provider_registry
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
@@ -79,7 +80,10 @@ def _validate_role(role: str) -> str:
     try:
         AgentRole(role_key)
     except ValueError:
-        cli_bail(f"unknown role: {role!r} (expected one of: {_known_roles_message()})")
+        cli_bail(
+            f"unknown role: {role!r} (expected one of: {_known_roles_message()})",
+            code=CLI_USAGE_EXIT_CODE,
+        )
     return role_key
 
 
@@ -165,7 +169,7 @@ def _agent_entry(
         created: dict[str, Any] = {}
         agents[name] = created
         return created
-    cli_bail(f"unknown agent {name!r}")
+    cli_bail(f"unknown agent {name!r}", code=CLI_USAGE_EXIT_CODE)
     return {}  # unreachable — cli_bail exits
 
 
@@ -452,8 +456,10 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         try:
             registry = load_registry(settings=settings, repo_root=target_dir)
             binding = registry.resolve_agent_ref(name)
-        except (RegistryValidationError, KeyError) as exc:
+        except RegistryValidationError as exc:
             cli_bail(str(exc))
+        except KeyError as exc:
+            cli_bail(str(exc.args[0]) if exc.args else str(exc), code=CLI_USAGE_EXIT_CODE)
 
         resolved = resolve_agent_model(binding, settings=settings)
         limits = effective_agent_limits(binding, settings=settings)
@@ -511,7 +517,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         if after is not None:
             _validate_agent_name(after)
             if after not in merged_agents:
-                cli_bail(f"unknown after agent {after!r}")
+                cli_bail(f"unknown after agent {after!r}", code=CLI_USAGE_EXIT_CODE)
 
         entry: dict[str, Any] = {"role": role_key}
         if after is not None:
@@ -686,7 +692,7 @@ def create_agent_app(*, target: AgentRosterTarget) -> typer.Typer:
         else:
             after_name = _validate_agent_name(after)
             if after_name not in merged_agents:
-                cli_bail(f"unknown after agent {after_name!r}")
+                cli_bail(f"unknown after agent {after_name!r}", code=CLI_USAGE_EXIT_CODE)
             entry["after"] = after_name
 
         _persist_entry(target_dir, target, config_path, raw, agents, agent_name, entry)

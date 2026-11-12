@@ -595,6 +595,7 @@ def materialize_resolved_diff(
         git_range_diff,
         git_ref_diff,
         git_staged_diff,
+        git_uncommitted_diff_with_limitations,
         git_unstaged_diff_with_limitations,
     )
 
@@ -612,7 +613,9 @@ def materialize_resolved_diff(
     base_ref: str | None = None
     coverage_limitations: tuple[str, ...] = ()
 
-    if spec.staged:
+    if spec.staged and spec.unstaged:
+        text, coverage_limitations = git_uncommitted_diff_with_limitations(cwd=workspace.cwd)
+    elif spec.staged:
         text = git_staged_diff(cwd=workspace.cwd)
         base_ref = None
     elif spec.unstaged:

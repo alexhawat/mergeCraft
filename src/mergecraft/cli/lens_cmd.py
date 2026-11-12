@@ -12,6 +12,7 @@ from mergecraft.agents.lenses import get_lens, load_lens_catalog, resolve_lens_p
 from mergecraft.classify.change_classifier import classify_change
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.review.lens_routing import load_routing_registry, route_lenses
 
@@ -44,7 +45,7 @@ def show_cmd(lens_id: str = typer.Argument(..., help="Lens id (e.g. security).")
     try:
         lens = get_lens(lens_id)
     except KeyError:
-        cli_bail(f"unknown lens id: {lens_id!r}")
+        cli_bail(f"unknown lens id: {lens_id!r}", code=CLI_USAGE_EXIT_CODE)
 
     console.print(f"[bold]{lens.lens_id}[/bold] — {lens.title}")
     typer.echo("\n--- rubric ---\n")
@@ -69,7 +70,7 @@ def run_lens_test(
     try:
         lens = get_lens(lens_id)
     except KeyError:
-        cli_bail(f"unknown lens id: {lens_id!r}")
+        cli_bail(f"unknown lens id: {lens_id!r}", code=CLI_USAGE_EXIT_CODE)
 
     diff_text = diff.read_text(encoding="utf-8")
     changed_paths = [

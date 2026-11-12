@@ -155,7 +155,7 @@ def _by_review_id(
         ),
     ] = None,
 ) -> None:
-    """Read persisted findings for a completed review id (D4)."""
+    """Read persisted findings for a completed review id."""
     review_id = str(ctx.meta.get("durable_review_id") or "")
     if not review_id:
         cli_bail("review id is required", code=CLI_USAGE_EXIT_CODE)
@@ -303,7 +303,7 @@ def outcomes(
     ] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Emit JSON.")] = False,
 ) -> None:
-    """Advisory human outcomes for published mergeCraft findings (#1165)."""
+    """Advisory human outcomes for published mergeCraft findings."""
     from mergecraft.findings.outcomes import (
         FindingOutcomeReport,
         classify_pull_request_outcomes,
