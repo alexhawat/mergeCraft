@@ -360,6 +360,10 @@ jobs:
       # from `steps.mergecraft.outputs.evidence_packet` — output only this
       # run can write. A `mergecraft-approval` check-run only corroborates it.
       #
+      # A `neutral` verdict whose packet records that every changed file is
+      # ignored by the review ignore paths passes with a notice: there was
+      # nothing to review, and approval is left to a human.
+      #
       # Fail closed on an empty verdict, an unattributable check, or a
       # disagreement. Fail open only when there is neither a verdict nor a
       # mergecraft-approval check at all.
@@ -373,6 +377,12 @@ jobs:
           # environment variable holds at most 128 KiB, and a large PR's whole
           # packet here stopped the gate from starting at all.
           REVIEW_VERDICT: ${{ steps.mergecraft.outputs.evidence_packet != '' && fromJSON(steps.mergecraft.outputs.evidence_packet).decision.verdict || '' }}
+          # `ignorePaths` only when the same packet records a `skip` triage
+          # tier because every changed file matched the review ignore paths
+          # (read from base configuration) and no review ran. The gate passes
+          # that neutral as "not reviewed"; every other neutral still fails.
+          REVIEW_SKIP_RECOGNIZER: ${{ steps.mergecraft.outputs.evidence_packet != '' && fromJSON(steps.mergecraft.outputs.evidence_packet).triage.tier == 'skip' && fromJSON(steps.mergecraft.outputs.evidence_packet).triage.recognizer || '' }}
+          REVIEW_SKIP_REASON: ${{ steps.mergecraft.outputs.evidence_packet != '' && fromJSON(steps.mergecraft.outputs.evidence_packet).triage.reason || '' }}
           # Set your mergeCraft App id here when the action authenticates as a
           # GitHub App, so the gate accepts that App's approval check. Left
           # empty, the gate trusts the github-actions issuer (job-token mode).
@@ -426,6 +436,21 @@ jobs:
           if [ "${check}" != "${verdict}" ]; then
             echo "::error title=mergeCraft requested changes::mergecraft-approval (${check}) disagrees with the review verdict (${verdict}). Failing closed."
             exit 1
+          fi
+          # Every changed file is ignored by the review ignore paths, so no
+          # review ran. Reached only after the neutral check was attributed to
+          # this run and head.
+          if [ "${verdict}" = "neutral" ] && [ "${REVIEW_SKIP_RECOGNIZER:-}" = "ignorePaths" ]; then
+            count="$(printf '%s' "${REVIEW_SKIP_REASON:-}" | sed -n 's/.*all \([0-9][0-9]*\) changed file.*/\1/p')"
+            files="all ${count} changed files"
+            [ -n "${count}" ] || files="all changed files"
+            echo "::notice title=mergeCraft not reviewed::nothing to review: ${files} are ignored by review.ignorePaths; passing without a review."
+            {
+              echo "### mergeCraft review: not reviewed"
+              echo ""
+              echo "Nothing to review: ${files} on ${HEAD_SHA} are ignored by the review ignore paths (\`review.ignorePaths\`, the \`ignore_paths\` input and the built-in defaults, read from base configuration). No review ran; this check passes without one, and approval is left to a human."
+            } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            exit 0
           fi
           if [ "${verdict}" != "success" ]; then
             echo "::error title=mergeCraft requested changes::mergecraft review verdict is ${verdict} — address the review feedback on this PR."

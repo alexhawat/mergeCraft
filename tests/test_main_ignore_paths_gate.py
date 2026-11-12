@@ -7,6 +7,7 @@ passes with "nothing to review" and approval is left to a human. Any doubt revie
 
 from __future__ import annotations
 
+import base64
 from types import SimpleNamespace
 from typing import Any
 
@@ -136,3 +137,77 @@ async def test_renaming_between_ignored_names_is_still_all_ignored() -> None:
     ctx = _ctx(["docs/CHANGELOG.md"], renames={"docs/CHANGELOG.md": "CHANGELOG.md"})
     out = await _ignore_paths_gate(ctx)
     assert isinstance(out, SkipAgentReview)
+
+
+# A pull request may edit ``.mergecraft/config.yaml`` in the same change that it wants
+# left unreviewed. The ``mergecraft review`` gate passes an all-ignored pull request
+# without a review, so the ignore decision must come from base (operator) configuration:
+# a broad glob the pull request adds to its own config never takes its other files out
+# of review.
+_BROAD_HEAD_CONFIG = "review:\n  ignorePaths:\n    - '**'\n"
+_HEAD_SHA = "h" * 40
+_BASE_SHA = "b" * 40
+
+
+class _RefScm(_Scm):
+    """Serves ``.mergecraft/config.yaml`` per ref: plain at base, broad at head."""
+
+    def __init__(self, files: list[str]) -> None:
+        super().__init__(files)
+        self.config_refs: list[str] = []
+
+    async def get(self, path: str, **kwargs: Any) -> Any:
+        if path.endswith("/contents/.mergecraft/config.yaml"):
+            ref = str((kwargs.get("params") or {}).get("ref"))
+            self.config_refs.append(ref)
+            text = _BROAD_HEAD_CONFIG if ref == _HEAD_SHA else "review: {}\n"
+            return {
+                "type": "file",
+                "encoding": "base64",
+                "content": base64.b64encode(text.encode()).decode(),
+            }
+        return await super().get(path, **kwargs)
+
+
+def _config_edit_ctx(*, operator_owned: bool, settings: RepoSettings | None = None) -> Any:
+    files = [".mergecraft/config.yaml", "src/app.py", "CHANGELOG.md"]
+    ctx = _ctx(files, settings=settings)
+    ctx.tool_context.scm = _RefScm(files)
+    ctx.gh_event = {
+        "pull_request": {"number": 3, "base": {"sha": _BASE_SHA}, "head": {"sha": _HEAD_SHA}}
+    }
+    ctx.settings_snapshot_operator_owned = operator_owned
+    return ctx
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("event_name", "operator_owned"),
+    [("pull_request_target", True), ("pull_request", False)],
+    ids=["pull_request_target-base-snapshot", "pull_request-base-contents"],
+)
+async def test_a_broad_ignore_glob_added_by_the_pr_does_not_make_it_all_ignored(
+    monkeypatch: pytest.MonkeyPatch, event_name: str, *, operator_owned: bool
+) -> None:
+    monkeypatch.setenv("GITHUB_EVENT_NAME", event_name)
+    ctx = _config_edit_ctx(operator_owned=operator_owned)
+
+    assert await _ignore_paths_gate(ctx) is None
+
+    assert ctx.tool_state.triage is None
+    assert _HEAD_SHA not in ctx.tool_context.scm.config_refs, "head config is never read"
+    if not operator_owned:
+        assert ctx.tool_context.scm.config_refs == [_BASE_SHA]
+    assert ctx.tool_state.review_ignore.is_ignored("src/app.py") is False
+
+
+@pytest.mark.asyncio
+async def test_a_broad_glob_in_base_config_is_the_operators_choice() -> None:
+    """The same glob in the base snapshot is trusted: that is how an operator opts out."""
+    base = RepoSettings.model_validate({"review": {"ignorePaths": ["**"]}})
+    ctx = _config_edit_ctx(operator_owned=True, settings=base)
+
+    out = await _ignore_paths_gate(ctx)
+
+    assert isinstance(out, SkipAgentReview)
+    assert ctx.tool_state.triage.recognizer == "ignorePaths"

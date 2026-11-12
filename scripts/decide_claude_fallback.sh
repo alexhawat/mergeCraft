@@ -40,7 +40,10 @@ else
   fi
   if [ -n "${packet}" ]; then
     verdict="$(verdict_from_packet "${packet}")"
-    if blocks_backstop "${verdict}"; then
+    if packet_is_all_ignored "${packet}"; then
+      need="false"
+      echo "packet decision.verdict=${verdict} (triage skip: ignorePaths) — every changed file is ignored, so no rung has anything to review; not spending the Claude backstop."
+    elif blocks_backstop "${verdict}"; then
       need="false"
       echo "packet decision.verdict=${verdict} — a rung posted a verdict despite failing later; not spending the Claude backstop."
     fi

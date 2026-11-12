@@ -48,6 +48,23 @@ described in [config failure policy](config-failure-policy.md)); the
 *effective* runtime default when left unset is `inconclusive` and `10m`
 respectively.
 
+### When every changed file is ignored
+
+A pull request whose every changed file matches `ignore_paths`, `review.ignorePaths`
+or the built-in defaults runs no review. `mergecraft-approval` is `neutral` ("nothing
+to review", approval left to a human), and the `evidence_packet` output records
+`triage.tier: skip` with `triage.recognizer: ignorePaths`. The ignore decision uses
+the base branch's configuration, so a pull request cannot add a glob that makes its
+own files ignored.
+
+The hardened workflow's review job (`examples/workflows/mergecraft-hardened.yml`)
+passes that pull request unreviewed. It reads the reason from this run's
+`evidence_packet` output, and passes only after the `neutral` approval check is
+attributed to this run and head. The job log shows a notice such as
+`nothing to review: all 2 changed files are ignored by review.ignorePaths; passing
+without a review`, and the job summary says the pull request was not reviewed. Every
+other `neutral` result still fails the job.
+
 ## Action outputs
 
 <!-- BEGIN:action-outputs -->

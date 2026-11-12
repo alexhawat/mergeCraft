@@ -96,6 +96,21 @@ neutral_is_untrusted_tier() {
   esac
 }
 
+# A neutral packet whose triage records that every changed file is ignored by
+# the review ignore paths: no review ran, and none would on a later rung, which
+# resolves the same base configuration against the same file listing. That
+# neutral is final, so neither fallback rung is spent on it, and the approval
+# gate passes it as "not reviewed".
+packet_is_all_ignored() {
+  local packet="$1"
+  [ -n "${packet}" ] || return 1
+  printf '%s' "${packet}" | jq -e '
+    .decision.verdict == "neutral"
+    and .triage.tier == "skip"
+    and .triage.recognizer == "ignorePaths"
+  ' >/dev/null 2>&1
+}
+
 # Claude backstop: failure|success|neutral all count as a posted verdict.
 verdict_blocks_claude_backstop() {
   case "$1" in
