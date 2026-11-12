@@ -1,0 +1,181 @@
+# SPDX-License-Identifier: MIT
+# Supported-platform matrix that is deliberately NOT part of the required graph.
+#
+# ci.yml gates merges on Linux with Python 3.11 and 3.14. The package also
+# advertises Python 3.12 and 3.13 and runs on macOS, and the optional `agents` and
+# `harbor` extras ship code that the required unit shards skip (their tests
+# `importorskip` the extras). Nothing here is a required check, so none of it
+# lengthens the merge path (#1363); a failure is a signal to read, not a block.
+#
+# Check names (add to the ruleset only if the owner wants them to block):
+#   Compat smoke (py3.12) / Compat smoke (py3.13)
+#   Compat unit (py3.12 1/2) ... Compat unit (py3.13 2/2)
+#   Extras (agents + harbor, py3.13)
+#   macOS unit (py3.14)
+name: CI matrix
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "43 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-matrix-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    uses: ./.github/workflows/classify-pr.yml
+    with:
+      classify-code: true
+
+  # The heavy legs run on main and nightly. A PR gets them only when it touches the
+  # files that decide platform support: this workflow, the toolchain bootstrap, the
+  # Makefile, or the dependency set (and so it proves its own change before merge).
+  scope:
+    name: Matrix scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Does this PR touch platform support?
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "full=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags origin "$BASE_REF"
+          if git diff --name-only "origin/${BASE_REF}...HEAD" \
+            | grep -Eq '^(\.github/workflows/ci-matrix\.yml|\.github/actions/bootstrap/|Makefile$|pyproject\.toml$|uv\.lock$)'; then
+            echo "full=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "full=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Cheap on every code PR: build the wheel, install it with runtime-only
+  # dependencies on the interpreter, and run the installed CLI against the corpus.
+  compat-smoke:
+    name: Compat smoke (py${{ matrix.python }})
+    needs: changes
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Installed wheel acceptance (runtime dependencies only)
+        run: make test-wheel-corpus
+
+  # The full unit suite on the two advertised interpreters the required graph skips.
+  compat-unit:
+    name: Compat unit (py${{ matrix.python }} ${{ matrix.group }}/2)
+    needs: scope
+    if: needs.scope.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+        group: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: ${{ matrix.python }}
+        env:
+          MERGECRAFT_UV_EXTRAS: tracing
+      - name: Unit tests (shard ${{ matrix.group }} of 2)
+        env:
+          MERGECRAFT_TEST_SPLITS: "2"
+          MERGECRAFT_TEST_GROUP: ${{ matrix.group }}
+        run: make test
+
+  # agents_sdk and harbor sit at 0% in the required run because their tests skip
+  # when the optional extra is missing. Install both and prove the import first, so
+  # a silent importorskip can never again stand in for a pass.
+  extras:
+    name: Extras (agents + harbor, py3.13)
+    needs: changes
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: "3.13"
+        env:
+          MERGECRAFT_UV_EXTRAS: tracing --extra agents --extra harbor
+      - name: The extras are importable
+        run: |
+          .venv-dev/bin/python -c "import agents, harbor; print('agents and harbor import')"
+      - name: Unit tests for the optional backends
+        run: |
+          .venv-dev/bin/python -m pytest tests/agents_sdk tests/harbor -q --tb=short \
+            --strict-markers -m "not live and not integration" -rs -p no:randomly \
+            | tee "$RUNNER_TEMP/extras.log"
+          if grep -q "could not import" "$RUNNER_TEMP/extras.log"; then
+            echo "::error title=Extras skipped::a backend test skipped on a missing import"
+            exit 1
+          fi
+
+  # macOS has different path, process and sandbox primitives than the Linux jobs
+  # that gate merges.
+  macos-unit:
+    name: macOS unit (py3.14)
+    needs: scope
+    if: needs.scope.outputs.full == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: "3.14"
+        env:
+          MERGECRAFT_UV_EXTRAS: tracing
+      - name: Unit tests
+        env:
+          MERGECRAFT_PYTEST_JOBS: "3"
+        run: |
+          # Known macOS-only failures (.github/macos-known-failures.txt) are
+          # deselected through pytest's own option variable; everything else gates.
+          addopts=""
+          while IFS= read -r node; do
+            case "$node" in ""|"#"*) continue ;; esac
+            addopts="$addopts --deselect $(printf '%q' "$node")"
+          done < .github/macos-known-failures.txt
+          PYTEST_ADDOPTS="$addopts" make test

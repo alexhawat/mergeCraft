@@ -1,0 +1,11 @@
+# Tests that fail on macOS today, so the macOS leg of ci-matrix.yml can gate on
+# everything else. One pytest node id per line; "#" starts a comment.
+# This is a debt list, not an allowlist: fix the test, then delete its line.
+# tests/ci/test_ci_matrix_workflow.py fails when a line names a test that no
+# longer exists, so the list cannot rot.
+#
+# The temp dir on macOS resolves under /private/var, which the credential
+# redactor rewrites, so these three assert on a path that is already redacted.
+tests/enterprise/test_support_bundle.py::test_support_bundle_resolves_audit_path_from_root
+tests/security/test_credentials.py::test_cleanup_warns_when_rmtree_reports_a_failure
+tests/security/test_credentials.py::test_cleanup_warns_when_the_askpass_file_survives
