@@ -77,6 +77,66 @@ def test_combined_flags_keep_a_staged_file_removed_from_the_work_tree(
     assert "+b = 2" in text
 
 
+def _staged_then_restored(root: Path) -> None:
+    (root / "unstaged.py").write_text("b = 9\n", encoding="utf-8")
+    _git(root, "add", "unstaged.py")
+    _git(root, "restore", "--worktree", "--source=HEAD", "unstaged.py")
+
+
+def _staged_then_deleted(root: Path) -> None:
+    (root / "unstaged.py").write_text("b = 9\n", encoding="utf-8")
+    _git(root, "add", "unstaged.py")
+    (root / "unstaged.py").unlink()
+
+
+def _staged_add_then_removed(root: Path) -> None:
+    (root / "fresh.py").write_text("b = 9\n", encoding="utf-8")
+    _git(root, "add", "fresh.py")
+    (root / "fresh.py").unlink()
+    _git(root, "restore", "--worktree", "--source=HEAD", "unstaged.py")
+
+
+def _staged_rename_then_restored(root: Path) -> None:
+    _git(root, "restore", "--worktree", "--source=HEAD", "unstaged.py")
+    _git(root, "mv", "unstaged.py", "renamed.py")
+    (root / "renamed.py").unlink()
+    _git(root, "restore", "--worktree", "--source=HEAD", "unstaged.py")
+
+
+def _staged_mode_only(root: Path) -> None:
+    _git(root, "restore", "--worktree", "--source=HEAD", "unstaged.py")
+    _git(root, "update-index", "--chmod=+x", "unstaged.py")
+
+
+# Each case leaves a change only in the index (what a commit would record),
+# with the work tree back at HEAD or missing the path.
+_INDEX_ONLY = {
+    "staged-then-restored": (_staged_then_restored, ("+b = 9",)),
+    "staged-then-deleted": (_staged_then_deleted, ("+b = 9",)),
+    "staged-add-then-removed": (_staged_add_then_removed, ("+++ b/fresh.py", "+b = 9")),
+    "staged-rename-then-restored": (
+        _staged_rename_then_restored,
+        ("+++ b/renamed.py", "deleted file mode", "a/unstaged.py"),
+    ),
+    "staged-mode-only": (_staged_mode_only, ("new mode 100755", "a/unstaged.py")),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_INDEX_ONLY), ids=sorted(_INDEX_ONLY))
+def test_combined_flags_keep_index_only_changes(case: str, repo: Path, tmp_path: Path) -> None:
+    """A change present only in the index still appears, exactly once per file."""
+    setup, expected = _INDEX_ONLY[case]
+    setup(repo)
+
+    text = _materialize(repo, tmp_path, staged=True, unstaged=True)
+
+    for snippet in expected:
+        assert snippet in text, f"{case}: {snippet!r} missing from\n{text}"
+    headers = [line for line in text.splitlines() if line.startswith("diff --git ")]
+    assert len(headers) == len(set(headers)), text
+    assert "+a = 2" in text  # the fixture's ordinary staged edit is kept
+
+
 def test_combined_flags_on_a_file_staged_then_edited_again(repo: Path, tmp_path: Path) -> None:
     """A file with staged and unstaged edits appears once, at its working-tree content."""
     (repo / "staged.py").write_text("a = 3\n", encoding="utf-8")

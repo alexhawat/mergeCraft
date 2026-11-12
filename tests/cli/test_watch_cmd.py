@@ -164,3 +164,30 @@ def test_root_format_json_overrides_pretty(monkeypatch: pytest.MonkeyPatch) -> N
     lines = [line for line in output.splitlines() if line.strip()]
     assert len(lines) == 1, output
     assert json.loads(lines[0])["cursor"] == "7"
+
+
+def test_cli_root_format_json_watch_streams_json_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``mergecraft --format json watch --pr 1`` runs through the CLI and prints JSON lines."""
+    from typer.testing import CliRunner
+
+    from mergecraft.cli.app import app
+
+    _install_mock_client(monkeypatch, [_id_event(8)])
+    monkeypatch.delenv("GITHUB_API_URL", raising=False)
+    monkeypatch.setattr(watch_cmd, "op", lambda *args, **kwargs: watch_cmd._poll_timeline)
+    monkeypatch.setattr(watch_cmd, "_resolve_repo", lambda repo: ("acme", "demo"))
+    monkeypatch.setattr(watch_cmd, "_get_gh_token", lambda: "t")
+
+    async def _stop_after_first_poll(_seconds: float) -> None:
+        raise typer.Exit(0)  # the watch loop re-raises typer.Exit
+
+    monkeypatch.setattr(watch_cmd.asyncio, "sleep", _stop_after_first_poll)
+
+    result = CliRunner().invoke(
+        app, ["--format", "json", "watch", "acme/demo", "--pr", "1", "--pretty"]
+    )
+
+    assert result.exit_code == 0, result.output
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    assert len(lines) == 1, result.stdout
+    assert json.loads(lines[0])["cursor"] == "8"
