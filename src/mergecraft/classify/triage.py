@@ -72,6 +72,8 @@ from mergecraft.review_policy.manifest_names import (
     DEPENDENCY_MANIFEST_NAMES,
     GENERATOR_CONFIG_NAMES,
     LOCKFILE_NAMES,
+    is_build_manifest_path,
+    is_dependency_manifest_path,
 )
 
 if TYPE_CHECKING:
@@ -377,6 +379,8 @@ def recognize_prose_only(
             if any(part in lowered for part in _HIGH_STAKES_PATH_PARTS):
                 return False
             if PurePosixPath(lowered).name in _PROSE_REFUSED_BASENAMES:
+                return False
+            if is_dependency_manifest_path(path) or is_build_manifest_path(path):
                 return False
             if _steers_review(path, extras):
                 return False
