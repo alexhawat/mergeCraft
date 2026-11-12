@@ -451,13 +451,11 @@ def _exempt_spans(text: str) -> list[tuple[int, int]]:
     whose host and path are ordinary words, or a ``/var/folders/<hash>/T`` temp
     root) and is kept verbatim; everything around it is redacted as usual.
     """
-    spans: list[tuple[int, int]] = []
-    if "https://github.com/" in text:
-        spans.extend(
-            match.span()
-            for match in _GITHUB_PERMALINK_RE.finditer(text)
-            if _is_exempt_github_permalink(match)
-        )
+    spans: list[tuple[int, int]] = [
+        match.span()
+        for match in _GITHUB_PERMALINK_RE.finditer(text)
+        if _is_exempt_github_permalink(match)
+    ]
     if "/var/folders/" in text:
         spans.extend(match.span() for match in _MACOS_TEMP_ROOT_RE.finditer(text))
     if "://" in text:
