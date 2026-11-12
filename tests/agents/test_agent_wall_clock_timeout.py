@@ -183,3 +183,21 @@ def test_driver_kills_a_streaming_agent_at_the_cap(
     assert result.metadata.get("timeout") is True
     assert "timed out" in (result.error or "")
     assert children[0].poll() is not None, "the capped child must be dead"
+
+    # The clock ended the attempt, not the review: the run is an infra error
+    # with a named reason, as an idle stall is, never a review that failed.
+    from mergecraft.agents.activity_watchdog import WALL_CLOCK_INFRA_REASON
+    from mergecraft.agents.shared import INFRA_REASON_KEY
+    from mergecraft.main_outcome import _classify_outcome
+    from mergecraft.run_outcome import RunOutcome
+
+    assert result.metadata.get(INFRA_REASON_KEY) == WALL_CLOCK_INFRA_REASON
+    outcome, _reason = _classify_outcome(
+        result=result,
+        setup_reason="",
+        setup_policy="warn",
+        prep_reason=None,
+        mode="Review",
+        verdict_protocol="enforce",
+    )
+    assert outcome is RunOutcome.infra_error

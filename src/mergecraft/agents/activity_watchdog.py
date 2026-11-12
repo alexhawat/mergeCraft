@@ -56,6 +56,9 @@ DEFAULT_IDLE_TIMEOUT_S: Final[float] = 900.0
 WALL_CLOCK_TIMEOUT_KIND: Final[str] = "wall-clock cap"
 """``AgentDiagnostic.timeout_kind`` for an attempt killed at its wall-clock cap."""
 
+WALL_CLOCK_INFRA_REASON: Final[str] = "agent_wall_clock_timeout"
+"""``AgentResult.metadata[INFRA_REASON_KEY]`` of an attempt killed at its wall-clock cap."""
+
 IDLE_TIMEOUT_KIND: Final[str] = "no-output watchdog"
 """``AgentDiagnostic.timeout_kind`` for an attempt killed by the idle watchdog."""
 
@@ -166,6 +169,11 @@ class AgentDiagnostic:
             kind_keys = {
                 "timeout": True,
                 "wall_clock_timeout": True,
+                # ``shared.INFRA_REASON_KEY`` (not imported: ``shared`` imports
+                # this module). The clock, not the review, ended the attempt, so
+                # the run reads as ``infra_error`` with this reason, as an idle
+                # stall does, and never as a review that ``failed``.
+                "infra_reason": WALL_CLOCK_INFRA_REASON,
                 "elapsed_seconds": (
                     round(self.elapsed_seconds, 3) if self.elapsed_seconds is not None else None
                 ),
@@ -439,6 +447,7 @@ def watchdog_for_process(
 __all__ = [
     "DEFAULT_IDLE_TIMEOUT_S",
     "IDLE_TIMEOUT_KIND",
+    "WALL_CLOCK_INFRA_REASON",
     "WALL_CLOCK_TIMEOUT_KIND",
     "AgentDiagnostic",
     "IdleWatchdog",
