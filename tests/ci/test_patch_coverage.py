@@ -273,3 +273,30 @@ def test_cli_passes_when_the_pr_changes_only_tests(tmp_path: Path) -> None:
     result = _run(repo, {"files": {}})
     assert result.returncode == 0, result.stdout + result.stderr
     assert "adds no executable lines" in result.stdout
+
+
+def test_an_added_line_that_looks_like_a_file_header_does_not_hide_later_hunks() -> None:
+    diff = (
+        "+++ b/src/mergecraft/a.py\n"
+        "@@ -0,0 +1,2 @@\n"
+        "+x = 1\n"
+        "+++ not a header\n"
+        "@@ -9,0 +10,1 @@\n"
+        "+y = 2\n"
+    )
+    assert _load().parse_changed_lines(diff) == {"src/mergecraft/a.py": {1, 2, 10}}
+
+
+def test_cli_checks_the_lines_a_renamed_and_edited_file_changed(tmp_path: Path) -> None:
+    repo = _repo_with_new_lines(tmp_path)
+    _git(repo, "mv", "src/mergecraft/a.py", "src/mergecraft/b.py")
+    module = repo / "src" / "mergecraft" / "b.py"
+    module.write_text(
+        module.read_text(encoding="utf-8") + "\n\ndef h():\n    return 4\n", encoding="utf-8"
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "move and edit")
+    report = _report(b={"executed_lines": [1, 2], "missing_lines": [5, 6, 7, 8, 11]})
+    result = _run(repo, report)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "src/mergecraft/b.py: uncovered lines 5-8, 11" in result.stderr

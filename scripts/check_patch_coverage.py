@@ -64,7 +64,7 @@ def parse_changed_lines(diff: str, *, prefix: str = DEFAULT_PREFIX) -> dict[str,
     changed: dict[str, set[int]] = {}
     current: str | None = None
     for line in diff.splitlines():
-        if line.startswith("+++ "):
+        if line.startswith(("+++ b/", "+++ /dev/null")):
             target = line[4:].strip()
             if target == "/dev/null":
                 current = None
@@ -154,7 +154,7 @@ def _git_diff(base: str, prefix: str) -> str:
             "diff",
             "--unified=0",
             "--no-color",
-            "--diff-filter=AM",
+            "--diff-filter=AMRC",
             anchor,
             "HEAD",
             "--",
