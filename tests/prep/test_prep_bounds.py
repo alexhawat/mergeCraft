@@ -144,6 +144,15 @@ async def _wait_for_file(path: Path, *, timeout_s: float = 5.0) -> int:
     raise AssertionError(msg)
 
 
+async def _wait_registered(pid: int, *, timeout_s: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if pid in active_process_groups():
+            return True
+        await asyncio.sleep(0.02)
+    return False
+
+
 async def test_agent_waits_for_install_started_on_another_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_npm: Any
 ) -> None:
@@ -207,7 +216,9 @@ async def test_install_registers_its_process_group_while_running(
     task = asyncio.ensure_future(run_prep_phase(PrepOptions(timeout_s=10, agent_owned_tree=True)))
     try:
         leader = await _wait_for_file(tmp_path / "leader.pid")
-        assert leader in active_process_groups()
+        # The child writes its pid as soon as it starts; the parent registers
+        # the group only once create_subprocess_exec returns. Poll briefly.
+        assert await _wait_registered(leader)
     finally:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
