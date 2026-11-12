@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.ci.blame import BlameVerdict, blame_failure
-from mergecraft.ci.flaky import FlakyVerdict, classify_failure
+from mergecraft.ci.flaky import FlakyVerdict, classify_failure, newest_base_runs
 from mergecraft.ci.truncate import DEFAULT_TRUNCATION_CAP, apply_truncation, truncation_notice
 from mergecraft.ci.verification import (
     annotate_caused_by_pr,
@@ -84,12 +84,13 @@ def _base_status_for_cluster(
 ) -> str | None:
     """Resolve the base-branch conclusion for one cluster (BL-D5).
 
-    A ``base_branch_runs`` entry matching the cluster fingerprint is authoritative.
+    The newest ``base_branch_runs`` entry per workflow matching the cluster
+    fingerprint is authoritative.
     The scalar ``base_branch_status`` applies only when the analysis produced
     exactly one cluster; with two or more it cannot describe both fingerprints and
     is ignored for attribution.
     """
-    matching = _matching_base_runs(fingerprint, base_branch_runs)
+    matching = newest_base_runs(_matching_base_runs(fingerprint, base_branch_runs))
     if matching:
         failing = [
             run for run in matching if str(run.get("conclusion", "")).strip().lower() == "failure"

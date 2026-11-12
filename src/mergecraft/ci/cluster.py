@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mergecraft.analyzers.finding import Finding, IntroducedByPr, make_finding
 from mergecraft.ci.paths import failure_line, primary_failure_path
@@ -70,6 +70,30 @@ def failure_to_finding(
     )
 
 
+def unanalyzed_run_finding(run: dict[str, Any]) -> Finding:
+    """Record a failed run whose logs were past the analysis cap (#1321).
+
+    No log was read, so nothing can attribute or clear it: the row is a
+    ``Major`` with ``introduced_by_pr: unknown``, like any unattributed failure.
+    """
+    name = str(run.get("name") or run.get("id") or "workflow run")
+    url = str(run.get("html_url") or "")
+    return make_finding(
+        tool=_CI_TOOL,
+        rule_id="ci-unanalyzed-failed-run",
+        category=_CI_CATEGORY,
+        severity="Major",
+        confidence="likely",
+        message=f"{name} failed; its logs were not analyzed (analysis cap reached)",
+        path="ci/pipeline",
+        start_line=1,
+        end_line=1,
+        source="ci",
+        evidence=[url] if url else [f"run:{name}"],
+        introduced_by_pr="unknown",
+    )
+
+
 def cluster_failures(failures: list[NormalizedFailure]) -> list[Finding]:
     """Group failures by root cause and publish one finding per cluster."""
     buckets: dict[str, list[NormalizedFailure]] = {}
@@ -94,4 +118,5 @@ __all__ = [
     "cluster_failures",
     "cluster_key",
     "failure_to_finding",
+    "unanalyzed_run_finding",
 ]

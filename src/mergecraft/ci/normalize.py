@@ -18,6 +18,21 @@ _ERROR_LINE = re.compile(
     re.I,
 )
 
+# Lines every failing step prints regardless of cause. A signature built from
+# one would give unrelated failures the same fingerprint (#1321).
+_GENERIC_LINE = re.compile(
+    r"^(?:##\[error\]\s*|Error:\s*)?(?:"
+    r"Process completed with exit code \d+\.?"
+    r"|make(?:\[\d+\])?: \*\*\* .*Error \d+"
+    r"|Found \d+ errors?\b.*"
+    r")$",
+    re.I,
+)
+_STRUCTURAL_LINE = re.compile(r"^##\[(?:group|endgroup)\]", re.I)
+# ``path:line[:col]:`` positions shift when unrelated lines move; the
+# diagnostic identity is the path and the message.
+_POSITION = re.compile(r"(\S):\d+(?::\d+)?:")
+
 
 def _strip_run_noise(text: str) -> str:
     lines = []
@@ -28,20 +43,44 @@ def _strip_run_noise(text: str) -> str:
     return "\n".join(line for line in lines if line)
 
 
-def _extract_error_signature(raw: RawFailure, log_excerpt: str) -> str:
+def _extract_error_signature(raw: RawFailure, log_excerpt: str) -> tuple[str, bool]:
+    """Return ``(signature, specific)`` for one failure excerpt.
+
+    ``specific`` is False when the excerpt holds nothing but lines every failing
+    step prints (GitHub's exit-code trailer, ``make: ***``, "Found N errors").
+    """
     explicit = raw.get("error_signature")
     if explicit:
-        return _strip_run_noise(str(explicit))
-    for match in _ERROR_LINE.finditer(log_excerpt):
-        candidate = _strip_run_noise(match.group(0))
-        if candidate:
-            return candidate
-    tail = log_excerpt.strip().splitlines()
-    return _strip_run_noise(tail[-1]) if tail else "unknown failure"
+        return _strip_run_noise(str(explicit)), True
+    lines = [line for line in _strip_run_noise(log_excerpt).splitlines() if line]
+    for line in lines:
+        if _GENERIC_LINE.match(line):
+            continue
+        match = _ERROR_LINE.search(line)
+        if match:
+            return match.group(0), True
+    # No specific error line (ruff, flake8, eslint, shellcheck, custom scripts):
+    # use the last diagnostic printed before the first generic summary line.
+    first_generic = next(
+        (index for index, line in enumerate(lines) if _GENERIC_LINE.match(line)), len(lines)
+    )
+    for line in (*reversed(lines[:first_generic]), *reversed(lines[first_generic:])):
+        if not _GENERIC_LINE.match(line) and not _STRUCTURAL_LINE.match(line):
+            return _POSITION.sub(r"\1:", line), True
+    return (lines[-1] if lines else "unknown failure"), False
 
 
-def _compute_fingerprint(*, command: str, error_signature: str) -> str:
-    material = redact_for_fingerprint(f"{command.strip()}\0{error_signature.strip()}", tool_id="ci")
+def _compute_fingerprint(
+    *, job: str, step: str, command: str, error_signature: str, specific: bool
+) -> str:
+    """Hash the command and error signature (#1321).
+
+    A specific diagnostic identifies the root cause on its own, so the same
+    defect in several jobs still clusters. A generic-only signature does not:
+    the job and step are hashed too, so unrelated jobs never share an identity.
+    """
+    parts = (command, error_signature) if specific else (job, step, command, error_signature)
+    material = redact_for_fingerprint("\0".join(part.strip() for part in parts), tool_id="ci")
     return hashlib.sha256(material.encode()).hexdigest()[:16]
 
 
@@ -75,7 +114,7 @@ def normalize_failure(raw: dict[str, Any]) -> NormalizedFailure:
     stripped_excerpt = _strip_run_noise(source_excerpt)
     failure_paths = extract_failure_paths(stripped_excerpt)
     log_excerpt = redact_secrets(stripped_excerpt)
-    error_signature = _extract_error_signature(typed, log_excerpt)
+    error_signature, specific = _extract_error_signature(typed, log_excerpt)
     artifacts = _coerce_artifacts(typed)
     retry_state = raw.get("retry_state")
     if retry_state is not None:
@@ -89,7 +128,13 @@ def normalize_failure(raw: dict[str, Any]) -> NormalizedFailure:
         log_excerpt=log_excerpt,
         artifacts=artifacts,
         retry_state=retry_state,
-        failure_fingerprint=_compute_fingerprint(command=command, error_signature=error_signature),
+        failure_fingerprint=_compute_fingerprint(
+            job=job,
+            step=step,
+            command=command,
+            error_signature=error_signature,
+            specific=specific,
+        ),
         failure_paths=failure_paths,
     )
 
