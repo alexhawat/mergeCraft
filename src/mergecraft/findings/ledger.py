@@ -46,6 +46,18 @@ _LEDGER_MARKER_V2_RE = re.compile(r"<!-- mergecraft-ledger:v2:([0-9a-f]+):([a-z-
 _LEDGER_MARKER_FAMILY_PREFIX = "<!-- mergecraft-ledger:"
 # A parsed row may carry a ``recorded_at`` this far past the reader's clock.
 _RECORDED_AT_CLOCK_SKEW = timedelta(minutes=5)
+# GitHub caps a review body at 65,536 characters. The ledger block gets at most
+# this share of it; the deterministic record, prose and learnings delta share
+# the rest. Past it the oldest rows are omitted (``merge_ledger_into_comment``).
+LEDGER_BLOCK_MAX_CHARS = 30_000
+_LEDGER_OMISSION_NOTE_RE = re.compile(
+    r"\n*_\d+ older finding-ledger rows omitted to fit GitHub's review body limit; "
+    r"earlier reviews still carry them\._\n?"
+)
+# The run record names at most this many reviewed files and change findings;
+# the review packet keeps the full lists.
+REVIEWED_FILES_SHOWN = 100
+CHANGE_FINDINGS_SHOWN = 100
 # Agent prose: the block must end at a real terminator. Falling back to ``\Z``
 # here meant a marker the agent merely quoted — plausible in a repo that reviews
 # its own reviewer — swallowed every finding after it. A bare marker with no
@@ -908,13 +920,68 @@ def _strip_ledger_markers(body: str) -> str:
         current = stripped
 
 
-def merge_ledger_into_comment(body: str, *, records: Iterable[LifecycleRecord]) -> str:
-    """Strip prior ledger markers and append the supplied record set."""
-    cleaned = _strip_ledger_markers(body).rstrip()
-    markers = [line for record in records for line in _marker_lines(record)]
+def _ledger_omission_note(omitted: int) -> str:
+    return (
+        f"_{omitted} older finding-ledger rows omitted to fit GitHub's review body limit; "
+        "earlier reviews still carry them._"
+    )
+
+
+def _budget_ledger_records(
+    records: Sequence[LifecycleRecord], *, max_chars: int
+) -> tuple[list[LifecycleRecord], int]:
+    """Keep the newest rows whose markers fit in ``max_chars``; return ``(kept, omitted)``.
+
+    Rows are ranked by ``recorded_at`` (newest first, fingerprint as the tie
+    break) and kept greedily, so the rows this round wrote always survive. The
+    rows left out are older, and the ledger is folded across every earlier
+    review, so a row omitted here is still read from the review that wrote it.
+    Kept rows are returned in the input order.
+    """
+    sized = [(record, sum(len(line) + 1 for line in _marker_lines(record))) for record in records]
+    if sum(size for _, size in sized) <= max_chars:
+        return list(records), 0
+    ranked = sorted(
+        sized, key=lambda item: (item[0].recorded_at or "", item[0].fingerprint), reverse=True
+    )
+    keep: set[str] = set()
+    used = 0
+    for record, size in ranked:
+        if used + size > max_chars:
+            continue
+        keep.add(record.fingerprint)
+        used += size
+    kept = [record for record in records if record.fingerprint in keep]
+    return kept, len(records) - len(kept)
+
+
+def merge_ledger_into_comment(
+    body: str,
+    *,
+    records: Iterable[LifecycleRecord],
+    max_chars: int = LEDGER_BLOCK_MAX_CHARS,
+) -> str:
+    """Strip prior ledger markers and append the supplied record set.
+
+    The marker block is bounded by ``max_chars`` so a long-lived ledger cannot
+    push the review past GitHub's body limit on its own. Past the budget the
+    oldest rows are left out (see :func:`_budget_ledger_records`) and one visible
+    note says how many; a previous note is replaced, never stacked.
+    """
+    cleaned = _LEDGER_OMISSION_NOTE_RE.sub("", _strip_ledger_markers(body)).rstrip()
+    kept, omitted = _budget_ledger_records(list(records), max_chars=max_chars)
+    markers = [line for record in kept for line in _marker_lines(record)]
     if not markers:
         return cleaned
     block = "\n".join(markers)
+    if omitted:
+        logger.warning(
+            "finding ledger: {} older rows omitted from this review to stay within its "
+            "{}-character ledger budget",
+            omitted,
+            max_chars,
+        )
+        block = f"{block}\n\n{_ledger_omission_note(omitted)}"
     if not cleaned:
         return block + "\n"
     return f"{cleaned}\n\n{block}\n"
@@ -1047,7 +1114,7 @@ async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> Find
                 for record in FindingLedger.from_comment_body(body).records():
                     ledger.upsert_if_newer(record)
     except Exception as err:
-        logger.info("finding ledger: could not read review history: {}", err)
+        logger.warning("finding ledger: could not read review history: {}", err)
 
     existing = tool_state.finding_ledger
     if existing is not None:
@@ -1140,7 +1207,7 @@ async def persist_finding_ledger_to_progress_comment(ctx: ToolContext) -> None:
         tool_state.progress_comment = ProgressComment(id=str(result["id"]), type="issue")
         tool_state.last_progress_body = body_with_ledger
     except Exception as err:
-        logger.info("finding ledger: could not persist progress comment: {}", err)
+        logger.warning("finding ledger: could not persist progress comment: {}", err)
 
 
 def _strip_deterministic_record_markers(body: str) -> str:
@@ -1465,9 +1532,11 @@ def render_deterministic_review_block(
         header_lines.append(f"- **Change:** `{change_id}`")
     changed_files = list(getattr(packet, "files_changed", []) or [])
     if changed_files:
-        header_lines.append(
-            "- **Reviewed files:** " + ", ".join(f"`{path}`" for path in changed_files)
-        )
+        shown_files = ", ".join(f"`{path}`" for path in changed_files[:REVIEWED_FILES_SHOWN])
+        hidden_files = len(changed_files) - REVIEWED_FILES_SHOWN
+        if hidden_files > 0:
+            shown_files += f", and {hidden_files} more (the review packet lists every file)"
+        header_lines.append(f"- **Reviewed files:** {shown_files}")
     triage = getattr(packet, "triage", None)
     if triage is not None and triage.tier == "skip":
         header_lines.append(f"- **Tier:** skip ({triage.recognizer}) — no LLM review ran")
@@ -1645,10 +1714,15 @@ def render_deterministic_review_block(
 
     finding_lines = ["", "<details>", "<summary>Change-scoped findings</summary>", ""]
     if change_findings:
-        for finding in change_findings:
+        for finding in change_findings[:CHANGE_FINDINGS_SHOWN]:
             line = f":{finding.start_line}" if finding.path and finding.start_line else ""
             location = f"`{finding.path}{line}` — " if finding.path else ""
             finding_lines.append(f"- **{finding.severity}** · {location}{finding.message}")
+        hidden_findings = len(change_findings) - CHANGE_FINDINGS_SHOWN
+        if hidden_findings > 0:
+            finding_lines.append(
+                f"- _and {hidden_findings} more change-scoped findings in the review packet_"
+            )
     else:
         finding_lines.append("_No change-scoped findings recorded._")
     finding_lines.extend(["", "</details>"])
@@ -1783,12 +1857,13 @@ async def upsert_sticky_progress_comment(ctx: ToolContext, record_block: str) ->
         tool_state.last_progress_body = body_with_ledger
     except Exception as err:
         message = f"deterministic record: could not persist progress comment: {err}"
-        logger.info(message)
+        logger.warning(message)
         gha_log.warning(message)
 
 
 __all__ = [
     "DETERMINISTIC_RECORD_MARKER",
+    "LEDGER_BLOCK_MAX_CHARS",
     "LEDGER_MARKER_PREFIX",
     "LEDGER_MARKER_V2_PREFIX",
     "LEDGER_SCHEMA_VERSION",

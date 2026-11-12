@@ -100,6 +100,13 @@ open skips every fingerprint the ledger records. Once the pull request is merged
 or closed, the ledger no longer suppresses anything, so every unresolved
 published thread is filed.
 
+**Size bound.** GitHub caps a review body at 65,536 characters. The run record
+names the first 100 reviewed files and change findings and points to the review
+packet for the rest. The ledger block gets at most 30,000 characters. Past that,
+the oldest rows (by `recorded_at`) are left out of the newest review, and a
+visible note says how many. Earlier reviews still carry those rows, and the
+ledger is folded across all of them.
+
 **Serialization precondition.** The final upsert does not re-fetch the live
 comment: the run's own snapshot is authoritative for a comment it owns, which
 keeps a trust question off the hot path. That is safe only while runs on one pull
