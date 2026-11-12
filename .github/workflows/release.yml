@@ -71,6 +71,7 @@ jobs:
       # the dist that CPython publishes.
       - name: Regenerate agent packages for the release tag
         id: packages
+        if: ${{ steps.craft.outputs.branch != '' }}
         env:
           RELEASE_BRANCH: ${{ steps.craft.outputs.branch }}
           RELEASE_VERSION: ${{ steps.craft.outputs.version }}

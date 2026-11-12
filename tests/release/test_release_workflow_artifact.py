@@ -121,6 +121,9 @@ def test_prepare_regenerates_agent_packages_before_reporting_the_release_sha() -
     assert generator, "prepare must regenerate the agent packages for the release tag"
     run = str(generator[0]["run"])
     assert "git push origin" in run, "the regenerated commit must reach the release branch"
+    assert generator[0].get("if") == "${{ steps.craft.outputs.branch != '' }}", (
+        "the step must no-op when Craft produced no branch, as dispatch-build and publish do"
+    )
     assert generator[0].get("id"), "the step must publish the regenerated sha"
     assert prepare["outputs"]["sha"] == "${{ steps." + generator[0]["id"] + ".outputs.sha }}", (
         "publish waits for CI/CD on prepare's sha, so it must be the regenerated head"
