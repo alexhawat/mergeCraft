@@ -1,8 +1,10 @@
-"""Review path ignoring: keep changelogs, lockfiles and generated files out of the diff.
+"""Review path ignoring: keep changelogs, lockfiles and minified files out of the diff.
 
 ``ignore_paths`` (Action input) and ``review.ignorePaths`` (repo config) name globs whose
-changed files the reviewer never sees. A built-in default set (changelogs, lockfiles,
-generated and minified files) applies unless ``review.ignorePathDefaults: false``.
+changed files the reviewer never sees. A built-in default set (changelogs, lockfiles and
+minified files) applies unless ``review.ignorePathDefaults: false``. A directory named
+``generated`` is not proof of generated output, so it is reviewed unless a glob such as
+``**/generated/**`` opts it out.
 
 The repo config half is only ever read from the operator's side of the pull request: the
 run-start snapshot on a ``pull_request_target`` run (the base checkout), the base commit
@@ -38,7 +40,6 @@ from __future__ import annotations
 import base64
 import re
 from dataclasses import dataclass, field
-from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
@@ -46,8 +47,8 @@ from loguru import logger
 from mergecraft.classify.generated_files import (
     FileKind,
     classify_path,
-    finding_survives_generated_policy,
 )
+from mergecraft.classify.path_globs import path_full_matches_glob
 from mergecraft.diff import parse_diff
 
 if TYPE_CHECKING:
@@ -62,7 +63,7 @@ DEFAULT_IGNORE_PATHS: Final[tuple[str, ...]] = (
     "**/package-lock.json",
 )
 """Default globs. ``**/*.lock`` covers ``uv.lock``, ``Cargo.lock``, ``poetry.lock`` and
-``yarn.lock``; generated and minified files are matched by
+``yarn.lock``; minified files are matched by
 :func:`mergecraft.classify.generated_files.classify_path` on top of these."""
 
 IGNORED_PATHS_HEADING: Final[str] = "### Not reviewed (ignored by config)"
@@ -103,53 +104,18 @@ def parse_ignore_paths(raw: str | Iterable[str] | None) -> list[str]:
     return list(out)
 
 
-@lru_cache(maxsize=256)
-def _glob_regex(pattern: str) -> re.Pattern[str]:
-    parts: list[str] = []
-    i = 0
-    n = len(pattern)
-    while i < n:
-        char = pattern[i]
-        if pattern.startswith("**", i):
-            i += 2
-            if i < n and pattern[i] == "/":
-                i += 1
-                parts.append("(?:.*/)?")
-            else:
-                parts.append(".*")
-            continue
-        if char == "*":
-            parts.append("[^/]*")
-        elif char == "?":
-            parts.append("[^/]")
-        elif char == "[":
-            end = pattern.find("]", i + 1)
-            if end == -1:
-                parts.append(re.escape(char))
-            else:
-                body = pattern[i + 1 : end]
-                if body.startswith("!"):
-                    body = "^" + body[1:]
-                parts.append(f"[{body}]")
-                i = end
-        else:
-            parts.append(re.escape(char))
-        i += 1
-    return re.compile("".join(parts) + r"\Z")
-
-
 def glob_matches(pattern: str, path: str) -> bool:
     """Return whether ``pattern`` matches the whole repository-relative ``path``.
+
+    The dialect is the one policy scopes and declared Scope paths read
+    (:func:`mergecraft.classify.path_globs.path_full_matches_glob`), so one glob
+    means the same thing in ``review.ignorePaths`` and in a policy rule.
 
     Examples:
         >>> glob_matches("**/*.lock", "uv.lock"), glob_matches("*.md", "docs/a.md")
         (True, False)
     """
-    normalized = path.replace("\\", "/").removeprefix("./")
-    try:
-        return _glob_regex(pattern).match(normalized) is not None
-    except re.error:
-        return False
+    return path_full_matches_glob(pattern, path)
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,7 +124,7 @@ class ReviewIgnore:
 
     Attributes:
         patterns: Every glob in force (defaults first, then config, then the input).
-        generated_defaults: Whether generated and minified files are ignored too.
+        generated_defaults: Whether minified files are ignored too (the defaults are on).
         source: Where the repo-config half came from (for the run log).
         detail: Why the repo-config half was dropped, when it was.
     """
@@ -176,18 +142,16 @@ class ReviewIgnore:
     def is_ignored(self, path: str, *, changed_paths: Sequence[str] = ()) -> bool:
         """Return whether ``path`` is kept out of review.
 
-        ``changed_paths`` lets the generated-file rule keep a generated output in scope
-        when its generator config changed in the same pull request.
+        The built-in default drops minified bundles (``*.min.js``, ``*.min.css``) by
+        name. A path under a ``generated/`` directory is reviewed unless a glob names
+        it: the directory name alone does not prove the file is generator output.
+        ``changed_paths`` is accepted for callers that pass the pull request's change
+        set; the name-only rule does not read it.
         """
+        del changed_paths
         if any(glob_matches(pattern, path) for pattern in self.patterns):
             return True
-        if not self.generated_defaults:
-            return False
-        if classify_path(path) not in {FileKind.GENERATED, FileKind.MINIFIED}:
-            return False
-        return not finding_survives_generated_policy(
-            path, change={"changed_paths": list(changed_paths) or [path]}
-        )
+        return self.generated_defaults and classify_path(path) == FileKind.MINIFIED
 
     def all_ignored(self, paths: Sequence[str], *, changed_paths: Sequence[str] = ()) -> bool:
         """Return whether every path one change names is ignored.

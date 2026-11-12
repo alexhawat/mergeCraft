@@ -2338,6 +2338,7 @@ async def _triage_gate(ctx: RunContext) -> SkipAgentReview | LiteAgentReview | N
         config=config,
         operator_owned=ctx.settings_snapshot_operator_owned,
         loader=load_triage_inputs,
+        instruction_extra_filenames=ctx.settings.review.instruction_extra_filenames,
     )
     ctx.tool_state.triage = decision
     if decision.tier == "lite" and inputs is not None:

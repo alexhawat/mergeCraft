@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from fnmatch import fnmatch
 from typing import TYPE_CHECKING, Any, Final
 
+from mergecraft.classify.path_globs import path_full_matches_glob
 from mergecraft.policy.schema import PolicyRule, parse_rule
 from mergecraft.policy.scoping import ScopeContext, resolve_effective_rules
 
@@ -125,7 +125,7 @@ def simulate_rule(
             continue
         if scope_path is None:
             continue
-        if any(fnmatch(str(path), str(scope_path)) for path in paths):
+        if any(path_full_matches_glob(str(scope_path), str(path)) for path in paths):
             triggered.append(number)
     return SimulationReport(triggered=tuple(triggered))
 

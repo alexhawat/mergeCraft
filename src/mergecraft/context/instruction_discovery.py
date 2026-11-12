@@ -30,7 +30,7 @@ from mergecraft.utils.fence import SAFETY_NOTE, Fence, render_untrusted
 from mergecraft.utils.path_confinement import resolved_within_root
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Collection, Mapping, Sequence
 
 _REPO_INSTRUCTIONS_HEADER = "************* REPO INSTRUCTIONS *************"
 _REVIEW_SKILLS_HEADER = "************* REVIEW SKILLS *************"
@@ -237,6 +237,31 @@ def is_review_skill_path(rel_path: str) -> bool:
     if parent in _REVIEW_SKILL_DIR_NAMES:
         return True
     return normalized.startswith(".github/skills/")
+
+
+def is_instruction_path(rel_path: str, *, extra_filenames: Collection[str] = ()) -> bool:
+    """Whether discovery reads ``rel_path`` as an instruction or skill source.
+
+    The same predicate the discovery walk applies to each candidate, before the
+    directory exclusions: any ``SKILL.md`` / ``AGENTS.md`` / ``CLAUDE.md`` /
+    ``GEMINI.md``, Copilot instructions, Cursor and Windsurf rules, and the
+    ``instructionExtraFilenames`` names at the repository root. Callers that must
+    never treat such a file as inert text (the triage ``prose`` recognizer) read
+    this rather than keeping a second list.
+
+    Args:
+        rel_path (str): A repo-relative path (``\\`` is read as ``/``).
+        extra_filenames (Collection[str], optional): ``review.instructionExtraFilenames``.
+
+    Returns:
+        bool: Whether the path names an instruction or skill source.
+
+    Examples:
+        >>> is_instruction_path("docs/review/SKILL.md"), is_instruction_path("README.md")
+        (True, False)
+    """
+    normalized = rel_path.replace("\\", "/").removeprefix("./")
+    return _is_instruction_rel(normalized, extras=frozenset(extra_filenames))
 
 
 def review_skill_sort_key(rel_path: str) -> tuple[int, str]:
@@ -962,6 +987,7 @@ __all__ = [
     "discover_instruction_paths",
     "discover_review_skill_paths",
     "hash_injected_instructions",
+    "is_instruction_path",
     "is_review_skill_path",
     "reference_link_targets",
     "render_review_context",
