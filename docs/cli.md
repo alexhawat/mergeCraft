@@ -115,19 +115,19 @@ needs a new review.
 | `mergecraft describe` | Print a PR title, summary, walkthrough, risk areas, and testing notes. |
 | `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, workflow auth, and MCP wiring. |
 | `mergecraft eval add` | Add a case to the bank. |
-| `mergecraft eval add-incident` | Add an incident-derived structural case (postmortem PR + revert/fix) (#1163). |
+| `mergecraft eval add-incident` | Add an incident-derived structural case (postmortem PR + revert/fix). |
 | `mergecraft eval adjudicate <baseline>` | Record who adjudicated one baseline label, enforcing repo policy. |
-| `mergecraft eval bench` | Join structural decision replay with a live finding-location run (#140, B3). |
-| `mergecraft eval convergence` | Score multi-round convergence scenarios and write a versioned result set (RC6). |
+| `mergecraft eval bench` | Join structural decision replay with a live finding-location run. |
+| `mergecraft eval convergence` | Score multi-round convergence scenarios and write a versioned result set. |
 | `mergecraft eval gate` | Check the eval bank's integrity and adversarial corpora — the CI-safe half. |
 | `mergecraft eval ingest` | Ingest recorded dismissal signals into the structural eval bank. |
 | `mergecraft eval judge-calibration` | Evaluate saved judge verdicts offline against frozen human references. |
 | `mergecraft eval list` | List cases in the bank. |
-| `mergecraft eval promote <case-id>` | Promote a case into a permanent pytest test file (#44). |
+| `mergecraft eval promote <case-id>` | Promote a case into a permanent pytest test file. |
 | `mergecraft eval publish-benchmark` | Validate two saved provider runs and write an auditable report. |
 | `mergecraft eval replay <case-id>` | Replay a case and report the diff. |
-| `mergecraft eval replay-bank` | Replay the eval bank and write a versioned benchmark result set (#140). |
-| `mergecraft eval rescore-delta` | Compare two structural replay result sets (base vs head) (#1164, advisory). |
+| `mergecraft eval replay-bank` | Replay the eval bank and write a versioned benchmark result set. |
+| `mergecraft eval rescore-delta` | Compare two structural replay result sets (base vs head); advisory. |
 | `mergecraft eval score <actual> <expected>` | Score review findings against a frozen benchmark baseline. |
 | `mergecraft eval trajectory-gate` | Compare a candidate trajectory report against a frozen baseline. |
 | `mergecraft eval trajectory-score --labels LABELS` | Score the deterministic trajectory auditor against frozen labels. |
@@ -137,7 +137,7 @@ needs a new review.
 | `mergecraft findings carryover --pr N` | File one issue per unresolved mergeCraft finding. Dry run unless `--apply`. |
 | `mergecraft findings export --pr N` | Print the findings a merge would bury. Never writes anything. |
 | `mergecraft findings ledger --pr N` | Print the open-PR finding ledger from formal reviews. Never writes. |
-| `mergecraft findings outcomes --pr N` | Advisory human outcomes for published mergeCraft findings (#1165). |
+| `mergecraft findings outcomes --pr N` | Advisory human outcomes for published mergeCraft findings. |
 | `mergecraft gha token` | Acquire a GitHub App installation token, or revoke it with `--post`. |
 | `mergecraft health run` | Emit JSON health status for the running mergeCraft installation. |
 | `mergecraft init` | Scaffold `.mergecraft/config.yaml` and an example workflow (local, no API). |
@@ -186,7 +186,7 @@ needs a new review.
 | `mergecraft provider enable <label>` | Authenticate one provider — the enable half of the toggle. |
 | `mergecraft provider harnesses` | List supported agent harnesses (generated from code). |
 | `mergecraft provider list` | List registered provider labels. |
-| `mergecraft provider migrate` | Migrate legacy `*_API_KEY` env vars into indexed provider registry layout (#483). |
+| `mergecraft provider migrate` | Migrate legacy `*_API_KEY` env vars into indexed provider registry layout. |
 | `mergecraft provider status` | Show the reviewer roster, credentials, wiring, and dispatch order. |
 | `mergecraft replay` | Replay a stored review run from local traces (read-only). |
 | `mergecraft requirements explain <requirement-id>` | Explain one requirement by id; unknown ids are an error. |
@@ -203,7 +203,7 @@ needs a new review.
 | `mergecraft trust set-agent-sandbox <tier>` | Write `trust.agentSandbox` to the committed config at `--cwd`. |
 | `mergecraft trust set-self-review <level>` | Write `trust.selfReview` to the committed config at `--cwd`. |
 | `mergecraft trust show` | Show the effective trust policy, level, and resolution source. |
-| `mergecraft update` | Reinstall mergecraft from GitHub using `uv tool install --reinstall`. |
+| `mergecraft update` | Reinstall mergecraft at the latest release, keeping installed extras. |
 | `mergecraft verify-behavior` | Reproduce a bug or verify acceptance criteria in a running app. |
 | `mergecraft version` | Show the mergeCraft package version. |
 | `mergecraft watch --pr N` | Stream a PR/issue timeline as one JSON line per new event. |
