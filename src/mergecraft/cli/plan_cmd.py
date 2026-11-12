@@ -103,25 +103,19 @@ def build_plan_report(
     enabled = _profile_analyzers(profile=profile, repo_root=repo_root, changed=changed)
     bounds = resolve_run_bounds(settings=settings)
     toolset = sorted(cls.value for cls in REVIEWER_ALLOWED_TOOL_CLASSES)
-    with tempfile.TemporaryDirectory(prefix="mergecraft-plan-") as tmp:
-        materialization = materialize_diff(cwd=repo_root, out_dir=Path(tmp))
-        prompt = build_offline_review_prompt(
-            diff_path=materialization.path,
-            base_ref=materialization.base_ref,
-            extra=None,
-            json_mode=False,
-        )
-        base_ref = materialization.base_ref
-        # PR #242 review finding ``e8bc195570ae6f1cc8ab5bc6`` — the
-        # ``TemporaryDirectory`` closes as soon as the ``with`` block ends,
-        # so the raw ``materialization.path`` would point at a missing file.
-        # Persist the materialized diff to a path the consumer of the
-        # report can read after return (sibling to ``.mergecraft/`` per S1).
-        diff_dir = repo_root / ".mergecraft"
-        diff_dir.mkdir(parents=True, exist_ok=True)
-        stable_diff = diff_dir / "plan-review.diff"
-        stable_diff.write_text(materialization.path.read_text(encoding="utf-8"), encoding="utf-8")
-        diff_path = str(stable_diff)
+    # The diff must outlive this call (callers read ``diff_path`` after return)
+    # but must never land in the repository: a file there would join the next
+    # review's diff as an untracked addition and dirty the checkout.
+    plan_dir = Path(tempfile.mkdtemp(prefix="mergecraft-plan-"))
+    materialization = materialize_diff(cwd=repo_root, out_dir=plan_dir)
+    prompt = build_offline_review_prompt(
+        diff_path=materialization.path,
+        base_ref=materialization.base_ref,
+        extra=None,
+        json_mode=False,
+    )
+    base_ref = materialization.base_ref
+    diff_path = str(materialization.path)
     return {
         "model_chain": model_slugs,
         "agent": agent_label,

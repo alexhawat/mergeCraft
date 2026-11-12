@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import tempfile
 from pathlib import Path
 
 import typer
@@ -31,25 +32,31 @@ from mergecraft.pr.similar import (
     find_similar_issues,
 )
 from mergecraft.review.split_advisor import recommend_pr_split
-from mergecraft.utils.git_hardening import git_argv
+from mergecraft.utils.offline_diff import materialize_diff
 
 
 def _read_diff(repo_root: Path) -> str:
+    """Return the branch diff ``review`` would see: merge base to working tree.
+
+    ``git diff HEAD`` misses everything already committed on the branch, so a
+    PR whose work is committed was described as zero changed files. Reuse the
+    review materializer instead (default base, untracked additions included).
+    Outside a git checkout, or when no base resolves, the diff is empty.
+
+    Args:
+        repo_root (Path): Repository root to diff.
+
+    Returns:
+        str: Unified diff text, or ``""`` when none can be produced.
+    """
     if not (repo_root / ".git").exists():
         return ""
-    try:
-        completed = subprocess.run(
-            git_argv(["diff", "HEAD"]),
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return ""
-    if completed.returncode != 0:
-        return ""
-    return completed.stdout
+    with tempfile.TemporaryDirectory(prefix="mergecraft-describe-") as tmp:
+        try:
+            materialization = materialize_diff(cwd=repo_root, out_dir=Path(tmp))
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            return ""
+        return materialization.path.read_text(encoding="utf-8")
 
 
 def _line_counts(diff: str) -> tuple[int, int]:
