@@ -8,16 +8,29 @@ models (mirroring ``mergecraft.analyzers.finding.findings_output_schema`` at
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
+from pathlib import Path
+from typing import Any
 
-from tests.analyzers.support import import_module as import_finding_module
-from tests.evidence.support import import_module
+from mergecraft.analyzers import finding as finding_mod
+from mergecraft.evidence import packet as packet_mod
+
+_FINGERPRINTS = Path(__file__).with_name("packet_schema_fingerprints.json")
+
+
+def _fingerprint(schema: dict[str, Any]) -> str:
+    canonical = json.dumps(schema, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _schema_fingerprint() -> str:
+    return _fingerprint(packet_mod.packet_output_schema())
 
 
 def test_evidence_packet_schema_is_derived_not_handwritten() -> None:
     """The packet's JSON Schema must be derived from the Pydantic models (D3)."""
-    finding_mod = import_finding_module("mergecraft.analyzers.finding")
-    packet_mod = import_module("mergecraft.evidence.packet")
 
     schema = packet_mod.packet_output_schema()
     assert isinstance(schema, dict)
@@ -40,8 +53,6 @@ def test_evidence_packet_schema_is_derived_not_handwritten() -> None:
 
 def test_packet_findings_match_finding_model_json_schema() -> None:
     """Each ``findings`` item must match ``Finding.model_json_schema()`` (D3)."""
-    finding_mod = import_finding_module("mergecraft.analyzers.finding")
-    packet_mod = import_module("mergecraft.evidence.packet")
 
     packet_cls = packet_mod.MergeEvidencePacket
     fields = packet_cls.model_fields
@@ -58,7 +69,6 @@ def test_packet_findings_match_finding_model_json_schema() -> None:
 
 def test_evidence_packet_requires_schema_version() -> None:
     """``schema_version`` is a required top-level field (D7)."""
-    packet_mod = import_module("mergecraft.evidence.packet")
     fields = packet_mod.MergeEvidencePacket.model_fields
     assert "schema_version" in fields
     # ``is_required`` is True when no default is supplied.
@@ -73,7 +83,6 @@ def test_packet_schema_declares_run_bound_review_fields() -> None:
     the orchestrator; neither is agent-controlled. The schema is derived from
     the model, so the properties must appear there too (D3).
     """
-    packet_mod = import_module("mergecraft.evidence.packet")
 
     fields = packet_mod.MergeEvidencePacket.model_fields
     assert "reviewed_head_sha" in fields
@@ -88,7 +97,6 @@ def test_packet_schema_declares_run_bound_review_fields() -> None:
 
 def test_packet_run_bound_fields_default_to_none() -> None:
     """A packet built before the fields existed still validates (P-6, forward-compatible)."""
-    packet_mod = import_module("mergecraft.evidence.packet")
 
     packet = packet_mod.MergeEvidencePacket(**_packet_kwargs())
 
@@ -97,28 +105,47 @@ def test_packet_run_bound_fields_default_to_none() -> None:
 
 
 def test_packet_schema_version_is_pinned() -> None:
-    """The current schema version is a literal the suite pins (D7).
+    """Any change to the packet wire schema must come with a version bump (D7).
 
-    Any field-level change to the packet (additive or otherwise) that is not
-    accompanied by a version bump must cause this assertion to fail, so the
-    reviewer catches silent schema drift at the gate.
+    ``packet_schema_fingerprints.json`` maps each released ``PACKET_SCHEMA_VERSION``
+    to the sha256 of the canonical ``packet_output_schema()`` JSON. Changing a
+    field without bumping the version changes the hash under an existing key and
+    fails here; bumping the version without recording its hash fails too.
+
+    To update after an intentional change: bump ``PACKET_SCHEMA_VERSION``, then add
+    ``"<new version>": "<hash printed by this failure>"`` to the JSON file.
     """
-    packet_mod = import_module("mergecraft.evidence.packet")
+    version = packet_mod.PACKET_SCHEMA_VERSION
+    assert packet_mod.MergeEvidencePacket.model_fields["schema_version"].default == version
 
-    # The packet must publish a single source of truth for the current version.
-    assert hasattr(packet_mod, "PACKET_SCHEMA_VERSION")
-    pinned = packet_mod.PACKET_SCHEMA_VERSION
-    assert isinstance(pinned, str)
-    assert pinned.count(".") == 2  # major.minor.patch
+    pins = json.loads(_FINGERPRINTS.read_text(encoding="utf-8"))
+    actual = _schema_fingerprint()
+    assert version in pins, (
+        f"PACKET_SCHEMA_VERSION {version} has no pinned fingerprint; "
+        f'add "{version}": "{actual}" to {_FINGERPRINTS.name}'
+    )
+    assert pins[version] == actual, (
+        f"the packet schema changed without bumping PACKET_SCHEMA_VERSION ({version}); "
+        f"bump it and pin the new fingerprint {actual}"
+    )
 
-    # And the same literal must appear in the model field default.
-    fields = packet_mod.MergeEvidencePacket.model_fields
-    assert fields["schema_version"].default == pinned
+
+def test_packet_schema_fingerprint_is_stable_and_sensitive() -> None:
+    """An unchanged rebuild hashes identically; adding or removing one property changes it."""
+    baseline = _fingerprint(packet_mod.packet_output_schema())
+    assert _fingerprint(packet_mod.packet_output_schema()) == baseline
+
+    added = copy.deepcopy(packet_mod.packet_output_schema())
+    added["properties"]["extra_wire_field"] = {"type": "string"}
+    assert _fingerprint(added) != baseline
+
+    removed = copy.deepcopy(packet_mod.packet_output_schema())
+    removed["properties"].pop("reviewed_head_sha")
+    assert _fingerprint(removed) != baseline
 
 
 def test_packet_schema_round_trip_json_serializes() -> None:
     """The derived schema must validate the serialized form of a real packet."""
-    packet_mod = import_module("mergecraft.evidence.packet")
 
     packet = packet_mod.MergeEvidencePacket(**_packet_kwargs())
     serialized = packet.model_dump_json()
@@ -128,7 +155,7 @@ def test_packet_schema_round_trip_json_serializes() -> None:
     json.loads(serialized)
 
 
-def _packet_kwargs() -> dict[str, object]:
+def _packet_kwargs() -> dict[str, Any]:
     from tests.evidence.support import sample_minimal_packet_dict
 
     return sample_minimal_packet_dict()

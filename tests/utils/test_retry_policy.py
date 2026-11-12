@@ -13,7 +13,6 @@ Contracts:
 
 from __future__ import annotations
 
-import inspect
 from typing import Any
 
 import httpx
@@ -129,13 +128,30 @@ class TestRetryShape:
         assert isinstance(retrying.stop, tenacity.stop_after_attempt)
         assert retrying.stop.max_attempt_number <= 5
 
-    def test_cursor_cloud_client_has_retry_policy(self) -> None:
-        from mergecraft.integrations.cursor_cloud import client as cursor_client
+    async def test_cursor_cloud_read_recovers_from_a_429(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A rate-limited GET is retried and the run then succeeds."""
+        from mergecraft.integrations.cursor_cloud.client import CursorCloudClient
 
-        source = inspect.getsource(cursor_client)
-        assert "retry" in source, (
-            "CursorCloudClient has no retry policy — transient 429/5xx fail the run"
-        )
+        url = "https://api.cursor.com/v1/agents/r/runs/r"
+        responses = [
+            httpx.Response(429, json={"message": "slow down"}, request=httpx.Request("GET", url)),
+            httpx.Response(200, json={"status": "FINISHED"}, request=httpx.Request("GET", url)),
+        ]
+        calls: list[str] = []
+
+        async def fake_request(self: httpx.AsyncClient, method: str, url: str, **_: Any) -> Any:
+            calls.append(method)
+            return responses[len(calls) - 1]
+
+        monkeypatch.setattr(httpx.AsyncClient, "request", fake_request)
+        monkeypatch.setattr(CursorCloudClient._request.retry, "wait", tenacity.wait_fixed(0))
+
+        run = await CursorCloudClient(api_key="k").get_run("r")
+
+        assert run == {"status": "FINISHED"}
+        assert calls == ["GET", "GET"]
 
 
 class TestRetryableCliFailure:

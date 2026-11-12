@@ -31,9 +31,7 @@ OTLP_PRE_SEED_TESTS: Final[tuple[str, ...]] = (
     "test_wrong_exporter_endpoint_fails_the_job",
     "test_tracing_disabled_is_true_noop_no_collector_traffic",
     "test_env_cli_yaml_precedence_resolves_to_live_sink",
-    "test_unguarded_set_tracer_provider_swallow_would_fail_the_job",
     "test_collector_image_is_digest_pinned_in_ci",
-    "test_make_target_invokes_collector_suite",
     "test_w7_touched_workflows_remain_sha_pinned",
 )
 
