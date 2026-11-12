@@ -22,6 +22,7 @@ Exports:
 
 from __future__ import annotations
 
+import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -36,6 +37,8 @@ if TYPE_CHECKING:
 #: Directory options that name the repository a command acts on.
 _REPO_DIR_PARAM_NAMES = frozenset({"cwd", "repo_root", "repo"})
 _IMPLICIT_SOURCES = frozenset({ParameterSource.DEFAULT, ParameterSource.DEFAULT_MAP})
+#: Commands whose directory options already carry the resolver (install once).
+_INSTALLED: weakref.WeakSet[click.Command] = weakref.WeakSet()
 
 
 def target_dir(cwd: Path) -> Path:
@@ -117,12 +120,12 @@ def install_implicit_repo_root(command: click.Command) -> None:
     Args:
         command (click.Command): The command about to be invoked.
     """
-    if getattr(command, "_mergecraft_implicit_repo_root", False):
+    if command in _INSTALLED:
         return
     for param in command.params:
         if _is_repo_dir_option(param):
             param.callback = _root_resolving_callback(param.callback)
-    command._mergecraft_implicit_repo_root = True  # type: ignore[attr-defined]  # — install-once flag is not on Click Command
+    _INSTALLED.add(command)
 
 
 __all__ = ["implicit_repo_root", "install_implicit_repo_root", "target_dir"]

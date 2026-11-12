@@ -37,7 +37,7 @@ from mergecraft.config.settings import RepoSettings
 from mergecraft.config.yaml_unique import ConfigParseError, safe_load_unique
 from mergecraft.evidence.run_manifest import runtime_tool_stamp
 from mergecraft.mcp.ports import port_available, read_env_port
-from mergecraft.models import MODEL_ALIASES
+from mergecraft.models import MODEL_ALIASES, is_auto_tier, resolve_display_alias
 from mergecraft.utils.agent_resolve import has_credentials_for_slug
 from mergecraft.utils.git_hardening import git_argv
 from mergecraft.workflow.auth_manifest import (
@@ -239,6 +239,26 @@ def _probe_slugs(raw: dict[str, Any], workflow: Path) -> tuple[list[str], bool]:
     return slugs, False
 
 
+def _slug_provider(slug: str) -> str:
+    """Return the provider label that authenticates *slug*.
+
+    An auto tier (``auto/efficient``) runs on its target model, so the target's
+    provider is the one that needs the credential.
+
+    Args:
+        slug (str): A configured model slug.
+
+    Returns:
+        str: Lower-case provider label, or ``""`` for an empty slug.
+    """
+    target = slug
+    if is_auto_tier(slug):
+        alias = resolve_display_alias(slug)
+        if alias is not None:
+            target = alias.slug
+    return target.partition("/")[0].strip().lower()
+
+
 def _workflow_auth_probe(root: Path) -> ProbeResult:
     """Check that the consumer workflow passes a stored credential to the Action.
 
@@ -269,7 +289,7 @@ def _workflow_auth_probe(root: Path) -> ProbeResult:
 
     providers: list[str] = []
     for slug in slugs:
-        provider = slug.partition("/")[0].strip().lower()
+        provider = _slug_provider(slug)
         if provider and provider not in providers:
             providers.append(provider)
     if not providers:
@@ -287,7 +307,8 @@ def _workflow_auth_probe(root: Path) -> ProbeResult:
         bound = sorted({secret for env_key, secret in bindings if env_key in keys})
         fix = f"run mergecraft provider auth {provider} --scope github"
         if not bound:
-            problems.append(f"{provider}: the workflow passes no credential ({fix})")
+            accepted = "this roster slot accepts" if require_all else "for it"
+            problems.append(f"{provider}: the workflow passes no credential {accepted} ({fix})")
         elif stored is None:
             unverified.append(provider)
         elif not stored.intersection(bound):

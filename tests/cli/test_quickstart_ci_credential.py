@@ -143,3 +143,44 @@ def test_doctor_reports_unverified_secrets_without_gh(
     code, out = _invoke("doctor")
     assert code == 0, out
     assert re.search(r"workflow auth\W+warn", out), out
+
+
+def test_doctor_checks_an_auto_tier_against_its_target_provider(
+    consumer_repo: Path, stored_secrets: dict[str, str]
+) -> None:
+    """``auto/intelligent`` runs on Anthropic, so the Anthropic secret satisfies it."""
+    config = consumer_repo / ".mergecraft" / "config.yaml"
+    text = config.read_text(encoding="utf-8").replace(
+        "- anthropic/claude-sonnet", "- auto/intelligent"
+    )
+    config.write_text(text, encoding="utf-8")
+    stored_secrets["CLAUDE_CODE_OAUTH_TOKEN"] = "stored"
+
+    code, out = _invoke("doctor")
+
+    assert code == 0, out
+    assert "provider auth auto" not in out
+    assert re.search(r"workflow auth\W+ok", out), out
+
+
+def test_doctor_names_the_roster_slot_for_a_flat_only_oauth_binding(
+    consumer_repo: Path, stored_secrets: dict[str, str]
+) -> None:
+    """A roster slot needs the indexed oauth secret; the flat scaffold binding is not enough.
+
+    Run start validates roster slots against the registry keys only, so doctor
+    must fail here rather than predict a green run.
+    """
+    config = consumer_repo / ".mergecraft" / "config.yaml"
+    config.write_text(
+        config.read_text(encoding="utf-8")
+        + "agents:\n  reviewer:\n    role: reviewer\n    modelChain:\n"
+        + "      - anthropic/claude-opus\n",
+        encoding="utf-8",
+    )
+    stored_secrets["CLAUDE_CODE_OAUTH_TOKEN"] = "stored"
+
+    code, out = _invoke("doctor")
+
+    assert code == CLI_CONFIGURATION_EXIT_CODE, out
+    assert "no credential this roster slot accepts" in " ".join(out.split()), out
