@@ -14,7 +14,7 @@ import typer
 
 from mergecraft.analyzers.scope import changed_paths_from_scope, parse_diff_scope
 from mergecraft.classify.change_clustering import cluster_changes
-from mergecraft.cli.diff_base import target_base
+from mergecraft.cli.diff_base import materialize_branch_diff
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
 from mergecraft.config.settings import load_repo_settings
@@ -34,7 +34,6 @@ from mergecraft.pr.similar import (
     find_similar_issues,
 )
 from mergecraft.review.split_advisor import recommend_pr_split
-from mergecraft.utils.offline_diff import materialize_diff
 
 
 def _read_diff(repo_root: Path, base: str | None = None) -> str:
@@ -63,11 +62,11 @@ def _read_diff(repo_root: Path, base: str | None = None) -> str:
         return ""
     with tempfile.TemporaryDirectory(prefix="mergecraft-describe-") as tmp:
         try:
-            resolved = base if base is not None else target_base(repo_root)
-            materialization = materialize_diff(cwd=repo_root, out_dir=Path(tmp), base=resolved)
-        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
-            if base is not None:
-                cli_bail(f"could not diff against --base {base!r}: {exc}")
+            materialization = materialize_branch_diff(cwd=repo_root, out_dir=Path(tmp), base=base)
+        except typer.Exit:
+            # ``typer.Exit`` subclasses ``RuntimeError``: a bad ``--base`` must still exit 30.
+            raise
+        except (OSError, RuntimeError, subprocess.SubprocessError):
             return ""
         return materialization.path.read_text(encoding="utf-8")
 

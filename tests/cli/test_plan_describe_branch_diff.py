@@ -157,3 +157,42 @@ def test_plan_after_push_u_diffs_against_the_target_branch(
     pinned = build_plan_report(cwd=root, base="origin/feat")
     assert pinned["base_ref"] == "origin/feat"
     assert "feature.py" not in Path(str(pinned["diff_path"])).read_text(encoding="utf-8")
+
+
+def test_plan_unknown_base_is_a_configuration_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``plan --base <unknown>`` prints one error line and exits 30, like ``describe``."""
+    root = _pushed_branch_repo(tmp_path)
+    monkeypatch.chdir(root)
+    result = CliRunner().invoke(
+        app, ["plan", "--cwd", str(root), "--base", "no-such-ref"], env=_ENV
+    )
+    output = result.stdout + result.stderr
+    assert result.exit_code == 30, (result.exception, output)
+    assert "Traceback" not in output
+    assert "no-such-ref" in output
+
+
+def test_target_base_on_main_never_picks_a_sibling_branch(tmp_path: Path) -> None:
+    """On ``main`` with ``origin/HEAD`` unset, ``develop`` is not the base."""
+    from mergecraft.cli.diff_base import target_base
+
+    remote = tmp_path / "remote.git"
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(remote))
+    root = tmp_path / "work"
+    root.mkdir()
+    _repo_with_branch_commit(root)
+    _git(root, "branch", "-q", "develop", "feat")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "remote", "add", "origin", str(remote))
+    _git(root, "push", "-q", "-u", "origin", "main", "develop")
+    unset = subprocess.run(
+        ["git", "symbolic-ref", "-q", "refs/remotes/origin/HEAD"], cwd=root, check=False
+    )
+    assert unset.returncode != 0
+
+    base = target_base(root)
+
+    assert "develop" not in base
+    assert base in {"origin/main", "main", "HEAD^"}

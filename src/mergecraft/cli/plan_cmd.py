@@ -11,7 +11,7 @@ from rich.table import Table
 
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
 from mergecraft.cli.consoles import err_console as console
-from mergecraft.cli.diff_base import target_base
+from mergecraft.cli.diff_base import materialize_branch_diff
 from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
 )
@@ -26,7 +26,6 @@ from mergecraft.utils.agent_resolve import (
     resolve_runtime_agent,
 )
 from mergecraft.utils.git_hardening import git_argv
-from mergecraft.utils.offline_diff import materialize_diff
 from mergecraft.utils.run_bounds import resolve_run_bounds
 from mergecraft.utils.source_resolve import SourceResolverSpec, resolve_workspace
 
@@ -110,8 +109,7 @@ def build_plan_report(
     # review's diff as an untracked addition and dirty the checkout.
     plan_dir = Path(tempfile.mkdtemp(prefix="mergecraft-plan-"))
     # Like ``describe``: the branch's own ``@{upstream}`` would hide pushed work.
-    resolved_base = base if base is not None else target_base(repo_root)
-    materialization = materialize_diff(cwd=repo_root, out_dir=plan_dir, base=resolved_base)
+    materialization = materialize_branch_diff(cwd=repo_root, out_dir=plan_dir, base=base)
     prompt = build_offline_review_prompt(
         diff_path=materialization.path,
         base_ref=materialization.base_ref,
