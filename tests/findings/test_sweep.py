@@ -309,3 +309,78 @@ async def test_a_thread_with_unread_comments_is_not_swept() -> None:
     plan = await plan_carryover(FakeGitHub(threads=[thread]), "o", "r", 7)  # type: ignore[arg-type]
 
     assert plan.to_file == []
+
+
+_PUBLISHERS = frozenset({"mergecraft[bot]"})
+
+
+class _PullStateGitHub(FakeGitHub):
+    """FakeGitHub that also answers ``get_pull`` with a fixed state."""
+
+    def __init__(self, *, state: str, merged: bool = False, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._state = state
+        self._merged = merged
+        self.pull_reads = 0
+
+    async def get_pull(self, owner: str, repo: str, pull_number: int) -> dict[str, Any]:
+        self.pull_reads += 1
+        return {"number": pull_number, "state": self._state, "merged": self._merged}
+
+
+def _ledger_with(fingerprint: str, state: str) -> list[Any]:
+    from mergecraft.findings.ledger import FindingLedger
+
+    book = FindingLedger()
+    book.record(fingerprint, state, source="inline", round_index=1)  # type: ignore[arg-type]
+    return book.records()
+
+
+async def test_a_published_finding_on_a_merged_pr_is_filed_despite_its_ledger_row() -> None:
+    """The publish path records every inline finding as ``open``; merge must still file it."""
+    github = _PullStateGitHub(state="closed", merged=True)
+
+    plan = await plan_carryover(
+        github,  # type: ignore[arg-type]
+        "o",
+        "r",
+        7,
+        publishers=_PUBLISHERS,
+        ledger_records=_ledger_with(_FP, "open"),
+    )
+
+    assert [f.fingerprint for f in plan.to_file] == [_FP]
+    assert plan.already_filed == []
+    assert github.pull_reads == 1
+
+
+async def test_a_ledger_row_still_skips_the_finding_while_the_pr_is_open() -> None:
+    github = _PullStateGitHub(state="open")
+
+    plan = await plan_carryover(
+        github,  # type: ignore[arg-type]
+        "o",
+        "r",
+        7,
+        publishers=_PUBLISHERS,
+        ledger_records=_ledger_with(_FP, "open"),
+    )
+
+    assert plan.to_file == []
+    assert [f.fingerprint for f in plan.already_filed] == [_FP]
+
+
+async def test_the_pr_state_is_not_read_when_no_finding_has_a_ledger_row() -> None:
+    github = _PullStateGitHub(state="closed", merged=True)
+
+    plan = await plan_carryover(
+        github,  # type: ignore[arg-type]
+        "o",
+        "r",
+        7,
+        publishers=_PUBLISHERS,
+        ledger_records=_ledger_with(_OTHER_FP, "deferred"),
+    )
+
+    assert [f.fingerprint for f in plan.to_file] == [_FP]
+    assert github.pull_reads == 0

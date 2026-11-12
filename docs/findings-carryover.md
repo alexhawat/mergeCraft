@@ -67,12 +67,20 @@ which is what makes it safe on a trigger that can fire more than once.
 While a pull request is open, mergeCraft keeps a **finding ledger** in its
 formal PR reviews. Each row is an HTML marker:
 
-`<!-- mergecraft-ledger:v1:<fingerprint>:<state> -->`
+`<!-- mergecraft-ledger:v2:<fingerprint>:<state>:<metadata> -->`
 
 The fingerprint is the same review-taxonomy hash stamped on inline comments.
-States include `open`, `deferred`, `unpublished`, and `withdrawn` — findings
-that overflow the inline budget, miss the verification budget, or are dropped by
-the verifier before publication.
+`<metadata>` is URL-encoded JSON with the optional fields `round_index`,
+`recorded_at` (ISO 8601 UTC), `source` and `reason`. Older reviews may still
+carry v1 rows (`<!-- mergecraft-ledger:v1:<fingerprint>:<state> -->`), which are
+read but never written. States are `open`, `resolved-by-change`, `stale`,
+`disputed`, `waived`, `deferred`, `unpublished` and `withdrawn`. Every inline
+finding the review publishes is recorded as `open`; `deferred`, `unpublished` and
+`withdrawn` cover findings that overflow the inline budget, miss the
+verification budget, or are dropped by the verifier before publication.
+Only reviews written by an expected publisher (the reviewer App's bot login or
+the PAT the run publishes with — never the shared `github-actions[bot]`) are
+folded into the ledger; see `docs/dev/self-review.md` for that authorship rule.
 These markers are hidden in GitHub's rendered review. A withdrawn fingerprint
 remains in the ledger for later runs, but its finding is absent from the visible
 review body and inline comments.
@@ -86,9 +94,11 @@ mergecraft findings ledger --pr 161 --output-format json
 
 **No double-filing.** The ledger never creates GitHub issues. Post-merge
 carryover (`findings carryover`) files issues for unresolved **published**
-threads only. Fingerprints already recorded in the open-PR ledger are skipped by
-carryover while the pull request is open, so deferred findings are disclosed on
-the PR without spawning duplicate issues.
+threads only, so deferred findings, which never became a thread, are disclosed
+on the PR without spawning issues. A sweep run while the pull request is still
+open skips every fingerprint the ledger records. Once the pull request is merged
+or closed, the ledger no longer suppresses anything, so every unresolved
+published thread is filed.
 
 **Serialization precondition.** The final upsert does not re-fetch the live
 comment: the run's own snapshot is authoritative for a comment it owns, which
