@@ -13,10 +13,15 @@
 # reads settings could wedge every merge the moment settings and file disagree.
 #
 # Safety: no PR code is checked out or executed. Reachable from `push` (main
-# only), `schedule` and `workflow_dispatch`. Reading rulesets needs only
-# metadata read on a public repository, so the job runs with `contents: read`
-# and the default GITHUB_TOKEN; it never needs a write-capable or admin secret.
-# The job skips on forks, whose rulesets are not this repository's.
+# only), `schedule` and `workflow_dispatch`. GitHub documents the ruleset read
+# endpoints as needing only Metadata read and as usable without authentication
+# for public resources; anonymous reads of this public repository are verified.
+# Whether the default GITHUB_TOKEN (`contents: read`) is accepted is not
+# verified before merge, so the script sends it, retries once anonymously on
+# 401/403/404 and logs which path worked. Exit 1 means drift; exit 2 means the
+# rulesets could not be read (rate limit or permission), which is not drift. No
+# write-capable or admin secret is ever used. The job skips on forks, whose
+# rulesets are not this repository's.
 name: Ruleset drift
 
 on:

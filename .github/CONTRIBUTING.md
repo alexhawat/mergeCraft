@@ -248,13 +248,18 @@ counts as drift; ids, timestamps, links and bypass actors are left out
 demand. It is not a PR check and not a required context. It fails with the
 diff in the job summary when the live rulesets differ from the file, and when a
 required context names a job no workflow produces (such a check would block
-every PR). It reads rulesets with the default `GITHUB_TOKEN` (`contents: read`);
-no admin secret is involved.
+every PR). GitHub documents the ruleset read endpoints as needing only Metadata
+read and as usable anonymously for public resources; anonymous reads of this
+repository are verified. Whether the default `GITHUB_TOKEN` (`contents: read`) is
+accepted is not verified before merge, so the script sends it, retries once
+anonymously on 401/403/404, and logs which path worked. Exit code 1 is drift;
+exit code 2 means the rulesets could not be read (rate limit or permission), not
+drift. No admin secret is involved.
 
 After an intentional ruleset change, update the expectation in the same breath:
 
 ```bash
-uv run python scripts/check_ruleset_drift.py --write   # needs `gh auth`/GITHUB_TOKEN or a public repo
+uv run python scripts/check_ruleset_drift.py --write   # anonymous read works on this public repo
 git add .github/rulesets.expected.json && git commit
 ```
 

@@ -48,7 +48,7 @@ def test_mergecraft_wait_script_uses_required_list() -> None:
 
 @pytest.mark.skipif(
     os.environ.get("GITHUB_ACTIONS") == "true",
-    reason="GITHUB_TOKEN on PR runners cannot read organization rulesets",
+    reason="runner-token ruleset reads are unverified here; ruleset-drift.yml covers live drift",
 )
 def test_required_verify_checks_file_matches_live_ruleset() -> None:
     if shutil.which("gh") is None:

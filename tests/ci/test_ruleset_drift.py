@@ -7,14 +7,22 @@ Nothing here touches the network: the fetcher is injected.
 from __future__ import annotations
 
 import copy
+import email.message
 import importlib
 import json
+import urllib.error
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from tests.ci.workflow_support import REPO_ROOT
+from tests.ci.workflow_support import (
+    REPO_ROOT,
+    assert_third_party_uses_sha_pinned,
+    job,
+    load_workflow,
+    workflow_on,
+)
 
 REPOSITORY = "alexhawat/mergeCraft"
 _CHECKS = ["Verify (static + build py3.11)", "Verify (tests py3.11 1/2)", "mergecraft review"]
@@ -50,6 +58,7 @@ def _live_rulesets() -> list[dict[str, Any]]:
                         "require_code_owner_review": True,
                         "require_last_push_approval": True,
                         "required_review_thread_resolution": True,
+                        "require_extra_approval_for_unattributed_changes": True,
                         "allowed_merge_methods": ["merge", "squash", "rebase"],
                     },
                 },
@@ -92,21 +101,26 @@ def _live_rulesets() -> list[dict[str, Any]]:
     ]
 
 
-def _fetcher(rulesets: list[dict[str, Any]]) -> Any:
-    calls: list[str] = []
+class _Fetcher:
+    """Fake API: lists and details ``rulesets``, recording every path read."""
 
-    def fetch(path: str) -> Any:
-        calls.append(path)
+    def __init__(self, rulesets: list[dict[str, Any]]) -> None:
+        self.rulesets = rulesets
+        self.calls: list[str] = []
+
+    def __call__(self, path: str) -> Any:
+        self.calls.append(path)
         listing = f"repos/{REPOSITORY}/rulesets"
         if path == listing:
-            return [{"id": r["id"], "name": r["name"]} for r in rulesets]
-        for ruleset in rulesets:
+            return [{"id": r["id"], "name": r["name"]} for r in self.rulesets]
+        for ruleset in self.rulesets:
             if path == f"{listing}/{ruleset['id']}":
                 return ruleset
         raise AssertionError(f"unexpected API path {path}")
 
-    fetch.calls = calls  # type: ignore[attr-defined]
-    return fetch
+
+def _fetcher(rulesets: list[dict[str, Any]]) -> _Fetcher:
+    return _Fetcher(rulesets)
 
 
 def _ci_ruleset(rulesets: list[dict[str, Any]]) -> dict[str, Any]:
@@ -194,6 +208,18 @@ def _review_count_zero(rulesets: list[dict[str, Any]]) -> None:
     rulesets[0]["rules"][2]["parameters"]["required_approving_review_count"] = 0
 
 
+def _narrow_ref_include(rulesets: list[dict[str, Any]]) -> None:
+    rulesets[0]["conditions"]["ref_name"]["include"] = ["refs/heads/pre-0.0.1"]
+
+
+def _add_ref_exclude(rulesets: list[dict[str, Any]]) -> None:
+    _ci_ruleset(rulesets)["conditions"]["ref_name"]["exclude"] = ["refs/heads/main"]
+
+
+def _retarget(rulesets: list[dict[str, Any]]) -> None:
+    rulesets[0]["target"] = "tag"
+
+
 def _drop_integration_id(rulesets: list[dict[str, Any]]) -> None:
     for check in _checks_params(rulesets)["required_status_checks"]:
         check.pop("integration_id", None)
@@ -210,6 +236,9 @@ def _drop_integration_id(rulesets: list[dict[str, Any]]) -> None:
         pytest.param(_remove_ruleset, "require-ci-on-main: ruleset missing live", id="missing"),
         pytest.param(_drop_deletion_rule, "rule deletion: missing live", id="rule-removed"),
         pytest.param(_review_count_zero, "required_approving_review_count", id="review-count"),
+        pytest.param(_narrow_ref_include, "ref include is", id="ref-include-narrowed"),
+        pytest.param(_add_ref_exclude, "ref exclude is", id="ref-exclude-added"),
+        pytest.param(_retarget, "target is 'tag'", id="target-changed"),
         pytest.param(_drop_integration_id, "integration_id is None", id="integration-id"),
     ],
 )
@@ -344,3 +373,133 @@ def test_committed_expectation_is_consistent_with_workflows(
     assert ci["strict_required_status_checks_policy"] is True
     assert "mergecraft review" in contexts
     assert module.unproduced_contexts(expected) == []
+
+
+class _Response:
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    def __enter__(self) -> _Response:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+    def read(self, *_args: object) -> bytes:
+        return self._body
+
+
+def _http_error(code: int, headers: dict[str, str] | None = None) -> urllib.error.HTTPError:
+    message = email.message.Message()
+    for key, value in (headers or {}).items():
+        message[key] = value
+    return urllib.error.HTTPError("https://api.github.com/x", code, "refused", message, None)
+
+
+class _Opener:
+    """Scripted ``urlopen``: each queued item is a body or an HTTPError."""
+
+    def __init__(self, *outcomes: bytes | urllib.error.HTTPError) -> None:
+        self.outcomes = list(outcomes)
+        self.auth: list[str | None] = []
+
+    def __call__(self, request: Any, timeout: int) -> _Response:
+        self.auth.append(request.get_header("Authorization"))
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, urllib.error.HTTPError):
+            raise outcome
+        return _Response(outcome)
+
+
+def test_http_fetch_uses_the_token_when_it_works(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module(monkeypatch)
+    opener = _Opener(b'[{"id": 1}]')
+    assert module.http_fetch("p", token="tok", opener=opener) == [{"id": 1}]
+    assert opener.auth == ["Bearer tok"]
+
+
+@pytest.mark.parametrize(
+    "code", [pytest.param(401, id="401"), pytest.param(403, id="403"), pytest.param(404, id="404")]
+)
+def test_http_fetch_retries_anonymously_when_the_token_is_refused(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], code: int
+) -> None:
+    module = _module(monkeypatch)
+    opener = _Opener(_http_error(code), b'{"ok": true}')
+    assert module.http_fetch("p", token="tok", opener=opener) == {"ok": True}
+    assert opener.auth == ["Bearer tok", None]
+    assert "anonymous read succeeded" in capsys.readouterr().err
+
+
+def test_http_fetch_without_a_token_does_not_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module(monkeypatch)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    opener = _Opener(_http_error(403))
+    with pytest.raises(module.FetchError, match="HTTP 403"):
+        module.http_fetch("p", opener=opener)
+    assert opener.auth == [None]
+
+
+def test_http_fetch_both_paths_failing_names_both_statuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module(monkeypatch)
+    opener = _Opener(_http_error(403), _http_error(404))
+    with pytest.raises(module.FetchError) as caught:
+        module.http_fetch("p", token="tok", opener=opener)
+    text = str(caught.value)
+    assert "with token HTTP 403" in text
+    assert "anonymous retry HTTP 404" in text
+
+
+def test_http_fetch_server_errors_are_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module(monkeypatch)
+    opener = _Opener(_http_error(500))
+    with pytest.raises(module.FetchError, match="HTTP 500"):
+        module.http_fetch("p", token="tok", opener=opener)
+    assert opener.auth == ["Bearer tok"]
+
+
+def test_anonymous_rate_limit_is_reported_as_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module(monkeypatch)
+    limited = {"x-ratelimit-remaining": "0"}
+    opener = _Opener(_http_error(403), _http_error(403, limited))
+    with pytest.raises(module.FetchError, match="rate limit exhausted"):
+        module.http_fetch("p", token="tok", opener=opener)
+
+
+def test_unreadable_rulesets_exit_2_not_1(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _module(monkeypatch)
+
+    def failing(_path: str) -> Any:
+        raise module.FetchError("p: HTTP 403: API rate limit exhausted (not a permission problem)")
+
+    code = module.main(
+        ["--check", "--repo", REPOSITORY, "--expected", str(tmp_path / "none.json")],
+        fetch=failing,
+    )
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "rate limit" in err
+    assert "not drift" in err
+
+
+def test_workflow_contract_read_only_scheduled_and_fork_safe() -> None:
+    doc = load_workflow("ruleset-drift.yml")
+    triggers = workflow_on(doc)
+    assert set(triggers) == {"push", "schedule", "workflow_dispatch"}
+    assert triggers["push"]["branches"] == ["main"]
+    assert doc["permissions"] == {"contents": "read"}
+    drift = job(doc, "drift")
+    assert drift["permissions"] == {"contents": "read"}
+    assert drift["if"] == "github.repository == 'alexhawat/mergeCraft'"
+    run = next(
+        step for step in drift["steps"] if "check_ruleset_drift.py --check" in step.get("run", "")
+    )
+    # Only the default, read-only token is passed; the script retries anonymously.
+    assert run["env"] == {"GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}
+    assert "secrets." not in json.dumps(
+        [step for step in drift["steps"] if step is not run]
+    ).replace("secrets.GITHUB_TOKEN", "")
+    assert_third_party_uses_sha_pinned("ruleset-drift.yml")

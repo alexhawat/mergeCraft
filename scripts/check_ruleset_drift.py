@@ -26,9 +26,14 @@ ignored: ids, node ids, timestamps, ``_links``, ``source`` and the per-user
 the API only returns it to callers with write access, so a read-only token and
 an admin token would otherwise disagree about the same repository.
 
-Reading rulesets needs no write scope and no admin secret. On a public
-repository ``GET /repos/{owner}/{repo}/rulesets`` works with metadata read, so
-the scheduled workflow runs with ``contents: read``.
+Reading rulesets needs no write scope and no admin secret. GitHub documents
+"List repository rulesets" and "Get a repository ruleset" as needing only
+Metadata read, and as usable without authentication for public resources
+(https://docs.github.com/en/rest/repos/rules). That is verified here against the
+live public repository for anonymous reads. It is NOT verified that an Actions
+``GITHUB_TOKEN`` is accepted; so a token is sent when set and, on 401/403/404,
+the request is retried once anonymously (the path taken is logged). If both
+fail, ``main`` exits 2 ("could not read"), distinct from exit 1 ("drift").
 
 Module: scripts.check_ruleset_drift
 Depends: argparse, json, os, re, sys, urllib, pathlib, yaml
@@ -38,7 +43,8 @@ Exports:
     diff_expectation — readable drift lines between two normalized documents.
     produced_check_names — job check names the workflow files can emit.
     unproduced_contexts — required contexts that no workflow job produces.
-    main — CLI entry.
+    FetchError — a ruleset read failed (not drift).
+    main — CLI entry; exit 0 clean, 1 drift, 2 unreadable.
 """
 
 from __future__ import annotations
@@ -49,6 +55,7 @@ import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -111,19 +118,59 @@ def fetch_live_rulesets(repository: str, fetch: Fetch) -> list[dict[str, Any]]:
     return [fetch(f"repos/{repository}/rulesets/{item['id']}") for item in listing]
 
 
-def http_fetch(path: str) -> Any:
-    """Fetch ``path`` from the GitHub REST API, authenticated when a token is set."""
+class FetchError(RuntimeError):
+    """The live rulesets could not be read; this is not drift."""
+
+
+Opener = Callable[..., Any]
+
+
+def _get(path: str, token: str | None, opener: Opener) -> Any:
     headers = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "mergecraft-ruleset-drift",
     }
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(f"{API_ROOT}/{path}", headers=headers)
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with opener(request, timeout=30) as response:
         return json.load(response)
+
+
+def _describe(exc: urllib.error.HTTPError) -> str:
+    remaining = exc.headers.get("x-ratelimit-remaining") if exc.headers else None
+    if exc.code in (403, 429) and remaining == "0":
+        return f"HTTP {exc.code}: API rate limit exhausted (not a permission problem)"
+    if exc.code in (401, 403, 404):
+        return f"HTTP {exc.code}: access refused (permission, not drift)"
+    return f"HTTP {exc.code}: {exc.reason}"
+
+
+def http_fetch(
+    path: str, *, token: str | None = None, opener: Opener = urllib.request.urlopen
+) -> Any:
+    """Fetch ``path`` from the GitHub REST API; raise ``FetchError`` on failure.
+
+    Tries with the token when one is set (``token`` argument, else
+    ``GITHUB_TOKEN`` / ``GH_TOKEN``). On 401/403/404 it retries once anonymously
+    and logs which path succeeded; if that also fails the error names the status
+    and whether it looks like a rate limit or a permission refusal.
+    """
+    if token is None:
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    try:
+        return _get(path, token, opener)
+    except urllib.error.HTTPError as exc:
+        first = _describe(exc)
+        if not token or exc.code not in (401, 403, 404):
+            raise FetchError(f"{path}: {first}") from exc
+    try:
+        result = _get(path, None, opener)
+    except urllib.error.HTTPError as exc:
+        raise FetchError(f"{path}: with token {first}; anonymous retry {_describe(exc)}") from exc
+    print(f"ruleset-drift: token read refused ({first}); anonymous read succeeded", file=sys.stderr)
+    return result
 
 
 def _contexts(ruleset: dict[str, Any]) -> dict[str, Any]:
@@ -298,7 +345,16 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None, *, fetch: Fetch = http_fetch) -> int:
     """Run ``--check`` or ``--write``; ``fetch`` is injectable so tests stay offline."""
     args = _parse_args(argv)
-    live = normalize_rulesets(fetch_live_rulesets(args.repo, fetch))
+    try:
+        live = normalize_rulesets(fetch_live_rulesets(args.repo, fetch))
+    except (FetchError, OSError) as exc:
+        print(f"ruleset-drift: could not read the live rulesets: {exc}", file=sys.stderr)
+        print(
+            "This is a read failure, not drift. 403 with x-ratelimit-remaining 0 is a "
+            "rate limit (retry later); otherwise check token permissions.",
+            file=sys.stderr,
+        )
+        return 2
 
     if args.write:
         args.expected.write_text(_render(live), encoding="utf-8")
