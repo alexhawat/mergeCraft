@@ -64,6 +64,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The optional external SkillSpector backend for the agent-security analyzer is
   removed; the scan now runs fully in process. **Fix:** none needed unless you
   installed SkillSpector for it; its corroboration pass no longer runs (#1397).
+- Policy rule and waiver `scope.path` globs now use the same gitignore-style dialect as
+  `review.ignorePaths`: `**/` matches zero directories and `*` stays inside one path
+  segment, and `scope.org` / `scope.repo` compare case-insensitively. A rule scoped
+  `src/*` no longer covers nested files; the run log names every rule this narrows.
+  **Fix:** change `src/*` to `src/**` where nested files must stay covered (#1424).
+- A `generated/` directory is reviewed by default, and the `generated` fast path needs a
+  generated-file marker in the file. **Fix:** add `**/generated/**` to
+  `review.ignorePaths` to keep skipping it (#1424).
+- `--config` or `MERGECRAFT_CONFIG` naming a file that does not exist is now a
+  configuration error (exit `30`); the run used to fall back silently to the committed
+  config or the defaults. **Fix:** point it at an existing file, or unset it (#1337,
+  #1430).
+- `mergecraft --format json <command>` exits `2` ("has no JSON output") for commands
+  without JSON output, such as `doctor` and `config show`; they used to exit `0` and
+  print a table. Commands with their own `--json` or `--format json` now honour the root
+  flag. **Fix:** drop the root flag for those commands, or handle exit `2` (#1343,
+  #1441).
+- An unknown id exits `2` (was `30`) for `agent show`, `agent-local show`, `lens show`,
+  `analyzers explain`, `memory show`, `eval replay` and `eval promote`, as do an unknown
+  agent role and an unknown `--after` agent. **Fix:** scripts that branched on `30` for
+  a missing id need to accept `2` (#1343, #1441).
+- `eval gate`, `eval list` and `eval replay-bank` exit `30` when an explicit `--bank`
+  path does not exist, instead of passing as an empty bank. **Fix:** pass an existing
+  bank, or omit `--bank` to use the default (#1343, #1441).
+- `mergecraft update` installs the latest published release and keeps installed extras
+  such as `tracing`; it no longer installs `main` by default. **Fix:** pass `--ref main`
+  for the old behaviour (#1342, #1441).
+- Runs that publish with only the Actions job token no longer carry finding-ledger rows
+  over from earlier review rounds, because reviews posted as `github-actions[bot]` are
+  not trusted as mergeCraft's own. **Fix:** publish with a reviewer App token or a PAT
+  to keep ledger history across rounds (#1312, #1425).
 
 ### Changed
 
@@ -95,6 +126,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mergecraft review` status check as the merge gate, instead of pointing at an
   approval workflow (#1415).
 
+- The `prose` fast path no longer skips instruction and skill files, `.mergecraft/`
+  files, configured extra instruction filenames, `CMakeLists.txt`, or requirements and
+  constraints `.txt` files, and the `generated` fast path never skips mode-only or
+  binary changes (#1424).
+
+- Blast radius treats source outside `src/`, Dockerfiles, composite actions, Kubernetes
+  and Helm paths, and every shared dependency manifest as elevated; large changes in
+  `app/` or `lib/` are no longer `eligible` (#1424).
+
+- The read-only checkout integrity check now covers Claude, Codex and Gemini reviews,
+  not only OpenCode (#1433).
+
+- The Claude subagent and judge model, and the Agents SDK default model, come from the
+  model catalog; on Bedrock or Vertex the Claude subagents use the portable `sonnet`
+  alias (#1330, #1433).
+
+- The eval regression gate compares structural replay exactly, so deleting a case or
+  flipping one verdict fails it by case id; the tolerance applies to live detection
+  only. The trajectory gate fails only on true-positive drops and false-positive or
+  false-negative rises, and fails on mismatched label sets, an ineligible candidate or a
+  missing input once a protocol exists (#1432).
+
+- Eval result sets pin the bank and detection corpus git trees and record whether the
+  checkout was clean; publication refuses a dirty checkout. The adversarial corpora gate
+  evaluates all three corpora (#1432).
+
+- `eval bench` records a failing or timing-out case and continues, enforces optional
+  timeout, token, cost and campaign-ceiling bounds, and reports latency, cost and
+  blocker precision (#1432).
+
+- CI fails a pull request whose changed `src` lines are under 80% covered or whose
+  coverage falls more than 0.25 points below `main`; the coverage floor is now 84%, and
+  coverage more than 2 points above the floor produces a warning that names the floor
+  that could be set (#1359, #1435).
+
+- The nightly mutation run lists surviving mutants in the job summary and enforces a
+  per-module escape limit, starting with `agents/gates.py`; a non-required `CI matrix`
+  workflow runs macOS, Python 3.12 and 3.13, and the `agents` and `harbor` extras
+  (#1435).
+
 ### Added
 
 - `mergecraft findings outcomes` aggregates several pull requests (repeat `--pr`)
@@ -125,6 +196,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scanner-config`) on untrusted runs for each changed file that a catalog scanner
   reads as configuration, an ignore list or a plugin, so a pull request that edits
   scanner configuration is visible in the review (#1407).
+
+- New troubleshooting, upgrade, cost, architecture and uninstall pages, an extended
+  glossary, and a README rebuilt around a quickstart; the agent prompts moved to
+  `docs/agents.md` (#1434).
+
+- `mergecraft doctor` has a `workflow auth` row and exits `30` when the workflow passes
+  no credential the repository holds; it warns when `gh` cannot list the repository's
+  secrets (#1333, #1430).
+
+- `mergecraft update --dry-run` previews the install command, and `--ref` selects a git
+  install (#1342, #1441).
+
+- biome and oxlint have their own JSON parsers, so a repository with `biome.json` gets
+  JS lint findings, and `make catalog-check` runs each manifest's parser on its fixture
+  (#1429).
 
 ### Removed
 
@@ -350,6 +436,166 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   status, so it no longer fails on pull requests authored by the reviewer App
   (#1415).
 
+- `mergecraft provider auth --scope github` wires the stored `LLM_PROVIDER_<N>_*` secret
+  into `.github/workflows/mergecraft.yml` and points `with.model` at the seeded reviewer
+  model, so a repository that follows the quickstart no longer runs its first CI review
+  without a credential. Commit the workflow change with the config (#1333, #1430).
+
+- A malformed `.mergecraft/config.yaml` makes `agent list`, `provider list`, `plan`,
+  `describe`, `trust show` and the other read commands print one error line and exit
+  `30` instead of a traceback with exit `1` (#1337, #1430).
+
+- `mergecraft traces show <run-id>` works; `mergecraft traces <run-id>` is still
+  accepted (#1338, #1430).
+
+- Commands run from a repository subdirectory without `--cwd` act on the repository
+  root: `init` scaffolds the workflow there, and config, provider and `.env` reads and
+  writes no longer land in the subdirectory. An explicit `--cwd` is still taken
+  literally (#1339, #1430).
+
+- `mergecraft plan` no longer writes `.mergecraft/plan-review.diff` into the repository,
+  which dirtied the checkout and blocked `review --head`, and `mergecraft describe`
+  summarizes committed branch changes (#1340, #1430).
+
+- `mergecraft review --staged --unstaged` reviews every uncommitted change, including a
+  staged change whose work-tree copy was deleted or restored, instead of passing on the
+  staged diff alone (#1341, #1441).
+
+- The Claude Code and OpenCode setup commands install the published release instead of
+  the `main` branch (#1342, #1441).
+
+- `mergecraft --format json version` prints JSON, and `mergecraft watch` runs under the
+  root `--format json` (#1343, #1441).
+
+- Terminal help no longer shows RST double backticks or internal planning ids, an
+  unknown command suggests a match once, and `mergecraft auth logfire` prints its
+  missing-extra warning without raw markup and with the correct `uv tool install
+  'mergecraft-action[tracing]'` command (#1344, #1441).
+
+- `mergecraft trust show` previews the configured agent-sandbox tier for a same-repo
+  pull request instead of always reporting the fork floor, and the `describe` summary no
+  longer ends with an internal guidance sentence (#1344, #1441).
+
+- `MERGECRAFT_AGENT_TIMEOUT` kills an agent CLI that is still streaming when the cap
+  passes, counted from spawn; the cap used to start only after the CLI closed its
+  output, so a busy agent was never bounded by it (#1422).
+
+- A secondary or file-group reviewer that hits its timeout has its CLI process group
+  killed instead of being left running and spending tokens after it was recorded as
+  timed out (#1422).
+
+- Provider outages (5xx), connection resets and idle-watchdog stalls fail over to the
+  next model in the chain, and text that merely contains `429` (for example a pull
+  request number) no longer triggers a failover (#1433).
+
+- A driver crash, such as the OpenCode serve process dying mid-turn, fails that attempt
+  and moves to the next model instead of aborting the review, and a failed attempt is no
+  longer resumed by the post-run retry loop (#1433).
+
+- A Codex post-run resume or same-harness fallback keeps a ChatGPT login that Codex
+  refreshed mid-run, concurrent Codex runs keep their own credential broker, and Claude
+  and Codex resumes target the run's own session id (#1433).
+
+- Prompts larger than 128 KiB no longer fail to spawn on Claude, Codex, Gemini or the
+  OpenCode 1.x fallback, and the 1.x fallback keeps the model's answer (#1433).
+
+- Reviews of pull requests that touch non-ASCII paths (for example `café.md`) no longer
+  fail scope binding, drop that file's hunks from untrusted offline reviews, or leave it
+  out of incremental re-reviews, analyzer targets, impact hunks and inline-comment
+  anchors (#1306, #1423).
+
+- `ignorePaths` globs match the decoded name of a git-quoted path, and a renamed file's
+  post-image is read correctly when its name contains ` b/` (#1423).
+
+- Post-merge `findings carryover` files unresolved published findings; the ledger used
+  to make a merged pull request file nothing (#1311, #1425).
+
+- With a reviewer App token, carryover and automatic thread resolution recognise
+  mergeCraft's own review threads, and ledger history folds in PAT-published reviews
+  (#1312, #1425).
+
+- Large pull requests and long-lived finding ledgers no longer stop the formal review
+  from publishing; it stays within GitHub's 65,536-character body limit (#1313, #1425).
+
+- Learnings persistence keeps one `## Active` / `## Staging` pair, so later promoted
+  entries reach the prompt; `learnings staging` no longer lists an unsectioned file, and
+  the init placeholder is no longer an active learning (#1314, #1425).
+
+- The GitHub client retries read-only GraphQL queries and rate-limited requests,
+  honouring `Retry-After` and `x-ratelimit-reset` up to 60 s, and run-cache and eval
+  `latest.json` writes are atomic (#1315, #1425).
+
+- The MCP `git_fetch` tool no longer shallows a full clone: `depth` is accepted only on
+  an already-shallow repository, and `depth` and `deepen` must be positive integers
+  (#1426).
+
+- `run_analyzers` reports `ran: false` ("head not materialized") in api-only scope
+  instead of scanning a tree that is not the pull request head, and `checkout_pr`
+  reports a `degraded` reason when the base fetch failed and the diff was computed
+  against a stale local base (#1426).
+
+- Analyzer findings keep their rule ids, GHSA ids, `path:line` values, doc links and
+  timestamps instead of showing `<redacted>`, SARIF results resolve their own rule's
+  severity again, and finding paths under the macOS `$TMPDIR` are no longer rewritten
+  (#1428).
+
+- Two advisories or lint hits on one file no longer merge into one finding when their
+  messages redact alike (#1428).
+
+- Java, Swift, C#, Go, Ruby, C++, TSX and CSS file names are kept as read evidence, so a
+  reviewer that read them no longer gets `changed-unread-file` findings and
+  `request_changes` (#1428).
+
+- Redacting multi-megabyte analyzer output takes linear time: each stream is capped and
+  redacted once, and deeply nested output no longer raises `RecursionError` (#1428).
+
+- An analyzer that exits non-zero without reporting a diagnostic (a crash, a config
+  error, an unreadable file) is reported as `tool-error` instead of `passed`; clean
+  oasdiff and squawk runs are no longer marked unavailable, and buf build failures are
+  no longer marked passed (#1429).
+
+- One SARIF result with `level: none` no longer discards an analyzer's or CI artifact's
+  whole report; `pass` results are no longer findings, percent-encoded paths anchor,
+  `ruleIndex`-only results keep their rule's level, and rejected suppressions no longer
+  hide results (#1429).
+
+- CRAP evidence scores class methods and nested functions, reads lcov 2.x function
+  records, and no longer reads coverage.py percentages below 1% as near-full coverage;
+  changed functions with no coverage row are counted in a run note (#1429).
+
+- `mergecraft review` keeps every analyzer finding that repeats the same message at a
+  different line, and keeps the most severe copy when two describe the same occurrence
+  (#1316, #1437).
+
+- ruff and buf findings keep one fingerprint across checkout locations, so deduplication
+  markers and short ids match between the CLI, the Action and self-hosted runners
+  (#1322, #1437).
+
+- A base branch that passes again no longer clears a pull request's CI failure because
+  an older base run failed, distinct lint failures no longer share a fingerprint, failed
+  runs past the log-analysis cap are recorded as blocking CI findings, and the merged
+  analyzer status table shows each tool's newest status (#1321, #1437).
+
+- Coverage and mutation reports for non-Python changes record
+  `changed_function_language_unsupported` instead of returning nothing (#1323, #1437).
+
+- The reviewer can wait for the dependency install the run started;
+  `await_dependency_installation` used to fail whenever an install was running (#1436).
+
+- A hung dependency install stops at a 600 s deadline with its whole process tree
+  killed, and publication waits at most 30 s for an install that is still running, then
+  stops it and marks the run inconclusive (#1436).
+
+- Dependency prep no longer restores tracked files in the checkout the agent is editing,
+  so agent edits made during an install are kept (#1436).
+
+- A publish-stage timeout after the verdict was posted still writes the evidence packet,
+  and when the primary reviewer publishes mid-run the evidence packet and approval check
+  include the findings secondary reviewers recorded afterwards (#1436).
+
+- "Re-run jobs" no longer rewrites an earlier attempt's review with the new attempt's
+  record (#1436).
+
 ### Security
 
 - `establish_review_scope` only reads a `diff_path` that resolves, symlinks
@@ -385,6 +631,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or a registered checkout (#1394).
 - Finding-ledger rows read back from review bodies are limited to markers
   mergeCraft wrote, with timestamps no later than the current time (#1401).
+
+- Credential keys such as `DB_PASSWORD`, `OPENAI_API_KEY` and `aws_secret_access_key`
+  are redacted in structured payloads by the same rule the environment filter uses, and
+  npm tokens, Slack webhooks and short passwords are redacted too (#1428).
+
+- `docs/trust-policy.md` states that `trust.sandboxTrustedAuthors` trusts author-chosen
+  commit emails and does not authenticate the author (#1310, #1434).
 ## [0.1.0a5] — 2026-11-08
 
 ### Breaking — action required
