@@ -302,6 +302,27 @@ async def test_a_prose_edit_reads_the_head_text_and_skips() -> None:
     assert any("/contents/README.md" in request for request in scm.requests)
 
 
+async def test_an_extra_instruction_filename_from_settings_is_never_prose() -> None:
+    """``review.instructionExtraFilenames`` reaches the prose recognizer."""
+    files = [
+        {
+            "filename": "TEAM.md",
+            "additions": 1,
+            "deletions": 1,
+            "patch": "@@ -1,3 +1,3 @@\n # Title\n-Old words.\n+New words.\n More.\n",
+        }
+    ]
+    contents = {"TEAM.md": "# Title\nNew words.\nMore.\n"}
+
+    plain = await _decide(FakeScm(files=files, contents=contents))
+    listed = await _decide(
+        FakeScm(files=files, contents=contents), instruction_extra_filenames=["TEAM.md"]
+    )
+
+    assert plain.tier == "skip"
+    assert listed.tier == "full"
+
+
 async def test_a_prose_edit_whose_head_text_cannot_be_read_is_full() -> None:
     files = [
         {

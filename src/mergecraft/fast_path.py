@@ -313,6 +313,7 @@ async def triage_pull_request(
     config: FastPathSettings,
     operator_owned: bool,
     loader: Callable[..., Awaitable[TriageInputs]] | None = None,
+    instruction_extra_filenames: Collection[str] = (),
 ) -> tuple[TriageDecision, TriageInputs | None]:
     """Return the triage tier and the inputs it was decided from.
 
@@ -322,7 +323,8 @@ async def triage_pull_request(
     ``operator_owned`` says the config was read from the base ref, which a fork cannot
     write. Head-side config can never opt a pull request out of review. ``loader``
     replaces :func:`load_triage_inputs` (the caller's module-level binding, so the
-    read can be substituted in tests).
+    read can be substituted in tests). ``instruction_extra_filenames`` is the
+    operator's ``review.instructionExtraFilenames``, which are never prose.
     """
     if not config.enabled:
         return (
@@ -359,6 +361,7 @@ async def triage_pull_request(
             config=config,
             head_files=inputs.head_files,
             passed_checks=inputs.passed_checks,
+            instruction_extra_filenames=instruction_extra_filenames,
         )
         if decision.recognizer == "whitespace" and decision.tier != "full":
             from mergecraft.utils.diff_paths import changed_paths_from_diff
@@ -401,6 +404,7 @@ async def decide_fast_path(
     config: FastPathSettings,
     operator_owned: bool,
     loader: Callable[..., Awaitable[TriageInputs]] | None = None,
+    instruction_extra_filenames: Collection[str] = (),
 ) -> TriageDecision:
     """Return the triage tier for a pull request, ``full`` whenever there is any doubt.
 
@@ -415,6 +419,7 @@ async def decide_fast_path(
         config=config,
         operator_owned=operator_owned,
         loader=loader,
+        instruction_extra_filenames=instruction_extra_filenames,
     )
     return decision
 

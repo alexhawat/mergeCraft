@@ -67,6 +67,7 @@ from typing import TYPE_CHECKING, Final, Literal
 from mergecraft.analyzers.scope import changed_paths_from_scope, parse_diff_scope
 from mergecraft.classify.change_classifier import _HIGH_STAKES_PATH_PARTS
 from mergecraft.classify.generated_files import FileKind, classify_path
+from mergecraft.context.instruction_discovery import is_instruction_path
 from mergecraft.review_policy.manifest_names import (
     DEPENDENCY_MANIFEST_NAMES,
     GENERATOR_CONFIG_NAMES,
@@ -93,6 +94,7 @@ _AGENT_INSTRUCTION_BASENAMES: Final[frozenset[str]] = frozenset(
         "agents.md",
         "claude.md",
         "gemini.md",
+        "skill.md",
         "copilot-instructions.md",
         ".cursorrules",
         ".windsurfrules",
@@ -112,6 +114,8 @@ _PROSE_REFUSED_PATH_PARTS: Final[tuple[str, ...]] = (
     ".cursor/",
     ".agents/",
     ".codex/",
+    ".windsurf/",
+    ".mergecraft/",
     "agent-instructions",
 )
 _MARKDOWN_SUFFIXES: Final[tuple[str, ...]] = (".md", ".markdown")
@@ -332,11 +336,39 @@ def _prose_file_ok(file: _File, head_text: str) -> bool:
     return True
 
 
-def recognize_prose_only(diff_text: str, *, head_files: Mapping[str, str]) -> bool:
-    """Only prose files changed, and no changed line sits in code, a fence or front matter."""
+def _steers_review(path: str, extras: frozenset[str]) -> bool:
+    """Whether ``path`` is an instruction source, a ``.mergecraft/`` file or similar.
+
+    Instruction discovery's own predicate decides first, so the two can never
+    drift; the lowercased name and directory checks also cover other casings
+    and agent config directories discovery does not read.
+    """
+    lowered = f"/{path.lower()}"
+    if is_instruction_path(path, extra_filenames=extras):
+        return True
+    name = PurePosixPath(lowered).name
+    if name in _AGENT_INSTRUCTION_BASENAMES:
+        return True
+    if "/" not in path.strip("/") and name in {extra.lower() for extra in extras}:
+        return True
+    return any(part in lowered for part in _PROSE_REFUSED_PATH_PARTS)
+
+
+def recognize_prose_only(
+    diff_text: str,
+    *,
+    head_files: Mapping[str, str],
+    instruction_extra_filenames: Collection[str] = (),
+) -> bool:
+    """Only prose files changed, and no changed line sits in code, a fence or front matter.
+
+    ``instruction_extra_filenames`` is ``review.instructionExtraFilenames``: those
+    repo-root names are instruction sources too, so they are never prose.
+    """
     files = _parse(diff_text)
     if not _changeable(files):
         return False
+    extras = frozenset(instruction_extra_filenames)
     for file in files:
         for path in (file.previous_path, file.path):
             lowered = path.lower()
@@ -346,7 +378,7 @@ def recognize_prose_only(diff_text: str, *, head_files: Mapping[str, str]) -> bo
                 return False
             if PurePosixPath(lowered).name in _PROSE_REFUSED_BASENAMES:
                 return False
-            if any(part in lowered for part in _PROSE_REFUSED_PATH_PARTS):
+            if _steers_review(path, extras):
                 return False
         head_text = head_files.get(file.path)
         if head_text is None:
@@ -751,6 +783,7 @@ def triage_diff(
     config: FastPathSettings,
     head_files: Mapping[str, str] | None = None,
     passed_checks: Collection[str] = (),
+    instruction_extra_filenames: Collection[str] = (),
 ) -> TriageDecision:
     """Decide the tier for one diff.
 
@@ -765,6 +798,9 @@ def triage_diff(
     verifying checks have not passed from a trusted App (including a pin bump with no
     ``requireChecks`` or no ``trustedCheckApps``, which can never pass). It never
     takes a diff away from ``skip``.
+
+    ``instruction_extra_filenames`` is ``review.instructionExtraFilenames``, so
+    an extra instruction source is never recognised as prose.
     """
     if not config.enabled:
         return _full("review.fastPath is not enabled")
@@ -774,7 +810,9 @@ def triage_diff(
     matched: list[str] = []
     if recognize_pin_bump(diff_text):
         matched.append("pinBump")
-    if recognize_prose_only(diff_text, head_files=heads):
+    if recognize_prose_only(
+        diff_text, head_files=heads, instruction_extra_filenames=instruction_extra_filenames
+    ):
         matched.append("prose")
     if recognize_whitespace_only(diff_text, head_files=heads):
         matched.append("whitespace")
