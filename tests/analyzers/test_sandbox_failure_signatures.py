@@ -210,7 +210,10 @@ def test_redacted_write_denied_line_classifies_as_path_not_writable() -> None:
     raw = "mkdir: cannot create directory '/workspace/build': Permission denied"
     redacted = redact_analyzer_output(raw, tool_id="gate")
 
-    assert redacted == REDACTED_DENIED_WRITE, redacted
+    # An ordinary absolute directory path now survives redaction; a path segment
+    # the redactor does blank still leaves the operation recognizable.
+    assert redacted == raw, redacted
+    assert _classifier()(redacted) == WRITE_REASON
     assert _classifier()(REDACTED_DENIED_WRITE) == WRITE_REASON
 
 

@@ -15,8 +15,10 @@ from mergecraft.ci.evidence import (
     record_gate_substitutions,
     substitute_declared_gates,
 )
+from mergecraft.mcp.analyzers import API_ONLY_SKIP_REASON
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import primary_repo_state
+from mergecraft.modes._api_only_scope import API_ONLY_SCOPE
 from mergecraft.review_checks import declared_cannot_run_outcomes, plan_checks, run_checks
 
 if TYPE_CHECKING:
@@ -276,6 +278,11 @@ def run_static_checks_tool(ctx: ToolContext):
         # completed the deterministic pass, and the D14 ordering gate asks
         # whether that pass happened, not whether it found anything.
         ctx.tool_state.static_checks_ran = True
+        if ctx.tool_state.review_scope == API_ONLY_SCOPE:
+            # The PR head was never materialized, so the gates would run over the
+            # base or an earlier head. The attempt above still counts for D14.
+            logger.info("static checks: skipped, {}", API_ONLY_SKIP_REASON)
+            return {"ran": False, "reason": API_ONLY_SKIP_REASON, "checks": []}
         state = primary_repo_state(ctx.tool_state)
         root = Path(state.dir)
         changed = [str(f) for f in (params.get("changed_files") or [])]

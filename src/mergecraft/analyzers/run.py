@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
-from mergecraft.analyzers.redact import redact_analyzer_output
+from mergecraft.analyzers.redact import redact_analyzer_output, redact_secrets
 from mergecraft.utils.process_group import kill_process_group
 from mergecraft.utils.secrets import filter_env
 
@@ -27,6 +27,10 @@ if TYPE_CHECKING:
 
 CHECK_TIMEOUT_S = 300
 MAX_OUTPUT_CHARS = 8_000
+# Per-stream ceiling on captured analyzer output that is redacted and parsed.
+# Past it the stream is cut (and the outcome says so) before any redaction, so
+# a runaway analyzer cannot make the redaction pass arbitrarily expensive.
+MAX_CAPTURED_OUTPUT_CHARS = 32 * 1024 * 1024
 
 _SANDBOX_BOOTSTRAP_ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "LC_ALL": "C"}
 _RESTORE_PAYLOAD_ENV = """set -eu
@@ -124,16 +128,29 @@ def _run_tmpdir(plan: AnalyzerPlan, *, output_dir: Path | None = None) -> Path:
     return tmpdir
 
 
-def _persist_output(raw: str, *, plan: AnalyzerPlan, output_dir: Path | None = None) -> str | None:
-    if not raw:
+def _persist_output(
+    redacted: str, *, plan: AnalyzerPlan, output_dir: Path | None = None
+) -> str | None:
+    """Persist already-redacted parser input; the caller redacts each stream once."""
+    if not redacted:
         return None
     from mergecraft.analyzers.parse import persist_analyzer_output
 
-    redacted = redact_analyzer_output(raw, tool_id=plan.manifest_id)
     path = persist_analyzer_output(
         redacted, tmpdir=_run_tmpdir(plan, output_dir=output_dir), tool_id=plan.manifest_id
     )
     return str(path)
+
+
+def _cap_captured(text: str) -> tuple[str, bool]:
+    """Keep the head of one captured stream (parsers need its start); flag a cut."""
+    if len(text) <= MAX_CAPTURED_OUTPUT_CHARS:
+        return text, False
+    return text[:MAX_CAPTURED_OUTPUT_CHARS], True
+
+
+def _redact_stream(text: str, *, plan: AnalyzerPlan) -> str:
+    return redact_analyzer_output(text, tool_id=plan.manifest_id) if text else text
 
 
 def _sandbox_preexec(context: SandboxContext, process_limit: tuple[int, int]) -> None:
@@ -470,27 +487,38 @@ def _outcome_from_completed(
     command: str,
     output_dir: Path | None = None,
 ) -> AnalyzerOutcome:
-    """Combine stdout/stderr, redact, persist to disk, and build the final outcome."""
-    raw_stdout = (completed.stdout or "").strip()
-    raw_stderr = (completed.stderr or "").strip()
-    raw_for_parser = raw_stdout or raw_stderr
-    combined = raw_for_parser
-    if raw_stderr and raw_stdout:
-        combined = f"{raw_stdout}\n{raw_stderr}".strip()
-    elif raw_stderr:
-        combined = raw_stderr
+    """Combine stdout/stderr, redact, persist to disk, and build the final outcome.
+
+    Each stream is capped, then redacted exactly once; the persisted parser input
+    and the display string are both built from those redacted streams.
+    """
+    capped_stdout, stdout_cut = _cap_captured(completed.stdout or "")
+    capped_stderr, stderr_cut = _cap_captured(completed.stderr or "")
+    stdout = _redact_stream(capped_stdout.strip(), plan=plan)
+    stderr = _redact_stream(capped_stderr.strip(), plan=plan)
+    for_parser = stdout or stderr
+    combined = for_parser
+    if stderr and stdout:
+        combined = f"{stdout}\n{stderr}".strip()
+    elif stderr:
+        combined = stderr
     if plan.version_note:
-        combined = f"{plan.version_note}\n{combined}".strip()
-    redacted = redact_analyzer_output(combined, tool_id=plan.manifest_id)
+        combined = f"{redact_secrets(plan.version_note)}\n{combined}".strip()
     # Persist only what a parser can read. ``combined`` is the display string and
     # may be nothing but ``plan.version_note`` prose when the analyzer wrote to
     # neither stream; persisting that turned a clean run into "failed to parse".
-    output_path = _persist_output(raw_for_parser, plan=plan, output_dir=output_dir)
+    output_path = _persist_output(for_parser, plan=plan, output_dir=output_dir)
+    display = _truncate(combined, output_path=output_path)
+    if stdout_cut or stderr_cut:
+        display = (
+            f"analyzer output exceeded {MAX_CAPTURED_OUTPUT_CHARS} chars per stream; "
+            f"the rest was dropped before parsing\n{display}"
+        )
     return AnalyzerOutcome(
         name=plan.manifest_id,
         command=command,
         status="passed" if completed.returncode == 0 else "failed",
-        output=_truncate(redacted, output_path=output_path),
+        output=display,
         exit_code=completed.returncode,
         output_path=output_path,
     )

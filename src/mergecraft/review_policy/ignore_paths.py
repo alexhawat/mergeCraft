@@ -49,6 +49,7 @@ from mergecraft.classify.generated_files import (
     classify_path,
 )
 from mergecraft.classify.path_globs import path_full_matches_glob
+from mergecraft.diff import parse_diff
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -73,9 +74,6 @@ _FILES_PAGE_SIZE: Final[int] = 100
 _FILES_MAX_PAGES: Final[int] = 30
 _SECTION_LIST_CAP: Final[int] = 50
 _SPLIT_RE: Final[re.Pattern[str]] = re.compile(r"[\n,]")
-_HEADER_RE: Final[re.Pattern[str]] = re.compile(
-    r'^diff --git (?:"a/(?P<qa>.+?)" "b/(?P<qb>.+)"|a/(?P<a>.+?) b/(?P<b>.+))$'
-)
 
 
 def parse_ignore_paths(raw: str | Iterable[str] | None) -> list[str]:
@@ -219,28 +217,10 @@ class FilteredDiff:
     """Every path the diff names, rename and copy pre-images included."""
 
 
-def _section_paths(header: str) -> tuple[str, ...]:
-    """``(post-image, pre-image)`` for one section header, deduplicated; ``()`` if unparsable."""
-    match = _HEADER_RE.match(header.rstrip("\r\n"))
-    if match is None:
-        return ()
-    post = match.group("qb") or match.group("b")
-    pre = match.group("qa") or match.group("a")
-    return tuple(dict.fromkeys(path for path in (post, pre) if path))
-
-
 def _split_sections(diff_text: str) -> tuple[str, list[tuple[tuple[str, ...], str]]]:
-    lines = diff_text.splitlines(keepends=True)
-    prefix: list[str] = []
-    sections: list[tuple[tuple[str, ...], list[str]]] = []
-    for line in lines:
-        if line.startswith("diff --git "):
-            sections.append((_section_paths(line), [line]))
-        elif sections:
-            sections[-1][1].append(line)
-        else:
-            prefix.append(line)
-    return "".join(prefix), [(paths, "".join(body)) for paths, body in sections]
+    """``(preamble, [((post-image, pre-image), section text)])``; ``()`` paths if unparsable."""
+    parsed = parse_diff(diff_text)
+    return parsed.preamble, [(section.paths, section.text) for section in parsed.files]
 
 
 def rename_sources(diff_text: str) -> dict[str, str]:

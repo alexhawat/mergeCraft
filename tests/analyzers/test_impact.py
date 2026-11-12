@@ -25,12 +25,12 @@ import pytest
 from mergecraft.analyzers.impact import (
     _MAX_DECLARATIONS,
     _MAX_REFS,
-    _changed_paths,
     _intersects_hunks,
     _parse_hunks,
     extract_impact,
     write_impact,
 )
+from mergecraft.diff import changed_paths_in_diff
 
 _SAMPLE_DIFF = """diff --git a/src/example.py b/src/example.py
 index abc..def 100644
@@ -102,7 +102,7 @@ def _added_file_diff(path: str, content: str) -> str:
 
 
 def test_changed_paths_extracts_post_image_paths() -> None:
-    paths = _changed_paths(_SAMPLE_DIFF)
+    paths = changed_paths_in_diff(_SAMPLE_DIFF)
     assert paths == ["src/example.py", "src/util.ts", "README.md"]
 
 

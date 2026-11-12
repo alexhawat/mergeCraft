@@ -82,6 +82,7 @@ class _Scm:
         self.comments: dict[int, str] = {}
         self.authors: dict[int, dict[str, str]] = {}
         self.review_authors: dict[int, dict[str, str]] = {}
+        self.review_commits: dict[int, str] = {}
         self.deleted: list[int] = []
         self.created = 0
         self.comment_creates = 0
@@ -112,7 +113,10 @@ class _Scm:
                     if ours
                     else {"login": "someone", "type": "User"}
                 )
-            rows.append({"id": key, "body": value, "user": author})
+            row: dict[str, Any] = {"id": key, "body": value, "user": author}
+            if key in self.review_commits:
+                row["commit_id"] = self.review_commits[key]
+            rows.append(row)
         return rows
 
     async def create_review(self, *_args: Any, **fields: Any) -> dict[str, Any]:
@@ -277,28 +281,81 @@ async def test_finalizing_truncated_review_preserves_durable_state(tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_lost_review_receipt_reuses_same_run_review(tmp_path: Path) -> None:
+async def test_lost_review_receipt_reuses_same_run_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A retry in the same attempt reuses the record whose create response was lost."""
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
     scm = _Scm()
     ctx = _context(tmp_path, scm)
     ctx.run_id = 123
-    scm.reviews[1] = (
-        f"{_PREAMBLE_MARKER}\n"
-        "- **Run:** https://github.com/acme/demo/actions/runs/123\n"
-        f"{ledger.REVIEW_BODY_MARKER}\n\nAccepted summary.\n"
-    )
-    scm.created = 1
+    packet = _sample_packet(findings=[], verdict="success", reason="approved")
+    await _publish_deterministic_record()(pull_number=546, packet=packet, ctx=ctx)
+    assert scm.created == 1
+    ctx.tool_state.review = None  # the create response never reached the run
 
-    await _publish_deterministic_record()(
-        pull_number=546,
-        packet=_sample_packet(findings=[], verdict="success", reason="approved"),
-        ctx=ctx,
-    )
+    await _publish_deterministic_record()(pull_number=546, packet=packet, ctx=ctx)
 
     assert scm.created == 1
     assert len(scm.reviews) == 1
-    assert scm.reviews[1].count("Accepted summary.") == 1
     assert ctx.tool_state.review is not None
     assert ctx.tool_state.review.id == 1
+
+
+@pytest.mark.asyncio
+async def test_rerun_attempt_keeps_earlier_attempts_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A re-run attempt that published no review never rewrites attempt 1's review."""
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    scm = _Scm()
+    first = _context(tmp_path, scm)
+    first.run_id = 123
+    await _publish_deterministic_record()(
+        pull_number=546,
+        packet=_sample_packet(findings=[], verdict="success", reason="approved"),
+        ctx=first,
+    )
+    attempt_one_body = scm.reviews[1]
+
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+    second = _context(tmp_path, scm)
+    second.run_id = 123
+    await _publish_deterministic_record()(
+        pull_number=546,
+        packet=_sample_packet(findings=[], verdict="failure", reason="agent failed"),
+        rejection_reason="no_accepted_model_verdict",
+        ctx=second,
+    )
+
+    assert scm.reviews[1] == attempt_one_body
+    assert scm.created == 2
+    assert second.tool_state.review is not None
+    assert second.tool_state.review.id == 2
+
+
+@pytest.mark.asyncio
+async def test_lost_receipt_lookup_skips_a_record_on_another_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A same-attempt record on a different commit than the bound head is not reused."""
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    scm = _Scm()
+    ctx = _context(tmp_path, scm)
+    ctx.run_id = 123
+    packet = _sample_packet(findings=[], verdict="success", reason="approved")
+    await _publish_deterministic_record()(pull_number=546, packet=packet, ctx=ctx)
+    scm.review_commits[1] = "0" * 40
+    primary_repo_state(ctx.tool_state).checkout_sha = "f" * 40
+    ctx.tool_state.review = None
+
+    await _publish_deterministic_record()(pull_number=546, packet=packet, ctx=ctx)
+
+    assert scm.created == 2
+    assert ctx.tool_state.review is not None
+    assert ctx.tool_state.review.id == 2
 
 
 @pytest.mark.asyncio

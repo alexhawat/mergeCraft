@@ -524,3 +524,35 @@ def test_a_path_carrying_a_secret_shaped_token_is_still_dropped(path: str) -> No
     record = build_trajectory_record(state)
     assert record.files_read == []
     assert _AWS_KEY_SHAPED not in record.model_dump_json()
+
+
+_MULTI_LANGUAGE_PATHS = [
+    "src/main/java/com/acme/UserProfileService.java",
+    "Sources/App/SettingsViewController.swift",
+    "src/Controllers/OrderController.cs",
+    "src/components/NavigationBar.tsx",
+    "internal/payment_service.go",
+    "lib/application_helper.rb",
+    "include/connection_pool.hpp",
+    "src/styles.module.css",
+    "db/migrate/20240115093000_create_users.rb",
+    "app/src/main/kotlin/com/acme/CheckoutViewModel.kt",
+    "src/lib/order_repository.rs",
+    "Assets/Scripts/PlayerMovementController.cs",
+]
+
+
+@pytest.mark.parametrize(
+    "path", _MULTI_LANGUAGE_PATHS, ids=[path.rsplit("/", 1)[-1] for path in _MULTI_LANGUAGE_PATHS]
+)
+def test_ordinary_file_names_across_languages_are_kept_as_read_evidence(path: str) -> None:
+    """CamelCase and snake_case names in any language are read evidence, not secrets."""
+    state = init_tool_state(owner="acme", name="demo", dir="/tmp/demo")
+    record_tool_call(
+        state, tool="shell", arguments={"command": f"cat {path}"}, ok=True, outcome_ok=True
+    )
+
+    record = build_trajectory_record(state, files_modified=[path])
+
+    assert record.files_read == [path]
+    assert _changed_unread_paths(record) == []

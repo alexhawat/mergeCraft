@@ -25,8 +25,8 @@ from mergecraft.analyzers.trust import (
     derive_source_trust_tier,
 )
 from mergecraft.config import load_repo_settings
+from mergecraft.diff import changed_paths_in_diff, diff_lines
 from mergecraft.jev.client import AsyncJevClient, TypeSafeAPIError
-from mergecraft.mcp.checkout import changed_paths_in_diff
 from mergecraft.review.offline_agent import run_offline_agent_review
 from mergecraft.review.offline_result import (
     OfflineReviewResult as OfflineReviewResult,
@@ -201,7 +201,7 @@ def _iter_diff_file_blocks(diff_text: str) -> list[str]:
     """Split a unified diff into per-file hunks (each starts with ``diff --git``)."""
     blocks: list[str] = []
     current: list[str] = []
-    for line in diff_text.splitlines(keepends=True):
+    for line in diff_lines(diff_text, keepends=True):
         if line.startswith("diff --git ") and current:
             blocks.append("".join(current))
             current = [line]
