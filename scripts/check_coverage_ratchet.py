@@ -7,8 +7,12 @@ in ``pyproject.toml``
 merge-base ``pyproject.toml`` value so lowering ``fail_under`` without a
 deliberate baseline commit fails the gate.
 
-When coverage exceeds the floor by more than a fixed margin, the default mode
-emits a **warning** (exit 0). Pass ``--hard-ceiling`` to fail instead.
+When coverage exceeds the floor by more than the margin the gate only
+**warns** (exit 0): an annotation and a job-summary line name the floor that could
+be set. Failing a required check because a PR added tests would punish the PR and
+force an unrelated ``pyproject.toml`` edit. The owner raises ``fail_under`` when
+the advisory shows up on main. Pass ``--hard-ceiling`` to fail instead (audit
+TST-F4).
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import os
 import subprocess
 import sys
@@ -24,8 +29,8 @@ from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
 # Allow coverage to rise this many points above ``fail_under`` before the gate
-# nudges a deliberate floor bump in ``pyproject.toml``.
-DEFAULT_MARGIN = 5.0
+# requires a deliberate floor bump in ``pyproject.toml``.
+DEFAULT_MARGIN = 2.0
 _EPS = 1e-9
 _COVERAGE_CONFIG_PATH = Path(__file__).resolve().parent / "coverage_config.py"
 
@@ -178,6 +183,16 @@ def _percent_covered(report: Path) -> float:
     return float(data["totals"]["percent_covered"])
 
 
+def _announce(message: str) -> None:
+    """Surface the advisory as an annotation and in the job summary under Actions."""
+    if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+        print(f"::warning title=Coverage floor can be raised::{message}", file=sys.stderr)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as handle:
+            handle.write(f"### Coverage floor can be raised\n\n{message}\n")
+
+
 def check_coverage_ratchet(
     report: Path | str,
     *,
@@ -190,8 +205,9 @@ def check_coverage_ratchet(
 ) -> int:
     """Return 0 when coverage is acceptable; 1 on hard failures.
 
-    Hard failures include measured coverage below ``fail_under``, an optional
-    hard ceiling when ``hard_ceiling`` is set, merge-base lookup errors in CI,
+    Hard failures include measured coverage below ``fail_under``, measured
+    coverage more than ``margin`` above it only when ``hard_ceiling`` is set,
+    merge-base lookup errors in CI,
     and a declared ``fail_under`` below the merge-base floor on pull requests.
 
     The merge-base **lowering guard** is PR-only: on ``push`` /
@@ -234,12 +250,13 @@ def check_coverage_ratchet(
         message = (
             f"combined coverage {measured:.2f}% exceeds floor {resolved_floor:.2f}% "
             f"by more than {margin:.2f} points (ceiling {ceiling:.2f}%) — "
-            "consider bumping fail_under in pyproject.toml in a deliberate commit"
+            f"fail_under can be raised to {math.floor(measured):d}"
         )
         if hard_ceiling:
             failures.append(message)
         else:
             warnings.append(message)
+            _announce(message)
 
     if failures:
         print("combined coverage ratchet FAILED:", file=sys.stderr)

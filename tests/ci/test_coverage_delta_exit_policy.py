@@ -64,12 +64,34 @@ def test_compare_to_base_marks_shallower_than_margin_drop_below_floor_as_caused(
     assert result.inherited is False
 
 
-def test_main_exits_zero_for_regression_above_floor(
+def test_main_exits_zero_for_a_dip_within_the_tolerance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = _load_module()
-    base = _coverage_json(tmp_path / "base.json", 83.0)
-    head = _coverage_json(tmp_path / "head.json", 82.5)
+    base = _coverage_json(tmp_path / "base.json", 95.0)
+    head = _coverage_json(tmp_path / "head.json", 94.9)
     monkeypatch.chdir(tmp_path)
 
     assert module.main([str(head.name), "--base", str(base.name)]) == 0
+
+
+def test_main_fails_a_one_point_drop_that_stays_above_the_floor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """W3.3-1 acceptance: a PR that lowers coverage by 1 point fails the delta gate."""
+    module = _load_module()
+    base = _coverage_json(tmp_path / "base.json", 95.0)
+    head = _coverage_json(tmp_path / "head.json", 94.0)
+    monkeypatch.chdir(tmp_path)
+
+    assert module.main([str(head.name), "--base", str(base.name)]) == 1
+    assert "1.00pp below base" in capsys.readouterr().err
+
+
+def test_max_drop_is_configurable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_module()
+    base = _coverage_json(tmp_path / "base.json", 95.0)
+    head = _coverage_json(tmp_path / "head.json", 94.0)
+    monkeypatch.chdir(tmp_path)
+
+    assert module.main([str(head.name), "--base", str(base.name), "--max-drop", "1.5"]) == 0

@@ -201,3 +201,74 @@ def test_real_pytest_distinguishes_import_kills_from_interrupts(
     assert result.killed == int(failure == "dataclass-import")
     assert result.errors == int(failure != "dataclass-import")
     assert result.survived == 0
+
+
+def _run_cli_with_exit_codes(
+    module: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codes: list[int], *argv: str
+) -> int:
+    _sandbox(module, tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        module,
+        "_prepare_mutation_sandbox",
+        lambda: (tmp_path, tmp_path, tmp_path / "python", lambda: None),
+    )
+    queue = iter(codes)
+    monkeypatch.setattr(module, "_run_pytest", lambda *a, **kw: (next(queue), "out"))
+    return int(module.main(["--module", "sample.py", "--max-mutants", "1", *argv]))
+
+
+def test_survivors_are_listed_without_verbose_and_written_to_the_job_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """W3.3-3: a survivor must be readable, not just counted."""
+    module = _load_mutate_module()
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    rc = _run_cli_with_exit_codes(module, tmp_path, monkeypatch, [0, 0])
+    assert rc == 1  # 100% escape against the default 45% threshold
+    out = capsys.readouterr().out
+    assert "Surviving mutants" in out
+    assert "sample.py L1" in out
+    assert "result = True" in out
+    text = summary.read_text(encoding="utf-8")
+    assert "Mutation survivors" in text
+    assert "sample.py L1" in text
+
+
+def test_summary_says_so_when_nothing_survived(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_mutate_module()
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    assert _run_cli_with_exit_codes(module, tmp_path, monkeypatch, [0, 1]) == 0
+    assert "No survivors." in summary.read_text(encoding="utf-8")
+
+
+def test_a_module_over_its_own_limit_fails_even_when_the_overall_rate_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _load_mutate_module()
+    monkeypatch.setattr(module, "_load_module_thresholds", lambda: {"sample.py": 10.0})
+    rc = _run_cli_with_exit_codes(module, tmp_path, monkeypatch, [0, 0], "--threshold", "100")
+    assert rc == 1
+    assert "sample.py: escape rate 100.0%" in capsys.readouterr().err
+
+
+def test_no_module_thresholds_flag_restores_the_overall_gate_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _load_mutate_module()
+    monkeypatch.setattr(module, "_load_module_thresholds", lambda: {"sample.py": 10.0})
+    rc = _run_cli_with_exit_codes(
+        module, tmp_path, monkeypatch, [0, 0], "--threshold", "100", "--no-module-thresholds"
+    )
+    assert rc == 0
+
+
+def test_the_approval_gate_has_a_module_limit_and_a_dedicated_test_file() -> None:
+    module = _load_mutate_module()
+    assert "agents/gates.py" in module._load_module_thresholds()
+    targets = module._load_module_test_dirs()["agents/gates.py"]
+    assert "tests/agents/test_gates_decision_contract.py" in targets
+    assert (REPO_ROOT / "tests/agents/test_gates_decision_contract.py").is_file()

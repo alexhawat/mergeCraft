@@ -185,7 +185,7 @@ class TestCoverageDeltaScript:
 
         base = _coverage_json(tmp_path / "base.json", 82.0)
         head = _coverage_json(tmp_path / "head.json", 81.5)
-        result = compare(head, base)
+        result = compare(head, base, floor=80.0)
 
         inherited = getattr(result, "inherited", None)
         caused = getattr(result, "caused_by_change", None)
