@@ -130,7 +130,8 @@ packages = ["src/mergecraft"]
 # Script-, Make- and test-only support modules. Every caller for the paths below
 # runs from the checkout, so the installed wheel tolerates their absence.
 # src/mergecraft/evals/corpora.py is deliberately NOT excluded: a shipped CLI
-# path (cli/eval_cmd.py, evals/human_batch.py) imports it at runtime.
+# path (cli/eval_cmd.py, evals/human_batch.py) imports it at runtime. The same holds
+# for evals/quality_metrics.py, which benchmark.py and live_run.py import.
 # The last five were re-measured against the tree that excluded them (#947): none
 # has a production importer. scm/webhooks.py is reached from tests only (its last
 # production caller, the MCP server's webhook route, is gone); shadow_compare,
@@ -138,7 +139,6 @@ packages = ["src/mergecraft"]
 # scripts/ and a CI step, all of which run from the checkout.
 exclude = [
     "src/mergecraft/evals/mcp_public.py",
-    "src/mergecraft/evals/quality_metrics.py",
     "src/mergecraft/evals/skill_taxonomy_gate.py",
     "src/mergecraft/utils/git_ref.py",
     "src/mergecraft/integrations/live_providers.py",

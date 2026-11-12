@@ -98,3 +98,59 @@ def test_adversarial_gate_does_not_publish_precision_recall_numbers() -> None:
         assert banned not in payload
     overlapping = ISSUE_140_GATE_METRICS & set(payload)
     assert not overlapping
+
+
+def test_gate_evaluates_every_corpus_kind(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Each of the three corpora is exercised; a break in any one fails the gate."""
+    from mergecraft.evals import adversarial_corpora as mod
+
+    seen: set[str] = set()
+    real = mod._fence_holds
+
+    def spy(case):  # type: ignore[no-untyped-def]
+        seen.add(case.kind)
+        return real(case)
+
+    monkeypatch.setattr(mod, "_fence_holds", spy)
+    report = mod.eval_adversarial_gate()
+    assert report.passed is True
+    assert seen == {"prompt_injection", "malicious_repository", "malicious_ticket_comment"}
+
+
+def test_gate_fails_when_a_non_prompt_injection_corpus_regresses(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from mergecraft.evals import adversarial_corpora as mod
+
+    monkeypatch.setattr(mod, "_hook_stays_inert", lambda case: False)
+    monkeypatch.setattr(mod, "_fence_holds", lambda case: case.kind != "malicious_ticket_comment")
+    report = mod.eval_adversarial_gate()
+    assert report.passed is False
+    assert "malicious_repository:git-hook" in report.failed_cases
+    assert "malicious_ticket_comment:issue-body" in report.failed_cases
+
+
+def test_reported_failure_does_not_suppress_the_harness(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from mergecraft.evals import adversarial_corpora as mod
+
+    monkeypatch.setattr(
+        mod, "_fence_holds", lambda case: case.case_id != "prompt_injection:forge-fence"
+    )
+    report = mod.eval_adversarial_gate(candidate_failures=("malicious_repository:hostile-readme",))
+    assert set(report.failed_cases) == {
+        "malicious_repository:hostile-readme",
+        "prompt_injection:forge-fence",
+    }
+
+
+def test_hostile_hook_stays_inert_under_the_hardened_argv() -> None:
+    from mergecraft.evals.adversarial_corpora import (
+        _hook_stays_inert,
+        discover_adversarial_corpora,
+    )
+
+    case = next(
+        c
+        for corpus in discover_adversarial_corpora()
+        for c in corpus.cases
+        if c.case_id == "malicious_repository:git-hook"
+    )
+    assert _hook_stays_inert(case) is True

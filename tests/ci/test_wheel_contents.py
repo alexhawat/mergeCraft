@@ -27,7 +27,6 @@ _PYPROJECT = REPO_ROOT / "pyproject.toml"
 # run from the checkout, or a test.
 _EXCLUDED = (
     "src/mergecraft/evals/mcp_public.py",
-    "src/mergecraft/evals/quality_metrics.py",
     "src/mergecraft/evals/skill_taxonomy_gate.py",
     "src/mergecraft/utils/git_ref.py",
     "src/mergecraft/integrations/live_providers.py",

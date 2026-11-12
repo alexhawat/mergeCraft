@@ -47,7 +47,8 @@ class QualityMetrics(BaseModel):
     time_to_first_useful_finding_ms: float | None
     p50_ms: float
     p95_ms: float
-    cost_per_review: float
+    #: ``None`` when the review reported no cost (never a fabricated 0.0).
+    cost_per_review: float | None
 
 
 def _findings_overlap(first: ReportedFinding, second: ReportedFinding, *, slack: int) -> bool:
@@ -83,7 +84,7 @@ def compute_quality_metrics(
     findings: Sequence[ReportedFinding],
     baseline: Sequence[BaselineIssue],
     latencies_ms: Sequence[float],
-    cost_usd: float,
+    cost_usd: float | None,
     time_to_first_useful_finding_ms: float | None,
 ) -> QualityMetrics:
     """Score findings against a baseline and attach latency/cost.
@@ -98,7 +99,7 @@ def compute_quality_metrics(
         findings: Reported review findings.
         baseline: Human-labelled expected issues.
         latencies_ms: Per-review (or per-stage) latencies in milliseconds.
-        cost_usd: Cost attributed to this review in USD.
+        cost_usd: Cost attributed to this review in USD, or ``None`` when unknown.
         time_to_first_useful_finding_ms: Wall time to the first baseline-matching
             finding, or ``None`` when none was useful.
 

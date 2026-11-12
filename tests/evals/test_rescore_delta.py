@@ -103,3 +103,12 @@ def test_rescore_delta_summary_includes_metric_lines() -> None:
     assert "Pass-rate" in text
     assert "Gained pass" in text
     assert "base" in text.lower() or "Base commit" in text
+
+
+def test_decision_surface_paths_trigger_the_rescore_delta() -> None:
+    """The one module that can move structural replay output must trigger the job."""
+    from mergecraft.evals.rescore_delta import touches_reviewer_surface
+
+    assert touches_reviewer_surface(["src/mergecraft/agents/gates.py"])
+    assert touches_reviewer_surface(["src/mergecraft/findings/severity.py"])
+    assert not touches_reviewer_surface(["src/mergecraft/agents/unrelated_module.py"])

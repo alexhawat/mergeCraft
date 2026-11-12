@@ -14,7 +14,11 @@ The release log must say *which* number moved, not just "failed", so
 
 Gated metrics:
 
-- Structural replay (always compared): ``decision_replay_pass_rate``
+- Structural replay (always compared, **exactly** — the replay is
+  deterministic, so no tolerance applies; W3.3-4): the case counts
+  (``cases_total`` and ``cases_replayable`` must not fall, ``cases_regression``
+  must not rise), every baseline case's status/decision (a deleted or flipped
+  case fails by id), and ``decision_replay_pass_rate``
   (higher is better), ``unsafe_approval_rate``, ``clean_block_rate`` and
   ``inconclusive_rate`` (lower is better). ``inconclusive_rate`` is gated
   because a crashed or non-replayable case leaves the unsafe-approval
@@ -118,6 +122,9 @@ class MetricDelta(BaseModel):
     delta: float
     #: True when the movement is a regression beyond the tolerance band.
     regressed: bool
+    #: ``rate`` rows are fractions; ``count`` rows are whole numbers (case
+    #: counts and per-case status checks), compared exactly.
+    kind: Literal["rate", "count"] = "rate"
 
 
 class GateReport(BaseModel):
@@ -147,6 +154,8 @@ def _compare(
     baseline: float,
     candidate: float,
     tolerance: float,
+    *,
+    kind: Literal["rate", "count"] = "rate",
 ) -> MetricDelta:
     return MetricDelta(
         metric=metric,
@@ -156,7 +165,84 @@ def _compare(
         regressed=_regressed(
             direction=direction, baseline=baseline, candidate=candidate, tolerance=tolerance
         ),
+        kind=kind,
     )
+
+
+def format_delta_value(delta: MetricDelta, value: float, *, signed: bool = False) -> str:
+    """Render a ledger value: whole numbers for ``count`` rows, percent otherwise."""
+    if delta.kind == "count":
+        return f"{value:+.0f}" if signed else f"{value:.0f}"
+    return f"{value:+.2%}" if signed else f"{value:.2%}"
+
+
+def _structural_count_deltas(
+    baseline: BenchmarkResultSet, candidate: BenchmarkResultSet
+) -> list[MetricDelta]:
+    """Exact case-count and per-case checks for the deterministic structural replay.
+
+    The replay is a pure function of the recorded bank, so there is no noise to
+    tolerate: a rate can hide a deleted or flipped case, a count and a per-case
+    status/decision comparison cannot. Cases present only in the candidate are
+    additions and do not regress; a baseline case that vanished or changed
+    status or decision does.
+    """
+    deltas = [
+        _compare(
+            "structural.cases_total",
+            "higher_is_better",
+            baseline.metrics.cases_total,
+            candidate.metrics.cases_total,
+            0.0,
+            kind="count",
+        ),
+        _compare(
+            "structural.cases_replayable",
+            "higher_is_better",
+            baseline.metrics.cases_replayable,
+            candidate.metrics.cases_replayable,
+            0.0,
+            kind="count",
+        ),
+        _compare(
+            "structural.cases_regression",
+            "lower_is_better",
+            baseline.metrics.cases_regression,
+            candidate.metrics.cases_regression,
+            0.0,
+            kind="count",
+        ),
+    ]
+    candidate_rows = {row.case_id: row for row in candidate.case_results}
+    for base_row in baseline.case_results:
+        row = candidate_rows.get(base_row.case_id)
+        if row is None:
+            deltas.append(
+                _compare(
+                    f"structural.case_missing:{base_row.case_id}",
+                    "lower_is_better",
+                    0.0,
+                    1.0,
+                    0.0,
+                    kind="count",
+                )
+            )
+        elif (row.status, row.current_decision, row.replayable) != (
+            base_row.status,
+            base_row.current_decision,
+            base_row.replayable,
+        ):
+            deltas.append(
+                _compare(
+                    f"structural.case_changed:{base_row.case_id}",
+                    "lower_is_better",
+                    0.0,
+                    1.0,
+                    0.0,
+                    kind="count",
+                )
+            )
+    return deltas
 
 
 def _convergence_metric_value(result: BenchmarkResultSet, metric: str) -> float:
@@ -208,9 +294,12 @@ def eval_gate(
 ) -> GateReport:
     """Compare two result sets' scalar gate metrics, direction-aware.
 
-    Pure: the caller owns how the result sets were produced. A metric is
-    regressed when it moves in its bad direction by strictly more than
-    ``tolerance``; movement within the band is noise and passes.
+    Pure: the caller owns how the result sets were produced. The structural
+    replay is deterministic, so its rates, case counts and per-case
+    status/decision are compared exactly (zero tolerance). ``tolerance`` is the
+    noise band for the live-detection and convergence metrics only: one of
+    those regresses when it moves in its bad direction by strictly more than
+    ``tolerance``.
 
     ``require_halves`` (EV-D11) turns a *missing* half into a regression: when
     the baseline carries a detection half and the candidate does not, the gate
@@ -232,9 +321,11 @@ def eval_gate(
                 direction,
                 getattr(baseline.metrics, metric),
                 getattr(candidate.metrics, metric),
-                tolerance,
+                # Structural replay is deterministic: zero tolerance (W3.3-4).
+                0.0,
             )
         )
+    deltas.extend(_structural_count_deltas(baseline, candidate))
 
     if baseline.detection is not None and candidate.detection is not None:
         for metric, direction in _DETECTION_GATE_METRICS:
@@ -330,8 +421,9 @@ def format_pr_gate_summary(report: GateReport) -> str:
         for metric in report.regressed_metrics:
             delta = by_name[metric]
             lines.append(
-                f"- {delta.metric}: baseline {delta.baseline:.2%} / "
-                f"candidate {delta.candidate:.2%} / delta {delta.delta:+.2%}"
+                f"- {delta.metric}: baseline {format_delta_value(delta, delta.baseline)} / "
+                f"candidate {format_delta_value(delta, delta.candidate)} / "
+                f"delta {format_delta_value(delta, delta.delta, signed=True)}"
             )
     return "\n".join(lines)
 
@@ -342,6 +434,7 @@ __all__ = [
     "GateReport",
     "MetricDelta",
     "eval_gate",
+    "format_delta_value",
     "format_pr_gate_summary",
     "load_result_set",
 ]

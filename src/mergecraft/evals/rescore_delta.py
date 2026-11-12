@@ -140,7 +140,18 @@ def format_rescore_summary(report: RescoreDeltaReport) -> str:
     return "\n".join(lines)
 
 
+#: The decision surface: the code that structural replay actually executes
+#: (``decide_approval`` and the finding/severity model it reads). Replay is a
+#: function of recorded findings and these paths only, so a change here is the
+#: one that can move the delta (W3.3-4). The prompt/mode paths below can only
+#: move the ``mode_prompt_versions`` pins.
+DECISION_SURFACE_PATH_PREFIXES: Final[tuple[str, ...]] = (
+    "src/mergecraft/agents/gates.py",
+    "src/mergecraft/findings/",
+)
+
 REVIEWER_SURFACE_PATH_PREFIXES: Final[tuple[str, ...]] = (
+    *DECISION_SURFACE_PATH_PREFIXES,
     "src/mergecraft/modes/",
     "src/mergecraft/agents/reviewer.py",
     "src/mergecraft/agents/registry.py",
@@ -155,7 +166,7 @@ REVIEWER_SURFACE_PATH_PREFIXES: Final[tuple[str, ...]] = (
 
 
 def touches_reviewer_surface(changed_paths: Sequence[str]) -> bool:
-    """True when any changed path affects prompts, modes, tools, or model config."""
+    """True when any changed path affects the decision surface, prompts, modes, tools, or model config."""
     for raw in changed_paths:
         path = raw.strip().replace("\\", "/")
         if not path:
@@ -169,6 +180,7 @@ def touches_reviewer_surface(changed_paths: Sequence[str]) -> bool:
 
 
 __all__ = [
+    "DECISION_SURFACE_PATH_PREFIXES",
     "RescoreDeltaReport",
     "compare_result_sets",
     "format_rescore_summary",
