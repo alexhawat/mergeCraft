@@ -144,7 +144,13 @@ async def test_api_only_scope_skips_local_analyzers_with_a_named_reason(
     assert body["ran"] is False
     assert "head not materialized" in body["reason"]
     assert body["findingCount"] == 0
-    assert ctx.tool_state.analyzer_run is None
+    recorded = ctx.tool_state.analyzer_run
+    assert recorded is not None
+    assert recorded.ran is False
+    assert "head not materialized" in str(recorded.reason)
+    from mergecraft.mcp.verification import _deterministic_checks_ran
+
+    assert _deterministic_checks_ran(ctx) == ["run_analyzers"]
 
 
 async def test_failed_base_fetch_is_reported_when_the_local_diff_succeeds(

@@ -216,6 +216,8 @@ def run_analyzers_tool(ctx: ToolContext):
             # an earlier head. Scanning it would attribute findings to code that
             # is not in the reviewed revision.
             logger.info("analyzers: skipped, {}", _API_ONLY_SKIP_REASON)
+            # Record the attempt: the verification gate counts a ran=False pass.
+            _store_run_state(ctx, AnalyzerRunState(ran=False, reason=_API_ONLY_SKIP_REASON))
             return {
                 "ran": False,
                 "reason": _API_ONLY_SKIP_REASON,
