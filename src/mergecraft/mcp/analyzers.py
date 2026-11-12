@@ -201,8 +201,28 @@ def _store_run_state(ctx: ToolContext, state: AnalyzerRunState) -> None:
     record_deferred_from_analyzer_run(tool_state, state)
 
 
+API_ONLY_SKIP_REASON = (
+    "head not materialized: the PR head could not be fetched, so the local "
+    "tree is not the reviewed revision (api-only scope)"
+)
+
+
 def run_analyzers_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
+        if ctx.tool_state.review_scope == API_ONLY_SCOPE:
+            # The PR head was never materialized, so the local tree is the base or
+            # an earlier head. Scanning it would attribute findings to code that
+            # is not in the reviewed revision.
+            logger.info("analyzers: skipped, {}", API_ONLY_SKIP_REASON)
+            # Record the attempt: the verification gate counts a ran=False pass.
+            _store_run_state(ctx, AnalyzerRunState(ran=False, reason=API_ONLY_SKIP_REASON))
+            return {
+                "ran": False,
+                "reason": API_ONLY_SKIP_REASON,
+                "analyzers": [],
+                "findingCount": 0,
+                "scopeNotice": API_ONLY_SCOPE_GUIDANCE,
+            }
         state = primary_repo_state(ctx.tool_state)
         repo_root = _confine_repo_root(ctx, Path(params.get("repo_root") or state.dir))
         changed = [str(f) for f in (params.get("changed_files") or [])]
@@ -306,8 +326,6 @@ def run_analyzers_tool(ctx: ToolContext):
             payload["mechanicalSection"] = run_state.mechanical_section
         if run_state.deferred_section:
             payload["deferredSection"] = run_state.deferred_section
-        if ctx.tool_state.review_scope == API_ONLY_SCOPE:
-            payload["scopeNotice"] = API_ONLY_SCOPE_GUIDANCE
         logger.info(
             "analyzers: ran={} tools={} findings={} catalog={}",
             run_state.ran,

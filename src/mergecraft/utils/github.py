@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import time
 from typing import TYPE_CHECKING, Any, Final
 
 import httpx
 from loguru import logger
-from tenacity import retry
+from tenacity import RetryCallState, retry, retry_base, wait_exponential_jitter
 
 from mergecraft.config.settings import (
     RepoSettings,
@@ -19,8 +20,8 @@ from mergecraft.config.settings import (
 from mergecraft.scm.types import LinkedIssue, ListedItems
 from mergecraft.utils.retry_policy import (
     DEFAULT_STOP,
-    DEFAULT_WAIT,
-    retry_transient_safe_methods,
+    is_safe_http_method,
+    is_transient_http_error,
 )
 
 if TYPE_CHECKING:
@@ -220,6 +221,127 @@ def usable_github_token(token: str) -> str:
     return token.strip()
 
 
+# GitHub answers a primary or secondary rate limit with 403 (or 429), and says
+# how long to wait in ``Retry-After`` or ``x-ratelimit-reset``. A wait it asks
+# for is honoured up to this cap, so a reset an hour away fails the call rather
+# than stalling the run.
+# https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api
+RATE_LIMIT_MAX_WAIT_S: Final[float] = 60.0
+# A secondary limit without ``Retry-After``: GitHub asks for at least a minute.
+_SECONDARY_RATE_LIMIT_WAIT_S: Final[float] = 60.0
+_RATE_LIMIT_STATUSES: Final[frozenset[int]] = frozenset({403, 429})
+
+
+def _is_secondary_rate_limit(response: httpx.Response) -> bool:
+    try:
+        text = response.text
+    except (httpx.ResponseNotRead, UnicodeDecodeError):
+        return False
+    return "secondary rate limit" in text.lower()
+
+
+def is_rate_limited_response(exc: BaseException) -> bool:
+    """True when ``exc`` is a GitHub rate-limit refusal rather than a permission 403."""
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return False
+    response = exc.response
+    if response.status_code not in _RATE_LIMIT_STATUSES:
+        return False
+    headers = response.headers
+    return (
+        "retry-after" in headers
+        or headers.get("x-ratelimit-remaining") == "0"
+        or _is_secondary_rate_limit(response)
+    )
+
+
+def rate_limit_wait_s(exc: BaseException | None) -> float | None:
+    """Return the wait GitHub asked for on a rate-limited response, capped, or ``None``."""
+    if exc is None or not is_rate_limited_response(exc):
+        return None
+    assert isinstance(exc, httpx.HTTPStatusError)  # narrowed by is_rate_limited_response
+    headers = exc.response.headers
+    wait: float | None = None
+    retry_after = headers.get("retry-after")
+    if retry_after is not None:
+        with contextlib.suppress(ValueError):
+            wait = float(retry_after)
+    if wait is None and headers.get("x-ratelimit-remaining") == "0":
+        with contextlib.suppress(ValueError):
+            wait = float(headers.get("x-ratelimit-reset", "")) - time.time()
+    if wait is None and _is_secondary_rate_limit(exc.response):
+        wait = _SECONDARY_RATE_LIMIT_WAIT_S
+    if wait is None:
+        return None
+    return min(max(wait, 0.0), RATE_LIMIT_MAX_WAIT_S)
+
+
+class _WaitRateLimitOrExponentialJitter(wait_exponential_jitter):
+    """Wait what GitHub's rate-limit headers ask for, else exponential backoff with jitter."""
+
+    def __call__(self, retry_state: RetryCallState) -> float:
+        outcome = retry_state.outcome
+        hinted = rate_limit_wait_s(outcome.exception() if outcome is not None else None)
+        if hinted is not None:
+            return hinted
+        return super().__call__(retry_state)
+
+
+class _RetryGitHubTransient(retry_base):
+    """Retry a transient or rate-limited failure of a safe or idempotent request.
+
+    Safe methods (GET/HEAD/OPTIONS) retry as before. A POST retries only when it
+    is a read-only GraphQL query sent to the client's GraphQL endpoint; a
+    mutation, or any REST write, may have landed and is never re-sent.
+    """
+
+    def __call__(self, retry_state: RetryCallState) -> bool:
+        outcome = retry_state.outcome
+        if outcome is None or not outcome.failed:
+            return False
+        exc = outcome.exception()
+        if exc is None or not (is_transient_http_error(exc) or is_rate_limited_response(exc)):
+            return False
+        method = retry_state.kwargs.get("method")
+        if method is None and len(retry_state.args) >= 2:
+            method = retry_state.args[1]
+        if not isinstance(method, str):
+            return False
+        return is_safe_http_method(method) or _is_graphql_query_request(retry_state)
+
+
+def _is_graphql_query_request(retry_state: RetryCallState) -> bool:
+    """True when the failed ``_send`` was a GraphQL query (not a mutation)."""
+    args = retry_state.args
+    if len(args) < 3 or not isinstance(args[0], GitHubClient):
+        return False
+    method, path = args[1], args[2]
+    if not isinstance(method, str) or method.upper() != "POST" or path != args[0].graphql_url:
+        return False
+    payload = retry_state.kwargs.get("json")
+    query = payload.get("query") if isinstance(payload, dict) else None
+    return isinstance(query, str) and _is_read_only_graphql(query)
+
+
+def _is_read_only_graphql(document: str) -> bool:
+    """True only when the document's first operation is a query (fail closed).
+
+    Leading BOMs, whitespace, commas and ``#`` comments are skipped. Retry is
+    allowed only for an explicit ``query`` operation or the ``{ ... }``
+    shorthand; ``mutation``, ``subscription`` or anything unrecognised is
+    never re-sent.
+    """
+    for line in document.lstrip("\ufeff").splitlines():
+        stripped = line.strip().lstrip(",").strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("{"):
+            return True
+        keyword = stripped.split("(", 1)[0].split("{", 1)[0].split()[0]
+        return keyword == "query"
+    return False
+
+
 class GitHubClient:
     """Thin async GitHub REST + GraphQL client backed by ``httpx.AsyncClient``."""
 
@@ -338,8 +460,8 @@ class GitHubClient:
         await self.aclose()
 
     @retry(
-        retry=retry_transient_safe_methods(),
-        wait=DEFAULT_WAIT,
+        retry=_RetryGitHubTransient(),
+        wait=_WaitRateLimitOrExponentialJitter(initial=0.5, max=8.0),
         stop=DEFAULT_STOP,
         reraise=True,
     )
@@ -382,8 +504,11 @@ class GitHubClient:
         """Perform a REST request and return parsed JSON (or ``None`` for 204).
 
         Safe methods (GET/HEAD/OPTIONS) retry on transient 429/5xx/transport
-        errors with bounded exponential backoff + jitter. Mutations
-        (POST/PATCH/PUT/DELETE) are never retried blindly (W9.3 / ``#34``).
+        errors and on rate-limit 403s, with bounded exponential backoff + jitter
+        or the wait ``Retry-After`` / ``x-ratelimit-reset`` asks for (capped at
+        ``RATE_LIMIT_MAX_WAIT_S``). Mutations (POST/PATCH/PUT/DELETE) are never
+        retried blindly (W9.3 / ``#34``); the one POST that retries is a
+        read-only GraphQL query to :attr:`graphql_url`.
         """
         response = await self._send(method, path, params=params, json=json, headers=headers)
         if response.status_code == 204 or not response.content:
@@ -414,6 +539,7 @@ class GitHubClient:
         payload: dict[str, Any] = {"query": query}
         if variables is not None:
             payload["variables"] = variables
+        # A query only reads, so ``_send`` retries it like a GET; a mutation never.
         data = await self.post(self.graphql_url, json=payload)
         if not isinstance(data, dict):
             msg = "unexpected GraphQL response"

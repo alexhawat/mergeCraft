@@ -25,7 +25,13 @@ def _redact_findings(findings: list[Finding], *, tool_id: str) -> list[Finding]:
         if body != finding.message:
             from mergecraft.review_taxonomy import finding_fingerprint
 
-            fingerprint = finding_fingerprint(path=finding.path, body=body)
+            # The parser's fingerprint was computed before this redaction. Chain
+            # it into the material so two findings whose messages redact to the
+            # same text keep distinct identities; the material itself carries
+            # only redacted text and a hash, never the original message.
+            fingerprint = finding_fingerprint(
+                path=finding.path, body=f"{body}\n{finding.fingerprint}"
+            )
         redacted.append(
             finding.model_copy(
                 update={

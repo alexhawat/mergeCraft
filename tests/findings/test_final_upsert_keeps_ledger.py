@@ -38,6 +38,14 @@ _RAW_BODY = "Reviewing the diff before the terminal verdict."
 _LEARNINGS_DELTA = "### Learnings delta"
 _MODEL = "openai/gpt-5.6-terra"
 _LEDGER_V2_RE = re.compile(r"<!-- mergecraft-ledger:v2:([0-9a-f]+):")
+# Review history is folded in only from an expected publisher (the reviewer
+# App's bot here); the shared ``github-actions[bot]`` login is never trusted.
+_PUBLISHER = "mergecraft[bot]"
+
+
+@pytest.fixture(autouse=True)
+def _reviewer_app_publisher(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MERGECRAFT_REVIEWER_BOT_LOGIN", _PUBLISHER)
 
 
 class _FakeScm:
@@ -75,7 +83,7 @@ class _FakeScm:
         row = {
             "id": self._next_id,
             "body": body,
-            "user": {"login": "github-actions[bot]", "type": "Bot"},
+            "user": {"login": _PUBLISHER, "type": "Bot"},
         }
         self.comments[self._next_id] = row
         return dict(row)
@@ -118,7 +126,7 @@ class _FakeScm:
             "node_id": f"R_{self._next_review_id}",
             "commit_id": "",
             "body": str(kwargs.get("body") or ""),
-            "user": {"login": "github-actions[bot]", "type": "Bot"},
+            "user": {"login": _PUBLISHER, "type": "Bot"},
         }
         self.reviews[self._next_review_id] = row
         return dict(row)

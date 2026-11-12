@@ -10,8 +10,8 @@ from typing import Any, Literal
 import pytest
 from tests.support.github_fakes import StrictGitHubClient
 
+from mergecraft.diff import changed_paths_in_diff
 from mergecraft.mcp.checkout import (
-    changed_paths_in_diff,
     checkout_pr_tool,
     ensure_local_base_branch_alias,
     last_reviewed_sha,
