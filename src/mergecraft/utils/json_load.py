@@ -6,6 +6,11 @@ import json
 from typing import Any, Literal, cast
 
 _JsonKind = Literal["any", "object", "array"]
+# Deeply nested input overflows the decoder's recursion guard instead of
+# failing as a ``JSONDecodeError``; these loaders never raise on either.
+_DECODE_ERRORS = (json.JSONDecodeError, RecursionError, ValueError)
+_SCAN_BUDGET_PASSES = 4
+_SCAN_BUDGET_SLACK = 65_536
 
 
 def _is_progress_token(payload: object) -> bool:
@@ -47,6 +52,11 @@ def _first_json_value(raw: str, *, kind: _JsonKind) -> object | None:
     decoder = json.JSONDecoder()
     index = 0
     length = len(raw)
+    # A failed decode can scan far past its start, so retrying at every brace
+    # was quadratic on garbage input. Charge each failure the characters it
+    # scanned and stop once the scans add up to a few passes over the input;
+    # a decode that overflows the recursion guard is charged as a whole pass.
+    scan_budget = _SCAN_BUDGET_PASSES * length + _SCAN_BUDGET_SLACK
     while index < length:
         char = raw[index]
         if char not in "{[":
@@ -54,7 +64,11 @@ def _first_json_value(raw: str, *, kind: _JsonKind) -> object | None:
             continue
         try:
             payload, _end = decoder.raw_decode(raw, index)
-        except json.JSONDecodeError:
+        except _DECODE_ERRORS as exc:
+            scanned = getattr(exc, "pos", None)
+            scan_budget -= length if scanned is None else max(scanned - index, 1)
+            if scan_budget < 0:
+                break
             index += 1
             continue
         if kind == "object" and not isinstance(payload, dict):
@@ -73,7 +87,7 @@ def _first_json_value(raw: str, *, kind: _JsonKind) -> object | None:
         return None
     try:
         return cast("object", json.loads(stripped))  # json.loads is typed Any
-    except json.JSONDecodeError:
+    except _DECODE_ERRORS:
         return None
 
 
