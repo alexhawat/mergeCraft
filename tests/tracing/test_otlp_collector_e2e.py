@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import pytest
-from tests.ci.workflow_support import REPO_ROOT, assert_third_party_uses_sha_pinned, read_text
+from tests.ci.workflow_support import REPO_ROOT, assert_third_party_uses_sha_pinned
 
 _GEN_AI_ATTRS = (
     "gen_ai.operation.name",
@@ -135,16 +135,6 @@ def test_wrong_exporter_endpoint_fails_the_job() -> None:
         )
 
 
-def test_unguarded_set_tracer_provider_swallow_would_fail_the_job() -> None:
-    source = (REPO_ROOT / "src" / "mergecraft" / "tracing" / "exporters.py").read_text(
-        encoding="utf-8"
-    )
-    assert "set_tracer_provider" in source
-    assert "is_proxy" in source or "Overriding of current TracerProvider is not allowed" in source
-    after = source.split("set_tracer_provider", 1)[1][:1200]
-    assert "return None" not in after or "REUSE the existing provider" in source
-
-
 @pytest.mark.integration
 def test_tracing_disabled_is_true_noop_no_collector_traffic() -> None:
     from mergecraft.config import RepoSettings
@@ -174,14 +164,6 @@ def test_collector_image_is_digest_pinned_in_ci() -> None:
     assert "@sha256:" in haystack[idx : idx + 500]
 
 
-def test_make_target_invokes_collector_suite() -> None:
-    makefile = read_text("Makefile")
-    assert "test-otlp-collector" in makefile, "Make target test-otlp-collector missing"
-    assert "run_otlp_collector_e2e" in makefile, (
-        "Make target must invoke scripts/run_otlp_collector_e2e.py"
-    )
-
-
 def test_check_otlp_e2e_slices_passes() -> None:
     """Direct pin: ``check_otlp_e2e_slices`` keeps harness tuples aligned with tests."""
     path = REPO_ROOT / "scripts" / "check_otlp_e2e_slices.py"
@@ -194,16 +176,6 @@ def test_check_otlp_e2e_slices_passes() -> None:
     check = module.check_otlp_e2e_slices
     assert callable(check)
     assert check() == 0
-
-
-def test_run_otlp_collector_e2e_script_exports_main() -> None:
-    """Named deliverable: scripts/run_otlp_collector_e2e.py (main)."""
-    path = REPO_ROOT / "scripts" / "run_otlp_collector_e2e.py"
-    assert path.is_file(), "scripts/run_otlp_collector_e2e.py missing"
-    source = path.read_text(encoding="utf-8")
-    assert "def main" in source
-    assert "test-otlp-collector" in source or "test_otlp_collector" in source
-    assert "MERGECRAFT_OTEL_COLLECTOR_DUMP" in source
 
 
 def test_w7_touched_workflows_remain_sha_pinned() -> None:

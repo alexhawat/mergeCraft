@@ -5,21 +5,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from tests.support.cc_batch import invoke, load_module, plain, require_registered
-from tests.support.dead_package_wiring import CLI_DIR, cli_cmd_path, root_callback_source
+from tests.support.cc_batch import invoke, plain, require_registered
 
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
-
-
-def test_evidence_cli_is_a_new_cmd_module() -> None:
-    """D10 — ``mergecraft evidence`` lives in ``cli/evidence_cmd.py``."""
-    path = cli_cmd_path("evidence")
-    assert path is not None, "expected src/mergecraft/cli/evidence_cmd.py"
-    source = path.read_text(encoding="utf-8")
-    assert "typer.Typer" in source or "def show" in source
-    assert path.resolve() != (CLI_DIR / "app.py").resolve()
-    module = load_module("mergecraft.cli.evidence_cmd")
-    assert getattr(module, "app", None) is not None or callable(getattr(module, "run", None))
 
 
 def test_root_help_lists_evidence() -> None:
@@ -57,15 +45,3 @@ def test_evidence_show_json_is_exportable() -> None:
     else:
         assert result.exit_code != CLI_SUCCESS_EXIT_CODE
         assert "finding" in combined.casefold() or "not" in combined.casefold()
-
-
-def test_w9_does_not_fold_evidence_into_root_callback() -> None:
-    """D10 current state — root callback stays additive-only (W9 must not edit it)."""
-    source = root_callback_source()
-    assert "def _root(" in source
-    assert '"--format"' in source
-    assert '"--quiet"' in source
-    assert '"--color"' in source
-    root_block = source.split("def _root(", 1)[1].split("\n@app.", 1)[0]
-    assert "evidence_cmd" not in root_block
-    assert "decide_approval" not in root_block

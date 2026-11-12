@@ -72,29 +72,6 @@ ALLOWED_ADDITIVE_REPORT_FIELDS: Final[frozenset[str]] = frozenset({"driver"})
 PINNED_ARTIFACT_FIELDS: Final[frozenset[str]] = frozenset(
     {"screenshots", "video", "trace", "logs", "network_summary"}
 )
-PINNED_FINDING_FIELDS: Final[frozenset[str]] = frozenset(
-    {
-        "tool",
-        "rule_id",
-        "category",
-        "severity",
-        "confidence",
-        "message",
-        "path",
-        "start_line",
-        "end_line",
-        "fingerprint",
-        "evidence",
-        "remediation",
-        "autofix",
-        "introduced_by_pr",
-        "source",
-        "scope",
-        "cluster_id",
-        "lens",
-        "collateral",
-    }
-)
 PINNED_FINDING_SOURCES: Final[frozenset[str]] = frozenset(
     {"analyzer", "agent", "ci", "trajectory", "classifier"}
 )

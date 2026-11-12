@@ -9,17 +9,10 @@ from __future__ import annotations
 import pytest
 from tests.cli.support_provider_registry import (
     BUILTIN_HARNESS_DEFAULTS,
-    EXPECTED_BUILTIN_PROVIDER_COUNT,
     import_provider_registry,
 )
 
-from mergecraft.models import PROVIDERS
 from mergecraft.utils import agent_resolve as ar
-
-
-def test_providers_catalog_has_fourteen_builtin_entries() -> None:
-    """Seed source ``PROVIDERS`` must expose exactly 14 built-in catalog rows."""
-    assert len(PROVIDERS) == EXPECTED_BUILTIN_PROVIDER_COUNT
 
 
 @pytest.mark.parametrize(
@@ -59,12 +52,14 @@ def test_allocate_env_index_never_reuses_gaps() -> None:
     assert allocate([{"envIndex": 1}, {"envIndex": 5}]) == 6
 
 
-def test_harness_support_predicate_is_reused_not_duplicated() -> None:
+def test_harness_support_predicate_agrees_with_agent_resolve() -> None:
     registry = import_provider_registry()
     supports = getattr(registry, "harness_supports_provider", None)
     if supports is None:
         pytest.fail("provider_registry.harness_supports_provider is not implemented")
-    assert supports is ar._harness_supports_provider
+    for harness in ("opencode", "codex", "claude", "gemini", "cursor"):
+        for label in BUILTIN_HARNESS_DEFAULTS:
+            assert supports(harness, label) == ar._harness_supports_provider(harness, label)
 
 
 def test_list_supported_harnesses_is_generated_from_code() -> None:

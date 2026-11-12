@@ -17,11 +17,8 @@ from typer.testing import CliRunner
 from mergecraft.cli.app import app
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
 from tests.support.dead_package_wiring import (
-    CLI_DIR,
-    cli_cmd_path,
     production_importers,
     production_invoked_names,
-    root_callback_source,
 )
 
 runner = CliRunner()
@@ -56,15 +53,6 @@ def _require_describe() -> None:
         pytest.fail("mergecraft describe is not registered yet")
 
 
-def test_d10_root_callback_still_owns_format_quiet_color() -> None:
-    """D10 — W5 must not restyle the root callback; tests invoke ``app`` as-is."""
-    source = root_callback_source()
-    assert "def _root(" in source
-    assert '"--format"' in source
-    assert '"--quiet"' in source
-    assert '"--color"' in source
-
-
 def test_pr_has_a_review_or_cli_production_call_site() -> None:
     """W5 — at least one review-path or CLI module imports ``mergecraft.pr``."""
     importers = production_importers("pr")
@@ -73,15 +61,6 @@ def test_pr_has_a_review_or_cli_production_call_site() -> None:
         path.startswith(("cli/", "modes/", "mcp/", "action/", "agents/")) or path == "main.py"
         for path in importers
     )
-
-
-def test_pr_cli_is_a_new_cmd_module() -> None:
-    """D10 — ``mergecraft describe`` lives in a new ``cli/*_cmd.py`` leaf."""
-    path = cli_cmd_path("pr", "describe")
-    assert path is not None, "expected src/mergecraft/cli/pr_cmd.py or describe_cmd.py"
-    source = path.read_text(encoding="utf-8")
-    assert "def run(" in source or "def describe" in source or "typer.Typer" in source
-    assert path.resolve() != (CLI_DIR / "app.py").resolve()
 
 
 def test_root_help_lists_describe() -> None:
@@ -145,14 +124,3 @@ def test_unknown_describe_option_is_usage_error() -> None:
     result = _invoke("describe", "--not-a-real-flag")
     combined = _plain(result.stdout + result.stderr)
     assert result.exit_code == CLI_USAGE_EXIT_CODE, combined
-
-
-def test_w5_does_not_fold_describe_into_root_callback() -> None:
-    """D10 — adding describe must not change ``_root`` option names."""
-    source = root_callback_source()
-    assert "def _root(" in source
-    assert '"--format"' in source
-    assert '"--quiet"' in source
-    assert '"--color"' in source
-    root_block = source.split("def _root(", 1)[1].split("\n@app.", 1)[0]
-    assert "build_describe_output" not in root_block

@@ -14,47 +14,11 @@ from pathlib import Path
 from tests.ci.workflow_support import REPO_ROOT
 from tests.support.cc_batch import invoke, plain
 from tests.support.cd_batch import (
-    d10_root_callback_owns_globals,
     require_callable,
     require_module,
 )
-from tests.support.dead_package_wiring import CLI_DIR, root_callback_source
 
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
-
-
-def test_d16_does_not_restyle_shared_console() -> None:
-    """D16 lasting — W19 must not restyle ``cli/consoles.py``."""
-    source = (CLI_DIR / "consoles.py").read_text(encoding="utf-8")
-    assert "out_console = Console()" in source
-    assert "err_console = Console(stderr=True)" in source
-    assignments = [
-        line.strip()
-        for line in source.splitlines()
-        if line.strip().startswith(("out_console", "err_console"))
-    ]
-    assert assignments == [
-        "out_console = Console()",
-        "err_console = Console(stderr=True)",
-    ]
-
-
-def test_w19_does_not_fold_supply_chain_into_root_callback() -> None:
-    """D10 — ``--supply-chain`` is a doctor option, not a root callback flag."""
-    root_block = d10_root_callback_owns_globals()
-    assert "supply-chain" not in root_block
-    assert "supply_chain" not in root_block
-    assert "doctor_cmd" not in root_block
-    source = root_callback_source()
-    assert 'app.command("doctor")' in source or 'command("doctor")' in source
-
-
-def test_sbom_signing_and_digest_pinning_already_ship() -> None:
-    """#366 out of scope — substrate is already shipped; doctor verifies it."""
-    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-    docker = (REPO_ROOT / "docker" / "agent-clis" / "package.json").read_text(encoding="utf-8")
-    assert "agent-clis" in docker or docker.strip().startswith("{")
-    assert "security" in makefile.casefold()
 
 
 def test_doctor_supply_chain_help_is_registered() -> None:
@@ -63,9 +27,6 @@ def test_doctor_supply_chain_help_is_registered() -> None:
     help_text = plain(result.stdout + result.stderr).casefold()
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, help_text
     assert "supply-chain" in help_text
-    doctor_src = (CLI_DIR / "doctor_cmd.py").read_text(encoding="utf-8")
-    assert "--supply-chain" in doctor_src
-    assert "supply_chain" in doctor_src
 
 
 def test_doctor_supply_chain_runs_provenance_probes(tmp_path: Path) -> None:

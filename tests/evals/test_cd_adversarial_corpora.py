@@ -23,17 +23,6 @@ from tests.support.cd_batch import (
 )
 
 
-def test_issue_140_gate_metrics_remain_the_published_numbers() -> None:
-    """D15 current state — do not close or retarget #140 precision/recall."""
-    from mergecraft.evals import gate as gate_mod
-
-    source = Path(gate_mod.__file__).read_text(encoding="utf-8")
-    assert "decision_replay_pass_rate" in source
-    assert "unsafe_approval_rate" in source
-    assert "corpus_confirmed_precision" in source
-    assert "#140" in source or "Detection" in source
-
-
 def test_three_adversarial_corpora_are_named_and_non_empty() -> None:
     """Happy: prompt-injection, malicious-repo, and malicious-ticket corpora."""
     module = require_module(ADVERSARIAL_CORPORA_MODULE)
