@@ -20,6 +20,7 @@ Exports:
     THREADS_PAGE_SIZE, THREADS_MAX_PAGES: Thread paging bounds.
     COMMENTS_PAGE_SIZE, COMMENTS_MAX_PAGES: Per-thread comment paging bounds.
     fetch_review_threads: Read one pull request's review threads.
+    rest_style_login: Normalize a GraphQL comment author to its REST login.
 """
 
 from __future__ import annotations
@@ -41,11 +42,12 @@ THREADS_PAGE_SIZE: Final[int] = 100
 THREADS_MAX_PAGES: Final[int] = 10
 COMMENTS_PAGE_SIZE: Final[int] = 100
 COMMENTS_MAX_PAGES: Final[int] = 10
+_BOT_SUFFIX: Final[str] = "[bot]"
 
 _COMMENT_FIELDS: Final[str] = """
               databaseId
               body
-              author { login }
+              author { __typename login }
               path
               line
               originalLine
@@ -97,6 +99,23 @@ query($threadId: ID!, $cursor: String) {
 }
 """
 )
+
+
+def rest_style_login(author: object) -> str:
+    """Return a GraphQL ``author`` in the REST login shape every comparison uses.
+
+    GraphQL names a GitHub App's bot by its bare slug (``mergecraft-app``) while
+    REST, and so every publisher set, names it ``mergecraft-app[bot]``. Normalizing
+    once here, at the only GraphQL boundary that reads comment authors, keeps
+    the authorship rule a plain login comparison everywhere else. A user login is
+    returned unchanged, and an author with no login yields ``""``.
+    """
+    if not isinstance(author, dict):
+        return ""
+    login = str(author.get("login") or "").strip()
+    if login and author.get("__typename") == "Bot" and not login.endswith(_BOT_SUFFIX):
+        return f"{login}{_BOT_SUFFIX}"
+    return login
 
 
 @dataclass(slots=True)
@@ -247,7 +266,7 @@ async def fetch_review_threads(
             {
                 "id": c.get("databaseId"),
                 "body": c.get("body"),
-                "author": (c.get("author") or {}).get("login"),
+                "author": rest_style_login(c.get("author")),
                 "path": c.get("path"),
                 "line": c.get("line") or c.get("originalLine"),
                 "url": c.get("url"),
@@ -276,4 +295,5 @@ __all__ = [
     "THREAD_COMMENTS_QUERY",
     "ReviewThreadPage",
     "fetch_review_threads",
+    "rest_style_login",
 ]

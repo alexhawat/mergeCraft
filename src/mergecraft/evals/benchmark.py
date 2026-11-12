@@ -43,6 +43,7 @@ from mergecraft.evals.store import (
     replay_case,
 )
 from mergecraft.modes import modes
+from mergecraft.utils.atomic_write import write_text_atomically
 from mergecraft.utils.git_hardening import git_argv
 
 RESULT_SET_SCHEMA_VERSION: Final[str] = "1.4.0"
@@ -738,13 +739,12 @@ def write_result_set(
             provider_tag = ""
         out_name = f"structural-replay{provider_tag}-{stamp}-{suffix}.json"
     path = results_dir / out_name
-    path.write_text(
-        json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    text = json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True) + "\n"
+    # Both writes are atomic: ``latest.json`` is the committed CI baseline, and
+    # an interrupted write must leave the previous baseline intact.
+    write_text_atomically(path, text)
     if update_latest:
-        latest = results_dir / "latest.json"
-        latest.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+        write_text_atomically(results_dir / "latest.json", text)
     return path
 
 
