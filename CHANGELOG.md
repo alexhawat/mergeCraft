@@ -596,6 +596,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - "Re-run jobs" no longer rewrites an earlier attempt's review with the new attempt's
   record (#1436).
 
+- The required `mergecraft review` check passes a pull request whose every changed file
+  is ignored by the review ignore paths (for example a changelog-only or lockfile-only
+  change): the job logs a "nothing to review" notice and its summary says the pull
+  request was not reviewed. Every other `neutral` result still fails, the Codex and
+  Claude fallback rungs no longer run on such a pull request, and the hardened example
+  workflow applies the same rule (#1447).
+
 ### Security
 
 - `establish_review_scope` only reads a `diff_path` that resolves, symlinks
