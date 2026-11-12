@@ -44,6 +44,7 @@ from mergecraft.ci.changed_functions import (
     ChangedFunction,
     changed_functions_from_diff,
     resolve_enclosing_symbol,
+    unsupported_language_skip,
 )
 from mergecraft.ci.evidence import CI_TOOL, GateSubstitution, artifact_ingest_failures
 
@@ -55,6 +56,7 @@ if TYPE_CHECKING:
     from mergecraft.utils.github import GitHubClient
 
 SKIP_UNSUPPORTED_MUTATION_FORMAT = "unsupported_mutation_format"
+SKIP_MUTATION_SYMBOLS_UNRESOLVED = "mutation_symbols_unresolved"
 
 _MUTATION_CATEGORY = "Maintainability & Code Quality"
 _SURVIVED = "survived"
@@ -364,6 +366,12 @@ def mutation_findings(
         diff=diff,
         source_tree=source_tree,
     )
+    if not symbols and diff.strip():
+        # Name why nothing can attribute, rather than an empty, reason-less
+        # result (#1323): attribution is Python-only.
+        return MutationIngestResult(
+            skip_reason=unsupported_language_skip(diff) or SKIP_MUTATION_SYMBOLS_UNRESOLVED
+        )
     attributed: list[tuple[str, MutationSurvivor]] = []
     for item in parsed.survivors:
         path = _norm_path(item.path)

@@ -154,6 +154,9 @@ class CiEvidenceSettings(_OptionalFeatureModel):
     (mutmut or Stryker JSON) the reviewer may ingest as survivor findings.
     Empty means no ingest and no extra API call (C-D2).
 
+    Both attribute to changed functions, which resolves Python only: a report
+    for a diff with no Python change records ``changed_function_language_unsupported``.
+
     ``redGreen`` declares the fail-then-pass receipt (:class:`RedGreenReceiptSettings`:
     the artifact and the one workflow allowed to upload it). Unset means no ingest and
     no extra API call; a fix pull request then has no proof (#1056). It is honoured

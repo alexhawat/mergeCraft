@@ -108,16 +108,16 @@ def _merge_analyzer_segments(
     segment. Compatible duplicate occurrences retain their strongest severity
     and evidence; contradictory attribution stays explicit. Descriptive fields
     take the most recent non-empty value, since they describe the latest run
-    rather than the union.
+    rather than the union; that includes each analyzer's status row, which
+    is taken from the newest segment that reports it (first-seen position).
     """
     if len(segments) == 1:
         return next(iter(segments.values()))
     findings: list[dict[str, Any]] = []
     inline: list[dict[str, Any]] = []
     deferred: list[dict[str, Any]] = []
-    analyzers: list[AnalyzerStatusRow] = []
+    analyzers: dict[str, AnalyzerStatusRow] = {}
     verified: set[str] = set()
-    seen_analyzers: set[str] = set()
     mechanical_section: str | None = None
     deferred_section: str | None = None
     pre_merge_summary: str | None = None
@@ -128,10 +128,8 @@ def _merge_analyzer_segments(
         inline.extend(segment.inline)
         deferred.extend(segment.deferred_findings)
         for status_row in segment.analyzers:
-            if status_row.id in seen_analyzers:
-                continue
-            seen_analyzers.add(status_row.id)
-            analyzers.append(status_row)
+            # Segments iterate oldest-first: a later row supersedes (#1321).
+            analyzers[status_row.id] = status_row
         verified |= set(segment.verified_ids)
         mechanical_section = segment.mechanical_section or mechanical_section
         deferred_section = segment.deferred_section or deferred_section
@@ -145,7 +143,7 @@ def _merge_analyzer_segments(
     return AnalyzerRunState(
         ran=any(segment.ran for segment in segments.values()),
         reason=latest.reason,
-        analyzers=analyzers,
+        analyzers=list(analyzers.values()),
         findings=merge_finding_records(findings),
         inline=merge_finding_records(inline, inline=True),
         mechanical_section=mechanical_section,

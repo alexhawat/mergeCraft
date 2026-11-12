@@ -26,6 +26,7 @@ from mergecraft.analyzers.trust import (
     IN_PROCESS_CONFIG_NOTE,
     IN_PROCESS_VERSION_NOTES,
 )
+from mergecraft.review_taxonomy import finding_fingerprint
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -51,7 +52,14 @@ def _normalize_paths(findings: list[Finding], *, repo_root: Path) -> list[Findin
     normalized: list[Finding] = []
     for finding in findings:
         path = resolve_repo_relative_path(finding.path, repo_root=repo_root)
-        normalized.append(finding.model_copy(update={"path": path}))
+        update: dict[str, str] = {"path": path}
+        # A fingerprint derived from the old path would change with the
+        # checkout root; re-derive it. A parser-pinned fingerprint is kept.
+        if path != finding.path and finding.fingerprint == finding_fingerprint(
+            path=finding.path, body=finding.message
+        ):
+            update["fingerprint"] = finding_fingerprint(path=path, body=finding.message)
+        normalized.append(finding.model_copy(update=update))
     return normalized
 
 

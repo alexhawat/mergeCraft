@@ -130,6 +130,12 @@ class GitHubActionsProvider:
             "count": len(jobs_out),
             "total_failed_runs": len(failed),
             "overflow": overflow,
+            # Runs past the log-analysis cap: no logs fetched, but each is still
+            # recorded as a blocking CI finding by the orchestrator (#1321).
+            "overflow_runs": [
+                {"id": run.get("id"), "name": run.get("name"), "html_url": run.get("html_url")}
+                for run in failed[len(selected) :]
+            ],
         }
 
     @staticmethod

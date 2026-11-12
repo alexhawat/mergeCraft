@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -392,6 +393,72 @@ def test_merge_analyzer_findings_dedupes_by_fingerprint() -> None:
     assert fingerprints.count(shared) == 1
     assert "fp-novel" in fingerprints
     assert len(findings) == 2
+
+
+def _repeated_mypy_findings() -> list[Finding]:
+    """Same mypy text at three lines; the middle occurrence is the strongest."""
+    return [
+        make_finding(
+            tool="mypy",
+            rule_id="no-untyped-def",
+            category="Maintainability & Code Quality",
+            severity=severity,
+            confidence="certain",
+            message="Function is missing a type annotation",
+            path="a.py",
+            start_line=line,
+            end_line=line,
+            source="analyzer",
+        )
+        for line, severity in ((10, "Minor"), (50, "Major"), (90, "Minor"))
+    ]
+
+
+def test_merge_analyzer_findings_keeps_repeated_message_at_each_line() -> None:
+    """Regression (#1316): same-text findings at different lines all survive the merge."""
+    result = OfflineReviewResult(
+        success=True,
+        structured_output='{"findings":[]}',
+        outcome=RunOutcome.passed,
+    )
+    merged = merge_analyzer_findings_into_result(result, _repeated_mypy_findings())
+    findings = parse_offline_review_findings(merged)
+    assert [(row.start_line, row.severity) for row in findings] == [
+        (10, "Minor"),
+        (50, "Major"),
+        (90, "Minor"),
+    ]
+    assert cli_exit_code_for_review(RunOutcome.passed, findings) == CLI_BLOCKED_EXIT_CODE
+
+
+def test_merge_analyzer_findings_same_occurrence_keeps_strongest_severity() -> None:
+    """Regression (#1316): a colliding occurrence keeps the more severe copy."""
+    agent = _finding(rule_id="AGT-1", severity="Minor", source="agent", fingerprint="fp-x")
+    analyzer = _finding(rule_id="ANL-1", severity="Major", source="analyzer", fingerprint="fp-x")
+    result = OfflineReviewResult(
+        success=True,
+        structured_output=json.dumps({"findings": [agent.model_dump()]}),
+        outcome=RunOutcome.passed,
+    )
+    findings = parse_offline_review_findings(
+        merge_analyzer_findings_into_result(result, [analyzer])
+    )
+    assert [row.severity for row in findings] == ["Major"]
+
+
+def test_shadow_judge_findings_keep_repeated_message_at_each_line() -> None:
+    """Regression (#1316): the Jev shadow-judge input keeps every occurrence too."""
+    state = AnalyzerRunState(
+        ran=True, findings=[row.model_dump() for row in _repeated_mypy_findings()]
+    )
+    driver = cast("offline_mod._OfflineDiffReviewRun", SimpleNamespace(analyzer_run=state))
+    review_out = OfflineReviewResult(success=True, structured_output='{"findings":[]}')
+    findings = offline_mod._findings_for_shadow_judge(driver, review_out)
+    assert [(row.start_line, row.severity) for row in findings] == [
+        (10, "Minor"),
+        (50, "Major"),
+        (90, "Minor"),
+    ]
 
 
 def test_findings_from_analyzer_run_skips_invalid_rows() -> None:
