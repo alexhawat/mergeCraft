@@ -7,8 +7,9 @@ editing:
 
 ```bash
 mergecraft init
-mergecraft provider auth opencode     # or opencode-go, openai, anthropic, google, …
-mergecraft review                  # local review works now
+mergecraft provider auth opencode --scope both   # or opencode-go, openai, anthropic, google, …
+mergecraft review                                # local review works now
+mergecraft doctor                                # the workflow auth row must be ok
 ```
 
 `mergecraft init` scaffolds `.mergecraft/config.yaml` and the workflow. The first
@@ -16,15 +17,31 @@ successful `provider auth` seeds `agents.reviewer` p0 with that provider's
 preferred catalog model and inserts the slug into `models:` when needed. Inspect
 the result with `mergecraft agent list`.
 
+`--scope` picks where the credential goes: `github` (the default) stores a
+GitHub Actions secret only, `local` writes the local `.env` only, and `both` does
+both. A local `mergecraft review` needs `local` or `both`.
+
+When the scope includes `github`, `provider auth` stores the indexed
+`LLM_PROVIDER_<N>_*` secret and also rewrites the mergeCraft step in
+`.github/workflows/mergecraft.yml` so its `env:` block passes that secret and
+`with.model` names the seeded reviewer model. `mergecraft doctor` fails its
+`workflow auth` row when the workflow passes no credential the repository holds
+(it lists the repository's secrets with `gh`; without `gh` it warns instead).
+
 To override models for local runs only — without changing what CI sees — use
 `mergecraft agent-local` (see [`docs/agent-roster.md`](agent-roster.md)).
 
 Commit `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml` after
-auth. Run `mergecraft workflow sync --check` before pushing if you assign roster
-models whose providers are not yet wired in the workflow.
+auth. If you later assign roster models whose providers the workflow does not
+wire, run `mergecraft workflow sync --apply` (or `--check` in CI).
 
-The default workflow does not listen for `@mergecraft review` — reviews
-run on `pull_request_target` (opened / synchronize).
+Use `mergecraft provider auth <label>` for every provider. The older
+`mergecraft auth <tool>` commands (`auth claude`, `auth codex`, …) are legacy
+shims kept for existing scripts.
+
+The default `mergecraft init` workflow does not listen for `@mergecraft review`
+comments — reviews run on `pull_request` (opened / ready_for_review /
+synchronize) and `workflow_dispatch`.
 
 ## Provider reference
 

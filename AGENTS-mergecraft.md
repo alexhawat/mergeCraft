@@ -59,8 +59,10 @@ Use this when asked to add AI PR review to another repository.
 
    Other providers: [`docs/authentication.md`](docs/authentication.md). **Never**
    invent, paste, or commit credentials, tokens, secrets, or `.env` files. Each
-   `mergecraft provider auth … --scope github` stores a GitHub Actions secret via `gh secret set` — hand
-   that step to the human when interactive auth is required.
+   `mergecraft provider auth … --scope github` stores a GitHub Actions secret via `gh secret set` and
+   rewrites `.github/workflows/mergecraft.yml` to pass it — hand that step to the human
+   when interactive auth is required. Then run `mergecraft doctor`: its `workflow auth`
+   row must be ok (if not, run `mergecraft workflow sync --apply`).
 5. **Commit only** `.mergecraft/config.yaml`, `.mergecraft/learnings.md`,
    `.github/workflows/mergecraft.yml`, and any `.gitignore` lines `init` added
    on a new branch. Do not commit secrets.

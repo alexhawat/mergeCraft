@@ -5,7 +5,7 @@ The two commands ship in Batch D:
 - ``mergecraft config tracing`` — render the resolved tracing settings with
   the logfire token redacted (D5). The operator can verify wiring without
   leaking the secret into terminal scrollback.
-- ``mergecraft traces <run-id>`` — read back local JSONL traces for the
+- ``mergecraft traces show <run-id>`` (or ``traces <run-id>``) — read back local JSONL traces for the
   given run id. Reuses :func:`mergecraft.tracing.read_jsonl_events` so the
   read path is one line.
 
@@ -14,7 +14,7 @@ to honour the CLI / env / config / default precedence (W7.6).
 
 Exports:
     config_app -- ``mergecraft config`` Typer group with the ``tracing`` subcommand.
-    app -- ``mergecraft traces`` Typer group (``<run-id>`` as a positional arg).
+    app -- ``mergecraft traces`` Typer group (``show <run-id>``; a bare ``<run-id>`` is a synonym).
     render_resolved -- plain-text helper used by ``config tracing``.
 """
 
@@ -28,24 +28,51 @@ import typer
 from rich.table import Table
 
 from mergecraft.cli.consoles import err_console as console
-from mergecraft.cli.exits import (
-    CLI_SUCCESS_EXIT_CODE,
-)
 from mergecraft.cli.tracing_gh_visibility import detect_github_action_tracing
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings, tracing_config_sources
-from mergecraft.cli.typer_group import mergecraft_typer
+from mergecraft.cli.typer_group import MergecraftTyperGroup, mergecraft_typer
 from mergecraft.config.env import ConfigLocatorEnv
 from mergecraft.config.env.tracing import TracingEnv
 from mergecraft.tracing.redaction import redact_attrs
 from mergecraft.tracing.sinks import read_jsonl_events
 
 if TYPE_CHECKING:
+    import click
     from rich.console import Console
 
     from mergecraft.config.layered import ConfigSources
 
+
+class _TracesGroup(MergecraftTyperGroup):
+    """``traces`` group that routes a bare run id to the ``show`` subcommand.
+
+    A positional argument on the group callback would swallow the subcommand
+    name (``traces show X`` parsed ``show`` as the run id), so the synonym is
+    resolved here instead: when the first token is not a subcommand or a
+    help flag, ``show`` is inserted in front of the arguments.
+    """
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        """Insert ``show`` before *args* unless they already name a subcommand.
+
+        Args:
+            ctx (click.Context): The group's parse context.
+            args (list[str]): Raw arguments after ``traces``.
+
+        Returns:
+            list[str]: The remaining arguments, as Click's group parser returns them.
+        """
+        if args and args[0] not in self.commands and args[0] not in ctx.help_option_names:
+            args = ["show", *args]
+        return super().parse_args(ctx, args)
+
+
 app = mergecraft_typer(
-    help="Trace inspection commands — show resolved config and read back local traces.",
+    cls=_TracesGroup,
+    help=(
+        "Read back local JSONL traces: mergecraft traces show RUN_ID "
+        "(mergecraft traces RUN_ID is a synonym)."
+    ),
     no_args_is_help=True,
 )
 
@@ -294,30 +321,9 @@ def traces_show(
     console.print(table)
 
 
-# ``mergecraft traces <run-id>`` is a synonym for ``mergecraft traces show <run-id>``.
-# Typer does not natively support bare-arg commands under a Typer group, so we
-# register a callback that dispatches to ``traces_show`` when a positional arg
-# is supplied. The contract test only checks that ``mergecraft traces <run-id>``
-# is wired up, so a callback that forwards is sufficient.
-@app.callback(invoke_without_command=True)
-def traces_callback(
-    ctx: typer.Context,
-    run_id: str | None = typer.Argument(
-        None, help="Run id to read back (the TraceEvent.session_id)."
-    ),
-    trace_dir: Path | None = typer.Option(
-        None,
-        "--trace-dir",
-        help="Override $MERGECRAFT_TRACE_DIR for this invocation.",
-    ),
-) -> None:
-    """Read back local JSONL traces for the given run id."""
-    if ctx.invoked_subcommand is not None:
-        return
-    if run_id is None:
-        console.print(ctx.get_help())
-        raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
-    traces_show(run_id=run_id, trace_dir=trace_dir)
+@app.callback()
+def traces_callback() -> None:
+    """Keep ``traces`` a group so ``show`` stays a named subcommand."""
 
 
 # ---------------------------------------------------------------------------

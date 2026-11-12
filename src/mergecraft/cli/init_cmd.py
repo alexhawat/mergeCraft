@@ -12,6 +12,7 @@ from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.provider_cmd import seed_builtin_providers
 from mergecraft.cli.startup_env import implicit_env_is_tracked
+from mergecraft.cli.target_dir import implicit_repo_root
 from mergecraft.config.io import load_config_dict, patch_config_dict
 from mergecraft.enterprise.audit import DEFAULT_AUDIT_REL
 from mergecraft.example_workflows import render_minimal_workflow
@@ -170,7 +171,9 @@ def run(
             f"invalid --agent-sandbox {agent_sandbox!r} — "
             "expected never, merged-only, dispatch, or same-repo"
         )
-    root = Path.cwd()
+    # Scaffold at the repository root: a workflow under a subdirectory's
+    # ``.github/`` is one GitHub never runs.
+    root = implicit_repo_root()
     config_dir = root / ".mergecraft"
     config_path = config_dir / "config.yaml"
     workflow_dir = root / ".github" / "workflows"
@@ -225,9 +228,12 @@ def run(
     console.print("\n[bold]next steps[/bold]")
     console.print(
         "  1. authenticate a provider: [cyan]mergecraft provider auth <label>[/cyan] "
-        "(seeds reviewer p0 automatically)"
+        "(stores the secret, wires it into the workflow, seeds reviewer p0)"
     )
-    console.print("  2. inspect the roster: [cyan]mergecraft agent list[/cyan]")
+    console.print(
+        "  2. check CI can authenticate: [cyan]mergecraft doctor[/cyan] "
+        "(the workflow auth row must be ok)"
+    )
     console.print("  3. commit and push the workflow + config")
     console.print("  4. open a PR or run workflow_dispatch")
     logger.debug("init complete at {}", root)

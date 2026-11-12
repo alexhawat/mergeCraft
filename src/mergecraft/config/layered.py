@@ -73,6 +73,18 @@ def _read_yaml_mapping(path: Path) -> dict[str, Any]:
     return loaded
 
 
+def _requested_config_file(path: Path, *, source: str = "config file") -> Path:
+    """Return *path* when it is a file; an explicitly named missing file is an error.
+
+    A ``--config`` path or ``MERGECRAFT_CONFIG`` names the one file the operator
+    chose. Loading something else when it is missing would run under a config
+    they did not pick, so it fails closed like an unparseable file.
+    """
+    if not path.is_file():
+        raise ConfigParseError(f"{source} not found: {path}")
+    return path
+
+
 def load_layered_config_dict(
     *,
     root: Path,
@@ -87,16 +99,12 @@ def load_layered_config_dict(
     """
     _ = strict
     if explicit_path is not None:
-        candidate = Path(explicit_path)
-        if not candidate.is_file():
-            return {}
-        return migrate_config(_read_yaml_mapping(candidate))
+        return migrate_config(_read_yaml_mapping(_requested_config_file(Path(explicit_path))))
 
     env_path = ConfigLocatorEnv().config_path
     if env_path:
-        candidate = Path(env_path)
-        if candidate.is_file():
-            return migrate_config(_read_yaml_mapping(candidate))
+        env_file = _requested_config_file(Path(env_path), source="MERGECRAFT_CONFIG file")
+        return migrate_config(_read_yaml_mapping(env_file))
 
     committed = migrate_config(_read_yaml_mapping(config_path_for_root(root)))
     use_local = include_local if include_local is not None else not running_in_github_actions()

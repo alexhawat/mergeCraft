@@ -55,8 +55,11 @@ a read-only verifier; typed findings drive inline comments and the
    - API-key providers: `mergecraft provider auth deepseek|minimax|tokenhub|openrouter|xai --scope github`
 
    Never handle raw credentials; never commit secrets. GitHub scope checks the exact
-   target repository before collecting credentials and stores Actions secrets.
+   target repository before collecting credentials, stores Actions secrets, and
+   rewrites `.github/workflows/mergecraft.yml` so the workflow passes them.
    Local scope writes only the displayed `.env` file and never calls GitHub.
+   After auth, run `mergecraft doctor`: its `workflow auth` row must be ok (if
+   not, run `mergecraft workflow sync --apply`).
 4. Commit `.mergecraft/config.yaml`, `.mergecraft/learnings.md`,
    `.github/workflows/mergecraft.yml`, and any `.gitignore` lines `init` added;
    push; open a PR or run `workflow_dispatch`. The default workflow does not

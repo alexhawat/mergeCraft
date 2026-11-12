@@ -9,7 +9,7 @@ Registry namespace: `mcp-name: io.github.alexhawat/mergecraft` (generated
 [`server.json`](../server.json)). Tool schemas: [`docs/mcp-tools.md`](mcp-tools.md).
 
 **Prereqs:** install the CLI (`uv tool install mergecraft-action==0.1.0a5`)
-and authenticate a provider for local stdio (`mergecraft auth <provider> --scope local`, or
+and authenticate a provider for local stdio (`mergecraft provider auth <label> --scope local`, or
 `--scope both` if you also use GitHub Actions). Run `mergecraft init` in the repo
 you want reviewed so `.mergecraft/config.yaml` exists.
 
