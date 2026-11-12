@@ -18,8 +18,10 @@ import pytest
 from tests.ci.workflow_support import read_text
 from tests.docs.support import load_harness_manifest
 
+# The long agent prompts moved from the landing README to docs/agents.md (#1351).
+_AGENT_PROMPTS_DOC = "docs/agents.md"
 _ALSO_TEACH_HEADING = re.compile(
-    r"^###\s+Also teach your agent",
+    r"^#{2,3}\s+Also teach your agent",
     re.MULTILINE | re.IGNORECASE,
 )
 _PER_AGENT_DETAILS = re.compile(
@@ -54,7 +56,7 @@ def _generated_harness_package_paths(manifest: dict[str, Any]) -> set[str]:
 
 def _also_teach_prompt_text(readme_text: str) -> str:
     heading = _ALSO_TEACH_HEADING.search(readme_text)
-    assert heading, 'README must keep "### Also teach your agent" copy prompt (D10)'
+    assert heading, 'docs/agents.md must keep "### Also teach your agent" copy prompt (D10)'
     region = readme_text[heading.end() :]
     match = _FENCED_TEXT_BLOCK.search(region)
     assert match, '"Also teach your agent" must ship a ```text fenced copy prompt (D10)'
@@ -63,7 +65,7 @@ def _also_teach_prompt_text(readme_text: str) -> str:
 
 def _per_agent_prompts(readme_text: str) -> dict[str, str]:
     details = _PER_AGENT_DETAILS.search(readme_text)
-    assert details, "README must keep the per-agent one-liners <details> block (D10)"
+    assert details, "docs/agents.md must keep the per-agent one-liners <details> block (D10)"
     region = details.group(1)
     prompts: dict[str, str] = {}
     sections = re.split(r"\n\*\*([^*]+)\*\*", region)
@@ -106,7 +108,7 @@ def test_jump_nav_may_link_source_skill_developer_path() -> None:
 
 def test_also_teach_agent_prompt_does_not_instruct_source_skill_copy() -> None:
     """Consumer copy prompt must not tell readers to copy repo-root skills/mergecraft/."""
-    prompt = _also_teach_prompt_text(read_text("README.md"))
+    prompt = _also_teach_prompt_text(read_text(_AGENT_PROMPTS_DOC))
     offenders = _source_skill_copy_offenders(prompt)
     assert not offenders, (
         '"Also teach your agent" must not instruct copying source skills/mergecraft/ '
@@ -117,7 +119,7 @@ def test_also_teach_agent_prompt_does_not_instruct_source_skill_copy() -> None:
 def test_also_teach_agent_prompt_references_generated_harness_packages() -> None:
     """Consumer copy prompt must name a generated harness package or install destination."""
     manifest = load_harness_manifest()
-    prompt = _also_teach_prompt_text(read_text("README.md"))
+    prompt = _also_teach_prompt_text(read_text(_AGENT_PROMPTS_DOC))
     assert _references_generated_harness_packages(
         prompt,
         package_paths=_generated_harness_package_paths(manifest),
@@ -129,7 +131,7 @@ def test_also_teach_agent_prompt_references_generated_harness_packages() -> None
 
 def test_per_agent_one_liners_do_not_instruct_source_skill_copy() -> None:
     """Per-agent fenced prompts must not instruct copying repo-root skills/mergecraft/."""
-    prompts = _per_agent_prompts(read_text("README.md"))
+    prompts = _per_agent_prompts(read_text(_AGENT_PROMPTS_DOC))
     assert prompts, "per-agent one-liners must include at least one fenced prompt (D10)"
     offenders: list[str] = []
     for agent, prompt in prompts.items():
@@ -147,7 +149,7 @@ def test_per_agent_one_liners_do_not_instruct_source_skill_copy() -> None:
 def test_per_agent_skill_copy_prompts_reference_harness_packages(agent_name: str) -> None:
     """Agents that install the skill must point at generated harness packages."""
     manifest = load_harness_manifest()
-    prompts = _per_agent_prompts(read_text("README.md"))
+    prompts = _per_agent_prompts(read_text(_AGENT_PROMPTS_DOC))
     prompt = prompts.get(agent_name)
     assert prompt is not None, f"missing fenced prompt for {agent_name!r} (D10)"
     assert _references_generated_harness_packages(

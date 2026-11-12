@@ -330,3 +330,39 @@ check is the merge gate. A formal APPROVE needs both authority trust (`trust.sel
 and [App setup](authentication.md#reviewer-app-identity). How this
 repository runs its own self-review is in
 [`docs/dev/self-review.md`](dev/self-review.md).
+
+## Ignoring paths
+
+Two layers, and you usually want both. A workflow-level `paths-ignore` skips the
+run when **every** changed file matches; the `ignore_paths` input trims a **mixed**
+pull request, so the reviewer never reads eval data or changelogs it has no
+opinion on. Changes to the [README example](../README.md#example-1--auto-review-every-pr):
+
+```yaml
+on:
+  pull_request:
+    types: [opened, ready_for_review, synchronize]
+    # Skip the whole run when only these files change.
+    paths-ignore:
+      - "host/evals/**/*.jsonl"
+      - "CHANGELOG.md"
+# ...
+      - uses: alexhawat/mergeCraft@7080e962c2259757a34b9f745602f093e4ee3378 # v0.1.0a4
+        with:
+          # Leave these out of the diff the reviewer sees on a mixed PR.
+          # Newline- or comma-separated globs; `**` crosses directories.
+          ignore_paths: |
+            host/evals/**/*.jsonl
+            CHANGELOG.md
+```
+
+Ignored files are listed in the review under "Not reviewed (ignored by config)",
+and a pull request whose every changed file is ignored passes quickly with
+"nothing to review", leaving approval to a human. Changelogs (`**/CHANGELOG.md`),
+lockfiles (`**/*.lock`, `**/package-lock.json`) and minified files are ignored by
+default (a `generated/` directory is reviewed unless `**/generated/**` is added); `review.ignorePaths` in `.mergecraft/config.yaml` adds
+globs, and `review.ignorePathDefaults: false` reviews the defaults again. A
+renamed file is ignored only when both its old and new names match. The
+config is read from the base branch only, so a pull request cannot opt its own
+files out of review. If `mergecraft` or `mergecraft-approval` is a required check,
+rely on `ignore_paths` alone: a run that `paths-ignore` skips never reports either check.
