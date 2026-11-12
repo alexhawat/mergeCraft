@@ -222,5 +222,32 @@ def test_a_scope_that_matched_nested_paths_under_fnmatch_is_logged(tmp_path: Pat
         )
     finally:
         logger.remove(sink)
-    assert rows == []
     assert any("policy.narrowed" in m and "src/a/b.py" in m and "**" in m for m in messages)
+    assert [str(row.rule_id) for row in rows] == ["policy.scope_narrowed"]
+    assert rows[0].severity == "Trivial"
+    assert "policy.narrowed" in rows[0].message
+    assert "**" in rows[0].message
+
+
+def test_the_narrowed_scope_row_reaches_the_review_summary(tmp_path: Path) -> None:
+    from mergecraft.policy.review import (
+        evaluate_review_policy,
+        load_repo_policy,
+        policy_summary_block,
+    )
+
+    write_policy(tmp_path, rules=[rule("policy.narrowed", scope={"path": "src/*"})])
+    rows = evaluate_review_policy(
+        load_repo_policy(tmp_path),
+        changed_paths=["src/a/b.py", "src/top.py"],
+        org="acme",
+        repo="demo",
+        base_ref="main",
+        exceptions_trusted=True,
+        now=_NOW,
+    )
+    block = policy_summary_block(rows)
+
+    assert "policy.narrowed" in block
+    assert "src/a/b.py" in block
+    assert {str(row.rule_id) for row in rows} == {"policy.narrowed", "policy.scope_narrowed"}

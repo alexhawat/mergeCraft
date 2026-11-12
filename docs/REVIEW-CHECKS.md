@@ -286,8 +286,11 @@ its source and its new name and leaves review only when both are ignored, so
 in `ignoredPaths`, and the review body lists them under "Not reviewed (ignored
 by config)". The globs are the `ignore_paths` Action input, `review.ignorePaths`
 and, unless `review.ignorePathDefaults: false`, the defaults: `**/CHANGELOG.md`,
-`**/*.lock`, `**/package-lock.json`, and generated or minified files (a
-generated file stays in scope when its generator config changed too). The YAML
+`**/*.lock`, `**/package-lock.json`, and minified `*.min.js` / `*.min.css` files.
+A directory named `generated` is not proof of generator output, so its files are
+reviewed unless a glob such as `**/generated/**` names them. Globs use the same
+dialect as policy `scope.path` and declared Scope paths: `*` stays inside one
+directory and `**` spans zero or more. The YAML
 half is read from the operator's side only — the base snapshot of a
 `pull_request_target` run, the base commit's config on any other pull request —
 so a pull request cannot ignore its own files. When the complete file listing of

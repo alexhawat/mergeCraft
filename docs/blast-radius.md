@@ -42,18 +42,18 @@ Every classification carries `reasons`: one row per signal, each with a stable d
 | `paths.payment` | high | a changed path is under a `payment`, `payments` or `billing` directory |
 | `paths.permissions` | high | a changed path is under a `permission` or `permissions` directory |
 | `paths.secrets_config` | high | a path under `config/`, or `.env.example`, changed |
-| `paths.deployment` | high | a GitHub Actions workflow under `.github/workflows/` changed |
+| `paths.deployment` | high | a GitHub Actions workflow under `.github/workflows/`, a composite action under `.github/actions/`, a `Dockerfile` (or `Dockerfile.*`, `*.dockerfile`), a Helm `Chart.yaml` or Kustomize `kustomization.yaml`, or a path under a `deploy/`, `k8s/`, `kubernetes/`, `helm/`, `charts/` or `overlays/` directory changed; documentation and test paths under those directories do not count |
 | `paths.irreversible_infra` | high | a path under `infra/terraform/` changed |
-| `diff.destructive_sql` | high | the diff text contains `DROP TABLE`, `ALTER TABLE` or `CREATE TABLE` |
-| `diff.secret_assignment` | high | the diff text contains a secret-assignment marker such as `password =` or `aws_secret_access_key` |
-| `diff.irreversible_command` | high | the diff text contains `rm -rf` or `terraform destroy` |
+| `diff.destructive_sql` | high | the diff text contains `DROP`, `ALTER` or `CREATE` then `TABLE`, in any case and with any whitespace between |
+| `diff.secret_assignment` | high | the diff text assigns a `password`, `secret_key` or `private_key` (prefixed names such as `db_password =` included, any spacing around `=`) or contains `aws_secret_access_key` |
+| `diff.irreversible_command` | high | the diff text contains `rm` with recursive and force flags in any order or spelling (`-rf`, `-fr`, `-r -f`, `--recursive --force`), or `terraform destroy`, with any whitespace between |
 | `paths.public_api` | medium | a package `__init__.py` changed |
-| `deps.changed` | medium | a dependency manifest or lockfile changed (`pyproject.toml`, `uv.lock`, `package.json`, `go.mod` and similar) |
-| `tests.missing` | medium | a `src/` path that is not generated output changed and no test path changed, whatever generated paths sit beside it; emitted at low, with the carve-out named, when the carve-out applies |
+| `deps.changed` | medium | a dependency manifest or lockfile changed: the shared manifest and lockfile names (`pyproject.toml`, `uv.lock`, `package.json`, `go.mod`, `Gemfile`, `composer.json`, `Pipfile`, `Pipfile.lock` and the rest) and every pip requirements or constraints file (`requirements*.txt`, `*-requirements.txt`, `constraints*.txt`, any `.txt` / `.in` under `requirements/`), compared case-insensitively |
+| `tests.missing` | medium | a hand-written source path (see below) changed and no test path changed, whatever generated paths sit beside it; emitted at low, with the carve-out named, when the carve-out applies |
 | `paths.review_config` | medium | config that governs how the PR is reviewed changed; an override cannot lower it |
-| `source.changed` | medium | a `src/` path that is not generated output changed, whatever generated paths sit beside it; a change made only of generated paths emits `paths.generated` instead |
+| `source.changed` | medium | a hand-written source path changed, whatever generated paths sit beside it; a change made only of generated paths emits `paths.generated` instead |
 | `paths.generated` | low | a changed path is under a `generated` directory |
-| `source.small_isolated` | low | the carve-out applies: one `src/` file, at most 5 changed lines, no review config, no `source_without_tests` override, no high reason |
+| `source.small_isolated` | low | the carve-out applies: one hand-written source file, at most 5 changed lines, no review config, no `source_without_tests` override, no high reason |
 | `baseline.clean` | low | no reason other than a `scope.*` or `fix.*` one was emitted |
 | `scope.unknown` | medium | a review run found no `Scope paths:` block in the pull request body or the issues it closes, or could not read them |
 | `scope.undeclared` | medium | a `Scope paths:` block lists no globs |
@@ -66,6 +66,8 @@ Every classification carries `reasons`: one row per signal, each with a stable d
 | `fix.no-receipt` | medium | a fix with no readable receipt from a successful run on the head, or with no `ciEvidence.redGreen` declared on the base; the message says which and repeats the evidence detail |
 | `fix.receipt.invalid` | medium | a fix whose receipt is malformed, has the wrong schema, or is over the 1 MB cap |
 | `fix.receipt.mismatch` | medium | a fix whose receipt was produced for other commits than the pull request's base and head |
+
+**Hand-written source** is any changed path, wherever the repository keeps it (`app/`, `lib/`, `cmd/`, `scripts/`, the root, not only `src/`), that is not one of these: documentation (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`, `.txt`, anything under `docs/` or `doc/`, and `LICENSE`, `NOTICE`, `AUTHORS`, `CONTRIBUTORS`, `COPYING`, `CODEOWNERS`); a test (a path under `tests/`, `test/`, `__tests__/`, `spec/` or `specs/`, or a file named `test_*`, `*_test.*`, `*.test.*`, `*.spec.*` or `*_spec.*`); generated output (a path under a `generated/` directory); an image or PDF; declarative config or data (`.toml`, `.yaml`, `.yml`, `.json`, `.ini`, `.cfg`, `.conf`, `.lock`, `.jsonl`, `.csv`, `.tsv`, `.xml`, and dotfiles); or a dependency manifest. Config that matters has its own reason: `paths.deployment`, `paths.secrets_config` or `paths.review_config`.
 
 The rendered `reason` string starts with the codes (`Lane reasons: deps.changed, source.changed.`) and keeps the category sentence, so existing readers keep working. The run record prints the lane and the codes on one line.
 

@@ -79,6 +79,7 @@ RULE_UNREADABLE = "policy.unreadable"
 RULE_UNEVALUATED = "policy.unevaluated"
 RULE_UNVERIFIABLE_SOURCE = "policy.unverifiable_source"
 RULE_CHANGED_IN_PR = "policy.changed_in_pr"
+RULE_SCOPE_NARROWED = "policy.scope_narrowed"
 
 # Provenance labels a row publishes, so a reader can tell which copy judged it.
 SOURCE_HEAD = "head"
@@ -753,15 +754,20 @@ def _warn_unreachable_repo_scopes(snapshot: PolicySnapshot, *, org: str, repo: s
             )
 
 
-def _warn_narrowed_path_scopes(snapshot: PolicySnapshot, *, changed_paths: list[str]) -> None:
-    """Log each rule whose ``scope.path`` stopped matching a changed path (#1307).
+def _narrowed_path_scopes(
+    snapshot: PolicySnapshot, *, changed_paths: list[str]
+) -> list[tuple[PolicyRule, list[str]]]:
+    """Return (and log) each rule whose ``scope.path`` stopped matching a changed path (#1307).
 
     ``scope.path`` used to be read with :mod:`fnmatch`, where ``*`` also crosses
     ``/``. It now reads the shared repo-path dialect, where ``*`` stays inside
     one segment and ``**`` spans directories. A rule written for the old reading
     (``src/*`` meant to cover ``src/a/b.py``) would otherwise go quiet without a
-    trace, so the run log names the rule, the path and the ``**`` form to use.
+    trace, so the run log names the rule, the path and the ``**`` form to use,
+    and :func:`evaluate_review_policy` records one ``policy.scope_narrowed`` row
+    per rule so the review summary says it too.
     """
+    narrowed_rules: list[tuple[PolicyRule, list[str]]] = []
     for rule in snapshot.rules:
         pattern = rule.scope.path if rule.scope is not None else None
         if not pattern or "*" not in pattern:
@@ -780,6 +786,23 @@ def _warn_narrowed_path_scopes(snapshot: PolicySnapshot, *, changed_paths: list[
                 narrowed[0],
                 len(narrowed),
             )
+            narrowed_rules.append((rule, narrowed))
+    return narrowed_rules
+
+
+def _scope_narrowed_row(rule: PolicyRule, paths: list[str]) -> Finding:
+    pattern = rule.scope.path if rule.scope is not None else ""
+    return _policy_row(
+        rule_id=RULE_SCOPE_NARROWED,
+        severity="Trivial",
+        message=(
+            f"Policy rule {rule.id} scope.path {pattern!r} does not match {paths[0]}"
+            + (f" (+{len(paths) - 1} more)" if len(paths) > 1 else "")
+            + ": `*` stays inside one directory, so use `**` to cover nested paths"
+        ),
+        path=paths[0],
+        evidence=[f"rule: {rule.id}", f"scope.path: {pattern}", *(f"path: {p}" for p in paths)],
+    )
 
 
 def _matching_rules(
@@ -1103,7 +1126,7 @@ def evaluate_review_policy(
 
     unresolved = _unresolved_dimensions_for(base_ref)
     _warn_unreachable_repo_scopes(snapshot, org=org, repo=repo)
-    _warn_narrowed_path_scopes(snapshot, changed_paths=changed_paths)
+    narrowed_scopes = _narrowed_path_scopes(snapshot, changed_paths=changed_paths)
     matched = _matching_rules(
         snapshot,
         changed_paths=changed_paths,
@@ -1128,6 +1151,7 @@ def evaluate_review_policy(
             )
         )
 
+    rows.extend(_scope_narrowed_row(rule, paths) for rule, paths in narrowed_scopes)
     if snapshot.changed_in_pr:
         rows.append(_changed_in_pr_row(snapshot))
     return rows
@@ -1407,6 +1431,7 @@ __all__ = [
     "POLICY_DIR_REL",
     "RULES_REL",
     "RULE_CHANGED_IN_PR",
+    "RULE_SCOPE_NARROWED",
     "RULE_UNEVALUATED",
     "RULE_UNREADABLE",
     "RULE_UNVERIFIABLE_SOURCE",
