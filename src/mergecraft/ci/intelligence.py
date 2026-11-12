@@ -421,6 +421,11 @@ async def run_ci_intelligence(
         ctx.tool_state,
         [_with_base_run_evidence(report.finding, base_collection.rows) for report in reports],
     )
+    overflow_runs = [run for run in suite.get("overflow_runs") or [] if isinstance(run, dict)]
+    if overflow_runs:
+        from mergecraft.ci.cluster import unanalyzed_run_finding
+
+        record_ci_findings(ctx.tool_state, [unanalyzed_run_finding(run) for run in overflow_runs])
     record_base_branch_runs(ctx.tool_state, base_collection.rows)
     payload["baseBranchRuns"] = list(base_collection.rows)
     if base_collection.note and not base_collection.rows:

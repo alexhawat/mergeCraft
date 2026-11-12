@@ -25,6 +25,21 @@ def _base_outcome(run: dict[str, Any]) -> str:
     return str(run.get("conclusion", "")).strip().lower() or "unknown"
 
 
+def newest_base_runs(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep the newest row per base workflow and branch; rows arrive newest-first.
+
+    The producer (``ci/base_runs.py``) lists each workflow's runs newest-first
+    with refs shaped ``<branch>@<sha>``, so the first row seen for a
+    (workflow, branch) pair is its latest verdict. Older rows of the same pair
+    stay evidence, never the verdict (#1321).
+    """
+    newest: dict[tuple[str, str], dict[str, Any]] = {}
+    for run in runs:
+        branch = str(run.get("ref") or "").split("@", 1)[0]
+        newest.setdefault((str(run.get("workflow") or ""), branch), run)
+    return list(newest.values())
+
+
 def classify_failure(
     *,
     fingerprint: str,
@@ -33,9 +48,11 @@ def classify_failure(
 ) -> FlakyVerdict:
     """Classify retry/base-branch behaviour for one failure fingerprint.
 
-    ``pre_existing`` requires a matching base run whose conclusion is ``failure``
-    (BL-D6). A matching base run that *passed* when this PR's attempts failed is
-    evidence the failure is new here: ``stable`` with ``blame_on_author=True``.
+    ``pre_existing`` requires the newest matching base run of a workflow to have
+    concluded ``failure`` (BL-D6); an older same-fingerprint failure behind a newer
+    pass is evidence only. A matching base run that *passed* when this PR's
+    attempts failed is evidence the failure is new here: ``stable`` with
+    ``blame_on_author=True``.
     """
     evidence: list[str] = []
     outcomes = _attempt_outcomes(attempts)
@@ -60,7 +77,8 @@ def classify_failure(
         ref = str(run.get("ref", "base branch"))
         evidence.append(f"{ref} saw fingerprint {fingerprint} as {_base_outcome(run)}")
 
-    failing_base = [run for run in matching_base if _base_outcome(run) == "failure"]
+    deciding_base = newest_base_runs(matching_base)
+    failing_base = [run for run in deciding_base if _base_outcome(run) == "failure"]
     if failing_base:
         ref = str(failing_base[0].get("ref", "base branch"))
         return FlakyVerdict(
@@ -74,7 +92,7 @@ def classify_failure(
         )
 
     if has_failure:
-        passing_base = [run for run in matching_base if _base_outcome(run) == "success"]
+        passing_base = [run for run in deciding_base if _base_outcome(run) == "success"]
         if passing_base:
             refs = ", ".join(str(run.get("ref", "base branch")) for run in passing_base)
             return FlakyVerdict(
@@ -104,4 +122,4 @@ def classify_failure(
     )
 
 
-__all__ = ["FlakyClassification", "FlakyVerdict", "classify_failure"]
+__all__ = ["FlakyClassification", "FlakyVerdict", "classify_failure", "newest_base_runs"]

@@ -18,8 +18,9 @@ from loguru import logger
 from mergecraft.analyzers.impact import resolve_ast_grep_binary, write_impact
 from mergecraft.analyzers.trust import analyzers_enabled
 from mergecraft.config.trust_policy import is_fork_pull_request
+from mergecraft.diff import changed_paths_in_diff
 from mergecraft.mcp.checkout_state import invalidate_checkout_review_state
-from mergecraft.mcp.git import _git_env, _is_auth_failure, _run_git
+from mergecraft.mcp.git import _git_env, _is_auth_failure, _is_shallow_repository, _run_git
 from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
 from mergecraft.mcp.tool_call import normalize_pull_number_aliases
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
@@ -168,7 +169,6 @@ _SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 # API after a successful checkout. Not ``api-only``: the head *is* checked out,
 # so head-side file reads work; only the local diff failed.
 FILES_API_DIFF_SCOPE = "files-api-diff"
-_DIFF_FILE_RE = re.compile(r"^diff --git a/(?P<path>.+?) b/(?P<to>.+)$", re.MULTILINE)
 _CHECKOUT_PR_INPUT_SCHEMA: JsonSchema = {
     "type": "object",
     "properties": {"pull_number": {"type": "number"}},
@@ -718,14 +718,6 @@ def _round_index(
     return review_round_index(prior_reviews, publishers=publishers)
 
 
-def changed_paths_in_diff(diff_text: str) -> list[str]:
-    """Return the post-image paths named by a unified diff, in first-seen order."""
-    seen: dict[str, None] = {}
-    for match in _DIFF_FILE_RE.finditer(diff_text):
-        seen.setdefault(match.group("to"), None)
-    return list(seen)
-
-
 def _remote_url_for_cwd(cwd: str) -> str:
     try:
         return read_remote_origin_url(cwd)
@@ -924,6 +916,20 @@ def _files_api_diff_reason(
     return _append_diff_degradations(reason, truncated=truncated, unreviewable=unreviewable)
 
 
+def _depth_flags(cwd: str) -> list[str]:
+    """``--depth=1000`` for a shallow clone only; a full clone must stay full."""
+    return ["--depth=1000"] if _is_shallow_repository(cwd) else []
+
+
+def _stale_base_reason(base_fetch_failure: str) -> str:
+    """Reason for a local diff taken against a base ref that could not be refreshed."""
+    return (
+        f"the base fetch failed ({base_fetch_failure}), so the local diff was "
+        "computed against a possibly stale base ref and may include unrelated "
+        "base-branch changes"
+    )
+
+
 def _fetch_head_with_retry(
     *,
     cwd: str,
@@ -988,7 +994,7 @@ def _write_incremental_diff(
         env, remote_url = _git_env_for_cwd(cwd, git_token)
         try:
             _run_git(
-                ["fetch", "--no-tags", "--depth=1000", "origin", prior_sha],
+                ["fetch", "--no-tags", *_depth_flags(cwd), "origin", prior_sha],
                 cwd=cwd,
                 env=env,
                 remote_url=remote_url or None,
@@ -1358,7 +1364,7 @@ def checkout_pr_tool(ctx: ToolContext):
                 [
                     "fetch",
                     "--no-tags",
-                    "--depth=1000",
+                    *_depth_flags(cwd),
                     "origin",
                     f"{base_ref}:refs/remotes/origin/{base_ref}",
                 ],
@@ -1435,6 +1441,11 @@ def checkout_pr_tool(ctx: ToolContext):
                 review_scope=FILES_API_DIFF_SCOPE,
             )
         else:
+            if base_fetch_failure is not None:
+                # The diff ran, but against whatever ``origin/<base>`` was already
+                # local; a stale merge-base can pull base commits into the review.
+                degraded_reason = _stale_base_reason(base_fetch_failure)
+                warning(degraded_reason)
             register_review_scope(ctx.tool_state, diff_path=diff_path, provenance="checkout")
         _rebaseline_config_after_checkout(ctx)
 

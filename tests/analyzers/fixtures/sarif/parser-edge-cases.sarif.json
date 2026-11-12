@@ -1,0 +1,88 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "edge",
+          "rules": [
+            {"id": "indexed-error", "defaultConfiguration": {"level": "error"}},
+            {"id": "plain-warning"}
+          ]
+        },
+        "extensions": [
+          {
+            "name": "pack",
+            "rules": [{"id": "pack/injection", "defaultConfiguration": {"level": "error"}}]
+          }
+        ]
+      },
+      "results": [
+        {
+          "ruleId": "real-error",
+          "level": "error",
+          "message": {"text": "real error"},
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/app.py"}, "region": {"startLine": 3}}}]
+        },
+        {
+          "ruleId": "informational-note",
+          "level": "none",
+          "message": {"text": "level none"},
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/app.py"}, "region": {"startLine": 4}}}]
+        },
+        {
+          "ruleId": "passed-check",
+          "kind": "pass",
+          "level": "error",
+          "message": {"text": "check passed"},
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/app.py"}, "region": {"startLine": 5}}}]
+        },
+        {
+          "ruleId": "encoded-uri",
+          "level": "warning",
+          "message": {"text": "space in path"},
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/my%20file.py"}, "region": {"startLine": 6}}}]
+        },
+        {
+          "ruleIndex": 0,
+          "message": {"text": "rule by index"},
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/app.py"}, "region": {"startLine": 7}}}]
+        },
+        {
+          "rule": {"id": "pack/injection", "index": 0, "toolComponent": {"index": 0}},
+          "message": {"text": "extension rule"},
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/app.py"}, "region": {"startLine": 8}}}]
+        },
+        {
+          "ruleId": "rejected-suppression",
+          "level": "error",
+          "message": {"text": "suppression rejected in triage"},
+          "suppressions": [{"kind": "external", "status": "rejected"}],
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/app.py"}, "region": {"startLine": 9}}}]
+        },
+        {
+          "ruleId": "under-review-suppression",
+          "level": "error",
+          "message": {"text": "suppression under review"},
+          "suppressions": [{"kind": "inSource", "status": "underReview"}],
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/app.py"}, "region": {"startLine": 10}}}]
+        },
+        {
+          "ruleId": "accepted-suppression",
+          "level": "error",
+          "message": {"text": "suppressed"},
+          "suppressions": [{"kind": "inSource", "status": "accepted"}],
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/app.py"}, "region": {"startLine": 11}}}]
+        },
+        {
+          "ruleId": "bare-suppression",
+          "level": "error",
+          "message": {"text": "suppressed without status"},
+          "suppressions": [{"kind": "inSource"}],
+          "locations": [{"physicalLocation": {"artifactLocation": {"uri": "src/app.py"}, "region": {"startLine": 12}}}]
+        }
+      ]
+    }
+  ]
+}

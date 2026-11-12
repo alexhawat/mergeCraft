@@ -32,6 +32,7 @@ from mergecraft.evals.lens_capability import (
     LensRoutingCapabilityReport,  # noqa: TC001 — Pydantic field type
 )
 from mergecraft.evals.lens_capability_benchmark import score_routing_baseline_capability
+from mergecraft.evals.quality_metrics import QualityMetrics  # noqa: TC001 — Pydantic field type
 from mergecraft.evals.scoring import DEFAULT_LINE_SLACK, AggregateScoreReport
 from mergecraft.evals.store import (
     CASE_STATUS_BLOCKED,
@@ -43,9 +44,10 @@ from mergecraft.evals.store import (
     replay_case,
 )
 from mergecraft.modes import modes
+from mergecraft.utils.atomic_write import write_text_atomically
 from mergecraft.utils.git_hardening import git_argv
 
-RESULT_SET_SCHEMA_VERSION: Final[str] = "1.4.0"
+RESULT_SET_SCHEMA_VERSION: Final[str] = "1.5.0"
 DEFAULT_RESULTS_DIR: Final[Path] = Path("evals/results")
 
 # Providers the benchmark names by default (W9.0: ≥2 providers).
@@ -150,6 +152,17 @@ class VersionPins(BaseModel):
     reviewing_model: dict[str, ReviewingModelPin] = Field(min_length=1)
     scorer_version: str
     line_slack: int
+    # W3.3-4: ``corpus_commit`` above holds the git *tree* id of the structural
+    # bank (kept under its old name so existing manifests and receipts still
+    # match). These record the trees explicitly: the structural bank, and the
+    # live-detection corpus (which ``corpus_commit`` never covered). ``None``
+    # means "not recorded" (older result sets, or a corpus outside the checkout).
+    bank_tree: str | None = None
+    detection_corpus_tree: str | None = None
+    # ``False`` when tracked files differed from ``HEAD`` at replay time, so
+    # ``mergecraft_commit`` does not describe the code that produced the numbers.
+    # ``None`` means git could not say.
+    working_tree_clean: bool | None = None
 
     @property
     def unpinned_providers(self) -> tuple[str, ...]:
@@ -274,6 +287,10 @@ class DetectionCaseResult(BaseModel):
     # but publication rejects a missing receipt instead of inferring what an
     # historical run reviewed from files that happen to exist now.
     execution_receipt: DetectionExecutionReceipt | None = None
+    # The #384 quality metric set (blocker precision, duplicate / unsupported /
+    # contradiction rates, latency, cost) for this case's review. Added in
+    # result-set 1.5.0; older result sets carry ``None``.
+    quality: QualityMetrics | None = None
 
 
 class DetectionRunIdentity(BaseModel):
@@ -299,6 +316,15 @@ class DetectionRunIdentity(BaseModel):
         )
 
 
+class LatencySummary(BaseModel):
+    """Percentile latency story of a benchmark run (EV2) — the tail, not the mean."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    p50_ms: float
+    p95_ms: float
+
+
 class DetectionMetrics(BaseModel):
     """Live finding-location metrics for one provider/model (B3, N5).
 
@@ -317,6 +343,13 @@ class DetectionMetrics(BaseModel):
     cases_run: int
     cases_failed: int = 0
     failed_case_ids: list[str] = Field(default_factory=list)
+    # Why each failed case failed (``case_id -> "ErrorClass: message"``), so a
+    # timeout or malformed-output case is recorded rather than aborting the run.
+    failed_case_errors: dict[str, str] = Field(default_factory=dict)
+    # Campaign-level latency and cost over the scored cases (result-set 1.5.0).
+    # ``total_cost_usd`` is ``None`` unless *every* scored case reported a cost.
+    latency: LatencySummary | None = None
+    total_cost_usd: float | None = None
     aggregate: AggregateScoreReport
     case_results: list[DetectionCaseResult]
     raw_findings_dir: str
@@ -384,15 +417,6 @@ class BenchmarkResultSet(BaseModel):
         payload["pins"].pop("recorded_at", None)
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-class LatencySummary(BaseModel):
-    """Percentile latency story of a benchmark run (EV2) — the tail, not the mean."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    p50_ms: float
-    p95_ms: float
 
 
 def _linear_percentile(sorted_sample: list[float], percentile: float) -> float:
@@ -496,6 +520,32 @@ def _git_corpus_commit() -> str:
         return out.strip()
     except (OSError, subprocess.CalledProcessError):  # fmt: skip
         return _git_head_sha()
+
+
+def git_tree_id(path: Path) -> str | None:
+    """Git tree id of ``HEAD:<path>`` (``path`` relative to the cwd), or ``None``."""
+    try:
+        out = subprocess.check_output(
+            git_argv(["rev-parse", f"HEAD:./{path.as_posix()}"]),
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return out.strip() or None
+
+
+def git_tracked_tree_clean() -> bool | None:
+    """True when no tracked file differs from ``HEAD``; ``None`` when git cannot say."""
+    try:
+        out = subprocess.check_output(
+            git_argv(["status", "--porcelain", "--untracked-files=no"]),
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return not out.strip()
 
 
 def _mode_prompt_versions() -> dict[str, str]:
@@ -690,6 +740,8 @@ def run_structural_replay(
         reviewing_model=_reviewing_model_pins(providers),
         scorer_version=SCORER_VERSION,
         line_slack=DEFAULT_LINE_SLACK,
+        bank_tree=git_tree_id(bank_dir),
+        working_tree_clean=git_tracked_tree_clean(),
     )
 
     return BenchmarkResultSet(
@@ -738,13 +790,12 @@ def write_result_set(
             provider_tag = ""
         out_name = f"structural-replay{provider_tag}-{stamp}-{suffix}.json"
     path = results_dir / out_name
-    path.write_text(
-        json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    text = json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True) + "\n"
+    # Both writes are atomic: ``latest.json`` is the committed CI baseline, and
+    # an interrupted write must leave the previous baseline intact.
+    write_text_atomically(path, text)
     if update_latest:
-        latest = results_dir / "latest.json"
-        latest.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+        write_text_atomically(results_dir / "latest.json", text)
     return path
 
 

@@ -179,3 +179,56 @@ def test_file_uri_inside_the_root_still_resolves_repo_relative(tmp_path: Path) -
     )
 
     assert findings[0].path == "src/app.py"
+
+
+def _edge_case_findings() -> dict[str, object]:
+    sarif = import_module("mergecraft.analyzers.parsers.sarif")
+    registry = import_module("mergecraft.analyzers.registry")
+    raw = (FIXTURES_DIR / "sarif/parser-edge-cases.sarif.json").read_text(encoding="utf-8")
+    findings = sarif.parse_sarif(
+        raw, manifest=registry.get_manifest("semgrep"), repo_root=Path(".")
+    )
+    return {finding.rule_id: finding for finding in findings}
+
+
+def test_level_none_result_does_not_discard_the_report() -> None:
+    """SARIF §3.27.10 allows ``level: none``; the error next to it must survive."""
+    by_rule = _edge_case_findings()
+    assert by_rule["real-error"].severity == "Major"
+    assert by_rule["informational-note"].severity == "Trivial"
+
+
+def test_non_problem_result_kinds_are_not_findings() -> None:
+    assert "passed-check" not in _edge_case_findings()
+
+
+def test_percent_encoded_relative_uri_is_decoded() -> None:
+    assert _edge_case_findings()["encoded-uri"].path == "src/my file.py"
+
+
+def test_rule_index_and_extension_rules_resolve_id_and_level() -> None:
+    by_rule = _edge_case_findings()
+    assert by_rule["indexed-error"].severity == "Major"
+    assert by_rule["indexed-error"].start_line == 7
+    assert by_rule["pack/injection"].severity == "Major"
+    assert "unknown" not in by_rule
+
+
+def test_only_accepted_suppressions_hide_a_result() -> None:
+    by_rule = _edge_case_findings()
+    assert "rejected-suppression" in by_rule
+    assert "under-review-suppression" in by_rule
+    assert "accepted-suppression" not in by_rule
+    assert "bare-suppression" not in by_rule
+
+
+def test_edge_case_fixture_parses_to_exactly_the_expected_findings() -> None:
+    assert sorted(_edge_case_findings()) == [
+        "encoded-uri",
+        "indexed-error",
+        "informational-note",
+        "pack/injection",
+        "real-error",
+        "rejected-suppression",
+        "under-review-suppression",
+    ]

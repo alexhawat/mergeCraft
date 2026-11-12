@@ -11,6 +11,7 @@ from rich.table import Table
 
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.diff_base import materialize_branch_diff
 from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
 )
@@ -25,7 +26,6 @@ from mergecraft.utils.agent_resolve import (
     resolve_runtime_agent,
 )
 from mergecraft.utils.git_hardening import git_argv
-from mergecraft.utils.offline_diff import materialize_diff
 from mergecraft.utils.run_bounds import resolve_run_bounds
 from mergecraft.utils.source_resolve import SourceResolverSpec, resolve_workspace
 
@@ -79,6 +79,7 @@ def build_plan_report(
     cwd: Path,
     profile_name: str | None = None,
     model_override: str | None = None,
+    base: str | None = None,
 ) -> dict[str, object]:
     """Assemble the structured plan preview for a workspace."""
     profile = resolve_profile(profile_name)
@@ -103,25 +104,20 @@ def build_plan_report(
     enabled = _profile_analyzers(profile=profile, repo_root=repo_root, changed=changed)
     bounds = resolve_run_bounds(settings=settings)
     toolset = sorted(cls.value for cls in REVIEWER_ALLOWED_TOOL_CLASSES)
-    with tempfile.TemporaryDirectory(prefix="mergecraft-plan-") as tmp:
-        materialization = materialize_diff(cwd=repo_root, out_dir=Path(tmp))
-        prompt = build_offline_review_prompt(
-            diff_path=materialization.path,
-            base_ref=materialization.base_ref,
-            extra=None,
-            json_mode=False,
-        )
-        base_ref = materialization.base_ref
-        # PR #242 review finding ``e8bc195570ae6f1cc8ab5bc6`` — the
-        # ``TemporaryDirectory`` closes as soon as the ``with`` block ends,
-        # so the raw ``materialization.path`` would point at a missing file.
-        # Persist the materialized diff to a path the consumer of the
-        # report can read after return (sibling to ``.mergecraft/`` per S1).
-        diff_dir = repo_root / ".mergecraft"
-        diff_dir.mkdir(parents=True, exist_ok=True)
-        stable_diff = diff_dir / "plan-review.diff"
-        stable_diff.write_text(materialization.path.read_text(encoding="utf-8"), encoding="utf-8")
-        diff_path = str(stable_diff)
+    # The diff must outlive this call (callers read ``diff_path`` after return)
+    # but must never land in the repository: a file there would join the next
+    # review's diff as an untracked addition and dirty the checkout.
+    plan_dir = Path(tempfile.mkdtemp(prefix="mergecraft-plan-"))
+    # Like ``describe``: the branch's own ``@{upstream}`` would hide pushed work.
+    materialization = materialize_branch_diff(cwd=repo_root, out_dir=plan_dir, base=base)
+    prompt = build_offline_review_prompt(
+        diff_path=materialization.path,
+        base_ref=materialization.base_ref,
+        extra=None,
+        json_mode=False,
+    )
+    base_ref = materialization.base_ref
+    diff_path = str(materialization.path)
     return {
         "model_chain": model_slugs,
         "agent": agent_label,
@@ -150,6 +146,11 @@ def run(
         "-m",
         help="Model slug override (wins over the profile bundle).",
     ),
+    base: str | None = typer.Option(
+        None,
+        "--base",
+        help="Base ref to diff against (default: the branch this one merges into).",
+    ),
 ) -> None:
     """Preview model chain, toolset, analyzers, and token estimate without provider calls."""
     from mergecraft.cli.profiles import apply_profile_env
@@ -161,7 +162,7 @@ def run(
         raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
 
     with apply_profile_env(resolve_profile(profile)):
-        report = build_plan_report(cwd=cwd, profile_name=profile, model_override=model)
+        report = build_plan_report(cwd=cwd, profile_name=profile, model_override=model, base=base)
     model_chain = report["model_chain"]
     toolset = report["toolset"]
     analyzers = report["analyzers"]

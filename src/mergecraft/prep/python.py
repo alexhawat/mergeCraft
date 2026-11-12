@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import re
 import shutil
@@ -13,7 +12,8 @@ from typing import Final
 
 from loguru import logger
 
-from mergecraft.prep.types import PrepOptions, PrepResult, PythonPackageManager
+from mergecraft.prep.process import run_prep_command
+from mergecraft.prep.types import PrepLanguage, PrepOptions, PrepResult, PythonPackageManager
 
 _BUILD_SYSTEM_RE = re.compile(r"^\s*\[\s*build-system\s*\]", re.MULTILINE)
 
@@ -155,20 +155,7 @@ def _adapt_tool_install(tool: str, venv: Path) -> tuple[str, list[str]]:
 
 
 async def _run_cmd(cmd: str, args: list[str], *, cwd: Path | None = None) -> tuple[int, str]:
-    proc = await asyncio.create_subprocess_exec(
-        cmd,
-        *args,
-        cwd=str(cwd) if cwd is not None else None,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=_prep_env(cwd),
-    )
-    stdout_b, stderr_b = await proc.communicate()
-    out = b"\n".join(part for part in (stdout_b, stderr_b) if part).decode(
-        "utf-8", errors="replace"
-    )
-    returncode = proc.returncode if proc.returncode is not None else -1
-    return returncode, out.strip()
+    return await run_prep_command(cmd, args, cwd=cwd, env=_prep_env(cwd))
 
 
 async def _ensure_prep_venv(cwd: Path) -> tuple[Path | None, str | None]:
@@ -187,6 +174,7 @@ async def _ensure_prep_venv(cwd: Path) -> tuple[Path | None, str | None]:
 
 class InstallPythonDependencies:
     name = "installPythonDependencies"
+    language: PrepLanguage = "python"
 
     def __init__(self) -> None:
         self._work_cwd: Path | None = None

@@ -68,7 +68,8 @@ Then store a provider credential, make sure the workflow passes it, and open a
 pull request:
 
 ```bash
-mergecraft provider auth <provider> --scope github
+mergecraft provider auth <provider> --scope github   # stores the secret, wires the workflow
+mergecraft doctor                                    # the workflow auth row must be ok
 mergecraft workflow sync --check   # --apply to wire any provider the workflow lacks
 ```
 

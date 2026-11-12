@@ -17,6 +17,7 @@ from mergecraft.evals.adversarial_corpora import eval_adversarial_gate
 from mergecraft.evals.gate import (
     DEFAULT_GATE_TOLERANCE,
     eval_gate,
+    format_delta_value,
     format_pr_gate_summary,
     load_result_set,
 )
@@ -61,7 +62,10 @@ def register_gate_command(app: typer.Typer) -> None:
         tolerance: float = typer.Option(
             DEFAULT_GATE_TOLERANCE,
             "--tolerance",
-            help="Declared tolerance band for the release regression gate.",
+            help=(
+                "Declared tolerance band for the live-detection and convergence "
+                "metrics; structural replay is deterministic and always exact."
+            ),
         ),
         require_halves: bool = typer.Option(
             False,
@@ -213,8 +217,9 @@ def register_gate_command(app: typer.Typer) -> None:
                 for delta in gate_report.deltas:
                     marker = " [red]REGRESSED[/red]" if delta.regressed else ""
                     console.print(
-                        f"  {delta.metric}: {delta.baseline:.2%} → {delta.candidate:.2%} "
-                        f"(Δ {delta.delta:+.2%}){marker}"
+                        f"  {delta.metric}: {format_delta_value(delta, delta.baseline)} → "
+                        f"{format_delta_value(delta, delta.candidate)} "
+                        f"(Δ {format_delta_value(delta, delta.delta, signed=True)}){marker}"
                     )
             if not paths:
                 console.print(

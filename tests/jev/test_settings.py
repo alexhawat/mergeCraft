@@ -24,7 +24,7 @@ def test_default_settings_jev_is_disabled() -> None:
 def test_absent_config_file_does_not_enable_jev(tmp_path: Path) -> None:
     from mergecraft.config.settings import load_repo_settings
 
-    settings = load_repo_settings(tmp_path / "missing.yaml", load_learnings_files=False)
+    settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
     assert settings.jev.enabled is False
 
 

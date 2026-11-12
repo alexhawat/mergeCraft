@@ -200,7 +200,10 @@ def test_row_without_recorded_at_is_still_accepted() -> None:
 
 
 @pytest.mark.asyncio
-async def test_review_ledger_keeps_the_real_row_over_a_future_dated_one() -> None:
+async def test_review_ledger_keeps_the_real_row_over_a_future_dated_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MERGECRAFT_REVIEWER_BOT_LOGIN", "mergecraft[bot]")
     real = _record(_FP, "open", "2026-08-20T10:00:00Z")
     future = _v2_marker(_FP, "withdrawn", {"recorded_at": "9999-01-01T00:00:00Z"})
 
@@ -213,7 +216,7 @@ async def test_review_ledger_keeps_the_real_row_over_a_future_dated_one() -> Non
         ) -> list[dict[str, object]]:
             if params["page"] != 1:
                 return []
-            bot = {"login": "github-actions[bot]", "type": "Bot"}
+            bot = {"login": "mergecraft[bot]", "type": "Bot"}
             return [
                 {"id": 1, "user": bot, "body": _published_review_body("", [real])},
                 {

@@ -1,0 +1,1 @@
+{"path":"proto/user/v1/user.proto","start_line":8,"start_column":3,"end_line":8,"end_column":21,"type":"FIELD_NO_DELETE","message":"Previously present field \"2\" with name \"email\" on message \"User\" was deleted."}

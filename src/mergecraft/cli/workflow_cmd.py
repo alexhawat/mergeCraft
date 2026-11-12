@@ -222,6 +222,45 @@ def wire_primary_workflow_model(
         _atomic_write_text(workflow, change.new_text)
 
 
+def wire_authenticated_provider(repo_root: Path, entry: Mapping[str, Any]) -> None:
+    """Point the consumer workflow at the secrets ``provider auth`` just stored.
+
+    ``provider auth --scope github`` stores indexed ``LLM_PROVIDER_<N>_*``
+    secrets, while the ``init`` scaffold passes flat names such as
+    ``CLAUDE_CODE_OAUTH_TOKEN`` to the Action. Without this step the stored
+    secret never reaches the container and the first CI review has no
+    credential. This is the same projection as ``workflow sync --apply``, but
+    forced for the provider just authenticated (a flat binding already makes
+    the provider look wired to ``sync``), followed by the reviewer p0 model.
+
+    Args:
+        repo_root (Path): Repository root holding the workflow and config.
+        entry (Mapping[str, Any]): Registry row of the authenticated provider.
+    """
+    workflow = _resolve_workflow_path(_workflow_option(), repo_root)
+    label = str(entry.get("label", ""))
+    if not workflow.is_file():
+        console.print(
+            f"[yellow]no workflow at {workflow}[/yellow] — run [cyan]mergecraft init[/cyan], "
+            "then [cyan]mergecraft workflow sync --apply[/cyan] so CI reads the stored secret"
+        )
+        return
+    before = workflow.read_text(encoding="utf-8")
+    wire_registry_provider_to_workflow(repo_root, entry, force=True)
+    p0_slug = reviewer_p0_slug(_load_config_dict(_config_path(repo_root)))
+    if p0_slug is not None:
+        wire_primary_workflow_model(repo_root, p0_slug, force=True)
+    after = workflow.read_text(encoding="utf-8")
+    shown = workflow.relative_to(repo_root) if workflow.is_relative_to(repo_root) else workflow
+    if after == before:
+        console.print(f"[dim]{shown} already passes the {label} secret to mergeCraft[/dim]")
+        return
+    secrets = ", ".join(indexed_credential_keys(entry))
+    console.print(
+        f"[green]wired[/green] {secrets} into {shown} — commit the workflow change with the config"
+    )
+
+
 def build_harness_provider_env_canonical(entry: dict[str, Any]) -> list[tuple[str, str]]:
     """Return workflow ``env:`` pairs for a harness provider with no custom base URL."""
     env_index = int(entry["envIndex"])

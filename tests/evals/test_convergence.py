@@ -300,3 +300,47 @@ def test_recall_pass_raises_first_pass_recall_on_the_corpus() -> None:
     precision = evaluate_dg1_precision_corpus()
     assert precision.recall >= PRE_DG1_BASELINE.recall
     assert precision.corpus_confirmed_precision >= PRE_DG1_BASELINE.corpus_confirmed_precision
+
+
+def _case_result(case_id: str, *, attributable: int, recall: float) -> Any:
+    mod = _convergence_mod()
+    return mod.ConvergenceCaseResult(
+        case_id=case_id,
+        report=mod.ConvergenceReport(
+            ground_truth_total=attributable,
+            ground_truth_fingerprints=[],
+            ground_truth_attributable_to_round1=attributable,
+            round_one_attributable_fingerprints=[],
+            first_pass_recall=recall,
+            leakage_rate=0.0,
+            round_one_generated=0,
+            round_one_surfaced=0,
+        ),
+    )
+
+
+def test_empty_convergence_fold_is_an_error() -> None:
+    with pytest.raises(ValueError, match="no cases"):
+        _convergence_mod().fold_convergence_reports([])
+
+
+def test_fold_ignores_vacuous_cases_with_nothing_attributable() -> None:
+    folded = _convergence_mod().fold_convergence_reports(
+        [
+            _case_result("real", attributable=2, recall=0.5),
+            _case_result("vacuous-a", attributable=0, recall=1.0),
+            _case_result("vacuous-b", attributable=0, recall=1.0),
+        ]
+    )
+    assert folded.mean_first_pass_recall == 0.5
+    assert folded.cases_total == 3
+
+
+def test_all_vacuous_convergence_fold_is_an_error() -> None:
+    with pytest.raises(ValueError, match="attributable"):
+        _convergence_mod().fold_convergence_reports(
+            [
+                _case_result("vacuous-a", attributable=0, recall=1.0),
+                _case_result("vacuous-b", attributable=0, recall=1.0),
+            ]
+        )

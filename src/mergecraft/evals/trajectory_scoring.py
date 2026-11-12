@@ -425,26 +425,38 @@ class TrajectoryComparisonResult(BaseModel):
     compared_checks: int = Field(ge=0)
 
 
-_COUNT_METRICS: Final[tuple[str, ...]] = ("true_positive", "false_positive", "false_negative")
+#: Per-check confusion counts and the direction in which a move is a regression:
+#: a *drop* in true positives, a *rise* in false positives or false negatives.
+#: The reverse movement is an improvement and never fails the gate.
+_COUNT_METRICS: Final[tuple[tuple[str, int], ...]] = (
+    ("true_positive", -1),
+    ("false_positive", 1),
+    ("false_negative", 1),
+)
+
+#: Failure ids for report-level (not per-check) mismatches.
+INPUT_DIGEST_FAILURE: Final[str] = "inputs.label_set_sha256"
+ELIGIBILITY_FAILURE: Final[str] = "eligibility.quality_eligible"
 
 
-def _counts_drift_outside_tolerance(
+def _counts_regress_beyond_tolerance(
     baseline: TrajectoryRuleMetrics,
     candidate: TrajectoryRuleMetrics,
     tolerance: float,
 ) -> bool:
-    """True when any per-check count drifts by more than *tolerance*.
+    """True when a per-check count moves in its *bad* direction by more than *tolerance*.
 
-    Each count is compared as a symmetric relative difference,
-    ``|candidate - baseline| / max(|candidate|, |baseline|, 1)``. The floor of
-    one bounds a move away from zero (an all-zero baseline cannot divide by
-    zero), so a move from 0 to *n* reads as a drift of exactly 1.0 — only a
-    tolerance of 1.0 or wider admits it, and any genuine count change at a
-    tighter tolerance is named.
+    Each count's movement is scaled as ``|candidate - baseline| /
+    max(|candidate|, |baseline|, 1)``. The floor of one bounds a move away from
+    zero (an all-zero baseline cannot divide by zero), so a move from 0 to *n*
+    reads as exactly 1.0 — only a tolerance of 1.0 or wider admits it. Only
+    true-positive drops and false-positive / false-negative rises count.
     """
-    for metric in _COUNT_METRICS:
+    for metric, bad_sign in _COUNT_METRICS:
         baseline_value = float(getattr(baseline, metric))
         candidate_value = float(getattr(candidate, metric))
+        if bad_sign * (candidate_value - baseline_value) <= 0:
+            continue
         scale = max(abs(candidate_value), abs(baseline_value), 1.0)
         if abs(candidate_value - baseline_value) / scale > tolerance:
             return True
@@ -457,23 +469,32 @@ def compare_trajectory_report(
     *,
     protocol: TrajectoryProtocol,
 ) -> TrajectoryComparisonResult:
-    """Compare a candidate report's per-check counts against a frozen baseline.
+    """Compare a candidate report against a frozen baseline.
 
-    A check fails when any of its confusion counts drifts by more than the
-    protocol ``tolerance`` relative to the baseline (counts scale by a floor of
-    one so a move away from zero is never lost). The returned ``failures`` name
-    every such check by rule id.
+    A check fails when a confusion count moves in its bad direction (true
+    positives down, false positives or false negatives up) by more than the
+    protocol ``tolerance``; improvements pass. The reports must also rest on the
+    same label sets (identical ``label_set_sha256`` digests) and the candidate
+    must be quality-eligible, otherwise the comparison is between different
+    truths and fails under :data:`INPUT_DIGEST_FAILURE` /
+    :data:`ELIGIBILITY_FAILURE`. ``failures`` names every failing check.
     """
     baseline_by_rule = {row.rule_id: row for row in baseline.per_check}
     candidate_by_rule = {row.rule_id: row for row in candidate.per_check}
     failures: list[str] = []
+    if sorted(ref.label_set_sha256 for ref in baseline.inputs) != sorted(
+        ref.label_set_sha256 for ref in candidate.inputs
+    ):
+        failures.append(INPUT_DIGEST_FAILURE)
+    if not candidate.eligibility.quality_eligible:
+        failures.append(ELIGIBILITY_FAILURE)
     for rule_id in _RULE_IDS:
         baseline_row = baseline_by_rule.get(rule_id)
         candidate_row = candidate_by_rule.get(rule_id)
         if (
             baseline_row is None
             or candidate_row is None
-            or _counts_drift_outside_tolerance(baseline_row, candidate_row, protocol.tolerance)
+            or _counts_regress_beyond_tolerance(baseline_row, candidate_row, protocol.tolerance)
         ):
             failures.append(rule_id)
     known = set(_RULE_IDS)

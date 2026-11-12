@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
+from mergecraft.diff import changed_paths_in_diff, diff_lines, parse_diff
 from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
@@ -52,7 +53,6 @@ _EXTENSION_RULES: dict[str, tuple[str, str]] = {
     ".cxx": ("C/C++", "cpp.yml"),
 }
 
-_DIFF_FILE_RE = re.compile(r"^diff --git a/(?P<path>.+?) b/(?P<to>.+)$", re.MULTILINE)
 _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(?P<start>\d+)(?:,(?P<count>\d+))? @@")
 
 
@@ -64,20 +64,13 @@ class _ExtractionFailed(RuntimeError):
     """Internal signal: a subprocess call failed outright (not just "no matches")."""
 
 
-def _changed_paths(diff_text: str) -> list[str]:
-    seen: dict[str, None] = {}
-    for match in _DIFF_FILE_RE.finditer(diff_text):
-        seen.setdefault(match.group("to"), None)
-    return list(seen)
-
-
 def _parse_hunks(diff_text: str) -> dict[str, list[tuple[int, int]]]:
     hunks: dict[str, list[tuple[int, int]]] = {}
     current_file: str | None = None
-    for line in diff_text.splitlines():
-        file_match = _DIFF_FILE_RE.match(line)
-        if file_match:
-            current_file = file_match.group("to")
+    sections = iter(parse_diff(diff_text).files)
+    for line in diff_lines(diff_text):
+        if line.startswith("diff --git "):
+            current_file = next(sections).path
             continue
         if current_file is None:
             continue
@@ -286,7 +279,7 @@ def extract_impact(
     attacker-controlled on an untrusted PR. Defaults to the safer "untrusted".
     """
     hunks = _parse_hunks(diff_text)
-    relevant_files = [fp for fp in _changed_paths(diff_text) if fp in hunks]
+    relevant_files = [fp for fp in changed_paths_in_diff(diff_text) if fp in hunks]
     if not relevant_files:
         return {"impactPath": [], "truncated": False, "totalDeclarations": 0}
 

@@ -18,6 +18,7 @@ from typer.testing import CliRunner
 
 from mergecraft.cli.config_precedence import explain_setting
 from mergecraft.cli.doctor_cmd import _config_probe
+from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
 from mergecraft.config.layered import resolve_config_sources
 
@@ -135,23 +136,30 @@ def test_the_local_overlay_is_ignored_on_ci_like_the_loader(
     assert re.search(r"status\s*│\s*disabled", rendered), rendered
 
 
-def test_a_missing_mergecraft_config_is_reported_the_way_doctor_reports_it(
+def test_a_missing_mergecraft_config_is_a_configuration_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Doctor names a missing ``MERGECRAFT_CONFIG``; ``config tracing`` refuses it.
+
+    The tracing view must not report the committed file's settings for a run
+    whose operator asked for a different file (#1337).
+    """
+    from mergecraft.cli.app import app
+
     _write_repo(tmp_path, local=None)
     missing = tmp_path / "nope.yaml"
     monkeypatch.setenv("MERGECRAFT_CONFIG", str(missing))
 
     doctor = _config_probe(tmp_path)
-    rendered = _config_tracing(
-        tmp_path, monkeypatch, env={"MERGECRAFT_CONFIG": str(missing)}
-    ).lower()
+    monkeypatch.chdir(tmp_path)
+    result = _RUNNER.invoke(app, ["config", "tracing"], env=_TERM)
+    rendered = _ANSI.sub("", result.stdout + result.stderr).lower()
 
     assert "mergecraft_config" in doctor.detail.lower()
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE, rendered
     assert "mergecraft_config" in rendered, rendered
     assert "nope.yaml" in rendered, rendered
-    assert "does not exist" in rendered, rendered
-    assert "config.yaml" in rendered, "the committed file still contributes"
+    assert "traceback" not in rendered, rendered
 
 
 def test_an_existing_mergecraft_config_is_the_sole_contributor(

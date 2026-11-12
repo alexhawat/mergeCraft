@@ -309,3 +309,112 @@ async def test_a_thread_with_unread_comments_is_not_swept() -> None:
     plan = await plan_carryover(FakeGitHub(threads=[thread]), "o", "r", 7)  # type: ignore[arg-type]
 
     assert plan.to_file == []
+
+
+_PUBLISHERS = frozenset({"mergecraft[bot]"})
+
+
+class _PullStateGitHub(FakeGitHub):
+    """FakeGitHub that also answers ``get_pull`` with a fixed state."""
+
+    def __init__(self, *, state: str, merged: bool = False, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._state = state
+        self._merged = merged
+        self.pull_reads = 0
+
+    async def get_pull(self, owner: str, repo: str, pull_number: int) -> dict[str, Any]:
+        self.pull_reads += 1
+        return {"number": pull_number, "state": self._state, "merged": self._merged}
+
+
+def _ledger_with(fingerprint: str, state: str) -> list[Any]:
+    from mergecraft.findings.ledger import FindingLedger
+
+    book = FindingLedger()
+    book.record(fingerprint, state, source="inline", round_index=1)  # type: ignore[arg-type]
+    return book.records()
+
+
+async def test_a_published_finding_on_a_merged_pr_is_filed_despite_its_ledger_row() -> None:
+    """The publish path records every inline finding as ``open``; merge must still file it."""
+    github = _PullStateGitHub(state="closed", merged=True)
+
+    plan = await plan_carryover(
+        github,  # type: ignore[arg-type]
+        "o",
+        "r",
+        7,
+        publishers=_PUBLISHERS,
+        ledger_records=_ledger_with(_FP, "open"),
+    )
+
+    assert [f.fingerprint for f in plan.to_file] == [_FP]
+    assert plan.already_filed == []
+    assert github.pull_reads == 1
+
+
+async def test_a_ledger_row_still_skips_the_finding_while_the_pr_is_open() -> None:
+    github = _PullStateGitHub(state="open")
+
+    plan = await plan_carryover(
+        github,  # type: ignore[arg-type]
+        "o",
+        "r",
+        7,
+        publishers=_PUBLISHERS,
+        ledger_records=_ledger_with(_FP, "open"),
+    )
+
+    assert plan.to_file == []
+    assert [f.fingerprint for f in plan.already_filed] == [_FP]
+
+
+async def test_the_pr_state_is_not_read_when_no_finding_has_a_ledger_row() -> None:
+    github = _PullStateGitHub(state="closed", merged=True)
+
+    plan = await plan_carryover(
+        github,  # type: ignore[arg-type]
+        "o",
+        "r",
+        7,
+        publishers=_PUBLISHERS,
+        ledger_records=_ledger_with(_OTHER_FP, "deferred"),
+    )
+
+    assert [f.fingerprint for f in plan.to_file] == [_FP]
+    assert github.pull_reads == 0
+
+
+def _graphql_bot_thread(login: str) -> dict[str, Any]:
+    """A thread whose author is in GitHub's GraphQL shape: ``Bot`` with a bare slug."""
+    thread = _graphql_thread()
+    thread["comments"]["nodes"][0]["author"] = {"__typename": "Bot", "login": login}
+    return thread
+
+
+async def test_a_graphql_bot_author_matches_its_rest_style_publisher_login() -> None:
+    """GraphQL names an App bot ``slug``; the publisher set holds ``slug[bot]``."""
+    github = FakeGitHub(threads=[_graphql_bot_thread("mergecraft")])
+
+    page = await fetch_review_threads(github, "o", "r", 7)  # type: ignore[arg-type]
+    plan = await plan_carryover(github, "o", "r", 7)  # type: ignore[arg-type]
+
+    assert page.threads[0]["comments"][0]["author"] == "mergecraft[bot]"
+    assert [f.fingerprint for f in plan.to_file] == [_FP]
+
+
+async def test_a_graphql_user_author_is_not_given_a_bot_suffix() -> None:
+    thread = _graphql_thread()
+    thread["comments"]["nodes"][0]["author"] = {"__typename": "User", "login": "mergecraft"}
+
+    page = await fetch_review_threads(FakeGitHub(threads=[thread]), "o", "r", 7)  # type: ignore[arg-type]
+
+    assert page.threads[0]["comments"][0]["author"] == "mergecraft"
+
+
+def test_the_thread_query_asks_for_the_author_type() -> None:
+    from mergecraft.findings.threads import THREAD_COMMENTS_QUERY, THREADS_QUERY
+
+    assert "author { __typename login }" in THREADS_QUERY
+    assert "author { __typename login }" in THREAD_COMMENTS_QUERY

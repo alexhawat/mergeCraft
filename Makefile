@@ -284,6 +284,9 @@ pins-check: ## Fail when the defaults.yaml copies drift or the pinned SHA disagr
 agent-packages: ## Regenerate per-harness Agent Skills packages
 	$(UV) run python scripts/gen_agent_packages.py
 
+release-normalize: ## Normalize a prepared release branch: `[Unreleased]` first, docs fixture on the release ref
+	$(UV) run python scripts/normalize_release_branch.py
+
 agent-packages-check: ## Fail when generated agent packages drift or fail skills-ref validation
 	$(UV) run python scripts/gen_agent_packages.py --check
 

@@ -7,6 +7,7 @@ import subprocess
 import threading
 from collections import deque
 from collections.abc import Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final, NamedTuple, Protocol
 
@@ -32,6 +33,81 @@ STDERR_DRAIN_MAX_LINES = 2000
 # must not stall the driver, so the join is always bounded.
 STDERR_DRAIN_JOIN_TIMEOUT_S = 5.0
 MAX_POST_RUN_RETRIES = 3
+
+
+class AgentProcessScope:
+    """The CLI processes one ``Agent.run`` spawned, so they can be killed with it.
+
+    Drivers run the blocking CLI loop in ``asyncio.to_thread``. Cancelling the
+    coroutine (a roster or file-group ``wait_for`` timeout, an outer cancel)
+    does not stop that worker thread or its child, so without this the child
+    keeps running, spending tokens and calling the run's MCP server after the
+    dispatcher has recorded it as timed out.
+
+    :func:`spawn_agent_cli` adds every child to the scope bound in the current
+    context (``asyncio.to_thread`` copies the context into the worker), and
+    :meth:`AgentImpl.run` closes the scope when the run returns, raises or is
+    cancelled. Closing kills the group of every child still alive and refuses
+    any later spawn in the scope, so a worker thread that outlives the cancel
+    cannot start a resume turn.
+    """
+
+    __slots__ = ("_closed", "_lock", "_processes")
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._processes: list[subprocess.Popen[str]] = []
+        self._closed = False
+
+    @property
+    def closed(self) -> bool:
+        """Return whether the scope was closed (its owner run finished)."""
+        return self._closed
+
+    def add(self, process: subprocess.Popen[str]) -> bool:
+        """Track ``process``; return ``False`` (caller must kill it) once closed."""
+        with self._lock:
+            if self._closed:
+                return False
+            self._processes.append(process)
+            return True
+
+    def live_pids(self) -> list[int]:
+        """Return the pids of tracked children that have not exited."""
+        with self._lock:
+            processes = list(self._processes)
+        pids: list[int] = []
+        for process in processes:
+            pid = getattr(process, "pid", None)
+            if isinstance(pid, int) and process.poll() is None:
+                pids.append(pid)
+        return pids
+
+    def close(self) -> None:
+        """Refuse new spawns and kill the process group of every live child.
+
+        Only children that have not exited are signalled: a reaped leader's pid
+        may already belong to an unrelated process.
+        """
+        from mergecraft.utils.process_group import kill_process_groups
+
+        with self._lock:
+            self._closed = True
+        pids = self.live_pids()
+        if not pids:
+            return
+        logger.warning("killing {} agent process group(s) left by a finished run", len(pids))
+        kill_process_groups(set(pids))
+
+
+_PROCESS_SCOPE: ContextVar[AgentProcessScope | None] = ContextVar(
+    "mergecraft_agent_process_scope", default=None
+)
+
+
+def current_agent_process_scope() -> AgentProcessScope | None:
+    """Return the process scope bound to the current run, if any."""
+    return _PROCESS_SCOPE.get()
 
 
 def spawn_agent_cli(
@@ -64,7 +140,16 @@ def spawn_agent_cli(
     D10 (OB4) — the dispatch-issued agent identity (``MERGECRAFT_AGENT_ID``,
     from the bound ``agent_run_span``) rides the same setdefault handoff so
     the harness subprocess's MCP calls can be attributed to their agent.
+
+    The child joins the current :class:`AgentProcessScope`, so it is killed
+    when its owning ``Agent.run`` is cancelled. A spawn in a scope that is
+    already closed (the run was cancelled while this worker thread was still
+    going) kills the child at once and raises ``RuntimeError``.
     """
+    scope = _PROCESS_SCOPE.get()
+    if scope is not None and scope.closed:
+        msg = "agent run was cancelled; refusing to spawn another agent CLI"
+        raise RuntimeError(msg)
     from mergecraft.tracing.review_context import review_env_for_subprocess
     from mergecraft.tracing.signals import AGENT_ID_ENV_VAR, current_agent_id
     from mergecraft.utils.privilege import agent_subprocess_env, wrap_agent_command
@@ -82,7 +167,7 @@ def spawn_agent_cli(
         # failure degrades to an uncorrelated child, never a failed spawn.
         logger.warning("review env export for agent subprocess failed: {}", exc)
 
-    return subprocess.Popen(
+    process = subprocess.Popen(
         wrapped_cmd,
         cwd=cwd if cwd is not None else os.getcwd(),
         env=resolved_env,
@@ -92,6 +177,13 @@ def spawn_agent_cli(
         bufsize=1,
         start_new_session=True,
     )
+    if scope is not None and not scope.add(process):
+        from mergecraft.utils.process_group import kill_process_group
+
+        kill_process_group(process.pid)
+        msg = "agent run was cancelled; refusing to spawn another agent CLI"
+        raise RuntimeError(msg)
+    return process
 
 
 @dataclass(slots=True)
@@ -381,7 +473,15 @@ class AgentImpl:
                 error="kill_switch",
                 diagnostics={"reason": "kill_switch"},
             )
-        result = await self._run(ctx)
+        # Every CLI this run spawns joins its own scope; closing it on the way
+        # out (return, raise or cancel) kills any child still alive (#1326).
+        scope = AgentProcessScope()
+        token = _PROCESS_SCOPE.set(scope)
+        try:
+            result = await self._run(ctx)
+        finally:
+            _PROCESS_SCOPE.reset(token)
+            scope.close()
         if budget is not None and result.usage is not None:
             record_provider_usage(
                 budget,

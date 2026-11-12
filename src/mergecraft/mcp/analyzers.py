@@ -108,16 +108,16 @@ def _merge_analyzer_segments(
     segment. Compatible duplicate occurrences retain their strongest severity
     and evidence; contradictory attribution stays explicit. Descriptive fields
     take the most recent non-empty value, since they describe the latest run
-    rather than the union.
+    rather than the union; that includes each analyzer's status row, which
+    is taken from the newest segment that reports it (first-seen position).
     """
     if len(segments) == 1:
         return next(iter(segments.values()))
     findings: list[dict[str, Any]] = []
     inline: list[dict[str, Any]] = []
     deferred: list[dict[str, Any]] = []
-    analyzers: list[AnalyzerStatusRow] = []
+    analyzers: dict[str, AnalyzerStatusRow] = {}
     verified: set[str] = set()
-    seen_analyzers: set[str] = set()
     mechanical_section: str | None = None
     deferred_section: str | None = None
     pre_merge_summary: str | None = None
@@ -128,10 +128,8 @@ def _merge_analyzer_segments(
         inline.extend(segment.inline)
         deferred.extend(segment.deferred_findings)
         for status_row in segment.analyzers:
-            if status_row.id in seen_analyzers:
-                continue
-            seen_analyzers.add(status_row.id)
-            analyzers.append(status_row)
+            # Segments iterate oldest-first: a later row supersedes (#1321).
+            analyzers[status_row.id] = status_row
         verified |= set(segment.verified_ids)
         mechanical_section = segment.mechanical_section or mechanical_section
         deferred_section = segment.deferred_section or deferred_section
@@ -145,7 +143,7 @@ def _merge_analyzer_segments(
     return AnalyzerRunState(
         ran=any(segment.ran for segment in segments.values()),
         reason=latest.reason,
-        analyzers=analyzers,
+        analyzers=list(analyzers.values()),
         findings=merge_finding_records(findings),
         inline=merge_finding_records(inline, inline=True),
         mechanical_section=mechanical_section,
@@ -203,8 +201,28 @@ def _store_run_state(ctx: ToolContext, state: AnalyzerRunState) -> None:
     record_deferred_from_analyzer_run(tool_state, state)
 
 
+API_ONLY_SKIP_REASON = (
+    "head not materialized: the PR head could not be fetched, so the local "
+    "tree is not the reviewed revision (api-only scope)"
+)
+
+
 def run_analyzers_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
+        if ctx.tool_state.review_scope == API_ONLY_SCOPE:
+            # The PR head was never materialized, so the local tree is the base or
+            # an earlier head. Scanning it would attribute findings to code that
+            # is not in the reviewed revision.
+            logger.info("analyzers: skipped, {}", API_ONLY_SKIP_REASON)
+            # Record the attempt: the verification gate counts a ran=False pass.
+            _store_run_state(ctx, AnalyzerRunState(ran=False, reason=API_ONLY_SKIP_REASON))
+            return {
+                "ran": False,
+                "reason": API_ONLY_SKIP_REASON,
+                "analyzers": [],
+                "findingCount": 0,
+                "scopeNotice": API_ONLY_SCOPE_GUIDANCE,
+            }
         state = primary_repo_state(ctx.tool_state)
         repo_root = _confine_repo_root(ctx, Path(params.get("repo_root") or state.dir))
         changed = [str(f) for f in (params.get("changed_files") or [])]
@@ -308,8 +326,6 @@ def run_analyzers_tool(ctx: ToolContext):
             payload["mechanicalSection"] = run_state.mechanical_section
         if run_state.deferred_section:
             payload["deferredSection"] = run_state.deferred_section
-        if ctx.tool_state.review_scope == API_ONLY_SCOPE:
-            payload["scopeNotice"] = API_ONLY_SCOPE_GUIDANCE
         logger.info(
             "analyzers: ran={} tools={} findings={} catalog={}",
             run_state.ran,

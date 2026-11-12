@@ -1,8 +1,13 @@
-{
-  "breakingChanges": [
-    {
-      "id": "response-property-removed",
-      "level": "breaking"
-    }
-  ]
-}
+[
+  {
+    "id": "response-property-removed",
+    "text": "removed the required property 'email' from the response with the '200' status",
+    "level": 3,
+    "operation": "GET",
+    "operationId": "getUser",
+    "path": "/users/{id}",
+    "source": "openapi/v1.yaml",
+    "section": "paths",
+    "baseSource": {"file": "openapi/v1.yaml", "line": 24, "column": 13}
+  }
+]

@@ -154,6 +154,9 @@ class CiEvidenceSettings(_OptionalFeatureModel):
     (mutmut or Stryker JSON) the reviewer may ingest as survivor findings.
     Empty means no ingest and no extra API call (C-D2).
 
+    Both attribute to changed functions, which resolves Python only: a report
+    for a diff with no Python change records ``changed_function_language_unsupported``.
+
     ``redGreen`` declares the fail-then-pass receipt (:class:`RedGreenReceiptSettings`:
     the artifact and the one workflow allowed to upload it). Unset means no ingest and
     no extra API call; a fix pull request then has no proof (#1056). It is honoured
@@ -555,8 +558,9 @@ class ReviewSettings(BaseModel):
         default=True,
         alias="ignorePathDefaults",
         description=(
-            "Also ignore the built-in defaults: changelogs, lockfiles, package-lock.json, "
-            "and generated or minified files. ``false`` reviews them."
+            "Also ignore the built-in defaults: changelogs, lockfiles, package-lock.json "
+            "and minified files. ``false`` reviews them. A ``generated/`` directory is "
+            "reviewed unless an ``ignorePaths`` glob names it."
         ),
     )
     # #1056 part 5 — labels that mark a pull request as a fix, which then needs a
@@ -1601,28 +1605,34 @@ def load_repo_settings(
 ) -> RepoSettings:
     """Load repo settings from path, ``MERGECRAFT_CONFIG``, or ``.mergecraft/config.yaml``.
 
-    When no config file exists, returns ``default_settings()``. Optionally merges
+    When no config file exists, returns ``default_settings()``; an explicit *path*
+    or ``MERGECRAFT_CONFIG`` that names a missing file raises
+    :class:`~mergecraft.config.yaml_unique.ConfigParseError`. Optionally merges
     learnings bodies + headings from ``.mergecraft/learnings.md`` (and xrepo files).
     """
     raw: dict[str, Any] | None = None
     if path is not None:
         candidate = Path(path)
-        if candidate.is_file():
-            from mergecraft.config.layered import config_parse_error
-            from mergecraft.config.yaml_unique import safe_load_unique
+        if not candidate.is_file():
+            from mergecraft.config.yaml_unique import ConfigParseError
 
-            try:
-                loaded = safe_load_unique(candidate.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
-                # Fail closed: a config that cannot be parsed must not widen to defaults.
-                raise config_parse_error(candidate, exc) from exc
-            if loaded is None:
-                raw = {}
-            elif not isinstance(loaded, dict):
-                msg = f"config must be a mapping, got {type(loaded).__name__}: {candidate}"
-                raise config_parse_error(candidate, ValueError(msg))
-            else:
-                raw = migrate_config(loaded)
+            # An explicitly named config that is missing must not fall back to defaults.
+            raise ConfigParseError(f"config file not found: {candidate}")
+        from mergecraft.config.layered import config_parse_error
+        from mergecraft.config.yaml_unique import safe_load_unique
+
+        try:
+            loaded = safe_load_unique(candidate.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            # Fail closed: a config that cannot be parsed must not widen to defaults.
+            raise config_parse_error(candidate, exc) from exc
+        if loaded is None:
+            raw = {}
+        elif not isinstance(loaded, dict):
+            msg = f"config must be a mapping, got {type(loaded).__name__}: {candidate}"
+            raise config_parse_error(candidate, ValueError(msg))
+        else:
+            raw = migrate_config(loaded)
     else:
         from mergecraft.config.layered import load_layered_config_dict
 

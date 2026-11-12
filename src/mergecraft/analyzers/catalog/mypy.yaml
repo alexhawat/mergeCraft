@@ -27,3 +27,7 @@ severity_map:
 provenance: {}
 network_allowlist: []
 exclusive_group: python-typecheck
+benign_exits:
+  - code: 2
+    marker: "There are no .py[i] files"
+    reason: "nothing to scan: no Python files in the analyzed paths"

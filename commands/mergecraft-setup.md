@@ -28,6 +28,8 @@ Set up mergeCraft in this repo by following the skill's setup checklist:
 3. **STOP before authentication.** Ask me to run the interactive
    `mergecraft provider auth <provider> --scope github` step (a configured label or id from `mergecraft provider list`; see
    [`docs/authentication.md`](../docs/authentication.md)). Never invent or commit
-   credentials or secrets.
+   credentials or secrets. The command stores the secret and wires it into
+   `.github/workflows/mergecraft.yml`. Then run `mergecraft doctor`; its
+   `workflow auth` row must be ok (if not, run `mergecraft workflow sync --apply`).
 4. Commit only `.mergecraft/config.yaml` and `.github/workflows/mergecraft.yml`
    on a new branch and open a pull request.

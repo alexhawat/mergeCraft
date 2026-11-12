@@ -160,7 +160,9 @@ class _FailingSecondaryAgent:
         return self._result
 
 
-async def _dispatch_one_secondary(tmp_path, monkeypatch: pytest.MonkeyPatch, agent: Any):
+async def _dispatch_one_secondary(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, agent: Any, *, timeout_s: float = 30.0
+):
     """Run the roster dispatch with *agent* standing in for the secondary reviewer."""
     write_config(tmp_path, two_reviewer_config())
     monkeypatch.chdir(tmp_path)
@@ -233,9 +235,78 @@ async def _dispatch_one_secondary(tmp_path, monkeypatch: pytest.MonkeyPatch, age
         settings=settings,
         payload={"event": {"trigger": "unknown"}},
         repo_root=tmp_path,
-        per_reviewer_timeout_s=30.0,
+        per_reviewer_timeout_s=timeout_s,
     )
     return summary, tool_state
+
+
+def _hung_cli_agent(spawned: list[Any], refused: list[BaseException]) -> Any:
+    """A real ``AgentImpl`` whose CLI never returns, run the way drivers run it.
+
+    The blocking loop runs in ``asyncio.to_thread`` and spawns through the real
+    ``spawn_agent_cli``. When its child dies it tries one more spawn (a resume
+    turn) and records whether that was refused.
+    """
+    import asyncio
+    import sys
+
+    from mergecraft.agents.shared import agent, spawn_agent_cli
+
+    def _blocking() -> AgentResult:
+        process = spawn_agent_cli(
+            [sys.executable, "-c", "import time; time.sleep(30)"], env={"PATH": "/usr/bin:/bin"}
+        )
+        spawned.append(process)
+        process.wait()
+        try:
+            again = spawn_agent_cli([sys.executable, "-c", "pass"], env={"PATH": "/usr/bin:/bin"})
+        except RuntimeError as exc:
+            refused.append(exc)
+        else:
+            again.wait()
+            spawned.append(again)
+        return AgentResult(success=True)
+
+    async def _install(_token: str | None = None) -> str:
+        return "fake"
+
+    async def _run(_ctx: AgentRunContext) -> AgentResult:
+        return await asyncio.to_thread(_blocking)
+
+    return agent(name="codex", install=_install, run=_run)
+
+
+@pytest.mark.asyncio
+async def test_a_timed_out_secondary_is_killed_not_abandoned(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1326 — the roster timeout kills the reviewer's CLI and refuses a later spawn."""
+    import asyncio
+    import time
+
+    spawned: list[Any] = []
+    refused: list[BaseException] = []
+    started = time.monotonic()
+    summary, tool_state = await _dispatch_one_secondary(
+        tmp_path, monkeypatch, _hung_cli_agent(spawned, refused), timeout_s=0.5
+    )
+
+    assert "timed out" in (summary.hard_error or "")
+    assert "timed out" in tool_state.reviewer_dispatch_errors["reviewer2"]
+    assert len(spawned) == 1
+    child = spawned[0]
+    for _ in range(50):
+        if child.poll() is not None:
+            break
+        await asyncio.sleep(0.1)
+    assert child.poll() is not None, "the timed-out reviewer's CLI is still running"
+    assert time.monotonic() - started < 10.0
+    for _ in range(50):
+        if refused:
+            break
+        await asyncio.sleep(0.1)
+    assert refused, "a spawn after the timeout must be refused"
+    assert len(spawned) == 1
 
 
 @pytest.mark.asyncio

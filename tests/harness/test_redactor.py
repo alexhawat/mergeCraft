@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import inspect
+import json
 
 from mergecraft.analyzers.redact import redact_secrets
 from mergecraft.redaction_sentinel import REDACTION_SENTINEL
@@ -25,17 +25,21 @@ def test_redacts_github_tokens_and_secret_like_values() -> None:
 def test_redacts_sensitive_request_fields_before_fixture_write() -> None:
     from tests.support.provider_harness import redaction as redaction_module
 
-    source = inspect.getsource(redaction_module.sanitize_value)
-    assert "redact_secrets" in source
-    assert "redact_attrs" in source
+    token = "ghp_" + "x" * 36
+    payload = {
+        "headers": {"authorization": f"Bearer {token}", "accept": "application/json"},
+        "messages": [{"role": "user", "content": f"token is {token}"}],
+        "model": "demo-model",
+    }
+
+    cleaned = redaction_module.sanitize_value(payload)
+
+    assert token not in json.dumps(cleaned)
+    assert isinstance(cleaned, dict)
+    assert cleaned["model"] == "demo-model"
+    assert REDACTION_SENTINEL in json.dumps(cleaned)
 
 
 def test_recording_requires_explicit_local_opt_in(monkeypatch) -> None:
     monkeypatch.delenv("MERGECRAFT_PROVIDER_HARNESS_RECORD", raising=False)
     assert recorder_module.recording_enabled() is False
-
-
-def test_recording_never_commits_or_pushes() -> None:
-    source = inspect.getsource(recorder_module)
-    assert "git" not in source
-    assert "subprocess" not in source

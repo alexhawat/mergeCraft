@@ -77,6 +77,7 @@ from mergecraft.evals.corpora import CorpusCase
 from mergecraft.evals.judge_calibration import load_and_evaluate
 from mergecraft.evals.live_run import (
     DEFAULT_DETECTION_CORPUS_DIR,
+    ReviewBudget,
     run_full_benchmark,
 )
 from mergecraft.evals.publication import build_publication, write_publication
@@ -685,6 +686,30 @@ def bench_cmd(
         help="Operator-declared model pin; must exactly equal the requested model slug and "
         "does not verify provider execution identity or make a floating alias immutable.",
     ),
+    per_review_timeout: float | None = typer.Option(
+        None,
+        "--per-review-timeout-seconds",
+        min=0.001,
+        help="Wall-clock bound for each live review; a case over it is recorded as failed.",
+    ),
+    per_review_token_limit: int | None = typer.Option(
+        None,
+        "--per-review-token-limit",
+        min=1,
+        help="Token bound for each live review.",
+    ),
+    per_review_cost_usd: float | None = typer.Option(
+        None,
+        "--per-review-cost-usd",
+        min=0.000001,
+        help="Cost bound in USD for each live review.",
+    ),
+    campaign_cost_ceiling_usd: float | None = typer.Option(
+        None,
+        "--campaign-cost-ceiling-usd",
+        min=0.000001,
+        help="Stop running cases once reported spend reaches this ceiling.",
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -761,6 +786,12 @@ def bench_cmd(
         detection_model=resolved_model,
         detection_model_pin=model_pin,
         required_provenance=required,
+        budget=ReviewBudget(
+            per_review_timeout_seconds=per_review_timeout,
+            per_review_token_limit=per_review_token_limit,
+            per_review_cost_budget_usd=per_review_cost_usd,
+            campaign_cost_ceiling_usd=campaign_cost_ceiling_usd,
+        ),
     )
     # update_latest=False: a single-provider detection result must not
     # silently become "latest.json" — see write_result_set's docstring (D12).
@@ -778,6 +809,24 @@ def bench_cmd(
         console.print(f"  recall          : {det.aggregate.recall:.2%}")
         console.print(f"  precision       : {det.aggregate.corpus_confirmed_precision:.2%}")
         console.print(f"  f1              : {det.aggregate.f1:.2%}")
+        console.print(f"  failed cases    : {det.cases_failed}")
+        for failed_id, error in det.failed_case_errors.items():
+            console.print(f"    {failed_id}: {error}")
+        if det.latency is not None:
+            console.print(
+                f"  latency         : p50 {det.latency.p50_ms:.0f} ms, p95 {det.latency.p95_ms:.0f} ms"
+            )
+        cost = f"${det.total_cost_usd:.4f}" if det.total_cost_usd is not None else "unknown"
+        console.print(f"  cost            : {cost}")
+        blockers = [
+            row.quality.blocker_precision
+            for row in det.case_results
+            if row.quality is not None and row.quality.blocker_precision is not None
+        ]
+        if blockers:
+            console.print(
+                f"  blocker precision (mean over cases): {sum(blockers) / len(blockers):.2%}"
+            )
         # Printed beside the numbers so provenance eligibility cannot be
         # mistaken for a completed judge-calibration study.
         if det.calibration is not None:
@@ -1128,7 +1177,9 @@ def trajectory_gate_cmd(
     tolerance) and fails when a candidate report drifts outside the tolerance,
     naming the check. Until an approved protocol is committed there is nothing
     to enforce, so the gate reports ``no approved protocol — advisory`` and
-    exits 0.
+    exits 0. Once a protocol exists, a missing baseline or candidate fails, and
+    so do mismatched label-set digests or an ineligible candidate; only
+    true-positive drops and false-positive / false-negative rises regress.
     """
     protocol_path = protocol if protocol is not None else DEFAULT_TRAJECTORY_PROTOCOL_PATH
     if not protocol_path.is_file():
@@ -1139,12 +1190,9 @@ def trajectory_gate_cmd(
         )
         return
     if baseline is None or candidate is None or not baseline.is_file() or not candidate.is_file():
-        _emit_trajectory_gate_advisory(
-            ctx,
-            json_output=json_output,
-            reason="no frozen baseline or candidate report — advisory",
-        )
-        return
+        # An approved protocol exists, so a missing input is a failure, not an
+        # advisory: otherwise deleting the baseline silently disables the gate.
+        cli_bail("trajectory gate: an approved protocol requires both --baseline and --candidate")
     try:
         loaded_protocol = load_trajectory_protocol(protocol_path)
         baseline_report = TrajectoryScoreReport.model_validate_json(

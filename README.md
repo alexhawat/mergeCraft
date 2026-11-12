@@ -40,8 +40,8 @@ Reference: https://github.com/alexhawat/mergeCraft/blob/main/AGENTS-mergecraft.m
 Install uv if missing, then `uv tool install mergecraft-action==0.1.0a5`, run
 `mergecraft init`, and print the `mergecraft provider auth <label> --scope github`
 command for me to run. Never read, echo or commit a credential. After I confirm,
-run `mergecraft workflow sync --check` (then `--apply` if it reports an unwired
-provider) and `mergecraft doctor`, commit only the files `init` created, and open a PR.
+run `mergecraft doctor` (its `workflow auth` row must be ok; if not, `mergecraft
+workflow sync --apply`), commit only the files `init` created, and open a PR.
 ```
 
 The full prompts (install, teach your agent the mergeCraft skill, per-agent
@@ -89,14 +89,18 @@ mergecraft provider auth google --scope github       # Google AI Studio
 ```
 
 The credential is stored as a GitHub Actions secret via `gh secret set`. Add
-`--scope local` to write a local `.env` instead, for offline `mergecraft review`.
+`--scope local` to write a local `.env` instead, for offline `mergecraft review`,
+or `--scope both` for both.
 
-3. **Make sure the workflow uses it,** then check the setup:
+3. **Check the setup:**
 
 ```bash
-mergecraft workflow sync --apply   # wires the provider you just authenticated into the workflow
-mergecraft doctor                  # git, providers, analyzers, auth, config, MCP wiring
+mergecraft doctor   # git, providers, analyzers, auth, config, workflow auth, MCP wiring
 ```
+
+   `provider auth --scope github` (or `both`) also rewrites `.github/workflows/mergecraft.yml`
+   so the workflow passes the secret it just stored. If the `workflow auth` row fails,
+   run `mergecraft workflow sync --apply`.
 
 4. **Commit and open a pull request.** Commit `.mergecraft/config.yaml`,
    `.github/workflows/mergecraft.yml`, the notes file under `.mergecraft/` and the
@@ -157,7 +161,7 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 
-More patterns — ignore paths, hardened `pull_request_target`, comment triggers, [SARIF](docs/glossary.md#sarif):
+More patterns — [ignore paths](docs/workflows.md#ignoring-paths), hardened `pull_request_target`, comment triggers, [SARIF](docs/glossary.md#sarif):
 [`docs/workflows.md`](docs/workflows.md). Other install paths (Docker-only, no local
 install): [`docs/install.md`](docs/install.md).
 

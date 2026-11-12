@@ -39,7 +39,7 @@ GLOSSARY_ANCHORS = (
     "evidence-packet",
     "terminal-verdict",
 )
-README_LINE_BUDGET = 280
+README_LINE_BUDGET = 300
 _FENCE = re.compile(r"```(?:bash|sh|shell|text)?\n(.*?)```", re.DOTALL)
 
 

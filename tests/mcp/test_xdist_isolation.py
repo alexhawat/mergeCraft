@@ -184,9 +184,17 @@ def test_reset_mcp_process_state_clears_shell_detection_cache(
     shared_mod.reset_selected_mode(token)
 
 
-def test_reset_detection_cache_is_public_shell_api() -> None:
-    """D4 — shell module exposes reset_detection_cache for xdist isolation."""
+def test_reset_detection_cache_is_public_shell_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D4 — reset_detection_cache clears the cached sandbox / netns probe results."""
+    from mergecraft.mcp import shell as shell_mod
+
+    monkeypatch.setattr(shell_mod, "_detected_sandbox", "unshare")
+    monkeypatch.setattr(shell_mod, "_detected_netns", True)
+
     reset_detection_cache()
+
+    assert shell_mod._detected_sandbox is None
+    assert shell_mod._detected_netns is None
 
 
 def test_parallel_server_starts_have_unique_ports_and_tokens(tmp_path: Path) -> None:

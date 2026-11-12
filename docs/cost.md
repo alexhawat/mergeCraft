@@ -34,9 +34,9 @@ on your provider, model, plan and the size of the change.
 - **Fewer reviewers.** Each extra reviewer on the roster adds a dispatch.
   `mergecraft provider status` shows what CI will run.
 - **Less diff.** The `ignore_paths` Action input and `review.ignorePaths`
-  keep changelogs, lockfiles, generated and minified files out of what the
+  keep changelogs, lockfiles and minified files out of what the
   reviewer reads; several of those are ignored by default
-  ([workflows](workflows.md)).
+  ([workflows](workflows.md#ignoring-paths)).
 - **A run cap.** The Action `timeout` input bounds run duration (default 1h)
   ([action reference](action-reference.md)).
 - **Preview before spending.** `mergecraft plan` prints the model chain,

@@ -1022,6 +1022,7 @@ def _run_codex_streaming(
         interval_s=ctx.idle_timeout_s,
         accumulator=accumulator,
         stderr_text=stderr_drain.text,
+        deadline_s=AgentRuntimeEnv().agent_timeout,
     )
 
     def _watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:

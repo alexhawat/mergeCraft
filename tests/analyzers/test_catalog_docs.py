@@ -66,3 +66,85 @@ def test_manifest_missing_fixture_fails_ci_gate(tmp_path: Path) -> None:
     )
     with pytest.raises(docs.CatalogIntegrityError, match="fixture"):
         docs.validate_manifest_ship_gate(bad_manifest, fixture_root=tmp_path)
+
+
+def test_every_manifest_fixture_parses_through_its_wired_parser() -> None:
+    docs = import_module("mergecraft.analyzers.catalog_docs")
+    fixture_root = REPO_ROOT / "tests" / "analyzers" / "fixtures"
+
+    failures = [
+        error
+        for manifest in _catalog_manifests()
+        if (error := docs.fixture_parse_error(manifest, fixture_root=fixture_root)) is not None
+    ]
+    assert failures == []
+
+
+def _write_js_lint_manifest(tmp_path: Path, *, parser: str) -> Path:
+    manifest = tmp_path / "jslint.yaml"
+    manifest.write_text(
+        "id: jslint\ncategory: lint\nlanguages: [javascript]\n"
+        "detect:\n  files: ['*.js']\ncommand: ['jslint', '{files}']\n"
+        f"scope: diff\nparser: {parser}\nsupports_fix: false\n"
+        "default_enabled: false\nversion: '0.0.0'\nruntime: repo-native\n"
+        "timeout_s: 60\ntrust: trusted\nseverity_map:\n  error: Major\n"
+        "  warning: Minor\n  fatal: Major\n  information: Trivial\n  hint: Trivial\n"
+        "provenance: {}\nnetwork_allowlist: []\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "ANALYZERS.md").write_text("| `jslint` | lint | fixture |\n", encoding="utf-8")
+    return manifest
+
+
+def test_catalog_check_fails_when_the_wired_parser_cannot_read_the_fixture(
+    tmp_path: Path,
+) -> None:
+    """A Biome-format fixture under a manifest wired to ``eslint_json`` must fail the gate."""
+    docs = import_module("mergecraft.analyzers.catalog_docs")
+    native = tmp_path / "native"
+    native.mkdir()
+    biome_report = (REPO_ROOT / "tests/analyzers/fixtures/native/biome-minimal.json").read_text(
+        encoding="utf-8"
+    )
+    (native / "jslint-minimal.json").write_text(biome_report, encoding="utf-8")
+    mismatched = _write_js_lint_manifest(tmp_path, parser="eslint_json")
+
+    with pytest.raises(docs.CatalogIntegrityError, match=r"cannot read jslint-minimal\.json"):
+        docs.validate_manifest_ship_gate(
+            mismatched, fixture_root=tmp_path, doc_path=tmp_path / "ANALYZERS.md"
+        )
+
+    matched = _write_js_lint_manifest(tmp_path, parser="biome_json")
+    docs.validate_manifest_ship_gate(
+        matched, fixture_root=tmp_path, doc_path=tmp_path / "ANALYZERS.md"
+    )
+
+
+def test_catalog_check_fails_when_the_fixture_parses_to_nothing(tmp_path: Path) -> None:
+    docs = import_module("mergecraft.analyzers.catalog_docs")
+    native = tmp_path / "native"
+    native.mkdir()
+    (native / "jslint-minimal.json").write_text("[]", encoding="utf-8")
+    manifest = _write_js_lint_manifest(tmp_path, parser="eslint_json")
+
+    with pytest.raises(docs.CatalogIntegrityError, match="found nothing"):
+        docs.validate_manifest_ship_gate(
+            manifest, fixture_root=tmp_path, doc_path=tmp_path / "ANALYZERS.md"
+        )
+
+
+def test_catalog_check_ignores_a_fixture_of_the_wrong_kind(tmp_path: Path) -> None:
+    """A native parser is never satisfied by a SARIF fixture (and vice versa)."""
+    docs = import_module("mergecraft.analyzers.catalog_docs")
+    sarif_dir = tmp_path / "sarif"
+    sarif_dir.mkdir()
+    sarif_fixture = REPO_ROOT / "tests/analyzers/fixtures/sarif/actionlint-minimal.sarif.json"
+    (sarif_dir / "jslint-minimal.sarif.json").write_text(
+        sarif_fixture.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    manifest = _write_js_lint_manifest(tmp_path, parser="eslint_json")
+
+    with pytest.raises(docs.CatalogIntegrityError, match="missing test fixture"):
+        docs.validate_manifest_ship_gate(
+            manifest, fixture_root=tmp_path, doc_path=tmp_path / "ANALYZERS.md"
+        )

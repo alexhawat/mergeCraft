@@ -120,7 +120,9 @@ def test_legacy_auth_success_reuses_preflight_target(
     monkeypatch.setattr(auth_cmd, "_set_gh_secret", save)
     result = CliRunner().invoke(app, ["auth", "tokenhub", "--scope", "github"])
     assert result.exit_code == 0, result.output
-    assert len(calls) == 2
+    # Only the GitHub preflight counts; the post-auth workflow wiring resolves
+    # the repository root with git, which is not a destination lookup.
+    assert len([call for call in calls if call.startswith("repos/")]) == 2
     assert len(writes) == 1
     assert writes[0]["repo_slug"] == "approved/project"
     assert writes[0]["name"] == ("LLM_PROVIDER_1_API_KEY" if registered else "TOKENHUB_API_KEY")

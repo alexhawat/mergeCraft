@@ -7718,7 +7718,7 @@
     "tests/cli/test_trace_jsonl_reuse.py::test_replay_and_run_cmd_use_shared_jsonl_loader": 0.5021014160010964,
     "tests/cli/test_trace_jsonl_reuse.py::test_run_inspect_defaults_to_latest_timestamp_when_ids_are_non_monotonic": 0.1531324999523349,
     "tests/cli/test_trace_jsonl_reuse.py::test_session_ids_order_by_timestamp_not_lexicographic_ids": 0.004469958017580211,
-    "tests/cli/test_tracing_config_sources.py::test_a_missing_mergecraft_config_is_reported_the_way_doctor_reports_it": 0.11133808403974399,
+    "tests/cli/test_tracing_config_sources.py::test_a_missing_mergecraft_config_is_a_configuration_error": 0.11133808403974399,
     "tests/cli/test_tracing_config_sources.py::test_an_existing_mergecraft_config_is_the_sole_contributor": 0.38890599901787937,
     "tests/cli/test_tracing_config_sources.py::test_an_explicit_config_flag_wins_before_the_shared_resolver": 0.21182629198301584,
     "tests/cli/test_tracing_config_sources.py::test_config_tracing_and_config_explain_agree_about_the_local_overlay": 0.17841645807493478,

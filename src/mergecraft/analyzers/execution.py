@@ -7,7 +7,7 @@ import platform
 import re
 import sys
 import time
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlparse
@@ -500,6 +500,22 @@ def provision_resolved_plan(
     return plan
 
 
+@dataclass(frozen=True, slots=True)
+class ArgvRun:
+    """Outcome of :func:`run_argv_result`.
+
+    ``raw`` is the persisted parse surface: ``""`` when the tool wrote nothing,
+    ``None`` when it never ran (then ``reason`` says why). It is never the
+    human-readable display string, which carries version-note prose.
+    """
+
+    raw: str | None
+    reason: str | None = None
+    findings: list[Finding] = field(default_factory=list)
+    exit_code: int | None = None
+    pass_reason: str | None = None
+
+
 def run_argv(
     *,
     manifest: AnalyzerManifest,
@@ -509,7 +525,28 @@ def run_argv(
     tier: TrustTier,
     scratch_suffix: str = "",
 ) -> tuple[str | None, str | None, list[Finding]]:
-    """Provision, sandbox, run, and return raw analyzer output."""
+    """Provision, sandbox, run, and return ``(raw output, skip reason, skip findings)``."""
+    result = run_argv_result(
+        manifest=manifest,
+        repo_root=repo_root,
+        argv=argv,
+        changed_files=changed_files,
+        tier=tier,
+        scratch_suffix=scratch_suffix,
+    )
+    return result.raw, result.reason, result.findings
+
+
+def run_argv_result(
+    *,
+    manifest: AnalyzerManifest,
+    repo_root: Path,
+    argv: tuple[str, ...],
+    changed_files: list[str],
+    tier: TrustTier,
+    scratch_suffix: str = "",
+) -> ArgvRun:
+    """Provision, sandbox, run, and return the raw output with the exit code."""
     from mergecraft.analyzers.sandbox import sandbox_skip_findings
 
     plan = resolve_analyzer(
@@ -518,9 +555,11 @@ def run_argv(
     try:
         provisioned = provision_resolved_plan(plan, manifest=manifest, repo_root=repo_root)
     except ProvisionError as exc:
-        return None, provisioning_failure_reason(manifest.id, exc), []
+        return ArgvRun(raw=None, reason=provisioning_failure_reason(manifest.id, exc))
     if provisioned is None:
-        return None, plan.reason or f"skipped {manifest.id}: provisioning failed", []
+        return ArgvRun(
+            raw=None, reason=plan.reason or f"skipped {manifest.id}: provisioning failed"
+        )
 
     finalized = finalize_plan(
         replace(provisioned, argv=argv, cwd=repo_root),
@@ -530,7 +569,7 @@ def run_argv(
         tier=tier,
     )
     if finalized.mode == "skip":
-        return None, finalized.reason or f"skipped {manifest.id}", []
+        return ArgvRun(raw=None, reason=finalized.reason or f"skipped {manifest.id}")
 
     scratch = fresh_analyzer_scratch_dir(f"{manifest.id}{scratch_suffix}")
     sandbox = plan_sandbox(
@@ -540,23 +579,27 @@ def run_argv(
         scratch_dir=scratch,
     )
     if not sandbox.can_run:
-        return None, sandbox.skip_reason, sandbox_skip_findings(sandbox)
+        return ArgvRun(
+            raw=None, reason=sandbox.skip_reason, findings=sandbox_skip_findings(sandbox)
+        )
 
     outcome = run_plan(finalized, sandbox_context=sandbox.context)
     if not outcome.ran:
-        return None, outcome.output, []
+        return ArgvRun(raw=None, reason=outcome.output)
+    if outcome.exit_code is None:
+        # Ran but never finished (timeout): there is no report to read.
+        return ArgvRun(raw=None, reason=outcome.output or f"skipped {manifest.id}")
 
-    raw = (
-        Path(outcome.output_path).read_text(encoding="utf-8")
-        if outcome.output_path
-        else outcome.output
-    )
-    return raw, None, []
+    # Only the persisted output is a parse surface; ``outcome.output`` is the
+    # display string and carries ``plan.version_note`` prose on managed runs.
+    raw = Path(outcome.output_path).read_text(encoding="utf-8") if outcome.output_path else ""
+    return ArgvRun(raw=raw, exit_code=outcome.exit_code)
 
 
 __all__ = [
     "SCANNER_CONFIG_RULE_ID",
     "TRUFFLEHOG_NO_UPDATE_FLAG",
+    "ArgvRun",
     "finalize_plan",
     "marker_only_lint_skip_reason",
     "provision_managed_argv",
@@ -564,6 +607,7 @@ __all__ = [
     "provision_resolved_plan",
     "provisioning_failure_reason",
     "run_argv",
+    "run_argv_result",
     "scanner_config_change_findings",
     "scanner_config_tools",
     "trusted_analyzer_cache_dir",

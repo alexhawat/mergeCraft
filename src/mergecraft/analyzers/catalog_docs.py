@@ -39,13 +39,22 @@ def parse_analyzers_doc(path: Path) -> set[str]:
     return ids
 
 
-def _fixture_candidates(manifest_id: str, *, fixture_root: Path) -> tuple[Path, ...]:
+def _fixture_candidates(manifest: AnalyzerManifest, *, fixture_root: Path) -> tuple[Path, ...]:
+    """Fixture paths of the kind ``manifest.parser`` reads: SARIF or native output."""
+    if manifest.parser == "sarif":
+        return (fixture_root / "sarif" / f"{manifest.id}-minimal.sarif.json",)
     return (
-        fixture_root / "sarif" / f"{manifest_id}-minimal.sarif.json",
-        fixture_root / "native" / f"{manifest_id}-minimal.json",
-        fixture_root / "native" / f"{manifest_id}-minimal.jsonl",
-        fixture_root / "native" / f"{manifest_id}-minimal.txt",
+        fixture_root / "native" / f"{manifest.id}-minimal.json",
+        fixture_root / "native" / f"{manifest.id}-minimal.jsonl",
+        fixture_root / "native" / f"{manifest.id}-minimal.txt",
     )
+
+
+def _parser_fixture(manifest: AnalyzerManifest, *, fixture_root: Path) -> Path | None:
+    for path in _fixture_candidates(manifest, fixture_root=fixture_root):
+        if path.is_file():
+            return path
+    return None
 
 
 def manifest_has_fixture(
@@ -53,13 +62,51 @@ def manifest_has_fixture(
     *,
     fixture_root: Path | None = None,
 ) -> bool:
-    """Return whether a parser fixture exists for ``manifest``."""
+    """Return whether a fixture of the kind the wired parser reads exists for ``manifest``."""
     from mergecraft.analyzers.trust import IN_PROCESS_ANALYZER_IDS
 
     root = fixture_root or _DEFAULT_FIXTURE_ROOT
     if manifest.id in IN_PROCESS_ANALYZER_IDS:
         return (root / manifest.id / f"{manifest.id}-minimal.yaml").is_file()
-    return any(path.is_file() for path in _fixture_candidates(manifest.id, fixture_root=root))
+    return _parser_fixture(manifest, fixture_root=root) is not None
+
+
+def fixture_parse_error(
+    manifest: AnalyzerManifest,
+    *,
+    fixture_root: Path | None = None,
+) -> str | None:
+    """Run the wired parser on the manifest's fixture; return why it fails, else ``None``.
+
+    The fixture must parse to at least one finding, each with a non-empty path
+    and a line that is absent (file-level, e.g. a lockfile) or ``>= 1``. This
+    is what catches a manifest wired to a parser for another tool's format.
+    """
+    from mergecraft.analyzers.parsers import get_parser
+    from mergecraft.analyzers.trust import IN_PROCESS_ANALYZER_IDS
+
+    if manifest.id in IN_PROCESS_ANALYZER_IDS:
+        return None
+    root = fixture_root or _DEFAULT_FIXTURE_ROOT
+    fixture = _parser_fixture(manifest, fixture_root=root)
+    if fixture is None:
+        return f"{manifest.id} missing test fixture under {root}"
+    try:
+        parser = get_parser(manifest.parser)
+        findings = parser(
+            fixture.read_text(encoding="utf-8"), manifest=manifest, repo_root=fixture.parent
+        )
+    except (KeyError, ValueError) as exc:
+        return f"{manifest.id} parser {manifest.parser!r} cannot read {fixture.name}: {exc}"
+    if not findings:
+        return f"{manifest.id} parser {manifest.parser!r} found nothing in {fixture.name}"
+    for finding in findings:
+        if not finding.path or (finding.start_line is not None and finding.start_line < 1):
+            return (
+                f"{manifest.id} parser {manifest.parser!r} produced an unanchored finding "
+                f"from {fixture.name} (path={finding.path!r}, line={finding.start_line!r})"
+            )
+    return None
 
 
 def severity_map_complete(manifest: AnalyzerManifest) -> bool:
@@ -77,7 +124,10 @@ def validate_manifest_ship_gate(
     fixture_root: Path | None = None,
     doc_path: Path | None = None,
 ) -> None:
-    """Validate one manifest satisfies fixture, doc row, and severity_map requirements."""
+    """Validate one manifest satisfies fixture, doc row, and severity_map requirements.
+
+    The fixture is not only required to exist: the wired parser must read it.
+    """
     try:
         manifest = load_manifest_file(
             manifest_path, strict_severity_map=False, check_provenance=True
@@ -88,6 +138,9 @@ def validate_manifest_ship_gate(
     if not manifest_has_fixture(manifest, fixture_root=root):
         msg = f"{manifest.id} missing test fixture under {root}"
         raise CatalogIntegrityError(msg)
+    parse_error = fixture_parse_error(manifest, fixture_root=root)
+    if parse_error is not None:
+        raise CatalogIntegrityError(parse_error)
     if not severity_map_complete(manifest):
         msg = f"{manifest.id} severity_map incomplete for parser {manifest.parser!r}"
         raise CatalogIntegrityError(msg)
@@ -499,8 +552,8 @@ def _sarif_upload_lines() -> list[str]:
         "`source: agent` findings carry narrative; neither is uploaded, and raw logs "
         "never leave the process.",
         "- **The clustered, placed set.** The upload reuses the findings the pipeline "
-        "already clustered and placed, not the raw analyzer output, so cross-tool "
-        "duplicates arrive as one alert. It is *not* truncated at the inline "
+        "already clustered and placed, not the raw analyzer output, so identical "
+        "findings arrive as one alert. It is *not* truncated at the inline "
         "comment budget — the overflow is exactly what this surface exists to show.",
         "- **Trust-gated.** Each finding's analyzer must still pass this run's "
         "`trust` x `shell` x `analyzers:` selection chain — the same predicates the "

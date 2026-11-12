@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from mergecraft.utils.atomic_write import write_bytes_atomically, write_text_atomically
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -57,19 +59,24 @@ class RunCache:
         if not self._index_path.is_file():
             return []
         try:
-            raw: list[dict[str, Any]] = json.loads(self._index_path.read_text(encoding="utf-8"))
+            raw: Any = json.loads(self._index_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):  # fmt: skip
+            return []
+        if not isinstance(raw, list):
             return []
         entries: list[_CacheEntry] = []
         for row in raw:
-            entries.append(
-                _CacheEntry(
-                    key=str(row["key"]),
-                    path=str(row["path"]),
-                    size=int(row["size"]),
-                    mtime=float(row["mtime"]),
+            try:
+                entries.append(
+                    _CacheEntry(
+                        key=str(row["key"]),
+                        path=str(row["path"]),
+                        size=int(row["size"]),
+                        mtime=float(row["mtime"]),
+                    )
                 )
-            )
+            except (KeyError, TypeError, ValueError):
+                continue
         return entries
 
     def _save_index(self, entries: list[_CacheEntry]) -> None:
@@ -82,7 +89,7 @@ class RunCache:
             }
             for entry in entries
         ]
-        self._index_path.write_text(json.dumps(payload), encoding="utf-8")
+        write_text_atomically(self._index_path, json.dumps(payload))
 
     def total_bytes(self) -> int:
         with self._locked():
@@ -103,7 +110,7 @@ class RunCache:
         with self._locked():
             entries = [entry for entry in self._load_index() if entry.key != key]
             path = self._key_path(key)
-            path.write_bytes(data)
+            write_bytes_atomically(path, data)
             now = time.time()
             entries.append(_CacheEntry(key=key, path=str(path), size=len(data), mtime=now))
             self._evict_if_needed(entries)

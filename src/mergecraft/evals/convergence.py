@@ -220,16 +220,24 @@ def score_convergence(
 def fold_convergence_reports(
     case_results: list[ConvergenceCaseResult],
 ) -> ConvergenceMetrics:
-    """Fold per-case convergence reports into corpus-wide means."""
+    """Fold per-case convergence reports into corpus-wide means.
+
+    Raises:
+        ValueError: ``case_results`` is empty, or no case has round-one
+            attributable ground truth. There is no recall to report, and the
+            old ``1.0`` read as a perfect score.
+    """
     total = len(case_results)
     if total == 0:
-        return ConvergenceMetrics(
-            cases_total=0,
-            mean_first_pass_recall=1.0,
-            mean_leakage_rate=0.0,
-            case_results=[],
-        )
-    mean_recall = sum(row.report.first_pass_recall for row in case_results) / total
+        msg = "cannot fold convergence reports: no cases were scored"
+        raise ValueError(msg)
+    # A case with no round-one-attributable issue has a vacuous recall of 1.0;
+    # averaging it in would let added cases raise the headline. Exclude them.
+    scored = [row for row in case_results if row.report.ground_truth_attributable_to_round1 > 0]
+    if not scored:
+        msg = "cannot fold convergence reports: no case has ground truth attributable to round one"
+        raise ValueError(msg)
+    mean_recall = sum(row.report.first_pass_recall for row in scored) / len(scored)
     mean_leakage = sum(row.report.leakage_rate for row in case_results) / total
     return ConvergenceMetrics(
         cases_total=total,

@@ -49,13 +49,6 @@ _CONSTANT_NAMES = [
 # ---------------------------------------------------------------------------
 
 
-def test_git_guards_module_is_importable() -> None:
-    """W9.1a — ``mergecraft.mcp.git_guards`` can be imported."""
-    import importlib
-
-    importlib.import_module("mergecraft.mcp.git_guards")
-
-
 @pytest.mark.parametrize("name", _GUARD_NAMES)
 def test_git_guards_exports_guard(name: str) -> None:
     """W9.1b — each guard function is exported from ``mcp.git_guards``."""

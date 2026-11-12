@@ -78,7 +78,7 @@ def test_default_cli_bounds() -> None:
 def test_absent_config_file_still_has_empty_coverage_artifacts(tmp_path: Path) -> None:
     from mergecraft.config.settings import load_repo_settings
 
-    settings = load_repo_settings(tmp_path / "missing.yaml", load_learnings_files=False)
+    settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
     assert settings.ci_evidence.coverage_artifacts == []
     assert settings.coverage.mode == "shadow"
 
