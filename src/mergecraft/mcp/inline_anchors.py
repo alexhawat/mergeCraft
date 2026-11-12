@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
-from mergecraft.diff import parse_diff
+from mergecraft.diff import diff_lines, parse_diff
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -46,7 +46,7 @@ def build_inline_anchor_index(diff_text: str) -> InlineAnchorIndex:
     new_line = 0
 
     sections = iter(parse_diff(diff_text).files)
-    for raw_line in diff_text.splitlines():
+    for raw_line in diff_lines(diff_text):
         if raw_line.startswith("diff --git "):
             current_path = next(sections).path
             continue

@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
-from mergecraft.diff import changed_paths_in_diff, parse_diff
+from mergecraft.diff import changed_paths_in_diff, diff_lines, parse_diff
 from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
@@ -68,7 +68,7 @@ def _parse_hunks(diff_text: str) -> dict[str, list[tuple[int, int]]]:
     hunks: dict[str, list[tuple[int, int]]] = {}
     current_file: str | None = None
     sections = iter(parse_diff(diff_text).files)
-    for line in diff_text.splitlines():
+    for line in diff_lines(diff_text):
         if line.startswith("diff --git "):
             current_file = next(sections).path
             continue

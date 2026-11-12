@@ -18,6 +18,7 @@ Exports:
     ParsedDiff: The text before the first section plus every section.
     parse_diff: Parse a unified diff into a :class:`ParsedDiff`.
     changed_paths_in_diff: The post-image path of every section, in first-seen order.
+    diff_lines: Split diff text on ``\\n`` only, as Git does.
 """
 
 from __future__ import annotations
@@ -151,8 +152,37 @@ def _build_section(lines: list[str]) -> DiffFile:
     )
 
 
+def diff_lines(diff_text: str, *, keepends: bool = False) -> list[str]:
+    """Split ``diff_text`` into lines the way Git writes them: on ``\\n`` only.
+
+    ``str.splitlines`` also breaks on ``\\r``, form feeds and Unicode separators
+    such as U+2028, all of which can appear inside a hunk's content. Splitting on
+    them would let file content start a phantom ``diff --git`` line, so every
+    walker that pairs its own line loop with :func:`parse_diff` must use this.
+
+    Args:
+        diff_text (str): A unified diff as ``git diff`` renders it.
+        keepends (bool): Keep the trailing ``\\n`` on each line.
+
+    Returns:
+        list[str]: The lines; no empty trailing element for a final newline.
+
+    Examples:
+        >>> diff_lines("+a\\u2028b\\n+c\\n")
+        ['+a\\u2028b', '+c']
+    """
+    lines = str(diff_text).split("\n")
+    tail = lines.pop()  # "" when the text ends with a newline
+    out = [line + "\n" for line in lines] if keepends else lines
+    if tail:
+        out.append(tail)
+    return out
+
+
 def parse_diff(diff_text: str) -> ParsedDiff:
     """Split ``diff_text`` into its preamble and one :class:`DiffFile` per section.
+
+    Lines are split on ``\\n`` only (see :func:`diff_lines`).
 
     A section whose paths cannot be read is still returned (with ``None`` paths)
     so a caller can decide whether an unreadable entry is kept or dropped.
@@ -171,7 +201,7 @@ def parse_diff(diff_text: str) -> ParsedDiff:
     """
     preamble: list[str] = []
     sections: list[list[str]] = []
-    for line in str(diff_text).splitlines(keepends=True):
+    for line in diff_lines(diff_text, keepends=True):
         if line.startswith(_HEADER):
             sections.append([line])
         elif sections:
@@ -212,4 +242,11 @@ def changed_paths_in_diff(diff_text: str, *, include_deleted: bool = True) -> li
     return list(seen)
 
 
-__all__ = ["DiffFile", "DiffStatus", "ParsedDiff", "changed_paths_in_diff", "parse_diff"]
+__all__ = [
+    "DiffFile",
+    "DiffStatus",
+    "ParsedDiff",
+    "changed_paths_in_diff",
+    "diff_lines",
+    "parse_diff",
+]

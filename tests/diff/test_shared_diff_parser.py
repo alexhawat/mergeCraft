@@ -18,6 +18,7 @@ from hypothesis import strategies as st
 
 from mergecraft.diff import (
     changed_paths_in_diff,
+    diff_lines,
     parse_diff,
     split_diff_git_paths,
     unquote_git_path,
@@ -186,6 +187,8 @@ _NAME_CHARS = st.sampled_from([*"abcXY _-.é日ü\"'b/", "\t"])
 
 def _valid_name(name: str) -> bool:
     parts = name.split("/")
+    if parts[0] == ".git":
+        return False
     return all(part.strip() and part not in {".", ".."} and part == part.strip() for part in parts)
 
 
@@ -222,6 +225,48 @@ def test_property_parser_recovers_every_path_git_writes(
             expected.add(target)
     diff = _commit_and_diff(repo, base)
     assert set(changed_paths_in_diff(diff)) == expected
+
+
+_SEPARATOR_CONTENT = "x\u2028diff --git a/elsewhere.py b/elsewhere.py\n"
+
+
+@pytest.fixture
+def separator_repo(tmp_path: Path) -> tuple[Path, str]:
+    """A file whose added content holds a Unicode line separator before header-like text."""
+    repo = tmp_path / "repo"
+    base = _init(repo, {"notes.md": "start\n"})
+    _write(repo, "notes.md", "start\n" + _SEPARATOR_CONTENT + "after the separator\n")
+    return repo, _commit_and_diff(repo, base)
+
+
+def test_unicode_line_separators_in_content_do_not_start_sections(
+    separator_repo: tuple[Path, str],
+) -> None:
+    """Only ``\\n`` ends a diff line, as in Git; content cannot open a new section."""
+    _repo, diff = separator_repo
+    assert "\u2028diff --git a/elsewhere.py" in diff
+    parsed = parse_diff(diff)
+    assert [f.path for f in parsed.files] == ["notes.md"]
+    assert changed_paths_in_diff(diff) == ["notes.md"]
+    assert len(diff_lines(diff)) == diff.count("\n")
+    assert "".join(diff_lines(diff, keepends=True)) == diff
+
+
+def test_call_sites_keep_the_whole_file_when_content_holds_a_separator(
+    separator_repo: tuple[Path, str],
+) -> None:
+    from mergecraft.agents_sdk.change_data import _confine_diff_paths
+    from mergecraft.analyzers.impact import _parse_hunks
+    from mergecraft.mcp.inline_anchors import build_inline_anchor_index
+    from mergecraft.offline_review import _filter_diff_to_paths
+
+    repo, diff = separator_repo
+    assert _filter_diff_to_paths(diff, ["notes.md"]) == diff
+    assert _confine_diff_paths(repo, diff) == (diff, ["notes.md"])
+    assert set(_parse_hunks(diff)) == {"notes.md"}
+    index = build_inline_anchor_index(diff)
+    assert set(index.hunk_ranges) == {"notes.md"}
+    assert ("notes.md", 3, "RIGHT") in index.anchors
 
 
 # ── real call sites ──────────────────────────────────────────────────────────

@@ -53,7 +53,7 @@ def paths_from_diff_headers(diff_text: str) -> set[str]:
     found: set[str] = set()
     for section in parse_diff(diff_text).files:
         if not section.paths:
-            header = section.text.splitlines()[0]
+            header = section.text.split("\n", 1)[0]
             msg = f"could not parse changed paths from diff header: {header}"
             raise ValueError(msg)
         found.update(section.paths)
