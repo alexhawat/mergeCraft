@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from tests.analyzers.support import CANARY_SECRET, REDACTION_ANALYZER_IDS, import_module
@@ -31,7 +33,8 @@ def test_canary_never_in_cache_key_material(analyzer_id: str) -> None:
     redact = import_module("mergecraft.analyzers.redact")
     key = redact.cache_key_fragment(f"output-with-{CANARY_SECRET}", tool_id=analyzer_id)
     assert CANARY_SECRET not in key
-    assert key
+    assert re.fullmatch(r"[0-9a-f]{64}", key)
+    assert key == redact.cache_key_fragment(f"output-with-{CANARY_SECRET}", tool_id=analyzer_id)
 
 
 def test_redaction_applies_by_value_not_tool_name() -> None:
