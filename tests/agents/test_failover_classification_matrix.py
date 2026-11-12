@@ -185,6 +185,48 @@ async def test_a_driver_exception_becomes_a_failed_retryable_attempt(tmp_path: P
 
 
 @pytest.mark.asyncio
+async def test_a_crash_after_the_verdict_keeps_the_verdict(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A crash after an accepted submission still carries it to the chain classifier."""
+    from mergecraft.agents import post_run
+
+    monkeypatch.setattr(
+        post_run, "_terminal_submission_fields", lambda _ctx: (True, "sub-accepted", {})
+    )
+
+    async def _install(_token: str | None = None) -> str:
+        return "fake"
+
+    async def _run(_ctx: Any) -> AgentResult:
+        raise httpx.RemoteProtocolError("serve process went away after the verdict")
+
+    crashing = agent(name="opencode", install=_install, run=_run)
+    result = await crashing.run(make_agent_run_context(tmp_path, resolved_model=None))
+
+    assert result.success is False
+    assert result.terminal_submission_received is True
+    assert result.terminal_submission_id == "sub-accepted"
+
+
+@pytest.mark.parametrize(
+    ("stderr", "advances"),
+    [
+        ('{"statusCode": 429, "message": "slow down"}', True),
+        ('{"statusCode": 503, "message": "try later"}', True),
+        ("HTTP/1.1 503 Service Unavailable", True),
+        ("429 Too Many Requests", True),
+        ('{"statusCode": 400, "message": "bad request"}', False),
+    ],
+    ids=["json-429", "json-503", "http-1.1-503", "429-too-many", "json-400"],
+)
+def test_status_code_outages_fail_over(stderr: str, advances: bool) -> None:
+    from mergecraft.utils.provider_failure import is_retryable_cli_failure
+
+    assert is_retryable_cli_failure(returncode=1, stderr=stderr) is advances
+
+
+@pytest.mark.asyncio
 async def test_a_configuration_error_still_ends_the_run(tmp_path: Path) -> None:
     from mergecraft.main import _ConfigurationError
 

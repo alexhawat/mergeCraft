@@ -239,13 +239,17 @@ def _harness_dispatched_model(binding: AgentBinding, settings: Any) -> str:
         return chain[0]
 
 
-def _claude_harness_model(binding: AgentBinding, settings: Any) -> str:
+def _claude_harness_model(
+    binding: AgentBinding, settings: Any, *, resolved_model: str | None = None
+) -> str:
     from mergecraft.agents.claude import claude_subagent_model
 
     if binding.role is AgentRole.verifier:
-        return pinned_judge_model("claude") or claude_subagent_model()
+        return pinned_judge_model("claude", resolved_model=resolved_model) or (
+            claude_subagent_model(resolved_model)
+        )
     if binding.role in (AgentRole.reviewer, AgentRole.recall):
-        return claude_subagent_model()
+        return claude_subagent_model(resolved_model)
     return _strip_provider_prefix(_harness_dispatched_model(binding, settings))
 
 
@@ -269,6 +273,7 @@ def _claude_agent_entry(
     *,
     settings: Any,
     denied_tools: Sequence[str],
+    resolved_model: str | None = None,
 ) -> dict[str, Any]:
     entry: dict[str, Any] = {
         "description": _role_description(binding),
@@ -276,7 +281,7 @@ def _claude_agent_entry(
             binding.prompt_id,
             version=binding.prompt_version,
         ),
-        "model": _claude_harness_model(binding, settings),
+        "model": _claude_harness_model(binding, settings, resolved_model=resolved_model),
     }
     denied = [format_mcp_tool_ref("claude", name) for name in denied_tools]
     if denied:
@@ -304,6 +309,7 @@ def _render_claude(
             binding,
             settings=settings,
             denied_tools=denied,
+            resolved_model=getattr(ctx, "resolved_model", None),
         )
         selected_ids.append(binding.agent_id)
     return HarnessRenderResult(

@@ -110,3 +110,19 @@ def test_claude_subagents_resolve_from_the_catalog(monkeypatch: pytest.MonkeyPat
     assert {spec["model"] for spec in agents.values()} == {"sonnet"}
     # The recorded judge pin is the dispatched value, not a first-party id.
     assert judge_pin(provider="claude").model == "sonnet"
+
+
+def test_a_bedrock_model_id_route_uses_the_portable_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``bedrock/byok`` resolves to ``BEDROCK_MODEL_ID`` with no CLI flag in the parent env."""
+    from mergecraft.agents.claude import claude_subagent_model
+    from mergecraft.agents.verifier import judge_pin
+
+    monkeypatch.delenv("CLAUDE_CODE_USE_BEDROCK", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_USE_VERTEX", raising=False)
+    monkeypatch.setenv("BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-x-v1:0")
+    model = "us.anthropic.claude-sonnet-x-v1:0"
+
+    assert claude_subagent_model(model) == "sonnet"
+    assert judge_pin(provider="claude", resolved_model=model).model == "sonnet"

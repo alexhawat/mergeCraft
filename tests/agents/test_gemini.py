@@ -31,6 +31,7 @@ class _FakeGeminiProcess:
         self._stderr_text = stderr
         self.stdout: list[str] = stdout.splitlines(keepends=True) or [""]
         self.stderr: Any = self
+        self.stdin: Any = None
         self.returncode = returncode
 
     def read(self) -> str:
@@ -73,7 +74,7 @@ def test_gemini_harness_invokes_cli_and_parses_agent_result(
     def _fake_popen(cmd: list[str], **kwargs: object) -> object:
         captured.append(list(cmd))
         proc = _FakeGeminiProcess(stdout=json.dumps(payload), stderr="", returncode=0)
-        proc.stdin = _Stdin()  # type: ignore[attr-defined]
+        proc.stdin = _Stdin()
         return proc
 
     monkeypatch.setattr(gemini_module.subprocess, "Popen", _fake_popen)

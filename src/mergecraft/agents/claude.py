@@ -267,16 +267,37 @@ def _write_claude_system_prompt(ctx: AgentRunContext, system: str) -> str:
 _CLAUDE_PORTABLE_SUBAGENT_ALIAS = "sonnet"
 
 
-def claude_subagent_model() -> str:
+def _claude_cloud_routes(resolved_model: str | None) -> tuple[bool, bool]:
+    """Return whether the Claude CLI runs on (Bedrock, Vertex) for ``resolved_model``.
+
+    The one routing decision: :func:`_build_env` sets the CLI's flags from it and
+    :func:`claude_subagent_model` picks the subagent id from it, so the two agree.
+    """
+    model = (resolved_model or "").strip()
+    lowered = model.lower()
+    bedrock_id = os.environ.get("BEDROCK_MODEL_ID", "").strip()
+    vertex_id = os.environ.get("VERTEX_MODEL_ID", "").strip()
+    bedrock = bool(
+        "bedrock" in lowered
+        or os.environ.get("CLAUDE_CODE_USE_BEDROCK", "").strip()
+        or (bedrock_id and model == bedrock_id)
+    )
+    vertex = bool(
+        "vertex" in lowered
+        or os.environ.get("CLAUDE_CODE_USE_VERTEX", "").strip()
+        or (vertex_id and model == vertex_id)
+    )
+    return bedrock, vertex
+
+
+def claude_subagent_model(resolved_model: str | None = None) -> str:
     """Return the model id the Claude reviewer, recall and verifier subagents run (#1330).
 
     The catalog's ``anthropic/claude-sonnet`` id on the first-party API; Claude
-    Code's portable ``sonnet`` alias when the CLI is routed to Bedrock or Vertex.
+    Code's portable ``sonnet`` alias when the CLI is routed to Bedrock or Vertex,
+    by the same signals :func:`_build_env` routes the CLI on.
     """
-    if (
-        os.environ.get("CLAUDE_CODE_USE_BEDROCK", "").strip()
-        or os.environ.get("CLAUDE_CODE_USE_VERTEX", "").strip()
-    ):
+    if any(_claude_cloud_routes(resolved_model)):
         return _CLAUDE_PORTABLE_SUBAGENT_ALIAS
     return claude_catalog_subagent_model()
 
@@ -475,21 +496,10 @@ def _build_env(ctx: AgentRunContext) -> dict[str, str]:
     if ctx.mcp_auth_token:
         # The value ``mcp.json`` references by name (``_claude_mcp_server_entry``).
         extras[_CLAUDE_MCP_TOKEN_ENV] = ctx.mcp_auth_token
-    model = (ctx.resolved_model or "").strip()
-    bedrock_id = os.environ.get("BEDROCK_MODEL_ID", "").strip()
-    vertex_id = os.environ.get("VERTEX_MODEL_ID", "").strip()
-    lowered = model.lower()
-    if (
-        "bedrock" in lowered
-        or os.environ.get("CLAUDE_CODE_USE_BEDROCK", "").strip()
-        or (bedrock_id and model == bedrock_id)
-    ):
+    bedrock, vertex = _claude_cloud_routes(ctx.resolved_model)
+    if bedrock:
         extras["CLAUDE_CODE_USE_BEDROCK"] = "1"
-    if (
-        "vertex" in lowered
-        or os.environ.get("CLAUDE_CODE_USE_VERTEX", "").strip()
-        or (vertex_id and model == vertex_id)
-    ):
+    if vertex:
         extras["CLAUDE_CODE_USE_VERTEX"] = "1"
     return build_agent_env("claude", extras, model=ctx.resolved_model)
 

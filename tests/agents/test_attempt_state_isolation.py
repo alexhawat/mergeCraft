@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import json
 from typing import TYPE_CHECKING, Any
@@ -16,6 +17,7 @@ from mergecraft.agents import codex_broker
 from mergecraft.security.broker import CodexBrokerPosture
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from _pytest.monkeypatch import MonkeyPatch
@@ -64,6 +66,21 @@ def test_a_different_secret_still_replaces_the_file(tmp_path: Path) -> None:
     assert (home / "auth.json").read_text(encoding="utf-8") == _OTHER_SECRET
 
 
+def test_a_login_naming_no_account_is_not_kept(tmp_path: Path) -> None:
+    """As on the export path, an unverifiable account is never trusted."""
+    ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-codex")
+    home = tmp_path / "home4" / ".codex"
+    no_account = json.dumps({"tokens": {"refresh_token": "rt-a", "access_token": "at-a"}})
+    secret = {codex_module.CODEX_AUTH_ENV: no_account}
+    codex_module._setup_codex_auth(ctx, codex_home=home, credential_env=secret)
+    rewritten = json.dumps({"tokens": {"refresh_token": "rt-b", "access_token": "at-b"}})
+    (home / "auth.json").write_text(rewritten, encoding="utf-8")
+
+    codex_module._setup_codex_auth(ctx, codex_home=home, credential_env=secret)
+
+    assert (home / "auth.json").read_text(encoding="utf-8") == no_account
+
+
 def test_a_stale_file_this_process_did_not_seed_is_overwritten(tmp_path: Path) -> None:
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-codex")
     home = tmp_path / "home3" / ".codex"
@@ -76,12 +93,17 @@ def test_a_stale_file_this_process_did_not_seed_is_overwritten(tmp_path: Path) -
 
 
 def _session(stopped: list[str], name: str) -> codex_broker.CodexBrokerSession:
-    class _Cm:
-        def __exit__(self, *_exc: object) -> None:
+    @contextlib.contextmanager
+    def _broker() -> Iterator[Any]:
+        try:
+            yield None
+        finally:
             stopped.append(name)
 
+    broker_cm: Any = _broker()
+    broker_cm.__enter__()
     posture = CodexBrokerPosture(active=True, auth_mode="api_key", reason="test")
-    return codex_broker.CodexBrokerSession(posture=posture, handle=None, _broker_cm=_Cm())  # type: ignore[arg-type]
+    return codex_broker.CodexBrokerSession(posture=posture, handle=None, _broker_cm=broker_cm)
 
 
 @pytest.mark.asyncio

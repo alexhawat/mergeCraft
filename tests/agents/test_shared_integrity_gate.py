@@ -93,3 +93,27 @@ async def test_the_gate_is_skipped_when_the_run_tmpdir_is_inside_the_checkout(
     result = await _with_run("claude", _writes_run_config).run(ctx)
 
     assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_an_unhashable_checkout_fails_the_attempt_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no baseline the read-only guarantee is unverified, so the agent never runs."""
+    ctx = _ctx(tmp_path / "repo", tmp_path / "run")
+
+    def _unreadable(_root: Path) -> str:
+        raise PermissionError("tree is unreadable")
+
+    monkeypatch.setattr("mergecraft.security.review_integrity.hash_tree", _unreadable)
+    ran: list[bool] = []
+
+    async def _reads_only(_ctx: AgentRunContext) -> AgentResult:
+        ran.append(True)
+        return AgentResult(success=True)
+
+    result = await _with_run("codex", _reads_only).run(ctx)
+
+    assert result.success is False
+    assert "checkout integrity failure" in (result.error or "")
+    assert ran == []

@@ -293,7 +293,10 @@ def _keep_seeded_codex_auth(auth_path: Path, raw: str) -> bool:
         return False
     if not subscription_auth_usable(current):
         return False
-    return _subscription_account_id(current) == _subscription_account_id(raw)
+    # Both bodies must name the account, as the export path requires: the file
+    # is read after the reviewer processed content the pull request controls.
+    seeded_account = _subscription_account_id(raw)
+    return seeded_account is not None and _subscription_account_id(current) == seeded_account
 
 
 def _setup_codex_auth(

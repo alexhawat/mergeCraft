@@ -511,7 +511,7 @@ class VerdictOutcome(BaseModel):
     reason: str
 
 
-def pinned_judge_model(provider: str) -> str | None:
+def pinned_judge_model(provider: str, *, resolved_model: str | None = None) -> str | None:
     """Return the pinned judge model for ``provider``, or ``None`` if unpinned.
 
     For ``claude`` this is the id actually dispatched to the verifier subagent,
@@ -520,7 +520,7 @@ def pinned_judge_model(provider: str) -> str | None:
     if provider == "claude":
         from mergecraft.agents.claude import claude_subagent_model
 
-        return claude_subagent_model()
+        return claude_subagent_model(resolved_model)
     return PINNED_JUDGE_MODELS.get(provider)
 
 
@@ -531,7 +531,7 @@ def judge_pin(*, provider: str, resolved_model: str | None = None) -> JudgePin:
     ``model_pinned=False`` and the run's own model — because an unpinned judge
     is a fact worth logging, not a reason to log nothing.
     """
-    pinned = pinned_judge_model(provider)
+    pinned = pinned_judge_model(provider, resolved_model=resolved_model)
     return JudgePin(
         provider=provider,
         model=pinned or (resolved_model or "unknown"),

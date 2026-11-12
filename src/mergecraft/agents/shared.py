@@ -535,9 +535,21 @@ class AgentImpl:
                 error="kill_switch",
                 diagnostics={"reason": "kill_switch"},
             )
-        baseline = (
-            await asyncio.to_thread(_gate_baseline_for_run, ctx) if self.integrity_gate else None
+        gated, baseline = (
+            await asyncio.to_thread(_gate_baseline_for_run, ctx)
+            if self.integrity_gate
+            else (False, None)
         )
+        if gated and baseline is None:
+            # An unhashable checkout leaves the read-only guarantee unverified;
+            # the attempt fails closed, as OpenCode's own gate does.
+            return AgentResult(
+                success=False,
+                error=(
+                    "checkout integrity failure: the review baseline could not be "
+                    "captured, so the read-only check cannot run"
+                ),
+            )
         # Every CLI this run spawns joins its own scope; closing it on the way
         # out (return, raise or cancel) kills any child still alive (#1326).
         scope = AgentProcessScope()
@@ -556,6 +568,11 @@ class AgentImpl:
                 error=f"{self.name} driver crashed: {type(exc).__name__}: {exc}",
                 metadata={"retryable": True, "crash": True},
             )
+            # A crash after the reviewer submitted keeps that verdict: the
+            # chain classifier reads it from the terminal-submission fields.
+            from mergecraft.agents.post_run import finalize_agent_result
+
+            result = await finalize_agent_result(ctx, result)
         finally:
             _PROCESS_SCOPE.reset(token)
             scope.close()
@@ -614,8 +631,11 @@ def apply_integrity_gate(result: AgentResult, baseline: TreeBaseline | None) -> 
     return result
 
 
-def _gate_baseline_for_run(ctx: AgentRunContext) -> TreeBaseline | None:
-    """Return the integrity baseline for a CLI run, or ``None`` when it cannot apply.
+def _gate_baseline_for_run(ctx: AgentRunContext) -> tuple[bool, TreeBaseline | None]:
+    """Return ``(gated, baseline)`` for a CLI run.
+
+    ``gated`` is false only when the gate deliberately does not apply; a gated
+    run whose baseline is ``None`` could not hash the checkout and fails closed.
 
     The run writes its own config (MCP config, system prompt, Codex home) under
     ``ctx.tmpdir``. When that directory sits inside the checkout, every review
@@ -632,8 +652,8 @@ def _gate_baseline_for_run(ctx: AgentRunContext) -> TreeBaseline | None:
             tmpdir,
             checkout,
         )
-        return None
-    return capture_integrity_baseline(ctx)
+        return False, None
+    return True, capture_integrity_baseline(ctx)
 
 
 def _is_run_abort(exc: Exception) -> bool:
