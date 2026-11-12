@@ -8,6 +8,11 @@ Usage:
     uv run python scripts/mutate_decision_modules.py
     uv run python scripts/mutate_decision_modules.py --module policy/scoping.py
     uv run python scripts/mutate_decision_modules.py --threshold 35
+
+Survivors are always listed (module, line, mutation) and, under GitHub Actions,
+written to the job summary. ``[thresholds]`` in ``mutation_modules.toml`` sets a
+per-module maximum escape rate that fails the run independently of the overall
+threshold, so a strong module cannot average away a weak one.
 """
 
 from __future__ import annotations
@@ -33,6 +38,12 @@ if TYPE_CHECKING:
 
 REPO = Path(__file__).resolve().parents[1]
 _MUTATION_MODULES_PATH = Path(__file__).with_name("mutation_modules.toml")
+
+
+def _load_module_thresholds() -> dict[str, float]:
+    """Load the per-module maximum escape rate (percent) from ``mutation_modules.toml``."""
+    data = tomllib.loads(_MUTATION_MODULES_PATH.read_text(encoding="utf-8"))
+    return {module: float(limit) for module, limit in data.get("thresholds", {}).items()}
 
 
 def _load_module_test_dirs() -> dict[str, tuple[str, ...]]:
@@ -97,6 +108,7 @@ class ModuleResult:
     survived: int
     killed: int
     errors: int
+    survivors: tuple[Mutant, ...] = ()
 
     @property
     def escape_rate_pct(self) -> float:
@@ -386,6 +398,7 @@ def _mutate_module(
     survived = 0
     killed = 0
     errors = 0
+    survivors: list[Mutant] = []
 
     if verbose:
         print(f"\n{module} ({len(candidates)} eligible, running {len(selected)})")
@@ -423,6 +436,7 @@ def _mutate_module(
                 mutate_path.write_text(original, encoding="utf-8")
             if code == 0:
                 survived += 1
+                survivors.append(mutant)
                 status = "SURVIVED"
             elif code == 1:
                 killed += 1
@@ -448,7 +462,51 @@ def _mutate_module(
         survived=survived,
         killed=killed,
         errors=errors,
+        survivors=tuple(survivors),
     )
+
+
+def _module_threshold_failures(
+    results: Sequence[ModuleResult], limits: dict[str, float]
+) -> list[str]:
+    """Return one message per module whose escape rate exceeds its own limit."""
+    failures: list[str] = []
+    for row in results:
+        limit = limits.get(row.module)
+        if limit is None or row.mutants == 0:
+            continue
+        if row.escape_rate_pct > limit:
+            failures.append(
+                f"{row.module}: escape rate {row.escape_rate_pct:.1f}% "
+                f"({row.survived}/{row.mutants} survived) exceeds its {limit:.0f}% limit"
+            )
+    return failures
+
+
+def _survivor_lines(results: Sequence[ModuleResult]) -> list[str]:
+    """One line per surviving mutant, so a reader can write the test that kills it."""
+    return [
+        f"{row.module} L{mutant.line_no}: {mutant.label.split(':', 1)[-1]}  | {mutant.before.strip()}"
+        for row in results
+        for mutant in row.survivors
+    ]
+
+
+def _write_step_summary(results: Sequence[ModuleResult], failures: Sequence[str]) -> None:
+    """Append the survivor list and any per-module failures to the job summary."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    lines = ["### Mutation survivors (decision modules)", ""]
+    survivors = _survivor_lines(results)
+    if survivors:
+        lines.extend(["```", *survivors, "```"])
+    else:
+        lines.append("No survivors.")
+    if failures:
+        lines.extend(["", "Per-module limits exceeded:", *(f"- {f}" for f in failures)])
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
 
 
 def _print_table(results: Sequence[ModuleResult]) -> None:
@@ -502,6 +560,12 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
             "Fail when overall escape rate exceeds this percent "
             f"(default: {DEFAULT_THRESHOLD_PCT})."
         ),
+    )
+    parser.add_argument(
+        "--no-module-thresholds",
+        dest="module_thresholds",
+        action="store_false",
+        help="Ignore the per-module limits in mutation_modules.toml (overall threshold only).",
     )
     parser.add_argument(
         "--list-modules",
@@ -558,6 +622,15 @@ def main(argv: list[str] | None = None) -> int:
         cleanup()
 
     _print_table(results)
+    survivor_lines = _survivor_lines(results)
+    if survivor_lines:
+        print("\nSurviving mutants (each needs a test that fails when the line changes):")
+        for line in survivor_lines:
+            print(f"  {line}")
+    module_failures = _module_threshold_failures(
+        results, _load_module_thresholds() if args.module_thresholds else {}
+    )
+    _write_step_summary(results, module_failures)
 
     if any(result.errors for result in results):
         print("ERROR: invalid mutation runs; escape score is incomplete.", file=sys.stderr)
@@ -570,6 +643,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     overall_pct = 100.0 * total_survived / total_mutants
+    for failure in module_failures:
+        print(f"FAIL: {failure}", file=sys.stderr)
     print(
         f"\nOverall escape rate: {overall_pct:.1f}% "
         f"({total_survived}/{total_mutants} survived); threshold {threshold:.0f}%",
@@ -580,6 +655,8 @@ def main(argv: list[str] | None = None) -> int:
             f"FAIL: escape rate {overall_pct:.1f}% exceeds threshold {threshold:.0f}%",
             file=sys.stderr,
         )
+        return 1
+    if module_failures:
         return 1
 
     print("PASS: escape rate within threshold.")
