@@ -76,6 +76,8 @@ def _resolve(command: str) -> str | None:
             return f"unknown command {token!r} in {command!r}"
         current = child
         index += 1
+    if tokens[:2] == ["workflow", "sync"] and not {"--check", "--apply"} & set(tokens):
+        return f"`workflow sync` needs --check or --apply in {command!r}"
     known = {opt for param in current.params for opt in (*param.opts, *param.secondary_opts)}
     known.add("--help")
     for token in tokens[index:]:
@@ -122,6 +124,7 @@ def test_commands_are_actually_checked() -> None:
     assert _resolve("mergecraft provider disable openai --scope both") is None
     assert _resolve("mergecraft workflow sync --bogus") is not None
     assert _resolve("mergecraft nonsense") is not None
+    assert _resolve("mergecraft workflow sync") is not None
 
 
 def test_glossary_defines_the_audit_terms() -> None:
@@ -186,3 +189,10 @@ def test_documented_check_names_are_produced_by_the_scaffold() -> None:
     for page in ("docs/glossary.md", "docs/uninstall.md", "docs/troubleshooting.md"):
         for name in set(re.findall(r"`(mergecraft(?:-approval)?)`", read_text(page))):
             assert name in {"mergecraft", status_checks.APPROVAL_CHECK}, name
+
+
+@pytest.mark.parametrize("page", NEW_PAGES, ids=[p.replace("/", "-") for p in NEW_PAGES])
+def test_new_pages_have_no_unclosed_markdown_links(page: str) -> None:
+    for number, line in enumerate(read_text(page).splitlines(), start=1):
+        stripped = re.sub(r"\]\([^)\s]*\)", "", line)
+        assert "](" not in stripped, f"{page}:{number} has a link missing its closing paren"

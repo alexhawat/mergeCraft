@@ -35,7 +35,7 @@ Do all of this yourself, without asking me, except where step 4 says STOP:
 3. Scaffold config + workflow (non-interactive, writes no secrets):
      mergecraft init
    This creates .mergecraft/config.yaml, .github/workflows/mergecraft.yml,
-   and a [learnings](glossary.md#learnings file at .mergecraft/learnings.md.
+   and a [learnings](glossary.md#learnings) file at .mergecraft/learnings.md.
 
 4. STOP and hand the credential step back to me. Do not read, generate, guess,
    echo, or commit any API key, token, or .env file. Print the single command
@@ -90,7 +90,7 @@ config keys, exit codes, and failure modes.
 1. Fetch the skill:
      git clone --depth 1 https://github.com/alexhawat/mergeCraft /tmp/mergecraft-src
 
-2. Copy the generated [harness](glossary.md#harness package for your agent from
+2. Copy the generated [harness](glossary.md#harness) package for your agent from
    skills/<harness>/mergecraft/ (listed in skills/harnesses.yaml) to the path
    your agent reads. Examples:
 
@@ -178,7 +178,7 @@ chain starts with openai/gpt-5.3-codex. Open a PR. I will add the
 CODEX_AUTH_JSON secret myself — do not handle credentials.
 ```
 
-**OpenCode** — mergeCraft's generic multi-provider [harness](glossary.md#harness; use it when your
+**OpenCode** — mergeCraft's generic multi-provider [harness](glossary.md#harness); use it when your
 model is not Anthropic/OpenAI/Google:
 
 ```text
@@ -210,7 +210,7 @@ handle the API key.
 
 **GitHub Copilot** (CLI, VS Code agent mode, or cloud agent) — copy the
 generated package, then follow `AGENTS-mergecraft.md`. Copilot also reads
-[`.github/copilot-instructions.md`](../.github/copilot-instructions.md:
+[`.github/copilot-instructions.md`](../.github/copilot-instructions.md):
 
 ```text
 Read https://github.com/alexhawat/mergeCraft/blob/main/AGENTS-mergecraft.md and set
@@ -264,23 +264,23 @@ Everything else — install, scaffold, config, commit, PR — is unattended.
 
 | Surface | What it gives an agent |
 |---|---|
-| [`AGENTS-mergecraft.md`](../AGENTS-mergecraft.md | Cross-vendor setup + contribution guidance for Codex, Cursor, Grok Bot, OpenCode, Gemini CLI and Copilot |
-| [`skills/mergecraft/SKILL.md`](../skills/mergecraft/SKILL.md | Agent-Skills package: setup checklist, CLI map, config keys, troubleshooting |
-| [`llms.txt`](../llms.txt · [`llms-full.txt`](../llms-full.txt | Curated doc map, and the full corpus in one file |
-| [`.claude-plugin/`](../.claude-plugin/plugin.json · [`commands/`](../commands/ | Claude plugin manifest and `/mergecraft-setup` · `/mergecraft-review` |
+| [`AGENTS-mergecraft.md`](../AGENTS-mergecraft.md) | Cross-vendor setup + contribution guidance for Codex, Cursor, Grok Bot, OpenCode, Gemini CLI and Copilot |
+| [`skills/mergecraft/SKILL.md`](../skills/mergecraft/SKILL.md) | Agent-Skills package: setup checklist, CLI map, config keys, troubleshooting |
+| [`llms.txt`](../llms.txt) · [`llms-full.txt`](../llms-full.txt) | Curated doc map, and the full corpus in one file |
+| [`.claude-plugin/`](../.claude-plugin/plugin.json) · [`commands/`](../commands/) | Claude plugin manifest and `/mergecraft-setup` · `/mergecraft-review` |
 | `mergecraft review --agent` | Versioned JSONL event stream (`run_started` · `phase` · `finding` · `verdict` · `run_finished`) for orchestrators |
 | `mergecraft review --json out.json` | Structured findings on disk |
-| [`docs/EXIT-CODES.md`](EXIT-CODES.md | Contractual exit codes — branch on them instead of parsing text |
+| [`docs/EXIT-CODES.md`](EXIT-CODES.md) | Contractual exit codes — branch on them instead of parsing text |
 | `mergecraft doctor` | Self-diagnosis of git, providers, analyzers, auth, config and MCP wiring |
 | `mergecraft provider status` | Roster inspection — what CI will run, credential and wiring state, optional `--github` secret check |
-| [`docs/mcp.md`](mcp.md | **Public MCP install** — six review-only tools over stdio for Cursor, Claude Desktop, Codex, Gemini CLI, OpenCode |
-| [`docs/agents-sdk.md`](agents-sdk.md | **OpenAI Agents SDK** optional extra — embed `review_agent` as a review step (`pip install mergecraft-action[agents]`) |
-| [`docs/opencode.md`](opencode.md · [`integrations/opencode/`](../integrations/opencode/ | OpenCode integration — `/mergecraft/*` commands, read-only reviewer subagent, V2 MCP wiring, JEV + Logfire |
+| [`docs/mcp.md`](mcp.md) | **Public MCP install** — six review-only tools over stdio for Cursor, Claude Desktop, Codex, Gemini CLI, OpenCode |
+| [`docs/agents-sdk.md`](agents-sdk.md) | **OpenAI Agents SDK** optional extra — embed `review_agent` as a review step (`pip install mergecraft-action[agents]`) |
+| [`docs/opencode.md`](opencode.md) · [`integrations/opencode/`](../integrations/opencode/) | OpenCode integration — `/mergecraft/*` commands, read-only reviewer subagent, V2 MCP wiring, JEV + Logfire |
 | `mergecraft mcp serve` | The reviewer's **in-run** MCP tool surface at `/mcp/reviewer`, Bearer-authenticated (not the public stdio profile) |
 
 > **Reviewing *with* an agent, locally:** `mergecraft review` works offline on a
 > local diff, worktree, or cloned repo — no GitHub Action required.
-> See [`docs/cli.md`](cli.md.
+> See [`docs/cli.md`](cli.md).
 
 <sub>Skill paths follow the [Agent Skills](https://agentskills.io/specification)
 open standard, verified against each tool's own docs on 2026-08-21. `AGENTS.md` at the
