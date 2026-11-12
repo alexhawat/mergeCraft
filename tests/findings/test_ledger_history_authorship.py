@@ -118,6 +118,40 @@ async def test_the_read_side_ledger_never_trusts_the_shared_actions_login() -> N
     assert found.get_record(_FP) is None
 
 
+async def test_a_later_review_written_in_the_same_second_wins_the_fold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reviews fold in publication order; a same-second later row is the newer state."""
+    monkeypatch.setenv("MERGECRAFT_REVIEWER_BOT_LOGIN", "mergecraft[bot]")
+    stamp = "2026-08-20T10:00:00+00:00"
+
+    def _body(state: str) -> str:
+        book = ledger.FindingLedger()
+        book.record(_FP, state, source="overflow", round_index=1, recorded_at=stamp)  # type: ignore[arg-type]
+        return ledger.merge_ledger_into_comment(
+            f"{ledger.DETERMINISTIC_RECORD_MARKER}\n", records=book.records()
+        )
+
+    class _TwoReviews(_Scm):
+        async def list_reviews(
+            self, *_a: object, params: dict[str, int], **_k: object
+        ) -> list[dict[str, Any]]:
+            if params["page"] != 1:
+                return []
+            user = {"login": "mergecraft[bot]", "type": "Bot"}
+            return [
+                {"id": 1, "user": user, "body": _body("deferred")},
+                {"id": 2, "user": user, "body": _body("open")},
+            ]
+
+    scm = _TwoReviews(author={})
+    found = await ledger.fetch_review_ledger(scm, "acme", "demo", 7)  # type: ignore[arg-type]
+
+    record = found.get_record(_FP)
+    assert record is not None
+    assert record.state == "open"
+
+
 async def test_the_read_side_ledger_trusts_the_configured_app_login(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

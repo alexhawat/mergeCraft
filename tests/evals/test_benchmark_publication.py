@@ -313,6 +313,44 @@ def test_write_result_set_persists_json_and_latest_mirror(tmp_path: Path) -> Non
     assert latest.is_file()
 
 
+def test_an_interrupted_latest_json_write_keeps_the_previous_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``latest.json`` is the committed CI baseline; a cut-off write must not truncate it."""
+    from mergecraft.utils import atomic_write
+
+    latest = tmp_path / "latest.json"
+    latest.write_text('{"baseline": "previous"}\n', encoding="utf-8")
+    real_replace = atomic_write.os.replace
+
+    def _interrupt_latest(src: str, dst: str) -> None:
+        if str(dst).endswith("latest.json"):
+            raise KeyboardInterrupt
+        real_replace(src, dst)
+
+    monkeypatch.setattr(atomic_write.os, "replace", _interrupt_latest)
+    result = BenchmarkResultSet(
+        pins=_pins(),
+        metrics=BenchmarkMetrics(
+            cases_total=0,
+            cases_replayable=0,
+            cases_passed=0,
+            cases_regression=0,
+            cases_blocked=0,
+            decision_replay_pass_rate=0.0,
+            **_empty_gate_kwargs(),
+        ),
+        case_results=[],
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        write_result_set(result, results_dir=tmp_path, filename="harness.json")
+
+    assert latest.read_text(encoding="utf-8") == '{"baseline": "previous"}\n'
+    assert json.loads((tmp_path / "harness.json").read_text(encoding="utf-8"))
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["harness.json", "latest.json"]
+
+
 def _aggregate() -> AggregateScoreReport:
     return AggregateScoreReport(
         total_cases=0,

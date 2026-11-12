@@ -177,14 +177,19 @@ class FindingLedger:
         return self._records.get(fingerprint)
 
     def upsert_if_newer(self, record: LifecycleRecord) -> LifecycleRecord:
-        """Insert ``record`` or replace the stored row when it is newer."""
+        """Insert ``record`` or replace the stored row unless the stored row is newer.
+
+        ``recorded_at`` has one-second resolution, and callers fold rows in
+        publication order (oldest review first, the live in-memory ledger last),
+        so on a tie the later row is the newer state and wins.
+        """
         prior = self._records.get(record.fingerprint)
         if prior is None:
             self._records[record.fingerprint] = record
             return record
         prior_at = prior.recorded_at or ""
         new_at = record.recorded_at or ""
-        if new_at > prior_at:
+        if new_at >= prior_at:
             self._records[record.fingerprint] = record
             return record
         return prior
