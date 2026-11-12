@@ -83,7 +83,7 @@ class MergecraftTyperGroup(TyperGroup):
             from mergecraft.cli.consoles import err_console
             from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
 
-            err_console.print(str(exc), style="red", markup=False, highlight=False)
+            err_console.print(str(exc), style="red", markup=False, highlight=False, soft_wrap=True)
             raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
 
 
