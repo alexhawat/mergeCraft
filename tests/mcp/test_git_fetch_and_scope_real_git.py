@@ -241,3 +241,31 @@ async def test_checkout_pr_keeps_a_shallow_clone_working(tmp_path: Path) -> None
 
     assert is_error is False, payload
     assert _shallow_flag(shallow) == "true"
+
+
+async def test_api_only_scope_skips_static_checks_with_a_named_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.mcp.static_checks import run_static_checks_tool
+    from mergecraft.mcp.verification import _deterministic_checks_ran
+    from mergecraft.review_checks import StaticCheckConfig
+
+    repo = _pr_repo(tmp_path)
+    ctx = _ctx_for(repo, _StubGitHub(), tmp_path)
+    marker = repo / "gate-ran.marker"
+    ctx.static_checks = [StaticCheckConfig(name="marker", command=f"touch {marker}")]
+    monkeypatch.setattr(
+        checkout_module, "_fetch_head_with_retry", lambda **_k: (False, "no such ref")
+    )
+    is_error, payload = await _checkout(ctx)
+    assert is_error is False, payload
+    assert isinstance(payload, dict)
+    assert payload["scope"] == "api-only"
+
+    result = await run_static_checks_tool(ctx).execute({})
+
+    body = json.loads(result.content[0]["text"])
+    assert body["ran"] is False
+    assert "head not materialized" in body["reason"]
+    assert not marker.exists(), "a gate ran against a tree that is not the PR head"
+    assert _deterministic_checks_ran(ctx) == ["run_static_checks"]
