@@ -16,10 +16,13 @@ import io
 import json
 from typing import Any
 
+import click
 import httpx
 import pytest
+import typer
 
 from mergecraft.cli import watch_cmd
+from mergecraft.cli.global_surface import CliGlobals
 
 
 class _Stop(BaseException):
@@ -106,7 +109,9 @@ def _install_mock_client(
     )
 
 
-def _run_watch_for_two_polls(monkeypatch: pytest.MonkeyPatch, *, pretty: bool = False) -> str:
+def _run_watch_for_two_polls(
+    monkeypatch: pytest.MonkeyPatch, *, pretty: bool = False, root_json: bool = False
+) -> str:
     """Drive ``watch.run`` through exactly two polls, then break the loop."""
     monkeypatch.delenv("GITHUB_API_URL", raising=False)
     monkeypatch.setattr(watch_cmd, "op", lambda *args, **kwargs: watch_cmd._poll_timeline)
@@ -124,8 +129,11 @@ def _run_watch_for_two_polls(monkeypatch: pytest.MonkeyPatch, *, pretty: bool = 
     out = io.StringIO()
     monkeypatch.setattr(watch_cmd.sys, "stdout", out)
 
+    ctx = typer.Context(
+        click.Command("watch"), obj=CliGlobals(format="json") if root_json else None
+    )
     with pytest.raises(_Stop):
-        watch_cmd.run(repo="acme/demo", pr=1, since=None, pretty=pretty)
+        watch_cmd.run(ctx, repo="acme/demo", pr=1, since=None, pretty=pretty)
 
     assert polls["count"] == 2, "expected exactly two poll cycles"
     return out.getvalue()
@@ -147,3 +155,12 @@ def test_run_still_dedups_events_by_id(monkeypatch: pytest.MonkeyPatch) -> None:
     lines = [line for line in output.splitlines() if line.strip()]
     assert len(lines) == 1, f"id'd event re-emitted: {output!r}"
     assert json.loads(lines[0])["cursor"] == "5"
+
+
+def test_root_format_json_overrides_pretty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``mergecraft --format json watch --pretty`` still streams JSON lines (#1343)."""
+    _install_mock_client(monkeypatch, [_id_event(7)])
+    output = _run_watch_for_two_polls(monkeypatch, pretty=True, root_json=True)
+    lines = [line for line in output.splitlines() if line.strip()]
+    assert len(lines) == 1, output
+    assert json.loads(lines[0])["cursor"] == "7"

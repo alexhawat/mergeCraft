@@ -62,6 +62,8 @@ def test_the_tree_has_both_kinds_of_command() -> None:
     assert len(_LEAVES) > 100
     assert ("doctor",) in _UNSUPPORTED
     assert ("version",) not in _UNSUPPORTED
+    # `watch` streams JSON lines unconditionally, so the root flag must not reject it.
+    assert ("watch",) not in _UNSUPPORTED
 
 
 def test_commands_without_json_output_reject_the_root_flag() -> None:
@@ -122,9 +124,18 @@ def test_root_format_commands_exist_and_read_the_root_format(path: tuple[str, ..
     """Each declared root-format command exists and consults the root format."""
     commands = dict(_LEAVES)
     assert path in commands, f"stale entry in ROOT_FORMAT_COMMANDS: {path}"
-    module = inspect.getmodule(commands[path].callback)
+    callback = commands[path].callback
+    assert callback is not None
+    # The command's own function, plus module helpers it calls by name.
+    source = inspect.getsource(callback)
+    module = inspect.getmodule(callback)
     assert module is not None
-    source = inspect.getsource(module)
+    helpers = [
+        inspect.getsource(obj)
+        for name, obj in vars(module).items()
+        if inspect.isfunction(obj) and obj.__module__ == module.__name__ and f"{name}(" in source
+    ]
+    source = "\n".join([source, *helpers])
     assert any(
         name in source for name in ("wants_json_output", "get_cli_globals", "cli_json_dumps")
     )

@@ -60,6 +60,7 @@ ROOT_FORMAT_COMMANDS: frozenset[tuple[str, ...]] = frozenset(
         ("review",),
         ("run", "diff"),
         ("run", "inspect"),
+        ("watch",),
         ("xrepo", "explain"),
     }
 )
