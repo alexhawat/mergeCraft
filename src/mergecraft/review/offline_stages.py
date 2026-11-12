@@ -11,7 +11,7 @@ from loguru import logger
 from mergecraft.analyzers.budget import resolve_inline_budget
 from mergecraft.analyzers.pipeline import run_analyzer_pipeline
 from mergecraft.config import load_repo_settings
-from mergecraft.mcp.checkout import changed_paths_in_diff
+from mergecraft.diff import changed_paths_in_diff
 from mergecraft.mcp.tool_state import AnalyzerRunState, analyzer_run_key
 
 if TYPE_CHECKING:

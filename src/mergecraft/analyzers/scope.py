@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from mergecraft.diff.quoting import split_diff_git_paths, unquote_git_path
 from mergecraft.review_policy.manifest_names import DEPENDENCY_MANIFEST_NAMES, LOCKFILE_NAMES
 from mergecraft.review_taxonomy import WITHDRAWN_FINDINGS_HEADING, finding_fingerprint
 
@@ -38,7 +39,6 @@ _DIFF_GIT_PREFIX = "diff --git "
 _RENAME_TO_PREFIX = "rename to "
 _POSTIMAGE_PREFIX = "+++ "
 _DEV_NULL_PATH = "/dev/null"
-_A_PREFIX = "a/"
 _B_PREFIX = "b/"
 
 # Header-line kinds returned by :func:`_classify_header_line`.
@@ -46,116 +46,10 @@ _HEADER_FILE = "file"
 _HEADER_RENAME = "rename"
 _HEADER_POSTIMAGE = "postimage"
 
-_C_ESCAPES: dict[str, int] = {
-    "a": 0x07,
-    "b": 0x08,
-    "f": 0x0C,
-    "n": 0x0A,
-    "r": 0x0D,
-    "t": 0x09,
-    "v": 0x0B,
-    '"': 0x22,
-    "\\": 0x5C,
-}
-_OCTAL_DIGITS = frozenset("01234567")
-
-
-def unquote_git_path(token: str) -> str | None:
-    """Decode a Git C-style quoted path, or return an unquoted token unchanged.
-
-    Git wraps a path in double quotes and escapes it C-style (``\\t``, ``\\n``,
-    ``\\"``, ``\\\\``, and octal ``\\NNN`` for a non-ASCII byte) when the path
-    needs it. The decoded bytes are interpreted as UTF-8. Returns ``None`` for
-    malformed quoting or bytes that are not valid UTF-8.
-    """
-    if not token.startswith('"'):
-        return token
-    if len(token) < 2 or not token.endswith('"'):
-        return None
-    body = token[1:-1]
-    out = bytearray()
-    index = 0
-    length = len(body)
-    while index < length:
-        char = body[index]
-        if char != "\\":
-            out.extend(char.encode("utf-8"))
-            index += 1
-            continue
-        index += 1
-        if index >= length:
-            return None
-        escape = body[index]
-        mapped = _C_ESCAPES.get(escape)
-        if mapped is not None:
-            out.append(mapped)
-            index += 1
-            continue
-        if escape in _OCTAL_DIGITS:
-            octal = body[index : index + 3]
-            if len(octal) != 3 or any(digit not in _OCTAL_DIGITS for digit in octal):
-                return None
-            out.append(int(octal, 8) & 0xFF)
-            index += 3
-            continue
-        return None
-    try:
-        return out.decode("utf-8")
-    except UnicodeDecodeError:
-        return None
-
-
-def _take_quoted_token(text: str) -> tuple[str | None, str]:
-    """Split a leading C-quoted token from ``text`` and decode it."""
-    if not text.startswith('"'):
-        return None, text
-    index = 1
-    length = len(text)
-    while index < length:
-        char = text[index]
-        if char == "\\":
-            index += 2
-            continue
-        if char == '"':
-            return unquote_git_path(text[: index + 1]), text[index + 1 :]
-        index += 1
-    return None, text
-
 
 def _strip_diff_prefix(path: str, prefix: str) -> str:
     """Drop a leading ``a/`` or ``b/`` diff prefix when present."""
     return path[len(prefix) :] if path.startswith(prefix) else path
-
-
-def split_diff_git_paths(body: str) -> tuple[str, str] | None:
-    """Split ``a/<old> b/<new>`` into the two unquoted paths.
-
-    Spaces are not necessarily quoted by Git. For an ambiguous unquoted
-    rename, return ``None`` and let the caller use ``rename from/to``. Equal
-    pre/post paths disambiguate ordinary binary and mode-only changes.
-    """
-    if body.startswith('"'):
-        old, rest = _take_quoted_token(body)
-        if old is None:
-            return None
-        if not rest.startswith(" "):
-            return None
-        new = unquote_git_path(rest[1:])
-        if new is None or not old.startswith(_A_PREFIX) or not new.startswith(_B_PREFIX):
-            return None
-        return old[len(_A_PREFIX) :], new[len(_B_PREFIX) :]
-    if not body.startswith(_A_PREFIX):
-        return None
-    candidates: list[tuple[str, str]] = []
-    for match in re.finditer(r' (?=b/|"b/)', body):
-        old = body[len(_A_PREFIX) : match.start()]
-        new = unquote_git_path(body[match.end() :])
-        if old and new is not None and new.startswith(_B_PREFIX):
-            candidates.append((old, new[len(_B_PREFIX) :]))
-    same_path = [pair for pair in candidates if pair[0] == pair[1]]
-    if len(same_path) == 1:
-        return same_path[0]
-    return candidates[0] if len(candidates) == 1 else None
 
 
 def _path_from_rename(raw_line: str) -> str | None:

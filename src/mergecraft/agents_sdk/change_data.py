@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from mergecraft.review.offline_result import OfflineReviewResult
 
 from mergecraft.agents_sdk.guardrails import path_in_change_set
-from mergecraft.mcp.checkout import changed_paths_in_diff
+from mergecraft.diff import changed_paths_in_diff
 from mergecraft.utils.source_resolve import (
     SourceResolverSpec,
     confine_path,

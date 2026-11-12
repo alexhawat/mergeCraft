@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-from mergecraft.analyzers.scope import (
-    parse_diff_scope,
-    split_diff_git_paths,
-    unquote_git_path,
-)
+from mergecraft.analyzers.scope import parse_diff_scope
+from mergecraft.diff import parse_diff, split_diff_git_paths
 
 _HEADER = "diff --git "
 
@@ -54,51 +51,12 @@ def paths_from_diff_headers(diff_text: str) -> set[str]:
         ['x.py', 'y.py']
     """
     found: set[str] = set()
-    header: str | None = None
-    pair: tuple[str, str] | None = None
-    images: dict[str, str] = {}
-    in_hunk = False
-
-    def finish_entry() -> None:
-        if header is None:
-            return
-        # Extended rename/copy metadata and ---/+++ headers are authoritative
-        # when an unquoted path itself contains the header separator " b/".
-        resolved = (images["old"], images["new"]) if len(images) == 2 else pair
-        if resolved is None:
+    for section in parse_diff(diff_text).files:
+        if not section.paths:
+            header = section.text.split("\n", 1)[0]
             msg = f"could not parse changed paths from diff header: {header}"
             raise ValueError(msg)
-        found.update(path for path in resolved if path and path != "/dev/null")
-
-    for line in diff_text.splitlines():
-        if line.startswith(_HEADER):
-            finish_entry()
-            header = line
-            pair = split_diff_git_paths(line[len(_HEADER) :])
-            images = {}
-            in_hunk = False
-        elif line.startswith("@@"):
-            in_hunk = True
-        elif header is not None and not in_hunk:
-            for prefix, image, diff_prefix in (
-                ("rename from ", "old", ""),
-                ("rename to ", "new", ""),
-                ("copy from ", "old", ""),
-                ("copy to ", "new", ""),
-                ("--- ", "old", "a/"),
-                ("+++ ", "new", "b/"),
-            ):
-                if line.startswith(prefix):
-                    token = line[len(prefix) :]
-                    # Git separates a space-bearing ---/+++ path from an
-                    # optional timestamp with a tab. Tabs in names are quoted.
-                    if diff_prefix:
-                        token = token.split("\t", 1)[0]
-                    decoded = unquote_git_path(token)
-                    if decoded is not None:
-                        images[image] = decoded.removeprefix(diff_prefix)
-                    break
-    finish_entry()
+        found.update(section.paths)
     return found
 
 
