@@ -11,12 +11,28 @@ PythonPackageManager = Literal["pip", "pipenv", "poetry", "uv"]
 PrepLanguage = Literal["node", "python", "unknown"]
 
 
+DEFAULT_PREP_TIMEOUT_S: float = 600.0
+"""Wall-clock budget for the whole prep phase (matches the setup and analyze stages)."""
+
+
 @dataclass(slots=True)
 class PrepOptions:
-    """Options for dependency prep steps."""
+    """Options for dependency prep steps.
+
+    ``timeout_s`` bounds the whole phase: a step still running at the deadline
+    is cancelled, its process group is killed, and it is recorded as a failed
+    install. ``None`` or ``<= 0`` disables the bound.
+
+    ``agent_owned_tree`` says the review agent works in the same checkout while
+    prep runs. Prep then never restores tracked files after its install: a file
+    that changed during the install may be the agent's edit, not the package
+    manager's, so the changed paths are only logged.
+    """
 
     ignore_scripts: bool = False
     bin_dir: str = ""
+    timeout_s: float | None = DEFAULT_PREP_TIMEOUT_S
+    agent_owned_tree: bool = False
 
 
 @dataclass(slots=True)
@@ -46,6 +62,7 @@ def is_prep_install_failure(result: PrepResult) -> bool:
 
 class PrepDefinition(Protocol):
     name: str
+    language: PrepLanguage
 
     def should_run(self) -> bool | Awaitable[bool]: ...
 
@@ -53,6 +70,7 @@ class PrepDefinition(Protocol):
 
 
 __all__ = [
+    "DEFAULT_PREP_TIMEOUT_S",
     "NodePackageManager",
     "PrepDefinition",
     "PrepLanguage",
