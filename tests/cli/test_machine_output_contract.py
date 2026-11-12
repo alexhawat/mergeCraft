@@ -64,14 +64,23 @@ def test_the_tree_has_both_kinds_of_command() -> None:
     assert ("version",) not in _UNSUPPORTED
 
 
-@pytest.mark.parametrize("path", _UNSUPPORTED, ids=[" ".join(p) for p in _UNSUPPORTED])
-def test_commands_without_json_output_reject_the_root_flag(path: tuple[str, ...]) -> None:
-    """No command silently ignores ``--format json``: it exits 2 before doing anything."""
-    result = CliRunner().invoke(app, ["--format", "json", *path], env=_ENV)
+def test_commands_without_json_output_reject_the_root_flag() -> None:
+    """No command silently ignores ``--format json``: it exits 2 before doing anything.
 
-    assert result.exit_code == CLI_USAGE_EXIT_CODE, result.output
-    assert result.stdout == ""
-    assert "has no JSON output" in result.stderr
+    One test over the whole tree (not one id per command) so the suite's
+    committed duration map keeps covering the collected ids.
+    """
+    problems: list[str] = []
+    for path in _UNSUPPORTED:
+        result = CliRunner().invoke(app, ["--format", "json", *path], env=_ENV)
+        if (
+            result.exit_code != CLI_USAGE_EXIT_CODE
+            or result.stdout != ""
+            or "has no JSON output" not in result.stderr
+        ):
+            problems.append(f"{' '.join(path)}: exit {result.exit_code}")
+
+    assert problems == []
 
 
 @pytest.mark.parametrize("path", _JSON_READERS, ids=[" ".join(p) for p in _JSON_READERS])

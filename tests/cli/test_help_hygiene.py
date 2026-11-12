@@ -9,7 +9,6 @@ from __future__ import annotations
 import re
 
 import click
-import pytest
 import typer
 from typer.testing import CliRunner
 
@@ -38,16 +37,29 @@ def _paths() -> list[tuple[str, ...]]:
 _PATHS = _paths()
 
 
-@pytest.mark.parametrize("path", _PATHS, ids=[" ".join(p) or "mergecraft" for p in _PATHS])
-def test_help_has_no_rst_planning_ids_or_foreign_names(path: tuple[str, ...]) -> None:
-    """Every ``--help`` page reads as user documentation."""
-    result = CliRunner().invoke(app, [*path, "--help"], env=_ENV)
+def test_help_has_no_rst_planning_ids_or_foreign_names() -> None:
+    """Every ``--help`` page reads as user documentation.
 
-    assert result.exit_code == 0, result.output
-    text = result.stdout
-    assert "``" not in text
-    assert _PLANNING_ID.findall(text) == []
-    assert "sevn" not in text.lower()
+    One test over the whole tree (not one id per command) so the suite's
+    committed duration map keeps covering the collected ids.
+    """
+    problems: list[str] = []
+    for path in _PATHS:
+        name = " ".join(("mergecraft", *path))
+        result = CliRunner().invoke(app, [*path, "--help"], env=_ENV)
+        if result.exit_code != 0:
+            problems.append(f"{name}: exit {result.exit_code}")
+            continue
+        text = result.stdout
+        if "``" in text:
+            problems.append(f"{name}: RST double backticks")
+        if ids := _PLANNING_ID.findall(text):
+            problems.append(f"{name}: planning ids {ids}")
+        if "sevn" in text.lower():
+            problems.append(f"{name}: foreign product name")
+
+    assert len(_PATHS) > 100
+    assert problems == []
 
 
 def test_unknown_command_suggests_once() -> None:
