@@ -11,6 +11,7 @@ from rich.table import Table
 
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
 from mergecraft.cli.consoles import err_console as console
+from mergecraft.cli.diff_base import target_base
 from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
 )
@@ -79,6 +80,7 @@ def build_plan_report(
     cwd: Path,
     profile_name: str | None = None,
     model_override: str | None = None,
+    base: str | None = None,
 ) -> dict[str, object]:
     """Assemble the structured plan preview for a workspace."""
     profile = resolve_profile(profile_name)
@@ -107,7 +109,9 @@ def build_plan_report(
     # but must never land in the repository: a file there would join the next
     # review's diff as an untracked addition and dirty the checkout.
     plan_dir = Path(tempfile.mkdtemp(prefix="mergecraft-plan-"))
-    materialization = materialize_diff(cwd=repo_root, out_dir=plan_dir)
+    # Like ``describe``: the branch's own ``@{upstream}`` would hide pushed work.
+    resolved_base = base if base is not None else target_base(repo_root)
+    materialization = materialize_diff(cwd=repo_root, out_dir=plan_dir, base=resolved_base)
     prompt = build_offline_review_prompt(
         diff_path=materialization.path,
         base_ref=materialization.base_ref,
@@ -144,6 +148,11 @@ def run(
         "-m",
         help="Model slug override (wins over the profile bundle).",
     ),
+    base: str | None = typer.Option(
+        None,
+        "--base",
+        help="Base ref to diff against (default: the branch this one merges into).",
+    ),
 ) -> None:
     """Preview model chain, toolset, analyzers, and token estimate without provider calls."""
     from mergecraft.cli.profiles import apply_profile_env
@@ -155,7 +164,7 @@ def run(
         raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
 
     with apply_profile_env(resolve_profile(profile)):
-        report = build_plan_report(cwd=cwd, profile_name=profile, model_override=model)
+        report = build_plan_report(cwd=cwd, profile_name=profile, model_override=model, base=base)
     model_chain = report["model_chain"]
     toolset = report["toolset"]
     analyzers = report["analyzers"]

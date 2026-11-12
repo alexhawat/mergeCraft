@@ -14,6 +14,8 @@ import typer
 
 from mergecraft.analyzers.scope import changed_paths_from_scope, parse_diff_scope
 from mergecraft.classify.change_clustering import cluster_changes
+from mergecraft.cli.diff_base import target_base
+from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
 from mergecraft.config.settings import load_repo_settings
 from mergecraft.pr import (
@@ -35,26 +37,37 @@ from mergecraft.review.split_advisor import recommend_pr_split
 from mergecraft.utils.offline_diff import materialize_diff
 
 
-def _read_diff(repo_root: Path) -> str:
-    """Return the branch diff ``review`` would see: merge base to working tree.
+def _read_diff(repo_root: Path, base: str | None = None) -> str:
+    """Return the branch diff: merge base with the target branch to working tree.
 
-    ``git diff HEAD`` misses everything already committed on the branch, so a
-    PR whose work is committed was described as zero changed files. Reuse the
-    review materializer instead (default base, untracked additions included).
-    Outside a git checkout, or when no base resolves, the diff is empty.
+    ``git diff HEAD`` misses everything already committed on the branch, and the
+    review default base (``@{upstream}``) is the branch's own remote copy once it
+    is pushed with ``-u``. Diff against the branch the work merges into
+    (:func:`mergecraft.cli.diff_base.target_base`) unless *base* is given;
+    untracked additions are included. Outside a git checkout, or when no default
+    base resolves, the diff is empty.
 
     Args:
         repo_root (Path): Repository root to diff.
+        base (str | None): Explicit base ref (``--base``). Defaults to None.
 
     Returns:
         str: Unified diff text, or ``""`` when none can be produced.
+
+    Raises:
+        typer.Exit: When an explicit *base* cannot be diffed (configuration code).
     """
     if not (repo_root / ".git").exists():
+        if base is not None:
+            cli_bail(f"--base {base!r} needs a git checkout at {repo_root}")
         return ""
     with tempfile.TemporaryDirectory(prefix="mergecraft-describe-") as tmp:
         try:
-            materialization = materialize_diff(cwd=repo_root, out_dir=Path(tmp))
-        except (OSError, RuntimeError, subprocess.SubprocessError):
+            resolved = base if base is not None else target_base(repo_root)
+            materialization = materialize_diff(cwd=repo_root, out_dir=Path(tmp), base=resolved)
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            if base is not None:
+                cli_bail(f"could not diff against --base {base!r}: {exc}")
             return ""
         return materialization.path.read_text(encoding="utf-8")
 
@@ -150,12 +163,17 @@ def run(
         "--repo-root",
         help="Repository root to describe (read-only; nothing is written).",
     ),
+    base: str | None = typer.Option(
+        None,
+        "--base",
+        help="Base ref to diff against (default: the branch this one merges into).",
+    ),
 ) -> None:
     """Print a PR title, summary, walkthrough, risk areas, and testing notes."""
     root = repo_root.expanduser().resolve()
     load_repo_settings(root=root, load_learnings_files=False)
 
-    diff = _read_diff(root)
+    diff = _read_diff(root, base)
     metadata: dict[str, object] = {"title": root.name}
     described = build_describe_output(diff=diff, pr_metadata=metadata, repo_root=root)
     labels = asyncio.run(
