@@ -58,6 +58,9 @@ verdict; everything else is advisory. Concretely:
   `timed_out`, `unavailable`, `declared-but-cannot-run`. **Only
   `failed`** is a negative finding; **only `passed`** is a positive
   signal. The other three are honest skips, never silent passes.
+  Analyzer catalog rows add one more: `tool-error`, for an analyzer that
+  ran but exited non-zero without reporting a single diagnostic (a crash,
+  a config error, an unreadable file). It judged nothing, like a skip.
 - **CI check-runs** — raw `check_suite` data from `mcp/check_runs.py`
   plus the cluster/blame/flaky annotations from `src/mergecraft/ci/`.
 - **The agent's `approved` boolean** — **NOT** mechanical evidence. It

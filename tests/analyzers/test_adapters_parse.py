@@ -330,8 +330,11 @@ def test_tsc_help_stdout_is_parse_failure_not_pass(
     )
     assert result.skipped is True
     assert result.findings == []
+    # Exit 1 with output that is not a report is the tool failing, not a parse quirk.
+    assert result.tool_error is True
     reason = result.skip_reason or ""
-    assert "failed to parse" in reason, reason
+    assert reason.startswith("tool-error tsc: analyzer exited 1"), reason
+    assert "COMMON COMMANDS" not in reason
 
 
 def test_unreadable_output_logs_exception_without_leaking_into_skip_reason(

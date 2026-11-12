@@ -136,7 +136,11 @@ def _build_pre_merge_summary(
 ) -> str:
     ran = [row for row in rows if row.status in {"passed", "failed"}]
     skipped = [row for row in rows if row.status == "unavailable"]
+    errored = [row for row in rows if row.status == "tool-error"]
     parts = [f"{len(ran)} ran"]
+    if errored:
+        reasons = ", ".join(f"{row.id}: {row.reason or 'tool error'}" for row in errored)
+        parts.append(f"{len(errored)} tool errors ({reasons})")
     if skipped:
         reasons = ", ".join(f"{row.id}: {row.reason or 'skipped'}" for row in skipped)
         parts.append(f"{len(skipped)} skipped ({reasons})")
@@ -409,7 +413,7 @@ def run_analyzer_pipeline(
                     rows.append(
                         AnalyzerStatusRow(
                             id=manifest.id,
-                            status="unavailable",
+                            status="tool-error" if result.tool_error else "unavailable",
                             reason=result.skip_reason,
                         )
                     )
