@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from mergecraft.analyzers.adapters import _normalize_paths
-from mergecraft.analyzers.finding import make_finding
+from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.analyzers.parsers import get_parser
 from mergecraft.analyzers.parsers.buf_native import (
     parse_buf_breaking_json,
@@ -56,14 +57,16 @@ def _buf_line(path: str) -> str:
     [parse_buf_breaking_json, parse_buf_lint_json],
     ids=["breaking", "lint"],
 )
-def test_buf_fingerprint_is_the_same_from_two_checkout_roots(parse: object, tmp_path: Path) -> None:
+def test_buf_fingerprint_is_the_same_from_two_checkout_roots(
+    parse: Callable[..., list[Finding]], tmp_path: Path
+) -> None:
     """Regression: absolute and root-relative buf paths resolve against the repo root."""
     manifest = get_manifest("buf")
     identities = set()
     for root in (tmp_path / "ci" / "workspace", tmp_path / "home" / "dev" / "repo"):
         (root / "proto").mkdir(parents=True)
         for path in (str(root / "proto" / "x.proto"), "proto/x.proto"):
-            (finding,) = parse(_buf_line(path), manifest=manifest, repo_root=root)  # type: ignore[operator]
+            (finding,) = parse(_buf_line(path), manifest=manifest, repo_root=root)
             assert finding.path == "proto/x.proto"
             identities.add(finding.fingerprint)
     assert len(identities) == 1

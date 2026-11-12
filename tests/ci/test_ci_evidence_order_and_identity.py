@@ -102,6 +102,21 @@ async def test_fixed_base_branch_does_not_clear_a_pr_failure(tmp_path: Path) -> 
     assert payload["stats"]["unattributedCount"] == 1
 
 
+@pytest.mark.asyncio
+async def test_a_pass_between_failures_still_outranks_the_older_failure(tmp_path: Path) -> None:
+    """Newest-first base history: unrelated failure, pass, same-fingerprint failure."""
+    github = _Github(
+        base_runs=[_base_run(102, "failure"), _base_run(101, "success"), _base_run(100, "failure")],
+        base_logs={102: _LINT_A, 101: "", 100: _FAILING_TEST},
+        head_log=_FAILING_TEST,
+    )
+    payload = await run_ci_intelligence(
+        _ctx(tmp_path, github), check_suite_id=9, pr_diff_paths=["README.md"]
+    )
+    assert [cluster["blameVerdict"] for cluster in payload["clusters"]] == ["unknown"]
+    assert [row["run_id"] for row in payload["baseBranchRuns"]] == [101, 100]
+
+
 # ── F12: fingerprint material ────────────────────────────────────────────────
 
 

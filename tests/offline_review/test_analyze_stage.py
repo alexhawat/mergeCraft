@@ -6,7 +6,7 @@ import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -451,9 +451,9 @@ def test_shadow_judge_findings_keep_repeated_message_at_each_line() -> None:
     state = AnalyzerRunState(
         ran=True, findings=[row.model_dump() for row in _repeated_mypy_findings()]
     )
-    driver = SimpleNamespace(analyzer_run=state)
+    driver = cast("offline_mod._OfflineDiffReviewRun", SimpleNamespace(analyzer_run=state))
     review_out = OfflineReviewResult(success=True, structured_output='{"findings":[]}')
-    findings = offline_mod._findings_for_shadow_judge(driver, review_out)  # type: ignore[arg-type]
+    findings = offline_mod._findings_for_shadow_judge(driver, review_out)
     assert [(row.start_line, row.severity) for row in findings] == [
         (10, "Minor"),
         (50, "Major"),
