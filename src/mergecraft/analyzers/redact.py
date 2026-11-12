@@ -138,6 +138,7 @@ _STRUCTURAL_SPLIT_RE = re.compile(r"[.:/@#]+")
 _MAX_STRUCTURAL_TOKEN_CHARS = 512
 # ``user:pass@host`` (no ``/`` between the ``:`` and the ``@``) is userinfo,
 # never a structural id; ``pkg:pypi/requests@2.31.0`` has one.
+_VERSION_AT_RE = re.compile(r"@(?:v?[0-9]|sha256:)")
 _USERINFO_SHAPE_RE = re.compile(r"(?:^|//)[^/@\s]*:[^/@\s]*@")
 # macOS per-user temp roots (``/private/var/folders/2p/<hash>/T``): the hash
 # segment is random by construction, and ``$TMPDIR`` checkouts live under it.
@@ -298,6 +299,10 @@ def _is_benign_structural_token(token: str) -> bool:
     if len(token) > _MAX_STRUCTURAL_TOKEN_CHARS or _STRUCTURAL_SPLIT_RE.search(token) is None:
         return False
     if _USERINFO_SHAPE_RE.search(token) is not None:
+        return False
+    # ``@`` only joins a version or digest (``requests@2.31.0``, ``image@sha256:…``);
+    # an address-shaped ``name@host`` keeps the dense-token rule.
+    if "@" in token and _VERSION_AT_RE.search(token) is None:
         return False
     parts = [part for part in _STRUCTURAL_SPLIT_RE.split(token) if part]
     if len(parts) < 2:
