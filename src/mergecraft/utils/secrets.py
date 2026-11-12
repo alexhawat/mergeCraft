@@ -8,6 +8,7 @@ import re
 from loguru import logger
 
 from mergecraft.config.runtime_provider_registry import provider_credential_env_names
+from mergecraft.redaction_structured import is_credential_key_name
 
 OPENCODE_AUTH_ENV = "OPENCODE_AUTH_JSON"
 
@@ -142,8 +143,13 @@ _user_allowlist: set[str] | None = None
 
 
 def is_sensitive_env_name(key: str) -> bool:
-    """Return whether ``key`` looks like a secret-bearing environment variable."""
-    return any(pattern.search(key) for pattern in SENSITIVE_PATTERNS)
+    """Return whether ``key`` looks like a secret-bearing environment variable.
+
+    The shared key-name rule (:func:`~mergecraft.redaction_structured.is_credential_key_name`)
+    decides, plus the broader ``*_KEY`` suffix: an env filter errs toward
+    withholding a variable, where structured redaction must keep ``cache_key``.
+    """
+    return any(pattern.search(key) for pattern in SENSITIVE_PATTERNS) or is_credential_key_name(key)
 
 
 def sanitize_secret(key: str, value: str) -> str | None:

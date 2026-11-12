@@ -15,11 +15,27 @@ from mergecraft.redaction_structured import redact_structured_value
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+# The key may carry a prefix (``DB_PASSWORD``, ``GITHUB_TOKEN``,
+# ``aws_secret_access_key``): the credential word only has to start a segment,
+# so the lookbehind admits ``_`` and ``-`` where ``\b`` would not.
 _ASSIGNMENT_SECRET_PATTERN: Pattern[str] = re.compile(
-    r"\b(?:api[_-]?key|secret|token|password)\s*[:=]\s*"
+    r"(?<![A-Za-z0-9])"
+    r"(?:api[_-]?key|access[_-]?key|private[_-]?key|secret[_-]?key|secret|token|password"
+    r"|passwd|credential)\s*[:=]\s*"
     r"""(?:"(?:\\.|[^"\\]){8,}"|'(?:\\.|[^'\\]){8,}'|"""
     r"(?P<unquoted>[^\s'\"]{8,}))",
     re.I,
+)
+# A password is redacted whatever its length: ``password: hunter2`` falls under
+# the 8-character floor the other credential words keep.
+_PASSWORD_ASSIGNMENT_PATTERN: Pattern[str] = re.compile(
+    r"(?<![A-Za-z0-9])(?:password|passwd|pwd)[ \t]*[:=][ \t]*"
+    r"""(?:"(?:\\.|[^"\\\n])+"|'(?:\\.|[^'\\\n])+'|"""
+    r"(?P<unquoted>[^\s'\"]+))",
+    re.I,
+)
+_ASSIGNMENT_PATTERNS: frozenset[Pattern[str]] = frozenset(
+    {_ASSIGNMENT_SECRET_PATTERN, _PASSWORD_ASSIGNMENT_PATTERN}
 )
 
 _SECRET_PATTERNS: tuple[Pattern[str], ...] = (
@@ -33,7 +49,11 @@ _SECRET_PATTERNS: tuple[Pattern[str], ...] = (
     re.compile(r"\bpypi-AgE[A-Za-z0-9_-]{20,}"),
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     re.compile(r"\b(?:xox[baprs]-)[A-Za-z0-9-]{10,}\b"),
+    re.compile(r"\bnpm_[A-Za-z0-9]{36}\b"),
+    # Slack incoming webhooks: the whole path after ``/services/`` is the credential.
+    re.compile(r"https://hooks\.slack\.com/services/[A-Za-z0-9/_-]+"),
     _ASSIGNMENT_SECRET_PATTERN,
+    _PASSWORD_ASSIGNMENT_PATTERN,
     re.compile(r"Basic [A-Za-z0-9+/=]{16,}"),
 )
 
@@ -94,7 +114,49 @@ _UPPER_RUN_RE = re.compile(r"[A-Z]{2,}")
 _BENIGN_FILENAME_RE = re.compile(
     r"^[\w.-]+\.(?:txt|json|yaml|yml|sh|py|js|ts|md|toml|lock|html|proto)$"
 )
-_BENIGN_ISO_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z?$")
+# Any other lowercase extension (``.go``, ``.java``, ``.swift``, ``.hpp``) is a
+# filename only when every stem part is a word: a random stem stays redactable.
+_ANY_EXTENSION_FILENAME_RE = re.compile(r"^(?P<stem>[\w.-]+)\.[a-z][a-z0-9]{0,7}$")
+_NAME_PART_SPLIT_RE = re.compile(r"[._-]+")
+_WORD_PART_RE = re.compile(r"[a-z]+[0-9]*|[0-9]+|[A-Z]{1,6}[0-9]{1,6}")
+# PascalCase type and file names (``UserProfileService``, ``HTTPServer``) held
+# to the same wordiness rules as camelCase keys.
+_PASCAL_CASE_IDENTIFIER_RE = re.compile(
+    rf"^(?:[A-Z][a-z]+|[A-Z]{{2,4}}(?=[A-Z][a-z]))[0-9]*(?:{_CAMEL_CASE_HUMP}[0-9]*)*$"
+)
+# Migration-style names: a timestamp run, then snake_case words.
+_TIMESTAMPED_SNAKE_RE = re.compile(r"^[0-9]{6,14}_[a-z][a-z0-9_]*$")
+_BENIGN_ISO_TIMESTAMP_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})?$"
+)
+# GitHub advisory ids use a fixed 4x3 alphabet without vowels or ambiguous digits.
+_GHSA_ID_RE = re.compile(r"^GHSA(?:-[23456789cfghjmpqrvwx]{4}){3}$")
+# Structural analyzer tokens (``python.lang.security.audit.eval-detected``,
+# ``B101:assert_used``, ``tests/test_x.py::test_foo``, ``pkg:pypi/requests@2.31.0``):
+# separator-joined parts that are each a word, a number or a short rule code.
+_STRUCTURAL_SPLIT_RE = re.compile(r"[.:/@#]+")
+_MAX_STRUCTURAL_TOKEN_CHARS = 512
+# ``user:pass@host`` (no ``/`` between the ``:`` and the ``@``) is userinfo,
+# never a structural id; ``pkg:pypi/requests@2.31.0`` has one.
+_USERINFO_SHAPE_RE = re.compile(r"(?:^|//)[^/@\s]*:[^/@\s]*@")
+# macOS per-user temp roots (``/private/var/folders/2p/<hash>/T``): the hash
+# segment is random by construction, and ``$TMPDIR`` checkouts live under it.
+_MACOS_TEMP_ROOT_RE = re.compile(
+    r"(?:/private)?/var/folders/[A-Za-z0-9_+-]{2}/[A-Za-z0-9_+-]{1,64}/[A-Z](?=/|$|[^\w/.-])"
+)
+# Generic http(s) links, host and path only: the query and fragment never join
+# the match and stay subject to the normal passes. Userinfo (``user:pw@``) and
+# Slack webhooks never match: the host class has no ``@`` and the pattern pass
+# blanks webhooks first.
+_HTTP_LINK_RE = re.compile(
+    r"(?<![\w.+/-])https?://"
+    r"(?P<host>[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+)(?::[0-9]{1,5})?(?![\w-])"
+    r"(?P<path>(?:/[\w.~%+-]{0,200}(?![\w.~%+-])){0,32})"
+)
+# A filename suffix after a path token (the entropy alphabet excludes dots).
+# Compiled once and matched *at* a position: slicing the remaining text per
+# token made redaction quadratic in the input size.
+_PATH_SUFFIX_RE = re.compile(r"\.[a-z][a-z0-9]{0,7}(?![\w.])")
 _BENIGN_HTTP_URL_RE = re.compile(r"^https?://[\w.-]+(?::\d+)?(?:/[\w./#:?=&%+-]*)?$")
 _LOWERCASE_SLUG_RE = re.compile(r"^[a-z]{12,24}$")
 _SLUG_ENTROPY_SLACK = 0.12
@@ -185,14 +247,70 @@ def _is_benign_camel_case(token: str) -> bool:
     return vowels >= _CAMEL_CASE_MIN_VOWEL_SHARE * len(letters)
 
 
+def _is_benign_pascal_case(token: str) -> bool:
+    """Wordy PascalCase type names; random mixed-case blobs do not qualify."""
+    if _PASCAL_CASE_IDENTIFIER_RE.match(token) is None:
+        return False
+    if len(token) < _MIN_ENTROPY_LENGTH:
+        return True
+    if len(_DIGIT_RUN_RE.findall(token)) > 1 or len(_UPPER_RUN_RE.findall(token)) > 1:
+        return False
+    humps = _CAMEL_CASE_HUMP_RE.findall(token)
+    if len(token) < _CAMEL_CASE_MIN_CHARS_PER_WORD * len(humps):
+        return False
+    if any(len(hump) == 2 and hump[1].islower() and not _has_vowel(hump) for hump in humps):
+        return False
+    letters = [char for char in token.lower() if char.isalpha()]
+    vowels = sum(1 for char in letters if char in _VOWELS)
+    return vowels >= _CAMEL_CASE_MIN_VOWEL_SHARE * len(letters)
+
+
 def _is_benign_identifier(token: str) -> bool:
-    """Catalog identifiers: snake/kebab/SCREAMING case and wordy camelCase keys."""
-    return _BENIGN_IDENTIFIER_RE.match(token) is not None or _is_benign_camel_case(token)
+    """Catalog identifiers: snake/kebab/SCREAMING case and wordy camel/PascalCase names."""
+    return (
+        _BENIGN_IDENTIFIER_RE.match(token) is not None
+        or _TIMESTAMPED_SNAKE_RE.match(token) is not None
+        or _is_benign_camel_case(token)
+        or _is_benign_pascal_case(token)
+    )
+
+
+def _is_word_part(part: str) -> bool:
+    """One separator-free part of a name: a word, a number, a rule code or an identifier."""
+    return _WORD_PART_RE.fullmatch(part) is not None or _is_benign_identifier(part)
 
 
 def _is_benign_filename(token: str) -> bool:
     """Common repo-relative filenames that are not credential material."""
-    return _BENIGN_FILENAME_RE.fullmatch(token) is not None
+    if _BENIGN_FILENAME_RE.fullmatch(token) is not None:
+        return True
+    match = _ANY_EXTENSION_FILENAME_RE.fullmatch(token)
+    if match is None:
+        return False
+    parts = [part for part in _NAME_PART_SPLIT_RE.split(match.group("stem")) if part]
+    return bool(parts) and all(_is_word_part(part) for part in parts)
+
+
+def _is_benign_structural_token(token: str) -> bool:
+    """Rule ids, advisory ids, node ids and ``path:line`` values from analyzer reports."""
+    if _GHSA_ID_RE.fullmatch(token) is not None:
+        return True
+    if len(token) > _MAX_STRUCTURAL_TOKEN_CHARS or _STRUCTURAL_SPLIT_RE.search(token) is None:
+        return False
+    if _USERINFO_SHAPE_RE.search(token) is not None:
+        return False
+    parts = [part for part in _STRUCTURAL_SPLIT_RE.split(token) if part]
+    if len(parts) < 2:
+        return False
+    for part in parts:
+        if _GHSA_ID_RE.fullmatch(part) is not None:
+            continue
+        words = [word for word in re.split(r"[_-]+", part) if word]
+        if not words or not (
+            _is_benign_identifier(part) or all(_is_word_part(word) for word in words)
+        ):
+            return False
+    return True
 
 
 def _is_benign_iso_timestamp(token: str) -> bool:
@@ -306,26 +424,78 @@ def _is_exempt_github_permalink(match: re.Match[str]) -> bool:
     return all(_is_ordinary_permalink_segment(segment) for segment in segments)
 
 
-def _strip_exempt_github_permalinks(text: str) -> str:
-    if "https://github.com/" not in text:
+def _is_ordinary_link_segment(segment: str) -> bool:
+    """A link host label or path segment made of words that survives redaction alone."""
+    if _GHSA_ID_RE.fullmatch(segment) is not None:
+        return True
+    parts = [part for part in re.split(r"[._~%+-]+", segment) if part]
+    return all(_is_word_part(part) for part in parts) and _is_ordinary_permalink_segment(segment)
+
+
+def _is_exempt_http_link(match: re.Match[str]) -> bool:
+    """A documentation or advisory link (``https://avd.aquasec.com/nvd/cve-2024-35195``)."""
+    labels = match.group("host").split(".")
+    segments = [segment for segment in match.group("path").split("/") if segment]
+    return all(_is_ordinary_link_segment(part) for part in [*labels, *segments])
+
+
+def _exempt_spans(text: str) -> list[tuple[int, int]]:
+    """Spans the entropy pass must not see: ordinary links and macOS temp roots.
+
+    Each span is structural by construction (an exempt GitHub permalink, a link
+    whose host and path are ordinary words, or a ``/var/folders/<hash>/T`` temp
+    root) and is kept verbatim; everything around it is redacted as usual.
+    """
+    spans: list[tuple[int, int]] = []
+    if "https://github.com/" in text:
+        spans.extend(
+            match.span()
+            for match in _GITHUB_PERMALINK_RE.finditer(text)
+            if _is_exempt_github_permalink(match)
+        )
+    if "/var/folders/" in text:
+        spans.extend(match.span() for match in _MACOS_TEMP_ROOT_RE.finditer(text))
+    if "://" in text:
+        spans.extend(
+            match.span()
+            for match in _HTTP_LINK_RE.finditer(text)
+            if match.group("path") and _is_exempt_http_link(match)
+        )
+    if len(spans) < 2:
+        return spans
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if merged and start < merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _strip_exempt_spans(text: str) -> str:
+    spans = _exempt_spans(text)
+    if not spans:
         return text
-    return _GITHUB_PERMALINK_RE.sub(
-        lambda match: "" if _is_exempt_github_permalink(match) else match.group(0), text
-    )
+    parts: list[str] = []
+    cursor = 0
+    for start, end in spans:
+        parts.append(text[cursor:start])
+        cursor = end
+    parts.append(text[cursor:])
+    return "".join(parts)
 
 
-def _entropy_redact_outside_permalinks(text: str) -> str:
-    """Run the entropy pass on everything except exempt GitHub permalinks (#1281)."""
-    if "https://github.com/" not in text:
+def _entropy_redact_outside_exempt_spans(text: str) -> str:
+    """Run the entropy pass on everything except exempt links and temp roots (#1281)."""
+    spans = _exempt_spans(text)
+    if not spans:
         return _entropy_redact(text)
     parts: list[str] = []
     cursor = 0
-    for match in _GITHUB_PERMALINK_RE.finditer(text):
-        if not _is_exempt_github_permalink(match):
-            continue
-        parts.append(_entropy_redact(text[cursor : match.start()]))
-        parts.append(match.group(0))
-        cursor = match.end()
+    for start, end in spans:
+        parts.append(_entropy_redact(text[cursor:start]))
+        parts.append(text[start:end])
+        cursor = end
     parts.append(_entropy_redact(text[cursor:]))
     return "".join(parts)
 
@@ -335,17 +505,17 @@ def _entropy_redact(text: str) -> str:
         token = match.group(0)
         if token in _KNOWN_SAFE_LITERALS:
             return token
-        # The entropy alphabet excludes dots, so inspect a bounded filename
-        # suffix before classifying a normal path prefix as a dense token.
-        suffix = re.match(
-            r"\.(?:py|js|ts|md|json|yaml|yml|toml|sh|txt)(?![\w.])", text[match.end() :]
-        )
-        if suffix and "/" in token:
-            # An absolute path's leading "/" yields one empty segment (#1255);
-            # every real segment must still be an ordinary, bounded word.
-            segments = token.removeprefix("/").split("/")
-            if all(_is_benign_path_stem_segment(part) for part in segments):
-                return token
+        if "/" in token:
+            # The entropy alphabet excludes dots, so inspect a bounded filename
+            # suffix before classifying a normal path prefix as a dense token.
+            # An absolute directory path needs no suffix. A leading "/" yields
+            # one empty segment (#1255); every real segment must still be an
+            # ordinary, bounded word.
+            absolute = token.startswith("/") and token.count("/") >= 2
+            if absolute or _PATH_SUFFIX_RE.match(text, match.end()) is not None:
+                segments = token.removeprefix("/").split("/")
+                if all(_is_benign_path_stem_segment(part) for part in segments):
+                    return token
         if _looks_like_repo_path_token(token):
             return token
         if len(token) < _MIN_ENTROPY_LENGTH:
@@ -353,6 +523,8 @@ def _entropy_redact(text: str) -> str:
         if _BENIGN_HEX_40_RE.match(token) or _BENIGN_HEX_64_RE.match(token):
             return token
         if _is_benign_identifier(token):
+            return token
+        if _GHSA_ID_RE.fullmatch(token) is not None:
             return token
         if _is_benign_filename(token):
             return token
@@ -389,9 +561,7 @@ def _redact_bearer(match: re.Match[str]) -> str:
 def _pattern_redact(text: str) -> str:
     redacted = text
     for pattern in _SECRET_PATTERNS:
-        replacement = (
-            _redact_assignment if pattern is _ASSIGNMENT_SECRET_PATTERN else REDACTION_SENTINEL
-        )
+        replacement = _redact_assignment if pattern in _ASSIGNMENT_PATTERNS else REDACTION_SENTINEL
         redacted = pattern.sub(replacement, redacted)
     return _BEARER_TOKEN_PATTERN.sub(_redact_bearer, redacted)
 
@@ -404,10 +574,10 @@ def _maybe_redact_entire_string(text: str, redacted: str) -> str:
         return redacted
     if len(text) < _MIN_ENTROPY_LENGTH or any(char.isspace() for char in text):
         return redacted
-    residual = _strip_exempt_github_permalinks(text)
+    residual = _strip_exempt_spans(text)
     if residual != text:
         # ``(https://github.com/o/r/pull/1).``: only what surrounds the exempt
-        # permalink decides; the link itself already passed its segment checks.
+        # span decides; the span itself already passed its own checks.
         if residual and _maybe_redact_entire_string(residual, residual) == REDACTION_SENTINEL:
             return REDACTION_SENTINEL
         return redacted
@@ -426,6 +596,8 @@ def _maybe_redact_entire_string(text: str, redacted: str) -> str:
     if _is_benign_lowercase_slug(text):
         return redacted
     if _is_benign_metadata_assignment(text):
+        return redacted
+    if _is_benign_structural_token(text.removeprefix("file://")):
         return redacted
     if _should_force_redact_dense_token(text):
         return REDACTION_SENTINEL
@@ -450,7 +622,7 @@ def redact_secrets(text: str) -> str:
     """Redact secret-like values from arbitrary text by pattern and entropy."""
     if not text:
         return text
-    redacted = _entropy_redact_outside_permalinks(_pattern_redact(text))
+    redacted = _entropy_redact_outside_exempt_spans(_pattern_redact(text))
     return _maybe_redact_entire_string(text, redacted)
 
 
@@ -462,6 +634,15 @@ def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+# Errors a JSON decode of untrusted output can raise: deep nesting overflows
+# the decoder's recursion guard rather than failing as a ``JSONDecodeError``.
+_JSON_DECODE_ERRORS = (json.JSONDecodeError, RecursionError, ValueError)
+# Failed ``raw_decode`` attempts tolerated before the rest of the text is
+# redacted as plain text. Each failed attempt can scan to the end of the input,
+# so an unbounded loop over every brace was quadratic (``"[" * 32000``).
+_MAX_FAILED_JSON_DECODES = 64
+
+
 def _looks_like_jsonl(raw: str) -> bool:
     lines = [line for line in raw.splitlines() if line.strip()]
     if not lines:
@@ -469,7 +650,7 @@ def _looks_like_jsonl(raw: str) -> bool:
     for line in lines:
         try:
             json.loads(line)
-        except json.JSONDecodeError:
+        except _JSON_DECODE_ERRORS:
             return False
     return True
 
@@ -483,7 +664,7 @@ def _redact_jsonl(raw: str) -> str:
             continue
         try:
             payload = json.loads(line)
-        except json.JSONDecodeError:
+        except _JSON_DECODE_ERRORS:
             out_lines.append(redact_secrets(line))
         else:
             out_lines.append(_json_dumps(_redact_json_value(payload)))
@@ -497,7 +678,7 @@ def _redact_json_text(raw: str) -> str | None:
         return raw
     try:
         payload = json.loads(stripped)
-    except json.JSONDecodeError:
+    except _JSON_DECODE_ERRORS:
         pass
     else:
         if isinstance(payload, (dict, list)):
@@ -517,6 +698,7 @@ def _redact_json_text(raw: str) -> str | None:
     # splits one run cannot split a secret out of the pattern's reach.
     literal: list[str] = []
     found_json = False
+    failed_decodes = 0
 
     def _flush_literal() -> None:
         if literal:
@@ -532,9 +714,13 @@ def _redact_json_text(raw: str) -> str | None:
             literal.append(raw[index:next_json])
             index = next_json
             continue
+        if failed_decodes >= _MAX_FAILED_JSON_DECODES:
+            literal.append(raw[index:])
+            break
         try:
             payload, end = decoder.raw_decode(raw, index)
-        except json.JSONDecodeError:
+        except _JSON_DECODE_ERRORS:
+            failed_decodes += 1
             literal.append(raw[index])
             index += 1
             continue
@@ -549,16 +735,22 @@ def _redact_json_text(raw: str) -> str | None:
 
 
 def redact_analyzer_output(raw: str, *, tool_id: str) -> str:
-    """Redact analyzer stdout/stderr before any downstream consumer."""
+    """Redact analyzer stdout/stderr before any downstream consumer. Never raises.
+
+    Output that nests too deeply to walk structurally is redacted as plain text.
+    """
     _ = tool_id
     if not raw:
         return raw
     stripped = raw.lstrip()
     if not stripped.startswith(("{", "[")):
         return redact_secrets(raw)
-    if _looks_like_jsonl(raw):
-        return _redact_jsonl(raw)
-    redacted = _redact_json_text(raw)
+    try:
+        if _looks_like_jsonl(raw):
+            return _redact_jsonl(raw)
+        redacted = _redact_json_text(raw)
+    except RecursionError:
+        return redact_secrets(raw)
     if redacted is not None:
         return redacted
     return redact_secrets(raw)
