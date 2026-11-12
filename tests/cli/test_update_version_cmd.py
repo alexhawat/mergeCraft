@@ -1,8 +1,9 @@
 """CF #473 RED — ``mergecraft update`` and commit in ``--version`` (D7).
 
 Pins:
-- ``update`` shells to ``uv tool install --reinstall``; default ref ``main``.
-- ``--branch`` accepts branch, tag, or SHA.
+- ``update`` shells to ``uv tool install --reinstall``; by default at the latest
+  release (``test_update_release_default.py``), never ``main``.
+- ``--ref`` / ``--branch`` accepts branch, tag, or SHA.
 - ``--version`` / ``version`` show ``0.1.0a1 (abc1234)`` when commit known;
   omit parentheses when unknown.
 - JSON ``commit`` field is additive on ``version --format json``.
@@ -20,7 +21,6 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from tests.cli.support_update_version import (
-    DEFAULT_UPDATE_REF,
     require_version_callable,
     update_cmd_module,
     uv_install_spec,
@@ -61,30 +61,6 @@ def test_update_help_documents_uv_reinstall() -> None:
     assert "reinstall" in lowered or "install" in lowered
 
 
-def test_update_default_shells_to_uv_tool_install_on_main(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Happy — default ``update`` runs ``uv tool install --reinstall`` at ``main``."""
-    recorded: list[list[str]] = []
-
-    def _fake_run(argv: list[str], **kwargs: Any) -> Any:
-        recorded.append(list(argv))
-        return None
-
-    monkeypatch.setattr(update_cmd_module().subprocess, "run", _fake_run)
-
-    result = runner.invoke(app, ["update"], env=_DUMB_ENV)
-    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, result.output
-
-    assert recorded, "update must invoke subprocess.run"
-    cmd = recorded[0]
-    assert cmd[0] == "uv"
-    assert "tool" in cmd
-    assert "install" in cmd
-    assert "--reinstall" in cmd
-    assert uv_install_spec(DEFAULT_UPDATE_REF) in cmd
-
-
 @pytest.mark.parametrize(
     "ref",
     [
@@ -105,6 +81,7 @@ def test_update_branch_option_accepts_branch_tag_or_sha(
         return None
 
     monkeypatch.setattr(update_cmd_module().subprocess, "run", _fake_run)
+    monkeypatch.setattr(update_cmd_module(), "installed_extras", lambda: ())
 
     result = runner.invoke(app, ["update", "--branch", ref], env=_DUMB_ENV)
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, result.output

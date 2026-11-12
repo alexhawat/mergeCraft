@@ -21,7 +21,7 @@ Set up mergeCraft in this repo by following the skill's setup checklist:
 2. Run:
 
    ```bash
-   uv tool install "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft"
+   uv tool install mergecraft-action   # latest published release; upgrade with `mergecraft update`
    mergecraft init
    ```
 
