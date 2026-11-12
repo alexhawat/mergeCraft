@@ -44,12 +44,12 @@ REVIEW_WORKFLOW_PATH = ".github/workflows/mergecraft.yml"
 REVIEW_BOT_LOGIN = "github-actions[bot]"
 BRANCH_PREFIX = "smoke/"
 SECRET_PREFIX = "LLM_PROVIDER_"
+SUBMITTED_STATES = frozenset({"APPROVED", "CHANGES_REQUESTED", "COMMENTED"})
 PR_EVENTS = frozenset({"pull_request", "pull_request_target"})
 # Run conclusions that mean the review job ran to the end. ``failure`` is allowed because
 # the scaffold can fail its final gate step on a "would not approve" verdict after the
 # review was posted; the posted-review predicate is what the acceptance asserts.
 CONCLUDED = frozenset({"success", "failure"})
-STATE_FILE_NAME = "quickstart-smoke-state.json"
 
 # ``uv tool install mergecraft-action==0.1.0a5`` as written in the README Quickstart.
 _INSTALL_RE = re.compile(r"^\s*uv tool install (mergecraft-action==\S+)\s*$", re.MULTILINE)
@@ -76,10 +76,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     def common(p: argparse.ArgumentParser) -> None:
         p.add_argument("--repo", default=DEFAULT_REPO, help="owner/name of the scratch repo")
         p.add_argument(
-            "--state",
-            type=Path,
-            default=Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir()) / STATE_FILE_NAME,
-            help="JSON file carrying the cleanup state between subcommands",
+            "--expect-repo",
+            required=True,
+            help="the one repo this command may act on (the workflow's SCRATCH_REPO)",
         )
 
     run = sub.add_parser("run", help="run one Quickstart scenario and assert the review")
@@ -155,6 +154,30 @@ def review_posted(
     return evidence
 
 
+def submitted_review_evidence(reviews: Sequence[Mapping[str, Any]], head_sha: str) -> list[str]:
+    """Bot reviews that were submitted (with a body) against ``head_sha``."""
+    found = []
+    for review in reviews:
+        user = review.get("user") or {}
+        if (
+            isinstance(user, Mapping)
+            and user.get("login") == REVIEW_BOT_LOGIN
+            and review.get("state") in SUBMITTED_STATES
+            and str(review.get("body") or "").strip()
+            and review.get("commit_id") == head_sha
+        ):
+            found.append(f"review {review.get('id')} ({review.get('state')})")
+    return found
+
+
+def check_target(repo: str, expect_repo: str, current_repo: str = "") -> None:
+    """Refuse to act on anything but the configured scratch repo (never the caller's own)."""
+    if not expect_repo or repo.lower() != expect_repo.lower():
+        raise SmokeError(f"refusing to act on {repo!r}: only {expect_repo!r} is allowed")
+    if current_repo and repo.lower() == current_repo.lower():
+        raise SmokeError(f"refusing to act on {repo!r}: it is the repository running this workflow")
+
+
 def run_outcome(
     runs: Sequence[Mapping[str, Any]], head_sha: str
 ) -> tuple[str, Mapping[str, Any] | None]:
@@ -196,20 +219,29 @@ def evaluate(
     """Decide the poll outcome. ``done=False`` means keep polling."""
     state, run = run_outcome(runs, head_sha)
     url = str((run or {}).get("html_url") or "")
-    evidence = review_posted(reviews, issue_comments, review_comments)
     if state in {"missing", "running"}:
         return Verdict(False, False, f"review run {state}", url)
     if state == "bad":
         conclusion = (run or {}).get("conclusion")
         return Verdict(False, True, f"review run ended '{conclusion}' without completing", url)
+    if (run or {}).get("conclusion") == "failure":
+        # A crashed run can leave an error comment; only a submitted review on the head
+        # commit proves the review itself was produced.
+        submitted = submitted_review_evidence(reviews, head_sha)
+        if not submitted:
+            return Verdict(
+                False,
+                True,
+                "review run failed and no submitted pull request review exists on the head commit",
+                url,
+            )
+        return Verdict(
+            True, True, f"review posted: {', '.join(submitted)} (run failed: final gate)", url
+        )
+    evidence = review_posted(reviews, issue_comments, review_comments)
     if not evidence:
         return Verdict(False, True, "review run concluded but no review or comment was posted", url)
-    note = (
-        " (run conclusion 'failure': review posted, final gate failed)"
-        if ((run or {}).get("conclusion") == "failure")
-        else ""
-    )
-    return Verdict(True, True, f"review posted: {', '.join(evidence)}{note}", url)
+    return Verdict(True, True, f"review posted: {', '.join(evidence)}", url)
 
 
 def cleanup_plan() -> list[str]:
@@ -289,6 +321,24 @@ class Context:
         return json.loads(out) if out.strip() else None
 
 
+def discover_root_sha(ctx: Context) -> str:
+    """Return the scratch repo's single root commit on ``main`` (the known-good reset target)."""
+    out = ctx.sh(
+        [
+            "gh",
+            "api",
+            "--paginate",
+            f"repos/{ctx.repo}/commits?sha=main&per_page=100",
+            "--jq",
+            ".[] | select(.parents | length == 0) | .sha",
+        ]
+    )
+    roots = out.split()
+    if len(roots) != 1:
+        raise SmokeError(f"scratch repo main must have exactly one root commit, found {len(roots)}")
+    return roots[0]
+
+
 def cleanup(ctx: Context, base_sha: str) -> list[str]:
     """Reset the scratch repo; every step is attempted, failures are collected."""
     errors: list[str] = []
@@ -365,7 +415,6 @@ def run_scenario(ctx: Context, args: argparse.Namespace) -> Verdict:
     if len(roots) != 1:
         raise SmokeError(f"scratch repo main must have exactly one root commit, found {len(roots)}")
     base_sha = roots[0]
-    args.state.write_text(json.dumps({"repo": ctx.repo, "base_sha": base_sha}), encoding="utf-8")
     head_main = ctx.sh([*git, "rev-parse", "HEAD"], cwd=clone).strip()
     if head_main != base_sha:
         ctx.log("scratch main is not at its root commit (stale prior run); resetting it first")
@@ -447,14 +496,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not token or (args.command == "run" and not api_key):
         print("::error title=quickstart smoke::SMOKE_REPO_TOKEN / SMOKE_PROVIDER_API_KEY not set")
         return 2
-    ctx = Context(repo=args.repo, token=token, api_key=api_key)
+    try:
+        check_target(args.repo, args.expect_repo, os.environ.get("GITHUB_REPOSITORY", ""))
+    except SmokeError as exc:
+        print(f"::error title=quickstart smoke::{exc}")
+        return 2
+    ctx = Context(repo=args.repo, token=token, api_key=api_key, runner=subprocess.run)
 
     if args.command == "cleanup":
-        if not args.state.is_file():
-            ctx.log("cleanup: no state file; the run never touched the scratch repo")
-            return 0
-        base_sha = json.loads(args.state.read_text(encoding="utf-8"))["base_sha"]
-        errors = cleanup(ctx, base_sha)
+        try:
+            errors = cleanup(ctx, discover_root_sha(ctx))
+        except SmokeError as exc:
+            errors = [f"discover_root_sha: {exc}"]
         for error in errors:
             print(f"::error title=quickstart smoke cleanup::{redact(error, (token, api_key))}")
         return 1 if errors else 0
