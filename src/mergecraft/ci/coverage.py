@@ -70,6 +70,8 @@ NOTE_COVERAGE_UNDECLARED = "coverage_undeclared"
 NOTE_COVERAGE_CLEAN = "coverage_clean"
 NOTE_COVERAGE_DEFAULT_BANDS = "coverage_default_bands"
 NOTE_COVERAGE_CONSUMER_BANDS = "coverage_consumer_bands"
+# ``coverage_symbols_unmatched=<n>``: changed functions with no coverage row.
+NOTE_COVERAGE_SYMBOLS_UNMATCHED = "coverage_symbols_unmatched"
 
 _COVERAGE_CATEGORY = "Maintainability & Code Quality"
 _DECISION_NODES = (
@@ -114,7 +116,12 @@ class CoverageIngestResult:
 
 
 def _norm_path(path: str) -> str:
-    return path.replace("\\", "/").lstrip("./")
+    normalized = path.replace("\\", "/")
+    # ``removeprefix``, not ``lstrip("./")``: lstrip strips characters, so
+    # ``../lib/a.py`` became ``lib/a.py`` and ``.github/x`` lost its dot.
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
 
 
 def _xml_local(tag: str) -> str:
@@ -133,17 +140,37 @@ def _as_finite_float(raw: object) -> float | None:
     return value
 
 
-def _coverage_ratio(raw: object) -> float | None:
+def _fraction_ratio(raw: object) -> float | None:
+    """A ``0..1`` fraction (Cobertura ``line-rate``); out of range is unknown."""
     value = _as_finite_float(raw)
-    if value is None:
-        return None
-    if value != value:
-        return None
-    if value > 1.0:
-        value = value / 100.0
-    if value < 0.0 or value > 1.0:
+    if value is None or value < 0.0 or value > 1.0:
         return None
     return value
+
+
+def _percent_ratio(raw: object) -> float | None:
+    """A ``0..100`` percentage (coverage.py ``percent_*``) as a ratio."""
+    value = _as_finite_float(raw)
+    if value is None or value < 0.0 or value > 100.0:
+        return None
+    return value / 100.0
+
+
+def _coverage_py_line_ratio(summary: Mapping[str, object]) -> float:
+    """Line coverage of one coverage.py function summary.
+
+    ``percent_covered`` blends statements and branches under ``--branch``; CRAP
+    is defined on line coverage, so prefer the statement counts.
+    """
+    covered = _as_finite_float(summary.get("covered_lines"))
+    statements = _as_finite_float(summary.get("num_statements"))
+    if covered is not None and statements:
+        return min(max(covered / statements, 0.0), 1.0)
+    for key in ("percent_statements_covered", "percent_covered"):
+        ratio = _percent_ratio(summary.get(key))
+        if ratio is not None:
+            return ratio
+    return 0.0
 
 
 def _mccabe(node: ast.AST) -> int:
@@ -197,11 +224,7 @@ def parse_coverage_py_json(text: str) -> ParsedCoverage:
                 continue
             raw_summary = record.get("summary")
             summary = raw_summary if isinstance(raw_summary, dict) else {}
-            ratio = _coverage_ratio(summary.get("percent_covered"))
-            if ratio is None:
-                covered = _as_finite_float(summary.get("covered_lines"))
-                statements = _as_finite_float(summary.get("num_statements"))
-                ratio = covered / statements if covered is not None and statements else 0.0
+            ratio = _coverage_py_line_ratio(summary)
             complexity_raw = record.get("complexity")
             complexity: int | None
             try:
@@ -228,26 +251,49 @@ def parse_coverage_py_json(text: str) -> ParsedCoverage:
     return ParsedCoverage(functions=functions)
 
 
+def _lcov_fn_record(payload: str) -> tuple[int, int | None, str] | None:
+    """Parse an ``FN:`` payload: ``start,name`` (lcov 1.x) or ``start,end,name`` (2.x)."""
+    start_text, _, rest = payload.partition(",")
+    try:
+        start = int(start_text)
+    except ValueError:
+        return None
+    end: int | None = None
+    end_text, sep, name = rest.partition(",")
+    if sep and end_text.isdigit():
+        end = int(end_text)
+    else:
+        name = rest
+    if not name:
+        return None
+    return start, end, name
+
+
 def parse_lcov(text: str) -> ParsedCoverage:
     """Parse lcov ``FN:`` / ``FNDA:`` records into per-function coverage."""
     functions: list[CoverageFunction] = []
     current_path = ""
-    declared: list[tuple[int, str]] = []
+    declared: list[tuple[int, int | None, str]] = []
     hits: dict[str, int] = {}
     line_hits: dict[int, int] = {}
+    # lcov >= 2.2 ``FNL:<index>,<start>[,<end>]`` + ``FNA:<index>,<count>,<name>``.
+    located: dict[str, tuple[int, int | None]] = {}
 
     def _flush() -> None:
         if not declared:
             return
-        starts = [start for start, _ in declared]
-        for index, (start, name) in enumerate(declared):
-            next_start = starts[index + 1] if index + 1 < len(starts) else None
+        starts = sorted({start for start, _, _ in declared})
+        for start, end, name in declared:
+            later = [other for other in starts if other > start]
+            next_start = later[0] if later else None
             covered = 0
             statements = 0
             for line, count in line_hits.items():
                 if line < start:
                     continue
-                if next_start is not None and line >= next_start:
+                if end is not None and line > end:
+                    continue
+                if end is None and next_start is not None and line >= next_start:
                     continue
                 statements += 1
                 if count > 0:
@@ -270,18 +316,35 @@ def parse_lcov(text: str) -> ParsedCoverage:
             declared = []
             hits = {}
             line_hits = {}
+            located = {}
             current_path = _norm_path(line[3:])
             continue
         if line.startswith("FN:"):
             saw_fn = True
-            payload = line[3:]
-            start_text, _, name = payload.partition(",")
+            parsed_fn = _lcov_fn_record(line[3:])
+            if parsed_fn is not None:
+                declared.append(parsed_fn)
+            continue
+        if line.startswith("FNL:"):
+            saw_fn = True
+            index_text, _, span = line[4:].partition(",")
+            start_text, _, end_text = span.partition(",")
             try:
-                start = int(start_text)
+                located[index_text] = (int(start_text), int(end_text) if end_text else None)
             except ValueError:
                 continue
-            if name:
-                declared.append((start, name))
+            continue
+        if line.startswith("FNA:"):
+            index_text, _, rest = line[4:].partition(",")
+            count_text, _, name = rest.partition(",")
+            span_row = located.get(index_text)
+            if span_row is None or not name:
+                continue
+            declared.append((span_row[0], span_row[1], name))
+            try:
+                hits[name] = int(count_text)
+            except ValueError:
+                hits[name] = 0
             continue
         if line.startswith("FNDA:"):
             count_text, _, name = line[5:].partition(",")
@@ -303,6 +366,7 @@ def parse_lcov(text: str) -> ParsedCoverage:
             declared = []
             hits = {}
             line_hits = {}
+            located = {}
             current_path = ""
 
     _flush()
@@ -334,7 +398,7 @@ def parse_cobertura(text: str) -> ParsedCoverage:
                 name = str(method.get("name") or "")
                 if not name:
                     continue
-                ratio = _coverage_ratio(method.get("line-rate"))
+                ratio = _fraction_ratio(method.get("line-rate"))
                 if ratio is None:
                     ratio = 0.0
                 complexity_raw = method.get("complexity")
@@ -418,18 +482,27 @@ def _lookup_coverage(
     name: str,
     start_line: int,
     source_text: str | None = None,
+    qualname: str = "",
 ) -> CoverageFunction | None:
     """Match a changed function to a coverage row by path, name, and start line.
 
-    When multiple rows share a name in one file, only an exact ``start_line``
-    match is accepted. A single row with a mismatched ``start_line`` is skipped.
-    A single row without ``start_line`` is skipped when the source defines
-    duplicate symbols with that name.
+    A row keyed by the qualified name (``Foo.bar``, as coverage.py and its lcov
+    writer emit) is preferred; producers that key by bare name still match on
+    ``name``. When multiple rows share a name in one file, only an exact
+    ``start_line`` match is accepted. A single row with a mismatched
+    ``start_line`` is skipped. A single bare-name row without ``start_line`` is
+    skipped when the source defines duplicate symbols with that name.
     """
     want_path = _norm_path(path)
-    candidates = [
-        item for item in functions if item.name == name and _norm_path(item.path) == want_path
-    ]
+    in_file = [item for item in functions if _norm_path(item.path) == want_path]
+    if qualname and qualname != name:
+        qualified = [item for item in in_file if item.name == qualname]
+        if len(qualified) == 1 and qualified[0].start_line in {None, start_line}:
+            return qualified[0]
+        if qualified:
+            matched = [item for item in qualified if item.start_line == start_line]
+            return matched[0] if len(matched) == 1 else None
+    candidates = [item for item in in_file if item.name == name]
     if not candidates:
         return None
     if len(candidates) == 1:
@@ -486,6 +559,7 @@ def coverage_findings(
 
     findings: list[Finding] = []
     scored_clean = False
+    unmatched = 0
     for symbol in symbols:
         source_text = tree.get(symbol.path)
         record = _lookup_coverage(
@@ -494,8 +568,10 @@ def coverage_findings(
             name=symbol.name,
             start_line=symbol.start_line,
             source_text=source_text,
+            qualname=symbol.qualified_name,
         )
         if record is None:
+            unmatched += 1
             continue
         complexity = record.complexity
         if complexity is None:
@@ -549,6 +625,10 @@ def coverage_findings(
 
     if not findings and scored_clean:
         notes.append(NOTE_COVERAGE_CLEAN)
+    if unmatched:
+        # A changed function with no coverage row was not scored: say so, so
+        # "no CRAP findings" is never read as "every changed function is fine".
+        notes.append(f"{NOTE_COVERAGE_SYMBOLS_UNMATCHED}={unmatched}")
 
     # Shadow findings are scope="run" so they stay out of change-scoped
     # blockers without touching BLOCKING_SEVERITIES / blocking_findings.

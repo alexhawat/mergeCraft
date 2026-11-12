@@ -41,11 +41,82 @@ TrustTier = Literal["trusted", "untrusted"]
 
 @dataclass(frozen=True, slots=True)
 class AdapterRunResult:
+    """What one adapter run produced.
+
+    ``tool_error`` marks a run that executed but exited non-zero without a
+    single parsed diagnostic (a crash, a config error, an unreadable file). It
+    is always ``skipped`` too, so every caller that only knows "skipped" keeps
+    treating it as "no evidence"; the pipeline reports it as ``tool-error``.
+    """
+
     findings: list[Finding]
     skipped: bool = False
     skip_reason: str | None = None
     version_note: str | None = None
     config_note: str | None = None
+    tool_error: bool = False
+    pass_reason: str | None = None
+
+
+def nonzero_exit_result(
+    manifest: AnalyzerManifest,
+    exit_code: int,
+    output: str,
+    *,
+    findings: list[Finding] | None = None,
+    version_note: str | None = None,
+    config_note: str | None = None,
+) -> AdapterRunResult:
+    """Classify a non-zero exit that reported no diagnostics.
+
+    A declared ``benign_exits`` entry ("nothing to scan") is a pass carrying its
+    reason; anything else is a :func:`tool_error_result`.
+    """
+    benign = manifest.benign_exit_reason(exit_code, output)
+    if benign is not None:
+        logger.info("{}: exit {} — {}", manifest.id, exit_code, benign)
+        return AdapterRunResult(
+            findings=list(findings or []),
+            version_note=version_note,
+            config_note=config_note,
+            pass_reason=benign,
+        )
+    return tool_error_result(
+        manifest.id,
+        exit_code,
+        findings=findings,
+        version_note=version_note,
+        config_note=config_note,
+    )
+
+
+def tool_error_result(
+    tool_id: str,
+    exit_code: int,
+    *,
+    findings: list[Finding] | None = None,
+    version_note: str | None = None,
+    config_note: str | None = None,
+) -> AdapterRunResult:
+    """Return the typed result for a run that exited non-zero with no diagnostics.
+
+    ``findings`` carries rows an earlier sub-run of the same adapter already
+    produced (a multi-file contract diff), so one failing file does not discard
+    them. The reason is generic on purpose: it never embeds the tool's output.
+    """
+    reason = (
+        f"tool-error {tool_id}: analyzer exited {exit_code} without reporting any "
+        "diagnostics; the run is not evidence of a clean result"
+    )
+    logger.warning("{}", reason)
+    return AdapterRunResult(
+        findings=list(findings or []),
+        skipped=True,
+        skip_reason=reason,
+        version_note=version_note,
+        config_note=config_note,
+        tool_error=True,
+    )
 
 
 def _normalize_paths(findings: list[Finding], *, repo_root: Path) -> list[Finding]:
@@ -589,6 +660,14 @@ def run_adapter(
                 version_note=plan.version_note,
                 config_note=config_note,
             )
+        if outcome.exit_code is not None:
+            return nonzero_exit_result(
+                manifest,
+                outcome.exit_code,
+                "",
+                version_note=plan.version_note,
+                config_note=config_note,
+            )
         reason = outcome.output or f"skipped {tool_id}: analyzer did not run"
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
@@ -614,6 +693,17 @@ def run_adapter(
             repo_root=repo_root,
         )
     except (ValueError, KeyError) as exc:
+        if outcome.exit_code:
+            # A non-zero exit whose output is not the tool's report is the tool
+            # failing (crash traceback, config error), not unparsable findings.
+            logger.info("{}: output did not parse: {}", tool_id, exc)
+            return nonzero_exit_result(
+                manifest,
+                outcome.exit_code,
+                raw,
+                version_note=plan.version_note,
+                config_note=config_note,
+            )
         # D3: unparsable stdout stays a skip (not ``failed``). skip_reason is
         # generic — do not embed raw analyzer bytes. Exception text is logged.
         # Empty output means the analyzer never produced anything (sandbox
@@ -632,6 +722,17 @@ def run_adapter(
             )
         logger.info("{}: {}", reason, exc)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
+
+    if not findings and outcome.exit_code:
+        # The exit code is only trusted as "findings present" when there are
+        # findings: lenient parsers read crash text on stderr as "no rows".
+        return nonzero_exit_result(
+            manifest,
+            outcome.exit_code,
+            raw,
+            version_note=plan.version_note,
+            config_note=config_note,
+        )
 
     if tool_id == "ruff":
         findings = [
@@ -663,5 +764,7 @@ def run_adapter(
 
 __all__ = [
     "AdapterRunResult",
+    "nonzero_exit_result",
     "run_adapter",
+    "tool_error_result",
 ]

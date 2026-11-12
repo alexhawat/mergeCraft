@@ -45,3 +45,6 @@ network_allowlist:
   - "https://api.osv.dev"
   - "https://deps.dev"
 exclusive_group: dependency-vuln
+benign_exits:
+  - code: 128
+    reason: "nothing to scan: no package sources found"

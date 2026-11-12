@@ -24,3 +24,7 @@ provenance:
     sha256: "e87b67160194884e375a46a12c57ccc904f762b53845f254fab7f17d98809c09"
 network_allowlist: []
 exclusive_group: null
+benign_exits:
+  - code: 3
+    marker: "no inputs collected"
+    reason: "nothing to scan: no auditable workflow or action inputs"

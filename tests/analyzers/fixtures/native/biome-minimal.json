@@ -1,0 +1,33 @@
+{
+  "summary": {
+    "changed": 0,
+    "unchanged": 1,
+    "errors": 1,
+    "warnings": 0,
+    "skipped": 0,
+    "suggestedFixesSkipped": 0,
+    "diagnosticsNotPrinted": 0
+  },
+  "diagnostics": [
+    {
+      "category": "lint/suspicious/noDebugger",
+      "severity": "error",
+      "description": "This is an unexpected use of the debugger statement.",
+      "message": [
+        {"elements": [], "content": "This is an unexpected use of the "},
+        {"elements": ["Emphasis"], "content": "debugger"},
+        {"elements": [], "content": " statement."}
+      ],
+      "advices": {"advices": []},
+      "verboseAdvices": {"advices": []},
+      "location": {
+        "path": {"file": "src/index.js"},
+        "span": [21, 30],
+        "sourceCode": "const answer = 42;\n\n\ndebugger;\n"
+      },
+      "tags": ["fixable"],
+      "source": null
+    }
+  ],
+  "command": "lint"
+}
