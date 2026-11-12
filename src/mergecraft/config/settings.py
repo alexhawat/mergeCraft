@@ -555,8 +555,9 @@ class ReviewSettings(BaseModel):
         default=True,
         alias="ignorePathDefaults",
         description=(
-            "Also ignore the built-in defaults: changelogs, lockfiles, package-lock.json, "
-            "and generated or minified files. ``false`` reviews them."
+            "Also ignore the built-in defaults: changelogs, lockfiles, package-lock.json "
+            "and minified files. ``false`` reviews them. A ``generated/`` directory is "
+            "reviewed unless an ``ignorePaths`` glob names it."
         ),
     )
     # #1056 part 5 — labels that mark a pull request as a fix, which then needs a
