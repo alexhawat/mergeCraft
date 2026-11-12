@@ -288,15 +288,28 @@ def test_an_added_line_that_looks_like_a_file_header_does_not_hide_later_hunks()
 
 
 def test_cli_checks_the_lines_a_renamed_and_edited_file_changed(tmp_path: Path) -> None:
-    repo = _repo_with_new_lines(tmp_path)
+    repo = tmp_path / "repo"
+    old = repo / "src" / "mergecraft" / "a.py"
+    old.parent.mkdir(parents=True)
+    old.write_text("".join(f"x{i} = {i}\n" for i in range(1, 11)), encoding="utf-8")
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+    _git(repo, "checkout", "-q", "-b", "topic")
     _git(repo, "mv", "src/mergecraft/a.py", "src/mergecraft/b.py")
-    module = repo / "src" / "mergecraft" / "b.py"
-    module.write_text(
-        module.read_text(encoding="utf-8") + "\n\ndef h():\n    return 4\n", encoding="utf-8"
-    )
+    new = repo / "src" / "mergecraft" / "b.py"
+    new.write_text(new.read_text(encoding="utf-8") + "y = 1\nz = 2\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "move and edit")
-    report = _report(b={"executed_lines": [1, 2], "missing_lines": [5, 6, 7, 8, 11]})
+    status = subprocess.run(
+        ["git", "diff", "--name-status", "main", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert status.startswith("R"), f"fixture must be a true rename: {status!r}"
+    report = _report(b={"executed_lines": list(range(1, 11)), "missing_lines": [11, 12]})
     result = _run(repo, report)
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "src/mergecraft/b.py: uncovered lines 5-8, 11" in result.stderr
+    assert "src/mergecraft/b.py: uncovered lines 11-12" in result.stderr
