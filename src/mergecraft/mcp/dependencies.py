@@ -8,7 +8,13 @@ from typing import TYPE_CHECKING, Any
 from mergecraft.mcp.shared import EMPTY_SCHEMA, ToolClass, execute, tool
 from mergecraft.mcp.tool_state import DependencyInstallationState
 from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, API_ONLY_SCOPE_GUIDANCE
-from mergecraft.prep import PrepOptions, PrepResult, is_prep_install_failure, run_prep_phase
+from mergecraft.prep import (
+    PrepOptions,
+    PrepResult,
+    PrepRun,
+    is_prep_install_failure,
+    run_prep_phase,
+)
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -53,19 +59,27 @@ def _prep_scope_notice(ctx: ToolContext) -> str | None:
 def start_installation(ctx: ToolContext) -> None:
     if ctx.tool_state.dependency_installation is not None:
         return
+    # The agent works in this checkout while prep runs, so prep never restores
+    # files after its install (it could revert the agent's edits).
     options = PrepOptions(
-        ignore_scripts=ctx.trust_tier == "untrusted" or ctx.payload.shell == "disabled"
+        ignore_scripts=ctx.trust_tier == "untrusted" or ctx.payload.shell == "disabled",
+        agent_owned_tree=True,
     )
-    promise = asyncio.ensure_future(run_prep_phase(options))
+    task = asyncio.ensure_future(run_prep_phase(options))
+    # ``PrepRun`` is awaitable from any loop: the MCP tools below run on the
+    # server's own loop, not the loop that started the install.
     ctx.tool_state.dependency_installation = DependencyInstallationState(
         status="in_progress",
-        promise=promise,
+        promise=PrepRun(task),
         results=None,
     )
 
     def _done(task: asyncio.Future[list[PrepResult]]) -> None:
         state = ctx.tool_state.dependency_installation
         if state is None:
+            return
+        if task.cancelled():
+            state.status = "failed"
             return
         try:
             results = task.result()
@@ -79,7 +93,7 @@ def start_installation(ctx: ToolContext) -> None:
         except Exception:
             state.status = "failed"
 
-    promise.add_done_callback(_done)
+    task.add_done_callback(_done)
 
 
 def start_dependency_installation_tool(ctx: ToolContext):

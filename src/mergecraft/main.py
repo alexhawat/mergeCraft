@@ -974,10 +974,29 @@ async def _publish(
         return str(written) if written else None
 
 
-async def _prep_failure_reason(tool_context: ToolContext) -> str | None:
+_PREP_PUBLISH_WAIT_S: float = 30.0
+"""How long publication waits for a still-running dependency install.
+
+A fraction of the publish stage's budget: an install that has not finished by
+the time the review did is stopped rather than allowed to hold publication
+(and the evidence packet) until the stage times out.
+"""
+
+
+async def _await_prep(promise: Any) -> object:
+    return await promise
+
+
+async def _prep_failure_reason(
+    tool_context: ToolContext, *, wait_s: float | None = None
+) -> str | None:
     """Return a reason string when review-relevant dependency prep failed (W6.1).
 
-    Awaits an in-progress install before inspecting status.
+    Awaits an in-progress install before inspecting status, for at most
+    ``wait_s`` seconds (``None`` waits until the install's own deadline). An
+    install still running then is stopped (its process groups are killed) and
+    reported as a reason, so the run is ``inconclusive``: the review ran
+    without its dependencies.
 
     Trusted-tier ``setup_script`` failures are **not** included here. They
     resolve through ``setup_failure_policy`` (S1 / D10 — closed vocabulary
@@ -996,7 +1015,15 @@ async def _prep_failure_reason(tool_context: ToolContext) -> str | None:
         return None
     if state.status == "in_progress" and state.promise is not None:
         try:
-            await state.promise
+            await asyncio.wait_for(_await_prep(state.promise), timeout=wait_s)
+        except TimeoutError:
+            cancel = getattr(state.promise, "cancel", None)
+            if callable(cancel):
+                cancel()
+            return (
+                f"dependency installation was still running {wait_s:g}s after the review "
+                "finished and was stopped"
+            )
         except Exception as exc:
             return f"dependency installation failed: {exc}"
     if state.status != "failed":
@@ -3334,7 +3361,7 @@ async def _finalize(
     # Every run-level gate is resolved before the formal review is published:
     # one shared resolver (``review.outcome_resolution``) maps them, and an
     # ``approve`` verdict is posted as an APPROVE only when the run passes.
-    prep_reason = await _prep_failure_reason(tool_context)
+    prep_reason = await _prep_failure_reason(tool_context, wait_s=_PREP_PUBLISH_WAIT_S)
     setup_reason = tool_state.setup_hook_failure or ""
     if ctx.budget_tracker is not None:
         ctx.run_bounds = ctx.budget_tracker.bounds
