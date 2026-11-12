@@ -166,6 +166,8 @@ def test_pipeline_reports_tool_error_status_and_summary(
     assert rows["mypy"].status == "tool-error"
     assert "exited 2" in (rows["mypy"].reason or "")
     assert state.ran is False
+    assert "tool-error" in (state.reason or "")
+    assert "skipped in this environment" not in (state.reason or "")
     assert "1 tool errors (mypy: tool-error mypy" in (state.pre_merge_summary or "")
 
 

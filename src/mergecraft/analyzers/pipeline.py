@@ -538,8 +538,16 @@ def run_analyzer_pipeline(
             run_state = AnalyzerRunState(
                 ran=False,
                 reason=(
-                    "every enabled analyzer was skipped in this environment — report the "
-                    "Analyzers pre-merge row as skipped, not failed"
+                    (
+                        "no enabled analyzer produced a verdict (some exited with a "
+                        "tool-error, the rest were skipped) — report the Analyzers "
+                        "pre-merge row as not run, not passed"
+                    )
+                    if any(row.status == "tool-error" for row in rows)
+                    else (
+                        "every enabled analyzer was skipped in this environment — report the "
+                        "Analyzers pre-merge row as skipped, not failed"
+                    )
                 ),
                 analyzers=rows,
                 findings=serialized,
