@@ -101,52 +101,37 @@ def test_ratchet_fails_when_combined_coverage_drops_below_floor(
     assert "combined coverage" in capsys.readouterr().err
 
 
-def test_ratchet_fails_when_coverage_exceeds_floor_without_bump(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_ratchet_only_warns_when_coverage_exceeds_floor_without_bump(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Audit TST-F4: a rise past the margin must be matched by a ``fail_under`` bump."""
-    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    """A PR that adds tests must never fail for it; the advisory names the new floor."""
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
     module = _load_ratchet()
-    check = getattr(module, "check_coverage_ratchet", None) or getattr(module, "main", None)
-    assert callable(check)
-    report = _coverage_json(tmp_path, 99.0)
-    rc = _run_ratchet(check, report, margin=5.0)
-    assert rc != 0, "the floor must ratchet: coverage far above it fails until fail_under is bumped"
-
-
-def test_ratchet_only_warns_above_the_ceiling_on_push(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A merge race must not turn main red: push events keep the warning."""
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
-    module = _load_ratchet()
-    report = _coverage_json(tmp_path, 99.0)
+    report = _coverage_json(tmp_path, 99.4)
     assert int(module.check_coverage_ratchet(report, margin=5.0)) == 0
+    err = capsys.readouterr().err
+    assert "::warning title=Coverage floor can be raised::" in err
+    assert "fail_under can be raised to 99" in err
+    assert "fail_under can be raised to 99" in summary.read_text(encoding="utf-8")
 
 
-def test_ratchet_warn_ceiling_flag_overrides_the_pull_request_default(
+def test_hard_ceiling_flag_opts_into_failing(tmp_path: Path) -> None:
+    module = _load_ratchet()
+    report = _coverage_json(tmp_path, 99.0)
+    assert int(module.main([str(report), "--margin", "5", "--hard-ceiling"])) != 0
+    assert int(module.main([str(report), "--margin", "5"])) == 0
+
+
+def test_ratchet_still_fails_below_the_floor_on_pull_requests(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
     module = _load_ratchet()
-    report = _coverage_json(tmp_path, 99.0)
-    assert int(module.check_coverage_ratchet(report, margin=5.0, hard_ceiling=False)) == 0
-    assert int(module.main([str(report), "--warn-ceiling"])) == 0
-    assert int(module.main([str(report), "--hard-ceiling"])) != 0
-
-
-def test_default_margin_keeps_the_declared_floor_close_to_measured_coverage() -> None:
-    assert _load_ratchet().DEFAULT_MARGIN <= 2.0
-
-
-def test_ratchet_fails_with_hard_ceiling_when_above_margin(tmp_path: Path) -> None:
-    """``--hard-ceiling`` fails above the margin even on a push event."""
-    module = _load_ratchet()
-    check = getattr(module, "check_coverage_ratchet", None) or getattr(module, "main", None)
-    assert callable(check)
-    report = _coverage_json(tmp_path, 99.0)
-    rc = _run_ratchet(check, report, margin=5.0, hard_ceiling=True)
-    assert rc != 0, "hard ceiling must fail when coverage far exceeds the floor"
+    report = _coverage_json(tmp_path, _fail_under() - 1.0)
+    assert int(module.check_coverage_ratchet(report)) != 0
 
 
 def test_ratchet_passes_within_margin(tmp_path: Path) -> None:

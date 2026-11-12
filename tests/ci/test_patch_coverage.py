@@ -97,11 +97,21 @@ def test_uncovered_lines_are_reported_per_file() -> None:
     assert result.uncovered == {"src/mergecraft/a.py": [2, 3, 4]}
 
 
-def test_a_changed_file_missing_from_the_report_counts_as_uncovered() -> None:
+def test_a_changed_file_with_no_coverage_data_is_skipped_not_failed() -> None:
+    """(c) A file the coverage config omits has no entry: it must not fail the gate."""
     module = _load()
     result = module.evaluate({"src/mergecraft/new.py": {1, 2}}, {"files": {}})
-    assert result.executable == 2
-    assert result.covered == 0
+    assert (result.executable, result.covered, result.percent) == (0, 0, 100.0)
+    assert result.skipped == ("src/mergecraft/new.py",)
+
+
+def test_lines_excluded_by_pragma_or_config_never_count() -> None:
+    """(b) Excluded lines sit in ``excluded_lines``, not in executed or missing."""
+    module = _load()
+    changed = {"src/mergecraft/a.py": {1, 2, 3}}
+    report = _report(a={"executed_lines": [1], "missing_lines": [], "excluded_lines": [2, 3]})
+    result = module.evaluate(changed, report)
+    assert (result.executable, result.covered, result.percent) == (1, 1, 100.0)
 
 
 def test_report_keys_with_a_different_root_still_match() -> None:
@@ -242,3 +252,24 @@ def test_the_delta_step_skips_without_a_baseline_instead_of_failing_the_required
     assert "Coverage delta skipped" in delta["run"]
     assert delta["env"]["MERGECRAFT_COVERAGE_ARTIFACT_REQUIRE_SUCCESS"] == "1"
     assert delta["env"]["MERGECRAFT_COVERAGE_ARTIFACT_BRANCH"] == "${{ github.base_ref }}"
+
+
+def test_cli_passes_when_a_changed_file_has_no_coverage_data(tmp_path: Path) -> None:
+    repo = _repo_with_new_lines(tmp_path)
+    result = _run(repo, {"files": {}})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "no coverage data for src/mergecraft/a.py" in result.stdout
+
+
+def test_cli_passes_when_the_pr_changes_only_tests(tmp_path: Path) -> None:
+    """(a) A code PR with no changed src lines has nothing to cover."""
+    repo = _repo_with_new_lines(tmp_path)
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "checkout", "-q", "-b", "tests-only")
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_x.py").write_text("def test_x():\n    assert True\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "tests")
+    result = _run(repo, {"files": {}})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "adds no executable lines" in result.stdout

@@ -122,6 +122,8 @@ def test_lowering_fail_under_without_baseline_commit_fails(
 
     module = _load_ratchet_module()
     monkeypatch.setattr(module, "_fail_under_from_pyproject", lambda repo_root=None: lowered)
+    # The merge base declares the real floor; this PR's pyproject declares less.
+    monkeypatch.setattr(module, "_fail_under_from_merge_base", lambda *a, **k: (floor, None))
     rc = int(module.check_coverage_ratchet(report, floor=lowered))
 
     assert rc != 0, (
@@ -130,29 +132,23 @@ def test_lowering_fail_under_without_baseline_commit_fails(
     )
 
 
-def test_raising_coverage_above_ceiling_fails_on_pull_requests_and_warns_on_push(
+def test_raising_coverage_above_ceiling_warns_not_fails_on_every_event(
     tmp_path: Path,
 ) -> None:
-    """``measured > floor + margin`` fails a PR until ``fail_under`` is bumped (TST-F4)."""
+    """``measured > floor + margin`` warns with the new floor, even on a pull request."""
     floor = _fail_under_from_pyproject()
-    measured = floor + _DEFAULT_MARGIN + 2.0
-    report = _coverage_json(tmp_path, measured)
+    report = _coverage_json(tmp_path, floor + _DEFAULT_MARGIN + 2.0)
 
-    def run(event: str) -> subprocess.CompletedProcess[str]:
-        env = {**os.environ, "GITHUB_EVENT_NAME": event}
-        return subprocess.run(
+    for event in ("pull_request", "push"):
+        proc = subprocess.run(
             [sys.executable, "scripts/check_coverage_ratchet.py", str(report)],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
             check=False,
-            env=env,
+            env={**os.environ, "GITHUB_EVENT_NAME": event},
         )
-
-    pr = run("pull_request")
-    assert pr.returncode == 1, pr.stdout + pr.stderr
-    assert "fail_under" in pr.stderr
-    push = run("push")
-    combined = push.stdout + push.stderr
-    assert push.returncode == 0, combined
-    assert re.search(r"warn", combined, re.IGNORECASE)
+        combined = proc.stdout + proc.stderr
+        assert proc.returncode == 0, combined
+        assert re.search(r"warn", combined, re.IGNORECASE)
+        assert "fail_under can be raised to" in combined

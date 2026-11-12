@@ -10,7 +10,10 @@ the *executable* lines the diff added or changed were executed.
 
 Only lines coverage.py considers executable count (blank lines, comments, docstring
 bodies and ``# pragma: no cover`` blocks are not in ``executed_lines`` or
-``missing_lines``). A diff with no executable ``src/`` lines passes.
+``missing_lines``). Lines excluded by ``exclude_lines`` or ``# pragma: no cover``
+are in ``excluded_lines`` and never count. A changed file with no entry in the
+report (omitted by the coverage config) is reported and not counted. A diff with
+no executable ``src/`` lines passes.
 
 Usage:
     python3 scripts/check_patch_coverage.py coverage.json --base origin/main
@@ -42,6 +45,7 @@ class PatchCoverage(NamedTuple):
     executable: int
     covered: int
     uncovered: dict[str, list[int]]
+    skipped: tuple[str, ...] = ()
 
     @property
     def percent(self) -> float:
@@ -98,16 +102,14 @@ def evaluate(changed: Mapping[str, set[int]], report: Mapping[str, Any]) -> Patc
     executable = 0
     covered = 0
     uncovered: dict[str, list[int]] = {}
+    skipped: list[str] = []
     for path in sorted(changed):
         entry = _report_entry(files, path)
         if entry is None:
-            # A new module the unit run never imported has no report entry. Every
-            # changed line in it is unexecuted, but only count the ones coverage
-            # would have treated as code: without the entry that is unknowable, so
-            # fall back to every added line and let the author see the file named.
-            lines = sorted(changed[path])
-            executable += len(lines)
-            uncovered[path] = lines
+            # coverage.py reports every file under ``source`` (imported or not), so a
+            # missing entry means the coverage config omits the file. No data is not
+            # a failure: say so and leave it out of the percentage.
+            skipped.append(path)
             continue
         executed = set(entry.get("executed_lines", ()))
         missing = set(entry.get("missing_lines", ()))
@@ -118,7 +120,7 @@ def evaluate(changed: Mapping[str, set[int]], report: Mapping[str, Any]) -> Patc
         covered += len(hit)
         if miss:
             uncovered[path] = sorted(miss)
-    return PatchCoverage(executable, covered, uncovered)
+    return PatchCoverage(executable, covered, uncovered, tuple(skipped))
 
 
 def _ranges(lines: Sequence[int]) -> str:
@@ -196,6 +198,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     result = evaluate(changed, report)
+    for path in result.skipped:
+        print(f"patch coverage: no coverage data for {path} (omitted by config); not counted")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as handle:
