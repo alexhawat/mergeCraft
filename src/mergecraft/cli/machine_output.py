@@ -182,7 +182,7 @@ def install_root_format_guard(command: click.Command) -> None:
             install_root_format_guard(sub)
         return
     # Instance attribute shadows the bound method; Context.make_context calls it.
-    command.parse_args = _guarded_parse_args(  # type: ignore[method-assign, assignment]
+    command.parse_args = _guarded_parse_args(  # type: ignore[method-assign, assignment]  # — Click reads parse_args off the instance
         command, command.parse_args
     )
 
