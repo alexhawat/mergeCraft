@@ -25,7 +25,8 @@ def waits(monkeypatch: pytest.MonkeyPatch) -> list[float]:
         recorded.append(seconds)
 
     # ``GitHubClient._send`` copies its retry controller per call, sleep included.
-    monkeypatch.setattr(GitHubClient._send.retry, "sleep", _record)  # type: ignore[attr-defined]
+    # tenacity attaches ``.retry`` at runtime, so it is read with getattr.
+    monkeypatch.setattr(getattr(GitHubClient._send, "retry"), "sleep", _record)  # noqa: B009
     return recorded
 
 
@@ -146,3 +147,31 @@ async def test_the_retried_graphql_request_is_the_same_query(waits: list[float])
     bodies: list[dict[str, Any]] = [json.loads(request.content) for request in seen]
     expected = {"query": "query($owner: String!) { x }", "variables": variables}
     assert bodies == [expected, expected]
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        "# resolve\nmutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { x } }",
+        "\ufeffmutation { x }",
+        "subscription { x }",
+        "fragment F on X { y }",
+    ],
+    ids=["comment_before_mutation", "bom_before_mutation", "subscription", "unrecognised"],
+)
+async def test_a_non_query_document_is_never_retried(waits: list[float], document: str) -> None:
+    client, seen = _client([httpx.Response(502), _ok_graphql()])
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await client.graphql(document)
+
+    assert len(seen) == 1
+    assert waits == []
+
+
+async def test_a_commented_query_is_still_retried(waits: list[float]) -> None:
+    client, seen = _client([httpx.Response(502), _ok_graphql()])
+
+    await client.graphql("# who am I\n  query Viewer { viewer { login } }")
+
+    assert len(seen) == 2

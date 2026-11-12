@@ -320,11 +320,26 @@ def _is_graphql_query_request(retry_state: RetryCallState) -> bool:
         return False
     payload = retry_state.kwargs.get("json")
     query = payload.get("query") if isinstance(payload, dict) else None
-    return isinstance(query, str) and not _is_graphql_mutation(query)
+    return isinstance(query, str) and _is_read_only_graphql(query)
 
 
-def _is_graphql_mutation(query: str) -> bool:
-    return query.lstrip().startswith("mutation")
+def _is_read_only_graphql(document: str) -> bool:
+    """True only when the document's first operation is a query (fail closed).
+
+    Leading BOMs, whitespace, commas and ``#`` comments are skipped. Retry is
+    allowed only for an explicit ``query`` operation or the ``{ ... }``
+    shorthand; ``mutation``, ``subscription`` or anything unrecognised is
+    never re-sent.
+    """
+    for line in document.lstrip("\ufeff").splitlines():
+        stripped = line.strip().lstrip(",").strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("{"):
+            return True
+        keyword = stripped.split("(", 1)[0].split("{", 1)[0].split()[0]
+        return keyword == "query"
+    return False
 
 
 class GitHubClient:
