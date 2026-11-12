@@ -104,3 +104,24 @@ def test_release_process_doc_names_the_dispatch_path() -> None:
     text = read_text("docs/release-process.md")
     assert "workflow_dispatch" in text or "dispatch" in text.lower()
     assert "artifact-python-dist" in text
+
+
+def test_prepare_regenerates_agent_packages_before_reporting_the_release_sha() -> None:
+    """The prepared branch must equal its own generator output.
+
+    Craft advances ``docs/consumer-release.json``, but the committed per-harness
+    packages keep the previous tag in the ``{{DOCUMENTATION_REF}}`` prose and in
+    every ``blob/v<release>/`` docs link, so ``make agent-packages-check`` failed
+    on the release branch alone and the publish job aborted before uploading. PR
+    CI cannot see it: that file only changes during a release.
+    """
+    prepare = job(load_workflow(_RELEASE), "prepare")
+    steps = prepare["steps"]
+    generator = [step for step in steps if "gen_agent_packages.py" in str(step.get("run", ""))]
+    assert generator, "prepare must regenerate the agent packages for the release tag"
+    run = str(generator[0]["run"])
+    assert "git push origin" in run, "the regenerated commit must reach the release branch"
+    assert generator[0].get("id"), "the step must publish the regenerated sha"
+    assert prepare["outputs"]["sha"] == "${{ steps." + generator[0]["id"] + ".outputs.sha }}", (
+        "publish waits for CI/CD on prepare's sha, so it must be the regenerated head"
+    )

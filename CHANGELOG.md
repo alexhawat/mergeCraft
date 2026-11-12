@@ -147,6 +147,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   heading as well as `## [<version>] — <date>`, so the GitHub release is no longer
   left half-done after PyPI publishes (#1226).
 
+- The release prepare job regenerates the per-harness agent packages on the release
+  branch, so `make agent-packages-check` no longer fails there. Craft advances
+  `docs/consumer-release.json`, but the committed packages kept the previous tag in
+  the `{{DOCUMENTATION_REF}}` prose and in every `blob/v<release>/` docs link, so
+  CI/CD's `make ci` failed and the publish job aborted before uploading. Pull
+  request CI could not catch it: that file only changes during a release.
+
 - Two URL-credential redaction canaries no longer trip TruffleHog's `URI` detector
   on a full-tree scan: the test assembles its synthetic userinfo at runtime and the
   changelog prose uses a `<password>` placeholder (#1217).
