@@ -7,8 +7,12 @@ in ``pyproject.toml``
 merge-base ``pyproject.toml`` value so lowering ``fail_under`` without a
 deliberate baseline commit fails the gate.
 
-When coverage exceeds the floor by more than a fixed margin, the default mode
-emits a **warning** (exit 0). Pass ``--hard-ceiling`` to fail instead.
+The floor auto-ratchets: when coverage exceeds the floor by more than the margin
+the gate **fails** until ``fail_under`` is raised in the same change, so the
+floor follows the measured value instead of drifting below it (audit TST-F4).
+On ``push`` events the same condition only warns, so a merge race between two
+PRs that each add tests cannot turn ``main`` red. Pass ``--warn-ceiling`` to
+force the warning everywhere.
 """
 
 from __future__ import annotations
@@ -24,8 +28,8 @@ from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
 # Allow coverage to rise this many points above ``fail_under`` before the gate
-# nudges a deliberate floor bump in ``pyproject.toml``.
-DEFAULT_MARGIN = 5.0
+# requires a deliberate floor bump in ``pyproject.toml``.
+DEFAULT_MARGIN = 2.0
 _EPS = 1e-9
 _COVERAGE_CONFIG_PATH = Path(__file__).resolve().parent / "coverage_config.py"
 
@@ -184,14 +188,15 @@ def check_coverage_ratchet(
     floor: float | None = None,
     margin: float = DEFAULT_MARGIN,
     repo_root: Path | None = None,
-    hard_ceiling: bool = False,
+    hard_ceiling: bool | None = None,
     allow_no_merge_base: bool = False,
     base_ref: str | None = None,
 ) -> int:
     """Return 0 when coverage is acceptable; 1 on hard failures.
 
-    Hard failures include measured coverage below ``fail_under``, an optional
-    hard ceiling when ``hard_ceiling`` is set, merge-base lookup errors in CI,
+    Hard failures include measured coverage below ``fail_under``, measured
+    coverage more than ``margin`` above it (``hard_ceiling``; default on except
+    for ``push`` events, where it warns), merge-base lookup errors in CI,
     and a declared ``fail_under`` below the merge-base floor on pull requests.
 
     The merge-base **lowering guard** is PR-only: on ``push`` /
@@ -203,6 +208,8 @@ def check_coverage_ratchet(
     (``merge_base_error``) and a lowered-floor comparison (``floor_lowered``)
     never both appear in the failure list.
     """
+    if hard_ceiling is None:
+        hard_ceiling = (os.environ.get("GITHUB_EVENT_NAME") or "").strip() != "push"
     report_path = Path(report)
     root = _repo_root(repo_root)
     declared_floor = _fail_under_from_pyproject(root)
@@ -234,7 +241,7 @@ def check_coverage_ratchet(
         message = (
             f"combined coverage {measured:.2f}% exceeds floor {resolved_floor:.2f}% "
             f"by more than {margin:.2f} points (ceiling {ceiling:.2f}%) — "
-            "consider bumping fail_under in pyproject.toml in a deliberate commit"
+            "raise fail_under in pyproject.toml so the floor tracks the measured value"
         )
         if hard_ceiling:
             failures.append(message)
@@ -270,12 +277,21 @@ def main(argv: list[str] | None = None) -> int:
         "--margin",
         type=float,
         default=DEFAULT_MARGIN,
-        help=f"Points above fail_under before a bump is suggested (default: {DEFAULT_MARGIN})",
+        help=f"Points above fail_under before a bump is required (default: {DEFAULT_MARGIN})",
     )
-    parser.add_argument(
+    ceiling = parser.add_mutually_exclusive_group()
+    ceiling.add_argument(
         "--hard-ceiling",
         action="store_true",
-        help="Fail (instead of warn) when measured exceeds floor + margin",
+        default=None,
+        help="Fail when measured exceeds floor + margin (default except on push events)",
+    )
+    ceiling.add_argument(
+        "--warn-ceiling",
+        dest="hard_ceiling",
+        action="store_false",
+        default=None,
+        help="Only warn when measured exceeds floor + margin",
     )
     parser.add_argument(
         "--allow-no-merge-base",

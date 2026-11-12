@@ -3,6 +3,11 @@
 # MERGECRAFT_COVERAGE_ARTIFACT_EVENT (optional) restricts the runs considered to one
 # trigger event: the base lookup passes ``push`` so a fork's pull_request run for the
 # same SHA can never supply the baseline; the head lookup passes ``pull_request``.
+# MERGECRAFT_COVERAGE_ARTIFACT_BRANCH (optional) restricts the runs to one head branch
+# (the base lookup passes ``main``). MERGECRAFT_COVERAGE_ARTIFACT_REQUIRE_SUCCESS=1
+# drops completed runs whose conclusion is not ``success``, so a base baseline never
+# comes from a failed or cancelled run. Only runs of ci.yml and ci-cd.yml are ever
+# considered: another workflow can upload an artifact with the same name.
 # MERGECRAFT_COVERAGE_ARTIFACT_STATUS=any also considers runs that are still in
 # progress: the head lookup uses it so Integration reads the artifact as soon as the
 # coverage gate uploads it, not when every other CI job has finished.
@@ -34,15 +39,30 @@ if [[ -n "${MERGECRAFT_COVERAGE_ARTIFACT_EVENT:-}" ]]; then
   event_filter="&event=${MERGECRAFT_COVERAGE_ARTIFACT_EVENT}"
 fi
 
+branch_filter=""
+if [[ -n "${MERGECRAFT_COVERAGE_ARTIFACT_BRANCH:-}" ]]; then
+  branch_filter="&branch=${MERGECRAFT_COVERAGE_ARTIFACT_BRANCH}"
+fi
+
 status_filter="&status=completed"
 if [[ "${MERGECRAFT_COVERAGE_ARTIFACT_STATUS:-}" == "any" ]]; then
   status_filter=""
 fi
 
 runs_json="$(gh api \
-  "/repos/${repo}/actions/runs?head_sha=${commit_sha}&per_page=20${status_filter}${event_filter}")"
+  "/repos/${repo}/actions/runs?head_sha=${commit_sha}&per_page=20${status_filter}${event_filter}${branch_filter}")"
 
-run_ids="$(printf '%s' "${runs_json}" | jq -r '.workflow_runs[]? | .id')"
+# Trusted publishers only: ci.yml and ci-cd.yml (the path may carry an @ref suffix),
+# never the run that is executing this script, and optionally only successful runs.
+# shellcheck disable=SC2016
+run_ids="$(printf '%s' "${runs_json}" | jq -r \
+  --arg self "${GITHUB_RUN_ID:-}" \
+  --arg require_success "${MERGECRAFT_COVERAGE_ARTIFACT_REQUIRE_SUCCESS:-0}" \
+  '.workflow_runs[]?
+   | select((.path // "") | test("^\\.github/workflows/(ci|ci-cd)\\.yml"))
+   | select((.id | tostring) != $self)
+   | select($require_success != "1" or .status != "completed" or .conclusion == "success")
+   | .id')"
 
 for run_id in ${run_ids}; do
   artifacts_json="$(gh api "/repos/${repo}/actions/runs/${run_id}/artifacts?per_page=100")"

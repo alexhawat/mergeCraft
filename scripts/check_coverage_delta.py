@@ -6,9 +6,10 @@ report so CI can distinguish an inherited floor breach from a drop caused by the
 change under review.
 
 Exit policy: inherited floor breaches fail even when the PR did not lower
-coverage. A head report that regresses versus base but stays at or above
-``fail_under`` exits 0 — the absolute floor is enforced separately by
-``make coverage-gate`` on the head tree, not by this delta script.
+coverage. A head report that falls more than ``MAX_DROP_PP`` below base fails
+even while it stays above ``fail_under`` (audit TST-F4: a drop inside the floor's
+headroom used to pass). A smaller dip is run-to-run noise and exits 0; the
+absolute floor is enforced separately by ``make coverage-gate``.
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ from typing import Any, NamedTuple
 # more below ``fail_under`` is treated as inherited cumulative drift rather than a
 # marginal regression caused solely by the current change (#432 / D6).
 INHERITED_BREACH_MARGIN = 1.0
+# A head report may sit this many points below base before the delta gate fails.
+MAX_DROP_PP = 0.25
 _EPS = 1e-9
 
 
@@ -125,8 +128,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
         epilog=(
-            "Regressions that stay at or above fail_under do not fail this check; "
-            "only inherited floor breaches and caused drops below fail_under exit 1."
+            "Fails on inherited floor breaches, on caused drops below fail_under, and on "
+            "any drop larger than --max-drop points, whether or not it stays above fail_under."
         ),
     )
     parser.add_argument(
@@ -141,6 +144,12 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         type=Path,
         help="Base-branch coverage report to compare against",
+    )
+    parser.add_argument(
+        "--max-drop",
+        type=float,
+        default=MAX_DROP_PP,
+        help=f"Largest tolerated head-below-base drop in points (default: {MAX_DROP_PP})",
     )
     args = parser.parse_args(argv)
 
@@ -157,6 +166,14 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"Coverage gate: caused drop — head {result.head_percent:.2f}% is below floor "
             f"{result.floor:.2f}% and regressed from base {result.base_percent:.2f}%.",
+            file=sys.stderr,
+        )
+        return 1
+    if result.caused_by_change and -result.delta > args.max_drop + _EPS:
+        print(
+            f"Coverage gate: head {result.head_percent:.2f}% is {-result.delta:.2f}pp below base "
+            f"{result.base_percent:.2f}% (tolerance {args.max_drop:.2f}pp) — add tests for the "
+            "code this change touches.",
             file=sys.stderr,
         )
         return 1

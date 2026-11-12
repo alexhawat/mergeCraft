@@ -86,15 +86,15 @@ def _coverage_json(tmp_path: Path, percent: float) -> Path:
     return path
 
 
-def test_pyproject_fail_under_is_eighty_two() -> None:
-    """#431 / D7: the global floor must be 82%, not the legacy 80%."""
-    assert _fail_under_from_pyproject() == HH431_TARGET_FAIL_UNDER
+def test_pyproject_fail_under_is_at_least_eighty_two() -> None:
+    """#431 / D7: the global floor is never below 82%. It ratchets up, so it may exceed it."""
+    assert _fail_under_from_pyproject() >= HH431_TARGET_FAIL_UNDER
 
 
 def test_coverage_config_fail_under_matches_target() -> None:
-    """``coverage_config.fail_under_from_pyproject`` must track the 82% contract."""
+    """``coverage_config.fail_under_from_pyproject`` reads the declared floor."""
     module = _load_coverage_config()
-    assert module.fail_under_from_pyproject(REPO_ROOT) == HH431_TARGET_FAIL_UNDER
+    assert module.fail_under_from_pyproject(REPO_ROOT) == _fail_under_from_pyproject()
 
 
 def test_check_coverage_floors_rejects_measured_below_target(
@@ -144,7 +144,7 @@ def test_check_coverage_floors_accepts_measured_at_target(
 ) -> None:
     """Gate logic: a report at the target floor must pass ``check_coverage_floors``."""
     module = _load_coverage_floors()
-    report = _coverage_json(tmp_path, HH431_TARGET_FAIL_UNDER)
+    report = _coverage_json(tmp_path, _fail_under_from_pyproject())
     monkeypatch.setattr(sys, "argv", ["check_coverage_floors", str(report)])
     rc = int(module.main())
     assert rc == 0

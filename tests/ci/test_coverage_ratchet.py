@@ -101,18 +101,46 @@ def test_ratchet_fails_when_combined_coverage_drops_below_floor(
     assert "combined coverage" in capsys.readouterr().err
 
 
-def test_ratchet_warns_when_coverage_exceeds_floor_without_bump(tmp_path: Path) -> None:
-    """D12: a large rise without bumping the floor warns by default (exit 0)."""
+def test_ratchet_fails_when_coverage_exceeds_floor_without_bump(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Audit TST-F4: a rise past the margin must be matched by a ``fail_under`` bump."""
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
     module = _load_ratchet()
     check = getattr(module, "check_coverage_ratchet", None) or getattr(module, "main", None)
     assert callable(check)
     report = _coverage_json(tmp_path, 99.0)
     rc = _run_ratchet(check, report, margin=5.0)
-    assert rc == 0, "ratchet should warn, not fail, when coverage exceeds the soft ceiling (D12)"
+    assert rc != 0, "the floor must ratchet: coverage far above it fails until fail_under is bumped"
+
+
+def test_ratchet_only_warns_above_the_ceiling_on_push(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A merge race must not turn main red: push events keep the warning."""
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+    module = _load_ratchet()
+    report = _coverage_json(tmp_path, 99.0)
+    assert int(module.check_coverage_ratchet(report, margin=5.0)) == 0
+
+
+def test_ratchet_warn_ceiling_flag_overrides_the_pull_request_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    module = _load_ratchet()
+    report = _coverage_json(tmp_path, 99.0)
+    assert int(module.check_coverage_ratchet(report, margin=5.0, hard_ceiling=False)) == 0
+    assert int(module.main([str(report), "--warn-ceiling"])) == 0
+    assert int(module.main([str(report), "--hard-ceiling"])) != 0
+
+
+def test_default_margin_keeps_the_declared_floor_close_to_measured_coverage() -> None:
+    assert _load_ratchet().DEFAULT_MARGIN <= 2.0
 
 
 def test_ratchet_fails_with_hard_ceiling_when_above_margin(tmp_path: Path) -> None:
-    """``--hard-ceiling`` restores the legacy fail-on-above-margin behaviour."""
+    """``--hard-ceiling`` fails above the margin even on a push event."""
     module = _load_ratchet()
     check = getattr(module, "check_coverage_ratchet", None) or getattr(module, "main", None)
     assert callable(check)

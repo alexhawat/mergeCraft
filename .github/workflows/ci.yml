@@ -138,6 +138,10 @@ jobs:
     needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      # Lists main's workflow runs to find the base-commit coverage artifact.
+      actions: read
     steps:
       - name: Docs-only skip
         if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true'
@@ -181,6 +185,43 @@ jobs:
           name: mergecraft-coverage-json
           path: coverage.json
           if-no-files-found: error
+      # The floor and the ratchet bound the whole tree. These two bound the change:
+      # new lines must be exercised, and the total must not fall against main.
+      - name: Patch coverage (changed src lines)
+        if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 scripts/check_patch_coverage.py coverage.json --base "origin/${BASE_REF}"
+      - name: Coverage delta vs main
+        if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # Only a successful push run of the base branch may supply the baseline.
+          MERGECRAFT_COVERAGE_ARTIFACT_EVENT: push
+          MERGECRAFT_COVERAGE_ARTIFACT_BRANCH: ${{ github.base_ref }}
+          MERGECRAFT_COVERAGE_ARTIFACT_REQUIRE_SUCCESS: "1"
+          MERGECRAFT_COVERAGE_ARTIFACT_STATUS: any
+        run: |
+          set -uo pipefail
+          base="${RUNNER_TEMP}/coverage-base.json"
+          # Bounded wait: main's own run normally finished long before this PR's
+          # coverage run did, so a miss is final after a short grace period and
+          # must not lengthen the required path.
+          found=false
+          for attempt in 1 2 3 4 5 6; do
+            rc=0
+            MERGECRAFT_COVERAGE_ATTEMPT="${attempt}" MERGECRAFT_COVERAGE_EMPTY_GRACE_ATTEMPTS=2 \
+              bash scripts/ci_fetch_coverage_artifact.sh "${BASE_SHA}" "${base}" || rc=$?
+            if [ "${rc}" -eq 0 ]; then found=true; break; fi
+            if [ "${rc}" -eq 3 ]; then break; fi
+            sleep 5
+          done
+          if [ "${found}" != true ]; then
+            echo "::warning title=Coverage delta skipped::No coverage artifact from a successful ${BASE_SHA} run on the base branch; the floor, ratchet and patch coverage still gate this PR."
+            exit 0
+          fi
+          python3 scripts/check_coverage_delta.py coverage.json --base "${base}"
 
   deterministic-integration:
     needs: changes

@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -23,7 +24,7 @@ from tests.ci.workflow_support import REPO_ROOT
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
-_DEFAULT_MARGIN = 5.0
+_DEFAULT_MARGIN = 2.0
 
 
 def _load_ratchet_module() -> Any:
@@ -129,23 +130,29 @@ def test_lowering_fail_under_without_baseline_commit_fails(
     )
 
 
-def test_raising_coverage_above_ceiling_warns_not_fails(tmp_path: Path) -> None:
-    """``measured > floor + margin`` should warn, not fail, unless hard ceiling is opted in (D12)."""
+def test_raising_coverage_above_ceiling_fails_on_pull_requests_and_warns_on_push(
+    tmp_path: Path,
+) -> None:
+    """``measured > floor + margin`` fails a PR until ``fail_under`` is bumped (TST-F4)."""
     floor = _fail_under_from_pyproject()
     measured = floor + _DEFAULT_MARGIN + 2.0
     report = _coverage_json(tmp_path, measured)
 
-    proc = subprocess.run(
-        [sys.executable, "scripts/check_coverage_ratchet.py", str(report)],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    combined = proc.stdout + proc.stderr
-    assert proc.returncode == 0, (
-        f"coverage above the soft ceiling should warn, not fail (D12 — TH6)\n{combined}"
-    )
-    assert re.search(r"warn", combined, re.IGNORECASE), (
-        "expected a warning when measured exceeds floor + margin (D12)"
-    )
+    def run(event: str) -> subprocess.CompletedProcess[str]:
+        env = {**os.environ, "GITHUB_EVENT_NAME": event}
+        return subprocess.run(
+            [sys.executable, "scripts/check_coverage_ratchet.py", str(report)],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+
+    pr = run("pull_request")
+    assert pr.returncode == 1, pr.stdout + pr.stderr
+    assert "fail_under" in pr.stderr
+    push = run("push")
+    combined = push.stdout + push.stderr
+    assert push.returncode == 0, combined
+    assert re.search(r"warn", combined, re.IGNORECASE)
