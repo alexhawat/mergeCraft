@@ -45,16 +45,18 @@ from mergecraft.agents.shared import (
     AgentRunContext,
     AgentUsage,
     agent,
+    apply_integrity_gate,
+    capture_integrity_baseline,
     log_token_table,
     resolve_cache_read,
     spawn_agent_cli,
     start_stderr_drain,
+    stderr_tail_for_error,
     with_prompt,
 )
 from mergecraft.config.env import AgentRuntimeEnv, McpEnv
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.security.private_files import write_private_file
-from mergecraft.security.review_integrity import TreeBaseline, hash_tree
 from mergecraft.tracing import current_tracer
 from mergecraft.tracing.genai import (
     ModelParams,
@@ -86,6 +88,7 @@ if TYPE_CHECKING:
 
     from mergecraft.agents._stream_consumer import StreamSpanAccumulator
     from mergecraft.mcp.tool_state import ToolState
+    from mergecraft.security.review_integrity import TreeBaseline
     from mergecraft.tracing.content import ContentCapture
 
 OPENCODE_AUTH_ENV = "OPENCODE_AUTH_JSON"
@@ -1286,28 +1289,15 @@ async def _prompt_session_http(
 
 
 def _capture_integrity_baseline(ctx: AgentRunContext) -> TreeBaseline | None:
-    checkout = _checkout_root(ctx)
-    try:
-        baseline = TreeBaseline(root=checkout, digest=hash_tree(checkout))
-    except OSError as exc:
-        msg = f"review integrity baseline failed for {checkout}: {exc}"
-        logger.error(msg)
-        return None
-    ctx.tool_state.review_tree_baseline = baseline
-    return baseline
+    # The shared gate (#1329); kept as a module seam for the opencode pins.
+    return capture_integrity_baseline(ctx)
 
 
 def _apply_integrity_gate(
     result: AgentResult,
     baseline: TreeBaseline | None,
 ) -> AgentResult:
-    if baseline is None:
-        return result
-    try:
-        baseline.verify()
-    except RuntimeError as exc:
-        return AgentResult(success=False, error=str(exc))
-    return result
+    return apply_integrity_gate(result, baseline)
 
 
 async def _run(ctx: AgentRunContext) -> AgentResult:
@@ -1525,6 +1515,22 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
 _OPENCODE_ARGV_PROMPT_LIMIT: Final = 120_000
 
 
+def _opencode_prompt_args(ctx: AgentRunContext, text: str) -> list[str]:
+    """Return the ``opencode run`` prompt arguments for ``text`` (#1329).
+
+    A prompt within one argv string's limit is passed as is; a longer one is
+    written to a file and attached with ``--file``. Shared by the 2.x run path
+    and the 1.x ``run`` fallback, which used to pass every prompt as argv.
+    """
+    if len(text.encode("utf-8")) <= _OPENCODE_ARGV_PROMPT_LIMIT:
+        return [text]
+    prompt_dir = _evidence_dir(ctx)
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    prompt_path = prompt_dir / f"opencode-prompt-{time.time_ns()}.md"
+    prompt_path.write_text(text, encoding="utf-8")
+    return ["--file", str(prompt_path), "Follow the instructions in the attached file."]
+
+
 async def _run_v2(
     *, cli: str, ctx: AgentRunContext, env: dict[str, str], model: str | None
 ) -> AgentResult:
@@ -1546,16 +1552,7 @@ async def _run_v2(
         cmd = list(base)
         if session_id:
             cmd.extend(["--session", session_id])
-        if len(text.encode("utf-8")) > _OPENCODE_ARGV_PROMPT_LIMIT:
-            prompt_dir = _evidence_dir(ctx)
-            prompt_dir.mkdir(parents=True, exist_ok=True)
-            prompt_path = prompt_dir / f"opencode-prompt-{time.time_ns()}.md"
-            prompt_path.write_text(text, encoding="utf-8")
-            cmd.extend(
-                ["--file", str(prompt_path), "Follow the instructions in the attached file."]
-            )
-        else:
-            cmd.append(text)
+        cmd.extend(_opencode_prompt_args(ctx, text))
         return await asyncio.to_thread(
             _run_opencode_cli_streaming, cmd=cmd, ctx=ctx, env=env, session=session
         )
@@ -1580,23 +1577,45 @@ async def _run_v2(
 
 
 async def _run_cli_fallback(*, cli: str, ctx: AgentRunContext, env: dict[str, str]) -> AgentResult:
+    """Run the review through ``opencode run`` when ``opencode serve`` cannot boot (1.x).
+
+    The session handler keeps the model's text answer and the session id, and
+    a long prompt is attached as a file, as on the 2.x path (#1329). Follow-up
+    prompts from the post-run retry loop resume that session.
+    """
     prompt = ctx.instructions.user
     if ctx.instructions.system:
         prompt = f"{ctx.instructions.system}\n\n{prompt}"
-    cmd = [cli, "run", "--format", "json", prompt]
+    base = [cli, "run", "--format", "json"]
     if ctx.resolved_model:
-        cmd.extend(["--model", ctx.resolved_model])
-    # W6 migration: opencode ``--format json`` may emit multiple NDJSON
-    # events. We attempt the streaming read loop and fall back to the
-    # legacy last-line parse if the events are not granular enough (D12).
-    # Run-level spans are emitted through the W4 tracer regardless.
-    # Blocking Popen/wait runs in a worker thread so outer wait_for can preempt.
-    result = await asyncio.to_thread(
-        _run_opencode_cli_streaming,
-        cmd=cmd,
-        ctx=ctx,
-        env=env,
-    )
+        base.extend(["--model", ctx.resolved_model])
+    session: dict[str, str] = {}
+
+    async def _turn(text: str, session_id: str | None = None) -> AgentResult:
+        cmd = list(base)
+        if session_id:
+            cmd.extend(["--session", session_id])
+        cmd.extend(_opencode_prompt_args(ctx, text))
+        # W6 migration: opencode ``--format json`` may emit multiple NDJSON
+        # events. We attempt the streaming read loop and fall back to the
+        # legacy last-line parse if the events are not granular enough (D12).
+        # Blocking Popen/wait runs in a worker thread so outer wait_for can preempt.
+        return await asyncio.to_thread(
+            _run_opencode_cli_streaming, cmd=cmd, ctx=ctx, env=env, session=session
+        )
+
+    initial = await _turn(prompt)
+
+    async def resume(followup: str) -> AgentResult:
+        session_id = session.get("id")
+        if not session_id:
+            return AgentResult(
+                success=False,
+                error="opencode run reported no session id; the follow-up cannot resume it",
+            )
+        return await _turn(followup, session_id)
+
+    result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
     return await finalize_agent_result(ctx, result)
 
 
@@ -1686,7 +1705,12 @@ def _run_opencode_cli_streaming(
                     timeout=AgentRuntimeEnv().agent_timeout,
                 )
             except subprocess.TimeoutExpired:
-                return AgentResult(success=False, error="opencode run timed out")
+                return AgentResult(
+                    success=False,
+                    error="opencode run timed out",
+                    metadata={"timeout": True, "retryable": True},
+                    usage=_priced_stream_usage(accumulator, ctx=ctx),
+                )
             finally:
                 # The process group is gone; collect the drained tail so the
                 # reader thread never outlives it.
@@ -1702,6 +1726,7 @@ def _run_opencode_cli_streaming(
             success=False,
             error=diagnostic.render(),
             metadata=diagnostic.as_metadata(),
+            usage=_priced_stream_usage(accumulator, ctx=ctx),
         )
 
     if returncode != 0:
@@ -1712,7 +1737,7 @@ def _run_opencode_cli_streaming(
         # A failed attempt still burns tokens — often the attempt that
         # escalates to the next model — so its usage belongs in the budget band
         # (claude.py and codex.py report it on the same path).
-        failure_error = (stderr_text or stream_error or "").strip()
+        failure_error = (stream_error or "").strip() or stderr_tail_for_error(stderr_text)
         return AgentResult(
             success=False,
             error=failure_error or f"opencode failed (exit {returncode})",

@@ -20,7 +20,23 @@ def test_resolve_model_config_openai_env(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.delenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", raising=False)
     cfg = resolve_model_config()
     assert cfg.api_key == "test-key"
-    assert cfg.openai_model_name() == "gpt-4o-mini"
+    # The default comes from the model catalog's ``openai/gpt-mini`` (#1330).
+    from mergecraft.models import resolve_model_slug
+
+    assert cfg.model == resolve_model_slug("openai/gpt-mini")
+    assert cfg.openai_model_name() == cfg.model.split("/", 1)[1]
+
+
+def test_resolve_model_config_refuses_a_foreign_slug_on_the_openai_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-OpenAI slug is not sent to OpenAI under its bare model id (#1330)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("OPENCODE_GO_API_KEY", raising=False)
+    monkeypatch.delenv("MERGECRAFT_CUSTOM_PROVIDER_API_KEY", raising=False)
+    monkeypatch.delenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL", raising=False)
+    with pytest.raises(ValueError, match="not an OpenAI model"):
+        resolve_model_config(model="anthropic/claude-opus")
 
 
 def test_resolve_model_config_opencode_go_fallback(monkeypatch: pytest.MonkeyPatch) -> None:

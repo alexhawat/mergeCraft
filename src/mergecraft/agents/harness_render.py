@@ -240,10 +240,12 @@ def _harness_dispatched_model(binding: AgentBinding, settings: Any) -> str:
 
 
 def _claude_harness_model(binding: AgentBinding, settings: Any) -> str:
+    from mergecraft.agents.claude import claude_subagent_model
+
     if binding.role is AgentRole.verifier:
-        return pinned_judge_model("claude") or "claude-sonnet-5"
+        return pinned_judge_model("claude") or claude_subagent_model()
     if binding.role in (AgentRole.reviewer, AgentRole.recall):
-        return "claude-sonnet-5"
+        return claude_subagent_model()
     return _strip_provider_prefix(_harness_dispatched_model(binding, settings))
 
 

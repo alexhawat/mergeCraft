@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import time
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -43,6 +44,7 @@ from mergecraft.agents.verifier import (
     VERIFIER_AGENT_NAME,
     VERIFIER_RUBRIC_VERSION,
     VERIFIER_SYSTEM_PROMPT,
+    claude_catalog_subagent_model,
     pinned_judge_model,
 )
 from mergecraft.config.env import AgentRuntimeEnv, McpEnv
@@ -243,6 +245,42 @@ def write_mcp_config(ctx: AgentRunContext) -> str:
     return str(config_path)
 
 
+def _write_claude_system_prompt(ctx: AgentRunContext, system: str) -> str:
+    """Write the system prompt to a private file for ``--system-prompt-file`` (#1329).
+
+    It sits beside ``mcp.json`` in the run's ``.claude`` directory, which the
+    reviewer's ``Read``/``Edit`` tools are denied. The name is unique per call so
+    concurrent runs sharing a tmpdir never read each other's prompt.
+    """
+    config_dir = _claude_mcp_config_dir(ctx)
+    config_dir.mkdir(parents=True, exist_ok=True)
+    path = config_dir / f"system-prompt-{uuid.uuid4().hex}.md"
+    write_private_file(path, system)
+    # Created by the root orchestrator; the dropped CLI must be able to read it.
+    prepare_workspace_for_agent(str(config_dir))
+    return str(path)
+
+
+# Claude Code's provider-portable alias for the subagent family. On Bedrock or
+# Vertex a first-party id is rejected; ``sonnet`` resolves per provider (through
+# ``ANTHROPIC_DEFAULT_SONNET_MODEL`` when the operator pins one).
+_CLAUDE_PORTABLE_SUBAGENT_ALIAS = "sonnet"
+
+
+def claude_subagent_model() -> str:
+    """Return the model id the Claude reviewer, recall and verifier subagents run (#1330).
+
+    The catalog's ``anthropic/claude-sonnet`` id on the first-party API; Claude
+    Code's portable ``sonnet`` alias when the CLI is routed to Bedrock or Vertex.
+    """
+    if (
+        os.environ.get("CLAUDE_CODE_USE_BEDROCK", "").strip()
+        or os.environ.get("CLAUDE_CODE_USE_VERTEX", "").strip()
+    ):
+        return _CLAUDE_PORTABLE_SUBAGENT_ALIAS
+    return claude_catalog_subagent_model()
+
+
 def build_agents_json(
     *,
     verifier_denied_tools: Sequence[str] = (),
@@ -267,7 +305,7 @@ def build_agents_json(
         # verdict and the judge model actually dispatched cannot diverge
         # (#45). Sonnet is deliberately a different tier from the
         # orchestrator that wrote the finding.
-        "model": pinned_judge_model("claude") or "claude-sonnet-5",
+        "model": pinned_judge_model("claude") or claude_subagent_model(),
     }
     denied = [format_mcp_tool_ref("claude", name) for name in verifier_denied_tools]
     if denied:
@@ -278,7 +316,7 @@ def build_agents_json(
             "Reads only — no writes, no state-changing shell or MCP calls."
         ),
         "prompt": REVIEWER_SYSTEM_PROMPT,
-        "model": "claude-sonnet-5",
+        "model": claude_subagent_model(),
     }
     reviewer_denied = [format_mcp_tool_ref("claude", name) for name in subagent_denied_tools]
     if reviewer_denied:
@@ -990,7 +1028,17 @@ def _run_claude_once(
     ctx: AgentRunContext,
     mcp_config: str,
     continue_session: bool = False,
+    session: dict[str, str] | None = None,
 ) -> AgentResult:
+    """Run one ``claude --print`` turn; ``session`` carries the session id between turns.
+
+    The first turn records the stream's ``session_id`` into ``session``; a
+    resume names it with ``--resume`` instead of ``--continue`` ("the last
+    conversation in this directory"), so concurrent runs never resume each
+    other's conversation (#1327). The system prompt goes in a private file and
+    the user prompt on stdin, never argv: either can pass the 128 KiB
+    per-argument ``execve`` limit (#1329).
+    """
     from mergecraft.agents.harness_render import (
         append_reviewer_dispatch_instructions,
         render_for_run,
@@ -1044,7 +1092,8 @@ def _run_claude_once(
     if model:
         cmd.extend(["--model", model])
     if continue_session:
-        cmd.append("--continue")
+        session_id = (session or {}).get("session_id")
+        cmd.extend(["--resume", session_id] if session_id else ["--continue"])
     # Permission mode: skip interactive prompts in CI. AR4.3 / AR-D7 — this
     # stays: headless CI cannot answer a prompt, so the boundary is the
     # ``--disallowedTools`` deny list above, not an interactive confirmation.
@@ -1058,8 +1107,7 @@ def _run_claude_once(
     )
     user_prompt = prompt or ctx.instructions.user
     if system:
-        cmd.extend(["--system-prompt", system])
-    cmd.append(user_prompt)
+        cmd.extend(["--system-prompt-file", _write_claude_system_prompt(ctx, system)])
 
     logger.info("invoking claude CLI (model={})", model or "default")
     accumulator = StreamSpanAccumulator(agent_name="claude")
@@ -1067,7 +1115,7 @@ def _run_claude_once(
     tracer = _resolve_active_tracer()
 
     try:
-        process = spawn_agent_cli(cmd, env=_build_env(ctx))
+        process = spawn_agent_cli(cmd, env=_build_env(ctx), stdin_text=user_prompt)
     except FileNotFoundError:
         # W5.4 / W5.5 regression pins and the W5.7 equivalence test patch
         # only ``subprocess.run``. When the real CLI is missing AND the
@@ -1080,6 +1128,7 @@ def _run_claude_once(
             ctx=ctx,
             model=model,
             skip_permissions=skip_permissions,
+            stdin_text=user_prompt,
         )
 
     assert process.stdout is not None
@@ -1121,6 +1170,10 @@ def _run_claude_once(
         watchdog.touch(
             model_output=event_has_model_output(event), event_type=event_type_name(event)
         )
+        if session is not None:
+            session_id = event.get("session_id")
+            if isinstance(session_id, str) and session_id.strip():
+                session.setdefault("session_id", session_id.strip())
         handler(acc, event)
 
     try:
@@ -1136,7 +1189,12 @@ def _run_claude_once(
                     timeout=AgentRuntimeEnv().agent_timeout,
                 )
             except subprocess.TimeoutExpired:
-                return AgentResult(success=False, error="claude CLI timed out")
+                return AgentResult(
+                    success=False,
+                    error="claude CLI timed out",
+                    metadata={"timeout": True, "retryable": True},
+                    usage=accumulator.to_usage(),
+                )
             finally:
                 # The process group is gone; collect the drained tail so the
                 # reader thread never outlives it.
@@ -1161,6 +1219,7 @@ def _run_claude_once(
             success=False,
             error=diagnostic.render(),
             metadata=diagnostic.as_metadata(),
+            usage=accumulator.to_usage(),
         )
 
     # HS4 — detection over the reads that actually happened: any ``Read`` /
@@ -1264,6 +1323,7 @@ def _run_claude_legacy_subprocess(
     ctx: AgentRunContext,
     model: str | None,
     skip_permissions: bool,
+    stdin_text: str | None = None,
 ) -> AgentResult:
     """Legacy ``subprocess.run`` path — preserved for the regression pins.
 
@@ -1295,13 +1355,18 @@ def _run_claude_legacy_subprocess(
             env=resolved_env,
             capture_output=True,
             text=True,
+            input=stdin_text,
             timeout=AgentRuntimeEnv().agent_timeout,
             check=False,
         )
     except FileNotFoundError as err:
         return AgentResult(success=False, error=str(err))
     except subprocess.TimeoutExpired:
-        return AgentResult(success=False, error="claude CLI timed out")
+        return AgentResult(
+            success=False,
+            error="claude CLI timed out",
+            metadata={"timeout": True, "retryable": True},
+        )
 
     stdout = completed.stdout or ""
     stderr = completed.stderr or ""
@@ -1327,12 +1392,14 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     mcp_config = write_mcp_config(ctx)
     # Blocking Popen/wait/stream consume runs in a worker thread so
     # ``asyncio.wait_for`` in ``main`` can preempt the coroutine (W9.2).
+    session: dict[str, str] = {}
     initial = await asyncio.to_thread(
         _run_claude_once,
         cli=cli,
         prompt=ctx.instructions.user,
         ctx=ctx,
         mcp_config=mcp_config,
+        session=session,
     )
     initial.prompt = ctx.instructions.user
 
@@ -1344,6 +1411,7 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
             ctx=ctx,
             mcp_config=mcp_config,
             continue_session=True,
+            session=session,
         )
         result.prompt = prompt
         return result
@@ -1352,4 +1420,4 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     return await finalize_agent_result(ctx, result)
 
 
-claude = agent(name="claude", install=_install, run=_run, build_env=_build_env)
+claude = agent(name="claude", install=_install, run=_run, build_env=_build_env, integrity_gate=True)

@@ -113,8 +113,29 @@ VERIFIER_RUBRIC: Final[tuple[tuple[str, str], ...]] = (
 # different family from the Opus-class orchestrator, per #45. Providers absent
 # here run the judge on the run's own model; the verdict records that the model
 # was not pinned rather than pretending otherwise.
+# The model catalog alias the Claude reviewer, recall and verifier subagents
+# run (#1330). The id comes from ``models.py``, never a literal here, so a model
+# change is one catalog edit and the recorded pin cannot drift from it.
+CLAUDE_SUBAGENT_ALIAS: Final[str] = "anthropic/claude-sonnet"
+
+
+def claude_catalog_subagent_model() -> str:
+    """Return the first-party Claude API id of :data:`CLAUDE_SUBAGENT_ALIAS`.
+
+    Raises:
+        RuntimeError: The catalog no longer defines the alias.
+    """
+    from mergecraft.models import resolve_model_slug
+
+    resolved = resolve_model_slug(CLAUDE_SUBAGENT_ALIAS)
+    if not resolved:
+        msg = f"model catalog has no {CLAUDE_SUBAGENT_ALIAS!r} alias for the Claude subagents"
+        raise RuntimeError(msg)
+    return resolved.split("/", 1)[-1]
+
+
 PINNED_JUDGE_MODELS: Final[dict[str, str]] = {
-    "claude": "claude-sonnet-5",
+    "claude": claude_catalog_subagent_model(),
     "jev": "jev-1.13.0",
 }
 
@@ -491,7 +512,15 @@ class VerdictOutcome(BaseModel):
 
 
 def pinned_judge_model(provider: str) -> str | None:
-    """Return the pinned judge model for ``provider``, or ``None`` if unpinned."""
+    """Return the pinned judge model for ``provider``, or ``None`` if unpinned.
+
+    For ``claude`` this is the id actually dispatched to the verifier subagent,
+    which on Bedrock or Vertex is Claude Code's portable ``sonnet`` alias.
+    """
+    if provider == "claude":
+        from mergecraft.agents.claude import claude_subagent_model
+
+        return claude_subagent_model()
     return PINNED_JUDGE_MODELS.get(provider)
 
 

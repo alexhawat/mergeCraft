@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 import threading
@@ -9,6 +10,7 @@ from collections import deque
 from collections.abc import Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NamedTuple, Protocol
 
 from loguru import logger
@@ -21,6 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
 
     from mergecraft.mcp.tool_state import ToolState
+    from mergecraft.security.review_integrity import TreeBaseline
     from mergecraft.types import AgentId
 
 # AR-D3 — the concurrent stderr drain keeps at most this many lines (tail-kept,
@@ -115,8 +118,14 @@ def spawn_agent_cli(
     *,
     env: dict[str, str],
     cwd: str | None = None,
+    stdin_text: str | None = None,
 ) -> subprocess.Popen[str]:
     """Wrap argv with privilege drop and open a session-leader agent process.
+
+    ``stdin_text``, when given, is written to the child's stdin from a daemon
+    thread and stdin is then closed. Drivers send the prompt this way rather
+    than as one argv string, which ``execve`` rejects (``E2BIG``) past the
+    128 KiB per-argument limit on Linux (#1329).
 
     Shared by Claude/Codex/Gemini/OpenCode so wrap + pipes + ``start_new_session``
     stay one place (W9 / Final CQ). Callers own streaming and
@@ -171,12 +180,16 @@ def spawn_agent_cli(
         wrapped_cmd,
         cwd=cwd if cwd is not None else os.getcwd(),
         env=resolved_env,
+        stdin=subprocess.PIPE if stdin_text is not None else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
         start_new_session=True,
     )
+    stdin_stream = getattr(process, "stdin", None)
+    if stdin_text is not None and stdin_stream is not None:
+        _start_stdin_feed(stdin_stream, stdin_text)
     if scope is not None and not scope.add(process):
         from mergecraft.utils.process_group import kill_process_group
 
@@ -184,6 +197,32 @@ def spawn_agent_cli(
         msg = "agent run was cancelled; refusing to spawn another agent CLI"
         raise RuntimeError(msg)
     return process
+
+
+def _start_stdin_feed(stream: Any, text: str) -> threading.Thread:
+    """Write ``text`` to a child's stdin on a daemon thread, then close it.
+
+    A thread, not an inline write: a prompt larger than the pipe buffer blocks
+    the writer until the child reads it, and the child may first fill stdout,
+    which only the driver's read loop drains.
+    """
+
+    def _feed() -> None:
+        try:
+            stream.write(text)
+        except (BrokenPipeError, OSError, ValueError) as exc:
+            # The child exited (or was killed) before reading all of it; its
+            # exit status and stderr carry the real failure.
+            logger.debug("agent stdin feed stopped early: {}", exc)
+        finally:
+            try:
+                stream.close()
+            except (BrokenPipeError, OSError, ValueError):
+                pass
+
+    thread = threading.Thread(target=_feed, name="agent-stdin-feed", daemon=True)
+    thread.start()
+    return thread
 
 
 @dataclass(slots=True)
@@ -259,6 +298,25 @@ def start_stderr_drain(stream: Any, *, max_lines: int = STDERR_DRAIN_MAX_LINES) 
     thread = threading.Thread(target=_pump, name="agent-stderr-drain", daemon=True)
     thread.start()
     return StderrDrain(_thread=thread, _lines=lines, _lock=lock)
+
+
+STDERR_ERROR_TAIL_LINES: Final[int] = 20
+"""Lines of child stderr a failed attempt's ``AgentResult.error`` carries."""
+
+
+def stderr_tail_for_error(text: str, *, lines: int = STDERR_ERROR_TAIL_LINES) -> str:
+    """Return the redacted last ``lines`` non-blank lines of a child's stderr.
+
+    The one shape every driver puts into ``AgentResult.error`` (#1328): the run
+    record and check summary carry that text, and stderr can echo the
+    credential that failed, so the kept lines are redacted. The cut is by whole
+    lines, so it never splits a credential, and only the kept tail is
+    redacted: a flooding child must not make the failure path slow.
+    """
+    from mergecraft.analyzers.redact import redact_secrets
+
+    kept = [line for line in (text or "").splitlines() if line.strip()][-lines:]
+    return redact_secrets("\n".join(kept))
 
 
 def get_git_status(cwd: str | None = None) -> str:
@@ -453,6 +511,10 @@ class AgentImpl:
     _run: Callable[[AgentRunContext], Awaitable[AgentResult]]
     _build_env: Callable[[AgentRunContext], dict[str, str]] | None = field(default=None, repr=False)
     _module_file: str | None = field(default=None, repr=False)
+    # #1329 — hash the checkout around the run and fail it closed when the
+    # tree changed. Set for the local CLI harnesses; OpenCode gates its own
+    # attempts, and a cloud harness never touches the local checkout.
+    integrity_gate: bool = field(default=False, repr=False)
 
     async def install(self, token: str | None = None) -> str:
         return await self._install(token)
@@ -473,15 +535,32 @@ class AgentImpl:
                 error="kill_switch",
                 diagnostics={"reason": "kill_switch"},
             )
+        baseline = (
+            await asyncio.to_thread(_gate_baseline_for_run, ctx) if self.integrity_gate else None
+        )
         # Every CLI this run spawns joins its own scope; closing it on the way
         # out (return, raise or cancel) kills any child still alive (#1326).
         scope = AgentProcessScope()
         token = _PROCESS_SCOPE.set(scope)
         try:
             result = await self._run(ctx)
+        except Exception as exc:
+            if _is_run_abort(exc):
+                raise
+            # #1328 — a driver crash (a dead serve process, a non-JSON reply,
+            # an OS error at spawn) is this attempt's failure, not the run's:
+            # it goes to the chain as a retryable crash so the next model runs.
+            logger.warning("agent {} raised {}: {}", self.name, type(exc).__name__, exc)
+            result = AgentResult(
+                success=False,
+                error=f"{self.name} driver crashed: {type(exc).__name__}: {exc}",
+                metadata={"retryable": True, "crash": True},
+            )
         finally:
             _PROCESS_SCOPE.reset(token)
             scope.close()
+        if baseline is not None:
+            result = await asyncio.to_thread(apply_integrity_gate, result, baseline)
         if budget is not None and result.usage is not None:
             record_provider_usage(
                 budget,
@@ -504,6 +583,79 @@ class AgentImpl:
         return self._module_file
 
 
+def capture_integrity_baseline(ctx: AgentRunContext) -> TreeBaseline | None:
+    """Hash the checkout before a read-only review and pin it on the tool state.
+
+    mergeCraft's own tools that legitimately rewrite the tree re-pin the
+    baseline at their boundary (``security.review_integrity.TreeBaseline``).
+    An unreadable tree logs an error and returns ``None``.
+    """
+    from mergecraft.mcp.tool_state import primary_repo_state
+    from mergecraft.security.review_integrity import TreeBaseline, hash_tree
+
+    checkout = Path(primary_repo_state(ctx.tool_state).dir or os.getcwd()).resolve()
+    try:
+        baseline = TreeBaseline(root=checkout, digest=hash_tree(checkout))
+    except OSError as exc:
+        logger.error("review integrity baseline failed for {}: {}", checkout, exc)
+        return None
+    ctx.tool_state.review_tree_baseline = baseline
+    return baseline
+
+
+def apply_integrity_gate(result: AgentResult, baseline: TreeBaseline | None) -> AgentResult:
+    """Fail the attempt closed when the checkout changed during the review."""
+    if baseline is None:
+        return result
+    try:
+        baseline.verify()
+    except RuntimeError as exc:
+        return AgentResult(success=False, error=str(exc), usage=result.usage)
+    return result
+
+
+def _gate_baseline_for_run(ctx: AgentRunContext) -> TreeBaseline | None:
+    """Return the integrity baseline for a CLI run, or ``None`` when it cannot apply.
+
+    The run writes its own config (MCP config, system prompt, Codex home) under
+    ``ctx.tmpdir``. When that directory sits inside the checkout, every review
+    would fail on mergeCraft's own files, so the gate is skipped there with a
+    warning; in Actions the tmpdir is ``RUNNER_TEMP``, outside the checkout.
+    """
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    checkout = Path(primary_repo_state(ctx.tool_state).dir or os.getcwd()).resolve()
+    tmpdir = Path(ctx.tmpdir).resolve()
+    if tmpdir == checkout or checkout in tmpdir.parents:
+        logger.warning(
+            "review integrity gate skipped: the run tmpdir {} is inside the checkout {}",
+            tmpdir,
+            checkout,
+        )
+        return None
+    return capture_integrity_baseline(ctx)
+
+
+def _is_run_abort(exc: Exception) -> bool:
+    """Return whether ``exc`` must end the run rather than fail one attempt.
+
+    A configuration error (privilege drop refused, say) fails the same way on
+    every chain entry, and the chain's own policy and budget errors are
+    decisions about the whole run; all three keep propagating.
+    """
+    from mergecraft.utils.agent_resolve import ModelFallbackPolicyError
+    from mergecraft.utils.run_bounds import BudgetExhausted
+
+    if isinstance(exc, ModelFallbackPolicyError | BudgetExhausted):
+        return True
+    # ``main._ConfigurationError`` is matched by name: importing ``main`` here
+    # would invert the dependency direction (``main`` imports the agents).
+    return any(
+        cls.__name__ == "_ConfigurationError" and cls.__module__ == "mergecraft.main"
+        for cls in type(exc).__mro__
+    )
+
+
 def agent(
     *,
     name: AgentId,
@@ -511,6 +663,7 @@ def agent(
     run: Callable[[AgentRunContext], Awaitable[AgentResult]],
     build_env: Callable[[AgentRunContext], dict[str, str]] | None = None,
     module_file: str | None = None,
+    integrity_gate: bool = False,
 ) -> AgentImpl:
     return AgentImpl(
         name=name,
@@ -518,6 +671,7 @@ def agent(
         _run=run,
         _build_env=build_env,
         _module_file=module_file,
+        integrity_gate=integrity_gate,
     )
 
 

@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias
@@ -59,6 +60,7 @@ from mergecraft.agents.shared import (
     payload_shell_mode,
     spawn_agent_cli,
     start_stderr_drain,
+    stderr_tail_for_error,
     with_prompt,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
@@ -268,6 +270,32 @@ def _has_openai_api_key() -> bool:
     return bool(os.environ.get(OPENAI_API_KEY_ENV, "").strip())
 
 
+# auth.json paths this process seeded, mapped to the secret they were seeded
+# from. Only a file this process wrote from the *same* secret may be kept: a
+# stale file from another run, or a different credential, is overwritten.
+_SEEDED_CODEX_AUTH: dict[str, str] = {}
+_SEEDED_CODEX_AUTH_LOCK = threading.Lock()
+
+
+def _keep_seeded_codex_auth(auth_path: Path, raw: str) -> bool:
+    """Return whether ``auth_path`` holds this process's login for ``raw``, possibly refreshed.
+
+    True only when this process seeded the file from the same secret, the file
+    still parses as a usable subscription login, and it names the same account.
+    """
+    with _SEEDED_CODEX_AUTH_LOCK:
+        seeded = _SEEDED_CODEX_AUTH.get(str(auth_path))
+    if seeded != raw:
+        return False
+    try:
+        current = auth_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    if not subscription_auth_usable(current):
+        return False
+    return _subscription_account_id(current) == _subscription_account_id(raw)
+
+
 def _setup_codex_auth(
     ctx: AgentRunContext,
     *,
@@ -285,12 +313,22 @@ def _setup_codex_auth(
     raw = source.get(CODEX_AUTH_ENV, "").strip()
     if raw and subscription_auth_usable(raw):
         codex_home.mkdir(parents=True, exist_ok=True)
+        auth_path = codex_home / "auth.json"
+        # #1327 — Codex rotates the refresh token and rewrites auth.json. A
+        # second attempt in this process (a post-run resume, or a same-harness
+        # chain rung) must not put the spent original back over the refreshed
+        # login, or the next refresh fails and the write-back exports nothing.
+        if _keep_seeded_codex_auth(auth_path, raw):
+            logger.debug("keeping the Codex login already in {} (it may be refreshed)", auth_path)
+            return
         # HS4 — the subscription credential must not be group/world-readable,
         # not even briefly: it is created ``0600``. The run home is chowned to the
         # agent user after this write so the Codex CLI (dropped via setpriv) can
         # still read its own ``auth.json``; the mode, not the owner, is what keeps
         # other processes and the agent's ``Read`` tool out of it.
-        write_private_file(codex_home / "auth.json", raw)
+        write_private_file(auth_path, raw)
+        with _SEEDED_CODEX_AUTH_LOCK:
+            _SEEDED_CODEX_AUTH[str(auth_path)] = raw
         return
     if raw:
         logger.warning(
@@ -922,7 +960,15 @@ def _run_codex_once(
     ctx: AgentRunContext,
     mcp_config: str,
     continue_session: bool = False,
+    session: dict[str, str] | None = None,
 ) -> AgentResult:
+    """Run one ``codex exec`` turn; ``session`` carries the thread id between turns.
+
+    The first turn records the ``thread.started`` id into ``session``; a resume
+    names that id instead of ``--last``, so concurrent runs never resume each
+    other's conversation (#1327). The prompt goes on stdin (``-``), never argv:
+    a prompt past 128 KiB cannot be one ``execve`` argument (#1329).
+    """
     del mcp_config  # config lives in $CODEX_HOME/config.toml written by write_mcp_config()
     model = None
     if ctx.resolved_model:
@@ -940,8 +986,9 @@ def _run_codex_once(
     if not _codex_use_permission_profiles(ctx):
         cmd.extend(["--sandbox", _sandbox_mode(ctx)])
     if continue_session:
-        cmd.extend(["resume", "--last"])
-    cmd.append(prompt or ctx.instructions.user)
+        thread_id = (session or {}).get("thread_id")
+        cmd.extend(["resume", thread_id] if thread_id else ["resume", "--last"])
+    cmd.append("-")
 
     logger.info("invoking codex CLI (model={})", model or "default")
 
@@ -956,6 +1003,8 @@ def _run_codex_once(
         ctx=ctx,
         model=model,
         prompt=prompt or ctx.instructions.user,
+        stdin_text=prompt or ctx.instructions.user,
+        session=session,
     )
 
 
@@ -965,6 +1014,8 @@ def _run_codex_streaming(
     ctx: AgentRunContext,
     model: str | None,
     prompt: str | None = None,
+    stdin_text: str | None = None,
+    session: dict[str, str] | None = None,
 ) -> AgentResult:
     """Streaming read loop for ``codex exec --json`` (W6).
 
@@ -1004,7 +1055,9 @@ def _run_codex_streaming(
     )
 
     try:
-        process = spawn_agent_cli(cmd, env=_build_env(ctx), cwd=_codex_working_dir(ctx))
+        process = spawn_agent_cli(
+            cmd, env=_build_env(ctx), cwd=_codex_working_dir(ctx), stdin_text=stdin_text
+        )
     except FileNotFoundError as err:
         return with_prompt(AgentResult(success=False, error=str(err)), prompt)
 
@@ -1029,6 +1082,10 @@ def _run_codex_streaming(
         watchdog.touch(
             model_output=event_has_model_output(event), event_type=event_type_name(event)
         )
+        if session is not None and event.get("type") == "thread.started":
+            thread_id = event.get("thread_id")
+            if isinstance(thread_id, str) and thread_id.strip():
+                session.setdefault("thread_id", thread_id.strip())
         handler(acc, event)
 
     try:
@@ -1044,7 +1101,15 @@ def _run_codex_streaming(
                     timeout=AgentRuntimeEnv().agent_timeout,
                 )
             except subprocess.TimeoutExpired:
-                return with_prompt(AgentResult(success=False, error="codex CLI timed out"), prompt)
+                return with_prompt(
+                    AgentResult(
+                        success=False,
+                        error="codex CLI timed out",
+                        metadata={"timeout": True, "retryable": True},
+                        usage=accumulator.to_usage(),
+                    ),
+                    prompt,
+                )
             finally:
                 # The process group is gone; collect the drained tail so the
                 # reader thread never outlives it.
@@ -1065,6 +1130,7 @@ def _run_codex_streaming(
                 success=False,
                 error=diagnostic.render(),
                 metadata=diagnostic.as_metadata(),
+                usage=accumulator.to_usage(),
             ),
             prompt,
         )
@@ -1084,7 +1150,7 @@ def _run_codex_streaming(
         # The provider's own event is the authoritative reason; stderr is the
         # fallback, because it routinely carries benign CLI chatter (#445).
         stream_error = accumulator.stream_error
-        error = stream_error or stderr_text.strip() or f"codex exited {returncode}"
+        error = stream_error or stderr_tail_for_error(stderr_text) or f"codex exited {returncode}"
         # bwrap fails on the very first exec, so this is the difference between
         # "the environment cannot run Codex" and "the reviewer errored" (#70).
         if is_user_namespace_failure(f"{stderr_text}\n{output or ''}"):
@@ -1195,12 +1261,14 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         mcp_config = write_mcp_config(ctx, subagent_block=subagent_block)
         # Blocking Popen/wait/stream consume runs in a worker thread so
         # ``asyncio.wait_for`` in ``main`` can preempt the coroutine (W9.2).
+        session: dict[str, str] = {}
         initial = await asyncio.to_thread(
             _run_codex_once,
             cli=cli,
             prompt=ctx.instructions.user,
             ctx=ctx,
             mcp_config=mcp_config,
+            session=session,
         )
 
         async def resume(prompt: str) -> AgentResult:
@@ -1211,6 +1279,7 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
                 ctx=ctx,
                 mcp_config=mcp_config,
                 continue_session=True,
+                session=session,
             )
 
         result = await run_post_run_retry_loop(ctx, initial=initial, resume=resume)
@@ -1235,4 +1304,4 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
         )
 
 
-codex = agent(name="codex", install=_install, run=_run, build_env=_build_env)
+codex = agent(name="codex", install=_install, run=_run, build_env=_build_env, integrity_gate=True)

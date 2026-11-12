@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import time
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -61,9 +62,19 @@ def test_gemini_harness_invokes_cli_and_parses_agent_result(
         },
     }
 
+    fed: list[str] = []
+
+    class _Stdin:
+        def write(self, text: str) -> None:
+            fed.append(text)
+
+        def close(self) -> None: ...
+
     def _fake_popen(cmd: list[str], **kwargs: object) -> object:
         captured.append(list(cmd))
-        return _FakeGeminiProcess(stdout=json.dumps(payload), stderr="", returncode=0)
+        proc = _FakeGeminiProcess(stdout=json.dumps(payload), stderr="", returncode=0)
+        proc.stdin = _Stdin()  # type: ignore[attr-defined]
+        return proc
 
     monkeypatch.setattr(gemini_module.subprocess, "Popen", _fake_popen)
 
@@ -81,7 +92,13 @@ def test_gemini_harness_invokes_cli_and_parses_agent_result(
     assert captured, "expected gemini harness to invoke subprocess.Popen"
     cmd = captured[0]
     assert cmd[0] == "/usr/bin/gemini"
-    prompt_arg = cmd[cmd.index("-p") + 1]
+    # The prompt rides on stdin; ``-p`` only carries the trailer (#1329).
+    assert cmd[cmd.index("-p") + 1] == gemini_module.GEMINI_STDIN_PROMPT_TRAILER
+    for _ in range(50):
+        if fed:
+            break
+        time.sleep(0.02)
+    prompt_arg = "".join(fed)
     assert "review this diff" in prompt_arg
     assert "mergecraft-reviewer" in prompt_arg
 
