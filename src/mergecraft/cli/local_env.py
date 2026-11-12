@@ -3,8 +3,10 @@
 Two anchors, because the CLI has two ways of naming a repository and they are
 not interchangeable:
 
-``--cwd`` is documented as "Repository root." and the whole config layer takes
-it literally --- :func:`mergecraft.cli.provider_cmd._config_path`,
+``--cwd`` is documented as "Repository root." An omitted ``--cwd`` has already
+been resolved to the git root of the process cwd by
+:func:`mergecraft.cli.target_dir.install_implicit_repo_root`; an explicit one
+is taken literally, and the whole config layer takes it literally --- :func:`mergecraft.cli.provider_cmd._config_path`,
 :func:`mergecraft.cli.config_surface_cmd._config_path`, and
 ``run_manifest`` all resolve ``<cwd>/.mergecraft/config.yaml`` without walking
 up. :func:`local_env_path_for_cwd` matches that so a command cannot read its

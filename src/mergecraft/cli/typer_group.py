@@ -41,8 +41,10 @@ class MergecraftTyperGroup(TyperGroup):
         if command is None:
             return None
         from mergecraft.cli.interactive import install_missing_param_prompts
+        from mergecraft.cli.target_dir import install_implicit_repo_root
 
         install_missing_param_prompts(command)
+        install_implicit_repo_root(command)
         return command
 
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
