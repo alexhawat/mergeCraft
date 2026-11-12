@@ -59,6 +59,24 @@ def test_combined_flags_include_staged_unstaged_and_untracked(repo: Path, tmp_pa
     assert "+c = 3" in text
 
 
+def test_combined_flags_keep_a_staged_file_removed_from_the_work_tree(
+    repo: Path, tmp_path: Path
+) -> None:
+    """A staged addition deleted from the work tree is still what a commit records."""
+    (repo / "added.py").write_text("d = 4\n", encoding="utf-8")
+    _git(repo, "add", "added.py")
+    (repo / "added.py").unlink()
+    (repo / "staged.py").unlink()
+
+    text = _materialize(repo, tmp_path, staged=True, unstaged=True)
+
+    assert text.count("+++ b/added.py") == 1
+    assert "+d = 4" in text
+    assert text.count("+++ b/staged.py") == 1
+    assert "+a = 2" in text
+    assert "+b = 2" in text
+
+
 def test_combined_flags_on_a_file_staged_then_edited_again(repo: Path, tmp_path: Path) -> None:
     """A file with staged and unstaged edits appears once, at its working-tree content."""
     (repo / "staged.py").write_text("a = 3\n", encoding="utf-8")

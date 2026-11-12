@@ -122,7 +122,9 @@ def test_root_format_commands_exist_and_read_the_root_format(path: tuple[str, ..
     """Each declared root-format command exists and consults the root format."""
     commands = dict(_LEAVES)
     assert path in commands, f"stale entry in ROOT_FORMAT_COMMANDS: {path}"
-    source = inspect.getsource(inspect.getmodule(commands[path].callback))  # type: ignore[arg-type]
+    module = inspect.getmodule(commands[path].callback)
+    assert module is not None
+    source = inspect.getsource(module)
     assert any(
         name in source for name in ("wants_json_output", "get_cli_globals", "cli_json_dumps")
     )
