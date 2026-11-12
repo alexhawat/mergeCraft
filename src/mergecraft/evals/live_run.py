@@ -360,6 +360,8 @@ def run_live_detection(
             raw_rows = outcome
             case_cost_usd = None
             case_tokens = None
+        # Every review that ran counts toward spend, scored or not.
+        case_costs.append(case_cost_usd)
         if case_cost_usd is not None:
             campaign_cost_usd += case_cost_usd
         overrun = _budget_overrun(
@@ -455,7 +457,6 @@ def run_live_detection(
             )
         )
         case_elapsed_ms.append(elapsed_seconds * 1000.0)
-        case_costs.append(case_cost_usd)
         _append_journal(
             journal_path, {"case_id": case.case_id, "status": "scored", "cost_usd": case_cost_usd}
         )
@@ -469,7 +470,7 @@ def run_live_detection(
         failed_case_errors=failed_case_errors,
         latency=summarize_latencies(case_elapsed_ms) if case_elapsed_ms else None,
         total_cost_usd=(
-            sum(cost for cost in case_costs if cost is not None)
+            campaign_cost_usd
             if case_costs and all(cost is not None for cost in case_costs)
             else None
         ),

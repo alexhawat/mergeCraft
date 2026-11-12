@@ -334,3 +334,13 @@ def test_fold_ignores_vacuous_cases_with_nothing_attributable() -> None:
     )
     assert folded.mean_first_pass_recall == 0.5
     assert folded.cases_total == 3
+
+
+def test_all_vacuous_convergence_fold_is_an_error() -> None:
+    with pytest.raises(ValueError, match="attributable"):
+        _convergence_mod().fold_convergence_reports(
+            [
+                _case_result("vacuous-a", attributable=0, recall=1.0),
+                _case_result("vacuous-b", attributable=0, recall=1.0),
+            ]
+        )

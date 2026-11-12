@@ -96,8 +96,15 @@ def test_detection_corpus_tree_is_the_detection_directory_tree(repo: Path) -> No
     assert git_tree_id(Path("evals/does-not-exist")) is None
 
 
-def test_full_benchmark_pins_the_detection_corpus_tree(repo: Path) -> None:
+def test_full_benchmark_pins_the_detection_corpus_tree(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.evals import live_run
     from mergecraft.evals.live_run import run_full_benchmark
+
+    # No live provider call can happen: credentials are stubbed on and the
+    # review is injected, so this works the same with or without real keys.
+    monkeypatch.setattr(live_run, "has_credentials_for_slug", lambda _model: True)
 
     result = run_full_benchmark(
         Path("evals/cases"),
@@ -106,6 +113,7 @@ def test_full_benchmark_pins_the_detection_corpus_tree(repo: Path) -> None:
         providers=("claude",),
         detection_provider="claude",
         detection_model="claude/none",
+        review_fn=lambda _case: [],
     )
 
     assert result.pins.detection_corpus_tree == _git(

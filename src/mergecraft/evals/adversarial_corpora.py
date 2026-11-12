@@ -292,8 +292,7 @@ def eval_adversarial_gate(
     """
     corpora = discover_adversarial_corpora(bank=bank)
     failed: list[str] = [item for item in candidate_failures if item]
-    if True:
-        failed.extend(_corpus_regressions(corpora))
+    failed.extend(_corpus_regressions(corpora))
     unique = tuple(dict.fromkeys(failed))
     return AdversarialGateReport(passed=not unique, failed_cases=unique)
 

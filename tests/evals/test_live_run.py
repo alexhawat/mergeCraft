@@ -966,3 +966,23 @@ def test_bench_command_exposes_failures_latency_cost_and_budget_flags(
     assert "bench-b-002: TimeoutError: hung" in result.output
     assert "cost            : $0.5000" in result.output
     assert "latency" in result.output
+
+
+def test_total_cost_includes_reviews_that_breached_a_bound(tmp_path: Path) -> None:
+    from mergecraft.evals.live_run import ReviewBudget, ReviewOutcome
+
+    def review_fn(case: DetectionCase) -> ReviewOutcome:
+        return ReviewOutcome(findings=[], cost_usd=5.0 if case.case_id == "bench-b-002" else 0.25)
+
+    metrics = run_live_detection(
+        _three_cases(tmp_path),
+        provider="claude",
+        model="claude-sonnet-5",
+        review_fn=review_fn,
+        results_dir=tmp_path / "results",
+        budget=ReviewBudget(per_review_cost_budget_usd=1.0),
+    )
+
+    assert metrics.failed_case_ids == ["bench-b-002"]
+    assert metrics.cases_run == 2
+    assert metrics.total_cost_usd == 5.5
