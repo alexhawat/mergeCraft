@@ -30,6 +30,7 @@ Add a new catalog tool with **one manifest YAML**, **one parser fixture**, and *
 | `trust` | `trusted` or `untrusted`. |
 | `exclusive_group` | One winner per group unless repo overrides both. |
 | `declared_unavailable` | Honest skip reason when the tool cannot run yet (C6.4). |
+| `benign_exits` | Documented non-zero exits that mean "nothing to scan" (`code`, optional output `marker`, `reason`). They report `passed` with the reason. Any other non-zero exit with no diagnostics is `tool-error`. Only declare an exit code the tool's docs or `--help` confirm. |
 
 ## Choosing a parser
 

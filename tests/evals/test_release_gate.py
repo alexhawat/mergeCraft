@@ -202,19 +202,88 @@ def test_release_gate_reports_which_metric_regressed(tmp_path: Path) -> None:
     assert "decision_replay_pass_rate" not in report.regressed_metrics
 
 
-def test_gate_tolerates_noise_within_the_declared_band(tmp_path: Path) -> None:
-    """One-point wobble on both gated rates, inside the declared default
-    band: the gate passes and names no regressed metric — a gate that alarms
-    on noise trains operators to ignore it."""
+def test_gate_tolerates_detection_noise_within_the_declared_band(tmp_path: Path) -> None:
+    """One-point wobble on live-detection metrics, inside the declared band,
+    passes: the tolerance applies to the noisy live half only."""
     from mergecraft.evals.gate import DEFAULT_GATE_TOLERANCE, eval_gate
 
-    baseline = _result_set(tmp_path / "base", pass_rate=0.90, unsafe_approval_rate=0.10)
-    candidate = _result_set(tmp_path / "cand", pass_rate=0.89, unsafe_approval_rate=0.11)
+    base = _result_set(tmp_path / "base", pass_rate=0.90, unsafe_approval_rate=0.10)
+    cand = _result_set(tmp_path / "cand", pass_rate=0.90, unsafe_approval_rate=0.10)
+    baseline = _with_detection(
+        base,
+        _detection(cases_run=10, cases_failed=0, total_issues=100, total_reported=100, found=80),
+    )
+    candidate = _with_detection(
+        cand,
+        _detection(cases_run=10, cases_failed=0, total_issues=100, total_reported=100, found=79),
+    )
 
     report = eval_gate(candidate=candidate, baseline=baseline, tolerance=DEFAULT_GATE_TOLERANCE)
 
     assert report.passed is True
     assert report.regressed_metrics == ()
+
+
+def test_structural_rates_have_zero_tolerance(tmp_path: Path) -> None:
+    """A one-point structural wobble fails: the replay is deterministic, so any
+    movement in the bad direction is a real change, not noise (W3.3-4)."""
+    from mergecraft.evals.gate import eval_gate
+
+    baseline = _result_set(tmp_path / "base", pass_rate=0.90, unsafe_approval_rate=0.10)
+    candidate = _result_set(tmp_path / "cand", pass_rate=0.89, unsafe_approval_rate=0.11)
+
+    report = eval_gate(candidate=candidate, baseline=baseline, tolerance=0.5)
+
+    assert report.passed is False
+    assert set(report.regressed_metrics) == {"decision_replay_pass_rate", "unsafe_approval_rate"}
+
+
+def _bank_result(bank: Path, ids: list[str]) -> BenchmarkResultSet:
+    for case_id in ids:
+        add_case(bank, _bank_case(case_id))
+    return run_structural_replay(bank, providers=("claude",))
+
+
+def test_deleting_a_case_fails_the_gate(tmp_path: Path) -> None:
+    """Dropping a case from the bank is named, even though every rate still looks fine."""
+    from mergecraft.evals.gate import eval_gate
+
+    baseline = _bank_result(tmp_path / "base", ["gate-001", "gate-002", "gate-003"])
+    candidate = _bank_result(tmp_path / "cand", ["gate-001", "gate-002"])
+
+    report = eval_gate(candidate=candidate, baseline=baseline)
+
+    assert report.passed is False
+    assert "structural.cases_total" in report.regressed_metrics
+    assert "structural.case_missing:gate-003" in report.regressed_metrics
+
+
+def test_adding_a_case_does_not_fail_the_gate(tmp_path: Path) -> None:
+    from mergecraft.evals.gate import eval_gate
+
+    baseline = _bank_result(tmp_path / "base", ["gate-001", "gate-002"])
+    candidate = _bank_result(tmp_path / "cand", ["gate-001", "gate-002", "gate-003"])
+
+    assert eval_gate(candidate=candidate, baseline=baseline).passed is True
+
+
+def test_flipping_one_verdict_fails_even_when_every_rate_is_unchanged(tmp_path: Path) -> None:
+    """A verdict moving between two block-like values leaves every rate alone;
+    the per-case decision comparison still names the case."""
+    from mergecraft.evals.gate import eval_gate, format_pr_gate_summary
+
+    baseline = _bank_result(tmp_path / "base", ["gate-001", "gate-002"])
+    candidate = baseline.model_copy(deep=True)
+    candidate.case_results[1] = candidate.case_results[1].model_copy(
+        update={"current_decision": "require_human_review"}
+    )
+    assert baseline.case_results[1].current_decision != "require_human_review"
+
+    report = eval_gate(candidate=candidate, baseline=baseline)
+
+    assert report.passed is False
+    assert report.regressed_metrics == ("structural.case_changed:gate-002",)
+    assert "structural.case_changed:gate-002" in format_pr_gate_summary(report)
 
 
 # ── coverage metrics: the gate counts what the fold drops (EV1 → EV2) ──

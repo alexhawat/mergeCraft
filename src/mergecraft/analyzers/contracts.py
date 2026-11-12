@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
-from mergecraft.analyzers.adapters import AdapterRunResult
+from mergecraft.analyzers.adapters import AdapterRunResult, tool_error_result
 from mergecraft.analyzers.execution import (
+    ArgvRun,
     provision_resolved_plan,
     provisioning_failure_reason,
-    run_argv,
+    run_argv_result,
 )
 from mergecraft.analyzers.parsers.buf_native import parse_buf_breaking_json, parse_buf_lint_json
 from mergecraft.analyzers.parsers.oasdiff_json import parse_oasdiff_json
@@ -130,8 +133,8 @@ def _run_argv(
     changed_files: list[str],
     tier: TrustTier,
     scratch_suffix: str = "",
-) -> tuple[str | None, str | None, list[Finding]]:
-    return run_argv(
+) -> ArgvRun:
+    run = run_argv_result(
         manifest=manifest,
         repo_root=repo_root,
         argv=argv,
@@ -139,6 +142,38 @@ def _run_argv(
         tier=tier,
         scratch_suffix=scratch_suffix,
     )
+    benign = manifest.benign_exit_reason(run.exit_code, run.raw or "")
+    if benign is not None:
+        # A declared "nothing to scan" exit is a clean run, not a tool-error.
+        logger.info("{}: exit {} — {}", manifest.id, run.exit_code, benign)
+        return replace(run, raw="", exit_code=0, pass_reason=benign)
+    return run
+
+
+def _unparsable_result(tool_id: str, exc: ValueError, *, exit_code: int | None) -> AdapterRunResult:
+    """Typed result for contract-tool output that does not parse (never raw bytes)."""
+    if exit_code:
+        logger.info("{}: output did not parse: {}", tool_id, exc)
+        return tool_error_result(tool_id, exit_code)
+    reason = (
+        f"skipped {tool_id}: failed to parse analyzer output; unparsable analyzer output omitted"
+    )
+    logger.info("{}: {}", reason, exc)
+    return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
+
+
+def _reported_json_rows(raw: str) -> bool:
+    """True when ``raw`` carries at least one JSON-object line (buf's annotation format)."""
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("{"):
+            continue
+        try:
+            if isinstance(json.loads(stripped), dict):
+                return True
+        except json.JSONDecodeError:
+            continue
+    return False
 
 
 def _collapse_squawk_findings(findings: list[Finding]) -> list[Finding]:
@@ -180,6 +215,7 @@ def _run_oasdiff(
         )
 
     findings: list[Finding] = []
+    pass_reason: str | None = None
     for head_rel in scoped:
         base_path = _resolve_base_file(repo_root, head_rel, base_ref)
         if base_path is None:
@@ -209,7 +245,7 @@ def _run_oasdiff(
 
         binary = provisioned.argv[0] if provisioned.argv else "oasdiff"
         argv = (binary, "breaking", "--format", "json", str(base_path), str(head_path))
-        raw, err, skip_findings = _run_argv(
+        run = _run_argv(
             manifest=manifest,
             repo_root=repo_root,
             argv=argv,
@@ -217,19 +253,24 @@ def _run_oasdiff(
             tier=tier,
             scratch_suffix=f"-{Path(head_rel).stem}",
         )
-        if err and not raw:
-            logger.info("{}", err)
-            return AdapterRunResult(
-                findings=skip_findings,
-                skipped=True,
-                skip_reason=err,
-            )
-        if not raw:
+        if run.raw is None:
+            reason = run.reason or f"skipped {manifest.id}: analyzer did not run"
+            logger.info("{}", reason)
+            return AdapterRunResult(findings=run.findings, skipped=True, skip_reason=reason)
+        if not run.raw.strip():
+            if run.exit_code:
+                return tool_error_result(manifest.id, run.exit_code, findings=findings)
+            pass_reason = pass_reason or run.pass_reason
             continue
-        parsed = parse_oasdiff_json(raw, manifest=manifest, repo_root=repo_root)
+        try:
+            parsed = parse_oasdiff_json(run.raw, manifest=manifest, repo_root=repo_root)
+        except ValueError as exc:
+            return _unparsable_result(manifest.id, exc, exit_code=run.exit_code)
+        if not parsed and run.exit_code:
+            return tool_error_result(manifest.id, run.exit_code, findings=findings)
         for finding in parsed:
             findings.append(finding.model_copy(update={"path": head_rel}))
-    return AdapterRunResult(findings=findings)
+    return AdapterRunResult(findings=findings, pass_reason=None if findings else pass_reason)
 
 
 def _run_squawk(
@@ -271,24 +312,28 @@ def _run_squawk(
 
     binary = provisioned.argv[0] if provisioned.argv else "squawk"
     argv = (binary, "--reporter=json", "--assume-in-transaction", *paths)
-    raw, err, skip_findings = _run_argv(
+    run = _run_argv(
         manifest=manifest,
         repo_root=repo_root,
         argv=argv,
         changed_files=scoped,
         tier=tier,
     )
-    if err and not raw:
-        logger.info("{}", err)
-        return AdapterRunResult(
-            findings=skip_findings,
-            skipped=True,
-            skip_reason=err,
-        )
-    if not raw:
-        return AdapterRunResult(findings=[])
+    if run.raw is None:
+        reason = run.reason or f"skipped {manifest.id}: analyzer did not run"
+        logger.info("{}", reason)
+        return AdapterRunResult(findings=run.findings, skipped=True, skip_reason=reason)
+    if not run.raw.strip():
+        if run.exit_code:
+            return tool_error_result(manifest.id, run.exit_code)
+        return AdapterRunResult(findings=[], pass_reason=run.pass_reason)
 
-    findings = parse_squawk_json(raw, manifest=manifest, repo_root=repo_root)
+    try:
+        findings = parse_squawk_json(run.raw, manifest=manifest, repo_root=repo_root)
+    except ValueError as exc:
+        return _unparsable_result(manifest.id, exc, exit_code=run.exit_code)
+    if not findings and run.exit_code:
+        return tool_error_result(manifest.id, run.exit_code)
     normalized: list[Finding] = []
     for finding in findings:
         try:
@@ -317,6 +362,7 @@ def _run_buf(
         )
 
     findings: list[Finding] = []
+    pass_reason: str | None = None
     for head_rel in scoped:
         base_path = _resolve_base_file(repo_root, head_rel, base_ref)
         if base_path is None:
@@ -354,7 +400,7 @@ def _run_buf(
             "--error-format",
             "json",
         )
-        raw, err, skip_findings = _run_argv(
+        breaking = _run_argv(
             manifest=manifest,
             repo_root=repo_root,
             argv=breaking_argv,
@@ -362,25 +408,26 @@ def _run_buf(
             tier=tier,
             scratch_suffix=f"-breaking-{Path(head_rel).stem}",
         )
-        if err and not raw:
-            logger.info("{}", err)
-            return AdapterRunResult(
-                findings=skip_findings,
-                skipped=True,
-                skip_reason=err,
+        if breaking.raw is None:
+            reason = breaking.reason or f"skipped {manifest.id}: analyzer did not run"
+            logger.info("{}", reason)
+            return AdapterRunResult(findings=breaking.findings, skipped=True, skip_reason=reason)
+        # buf exits non-zero both for reported annotations and for a failed
+        # build; only JSON annotation rows mean the comparison actually ran.
+        if breaking.exit_code and not _reported_json_rows(breaking.raw):
+            return tool_error_result(manifest.id, breaking.exit_code, findings=findings)
+        pass_reason = pass_reason or breaking.pass_reason
+        findings.extend(
+            parse_buf_breaking_json(
+                breaking.raw,
+                manifest=manifest,
+                repo_root=repo_root,
+                head_path=head_rel,
             )
-        if raw:
-            findings.extend(
-                parse_buf_breaking_json(
-                    raw,
-                    manifest=manifest,
-                    repo_root=repo_root,
-                    head_path=head_rel,
-                )
-            )
+        )
 
         lint_argv = (binary, "lint", str(head_path), "--error-format", "json")
-        lint_raw, _, _ = _run_argv(
+        lint = _run_argv(
             manifest=manifest,
             repo_root=repo_root,
             argv=lint_argv,
@@ -388,10 +435,14 @@ def _run_buf(
             tier=tier,
             scratch_suffix=f"-lint-{Path(head_rel).stem}",
         )
-        if lint_raw:
-            findings.extend(parse_buf_lint_json(lint_raw, manifest=manifest, repo_root=repo_root))
+        if lint.raw is None:
+            logger.info("{} lint did not run: {}", manifest.id, lint.reason)
+            continue
+        if lint.exit_code and not _reported_json_rows(lint.raw):
+            return tool_error_result(manifest.id, lint.exit_code, findings=findings)
+        findings.extend(parse_buf_lint_json(lint.raw, manifest=manifest, repo_root=repo_root))
 
-    return AdapterRunResult(findings=findings)
+    return AdapterRunResult(findings=findings, pass_reason=None if findings else pass_reason)
 
 
 def run_differential_adapter(

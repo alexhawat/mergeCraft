@@ -268,7 +268,8 @@ def _run_osv_scan(
     lockfiles: list[str],
     tier: TrustTier,
     allow_repo_binaries: bool = True,
-) -> tuple[list[Finding], str | None]:
+) -> tuple[list[Finding], str | None, str | None]:
+    """Return ``(findings, skip reason, nothing-to-scan reason)`` for one osv side."""
     from mergecraft.analyzers.parsers.osv_json import parse_osv_json
     from mergecraft.analyzers.resolve import resolve_analyzer
 
@@ -280,7 +281,8 @@ def _run_osv_scan(
     )
     provisioned, provision_failure = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
     if provisioned is None:
-        return [], provision_failure or plan.reason or f"skipped {manifest.id}: provisioning failed"
+        reason = provision_failure or plan.reason or f"skipped {manifest.id}: provisioning failed"
+        return [], reason, None
 
     existing = [rel for rel in lockfiles if safe_repo_relative_path(repo_root, rel) is not None]
     argv = expand_analyzer_argv(provisioned.argv, repo_root=repo_root, changed_files=existing)
@@ -303,24 +305,28 @@ def _run_osv_scan(
     if not sandbox.can_run:
         from mergecraft.analyzers.sandbox import sandbox_skip_findings
 
-        return sandbox_skip_findings(sandbox), sandbox.skip_reason
+        return sandbox_skip_findings(sandbox), sandbox.skip_reason, None
 
     outcome = run_plan(finalized, sandbox_context=sandbox.context)
     if not outcome.ran:
-        return [], outcome.output
+        return [], outcome.output, None
 
     raw = (
         Path(outcome.output_path).read_text(encoding="utf-8")
         if outcome.output_path
         else outcome.output
     )
+    benign = manifest.benign_exit_reason(outcome.exit_code, raw)
+    if benign is not None:
+        logger.info("{}: exit {} — {}", manifest.id, outcome.exit_code, benign)
+        return [], None, benign
     manifest_paths = _manifest_paths(repo_root, existing)
     package_names = _osv_package_names_by_file(raw)
     findings = parse_osv_json(raw, manifest=manifest, repo_root=repo_root)
     enriched = _enrich_osv_findings(
         findings, manifest_paths=manifest_paths, package_names=package_names
     )
-    return enriched, None
+    return enriched, None, None
 
 
 # Trivy fetches its vulnerability DB over the network on every invocation (no
@@ -533,7 +539,8 @@ def _scan_side(
     files: list[str],
     tier: TrustTier,
     allow_repo_binaries: bool = True,
-) -> tuple[list[Finding], str | None]:
+) -> tuple[list[Finding], str | None, str | None]:
+    """Scan one side; returns ``(findings, skip reason, nothing-to-scan reason)``."""
     snapshot = _snapshot_dir(repo_root, files)
     try:
         if tool_id == "osv-scanner":
@@ -553,7 +560,7 @@ def _scan_side(
                 allow_repo_binaries=allow_repo_binaries,
             )
             if err and not fs_findings:
-                return [], err
+                return [], err, None
             config_findings, _ = _run_trivy_config(
                 manifest=manifest,
                 repo_root=snapshot,
@@ -561,7 +568,7 @@ def _scan_side(
                 tier=tier,
                 allow_repo_binaries=allow_repo_binaries,
             )
-            return fs_findings + config_findings, None
+            return fs_findings + config_findings, None, None
         msg = f"unsupported differential tool: {tool_id}"
         raise ValueError(msg)
     finally:
@@ -594,7 +601,7 @@ def run_differential_scan(
         # skip duplicate network scans that can flake under parallel xdist.
         return AdapterRunResult(findings=[])
 
-    head_findings, head_err = _scan_side(
+    head_findings, head_err, head_pass_reason = _scan_side(
         tool_id,
         manifest=manifest,
         repo_root=repo_root,
@@ -612,7 +619,7 @@ def run_differential_scan(
         logger.info("{}", head_err)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=head_err)
 
-    base_findings, base_err = _scan_side(
+    base_findings, base_err, _ = _scan_side(
         tool_id,
         manifest=manifest,
         repo_root=repo_root,
@@ -627,7 +634,11 @@ def run_differential_scan(
             skip_reason=base_err,
         )
 
-    return AdapterRunResult(findings=_delta_findings(base_findings, head_findings))
+    # A head side with nothing to scan keeps its reason on the passed row.
+    return AdapterRunResult(
+        findings=_delta_findings(base_findings, head_findings),
+        pass_reason=head_pass_reason,
+    )
 
 
 def run_supply_chain_adapter(

@@ -96,7 +96,7 @@ def test_defaults_apply_when_nothing_is_configured() -> None:
     assert ignore.is_ignored("uv.lock")
     assert ignore.is_ignored("web/package-lock.json")
     assert ignore.is_ignored("static/app.min.js")
-    assert ignore.is_ignored("api/generated/client.py")
+    assert not ignore.is_ignored("api/generated/client.py"), "a directory name is no proof"
     assert not ignore.is_ignored("src/app.py")
     assert not ignore.is_ignored("host/evals/case.jsonl"), "eval data is an example, not a default"
 
@@ -127,15 +127,18 @@ def test_dropped_config_keeps_defaults_and_input() -> None:
     assert ignore.patterns == (*DEFAULT_IGNORE_PATHS, "x/**")
 
 
-def test_generated_output_stays_in_scope_when_its_generator_config_changed() -> None:
+def test_a_generated_directory_is_reviewed_unless_a_glob_names_it() -> None:
     ignore = build_review_ignore(input_value=None, review=ReviewSettings(), source="test")
     assert ignore.partition(["api/generated/client.py", "src/app.py"]) == (
+        ["api/generated/client.py", "src/app.py"],
+        [],
+    )
+    review = ReviewSettings.model_validate({"ignorePaths": ["**/generated/**"]})
+    opted = build_review_ignore(input_value=None, review=review, source="test")
+    assert opted.partition(["api/generated/client.py", "src/app.py"]) == (
         ["src/app.py"],
         ["api/generated/client.py"],
     )
-    kept, ignored = ignore.partition(["api/generated/client.py", "openapi-generator.yaml"])
-    assert kept == ["api/generated/client.py", "openapi-generator.yaml"]
-    assert ignored == []
 
 
 def test_settings_parse_camel_case_aliases() -> None:

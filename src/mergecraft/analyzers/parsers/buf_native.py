@@ -17,10 +17,18 @@ _BUF_LINT_FINDING_CAP = 3
 
 
 def _repo_relative(path: str, *, repo_root: Path) -> str:
+    """Resolve ``path`` against ``repo_root`` (not the process CWD).
+
+    An out-of-root path keeps its original form: its basename could name an
+    unrelated file at the repo root (see ``resolve_path_and_origin``).
+    """
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        candidate = repo_root / candidate
     try:
-        return Path(path).resolve().relative_to(repo_root.resolve()).as_posix()
+        return candidate.resolve().relative_to(repo_root.resolve()).as_posix()
     except ValueError:
-        return Path(path).name
+        return path
 
 
 def parse_buf_breaking_json(

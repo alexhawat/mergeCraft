@@ -1657,6 +1657,7 @@ def _run_opencode_cli_streaming(
         interval_s=ctx.idle_timeout_s,
         accumulator=accumulator,
         stderr_text=stderr_drain.text,
+        deadline_s=AgentRuntimeEnv().agent_timeout,
     )
     base_handler = (
         _session_event_handler(session, tool_state=ctx.tool_state, model=ctx.resolved_model)

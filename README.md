@@ -523,8 +523,8 @@ on:
 Ignored files are listed in the review under "Not reviewed (ignored by config)",
 and a pull request whose every changed file is ignored passes quickly with
 "nothing to review", leaving approval to a human. Changelogs (`**/CHANGELOG.md`),
-lockfiles (`**/*.lock`, `**/package-lock.json`) and generated or minified files
-are ignored by default; `review.ignorePaths` in `.mergecraft/config.yaml` adds
+lockfiles (`**/*.lock`, `**/package-lock.json`) and minified files are ignored by
+default (a `generated/` directory is reviewed unless `**/generated/**` is added); `review.ignorePaths` in `.mergecraft/config.yaml` adds
 globs, and `review.ignorePathDefaults: false` reviews the defaults again. A
 renamed file is ignored only when both its old and new names match. The
 config is read from the base branch only, so a pull request cannot opt its own

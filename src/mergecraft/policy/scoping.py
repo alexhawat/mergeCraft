@@ -6,6 +6,7 @@ import fnmatch
 from dataclasses import dataclass
 from typing import Literal
 
+from mergecraft.classify.path_globs import path_full_matches_glob
 from mergecraft.policy.schema import PolicyRule, RuleScope  # noqa: TC001
 
 SourceLayer = Literal["org", "repo", "path", "symbol", "global"]
@@ -70,12 +71,26 @@ def _scope_matches(
     not resolve it for this run and over-approximating keeps the rule from
     silently failing open. The default resolves every dimension strictly, so
     every existing caller keeps its behaviour.
+
+    ``org`` and ``repo`` compare case-insensitively (GitHub owner and repository
+    names are). ``path`` reads the repo-path glob dialect shared with
+    ``review.ignorePaths`` and declared Scope paths
+    (:func:`~mergecraft.classify.path_globs.path_full_matches_glob`): ``*`` stays
+    inside one segment and ``**`` spans zero or more directories.
     """
     if scope is None:
         return True
-    if scope.org is not None and "org" not in unresolved and scope.org != context.org:
+    if (
+        scope.org is not None
+        and "org" not in unresolved
+        and scope.org.casefold() != context.org.casefold()
+    ):
         return False
-    if scope.repo is not None and "repo" not in unresolved and scope.repo != context.repo:
+    if (
+        scope.repo is not None
+        and "repo" not in unresolved
+        and scope.repo.casefold() != context.repo.casefold()
+    ):
         return False
     if scope.branch is not None and "branch" not in unresolved and scope.branch != context.branch:
         return False
@@ -88,7 +103,7 @@ def _scope_matches(
     if (
         scope.path is not None
         and "path" not in unresolved
-        and not fnmatch.fnmatch(context.path, scope.path)
+        and not path_full_matches_glob(scope.path, context.path)
     ):
         return False
     if scope.symbol is None:

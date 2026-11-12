@@ -133,8 +133,11 @@ def test_root_orchestrator_refuses_the_userspace_egress_bridge(
     """The bridge maps root to root, so the identity drop cannot land: refuse it."""
     sandbox = import_module("mergecraft.analyzers.sandbox")
     egress = import_module("mergecraft.analyzers.egress")
+    shell_mod = import_module("mergecraft.mcp.shell")
     _fake_drop_tools(monkeypatch, uid=0)
     monkeypatch.setattr(sandbox, "probe_capabilities", _full_caps_with_user_namespace)
+    # Pin the host probe: direct unshare, so the sudo-path refusal cannot fire first.
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "unshare")
     context = sandbox.build_sandbox_context(
         repo_root=tmp_path,
         scratch_dir=tmp_path / "scratch",
@@ -155,6 +158,34 @@ def test_root_orchestrator_refuses_the_userspace_egress_bridge(
             event_name="pull_request_target",
             event={},
             egress_session=_BridgeSession(),
+        )
+
+
+def test_untrusted_analyzer_refuses_the_sudo_unshare_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When only sudo-unshare is available, untrusted runs fail before any bridge check."""
+    sandbox = import_module("mergecraft.analyzers.sandbox")
+    egress = import_module("mergecraft.analyzers.egress")
+    shell_mod = import_module("mergecraft.mcp.shell")
+    _fake_drop_tools(monkeypatch, uid=0)
+    monkeypatch.setattr(sandbox, "probe_capabilities", _full_caps_with_user_namespace)
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "sudo-unshare")
+    context = sandbox.build_sandbox_context(
+        repo_root=tmp_path,
+        scratch_dir=tmp_path / "scratch",
+        limits=sandbox.SandboxLimits(timeout_s=30, memory_mb=256, max_processes=8),
+        network_allowlist=["osv.dev"],
+        read_only_source=True,
+        caps=_full_caps_with_user_namespace(),
+    )
+
+    with pytest.raises(egress.FilteredEgressSetupError, match="requires direct unshare"):
+        sandbox.build_analyzer_sandbox_argv_for_run(
+            ("echo", "probe"),
+            context=context,
+            event_name="pull_request_target",
+            event={},
         )
 
 

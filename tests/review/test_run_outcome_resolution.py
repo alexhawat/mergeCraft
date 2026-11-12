@@ -107,7 +107,7 @@ async def _run_gate(
         kwargs["budget_tracker"] = _tool_call_tracker()
     elif gate == "prep":
 
-        async def _prep(_tool_context: Any) -> str:
+        async def _prep(_tool_context: Any, **_kwargs: Any) -> str:
             return "dependency installation failed: npm ci exited 1"
 
         monkeypatch.setattr(main_mod, "_prep_failure_reason", _prep)

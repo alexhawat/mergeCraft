@@ -195,6 +195,16 @@ async def carryover_publishers(
     return publishers
 
 
+async def _pull_is_open(github: GitHubClient, owner: str, repo: str, pull_number: int) -> bool:
+    """Return whether ``pull_number`` is still open on GitHub.
+
+    A read failure propagates: guessing "open" would skip every ledger-tracked
+    finding, and guessing "closed" would file findings the review still owns.
+    """
+    pull = await github.get_pull(owner, repo, pull_number)
+    return str(pull.get("state") or "").strip().lower() == "open"
+
+
 async def plan_carryover(
     github: GitHubClient,
     owner: str,
@@ -219,8 +229,12 @@ async def plan_carryover(
         include_answered: Carry over threads a human replied to.
         publishers: Logins mergeCraft publishes as. Derived with
             :func:`carryover_publishers` when omitted.
-        ledger_records: Open-PR ledger rows — fingerprints already tracked there
-            are not filed while the pull request is open (D5).
+        ledger_records: The pull request's finding-ledger rows. While the pull
+            request is still open, a fingerprint the ledger tracks is not filed
+            (D5): the review lifecycle still owns it. Once it is closed or merged
+            the ledger no longer suppresses anything — the publish path records
+            every inline finding as ``open``, so skipping on a ledger row after
+            merge would bury every surviving thread.
 
     Returns:
         A :class:`CarryoverPlan`; ``to_file`` is empty when nothing survives or
@@ -251,6 +265,12 @@ async def plan_carryover(
         await filed_carryover_keys(github, owner, repo, label=label) if findings else frozenset()
     )
     ledger_fps = {record.fingerprint for record in (ledger_records or [])}
+    if (
+        ledger_fps
+        and any(finding.fingerprint in ledger_fps for finding in findings)
+        and not await _pull_is_open(github, owner, repo, pull_number)
+    ):
+        ledger_fps = set()
 
     to_file: list[CarryoverFinding] = []
     already: list[CarryoverFinding] = []

@@ -975,15 +975,47 @@ def git_tool(ctx: ToolContext):
     )
 
 
+def _fetch_count(params: dict[str, Any], key: str) -> int | None:
+    """Return ``params[key]`` as a positive integer, or ``None`` when unset.
+
+    Raises:
+        ToolRefusedError: When the value is not a whole number of at least 1.
+    """
+    value = params.get(key)
+    if value is None:
+        return None
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        msg = f"Blocked: `{key}` must be a whole number of at least 1, got {value!r}."
+        raise ToolRefusedError(msg)
+    return value
+
+
+def _is_shallow_repository(cwd: str) -> bool:
+    """Report whether the repository at *cwd* is already a shallow clone."""
+    out = _run_git(["rev-parse", "--is-shallow-repository"], cwd=cwd)
+    return out.strip() == "true"
+
+
 def git_fetch_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
         cwd = primary_repo_state(ctx.tool_state).dir
         refspec = params.get("refspec")
         args = ["fetch", "--no-tags"]
-        if params.get("depth"):
-            args.extend(["--depth", str(params["depth"])])
-        if params.get("deepen"):
-            args.extend(["--deepen", str(params["deepen"])])
+        depth = _fetch_count(params, "depth")
+        deepen = _fetch_count(params, "deepen")
+        if depth is not None:
+            if not _is_shallow_repository(cwd):
+                msg = (
+                    "Blocked: `depth` would truncate the history of a full clone; "
+                    "it is only accepted on a repository that is already shallow. "
+                    "Use `deepen` to fetch more history, or omit `depth`."
+                )
+                raise ToolRefusedError(msg)
+            args.extend(["--depth", str(depth)])
+        if deepen is not None:
+            args.extend(["--deepen", str(deepen)])
         args.append("origin")
         if refspec:
             args.append(validate_fetch_refspec(str(refspec)))
@@ -1004,8 +1036,12 @@ def git_fetch_tool(ctx: ToolContext):
             "type": "object",
             "properties": {
                 "refspec": {"type": "string"},
-                "depth": {"type": "number"},
-                "deepen": {"type": "number"},
+                "depth": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Only accepted when the repository is already shallow.",
+                },
+                "deepen": {"type": "integer", "minimum": 1},
             },
             "additionalProperties": False,
         },

@@ -8,7 +8,7 @@ Depends: mergecraft.analyzers.scope
 
 Exports:
     Classes:
-        ChangedFunction — One enclosing symbol (name, path, start_line).
+        ChangedFunction — One enclosing symbol (name, qualname, path, start_line).
     Functions:
         resolve_enclosing_symbol — Innermost function covering ``line``.
         changed_functions_from_diff — Unique enclosing symbols for hunk lines.
@@ -28,11 +28,43 @@ from mergecraft.analyzers.scope import parse_diff_scope
 
 @dataclass(frozen=True, slots=True)
 class ChangedFunction:
-    """One function that encloses at least one changed line."""
+    """One function that encloses at least one changed line.
+
+    ``qualname`` is the dotted path of enclosing classes and functions
+    (``Foo.bar``, ``outer.inner``), the key coverage.py and its lcov writer
+    use for methods and nested functions. Empty means "same as ``name``".
+    """
 
     name: str
     path: str
     start_line: int
+    qualname: str = ""
+
+    @property
+    def qualified_name(self) -> str:
+        """``qualname`` when known, else the bare ``name``."""
+        return self.qualname or self.name
+
+
+_FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
+
+
+def _iter_functions(tree: ast.AST) -> list[tuple[_FunctionNode, str]]:
+    """Every function in ``tree`` with its dotted qualified name."""
+    found: list[tuple[_FunctionNode, str]] = []
+    stack: list[tuple[ast.AST, tuple[str, ...]]] = [(tree, ())]
+    while stack:
+        node, prefix = stack.pop()
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                qualified = (*prefix, child.name)
+                found.append((child, ".".join(qualified)))
+                stack.append((child, qualified))
+            elif isinstance(child, ast.ClassDef):
+                stack.append((child, (*prefix, child.name)))
+            else:
+                stack.append((child, prefix))
+    return found
 
 
 def resolve_enclosing_symbol(path: str, line: int, source: str) -> ChangedFunction | None:
@@ -54,9 +86,7 @@ def resolve_enclosing_symbol(path: str, line: int, source: str) -> ChangedFuncti
 
     best: ChangedFunction | None = None
     best_span = -1
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for node, qualname in _iter_functions(tree):
         start = int(node.lineno)
         end = int(getattr(node, "end_lineno", None) or start)
         if start <= line <= end:
@@ -64,7 +94,9 @@ def resolve_enclosing_symbol(path: str, line: int, source: str) -> ChangedFuncti
             # Innermost: the covering function with the smallest span. Nested
             # functions beat their enclosing def when both cover ``line``.
             if best is None or span < best_span or (span == best_span and start > best.start_line):
-                best = ChangedFunction(name=node.name, path=path, start_line=start)
+                best = ChangedFunction(
+                    name=node.name, path=path, start_line=start, qualname=qualname
+                )
                 best_span = span
     return best
 
@@ -106,8 +138,31 @@ def changed_functions_from_diff(
     return ordered
 
 
+#: Skip reason when every changed file is in a language with no resolver.
+SKIP_CHANGED_LANGUAGE_UNSUPPORTED = "changed_function_language_unsupported"
+# Enclosing-symbol resolution parses Python only (``ast``).
+_RESOLVABLE_SUFFIXES = (".py", ".pyi")
+
+
+def unsupported_language_skip(diff: str) -> str | None:
+    """Return a named skip when no changed file is in a resolvable language.
+
+    Coverage (lcov, Cobertura) and mutation (Stryker) reports for JS/TS, Java,
+    Go and other languages parse, but nothing here can map their changed hunks
+    to a function. Callers report this reason instead of an empty result.
+    """
+    if not diff.strip():
+        return None
+    paths = list(parse_diff_scope(diff).hunk_ranges)
+    if paths and not any(path.endswith(_RESOLVABLE_SUFFIXES) for path in paths):
+        return SKIP_CHANGED_LANGUAGE_UNSUPPORTED
+    return None
+
+
 __all__ = [
+    "SKIP_CHANGED_LANGUAGE_UNSUPPORTED",
     "ChangedFunction",
     "changed_functions_from_diff",
     "resolve_enclosing_symbol",
+    "unsupported_language_skip",
 ]

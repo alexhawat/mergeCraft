@@ -697,3 +697,292 @@ def test_failed_case_rate_is_computed_not_a_serialised_field() -> None:
     )
     assert legacy.cases_failed == 0
     assert legacy.failed_case_rate == 0.0
+
+
+# ── W3.3-5: per-case isolation, budgets, cost, metric set ──
+
+
+def _three_cases(tmp_path: Path) -> list[DetectionCase]:
+    corpus = tmp_path / "detect-corpus"
+    for case_id in ("bench-a-001", "bench-b-002", "bench-c-003"):
+        _write_detection_case(corpus, case_id, closed_world=False, issues=[])
+    return discover_detection_cases(corpus)
+
+
+def test_a_timing_out_case_is_recorded_and_the_campaign_continues(tmp_path: Path) -> None:
+    def review_fn(case: DetectionCase) -> list[dict[str, Any]]:
+        if case.case_id == "bench-b-002":
+            raise TimeoutError("review timed out")
+        return []
+
+    metrics = run_live_detection(
+        _three_cases(tmp_path),
+        provider="claude",
+        model="claude-sonnet-5",
+        review_fn=review_fn,
+        results_dir=tmp_path / "results",
+    )
+
+    assert metrics.cases_run == 2
+    assert metrics.failed_case_ids == ["bench-b-002"]
+    assert metrics.failed_case_errors == {"bench-b-002": "TimeoutError: review timed out"}
+    # The cases around the failure still wrote their raw findings and a journal row.
+    raw_dir = Path(metrics.raw_findings_dir)
+    assert (raw_dir / "bench-a-001.json").is_file()
+    assert (raw_dir / "bench-c-003.json").is_file()
+    journal = [json.loads(line) for line in (raw_dir / "journal.jsonl").read_text().splitlines()]
+    assert [(row["case_id"], row["status"]) for row in journal] == [
+        ("bench-a-001", "scored"),
+        ("bench-b-002", "failed"),
+        ("bench-c-003", "scored"),
+    ]
+
+
+def test_malformed_output_error_is_isolated_per_case(tmp_path: Path) -> None:
+    def review_fn(case: DetectionCase) -> list[dict[str, Any]]:
+        if case.case_id == "bench-a-001":
+            json.loads("{not json")
+        return []
+
+    metrics = run_live_detection(
+        _three_cases(tmp_path),
+        provider="claude",
+        model="claude-sonnet-5",
+        review_fn=review_fn,
+        results_dir=tmp_path / "results",
+    )
+
+    assert metrics.cases_run == 2
+    assert metrics.failed_case_errors["bench-a-001"].startswith("JSONDecodeError")
+
+
+def test_reported_cost_is_recorded_on_receipts_and_totalled(tmp_path: Path) -> None:
+    from mergecraft.evals.live_run import ReviewOutcome
+
+    def review_fn(case: DetectionCase) -> ReviewOutcome:
+        return ReviewOutcome(findings=[], cost_usd=0.25, total_tokens=1000)
+
+    metrics = run_live_detection(
+        _three_cases(tmp_path),
+        provider="claude",
+        model="claude-sonnet-5",
+        review_fn=review_fn,
+        results_dir=tmp_path / "results",
+    )
+
+    receipts = [row.execution_receipt for row in metrics.case_results]
+    assert all(r is not None and r.cost_known and r.cost_usd == 0.25 for r in receipts)
+    assert metrics.total_cost_usd == 0.75
+    assert metrics.latency is not None
+    assert all(
+        row.quality is not None and row.quality.cost_per_review == 0.25
+        for row in metrics.case_results
+    )
+
+
+def test_unreported_cost_stays_unknown_not_zero(tmp_path: Path) -> None:
+    stub, _ = _stub_review_fn({})
+
+    metrics = run_live_detection(
+        _three_cases(tmp_path),
+        provider="claude",
+        model="claude-sonnet-5",
+        review_fn=stub,
+        results_dir=tmp_path / "results",
+    )
+
+    assert metrics.total_cost_usd is None
+    assert all(
+        r.execution_receipt is not None and not r.execution_receipt.cost_known
+        for r in metrics.case_results
+    )
+
+
+def test_per_review_cost_and_token_bounds_fail_the_case(tmp_path: Path) -> None:
+    from mergecraft.evals.live_run import ReviewBudget, ReviewOutcome
+
+    def review_fn(case: DetectionCase) -> ReviewOutcome:
+        if case.case_id == "bench-a-001":
+            return ReviewOutcome(findings=[], cost_usd=5.0)
+        if case.case_id == "bench-b-002":
+            return ReviewOutcome(findings=[], cost_usd=0.1, total_tokens=999_999)
+        return ReviewOutcome(findings=[], cost_usd=0.1, total_tokens=10)
+
+    metrics = run_live_detection(
+        _three_cases(tmp_path),
+        provider="claude",
+        model="claude-sonnet-5",
+        review_fn=review_fn,
+        results_dir=tmp_path / "results",
+        budget=ReviewBudget(per_review_cost_budget_usd=1.0, per_review_token_limit=1000),
+    )
+
+    assert metrics.failed_case_ids == ["bench-a-001", "bench-b-002"]
+    assert "cost" in metrics.failed_case_errors["bench-a-001"]
+    assert "tokens" in metrics.failed_case_errors["bench-b-002"]
+    assert metrics.cases_run == 1
+
+
+def test_campaign_cost_ceiling_stops_spending(tmp_path: Path) -> None:
+    from mergecraft.evals.live_run import ReviewBudget, ReviewOutcome
+
+    calls: list[str] = []
+
+    def review_fn(case: DetectionCase) -> ReviewOutcome:
+        calls.append(case.case_id)
+        return ReviewOutcome(findings=[], cost_usd=0.6)
+
+    metrics = run_live_detection(
+        _three_cases(tmp_path),
+        provider="claude",
+        model="claude-sonnet-5",
+        review_fn=review_fn,
+        results_dir=tmp_path / "results",
+        budget=ReviewBudget(campaign_cost_ceiling_usd=1.0),
+    )
+
+    assert calls == ["bench-a-001", "bench-b-002"]
+    assert metrics.failed_case_ids == ["bench-c-003"]
+    assert "ceiling" in metrics.failed_case_errors["bench-c-003"]
+
+
+def test_a_review_over_its_wall_clock_bound_is_recorded_as_a_timeout(tmp_path: Path) -> None:
+    import time as time_module
+
+    from mergecraft.evals.live_run import ReviewBudget
+
+    def review_fn(case: DetectionCase) -> list[dict[str, Any]]:
+        time_module.sleep(0.05)
+        return []
+
+    metrics = run_live_detection(
+        _three_cases(tmp_path)[:1],
+        provider="claude",
+        model="claude-sonnet-5",
+        review_fn=review_fn,
+        results_dir=tmp_path / "results",
+        budget=ReviewBudget(per_review_timeout_seconds=0.001),
+    )
+
+    assert metrics.cases_run == 0
+    assert metrics.failed_case_errors["bench-a-001"].startswith("TimeoutError")
+
+
+def test_default_review_enforces_the_timeout_and_scopes_the_bounds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The production review fn cancels a hung review and exports the token/cost
+    bounds only for the duration of the review."""
+    import asyncio
+    import os
+
+    from mergecraft.evals import live_run
+    from mergecraft.evals.live_run import ReviewBudget
+
+    seen: dict[str, str | None] = {}
+
+    async def hung_review(**_kwargs: Any) -> Any:
+        seen["token"] = os.environ.get("MERGECRAFT_TOKEN_BUDGET")
+        seen["cost"] = os.environ.get("MERGECRAFT_COST_BUDGET_USD")
+        await asyncio.sleep(30)
+
+    monkeypatch.delenv("MERGECRAFT_TOKEN_BUDGET", raising=False)
+    monkeypatch.delenv("MERGECRAFT_COST_BUDGET_USD", raising=False)
+    monkeypatch.setattr("mergecraft.offline_review.run_offline_diff_review", hung_review)
+    review_fn = live_run._default_review_fn(
+        "claude/claude-sonnet-5",
+        ReviewBudget(
+            per_review_timeout_seconds=0.05,
+            per_review_token_limit=1234,
+            per_review_cost_budget_usd=0.5,
+        ),
+    )
+
+    metrics = run_live_detection(
+        _three_cases(tmp_path)[:1],
+        provider="claude",
+        model="claude/claude-sonnet-5",
+        review_fn=review_fn,
+        results_dir=tmp_path / "results",
+    )
+
+    assert metrics.failed_case_errors["bench-a-001"].startswith("TimeoutError")
+    assert seen == {"token": "1234", "cost": "0.5"}
+    assert "MERGECRAFT_TOKEN_BUDGET" not in os.environ
+    assert "MERGECRAFT_COST_BUDGET_USD" not in os.environ
+
+
+def test_bench_command_exposes_failures_latency_cost_and_budget_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``eval bench`` prints the recorded failures, latency and cost, and takes the bounds."""
+    from typer.testing import CliRunner
+
+    from mergecraft.cli.app import app
+    from mergecraft.evals import live_run
+    from mergecraft.evals.live_run import ReviewOutcome
+
+    corpus = tmp_path / "corpus"
+    _write_detection_case(corpus, "bench-a-001", closed_world=False, issues=[])
+    _write_detection_case(corpus, "bench-b-002", closed_world=False, issues=[])
+
+    def fake_default(model: str, budget: Any = None) -> Any:
+        assert budget is not None
+        assert budget.per_review_timeout_seconds == 7.0
+        assert budget.campaign_cost_ceiling_usd == 3.0
+
+        def _fn(case: DetectionCase) -> ReviewOutcome:
+            if case.case_id == "bench-b-002":
+                raise TimeoutError("hung")
+            return ReviewOutcome(findings=[], cost_usd=0.5)
+
+        return _fn
+
+    monkeypatch.setattr(live_run, "has_credentials_for_slug", lambda _model: True)
+    monkeypatch.setattr(live_run, "_default_review_fn", fake_default)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "bench",
+            "--bank",
+            str(tmp_path / "bank"),
+            "--detection-corpus",
+            str(corpus),
+            "--results-dir",
+            str(tmp_path / "results"),
+            "--model",
+            "claude/claude-sonnet-5",
+            "--per-review-timeout-seconds",
+            "7",
+            "--campaign-cost-ceiling-usd",
+            "3",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "failed cases    : 1" in result.output
+    assert "bench-b-002: TimeoutError: hung" in result.output
+    assert "cost            : $0.5000" in result.output
+    assert "latency" in result.output
+
+
+def test_total_cost_includes_reviews_that_breached_a_bound(tmp_path: Path) -> None:
+    from mergecraft.evals.live_run import ReviewBudget, ReviewOutcome
+
+    def review_fn(case: DetectionCase) -> ReviewOutcome:
+        return ReviewOutcome(findings=[], cost_usd=5.0 if case.case_id == "bench-b-002" else 0.25)
+
+    metrics = run_live_detection(
+        _three_cases(tmp_path),
+        provider="claude",
+        model="claude-sonnet-5",
+        review_fn=review_fn,
+        results_dir=tmp_path / "results",
+        budget=ReviewBudget(per_review_cost_budget_usd=1.0),
+    )
+
+    assert metrics.failed_case_ids == ["bench-b-002"]
+    assert metrics.cases_run == 2
+    assert metrics.total_cost_usd == 5.5

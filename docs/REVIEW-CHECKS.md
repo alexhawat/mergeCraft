@@ -58,6 +58,14 @@ verdict; everything else is advisory. Concretely:
   `timed_out`, `unavailable`, `declared-but-cannot-run`. **Only
   `failed`** is a negative finding; **only `passed`** is a positive
   signal. The other three are honest skips, never silent passes.
+  Analyzer catalog rows add one more: `tool-error`, for an analyzer that
+  ran but exited non-zero without reporting a single diagnostic (a crash,
+  a config error, an unreadable file). It judged nothing, like a skip.
+  A manifest can declare documented "nothing to scan" exits
+  (`benign_exits`, for example osv-scanner's `128`); those report
+  `passed` with a `nothing to scan` reason instead, and the pre-merge
+  summary lists them as "passed with nothing to scan", separate from
+  clean scans.
 - **CI check-runs** — raw `check_suite` data from `mcp/check_runs.py`
   plus the cluster/blame/flaky annotations from `src/mergecraft/ci/`.
 - **The agent's `approved` boolean** — **NOT** mechanical evidence. It
@@ -188,7 +196,9 @@ paths, never a dependency manifest, lockfile or agent-instruction file, proved
 against the head-side text), `whitespace` (the same tokens before and after;
 indentation counts in whitespace-sensitive languages), `generated` (only
 lockfiles or generated paths, with no manifest or generator config beside
-them) and `commentOnly` (only `//` line comments changed, in a closed list of
+them; each file under a `generated/` directory needs a generated-file marker
+such as `Code generated … DO NOT EDIT` or `@generated` in its first 20 lines,
+and a mode-only or binary change never matches) and `commentOnly` (only `//` line comments changed, in a closed list of
 `//`-comment languages — `.ts .go .java .kt .c .h .cc .cpp .hpp .cs .swift`.
 JavaScript (`.js`, which can hold JSX) and `.jsx` / `.tsx` are excluded because a
 JSX text child can start with `//` and render; Rust because a lifetime's lone `'`
@@ -286,8 +296,11 @@ its source and its new name and leaves review only when both are ignored, so
 in `ignoredPaths`, and the review body lists them under "Not reviewed (ignored
 by config)". The globs are the `ignore_paths` Action input, `review.ignorePaths`
 and, unless `review.ignorePathDefaults: false`, the defaults: `**/CHANGELOG.md`,
-`**/*.lock`, `**/package-lock.json`, and generated or minified files (a
-generated file stays in scope when its generator config changed too). The YAML
+`**/*.lock`, `**/package-lock.json`, and minified `*.min.js` / `*.min.css` files.
+A directory named `generated` is not proof of generator output, so its files are
+reviewed unless a glob such as `**/generated/**` names them. Globs use the same
+dialect as policy `scope.path` and declared Scope paths: `*` stays inside one
+directory and `**` spans zero or more. The YAML
 half is read from the operator's side only — the base snapshot of a
 `pull_request_target` run, the base commit's config on any other pull request —
 so a pull request cannot ignore its own files. When the complete file listing of
@@ -404,7 +417,7 @@ Offline inspection: `mergecraft analyzers list|detect|run|explain|export --sarif
 
 **Scoping:** analyzers run on **head** by default; findings outside the diff hunks are dropped unless the path is an explicit exception (new file, dependency manifest, lockfile, workflow, migration). `introduced_by_pr: unknown` when no base run happened — never implied `true`. Every drop is recorded against the hit with the stage and a reason (see **Disposition ledger** below).
 
-**Clustering:** one defect from multiple tools publishes **one** finding with corroborating evidence and raised `confidence`. A hit merged into a cluster is recorded `merged` and points at the surviving finding's fingerprint.
+**Clustering:** findings that agree on path, line span, scope, attribution and normalized message text publish **one** finding with corroborating evidence and raised `confidence`. Different tools that word the same defect differently (ruff `F401` vs pylint `W0611`, for example) are not merged today. A hit merged into a cluster is recorded `merged` and points at the surviving finding's fingerprint.
 
 **Verification:** Critical/Major analyzer hits are **hypotheses** until the read-only `mergecraft-verifier` subagent confirms, downgrades, or drops them. Drops write a reason under `## Withdrawn review findings (known non-issues)` **and** are recorded against the hit in the disposition ledger (`dropped:verifier`, or `downgraded` with the old and new severity).
 
@@ -442,14 +455,17 @@ To discover a `check_suite_id` for a commit, call `list_check_runs` with the PR 
 - mergeCraft does not re-run CI, retry jobs, or push fix commits
 - Non-GitHub providers (CircleCI, GitLab, Azure) are honestly stubbed — no silent empty results
 - A failure outside the diff is **reported, not blamed** on the author
-- When the evidence does not decide — no diff overlap and no same-fingerprint base-branch failure — the failure is **unattributed** and stays blocking; only a base-branch failure or a retry flip clears it
+- When the evidence does not decide — no diff overlap and no same-fingerprint base-branch failure — the failure is **unattributed** and stays blocking; only a base-branch failure or a retry flip clears it. The **newest** completed base run of the workflow decides: once the base branch passes again, an older same-fingerprint base failure is evidence only and clears nothing
+- A failure's fingerprint is its command plus its specific diagnostic line — GitHub's `Process completed with exit code N` trailer, `make: ***` and "Found N errors" summaries never count as the signature. A log with nothing but such lines also hashes the job and step, so two unrelated jobs never share an identity
 - Flaky failures are named flaky rather than treated as the author's defect
 
 The review publishes `### 🚨 CI failures` with clustered root causes, flaky/blame verdicts, and redacted excerpts. The pre-merge **CI** row reports failure count, cluster count, flaky count, PR-attributed count, unattributed count, and whether truncation occurred. Inline CI comments may carry a one-click `suggestion` when the fix is a contained single-hunk edit; pushing a fix commit stays behind the existing `push` permission. Only an inline comment is posted for a `caused_by_pr` failure: an unattributed one has no proven hunk to anchor to.
 
-**Recorded as evidence (#36).** Each clustered CI failure is also recorded as a `source: ci` finding on the run and carried into the [merge evidence packet](REVIEW-DOCTRINE.md), keeping the blame verdict it was given: a failure attributed to this PR is `Major` / `introduced_by_pr: true`; a flaky or pre-existing one is `Minor` / `introduced_by_pr: false`; and an **unattributed** one — no diff overlap and no same-fingerprint base-branch failure — is `Major` / `introduced_by_pr: unknown`. Since every gate that consumes findings is monotone in blockers, the annotation is what makes the verdict mechanical rather than a matter of wording — a flaky pipeline cannot block a clean pull request, and an unattributed failure cannot be cleared without evidence.
+**Recorded as evidence (#36).** Each clustered CI failure is also recorded as a `source: ci` finding on the run and carried into the [merge evidence packet](REVIEW-DOCTRINE.md), keeping the blame verdict it was given: a failure attributed to this PR is `Major` / `introduced_by_pr: true`; a flaky or pre-existing one is `Minor` / `introduced_by_pr: false`; and an **unattributed** one — no diff overlap and no same-fingerprint base-branch failure — is `Major` / `introduced_by_pr: unknown`. Since every gate that consumes findings is monotone in blockers, the annotation is what makes the verdict mechanical rather than a matter of wording — a flaky pipeline cannot block a clean pull request, and an unattributed failure cannot be cleared without evidence. Failed runs past the log-analysis cap (three per check suite) are recorded too, one `Major` / `introduced_by_pr: unknown` finding per run naming it, since no log was read that could clear them.
 
-**SARIF your CI already produced.** Naming artifacts under `ciEvidence.sarifArtifacts` lets the reviewer ingest their SARIF as CI findings through the same parser the analyzer catalog uses. Default is empty, in which case no artifact API call is made. Ingested results are reported at a non-blocking severity with `introduced_by_pr: unknown` — SARIF from another pipeline describes the tree, not this diff.
+**SARIF your CI already produced.** Naming artifacts under `ciEvidence.sarifArtifacts` lets the reviewer ingest their SARIF as CI findings through the same parser the analyzer catalog uses. Default is empty, in which case no artifact API call is made. Ingested results keep their native SARIF severity (an `error` result maps to `Major`, which blocks) with `introduced_by_pr: unknown` — SARIF from another pipeline describes the tree, not this diff, so attribution stays open while the severity can still reach the gate.
+
+**Coverage and mutation reports.** `ciEvidence.coverageArtifacts` (coverage.py JSON, lcov, Cobertura) and `ciEvidence.mutationArtifacts` (mutmut, Stryker JSON) are attributed to changed functions, and changed-function resolution parses **Python only**. A report for a diff that changes no Python file parses, but produces no finding and records the skip reason `changed_function_language_unsupported`; a Python change outside any function records `enclosing_symbol_unresolved` (coverage) or `mutation_symbols_unresolved` (mutation).
 
 Implementation: [`src/mergecraft/ci/intelligence.py`](../src/mergecraft/ci/intelligence.py), [`src/mergecraft/ci/review.py`](../src/mergecraft/ci/review.py), [`src/mergecraft/ci/cluster.py`](../src/mergecraft/ci/cluster.py), [`src/mergecraft/mcp/ci_intelligence.py`](../src/mergecraft/mcp/ci_intelligence.py), [`src/mergecraft/mcp/check_suite.py`](../src/mergecraft/mcp/check_suite.py), [`src/mergecraft/mcp/check_runs.py`](../src/mergecraft/mcp/check_runs.py).
 
@@ -585,7 +601,7 @@ What mergecraft deliberately does **not** report — this is most of what keeps 
   later run. Later reviews read that section first and treat it as binding, so a false positive is
   argued once instead of on every PR.
 - **Finding fingerprints** — each inline comment is stamped server-side with a content hash of its path and body (`<!-- mergecraft-finding:v1:… -->`). Whitespace and case are normalized, so a re-raised finding is recognizable across runs even when reworded.
-- **Open-PR finding ledger** — the sticky progress comment carries `<!-- mergecraft-ledger:v1:<fingerprint>:<state> -->` markers for every finding this pull request's reviews considered, including deferred overflow, verifier drops (`withdrawn`), and over-budget verifications (`unpublished`). Persistence is GitHub-only; inspect with `mergecraft findings ledger --pr N`. The ledger never files GitHub issues — post-merge carryover owns issue filing.
+- **Open-PR finding ledger** — mergeCraft's formal reviews carry `<!-- mergecraft-ledger:v2:<fingerprint>:<state>:<metadata> -->` markers (metadata is URL-encoded JSON: `round_index`, `recorded_at`, `source`, `reason`) for every finding this pull request's reviews considered, including published inline findings (`open`), deferred overflow, verifier drops (`withdrawn`), and over-budget verifications (`unpublished`). A legacy sticky progress comment is read only for migration. Persistence is GitHub-only; inspect with `mergecraft findings ledger --pr N`. The ledger never files GitHub issues — post-merge carryover owns issue filing, and it skips ledger fingerprints only while the pull request is still open ([findings carryover](findings-carryover.md#open-pr-finding-ledger)).
 - **Repo learnings** — test commands, conventions, gotchas, and architecture notes persist in the same file and are loaded into every run.
 
 ## 8. Output shape

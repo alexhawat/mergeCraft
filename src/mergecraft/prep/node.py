@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import shutil
 from pathlib import Path
 
 from loguru import logger
 
-from mergecraft.prep.types import NodePackageManager, PrepOptions, PrepResult
+from mergecraft.prep.process import run_prep_command
+from mergecraft.prep.types import NodePackageManager, PrepLanguage, PrepOptions, PrepResult
 
 _LOCKFILES: dict[str, NodePackageManager] = {
     "pnpm-lock.yaml": "pnpm",
@@ -73,22 +73,16 @@ def _install_args(manager: NodePackageManager, *, ignore_scripts: bool) -> list[
 
 
 async def _run_cmd(cmd: str, args: list[str]) -> tuple[int, str]:
-    proc = await asyncio.create_subprocess_exec(
+    return await run_prep_command(
         cmd,
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+        args,
         env={**os.environ, "PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")},
     )
-    stdout_b, stderr_b = await proc.communicate()
-    out = b"\n".join(part for part in (stdout_b, stderr_b) if part).decode(
-        "utf-8", errors="replace"
-    )
-    return proc.returncode or 0, out.strip()
 
 
 class InstallNodeDependencies:
     name = "installNodeDependencies"
+    language: PrepLanguage = "node"
 
     def should_run(self) -> bool:
         return (Path.cwd() / "package.json").is_file()

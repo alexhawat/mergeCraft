@@ -227,6 +227,31 @@ key is missing, the message and the evidence both carry `required evidence
 missing: <keys>`, naming only the absent keys, followed by one `why <key> is
 missing: <reason>` line for each of them.
 
+## Rule scopes
+
+A rule or waiver `scope` narrows where it applies. `org` and `repo` compare
+case-insensitively, as GitHub names do; `branch` is the base branch and compares
+exactly. A rule whose `org` or `repo` can never match the reviewed repository is
+named in the run log.
+
+`scope.path` is a glob matched against the whole repository-relative path, in
+the same dialect as `review.ignorePaths` and declared Scope paths:
+
+- `*`, `?` and `[...]` stay inside one directory: `src/*.py` matches
+  `src/app.py`, not `src/api/app.py`.
+- A `**` segment spans zero or more directories: `services/payments/**/*.py`
+  matches `services/payments/charge.py` and `services/payments/v2/charge.py`,
+  and `**/migrations/**` matches a root `migrations/` as well as
+  `db/migrations/`.
+- A leading `./` is ignored, and `README.md` matches only the root file.
+
+Earlier releases matched `scope.path` with `fnmatch`, where `*` also crossed
+`/`. A rule written for that reading, such as `scope.path: "src/*"` meant to cover
+`src/api/app.py`, now matches only files directly under `src/`; write
+`src/**` instead. When a changed path matched a rule under the old reading but
+not the new one, the run log names the rule and the review records a Trivial
+`policy.scope_narrowed` row in the *Policy rules* summary.
+
 ## See also
 
 - [`docs/REVIEW-CHECKS.md`](REVIEW-CHECKS.md), *Policy rules*: enforcement modes,

@@ -201,7 +201,7 @@ async def collect_base_branch_runs(
                     own_head_shas=own_head_shas,
                 )
             ][:MAX_BASE_RUNS_PER_WORKFLOW]
-            for position, run in enumerate(completed):
+            for run in completed:
                 conclusion = _conclusion(run)
                 run_id = run.get("id")
                 if not isinstance(run_id, int):
@@ -229,9 +229,11 @@ async def collect_base_branch_runs(
                     fingerprint = _fingerprint_for_logs(names[workflow_id], run_id, log_text)
                     if fingerprint in wanted:
                         rows.append({**base, "fingerprint": fingerprint})
-                elif conclusion == "success" and position == 0:
-                    # The newest completed base run passed: recorded as (non-clearing)
-                    # evidence against each failure of this workflow.
+                elif conclusion == "success":
+                    # A passing base run is (non-clearing) evidence against each
+                    # failure of this workflow. Every pass is kept, in newest-first
+                    # order, so an older same-fingerprint failure behind it never
+                    # decides (``flaky.newest_base_runs``, #1321).
                     rows.extend({**base, "fingerprint": fp} for fp in workflows[workflow_id])
         return BaseRunsCollection(rows=rows)
     except Exception as err:  # base evidence is supplementary and never fails a review

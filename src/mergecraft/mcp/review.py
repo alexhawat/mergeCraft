@@ -1001,9 +1001,20 @@ def _truncate_review_body_for_github(
         prefix = record + REVIEW_BODY_MARKER
         keep = REVIEW_BODY_MAX_CHARS - len(prefix) - len(durable_suffix) - len(marker)
         if keep < 0:
-            msg = "review record and durable metadata exceed GitHub's review body limit"
-            raise ValueError(msg)
-        shortened = prefix + prose[:keep] + marker + durable_suffix
+            # The record and durable state alone are over the cap. Publishing a
+            # shortened record beats publishing nothing: drop the prose and cut
+            # the durable tail at a line boundary, so every marker left parses.
+            logger.warning(
+                "review record and durable metadata for PR #{} exceed GitHub's {}-character "
+                "cap; dropping the review prose and the trailing durable rows",
+                pull_number,
+                REVIEW_BODY_MAX_CHARS,
+            )
+            durable = (prefix + durable_suffix)[: REVIEW_BODY_MAX_CHARS - len(marker)]
+            boundary = durable.rfind("\n")
+            shortened = (durable[:boundary] if boundary > 0 else durable) + marker
+        else:
+            shortened = prefix + prose[:keep] + marker + durable_suffix
     else:
         keep = max(REVIEW_BODY_MAX_CHARS - len(marker), 0)
         shortened = body[:keep] + marker

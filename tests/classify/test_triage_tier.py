@@ -253,10 +253,20 @@ def test_the_decision_is_deterministic() -> None:
 
 
 def test_no_pull_request_authored_field_is_an_input() -> None:
-    """The title, body, labels and head-side config cannot select a tier — by signature."""
+    """The title, body, labels and head-side config cannot select a tier — by signature.
+
+    ``instruction_extra_filenames`` is the operator's base-side
+    ``review.instructionExtraFilenames``; it can only refuse a skip.
+    """
     from mergecraft.classify.triage import TriageDecision, triage_diff
 
     parameters = set(inspect.signature(triage_diff).parameters)
 
-    assert parameters == {"diff_text", "config", "head_files", "passed_checks"}
+    assert parameters == {
+        "diff_text",
+        "config",
+        "head_files",
+        "passed_checks",
+        "instruction_extra_filenames",
+    }
     assert isinstance(triage_diff(_PIN_DIFF, config=_config(), passed_checks=[]), TriageDecision)

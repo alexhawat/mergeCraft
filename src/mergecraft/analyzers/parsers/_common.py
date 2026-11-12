@@ -188,6 +188,34 @@ def require_diagnostic_text(raw: str, *, matched: bool, what: str) -> None:
         raise ValueError(msg)
 
 
+# Bound on a source file read to turn a byte offset into a line number.
+_MAX_OFFSET_SOURCE_BYTES = 4 * 1024 * 1024
+
+
+def line_at_byte_offset(text: str, offset: object) -> int:
+    """1-indexed line holding UTF-8 byte ``offset`` of ``text`` (1 when unusable)."""
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+        return 1
+    return text.encode("utf-8")[:offset].count(b"\n") + 1
+
+
+def read_repo_text(repo_root: Path, rel_path: str) -> str | None:
+    """Read a repo file for offset-to-line mapping; ``None`` if it escapes, is big or unreadable."""
+    from mergecraft.analyzers.paths import safe_repo_relative_path
+
+    if not rel_path:
+        return None
+    candidate = safe_repo_relative_path(repo_root, rel_path)
+    if candidate is None:
+        return None
+    try:
+        if not candidate.is_file() or candidate.stat().st_size > _MAX_OFFSET_SOURCE_BYTES:
+            return None
+        return candidate.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
 def iter_json_objects(raw: str) -> Iterator[dict[str, Any]]:
     """Yield JSON objects from JSONL (or a single object/array) without raising."""
     stripped = raw.strip()

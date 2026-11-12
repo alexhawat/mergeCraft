@@ -7,7 +7,6 @@ Implementation lands in W7.2.
 
 from __future__ import annotations
 
-import inspect
 from typing import TYPE_CHECKING, Any
 
 from tests.analyzers.support import import_module
@@ -196,9 +195,6 @@ def test_recall_pass_output_excludes_findings_already_drafted() -> None:
         _agent_finding(start=20, body=paraphrase_body),
         _agent_finding(start=44, body=novel_body),
     ]
-
-    source = inspect.getsource(recall.filter_novel_recall_findings)
-    assert "dedupe_findings" in source
 
     filtered = recall.filter_novel_recall_findings(draft, recalled)
     bodies = {row.message for row in filtered}

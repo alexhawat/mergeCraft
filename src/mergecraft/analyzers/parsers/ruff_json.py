@@ -11,6 +11,7 @@ from mergecraft.analyzers.parsers._common import (
     coerce_line,
     map_confidence,
     map_native_severity,
+    resolve_repo_relative_path,
     taxonomy_category,
 )
 
@@ -57,7 +58,6 @@ def _severity_for_rule(manifest: AnalyzerManifest, native_level: str, code: str)
 
 
 def parse_ruff_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) -> list[Finding]:
-    _ = repo_root
     payload = json.loads(raw)
     if not isinstance(payload, list):
         msg = "ruff JSON output must be an array"
@@ -68,7 +68,9 @@ def parse_ruff_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) ->
     for item in payload:
         if not isinstance(item, dict):
             continue
-        path = str(item.get("filename") or "")
+        # ruff reports absolute filenames; hash the repo-relative path so a
+        # finding keeps one identity across checkout roots (#1322).
+        path = resolve_repo_relative_path(str(item.get("filename") or ""), repo_root=repo_root)
         location = item.get("location") or {}
         start_line = coerce_line(location.get("row", 1))
         end_line = start_line

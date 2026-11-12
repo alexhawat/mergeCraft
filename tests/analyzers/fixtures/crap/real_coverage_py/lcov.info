@@ -1,0 +1,39 @@
+SF:src/pkg/mod.py
+DA:1,1
+DA:4,1
+DA:5,1
+DA:6,1
+DA:7,0
+DA:8,1
+DA:9,0
+DA:10,1
+DA:13,1
+DA:14,1
+DA:15,1
+DA:16,1
+DA:17,0
+DA:20,1
+DA:21,0
+DA:22,0
+DA:24,0
+LF:17
+LH:11
+FN:5,10,Foo.bar
+FNDA:1,Foo.bar
+FN:14,17,top
+FNDA:1,top
+FN:20,24,outer
+FNDA:0,outer
+FN:21,22,outer.inner
+FNDA:0,outer.inner
+FNF:4
+FNH:2
+BRDA:6,0,jump to line 7,0
+BRDA:6,0,jump to line 8,1
+BRDA:8,0,jump to line 9,0
+BRDA:8,0,jump to line 10,1
+BRDA:15,0,jump to line 16,1
+BRDA:15,0,jump to line 17,0
+BRF:6
+BRH:3
+end_of_record

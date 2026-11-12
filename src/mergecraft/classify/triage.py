@@ -22,7 +22,8 @@ matches and hides one real change matches nothing and gets a full review.
   ambiguous multiline lexical constructs. Normalized file text must also match.
   Missing context, executable-mode changes and unsupported syntax get full review.
 * ``generated`` — only lockfiles or generated paths changed, and no dependency
-  manifest or generator config changed with them.
+  manifest or generator config changed with them. A ``generated/`` path also needs a
+  generated-file marker in its head text; mode-only and binary entries never count.
 * ``commentOnly`` — only ``//`` comment lines changed, in a closed list of
   ``//``-comment languages chosen by suffix (no JavaScript, JSX/TSX or Rust;
   ``Package.swift`` and Go ``_test.go`` / ``DO NOT EDIT`` files refused; a Java unicode
@@ -66,11 +67,14 @@ from typing import TYPE_CHECKING, Final, Literal
 
 from mergecraft.analyzers.scope import changed_paths_from_scope, parse_diff_scope
 from mergecraft.classify.change_classifier import _HIGH_STAKES_PATH_PARTS
-from mergecraft.classify.generated_files import FileKind, classify_path
+from mergecraft.classify.generated_files import FileKind, classify_path, has_generated_marker
+from mergecraft.context.instruction_discovery import is_instruction_path
 from mergecraft.review_policy.manifest_names import (
     DEPENDENCY_MANIFEST_NAMES,
     GENERATOR_CONFIG_NAMES,
     LOCKFILE_NAMES,
+    is_build_manifest_path,
+    is_dependency_manifest_path,
 )
 
 if TYPE_CHECKING:
@@ -93,6 +97,7 @@ _AGENT_INSTRUCTION_BASENAMES: Final[frozenset[str]] = frozenset(
         "agents.md",
         "claude.md",
         "gemini.md",
+        "skill.md",
         "copilot-instructions.md",
         ".cursorrules",
         ".windsurfrules",
@@ -112,6 +117,8 @@ _PROSE_REFUSED_PATH_PARTS: Final[tuple[str, ...]] = (
     ".cursor/",
     ".agents/",
     ".codex/",
+    ".windsurf/",
+    ".mergecraft/",
     "agent-instructions",
 )
 _MARKDOWN_SUFFIXES: Final[tuple[str, ...]] = (".md", ".markdown")
@@ -172,6 +179,7 @@ class _File:
     previous_path: str
     binary: bool = False
     metadata_changed: bool = False
+    mode_changed: bool = False
     hunks: list[_Hunk] = field(default_factory=list)
 
 
@@ -194,6 +202,8 @@ def _parse(diff_text: str, *, newline_only: bool = False) -> list[_File]:
             ("old mode ", "new mode ", "new file mode ", "deleted file mode ", "\\ No newline")
         ):
             current.metadata_changed = True
+            if raw.startswith(("old mode ", "new mode ")):
+                current.mode_changed = True
             continue
         if hunk is None:
             if raw.startswith("+++ b/"):
@@ -332,11 +342,39 @@ def _prose_file_ok(file: _File, head_text: str) -> bool:
     return True
 
 
-def recognize_prose_only(diff_text: str, *, head_files: Mapping[str, str]) -> bool:
-    """Only prose files changed, and no changed line sits in code, a fence or front matter."""
+def _steers_review(path: str, extras: frozenset[str]) -> bool:
+    """Whether ``path`` is an instruction source, a ``.mergecraft/`` file or similar.
+
+    Instruction discovery's own predicate decides first, so the two can never
+    drift; the lowercased name and directory checks also cover other casings
+    and agent config directories discovery does not read.
+    """
+    lowered = f"/{path.lower()}"
+    if is_instruction_path(path, extra_filenames=extras):
+        return True
+    name = PurePosixPath(lowered).name
+    if name in _AGENT_INSTRUCTION_BASENAMES:
+        return True
+    if "/" not in path.strip("/") and name in {extra.lower() for extra in extras}:
+        return True
+    return any(part in lowered for part in _PROSE_REFUSED_PATH_PARTS)
+
+
+def recognize_prose_only(
+    diff_text: str,
+    *,
+    head_files: Mapping[str, str],
+    instruction_extra_filenames: Collection[str] = (),
+) -> bool:
+    """Only prose files changed, and no changed line sits in code, a fence or front matter.
+
+    ``instruction_extra_filenames`` is ``review.instructionExtraFilenames``: those
+    repo-root names are instruction sources too, so they are never prose.
+    """
     files = _parse(diff_text)
     if not _changeable(files):
         return False
+    extras = frozenset(instruction_extra_filenames)
     for file in files:
         for path in (file.previous_path, file.path):
             lowered = path.lower()
@@ -346,7 +384,9 @@ def recognize_prose_only(diff_text: str, *, head_files: Mapping[str, str]) -> bo
                 return False
             if PurePosixPath(lowered).name in _PROSE_REFUSED_BASENAMES:
                 return False
-            if any(part in lowered for part in _PROSE_REFUSED_PATH_PARTS):
+            if is_dependency_manifest_path(path) or is_build_manifest_path(path):
+                return False
+            if _steers_review(path, extras):
                 return False
         head_text = head_files.get(file.path)
         if head_text is None:
@@ -485,20 +525,40 @@ def _normalize(lines: list[str], *, strict: bool) -> list[str]:
     return [line.strip() for line in lines if line.strip()]
 
 
-def recognize_generated(diff_text: str) -> bool:
-    """Only lockfiles or generated paths changed, with no manifest or generator config."""
+def recognize_generated(diff_text: str, *, head_files: Mapping[str, str] | None = None) -> bool:
+    """Only lockfiles or marked generated files changed, with no manifest or generator config.
+
+    A path under a ``generated/`` directory counts only when its head text in
+    ``head_files`` carries a generated-file marker
+    (:func:`~mergecraft.classify.generated_files.has_generated_marker`): the
+    directory name alone proves nothing. An entry with no hunks at its own path
+    never counts, whatever the path: the files API sends a mode-only or binary
+    change that way, with no ``old mode`` / ``Binary files`` line to read. A pure
+    rename or copy (no hunks, a different pre-image) is judged by both paths.
+    """
     files = _parse(diff_text)
-    if not files:
+    if not files or any(f.binary or f.mode_changed for f in files):
         return False
+    if any(not f.hunks and not _renamed_or_copied(f) for f in files):
+        return False
+    heads = head_files or {}
     paths = {path for f in files for path in (f.previous_path, f.path)}
     paths.update(changed_paths_from_scope(parse_diff_scope(diff_text)))
     names = {_basename(p) for p in paths}
     if names & DEPENDENCY_MANIFEST_NAMES or names & GENERATOR_CONFIG_NAMES:
         return False
-    return all(
+    if not all(
         _basename(path) in LOCKFILE_NAMES or classify_path(path) == FileKind.GENERATED
         for path in paths
-    )
+    ):
+        return False
+    for file in files:
+        if _basename(file.path) in LOCKFILE_NAMES:
+            continue
+        head = heads.get(file.path)
+        if head is None or not has_generated_marker(head):
+            return False
+    return True
 
 
 # ── comment-only ──────────────────────────────────────────────────────────────
@@ -751,6 +811,7 @@ def triage_diff(
     config: FastPathSettings,
     head_files: Mapping[str, str] | None = None,
     passed_checks: Collection[str] = (),
+    instruction_extra_filenames: Collection[str] = (),
 ) -> TriageDecision:
     """Decide the tier for one diff.
 
@@ -765,6 +826,9 @@ def triage_diff(
     verifying checks have not passed from a trusted App (including a pin bump with no
     ``requireChecks`` or no ``trustedCheckApps``, which can never pass). It never
     takes a diff away from ``skip``.
+
+    ``instruction_extra_filenames`` is ``review.instructionExtraFilenames``, so
+    an extra instruction source is never recognised as prose.
     """
     if not config.enabled:
         return _full("review.fastPath is not enabled")
@@ -774,11 +838,13 @@ def triage_diff(
     matched: list[str] = []
     if recognize_pin_bump(diff_text):
         matched.append("pinBump")
-    if recognize_prose_only(diff_text, head_files=heads):
+    if recognize_prose_only(
+        diff_text, head_files=heads, instruction_extra_filenames=instruction_extra_filenames
+    ):
         matched.append("prose")
     if recognize_whitespace_only(diff_text, head_files=heads):
         matched.append("whitespace")
-    if recognize_generated(diff_text):
+    if recognize_generated(diff_text, head_files=heads):
         matched.append("generated")
     if recognize_comment_only(diff_text, head_files=heads):
         matched.append("commentOnly")

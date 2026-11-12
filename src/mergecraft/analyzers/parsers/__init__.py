@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from mergecraft.analyzers.finding import Finding
 from mergecraft.analyzers.parsers.bandit_json import parse_bandit_json
+from mergecraft.analyzers.parsers.biome_json import parse_biome_json
 from mergecraft.analyzers.parsers.buf_native import parse_buf_native
 from mergecraft.analyzers.parsers.bundler_audit_json import parse_bundler_audit_json
 from mergecraft.analyzers.parsers.cargo_audit_json import parse_cargo_audit_json
@@ -23,6 +24,7 @@ from mergecraft.analyzers.parsers.markdownlint_json import parse_markdownlint_js
 from mergecraft.analyzers.parsers.mypy_json import parse_mypy_json
 from mergecraft.analyzers.parsers.oasdiff_json import parse_oasdiff_json
 from mergecraft.analyzers.parsers.osv_json import parse_osv_json
+from mergecraft.analyzers.parsers.oxlint_json import parse_oxlint_json
 from mergecraft.analyzers.parsers.prisma_lint_json import parse_prisma_lint_json
 from mergecraft.analyzers.parsers.pyright_json import parse_pyright_json
 from mergecraft.analyzers.parsers.ruff_json import parse_ruff_json
@@ -51,6 +53,8 @@ _PARSERS: dict[str, ParserFn] = {
     "sarif": parse_sarif,
     "ruff_json": parse_ruff_json,
     "eslint_json": parse_eslint_json,
+    "biome_json": parse_biome_json,
+    "oxlint_json": parse_oxlint_json,
     "mypy_json": parse_mypy_json,
     "pyright_json": parse_pyright_json,
     "oasdiff_json": parse_oasdiff_json,

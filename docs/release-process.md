@@ -15,14 +15,29 @@ changelog section.
 
 1. `craft prepare` (or the Release workflow) cuts `release/<version>`. It
    generates a version section and inserts it **above** `CHANGELOG.md`
-   `## [Unreleased]`, which it leaves in place; fold the hand-written block
-   into the generated section by hand before pushing, then put an empty
-   `## [Unreleased]` back as the first block. `tests/docs/test_changelog_structure.py`
-   fails when `[Unreleased]` is not first, when a block repeats a heading type, or
-   when an entry appears under both `[Unreleased]` and a released version. Craft also bumps
+   `## [Unreleased]`, which it leaves in place. `tests/docs/test_changelog_structure.py`
+   requires `## [Unreleased]` to be the first release block, so a prepared branch
+   must move that block back above the new section, and
+   `tests/docs/test_gen_agent_packages_blob_ref.py` requires
+   `tests/docs/fixtures/agent_package_documentation.json` to name the tag being
+   released, because it records the documentation blob ids. `make release-normalize`
+   does both. It also folds the hand-written `[Unreleased]` entries into the section
+   being released and leaves `[Unreleased]` empty: `scripts/release_publish.py`
+   builds the GitHub release notes from that section alone, so entries left under
+   `[Unreleased]` never reach the release. The fold merges same-named `###`
+   sections and rewrites no entry, which keeps one heading per type and stops a
+   change being listed as both unreleased and released.
+   Craft also bumps
    `pyproject.toml`, `server.json`, and `uv.lock` in step. The same transaction
    updates `docs/consumer-release.json`, consumer install pins, matching release
-   documentation links, generated skill copies/hashes, and `llms-full.txt`.
+   documentation links, and `llms-full.txt`. It does **not** regenerate the
+   per-harness agent packages. The bump rewrites the install pins and the
+   `tree/v<release>/docs` links, while `scripts/gen_agent_packages.py` also
+   resolves the `{{DOCUMENTATION_REF}}` prose and every `blob/v<release>/` docs
+   link, so a prepared branch keeps the previous tag there and fails its own
+   `agent-packages-check`. Run `make agent-packages` too, and commit both results
+   before pushing; the Release workflow's `prepare` job runs both and pushes the
+   normalized commit before it dispatches CI/CD.
    Candidate-branch docs name the release being prepared; publish that candidate
    before recommending its install version. The post-release development bump
    retains the published release pin, never the next unpublished `.dev` version.
@@ -53,8 +68,10 @@ The two ways of cutting a release reach the same artifact:
   credentials. A push by a person starts CI/CD, which builds the dist.
 - **Workflow path.** The Release workflow's `prepare` job pushes the branch with the
   workflow's own `GITHUB_TOKEN`. GitHub does not start workflows from a
-  `GITHUB_TOKEN` push, so CI/CD would never run. The workflow's `dispatch-build` job
-  therefore dispatches CI/CD on the branch it just prepared (a `workflow_dispatch`
+  `GITHUB_TOKEN` push, so CI/CD would never run. `prepare` first regenerates the
+  per-harness agent packages on that branch and pushes the commit (see step 1), then
+  reports the regenerated head as the release SHA. The workflow's `dispatch-build`
+  job therefore dispatches CI/CD on that branch (a `workflow_dispatch`
   event created with `GITHUB_TOKEN` is the one event GitHub does start). It holds
   only `actions: write` and reads no secret.
 

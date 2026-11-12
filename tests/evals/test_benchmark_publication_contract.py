@@ -225,6 +225,8 @@ def _result(
     pins = base.pins.model_copy(
         update={
             "corpus_commit": CORPUS_COMMIT,
+            # Explicit: the fixture must not depend on the developer's checkout.
+            "working_tree_clean": True,
             "reviewing_model": {
                 provider: ReviewingModelPin(
                     model_id=recorded_model,
@@ -586,4 +588,13 @@ def test_human_receipt_prevents_manifest_from_flipping_closed_world(tmp_path: Pa
     payload["cases"][0]["closed_world"] = True
     manifest.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ValueError, match="case hashes do not match"):
+        build_publication(manifest, results)
+
+
+def test_publication_refuses_a_result_from_a_dirty_working_tree(tmp_path: Path) -> None:
+    manifest, results = _campaign(tmp_path)
+    payload = json.loads(results[0].read_text(encoding="utf-8"))
+    payload["pins"]["working_tree_clean"] = False
+    results[0].write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="uncommitted changes"):
         build_publication(manifest, results)

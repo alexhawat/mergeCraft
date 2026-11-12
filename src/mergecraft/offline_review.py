@@ -25,8 +25,9 @@ from mergecraft.analyzers.trust import (
     derive_source_trust_tier,
 )
 from mergecraft.config import load_repo_settings
+from mergecraft.diff import changed_paths_in_diff, diff_lines
+from mergecraft.evidence.merge import merge_findings
 from mergecraft.jev.client import AsyncJevClient, TypeSafeAPIError
-from mergecraft.mcp.checkout import changed_paths_in_diff
 from mergecraft.review.offline_agent import run_offline_agent_review
 from mergecraft.review.offline_result import (
     OfflineReviewResult as OfflineReviewResult,
@@ -121,14 +122,11 @@ def merge_analyzer_findings_into_result(
             return result
     else:
         existing = []
-    seen = {row.fingerprint for row in existing}
-    merged = list(existing)
-    for finding in extra:
-        if finding.fingerprint in seen:
-            continue
-        merged.append(finding)
-        seen.add(finding.fingerprint)
-    if len(merged) == len(existing) and result.structured_output:
+    # Location-aware identity (same key as the Action path): repeated
+    # diagnostics at other lines survive, and a colliding occurrence keeps
+    # its most severe copy (#1316).
+    merged = merge_findings(existing, extra)
+    if merged == existing and result.structured_output:
         return result
     result.structured_output = FindingsPayload(findings=merged).model_dump_json()
     return result
@@ -201,7 +199,7 @@ def _iter_diff_file_blocks(diff_text: str) -> list[str]:
     """Split a unified diff into per-file hunks (each starts with ``diff --git``)."""
     blocks: list[str] = []
     current: list[str] = []
-    for line in diff_text.splitlines(keepends=True):
+    for line in diff_lines(diff_text, keepends=True):
         if line.startswith("diff --git ") and current:
             blocks.append("".join(current))
             current = [line]
@@ -622,17 +620,11 @@ def _findings_for_shadow_judge(
     driver: _OfflineDiffReviewRun,
     review_out: OfflineReviewResult,
 ) -> list[Finding]:
-    """Merge review findings with analyzer rows; review rows win on fingerprint."""
-    review_findings = parse_offline_review_findings(review_out)
-    analyzer_findings = findings_from_analyzer_run(driver.analyzer_run)
-    seen = {row.fingerprint for row in review_findings}
-    merged = list(review_findings)
-    for finding in analyzer_findings:
-        if finding.fingerprint in seen:
-            continue
-        merged.append(finding)
-        seen.add(finding.fingerprint)
-    return merged
+    """Merge review findings with analyzer rows on location-aware identity."""
+    return merge_findings(
+        parse_offline_review_findings(review_out),
+        findings_from_analyzer_run(driver.analyzer_run),
+    )
 
 
 async def _run_shadow_jev_review(
