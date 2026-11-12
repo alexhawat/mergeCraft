@@ -188,7 +188,9 @@ paths, never a dependency manifest, lockfile or agent-instruction file, proved
 against the head-side text), `whitespace` (the same tokens before and after;
 indentation counts in whitespace-sensitive languages), `generated` (only
 lockfiles or generated paths, with no manifest or generator config beside
-them) and `commentOnly` (only `//` line comments changed, in a closed list of
+them; each file under a `generated/` directory needs a generated-file marker
+such as `Code generated … DO NOT EDIT` or `@generated` in its first 20 lines,
+and a mode-only or binary change never matches) and `commentOnly` (only `//` line comments changed, in a closed list of
 `//`-comment languages — `.ts .go .java .kt .c .h .cc .cpp .hpp .cs .swift`.
 JavaScript (`.js`, which can hold JSX) and `.jsx` / `.tsx` are excluded because a
 JSX text child can start with `//` and render; Rust because a lifetime's lone `'`
