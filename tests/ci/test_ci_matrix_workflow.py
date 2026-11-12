@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+import shlex
+import subprocess
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from tests.ci.workflow_support import REPO_ROOT, job, load_workflow, workflow_on
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _MATRIX = "ci-matrix.yml"
 _REQUIRED = [
@@ -101,11 +106,11 @@ def test_default_token_is_read_only() -> None:
     assert load_workflow(_MATRIX)["permissions"] == {"contents": "read"}
 
 
-# -- macOS known-failures list --------------------------------------------------------
+# -- matrix known-failures list --------------------------------------------------------
 
 
 def _known_failures() -> list[str]:
-    text = (REPO_ROOT / ".github" / "macos-known-failures.txt").read_text(encoding="utf-8")
+    text = (REPO_ROOT / ".github" / "matrix-known-failures.txt").read_text(encoding="utf-8")
     return [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
 
 
@@ -119,15 +124,34 @@ def test_the_macos_debt_list_names_only_tests_that_still_exist() -> None:
         )
 
 
-def test_the_macos_leg_deselects_the_debt_list_through_pytest_addopts() -> None:
+@pytest.mark.parametrize("job_id", ["compat-unit", "macos-unit"])
+def test_every_unit_leg_deselects_the_debt_list_through_pytest_addopts(job_id: str) -> None:
     step = next(
         s
-        for s in job(load_workflow(_MATRIX), "macos-unit")["steps"]
-        if s.get("name") == "Unit tests"
+        for s in job(load_workflow(_MATRIX), job_id)["steps"]
+        if str(s.get("name", "")).startswith("Unit tests")
     )
-    assert ".github/macos-known-failures.txt" in step["run"]
+    assert "scripts/ci_known_failures_addopts.sh .github/matrix-known-failures.txt" in step["run"]
     assert "PYTEST_ADDOPTS" in step["run"]
-    assert "--deselect" in step["run"]
+
+
+def test_the_addopts_helper_emits_one_quoted_deselect_per_node(tmp_path: Path) -> None:
+    listing = tmp_path / "known.txt"
+    listing.write_text(
+        "# comment\n\ntests/a.py::test_one\ntests/b.py::test_two[x y]\n", encoding="utf-8"
+    )
+    out = subprocess.run(
+        ["bash", str(REPO_ROOT / "scripts" / "ci_known_failures_addopts.sh"), str(listing)],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert shlex.split(out) == [
+        "--deselect",
+        "tests/a.py::test_one",
+        "--deselect",
+        "tests/b.py::test_two[x y]",
+    ]
 
 
 # -- the cache a PR seeds must never hold head coverage under the base key (CIR-F7) ----

@@ -116,7 +116,10 @@ jobs:
         env:
           MERGECRAFT_TEST_SPLITS: "2"
           MERGECRAFT_TEST_GROUP: ${{ matrix.group }}
-        run: make test
+        run: |
+          # Known failures (.github/matrix-known-failures.txt) are deselected
+          # through pytest's own option variable; everything else gates.
+          PYTEST_ADDOPTS="$(scripts/ci_known_failures_addopts.sh .github/matrix-known-failures.txt)" make test
 
   # agents_sdk and harbor sit at 0% in the required run because their tests skip
   # when the optional extra is missing. Install both and prove the import first, so
@@ -171,11 +174,6 @@ jobs:
         env:
           MERGECRAFT_PYTEST_JOBS: "3"
         run: |
-          # Known macOS-only failures (.github/macos-known-failures.txt) are
-          # deselected through pytest's own option variable; everything else gates.
-          addopts=""
-          while IFS= read -r node; do
-            case "$node" in ""|"#"*) continue ;; esac
-            addopts="$addopts --deselect $(printf '%q' "$node")"
-          done < .github/macos-known-failures.txt
-          PYTEST_ADDOPTS="$addopts" make test
+          # Known failures (.github/matrix-known-failures.txt) are deselected
+          # through pytest's own option variable; everything else gates.
+          PYTEST_ADDOPTS="$(scripts/ci_known_failures_addopts.sh .github/matrix-known-failures.txt)" make test
