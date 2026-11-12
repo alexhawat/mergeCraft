@@ -210,6 +210,8 @@ _CONFIG_SUFFIXES: Final[tuple[str, ...]] = (
     ".tsv",
     ".xml",
 )
+# Package roots whose config and data files are shipped behaviour, not inert config.
+_SOURCE_ROOTS: Final[frozenset[str]] = frozenset({"src", "lib", "app", "pkg", "packages"})
 _TEST_DIRS: Final[frozenset[str]] = frozenset({"tests", "test", "__tests__", "spec", "specs"})
 _TEST_NAME: Final[re.Pattern[str]] = re.compile(
     r"^test_|_test\.[a-z0-9]+$|\.(?:test|spec)\.[a-z0-9]+$|_spec\.[a-z0-9]+$"
@@ -274,23 +276,32 @@ def _is_doc_path(path: str) -> bool:
 
 
 def _is_hand_written_source(path: str) -> bool:
-    """Any path that is not documentation, a test, an asset, config, generated output or a manifest.
+    """Whether ``path`` is hand-written source.
 
-    Repositories keep code in ``app/``, ``lib/``, ``cmd/``, ``scripts/`` or the root,
-    not only ``src/``, so source is what is left once the known non-source kinds are
-    removed. Dependency manifests and lockfiles have their own ``deps.changed`` reason;
-    declarative config (``.toml``, ``.yaml``, ``.json`` and dotfiles) is judged by the
-    deployment, secrets and review-config reasons instead.
+    Everything under ``src/`` that is not generated output is source, whatever its
+    suffix: packaged config and data there (policy packs, analyzer manifests,
+    ``application.yml``) is behaviour. Elsewhere repositories keep code in
+    ``app/``, ``lib/``, ``cmd/``, ``scripts/`` or the root, so source is what is
+    left once documentation, tests, assets, generated output and dependency
+    manifests are removed. Declarative config and data (``.toml``, ``.yaml``,
+    ``.json``, ``.xml``, dotfiles) is exempt only outside the package roots in
+    :data:`_SOURCE_ROOTS`.
     """
     lowered = path.lower().strip("/")
-    return not (
+    first = lowered.split("/", 1)[0] if "/" in lowered else ""
+    if first == "src":
+        return not _is_generated(lowered)
+    if (
         _is_doc_path(lowered)
         or _is_test_path(lowered)
         or _is_generated(lowered)
-        or lowered.endswith((*_ASSET_SUFFIXES, *_CONFIG_SUFFIXES))
-        or lowered.rsplit("/", 1)[-1].startswith(".")
+        or lowered.endswith(_ASSET_SUFFIXES)
         or is_dependency_manifest_path(lowered)
-    )
+    ):
+        return False
+    if first in _SOURCE_ROOTS:
+        return True
+    return not (lowered.endswith(_CONFIG_SUFFIXES) or lowered.rsplit("/", 1)[-1].startswith("."))
 
 
 def _has_hand_written_source(paths: list[str]) -> bool:

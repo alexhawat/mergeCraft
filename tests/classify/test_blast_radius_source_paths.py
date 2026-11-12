@@ -183,3 +183,42 @@ def test_docs_and_test_fixtures_under_deploy_dirs_are_not_deployment(path: str) 
     result = _classify([path], added=1, deleted=1)
 
     assert "paths.deployment" not in _codes(result)
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        ("src/mergecraft/policy/packs/security.yaml", True),
+        ("src/mergecraft/analyzers/catalog/ruff.json", True),
+        ("src/main/resources/application.yml", True),
+        ("src/pkg/schema.xml", True),
+        ("src/pkg/README.md", True),
+        ("lib/app/config.toml", True),
+        ("src/generated/client.py", False),
+        ("ruff.toml", False),
+        ("renovate.json", False),
+        (".editorconfig", False),
+        ("docs/guide.md", False),
+        ("README.md", False),
+    ],
+    ids=[
+        "src-policy-pack-yaml",
+        "src-catalog-json",
+        "src-application-yml",
+        "src-xml",
+        "src-markdown",
+        "lib-toml",
+        "src-generated",
+        "root-toml",
+        "root-json",
+        "root-dotfile",
+        "docs-dir",
+        "root-readme",
+    ],
+)
+def test_config_under_package_roots_keeps_its_source_signal(path: str, *, source: bool) -> None:
+    result = _classify([path])
+
+    assert ("source.changed" in _codes(result)) is source
+    if source:
+        assert result.auto_merge_lane != "eligible"
