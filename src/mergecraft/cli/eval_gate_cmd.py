@@ -29,6 +29,10 @@ from mergecraft.utils.step_summary import append_step_summary
 
 
 def _bank_dir(bank: Path | None) -> Path:
+    # Only the default bank may be absent (the empty-bank pass); an explicit
+    # --bank that does not exist is a typo, not an empty bank.
+    if bank is not None and not bank.is_dir():
+        cli_bail(f"eval bank {bank} does not exist")
     return bank if bank is not None else DEFAULT_BANK_DIR
 
 

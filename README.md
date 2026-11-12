@@ -264,7 +264,8 @@ Constraints:
   - `mergecraft review --agent` streams versioned JSONL on stdout — use that,
     not screen-scraping, if you want to consume review results.
   - Exit codes are contractual: 0 pass, 10 findings, 11 blocking, 12 failed,
-    20 inconclusive, 30 config error, 40 provider/infra, 50 timeout, 2 usage.
+    20 inconclusive, 30 config error, 40 provider/infra, 50 timeout, 2 usage,
+    1 failed verification (`audit verify`, `verify-behavior`).
     See docs/EXIT-CODES.md.
 
 Produce a plan, execute it, then open a PR and report the escalation you need.

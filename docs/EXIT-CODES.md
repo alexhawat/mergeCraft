@@ -6,17 +6,18 @@ outcomes reuse the `RunOutcome` taxonomy via `exit_code_for_outcome` /
 (`CLI_SUCCESS_EXIT_CODE`, `CLI_USAGE_EXIT_CODE`) and review aliases live in
 `mergecraft.cli.exits`. See this table for the full mapping.
 
-**Breaking change (pre-0.0.1):** scripts that branched on exit code `1` for
-generic CLI failures must follow this table instead. Usage / operator-input
-errors now exit `2`. Most former `1` paths exit `30` (configuration) unless
-documented otherwise below.
+Scripts that branched on exit code `1` for generic CLI failures must follow
+this table instead: usage and operator-input errors exit `2`, and most former
+`1` paths exit `30` (configuration). Code `1` remains only for the failed
+verification row below.
 
 ## Success and usage
 
 | Code | Constant | When |
 |------|----------|------|
 | `0` | `CLI_SUCCESS_EXIT_CODE` | Command completed successfully (including `--version`, successful auth writes, empty config validation). |
-| `2` | `CLI_USAGE_EXIT_CODE` | Invalid CLI flags or arguments (Typer usage errors, unknown `--scope`, bad `--format`, malformed input). |
+| `1` | `CLI_AUDIT_VERIFY_FAILED_EXIT_CODE` | A verification found a problem: `audit verify` (broken or unreadable chain), `verify-behavior` (blocked or failed), `opencode doctor --strict` (a failed check). |
+| `2` | `CLI_USAGE_EXIT_CODE` | Invalid CLI flags or arguments (Typer usage errors, unknown `--scope`, bad `--format`, malformed input), an unknown id (`agent show`, `lens show`, `analyzers explain`, `memory show`, `eval replay`, `evidence show`, `requirements explain`, `explain`), and root `--format json` on a command with no JSON output. |
 
 ## Review outcomes (`mergecraft review`)
 
@@ -49,6 +50,9 @@ Examples:
 
 - `mergecraft auth codex --scope everywhere` → `2` (unknown `--scope`)
 - `mergecraft findings export --output-format xml` → `2` (unsupported `--output-format`)
+- `mergecraft lens show no-such-lens` → `2` (unknown id)
+- `mergecraft --format json doctor` → `2` (`doctor` has no JSON output)
+- `mergecraft eval gate --bank no-such-dir` → `30` (an explicit bank must exist)
 - `mergecraft eval replay` with a verdict regression → `12` (`CLI_FAILED_EXIT_CODE`)
 - `mergecraft doctor` with a missing dependency → `30` (configuration / environment)
 - `mergecraft config validate` with a YAML schema error → `30`

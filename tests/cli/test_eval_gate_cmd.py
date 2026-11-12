@@ -96,8 +96,15 @@ def test_empty_bank_passes_but_says_it_measures_nothing(tmp_path: Path) -> None:
     assert "not yet measuring anything" in result.output
 
 
-def test_missing_bank_is_not_an_error(tmp_path: Path) -> None:
-    result = runner.invoke(app, ["gate", "--bank", str(tmp_path / "absent")])
+def _empty_bank(tmp_path: Path) -> Path:
+    """An explicit bank that exists but holds no cases (a missing one is an error)."""
+    bank = tmp_path / "empty-bank"
+    bank.mkdir(exist_ok=True)
+    return bank
+
+
+def test_empty_bank_is_not_an_error(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["gate", "--bank", str(_empty_bank(tmp_path))])
 
     assert result.exit_code == 0
 
@@ -223,7 +230,7 @@ def test_gate_regression_names_inconclusive_rate_in_the_step_summary(
             "--candidate",
             str(candidate_path),
             "--bank",
-            str(tmp_path / "absent-bank"),
+            str(_empty_bank(tmp_path)),
         ],
     )
 
@@ -254,7 +261,7 @@ def test_require_halves_flag_fails_a_candidate_missing_the_detection_half(
         "--candidate",
         str(candidate_path),
         "--bank",
-        str(tmp_path / "absent-bank"),
+        str(_empty_bank(tmp_path)),
     ]
 
     skipped = runner.invoke(app, common)

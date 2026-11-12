@@ -45,6 +45,7 @@ from mergecraft.cli.eval_gate_cmd import register_gate_command
 from mergecraft.cli.exits import (
     CLI_CONFIGURATION_EXIT_CODE,
     CLI_FAILED_EXIT_CODE,
+    CLI_USAGE_EXIT_CODE,
 )
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
 from mergecraft.cli.typer_group import mergecraft_typer
@@ -117,6 +118,13 @@ register_gate_command(app)
 def _bank_dir(bank: Path | None) -> Path:
     """Return the resolved bank directory (default = ``evals/cases/``)."""
     return bank if bank is not None else DEFAULT_BANK_DIR
+
+
+def _existing_bank_dir(bank: Path | None) -> Path:
+    """Like :func:`_bank_dir`, but an explicit ``--bank`` must exist (read commands)."""
+    if bank is not None and not bank.is_dir():
+        cli_bail(f"eval bank {bank} does not exist")
+    return _bank_dir(bank)
 
 
 def _case_path(bank_dir: Path, case_id: str) -> Path:
@@ -391,7 +399,7 @@ def list_cmd(
     The listing is sorted by ``submitted_at`` ascending. The JSON
     output mirrors the case schema one-to-one.
     """
-    bank_dir = _bank_dir(bank)
+    bank_dir = _existing_bank_dir(bank)
     since_dt: datetime | None = None
     if since is not None:
         try:
@@ -451,7 +459,7 @@ def replay(
     bank_dir = _bank_dir(bank)
     case_path = _case_path(bank_dir, case_id)
     if not case_path.is_file():
-        cli_bail(f"case {case_id!r} not found at {case_path}")
+        cli_bail(f"case {case_id!r} not found at {case_path}", code=CLI_USAGE_EXIT_CODE)
     try:
         case = load_case(case_path)
     except Exception as exc:
@@ -504,7 +512,7 @@ def promote(
     bank_dir = _bank_dir(bank)
     case_path = _case_path(bank_dir, case_id)
     if not case_path.is_file():
-        cli_bail(f"case {case_id!r} not found at {case_path}")
+        cli_bail(f"case {case_id!r} not found at {case_path}", code=CLI_USAGE_EXIT_CODE)
     try:
         case = load_case(case_path)
     except Exception as exc:
@@ -565,7 +573,7 @@ def replay_bank_cmd(
     precision/recall/F1 against live providers is a separate future path and is
     not recorded by structural replay.
     """
-    bank_dir = _bank_dir(bank)
+    bank_dir = _existing_bank_dir(bank)
     out_dir = results_dir if results_dir is not None else DEFAULT_RESULTS_DIR
     providers = tuple(provider) if provider else DEFAULT_BENCHMARK_PROVIDERS
     result, path = replay_bank(
