@@ -172,7 +172,17 @@ _NEXT_ACTION: dict[Lane, str] = {
     "high": "Require human review; automatic merge is forbidden.",
 }
 # Paths that are not hand-written source: documentation, tests, binary assets.
-_DOC_SUFFIXES: Final[tuple[str, ...]] = (".md", ".markdown", ".rst", ".adoc", ".txt")
+_DOC_SUFFIXES: Final[tuple[str, ...]] = (
+    ".md",
+    ".mdx",
+    ".markdown",
+    ".rst",
+    ".adoc",
+    ".txt",
+)
+_DOC_NAMES: Final[frozenset[str]] = frozenset(
+    {"license", "licence", "notice", "authors", "contributors", "copying", "codeowners"}
+)
 _DOC_DIRS: Final[tuple[str, ...]] = ("docs", "doc")
 _ASSET_SUFFIXES: Final[tuple[str, ...]] = (
     ".png",
@@ -195,12 +205,26 @@ _CONFIG_SUFFIXES: Final[tuple[str, ...]] = (
     ".cfg",
     ".conf",
     ".lock",
+    ".jsonl",
+    ".csv",
+    ".tsv",
+    ".xml",
 )
 _TEST_DIRS: Final[frozenset[str]] = frozenset({"tests", "test", "__tests__", "spec", "specs"})
 _TEST_NAME: Final[re.Pattern[str]] = re.compile(
     r"^test_|_test\.[a-z0-9]+$|\.(?:test|spec)\.[a-z0-9]+$|_spec\.[a-z0-9]+$"
 )
-_DEPLOYMENT_DIRS: Final[tuple[str, ...]] = ("deploy", "k8s", "kubernetes", "helm")
+_DEPLOYMENT_DIRS: Final[tuple[str, ...]] = (
+    "deploy",
+    "k8s",
+    "kubernetes",
+    "helm",
+    "charts",
+    "overlays",
+)
+_DEPLOYMENT_NAMES: Final[frozenset[str]] = frozenset(
+    {"chart.yaml", "kustomization.yaml", "kustomization.yml"}
+)
 _DESTRUCTIVE_SQL: Final[re.Pattern[str]] = re.compile(r"\b(?:drop|alter|create)\s+table\b")
 _IRREVERSIBLE_COMMAND: Final[re.Pattern[str]] = re.compile(
     r"\brm\s+(?:-[a-z]*r[a-z]*f[a-z]*|-[a-z]*f[a-z]*r[a-z]*"
@@ -208,7 +232,7 @@ _IRREVERSIBLE_COMMAND: Final[re.Pattern[str]] = re.compile(
     r"|\bterraform\s+destroy\b"
 )
 _SECRET_ASSIGNMENT: Final[re.Pattern[str]] = re.compile(
-    r"\b(?:password|secret_key|private_key)\s*=|aws_secret_access_key"
+    r"(?:password|secret_key|private_key)\s*=|aws_secret_access_key"
 )
 _DIFF_SIGNAL_KEYS = ("diff", "diff_text", "patch", "text")
 
@@ -244,6 +268,8 @@ def _is_doc_path(path: str) -> bool:
         name.lower() for name in BUILD_MANIFEST_NAMES
     }:
         return False
+    if lowered.rsplit("/", 1)[-1] in _DOC_NAMES:
+        return True
     return lowered.endswith(_DOC_SUFFIXES) or _contains_path_part(lowered, _DOC_DIRS)
 
 
@@ -273,8 +299,15 @@ def _has_hand_written_source(paths: list[str]) -> bool:
 
 
 def _is_deployment_path(path: str) -> bool:
-    """A Dockerfile, a composite action, or a path under a deploy / Kubernetes / Helm tree."""
+    """A Dockerfile, a composite action, a Helm chart or Kustomize file, or a deploy tree.
+
+    Documentation and test fixtures under such a directory are not deployment.
+    """
+    if _is_doc_path(path) or _is_test_path(path):
+        return False
     name = path.rsplit("/", 1)[-1]
+    if name in _DEPLOYMENT_NAMES:
+        return True
     if name.startswith("dockerfile") or name.endswith(".dockerfile"):
         return True
     if path.startswith(".github/actions/"):

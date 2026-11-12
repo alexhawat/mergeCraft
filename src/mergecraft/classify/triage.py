@@ -531,11 +531,15 @@ def recognize_generated(diff_text: str, *, head_files: Mapping[str, str] | None 
     A path under a ``generated/`` directory counts only when its head text in
     ``head_files`` carries a generated-file marker
     (:func:`~mergecraft.classify.generated_files.has_generated_marker`): the
-    directory name alone proves nothing. A mode change or a binary entry never
-    counts, whatever the path.
+    directory name alone proves nothing. An entry with no hunks at its own path
+    never counts, whatever the path: the files API sends a mode-only or binary
+    change that way, with no ``old mode`` / ``Binary files`` line to read. A pure
+    rename or copy (no hunks, a different pre-image) is judged by both paths.
     """
     files = _parse(diff_text)
     if not files or any(f.binary or f.mode_changed for f in files):
+        return False
+    if any(not f.hunks and not _renamed_or_copied(f) for f in files):
         return False
     heads = head_files or {}
     paths = {path for f in files for path in (f.previous_path, f.path)}

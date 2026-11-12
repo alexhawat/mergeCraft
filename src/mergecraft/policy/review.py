@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import fnmatch
 import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
@@ -49,6 +50,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 from mergecraft.analyzers.finding import Finding, make_finding
+from mergecraft.classify.path_globs import path_full_matches_glob
 from mergecraft.policy.enforcement import evaluate_enforcement
 from mergecraft.policy.evidence import evaluate_rule_evidence
 from mergecraft.policy.evidence_producers import PolicyEvidence, collect_policy_evidence
@@ -751,6 +753,35 @@ def _warn_unreachable_repo_scopes(snapshot: PolicySnapshot, *, org: str, repo: s
             )
 
 
+def _warn_narrowed_path_scopes(snapshot: PolicySnapshot, *, changed_paths: list[str]) -> None:
+    """Log each rule whose ``scope.path`` stopped matching a changed path (#1307).
+
+    ``scope.path`` used to be read with :mod:`fnmatch`, where ``*`` also crosses
+    ``/``. It now reads the shared repo-path dialect, where ``*`` stays inside
+    one segment and ``**`` spans directories. A rule written for the old reading
+    (``src/*`` meant to cover ``src/a/b.py``) would otherwise go quiet without a
+    trace, so the run log names the rule, the path and the ``**`` form to use.
+    """
+    for rule in snapshot.rules:
+        pattern = rule.scope.path if rule.scope is not None else None
+        if not pattern or "*" not in pattern:
+            continue
+        narrowed = [
+            path
+            for path in changed_paths
+            if fnmatch.fnmatchcase(path, pattern) and not path_full_matches_glob(pattern, path)
+        ]
+        if narrowed:
+            logger.warning(
+                "policy: rule {} scope.path {!r} no longer matches {} ({} path(s)): "
+                "`*` stays inside one directory; use `**` to cover nested paths",
+                rule.id,
+                pattern,
+                narrowed[0],
+                len(narrowed),
+            )
+
+
 def _matching_rules(
     snapshot: PolicySnapshot,
     *,
@@ -1072,6 +1103,7 @@ def evaluate_review_policy(
 
     unresolved = _unresolved_dimensions_for(base_ref)
     _warn_unreachable_repo_scopes(snapshot, org=org, repo=repo)
+    _warn_narrowed_path_scopes(snapshot, changed_paths=changed_paths)
     matched = _matching_rules(
         snapshot,
         changed_paths=changed_paths,

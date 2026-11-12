@@ -201,3 +201,26 @@ def test_rule_simulation_reads_the_shared_glob_dialect() -> None:
         ],
     )
     assert report.triggered == (1,)
+
+
+def test_a_scope_that_matched_nested_paths_under_fnmatch_is_logged(tmp_path: Path) -> None:
+    """``src/*`` no longer covers ``src/a/b.py``; the run log says so and names ``**``."""
+    from mergecraft.policy.review import evaluate_review_policy, load_repo_policy
+
+    write_policy(tmp_path, rules=[rule("policy.narrowed", scope={"path": "src/*"})])
+    messages: list[str] = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        rows = evaluate_review_policy(
+            load_repo_policy(tmp_path),
+            changed_paths=["src/a/b.py"],
+            org="acme",
+            repo="demo",
+            base_ref="main",
+            exceptions_trusted=True,
+            now=_NOW,
+        )
+    finally:
+        logger.remove(sink)
+    assert rows == []
+    assert any("policy.narrowed" in m and "src/a/b.py" in m and "**" in m for m in messages)
