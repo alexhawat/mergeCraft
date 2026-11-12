@@ -1,0 +1,118 @@
+# SPDX-License-Identifier: MIT
+# Nightly (and on-demand / pre-release) end-to-end smoke of the README Quickstart.
+#
+# Follows the Quickstart as a new user would: install the CLI, `mergecraft init`,
+# `mergecraft provider auth opencode-go --scope github`, push the scaffold, open a
+# pull request, and assert the mergeCraft review was posted. The target is the private
+# scratch repository `alexhawat/mergecraft-smoke`; everything is reset afterwards.
+#
+# Safety: this workflow holds a repo-scoped token and a provider key, so it is reachable
+# ONLY from `schedule`, `workflow_dispatch` and `workflow_call`. Never add a
+# `pull_request` / `pull_request_target` trigger: PR-authored code must not run next to
+# these secrets. The workflow checks out this repository only to read the README pin and
+# the smoke script (and, for `install: source`, to build the CLI from the checkout).
+# A pre-release caller passes `install: source`, so the smoke exercises the tree it is
+# about to ship; the nightly default exercises the published release a new user gets.
+#
+# Skips cleanly (notice, green) when either secret is absent, e.g. on forks.
+name: Quickstart smoke
+
+on:
+  schedule:
+    - cron: "43 3 * * *"
+  workflow_dispatch:
+    inputs:
+      install:
+        description: "What to install: the published release, this checkout, or both (run in turn)"
+        required: false
+        default: release
+        type: choice
+        options: [release, source, both]
+  workflow_call:
+    inputs:
+      install:
+        description: "release | source | both (a pre-release caller wants `source`)"
+        required: false
+        default: source
+        type: string
+    secrets:
+      SMOKE_PROVIDER_API_KEY:
+        required: false
+      SMOKE_REPO_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+# One scratch repo: two runs (nightly + a manual dispatch, or a release call) must queue,
+# never overlap, and a queued run must not be cancelled mid-cleanup.
+concurrency:
+  group: quickstart-smoke-scratch-repo
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Quickstart smoke
+    runs-on: ubuntu-latest
+    # Time budget (minutes): start cleanup 5 + smoke 20 + smoke 20 (`both`) + final cleanup 5
+    # + checkout/uv ~3 = 53, under this 60. Each step carries its own timeout so a hung
+    # smoke step is cut off and the always() cleanup still gets its 5 minutes; this job
+    # limit is only the backstop. One scenario = install ~3 + auth/push ~3 + poll 12 (below).
+    timeout-minutes: 60
+    env:
+      INSTALL_MODE: ${{ inputs.install || 'release' }}
+      SCRATCH_REPO: alexhawat/mergecraft-smoke
+    steps:
+      - name: Check smoke secrets
+        id: gate
+        env:
+          SMOKE_PROVIDER_API_KEY: ${{ secrets.SMOKE_PROVIDER_API_KEY }}
+          SMOKE_REPO_TOKEN: ${{ secrets.SMOKE_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SMOKE_PROVIDER_API_KEY:-}" || -z "${SMOKE_REPO_TOKEN:-}" ]]; then
+            echo "::notice title=Quickstart smoke skipped::SMOKE_PROVIDER_API_KEY and SMOKE_REPO_TOKEN are not both configured (expected on forks)"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        if: steps.gate.outputs.enabled == 'true'
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+
+      - name: Reset scratch repo (start)
+        if: steps.gate.outputs.enabled == 'true'
+        timeout-minutes: 5
+        env:
+          SMOKE_REPO_TOKEN: ${{ secrets.SMOKE_REPO_TOKEN }}
+        run: python3 scripts/quickstart_smoke.py cleanup --repo "$SCRATCH_REPO" --expect-repo "$SCRATCH_REPO"
+
+      - name: Smoke (published release)
+        if: steps.gate.outputs.enabled == 'true' && (env.INSTALL_MODE == 'release' || env.INSTALL_MODE == 'both')
+        timeout-minutes: 20
+        env:
+          SMOKE_PROVIDER_API_KEY: ${{ secrets.SMOKE_PROVIDER_API_KEY }}
+          SMOKE_REPO_TOKEN: ${{ secrets.SMOKE_REPO_TOKEN }}
+        run: python3 scripts/quickstart_smoke.py run --repo "$SCRATCH_REPO" --expect-repo "$SCRATCH_REPO" --install release --timeout 720 --run-id "${GITHUB_RUN_ID}"
+
+      - name: Smoke (this checkout)
+        if: steps.gate.outputs.enabled == 'true' && (env.INSTALL_MODE == 'source' || env.INSTALL_MODE == 'both')
+        timeout-minutes: 20
+        env:
+          SMOKE_PROVIDER_API_KEY: ${{ secrets.SMOKE_PROVIDER_API_KEY }}
+          SMOKE_REPO_TOKEN: ${{ secrets.SMOKE_REPO_TOKEN }}
+        run: python3 scripts/quickstart_smoke.py run --repo "$SCRATCH_REPO" --expect-repo "$SCRATCH_REPO" --install source --timeout 720 --run-id "${GITHUB_RUN_ID}" --source-dir "$GITHUB_WORKSPACE"
+
+      - name: Reset scratch repo
+        if: always() && steps.gate.outputs.enabled == 'true'
+        timeout-minutes: 5
+        env:
+          SMOKE_REPO_TOKEN: ${{ secrets.SMOKE_REPO_TOKEN }}
+        run: python3 scripts/quickstart_smoke.py cleanup --repo "$SCRATCH_REPO" --expect-repo "$SCRATCH_REPO"
