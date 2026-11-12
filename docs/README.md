@@ -22,6 +22,8 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [agent-loop](agent-loop.md) | consumer | Reference workflow for an external coding agent looping with mergecraft review --agent. |
 | [agent-roster](agent-roster.md) | consumer | Agent roster — priority slots, named agents, local overrides, multi-reviewer merge, and trust snapshot. |
 | [agents-sdk](agents-sdk.md) | consumer | OpenAI Agents SDK optional extra — review_agent helper, model config, guardrails, and example loop. |
+| [agents](agents.md) | consumer | Copy-paste prompts that let a coding agent install mergeCraft and learn to use it. |
+| [architecture](architecture.md) | contributor | A review run end to end, mapped to the packages under src/mergecraft/. |
 | [assets README](assets/README.md) | satellite | Demo capture path and rules — omit broken GIF/MP4 until a real asset exists. |
 | [brand README](assets/brand/README.md) | satellite | Brand SVG inventory and regeneration commands for logo assets. |
 | [diagrams README](assets/diagrams/README.md) | satellite | Architecture diagram SVG inventory and Terrastruct diagram regeneration commands. |
@@ -31,6 +33,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [cli](cli.md) | consumer | Full mergecraft CLI command reference derived from the live Typer app. |
 | [compatibility-matrix](compatibility-matrix.md) | contributor | Harness and provider compatibility notes for maintainers. |
 | [config-failure-policy](config-failure-policy.md) | contributor | setup_failure_policy and setup_timeout runtime behaviour. |
+| [cost](cost.md) | consumer | What a review spends, which settings change it, and where provider prices are recorded. |
 | [provider-harness](dev/provider-harness.md) | contributor | Provider harness notes for OpenCode, Codex, and OpenAI-compatible gateways. |
 | [python-version-floor](dev/python-version-floor.md) | contributor | ADR for the Python 3.11 install floor and PEP 758 parenthesize-now strategy. |
 | [self-review](dev/self-review.md) | contributor | How this repository reviews its own PRs - Action pin guards, App tokens, approval lifecycle, and Codex login write-back. |
@@ -55,8 +58,11 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [release-process](release-process.md) | contributor | Release candidates, soak periods, changelog, and per-release migration notes. |
 | [supply-chain](supply-chain.md) | contributor | Supply-chain and SBOM posture for releases and the Action image. |
 | [support-matrix](support-matrix.md) | consumer | Generated six-axis support matrix — OS, SCM, languages, analyzers, providers, models. |
+| [troubleshooting](troubleshooting.md) | consumer | Symptom-first fixes for a missing check, empty secrets, skipped fork runs, and non-zero exit codes. |
 | [trust-policy](trust-policy.md) | consumer | Two-axis trust policy — execution vs authority, selfReview levels, approval and the merge gate, base snapshot rule. |
 | [ultramarine-second-reviewer](ultramarine-second-reviewer.md) | consumer | Configure Paper Instruments Ultramarine 1 Flash as a second reviewer with cost and env wiring. |
+| [uninstall](uninstall.md) | consumer | Pause reviews or remove mergeCraft, its credentials and its integrations from a repository. |
+| [upgrade](upgrade.md) | consumer | Move the CLI and the GitHub Action pin to a new release together, and roll back. |
 | [verify-behavior](verify-behavior.md) | consumer | mergecraft verify-behavior and review --verification-report: flags, trust rule, artifact layout. |
 | [workflows](workflows.md) | consumer | Workflow examples 2–6, trust tiers, [security model](workflows.md#security-model), and pull_request_target placement gotchas. |
 | [evals README](../evals/README.md) | satellite | Eval bank vs ReviewBench — what each mechanism measures and how to run gates. |
