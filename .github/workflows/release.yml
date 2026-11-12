@@ -58,18 +58,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: ./.github/actions/bootstrap
-      # Craft bumps `docs/consumer-release.json`, but the generated agent packages
-      # keep rendering the *previous* tag: `scripts/consumer_install_pins.py`
-      # rewrites the install pins and `tree/v<release>/docs` links, while
-      # `scripts/gen_agent_packages.py` also resolves the `{{DOCUMENTATION_REF}}`
-      # prose and every `blob/v<release>/` documentation link. `make
-      # agent-packages-check` therefore failed on the release branch only:
-      # `docs/consumer-release.json` never changes on a pull request, so PR CI
-      # renders against the published tag and cannot see the drift. Regenerating
-      # here, on the branch Craft just pushed, keeps the prepared branch equal to
-      # its own generator output and leaves the release commit as the source of
-      # the dist that CPython publishes.
-      - name: Regenerate agent packages for the release tag
+      # Craft leaves the prepared branch unable to pass three gates that only a
+      # release can trip, because each is keyed to state that changes once, at
+      # release time, and never on a pull request:
+      #
+      # * `scripts/normalize_release_branch.py` puts `## [Unreleased]` back above
+      #   the section Craft cut, and repoints the generated-package documentation
+      #   fixture at the tag being released.
+      # * `scripts/gen_agent_packages.py` re-resolves the `{{DOCUMENTATION_REF}}`
+      #   prose and every `blob/v<release>/` link, which the version bump leaves
+      #   on the previous tag.
+      #
+      # PR CI renders against the published tag, so it cannot see any of this.
+      # Normalizing here, on the branch Craft just pushed, keeps the prepared
+      # branch equal to its own gates.
+      - name: Normalize the prepared release branch
         id: packages
         if: ${{ steps.craft.outputs.branch != '' }}
         env:
@@ -79,19 +82,20 @@ jobs:
           set -euo pipefail
           git fetch origin "${RELEASE_BRANCH}"
           git checkout "${RELEASE_BRANCH}"
+          uv run python scripts/normalize_release_branch.py --version "${RELEASE_VERSION}"
           uv run python scripts/gen_agent_packages.py
           if git diff --quiet; then
-            echo "Agent packages already match the release tag." >> "$GITHUB_STEP_SUMMARY"
+            echo "The release branch already matches its gates." >> "$GITHUB_STEP_SUMMARY"
             echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git add -A
           git -c user.name="mergecraft-release" \
               -c user.email="noreply@users.noreply.github.com" \
-              commit -m "chore(release): regenerate agent packages for ${RELEASE_VERSION}"
+              commit -m "chore(release): normalize the release branch for ${RELEASE_VERSION}"
           git push origin "${RELEASE_BRANCH}"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "Regenerated agent packages for ${RELEASE_VERSION}." >> "$GITHUB_STEP_SUMMARY"
+          echo "Normalized the release branch for ${RELEASE_VERSION}." >> "$GITHUB_STEP_SUMMARY"
       # Craft's "Request publish" step always runs and opens
       # `publish: <owner>/<repo>@<version>`. Nothing in this repository acts on
       # that issue — the approval is the `pypi` environment deployment review — so

@@ -154,6 +154,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CI/CD's `make ci` failed and the publish job aborted before uploading. Pull
   request CI could not catch it: that file only changes during a release.
 
+- The same prepare job normalizes the release branch for the other two gates that
+  only a release can trip: `## [Unreleased]` moves back above the section Craft cut,
+  and `tests/docs/fixtures/agent_package_documentation.json` is repointed at the tag
+  being released. `make release-normalize` does this for a local `craft prepare`.
+  Both failures aborted the a6 publish job before PyPI was touched.
+
 - Two URL-credential redaction canaries no longer trip TruffleHog's `URI` detector
   on a full-tree scan: the test assembles its synthetic userinfo at runtime and the
   changelog prose uses a `<password>` placeholder (#1217).

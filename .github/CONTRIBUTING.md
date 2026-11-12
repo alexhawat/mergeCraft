@@ -336,11 +336,12 @@ Local mirrors: `make test-integration`, `make test-integration-live`,
 That workflow prepares the release branch and
 then dispatches CI/CD on it, because a branch pushed with the workflow's own token
 does not start CI/CD by itself; CI/CD's `build-dist` job then builds the dist for
-that dispatch. After Craft's version bump, `prepare` regenerates the per-harness
-agent packages with `make agent-packages`, pushes that commit, and reports the
-regenerated head as the release SHA the publish job waits on. A local
-`craft prepare` has to do the same by hand: run `make agent-packages` and commit
-before pushing, or the branch fails its own `agent-packages-check`. Step 3 publishes:
+that dispatch. After Craft's version bump, `prepare` runs `make release-normalize`
+and `make agent-packages`, pushes that commit, and reports the normalized head as
+the release SHA the publish job waits on. A local `craft prepare` has to do the same
+by hand: run both and commit before pushing, or the branch fails its own
+`test_changelog_structure.py`, `test_gen_agent_packages_blob_ref.py` or
+`agent-packages-check`. Step 3 publishes:
 the `publish` job runs only after the `pypi`
 environment's required reviewers approve it. The jobs are least-privilege (no
 `secrets: inherit`); image signing stays in CI/CD. The publish job then commits

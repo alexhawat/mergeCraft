@@ -15,11 +15,17 @@ changelog section.
 
 1. `craft prepare` (or the Release workflow) cuts `release/<version>`. It
    generates a version section and inserts it **above** `CHANGELOG.md`
-   `## [Unreleased]`, which it leaves in place; fold the hand-written block
-   into the generated section by hand before pushing, then put an empty
-   `## [Unreleased]` back as the first block. `tests/docs/test_changelog_structure.py`
-   fails when `[Unreleased]` is not first, when a block repeats a heading type, or
-   when an entry appears under both `[Unreleased]` and a released version. Craft also bumps
+   `## [Unreleased]`, which it leaves in place. `tests/docs/test_changelog_structure.py`
+   requires `## [Unreleased]` to be the first release block, so a prepared branch
+   must move that block back above the new section, and
+   `tests/docs/test_gen_agent_packages_blob_ref.py` requires
+   `tests/docs/fixtures/agent_package_documentation.json` to name the tag being
+   released, because it records the documentation blob ids. `make release-normalize`
+   does both. That structure test also fails when a block repeats a heading type, or
+   when an entry appears under both `[Unreleased]` and a released version, so
+   normalizing moves blocks and never rewrites an entry; folding hand-written entries
+   into the generated section stays an editorial choice.
+   Craft also bumps
    `pyproject.toml`, `server.json`, and `uv.lock` in step. The same transaction
    updates `docs/consumer-release.json`, consumer install pins, matching release
    documentation links, and `llms-full.txt`. It does **not** regenerate the
@@ -27,9 +33,9 @@ changelog section.
    `tree/v<release>/docs` links, while `scripts/gen_agent_packages.py` also
    resolves the `{{DOCUMENTATION_REF}}` prose and every `blob/v<release>/` docs
    link, so a prepared branch keeps the previous tag there and fails its own
-   `agent-packages-check`. Run `make agent-packages` and commit the result before
-   pushing; the Release workflow's `prepare` job does the same and pushes the
-   regeneration commit before it dispatches CI/CD.
+   `agent-packages-check`. Run `make agent-packages` too, and commit both results
+   before pushing; the Release workflow's `prepare` job runs both and pushes the
+   normalized commit before it dispatches CI/CD.
    Candidate-branch docs name the release being prepared; publish that candidate
    before recommending its install version. The post-release development bump
    retains the published release pin, never the next unpublished `.dev` version.
