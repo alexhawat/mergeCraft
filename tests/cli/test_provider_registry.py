@@ -57,9 +57,18 @@ def test_harness_support_predicate_agrees_with_agent_resolve() -> None:
     supports = getattr(registry, "harness_supports_provider", None)
     if supports is None:
         pytest.fail("provider_registry.harness_supports_provider is not implemented")
-    for harness in ("opencode", "codex", "claude", "gemini", "cursor"):
-        for label in BUILTIN_HARNESS_DEFAULTS:
-            assert supports(harness, label) == ar._harness_supports_provider(harness, label)
+    assert supports is ar._harness_supports_provider
+    expected = {
+        "opencode": {"openai", "anthropic"},
+        "codex": {"openai"},
+        "claude": {"anthropic"},
+        "gemini": {"google"},
+        "cursor": {"cursor"},
+    }
+    labels = ("openai", "anthropic", "google", "cursor", "openrouter")
+    for harness, supported in expected.items():
+        for label in labels:
+            assert supports(harness, label) is (label in supported), (harness, label)
 
 
 def test_list_supported_harnesses_is_generated_from_code() -> None:

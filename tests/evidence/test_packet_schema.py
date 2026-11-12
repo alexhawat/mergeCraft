@@ -8,6 +8,7 @@ models (mirroring ``mergecraft.analyzers.finding.findings_output_schema`` at
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -129,14 +130,18 @@ def test_packet_schema_version_is_pinned() -> None:
     )
 
 
-def test_packet_schema_fingerprint_changes_when_a_field_is_added() -> None:
-    """The fingerprint is sensitive to field changes, so the pin can actually fail."""
-    baseline = _schema_fingerprint()
+def test_packet_schema_fingerprint_is_stable_and_sensitive() -> None:
+    """An unchanged rebuild hashes identically; adding or removing one property changes it."""
+    baseline = _fingerprint(packet_mod.packet_output_schema())
+    assert _fingerprint(packet_mod.packet_output_schema()) == baseline
 
-    class Drifted(packet_mod.MergeEvidencePacket):
-        extra_wire_field: str | None = None
+    added = copy.deepcopy(packet_mod.packet_output_schema())
+    added["properties"]["extra_wire_field"] = {"type": "string"}
+    assert _fingerprint(added) != baseline
 
-    assert _fingerprint(Drifted.model_json_schema()) != baseline
+    removed = copy.deepcopy(packet_mod.packet_output_schema())
+    removed["properties"].pop("reviewed_head_sha")
+    assert _fingerprint(removed) != baseline
 
 
 def test_packet_schema_round_trip_json_serializes() -> None:
