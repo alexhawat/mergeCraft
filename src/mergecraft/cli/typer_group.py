@@ -9,6 +9,7 @@ import typer
 from typer.core import TyperGroup
 
 from mergecraft.cli.global_surface import bootstrap_cli_surface_from_argv
+from mergecraft.config.yaml_unique import ConfigParseError
 
 if TYPE_CHECKING:
     import click
@@ -16,6 +17,9 @@ if TYPE_CHECKING:
 
 class MergecraftTyperGroup(TyperGroup):
     """Apply #342 colour policy before Rich help, and open a TTY session.
+
+    It also maps an unparseable repo config (:class:`ConfigParseError`) raised
+    by any subcommand to the configuration exit code with one error line.
 
     A group invoked with no subcommand (``mergecraft provider``,
     ``mergecraft analyzers``) prints help for scripts and CI. On a TTY it
@@ -68,7 +72,17 @@ class MergecraftTyperGroup(TyperGroup):
             if self.no_args_is_help:
                 typer.echo(ctx.get_help())
                 raise typer.Exit(CLI_SUCCESS_EXIT_CODE)
-        return super().invoke(ctx)
+        try:
+            return super().invoke(ctx)
+        except ConfigParseError as exc:
+            # A config that cannot be parsed is a configuration error (exit 30),
+            # whichever command loaded it, never a traceback with exit 1. The
+            # message names the file and error type only, never YAML values.
+            from mergecraft.cli.consoles import err_console
+            from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
+
+            err_console.print(str(exc), style="red", markup=False, highlight=False)
+            raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
 
 
 def _is_empty_group_invocation(group: TyperGroup, ctx: click.Context) -> bool:

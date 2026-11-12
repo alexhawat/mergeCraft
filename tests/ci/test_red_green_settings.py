@@ -55,7 +55,7 @@ def test_fix_labels_default_to_bug_and_fix() -> None:
 
 
 def test_a_missing_config_file_keeps_both_defaults(tmp_path: Path) -> None:
-    settings = load_repo_settings(tmp_path / "missing.yaml", load_learnings_files=False)
+    settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
 
     assert settings.ci_evidence.red_green is None
     assert settings.review.fix_labels == ["bug", "fix"]

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import typer
+import yaml
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
@@ -27,6 +28,7 @@ from mergecraft.config.env import LocalDotEnv
 from mergecraft.config.io import load_config_dict as _load_config_dict_raw
 from mergecraft.config.io import patch_config_dict
 from mergecraft.config.io import write_config_dict as _write_config_dict
+from mergecraft.config.layered import config_parse_error
 from mergecraft.config.provider_registry import (
     BUILTIN_HARNESS_DEFAULTS,
     allocate_env_index,
@@ -158,8 +160,15 @@ def _env_path(cwd: Path | None = None) -> Path:
 
 
 def _load_config_dict(path: Path) -> dict[str, Any]:
+    """Load the repo config mapping for a CLI read or write.
+
+    An unparseable file raises :class:`ConfigParseError`, which the CLI group
+    maps to the configuration exit code; other value errors bail the same way.
+    """
     try:
         return _load_config_dict_raw(path)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise config_parse_error(path, exc) from exc
     except ValueError as exc:
         cli_bail(str(exc))
 
