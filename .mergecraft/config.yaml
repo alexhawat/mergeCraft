@@ -22,6 +22,12 @@ providers:
 
 prApproveEnabled: false
 
+# main requires up-to-date branches and the `mergecraft review` check, so every
+# merge to main sends each open PR through another review round. With the default
+# cap of 3 a PR reaches the blocking round-cap finding from branch updates alone.
+review:
+  maxReviewRounds: 10
+
 runBounds:
   tokenBudget: 8000000
 
