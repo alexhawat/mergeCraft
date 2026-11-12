@@ -924,6 +924,15 @@ def _files_api_diff_reason(
     return _append_diff_degradations(reason, truncated=truncated, unreviewable=unreviewable)
 
 
+def _stale_base_reason(base_fetch_failure: str) -> str:
+    """Reason for a local diff taken against a base ref that could not be refreshed."""
+    return (
+        f"the base fetch failed ({base_fetch_failure}), so the local diff was "
+        "computed against a possibly stale base ref and may include unrelated "
+        "base-branch changes"
+    )
+
+
 def _fetch_head_with_retry(
     *,
     cwd: str,
@@ -1435,6 +1444,11 @@ def checkout_pr_tool(ctx: ToolContext):
                 review_scope=FILES_API_DIFF_SCOPE,
             )
         else:
+            if base_fetch_failure is not None:
+                # The diff ran, but against whatever ``origin/<base>`` was already
+                # local; a stale merge-base can pull base commits into the review.
+                degraded_reason = _stale_base_reason(base_fetch_failure)
+                warning(degraded_reason)
             register_review_scope(ctx.tool_state, diff_path=diff_path, provenance="checkout")
         _rebaseline_config_after_checkout(ctx)
 
