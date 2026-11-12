@@ -513,6 +513,7 @@ class ArgvRun:
     reason: str | None = None
     findings: list[Finding] = field(default_factory=list)
     exit_code: int | None = None
+    pass_reason: str | None = None
 
 
 def run_argv(

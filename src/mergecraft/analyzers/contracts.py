@@ -146,7 +146,7 @@ def _run_argv(
     if benign is not None:
         # A declared "nothing to scan" exit is a clean run, not a tool-error.
         logger.info("{}: exit {} — {}", manifest.id, run.exit_code, benign)
-        return replace(run, raw="", exit_code=0)
+        return replace(run, raw="", exit_code=0, pass_reason=benign)
     return run
 
 
@@ -215,6 +215,7 @@ def _run_oasdiff(
         )
 
     findings: list[Finding] = []
+    pass_reason: str | None = None
     for head_rel in scoped:
         base_path = _resolve_base_file(repo_root, head_rel, base_ref)
         if base_path is None:
@@ -259,6 +260,7 @@ def _run_oasdiff(
         if not run.raw.strip():
             if run.exit_code:
                 return tool_error_result(manifest.id, run.exit_code, findings=findings)
+            pass_reason = pass_reason or run.pass_reason
             continue
         try:
             parsed = parse_oasdiff_json(run.raw, manifest=manifest, repo_root=repo_root)
@@ -268,7 +270,7 @@ def _run_oasdiff(
             return tool_error_result(manifest.id, run.exit_code, findings=findings)
         for finding in parsed:
             findings.append(finding.model_copy(update={"path": head_rel}))
-    return AdapterRunResult(findings=findings)
+    return AdapterRunResult(findings=findings, pass_reason=None if findings else pass_reason)
 
 
 def _run_squawk(
@@ -324,7 +326,7 @@ def _run_squawk(
     if not run.raw.strip():
         if run.exit_code:
             return tool_error_result(manifest.id, run.exit_code)
-        return AdapterRunResult(findings=[])
+        return AdapterRunResult(findings=[], pass_reason=run.pass_reason)
 
     try:
         findings = parse_squawk_json(run.raw, manifest=manifest, repo_root=repo_root)
@@ -360,6 +362,7 @@ def _run_buf(
         )
 
     findings: list[Finding] = []
+    pass_reason: str | None = None
     for head_rel in scoped:
         base_path = _resolve_base_file(repo_root, head_rel, base_ref)
         if base_path is None:
@@ -413,6 +416,7 @@ def _run_buf(
         # build; only JSON annotation rows mean the comparison actually ran.
         if breaking.exit_code and not _reported_json_rows(breaking.raw):
             return tool_error_result(manifest.id, breaking.exit_code, findings=findings)
+        pass_reason = pass_reason or breaking.pass_reason
         findings.extend(
             parse_buf_breaking_json(
                 breaking.raw,
@@ -438,7 +442,7 @@ def _run_buf(
             return tool_error_result(manifest.id, lint.exit_code, findings=findings)
         findings.extend(parse_buf_lint_json(lint.raw, manifest=manifest, repo_root=repo_root))
 
-    return AdapterRunResult(findings=findings)
+    return AdapterRunResult(findings=findings, pass_reason=None if findings else pass_reason)
 
 
 def run_differential_adapter(

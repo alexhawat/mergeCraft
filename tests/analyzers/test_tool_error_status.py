@@ -406,17 +406,19 @@ def test_pipeline_reports_nothing_to_scan_as_passed_with_reason(
     row = next(row for row in state.analyzers if row.id == "mypy")
     assert row.status == "passed"
     assert (row.reason or "").startswith("nothing to scan")
+    assert "1 passed with nothing to scan (mypy: nothing to scan" in (state.pre_merge_summary or "")
 
 
 @pytest.mark.parametrize(
-    ("exit_code", "clean"),
+    ("exit_code", "nothing_to_scan"),
     [(128, True), (127, False)],
     ids=["no-package-sources", "general-error"],
 )
-def test_osv_scanner_no_package_sources_exit_is_a_clean_scan(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int, clean: bool
+def test_osv_scanner_no_package_sources_row_keeps_its_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int, nothing_to_scan: bool
 ) -> None:
-    from mergecraft.analyzers import supply_chain
+    """Pipeline → run_adapter → supply-chain diff scan → a real fake ``osv-scanner``."""
+    from mergecraft.analyzers import pipeline, supply_chain
 
     binary = _fake_binary(tmp_path, exit_code=exit_code, stderr="No package sources found")
     plan = AnalyzerPlan(manifest_id="osv-scanner", mode="managed", argv=(binary,), cwd=tmp_path)
@@ -428,19 +430,21 @@ def test_osv_scanner_no_package_sources_exit_is_a_clean_scan(
         "plan_sandbox",
         lambda **_kwargs: SimpleNamespace(can_run=True, skip_reason=None, context=None),
     )
+    monkeypatch.setattr(pipeline, "detect_enabled", lambda **_: [get_manifest("osv-scanner")])
+    # A ``*.base.*`` companion gives the diff scan a distinct base side, so both run.
     (tmp_path / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+    (tmp_path / "uv.base.lock").write_text("version = 1\n", encoding="utf-8")
 
-    def _scan() -> tuple[list[Any], str | None]:
-        return supply_chain._run_osv_scan(
-            manifest=get_manifest("osv-scanner"),
-            repo_root=tmp_path,
-            lockfiles=["uv.lock"],
-            tier="trusted",
-        )
+    state = pipeline.run_analyzer_pipeline(
+        repo_root=tmp_path, changed_files=["uv.lock"], tier="trusted", shell="restricted"
+    )
 
-    if clean:
-        assert _scan() == ([], None)
+    row = next(row for row in state.analyzers if row.id == "osv-scanner")
+    if nothing_to_scan:
+        assert row.status == "passed"
+        assert row.reason == "nothing to scan: no package sources found"
+        assert "passed with nothing to scan (osv-scanner" in (state.pre_merge_summary or "")
     else:
-        # Not declared benign: the text is not an OSV report, so it never reads as clean.
-        with pytest.raises(ValueError, match="JSON"):
-            _scan()
+        # Not declared benign: the text is not an OSV report, so it never reads as a pass.
+        assert row.status != "passed"
+        assert "nothing to scan" not in (row.reason or "")

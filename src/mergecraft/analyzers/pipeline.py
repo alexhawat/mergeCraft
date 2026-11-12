@@ -137,7 +137,16 @@ def _build_pre_merge_summary(
     ran = [row for row in rows if row.status in {"passed", "failed"}]
     skipped = [row for row in rows if row.status == "unavailable"]
     errored = [row for row in rows if row.status == "tool-error"]
+    idle = [
+        row
+        for row in ran
+        if row.status == "passed" and (row.reason or "").startswith("nothing to scan")
+    ]
     parts = [f"{len(ran)} ran"]
+    if idle:
+        # A "nothing to scan" pass judged no input; never let it read as a clean scan.
+        reasons = ", ".join(f"{row.id}: {row.reason}" for row in idle)
+        parts.append(f"{len(idle)} passed with nothing to scan ({reasons})")
     if errored:
         reasons = ", ".join(f"{row.id}: {row.reason or 'tool error'}" for row in errored)
         parts.append(f"{len(errored)} tool errors ({reasons})")

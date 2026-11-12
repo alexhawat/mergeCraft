@@ -846,7 +846,9 @@ verdict; everything else is advisory. Concretely:
   a config error, an unreadable file). It judged nothing, like a skip.
   A manifest can declare documented "nothing to scan" exits
   (`benign_exits`, for example osv-scanner's `128`); those report
-  `passed` with a `nothing to scan` reason instead.
+  `passed` with a `nothing to scan` reason instead, and the pre-merge
+  summary lists them as "passed with nothing to scan", separate from
+  clean scans.
 - **CI check-runs** — raw `check_suite` data from `mcp/check_runs.py`
   plus the cluster/blame/flaky annotations from `src/mergecraft/ci/`.
 - **The agent's `approved` boolean** — **NOT** mechanical evidence. It
