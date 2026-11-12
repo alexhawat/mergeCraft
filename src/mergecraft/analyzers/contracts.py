@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -133,7 +134,7 @@ def _run_argv(
     tier: TrustTier,
     scratch_suffix: str = "",
 ) -> ArgvRun:
-    return run_argv_result(
+    run = run_argv_result(
         manifest=manifest,
         repo_root=repo_root,
         argv=argv,
@@ -141,6 +142,12 @@ def _run_argv(
         tier=tier,
         scratch_suffix=scratch_suffix,
     )
+    benign = manifest.benign_exit_reason(run.exit_code, run.raw or "")
+    if benign is not None:
+        # A declared "nothing to scan" exit is a clean run, not a tool-error.
+        logger.info("{}: exit {} — {}", manifest.id, run.exit_code, benign)
+        return replace(run, raw="", exit_code=0)
+    return run
 
 
 def _unparsable_result(tool_id: str, exc: ValueError, *, exit_code: int | None) -> AdapterRunResult:

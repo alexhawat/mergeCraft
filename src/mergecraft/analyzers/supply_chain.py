@@ -314,6 +314,10 @@ def _run_osv_scan(
         if outcome.output_path
         else outcome.output
     )
+    benign = manifest.benign_exit_reason(outcome.exit_code, raw)
+    if benign is not None:
+        logger.info("{}: exit {} — {}", manifest.id, outcome.exit_code, benign)
+        return [], None
     manifest_paths = _manifest_paths(repo_root, existing)
     package_names = _osv_package_names_by_file(raw)
     findings = parse_osv_json(raw, manifest=manifest, repo_root=repo_root)

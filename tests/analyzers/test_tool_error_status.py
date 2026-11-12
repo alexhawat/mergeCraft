@@ -7,6 +7,7 @@ only the subprocess itself is replaced by a ``CompletedProcess``.
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -307,3 +308,139 @@ def test_run_argv_result_returns_empty_raw_and_exit_code_for_a_silent_run(
     assert run.raw == ""
     assert run.exit_code == 0
     assert run.reason is None
+
+
+# --------------------------------------------------------------------------- benign exits
+
+
+def _fake_binary(tmp_path: Path, *, exit_code: int, stderr: str) -> str:
+    """A real executable that writes ``stderr`` and exits ``exit_code``."""
+    script = tmp_path / f"fake-tool-{exit_code}"
+    script.write_text(
+        f"#!/bin/sh\nprintf '%s\\n' {shlex.quote(stderr)} >&2\nexit {exit_code}\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return str(script)
+
+
+def _stub_to_real_run_plan(monkeypatch: pytest.MonkeyPatch, plan: AnalyzerPlan) -> None:
+    """Stub resolution/sandboxing only; the real ``run_plan`` spawns ``plan.argv``."""
+    monkeypatch.setattr(adapters_mod, "resolve_analyzer", lambda **_kwargs: plan)
+    monkeypatch.setattr(adapters_mod, "provision_managed_argv", lambda _plan, **_kwargs: plan)
+    monkeypatch.setattr(
+        adapters_mod,
+        "plan_sandbox",
+        lambda **_kwargs: SimpleNamespace(can_run=True, skip_reason=None, context=None),
+    )
+    monkeypatch.setattr(adapters_mod, "finalize_plan", lambda _plan, **_kwargs: plan)
+
+
+_CHANGED = {"mypy": ["src/app.py"], "zizmor": [".github/workflows/ci.yml"]}
+
+
+def _run_fake(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, tool_id: str, binary: str) -> Any:
+    plan = AnalyzerPlan(manifest_id=tool_id, mode="repo-native", argv=(binary,), cwd=tmp_path)
+    _stub_to_real_run_plan(monkeypatch, plan)
+    return run_adapter(
+        tool_id=tool_id, repo_root=tmp_path, changed_files=_CHANGED[tool_id], tier="trusted"
+    )
+
+
+@pytest.mark.parametrize(
+    ("tool_id", "exit_code", "message"),
+    [
+        ("mypy", 2, "There are no .py[i] files in directory '.'"),
+        ("zizmor", 3, "fatal: no audit was performed\nerror: no inputs collected"),
+    ],
+    ids=["mypy-no-python-files", "zizmor-no-inputs"],
+)
+def test_declared_nothing_to_scan_exit_is_a_pass_with_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool_id: str, exit_code: int, message: str
+) -> None:
+    binary = _fake_binary(tmp_path, exit_code=exit_code, stderr=message)
+
+    result = _run_fake(tmp_path, monkeypatch, tool_id=tool_id, binary=binary)
+
+    assert result.tool_error is False
+    assert result.skipped is False, result.skip_reason
+    assert result.findings == []
+    assert (result.pass_reason or "").startswith("nothing to scan")
+
+
+@pytest.mark.parametrize(
+    ("tool_id", "exit_code", "message"),
+    [
+        ("mypy", 2, "mypy: error: INTERNAL ERROR"),
+        ("mypy", 1, "There are no .py[i] files in directory '.'"),
+        ("zizmor", 1, "error: no inputs collected"),
+    ],
+    ids=["mypy-same-code-other-output", "mypy-marker-other-code", "zizmor-marker-other-code"],
+)
+def test_other_nonzero_exits_stay_tool_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool_id: str, exit_code: int, message: str
+) -> None:
+    binary = _fake_binary(tmp_path, exit_code=exit_code, stderr=message)
+
+    result = _run_fake(tmp_path, monkeypatch, tool_id=tool_id, binary=binary)
+
+    assert result.tool_error is True
+    reason = result.skip_reason or ""
+    assert reason.startswith(f"tool-error {tool_id}: analyzer exited {exit_code}")
+
+
+def test_pipeline_reports_nothing_to_scan_as_passed_with_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.analyzers import pipeline
+
+    binary = _fake_binary(tmp_path, exit_code=2, stderr="There are no .py[i] files in directory")
+    plan = AnalyzerPlan(manifest_id="mypy", mode="repo-native", argv=(binary,), cwd=tmp_path)
+    _stub_to_real_run_plan(monkeypatch, plan)
+    monkeypatch.setattr(pipeline, "detect_enabled", lambda **_: [get_manifest("mypy")])
+
+    state = pipeline.run_analyzer_pipeline(
+        repo_root=tmp_path, changed_files=["src/app.py"], tier="trusted", shell="restricted"
+    )
+
+    row = next(row for row in state.analyzers if row.id == "mypy")
+    assert row.status == "passed"
+    assert (row.reason or "").startswith("nothing to scan")
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "clean"),
+    [(128, True), (127, False)],
+    ids=["no-package-sources", "general-error"],
+)
+def test_osv_scanner_no_package_sources_exit_is_a_clean_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int, clean: bool
+) -> None:
+    from mergecraft.analyzers import supply_chain
+
+    binary = _fake_binary(tmp_path, exit_code=exit_code, stderr="No package sources found")
+    plan = AnalyzerPlan(manifest_id="osv-scanner", mode="managed", argv=(binary,), cwd=tmp_path)
+    monkeypatch.setattr("mergecraft.analyzers.resolve.resolve_analyzer", lambda **_kwargs: plan)
+    monkeypatch.setattr(supply_chain, "_provision_plan", lambda p, **_kwargs: (p, None))
+    monkeypatch.setattr(supply_chain, "finalize_plan", lambda p, **_kwargs: p)
+    monkeypatch.setattr(
+        supply_chain,
+        "plan_sandbox",
+        lambda **_kwargs: SimpleNamespace(can_run=True, skip_reason=None, context=None),
+    )
+    (tmp_path / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+
+    def _scan() -> tuple[list[Any], str | None]:
+        return supply_chain._run_osv_scan(
+            manifest=get_manifest("osv-scanner"),
+            repo_root=tmp_path,
+            lockfiles=["uv.lock"],
+            tier="trusted",
+        )
+
+    if clean:
+        assert _scan() == ([], None)
+    else:
+        # Not declared benign: the text is not an OSV report, so it never reads as clean.
+        with pytest.raises(ValueError, match="JSON"):
+            _scan()

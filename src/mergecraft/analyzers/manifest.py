@@ -80,6 +80,28 @@ class ProvenanceEntry(BaseModel):
     sha256: str
 
 
+class BenignExit(BaseModel):
+    """A documented non-zero exit that means "nothing to scan", not a tool failure.
+
+    ``marker``, when set, must appear in the tool's own output for the exit to
+    count as benign, so the same code used for a real error stays a tool-error.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: int
+    marker: str | None = Field(default=None, min_length=1)
+    reason: str = Field(min_length=1)
+
+    @field_validator("code")
+    @classmethod
+    def _non_zero(cls, value: int) -> int:
+        if value == 0:
+            msg = "benign_exits code must be non-zero (exit 0 is already a pass)"
+            raise ValueError(msg)
+        return value
+
+
 class AnalyzerManifest(BaseModel):
     """One catalog analyzer definition (D1)."""
 
@@ -103,6 +125,16 @@ class AnalyzerManifest(BaseModel):
     network_allowlist: list[str]
     exclusive_group: str | None = None
     declared_unavailable: str | None = None
+    benign_exits: list[BenignExit] = Field(default_factory=list)
+
+    def benign_exit_reason(self, exit_code: int | None, output: str) -> str | None:
+        """Reason for a declared "nothing to scan" exit, or ``None`` when it is not one."""
+        if not exit_code:
+            return None
+        for entry in self.benign_exits:
+            if entry.code == exit_code and (entry.marker is None or entry.marker in output):
+                return entry.reason
+        return None
 
     @field_validator("severity_map")
     @classmethod
@@ -226,6 +258,7 @@ def expand_detect_patterns(patterns: list[str]) -> list[str]:
 
 __all__ = [
     "AnalyzerManifest",
+    "BenignExit",
     "DefaultEnabled",
     "DetectRules",
     "ManifestValidationError",

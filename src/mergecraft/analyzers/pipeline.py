@@ -432,6 +432,7 @@ def run_analyzer_pipeline(
                     AnalyzerStatusRow(
                         id=manifest.id,
                         status=status,
+                        reason=result.pass_reason,
                         finding_count=findings_count,
                     )
                 )

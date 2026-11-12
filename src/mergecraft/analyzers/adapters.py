@@ -54,6 +54,39 @@ class AdapterRunResult:
     version_note: str | None = None
     config_note: str | None = None
     tool_error: bool = False
+    pass_reason: str | None = None
+
+
+def nonzero_exit_result(
+    manifest: AnalyzerManifest,
+    exit_code: int,
+    output: str,
+    *,
+    findings: list[Finding] | None = None,
+    version_note: str | None = None,
+    config_note: str | None = None,
+) -> AdapterRunResult:
+    """Classify a non-zero exit that reported no diagnostics.
+
+    A declared ``benign_exits`` entry ("nothing to scan") is a pass carrying its
+    reason; anything else is a :func:`tool_error_result`.
+    """
+    benign = manifest.benign_exit_reason(exit_code, output)
+    if benign is not None:
+        logger.info("{}: exit {} — {}", manifest.id, exit_code, benign)
+        return AdapterRunResult(
+            findings=list(findings or []),
+            version_note=version_note,
+            config_note=config_note,
+            pass_reason=benign,
+        )
+    return tool_error_result(
+        manifest.id,
+        exit_code,
+        findings=findings,
+        version_note=version_note,
+        config_note=config_note,
+    )
 
 
 def tool_error_result(
@@ -620,9 +653,10 @@ def run_adapter(
                 config_note=config_note,
             )
         if outcome.exit_code is not None:
-            return tool_error_result(
-                tool_id,
+            return nonzero_exit_result(
+                manifest,
                 outcome.exit_code,
+                "",
                 version_note=plan.version_note,
                 config_note=config_note,
             )
@@ -655,9 +689,10 @@ def run_adapter(
             # A non-zero exit whose output is not the tool's report is the tool
             # failing (crash traceback, config error), not unparsable findings.
             logger.info("{}: output did not parse: {}", tool_id, exc)
-            return tool_error_result(
-                tool_id,
+            return nonzero_exit_result(
+                manifest,
                 outcome.exit_code,
+                raw,
                 version_note=plan.version_note,
                 config_note=config_note,
             )
@@ -683,9 +718,10 @@ def run_adapter(
     if not findings and outcome.exit_code:
         # The exit code is only trusted as "findings present" when there are
         # findings: lenient parsers read crash text on stderr as "no rows".
-        return tool_error_result(
-            tool_id,
+        return nonzero_exit_result(
+            manifest,
             outcome.exit_code,
+            raw,
             version_note=plan.version_note,
             config_note=config_note,
         )
@@ -720,6 +756,7 @@ def run_adapter(
 
 __all__ = [
     "AdapterRunResult",
+    "nonzero_exit_result",
     "run_adapter",
     "tool_error_result",
 ]
