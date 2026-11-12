@@ -1,0 +1,83 @@
+{
+  "rulesets": {
+    "protect-main": {
+      "enforcement": "active",
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "refs/heads/pre-0.0.1",
+          "~DEFAULT_BRANCH"
+        ]
+      },
+      "rules": {
+        "deletion": {},
+        "non_fast_forward": {},
+        "pull_request": {
+          "allowed_merge_methods": [
+            "merge",
+            "rebase",
+            "squash"
+          ],
+          "dismiss_stale_reviews_on_push": true,
+          "require_code_owner_review": true,
+          "require_extra_approval_for_unattributed_changes": true,
+          "require_last_push_approval": true,
+          "required_approving_review_count": 1,
+          "required_review_thread_resolution": true,
+          "required_reviewers": []
+        }
+      },
+      "target": "branch"
+    },
+    "require-ci-on-main": {
+      "enforcement": "active",
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "~DEFAULT_BRANCH"
+        ]
+      },
+      "rules": {
+        "required_status_checks": {
+          "do_not_enforce_on_create": false,
+          "required_status_checks": [
+            {
+              "context": "Verify (coverage gate py3.14)"
+            },
+            {
+              "context": "Verify (security audit py3.11)"
+            },
+            {
+              "context": "Verify (security audit py3.14)"
+            },
+            {
+              "context": "Verify (static + build py3.11)"
+            },
+            {
+              "context": "Verify (static + build py3.14)"
+            },
+            {
+              "context": "Verify (tests py3.11 1/2)"
+            },
+            {
+              "context": "Verify (tests py3.11 2/2)"
+            },
+            {
+              "context": "Verify (tests py3.14 1/2)"
+            },
+            {
+              "context": "Verify (tests py3.14 2/2)"
+            },
+            {
+              "context": "mergecraft review",
+              "integration_id": 15368
+            }
+          ],
+          "strict_required_status_checks_policy": true
+        }
+      },
+      "target": "branch"
+    }
+  },
+  "version": 1
+}
