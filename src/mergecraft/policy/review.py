@@ -725,6 +725,32 @@ def _rule_order_key(
     )
 
 
+def _warn_unreachable_repo_scopes(snapshot: PolicySnapshot, *, org: str, repo: str) -> None:
+    """Log each rule whose ``org`` or ``repo`` scope can never match this repository.
+
+    Such a rule raises no row on any change here, so without this line an
+    operator who mistyped the organization or repository never learns the rule
+    is inert. Names compare case-insensitively, as scope resolution does.
+    """
+    for rule in snapshot.rules:
+        scope = rule.scope
+        if scope is None:
+            continue
+        mismatched = [
+            f"{name}={declared!r}"
+            for name, declared, current in (("org", scope.org, org), ("repo", scope.repo, repo))
+            if declared is not None and declared.casefold() != current.casefold()
+        ]
+        if mismatched:
+            logger.warning(
+                "policy: rule {} is scoped to {} and never applies to {}/{}",
+                rule.id,
+                ", ".join(mismatched),
+                org,
+                repo,
+            )
+
+
 def _matching_rules(
     snapshot: PolicySnapshot,
     *,
@@ -1045,6 +1071,7 @@ def evaluate_review_policy(
         rows.append(_unverifiable_row(snapshot))
 
     unresolved = _unresolved_dimensions_for(base_ref)
+    _warn_unreachable_repo_scopes(snapshot, org=org, repo=repo)
     matched = _matching_rules(
         snapshot,
         changed_paths=changed_paths,

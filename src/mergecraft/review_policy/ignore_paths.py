@@ -38,7 +38,6 @@ from __future__ import annotations
 import base64
 import re
 from dataclasses import dataclass, field
-from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
@@ -48,6 +47,7 @@ from mergecraft.classify.generated_files import (
     classify_path,
     finding_survives_generated_policy,
 )
+from mergecraft.classify.path_globs import path_full_matches_glob
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -105,53 +105,18 @@ def parse_ignore_paths(raw: str | Iterable[str] | None) -> list[str]:
     return list(out)
 
 
-@lru_cache(maxsize=256)
-def _glob_regex(pattern: str) -> re.Pattern[str]:
-    parts: list[str] = []
-    i = 0
-    n = len(pattern)
-    while i < n:
-        char = pattern[i]
-        if pattern.startswith("**", i):
-            i += 2
-            if i < n and pattern[i] == "/":
-                i += 1
-                parts.append("(?:.*/)?")
-            else:
-                parts.append(".*")
-            continue
-        if char == "*":
-            parts.append("[^/]*")
-        elif char == "?":
-            parts.append("[^/]")
-        elif char == "[":
-            end = pattern.find("]", i + 1)
-            if end == -1:
-                parts.append(re.escape(char))
-            else:
-                body = pattern[i + 1 : end]
-                if body.startswith("!"):
-                    body = "^" + body[1:]
-                parts.append(f"[{body}]")
-                i = end
-        else:
-            parts.append(re.escape(char))
-        i += 1
-    return re.compile("".join(parts) + r"\Z")
-
-
 def glob_matches(pattern: str, path: str) -> bool:
     """Return whether ``pattern`` matches the whole repository-relative ``path``.
+
+    The dialect is the one policy scopes and declared Scope paths read
+    (:func:`mergecraft.classify.path_globs.path_full_matches_glob`), so one glob
+    means the same thing in ``review.ignorePaths`` and in a policy rule.
 
     Examples:
         >>> glob_matches("**/*.lock", "uv.lock"), glob_matches("*.md", "docs/a.md")
         (True, False)
     """
-    normalized = path.replace("\\", "/").removeprefix("./")
-    try:
-        return _glob_regex(pattern).match(normalized) is not None
-    except re.error:
-        return False
+    return path_full_matches_glob(pattern, path)
 
 
 @dataclass(frozen=True, slots=True)
