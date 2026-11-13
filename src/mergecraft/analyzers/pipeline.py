@@ -486,6 +486,7 @@ def run_analyzer_pipeline(
                     )
                     run_attrs["analyzer.exit_code"] = 1
                     run_attrs["analyzer.findings_count"] = 0
+                    run_attrs["error"] = str(result)
                     span.set_status("error", str(result))
                 else:
                     raw_findings.extend(result.findings)
