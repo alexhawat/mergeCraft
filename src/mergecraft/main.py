@@ -7,7 +7,7 @@ import os
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
@@ -209,6 +209,9 @@ class RunContext:
     timeout_raw: Any = None
     timeout_error: str | None = None
     setup_completed: bool = False
+    automatic_review: Literal["skip", "lite"] | None = None
+    automatic_review_reason: str = ""
+    draft_lite_settings: RepoSettings | None = None
 
     # -- populated by ``_resolve_credentials`` (security boundary) ----------
     trust_tier: TrustTier = "untrusted"
@@ -271,17 +274,29 @@ class RunContext:
             gha_log.warning(self.setup_script_skip_reason)
 
     async def analyze(self) -> None:
+        self.automatic_review, self.automatic_review_reason = await _automatic_review_policy(self)
+        if self.automatic_review is not None:
+            self.tool_context = _policy_tool_context(self)
+            if self.timeout_error is not None:
+                raise _ConfigurationError(self.timeout_error) from None
+            return
         with gha_log.group("model-chain"):
             await _assemble_model_chain(self)
             await _build_run_tool_context(self)
 
     async def review(self) -> AgentResult | SkipAgentReview | LiteAgentReview:
+        if self.automatic_review == "skip":
+            return SkipAgentReview(reason=self.automatic_review_reason)
+        if self.automatic_review == "lite":
+            return await _run_draft_lite(self)
         return await _run_review_after_analyze(self)
 
     async def publish(
         self, review_out: AgentResult | SkipAgentReview | LiteAgentReview
     ) -> MainResult:
         with gha_log.group("publish"):
+            if self.automatic_review is not None and isinstance(review_out, SkipAgentReview):
+                return await _publish_policy_skip(self, review_out.reason)
             return await _finalize(self, review_out)
 
 
@@ -2292,6 +2307,201 @@ async def _dispatch_agent_with_deadline(ctx: RunContext) -> AgentResult:
     return _promote_and_finalize_agent_result(ctx, winning_slug, result)
 
 
+def _policy_tool_context(ctx: RunContext) -> ToolContext:
+    """Carry the bound PR identity for policy checks without building an agent."""
+    assert ctx.run_context is not None
+    assert ctx.scm is not None
+    assert ctx.tool_state is not None
+    assert ctx.tmpdir is not None
+    assert ctx.token_ref is not None
+    payload = _payload_to_ctx(ctx.payload)
+    payload.event = PayloadEvent(
+        trigger=payload.event.trigger,
+        issue_number=int(ctx.pr_number) if ctx.pr_number is not None else None,
+        is_pr=True,
+    )
+    return ToolContext(
+        agent_id="claude",
+        repo=RepoIdentity(owner=ctx.run_context.repo.owner, name=ctx.run_context.repo.name),
+        payload=payload,
+        scm=ctx.scm,
+        github_installation_token=ctx.token_ref.mcp_token,
+        tool_state=ctx.tool_state,
+        tmpdir=ctx.tmpdir,
+        trust_tier=ctx.trust_tier,
+        authority_trust=ctx.authority_trust,
+        gh_event=ctx.gh_event,
+    )
+
+
+def _is_completed_review(review: dict[str, Any]) -> bool:
+    """Recognize already-authenticated history for frequency, never approval."""
+    import re
+
+    from mergecraft.findings.ledger import DETERMINISTIC_RECORD_MARKER, REVIEW_BODY_MARKER
+
+    commit = review.get("commit_id")
+    if not isinstance(commit, str) or re.fullmatch(r"[0-9a-fA-F]{40}", commit) is None:
+        return False
+    state = str(review.get("state")).upper()
+    if state in {"APPROVED", "CHANGES_REQUESTED"}:
+        return True
+    if state != "COMMENTED":
+        return False
+    body = str(review.get("body") or "").lstrip()
+    if not body.startswith(f"{DETERMINISTIC_RECORD_MARKER}\n### mergeCraft run record\n"):
+        return False
+    record, separator, _prose = body.partition(REVIEW_BODY_MARKER)
+    if not separator:
+        return False
+    lines = set(record.splitlines())
+    if "- **Publication path:** `publish_pull_request_review`" not in lines or any(
+        line.startswith(("- **Tier:** skip", "- **Tier:** lite")) for line in lines
+    ):
+        return False
+    completed_pass = {
+        "- **Outcome:** `passed`",
+        "- **Verdict diagnostic:** `approved`",
+    } <= lines
+    completed_request = (
+        "- **Outcome:** `failed`" in lines
+        and any(line.startswith("- **Decision:** `failure`") for line in lines)
+        and any(
+            line.startswith(
+                "- **Review integrity:** the reviewer's terminal verdict was `request_changes`"
+            )
+            for line in lines
+        )
+    )
+    return completed_pass or completed_request
+
+
+async def _automatic_review_policy(
+    ctx: RunContext,
+) -> tuple[Literal["skip", "lite"] | None, str]:
+    """Apply defaults to native PR events and accept overrides from the base only."""
+    if os.environ.get("GITHUB_EVENT_NAME") not in {"pull_request", "pull_request_target"}:
+        return None, ""
+    assert ctx.settings is not None
+    event = ctx.gh_event or {}
+    if isinstance(event.get("comment"), dict):
+        return None, ""
+    pull = event.get("pull_request")
+    if not isinstance(pull, dict) or not isinstance(pull.get("number"), int):
+        return None, ""
+    settings: RepoSettings | None = ctx.settings
+    if not ctx.settings_snapshot_operator_owned:
+        from mergecraft.review_policy.ignore_paths import _base_repo_settings, _event_base_sha
+
+        base_sha = _event_base_sha(event)
+        settings_from_base = None
+        if base_sha:
+            assert ctx.scm is not None
+            assert ctx.run_context is not None
+            repo = ctx.run_context.repo
+            settings_from_base, _source, _detail = await _base_repo_settings(
+                ctx.scm, repo.owner, repo.name, base_sha
+            )
+        settings = settings_from_base
+    review = settings.review if settings is not None else None
+    frequency = review.triggers.frequency if review is not None else "everyPush"
+    if frequency == "onRequest":
+        return "skip", "Automatic review is disabled; request a review to run mergeCraft."
+
+    drafts = review.drafts if review is not None else "skip"
+    is_draft = pull.get("draft") is True
+    if is_draft and drafts == "skip":
+        return "skip", "Draft pull request; mergeCraft will review it when marked ready."
+
+    if frequency == "oncePerPr" and event.get("action") == "synchronize":
+        from mergecraft.mcp.checkout import list_mergecraft_reviews
+
+        reviews = await list_mergecraft_reviews(
+            _policy_tool_context(ctx), pull_number=pull["number"]
+        )
+        if any(_is_completed_review(item) for item in reviews):
+            return "skip", "This pull request already received a mergeCraft review."
+    if is_draft and drafts == "lite":
+        ctx.draft_lite_settings = settings
+        return "lite", "Draft pull request configured for a lite review."
+    return None, ""
+
+
+async def _publish_policy_skip(ctx: RunContext, reason: str) -> MainResult:
+    """Complete an intentional Action no-op with neutral checks and no verdict."""
+    assert ctx.tool_context is not None
+    from mergecraft.config.trust_policy import bound_head_sha
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    head_sha = bound_head_sha(
+        ctx.gh_event or {}, event_name=os.environ.get("GITHUB_EVENT_NAME", "")
+    )
+    if head_sha:
+        primary_repo_state(ctx.tool_context.tool_state).checkout_sha = head_sha
+    await report_status_checks(
+        ctx.tool_context, run_succeeded=True, conclusion="neutral", failure_reason=reason
+    )
+    logger.info("» {}", reason)
+    return MainResult(success=True, output=reason, result=reason, outcome=RunOutcome.inconclusive)
+
+
+async def _run_draft_lite(ctx: RunContext) -> SkipAgentReview | LiteAgentReview:
+    """Run the capped draft review or stop without escalating to a full review."""
+    assert ctx.draft_lite_settings is not None
+    assert ctx.tool_context is not None
+    assert ctx.tool_state is not None
+    from mergecraft.config.trust_policy import bound_head_sha
+    from mergecraft.fast_path import _read_diff
+    from mergecraft.mcp.tool_state import primary_repo_state
+    from mergecraft.review_policy.ignore_paths import _event_base_sha
+
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+    head_sha = bound_head_sha(ctx.gh_event or {}, event_name=event_name)
+    pull_number = ctx.tool_context.payload.event.issue_number
+    base_sha = _event_base_sha(ctx.gh_event)
+    if not head_sha or not base_sha or not isinstance(pull_number, int):
+        return SkipAgentReview(reason="Draft lite review skipped: no bound pull request revision.")
+    scm, repo = ctx.tool_context.scm, ctx.tool_context.repo
+    number = pull_number
+
+    async def revision_matches() -> bool:
+        pull = await scm.get_pull(repo.owner, repo.name, number)
+        event = {"pull_request": pull}
+        return (
+            bound_head_sha(event, event_name=event_name).casefold() == head_sha.casefold()
+            and _event_base_sha(event).casefold() == base_sha.casefold()
+        )
+
+    changed = SkipAgentReview(
+        reason="Draft lite review skipped: the pull request revision changed."
+    )
+    try:
+        if not await revision_matches():
+            return changed
+        diff, _paths = await _read_diff(scm, repo.owner, repo.name, number)
+        if not await revision_matches():
+            return changed
+    except Exception as exc:
+        logger.info("Draft lite diff unavailable ({})", type(exc).__name__)
+        return SkipAgentReview(
+            reason="Draft lite review skipped: the pull request diff is unavailable."
+        )
+    decision = TriageDecision(
+        tier="lite",
+        recognizer=None,
+        reason=ctx.automatic_review_reason,
+        token_cap=ctx.draft_lite_settings.review.fast_path.lite.token_cap,
+    )
+    primary_repo_state(ctx.tool_state).checkout_sha = head_sha
+    ctx.tool_state.triage = decision
+    result = await _run_lite_tier(
+        ctx, decision, diff_text=diff, draft_settings=ctx.draft_lite_settings
+    )
+    return result or SkipAgentReview(
+        reason="Draft lite review skipped: a capped call was unavailable."
+    )
+
+
 async def _triage_gate(ctx: RunContext) -> SkipAgentReview | LiteAgentReview | None:
     """Deterministic pre-dispatch triage (``review.fastPath``): skip the agent when certain.
 
@@ -2402,7 +2612,11 @@ async def _reapproval_gate(
 
 
 async def _run_lite_tier(
-    ctx: RunContext, decision: TriageDecision, *, diff_text: str
+    ctx: RunContext,
+    decision: TriageDecision,
+    *,
+    diff_text: str,
+    draft_settings: RepoSettings | None = None,
 ) -> LiteAgentReview | None:
     """Run the ``lite`` tier's single call; ``None`` (a full review) when it downgraded.
 
@@ -2417,20 +2631,22 @@ async def _run_lite_tier(
     assert ctx.settings is not None
     assert ctx.tool_state is not None
     tool_state = ctx.tool_state
+    settings = draft_settings if draft_settings is not None else ctx.settings
     try:
-        outcome = await run_lite_review(
-            decision=decision, diff_text=diff_text, settings=ctx.settings
-        )
+        outcome = await run_lite_review(decision=decision, diff_text=diff_text, settings=settings)
     except Exception as err:  # the driver is total; a bug in it must not crash the run
         logger.warning("» lite review raised {}: the run is inconclusive", type(err).__name__)
         outcome = LiteOutcome(
             status="failed", reason=f"the lite review raised {type(err).__name__}"
         )
-    if outcome.status == "downgraded":
-        tool_state.triage = TriageDecision(tier="full", recognizer=None, reason=outcome.reason)
-        logger.warning("» Tier: full — lite downgraded: {}", outcome.reason)
+    if draft_settings is not None and outcome.status == "failed":
         return None
-    model_slug = outcome.model_slug or lite_model_slug(ctx.settings)
+    if outcome.status == "downgraded":
+        if draft_settings is None:
+            tool_state.triage = TriageDecision(tier="full", recognizer=None, reason=outcome.reason)
+            logger.warning("» Tier: full — lite downgraded: {}", outcome.reason)
+        return None
+    model_slug = outcome.model_slug or lite_model_slug(settings)
     if outcome.model_slug is None and model_slug is not None:
         outcome = replace(outcome, model_slug=model_slug)
     tool_state.lite_review = outcome
