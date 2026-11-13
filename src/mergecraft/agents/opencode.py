@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Final
 import httpx
 from loguru import logger
 
-from mergecraft.agents.cli_runner import CliHarnessSpec, run_cli_attempt
+from mergecraft.agents.cli_runner import CliHarnessSpec, cli_working_directory, run_cli_attempt
 from mergecraft.agents.gates import GIT_NATIVE_READ_DENY_OPENCODE
 from mergecraft.agents.openai_compatible_gateways import (
     SINGLETON_PROVIDER_ID,
@@ -1385,7 +1385,9 @@ async def _run(ctx: AgentRunContext) -> AgentResult:
     def _boot() -> None:
         try:
             boot_handle.append(
-                _boot_opencode_server(cli=cli, env=env, cwd=os.getcwd(), cancel=cancel)
+                _boot_opencode_server(
+                    cli=cli, env=env, cwd=cli_working_directory(ctx), cancel=cancel
+                )
             )
         except Exception as err:
             boot_error.append(err)
