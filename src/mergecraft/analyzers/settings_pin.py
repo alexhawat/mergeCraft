@@ -28,6 +28,7 @@ Exports:
         PinnedAnalyzerSettings — Settings plus where they were resolved from.
     Functions:
         resolve_pinned_analyzer_settings — The analyzer settings this run may apply.
+        resolve_pinned_analyzer_settings_async — Off-loop reads with loop-side caching.
         repo_settings_from_text — Validate base config text into ``RepoSettings``.
 """
 
@@ -42,7 +43,9 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.config.settings import AnalyzersSettings
+from mergecraft.utils.blocking import run_blocking
 from mergecraft.utils.git_hardening import git_argv
+from mergecraft.utils.process_scope import check_process_cancelled
 
 if TYPE_CHECKING:
     from mergecraft.config.settings import RepoSettings
@@ -78,12 +81,15 @@ def _event_base(event: dict[str, Any] | None) -> tuple[str, str]:
 
 
 def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(
+    check_process_cancelled()
+    result = subprocess.run(
         git_argv(["-C", str(repo_root), *args]),
         capture_output=True,
         check=False,
         timeout=_GIT_TIMEOUT_S,
     )
+    check_process_cancelled()
+    return result
 
 
 def _resolvable_base(repo_root: Path, sha: str, ref: str) -> str | None:
@@ -168,14 +174,28 @@ def _snapshot(ctx: ToolContext) -> RepoSettingsSnapshot | None:
     return ctx.repo_settings_snapshot or run_scope_settings_snapshot()
 
 
+_SettingsKey = tuple[str, str, str, bool | None]
+
+
 def resolve_pinned_analyzer_settings(
     ctx: ToolContext, repo_root: Path | None = None
 ) -> PinnedAnalyzerSettings:
-    """Return the analyzer settings this run may apply, and where they came from.
+    """Return base-pinned settings, caching successful resolution on tool state."""
+    return _publish_settings(ctx, _resolve_settings(ctx, repo_root))
 
-    Never reads ``.mergecraft/config.yaml`` from the checkout when the run carries a PR
-    base. The result is cached per base on the run's tool state: ``git`` runs once.
-    """
+
+async def resolve_pinned_analyzer_settings_async(
+    ctx: ToolContext, repo_root: Path | None = None
+) -> PinnedAnalyzerSettings:
+    """Read base settings off-loop, publishing the cache only after success."""
+    resolved = await run_blocking(_resolve_settings, ctx, repo_root)
+    return _publish_settings(ctx, resolved)
+
+
+def _resolve_settings(
+    ctx: ToolContext, repo_root: Path | None
+) -> tuple[_SettingsKey, PinnedAnalyzerSettings]:
+    """Compute settings without mutating shared tool state."""
     from mergecraft.mcp.tool_state import primary_repo_state
 
     root = (repo_root or Path(primary_repo_state(ctx.tool_state).dir or Path.cwd())).resolve()
@@ -188,7 +208,7 @@ def resolve_pinned_analyzer_settings(
         and cached[0] == key
         and isinstance(cached[1], PinnedAnalyzerSettings)
     ):
-        return cached[1]
+        return key, cached[1]
 
     if snapshot is not None and snapshot.operator_owned:
         pinned = PinnedAnalyzerSettings(snapshot.settings.analyzers, "base_snapshot")
@@ -202,6 +222,13 @@ def resolve_pinned_analyzer_settings(
         pinned = PinnedAnalyzerSettings(
             load_repo_settings(root=root, load_learnings_files=False).analyzers, "live_load"
         )
+    return key, pinned
+
+
+def _publish_settings(
+    ctx: ToolContext, resolved: tuple[_SettingsKey, PinnedAnalyzerSettings]
+) -> PinnedAnalyzerSettings:
+    key, pinned = resolved
     if pinned.resolved_from != "defaults":
         # A fail-closed fallback is recomputed: the base may simply not have been fetched
         # yet (``checkout_pr`` fetches it), and a stale "unreadable" must not outlive that.
@@ -213,4 +240,5 @@ __all__ = [
     "PinnedAnalyzerSettings",
     "repo_settings_from_text",
     "resolve_pinned_analyzer_settings",
+    "resolve_pinned_analyzer_settings_async",
 ]

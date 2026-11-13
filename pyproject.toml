@@ -66,7 +66,7 @@ Changelog = "https://github.com/alexhawat/mergeCraft/blob/main/CHANGELOG.md"
 Issues = "https://github.com/alexhawat/mergeCraft/issues"
 
 [project.scripts]
-mergecraft = "mergecraft.cli.app:main"
+mergecraft = "mergecraft.cli.entrypoint:main"
 
 [project.optional-dependencies]
 harbor = [
@@ -83,10 +83,10 @@ agents = [
 # gate via `make lockcheck`.
 tracing = [
     "logfire==5.5.0",
-    "opentelemetry-api==1.45.1",
-    "opentelemetry-sdk==1.45.1",
+    "opentelemetry-api==1.45.2",
+    "opentelemetry-sdk==1.45.2",
     "opentelemetry-exporter-otlp-proto-http==1.45.1",
-    "opentelemetry-semantic-conventions==0.66b1",
+    "opentelemetry-semantic-conventions==0.66b2",
 ]
 dev = [
     "pytest==9.2.0",

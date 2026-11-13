@@ -346,9 +346,16 @@ class _FinishedProcess:
     """Stands in for the spawned shell: the command ran and exited ``returncode``."""
 
     pid = 4242
+    stdin = stdout = stderr = None
 
     def __init__(self, returncode: int) -> None:
         self.returncode = returncode
+
+    def __enter__(self) -> _FinishedProcess:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        pass
 
     def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
         del timeout

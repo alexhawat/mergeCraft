@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any, Literal
 import yaml
 from loguru import logger
 
+from mergecraft.utils.file_lock import acquire_file_lock
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
@@ -125,7 +127,7 @@ def _lockfile_transaction(path: Path) -> Iterator[int]:
         lock_fd = _open_in(dir_fd, f"{path.name}.lock", os.O_RDWR | os.O_CREAT)
         try:
             if sys.platform != "win32":
-                fcntl.flock(lock_fd, fcntl.LOCK_EX)
+                acquire_file_lock(lock_fd)
             try:
                 yield dir_fd
             finally:

@@ -27,7 +27,9 @@ def _paths() -> list[tuple[str, ...]]:
     def walk(command: click.Command, path: tuple[str, ...]) -> list[tuple[str, ...]]:
         found = [path]
         if isinstance(command, click.Group):
-            for name, sub in sorted(command.commands.items()):
+            for name in command.list_commands(click.Context(command)):
+                sub = command.get_command(click.Context(command), name)
+                assert sub is not None
                 found.extend(walk(sub, (*path, name)))
         return found
 

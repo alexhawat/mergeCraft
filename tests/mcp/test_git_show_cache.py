@@ -116,7 +116,7 @@ async def test_show_reads_the_resolved_object_when_head_moves_before_read(
     def moving_run(args: list[str], **kwargs: Any) -> str:
         nonlocal moved
         output = real_run(args, **kwargs)
-        if args[0] == "rev-parse" and not moved:
+        if args[0] == "cat-file" and "--batch-check" in args[1] and not moved:
             moved = True
             (repo / "README.md").write_text("after\n")
             commit_all(repo, "advance")
@@ -165,3 +165,31 @@ async def test_immutable_revision_cache_hit_does_not_spawn_git(
     again = await _show(tool, [f"{oid}:README.md"])
     assert again["cached"] is True
     assert again["output"] == first["output"]
+
+
+async def test_symbolic_show_uses_one_identity_probe_and_reuses_blob(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.mcp import git as git_mod
+
+    repo = tmp_path / "repo"
+    await asyncio.to_thread(_repo, repo, "cached body\n")
+    ctx = _ctx(repo)
+    ctx.tmpdir = str(tmp_path)
+    spec = git_tool(ctx)
+    real_run_git = git_mod._run_git
+    commands: list[list[str]] = []
+
+    def record_git(args: list[str], **kwargs: Any) -> str:
+        commands.append(args)
+        return real_run_git(args, **kwargs)
+
+    monkeypatch.setattr(git_mod, "_run_git", record_git)
+    first = await _show(spec, ["HEAD:README.md"])
+    assert first["output"] == "cached body"
+    assert len(commands) == 2, commands
+    commands.clear()
+    again = await _show(spec, ["HEAD:README.md"])
+    assert again["cached"] is True
+    assert again["output"] == "cached body"
+    assert len(commands) == 1, commands
