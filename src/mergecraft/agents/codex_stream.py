@@ -318,9 +318,12 @@ def codex_stream_event_handler(
                 span.set_attribute("tool.input", arguments)
                 span.set_attribute("gen_ai.tool.input", redact_tool_payload(arguments))
                 enrich_tool_request(span, arguments=arguments)
-                failed = item.get("status") == "failed"
+                # MCP tool errors still carry a result. Transport errors carry an error object.
+                result = item.get("result")
                 close_tool_span(
-                    tool_id, item.get("error") if failed else item.get("result"), failed=failed
+                    tool_id,
+                    result if result is not None else item.get("error"),
+                    failed=item.get("status") == "failed",
                 )
                 return
             if item_type == "tool_call":

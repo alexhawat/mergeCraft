@@ -43,8 +43,12 @@ def test_codex_tool_span_waits_for_matching_result() -> None:
     assert calls[0].attrs["tool.output"] == "file contents"
 
 
-@pytest.mark.parametrize("failed", [False, True], ids=["result", "error"])
-def test_codex_cli_mcp_tool_item_records_completed_response(failed: bool) -> None:
+@pytest.mark.parametrize(
+    ("status", "has_result"),
+    [("completed", True), ("failed", True), ("failed", False)],
+    ids=["success", "tool-error-result", "transport-error"],
+)
+def test_codex_cli_mcp_tool_item_records_completed_response(status: str, has_result: bool) -> None:
     """Trace the MCP item shape emitted by the pinned Codex CLI."""
     sink = MemorySink()
     tracer = Tracer(sink=sink, session_id="s", run_id="r")
@@ -73,9 +77,9 @@ def test_codex_cli_mcp_tool_item_records_completed_response(failed: bool) -> Non
             "type": "item.completed",
             "item": {
                 **item,
-                "result": None if failed else result,
-                "error": error if failed else None,
-                "status": "failed" if failed else "completed",
+                "result": result if has_result else None,
+                "error": None if has_result else error,
+                "status": status,
             },
         },
     )
@@ -85,8 +89,8 @@ def test_codex_cli_mcp_tool_item_records_completed_response(failed: bool) -> Non
     attrs = calls[0].attrs
     assert attrs["tool.input"] == {"path": "input.txt", "password": "<redacted>"}
     redacted_result = {**result, "structured_content": {"token": "<redacted>"}}
-    assert attrs["tool.output"] == (error if failed else redacted_result)
-    assert attrs["tool.exit_code"] == ("error" if failed else "ok")
+    assert attrs["tool.output"] == (redacted_result if has_result else error)
+    assert attrs["tool.exit_code"] == ("error" if status == "failed" else "ok")
     assert "fixture-password" not in attrs["gen_ai.tool.input"]
     assert "fixture-token" not in attrs["gen_ai.tool.output"]
     close_all()
