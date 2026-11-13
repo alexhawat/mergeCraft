@@ -163,6 +163,9 @@ def run_cli_attempt(spec: CliHarnessSpec, ctx: AgentRunContext) -> AgentResult:
                 if stderr_drain is not None:
                     stderr_drain.join(timeout=STDERR_DRAIN_JOIN_TIMEOUT_S)
 
+        # Classification is reached only after both supervisors were initialized.
+        assert watchdog is not None
+        assert stderr_drain is not None
         if watchdog.stalled:
             diagnostic = watchdog.diagnostic()
             return with_prompt(
