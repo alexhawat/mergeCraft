@@ -10,7 +10,7 @@ with a reason — never a silent zero-finding report).
 
 These tests exercise the **real git read path** (``_base_linked_repo_manifest``
 over a checkout with an ``origin/<base>`` ref) and feed the lookup into
-``attach_linked_repo_review``, so the glue between the read and the payload is
+``linked_repo_review_with_payload``, so the glue between the read and the payload is
 covered, not just a hand-built manifest.
 """
 
@@ -27,7 +27,7 @@ from tests.xrepo.support import (
 )
 
 from mergecraft.mcp.checkout import _base_linked_repo_manifest
-from mergecraft.review.linked_repos import attach_linked_repo_review
+from mergecraft.review.linked_repos import linked_repo_review_with_payload
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -194,12 +194,13 @@ def test_absent_base_manifest_yields_no_omission(tmp_path: Path) -> None:
     )
 
     lookup = _base_linked_repo_manifest(cwd=str(clone), base_ref="main")
-    payload = attach_linked_repo_review(
+    payload = linked_repo_review_with_payload(
         clone,
         authorized_repos=frozenset({"acme/api-contracts"}),
         base_manifest=lookup.manifest,
         base_manifest_error=lookup.unreadable_reason,
     )
+    payload = payload[1] if payload is not None else None
 
     assert payload is not None
     assert payload["linkedRepoFindings"] == []
@@ -226,12 +227,13 @@ def test_unreadable_base_manifest_omits_every_reviewable_entry(tmp_path: Path) -
     lookup = _base_linked_repo_manifest(cwd=str(clone), base_ref="main")
     assert lookup.unreadable_reason is not None
 
-    payload = attach_linked_repo_review(
+    payload = linked_repo_review_with_payload(
         clone,
         authorized_repos=frozenset({"acme/api-contracts"}),
         base_manifest=lookup.manifest,
         base_manifest_error=lookup.unreadable_reason,
     )
+    payload = payload[1] if payload is not None else None
 
     assert payload is not None
     assert payload["linkedRepoFindings"] == []
@@ -278,12 +280,13 @@ def test_failed_base_fetch_omits_every_reviewable_entry(tmp_path: Path) -> None:
     )
     assert lookup.unreadable_reason is not None
 
-    payload = attach_linked_repo_review(
+    payload = linked_repo_review_with_payload(
         clone,
         authorized_repos=frozenset({"acme/api-contracts"}),
         base_manifest=lookup.manifest,
         base_manifest_error=lookup.unreadable_reason,
     )
+    payload = payload[1] if payload is not None else None
 
     assert payload is not None
     assert payload["linkedRepoFindings"] == []
@@ -307,12 +310,13 @@ def test_absent_manifest_with_no_fetch_failure_stays_omission_free(tmp_path: Pat
     assert lookup.manifest.repos == ()
     assert lookup.unreadable_reason is None
 
-    payload = attach_linked_repo_review(
+    payload = linked_repo_review_with_payload(
         clone,
         authorized_repos=frozenset({"acme/api-contracts"}),
         base_manifest=lookup.manifest,
         base_manifest_error=lookup.unreadable_reason,
     )
+    payload = payload[1] if payload is not None else None
 
     assert payload is not None
     assert payload.get("linkedRepoOmitted") == []
@@ -348,12 +352,13 @@ def test_valid_base_manifest_drives_the_pin_movement_findings(tmp_path: Path) ->
     assert lookup.unreadable_reason is None
     assert [entry.commit for entry in lookup.manifest.repos] == [first_pin, consumer_pin]
 
-    payload = attach_linked_repo_review(
+    payload = linked_repo_review_with_payload(
         clone,
         authorized_repos=frozenset({"acme/api-contracts", "acme/web-client"}),
         base_manifest=lookup.manifest,
         base_manifest_error=lookup.unreadable_reason,
     )
+    payload = payload[1] if payload is not None else None
 
     assert payload is not None
     paths = {row["path"] for row in payload["linkedRepoFindings"]}

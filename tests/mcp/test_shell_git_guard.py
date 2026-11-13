@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
-from tests.support.tool_context import write_capable_mcp_mode
+from tests.support.tool_context import inner_mutation_guard_probe
 
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -197,12 +197,12 @@ async def test_shell_tool_refuses_every_git_form(
 
 @pytest.mark.parametrize("command", BYPASSES)
 @pytest.mark.parametrize("shell", ["restricted", "enabled"])
-async def test_shell_tool_refuses_every_git_form_when_write_mode_selected(
+async def test_shell_inner_guard_refuses_every_git_form(
     tmp_path: Path, command: str, shell: Shell
 ) -> None:
-    """Inner git guard still refuses every form after a write-capable mode is bound."""
+    """Inner git guard refuses every form when the outer mutation gate is bypassed."""
     spec = shell_tool(_ctx(tmp_path, shell=shell))
-    with write_capable_mcp_mode():
+    with inner_mutation_guard_probe():
         result = await spec.execute({"command": command, "description": "git bypass attempt"})
     assert result.is_error is True, result.content[0]["text"]
     assert "git commands are not allowed" in result.content[0]["text"]

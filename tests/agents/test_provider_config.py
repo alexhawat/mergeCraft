@@ -9,7 +9,7 @@ HA1 types what already exists and does not change the wire contract).
 ``mergecraft.agents.openai_compatible_gateways`` — **not** the catalog
 ``mergecraft.models.ProviderConfig``. The key is read through ``api_key_env``
 at use time and is never stored on the model (convention 5 / HA1 File 1).
-``build_custom_provider`` and ``_custom_provider_ids`` consume the typed
+``build_custom_provider`` consumes the typed
 records internally; emitted OpenCode JSON is byte-identical to
 ``origin/pre-0.0.1``.
 
@@ -30,7 +30,7 @@ from mergecraft.agents.openai_compatible_gateways import (
     resolve_gateway_endpoint,
     resolve_gateway_endpoints,
 )
-from mergecraft.agents.opencode import _custom_provider_ids, build_custom_provider
+from mergecraft.agents.opencode import build_custom_provider
 
 # -- env-var surface (D16 / README "Custom OpenAI-compatible provider") ------
 
@@ -260,7 +260,7 @@ def test_partial_pair_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
 
     README: both halves of each numeric pair must be set; partial pairs are
     silently dropped. Pins today's ``resolve_gateway_endpoints`` /
-    ``build_custom_provider`` / ``_custom_provider_ids`` behaviour.
+    ``build_custom_provider`` behaviour.
     """
     monkeypatch.setenv(INDEXED_API_KEY_FMT.format(n=1), "key-1")
 
@@ -273,14 +273,13 @@ def test_partial_pair_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
     else:
         assert emitted is None
 
-    assert _custom_provider_ids("provider_1/some-model") == []
+    assert not emitted
 
 
 def test_gaps_in_indices_are_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
     """``_1`` + ``_3`` set, ``_2`` absent → providers 1 and 3 present, 2 absent.
 
-    Discovery preserves gaps (no renumbering). ``_custom_provider_ids``
-    mirrors ``build_custom_provider``'s resolution order.
+    Discovery and emitted provider blocks preserve gaps without renumbering.
     """
     monkeypatch.setenv(INDEXED_BASE_URL_FMT.format(n=1), "https://provider-1.example.test/v1")
     monkeypatch.setenv(INDEXED_API_KEY_FMT.format(n=1), "key-1")
@@ -298,7 +297,7 @@ def test_gaps_in_indices_are_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
     assert PROVIDER_3_ID in emitted
     assert PROVIDER_2_ID not in emitted
 
-    assert _custom_provider_ids("provider_1/some-model") == [PROVIDER_1_ID, PROVIDER_3_ID]
+    assert sorted(emitted) == [PROVIDER_1_ID, PROVIDER_3_ID]
 
 
 def test_named_presets_still_resolve_via_registry(
@@ -323,7 +322,6 @@ def test_named_presets_still_resolve_via_registry(
             "models": {"deepseek/deepseek-v4-flash": {"name": "deepseek/deepseek-v4-flash"}},
         }
     }
-    assert _custom_provider_ids(NOUS_MODEL) == ["nous"]
 
     bootstrap_opencode_gateway(
         tmp_path,
@@ -343,7 +341,6 @@ def test_named_presets_still_resolve_via_registry(
             "models": {"hy3": {"name": "hy3"}},
         }
     }
-    assert _custom_provider_ids(TOKENHUB_MODEL) == ["tokenhub"]
 
 
 def test_emitted_opencode_config_is_byte_identical_for_existing_inputs(

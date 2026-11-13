@@ -127,24 +127,16 @@ override-dependencies = ["filelock>=4"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mergecraft"]
-# Script-, Make- and test-only support modules. Every caller for the paths below
-# runs from the checkout, so the installed wheel tolerates their absence.
-# src/mergecraft/evals/corpora.py is deliberately NOT excluded: a shipped CLI
-# path (cli/eval_cmd.py, evals/human_batch.py) imports it at runtime. The same holds
-# for evals/quality_metrics.py, which benchmark.py and live_run.py import.
-# The last five were re-measured against the tree that excluded them (#947): none
-# has a production importer. scm/webhooks.py is reached from tests only (its last
-# production caller, the MCP server's webhook route, is gone); shadow_compare,
-# human_batch, skill and agents/catalog_docs are reached from Make targets,
-# scripts/ and a CI step, all of which run from the checkout.
+# Maintainer commands and support modules run from the checkout, not the wheel.
+# Corpus readers and quality metrics remain available for benchmark/live consumers.
 exclude = [
+    "src/mergecraft/cli/eval_cmd.py",
+    "src/mergecraft/analyzers/catalog_docs.py",
     "src/mergecraft/evals/mcp_public.py",
     "src/mergecraft/evals/skill_taxonomy_gate.py",
     "src/mergecraft/utils/git_ref.py",
     "src/mergecraft/integrations/live_providers.py",
     "src/mergecraft/mcp/codegen.py",
-    "src/mergecraft/scm/errors.py",
-    "src/mergecraft/scm/webhooks.py",
     "src/mergecraft/evidence/shadow_compare.py",
     "src/mergecraft/evals/human_batch.py",
     "src/mergecraft/evals/skill.py",

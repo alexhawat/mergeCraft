@@ -16,9 +16,9 @@ import pytest
 from mergecraft.evidence.packet import (
     PACKET_SCHEMA_VERSION,
     MergeEvidencePacket,
-    packet_output_schema,
 )
 from mergecraft.evidence.run_packet import build_run_packet
+from tests.evidence.schema_support import packet_output_schema
 from tests.evidence.support import sample_minimal_packet_dict
 from tests.evidence.test_run_packet import _make_ctx
 

@@ -85,7 +85,6 @@ substituting a branch.
 | `mergecraft analyzers list\|detect\|run\|explain` | Deterministic analyzers |
 | `mergecraft learnings active\|staging` | Inspect learnings memory |
 | `mergecraft findings export` | Export unresolved findings |
-| `mergecraft eval replay-bank` | Eval bank replay |
 | `mergecraft mcp serve` | Start MCP HTTP server (Bearer token required) |
 | `mergecraft mcp list` | List MCP tool surface for a role |
 

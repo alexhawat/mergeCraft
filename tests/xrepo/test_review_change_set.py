@@ -31,7 +31,7 @@ from tests.xrepo.support import (
     write_linked_repos_manifest,
 )
 
-from mergecraft.review.linked_repos import attach_linked_repo_review
+from mergecraft.review.linked_repos import linked_repo_review_with_payload
 from mergecraft.xrepo.linked_repos import LinkedRepoEntry, LinkedReposManifest
 from mergecraft.xrepo.review import review_linked_repos
 
@@ -188,7 +188,10 @@ def test_ungranted_entry_appears_in_linked_repo_omitted(tmp_path: Path) -> None:
     git_init_repo(primary)
     git_commit_all(primary)
 
-    payload = attach_linked_repo_review(primary, authorized_repos=frozenset({"acme/api-contracts"}))
+    payload = linked_repo_review_with_payload(
+        primary, authorized_repos=frozenset({"acme/api-contracts"})
+    )
+    payload = payload[1] if payload is not None else None
 
     assert payload is not None
     omitted = payload.get("linkedRepoOmitted")
@@ -205,11 +208,12 @@ def test_unreachable_previous_pin_is_an_omission_not_a_full_index(tmp_path: Path
         ("acme", "web-client", fixture["consumer_pin"]),
     )
 
-    payload = attach_linked_repo_review(
+    payload = linked_repo_review_with_payload(
         fixture["primary"],
         authorized_repos=fixture["grant"],
         base_manifest=base,
     )
+    payload = payload[1] if payload is not None else None
 
     assert payload is not None
     assert payload["linkedRepoFindings"] == []
@@ -226,7 +230,7 @@ def test_same_name_entries_are_omitted_not_silently_dropped(tmp_path: Path) -> N
     shared name exists, so neither the "not authorized" nor the "sibling
     checkout not found" branch fires: without a dedicated reason the entry
     vanished from the findings *and* the omissions — the silent skip TB-D12
-    exists to forbid. (``attach_linked_repo_review`` intersects its grant and so
+    exists to forbid. (``linked_repo_review_with_payload`` intersects its grant and so
     reaches the first branch instead; this pins the lower-level contract.)
     """
     primary = tmp_path / "primary"

@@ -78,7 +78,6 @@ def _tool_ctx(target_dir: Path) -> ToolContext:
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(target_dir),
-        signed_commits=True,
         xrepo=XrepoConfig(mode="explicit", read=[], write=[]),
         static_checks_enabled=True,
         # Local acme/demo context on the operator's own machine: trusted by choice.

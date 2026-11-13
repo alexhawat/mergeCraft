@@ -22,7 +22,7 @@ from tests.support.tool_context import (
     bind_github_client,
     bind_review_publication_scope,
     github_client_from_ctx,
-    write_capable_mcp_mode,
+    inner_mutation_guard_probe,
 )
 
 from mergecraft.agents.shared import AgentResult
@@ -967,8 +967,8 @@ async def test_resolve_tool_does_not_mark_the_run_updated_on_a_missing_payload(
     ctx = publication_ctx(tmp_path, github=_ResolvePayloadGitHub(payload), trust_tier="trusted")
     # The MCP tool is default-denied in review-only runs; the internal helper
     # above is what thread retirement calls. The tool's own contract is pinned
-    # under a write-capable mode.
-    with write_capable_mcp_mode():
+    # with only that outer gate bypassed by the test probe.
+    with inner_mutation_guard_probe():
         result = await resolve_review_thread_tool(ctx).execute({"thread_id": "T1"})
 
     assert result.is_error is False
@@ -985,7 +985,7 @@ async def test_resolve_tool_marks_the_run_updated_when_github_resolved(tmp_path:
 
     payload = {"resolveReviewThread": {"thread": {"id": "T1", "isResolved": True}}}
     ctx = publication_ctx(tmp_path, github=_ResolvePayloadGitHub(payload), trust_tier="trusted")
-    with write_capable_mcp_mode():
+    with inner_mutation_guard_probe():
         result = await resolve_review_thread_tool(ctx).execute({"thread_id": "T1"})
 
     assert result.is_error is False

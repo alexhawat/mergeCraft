@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from importlib.util import find_spec
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -11,7 +12,6 @@ import typer
 from rich.table import Table
 
 from mergecraft.analyzers.adapters import run_adapter
-from mergecraft.analyzers.catalog_docs import write_analyzers_doc
 from mergecraft.analyzers.lockfile import LockEntry, read_lock, write_lock
 from mergecraft.analyzers.provision import resolve_with_lock
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
@@ -238,11 +238,15 @@ def lock_cmd(
     console.print(f"lockfile updated: {lock_path} ({len(entries)} tools)")
 
 
-@app.command("docs")
-def docs_cmd() -> None:
-    """Regenerate ``docs/ANALYZERS.md`` from manifests."""
-    path = write_analyzers_doc()
-    console.print(f"wrote {path}")
+# Documentation generation belongs to the source checkout, not consumer wheels.
+if find_spec("mergecraft.analyzers.catalog_docs") is not None:
+    from mergecraft.analyzers.catalog_docs import write_analyzers_doc
+
+    @app.command("docs", hidden=True)
+    def docs_cmd() -> None:
+        """Regenerate ``docs/ANALYZERS.md`` from manifests."""
+        path = write_analyzers_doc()
+        console.print(f"wrote {path}")
 
 
 __all__ = ["app"]

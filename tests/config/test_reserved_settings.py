@@ -1,11 +1,7 @@
 """CF2.3 — reserved settings warn when set to a non-default value (CF-D6).
 
-Five settings validate, round-trip and do nothing: ``gates.thermostat``,
-``tracing.redaction``, ``stopScript``, ``blastRadiusOverride`` and
-``operatorPipeline``. ``autoMergeEnabled`` is plumbed but has no consumer.
-They are kept (``extra="forbid"`` would turn a key a consumer already has into
-a hard failure) and marked reserved; ``load_repo_settings`` logs exactly one
-warning per reserved key that is set to a non-default value.
+Reserved settings warn on non-default values. Retired auto-merge and pipeline
+keys load through a narrow compatibility migration and no longer serialize.
 
 ``modelIndex`` and ``providersSeeded`` have real readers and must stay silent.
 """
@@ -119,7 +115,7 @@ def test_reserved_defaults_log_nothing(tmp_path: Path) -> None:
 def test_auto_merge_enabled_warns_only_when_true(
     tmp_path: Path, body: str, expected_warning: bool
 ) -> None:
-    """``init`` scaffolds ``false``; only an explicit ``true`` has no consumer."""
+    """Legacy scaffolds used ``false``; only an explicit ``true`` needs a warning."""
     _write_config(tmp_path, body)
     matched = _matching(_warn_messages(tmp_path), ("automergeenabled", "auto_merge_enabled"))
     if expected_warning:

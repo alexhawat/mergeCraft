@@ -15,7 +15,6 @@ from pydantic import BaseModel, ConfigDict
 from mergecraft.agents.lens_triggers import LensTriggers
 from mergecraft.agents.recall import RECALL_SYSTEM_PROMPT
 from mergecraft.agents.reviewer import REVIEWER_SYSTEM_PROMPT
-from mergecraft.agents.structured_handoff import agent_finding_output_schema_id
 from mergecraft.agents.verifier import VERIFIER_SYSTEM_PROMPT, pinned_judge_model
 from mergecraft.config.roster_graph import (
     AfterEdge,
@@ -232,7 +231,7 @@ def _default_prompt_id(role: AgentRole) -> str:
 
 def _default_output_schema(role: AgentRole) -> str | None:
     if role in (AgentRole.reviewer, AgentRole.recall):
-        return agent_finding_output_schema_id()
+        return "mergecraft.agent_finding"
     return None
 
 

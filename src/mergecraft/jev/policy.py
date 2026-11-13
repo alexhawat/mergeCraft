@@ -14,22 +14,16 @@ Exports:
     iter_thresholds: Pack-versioned floors with corpus row ids (D15).
     unit_battery: One residual-hunk call through the existing client.
     dispatch_residual_units: Battery + ratchet + order over residual hunks.
-    detect_withdrawn_reraise: Plan 21 D6 rule 2 via ``align/v1``.
-    semantic_dedupe_pair: Escalate-only pair collapse (audit r2 N5).
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
-from pydantic import BaseModel, ConfigDict
 
-from mergecraft.evidence.merge import _severity_rank
 from mergecraft.jev.architecture import (
     build_system_one_questions,
-    route_choice,
-    route_noul,
 )
 from mergecraft.jev.types import (
     ALIGN_PACK_ID,
@@ -49,20 +43,17 @@ from mergecraft.jev.types import (
     JevError,
     JevPrediction,
     JevThreshold,
-    NoulAnswer,
     PolicyVerdict,
     ScoreAnswer,
     SystemOneResponse,
     UnitAssessment,
     parse_system_one_response,
 )
-from mergecraft.review_taxonomy import WITHDRAWN_FINDINGS_HEADING
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Sequence
     from pathlib import Path
 
-    from mergecraft.analyzers.finding import Finding
     from mergecraft.config.settings import RepoSettings
     from mergecraft.evidence.packet import MergeEvidencePacket
     from mergecraft.jev.client import AsyncJevClient
@@ -71,19 +62,6 @@ _CHOICE_RANK: dict[str, int] = {"clean": 0, "suspicious": 1, "defective": 2}
 _REVIEW_ACTION: str = "require_human_review"
 _ESCALATE_ACTION: str = "escalate"
 _SAME_DEFECT: str = "same"
-
-
-class AlignResult(BaseModel):
-    """One ``align/v1`` pair. Attesting, never blocking (D6)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    pack_id: str = ALIGN_PACK_ID
-    same_defect: str
-    is_withdrawn_reraise: bool
-    confidence: float = 0.0
-    scope: Literal["run"] = "run"
-    blocking: bool = False
 
 
 def bucket_confidence(
@@ -320,13 +298,13 @@ def iter_thresholds(settings: RepoSettings | None = None) -> Iterator[JevThresho
     yield JevThreshold(
         pack_id=ALIGN_PACK_ID,
         name="same_defect",
-        value=_settings_threshold("align/v1.same_defect", LIKELY_CONFIDENCE_FLOOR, settings),
+        value=LIKELY_CONFIDENCE_FLOOR,
         corpus_ids=ALIGN_THRESHOLD_CORPUS_IDS,
     )
     yield JevThreshold(
         pack_id=ALIGN_PACK_ID,
         name="is_withdrawn_reraise",
-        value=_settings_threshold("align/v1.is_withdrawn_reraise", NOUL_ACT_FLOOR, settings),
+        value=NOUL_ACT_FLOOR,
         corpus_ids=ALIGN_THRESHOLD_CORPUS_IDS,
     )
 
@@ -444,96 +422,6 @@ async def dispatch_residual_units(
     return [by_id[item.unit_id] for item in ordered]
 
 
-async def detect_withdrawn_reraise(
-    finding: Finding,
-    *,
-    withdrawn_body: str,
-    client: AsyncJevClient,
-) -> AlignResult:
-    """Ask ``align/v1`` whether ``finding`` re-raises a withdrawn non-issue.
-
-    Enforces plan 21 D6 rule 2 as an attesting ``scope="run"`` check (D6).
-
-    Args:
-        finding: Candidate finding the reviewer is about to publish.
-        withdrawn_body: Learnings text containing ``## Withdrawn review findings``.
-        client: Pinned Jev client (recorded transport in CI).
-
-    Returns:
-        AlignResult: ``same_defect`` plus a boolean withdrawn-re-raise flag.
-
-    Raises:
-        JevError: When the client skips or returns no answers.
-    """
-    result = await _align_call(
-        client,
-        state={
-            "finding": finding.message,
-            "path": finding.path,
-            "withdrawn": _withdrawn_section(withdrawn_body),
-        },
-        unit_id=finding.fingerprint or finding.path or "align",
-    )
-    logger.info(
-        "jev withdrawn reraise pack_id={} same_defect={} reraise={} blocking=false",
-        result.pack_id,
-        result.same_defect,
-        result.is_withdrawn_reraise,
-    )
-    return result
-
-
-async def semantic_dedupe_pair(
-    first: Finding,
-    second: Finding,
-    *,
-    client: AsyncJevClient,
-) -> Finding:
-    """Collapse a candidate pair to the stronger member only.
-
-    Always asks Jev (D7 — no skip-the-LLM path). When ``same_defect`` is
-    ``same``, the kept finding is the stronger severity, never the first
-    arrival (audit r2 N5). A weaker duplicate cannot lower a grade.
-
-    Args:
-        first: Earlier finding in arrival order.
-        second: Later finding, possibly a paraphrase.
-        client: Pinned Jev client (recorded transport in CI).
-
-    Returns:
-        Finding: The member to keep. Severity is never below either input
-        when the pair is the same defect.
-
-    Raises:
-        JevError: When the client skips or returns no answers.
-    """
-    alignment = await _align_call(
-        client,
-        state={
-            "left": first.message,
-            "right": second.message,
-            "left_path": first.path,
-            "right_path": second.path,
-        },
-        unit_id=first.fingerprint or first.path or "align",
-    )
-    if not route_choice(
-        choice=alignment.same_defect,
-        confidence=alignment.confidence,
-        act_on=frozenset({_SAME_DEFECT}),
-        floor=_align_same_floor(),
-    ):
-        return first
-    kept = _stronger_member(first, second)
-    logger.info(
-        "jev semantic dedupe pack_id={} same_defect={} kept_severity={}",
-        alignment.pack_id,
-        alignment.same_defect,
-        kept.severity,
-    )
-    return kept
-
-
 def _unit_floors(settings: RepoSettings | None = None) -> tuple[float, float]:
     return (
         _settings_threshold("unit/v1.certain", CERTAIN_CONFIDENCE_FLOOR, settings),
@@ -577,89 +465,6 @@ def _as_verdict(
 def _score_to_severity(score: float) -> str:
     key = int(score) if float(score).is_integer() else 0
     return SEVERITY_BY_SCORE.get(key, "Trivial")
-
-
-async def _align_call(
-    client: AsyncJevClient,
-    *,
-    state: dict[str, Any],
-    unit_id: str,
-    trust_tier: str = "untrusted",
-) -> AlignResult:
-    from mergecraft.jev.questions import align_pack
-
-    pack = align_pack()
-    result = await client.call(
-        state=state,
-        pack_id=pack.pack_id,
-        unit_id=unit_id,
-        questions=build_system_one_questions(pack),
-        trust_tier=trust_tier,
-    )
-    response = _require_align_response(result)
-    same = _choice(response, "same_defect")
-    noul = _noul(response, "is_withdrawn_reraise")
-    return AlignResult(
-        pack_id=pack.pack_id,
-        same_defect=same,
-        is_withdrawn_reraise=route_noul(noul=noul, floor=_align_noul_floor()),
-        confidence=_choice_confidence(response, "same_defect"),
-        scope="run",
-        blocking=False,
-    )
-
-
-def _require_align_response(result: JevCallResult) -> SystemOneResponse:
-    response = getattr(result, "response", None)
-    if getattr(result, "skipped", False) or not isinstance(response, SystemOneResponse):
-        raise JevError("align pack produced no answers", code="invalid_response")
-    return response
-
-
-def _choice(response: SystemOneResponse, name: str) -> str:
-    answer = response.answers.get(name)
-    if isinstance(answer, ChoiceAnswer):
-        return answer.choice
-    return ""
-
-
-def _choice_confidence(response: SystemOneResponse, name: str) -> float:
-    answer = response.answers.get(name)
-    if isinstance(answer, ChoiceAnswer):
-        return float(answer.confidence)
-    return 0.0
-
-
-def _noul(response: SystemOneResponse, name: str) -> float:
-    answer = response.answers.get(name)
-    if isinstance(answer, NoulAnswer):
-        return float(answer.noul)
-    return 0.0
-
-
-def _withdrawn_section(text: str) -> str:
-    if WITHDRAWN_FINDINGS_HEADING not in text:
-        return text.strip()
-    section = text.split(WITHDRAWN_FINDINGS_HEADING, 1)[1]
-    next_heading = section.find("\n## ")
-    if next_heading != -1:
-        section = section[:next_heading]
-    return f"{WITHDRAWN_FINDINGS_HEADING}\n{section}".strip()
-
-
-def _stronger_member(left: Finding, right: Finding) -> Finding:
-    """Return the stronger-severity member. First-arrival never wins on grade."""
-    if _severity_rank(right) < _severity_rank(left):
-        return right
-    return left
-
-
-def _align_same_floor(settings: RepoSettings | None = None) -> float:
-    return _settings_threshold("align/v1.same_defect", LIKELY_CONFIDENCE_FLOOR, settings)
-
-
-def _align_noul_floor(settings: RepoSettings | None = None) -> float:
-    return _settings_threshold("align/v1.is_withdrawn_reraise", NOUL_ACT_FLOOR, settings)
 
 
 def _repo_settings(settings: RepoSettings | None) -> RepoSettings:
@@ -732,17 +537,14 @@ def _prediction_from_verdict(
 
 
 __all__ = [
-    "AlignResult",
     "JevError",
     "apply_ratchet",
     "assessment_from_response",
     "bucket_confidence",
-    "detect_withdrawn_reraise",
     "dispatch_residual_units",
     "iter_thresholds",
     "order_units",
     "predict_jev_action",
     "record_jev_prediction",
-    "semantic_dedupe_pair",
     "unit_battery",
 ]

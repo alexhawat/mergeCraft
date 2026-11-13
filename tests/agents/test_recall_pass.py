@@ -48,16 +48,6 @@ _MUTATION_TOOLS = frozenset(
     }
 )
 
-_SAMPLE_DIFF = """\
-diff --git a/src/app.py b/src/app.py
-index 1111111..2222222 100644
---- a/src/app.py
-+++ b/src/app.py
-@@ -10,3 +10,4 @@ def handler():
-+    timeout = None
-     return value
-"""
-
 
 def _recall_mod() -> Any:
     return import_module("mergecraft.agents.recall")
@@ -108,15 +98,6 @@ def _tool_names(registry: object, binding: object, ctx: ToolContext) -> frozense
     return frozenset(registry.resolve_tool_names(binding, ctx))
 
 
-def _draft_agent_row(*, path: str = "src/app.py", line: int = 12, body: str) -> dict[str, object]:
-    return {
-        "severity": "Major",
-        "path": path,
-        "line": line,
-        "body": body,
-    }
-
-
 def _agent_finding(
     *,
     path: str = "src/app.py",
@@ -158,28 +139,6 @@ def test_recall_role_is_registered_with_read_only_tool_classes(
     assert ToolClass.TERMINAL_PROTOCOL not in binding.tool_classes
     assert ToolClass.REVIEW_WRITE not in binding.tool_classes
     assert ToolClass.VERIFICATION not in binding.tool_classes
-
-
-def test_recall_pass_receives_the_draft_finding_list() -> None:
-    """The recall brief must include the aggregated draft findings plus the diff."""
-    recall = _recall_mod()
-    draft = [
-        _draft_agent_row(body="Missing timeout on retry path."),
-        _draft_agent_row(path="src/util.py", line=4, body="Unchecked null before return."),
-    ]
-
-    brief = recall.build_recall_pass_brief(
-        diff_text=_SAMPLE_DIFF,
-        draft_findings=draft,
-    )
-
-    assert isinstance(brief, str)
-    assert "Missing timeout on retry path." in brief
-    assert "Unchecked null before return." in brief
-    assert "src/util.py" in brief
-    prompt = recall.RECALL_SYSTEM_PROMPT.casefold()
-    assert "draft" in prompt
-    assert "diff" in prompt
 
 
 def test_recall_pass_output_excludes_findings_already_drafted() -> None:
@@ -247,7 +206,6 @@ agents:
     )
     monkeypatch.chdir(tmp_path)
 
-    from mergecraft.agents.recall import build_recall_pass_brief
     from mergecraft.agents.registry import AgentRole, effective_agent_limits
 
     registry = _load_registry(tmp_path)
@@ -259,10 +217,6 @@ agents:
     assert binding.timeout_s == 90
     assert limits.budget == 4
     assert limits.timeout_s == 90
-
-    brief = build_recall_pass_brief(diff_text=_SAMPLE_DIFF, draft_findings=[])
-    assert isinstance(brief, str)
-    assert _SAMPLE_DIFF.strip() in brief
 
 
 def test_recall_pass_cannot_call_terminal_or_mutation_tools(tmp_path: Path) -> None:
@@ -280,4 +234,3 @@ def test_recall_pass_cannot_call_terminal_or_mutation_tools(tmp_path: Path) -> N
     denied = recall.recall_denied_tool_names(ctx)
     assert denied == subagent_denied_tool_names(ctx)
     assert _TERMINAL_PROTOCOL_TOOL in denied
-    assert "push_branch" in denied

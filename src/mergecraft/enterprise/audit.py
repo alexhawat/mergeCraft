@@ -27,7 +27,6 @@ skipped (best-effort only — see ``_audit_append_lock``).
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import hashlib
 import json
 import os
@@ -184,6 +183,8 @@ def _audit_append_lock(path: Path) -> Iterator[None]:
     lock_path = path.parent / ".audit.lock"
     with lock_path.open("a+", encoding="utf-8") as handle:
         if sys.platform != "win32":
+            import fcntl
+
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
             yield

@@ -558,7 +558,7 @@ async def test_bot_only_legacy_record_is_not_adopted_without_a_run_publisher(
         fingerprint, "open", source="inline", round_index=1
     )
     with _capture_warnings() as persist_warnings:
-        await ledger.persist_finding_ledger_to_progress_comment(ctx)
+        await ledger.upsert_sticky_progress_comment(ctx, "### mergeCraft run record")
 
     assert scm.comment_creates == 1
     assert scm.comment_updates == []

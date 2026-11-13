@@ -76,9 +76,7 @@ def planted_repo(tmp_path: Path) -> PlantedRepo:
 def make_tool_ctx(tmp_path: Path, planted_repo: PlantedRepo):
     """Factory: ToolContext pinned at ``shell`` / ``push`` for one matrix cell."""
 
-    def _make(
-        shell: str = "restricted", push: str = "restricted", *, signed_commits: bool = False
-    ) -> ToolContext:
+    def _make(shell: str = "restricted", push: str = "restricted") -> ToolContext:
         state = init_tool_state(owner="acme", name="demo", dir=str(planted_repo.path))
         return ToolContext(
             agent_id="claude",
@@ -96,7 +94,6 @@ def make_tool_ctx(tmp_path: Path, planted_repo: PlantedRepo):
             tool_state=state,
             mcp_server_url="",
             tmpdir=str(tmp_path),
-            signed_commits=signed_commits,
             xrepo=XrepoConfig(mode="explicit", read=[], write=[]),
             static_checks_enabled=True,
             trust_tier="trusted",

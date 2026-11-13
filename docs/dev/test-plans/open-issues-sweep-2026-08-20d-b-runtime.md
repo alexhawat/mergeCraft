@@ -79,7 +79,6 @@ GREEN (no xfail) — must stay passing through impl:
 | `src/mergecraft/enterprise/audit.py` | `export_audit_log`, `export_usage`, `explain_blocking_decision` |
 | `src/mergecraft/enterprise/support_bundle.py` | `write_support_bundle` |
 | `src/mergecraft/enterprise/policy_distribution.py` | `distribute_org_policy` (wraps `mergecraft.policy`) |
-| `src/mergecraft/enterprise/memory_distribution.py` | `bind_org_memory` (wraps `mergecraft.memory.OrganizationMemoryBackend`) |
 | `src/mergecraft/enterprise/retention.py` | `TraceRetentionPolicy`, `PrivacyLogMode` |
 | `src/mergecraft/enterprise/diagnostics.py` | `operational_diagnostics` |
 | `src/mergecraft/cli/health_cmd.py` | Typer `app` |
