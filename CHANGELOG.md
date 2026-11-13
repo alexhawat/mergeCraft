@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The pin freshness gate exempts a branch whose pin is itself on the default
+  branch. It used to fail on the pin bump that clears a stale backlog, because
+  it measured the default branch's own debt: the same trap rule 4 was moved off
+  the PR gate for (#669), one rule over. The bound had been raised 100 → 120 →
+  200 → 250 commits instead, and 404 commits of audit work tripped it again.
+
 - `mergecraft agent assign-model` and the other `agent`, `model` and `provider`
   commands that write `.mergecraft/config.yaml` now work on the commented config
   that `mergecraft init` generates. They used to stop with a "refusing to rewrite"
