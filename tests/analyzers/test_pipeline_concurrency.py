@@ -5,10 +5,9 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    import pytest
+import pytest
 
 from mergecraft.analyzers import adapters, pipeline
 from mergecraft.analyzers.registry import get_manifest
@@ -47,14 +46,16 @@ def test_adapters_overlap_and_keep_manifest_order(
     assert all(row.status == "passed" for row in state.analyzers)
 
 
+@pytest.mark.parametrize(
+    "fatal_tool",
+    [pytest.param("ruff", id="first-ruff"), pytest.param("vulture", id="later-vulture")],
+)
 def test_fatal_adapter_failure_reaps_only_its_pipeline_children(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fatal_tool: str
 ) -> None:
     """A collector failure cancels worker processes before propagating."""
     import subprocess
     import sys
-
-    import pytest
 
     from mergecraft.analyzers.run import _run_in_own_session
 
@@ -80,7 +81,7 @@ def test_fatal_adapter_failure_reaps_only_its_pipeline_children(
     monkeypatch.setattr(subprocess, "Popen", spawn)
 
     def run_adapter(**kwargs: Any) -> adapters.AdapterRunResult:
-        if kwargs["tool_id"] == "ruff":
+        if kwargs["tool_id"] == fatal_tool:
             assert ready.wait(5), "the other workers must start before the fatal result"
             raise RuntimeError("fatal adapter failure")
         _run_in_own_session(

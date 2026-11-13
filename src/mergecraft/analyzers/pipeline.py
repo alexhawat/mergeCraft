@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from contextvars import copy_context
 from enum import StrEnum
@@ -442,6 +442,10 @@ def run_analyzer_pipeline(
                 for manifest, decision in decisions
                 if not decision.skipped
             }
+            # Detect fatal failures in completion order before collecting rows;
+            # an earlier slow tool must not hide a failed later worker.
+            for completed in as_completed(pending.values()):
+                completed.result()
             for manifest, decision in decisions:
                 if decision.skipped:
                     rows.append(
