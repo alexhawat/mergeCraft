@@ -194,10 +194,51 @@ def patch_config_dict(path: Path, patch: dict[str, Any]) -> None:
     write_config_dict(path, data)
 
 
+def remove_config_block(text: str, key: str) -> str:
+    """Remove the top-level *key* block from *text*; a no-op when it is absent."""
+    lines = text.splitlines(keepends=True)
+    span = _top_level_block_span(lines, key)
+    if span is None:
+        return text
+    start, end = span
+    return "".join(lines[:start]) + "".join(lines[end:])
+
+
+def save_config_dict(path: Path, data: dict[str, Any]) -> None:
+    """Persist *data* as the whole config, keeping comments outside the changed keys.
+
+    A comment-free file gets the atomic whole-document rewrite. A file with
+    comments is edited in place: only top-level keys whose value differs from
+    the file are replaced, added or removed, so every other line stays
+    byte-for-byte. The ``trust`` block is never rewritten this way; a change to
+    it on a commented file is refused, as :func:`write_config_dict` does.
+    """
+    if not config_has_yaml_comments(path):
+        write_config_dict(path, data)
+        return
+    current = load_config_dict(path)
+    changed = [key for key, value in data.items() if key not in current or current[key] != value]
+    removed = [key for key in current if key not in data]
+    if "trust" in changed or "trust" in removed:
+        # Raises the comment-preservation refusal with the hand-edit guidance.
+        write_config_dict(path, data)
+        return
+    if not changed and not removed:
+        return
+    text = path.read_text(encoding="utf-8")
+    for key in changed:
+        text = replace_config_block(text, key, data[key])
+    for key in removed:
+        text = remove_config_block(text, key)
+    _write_text_atomically(path, text)
+
+
 __all__ = [
     "config_has_yaml_comments",
     "config_path_for_root",
     "load_config_dict",
     "patch_config_dict",
+    "remove_config_block",
+    "save_config_dict",
     "write_config_dict",
 ]
