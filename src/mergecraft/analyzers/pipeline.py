@@ -6,6 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from contextvars import copy_context
+from dataclasses import dataclass
 from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
@@ -94,18 +95,33 @@ def _adapter_pool() -> Iterator[ThreadPoolExecutor]:
             pool.shutdown(wait=True)
 
 
+@dataclass(frozen=True, slots=True)
+class _AdapterExecution:
+    outcome: AdapterRunResult | KeyError | OSError | ValueError
+    started_ns: int
+    ended_ns: int
+    duration_ms: int
+
+
 def _timed_adapter(
     run: Callable[[], AdapterRunResult],
-) -> tuple[AdapterRunResult | KeyError | OSError | ValueError, float]:
+) -> _AdapterExecution:
     """Measure the actual adapter work, including named unavailable outcomes."""
     check_process_cancelled()
     started = time.perf_counter()
+    started_ns = time.time_ns()
+    outcome: AdapterRunResult | KeyError | OSError | ValueError
     try:
-        result = run()
+        outcome = run()
         check_process_cancelled()
     except (KeyError, OSError, ValueError) as exc:
-        return exc, time.perf_counter() - started
-    return result, time.perf_counter() - started
+        outcome = exc
+    return _AdapterExecution(
+        outcome=outcome,
+        started_ns=started_ns,
+        ended_ns=time.time_ns(),
+        duration_ms=round((time.perf_counter() - started) * 1000),
+    )
 
 
 def _serialize_finding(finding: Finding) -> dict[str, Any]:
@@ -329,7 +345,7 @@ def run_analyzer_pipeline(
     when the caller scoped findings without supplying one.
     """
     from mergecraft.analyzers.sandbox import require_sandbox_for_enabled_shell
-    from mergecraft.tracing.tracer import get_tracer_from_settings
+    from mergecraft.tracing.tracer import Span, get_tracer_from_settings
 
     require_sandbox_for_enabled_shell(shell=shell)
     full_settings, settings = _pipeline_settings(repo_root, analyzers_settings)
@@ -388,7 +404,7 @@ def run_analyzer_pipeline(
             "analyzers.selection_tier": selection_tier,
             "changed_file_count": len(changed_files),
         },
-    ) as parent_span:
+    ):
         rows: list[AnalyzerStatusRow] = []
         raw_findings: list[Finding] = []
         head_succeeded_manifest_ids: set[str] = set()
@@ -456,40 +472,26 @@ def run_analyzer_pipeline(
                         )
                     )
                     continue
-                run_attrs: dict[str, Any] = {"analyzer.id": manifest.id}
-                parent_id = parent_span.span_id if hasattr(parent_span, "span_id") else None
-                with tracer.start_span(
-                    "analyzer.run",
-                    parent_span_id=parent_id,
-                    attrs_source=_snapshot_attrs(run_attrs),
-                ) as child_span:
-                    exit_code = 0
-                    findings_count = 0
-                    try:
-                        outcome, duration_s = pending[manifest.id].result()
-                        if isinstance(outcome, (KeyError, OSError, ValueError)):
-                            raise outcome
-                        result = outcome
-                    except (KeyError, OSError, ValueError) as exc:
-                        logger.info("analyzer {} unavailable: {}", manifest.id, exc)
-                        rows.append(
-                            AnalyzerStatusRow(
-                                id=manifest.id,
-                                status="unavailable",
-                                reason=str(exc),
-                            )
-                        )
-                        exit_code = 1
-                        run_attrs["analyzer.exit_code"] = exit_code
-                        run_attrs["analyzer.findings_count"] = 0
-                        run_attrs["analyzer.duration_ms"] = round(duration_s * 1000)
-                        run_attrs["error"] = str(exc)
-                        child_span.set_status("error", str(exc))
-                        continue
-
+                execution = pending[manifest.id].result()
+                result = execution.outcome
+                run_attrs: dict[str, Any] = {
+                    "analyzer.id": manifest.id,
+                    "analyzer.duration_ms": execution.duration_ms,
+                }
+                span = tracer.start_span("analyzer.run", attrs_source=_snapshot_attrs(run_attrs))
+                if isinstance(result, (KeyError, OSError, ValueError)):
+                    logger.info("analyzer {} unavailable: {}", manifest.id, result)
+                    rows.append(
+                        AnalyzerStatusRow(id=manifest.id, status="unavailable", reason=str(result))
+                    )
+                    run_attrs["analyzer.exit_code"] = 1
+                    run_attrs["analyzer.findings_count"] = 0
+                    span.set_status("error", str(result))
+                else:
+                    raw_findings.extend(result.findings)
+                    run_attrs["analyzer.exit_code"] = 0
+                    run_attrs["analyzer.findings_count"] = 0
                     if result.skipped:
-                        if result.findings:
-                            raw_findings.extend(result.findings)
                         rows.append(
                             AnalyzerStatusRow(
                                 id=manifest.id,
@@ -497,27 +499,22 @@ def run_analyzer_pipeline(
                                 reason=result.skip_reason,
                             )
                         )
-                        run_attrs["analyzer.exit_code"] = 0
-                        run_attrs["analyzer.findings_count"] = 0
-                        run_attrs["analyzer.duration_ms"] = round(duration_s * 1000)
                         run_attrs["analyzer.skipped"] = True
-                        continue
-
-                    findings_count = len(result.findings)
-                    status = "failed" if result.findings else "passed"
-                    head_succeeded_manifest_ids.add(manifest.id)
-                    rows.append(
-                        AnalyzerStatusRow(
-                            id=manifest.id,
-                            status=status,
-                            reason=result.pass_reason,
-                            finding_count=findings_count,
+                    else:
+                        findings_count = len(result.findings)
+                        head_succeeded_manifest_ids.add(manifest.id)
+                        rows.append(
+                            AnalyzerStatusRow(
+                                id=manifest.id,
+                                status="failed" if result.findings else "passed",
+                                reason=result.pass_reason,
+                                finding_count=findings_count,
+                            )
                         )
-                    )
-                    raw_findings.extend(result.findings)
-                    run_attrs["analyzer.exit_code"] = exit_code
-                    run_attrs["analyzer.findings_count"] = findings_count
-                    run_attrs["analyzer.duration_ms"] = round(duration_s * 1000)
+                        run_attrs["analyzer.findings_count"] = findings_count
+                if isinstance(span, Span):
+                    span.ts_start_ns = execution.started_ns
+                    span.close(ended_ns=execution.ended_ns)
         if tier == "untrusted":
             from mergecraft.analyzers.execution import scanner_config_change_findings
 
