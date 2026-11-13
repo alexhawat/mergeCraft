@@ -26,6 +26,32 @@ _P = ParamSpec("_P")
 _T = TypeVar("_T")
 
 
+async def _wait_owned_task(task: asyncio.Task[_T]) -> _T:
+    """Wait without transferring cancellation or logging a consumed late error.
+
+    The caller owns and joins the task separately. Python 3.14's shield logs
+    late failures after waiter cancellation even when that owner consumes them.
+    A local future keeps cancellation one-way and always retrieves completion.
+    """
+    waiter: asyncio.Future[_T] = asyncio.get_running_loop().create_future()
+
+    def completed(source: asyncio.Task[_T]) -> None:
+        if source.cancelled():
+            if not waiter.done():
+                waiter.cancel()
+            return
+        error = source.exception()
+        if waiter.done():
+            return
+        if error is not None:
+            waiter.set_exception(error)
+        else:
+            waiter.set_result(source.result())
+
+    task.add_done_callback(completed)
+    return await waiter
+
+
 async def run_blocking(function: Callable[_P, _T], /, *args: _P.args, **kwargs: _P.kwargs) -> _T:
     """Run a synchronous operation off-loop and wait for its cancellation cleanup.
 
@@ -50,7 +76,7 @@ async def run_blocking(function: Callable[_P, _T], /, *args: _P.args, **kwargs: 
 
     worker = asyncio.create_task(asyncio.to_thread(invoke))
     try:
-        return await asyncio.shield(worker)
+        return await _wait_owned_task(worker)
     except asyncio.CancelledError:
 
         async def cleanup() -> None:
@@ -71,7 +97,7 @@ async def run_blocking(function: Callable[_P, _T], /, *args: _P.args, **kwargs: 
         cleanup_task = asyncio.create_task(cleanup())
         while not cleanup_task.done():
             with contextlib.suppress(asyncio.CancelledError):
-                await asyncio.shield(cleanup_task)
+                await _wait_owned_task(cleanup_task)
         cleanup_task.result()
         raise
 
@@ -89,7 +115,7 @@ async def run_blocking_cleanup(
     cancelled = False
     while not cleanup.done():
         try:
-            await asyncio.shield(cleanup)
+            await _wait_owned_task(cleanup)
         except asyncio.CancelledError:
             cancelled = True
     result = cleanup.result()
