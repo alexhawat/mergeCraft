@@ -135,9 +135,18 @@ def test_maintainer_commands_hidden_and_removed_pipeline_unavailable() -> None:
     root_help = runner.invoke(root, ["--help"])
     analyzers_help = runner.invoke(root, ["analyzers", "--help"])
     assert root_help.exit_code == analyzers_help.exit_code == 0
-    assert "pipeline" not in root_help.output
-    assert "eval" not in root_help.output
-    assert "docs" not in analyzers_help.output
+    root_commands = {
+        line.lstrip(" │").split()[0]
+        for line in root_help.output.splitlines()
+        if line.lstrip(" │").split()
+    }
+    analyzer_commands = {
+        line.lstrip(" │").split()[0]
+        for line in analyzers_help.output.splitlines()
+        if line.lstrip(" │").split()
+    }
+    assert {"pipeline", "eval"}.isdisjoint(root_commands)
+    assert "docs" not in analyzer_commands
     assert runner.invoke(root, ["pipeline", "--help"]).exit_code == 2
     assert runner.invoke(root, ["eval", "--help"]).exit_code == 0
     assert runner.invoke(root, ["analyzers", "docs", "--help"]).exit_code == 0
