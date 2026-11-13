@@ -18,13 +18,26 @@ Exports:
 
 from __future__ import annotations
 
-from mergecraft.findings.select import (
-    CarryoverFinding,
-    carryover_findings,
-    issue_body,
-    issue_title,
-)
-from mergecraft.findings.threads import ReviewThreadPage, fetch_review_threads
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mergecraft.findings.select import (
+        CarryoverFinding,
+        carryover_findings,
+        issue_body,
+        issue_title,
+    )
+    from mergecraft.findings.threads import ReviewThreadPage, fetch_review_threads
+
+_EXPORT_MODULES = {
+    "CarryoverFinding": "mergecraft.findings.select",
+    "carryover_findings": "mergecraft.findings.select",
+    "issue_body": "mergecraft.findings.select",
+    "issue_title": "mergecraft.findings.select",
+    "ReviewThreadPage": "mergecraft.findings.threads",
+    "fetch_review_threads": "mergecraft.findings.threads",
+}
 
 __all__ = [
     "CarryoverFinding",
@@ -34,3 +47,12 @@ __all__ = [
     "issue_body",
     "issue_title",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve public re-exports without loading unrelated runtime subsystems."""
+    if name not in _EXPORT_MODULES:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(_EXPORT_MODULES[name]), name)
+    globals()[name] = value
+    return value
