@@ -15,7 +15,7 @@ from tests.support.ce_batch import (
     require_callable,
     require_module,
 )
-from tests.support.dead_package_wiring import CLI_DIR, SRC_ROOT, root_callback_source
+from tests.support.dead_package_wiring import CLI_DIR, root_callback_source
 
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
 from mergecraft.cli.profiles import parse_profile_name, resolve_profile
@@ -154,9 +154,9 @@ def test_profile_cli_is_a_new_cmd_module() -> None:
     assert path.is_file()
     source = path.read_text(encoding="utf-8")
     assert "recommend" in source
-    app_src = (SRC_ROOT / "cli" / "app.py").read_text(encoding="utf-8")
-    assert "profile_cmd" in app_src
-    assert "add_typer" in app_src
+    result = invoke("profile", "recommend", "--risk", "trivial")
+    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, result.output
+    assert result.output.strip() == "fast"
 
 
 def test_root_help_lists_profile() -> None:
