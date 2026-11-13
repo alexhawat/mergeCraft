@@ -328,3 +328,20 @@ async def test_diff_budget_omissions_withhold_approval_even_with_warn_coverage(
     assert record.failure_reason == ctx.tool_state.diff_budget_reason
     assert github.review_payloads
     assert all(payload["event"] != "APPROVE" for payload in github.review_payloads)
+
+
+async def test_incremental_progress_only_cannot_bypass_diff_budget(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A progress summary cannot attest review of omitted incremental changes."""
+    ctx = publication_ctx(tmp_path, github=RecordingReviewGitHub(), trust_tier="trusted")
+    ctx.tool_state.selected_mode = "IncrementalReview"
+    ctx.tool_state.final_summary_written = True
+    ctx.tool_state.diff_budget_reason = "diff exceeded max_diff_lines; scope reduced"
+    settings = RepoSettings.model_validate({"review": {"coverage": {"onIncomplete": "warn"}}})
+
+    record = await run_finalize(ctx, monkeypatch=monkeypatch, settings=settings, real_publish=True)
+
+    assert record.outcome is RunOutcome.inconclusive
+    assert record.failure_reason == ctx.tool_state.diff_budget_reason
+    assert record.publish_calls[-1]["packet"].decision.verdict != "success"

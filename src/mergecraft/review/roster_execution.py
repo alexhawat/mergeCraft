@@ -56,6 +56,7 @@ if TYPE_CHECKING:
 _ROSTER_SUBMIT_INSTRUCTIONS = """
 You are a secondary reviewer on this run. Review the diff and record your outcome
 with `record_reviewer_dispatch_run` (pass your ``agent_id`` and structured findings).
+If you find no issues, you must still record your outcome with an empty findings list.
 Do **not** call `submit_review_verdict` — the primary reviewer owns the terminal verdict.
 """.strip()
 

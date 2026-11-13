@@ -261,6 +261,9 @@ def _classify_outcome(
         and verdict_protocol != "shadow"
     ):
         if _is_incremental_review(mode) and final_summary_written:
+            if coverage_incomplete_reason:
+                logger.warning("» {}", coverage_incomplete_reason)
+                return RunOutcome.inconclusive, coverage_incomplete_reason
             return RunOutcome.passed, None
         logger.warning("» {}", _MISSING_TERMINAL_VERDICT_REASON)
         return RunOutcome.inconclusive, _MISSING_TERMINAL_VERDICT_REASON
