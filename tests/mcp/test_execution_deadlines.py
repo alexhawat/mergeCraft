@@ -15,6 +15,7 @@ import pytest
 from tests.mcp.test_static_checks import _ctx
 from tests.support.tool_context import inner_mutation_guard_probe
 
+from mergecraft.mcp import rpc
 from mergecraft.mcp.rpc import dispatch_mcp_rpc
 from mergecraft.mcp.shared import ToolClass, ToolSpec
 from mergecraft.mcp.static_checks import run_static_checks_tool
@@ -39,6 +40,15 @@ async def _dispatch(spec: ToolSpec, *, ctx: Any = None) -> dict[str, Any]:
         tool_ctx=ctx,
         validators={},
     )
+
+
+def _controlled_rpc_deadline(monkeypatch: pytest.MonkeyPatch) -> asyncio.Timeout:
+    """Let the test expire the real asyncio deadline once work is running."""
+    from types import SimpleNamespace
+
+    deadline = asyncio.timeout(None)
+    monkeypatch.setattr(rpc, "asyncio", SimpleNamespace(timeout=lambda _delay: deadline))
+    return deadline
 
 
 async def test_rpc_deadline_cancels_coroutine_before_result_publication() -> None:
@@ -129,10 +139,17 @@ async def test_real_static_gate_does_not_block_another_rpc(tmp_path: Path) -> No
 
 async def test_real_static_gate_timeout_reaps_child_and_prevents_late_writes(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    spec = _gate(tmp_path)
-    spec.timeout_ms = 150
-    result = await _dispatch(spec)
+    deadline = _controlled_rpc_deadline(monkeypatch)
+    spec = _gate(tmp_path, delay=5)
+    pending = asyncio.create_task(_dispatch(spec))
+    try:
+        await asyncio.to_thread(_wait_for_file, tmp_path / "started")
+    finally:
+        if not pending.done():
+            deadline.reschedule(asyncio.get_running_loop().time())
+        result = await pending
     assert result["error"]["code"] == -32000
     assert "timed out" in result["error"]["message"]
     assert (tmp_path / "started").exists()
@@ -251,11 +268,14 @@ async def test_cancelled_worker_finishes_before_state_can_be_reused(
     monkeypatch.setattr("mergecraft.analyzers.pipeline.run_analyzer_pipeline", bounded_io)
     ctx = analyzer_ctx(tmp_path)
     spec = run_analyzers_tool(ctx)
-    spec.timeout_ms = 50
+    deadline = _controlled_rpc_deadline(monkeypatch)
     pending = asyncio.create_task(_dispatch(spec, ctx=ctx))
-    assert await asyncio.to_thread(entered.wait, 5)
     try:
-        await asyncio.sleep(0.1)
+        assert await asyncio.to_thread(entered.wait, 5)
+        deadline.reschedule(asyncio.get_running_loop().time())
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert deadline.expired()
         assert not pending.done(), "cleanup must finish before shared state is reused"
         assert ctx.tool_state.analyzer_run is None
     finally:
