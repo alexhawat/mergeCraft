@@ -43,6 +43,56 @@ def test_codex_tool_span_waits_for_matching_result() -> None:
     assert calls[0].attrs["tool.output"] == "file contents"
 
 
+@pytest.mark.parametrize("failed", [False, True], ids=["result", "error"])
+def test_codex_cli_mcp_tool_item_records_completed_response(failed: bool) -> None:
+    """Trace the MCP item shape emitted by the pinned Codex CLI."""
+    sink = MemorySink()
+    tracer = Tracer(sink=sink, session_id="s", run_id="r")
+    handler, close_all = codex_stream_event_handler(tracer=tracer, model_id="codex-mini")
+    accumulator = StreamSpanAccumulator(agent_name="codex")
+    item = {
+        "type": "mcp_tool_call",
+        "id": "item_1",
+        "server": "mergecraft",
+        "tool": "read_file",
+        "arguments": {"path": "input.txt", "password": "fixture-password"},
+        "result": None,
+        "error": None,
+        "status": "in_progress",
+    }
+    handler(accumulator, {"type": "item.started", "item": item})
+    assert not [event for event in sink.events if event.kind == "tool.call"]
+    result = {
+        "content": [{"type": "text", "text": "file contents"}],
+        "structured_content": {"token": "fixture-token"},
+    }
+    error = {"message": "file missing"}
+    handler(
+        accumulator,
+        {
+            "type": "item.completed",
+            "item": {
+                **item,
+                "result": None if failed else result,
+                "error": error if failed else None,
+                "status": "failed" if failed else "completed",
+            },
+        },
+    )
+    calls = [event for event in sink.events if event.kind == "tool.call"]
+    assert len(calls) == 1
+    assert calls[0].attrs["tool.server"] == "mergecraft"
+    attrs = calls[0].attrs
+    assert attrs["tool.input"] == {"path": "input.txt", "password": "<redacted>"}
+    redacted_result = {**result, "structured_content": {"token": "<redacted>"}}
+    assert attrs["tool.output"] == (error if failed else redacted_result)
+    assert attrs["tool.exit_code"] == ("error" if failed else "ok")
+    assert "fixture-password" not in attrs["gen_ai.tool.input"]
+    assert "fixture-token" not in attrs["gen_ai.tool.output"]
+    close_all()
+    assert len([event for event in sink.events if event.kind == "tool.call"]) == 1
+
+
 def test_jsonl_retention_runs_on_open_only(
     tmp_path: Path, trace_event_data: dict[str, Any]
 ) -> None:

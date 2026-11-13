@@ -160,7 +160,9 @@ def codex_stream_event_handler(
 
     Codex ``--json`` events:
       - ``thread.started``: open a ``llm.call`` span for the thread.
-      - ``item.started`` with ``item.type == "tool_call"``: open a
+      - ``mcp_tool_call`` items carry the request and terminal response for an
+        MCP tool. Open on ``item.started`` and close on ``item.completed``.
+      - ``item.started`` with legacy ``item.type == "tool_call"``: open a
         ``tool.call`` span keyed on the tool call id.
       - ``item.completed`` with ``item.type == "tool_call"``: stamp
         the tool call's name + input on the open span.
@@ -189,6 +191,23 @@ def codex_stream_event_handler(
     open_tool_spans: dict[str, dict[str, Any]] = {}
     open_pairs: dict[str, ProviderLLMPair | None] = {}
     open_pair_bookkeeping: dict[str, dict[str, Any]] = {}
+
+    def close_tool_span(tool_id: str, output: Any, *, failed: bool) -> None:
+        entry = open_tool_spans.pop(tool_id, None)
+        if entry is None:
+            return
+        span = entry["span"]
+        enrich_tool_response(span, output=output)
+        if failed:
+            span.set_attribute("tool.exit_code", "error")
+            span.set_status("error", "tool result reported failure")
+        span.close()
+        emit_verb_subevent(
+            tracer,
+            parent_span_id=span.span_id,
+            tool_name=entry["name"],
+            attrs=dict(span._attrs),
+        )
 
     def handler(
         accumulator: StreamSpanAccumulator,
@@ -261,10 +280,10 @@ def codex_stream_event_handler(
 
         if event_type == "item.started":
             item = event.get("item") or {}
-            if not isinstance(item, dict) or item.get("type") != "tool_call":
+            if not isinstance(item, dict) or item.get("type") not in ("tool_call", "mcp_tool_call"):
                 return
             tool_id = str(item.get("id") or "")
-            tool_name = str(item.get("name") or "unknown")
+            tool_name = str(item.get("tool") or item.get("name") or "unknown")
             if not tool_id:
                 return
             if tool_id in open_tool_spans:
@@ -277,7 +296,7 @@ def codex_stream_event_handler(
                     span.ts_start_ns = time.time_ns()
                 span.set_attribute("tool.name", tool_name)
                 span.set_attribute("tool.id", tool_id)
-                span.set_attribute("tool.server", "codex")
+                span.set_attribute("tool.server", str(item.get("server") or "codex"))
                 span.set_attribute("gen_ai.operation.name", "execute_tool")
                 span.set_attribute("gen_ai.tool.name", tool_name)
                 span.set_attribute("gen_ai.tool.call.id", tool_id)
@@ -289,6 +308,21 @@ def codex_stream_event_handler(
             if not isinstance(item, dict):
                 return
             item_type = item.get("type")
+            if item_type == "mcp_tool_call":
+                tool_id = str(item.get("id") or "")
+                entry = open_tool_spans.get(tool_id)
+                if entry is None:
+                    return
+                span = entry["span"]
+                arguments = item.get("arguments")
+                span.set_attribute("tool.input", arguments)
+                span.set_attribute("gen_ai.tool.input", redact_tool_payload(arguments))
+                enrich_tool_request(span, arguments=arguments)
+                failed = item.get("status") == "failed"
+                close_tool_span(
+                    tool_id, item.get("error") if failed else item.get("result"), failed=failed
+                )
+                return
             if item_type == "tool_call":
                 tool_id = str(item.get("id") or "")
                 entry = open_tool_spans.get(tool_id)
@@ -297,6 +331,7 @@ def codex_stream_event_handler(
                 span_obj = entry.get("span")
                 if span_obj is not None:
                     resolved_name = str(item.get("name") or entry.get("name") or "unknown")
+                    entry["name"] = resolved_name
                     span_obj.set_attribute("tool.name", resolved_name)
                     span_obj.set_attribute("gen_ai.tool.name", resolved_name)
                     tool_input = str(item.get("input") or "")
@@ -308,23 +343,11 @@ def codex_stream_event_handler(
                 tool_id = str(
                     item.get("tool_call_id") or item.get("call_id") or item.get("id") or ""
                 )
-                entry = open_tool_spans.pop(tool_id, None)
-                if entry is None:
-                    return
-                span_obj = entry.get("span")
-                if span_obj is not None:
-                    tool_output = item.get("output", item.get("content", ""))
-                    enrich_tool_response(span_obj, output=tool_output)
-                    if item.get("is_error"):
-                        span_obj.set_attribute("tool.exit_code", "error")
-                        span_obj.set_status("error", "tool result reported failure")
-                    span_obj.close()
-                    emit_verb_subevent(
-                        tracer,
-                        parent_span_id=span_obj.span_id,
-                        tool_name=str(entry.get("name") or "unknown"),
-                        attrs=dict(span_obj._attrs),
-                    )
+                close_tool_span(
+                    tool_id,
+                    item.get("output", item.get("content", "")),
+                    failed=bool(item.get("is_error")),
+                )
                 return
             if item_type == "command_execution":
                 from mergecraft.agents.codex import (
