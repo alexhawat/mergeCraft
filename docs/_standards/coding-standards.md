@@ -368,19 +368,19 @@ List **every** public class and public function defined in the module under `Exp
 ### Class docstring template
 
 ```python
-class GitHubActionsProvider(PipelineProvider):
-    """GitHub Actions implementation of the pipeline-intelligence provider.
+class GitHubActionsProvider:
+    """Fetch and decode failed workflow logs for a GitHub check suite.
 
-    Fetches check suites and job logs for a PR head SHA, normalizes them into
-    failure records, and hands them to the clustering layer.
+    The caller supplies the authenticated client and the listed workflow runs.
 
     Attributes:
-        token: Installation or PAT credential used for the REST calls.
-        repo: `owner/name` slug the provider is bound to.
+        supports_retry_state: Whether the provider supports retry-state checks.
 
     Example:
-        provider = GitHubActionsProvider(token=token, repo="alexhawat/mergeCraft")
-        failures = await provider.failures_for("abc1234")
+        provider = GitHubActionsProvider()
+        logs = await provider.fetch_check_suite_logs(
+            ctx, check_suite_id=42, client=client, runs=runs
+        )
     """
 ```
 
