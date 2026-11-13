@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from enum import StrEnum
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
@@ -51,6 +54,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from mergecraft.analyzers.adapters import AdapterRunResult
     from mergecraft.analyzers.manifest import AnalyzerManifest
     from mergecraft.config.settings import AnalyzersSettings, RepoSettings
 
@@ -66,6 +70,18 @@ class CatalogScanStatus(StrEnum):
 
 
 AnalyzersMode = Literal["off", "auto", "full", "untrusted-only"]
+
+
+def _timed_adapter(
+    run: Callable[[], AdapterRunResult],
+) -> tuple[AdapterRunResult | KeyError | OSError | ValueError, float]:
+    """Measure the actual adapter work, including named unavailable outcomes."""
+    started = time.perf_counter()
+    try:
+        result = run()
+    except (KeyError, OSError, ValueError) as exc:
+        return exc, time.perf_counter() - started
+    return result, time.perf_counter() - started
 
 
 def _serialize_finding(finding: Finding) -> dict[str, Any]:
@@ -355,6 +371,7 @@ def run_analyzer_pipeline(
 
         from mergecraft.analyzers.adapters import run_adapter
 
+        decisions = []
         for manifest in manifests:
             decision = evaluate_manifest_for_tier(
                 manifest=manifest, tier=selection_tier, cause=tier_skip_cause
@@ -363,27 +380,27 @@ def run_analyzer_pipeline(
                 decision = evaluate_manifest_for_shell(manifest=manifest, shell=shell)
             if not decision.skipped:
                 decision = evaluate_manifest_for_mode(manifest=manifest, mode=effective_mode)
-            if decision.skipped:
-                rows.append(
-                    AnalyzerStatusRow(
-                        id=manifest.id,
-                        status="unavailable",
-                        reason=decision.reason,
-                    )
-                )
-                continue
-            run_attrs: dict[str, Any] = {"analyzer.id": manifest.id}
-            parent_id = parent_span.span_id if hasattr(parent_span, "span_id") else None
-            with tracer.start_span(
-                "analyzer.run",
-                parent_span_id=parent_id,
-                attrs_source=_snapshot_attrs(run_attrs),
-            ) as child_span:
-                run_started = time.perf_counter()
-                exit_code = 0
-                findings_count = 0
-                try:
-                    result = run_adapter(
+            decisions.append((manifest, decision))
+
+        from mergecraft.analyzers.sandbox import analyzer_run_root
+
+        # Establish the per-process root before worker threads allocate scratch.
+        analyzer_run_root()
+        if tier == "untrusted":
+            from mergecraft.analyzers.execution import neutral_config_dir
+
+            # Prepare shared read-only defaults before any worker sees them.
+            neutral_config_dir()
+
+        # Adapters run concurrently; trace status, rows and the disposition ledger
+        # are collected on this thread in catalog order. No trust check is deferred.
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="analyzer") as pool:
+            pending = {
+                manifest.id: pool.submit(
+                    copy_context().run,
+                    _timed_adapter,
+                    partial(
+                        run_adapter,
                         tool_id=manifest.id,
                         repo_root=repo_root,
                         changed_files=changed_files,
@@ -396,62 +413,83 @@ def run_analyzer_pipeline(
                         self_review_level=self_review_level,
                         diff_text=diff_text or adapter_diff_text,
                         analyzers_settings=settings,
-                    )
-                except (KeyError, OSError, ValueError) as exc:
-                    logger.info("analyzer {} unavailable: {}", manifest.id, exc)
+                    ),
+                )
+                for manifest, decision in decisions
+                if not decision.skipped
+            }
+            for manifest, decision in decisions:
+                if decision.skipped:
                     rows.append(
                         AnalyzerStatusRow(
                             id=manifest.id,
                             status="unavailable",
-                            reason=str(exc),
+                            reason=decision.reason,
                         )
                     )
-                    exit_code = 1
-                    run_attrs["analyzer.exit_code"] = exit_code
-                    run_attrs["analyzer.findings_count"] = 0
-                    run_attrs["analyzer.duration_ms"] = round(
-                        (time.perf_counter() - run_started) * 1000
-                    )
-                    run_attrs["error"] = str(exc)
-                    child_span.set_status("error", str(exc))
                     continue
+                run_attrs: dict[str, Any] = {"analyzer.id": manifest.id}
+                parent_id = parent_span.span_id if hasattr(parent_span, "span_id") else None
+                with tracer.start_span(
+                    "analyzer.run",
+                    parent_span_id=parent_id,
+                    attrs_source=_snapshot_attrs(run_attrs),
+                ) as child_span:
+                    exit_code = 0
+                    findings_count = 0
+                    try:
+                        outcome, duration_s = pending[manifest.id].result()
+                        if isinstance(outcome, (KeyError, OSError, ValueError)):
+                            raise outcome
+                        result = outcome
+                    except (KeyError, OSError, ValueError) as exc:
+                        logger.info("analyzer {} unavailable: {}", manifest.id, exc)
+                        rows.append(
+                            AnalyzerStatusRow(
+                                id=manifest.id,
+                                status="unavailable",
+                                reason=str(exc),
+                            )
+                        )
+                        exit_code = 1
+                        run_attrs["analyzer.exit_code"] = exit_code
+                        run_attrs["analyzer.findings_count"] = 0
+                        run_attrs["analyzer.duration_ms"] = round(duration_s * 1000)
+                        run_attrs["error"] = str(exc)
+                        child_span.set_status("error", str(exc))
+                        continue
 
-                if result.skipped:
-                    if result.findings:
-                        raw_findings.extend(result.findings)
+                    if result.skipped:
+                        if result.findings:
+                            raw_findings.extend(result.findings)
+                        rows.append(
+                            AnalyzerStatusRow(
+                                id=manifest.id,
+                                status="tool-error" if result.tool_error else "unavailable",
+                                reason=result.skip_reason,
+                            )
+                        )
+                        run_attrs["analyzer.exit_code"] = 0
+                        run_attrs["analyzer.findings_count"] = 0
+                        run_attrs["analyzer.duration_ms"] = round(duration_s * 1000)
+                        run_attrs["analyzer.skipped"] = True
+                        continue
+
+                    findings_count = len(result.findings)
+                    status = "failed" if result.findings else "passed"
+                    head_succeeded_manifest_ids.add(manifest.id)
                     rows.append(
                         AnalyzerStatusRow(
                             id=manifest.id,
-                            status="tool-error" if result.tool_error else "unavailable",
-                            reason=result.skip_reason,
+                            status=status,
+                            reason=result.pass_reason,
+                            finding_count=findings_count,
                         )
                     )
-                    run_attrs["analyzer.exit_code"] = 0
-                    run_attrs["analyzer.findings_count"] = 0
-                    run_attrs["analyzer.duration_ms"] = round(
-                        (time.perf_counter() - run_started) * 1000
-                    )
-                    run_attrs["analyzer.skipped"] = True
-                    continue
-
-                findings_count = len(result.findings)
-                status = "failed" if result.findings else "passed"
-                head_succeeded_manifest_ids.add(manifest.id)
-                rows.append(
-                    AnalyzerStatusRow(
-                        id=manifest.id,
-                        status=status,
-                        reason=result.pass_reason,
-                        finding_count=findings_count,
-                    )
-                )
-                raw_findings.extend(result.findings)
-                run_attrs["analyzer.exit_code"] = exit_code
-                run_attrs["analyzer.findings_count"] = findings_count
-                run_attrs["analyzer.duration_ms"] = round(
-                    (time.perf_counter() - run_started) * 1000
-                )
-
+                    raw_findings.extend(result.findings)
+                    run_attrs["analyzer.exit_code"] = exit_code
+                    run_attrs["analyzer.findings_count"] = findings_count
+                    run_attrs["analyzer.duration_ms"] = round(duration_s * 1000)
         if tier == "untrusted":
             from mergecraft.analyzers.execution import scanner_config_change_findings
 

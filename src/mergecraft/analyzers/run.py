@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import os
 import re
-import resource
 import subprocess
 import sys
 import tempfile
@@ -20,8 +19,6 @@ from mergecraft.utils.process_group import kill_process_group
 from mergecraft.utils.secrets import filter_env
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from mergecraft.analyzers.resolve import AnalyzerPlan
     from mergecraft.analyzers.sandbox import SandboxContext
 
@@ -153,35 +150,16 @@ def _redact_stream(text: str, *, plan: AnalyzerPlan) -> str:
     return redact_analyzer_output(text, tool_id=plan.manifest_id) if text else text
 
 
-def _sandbox_preexec(context: SandboxContext, process_limit: tuple[int, int]) -> None:
-    if sys.platform == "win32":
-        return
-    with contextlib.suppress(OSError):
-        resource.setrlimit(resource.RLIMIT_NPROC, process_limit)
-    if context.memory_mb > 0:
-        with contextlib.suppress(OSError):
-            byte_limit = context.memory_mb * 1024 * 1024
-            resource.setrlimit(resource.RLIMIT_AS, (byte_limit, byte_limit))
-
-
 @dataclass(frozen=True, slots=True)
-class _SandboxPreexec:
-    """Preexec callable that also carries the sandbox context.
+class _SandboxLimits:
+    """Resolved limits and sandbox context for the isolated child launcher.
 
-    ``_run_subprocess`` gets only the argv and the preexec, so the context rides
-    on the callable to point a dropped payload's ``HOME`` at the scratch dir.
-    ``process_limit`` is the ``RLIMIT_NPROC`` pair resolved in the parent before
-    forking — a dropping payload's cap is calibrated against the kernel's own
-    answer by :func:`~mergecraft.analyzers.sandbox.process_limit_for_drop` (SX-D2),
-    which must run here, in the parent, because it reads ``/proc`` and probes with
-    a subprocess; inside ``preexec_fn`` only async-signal-safe work is allowed.
+    The process cap is calibrated in the parent before launch because its
+    credential-changing probe must run outside the limited child.
     """
 
     context: SandboxContext
     process_limit: tuple[int, int]
-
-    def __call__(self) -> None:
-        _sandbox_preexec(self.context, self.process_limit)
 
 
 def _truncate(text: str, *, output_path: str | None = None) -> str:
@@ -281,7 +259,7 @@ def _sandboxed_argv(
     analyzer_id: str = "",
     netns_name: str | None = None,
     egress_session: Any | None = None,
-) -> tuple[list[str], Callable[[], None] | None]:
+) -> tuple[list[str], _SandboxLimits | None]:
     """Wrap ``plan.argv`` in namespace isolation when the sandbox context requires it.
 
     The untrusted (read-only source) context is always wrapped. A trusted context
@@ -306,12 +284,12 @@ def _sandboxed_argv(
     )
 
     # The drop target's ``RLIMIT_NPROC`` pair is resolved here, in the parent:
-    # only async-signal-safe work is allowed inside ``preexec_fn``, and a
+    # the child launcher must not probe while under its own resource limits. A
     # credential-changing ``execve`` is refused ``EAGAIN`` when the target uid
     # already exceeds ``RLIMIT_NPROC`` (SX-D2). ``process_limit_for_drop`` probes
     # the kernel for a limit that carries the drop, so it must run outside the
-    # fork.
-    preexec_fn = _SandboxPreexec(
+    # limited child.
+    preexec_fn = _SandboxLimits(
         sandbox_context,
         process_limit=process_limit_for_drop(
             sandbox_context.max_processes,
@@ -363,16 +341,29 @@ def _run_in_own_session(
     timeout_s: int,
     env: dict[str, str],
     pass_fds: tuple[int, ...],
-    preexec_fn: Callable[[], None] | None,
+    preexec_fn: _SandboxLimits | None,
 ) -> subprocess.CompletedProcess[str]:
     """``subprocess.run`` that heads its own session and reaps the whole group.
 
     ``subprocess.run`` kills only the direct child on timeout, so a grandchild
     (a language server, a watcher, a forked test runner) outlives the analyzer
     and keeps the stdout/stderr pipes -- and the runner -- busy. Start the child
-    as a session leader (``setsid`` runs before ``preexec_fn``, so the sandbox
-    privilege drop is unaffected) and ``killpg`` the group on timeout.
+    as a session leader before the resource-limit launcher and namespace
+    privilege drop, and ``killpg`` the group on timeout.
     """
+    if isinstance(preexec_fn, _SandboxLimits):
+        # A Python callback between fork and exec can inherit locked interpreter
+        # state from another analyzer worker. Apply limits after a fresh exec.
+        run_argv = [
+            sys.executable,
+            "-I",
+            "-S",
+            str(Path(__file__).with_name("_resource_limits.py")),
+            str(preexec_fn.process_limit[0]),
+            str(preexec_fn.process_limit[1]),
+            str(preexec_fn.context.memory_mb),
+            *run_argv,
+        ]
     with subprocess.Popen(
         run_argv,
         cwd=cwd,
@@ -381,7 +372,6 @@ def _run_in_own_session(
         text=True,
         env=env,
         pass_fds=pass_fds,
-        preexec_fn=preexec_fn,
         start_new_session=True,
     ) as proc:
         try:
@@ -406,7 +396,7 @@ def _run_subprocess(
     plan: AnalyzerPlan,
     cwd: Path | None,
     timeout_s: int,
-    preexec_fn: Callable[[], None] | None,
+    preexec_fn: _SandboxLimits | None,
     command: str,
     sandboxed: bool = False,
 ) -> subprocess.CompletedProcess[str] | AnalyzerOutcome:
@@ -420,7 +410,7 @@ def _run_subprocess(
             pass_fds: tuple[int, ...] = ()
             if sandboxed:
                 payload_env = plan.env or filter_env()
-                if os.geteuid() == 0 and isinstance(preexec_fn, _SandboxPreexec):
+                if os.geteuid() == 0 and isinstance(preexec_fn, _SandboxLimits):
                     # SX2: a payload dropped to the agent user cannot write the
                     # runner-owned HOME it inherited; point it at the writable
                     # scratch tmpfs instead, or every cache write fails (P-8).
