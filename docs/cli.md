@@ -242,6 +242,16 @@ CLI JSON output only, and does **not** by itself mean the review snapshot or the
 agent wire format changed. The converse also holds — a change to either of those
 contracts does not move the CLI stamp.
 
+## Version startup
+
+Standalone `mergecraft --version` and `mergecraft -v` read package/build identity
+without loading application settings or repository `.env` files. Build identity
+uses the process `MERGECRAFT_BUILD_COMMIT` value first, then baked build metadata,
+then the source checkout's Git HEAD. The existing `build_commit` field-name alias
+is a fallback only when the uppercase variable is absent or empty. Values are
+stripped; a whitespace-only primary value supplies no override. These names are
+build provenance, not operator settings to add to `.env`.
+
 ## Environment variables
 
 `mergecraft` honours these operator-facing environment variables. Each row names
