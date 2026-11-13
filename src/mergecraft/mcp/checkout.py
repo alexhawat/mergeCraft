@@ -1050,6 +1050,34 @@ def _write_incremental_diff(
     )
 
 
+def _apply_diff_budget(
+    ctx: ToolContext, diff_text: str, *, unreviewable: list[str]
+) -> tuple[str, list[str]]:
+    """Bound the delivered diff by whole files and retain every omitted path.
+
+    Args:
+        ctx (ToolContext): Run context carrying the trusted budget snapshot.
+        diff_text (str): Diff after ignore-path filtering.
+        unreviewable (list[str]): Existing files whose patches were unavailable.
+
+    Returns:
+        tuple[str, list[str]]: Bounded diff and all files still unreviewable.
+    """
+    from mergecraft.config.settings_snapshot import repo_settings_from_context
+    from mergecraft.utils.run_bounds import apply_diff_line_budget, resolve_run_bounds
+
+    bounds = (
+        ctx.budget_tracker.bounds
+        if ctx.budget_tracker is not None
+        else resolve_run_bounds(settings=repo_settings_from_context(ctx))
+    )
+    reduced, omission = apply_diff_line_budget(diff_text, max_lines=bounds.max_diff_lines)
+    if omission is None:
+        return diff_text, unreviewable
+    ctx.tool_state.diff_budget_reason = omission.reason
+    return reduced, list(dict.fromkeys([*unreviewable, *omission.omitted_paths]))
+
+
 def _record_delivered_diff(
     ctx: ToolContext, diff_text: str, *, unreviewable: list[str], truncated: bool
 ) -> None:
@@ -1276,6 +1304,9 @@ def checkout_pr_tool(ctx: ToolContext):
                 unreviewable=fetch_files_diff.unreviewable_paths,
                 truncated=fetch_truncated,
             )
+            fetch_diff, fetch_unreviewable = _apply_diff_budget(
+                ctx, fetch_diff, unreviewable=fetch_unreviewable
+            )
             fetch_degraded = _append_diff_degradations(
                 fetch_degraded, truncated=fetch_truncated, unreviewable=fetch_unreviewable
             )
@@ -1442,6 +1473,7 @@ def checkout_pr_tool(ctx: ToolContext):
         diff, unreviewable, ignored_paths = _apply_review_ignore(
             ctx, diff, unreviewable=unreviewable, truncated=diff_truncated
         )
+        diff, unreviewable = _apply_diff_budget(ctx, diff, unreviewable=unreviewable)
         Path(diff_path).write_text(diff, encoding="utf-8")
         _record_delivered_diff(ctx, diff, unreviewable=unreviewable, truncated=diff_truncated)
         from mergecraft.mcp.verdict import register_review_scope
@@ -1526,6 +1558,15 @@ def checkout_pr_tool(ctx: ToolContext):
             result["lastReviewedSha"] = prior_sha
             result["incrementalDiffStatus"] = incremental.status
             if incremental.status == "ok" and incremental.path is not None:
+                incremental_text = Path(incremental.path).read_text(encoding="utf-8")
+                incremental_text, incremental_omitted = _apply_diff_budget(
+                    ctx, incremental_text, unreviewable=[]
+                )
+                Path(incremental.path).write_text(incremental_text, encoding="utf-8")
+                if incremental_omitted:
+                    unreviewable = list(dict.fromkeys([*unreviewable, *incremental_omitted]))
+                    ctx.tool_state.coverage.unreviewable_paths = unreviewable
+                    result["unreviewablePaths"] = unreviewable
                 state.last_reviewed_sha = prior_sha
                 state.incremental_diff_path = incremental.path
                 state.incremental_changed_paths = list(incremental.changed_paths)

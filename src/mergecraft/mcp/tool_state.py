@@ -659,6 +659,8 @@ class ToolState:
     finalize_failure: str | None = None
     # Changed-line coverage (#940): which hunks reached the reviewer, and the follow-up state.
     coverage: CoverageRecord = field(default_factory=CoverageRecord)
+    # Sticky omission reason: a bounded diff can never silently grant approval.
+    diff_budget_reason: str | None = None
     # Pre-dispatch triage (#890): the ``TriageDecision`` when ``review.fastPath`` was
     # evaluated for this run; ``None`` when the fast path is off.
     triage: Any = None
