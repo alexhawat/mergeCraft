@@ -100,6 +100,7 @@ def run_cli_attempt(spec: CliHarnessSpec, ctx: AgentRunContext) -> AgentResult:
     accumulator = spec.accumulator
     usage = spec.usage or accumulator.to_usage
     try:
+        timeout = AgentRuntimeEnv().agent_timeout
         try:
             process = spawn_agent_cli(
                 spec.command,
@@ -113,31 +114,32 @@ def run_cli_attempt(spec: CliHarnessSpec, ctx: AgentRunContext) -> AgentResult:
             return with_prompt(AgentResult(success=False, error=str(exc)), spec.prompt)
 
         with track_process_group(process):
-            assert process.stdout is not None
-            assert process.stderr is not None
-            stderr_drain = start_stderr_drain(process.stderr)
-            watchdog = watchdog_for_process(
-                process,
-                label=spec.label,
-                interval_s=ctx.idle_timeout_s,
-                accumulator=accumulator,
-                stderr_text=stderr_drain.text,
-                deadline_s=AgentRuntimeEnv().agent_timeout,
-            )
-
-            def watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
-                watchdog.touch(
-                    model_output=event_has_model_output(event), event_type=event_type_name(event)
-                )
-                spec.handler(acc, event)
-
+            stderr_drain = None
+            watchdog = None
             try:
+                assert process.stdout is not None
+                assert process.stderr is not None
+                stderr_drain = start_stderr_drain(process.stderr)
+                watchdog = watchdog_for_process(
+                    process,
+                    label=spec.label,
+                    interval_s=ctx.idle_timeout_s,
+                    accumulator=accumulator,
+                    stderr_text=stderr_drain.text,
+                    deadline_s=timeout,
+                )
+
+                def watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
+                    watchdog.touch(
+                        model_output=event_has_model_output(event),
+                        event_type=event_type_name(event),
+                    )
+                    spec.handler(acc, event)
+
                 consume_stream(
                     raw_stream=process.stdout, accumulator=accumulator, handler=watched_handler
                 )
-                returncode = wait_or_kill_process_group(
-                    process, timeout=AgentRuntimeEnv().agent_timeout
-                )
+                returncode = wait_or_kill_process_group(process, timeout=timeout)
             except subprocess.TimeoutExpired:
                 return with_prompt(
                     AgentResult(
@@ -149,14 +151,17 @@ def run_cli_attempt(spec: CliHarnessSpec, ctx: AgentRunContext) -> AgentResult:
                     spec.prompt,
                 )
             except BaseException:
-                # A parser exception must not strand a running child.
+                # Setup can fail before either supervisor exists. Once spawned,
+                # a failed attempt must kill and reap its child before unregistering.
                 if process.poll() is None:
                     kill_process_group(process.pid)
                     wait_or_kill_process_group(process, timeout=5)
                 raise
             finally:
-                watchdog.stop()
-                stderr_drain.join(timeout=STDERR_DRAIN_JOIN_TIMEOUT_S)
+                if watchdog is not None:
+                    watchdog.stop()
+                if stderr_drain is not None:
+                    stderr_drain.join(timeout=STDERR_DRAIN_JOIN_TIMEOUT_S)
 
         if watchdog.stalled:
             diagnostic = watchdog.diagnostic()

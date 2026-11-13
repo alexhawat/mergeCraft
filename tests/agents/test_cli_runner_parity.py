@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from tests.agents.conftest import make_agent_run_context
 
+from mergecraft.utils.process_group import active_process_groups
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -133,7 +135,8 @@ def test_driver_preserves_usage_across_attempt_outcomes(
             assert result.metadata["retryable"] is True
         assert result.metadata.get("timeout", False) is (outcome == "timeout")
         assert len(processes) == 1
-        assert processes[0].poll() is not None
+        assert processes[0].returncode is not None
+        assert processes[0].pid not in active_process_groups()
     finally:
         for process in processes:
             if process.poll() is None:
@@ -145,8 +148,11 @@ def test_driver_preserves_usage_across_attempt_outcomes(
 
 
 @pytest.mark.parametrize("backend", list(_USAGE_EVENTS), ids=str)
-def test_driver_reaps_child_when_stream_consumer_raises(
-    backend: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "failure_boundary", ["consume_stream", "start_stderr_drain", "watchdog_for_process"]
+)
+def test_driver_reaps_child_when_supervision_raises(
+    backend: str, failure_boundary: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from mergecraft.agents import cli_runner
 
@@ -161,15 +167,16 @@ def test_driver_reaps_child_when_stream_consumer_raises(
         processes.append(process)
         return process
 
-    def fail_consumer(**kwargs: Any) -> None:
-        raise RuntimeError("stream reader broke")
+    def fail_supervision(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("supervision failed")
 
     monkeypatch.setattr(subprocess, "Popen", spawn)
-    monkeypatch.setattr(cli_runner, "consume_stream", fail_consumer)
+    monkeypatch.setattr(cli_runner, failure_boundary, fail_supervision)
     try:
-        with pytest.raises(RuntimeError, match="stream reader broke"):
+        with pytest.raises(RuntimeError, match="supervision failed"):
             _invoke_driver(backend, make_agent_run_context(tmp_path, resolved_model=None))
-        assert processes[0].poll() is not None
+        assert processes[0].returncode is not None
+        assert processes[0].pid not in active_process_groups()
     finally:
         for process in processes:
             if process.poll() is None:
@@ -211,3 +218,34 @@ def test_opencode_serve_preserves_identity_and_replaces_invalid_bytes(
         for stream in (handle.proc.stdout, handle.proc.stderr):
             if stream is not None:
                 stream.close()
+
+
+def test_driver_validates_timeout_before_spawning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pydantic import ValidationError
+
+    module = importlib.import_module("mergecraft.agents.gemini")
+    monkeypatch.setattr(module, "_build_env", lambda _ctx: {})
+    monkeypatch.setenv("MERGECRAFT_AGENT_TIMEOUT", "not-a-number")
+    original_popen = subprocess.Popen
+    processes: list[subprocess.Popen[str]] = []
+
+    def spawn(_cmd: list[str], **kwargs: Any) -> subprocess.Popen[str]:
+        process = original_popen([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    try:
+        with pytest.raises(ValidationError):
+            _invoke_driver("gemini", make_agent_run_context(tmp_path, resolved_model=None))
+        assert not processes, "invalid timeout must fail before a provider process exists"
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
