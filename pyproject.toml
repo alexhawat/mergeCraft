@@ -31,26 +31,26 @@ dependencies = [
     # so httpcore is declared directly rather than left to httpx's transitive tree.
     "httpcore==1.0.9",
     "rich==15.0.0",
-    "typer==0.25.1",
+    "typer==0.29.0",
     # cli/interactive.py and cli/typer_group.py import click directly; typer only
     # brings it transitively, so pin it explicitly at the locked resolution.
-    "click==8.4.2",
+    "click==8.5.1",
     "pyyaml==6.0.3",
     "pydantic==2.14.3",
     # Imported by src/mergecraft/config/env/ (the typed settings layer).
     "pydantic-settings==2.16.2",
-    "fastapi==0.162.0",
+    "fastapi==0.162.4",
     "uvicorn[standard]==0.54.0",
     "starlette==1.10.0",
     "jsonschema==4.26.0",
-    "semver==3.1.0",
+    "semver==3.1.1",
     "python-dotenv==1.2.4",
     # Transitive runtime requirement of httpx and starlette; the exact pin is policy.
     "anyio==4.16.0",
     "defusedxml==0.7.1",
     "tenacity==9.2.1",
     "pyjwt[crypto]==2.15.1",
-    "tree-sitter==0.26.0",
+    "tree-sitter==0.26.1",
     "tree-sitter-python==0.25.0",
     "typing-extensions==4.16.0",
     "typesafe-sdk==0.7.5",
@@ -75,7 +75,7 @@ harbor = [
 # Optional in-process OpenAI Agents SDK integration.
 agents = [
     "openai-agents==0.24.0",
-    "openai==3.46.0",
+    "openai==3.49.0",
 ]
 # W8 / D6 — `tracing` extra behind which `logfire` and `opentelemetry-*` live.
 # Imports are lazy and guarded inside the sink factory; `make ci-resume` passes
@@ -102,7 +102,7 @@ dev = [
     "pyright==1.1.414",
     "basedpyright==1.40.2",
     "pytest-cov==7.1.0",
-    "pytest-randomly==5.0.0",
+    "pytest-randomly==5.1.0",
     "pytest-split==0.11.0",
     # Pinned to the version in analyzers/catalog/ast-grep.yaml so dev/test
     # runs exercise the same declaration-node kinds as the managed binary
@@ -113,7 +113,7 @@ dev = [
     # Pinned to analyzers/catalog/typos.yaml — repo-native typo checker (#427).
     "typos==1.52.0",
     # BR0 / D14b — property-based tests for redaction transforms (BR1 RED suite).
-    "hypothesis==6.170.14",
+    "hypothesis==6.170.15",
 ]
 
 [tool.uv]
