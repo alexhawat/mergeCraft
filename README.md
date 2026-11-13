@@ -37,7 +37,7 @@ the CLI, runs `mergecraft init`, and stops at the credential step for you.
 ```text
 Set up mergeCraft (BYOK AI PR review) in this repository.
 Reference: https://github.com/alexhawat/mergeCraft/blob/main/AGENTS-mergecraft.md
-Install uv if missing, then `uv tool install mergecraft-action==0.1.0a5`, run
+Install uv if missing, then `uv tool install mergecraft-action==0.1.0a6`, run
 `mergecraft init`, and print the `mergecraft provider auth <label> --scope github`
 command for me to run. Never read, echo or commit a credential. After I confirm,
 run `mergecraft doctor` (its `workflow auth` row must be ok; if not, `mergecraft
@@ -73,7 +73,7 @@ and Claude Code for `anthropic`
 1. **Install the CLI and scaffold the repo:**
 
 ```bash
-uv tool install mergecraft-action==0.1.0a5
+uv tool install mergecraft-action==0.1.0a6
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml, no secrets
 ```
 
@@ -110,7 +110,7 @@ mergecraft doctor   # git, providers, analyzers, auth, config, workflow auth, MC
    `@mergecraft review` comments.
 
 Docs on `main` may describe unreleased behavior; the
-[v0.1.0a5 docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a5/docs) match
+[v0.1.0a5 docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a6/docs) match
 this install. Offline first: `mergecraft review --dry-run` prints the review prompt
 with no credential. Something wrong? [`docs/troubleshooting.md`](docs/troubleshooting.md).
 
