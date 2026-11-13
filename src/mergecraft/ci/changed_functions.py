@@ -84,9 +84,15 @@ def resolve_enclosing_symbol(path: str, line: int, source: str) -> ChangedFuncti
     except (SyntaxError, ValueError):
         return None
 
+    return _resolve_from_functions(path, line, _iter_functions(tree))
+
+
+def _resolve_from_functions(
+    path: str, line: int, functions: list[tuple[_FunctionNode, str]]
+) -> ChangedFunction | None:
     best: ChangedFunction | None = None
     best_span = -1
-    for node, qualname in _iter_functions(tree):
+    for node, qualname in functions:
         start = int(node.lineno)
         end = int(getattr(node, "end_lineno", None) or start)
         if start <= line <= end:
@@ -125,9 +131,13 @@ def changed_functions_from_diff(
         source = source_tree.get(path)
         if source is None:
             continue
+        try:
+            functions = _iter_functions(ast.parse(source))
+        except (SyntaxError, ValueError):
+            continue
         for start, end in ranges:
             for line in range(start, end + 1):
-                symbol = resolve_enclosing_symbol(path, line, source)
+                symbol = _resolve_from_functions(path, line, functions)
                 if symbol is None:
                     continue
                 key = (symbol.path, symbol.name, symbol.start_line)
