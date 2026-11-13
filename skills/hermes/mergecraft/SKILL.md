@@ -18,7 +18,7 @@ Hermes Agent reads skills from ``~/.hermes/skills/`` or a category-nested projec
 ``skills/`` tree. Install this package with:
 
 ```bash
-hermes skills install https://github.com/alexhawat/mergeCraft/tree/v0.1.0a5/skills/hermes
+hermes skills install https://github.com/alexhawat/mergeCraft/tree/v0.1.0a6/skills/hermes
 ```
 
 mergeCraft has no built-in Nous provider, but Nous Portal is OpenAI-compatible:
@@ -44,10 +44,10 @@ a read-only verifier; typed findings drive inline comments and the
    `--scope local` needs no `gh`, but provider-specific authentication may need a network.
    Two providers need one more CLI at the credential step: the Codex CLI for `openai`
    and Claude Code for `anthropic`
-   ([provider table](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a5/docs/authentication.md)).
+   ([provider table](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a6/docs/authentication.md)).
    <!-- END:requirements -->
    If uv cannot be installed, use the Docker Action only
-   ([`docs/install.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a5/docs/install.md)).
+   ([`docs/install.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a6/docs/install.md)).
 2. **Install:**
 
    ```bash
@@ -87,7 +87,7 @@ a read-only verifier; typed findings drive inline comments and the
 Install the generated `skills/<harness>/mergecraft/SKILL.md` package. The raw
 `skills/mergecraft/SKILL.md` is a generator template; replace a copied template
 with the generated package to repair relative links. Documentation links use the
-`v0.1.0a5` release tag, the release this checklist installs. Release
+`v0.1.0a6` release tag, the release this checklist installs. Release
 maintainers can set `MERGECRAFT_AGENT_PACKAGES_REF` when generating packages for another verified ref.
 Fetch that ref first: an unresolved explicit override fails instead of silently
 substituting a branch.
@@ -122,7 +122,7 @@ Two profiles — do not confuse them:
 | **Runtime harness** | `mergecraft mcp serve` (default `--role reviewer`) | HTTP on ephemeral port | Per-serve Bearer required |
 
 **Public install (Cursor, Claude Desktop, Codex, Gemini CLI, OpenCode):** see
-[`docs/mcp.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a5/docs/mcp.md) for copy-paste `mcpServers` JSON. Six tools only
+[`docs/mcp.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a6/docs/mcp.md) for copy-paste `mcpServers` JSON. Six tools only
 (`review_change`, `get_review`, `inspect_finding`, `explain_finding`,
 `get_capabilities`, `get_policy`). Registry: `mcp-name: io.github.alexhawat/mergecraft`.
 
@@ -152,5 +152,5 @@ Optional HTTP public (`--role public` without `--transport stdio`) also requires
   commenters are authorized; authorization reads `author_association` from the
   event payload, never the comment body.
 - **Model skipped** — no credential for that provider; run `mergecraft models list`.
-- **Full docs:** [`README.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a5/README.md), [`AGENTS-mergecraft.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a5/AGENTS-mergecraft.md),
-  [`docs/REVIEW-CHECKS.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a5/docs/REVIEW-CHECKS.md), [`docs/`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a5/docs/README.md).
+- **Full docs:** [`README.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a6/README.md), [`AGENTS-mergecraft.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a6/AGENTS-mergecraft.md),
+  [`docs/REVIEW-CHECKS.md`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a6/docs/REVIEW-CHECKS.md), [`docs/`](https://github.com/alexhawat/mergeCraft/blob/v0.1.0a6/docs/README.md).
