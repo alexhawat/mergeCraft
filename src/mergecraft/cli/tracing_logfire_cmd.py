@@ -6,9 +6,6 @@ prompt for project, validate against the Logfire REST API), this module is the
 *non-interactive* counterpart — an operator-facing toggle that reads ``--token`` /
 ``--project`` from flags, validates the bearer (when given), and writes the
 same two env vars + the same ``LOGFIRE_TOKEN`` Actions secret.
-
-Exports:
-    register -- attach the ``tracing`` Typer subapp to the root CLI.
 """
 
 from __future__ import annotations
@@ -563,11 +560,6 @@ def logfire_unwire_workflow(
     console.print(f"[green]wrote[/green] {workflow}")
 
 
-def register(root: typer.Typer) -> None:
-    """Attach the ``tracing`` Typer subapp to ``root``."""
-    root.add_typer(app, name="tracing")
-
-
 __all__ = [
     "app",
     "logfire_app",
@@ -575,5 +567,4 @@ __all__ = [
     "logfire_enable",
     "logfire_unwire_workflow",
     "logfire_wire_workflow",
-    "register",
 ]

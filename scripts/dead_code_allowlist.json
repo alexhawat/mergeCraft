@@ -494,5 +494,26 @@
       "src/mergecraft/yes/__init__.py:method:has",
       "src/mergecraft/yes/__init__.py:method:invalidate"
     ]
+  },
+  {
+    "reason": "Python invokes these package __getattr__ hooks to resolve documented lazy exports on first access.",
+    "symbols": [
+      "src/mergecraft/analyzers/__init__.py:function:__getattr__",
+      "src/mergecraft/config/__init__.py:function:__getattr__",
+      "src/mergecraft/mcp/__init__.py:function:__getattr__",
+      "src/mergecraft/utils/__init__.py:function:__getattr__"
+    ]
+  },
+  {
+    "reason": "The lazy CLI catalog resolves this Typer entrypoint by module and attribute name.",
+    "symbols": [
+      "src/mergecraft/cli/analyzers_cmd.py:function:run_cmd"
+    ]
+  },
+  {
+    "reason": "Pydantic exposes the build provenance field on the typed environment model. The standalone version path uses a lightweight reader with tested parity.",
+    "symbols": [
+      "src/mergecraft/config/env/runtime.py:variable:build_commit"
+    ]
   }
 ]
