@@ -27,7 +27,7 @@ SHELL := /bin/bash
 	bench-detect diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector test-durations test-durations-check coverage-measure coverage-combine-gate coverage-gate npm-audit workflow-lint \
 	lint-ruff-advisory hook-pins-check pins-check action-pin-check action-pin-staleness-check action-image-digest-check action-image-structure-check action-candidate-check action-images-resolve action-images-verify action-images-publish-canonical action-manifest-prepare action-pin-prepare \
-	tracked-markdown-check
+	tracked-markdown-check dead-code-check
 
 PIPELINE_D2 := docs/diagrams/pipeline.d2
 PIPELINE_LIGHT := docs/assets/diagrams/pipeline-light.svg
@@ -75,7 +75,7 @@ npm-lockcheck: ## Fail when npm lockfiles drift from package.json
 	cd scripts && npm ci --dry-run --ignore-scripts --no-audit --no-fund
 	cd docker/agent-clis && npm ci --dry-run --ignore-scripts --no-audit --no-fund
 
-lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + tracked-markdown + hook-pins-check + privilege-drop chown + type-ignore reasons + called-workflow permissions
+lint: dead-code-check ## Ruff check + formatting + loguru-only + action-yml-hygiene + tracked-markdown + hook-pins-check + privilege-drop chown + type-ignore reasons + called-workflow permissions
 	$(RUFF) check src tests scripts
 	$(RUFF) format --check src tests scripts
 	$(UV) run python scripts/check_loguru_only.py
@@ -92,6 +92,9 @@ lint: ## Ruff check + formatting + loguru-only + action-yml-hygiene + tracked-ma
 	$(UV) run python scripts/check_called_workflow_permissions.py
 	$(MAKE) lint-test-hygiene
 	@$(MAKE) npm-lockcheck
+
+dead-code-check: ## Vulture confidence-60 scan with reviewed contract exceptions
+	$(UV) run python scripts/check_dead_code.py
 
 lint-test-hygiene: ## Block on tautological test patterns (D16)
 	$(UV) run python scripts/check_test_cheat_signatures.py

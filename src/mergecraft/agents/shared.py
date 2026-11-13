@@ -17,7 +17,6 @@ from loguru import logger
 
 from mergecraft.agents.activity_watchdog import DEFAULT_IDLE_TIMEOUT_S
 from mergecraft.mcp.endpoints import mcp_role_url as _mcp_role_url
-from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -324,37 +323,6 @@ def stderr_tail_for_error(text: str, *, lines: int = STDERR_ERROR_TAIL_LINES) ->
     return redact_secrets("\n".join(kept))
 
 
-def get_git_status(cwd: str | None = None) -> str:
-    try:
-        return subprocess.check_output(
-            git_argv(["status", "--porcelain"]),
-            cwd=cwd,
-            text=True,
-            timeout=10,
-        ).strip()
-    except Exception:
-        return ""
-
-
-def build_commit_prompt(status: str) -> str:
-    return "\n".join(
-        [
-            "UNCOMMITTED CHANGES — the working tree is dirty. push all changes to a "
-            "pull request (new or existing). `git status` must be clean before you finish.",
-            "",
-            "```",
-            status,
-            "```",
-        ]
-    )
-
-
-@dataclass(slots=True)
-class StopHookFailure:
-    exit_code: int
-    output: str
-
-
 @dataclass(slots=True)
 class SummaryStale:
     file_path: str
@@ -362,20 +330,13 @@ class SummaryStale:
 
 @dataclass(slots=True)
 class PostRunIssues:
-    stop_hook: StopHookFailure | None = None
-    dirty_tree: str | None = None
     summary_stale: SummaryStale | None = None
     unsubmitted_review: str | None = None  # "Review" | "IncrementalReview"
     retryable: bool = True
 
 
 def has_post_run_issues(issues: PostRunIssues) -> bool:
-    return (
-        issues.stop_hook is not None
-        or issues.dirty_tree is not None
-        or issues.summary_stale is not None
-        or issues.unsubmitted_review is not None
-    )
+    return issues.summary_stale is not None or issues.unsubmitted_review is not None
 
 
 @dataclass(slots=True)

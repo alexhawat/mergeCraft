@@ -266,14 +266,14 @@ def test_only_the_first_slash_splits_the_model_slug() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _custom_provider_ids / build_custom_provider — unconfigured environment
+# build_custom_provider — unconfigured environment
 # ---------------------------------------------------------------------------
 
 
-def test_no_provider_ids_without_a_resolvable_gateway() -> None:
-    """An unconfigured environment registers no ``enabled_providers``."""
-    assert oc._custom_provider_ids(None) == []
-    assert oc._custom_provider_ids("nous/deepseek-v4") == []
+def test_no_provider_blocks_without_a_resolvable_gateway() -> None:
+    """An unconfigured environment emits no provider configuration."""
+    assert oc.build_custom_provider(None) is None
+    assert oc.build_custom_provider("nous/deepseek-v4") is None
 
 
 def test_custom_provider_is_none_without_a_model() -> None:

@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from mergecraft.agents.verifier import should_verify
-from mergecraft.analyzers.review_gate import filter_for_review
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
@@ -57,24 +56,9 @@ def requires_verification(finding: Finding) -> bool:
     return finding.source == "ci" and finding.introduced_by_pr == "true" and should_verify(finding)
 
 
-def filter_ci_for_review(
-    findings: list[Finding],
-    *,
-    verified_ids: set[str],
-    require_verification: bool = False,
-) -> list[Finding]:
-    """Apply the shared review gate to CI findings (D11)."""
-    return filter_for_review(
-        findings,
-        verified_ids=verified_ids,
-        require_verification=require_verification,
-    )
-
-
 __all__ = [
     "annotate_caused_by_pr",
     "annotate_not_caused_by_pr",
     "annotate_unattributed",
-    "filter_ci_for_review",
     "requires_verification",
 ]

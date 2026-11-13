@@ -30,9 +30,9 @@ from mergecraft.evidence.packet import (
     PACKET_SCHEMA_VERSION,
     AgentMetadata,
     MergeEvidencePacket,
-    packet_output_schema,
 )
 from mergecraft.utils.learnings import LearningProvenance
+from tests.evidence.schema_support import packet_output_schema
 
 # ── fixtures ───────────────────────────────────────────────────────────
 

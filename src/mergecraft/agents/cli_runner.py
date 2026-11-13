@@ -62,7 +62,6 @@ class CliHarnessSpec:
     prompt: str | None = None
     close_spans: Callable[[], None] | None = None
     usage: Callable[[], AgentUsage | None] | None = None
-    missing_binary: Callable[[], AgentResult] | None = None
 
 
 def cli_working_directory(ctx: AgentRunContext) -> str:
@@ -109,8 +108,6 @@ def run_cli_attempt(spec: CliHarnessSpec, ctx: AgentRunContext) -> AgentResult:
                 stdin_text=spec.stdin_text,
             )
         except FileNotFoundError as exc:
-            if spec.missing_binary is not None:
-                return spec.missing_binary()
             return with_prompt(AgentResult(success=False, error=str(exc)), spec.prompt)
 
         with track_process_group(process):

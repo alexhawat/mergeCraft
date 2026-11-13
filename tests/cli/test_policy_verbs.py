@@ -22,7 +22,7 @@ runner = CliRunner()
 
 
 def _write_policy_tree(tmp_path: Path, rules_yaml: str) -> None:
-    from tests.orchestrator.conftest import write_repo_config
+    from tests.support.repo_config import write_repo_config
 
     write_repo_config(tmp_path)
     policy_dir = tmp_path / ".mergecraft" / "policy"
@@ -139,7 +139,7 @@ def test_policy_effective_says_review_evaluates_no_rules_without_rules_yaml(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """The pack fallback is authoring material, and the CLI says so."""
-    from tests.orchestrator.conftest import write_repo_config
+    from tests.support.repo_config import write_repo_config
 
     write_repo_config(tmp_path)
     (tmp_path / ".mergecraft" / "policy").mkdir(parents=True)

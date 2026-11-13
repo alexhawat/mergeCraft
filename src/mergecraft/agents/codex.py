@@ -579,13 +579,13 @@ def _build_subagent_instructions(subagent_block: str | None = None) -> str:
     if subagent_block is not None:
         return subagent_block
     # T9 / DC-D12 — the mutating MCP tools are denied to subagents; name the
-    # ``push_branch`` one in the CLI spelling Codex documents
+    # ``create_pull_request_review`` one in the CLI spelling Codex documents
     # (``mergecraft_<tool>``), never the bare name, so a subagent that reads
     # this instruction sees a tool it could actually call.
-    push_branch_ref = format_mcp_tool_ref("codex", "push_branch")
+    create_pull_request_review_ref = format_mcp_tool_ref("codex", "create_pull_request_review")
     read_only_note = (
         "Subagents are read-only: the mutating mergeCraft MCP tools "
-        f"(for example `{push_branch_ref}`) are not available to them."
+        f"(for example `{create_pull_request_review_ref}`) are not available to them."
     )
     return "\n\n".join(
         [

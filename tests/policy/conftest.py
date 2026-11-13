@@ -115,7 +115,7 @@ rules:
 @pytest.fixture
 def policy_dir(tmp_path: Path) -> Path:
     """Write a minimal policy tree under ``.mergecraft/policy/``."""
-    from tests.orchestrator.conftest import write_repo_config
+    from tests.support.repo_config import write_repo_config
 
     write_repo_config(tmp_path)
     directory = tmp_path / ".mergecraft" / "policy"

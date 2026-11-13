@@ -628,9 +628,8 @@ class OTLPSink:
         self.service_name = service_name
         self.token = token
         self._provider = provider
-        # When the ``logfire`` package is present, configure its auto-tracing
-        # hooks too — that's how Logfire picks up OpenTelemetry spans.
-        self._logfire = logfire_module
+        # Retain the constructor argument for callers; OTLP uses the explicit provider.
+        del logfire_module
         self._warned = False
         self._tracer: Any | None = None
         # Mirror the wiring into the module-level test seam so tests can

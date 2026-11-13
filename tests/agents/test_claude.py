@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import importlib
-import subprocess
 from typing import TYPE_CHECKING
 
-from loguru import logger
+from tests.agents.support_claude_stream import write_claude_cli
 
 from mergecraft.agents.claude import _run_claude_once
 from mergecraft.agents.shared import AgentRunContext, ResolvedInstructions
@@ -40,31 +38,12 @@ def test_claude_exit_with_empty_streams_surfaces_diagnosable_error(
     """Non-zero ``claude`` exit with empty stdout/stderr must name exit code + attempt context."""
     monkeypatch.setenv("CI", "true")
 
-    def _fake_run(
-        cmd: list[str],
-        **kwargs: object,
-    ) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(args=cmd, returncode=1, stdout="", stderr="")
-
-    claude_module = importlib.import_module("mergecraft.agents.claude")
-    monkeypatch.setattr(claude_module.subprocess, "run", _fake_run)
-
-    log_records: list[tuple[str, str]] = []
-
-    def _capture(record: object) -> None:
-        entry = record.record  # type: ignore[attr-defined]
-        log_records.append((entry["level"].name, entry["message"]))
-
-    sink_id = logger.add(_capture, level="DEBUG")
-    try:
-        result = _run_claude_once(
-            cli="/usr/bin/claude",
-            prompt="review this diff",
-            ctx=_run_ctx(tmp_path),
-            mcp_config=str(tmp_path / "mcp.json"),
-        )
-    finally:
-        logger.remove(sink_id)
+    result = _run_claude_once(
+        cli=write_claude_cli(tmp_path, returncode=1),
+        prompt="review this diff",
+        ctx=_run_ctx(tmp_path),
+        mcp_config=str(tmp_path / "mcp.json"),
+    )
 
     assert result.success is False
     assert result.error is not None
@@ -74,7 +53,3 @@ def test_claude_exit_with_empty_streams_surfaces_diagnosable_error(
     lowered = result.error.lower()
     assert "model" in lowered or "claude-sonnet" in lowered
     assert "ci" in lowered or "skip-permissions" in lowered or "dangerously" in lowered
-
-    visible = [message for level, message in log_records if level in {"WARNING", "ERROR"}]
-    assert visible
-    assert any("1" in message or "exit" in message.lower() for message in visible)

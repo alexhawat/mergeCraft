@@ -88,6 +88,8 @@ def _walk_typer_commands(app: typer.Typer, prefix: tuple[str, ...] = ()) -> set[
         assert name, f"unnamed command under {prefix}"
         paths.add((*prefix, name))
     for group in app.registered_groups:
+        if group.hidden:
+            continue
         assert group.name, f"unnamed group under {prefix}"
         assert group.typer_instance is not None, f"group {group.name!r} has no typer_instance"
         paths |= _walk_typer_commands(group.typer_instance, (*prefix, group.name))

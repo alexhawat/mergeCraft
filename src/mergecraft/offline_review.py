@@ -689,6 +689,7 @@ async def _run_shadow_jev_review(
                 review_body=body,
                 client=client,
                 trust_tier=driver.trust_tier,
+                settings=settings,
             )
         _persist_shadow_jev_artifacts(
             review_out,

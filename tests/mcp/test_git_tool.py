@@ -7,14 +7,12 @@ Also covers the reviewer-surface hardening contract for issue #257 (D7) and the
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 from pathlib import Path
 from typing import Any, Literal
 
 import pytest
 from tests.support.policy_fixtures import init_git_repo
-from tests.support.tool_context import write_capable_mcp_mode
 
 from mergecraft.mcp.context import (
     PayloadEvent,
@@ -24,7 +22,6 @@ from mergecraft.mcp.context import (
 )
 from mergecraft.mcp.git import (
     _GitCommandError,
-    commit_changes_tool,
     git_fetch_tool,
     git_tool,
 )
@@ -1047,7 +1044,7 @@ async def test_auth_requiring_subcommands_name_their_dedicated_tool(
     assert recorder.calls == []
     text = result.content[0]["text"]
     assert "read-only allowlist" not in text
-    assert any(name in text for name in ("push_branch", "git_fetch", "checkout_repo"))
+    assert any(name in text for name in ("review-only", "git_fetch", "checkout_repo"))
 
 
 async def test_relative_c_is_resolved_against_the_repo_checkout(
@@ -1566,100 +1563,6 @@ async def test_glued_short_config_flag_in_command_string_is_not_forwarded(
     )
     assert result.is_error is True
     assert recorder.calls == []
-
-
-class _CommitGitRecorder:
-    """Serves the argv sequence ``commit_changes`` issues, recording each call."""
-
-    def __init__(self, *, branch: str = "topic", sha: str = "abc1234") -> None:
-        self.calls: list[list[str]] = []
-        self.branch = branch
-        self.sha = sha
-
-    def __call__(self, args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
-        argv = [str(a) for a in args]
-        self.calls.append(argv)
-        if argv == ["rev-parse", "--abbrev-ref", "HEAD"]:
-            return f"{self.branch}\n"
-        if argv == ["status", "--porcelain"]:
-            return " M src/mergecraft/mcp/git.py\n"
-        if argv == ["rev-parse", "HEAD"]:
-            return f"{self.sha}\n"
-        return ""
-
-
-class _PatchRecordingGitHub(GitHubClient):
-    """Records Git Data ref PATCH attempts made by ``commit_changes``."""
-
-    def __init__(self) -> None:
-        super().__init__(token="test-token")
-        self.patch_calls: list[str] = []
-
-    async def patch(self, path: str, **kwargs: Any) -> Any:
-        self.patch_calls.append(path)
-        return {}
-
-
-async def test_commit_changes_push_policy_skip_reports_pushed_false(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Review-only default-deny when no mode; honest ``pushed`` after write mode."""
-    recorder = _CommitGitRecorder()
-    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
-
-    ctx = _ctx(tmp_path, push="disabled")
-    denied = await commit_changes_tool(ctx).execute({"message": "chore: wip"})
-    assert denied.is_error is True
-    assert "review-only" in denied.content[0]["text"]
-
-    with write_capable_mcp_mode():
-        result = await commit_changes_tool(ctx).execute({"message": "chore: wip"})
-    assert result.is_error is False, result.content[0]["text"]
-    payload = json.loads(result.content[0]["text"])
-    assert payload["pushed"] is False
-
-
-async def test_commit_changes_always_reports_pushed_and_never_patches_ref(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """#259 / D9: no doomed Git Data ref PATCH, and `pushed` is always present."""
-    recorder = _CommitGitRecorder()
-    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
-
-    github = _PatchRecordingGitHub()
-    ctx = _ctx(tmp_path, push="enabled", github=github)
-    denied = await commit_changes_tool(ctx).execute({"message": "chore: wip"})
-    assert denied.is_error is True
-    assert "review-only" in denied.content[0]["text"]
-    assert github.patch_calls == []
-
-    with write_capable_mcp_mode():
-        result = await commit_changes_tool(ctx).execute({"message": "chore: wip"})
-    assert result.is_error is False, result.content[0]["text"]
-    payload = json.loads(result.content[0]["text"])
-    assert isinstance(payload["pushed"], bool)
-    assert payload["pushed"] is False
-    assert github.patch_calls == []
-
-
-async def test_commit_changes_description_matches_the_local_only_contract(tmp_path: Path) -> None:
-    """The description must promise exactly what the body does.
-
-    ``commit_changes`` always returns ``pushed: False`` and the Git Data ref
-    PATCH that once produced a signed, remote commit is gone (#259 / D9), so the
-    description has to state the local-only contract and claim neither a push
-    nor a signature. Word boundaries keep "unsigned" from reading as a claim.
-    """
-    description = commit_changes_tool(_ctx(tmp_path)).description.lower()
-
-    assert "local commit" in description
-    assert "no push" in description
-    claims = [
-        claim
-        for claim in ("signed", "signs", "signature", "verified", "pushes", "remote commit")
-        if re.search(rf"\b{claim}\b", description)
-    ]
-    assert claims == []
 
 
 # --- #623 — --textconv / --ext-diff run a git-config content filter -----------

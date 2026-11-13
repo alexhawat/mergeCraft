@@ -105,6 +105,26 @@ ignore = [
 - Keep the Ruff version in `pyproject.toml` `[project.optional-dependencies].dev` and the `.pre-commit-config.yaml` `rev` aligned so local hooks and CI use the same rule set.
 - Run format as part of the lint workflow (`make lint` does `ruff check` **and** `ruff format --check`) so style never drifts.
 
+### Dead-code gate
+
+`make dead-code-check` runs the pinned Vulture scanner over `src/` at minimum
+confidence 60, including unused functions. `make lint` and therefore `make ci`
+include this check. Scanner syntax/input failures remain failures.
+
+`scripts/dead_code_allowlist.json` records reviewed dynamic-framework and public
+contract exceptions as exact source path, diagnostic kind, and symbol names,
+with a reason for each group. It does not exclude whole modules, match symbol
+patterns, or globally suppress a name. A new unused helper still fails even
+when another field in its file is allowed. Stale entries fail too, so remove an
+exception when its definition disappears or acquires a visible caller.
+
+Review each finding before adding an entry. Typer callbacks, Pydantic serialized
+fields/validators, protocol implementations and explicit compatibility exports
+can need exceptions; callerless private helpers and write-only private state
+should be removed instead. Do not generate an allow-list from all diagnostics.
+Vulture's underlying use analysis is name-based, so this gate complements
+production-path tests and review rather than proving reachability.
+
 ### Naming Conventions
 
 | Element | Convention | Example |
@@ -348,19 +368,19 @@ List **every** public class and public function defined in the module under `Exp
 ### Class docstring template
 
 ```python
-class GitHubActionsProvider(PipelineProvider):
-    """GitHub Actions implementation of the pipeline-intelligence provider.
+class GitHubActionsProvider:
+    """Fetch and decode failed workflow logs for a GitHub check suite.
 
-    Fetches check suites and job logs for a PR head SHA, normalizes them into
-    failure records, and hands them to the clustering layer.
+    The caller supplies the authenticated client and the listed workflow runs.
 
     Attributes:
-        token: Installation or PAT credential used for the REST calls.
-        repo: `owner/name` slug the provider is bound to.
+        supports_retry_state: Whether the provider supports retry-state checks.
 
     Example:
-        provider = GitHubActionsProvider(token=token, repo="alexhawat/mergeCraft")
-        failures = await provider.failures_for("abc1234")
+        provider = GitHubActionsProvider()
+        logs = await provider.fetch_check_suite_logs(
+            ctx, check_suite_id=42, client=client, runs=runs
+        )
     """
 ```
 

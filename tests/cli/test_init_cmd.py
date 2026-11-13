@@ -106,6 +106,8 @@ def test_scaffolded_config_uses_models_list(tmp_path: Path, monkeypatch: MonkeyP
     config_path = tmp_path / ".mergecraft" / "config.yaml"
     data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert isinstance(data, dict)
+    assert "signedCommits" not in data
+    assert "signed_commits" not in data
     assert "models" in data
     assert isinstance(data["models"], list), (
         "init must scaffold models: list, not singular model: (D13)"
@@ -288,3 +290,10 @@ def test_scaffolded_workflow_serializes_runs_per_pull_request(
         "the group must be keyed on the PR number so two runs cannot race the same PR"
     )
     assert concurrency.get("cancel-in-progress") is True
+
+
+def test_sample_config_omits_retired_write_settings() -> None:
+    data = yaml.safe_load((REPO_ROOT / "examples" / "config.yaml").read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
+    for key in ("signedCommits", "signed_commits", "autoMergeEnabled", "auto_merge_enabled"):
+        assert key not in data

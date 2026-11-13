@@ -12,9 +12,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Literal
+from unittest.mock import patch
 
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
-from mergecraft.mcp.shared import bind_selected_mode, reset_selected_mode
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.scm.github import GitHubScmAdapter, github_client_from_scm
@@ -78,17 +78,15 @@ def bind_github_client(ctx: ToolContext, client: GitHubClient) -> None:
 
 
 @contextmanager
-def write_capable_mcp_mode(name: str = "Fix") -> Iterator[None]:
-    """Bind a write-capable mode so mutating MCP tools can run their inner guards.
+def inner_mutation_guard_probe() -> Iterator[None]:
+    """Exercise inner security guards while explicitly bypassing the outer mode gate.
 
-    Production has no write-capable modes; tests use this only to reach
-    git/shell/env stripping after the review-only default-deny.
+    Production rejects every repository mutation. Tests separately assert that
+    default-deny, then use this narrow seam to keep credential stripping, shell
+    sandboxing and path confinement exercised rather than masked by that gate.
     """
-    token = bind_selected_mode(name)
-    try:
+    with patch("mergecraft.mcp.shared.guard_mutating_tool"):
         yield
-    finally:
-        reset_selected_mode(token)
 
 
 def github_client_from_ctx(ctx: ToolContext) -> GitHubClient:

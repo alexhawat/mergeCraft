@@ -63,13 +63,12 @@ def test_subagent_denied_tools_derived_from_class_complement(tmp_path: Path) -> 
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
-        signed_commits=True,
         trust_tier="trusted",
     )
     denied = subagent_denied_tool_names(ctx)
-    assert "push_branch" in denied
+    assert "create_pull_request_review" in denied
     assert "create_issue_comment" in denied
-    assert "commit_changes" in denied
+    assert "report_progress" in denied
     # `checkout_pr` is class `scope` — reviewer-allowed, so off the subagent deny list.
     assert "checkout_pr" not in denied
     # Mutating tools whose class is otherwise reviewer-allowed stay denied.
