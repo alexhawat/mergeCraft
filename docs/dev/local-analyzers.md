@@ -59,6 +59,14 @@ shell and analyzer-mode checks happen before scheduling; results retain catalog
 order. Contract adapters reuse their provisioned binary across changed files,
 while each invocation still goes through configuration and sandbox checks.
 
+A fatal pipeline error cancels queued adapters, kills that pipeline's child
+process groups, and joins worker cleanup before propagating. Nested operation
+scopes keep cancellation separate from other reviews. Resource limits and
+privilege-drop calibration probes use a fresh isolated interpreter instead of
+Python callbacks after fork, so worker threads cannot inherit locked callback
+state. Payload environment file descriptors and process sessions survive the
+launcher unchanged.
+
 Managed downloads are already reused across CLI runs under
 `$XDG_CACHE_HOME/mergecraft/analyzer-cache` (or
 `~/.cache/mergecraft/analyzer-cache`). The cache is keyed by tool, platform and

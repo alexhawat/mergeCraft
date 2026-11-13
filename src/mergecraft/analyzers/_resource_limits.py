@@ -12,6 +12,31 @@ import resource
 import sys
 
 
+def resource_limited_argv(
+    argv: list[str], *, process_limit: tuple[int, int], memory_mb: int = 0
+) -> list[str]:
+    """Build a fresh-interpreter launcher for resolved child limits.
+
+    Args:
+        argv (list[str]): Command executed after limits are applied.
+        process_limit (tuple[int, int]): Soft and hard process-count limits.
+        memory_mb (int): Address-space limit, or zero to preserve the inherited limit.
+
+    Returns:
+        list[str]: Isolated Python invocation followed by limits and payload argv.
+    """
+    return [
+        sys.executable,
+        "-I",
+        "-S",
+        os.path.abspath(__file__),
+        str(process_limit[0]),
+        str(process_limit[1]),
+        str(memory_mb),
+        *argv,
+    ]
+
+
 def main() -> None:
     """Apply the parent's resolved limits and replace this process with its argv."""
     soft, hard, memory_mb = (int(value) for value in sys.argv[1:4])

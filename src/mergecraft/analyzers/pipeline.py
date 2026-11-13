@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from contextvars import copy_context
 from enum import StrEnum
 from functools import partial
@@ -49,9 +50,14 @@ from mergecraft.config import load_repo_settings
 from mergecraft.findings.dedup import dedupe_findings
 from mergecraft.mcp.review import format_analyzer_inline_body
 from mergecraft.mcp.tool_state import AnalyzerRunState, AnalyzerStatusRow
+from mergecraft.utils.process_scope import (
+    ProcessGroupScope,
+    bind_process_group_scope,
+    check_process_cancelled,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
     from mergecraft.analyzers.adapters import AdapterRunResult
@@ -72,13 +78,31 @@ class CatalogScanStatus(StrEnum):
 AnalyzersMode = Literal["off", "auto", "full", "untrusted-only"]
 
 
+@contextmanager
+def _adapter_pool() -> Iterator[ThreadPoolExecutor]:
+    """Join workers after cancelling only this pipeline's children on failure."""
+    scope = ProcessGroupScope()
+    with bind_process_group_scope(scope):
+        pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="analyzer")
+        try:
+            yield pool
+        except BaseException:
+            scope.cancel()
+            pool.shutdown(wait=True, cancel_futures=True)
+            raise
+        else:
+            pool.shutdown(wait=True)
+
+
 def _timed_adapter(
     run: Callable[[], AdapterRunResult],
 ) -> tuple[AdapterRunResult | KeyError | OSError | ValueError, float]:
     """Measure the actual adapter work, including named unavailable outcomes."""
+    check_process_cancelled()
     started = time.perf_counter()
     try:
         result = run()
+        check_process_cancelled()
     except (KeyError, OSError, ValueError) as exc:
         return exc, time.perf_counter() - started
     return result, time.perf_counter() - started
@@ -394,7 +418,7 @@ def run_analyzer_pipeline(
 
         # Adapters run concurrently; trace status, rows and the disposition ledger
         # are collected on this thread in catalog order. No trust check is deferred.
-        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="analyzer") as pool:
+        with _adapter_pool() as pool:
             pending = {
                 manifest.id: pool.submit(
                     copy_context().run,

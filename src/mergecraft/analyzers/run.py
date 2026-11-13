@@ -14,8 +14,10 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
 
+from mergecraft.analyzers._resource_limits import resource_limited_argv
 from mergecraft.analyzers.redact import redact_analyzer_output, redact_secrets
-from mergecraft.utils.process_group import kill_process_group
+from mergecraft.utils.process_group import kill_process_group, track_process_group
+from mergecraft.utils.process_scope import check_process_cancelled
 from mergecraft.utils.secrets import filter_env
 
 if TYPE_CHECKING:
@@ -354,28 +356,28 @@ def _run_in_own_session(
     if isinstance(preexec_fn, _SandboxLimits):
         # A Python callback between fork and exec can inherit locked interpreter
         # state from another analyzer worker. Apply limits after a fresh exec.
-        run_argv = [
-            sys.executable,
-            "-I",
-            "-S",
-            str(Path(__file__).with_name("_resource_limits.py")),
-            str(preexec_fn.process_limit[0]),
-            str(preexec_fn.process_limit[1]),
-            str(preexec_fn.context.memory_mb),
-            *run_argv,
-        ]
-    with subprocess.Popen(
-        run_argv,
-        cwd=cwd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=env,
-        pass_fds=pass_fds,
-        start_new_session=True,
-    ) as proc:
+        run_argv = resource_limited_argv(
+            run_argv,
+            process_limit=preexec_fn.process_limit,
+            memory_mb=preexec_fn.context.memory_mb,
+        )
+    check_process_cancelled()
+    with (
+        subprocess.Popen(
+            run_argv,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+            pass_fds=pass_fds,
+            start_new_session=True,
+        ) as proc,
+        track_process_group(proc),
+    ):
         try:
             stdout, stderr = proc.communicate(timeout=timeout_s)
+            check_process_cancelled()
         except BaseException:
             # TimeoutExpired, KeyboardInterrupt, ...: take the whole tree down.
             kill_process_group(proc.pid)
