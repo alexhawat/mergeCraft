@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -441,8 +442,26 @@ def _capabilities_without_linux_probe() -> SandboxCapabilities:
     )
 
 
-@functools.lru_cache(maxsize=1)
+_CAPABILITY_PROBE_LOCK = threading.Lock()
+
+
 def probe_capabilities() -> SandboxCapabilities:
+    """Share one lazy capability probe across analyzer workers."""
+    with _CAPABILITY_PROBE_LOCK:
+        return _probe_capabilities_cached()
+
+
+def _clear_capabilities_cache() -> None:
+    with _CAPABILITY_PROBE_LOCK:
+        _probe_capabilities_cached.cache_clear()
+
+
+# Preserve the reset hook exposed by the previous cached public function.
+probe_capabilities.__dict__["cache_clear"] = _clear_capabilities_cache
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_capabilities_cached() -> SandboxCapabilities:
     """Probe isolation primitives; record every unavailable capability by name."""
     if sys.platform != "linux":
         caps = _capabilities_without_linux_probe()
@@ -498,7 +517,7 @@ def sandbox_skip_findings(plan: SandboxPlan) -> list[Finding]:
 
 def reset_detection_cache() -> None:
     """Clear cached sandbox probes (xdist isolation / #421)."""
-    probe_capabilities.cache_clear()
+    _clear_capabilities_cache()
     from mergecraft.analyzers.egress import reset_filtered_egress_cache
     from mergecraft.mcp.shell import _reset_shell_detection_globals
 
