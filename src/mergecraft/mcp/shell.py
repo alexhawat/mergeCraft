@@ -428,12 +428,12 @@ def _run_foreground(
     timeout_s: float,
     isolate_network: bool,
 ) -> tuple[bytes | None, bytes | None, int | None, bool]:
-    """Run ``command`` to completion or timeout; always reap the process group.
+    """Run ``command`` with bounded process-group termination and reaping.
 
     Returns ``(stdout, stderr, returncode, timed_out)``. After a timeout the
-    group is killed and reaped; if even that wait times out the process is
-    killed again and whatever output was gathered so far is returned, rather
-    than letting a second ``TimeoutExpired`` escape with the child unreaped.
+    group is killed and reaping is attempted. If that wait times out, the
+    process is killed again and the available output is returned. Final
+    cleanup closes the pipes and never waits indefinitely for an unreapable child.
     """
     check_process_cancelled()
     proc = _spawn_shell(
@@ -446,25 +446,40 @@ def _run_foreground(
     )
     stdout_b: bytes | None
     stderr_b: bytes | None
-    with proc, track_process_group(proc):
-        try:
-            stdout_b, stderr_b = proc.communicate(timeout=timeout_s)
-            check_process_cancelled()
-            return stdout_b, stderr_b, proc.returncode, False
-        except subprocess.TimeoutExpired as first:
-            kill_process_group(proc.pid)
-            stdout_b, stderr_b = first.stdout, first.stderr
+    try:
+        with track_process_group(proc):
             try:
-                stdout_b, stderr_b = proc.communicate(timeout=5)
-            except subprocess.TimeoutExpired as second:
-                # A descendant escaped the group and holds the pipes open.
-                stdout_b = second.stdout if second.stdout is not None else stdout_b
-                stderr_b = second.stderr if second.stderr is not None else stderr_b
+                stdout_b, stderr_b = proc.communicate(timeout=timeout_s)
+                check_process_cancelled()
+                return stdout_b, stderr_b, proc.returncode, False
+            except subprocess.TimeoutExpired as first:
+                kill_process_group(proc.pid)
+                stdout_b, stderr_b = first.stdout, first.stderr
+                try:
+                    stdout_b, stderr_b = proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired as second:
+                    # A descendant escaped the group and holds the pipes open.
+                    stdout_b = second.stdout if second.stdout is not None else stdout_b
+                    stderr_b = second.stderr if second.stderr is not None else stderr_b
+                    with contextlib.suppress(OSError):
+                        proc.kill()
+                    with contextlib.suppress(subprocess.TimeoutExpired):
+                        proc.wait(timeout=2)
+                return stdout_b, stderr_b, proc.returncode, True
+    finally:
+        # Popen.__exit__ waits without a timeout. Keep cleanup bounded even
+        # when a killed child cannot be reaped, including registration failure.
+        try:
+            if proc.returncode is None:
+                kill_process_group(proc.pid)
                 with contextlib.suppress(OSError):
                     proc.kill()
                 with contextlib.suppress(subprocess.TimeoutExpired):
                     proc.wait(timeout=2)
-            return stdout_b, stderr_b, proc.returncode, True
+        finally:
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                if pipe is not None:
+                    pipe.close()
 
 
 def shell_tool(ctx: ToolContext):

@@ -346,6 +346,7 @@ class _FinishedProcess:
     """Stands in for the spawned shell: the command ran and exited ``returncode``."""
 
     pid = 4242
+    stdin = stdout = stderr = None
 
     def __init__(self, returncode: int) -> None:
         self.returncode = returncode
