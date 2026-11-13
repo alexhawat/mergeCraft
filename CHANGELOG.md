@@ -5,6 +5,136 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.1.0a6
+
+### Added
+
+- Re-approve a passed PR whose only new edit is changelog prose by @sevn-one and @claude in [#1285](https://github.com/alexhawat/mergeCraft/pull/1285)
+
+### Fixed
+
+#### Agents
+
+- Fail over on outages, keep Codex logins, prompt via stdin by @alexhawat and @claude in [#1433](https://github.com/alexhawat/mergeCraft/pull/1433)
+- Bound agent runs by wall clock and kill cancelled CLIs by @alexhawat and @claude in [#1422](https://github.com/alexhawat/mergeCraft/pull/1422)
+- Reference the MCP bearer env var in the Claude MCP config by @alexhawat and @claude in [#1405](https://github.com/alexhawat/mergeCraft/pull/1405)
+- Reference credential env vars in OpenCode run config by @alexhawat and @claude in [#1395](https://github.com/alexhawat/mergeCraft/pull/1395)
+
+#### Analyzers
+
+- Exit handling, SARIF, CRAP and JS lint parsers by @alexhawat and @claude in [#1429](https://github.com/alexhawat/mergeCraft/pull/1429)
+- Pin remaining untrusted scanner config sources by @alexhawat and @claude in [#1407](https://github.com/alexhawat/mergeCraft/pull/1407)
+- Resolve and confine analyzers by trust tier by @alexhawat and @claude in [#1397](https://github.com/alexhawat/mergeCraft/pull/1397)
+
+#### Ci
+
+- Pass the review gate when every changed file is ignored by @alexhawat and @claude in [#1447](https://github.com/alexhawat/mergeCraft/pull/1447)
+- One workflow template source; fail review gate when skipped by @alexhawat and @claude in [#1403](https://github.com/alexhawat/mergeCraft/pull/1403)
+
+#### Cli
+
+- Output and exit-code contracts, release updates, help hygiene by @alexhawat and @claude in [#1441](https://github.com/alexhawat/mergeCraft/pull/1441)
+- Wire CI credential on auth; fix config, traces, cwd, plan by @alexhawat and @claude in [#1430](https://github.com/alexhawat/mergeCraft/pull/1430)
+
+#### Mcp
+
+- Protect full clones; flag api-only and stale-base runs by @alexhawat and @claude in [#1426](https://github.com/alexhawat/mergeCraft/pull/1426)
+- Bind git options to registered checkouts, share path denylist by @alexhawat and @claude in [#1394](https://github.com/alexhawat/mergeCraft/pull/1394)
+
+#### Release
+
+- Normalize the prepared branch for release-only gates by @alexhawat and @web-flow in [#1440](https://github.com/alexhawat/mergeCraft/pull/1440)
+- Regenerate agent packages on the release branch by @alexhawat and @web-flow in [#1421](https://github.com/alexhawat/mergeCraft/pull/1421)
+
+#### Review
+
+- Offline outcome parity, KEEP_TMP cleanup, thread resolution by @alexhawat and @claude in [#1406](https://github.com/alexhawat/mergeCraft/pull/1406)
+- Resolve the run outcome before publishing the review by @alexhawat and @claude in [#1399](https://github.com/alexhawat/mergeCraft/pull/1399)
+
+#### Other
+
+- Sandbox startup classification, ruff severity, group-kill on timeout, off-loop subprocess calls by @sevn-one, @claude and @alexhawat in [#1275](https://github.com/alexhawat/mergeCraft/pull/1275)
+- Limit instruction discovery to repo-authored paths by @alexhawat and @claude in [#1384](https://github.com/alexhawat/mergeCraft/pull/1384)
+- Bound dependency prep and keep publication evidence by @alexhawat and @claude in [#1436](https://github.com/alexhawat/mergeCraft/pull/1436)
+- Parse git-quoted paths with one shared diff parser by @alexhawat and @claude in [#1423](https://github.com/alexhawat/mergeCraft/pull/1423)
+- Close vacuous eval gates, harden live campaign by @alexhawat and @claude in [#1432](https://github.com/alexhawat/mergeCraft/pull/1432)
+- Tighten ledger marker parsing and row acceptance by @alexhawat and @claude in [#1401](https://github.com/alexhawat/mergeCraft/pull/1401)
+- Keep camelCase directory names in absolute paths readable by @sevn-one and @claude in [#1286](https://github.com/alexhawat/mergeCraft/pull/1286)
+- Keep analyzer ids and file names, bound redaction work by @alexhawat and @claude in [#1428](https://github.com/alexhawat/mergeCraft/pull/1428)
+- Scope TruffleHog URI canary; document PageIndex pilot by @sevn-one and @alexhawat in [#1418](https://github.com/alexhawat/mergeCraft/pull/1418)
+- Operator-side tracing and enterprise config on untrusted runs by @alexhawat and @claude in [#1402](https://github.com/alexhawat/mergeCraft/pull/1402)
+- Shared policy glob dialect and tighter fast-path triage by @alexhawat and @claude in [#1424](https://github.com/alexhawat/mergeCraft/pull/1424)
+- Carryover, ledger trust, review size, learnings, GitHub retries by @alexhawat and @claude in [#1425](https://github.com/alexhawat/mergeCraft/pull/1425)
+- Analyzer dedup, CI evidence identity and fingerprint stability by @alexhawat and @claude in [#1437](https://github.com/alexhawat/mergeCraft/pull/1437)
+- Gitignore init credentials, fail skipped reviews, disclose Jev by @alexhawat and @claude in [#1393](https://github.com/alexhawat/mergeCraft/pull/1393)
+- Permalink redaction, Craft changelog heading, trufflehog canaries, outcome FP check by @sevn-one and @claude in [#1287](https://github.com/alexhawat/mergeCraft/pull/1287)
+- Correctness and confinement fixes from the 2026-11-09 audit by @sevn-one, @claude and @alexhawat in [#1276](https://github.com/alexhawat/mergeCraft/pull/1276)
+- Resource-hygiene fixes from the 2026-11-09 audit (timeouts, leaks, reaping, sink redaction) by @sevn-one and @claude in [#1278](https://github.com/alexhawat/mergeCraft/pull/1278)
+- Harden git_fetch refspecs, Darwin seatbelt reads, native author permission, and sandbox tier advice by @sevn-one and @claude in [#1279](https://github.com/alexhawat/mergeCraft/pull/1279)
+- Close redaction and env leaks (F1, F14, F15, F12) by @sevn-one, @claude and @alexhawat in [#1280](https://github.com/alexhawat/mergeCraft/pull/1280)
+- Fail closed on config parse/duplicate keys, bind config hash to loaded files, harden jev/sandbox/git/issue-tool edges by @sevn-one, @claude and @alexhawat in [#1277](https://github.com/alexhawat/mergeCraft/pull/1277)
+
+### Changed
+
+- Drop unused package re-exports by @alexhawat in [#1431](https://github.com/alexhawat/mergeCraft/pull/1431)
+- Drop unused package re-exports by @alexhawat in [#1400](https://github.com/alexhawat/mergeCraft/pull/1400)
+
+### Docs
+
+#### Changelog
+
+- Fold in round 2 audit entries by @alexhawat and @claude in [#1444](https://github.com/alexhawat/mergeCraft/pull/1444)
+- Fold in unreleased audit entries by @alexhawat and @claude in [#1414](https://github.com/alexhawat/mergeCraft/pull/1414)
+
+#### Other
+
+- Onboarding pages, quickstart README, author-gate limit by @alexhawat and @claude in [#1434](https://github.com/alexhawat/mergeCraft/pull/1434)
+- Document the analyzer sandbox and move test plans by @alexhawat and @claude in [#1416](https://github.com/alexhawat/mergeCraft/pull/1416)
+- Move self-review and pin-cycle notes out of consumer docs by @alexhawat and @claude in [#1404](https://github.com/alexhawat/mergeCraft/pull/1404)
+- Truth pass for changelog, providers, env and threat model by @alexhawat and @claude in [#1396](https://github.com/alexhawat/mergeCraft/pull/1396)
+
+### Internal
+
+#### Deps
+
+- Bump sigstore/cosign-installer from 3.9.2 to 4.1.3 by @dependabot in [#1390](https://github.com/alexhawat/mergeCraft/pull/1390)
+- Bump logfire from 5.4.0 to 5.5.0 in the python-tracing group across 1 directory by @dependabot in [#1388](https://github.com/alexhawat/mergeCraft/pull/1388)
+- Bump the github-actions-patch-minor group across 1 directory with 4 updates by @dependabot in [#1389](https://github.com/alexhawat/mergeCraft/pull/1389)
+- Bump the agent-clis-patch-minor group in /docker/agent-clis with 4 updates by @dependabot in [#1387](https://github.com/alexhawat/mergeCraft/pull/1387)
+- Bump golang from `d9b6a1b` to `dc0963f` in /docker by @dependabot in [#1386](https://github.com/alexhawat/mergeCraft/pull/1386)
+- Bump re2js and markdownlint in /scripts by @alexhawat and @claude with @dependabot in [#1231](https://github.com/alexhawat/mergeCraft/pull/1231)
+- Update 19 Python packages and synchronize tool pins by @alexhawat with @dependabot in [#1142](https://github.com/alexhawat/mergeCraft/pull/1142)
+- Bump logfire from 5.2.0 to 5.4.0 in the python-tracing group across 1 directory by @alexhawat with @dependabot in [#1063](https://github.com/alexhawat/mergeCraft/pull/1063)
+- Bump js-yaml and markdownlint-cli in /scripts by @alexhawat with @dependabot in [#1208](https://github.com/alexhawat/mergeCraft/pull/1208)
+
+#### Other
+
+- Remove the dormant App approval workflow by @alexhawat and @claude in [#1415](https://github.com/alexhawat/mergeCraft/pull/1415)
+- Flatten the doctor table before matching a wrapped cell by @alexhawat and @web-flow in [#1450](https://github.com/alexhawat/mergeCraft/pull/1450)
+- Raise the review round cap for this repository by @alexhawat and @claude in [#1448](https://github.com/alexhawat/mergeCraft/pull/1448)
+- Merge 0.1.0a5 back by @alexhawat with @mergecraft-reviewer and @github-actions in [#1225](https://github.com/alexhawat/mergeCraft/pull/1225)
+- Make fan-out share-cap tests deterministic by @alexhawat and @claude in [#1442](https://github.com/alexhawat/mergeCraft/pull/1442)
+- Pin host probes in the root-orchestrator refusal test by @alexhawat and @claude in [#1438](https://github.com/alexhawat/mergeCraft/pull/1438)
+- Drop unused argv from run_live_integration.main by @alexhawat in [#1229](https://github.com/alexhawat/mergeCraft/pull/1229)
+- Add ruleset drift check against committed expectation by @alexhawat and @claude in [#1445](https://github.com/alexhawat/mergeCraft/pull/1445)
+- Add a nightly Quickstart smoke on a scratch repo by @alexhawat and @claude in [#1446](https://github.com/alexhawat/mergeCraft/pull/1446)
+- Ratchet coverage gates, list mutation survivors, add matrix by @alexhawat and @claude in [#1435](https://github.com/alexhawat/mergeCraft/pull/1435)
+- Real packet schema pin, drop structural source-text tests by @alexhawat and @claude in [#1427](https://github.com/alexhawat/mergeCraft/pull/1427)
+- Gate privileged proofs, align analyzers image, fix coverage wait by @alexhawat and @claude in [#1419](https://github.com/alexhawat/mergeCraft/pull/1419)
+- Refresh test durations and guard against staleness by @alexhawat and @claude in [#1417](https://github.com/alexhawat/mergeCraft/pull/1417)
+- Strict GitHub fake, empty network allow-lists by @alexhawat and @claude in [#1408](https://github.com/alexhawat/mergeCraft/pull/1408)
+- Stop cancelling main runs, surface shard failures by @alexhawat and @claude in [#1409](https://github.com/alexhawat/mergeCraft/pull/1409)
+- Synthetic repo and shorter sleeps in slow tests by @alexhawat and @claude in [#1410](https://github.com/alexhawat/mergeCraft/pull/1410)
+- Hermetic guards, timeout and warning policy by @alexhawat and @claude in [#1398](https://github.com/alexhawat/mergeCraft/pull/1398)
+- Build image once, publish base coverage, block on scanners by @alexhawat and @claude in [#1392](https://github.com/alexhawat/mergeCraft/pull/1392)
+
+### Other
+
+- Enforce finding lifecycle transitions and keep unresolved stale threads open for assessment by @alexhawat and @claude in [#1227](https://github.com/alexhawat/mergeCraft/pull/1227)
+- Drop unused package-level reliability re-exports by @alexhawat in [#1282](https://github.com/alexhawat/mergeCraft/pull/1282)
+- Make review execution and publication transitions explicit by @alexhawat in [#1228](https://github.com/alexhawat/mergeCraft/pull/1228)
+- Review image-only Action pins without an LLM by @alexhawat in [#1215](https://github.com/alexhawat/mergeCraft/pull/1215)
+
 ## [Unreleased]
 
 ### Breaking — action required
