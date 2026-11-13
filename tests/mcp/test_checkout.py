@@ -395,7 +395,7 @@ class _StubGitHub(StrictGitHubClient):
         repo_ref = {"full_name": f"{owner}/{repo}"}
         return {
             "head": {"ref": "feature", "sha": self._head_sha, "repo": repo_ref},
-            "base": {"ref": "base", "repo": repo_ref},
+            "base": {"ref": "base", "sha": "0" * 40, "repo": repo_ref},
             "title": "A pull request",
             "html_url": "https://x/1",
         }
