@@ -1241,8 +1241,8 @@ jobs:
     outputs:
       approval_verdict: ${{ steps.approval_verdict.outputs.approval_verdict }}
       approval_rung: ${{ steps.approval_verdict.outputs.approval_rung }}
-      # `ignore_paths` when the verdict is a neutral whose packet records that
-      # every changed file was ignored and no review ran; empty otherwise.
+      # A closed no-review reason from this run's neutral packet: ignore_paths
+      # or review_policy. Every other neutral remains a failed gate.
       approval_reason: ${{ steps.approval_verdict.outputs.approval_reason }}
       approval_ignored_count: ${{ steps.approval_verdict.outputs.approval_ignored_count }}
 
@@ -1561,6 +1561,7 @@ jobs:
         if: always()
         id: approval_verdict
         env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           OPENCODE_GO_PACKET_FILE: ${{ runner.temp }}/packet-opencode-go.json
           CODEX_PACKET_FILE: ${{ runner.temp }}/packet-codex.json
           CLAUDE_PACKET_FILE: ${{ runner.temp }}/packet-claude.json
@@ -1582,12 +1583,20 @@ jobs:
             # The orchestrator records a `skip` triage tier with the
             # `ignorePaths` recognizer only when every changed file matched the
             # ignore paths resolved from base configuration and no review ran.
-            # The approval gate passes that neutral, and no other.
+            # The approval gate passes this neutral or the explicit, head-bound
+            # reviewPolicy skip below. Other neutral outcomes still fail.
             if jq -e '.decision.verdict == "neutral" and .triage.tier == "skip" and .triage.recognizer == "ignorePaths"' \
               "${packet_file}" >/dev/null 2>&1; then
               reason="ignore_paths"
               ignored_count="$(jq -r '(.triage.reason // "") | (capture("all (?<n>[0-9]+) changed file") | .n) // empty' \
                 "${packet_file}" 2>/dev/null || true)"
+            fi
+            if jq -e --arg head "${HEAD_SHA:-}" '
+              $head != "" and .decision.verdict == "neutral"
+              and .triage.tier == "skip" and .triage.recognizer == "reviewPolicy"
+              and .reviewed_head_sha == $head
+            ' "${packet_file}" >/dev/null 2>&1; then
+              reason="review_policy"
             fi
           fi
           echo "approval verdict from rung=${rung:-none} verdict=${verdict:-none} reason=${reason:-none}"
@@ -1680,8 +1689,8 @@ jobs:
           APPROVAL_VERDICT: ${{ needs.review-backstop.outputs.approval_verdict }}
           APPROVAL_RUNG: ${{ needs.review-backstop.outputs.approval_rung }}
           # Set by the verdict recorder from the same packet, never from PR
-          # content: `ignore_paths` only when that neutral means every changed
-          # file was ignored and no review ran.
+          # content: ignore_paths or review_policy only for explicit neutral
+          # no-review packets. The current head/run check must corroborate it.
           APPROVAL_REASON: ${{ needs.review-backstop.outputs.approval_reason }}
           APPROVAL_IGNORED_COUNT: ${{ needs.review-backstop.outputs.approval_ignored_count }}
           EXPECTED_APP_ID: ${{ secrets.MERGECRAFT_APP_ID }}
@@ -1746,7 +1755,8 @@ jobs:
           # Every changed file is ignored by the review ignore paths (resolved
           # from base configuration), so no review ran and the product left
           # approval to a human. Reached only after the neutral check above was
-          # attributed to this run and head; every other neutral still fails.
+          # attributed to this run and head. The only other allowed neutral is
+          # the explicit base-side review policy skip below.
           if [ "${verdict}" = "neutral" ] && [ "${APPROVAL_REASON:-}" = "ignore_paths" ]; then
             files="all ${APPROVAL_IGNORED_COUNT:-} changed files"
             [ -n "${APPROVAL_IGNORED_COUNT:-}" ] || files="all changed files"
@@ -1755,6 +1765,15 @@ jobs:
               echo "### mergecraft review: not reviewed"
               echo ""
               echo "Nothing to review: ${files} on ${HEAD_SHA} are ignored by the review ignore paths (\`review.ignorePaths\`, the \`ignore_paths\` input and the built-in defaults, read from base configuration). No review ran; this check passes without one, and approval is left to a human."
+            } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            exit 0
+          fi
+          if [ "${verdict}" = "neutral" ] && [ "${APPROVAL_REASON:-}" = "review_policy" ]; then
+            echo "::notice title=mergecraft not reviewed::automatic review skipped by base-side review policy (rung=${rung}); approval remains with a human."
+            {
+              echo "### mergecraft review: not reviewed"
+              echo ""
+              echo "Automatic review on ${HEAD_SHA} was skipped by the base-side review policy. This run's evidence packet and attributable neutral check agree. No approval was granted."
             } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
             exit 0
           fi

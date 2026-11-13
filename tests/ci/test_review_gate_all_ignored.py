@@ -1,4 +1,4 @@
-"""The required review gate passes an all-ignored pull request, and no other neutral.
+"""The required review gate passes recognized neutral outcomes for deliberate skips.
 
 A pull request whose every changed file matches the review ignore paths runs no LLM
 review: the orchestrator records a ``skip`` triage tier with the ``ignorePaths``
@@ -6,7 +6,8 @@ recognizer and publishes ``mergecraft-approval=neutral`` ("nothing to review"). 
 ``mergecraft review`` gate used to fail every non-success verdict, so a changelog-only
 or lockfile-only pull request could never pass the required check.
 
-The gate now passes exactly that neutral. It learns the reason from this run's own
+The gate passes that neutral and an explicit base-side review policy skip.
+It learns the reason from this run's own
 evidence packet (the self-workflow's verdict recorder turns it into the
 ``approval_reason`` job output; the consumer templates read it from the action's
 ``evidence_packet`` output), never from PR text, labels or a check-run, and only after
@@ -288,6 +289,52 @@ def test_self_gate(case_id: str, tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    ("case", "passes"),
+    [
+        pytest.param("policy", True, id="head-bound-policy"),
+        pytest.param("missing_packet", False, id="missing-packet"),
+        pytest.param("unknown_recognizer", False, id="unknown-recognizer"),
+        pytest.param("wrong_tier", False, id="wrong-tier"),
+        pytest.param("stale_packet_head", False, id="stale-packet-head"),
+        pytest.param("missing_check", False, id="missing-check"),
+        pytest.param("wrong_check_head", False, id="wrong-check-head"),
+        pytest.param("wrong_attempt", False, id="wrong-attempt"),
+        pytest.param("wrong_publisher", False, id="wrong-publisher"),
+        pytest.param("wrong_conclusion", False, id="wrong-conclusion"),
+    ],
+)
+def test_self_gate_policy_skip_requires_bound_packet_and_check(
+    tmp_path: Path, case: str, *, passes: bool
+) -> None:
+    packet = _packet("neutral", tier="skip", recognizer="reviewPolicy")
+    packet["reviewed_head_sha"] = HEAD_SHA
+    check = _check("neutral")
+    if case == "unknown_recognizer":
+        packet["triage"]["recognizer"] = "unrecognized"
+    elif case == "wrong_tier":
+        packet["triage"]["tier"] = "full"
+    elif case == "stale_packet_head":
+        packet["reviewed_head_sha"] = "c" * 40
+    elif case == "wrong_check_head":
+        check["head_sha"] = "c" * 40
+    elif case == "wrong_attempt":
+        check["external_id"] = f"{RUN_ID}:1"
+    elif case == "wrong_publisher":
+        check["app"] = {"id": 999, "slug": "unrelated"}
+    elif case == "wrong_conclusion":
+        check["conclusion"] = "failure"
+
+    packets = {} if case == "missing_packet" else {"opencode-go": packet}
+    recorded = _record_self(tmp_path, packets)
+    checks = [] if case == "missing_check" else [check]
+    completed, summary = _gate_self(tmp_path, recorded, checks)
+    assert (completed.returncode == 0) is passes, completed.stdout + completed.stderr
+    if passes:
+        assert recorded["approval_reason"] == "review_policy"
+        assert "No approval was granted." in summary
+
+
+@pytest.mark.parametrize(
     "relative", [_HARDENED_TPL, _HARDENED, _DOGFOOD], ids=["tpl", "hardened", "dogfood"]
 )
 @pytest.mark.parametrize("case_id", _GATE_IDS, ids=_GATE_IDS)
@@ -391,6 +438,8 @@ def test_recorder_exports_the_reason_from_the_last_rungs_packet(
 
 def test_reason_crosses_jobs_as_review_backstop_outputs() -> None:
     """A job output can only be written by this run, which binds the reason to it."""
+    recorder = _step(_SELF, "review-backstop", step_id="approval_verdict")
+    assert recorder["env"]["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
     doc = _load(_SELF)
     outputs = job(doc, "review-backstop").get("outputs") or {}
     assert "steps.approval_verdict.outputs.approval_reason" in outputs["approval_reason"]
