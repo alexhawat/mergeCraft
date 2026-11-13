@@ -427,8 +427,8 @@ jobs:
       # ignored by the review ignore paths passes with a notice: there was
       # nothing to review, and approval is left to a human.
       #
-      # Fail closed on an empty verdict, an unattributable check, or a
-      # disagreement. Fail open only when there is neither a verdict nor a
+      # Fail closed on a failed review step, an empty verdict, an
+      # unattributable check, or a disagreement. Fail open only when there is neither a verdict nor a
       # mergecraft-approval check at all: the required-check pattern relies on a
       # posted check, so the branch-protection rule itself blocks that merge.
       - name: Fail when mergeCraft would not approve
@@ -437,6 +437,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEW_STEP_OUTCOME: ${{ steps.mergecraft.outcome }}
           # Only the verdict reaches the step, extracted before it starts: one
           # environment variable holds at most 128 KiB, and a large PR's whole
           # packet here stopped the gate from starting at all.
@@ -444,8 +445,9 @@ jobs:
           # `ignorePaths` only when the same packet records a `skip` triage
           # tier because every changed file matched the review ignore paths
           # (read from base configuration) and no review ran. The gate passes
-          # that neutral as "not reviewed"; every other neutral still fails.
+          # that neutral and an attributable policy skip as "not reviewed".
           REVIEW_SKIP_RECOGNIZER: ${{ steps.mergecraft.outputs.evidence_packet != '' && fromJSON(steps.mergecraft.outputs.evidence_packet).triage.tier == 'skip' && fromJSON(steps.mergecraft.outputs.evidence_packet).triage.recognizer || '' }}
+          REVIEWED_HEAD_SHA: ${{ steps.mergecraft.outputs.evidence_packet != '' && fromJSON(steps.mergecraft.outputs.evidence_packet).reviewed_head_sha || '' }}
           REVIEW_SKIP_REASON: ${{ steps.mergecraft.outputs.evidence_packet != '' && fromJSON(steps.mergecraft.outputs.evidence_packet).triage.reason || '' }}
           # Set your mergeCraft App id here when the action authenticates as a
           # GitHub App, so the gate accepts that App's approval check. Left
@@ -453,6 +455,10 @@ jobs:
           EXPECTED_APP_ID: ''
         run: |
           set -euo pipefail
+          if [ "${REVIEW_STEP_OUTCOME:-}" = "failure" ]; then
+            echo "::error title=mergeCraft review incomplete::The review step failed. Failing closed."
+            exit 1
+          fi
           verdict="${REVIEW_VERDICT:-}"
 
           # Name-filtered and paged so a large CI matrix cannot push the check
@@ -467,6 +473,10 @@ jobs:
             sleep 5
           done
           if [ -z "${queried}" ]; then
+            if [ "${REVIEW_SKIP_RECOGNIZER:-}" = "reviewPolicy" ]; then
+              echo "::error title=mergeCraft review incomplete::Could not corroborate the review-policy skip. Failing closed."
+              exit 1
+            fi
             echo "::warning title=mergeCraft approval unknown::Could not query check-runs for ${HEAD_SHA} after retries. Failing open."
             exit 0
           fi
@@ -505,6 +515,12 @@ jobs:
           if [ "${check}" != "${verdict}" ]; then
             echo "::error title=mergeCraft requested changes::mergecraft-approval (${check}) disagrees with the review verdict (${verdict}). Failing closed."
             exit 1
+          fi
+          if [ "${verdict}" = "neutral" ] && [ "${REVIEW_SKIP_RECOGNIZER:-}" = "reviewPolicy" ] &&
+             [ -n "${HEAD_SHA}" ] && [ "${REVIEWED_HEAD_SHA:-}" = "${HEAD_SHA}" ]; then
+            echo "::notice title=mergeCraft not reviewed::Review skipped by repository policy."
+            echo "### mergeCraft review: not reviewed (repository policy)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            exit 0
           fi
           # Every changed file is ignored by the review ignore paths, so no
           # review ran. Reached only after the neutral check was attributed to

@@ -2338,6 +2338,8 @@ def _policy_tool_context(ctx: RunContext) -> ToolContext:
         tmpdir=ctx.tmpdir,
         trust_tier=ctx.trust_tier,
         authority_trust=ctx.authority_trust,
+        run_id=int(os.environ["GITHUB_RUN_ID"]) if os.environ.get("GITHUB_RUN_ID") else None,
+        job_id=os.environ.get("GITHUB_JOB"),
         gh_event=ctx.gh_event,
     )
 
@@ -2431,21 +2433,72 @@ async def _automatic_review_policy(
 
 
 async def _publish_policy_skip(ctx: RunContext, reason: str) -> MainResult:
-    """Complete an intentional Action no-op with neutral checks and no verdict."""
-    assert ctx.tool_context is not None
+    """Publish a head-bound record of a deliberate no-op and neutral checks."""
+    tool_context = ctx.tool_context
+    assert tool_context is not None
     from mergecraft.config.trust_policy import bound_head_sha
     from mergecraft.mcp.tool_state import primary_repo_state
 
     head_sha = bound_head_sha(
         ctx.gh_event or {}, event_name=os.environ.get("GITHUB_EVENT_NAME", "")
     )
-    if head_sha:
-        primary_repo_state(ctx.tool_context.tool_state).checkout_sha = head_sha
+    if not head_sha:
+        return MainResult(
+            success=False,
+            error="Cannot record a review policy skip without a bound PR head.",
+            outcome=RunOutcome.inconclusive,
+        )
+    primary_repo_state(tool_context.tool_state).checkout_sha = head_sha
+    # Unavailable draft-lite work stays inconclusive and cannot use the
+    # workflow exception for an explicit policy decision to run no review.
+    triage = (
+        TriageDecision(tier="skip", recognizer="reviewPolicy", reason=reason)
+        if ctx.automatic_review == "skip"
+        else TriageDecision(tier="lite", recognizer=None, reason=reason)
+    )
+    tool_context.tool_state.triage = triage
+
+    sink_error = _scan_sinks_after_run(ctx)
+    packet_path = None
+    packet = None
+    if sink_error is None:
+        packet = resolve_prepared_run_packet(tool_context, run_succeeded=False)
+        if (
+            packet is not None
+            and packet.decision is not None
+            and packet.decision.verdict == "neutral"
+            and packet.reviewed_head_sha == head_sha
+        ):
+            packet_path = await asyncio.to_thread(emit_run_packet, tool_context, packet=packet)
+            if packet_path is not None:
+                sink_error = _scan_sinks_after_run(ctx, extra_paths=[packet_path])
+
+    if sink_error is not None or packet_path is None:
+        error = sink_error or "Could not record the review policy skip in the evidence packet."
+        await report_status_checks(
+            tool_context,
+            run_succeeded=False,
+            conclusion="failure",
+            failure_reason=error,
+            approval_failure_reason=sink_error,
+        )
+        return MainResult(success=False, error=error, outcome=RunOutcome.failed)
+
     await report_status_checks(
-        ctx.tool_context, run_succeeded=True, conclusion="neutral", failure_reason=reason
+        tool_context,
+        run_succeeded=False,
+        conclusion="neutral",
+        failure_reason=reason,
+        packet=packet,
     )
     logger.info("» {}", reason)
-    return MainResult(success=True, output=reason, result=reason, outcome=RunOutcome.inconclusive)
+    return MainResult(
+        success=True,
+        output=reason,
+        result=reason,
+        outcome=RunOutcome.inconclusive,
+        evidence_packet_path=str(packet_path),
+    )
 
 
 async def _run_draft_lite(ctx: RunContext) -> SkipAgentReview | LiteAgentReview:
@@ -2453,6 +2506,14 @@ async def _run_draft_lite(ctx: RunContext) -> SkipAgentReview | LiteAgentReview:
     assert ctx.draft_lite_settings is not None
     assert ctx.tool_context is not None
     assert ctx.tool_state is not None
+    settings = ctx.draft_lite_settings
+    lite = settings.review.fast_path.lite
+    unavailable = SkipAgentReview(
+        reason="Draft lite review skipped: a capped call was unavailable."
+    )
+    if not lite.enabled or lite_model_slug(settings) is None:
+        return unavailable
+
     from mergecraft.config.trust_policy import bound_head_sha
     from mergecraft.fast_path import _read_diff
     from mergecraft.mcp.tool_state import primary_repo_state
@@ -2493,16 +2554,12 @@ async def _run_draft_lite(ctx: RunContext) -> SkipAgentReview | LiteAgentReview:
         tier="lite",
         recognizer=None,
         reason=ctx.automatic_review_reason,
-        token_cap=ctx.draft_lite_settings.review.fast_path.lite.token_cap,
+        token_cap=lite.token_cap,
     )
     primary_repo_state(ctx.tool_state).checkout_sha = head_sha
     ctx.tool_state.triage = decision
-    result = await _run_lite_tier(
-        ctx, decision, diff_text=diff, draft_settings=ctx.draft_lite_settings
-    )
-    return result or SkipAgentReview(
-        reason="Draft lite review skipped: a capped call was unavailable."
-    )
+    result = await _run_lite_tier(ctx, decision, diff_text=diff, draft_settings=settings)
+    return result or unavailable
 
 
 async def _triage_gate(ctx: RunContext) -> SkipAgentReview | LiteAgentReview | None:

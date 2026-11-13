@@ -214,6 +214,7 @@ async def run_main_for_test(
     setup_script_delay_s: float = 0.0,
     packet_path: Path | None = None,
     packet_payload: str | None = None,
+    real_packet_emission: bool = False,
     cleanup_tmpdir: bool = True,
     prompt: str = "review the diff",
     real_prompt_input: bool = False,
@@ -229,6 +230,7 @@ async def run_main_for_test(
     skip (``skipped=True``, ``status="completed"``) — ``shell: disabled`` must
     not map that skip to ``RunOutcome.inconclusive``. ``cleanup_tmpdir=False`` leaves the run's
     temp dir alone so cleanup-contract tests can observe what ``main()`` did.
+    ``real_packet_emission=True`` keeps the actual packet writer and runner-temp path.
     ``real_prompt_input=True`` leaves the production ``resolve_prompt_input`` in
     place, so a test can exercise the real Action ordering; set ``INPUT_PROMPT``
     (or ``INPUT_PROMPT_FILE``) in ``env`` instead of relying on ``prompt``.
@@ -496,7 +498,8 @@ async def run_main_for_test(
             packet_path.write_text(packet_payload, encoding="utf-8")
         return packet_path
 
-    monkeypatch.setattr(main_mod, "emit_run_packet", _fake_emit_packet)
+    if not real_packet_emission:
+        monkeypatch.setattr(main_mod, "emit_run_packet", _fake_emit_packet)
 
     import mergecraft.tracing.tracer as tracer_mod
 

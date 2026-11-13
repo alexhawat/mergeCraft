@@ -389,10 +389,11 @@ review:
   capped call is unavailable, the Action skips the draft without escalating.
 - `review.triggers.frequency` accepts `everyPush`, `oncePerPr`, and
   `onRequest`. With `oncePerPr`, a push is skipped only after a verified
-  mergeCraft review has completed, including a formal review published as a
-  comment with a successful deterministic run record. Opening, reopening, and
-  marking the PR ready still trigger a review if the workflow sends those
-  events. Missing or unverifiable review history allows a review.
+  mergeCraft review has completed. Formal approvals and requests for changes
+  count as completed. Reviews posted as comments require a successful
+  deterministic run record. Opening, reopening, and marking the PR ready
+  still trigger a review if the workflow sends those events. Missing or
+  unverifiable review history allows a review.
   `onRequest` suppresses automatic PR reviews, including ready events.
 
 The Action reads these settings from the base checkout for
@@ -403,5 +404,8 @@ bypass automatic draft and frequency policy. Comment triggers remain opt-in.
 
 Policy applies when the workflow invokes the Action. The hardened example
 filters drafts before invoking it. To use lite or full draft reviews with
-that workflow, adjust its draft filter and account for the approval gate's
-handling of neutral results.
+that workflow, adjust its draft filter. An explicit policy skip records a
+neutral evidence packet for the event's head and an attributable check. The
+hardened workflow gate reports that result as not reviewed and leaves approval
+to a human. An unavailable lite review remains inconclusive and does not
+qualify for the policy skip exception.

@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
-from typing import TYPE_CHECKING, Any
+import json
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from mergecraft.config import RepoSettings
 from tests.support.run_main_harness import FakeGitHubClient, run_main_for_test
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _event(*, action: str, draft: bool) -> dict[str, Any]:
@@ -38,8 +38,10 @@ async def test_drafts_default_to_neutral_action_noop(
     record = await run_main_for_test(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
+        real_packet_emission=True,
         event_name="pull_request",
         event_payload=_event(action=action, draft=True),
+        env={"GITHUB_RUN_ID": "501", "GITHUB_RUN_ATTEMPT": "2", "GITHUB_JOB": "review"},
         capture_status_checks=True,
     )
     assert record.result is not None
@@ -52,6 +54,62 @@ async def test_drafts_default_to_neutral_action_noop(
         "mergecraft": "neutral",
         "mergecraft-approval": "neutral",
     }
+    for item in record.status_check_runs:
+        assert item["external_id"] == "501:2"
+        assert item["details_url"].endswith("/acme/demo/actions/runs/501")
+
+
+async def test_policy_skip_fails_closed_when_packet_cannot_be_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    blocked_directory = tmp_path / "blocked"
+    blocked_directory.write_text("not a directory", encoding="utf-8")
+    record = await run_main_for_test(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        real_packet_emission=True,
+        event_name="pull_request",
+        event_payload=_event(action="opened", draft=True),
+        env={"MERGECRAFT_EVIDENCE_DIR": str(blocked_directory)},
+        capture_status_checks=True,
+    )
+    assert record.result is not None
+    assert not record.result.success
+    assert record.result.evidence_packet_path is None
+    assert record.result.error == "Could not record the review policy skip in the evidence packet."
+    assert not record.agent_runs
+    assert {item["name"]: item["conclusion"] for item in record.status_check_runs} == {
+        "mergecraft": "failure",
+        "mergecraft-approval": "neutral",
+    }
+
+
+async def test_policy_skip_removes_packet_that_exposes_credential_material(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    canary = "test-provider-canary-policy-skip-2026"
+    packet_path = tmp_path / "runner-temp" / "packet-opencode-go.json"
+    record = await run_main_for_test(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        event_name="pull_request",
+        event_payload=_event(action="opened", draft=True),
+        env={"ANTHROPIC_API_KEY": canary},
+        packet_path=packet_path,
+        packet_payload=canary,
+        capture_status_checks=True,
+    )
+    assert record.result is not None
+    assert not record.result.success
+    assert record.result.evidence_packet_path is None
+    assert record.result.error is not None
+    assert "credential material found in local sink" in record.result.error
+    assert canary not in record.result.error
+    assert not packet_path.exists()
+    assert {item["name"]: item["conclusion"] for item in record.status_check_runs} == {
+        "mergecraft": "failure",
+        "mergecraft-approval": "failure",
+    }
 
 
 async def test_ready_for_review_runs_normal_agent(
@@ -60,6 +118,7 @@ async def test_ready_for_review_runs_normal_agent(
     record = await run_main_for_test(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
+        real_packet_emission=True,
         event_name="pull_request",
         event_payload=_event(action="ready_for_review", draft=False),
     )
@@ -85,6 +144,7 @@ async def test_draft_overrides_only_apply_from_operator_settings(
     record = await run_main_for_test(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
+        real_packet_emission=True,
         settings=settings,
         event_name=event_name,
         event_payload=_event(action="opened", draft=True),
@@ -120,6 +180,7 @@ async def test_native_review_reads_policy_at_base_sha(
     record = await run_main_for_test(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
+        real_packet_emission=True,
         settings=RepoSettings.model_validate({"review": {"drafts": "skip"}}),
         event_name="pull_request",
         event_payload=_event(action="opened", draft=True),
@@ -138,6 +199,9 @@ async def test_native_review_reads_policy_at_base_sha(
         pytest.param("everyPush", "synchronize", "approved", True, id="every-push"),
         pytest.param("oncePerPr", "synchronize", "approved", False, id="once-already-reviewed"),
         pytest.param("oncePerPr", "synchronize", "none", True, id="once-no-reviewed-history"),
+        pytest.param(
+            "oncePerPr", "synchronize", "formal-changes", False, id="once-formal-changes-requested"
+        ),
         pytest.param("oncePerPr", "ready_for_review", "approved", True, id="once-ready"),
         pytest.param("oncePerPr", "synchronize", "commented", False, id="once-completed-comment"),
         pytest.param(
@@ -165,7 +229,7 @@ async def test_frequency_uses_verified_formal_review_history(
 
     from mergecraft.findings.ledger import REVIEW_BODY_MARKER, render_deterministic_review_block
 
-    request = prior_review == "request-changes"
+    request = prior_review in {"request-changes", "formal-changes"}
     outcome = (
         "failed"
         if request
@@ -204,9 +268,10 @@ async def test_frequency_uses_verified_formal_review_history(
     ) -> list[dict[str, Any]]:
         if prior_review == "none":
             return []
+        formal_states = {"approved": "APPROVED", "formal-changes": "CHANGES_REQUESTED"}
         return [
             {
-                "state": "APPROVED" if prior_review == "approved" else "COMMENTED",
+                "state": formal_states.get(prior_review, "COMMENTED"),
                 "commit_id": "3" * 40,
                 "body": f"{body}\n{REVIEW_BODY_MARKER}\n*via mergecraft*",
                 "user": {
@@ -225,6 +290,7 @@ async def test_frequency_uses_verified_formal_review_history(
     record = await run_main_for_test(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
+        real_packet_emission=True,
         settings=RepoSettings.model_validate({"review": {"triggers": {"frequency": frequency}}}),
         event_name="pull_request_target",
         event_payload=_event(action=action, draft=False),
@@ -290,6 +356,7 @@ async def test_draft_lite_uses_base_provider_settings_without_full_dispatch(
     record = await run_main_for_test(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
+        real_packet_emission=True,
         event_name="pull_request",
         event_payload=_event(action="opened", draft=True),
         settings=RepoSettings.model_validate(
@@ -309,6 +376,48 @@ async def test_draft_lite_uses_base_provider_settings_without_full_dispatch(
         assert calls[0]["decision"].token_cap == 8_000
         assert "+new" in calls[0]["diff_text"]
     assert {run["conclusion"] for run in record.status_check_runs} == {"neutral"}
+    assert record.result.evidence_packet_path is not None
+    packet_path = Path(record.result.evidence_packet_path)
+    packet = json.loads(await asyncio.to_thread(packet_path.read_text, encoding="utf-8"))
+    assert packet["triage"]["tier"] == "lite"
+    assert packet["triage"]["recognizer"] is None
+
+
+@pytest.mark.parametrize(
+    "lite", [{"enabled": False}, {"enabled": True}], ids=["disabled", "missing-model"]
+)
+async def test_unavailable_draft_lite_avoids_revision_and_files_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lite: dict[str, bool]
+) -> None:
+    reads: list[str] = []
+
+    async def get_pull(_self: FakeGitHubClient, *_args: Any) -> dict[str, Any]:
+        reads.append("revision")
+        return _event(action="opened", draft=True)["pull_request"]
+
+    async def get(_self: FakeGitHubClient, path: str, **_kwargs: Any) -> Any:
+        if path.endswith("/files"):
+            reads.append("files")
+            return []
+        return {}
+
+    monkeypatch.setattr(FakeGitHubClient, "get_pull", get_pull, raising=False)
+    monkeypatch.setattr(FakeGitHubClient, "get", get)
+    record = await run_main_for_test(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        real_packet_emission=True,
+        event_name="pull_request_target",
+        event_payload=_event(action="opened", draft=True),
+        settings=RepoSettings.model_validate(
+            {"review": {"drafts": "lite", "fastPath": {"lite": lite}}}
+        ),
+    )
+    assert record.result is not None
+    assert record.result.success
+    assert record.result.outcome == "inconclusive"
+    assert not record.agent_runs
+    assert reads == []
 
 
 async def test_gha_draft_policy_noop_leaves_the_action_step_green(
@@ -328,6 +437,7 @@ async def test_gha_draft_policy_noop_leaves_the_action_step_green(
             record = await run_main_for_test(
                 tmp_path=work,
                 monkeypatch=scoped,
+                real_packet_emission=True,
                 event_name="pull_request",
                 event_payload=_event(action="opened", draft=True),
             )
@@ -338,8 +448,18 @@ async def test_gha_draft_policy_noop_leaves_the_action_step_green(
     monkeypatch.setattr(main_module, "main", run_with_boundaries)
     await gha_cmd._run_main()
 
-    assert "failover_eligible=false" in output.read_text()
-    assert "result=Draft pull request;" in output.read_text()
+    lines = output.read_text().splitlines()
+    assert "failover_eligible=false" in lines
+    assert any(line.startswith("result=Draft pull request;") for line in lines)
+    headers = [line for line in lines if line.startswith("evidence_packet<<")]
+    assert len(headers) == 1
+    delimiter = headers[0].partition("<<")[2]
+    packet = json.loads("\n".join(lines[lines.index(headers[0]) + 1 : lines.index(delimiter)]))
+    assert packet["decision"]["verdict"] == "neutral"
+    assert packet["triage"]["tier"] == "skip"
+    assert packet["triage"]["recognizer"] == "reviewPolicy"
+    assert packet["reviewed_head_sha"] == "1" * 40
+    assert packet["decision"]["action"] == "require_human_review"
 
 
 async def test_unavailable_base_does_not_let_head_disable_ready_reviews(
@@ -358,6 +478,7 @@ async def test_unavailable_base_does_not_let_head_disable_ready_reviews(
     record = await run_main_for_test(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
+        real_packet_emission=True,
         event_name="pull_request",
         event_payload=_event(action="ready_for_review", draft=False),
         settings=RepoSettings.model_validate({"review": {"triggers": {"frequency": "onRequest"}}}),
@@ -373,6 +494,7 @@ async def test_draft_skip_still_rejects_invalid_timeout(
     record = await run_main_for_test(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
+        real_packet_emission=True,
         event_name="pull_request",
         event_payload=_event(action="opened", draft=True),
         env={"INPUT_TIMEOUT": "not-a-duration"},
@@ -390,6 +512,7 @@ async def test_authorized_dispatch_bypasses_automatic_policy(
     record = await run_main_for_test(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
+        real_packet_emission=True,
         event_name="workflow_dispatch",
         event_payload=_event(action="opened", draft=True),
         settings=RepoSettings.model_validate({"review": {"triggers": {"frequency": "onRequest"}}}),

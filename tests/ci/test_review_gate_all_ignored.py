@@ -323,6 +323,30 @@ def test_consumer_gate_names_the_reason_and_count_as_a_notice(
     assert "not reviewed" in summary
 
 
+@pytest.mark.parametrize("api_available", [True, False], ids=["missing-check", "api-error"])
+@pytest.mark.parametrize(
+    ("outcome", "passes"), [("failure", False), ("success", True)], ids=["failed", "successful"]
+)
+def test_hardened_gate_honors_review_step_outcome(
+    tmp_path: Path, api_available: bool, outcome: str, passes: bool
+) -> None:
+    step = _step(_HARDENED_TPL, "review", name=_GATE_STEP)
+    assert step["env"]["REVIEW_STEP_OUTCOME"] == "${{ steps.mergecraft.outcome }}"
+    gh_bin = _gh_mock(tmp_path, [])
+    if not api_available:
+        (gh_bin / "gh").write_text("#!/bin/bash\nexit 1\n", encoding="utf-8")
+        sleep = gh_bin / "sleep"
+        sleep.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+        sleep.chmod(0o755)
+    completed, _, _ = _run_script(
+        str(step["run"]), tmp_path, {"REVIEW_STEP_OUTCOME": outcome}, path_prefix=gh_bin
+    )
+    assert (completed.returncode == 0) is passes, completed.stdout + completed.stderr
+    if not passes:
+        assert "review step failed" in completed.stdout
+        assert "check-runs query failed" not in completed.stderr
+
+
 def test_ordinary_neutral_keeps_todays_error(tmp_path: Path) -> None:
     recorded = _record_self(tmp_path, {"codex": _packet("neutral")})
     completed, _ = _gate_self(tmp_path, recorded, [_check("neutral")])
@@ -426,6 +450,70 @@ def test_codex_fallback_is_not_spent_on_an_all_ignored_neutral(tmp_path: Path) -
     assert completed.returncode == 0, completed.stderr
     assert outputs.get("need") == "false"
     assert "ignorePaths" in completed.stdout
+
+
+@pytest.mark.parametrize(
+    ("head", "conclusion", "external_id", "need"),
+    [
+        (HEAD_SHA, "neutral", f"{RUN_ID}:{RUN_ATTEMPT}", "false"),
+        ("stale-head", "neutral", f"{RUN_ID}:{RUN_ATTEMPT}", "true"),
+        (HEAD_SHA, "neutral", f"{RUN_ID}:1", "true"),
+        (HEAD_SHA, "failure", f"{RUN_ID}:{RUN_ATTEMPT}", "true"),
+    ],
+    ids=["attributed", "stale-packet-head", "stale-check-attempt", "wrong-check-conclusion"],
+)
+def test_codex_policy_skip_requires_current_packet_and_neutral_check(
+    tmp_path: Path, head: str, conclusion: str, external_id: str, need: str
+) -> None:
+    root = stage_trusted_copy(tmp_path)
+    packet = _packet("neutral", tier="skip", recognizer="reviewPolicy")
+    packet["reviewed_head_sha"] = head
+    outputs, _ = run_decide_script(
+        tmp_path,
+        root / "scripts/decide_codex_fallback.sh",
+        env={"OPENCODE_GO_OUTCOME": "success", "OPENCODE_GO_PACKET": json.dumps(packet)},
+        gh_mock_dir=write_gh_mock(tmp_path, conclusion=conclusion, external_id=external_id),
+        cwd=root,
+    )
+    assert outputs["need"] == need
+
+
+@pytest.mark.parametrize("packet", ["", "{not-json"], ids=["missing", "malformed"])
+def test_codex_cannot_infer_policy_skip_without_a_typed_packet(tmp_path: Path, packet: str) -> None:
+    root = stage_trusted_copy(tmp_path)
+    outputs, _ = run_decide_script(
+        tmp_path,
+        root / "scripts/decide_codex_fallback.sh",
+        env={"OPENCODE_GO_OUTCOME": "success", "OPENCODE_GO_PACKET": packet},
+        gh_mock_dir=write_gh_mock(tmp_path, conclusion="neutral"),
+        cwd=root,
+    )
+    assert outputs["need"] == "true"
+
+
+@pytest.mark.parametrize(
+    ("head", "checks", "passes"),
+    [
+        (HEAD_SHA, (_check("neutral"),), True),
+        ("stale-head", (_check("neutral"),), False),
+        (HEAD_SHA, (_check("neutral", external_id=f"{RUN_ID}:1"),), False),
+        (HEAD_SHA, (), False),
+        (HEAD_SHA, (_check("neutral", app={"id": 7, "slug": "foreign"}),), False),
+    ],
+    ids=["attributed", "stale-packet-head", "stale-check-attempt", "no-check", "wrong-publisher"],
+)
+def test_hardened_policy_skip_requires_current_packet_and_neutral_check(
+    tmp_path: Path, head: str, checks: tuple[dict[str, Any], ...], passes: bool
+) -> None:
+    step = _step(_HARDENED_TPL, "review", name=_GATE_STEP)
+    env = _packet_env(_packet("neutral", tier="skip", recognizer="reviewPolicy"))
+    env["REVIEWED_HEAD_SHA"] = head
+    completed, _, summary = _run_script(
+        str(step["run"]), tmp_path, env, path_prefix=_gh_mock(tmp_path, list(checks))
+    )
+    assert (completed.returncode == 0) is passes
+    if passes:
+        assert "not reviewed" in summary.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
