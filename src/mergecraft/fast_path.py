@@ -33,6 +33,7 @@ from mergecraft.classify.triage import (
     triage_diff,
     trusted_check_apps,
 )
+from mergecraft.scm.pull_files import list_pull_files
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Collection
@@ -92,35 +93,39 @@ def _section_header(entry: dict[str, Any], name: str) -> str:
 
 
 async def _read_diff(
-    scm: ScmProvider, owner: str, repo: str, pull_number: int
+    scm: ScmProvider, owner: str, repo: str, pull_number: int, *, head_sha: str | None = None
 ) -> tuple[str, list[str]]:
     """Build the unified diff from the files API; refuse a truncated or patchless read."""
-    endpoint = f"/repos/{owner}/{repo}/pulls/{pull_number}/files"
+    listing = await list_pull_files(
+        scm,
+        owner,
+        repo,
+        pull_number,
+        head_sha=head_sha,
+        page_size=_FILES_PAGE_SIZE,
+        max_pages=_FILES_MAX_PAGES,
+    )
     parts: list[str] = []
     paths: list[str] = []
-    for page in range(1, _FILES_MAX_PAGES + 1):
-        batch = list(
-            await scm.get(endpoint, params={"per_page": _FILES_PAGE_SIZE, "page": page}) or []
-        )
-        for entry in batch:
-            name = str(entry.get("filename") or "").strip()
-            if not name:
-                continue
-            patch = entry.get("patch")
-            if not patch and _line_changes(entry) > 0:
-                msg = f"{name} has line changes but GitHub sent no patch for it"
-                raise TriageUnavailableError(msg)
-            paths.append(name)
-            parts.append(_section_header(entry, name))
-            if patch:
-                parts.append(f"{patch}\n")
-            # Include the source in _read_head_files' all-prose suffix gate.
-            # Recognizers read both names from the rebuilt diff header above.
-            previous = _previous_filename(entry, name)
-            if previous:
-                paths.append(previous)
-        if len(batch) < _FILES_PAGE_SIZE:
-            return "".join(parts), list(dict.fromkeys(paths))
+    for entry in listing.items:
+        name = str(entry.get("filename") or "").strip()
+        if not name:
+            continue
+        patch = entry.get("patch")
+        if not patch and _line_changes(entry) > 0:
+            msg = f"{name} has line changes but GitHub sent no patch for it"
+            raise TriageUnavailableError(msg)
+        paths.append(name)
+        parts.append(_section_header(entry, name))
+        if patch:
+            parts.append(f"{patch}\n")
+        # Include the source in _read_head_files' all-prose suffix gate.
+        # Recognizers read both names from the rebuilt diff header above.
+        previous = _previous_filename(entry, name)
+        if previous:
+            paths.append(previous)
+    if not listing.incomplete:
+        return "".join(parts), list(dict.fromkeys(paths))
     msg = f"the files listing was truncated at the {_FILES_MAX_PAGES}-page cap"
     raise TriageUnavailableError(msg)
 
@@ -296,7 +301,7 @@ async def load_triage_inputs(
         TriageUnavailableError: The diff could not be read completely.
         Exception: Any transport error; :func:`decide_fast_path` turns it into ``full``.
     """
-    diff_text, paths = await _read_diff(scm, owner, repo, pull_number)
+    diff_text, paths = await _read_diff(scm, owner, repo, pull_number, head_sha=head_sha)
     head_files = await _read_head_files(
         scm, owner, repo, head_sha, paths, read_code_head=read_code_head
     )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -202,6 +203,10 @@ class RunContext:
     settings: RepoSettings | None = None
     gh_event: dict[str, Any] | None = None
     pr_number: int | str | None = None
+    # Author metadata is cached separately from the deliberately narrow trust event.
+    pull_request_snapshots: dict[tuple[str, str, int, str, str], dict[str, Any]] = field(
+        default_factory=dict
+    )
     tool_state: ToolState | None = None
     tmpdir: str | None = None
     payload: dict[str, Any] = field(default_factory=dict)
@@ -1288,6 +1293,9 @@ async def _resolve_credentials(ctx: RunContext) -> RunContext:
                 exc,
             )
         else:
+            _remember_pull_request(
+                ctx, ctx.run_context.repo.owner, ctx.run_context.repo.name, unbound_pull, pull
+            )
             gh_event = bind_target_pull_request(gh_event, pull)
             ctx.gh_event = gh_event
             # Dispatch events carry no PR number during setup. Keep the run and
@@ -2737,10 +2745,36 @@ def _lite_inconclusive_reason(outcome: LiteOutcome) -> str | None:
 _IGNORE_SKIP_EVENTS: frozenset[str] = frozenset({"pull_request", "pull_request_target"})
 
 
+def _pull_snapshot_key(
+    owner: str, repo: str, number: int, pull: dict[str, Any]
+) -> tuple[str, str, int, str, str] | None:
+    head, base = pull.get("head"), pull.get("base")
+    head_sha = head.get("sha") if isinstance(head, dict) else None
+    base_sha = base.get("sha") if isinstance(base, dict) else None
+    if (
+        not isinstance(head_sha, str)
+        or not head_sha
+        or not isinstance(base_sha, str)
+        or not base_sha
+    ):
+        return None
+    return owner, repo, number, head_sha.lower(), base_sha.lower()
+
+
+def _remember_pull_request(
+    ctx: RunContext, owner: str, repo: str, number: int, pull: dict[str, Any]
+) -> None:
+    """Keep the initial API payload as author data, outside the trust-binding event."""
+    snapshots = getattr(ctx, "pull_request_snapshots", None)
+    key = _pull_snapshot_key(owner, repo, number, pull)
+    if snapshots is not None and key is not None and pull.get("number") == number:
+        snapshots[key] = deepcopy(pull)
+
+
 async def _fetch_pull_request(
     ctx: RunContext, pull: dict[str, Any], *, what: str
 ) -> dict[str, Any]:
-    """Read the pull request through the SCM (one ``get_pull``).
+    """Reuse the run's bound PR snapshot or read it once through the SCM.
 
     *what* names the field the caller is after, for the error. Raises when the
     read fails or there is no SCM to read with, so the caller records what it
@@ -2758,8 +2792,15 @@ async def _fetch_pull_request(
     if scm is None or repo is None or number is None:
         msg = f"the pull request {what} is not in the event and cannot be read"
         raise RuntimeError(msg)
+    key = _pull_snapshot_key(repo.owner, repo.name, int(number), pull)
+    snapshots = getattr(ctx, "pull_request_snapshots", {})
+    if key is not None and key in snapshots:
+        return deepcopy(snapshots[key])
     fetched = await scm.get_pull(repo.owner, repo.name, int(number))
-    return fetched if isinstance(fetched, dict) else {}
+    if not isinstance(fetched, dict):
+        return {}
+    _remember_pull_request(ctx, repo.owner, repo.name, int(number), fetched)
+    return fetched
 
 
 async def _fetch_pull_request_body(ctx: RunContext, pull: dict[str, Any]) -> str | None:

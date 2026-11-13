@@ -26,6 +26,7 @@ from mergecraft.mcp.tool_call import normalize_pull_number_aliases
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
 from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, degraded_checkout_reason
 from mergecraft.review_policy.ignore_paths import ReviewIgnore, filter_diff, rename_sources
+from mergecraft.scm.pull_files import list_pull_files
 from mergecraft.utils.blocking import run_blocking, run_blocking_cleanup
 from mergecraft.utils.gha_log import warning
 from mergecraft.utils.git_hardening import read_remote_origin_url
@@ -754,26 +755,26 @@ async def pull_request_path_expectations(
     ``<old>`` as required would reject an honest rename. ``renames``, when given,
     is filled with each renamed post-image path's source.
     """
-    endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/files"
+    listing = await list_pull_files(
+        ctx.scm,
+        ctx.repo.owner,
+        ctx.repo.name,
+        pull_number,
+        page_size=_PULL_FILES_PAGE_SIZE,
+        max_pages=_PULL_FILES_MAX_PAGES,
+    )
     required: set[str] = set()
     allowed: set[str] = set()
-    for page in range(1, _PULL_FILES_MAX_PAGES + 1):
-        files = await ctx.scm.get(
-            endpoint, params={"per_page": _PULL_FILES_PAGE_SIZE, "page": page}
-        )
-        batch = list(files or [])
-        for f in batch:
-            filename = str(f.get("filename") or "")
-            if filename:
-                required.add(filename)
-                allowed.add(filename)
-            previous = str(f.get("previous_filename") or "")
-            if previous:
-                allowed.add(previous)
-                if renames is not None and filename:
-                    renames[filename] = previous
-        if len(batch) < _PULL_FILES_PAGE_SIZE:
-            break
+    for f in listing.items:
+        filename = str(f.get("filename") or "")
+        if filename:
+            required.add(filename)
+            allowed.add(filename)
+        previous = str(f.get("previous_filename") or "")
+        if previous:
+            allowed.add(previous)
+            if renames is not None and filename:
+                renames[filename] = previous
     return required, allowed
 
 
@@ -837,36 +838,36 @@ async def _diff_from_pull_files(ctx: ToolContext, *, pull_number: int) -> _Files
     A file with no ``patch`` **and** no line changes is a binary (or empty)
     header, written as today and not flagged.
     """
+    listing = await list_pull_files(
+        ctx.scm,
+        ctx.repo.owner,
+        ctx.repo.name,
+        pull_number,
+        page_size=_PULL_FILES_PAGE_SIZE,
+        max_pages=_PULL_FILES_MAX_PAGES,
+    )
     parts: list[str] = []
     unreviewable: list[str] = []
-    truncated = False
-    endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/files"
-    for page in range(1, _PULL_FILES_MAX_PAGES + 1):
-        files = await ctx.scm.get(
-            endpoint, params={"per_page": _PULL_FILES_PAGE_SIZE, "page": page}
-        )
-        batch = list(files or [])
-        for f in batch:
-            filename = str(f.get("filename") or "")
-            # A rename keeps its source on the ``a/`` side, as ``git diff`` writes it, so
-            # the pre-image is never lost to readers of the header.
-            previous = str(f.get("previous_filename") or "") or filename
-            old_image = _quote_diff_path(f"a/{previous}")
-            new_image = _quote_diff_path(f"b/{filename}")
-            parts.append(f"diff --git {old_image} {new_image}\n")
-            if previous != filename:
-                parts.append(f"rename from {_quote_diff_path(previous)}\n")
-                parts.append(f"rename to {_quote_diff_path(filename)}\n")
-            if f.get("patch"):
-                parts.append(f.get("patch") + "\n")
-            elif filename and _line_change_count(f) > 0:
-                # GitHub omits ``patch`` for binary files *and* for text diffs
-                # too large to inline; the line counts tell them apart.
-                unreviewable.append(filename)
-        if len(batch) < _PULL_FILES_PAGE_SIZE:
-            break
-    else:
-        truncated = True
+    truncated = listing.incomplete
+    for f in listing.items:
+        filename = str(f.get("filename") or "")
+        # A rename keeps its source on the ``a/`` side, as ``git diff`` writes it, so
+        # the pre-image is never lost to readers of the header.
+        previous = str(f.get("previous_filename") or "") or filename
+        old_image = _quote_diff_path(f"a/{previous}")
+        new_image = _quote_diff_path(f"b/{filename}")
+        parts.append(f"diff --git {old_image} {new_image}\n")
+        if previous != filename:
+            parts.append(f"rename from {_quote_diff_path(previous)}\n")
+            parts.append(f"rename to {_quote_diff_path(filename)}\n")
+        patch = f.get("patch")
+        if patch:
+            parts.append(patch + "\n")
+        elif filename and _line_change_count(f) > 0:
+            # GitHub omits ``patch`` for binary files *and* for text diffs
+            # too large to inline; the line counts tell them apart.
+            unreviewable.append(filename)
+    if truncated:
         logger.warning(
             "api-only diff: stopped after {} pages of pull files for #{}; "
             "the diff may be incomplete",
