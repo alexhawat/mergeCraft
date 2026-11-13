@@ -51,7 +51,7 @@ async def _list_tools_during_work(entered: threading.Event, finished: threading.
     assert not finished.is_set(), "the integrity/confinement boundary blocked the RPC loop"
 
 
-@pytest.mark.parametrize("tool_name", ["checkout", "static"])
+@pytest.mark.parametrize("tool_name", ["checkout", "static"], ids=["checkout", "static"])
 @pytest.mark.parametrize("hash_index", [1, 2], ids=["before", "after"])
 async def test_integrity_hashing_does_not_block_concurrent_rpc(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tool_name: str, hash_index: int
@@ -133,7 +133,11 @@ async def test_git_subdirectory_confinement_does_not_block_concurrent_rpc(
     assert "error" not in response
 
 
-@pytest.mark.parametrize("integrity_state", ["clean", "already-broken", "tampered"])
+@pytest.mark.parametrize(
+    "integrity_state",
+    ["clean", "already-broken", "tampered"],
+    ids=["clean", "already-broken", "tampered"],
+)
 async def test_cancelled_checkout_repins_tree_after_worker_changed_head(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, integrity_state: str
 ) -> None:
