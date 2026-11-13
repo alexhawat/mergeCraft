@@ -166,6 +166,7 @@ def _classify_outcome(
     terminal_publication_mismatch: tuple[str, str] | None = None,
     terminal_publication_unproven: bool = False,
     coverage_incomplete_reason: str | None = None,
+    diff_budget_reason: str | None = None,
     terminal_rejection: str | None = None,
 ) -> tuple[RunOutcome, str | None]:
     """Map the run's result + side-channels to a ``RunOutcome`` (D3/W5.2 + S1/D5/D10).
@@ -261,9 +262,11 @@ def _classify_outcome(
         and verdict_protocol != "shadow"
     ):
         if _is_incremental_review(mode) and final_summary_written:
-            if coverage_incomplete_reason:
-                logger.warning("» {}", coverage_incomplete_reason)
-                return RunOutcome.inconclusive, coverage_incomplete_reason
+            # A no-op incremental review need not re-read the full PR. Only
+            # hard scope loss overrides that progress-only completion path.
+            if diff_budget_reason:
+                logger.warning("» {}", diff_budget_reason)
+                return RunOutcome.inconclusive, diff_budget_reason
             return RunOutcome.passed, None
         logger.warning("» {}", _MISSING_TERMINAL_VERDICT_REASON)
         return RunOutcome.inconclusive, _MISSING_TERMINAL_VERDICT_REASON

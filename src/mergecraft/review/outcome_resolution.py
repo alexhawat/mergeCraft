@@ -55,6 +55,8 @@ class OutcomeInputs:
         terminal_publication_mismatch: ``(published, recorded)`` verdicts.
         terminal_publication_unproven: Whether the receipt proves no verdict.
         coverage_incomplete_reason: The gated changed-line coverage gap.
+        diff_budget_reason: Hard scope loss that also blocks progress-only
+            incremental completion, independently of advisory coverage policy.
         terminal_rejection: The last refused terminal attempt, if any.
         budget_exhaustion: A token, cost or tool-call budget that ran out.
         finalize_failure: Why the post-run finalize step raised, if it did.
@@ -78,6 +80,7 @@ class OutcomeInputs:
     terminal_publication_mismatch: tuple[str, str] | None = None
     terminal_publication_unproven: bool = False
     coverage_incomplete_reason: str | None = None
+    diff_budget_reason: str | None = None
     terminal_rejection: str | None = None
     budget_exhaustion: BudgetExhausted | None = None
     finalize_failure: str | None = None
@@ -214,6 +217,7 @@ def resolve_run_outcome(inputs: OutcomeInputs) -> tuple[RunOutcome, str | None]:
             terminal_publication_mismatch=inputs.terminal_publication_mismatch,
             terminal_publication_unproven=inputs.terminal_publication_unproven,
             coverage_incomplete_reason=inputs.coverage_incomplete_reason,
+            diff_budget_reason=inputs.diff_budget_reason,
             terminal_rejection=inputs.terminal_rejection,
         )
         if inputs.finalize_failure is not None and outcome in {

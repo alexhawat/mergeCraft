@@ -345,3 +345,25 @@ async def test_incremental_progress_only_cannot_bypass_diff_budget(
     assert record.outcome is RunOutcome.inconclusive
     assert record.failure_reason == ctx.tool_state.diff_budget_reason
     assert record.publish_calls[-1]["packet"].decision.verdict != "success"
+
+
+async def test_incremental_progress_only_keeps_noop_coverage_policy_exception(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A no-op re-review need not re-read the full PR when no hard budget was hit."""
+    from mergecraft.main import _coverage_gate_reason
+
+    ctx = publication_ctx(tmp_path, github=RecordingReviewGitHub(), trust_tier="trusted")
+    ctx.tool_state.selected_mode = "IncrementalReview"
+    ctx.tool_state.final_summary_written = True
+    ctx.tool_state.tool_calls.clear()
+    ctx.tool_state.coverage.authoritative_diff = APP_DIFF
+    settings = RepoSettings()
+    assert ctx.tool_state.diff_budget_reason is None
+    assert ctx.tool_state.coverage.unreviewable_paths == []
+    assert _coverage_gate_reason(ctx, settings) is not None
+
+    record = await run_finalize(ctx, monkeypatch=monkeypatch, settings=settings, real_publish=True)
+
+    assert record.outcome is RunOutcome.passed
+    assert record.failure_reason is None

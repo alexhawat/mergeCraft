@@ -3426,6 +3426,7 @@ async def _finalize(
         prep_reason=prep_reason,
         final_summary_written=tool_state.final_summary_written,
         coverage_incomplete_reason=_coverage_gate_reason(tool_context, settings),
+        diff_budget_reason=tool_state.diff_budget_reason,
         terminal_rejection=tool_state.last_terminal_rejection,
         budget_exhaustion=budget_exhaustion,
         finalize_failure=finalize_failure,
