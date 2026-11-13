@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mergecraft.mcp.git import _run_git
 from tests.ci.workflow_support import REPO_ROOT
@@ -63,16 +63,18 @@ def test_run_git_spawns_with_the_hardened_environment(
     """
     captured: dict[str, str] = {}
 
-    def _fake_run(
-        argv: list[str], *, env: Mapping[str, str], **kwargs: object
-    ) -> subprocess.CompletedProcess[str]:
+    original_popen = subprocess.Popen
+
+    def _record_spawn(
+        argv: list[str], *, env: Mapping[str, str], **kwargs: Any
+    ) -> subprocess.Popen[bytes]:
         captured.update(env)
-        return subprocess.CompletedProcess(argv, 0, "", "")
+        return original_popen(argv, env=env, **kwargs)
 
     monkeypatch.setenv("MC_RESIDUAL_PROBE", "kept")
     monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'a.b'='c'")
-    monkeypatch.setattr(subprocess, "run", _fake_run)
-    _run_git(["status"], cwd=str(tmp_path))
+    monkeypatch.setattr(subprocess, "Popen", _record_spawn)
+    assert _run_git(["--version"], cwd=str(tmp_path)).startswith("git version ")
     assert captured["MC_RESIDUAL_PROBE"] == "kept"
     assert captured["GIT_CONFIG_NOSYSTEM"] == "1"
     assert captured["GIT_CONFIG_GLOBAL"] == os.devnull

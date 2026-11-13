@@ -350,6 +350,12 @@ class _FinishedProcess:
     def __init__(self, returncode: int) -> None:
         self.returncode = returncode
 
+    def __enter__(self) -> _FinishedProcess:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        pass
+
     def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
         del timeout
         return b"", b""
