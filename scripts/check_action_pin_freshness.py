@@ -26,7 +26,10 @@ Four rules, split across two scopes by ``--scope``.
    be an ancestor of this branch's pin and within ``MAX_DRIFT`` commits of it.
    Skips with a notice when the ref is not fetched, so a local ``make lint``
    in a shallow or offline checkout does not fail on it. It is a no-op unless
-   the branch actually moves the pin, which is what keeps it a PR rule.
+   the branch actually moves the pin, which is what keeps it a PR rule. A pin
+   that is itself on the default branch is exempt from the distance bound: it
+   can only name code that already merged there, and the distance it measures is
+   the default branch's backlog — which the pin bump is the change that clears.
 
 ``--scope all`` (the default) — adds the rule whose subject is the default
 branch itself. Run on a schedule against ``main`` by
@@ -194,6 +197,14 @@ def _check_env_parity(rel_path: str, text: str, pins: list[tuple[int, str]]) -> 
     ]
 
 
+def _default_branch_ref() -> str | None:
+    """Return a ref naming the default branch's tip, or ``None`` when unavailable."""
+    for ref in (f"origin/{DEFAULT_BRANCH}", DEFAULT_BRANCH):
+        if _git("rev-parse", "--verify", "--quiet", ref) is not None:
+            return ref
+    return None
+
+
 def _check_freshness(rel_path: str, head_sha: str) -> list[str]:
     """Compare this branch's pin against the default branch's."""
     base_text = _default_branch_workflow(rel_path)
@@ -224,6 +235,19 @@ def _check_freshness(rel_path: str, head_sha: str) -> list[str]:
     drift_raw = _git("rev-list", "--count", f"{base_sha}..{head_sha}")
     drift = int(drift_raw) if drift_raw and drift_raw.isdigit() else 0
     if drift <= MAX_DRIFT:
+        return []
+    # A pin that is itself on the default branch cannot name unreviewed code: it
+    # only runs commits that already merged there. The distance is then the
+    # default branch's own backlog, and this merge is the change that clears it —
+    # the same trap rule 4 was moved off the PR gate for (#669). Judge the
+    # branch's pin, not the debt it pays.
+    tip = _default_branch_ref()
+    if tip is not None and _git("merge-base", "--is-ancestor", head_sha, tip) is not None:
+        print(
+            f"action-pin-check: {rel_path}: moves the pin forward to {head_sha[:12]}, "
+            f"already on {DEFAULT_BRANCH}; the {drift} commits behind are "
+            f"{DEFAULT_BRANCH}'s backlog and this merge clears them",
+        )
         return []
     return [
         f"{rel_path}: {DEFAULT_BRANCH} pins {base_sha[:12]}, {drift} commits behind "
