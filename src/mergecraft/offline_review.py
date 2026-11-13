@@ -1209,7 +1209,7 @@ async def _run_offline_diff_review(
             run_root_span,
         )
 
-        tracer = get_tracer_from_settings(settings)
+        tracer = get_tracer_from_settings(settings, new_run=True)
         with run_root_span(
             tracer,
             attrs_source=lambda: dict(resolve_correlation_from_env()),

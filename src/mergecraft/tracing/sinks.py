@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import json
 from contextvars import ContextVar
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -141,10 +141,13 @@ class JSONLFileSink:
         self,
         trace_dir: Path,
         clock: Callable[[], datetime] | None = None,
+        *,
+        retention_days: int = 30,
     ) -> None:
         self.trace_dir = trace_dir
         self.clock = clock if clock is not None else _now_utc
-        self.retention_days: int = 30
+        self.retention_days = retention_days
+        self.purge_expired()
 
     def write(self, event: TraceEvent) -> None:
         """Append ``event`` to today's JSONL file (best-effort)."""
@@ -158,16 +161,19 @@ class JSONLFileSink:
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(persisted.model_dump()) + "\n")
-            self.purge_expired()
         except OSError as exc:
             logger.warning("trace sink JSONLFileSink write failed: {}", exc)
 
     def purge_expired(self) -> None:
-        """Remove ``*.jsonl`` files older than :attr:`retention_days` (mtime)."""
+        """Remove daily trace files older than :attr:`retention_days` (mtime)."""
         if not self.trace_dir.exists():
             return
         cutoff = self.clock().timestamp() - self.retention_days * 86_400
-        for path in self.trace_dir.glob("*.jsonl"):
+        for path in self.trace_dir.glob("????-??-??.jsonl"):
+            try:
+                date.fromisoformat(path.stem)
+            except ValueError:
+                continue
             try:
                 mtime = path.stat().st_mtime
             except OSError as exc:
@@ -299,16 +305,15 @@ def sink_factory(tracing_settings: Any) -> Any:
         sink_type = getattr(entry, "type", None)
         if sink_type == "jsonl_file":
             raw_path = getattr(entry, "path", None) or _DEFAULT_LOCAL_TRACES_PATH
-            jsonl_sink = JSONLFileSink(Path(raw_path))
             from mergecraft.enterprise.runtime import effective_retention_days
 
             enterprise_days = effective_retention_days()
-            if enterprise_days is not None:
-                jsonl_sink.retention_days = enterprise_days
-            else:
-                jsonl_sink.retention_days = int(
-                    getattr(tracing_settings, "retention_days", jsonl_sink.retention_days)
-                )
+            retention_days = (
+                enterprise_days
+                if enterprise_days is not None
+                else int(getattr(tracing_settings, "retention_days", 30))
+            )
+            jsonl_sink = JSONLFileSink(Path(raw_path), retention_days=retention_days)
             children.append(jsonl_sink)
             continue
         if sink_type == "memory":

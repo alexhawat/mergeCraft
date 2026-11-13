@@ -200,7 +200,7 @@ record.
 ## Retention
 
 `retentionDays` (default `30`) governs `JSONLFileSink.purge_expired()`. Files
-whose mtime is older than the cap are removed on the next write (or
+whose mtime is older than the cap are removed when the sink opens (or
 explicit purge). A bound `enterprise.retentionDays` overrides it.
 
 ## Enterprise controls on trace export
@@ -964,3 +964,23 @@ forensic surface for tool identity, outcomes, paths, and failure class.
 
 Loguru queue drain is registered beside the existing temp-dir `atexit` hook so
 Docker action tails are not lost when the container exits.
+
+### Repeated reviews in one process
+
+Each Action or offline review owns a fresh tracer, trace identifier, and span
+limit. Nested model fallback and MCP calls retain that run's trace. Session and
+GitHub workflow identifiers remain correlation attributes across reviews; an
+explicit `MERGECRAFT_TRACE_ID` still overrides the generated identifier.
+
+JSONL retention runs once when a sink opens, using the configured retention
+period. It removes only daily `YYYY-MM-DD.jsonl` trace files; unrelated JSONL
+files in that directory are preserved.
+
+Enterprise audit events include both approving and blocking terminal submissions.
+Action users must persist or forward the audit directory to retain events after
+the runner exits. The unkeyed hash chain detects corruption; it does not prevent
+someone with write access from replacing the file and recomputing its hashes.
+
+A trusted `enterprise.caFile` also sets `NODE_EXTRA_CA_CERTS` for Node-based agent
+CLIs. Existing Node CA and the already-supported uppercase proxy variables are
+forwarded into the restricted agent environment.

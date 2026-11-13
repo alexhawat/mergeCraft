@@ -368,3 +368,17 @@ def test_enterprise_retention_purges_expired_jsonl_on_write(
         )
     )
     assert not expired.exists()
+
+
+def test_custom_ca_reaches_node_agent_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Validated custom trust reaches the restricted Node CLI environment."""
+    from mergecraft.enterprise.runtime import agent_network_env
+    from tests.enterprise.test_certificates import _write_self_signed_ca
+
+    monkeypatch.delenv("NODE_EXTRA_CA_CERTS", raising=False)
+    pem = tmp_path / "ca.pem"
+    _write_self_signed_ca(pem)
+    bind_enterprise_from_settings(EnterpriseSettings(ca_file=str(pem)))
+    assert agent_network_env()["NODE_EXTRA_CA_CERTS"] == str(pem)

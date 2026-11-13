@@ -455,6 +455,7 @@ _ACTIVE_RUN_SPAN: ContextVar[Span | None] = ContextVar(
 
 _PROCESS_TRACER: Tracer | None = None
 _PROCESS_TRACING_FINGERPRINT: str | None = None
+_RUN_TRACERS: dict[TraceParent, Tracer] = {}
 
 
 def _reset_bound_enterprise_runtime() -> None:
@@ -478,6 +479,7 @@ def reset_process_tracer_cache() -> None:
 
     _PROCESS_TRACER = None
     _PROCESS_TRACING_FINGERPRINT = None
+    _RUN_TRACERS.clear()
     # Prevent ``get_tracer_from_settings`` from returning a stale tracer when
     # a prior test left an active span on the ContextVar (xdist shard ordering).
     _ACTIVE_SPAN.set(None)
@@ -833,11 +835,19 @@ def current_trace_parent() -> TraceParent | None:
 
 def tracer_for_trace_parent(parent: TraceParent | None) -> Tracer | None:
     """Resolve the cached tracer that owns an explicitly carried parent."""
-    if parent is None or _PROCESS_TRACER is None:
+    if parent is None:
         return None
-    if _PROCESS_TRACER.trace_id != parent.trace_id:
-        return None
-    return _PROCESS_TRACER
+    owned = _RUN_TRACERS.get(parent)
+    if owned is not None:
+        return owned
+    cached = _PROCESS_TRACER
+    if (
+        cached is not None
+        and cached.trace_id == parent.trace_id
+        and not any(tracer is cached for tracer in tuple(_RUN_TRACERS.values()))
+    ):
+        return cached
+    return None
 
 
 @contextlib.contextmanager
@@ -847,6 +857,8 @@ def run_root_span(
     attrs_source: Callable[[], dict[str, Any]] | None = None,
 ) -> Iterator[Span | NullSpan]:
     """Reuse the active run root or own one for a standalone lifecycle."""
+    global _PROCESS_TRACER, _PROCESS_TRACING_FINGERPRINT
+
     active_run = _ACTIVE_RUN_SPAN.get()
     if active_run is not None and active_run.tracer is tracer:
         yield active_run
@@ -854,10 +866,16 @@ def run_root_span(
     with tracer.start_span("mergecraft.run", attrs_source=attrs_source) as root:
         if isinstance(root, Span):
             token = _ACTIVE_RUN_SPAN.set(root)
+            identity = TraceParent(trace_id=root.trace_id, span_id=root.span_id)
+            _RUN_TRACERS[identity] = root.tracer
             try:
                 yield root
             finally:
                 _ACTIVE_RUN_SPAN.reset(token)
+                _RUN_TRACERS.pop(identity, None)
+                if _PROCESS_TRACER is root.tracer:
+                    _PROCESS_TRACER = None
+                    _PROCESS_TRACING_FINGERPRINT = None
         else:
             yield root
 
@@ -879,11 +897,15 @@ def resolve_session_id() -> str:
     )
 
 
-def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
+def get_tracer_from_settings(
+    settings: RepoSettings, *, new_run: bool = False
+) -> Tracer | NullTracer:
     """Build the enabled tracer for ``settings`` or return the null path.
 
     Args:
         settings (RepoSettings): Resolved repository settings.
+        new_run (bool): Start an independent run when no span is active. Nested
+            dispatch always retains its owning run. Defaults to False.
 
     Returns:
         Tracer | NullTracer: Active tracer when enabled; otherwise a no-op tracer.
@@ -912,8 +934,9 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
         return active.tracer
 
     fingerprint = _tracing_fingerprint(active_tracing)
-    if _PROCESS_TRACER is not None and fingerprint == _PROCESS_TRACING_FINGERPRINT:
-        return _PROCESS_TRACER
+    cached = _PROCESS_TRACER
+    if not new_run and cached is not None and fingerprint == _PROCESS_TRACING_FINGERPRINT:
+        return cached
 
     from mergecraft.enterprise.runtime import scoped_enterprise_binding
 
@@ -931,7 +954,11 @@ def get_tracer_from_settings(settings: RepoSettings) -> Tracer | NullTracer:
     correlation = resolve_correlation_from_env()
     session_id = resolve_session_id()
     run_id = str(correlation.get("run_id") or session_id)
-    trace_id = resolve_trace_id(pin=True)
+    # Session/Actions ids correlate many reviews; they are not per-review ids.
+    # Never pin a generated trace id into the process environment.
+    trace_id = (
+        os.environ.get("MERGECRAFT_TRACE_ID") or uuid.uuid4().hex if new_run else resolve_trace_id()
+    )
     tier = os.environ.get("MERGECRAFT_TRUST_TIER") or "balanced"
     tracer = Tracer(
         sink=sink,

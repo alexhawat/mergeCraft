@@ -357,6 +357,16 @@ def test_codex_tool_call_span_has_request_response_attrs(
             },
         },
     ]
+    events.append(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "tool_result",
+                "tool_call_id": "tool-codex-1",
+                "output": "codex-output",
+            },
+        }
+    )
     for event in events:
         handler(acc, event)
     close_all()

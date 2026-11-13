@@ -62,6 +62,7 @@ _AGENT_NETWORK_ENV: tuple[str, ...] = (
     "NO_PROXY",
     "SSL_CERT_FILE",
     "REQUESTS_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
 )
 
 # Child processes pick Bedrock/Vertex endpoints from these vars, not catalog labels.
@@ -118,6 +119,7 @@ def bind_enterprise_from_settings(
         load_custom_ca(ca_path)
         os.environ["SSL_CERT_FILE"] = str(ca_path)
         os.environ["REQUESTS_CA_BUNDLE"] = str(ca_path)
+        os.environ["NODE_EXTRA_CA_CERTS"] = str(ca_path)
 
 
 @contextlib.contextmanager

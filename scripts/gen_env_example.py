@@ -89,6 +89,9 @@ _TRACING = """\
 # Logfire tracing token (written by `mergecraft auth logfire`; docs/TRACING.md)
 # ---------------------------------------------------------------------------
 # MERGECRAFT_LOGFIRE_TOKEN=
+# Extra trusted PEM certificates forwarded to Node-based agent CLIs.
+# enterprise.caFile also sets this after trusted configuration is validated.
+# NODE_EXTRA_CA_CERTS=
 """
 
 _GITHUB = """\

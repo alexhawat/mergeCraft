@@ -1085,7 +1085,7 @@ async def run_with_model_chain(
         run_root_span,
     )
 
-    tracer = get_tracer_from_settings(settings)
+    tracer = get_tracer_from_settings(settings, new_run=True)
     correlation_attrs = (
         dict(correlation) if correlation is not None else resolve_correlation_from_env()
     )

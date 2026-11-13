@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -23,6 +24,7 @@ from mergecraft.tracing.genai import (
 from mergecraft.tracing.redaction import redact_tool_payload
 from mergecraft.tracing.tracer import (
     ProviderLLMPair,
+    Span,
     _close_provider_llm_pair,
     _open_provider_llm_pair,
 )
@@ -269,7 +271,10 @@ def codex_stream_event_handler(
                 return
             if tracer is not None:
                 span = tracer.start_span("tool.call")
-                span.__enter__()
+                # Results can arrive out of order. Keep the explicit parent
+                # without holding a ContextVar frame across stream callbacks.
+                if isinstance(span, Span):
+                    span.ts_start_ns = time.time_ns()
                 span.set_attribute("tool.name", tool_name)
                 span.set_attribute("tool.id", tool_id)
                 span.set_attribute("tool.server", "codex")
@@ -286,7 +291,7 @@ def codex_stream_event_handler(
             item_type = item.get("type")
             if item_type == "tool_call":
                 tool_id = str(item.get("id") or "")
-                entry = open_tool_spans.pop(tool_id, None)
+                entry = open_tool_spans.get(tool_id)
                 if entry is None:
                     return
                 span_obj = entry.get("span")
@@ -298,16 +303,28 @@ def codex_stream_event_handler(
                     span_obj.set_attribute("tool.input", tool_input)
                     span_obj.set_attribute("gen_ai.tool.input", redact_tool_payload(tool_input))
                     enrich_tool_request(span_obj, arguments=tool_input)
-                    enrich_tool_response(span_obj, output=tool_input)
+                return
+            if item_type == "tool_result":
+                tool_id = str(
+                    item.get("tool_call_id") or item.get("call_id") or item.get("id") or ""
+                )
+                entry = open_tool_spans.pop(tool_id, None)
+                if entry is None:
+                    return
+                span_obj = entry.get("span")
+                if span_obj is not None:
+                    tool_output = item.get("output", item.get("content", ""))
+                    enrich_tool_response(span_obj, output=tool_output)
+                    if item.get("is_error"):
+                        span_obj.set_attribute("tool.exit_code", "error")
+                        span_obj.set_status("error", "tool result reported failure")
                     span_obj.close()
                     emit_verb_subevent(
                         tracer,
                         parent_span_id=span_obj.span_id,
-                        tool_name=resolved_name,
+                        tool_name=str(entry.get("name") or "unknown"),
                         attrs=dict(span_obj._attrs),
                     )
-                return
-            if item_type == "tool_result":
                 return
             if item_type == "command_execution":
                 from mergecraft.agents.codex import (
