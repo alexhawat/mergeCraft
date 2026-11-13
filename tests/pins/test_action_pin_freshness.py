@@ -78,8 +78,15 @@ def _freshness_with(
     drift: str | None,
     is_ancestor: str | None = "",
     base_known: str | None = "",
+    head_on_default: str | None = "",
+    default_ref: str | None = "origin/main",
 ) -> list[str]:
-    """Drive ``_check_freshness`` with git responses stubbed."""
+    """Drive ``_check_freshness`` with git responses stubbed.
+
+    ``head_on_default`` is the second ``merge-base --is-ancestor`` answer (the
+    branch's pin against the default branch's tip); ``""`` means it is on the
+    default branch and ``None`` means it is not.
+    """
     monkeypatch.setattr(
         module,
         "_default_branch_workflow",
@@ -89,8 +96,11 @@ def _freshness_with(
     def fake_git(*args: str) -> Any:
         if args[0] == "cat-file":
             return base_known
+        if args[0] == "rev-parse":
+            return None if default_ref is None else ""
         if args[0] == "merge-base":
-            return is_ancestor
+            # base-vs-head first, then head-vs-default-branch-tip.
+            return is_ancestor if args[3] == _SHA_NEW and args[2] != _SHA_NEW else head_on_default
         if args[0] == "rev-list":
             return drift
         return ""
@@ -113,13 +123,51 @@ def test_drift_within_the_bound_passes(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_excessive_drift_fails_and_names_the_cause(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The real #450 shape: hundreds of commits behind, silently."""
+    """The real #450 shape: hundreds of commits behind, silently.
+
+    The branch's pin is not on the default branch here, which is the case the
+    bound exists for: it names code the default branch never reviewed.
+    """
     module = _load()
     monkeypatch.setattr(module, "MAX_DRIFT", 100)
-    failures = _freshness_with(module, monkeypatch, base_sha=_SHA_OLD, drift="687")
+    failures = _freshness_with(
+        module, monkeypatch, base_sha=_SHA_OLD, drift="687", head_on_default=None
+    )
     assert len(failures) == 1
     assert "687 commits behind" in failures[0]
     assert "pull_request_target" in failures[0]
+
+
+def test_a_forward_bump_to_a_commit_on_the_default_branch_is_exempt(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The pin bump that clears a backlog must not be blocked by that backlog.
+
+    Both branches' pins are on the default branch, so the distance measures the
+    repository's own debt. Blocking here is the trap rule 4 was moved off the PR
+    gate for (#669): the only change that can clear the debt is the one the
+    check refuses.
+    """
+    module = _load()
+    monkeypatch.setattr(module, "MAX_DRIFT", 100)
+    failures = _freshness_with(
+        module, monkeypatch, base_sha=_SHA_OLD, drift="404", head_on_default=""
+    )
+    assert failures == []
+    assert "clears them" in capsys.readouterr().out
+
+
+def test_a_forward_bump_fails_when_the_default_branch_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without the default branch ref the exemption cannot be proven, so it fails."""
+    module = _load()
+    monkeypatch.setattr(module, "MAX_DRIFT", 100)
+    failures = _freshness_with(
+        module, monkeypatch, base_sha=_SHA_OLD, drift="404", head_on_default="", default_ref=None
+    )
+    assert len(failures) == 1
+    assert "404 commits behind" in failures[0]
 
 
 def test_a_diverged_default_branch_fails(monkeypatch: pytest.MonkeyPatch) -> None:
