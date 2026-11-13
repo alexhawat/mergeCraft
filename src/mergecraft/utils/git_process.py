@@ -6,6 +6,7 @@ Exports:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import selectors
 import subprocess
@@ -30,22 +31,21 @@ def run_git_process(
     Timeouts, cancellation and output overflow terminate the entire process group.
     """
     check_process_cancelled()
-    with (
-        subprocess.Popen(
-            argv,
-            cwd=cwd,
-            env=env,
-            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
-        ) as process,
-        track_process_group(process),
-    ):
+    process = subprocess.Popen(
+        argv,
+        cwd=cwd,
+        env=env,
+        stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    with contextlib.ExitStack() as scope:
         stdout = bytearray()
         stderr = bytearray()
         deadline = time.monotonic() + timeout
         try:
+            scope.enter_context(track_process_group(process))
             if input_text is not None:
                 assert process.stdin is not None
                 process.stdin.write(input_text.encode())
@@ -74,8 +74,14 @@ def run_git_process(
             check_process_cancelled()
         except BaseException:
             kill_process_group(process.pid)
-            process.wait(timeout=5)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=5)
             raise
+        finally:
+            # Popen.__exit__ can wait indefinitely for an unreapable child.
+            for pipe in (process.stdin, process.stdout, process.stderr):
+                if pipe is not None:
+                    pipe.close()
         return subprocess.CompletedProcess(
             argv,
             process.returncode,

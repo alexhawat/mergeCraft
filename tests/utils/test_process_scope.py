@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import subprocess
 import sys
 from typing import TYPE_CHECKING, Any
@@ -100,3 +101,71 @@ def test_child_spawned_during_cancellation_is_killed_and_reaped(
         )
     assert len(children) == 1
     assert children[0].poll() is not None
+
+
+@pytest.mark.parametrize("late_cancel", [False, True], ids=["timeout", "late-cancellation"])
+def test_analyzer_reap_is_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, late_cancel: bool
+) -> None:
+    from mergecraft.utils import process_group
+
+    scope = ProcessGroupScope()
+    signals: list[int] = []
+    monkeypatch.setattr(process_group, "kill_process_group", signals.append)
+    monkeypatch.setattr("mergecraft.analyzers.run.kill_process_group", signals.append)
+
+    class UnreapableChild:
+        pid = 12345
+        stdin = None
+
+        def __init__(self) -> None:
+            self.stdout = io.StringIO()
+            self.stderr = io.StringIO()
+            self.communicates: list[float] = []
+            self.waits: list[float | None] = []
+            self.killed = False
+
+        def __enter__(self) -> UnreapableChild:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            self.wait()
+
+        def communicate(self, *, timeout: float) -> tuple[str, str]:
+            self.communicates.append(timeout)
+            raise subprocess.TimeoutExpired("analyzer", timeout)
+
+        def kill(self) -> None:
+            self.killed = True
+
+        def wait(self, timeout: float | None = None) -> int:
+            self.waits.append(timeout)
+            if timeout is None:
+                raise AssertionError("Popen.__exit__ made an unbounded wait")
+            raise subprocess.TimeoutExpired("analyzer", timeout)
+
+    child = UnreapableChild()
+
+    def spawn(*_args: object, **_kwargs: object) -> UnreapableChild:
+        if late_cancel:
+            scope.cancel()
+        return child
+
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    expected = asyncio.CancelledError if late_cancel else subprocess.TimeoutExpired
+    with bind_process_group_scope(scope), pytest.raises(expected):
+        _run_in_own_session(
+            [sys.executable, "-c", "pass"],
+            cwd=tmp_path,
+            timeout_s=2,
+            env={},
+            pass_fds=(),
+            preexec_fn=None,
+        )
+    assert child.communicates == ([5] if late_cancel else [2, 5])
+    assert child.waits == [1]
+    assert child.killed
+    assert child.pid in signals
+    assert child.pid not in process_group.active_process_groups()
+    assert child.stdout.closed
+    assert child.stderr.closed
