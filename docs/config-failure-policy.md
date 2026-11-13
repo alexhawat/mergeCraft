@@ -152,7 +152,7 @@ and enforces fail-closed restrictions regardless of ``payload.shell``:
 |-------|-----------------|-----------|
 | Read-only allowlist (`_READONLY_SUBCOMMANDS`) | Any subcommand not in `{status, log, diff, show, rev-parse, describe, ls-files, blame, cat-file, rev-list, branch, show-ref, for-each-ref, ls-remote, config, grep, ls-tree, merge-base}` — including `reset`, `clean`, `stash`, `update-ref` | The reviewer has no legitimate reason to mutate the tree |
 | `config` write forms | Any `config` invocation outside `{--get, --get-all}`; `config --list` (enumerates all keys including brokered auth headers); credential-bearing keys (`credential.*`, `url.*`, `*.extraHeader`) on `--get` and `--get-all` | `config` is lookup-only on the reviewer surface; credential keys are denied regardless of confinement |
-| `branch` write forms | Any `branch` argument that is not on the listing-flag allowlist (`-a`/`-r`/`-v`/`--all`/`--remotes`/`--merged`/`--no-merged`/`--contains`/…), including bare `git branch <name>` creation | `branch` is allowlisted read-only; deletion, rename, copy, upstream edits and creation are writes, and a rename of the checked-out branch changes what a later `commit_changes` / `push_branch` targets |
+| `branch` write forms | Any `branch` argument that is not on the listing-flag allowlist (`-a`/`-r`/`-v`/`--all`/`--remotes`/`--merged`/`--no-merged`/`--contains`/…), including bare `git branch <name>` creation | `branch` is allowlisted read-only; deletion, rename, copy, upstream edits and creation are writes, and a rename of the checked-out branch changes repository state |
 | File-writing flags | `--output` and every unambiguous prefix of it (`--out`, `--outp`, …) on any allowlisted subcommand, plus `-o` on the subcommands that do not define it themselves | The subcommand allowlist constrains the verb, not its flags — `git diff --output=<path>` writes an arbitrary file. `-o` is scoped because it means `--others` to `ls-files` and writes nothing there |
 | `-c` / `--config-env` unconditional block | Both flags in `command` string and `args`, in spaced (`-c key=v`), glued (`-ckey=v`) and inline (`--config-env=…`) spellings, regardless of `payload.shell`. Read against the subcommand's own short flags first, so `ls-files -co` and `log -c` are forwarded while every glued config payload stays refused | `git -c alias.x='!cmd'` expands arbitrary shell even with `shell: disabled`; there is no safe-key allowlist |
 | `--no-index` | Any `--no-index` spelling — operates outside a repository so positional confinement cannot apply | The bypass used to read `.git/config` via `git diff --no-index` in run 33126460925 |
@@ -200,3 +200,22 @@ Both checks fail closed: no `file://` URI is emitted and no bytes are read from 
    collide exactly.
 9. Prep install failed → treat the check conclusion as inconclusive/neutral
    and re-run after fixing the install error.
+
+## Retired preview configuration
+
+The unused `autoMergeEnabled` and `signedCommits` settings (including their
+snake-case aliases) and preview `orchestrator`, `pipeline`, and
+`operatorPipeline` settings are removed from the runtime model and new
+scaffolds. Existing configurations still load: these exact keys are discarded,
+and non-default values produce a warning. Unknown keys still fail validation.
+
+`review.roundBudgets.multipliers` must contain at least one value, each greater
+than zero and at most 10. Use `multipliers: [1.0]` for a flat budget. Instruction
+byte caps, verification budgets, and file-group thresholds must be nonnegative;
+`verificationBudget: 0` retains its existing uncapped meaning.
+
+Jev threshold names must match supported pack keys, values must be in `[0, 1]`,
+and the effective `unit/v1.certain` floor must be at least `unit/v1.likely`.
+Configured evidence floors and confidence buckets apply to the live shadow
+judge. The two unwired `align/v1` overrides are discarded with a warning;
+fixed alignment calibration metadata remains available for the pack corpus.

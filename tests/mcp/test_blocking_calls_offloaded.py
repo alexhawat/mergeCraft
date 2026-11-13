@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from tests.mcp.test_shell_git_guard import _ctx
-from tests.support.tool_context import write_capable_mcp_mode
+from tests.support.tool_context import inner_mutation_guard_probe
 
 from mergecraft.mcp import git as git_mod
 from mergecraft.mcp import shell as shell_mod
@@ -57,7 +57,7 @@ async def test_shell_foreground_command_does_not_block_the_loop(
 
     monkeypatch.setattr(shell_mod, "_spawn_shell", spawn)
     spec = shell_tool(_ctx(tmp_path, shell="enabled"))
-    with write_capable_mcp_mode():
+    with inner_mutation_guard_probe():
         result, ticks = await _ticks_while(
             spec.execute({"command": "sleep 1; echo done", "description": "slow"})
         )
@@ -140,7 +140,6 @@ async def test_rpc_deadline_reaps_foreground_shell(
     monkeypatch.setenv("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL", "1")
     monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "none")
     ctx = _ctx(tmp_path, shell="enabled")
-    ctx.tool_state.selected_mode = "Fix"
     spec = shell_tool(ctx)
     spec.timeout_ms = 500
     script = tmp_path / "slow.py"
@@ -149,21 +148,22 @@ async def test_rpc_deadline_reaps_foreground_shell(
         "Path('started').write_text(str(os.getpid()))\n"
         "time.sleep(5)\nPath('finished').write_text('late')\n"
     )
-    response = await dispatch_mcp_rpc(
-        1,
-        "tools/call",
-        {
-            "name": spec.name,
-            "arguments": {
-                "command": shlex.join([sys.executable, str(script)]),
-                "description": "slow",
+    with inner_mutation_guard_probe():
+        response = await dispatch_mcp_rpc(
+            1,
+            "tools/call",
+            {
+                "name": spec.name,
+                "arguments": {
+                    "command": shlex.join([sys.executable, str(script)]),
+                    "description": "slow",
+                },
             },
-        },
-        tools=[spec],
-        by_name={spec.name: spec},
-        tool_ctx=ctx,
-        validators={},
-    )
+            tools=[spec],
+            by_name={spec.name: spec},
+            tool_ctx=ctx,
+            validators={},
+        )
     assert response["error"]["code"] == -32000
     assert not (tmp_path / "finished").exists()
     with pytest.raises(ProcessLookupError):
@@ -208,20 +208,20 @@ async def test_foreground_cleanup_never_reintroduces_an_unbounded_wait(
     monkeypatch.setattr(shell_mod, "_spawn_shell", lambda *a, **k: process)
     monkeypatch.setattr(shell_mod, "kill_process_group", killed_groups.append)
     ctx = _ctx(tmp_path, shell="enabled")
-    ctx.tool_state.selected_mode = "Fix"
     spec = shell_tool(ctx)
-    response = await dispatch_mcp_rpc(
-        1,
-        "tools/call",
-        {
-            "name": spec.name,
-            "arguments": {"command": "probe", "description": "probe", "timeout": 1},
-        },
-        tools=[spec],
-        by_name={spec.name: spec},
-        tool_ctx=ctx,
-        validators={},
-    )
+    with inner_mutation_guard_probe():
+        response = await dispatch_mcp_rpc(
+            1,
+            "tools/call",
+            {
+                "name": spec.name,
+                "arguments": {"command": "probe", "description": "probe", "timeout": 1},
+            },
+            tools=[spec],
+            by_name={spec.name: spec},
+            tool_ctx=ctx,
+            validators={},
+        )
     assert waits, response
     assert all(timeout is not None for timeout in waits), response
     assert killed_groups

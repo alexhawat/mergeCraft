@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from mergecraft.utils.git_hardening import git_argv
+from mergecraft.utils.path_confinement import resolved_within_root
 from mergecraft.utils.runtime_artifacts import is_untracked_runtime_artifact
 from mergecraft.utils.workspace import git_repo_root
 
@@ -103,7 +104,7 @@ def _source_digest(root: Path, *, base_ref: str | None) -> str | None:
     remaining = _MAX_BYTES
     for raw_path in paths:
         path = root / os.fsdecode(raw_path)
-        if not path.resolve().is_relative_to(root.resolve()):
+        if not resolved_within_root(path, root.resolve()):
             # Tool confinement can admit other registered checkouts, whose
             # mutable contents are not covered by this repository's digest.
             logger.debug("Review result cache disabled: source symlink resolves outside repository")

@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from mergecraft.types import PushPermission, XrepoConfig
 
 _mcp_token_value: str | None = None
-_mcp_token_refresh: Callable[[str], Awaitable[str]] | None = None
 
 
 def get_job_token() -> str:
@@ -30,17 +29,6 @@ def get_job_token() -> str:
         return fallback
     msg = "token input is required (set INPUT_TOKEN, GH_TOKEN, or GITHUB_TOKEN)"
     raise ValueError(msg)
-
-
-def get_github_installation_token() -> str:
-    if not _mcp_token_value:
-        msg = "tokens not set — call resolve_tokens first"
-        raise RuntimeError(msg)
-    return _mcp_token_value
-
-
-def get_mcp_token_refresh() -> Callable[[str], Awaitable[str]] | None:
-    return _mcp_token_refresh
 
 
 @dataclass(slots=True)
@@ -162,7 +150,7 @@ async def resolve_tokens(
     sarif_upload: bool = False,
 ) -> TokenRef:
     """Resolve git + MCP tokens for the run (local BYOK — no mergecraft.com)."""
-    global _mcp_token_value, _mcp_token_refresh
+    global _mcp_token_value
 
     if _mcp_token_value:
         msg = "tokens are already resolved"
@@ -175,9 +163,8 @@ async def resolve_tokens(
         read = external if xrepo else None
 
         async def _noop_dispose() -> None:
-            global _mcp_token_value, _mcp_token_refresh
+            global _mcp_token_value
             _mcp_token_value = None
-            _mcp_token_refresh = None
 
         return TokenRef(
             git_token=external,
@@ -268,9 +255,8 @@ async def resolve_tokens(
     _mcp_token_value = mcp_token
 
     async def _dispose() -> None:
-        global _mcp_token_value, _mcp_token_refresh
+        global _mcp_token_value
         _mcp_token_value = None
-        _mcp_token_refresh = None
         await _revoke_distinct_tokens(minted_tokens)
 
     return TokenRef(
@@ -318,9 +304,7 @@ __all__ = [
     "TokenRef",
     "acquire_installation_token",
     "acquire_new_token",
-    "get_github_installation_token",
     "get_job_token",
-    "get_mcp_token_refresh",
     "resolve_tokens",
     "revoke_github_installation_token",
     "revoke_installation_token",

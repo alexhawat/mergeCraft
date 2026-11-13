@@ -68,7 +68,6 @@ def _ctx(tmp_path: Path, github: GitHubClient) -> ToolContext:
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
-        signed_commits=False,
         xrepo=None,
         static_checks_enabled=True,
         trust_tier="trusted",

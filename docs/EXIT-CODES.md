@@ -48,6 +48,9 @@ review logic.
 
 Examples:
 
+The `eval` examples require a source checkout. Installed packages omit that
+maintainer command and return usage error `2` if it is invoked.
+
 - `mergecraft auth codex --scope everywhere` → `2` (unknown `--scope`)
 - `mergecraft findings export --output-format xml` → `2` (unsupported `--output-format`)
 - `mergecraft lens show no-such-lens` → `2` (unknown id)

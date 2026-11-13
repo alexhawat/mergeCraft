@@ -48,7 +48,7 @@ All cross-wave markers are **non-strict** (`strict=False`) — the repo sets
 | Piece | Purpose |
 |-------|---------|
 | `tests/support/run_main_harness.py` | Instrumented `mergecraft.main.main()` runner: scripts GitHub client, agents, setup-script subprocess, trust derivation; records an ordered event log (`MainRunRecord`) so tests assert **call order** and observed env without live services. Knobs: `event_name`/`event_payload`, `settings`, `agent` (FakeAgent), `prep_failure`, `setup_script_rc`, `env`, `cleanup_tmpdir`. |
-| `tests/security/conftest.py` | `planted_repo` (real git repo with malicious `post-checkout` hook), `make_tool_ctx` factory (parametrized `shell`/`push`/`signed_commits`), `make_agent_run_ctx`, `no_ci_env` (clears `CI` + the `_detected_sandbox` cache so spawns use plain bash). |
+| `tests/security/conftest.py` | `planted_repo` (real git repo with malicious `post-checkout` hook), `make_tool_ctx` factory (parametrized `shell`/`push`), `make_agent_run_ctx`, `no_ci_env` (clears `CI` + the `_detected_sandbox` cache so spawns use plain bash). |
 | `FakeAgent` (harness) | Returns a scripted `AgentResult`, raises a scripted exception, or sleeps past the timeout — drives every W5/W6 outcome path. |
 
 ## Contract → coverage matrix

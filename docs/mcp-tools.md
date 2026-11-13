@@ -7,7 +7,7 @@ Install and connect via `docs/mcp.md`.
 
 ## `review_change`
 
-Run a read-only mergeCraft review on the workspace change and persist a durable review id. Do not use when you need to commit, push, or open a PR — use runtime reviewer tools instead.
+Run a read-only mergeCraft review on the workspace change and persist a durable review id with the findings.
 
 ### Input schema
 
@@ -207,8 +207,9 @@ Credential-bearing `config` keys (`credential.*`, `url.*`) are refused. Writes
 | Credential paths | `.git/config`, `.git/credentials`, askpass tree unreadable even inside the repo |
 | Failure text | `RuntimeError` bodies from `_run_git` pass through `redact_secrets` |
 
-Redirects for mutating verbs: `push` → `push_branch`, `fetch` → `git_fetch`,
-`clone` → `checkout_repo` / `checkout_pr`.
+`push` is refused because repository mutation is unavailable in review-only
+runs. Use `git_fetch` to read remote refs and `checkout_repo` / `checkout_pr`
+for bounded checkout operations; `pull` cannot merge changes.
 
 ## `establish_review_scope`
 

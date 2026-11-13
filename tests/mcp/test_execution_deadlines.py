@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 from tests.mcp.test_static_checks import _ctx
+from tests.support.tool_context import inner_mutation_guard_probe
 
 from mergecraft.mcp.rpc import dispatch_mcp_rpc
 from mergecraft.mcp.shared import ToolClass, ToolSpec
@@ -71,21 +72,25 @@ async def test_shell_rpc_returns_partial_output_after_max_command_timeout(
     monkeypatch.setattr(shell, "detect_sandbox_method", lambda: "none")
     monkeypatch.setenv("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL", "1")
     ctx = _ctx(tmp_path)
-    ctx.tool_state.selected_mode = "Build"
     spec = shell.shell_tool(ctx)
     command = "printf 'partial output\n'; sleep 3"
-    response = await dispatch_mcp_rpc(
-        1,
-        "tools/call",
-        {
-            "name": spec.name,
-            "arguments": {"command": command, "description": "deadline test", "timeout": 120_000},
-        },
-        tools=[spec],
-        by_name={spec.name: spec},
-        tool_ctx=ctx,
-        validators={},
-    )
+    with inner_mutation_guard_probe():
+        response = await dispatch_mcp_rpc(
+            1,
+            "tools/call",
+            {
+                "name": spec.name,
+                "arguments": {
+                    "command": command,
+                    "description": "deadline test",
+                    "timeout": 120_000,
+                },
+            },
+            tools=[spec],
+            by_name={spec.name: spec},
+            tool_ctx=ctx,
+            validators={},
+        )
     assert "result" in response, response
     result = json.loads(response["result"]["content"][0]["text"])
     assert result["timed_out"] is True

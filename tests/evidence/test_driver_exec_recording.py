@@ -365,32 +365,32 @@ class _FinishedProcess:
 async def _mcp_shell_door(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, command: str, exit_code: int
 ) -> Any:
-    """Run ``command`` through ``tools/call`` exactly as production does.
+    """Exercise shell evidence recording behind the default-deny mode gate.
 
-    The real ``shell`` tool spec, its ``execute()`` wrapper (which turns the
-    body's dict into a :class:`ToolResult`) and ``dispatch_mcp_rpc`` all run;
-    only the process spawn is replaced, so the test needs no sandbox.
+    The real tool spec, execute wrapper, and RPC dispatcher run. The outer
+    mutation gate is bypassed explicitly to exercise the inner recorder, and
+    process spawning is replaced so the test needs no sandbox.
     """
     import mergecraft.mcp.shell as shell_mod
+    from tests.support.tool_context import inner_mutation_guard_probe
 
     def _spawn(*_args: Any, **_kwargs: Any) -> _FinishedProcess:
         return _FinishedProcess(exit_code)
 
     monkeypatch.setattr(shell_mod, "_spawn_shell", _spawn)
     state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
-    # ``shell`` is a mutating tool; ``rpc.py`` binds the run's mode before it runs.
-    state.selected_mode = "Fix"
     ctx = make_tool_context(tmp_path, trust_tier="trusted", tool_state=state)
     spec = shell_mod.shell_tool(ctx)
-    response = await dispatch_mcp_rpc(
-        1,
-        "tools/call",
-        {"name": "shell", "arguments": {"command": command, "description": "probe"}},
-        tools=[spec],
-        by_name={"shell": spec},
-        tool_ctx=ctx,
-        validators={},
-    )
+    with inner_mutation_guard_probe():
+        response = await dispatch_mcp_rpc(
+            1,
+            "tools/call",
+            {"name": "shell", "arguments": {"command": command, "description": "probe"}},
+            tools=[spec],
+            by_name={"shell": spec},
+            tool_ctx=ctx,
+            validators={},
+        )
     assert "result" in response, response
     assert response["result"].get("isError") is not True, response
     return state

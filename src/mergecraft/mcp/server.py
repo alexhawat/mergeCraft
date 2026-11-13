@@ -41,12 +41,8 @@ from mergecraft.mcp.endpoints import (
     MCP_VERIFIER_ENDPOINT as MCP_VERIFIER_ENDPOINT,
 )
 from mergecraft.mcp.git import (
-    commit_changes_tool,
-    delete_branch_tool,
     git_fetch_tool,
     git_tool,
-    push_branch_tool,
-    push_tags_tool,
 )
 from mergecraft.mcp.issue import close_issue_tool, create_issue_tool, reopen_issue_tool
 from mergecraft.mcp.issue_comments import get_issue_comments_tool
@@ -61,11 +57,6 @@ from mergecraft.mcp.ports import (
     attach_serve_error_sink,
     resolve_uvicorn_bind_port,
     wait_for_bound_port,
-)
-from mergecraft.mcp.pr import (
-    close_pull_request_tool,
-    create_pull_request_tool,
-    update_pull_request_body_tool,
 )
 from mergecraft.mcp.pr_info import get_pull_request_tool
 from mergecraft.mcp.review import create_pull_request_review_tool
@@ -232,23 +223,14 @@ def build_verifier_tools(
 def build_orchestrator_tools(
     ctx: ToolContext, output_schema: JsonSchema | None = None
 ) -> list[ToolSpec]:
-    tools = [
+    return [
         *build_common_tools(ctx, output_schema),
         report_progress_tool(ctx),
         select_mode_tool(ctx),
         record_reviewer_dispatch_error_tool(ctx),
         record_reviewer_dispatch_run_tool(ctx),
         submit_review_verdict_tool(ctx),
-        push_branch_tool(ctx),
-        push_tags_tool(ctx),
-        delete_branch_tool(ctx),
-        create_pull_request_tool(ctx),
-        update_pull_request_body_tool(ctx),
-        close_pull_request_tool(ctx),
     ]
-    if ctx.signed_commits:
-        tools.append(commit_changes_tool(ctx))
-    return tools
 
 
 def _is_notification(message: Any) -> bool:
