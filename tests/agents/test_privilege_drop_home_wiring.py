@@ -32,6 +32,8 @@ the checkout-workspace chown that already existed for W3.4.
 from __future__ import annotations
 
 import importlib
+import os
+import stat
 import sys
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
@@ -78,7 +80,16 @@ def _simulate_root_privilege_drop(monkeypatch: MonkeyPatch) -> None:
         "which",
         lambda name: f"/usr/bin/{name}" if name == "setpriv" else None,
     )
-    monkeypatch.setattr(privilege_module.os, "stat", lambda _path, **kwargs: MagicMock(st_uid=0))
+    real_stat = os.stat
+
+    def root_owned_stat(path: Any, **kwargs: Any) -> os.stat_result:
+        # Only ownership is simulated. Preserve real metadata and missing-path
+        # errors for config discovery and the streaming driver's filesystem use.
+        fields = list(real_stat(path, **kwargs))
+        fields[stat.ST_UID] = 0
+        return os.stat_result(fields)
+
+    monkeypatch.setattr(privilege_module.os, "stat", root_owned_stat)
     fake_pwd = MagicMock()
     fake_pwd.getpwnam.return_value = _FakePw()
     monkeypatch.setitem(sys.modules, "pwd", fake_pwd)
