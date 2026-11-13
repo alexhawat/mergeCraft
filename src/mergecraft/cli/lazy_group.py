@@ -59,7 +59,7 @@ class LazyRootGroup(MergecraftTyperGroup):
             elif entry.group:
                 command = get_group(target)
             else:
-                wrapper = typer.Typer()
+                wrapper = typer.Typer(add_completion=False)
                 wrapper.command(cmd_name, hidden=entry.hidden)(target)
                 command = get_command(wrapper)
             command.name = cmd_name

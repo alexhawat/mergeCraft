@@ -183,3 +183,33 @@ assert values == {"EXAMPLE_SETTING": "value"}
         check=True,
         timeout=30,
     )
+
+
+@pytest.mark.parametrize("command", ["init", "review"])
+def test_installed_subcommands_keep_completion_flags_root_only(
+    command: str, tmp_path: Path
+) -> None:
+    executable = str(Path(sys.executable).with_name("mergecraft"))
+    env = {"PATH": os.defpath, "HOME": str(tmp_path)}
+    result = subprocess.run(
+        [executable, command, "--show-completion", "bash"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 2
+    assert "No such option" in result.stderr
+    help_result = subprocess.run(
+        [executable, command, "--help"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    assert "--install-completion" not in help_result.stdout
+    assert "--show-completion" not in help_result.stdout
