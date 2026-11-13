@@ -288,7 +288,13 @@ async def test_review_scope_accepts_an_honest_diff_with_quoted_paths(
         if status == "renamed":
             entry["previous_filename"] = pre
         files.append(entry)
-    github = StrictGitHubClient(routes={("GET", "/repos/acme/demo/pulls/7/files"): files})
+    pull = {"head": {"sha": "a" * 40}, "base": {"sha": "b" * 40}}
+    github = StrictGitHubClient(
+        routes={
+            ("GET", "/repos/acme/demo/pulls/7"): pull,
+            ("GET", "/repos/acme/demo/pulls/7/files"): files,
+        }
+    )
     ctx = make_tool_context(tmp_path, trust_tier="untrusted", github=github)
     diff_path = tmp_path / "pr.diff"
     diff_path.write_text(diff, encoding="utf-8")
@@ -296,6 +302,8 @@ async def test_review_scope_accepts_an_honest_diff_with_quoted_paths(
     await reject_diff_that_does_not_match_the_pr(ctx, diff_path=str(diff_path), pull_number=7)
 
     files.append({"filename": "unlisted.py", "status": "added"})
+    # A changed file set belongs to a new revision, not the cached old head.
+    pull["head"]["sha"] = "c" * 40
     with pytest.raises(ValueError, match="missing 1 file"):
         await reject_diff_that_does_not_match_the_pr(ctx, diff_path=str(diff_path), pull_number=7)
 
