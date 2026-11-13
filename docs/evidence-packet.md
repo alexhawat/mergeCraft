@@ -60,12 +60,18 @@ worked example at the end.
 
 ## Source
 
-The packet is defined in `src/mergecraft/evidence/packet.py` and exposed
-via `mergecraft.evidence.packet_output_schema()`. The JSON Schema is
-**derived from the Pydantic models** — there is no hand-written schema
-dict in parallel. The precedent is
-`mergecraft.analyzers.finding.findings_output_schema()`
-(`src/mergecraft/analyzers/finding.py:138`).
+The packet is defined by `MergeEvidencePacket` in
+`src/mergecraft/evidence/packet.py`. Obtain its JSON Schema with the
+model's standard Pydantic API:
+
+```python
+from mergecraft.evidence.packet import MergeEvidencePacket
+
+schema = MergeEvidencePacket.model_json_schema()
+```
+
+The schema is **derived from the Pydantic models**, with nested model
+references in `$defs`; there is no hand-written schema dict in parallel.
 
 ## Versioning
 
@@ -493,8 +499,10 @@ at validation. There is no second finding model: the packet's
 The packet is the **contract** between the per-run evidence layer
 and the gate layer. Consumers of the packet should:
 
-1. Validate it against `mergecraft.evidence.packet_output_schema()`
-   before reading any fields.
+1. Parse and validate the JSON with
+   `MergeEvidencePacket.model_validate_json(packet_json)` before reading
+   any fields. Import the model as shown above; non-Python consumers can
+   validate against its generated JSON Schema.
 2. Treat the `schema_version` as a hard precondition — refuse
    versions your consumer does not understand.
 3. **Never** rely on the agent's self-assessment alone (that is the

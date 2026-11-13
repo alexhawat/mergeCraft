@@ -282,28 +282,6 @@ def _publisher_login_from_repo_config() -> str:
     return loaded
 
 
-def _expected_publisher_login() -> str:
-    """Return the bot login this run is allowed to treat as its own publisher.
-
-    ``MERGECRAFT_REVIEWER_BOT_LOGIN`` is the App slug plus ``[bot]`` when the
-    workflow minted an App token, and ``github-actions[bot]`` when it fell
-    back to the job token. Read-side commands (``findings ledger``,
-    ``findings carryover``) do not see that env, so they use
-    ``reviewerBotLogin`` from repo config, then the job-token default.
-    Any other bot, including another installed App, is not this publisher.
-    """
-    from mergecraft.config.env import ReviewEnv
-
-    configured = ReviewEnv().reviewer_bot_login or ""
-    if configured:
-        return configured
-    override = _publisher_logins_override.get()
-    if override:
-        return next(iter(override))
-    from_config = _publisher_login_from_repo_config()
-    return from_config or _DEFAULT_PUBLISHER_LOGIN
-
-
 def _allowed_publisher_logins() -> frozenset[str]:
     """Logins that may own a formal review or legacy sticky comment."""
     from mergecraft.config.env import ReviewEnv
@@ -398,8 +376,8 @@ def _is_trusted_sticky_author(comment: Mapping[str, object]) -> bool:
     A PR participant can quote the heading, the footer or a ledger marker, so a
     body shape test alone lets a human win selection. ``user.type == "Bot"`` is
     not enough either: another App, or ``github-actions[bot]`` from a different
-    workflow, can post the same public marker. The login must match
-    :func:`_expected_publisher_login`.
+    workflow, can post the same public marker. The login must belong to the set returned by
+    :func:`_allowed_publisher_logins`.
 
     When the workflow has no App token, the expected login stays
     ``github-actions[bot]``. That login is shared by every workflow in the
@@ -1134,87 +1112,6 @@ async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> Find
     return ledger
 
 
-async def persist_finding_ledger_to_progress_comment(ctx: ToolContext) -> None:
-    """Persist the in-memory ledger into the sticky progress comment (RC4, M9)."""
-    from mergecraft.mcp.comment import add_footer
-    from mergecraft.mcp.tool_state import ProgressComment, primary_repo_state
-    from mergecraft.utils.learnings import (
-        ensure_learnings_review_delta,
-        merge_learnings_delta_into_review_body,
-    )
-
-    tool_state = ctx.tool_state
-    if tool_state.progress_comment is False:
-        return
-
-    ledger = ensure_finding_ledger(tool_state)
-    if not ledger.records():
-        return
-
-    issue_number = primary_repo_state(tool_state).issue_number or tool_state.pr_number
-    if issue_number is None:
-        return
-
-    try:
-        base_body = str(tool_state.last_progress_body or "").strip()
-        if not base_body:
-            base_body = f"{_PROGRESS_HEADING}\n\nReview published."
-
-        await ensure_learnings_review_delta(tool_state)
-        body_with_delta = merge_learnings_delta_into_review_body(tool_state, base_body)
-        body_with_ledger = merge_ledger_into_comment(body_with_delta, records=ledger.records())
-        body_with_footer = add_footer(ctx, body_with_ledger)
-
-        if isinstance(tool_state.progress_comment, ProgressComment):
-            await ctx.scm.update_issue_comment(
-                ctx.repo.owner,
-                ctx.repo.name,
-                int(tool_state.progress_comment.id),
-                body_with_footer,
-            )
-            tool_state.last_progress_body = body_with_ledger
-            return
-
-        with _run_sticky_scope(ctx):
-            sticky = await fetch_sticky_progress_comment(
-                ctx.scm,
-                ctx.repo.owner,
-                ctx.repo.name,
-                int(issue_number),
-            )
-        if sticky is not None:
-            # A selected sticky is always updated. Guarding on a non-empty body
-            # meant a sticky the selector returned without content fell through
-            # to ``create``, a duplicate; a blank comment is not a sticky but a
-            # selected one must still be written to.
-            existing_body = str(sticky.get("body") or "")
-            merged = merge_ledger_into_comment(existing_body, records=ledger.records())
-            body_with_footer = add_footer(ctx, merged)
-            await ctx.scm.update_issue_comment(
-                ctx.repo.owner,
-                ctx.repo.name,
-                int(sticky["id"]),
-                body_with_footer,
-            )
-            tool_state.progress_comment = ProgressComment(
-                id=str(sticky["id"]),
-                type="issue",
-            )
-            tool_state.last_progress_body = merged
-            return
-
-        result = await ctx.scm.create_issue_comment(
-            ctx.repo.owner,
-            ctx.repo.name,
-            int(issue_number),
-            body_with_footer,
-        )
-        tool_state.progress_comment = ProgressComment(id=str(result["id"]), type="issue")
-        tool_state.last_progress_body = body_with_ledger
-    except Exception as err:
-        logger.warning("finding ledger: could not persist progress comment: {}", err)
-
-
 def _strip_deterministic_record_markers(body: str) -> str:
     """Remove forged or stale deterministic-record markers from agent prose.
 
@@ -1884,7 +1781,6 @@ __all__ = [
     "ledger_round_index",
     "merge_deterministic_record_into_comment",
     "merge_ledger_into_comment",
-    "persist_finding_ledger_to_progress_comment",
     "record_deferred_from_analyzer_run",
     "record_over_budget_verifications",
     "record_published_findings_in_ledger",

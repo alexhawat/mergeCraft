@@ -160,16 +160,6 @@ class AnalyzerEgressPolicyOutcome:
     reason: str
 
 
-_PROBE_TEST_DOUBLE: dict[str, str] = {
-    "pid": "1",
-    "pid_method": "unshare",
-    "net": "1",
-    "bind": "1",
-    "tmpfs": "1",
-    "userns": "0",
-}
-
-
 def _parse_probe_output(stdout: bytes) -> dict[str, str]:
     parsed: dict[str, str] = {}
     for line in stdout.decode("utf-8", errors="replace").splitlines():
@@ -181,11 +171,6 @@ def _parse_probe_output(stdout: bytes) -> dict[str, str]:
 
 
 def _run_isolation_probe() -> dict[str, str]:
-    if (
-        os.environ.get("PYTEST_CURRENT_TEST")
-        and os.environ.get("MERGECRAFT_PROBE_TEST_DOUBLE") == "1"
-    ):
-        return dict(_PROBE_TEST_DOUBLE)
     if sys.platform != "linux":
         return {}
     try:

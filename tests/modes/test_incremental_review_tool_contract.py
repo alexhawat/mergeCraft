@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 
 def _refused_in_review_session(tmp_path: Path) -> set[str]:
-    ctx = make_tool_context(tmp_path, trust_tier="trusted", signed_commits=True)
+    ctx = make_tool_context(tmp_path, trust_tier="trusted")
     refused: set[str] = set()
     for tool in build_orchestrator_tools(ctx):
         if not tool.mutates:

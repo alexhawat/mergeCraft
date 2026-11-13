@@ -13,14 +13,13 @@ from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.findings.dedup import dedupe_findings, dedupe_findings_with_indices
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
     from mergecraft.analyzers.finding import Finding
     from mergecraft.mcp.context import ToolContext
 
 __all__ = [
     "RECALL_SYSTEM_PROMPT",
-    "build_recall_pass_brief",
     "filter_novel_recall_findings",
     "recall_denied_tool_names",
 ]
@@ -45,43 +44,6 @@ RECALL_SYSTEM_PROMPT = (
     "output; otherwise end with a `---typed-findings---` JSON array of findings "
     "not already represented in the draft list."
 )
-
-
-def _format_draft_row(row: Mapping[str, object]) -> str:
-    path = str(row.get("path") or "")
-    line = row.get("line", row.get("start_line", ""))
-    severity = str(row.get("severity") or "Minor")
-    body = str(row.get("body") or row.get("message") or "").strip()
-    return f"- **{severity}** `{path}:{line}` — {body}"
-
-
-def build_recall_pass_brief(
-    *,
-    diff_text: str,
-    draft_findings: Sequence[Mapping[str, object]],
-) -> str:
-    """Build the recall dispatch brief from the diff and draft findings."""
-    lines = [
-        "Recall pass — find defects absent from the draft list.",
-        "",
-        "### Diff",
-        "",
-        diff_text.strip() or "(empty diff)",
-        "",
-        "### Draft findings already planned for publication",
-        "",
-    ]
-    if draft_findings:
-        lines.extend(_format_draft_row(row) for row in draft_findings)
-    else:
-        lines.append("(none — the orchestrator has not drafted any findings yet.)")
-    lines.extend(
-        [
-            "",
-            "Return only novel findings with file:line citations and quoted evidence.",
-        ]
-    )
-    return "\n".join(lines)
 
 
 def filter_novel_recall_findings(

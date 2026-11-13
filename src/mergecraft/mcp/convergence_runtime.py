@@ -127,39 +127,6 @@ def prepare_inline_comment_for_publish(
     )
 
 
-def apply_recall_pass_post_process(
-    ctx: ToolContext,
-    recalled: Sequence[Mapping[str, object]],
-    *,
-    publish_sets: RecallPublishSets | None = None,
-) -> None:
-    """Merge recall subagent output into the analyzer deferred lane when enabled."""
-    from pathlib import Path
-
-    from mergecraft.config.settings import load_repo_settings
-    from mergecraft.mcp.tool_state import primary_repo_state
-
-    repo_root = Path(primary_repo_state(ctx.tool_state).dir or Path.cwd())
-    settings = load_repo_settings(root=repo_root, load_learnings_files=False)
-    if not settings.review.recall_pass or not recalled:
-        return
-    analyzer_run = ctx.tool_state.analyzer_run
-    if analyzer_run is None:
-        from mergecraft.mcp.tool_state import AnalyzerRunState
-
-        analyzer_run = AnalyzerRunState(ran=True)
-        ctx.tool_state.analyzer_run = analyzer_run
-    resolved_sets = publish_sets or recall_publish_sets(ctx)
-    merge_recall_findings_into_analyzer_run(
-        analyzer_run,
-        draft=resolved_sets.draft_rows,
-        recalled=recalled,
-    )
-    from mergecraft.findings.ledger import record_deferred_from_analyzer_run
-
-    record_deferred_from_analyzer_run(ctx.tool_state, analyzer_run)
-
-
 def _withdrawn_fingerprints_for_recall(ctx: ToolContext) -> set[str]:
     """Fingerprints a verifier ``drop`` retired — live set plus learnings memory."""
     from mergecraft.mcp.verdict import withdrawn_fingerprints_for_state
@@ -266,7 +233,6 @@ def strip_recall_inline_comments(
 
 
 __all__ = [
-    "apply_recall_pass_post_process",
     "collateral_by_fingerprint",
     "enforce_recall_deferred_lane_at_publish",
     "merge_recall_findings_into_analyzer_run",
