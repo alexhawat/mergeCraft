@@ -56,6 +56,7 @@ if TYPE_CHECKING:
 _ROSTER_SUBMIT_INSTRUCTIONS = """
 You are a secondary reviewer on this run. Review the diff and record your outcome
 with `record_reviewer_dispatch_run` (pass your ``agent_id`` and structured findings).
+If you find no issues, you must still record your outcome with an empty findings list.
 Do **not** call `submit_review_verdict` — the primary reviewer owns the terminal verdict.
 """.strip()
 
@@ -276,6 +277,7 @@ async def _dispatch_reviewer(
     submit_instructions: str = _ROSTER_SUBMIT_INSTRUCTIONS,
     owns_finding: Callable[[dict[str, Any]], bool] | None = None,
     stamp_reviewer_evidence: bool = False,
+    require_recorded_run: bool = False,
     instructions_for: Callable[[str], ResolvedInstructions | None] | None = None,
 ) -> _SecondaryOutcome:
     """Run one reviewer binding server-side and record its outcome under ``record_as``.
@@ -304,6 +306,8 @@ async def _dispatch_reviewer(
         stamp_reviewer_evidence: Append ``reviewer: <record_as> (<model>)`` to
             the evidence of every row the run claims, in the run's findings and
             in the stored rows the evidence packet reads.
+        require_recorded_run: Require an explicit outcome for concurrent roster
+            reviewers, whose shared finding snapshots cannot establish ownership.
         instructions_for: When given, maps the reviewer's harness name to the
             instructions resolved at run start; they are used instead of
             rendering new ones from ``repo_root``. A harness it has no entry
@@ -436,7 +440,13 @@ async def _dispatch_reviewer(
             infra_reason if isinstance(infra_reason, str) and infra_reason else None,
         )
 
+    if recorded_error := tool_state.reviewer_dispatch_errors.get(record_as):
+        return _SecondaryOutcome(recorded_error)
     if not _binding_already_recorded(tool_state, record_as):
+        if require_recorded_run:
+            reason = f"{label} {record_as!r} finished without recording its outcome"
+            record_reviewer_dispatch_error(tool_state, agent_id=record_as, reason=reason)
+            return _SecondaryOutcome(reason)
         findings = _findings_since(before_findings, tool_state)
         if owns_finding is not None:
             findings = [row for row in findings if owns_finding(row)]
@@ -462,6 +472,7 @@ async def _run_one_secondary_reviewer(
     payload: dict[str, Any],
     repo_root: Path,
     timeout_s: float | None,
+    require_recorded_run: bool = False,
     instructions_for: Callable[[str], ResolvedInstructions | None] | None = None,
 ) -> _SecondaryOutcome:
     """Dispatch one secondary reviewer; return its hard error, if any."""
@@ -475,6 +486,10 @@ async def _run_one_secondary_reviewer(
         payload=payload,
         repo_root=repo_root,
         timeout_s=timeout_s,
+        submit_instructions=(
+            f"{_ROSTER_SUBMIT_INSTRUCTIONS}\nYour reviewer agent_id is `{binding.agent_id}`."
+        ),
+        require_recorded_run=require_recorded_run,
         instructions_for=instructions_for,
     )
 
@@ -530,9 +545,11 @@ async def run_pending_roster_reviewers(
 
     Each reviewer runs under :func:`secondary_reviewer_timeout_s`. A required
     reviewer (:func:`reviewer_is_required`) that fails or times out is the
-    summary's ``hard_error`` and stops the dispatch; a reviewer that is not
-    required is recorded as a dispatch error (a degradation note) and the
-    remaining reviewers still run.
+    summary's ``hard_error``; other reviewers still run. Peers within a dispatch
+    level run concurrently, and the next level waits for every peer to finish
+    or fail. Optional failures remain degradation notes. Concurrent reviewers
+    must explicitly record their outcomes so shared findings are never claimed
+    by the wrong reviewer.
 
     ``instructions_for`` maps a harness name to the instructions resolved at run
     start. When it is given, every reviewer uses those instead of rendering new
@@ -556,51 +573,71 @@ async def run_pending_roster_reviewers(
     hard_error: str | None = None
     infra_reason: str | None = None
 
+    errors: list[str] = []
     for batch in batches:
+        pending: list[AgentBinding] = []
         for agent_id in batch:
             if agent_id == primary_id:
                 continue
-            required = reviewer_is_required(effective_settings, agent_id)
             try:
                 binding = registry.resolve_agent_ref(agent_id)
             except KeyError:
                 reason = f"no registry binding for secondary reviewer {agent_id!r}"
-                if not required:
-                    record_reviewer_dispatch_error(
-                        tool_context.tool_state, agent_id=agent_id, reason=reason
-                    )
-                    continue
-                hard_error = reason
-                break
-            if _binding_already_recorded(tool_context.tool_state, binding.agent_id):
+                record_reviewer_dispatch_error(
+                    tool_context.tool_state, agent_id=agent_id, reason=reason
+                )
+                if reviewer_is_required(effective_settings, agent_id):
+                    errors.append(reason)
                 continue
-            outcome = await _run_one_secondary_reviewer(
-                binding=binding,
-                base_ctx=base_run_ctx,
-                tool_context=tool_context,
-                settings=effective_settings,
-                payload=payload,
-                repo_root=root,
-                timeout_s=secondary_reviewer_timeout_s(
-                    binding, per_reviewer_timeout_s=per_reviewer_timeout_s
-                ),
-                instructions_for=instructions_for,
-            )
+            if not _binding_already_recorded(tool_context.tool_state, binding.agent_id):
+                pending.append(binding)
+
+        # gather preserves registry order and lets every peer finish, including
+        # when model/credential/instruction preparation raises before invocation.
+        # Cancelling this parent still cancels and awaits all its children.
+        outcomes = await asyncio.gather(
+            *(
+                _run_one_secondary_reviewer(
+                    binding=binding,
+                    base_ctx=base_run_ctx,
+                    tool_context=tool_context,
+                    settings=effective_settings,
+                    payload=payload,
+                    repo_root=root,
+                    timeout_s=secondary_reviewer_timeout_s(
+                        binding, per_reviewer_timeout_s=per_reviewer_timeout_s
+                    ),
+                    require_recorded_run=len(pending) > 1,
+                    instructions_for=instructions_for,
+                )
+                for binding in pending
+            ),
+            return_exceptions=True,
+        )
+        for binding, outcome in zip(pending, outcomes, strict=True):
+            if isinstance(outcome, BaseException):
+                reason = (
+                    f"secondary reviewer {binding.agent_id!r} failed: "
+                    f"{type(outcome).__name__}: {outcome}"
+                )
+                record_reviewer_dispatch_error(
+                    tool_context.tool_state, agent_id=binding.agent_id, reason=reason
+                )
+                outcome = _SecondaryOutcome(reason)
             if outcome.error:
-                if not required:
+                if reviewer_is_required(effective_settings, binding.agent_id):
+                    errors.append(outcome.error)
+                    infra_reason = infra_reason or outcome.infra_reason
+                else:
                     logger.warning(
                         "» secondary reviewer {} is not required; recorded as degraded: {}",
                         binding.agent_id,
                         outcome.error,
                     )
-                    continue
-                hard_error = outcome.error
-                infra_reason = outcome.infra_reason
-                break
-            dispatched.append(binding.agent_id)
-        if hard_error:
-            break
+            else:
+                dispatched.append(binding.agent_id)
 
+    hard_error = "; ".join(errors) or None
     gaps = roster_dispatch_gaps(registry, tool_context.tool_state, settings=effective_settings)
     if gaps and hard_error is None:
         hard_error = roster_dispatch_failure_message(gaps)

@@ -35,6 +35,7 @@ RETAINED_TOOL_FIELDS = {
     "capture_verdicts",
     "credential_degradations",
     "dependency_installation",
+    "diff_budget_reason",
     "driver_reports_reads",
     "existing_plan_comment_id",
     "fallback_index",
