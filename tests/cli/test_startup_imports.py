@@ -185,7 +185,7 @@ assert values == {"EXAMPLE_SETTING": "value"}
     )
 
 
-@pytest.mark.parametrize("command", ["init", "review"])
+@pytest.mark.parametrize("command", ["init", "review"], ids=["init", "review"])
 def test_installed_subcommands_keep_completion_flags_root_only(
     command: str, tmp_path: Path
 ) -> None:
