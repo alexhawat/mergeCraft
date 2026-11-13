@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `mergecraft agent assign-model` and the other `agent`, `model` and `provider`
+  commands that write `.mergecraft/config.yaml` now work on the commented config
+  that `mergecraft init` generates. They used to stop with a "refusing to rewrite"
+  traceback, so the Quickstart failed at its model step. Only the keys a command
+  changes are rewritten; comments elsewhere in the file are kept (#1336, #1455).
+
 
 ## 0.1.0a6
 ### Breaking — action required

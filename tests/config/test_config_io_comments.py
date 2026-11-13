@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-from mergecraft.config.io import config_has_yaml_comments, write_config_dict
+from mergecraft.config.io import (
+    config_has_yaml_comments,
+    save_config_dict,
+    write_config_dict,
+)
 
 _COMMENTED_CONFIG = """\
 # fork floor always refuses
@@ -235,3 +239,56 @@ def test_patch_config_dict_is_idempotent_for_list_values(tmp_path: Path) -> None
     assert second == first, f"repeated write changed the file:\n{second}"
     assert yaml.safe_load(second)["models"] == ["nous/tencent/hy3"]
     assert second.count("nous/tencent/hy3") == 1, f"value duplicated:\n{second}"
+
+
+# ── ``save_config_dict`` writes a whole config without losing comments ───────
+
+
+def _commented(tmp_path: Path) -> Path:
+    path = tmp_path / ".mergecraft" / "config.yaml"
+    path.parent.mkdir(parents=True)
+    path.write_text(_COMMENTED_CONFIG, encoding="utf-8")
+    return path
+
+
+def test_save_config_dict_replaces_only_changed_keys(tmp_path: Path) -> None:
+    path = _commented(tmp_path)
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data["model"] = "openai/gpt-5"
+    data["agents"] = {"reviewer": {"role": "reviewer"}}
+    save_config_dict(path, data)
+    text = path.read_text(encoding="utf-8")
+    assert "# fork floor always refuses" in text
+    assert "  selfReview: 'off'\n" in text
+    assert yaml.safe_load(text) == data
+
+
+def test_save_config_dict_removes_dropped_keys(tmp_path: Path) -> None:
+    path = _commented(tmp_path)
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    del data["push"]
+    save_config_dict(path, data)
+    text = path.read_text(encoding="utf-8")
+    assert "# fork floor always refuses" in text
+    assert yaml.safe_load(text) == data
+
+
+def test_save_config_dict_leaves_unchanged_file_untouched(tmp_path: Path) -> None:
+    path = _commented(tmp_path)
+    save_config_dict(path, yaml.safe_load(path.read_text(encoding="utf-8")))
+    assert path.read_text(encoding="utf-8") == _COMMENTED_CONFIG
+
+
+def test_save_config_dict_refuses_trust_change_on_commented_file(tmp_path: Path) -> None:
+    path = _commented(tmp_path)
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data["trust"]["agentSandbox"] = "same-repo"
+    with pytest.raises(ValueError, match="refusing to rewrite"):
+        save_config_dict(path, data)
+    assert path.read_text(encoding="utf-8") == _COMMENTED_CONFIG
+
+
+def test_save_config_dict_rewrites_comment_free_file(tmp_path: Path) -> None:
+    path = tmp_path / ".mergecraft" / "config.yaml"
+    save_config_dict(path, {"model": "openai/gpt-5"})
+    assert yaml.safe_load(path.read_text(encoding="utf-8")) == {"model": "openai/gpt-5"}

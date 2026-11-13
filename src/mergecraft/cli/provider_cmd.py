@@ -27,7 +27,7 @@ from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.config.env import LocalDotEnv
 from mergecraft.config.io import load_config_dict as _load_config_dict_raw
 from mergecraft.config.io import patch_config_dict
-from mergecraft.config.io import write_config_dict as _write_config_dict
+from mergecraft.config.io import save_config_dict as _write_config_dict
 from mergecraft.config.layered import config_parse_error
 from mergecraft.config.provider_registry import (
     BUILTIN_HARNESS_DEFAULTS,

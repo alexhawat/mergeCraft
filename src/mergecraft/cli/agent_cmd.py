@@ -44,7 +44,7 @@ from mergecraft.config.agent_roster import (
     remove_slot,
     write_roster,
 )
-from mergecraft.config.io import config_path_for_root, load_config_dict, write_config_dict
+from mergecraft.config.io import config_path_for_root, load_config_dict, save_config_dict
 from mergecraft.config.layered import (
     load_layered_config_dict,
     local_config_path,
@@ -245,7 +245,7 @@ def _persist_entry(
     except AgentRosterError as exc:
         cli_bail(str(exc))
     write_roster(raw, roster)
-    write_config_dict(config_path, raw)
+    save_config_dict(config_path, raw)
 
 
 def _remove_entry(
@@ -265,7 +265,7 @@ def _remove_entry(
     except AgentRosterError as exc:
         cli_bail(str(exc))
     write_roster(raw, roster)
-    write_config_dict(config_path, raw)
+    save_config_dict(config_path, raw)
 
 
 def _count_role_bindings(agents: dict[str, Any], role: str) -> int:
@@ -308,7 +308,7 @@ def _prepare_assign_slug(
         data = load_config_dict(config_path)
         updated, validated = ensure_registered_model_slug(data, provider, model_id)
         if updated is not data:
-            write_config_dict(config_path, updated)
+            save_config_dict(config_path, updated)
             raw["providers"] = updated.get("providers", [])
         return validated
     return _validate_slug(target_dir, target, raw, slug)
