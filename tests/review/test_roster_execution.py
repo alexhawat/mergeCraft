@@ -31,6 +31,7 @@ class _FakeAgent:
         return None
 
     async def run(self, ctx: AgentRunContext) -> AgentResult:
+        assert "empty findings list" in ctx.instructions.system
         self.models.append(ctx.resolved_model or "")
         record_reviewer_dispatch_run(
             ctx.tool_state,
