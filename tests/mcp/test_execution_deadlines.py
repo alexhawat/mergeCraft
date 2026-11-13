@@ -60,6 +60,39 @@ async def test_rpc_deadline_cancels_coroutine_before_result_publication() -> Non
     assert not completed.is_set()
 
 
+async def test_shell_rpc_returns_partial_output_after_max_command_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.mcp import shell
+
+    # Use the real shell process and dispatch on a short command budget.
+    monkeypatch.setattr(shell, "_MAX_COMMAND_TIMEOUT_MS", 300)
+    monkeypatch.setattr(shell, "_RPC_CLEANUP_HEADROOM_MS", 2_000)
+    monkeypatch.setattr(shell, "detect_sandbox_method", lambda: "none")
+    monkeypatch.setenv("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL", "1")
+    ctx = _ctx(tmp_path)
+    ctx.tool_state.selected_mode = "Build"
+    spec = shell.shell_tool(ctx)
+    command = "printf 'partial output\n'; sleep 3"
+    response = await dispatch_mcp_rpc(
+        1,
+        "tools/call",
+        {
+            "name": spec.name,
+            "arguments": {"command": command, "description": "deadline test", "timeout": 120_000},
+        },
+        tools=[spec],
+        by_name={spec.name: spec},
+        tool_ctx=ctx,
+        validators={},
+    )
+    assert "result" in response, response
+    result = json.loads(response["result"]["content"][0]["text"])
+    assert result["timed_out"] is True
+    assert result["exit_code"] != 0
+    assert result["output"] == "partial output\n[timed out after 300ms]"
+
+
 def _gate(tmp_path: Path, *, delay: float = 0.6) -> ToolSpec:
     script = tmp_path / "gate.py"
     script.write_text(

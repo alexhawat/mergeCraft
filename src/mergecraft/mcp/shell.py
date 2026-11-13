@@ -37,6 +37,8 @@ if TYPE_CHECKING:
 
 SandboxMethod = Literal["unshare", "sudo-unshare", "sandbox-exec", "none"]
 MAX_OUTPUT_CHARS = 5000
+_MAX_COMMAND_TIMEOUT_MS = 120_000
+_RPC_CLEANUP_HEADROOM_MS = 30_000
 
 _detected_sandbox: SandboxMethod | None = None
 _detected_netns: bool | None = None
@@ -492,7 +494,7 @@ def shell_tool(ctx: ToolContext):
                 "git tools instead"
             )
             raise ToolRefusedError(msg)
-        timeout_ms = min(int(params.get("timeout") or 30_000), 120_000)
+        timeout_ms = min(int(params.get("timeout") or 30_000), _MAX_COMMAND_TIMEOUT_MS)
         default_dir = primary_repo_state(ctx.tool_state).dir
         working_directory = params.get("working_directory")
         try:
@@ -574,7 +576,8 @@ def shell_tool(ctx: ToolContext):
         name="shell",
         tool_class=ToolClass.SHELL,
         mutates=True,
-        timeout_ms=120_000,
+        # Leave time for dispatch and bounded reaping before returning partial output.
+        timeout_ms=_MAX_COMMAND_TIMEOUT_MS + _RPC_CLEANUP_HEADROOM_MS,
         description=(
             f"Execute shell commands securely. Environment is filtered to remove API "
             f"keys and secrets. Output capped at {MAX_OUTPUT_CHARS} chars. "
