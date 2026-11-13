@@ -52,7 +52,6 @@ def minimal_tool_context(
         mcp_auth_token=mcp_auth_token,
         mcp_orchestrator_auth_token="",
         tmpdir=tmpdir,
-        signed_commits=False,
         pr_approve_enabled=False,
         static_checks_enabled=static_checks_enabled,
         analyzers_mode="auto",

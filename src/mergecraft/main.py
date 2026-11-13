@@ -1624,7 +1624,6 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         xrepo=payload.get("xrepo"),
         prepush_script=settings.prepush_script,
         pr_approve_enabled=settings.pr_approve_enabled,
-        signed_commits=settings.signed_commits,
         mode_instructions=settings.mode_instructions,
         static_checks=[
             StaticCheckConfig(
@@ -1900,7 +1899,6 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
         modes=ctx.modes,
         agent_id=ctx.agent_id,
         output_schema=ctx.output_schema,
-        signed_commits=settings.signed_commits,
         learnings_file_path=tool_state.learnings_file_path,
         learnings_headings=settings.learnings_headings,
         setup_hook_failure=ctx.setup_hook_failure,
@@ -1965,7 +1963,6 @@ def _render_agent_instructions(
         modes=modes,
         agent_id=agent_id,
         output_schema=ctx.output_schema,
-        signed_commits=settings.signed_commits,
         learnings_file_path=tool_state.learnings_file_path,
         learnings_headings=settings.learnings_headings,
         setup_hook_failure=ctx.setup_hook_failure,

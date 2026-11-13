@@ -261,7 +261,6 @@ async def run_offline_agent_review(
             tool_state=tool_state,
             mcp_server_url="",
             tmpdir=str(tmpdir),
-            signed_commits=False,
             pr_approve_enabled=False,
             static_checks=[
                 StaticCheckConfig(

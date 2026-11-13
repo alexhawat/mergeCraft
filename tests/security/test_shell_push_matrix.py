@@ -15,7 +15,7 @@ CELLS = [(s, p) for s in SHELL_MODES for p in PUSH_MODES]
 
 @pytest.mark.parametrize(("shell", "push"), CELLS, ids=CELL_IDS)
 def test_tool_registration_deltas(make_tool_ctx, shell: str, push: str) -> None:
-    ctx = make_tool_ctx(shell=shell, push=push, signed_commits=True)
+    ctx = make_tool_ctx(shell=shell, push=push)
     names = {t.name for t in build_orchestrator_tools(ctx)}
     assert ("shell" in names) == (shell == "restricted")
     assert ("kill_background" in names) == (shell == "restricted")
@@ -40,7 +40,7 @@ async def test_direct_git_push_subcommand_always_blocked(
 def test_removed_mutations_cannot_touch_git_or_scm(
     make_tool_ctx, monkeypatch: pytest.MonkeyPatch, shell: str, push: str
 ) -> None:
-    ctx = make_tool_ctx(shell=shell, push=push, signed_commits=True)
+    ctx = make_tool_ctx(shell=shell, push=push)
     git_calls: list[object] = []
     monkeypatch.setattr("mergecraft.mcp.git._run_git", lambda *a, **kw: git_calls.append(a))
     app = create_mcp_app(build_orchestrator_tools(ctx), ctx, auth_token="test-token")

@@ -955,9 +955,7 @@ def _reject_config_invocation(args: list[str]) -> None:
 def _reject_branch_writes(args: list[str]) -> None:
     """Keep ``git branch`` to listing only (H2, #257 / D7).
 
-    Deletion, rename and copy all write refs, and a rename of the checked-out
-    branch changes what ``commit_changes`` / ``push_branch`` later resolve
-    through ``rev-parse --abbrev-ref HEAD``. Bare ``git branch <name>`` creates a
+    Deletion, rename and copy all write refs. Bare ``git branch <name>`` creates a
     branch, so a positional argument is a write too unless a listing flag that
     takes a value consumed it.
     """

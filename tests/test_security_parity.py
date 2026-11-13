@@ -47,7 +47,6 @@ def tool_ctx(tmp_path: Path) -> ToolContext:
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
-        signed_commits=True,
         trust_tier="trusted",
     )
 

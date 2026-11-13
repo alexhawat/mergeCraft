@@ -19,6 +19,7 @@ from mergecraft.mcp.server import (
     build_verifier_tools,
     create_mcp_app,
 )
+from mergecraft.modes import compute_modes
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,7 +39,7 @@ _REMOVED = {
 @pytest.mark.parametrize("push", ["disabled", "restricted", "enabled"])
 def test_rpc_surfaces_omit_abandoned_write_tools(tmp_path: Path, signed: bool, push: str) -> None:
     ctx = _tool_ctx(tmp_path)
-    ctx.signed_commits = signed
+    ctx.modes = compute_modes("claude", signed_commits=signed)
     ctx.payload = replace(ctx.payload, push=push)
     app = create_mcp_app(
         build_orchestrator_tools(ctx),

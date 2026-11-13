@@ -364,7 +364,6 @@ async def _dispatch_reviewer(
             repo=RepoInfo(owner=tool_context.repo.owner, name=tool_context.repo.name),
             modes=attempt_modes,
             agent_id=binding.agent_id,
-            signed_commits=settings.signed_commits,
             learnings_file_path=tool_state.learnings_file_path,
             learnings_headings=settings.learnings_headings,
             setup_hook_failure=tool_state.setup_hook_failure or "",

@@ -146,7 +146,6 @@ def _ctx(tmp_path: Path, *, agent_id: str, selected_mode: str = "Review") -> Too
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
-        signed_commits=True,
         trust_tier="trusted",
     )
 

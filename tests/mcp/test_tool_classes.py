@@ -63,7 +63,6 @@ def _tool_ctx(
     *,
     shell: Literal["disabled", "restricted", "enabled"] = "restricted",
     push: Literal["disabled", "restricted", "enabled"] = "restricted",
-    signed_commits: bool = True,
 ) -> ToolContext:
     """Full-surface context so a class cannot hide behind a disabled flag."""
     state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
@@ -83,7 +82,6 @@ def _tool_ctx(
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
-        signed_commits=signed_commits,
         xrepo=XrepoConfig(mode="explicit", read=["other"], write=["other"]),
         static_checks_enabled=True,
         trust_tier="trusted",
