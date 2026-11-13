@@ -17,7 +17,7 @@ from mergecraft.cli.provider_cmd import (
     load_provider_registry,
 )
 from mergecraft.cli.typer_group import mergecraft_typer
-from mergecraft.config.io import write_config_dict
+from mergecraft.config.io import save_config_dict
 from mergecraft.config.model_registry import (
     allocate_model_index,
     effective_model_id,
@@ -164,7 +164,7 @@ def add_cmd(
     entry["models"] = models
     entries[provider_idx] = entry
     data["providers"] = entries
-    write_config_dict(config_path, data)
+    save_config_dict(config_path, data)
     console.print(
         f"registered model [green]{normalised_id}[/green] on provider "
         f"[green]{provider_name}[/green] (modelIndex={model_index})"
@@ -207,7 +207,7 @@ def delete_cmd(
     entry["models"] = remaining
     entries[provider_idx] = entry
     data["providers"] = entries
-    write_config_dict(config_path, data)
+    save_config_dict(config_path, data)
     console.print(
         f"deleted model [green]{target_id}[/green] from provider [green]{provider_name}[/green]"
     )

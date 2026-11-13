@@ -46,14 +46,14 @@ PyPI carries the pre-release `mergecraft-action` (the CLI binary stays
 `mergecraft`):
 
 ```bash
-uv tool install mergecraft-action==0.1.0a5
+uv tool install mergecraft-action==0.1.0a6
 mergecraft --install-completion   # bash/zsh/fish — see --show-completion
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
 
 Docs on `main` may describe unreleased behavior, including CLI selection rules
 and review fixes that this alpha does not contain. Use the
-[matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a5/docs)
+[matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a6/docs)
 for the installed version.
 
 For intentional development testing, replace `<full-commit-sha>` below with
