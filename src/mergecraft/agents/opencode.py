@@ -19,11 +19,7 @@ from typing import TYPE_CHECKING, Final
 import httpx
 from loguru import logger
 
-from mergecraft.agents.activity_watchdog import (
-    event_has_model_output,
-    event_type_name,
-    watchdog_for_process,
-)
+from mergecraft.agents.cli_runner import CliHarnessSpec, run_cli_attempt
 from mergecraft.agents.gates import GIT_NATIVE_READ_DENY_OPENCODE
 from mergecraft.agents.openai_compatible_gateways import (
     SINGLETON_PROVIDER_ID,
@@ -40,7 +36,6 @@ from mergecraft.agents.opencode_pricing import (
 )
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.shared import (
-    STDERR_DRAIN_JOIN_TIMEOUT_S,
     AgentResult,
     AgentRunContext,
     AgentUsage,
@@ -50,11 +45,10 @@ from mergecraft.agents.shared import (
     log_token_table,
     resolve_cache_read,
     spawn_agent_cli,
-    start_stderr_drain,
     stderr_tail_for_error,
     with_prompt,
 )
-from mergecraft.config.env import AgentRuntimeEnv, McpEnv
+from mergecraft.config.env import McpEnv
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.security.private_files import write_private_file
 from mergecraft.tracing import current_tracer
@@ -71,7 +65,6 @@ from mergecraft.tracing.genai import (
 from mergecraft.tracing.http import instrument_httpx
 from mergecraft.types import MERGECRAFT_MCP_NAME
 from mergecraft.utils.git_setup import created_temp_directory, is_run_owned_directory
-from mergecraft.utils.privilege import agent_subprocess_env, wrap_agent_command
 from mergecraft.utils.process_group import (
     kill_process_group,
     register_process_group,
@@ -80,7 +73,7 @@ from mergecraft.utils.process_group import (
     wait_or_kill_process_group,
 )
 from mergecraft.utils.provider_failure import is_retryable_cli_failure
-from mergecraft.utils.secrets import build_agent_env
+from mergecraft.utils.secrets import build_agent_env, filter_env
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -837,10 +830,15 @@ def _opencode_major_version(cli: str) -> int | None:
         return _OPENCODE_MAJOR_CACHE[cli]
     major: int | None = None
     try:
-        completed = subprocess.run(
-            [cli, "--version"], capture_output=True, text=True, timeout=30, check=False
-        )
-        match = _OPENCODE_VERSION_RE.search(f"{completed.stdout}\n{completed.stderr}")
+        process = spawn_agent_cli([cli, "--version"], env=filter_env())
+        with track_process_group(process):
+            try:
+                stdout, stderr = process.communicate(timeout=30)
+            except subprocess.TimeoutExpired:
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    wait_or_kill_process_group(process, timeout=0)
+                raise
+        match = _OPENCODE_VERSION_RE.search(f"{stdout}\n{stderr}")
         if match:
             major = int(match.group(1))
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -852,7 +850,7 @@ def _opencode_major_version(cli: str) -> int | None:
 class _ServerHandle:
     def __init__(
         self,
-        proc: subprocess.Popen[bytes],
+        proc: subprocess.Popen[str] | subprocess.Popen[bytes],
         *,
         base_url: str = "",
         url_event: threading.Event | None = None,
@@ -888,10 +886,12 @@ class _ServerHandle:
             thread.start()
             self._drains.append(thread)
 
-    def _drain(self, stream: IO[bytes], label: str) -> None:
+    def _drain(self, stream: IO[str] | IO[bytes], label: str) -> None:
         try:
-            for raw in iter(stream.readline, b""):
-                text = raw.decode("utf-8", errors="replace").rstrip()
+            while raw := stream.readline():
+                text = (
+                    raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+                ).rstrip()
                 if not text:
                     continue
                 # ``deque.append`` is itself atomic, but that says nothing
@@ -964,21 +964,11 @@ def _boot_opencode_server(
     cwd: str,
     cancel: threading.Event | None = None,
 ) -> _ServerHandle:
-    # Wrap argv with setpriv, then patch HOME/USER/LOGNAME to match the
-    # dropped-to agent user (setpriv does not reset $HOME itself — see
-    # mergecraft.utils.privilege.agent_subprocess_env). This is the exact
-    # bug behind "opencode serve exited early: EACCES: permission denied,
-    # mkdir '/github/home/.local'": opencode inherited the container's
-    # HOME=/github/home, which the dropped-to uid cannot write under.
-    wrapped_cmd = wrap_agent_command([cli, "serve", "--port", "0", "--hostname", "127.0.0.1"])
-    resolved_env = agent_subprocess_env(env)
-    proc = subprocess.Popen(
-        wrapped_cmd,
+    proc = spawn_agent_cli(
+        [cli, "serve", "--port", "0", "--hostname", "127.0.0.1"],
+        env=env,
         cwd=cwd,
-        env=resolved_env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
+        errors="replace",
     )
     assert proc.stdout is not None
     # Register at spawn and drain both pipes from spawn: a boot that hangs must
@@ -1001,7 +991,10 @@ def _boot_opencode_server(
                 err = handle.recent_output()
                 if not err and proc.stderr is not None:
                     with contextlib.suppress(OSError, ValueError):
-                        err = proc.stderr.read().decode("utf-8", errors="replace").strip()
+                        raw = proc.stderr.read()
+                        err = (
+                            raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+                        ).strip()
                 msg = f"opencode serve exited early: {err}"
                 raise RuntimeError(msg)
             if time.time() >= deadline:
@@ -1635,7 +1628,6 @@ def _run_opencode_cli_streaming(
     """
     from mergecraft.agents._stream_consumer import (
         StreamSpanAccumulator,
-        consume_stream,
     )
     from mergecraft.tracing.sinks import claim_sink
 
@@ -1657,97 +1649,45 @@ def _run_opencode_cli_streaming(
     except Exception as exc:
         logger.debug("opencode stream tracer resolution failed: {}", exc)
 
-    try:
-        process = spawn_agent_cli(cmd, env=env)
-    except FileNotFoundError as err:
-        return AgentResult(success=False, error=str(err))
-
-    assert process.stdout is not None
-    assert process.stderr is not None
-
-    stderr_text = ""
-    returncode: int = -1
-    # P4 / AR-D2 — drain stderr concurrently from spawn. Reading stdout to EOF
-    # first would deadlock a child that fills the stderr pipe buffer.
-    stderr_drain = start_stderr_drain(process.stderr)
-    watchdog = watchdog_for_process(
-        process,
-        label="opencode",
-        interval_s=ctx.idle_timeout_s,
-        accumulator=accumulator,
-        stderr_text=stderr_drain.text,
-        deadline_s=AgentRuntimeEnv().agent_timeout,
-    )
-    base_handler = (
+    handler = (
         _session_event_handler(session, tool_state=ctx.tool_state, model=ctx.resolved_model)
         if session is not None
         else _bash_only_handler(ctx.tool_state, model=ctx.resolved_model)
     )
 
-    def _watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
-        watchdog.touch(
-            model_output=event_has_model_output(event), event_type=event_type_name(event)
-        )
-        base_handler(acc, event)
-
-    try:
-        with track_process_group(process):
-            try:
-                # Opencode events are partial: try streaming, but the
-                # handler is a no-op for unknown shapes (graceful degradation).
-                consume_stream(
-                    raw_stream=process.stdout,
-                    accumulator=accumulator,
-                    handler=_watched_handler,
-                )
-                returncode = wait_or_kill_process_group(
-                    process,
-                    timeout=AgentRuntimeEnv().agent_timeout,
-                )
-            except subprocess.TimeoutExpired:
-                return AgentResult(
-                    success=False,
-                    error="opencode run timed out",
-                    metadata={"timeout": True, "retryable": True},
-                    usage=_priced_stream_usage(accumulator, ctx=ctx),
-                )
-            finally:
-                # The process group is gone; collect the drained tail so the
-                # reader thread never outlives it.
-                watchdog.stop()
-                stderr_drain.join(timeout=STDERR_DRAIN_JOIN_TIMEOUT_S)
-        stderr_text = stderr_drain.text()
-    finally:
-        watchdog.stop()
-
-    if watchdog.stalled:
-        diagnostic = watchdog.diagnostic()
+    def classify(returncode: int, stderr_text: str) -> AgentResult:
+        if returncode != 0:
+            stream_error = (session or {}).get("error", "")
+            retryable = is_retryable_cli_failure(
+                returncode=returncode, stderr=f"{stream_error}\n{stderr_text}"
+            )
+            # A failed attempt still burns tokens — often the attempt that
+            # escalates to the next model — so its usage belongs in the budget band
+            # (claude.py and codex.py report it on the same path).
+            failure_error = (stream_error or "").strip() or stderr_tail_for_error(stderr_text)
+            return AgentResult(
+                success=False,
+                error=failure_error or f"opencode failed (exit {returncode})",
+                metadata={"retryable": True} if retryable else {},
+                usage=_priced_stream_usage(accumulator, ctx=ctx),
+            )
         return AgentResult(
-            success=False,
-            error=diagnostic.render(),
-            metadata=diagnostic.as_metadata(),
+            success=True,
+            output=accumulator.final_output or None,
             usage=_priced_stream_usage(accumulator, ctx=ctx),
         )
 
-    if returncode != 0:
-        stream_error = (session or {}).get("error", "")
-        retryable = is_retryable_cli_failure(
-            returncode=returncode, stderr=f"{stream_error}\n{stderr_text}"
-        )
-        # A failed attempt still burns tokens — often the attempt that
-        # escalates to the next model — so its usage belongs in the budget band
-        # (claude.py and codex.py report it on the same path).
-        failure_error = (stream_error or "").strip() or stderr_tail_for_error(stderr_text)
-        return AgentResult(
-            success=False,
-            error=failure_error or f"opencode failed (exit {returncode})",
-            metadata={"retryable": True} if retryable else {},
-            usage=_priced_stream_usage(accumulator, ctx=ctx),
-        )
-    return AgentResult(
-        success=True,
-        output=accumulator.final_output or None,
-        usage=_priced_stream_usage(accumulator, ctx=ctx),
+    return run_cli_attempt(
+        CliHarnessSpec(
+            label="opencode",
+            command=cmd,
+            env=env,
+            accumulator=accumulator,
+            handler=handler,
+            classify=classify,
+            usage=lambda: _priced_stream_usage(accumulator, ctx=ctx),
+        ),
+        ctx,
     )
 
 

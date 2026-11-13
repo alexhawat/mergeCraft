@@ -6,35 +6,26 @@ import asyncio
 import json
 import os
 import shutil
-import subprocess
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.agents.activity_watchdog import (
-    event_has_model_output,
-    event_type_name,
-    watchdog_for_process,
-)
+from mergecraft.agents.cli_runner import CliHarnessSpec, run_cli_attempt
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
-    STDERR_DRAIN_JOIN_TIMEOUT_S,
     AgentResult,
     AgentRunContext,
     AgentUsage,
     agent,
     log_token_table,
     mcp_auth_headers,
-    spawn_agent_cli,
-    start_stderr_drain,
     stderr_tail_for_error,
     with_prompt,
 )
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME, VERIFIER_SYSTEM_PROMPT
-from mergecraft.config.env import AgentRuntimeEnv
 from mergecraft.tracing._tool_attrs import (
     emit_verb_subevent,
     enrich_tool_request,
@@ -52,7 +43,6 @@ from mergecraft.tracing.tracer import (
     _open_provider_llm_pair,
 )
 from mergecraft.types import MERGECRAFT_MCP_NAME, format_mcp_tool_ref
-from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
@@ -313,7 +303,6 @@ def _run_gemini_streaming(
     """Streaming read loop for ``gemini --output-format stream-json`` (W6)."""
     from mergecraft.agents._stream_consumer import (
         StreamSpanAccumulator,
-        consume_stream,
     )
     from mergecraft.tracing import resolve_driver_tracer
 
@@ -336,101 +325,42 @@ def _run_gemini_streaming(
         input_prompt=prompt,
     )
 
-    try:
-        process = spawn_agent_cli(cmd, env=_build_env(ctx), stdin_text=stdin_text)
-    except FileNotFoundError as err:
-        return with_prompt(AgentResult(success=False, error=str(err)), prompt)
+    def classify(returncode: int, stderr_text: str) -> AgentResult:
+        if stderr_text.strip():
+            for line in stderr_text.strip().splitlines()[-20:]:
+                logger.debug("[gemini] {}", line)
 
-    assert process.stdout is not None
-    assert process.stderr is not None
+        output = accumulator.final_output
+        usage = accumulator.to_usage()
 
-    stderr_text = ""
-    returncode: int = -1
-    # P4 / AR-D2 — drain stderr concurrently from spawn. Reading stdout to EOF
-    # first would deadlock a child that fills the stderr pipe buffer.
-    stderr_drain = start_stderr_drain(process.stderr)
-    watchdog = watchdog_for_process(
-        process,
-        label="gemini",
-        interval_s=ctx.idle_timeout_s,
-        accumulator=accumulator,
-        stderr_text=stderr_drain.text,
-        deadline_s=AgentRuntimeEnv().agent_timeout,
+        if returncode != 0:
+            retryable = is_retryable_cli_failure(returncode=returncode, stderr=stderr_text)
+            return with_prompt(
+                AgentResult(
+                    success=False,
+                    output=output or None,
+                    error=stderr_tail_for_error(stderr_text) or f"gemini exited {returncode}",
+                    usage=usage,
+                    metadata={"retryable": True} if retryable else {},
+                ),
+                prompt,
+            )
+        return with_prompt(AgentResult(success=True, output=output or None, usage=usage), prompt)
+
+    return run_cli_attempt(
+        CliHarnessSpec(
+            label="gemini",
+            command=cmd,
+            env=_build_env(ctx),
+            accumulator=accumulator,
+            handler=handler,
+            classify=classify,
+            close_spans=close_all_open_spans,
+            stdin_text=stdin_text,
+            prompt=prompt,
+        ),
+        ctx,
     )
-
-    def _watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
-        watchdog.touch(
-            model_output=event_has_model_output(event), event_type=event_type_name(event)
-        )
-        handler(acc, event)
-
-    try:
-        with track_process_group(process):
-            try:
-                consume_stream(
-                    raw_stream=process.stdout,
-                    accumulator=accumulator,
-                    handler=_watched_handler,
-                )
-                returncode = wait_or_kill_process_group(
-                    process,
-                    timeout=AgentRuntimeEnv().agent_timeout,
-                )
-            except subprocess.TimeoutExpired:
-                return with_prompt(
-                    AgentResult(
-                        success=False,
-                        error="gemini CLI timed out",
-                        metadata={"timeout": True, "retryable": True},
-                        usage=accumulator.to_usage(),
-                    ),
-                    prompt,
-                )
-            finally:
-                # The process group is gone; collect the drained tail so the
-                # reader thread never outlives it.
-                watchdog.stop()
-                stderr_drain.join(timeout=STDERR_DRAIN_JOIN_TIMEOUT_S)
-        stderr_text = stderr_drain.text()
-    finally:
-        watchdog.stop()
-        try:
-            close_all_open_spans()
-        except Exception as exc:
-            logger.debug("gemini stream handler cleanup failed: {}", exc)
-
-    if watchdog.stalled:
-        diagnostic = watchdog.diagnostic()
-        return with_prompt(
-            AgentResult(
-                success=False,
-                error=diagnostic.render(),
-                metadata=diagnostic.as_metadata(),
-                usage=accumulator.to_usage(),
-            ),
-            prompt,
-        )
-
-    if stderr_text.strip():
-        for line in stderr_text.strip().splitlines()[-20:]:
-            logger.debug("[gemini] {}", line)
-
-    output = accumulator.final_output
-    usage = accumulator.to_usage()
-
-    if returncode != 0:
-        retryable = is_retryable_cli_failure(returncode=returncode, stderr=stderr_text)
-        return with_prompt(
-            AgentResult(
-                success=False,
-                output=output or None,
-                error=stderr_tail_for_error(stderr_text) or f"gemini exited {returncode}",
-                usage=usage,
-                metadata={"retryable": True} if retryable else {},
-            ),
-            prompt,
-        )
-    return with_prompt(AgentResult(success=True, output=output or None, usage=usage), prompt)
 
 
 def _gemini_stream_event_handler(

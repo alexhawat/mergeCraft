@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from tests.agents.conftest import make_agent_run_context
 
+from mergecraft.agents import cli_runner
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator
 from mergecraft.evidence.trajectory import build_trajectory_record
 
@@ -74,9 +75,9 @@ class _NoopGroup:
 
 
 def _patch_process(monkeypatch: pytest.MonkeyPatch, module: Any, proc: _Proc) -> None:
-    monkeypatch.setattr(module, "spawn_agent_cli", lambda *_a, **_k: proc)
-    monkeypatch.setattr(module, "track_process_group", _NoopGroup)
-    monkeypatch.setattr(module, "wait_or_kill_process_group", lambda p, timeout: p.wait())
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda *_a, **_k: proc)
+    monkeypatch.setattr(cli_runner, "track_process_group", _NoopGroup)
+    monkeypatch.setattr(cli_runner, "wait_or_kill_process_group", lambda p, timeout: p.wait())
 
 
 # ── Codex ────────────────────────────────────────────────────────────────────
@@ -359,9 +360,9 @@ def test_opencode_cli_stream_records_a_failing_then_passing_command(
         _opencode_bash("pytest -q", exit_code=0, status="completed", output="1 passed"),
         {"type": "text", "sessionID": "ses_1", "part": {"text": "done"}},
     )
-    monkeypatch.setattr(oc, "spawn_agent_cli", lambda *_a, **_k: _Proc(stream))
-    monkeypatch.setattr(oc, "track_process_group", _NoopGroup)
-    monkeypatch.setattr(oc, "wait_or_kill_process_group", lambda p, timeout: p.wait())
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda *_a, **_k: _Proc(stream))
+    monkeypatch.setattr(cli_runner, "track_process_group", _NoopGroup)
+    monkeypatch.setattr(cli_runner, "wait_or_kill_process_group", lambda p, timeout: p.wait())
 
     result = oc._run_opencode_cli_streaming(cmd=["opencode"], ctx=ctx, env={})
 
@@ -379,9 +380,9 @@ def test_opencode_cli_stream_records_a_tool_error_without_an_exit_code(
     stream = _lines(
         _opencode_bash("cargo test", exit_code=None, status="error", output="spawn failed"),
     )
-    monkeypatch.setattr(oc, "spawn_agent_cli", lambda *_a, **_k: _Proc(stream))
-    monkeypatch.setattr(oc, "track_process_group", _NoopGroup)
-    monkeypatch.setattr(oc, "wait_or_kill_process_group", lambda p, timeout: p.wait())
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda *_a, **_k: _Proc(stream))
+    monkeypatch.setattr(cli_runner, "track_process_group", _NoopGroup)
+    monkeypatch.setattr(cli_runner, "wait_or_kill_process_group", lambda p, timeout: p.wait())
 
     oc._run_opencode_cli_streaming(cmd=["opencode"], ctx=ctx, env={})
 
@@ -641,9 +642,9 @@ def test_opencode_cli_stream_reports_its_reads(
         {"type": "tool_use", "part": _opencode_read_part("/etc/hostname")},
         {"type": "text", "sessionID": "ses_1", "part": {"text": "done"}},
     )
-    monkeypatch.setattr(oc, "spawn_agent_cli", lambda *_a, **_k: _Proc(stream))
-    monkeypatch.setattr(oc, "track_process_group", _NoopGroup)
-    monkeypatch.setattr(oc, "wait_or_kill_process_group", lambda p, timeout: p.wait())
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda *_a, **_k: _Proc(stream))
+    monkeypatch.setattr(cli_runner, "track_process_group", _NoopGroup)
+    monkeypatch.setattr(cli_runner, "wait_or_kill_process_group", lambda p, timeout: p.wait())
     assert ctx.tool_state.driver_reports_reads is False
 
     oc._run_opencode_cli_streaming(cmd=["opencode"], ctx=ctx, env={})

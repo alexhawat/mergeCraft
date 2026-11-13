@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from mergecraft.agents import cli_runner
 from mergecraft.config.settings import RepoSettings
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.mcp.verdict import submit_review_verdict_tool
@@ -171,9 +172,9 @@ def _opencode_stream(
     from mergecraft.agents import opencode as oc
 
     stream = _lines(*events, _ANSWER)
-    monkeypatch.setattr(oc, "spawn_agent_cli", lambda *_a, **_k: _Proc(stream))
-    monkeypatch.setattr(oc, "track_process_group", _NoopGroup)
-    monkeypatch.setattr(oc, "wait_or_kill_process_group", lambda p, timeout: p.wait())
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda *_a, **_k: _Proc(stream))
+    monkeypatch.setattr(cli_runner, "track_process_group", _NoopGroup)
+    monkeypatch.setattr(cli_runner, "wait_or_kill_process_group", lambda p, timeout: p.wait())
 
     result = oc._run_opencode_cli_streaming(
         cmd=["opencode"], ctx=run_ctx_for(ctx), env={}, session={}

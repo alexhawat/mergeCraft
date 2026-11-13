@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 import pytest
 from tests.agents.conftest import make_agent_run_context
 
-from mergecraft.agents import shared
+from mergecraft.agents import cli_runner, shared
 from mergecraft.agents.shared import AgentResult, ResolvedInstructions
 
 if TYPE_CHECKING:
@@ -101,7 +101,7 @@ def test_a_200_kib_prompt_reaches_the_cli(
         kwargs["env"] = {"PATH": "/usr/bin:/bin"}
         return real_spawn(fake, **kwargs)
 
-    monkeypatch.setattr(module, "spawn_agent_cli", _spawn)
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", _spawn)
     if hasattr(module, "_build_env"):
         monkeypatch.setattr(module, "_build_env", lambda _ctx: {})
     if driver.name == "opencode-1x":
@@ -134,7 +134,7 @@ def test_the_opencode_1x_fallback_keeps_the_answer(
         kwargs["env"] = {"PATH": "/usr/bin:/bin"}
         return real_spawn([sys.executable, "-c", script], **kwargs)
 
-    monkeypatch.setattr(module, "spawn_agent_cli", _spawn)
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", _spawn)
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
 
     result = _opencode(module, ctx, tmp_path)

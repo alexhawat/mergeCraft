@@ -18,6 +18,7 @@ import httpx
 import pytest
 from tests.agents.conftest import make_agent_run_context
 
+from mergecraft.agents import cli_runner
 from mergecraft.agents import opencode as oc
 from mergecraft.agents.openai_compatible_gateways import (
     CUSTOM_PROVIDER_API_KEY_ENV,
@@ -831,7 +832,7 @@ def test_cli_streaming_returns_a_failed_result_when_the_binary_is_missing(
         msg = "no such file: opencode"
         raise FileNotFoundError(msg)
 
-    monkeypatch.setattr(oc, "spawn_agent_cli", _boom)
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", _boom)
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
 
     result = oc._run_opencode_cli_streaming(cmd=["opencode"], ctx=ctx, env={})
@@ -844,19 +845,19 @@ def test_cli_streaming_reports_a_timeout_as_a_clean_failed_result(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     """``TimeoutExpired`` becomes a named failure rather than a traceback."""
-    monkeypatch.setattr(oc, "spawn_agent_cli", _spawn(_FakeCliProc()))
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", _spawn(_FakeCliProc()))
 
     def _timeout(process: Any, *, timeout: float | None) -> int:
         del process, timeout
         raise subprocess.TimeoutExpired(cmd="opencode", timeout=1)
 
-    monkeypatch.setattr(oc, "wait_or_kill_process_group", _timeout)
+    monkeypatch.setattr(cli_runner, "wait_or_kill_process_group", _timeout)
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
 
     result = oc._run_opencode_cli_streaming(cmd=["opencode"], ctx=ctx, env={})
 
     assert result.success is False
-    assert result.error == "opencode run timed out"
+    assert result.error == "opencode CLI timed out"
 
 
 def test_cli_streaming_marks_rate_limited_failures_retryable(
@@ -864,7 +865,7 @@ def test_cli_streaming_marks_rate_limited_failures_retryable(
 ) -> None:
     """An overload message on stderr sets ``metadata['retryable']`` for the chain."""
     monkeypatch.setattr(
-        oc,
+        cli_runner,
         "spawn_agent_cli",
         _spawn(_FakeCliProc(stderr="provider overloaded, retry later\n", returncode=1)),
     )
@@ -881,7 +882,9 @@ def test_cli_streaming_falls_back_to_a_generic_message_with_empty_stderr(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     """No stderr at all → the generic "opencode failed" marker."""
-    monkeypatch.setattr(oc, "spawn_agent_cli", _spawn(_FakeCliProc(stderr="", returncode=2)))
+    monkeypatch.setattr(
+        cli_runner, "spawn_agent_cli", _spawn(_FakeCliProc(stderr="", returncode=2))
+    )
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
 
     result = oc._run_opencode_cli_streaming(cmd=["opencode"], ctx=ctx, env={})
@@ -895,7 +898,9 @@ def test_cli_streaming_names_the_exit_code_for_whitespace_only_stderr(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     """Whitespace-only stderr strips to empty, so the exit code carries the signal."""
-    monkeypatch.setattr(oc, "spawn_agent_cli", _spawn(_FakeCliProc(stderr="  \n ", returncode=3)))
+    monkeypatch.setattr(
+        cli_runner, "spawn_agent_cli", _spawn(_FakeCliProc(stderr="  \n ", returncode=3))
+    )
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
 
     result = oc._run_opencode_cli_streaming(cmd=["opencode"], ctx=ctx, env={})
@@ -908,7 +913,9 @@ def test_cli_streaming_success_with_no_events_reports_none_output(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     """An empty stream on a clean exit is ``output=None``, not ``""``."""
-    monkeypatch.setattr(oc, "spawn_agent_cli", _spawn(_FakeCliProc(stdout="\n\n", returncode=0)))
+    monkeypatch.setattr(
+        cli_runner, "spawn_agent_cli", _spawn(_FakeCliProc(stdout="\n\n", returncode=0))
+    )
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
 
     result = oc._run_opencode_cli_streaming(cmd=["opencode"], ctx=ctx, env={})

@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from tests.agents.conftest import make_agent_run_context
 
+from mergecraft.agents import cli_runner
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -72,10 +74,10 @@ def _captured_argv(monkeypatch: MonkeyPatch, tmp_path: Path) -> list[str]:
         seen.append(list(cmd))
         return _EmptyProcess()
 
-    monkeypatch.setattr(module, "spawn_agent_cli", _spawn)
-    monkeypatch.setattr(module, "track_process_group", _NullProcessGroup)
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", _spawn)
+    monkeypatch.setattr(cli_runner, "track_process_group", _NullProcessGroup)
     monkeypatch.setattr(
-        module, "wait_or_kill_process_group", lambda process, timeout: process.wait()
+        cli_runner, "wait_or_kill_process_group", lambda process, timeout: process.wait()
     )
 
     module._run_claude_once(

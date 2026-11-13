@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 import pytest
 from tests.agents.conftest import make_agent_run_context
 
+from mergecraft.agents import cli_runner
 from mergecraft.agents.activity_watchdog import WALL_CLOCK_TIMEOUT_KIND, IdleWatchdog
 
 if TYPE_CHECKING:
@@ -170,7 +171,7 @@ def test_driver_kills_a_streaming_agent_at_the_cap(
         children.append(proc)
         return proc
 
-    monkeypatch.setattr(module, "spawn_agent_cli", _spawn)
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", _spawn)
     if hasattr(module, "_build_env"):
         monkeypatch.setattr(module, "_build_env", lambda _ctx: {})
 

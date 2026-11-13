@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import contextlib
 import http.server
-import importlib
 import json
 import os
 import shutil
@@ -25,7 +24,7 @@ from typing import Any
 
 import pytest
 
-from mergecraft.agents import claude
+from mergecraft.agents import claude, cli_runner
 from mergecraft.agents.shared import AgentRunContext, ResolvedInstructions
 from mergecraft.agents.verifier import VERIFIER_AGENT_NAME
 from mergecraft.config.env import McpEnv
@@ -88,16 +87,17 @@ class _EmptyProcess:
 
 def _launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[list[str], dict[str, str]]:
     """Run the driver's real spawn path with the process stubbed; return argv and env."""
-    module = importlib.import_module("mergecraft.agents.claude")
     seen: list[tuple[list[str], dict[str, str]]] = []
 
     def _spawn(cmd: list[str], *, env: dict[str, str], **_k: Any) -> _EmptyProcess:
         seen.append((list(cmd), dict(env)))
         return _EmptyProcess()
 
-    monkeypatch.setattr(module, "spawn_agent_cli", _spawn)
-    monkeypatch.setattr(module, "track_process_group", lambda *_a, **_k: contextlib.nullcontext())
-    monkeypatch.setattr(module, "wait_or_kill_process_group", lambda proc, timeout: proc.wait())
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", _spawn)
+    monkeypatch.setattr(
+        cli_runner, "track_process_group", lambda *_a, **_k: contextlib.nullcontext()
+    )
+    monkeypatch.setattr(cli_runner, "wait_or_kill_process_group", lambda proc, timeout: proc.wait())
 
     ctx = _ctx(tmp_path)
     claude._run_claude_once(

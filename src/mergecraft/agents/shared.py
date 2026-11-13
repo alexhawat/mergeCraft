@@ -119,6 +119,7 @@ def spawn_agent_cli(
     env: dict[str, str],
     cwd: str | None = None,
     stdin_text: str | None = None,
+    errors: str | None = None,
 ) -> subprocess.Popen[str]:
     """Wrap argv with privilege drop and open a session-leader agent process.
 
@@ -126,6 +127,9 @@ def spawn_agent_cli(
     thread and stdin is then closed. Drivers send the prompt this way rather
     than as one argv string, which ``execve`` rejects (``E2BIG``) past the
     128 KiB per-argument limit on Linux (#1329).
+
+    ``errors`` selects the text decoder policy when a backend emits arbitrary
+    diagnostic bytes; ``None`` preserves Python's default strict decoding.
 
     Shared by Claude/Codex/Gemini/OpenCode so wrap + pipes + ``start_new_session``
     stay one place (W9 / Final CQ). Callers own streaming and
@@ -184,6 +188,7 @@ def spawn_agent_cli(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        errors=errors,
         bufsize=1,
         start_new_session=True,
     )

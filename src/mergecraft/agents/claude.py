@@ -21,24 +21,17 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_stream
-from mergecraft.agents.activity_watchdog import (
-    event_has_model_output,
-    event_type_name,
-    watchdog_for_process,
-)
+from mergecraft.agents._stream_consumer import StreamSpanAccumulator
+from mergecraft.agents.cli_runner import CliHarnessSpec, run_cli_attempt
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.shared import (
-    STDERR_DRAIN_JOIN_TIMEOUT_S,
     AgentResult,
     AgentRunContext,
     AgentUsage,
     agent,
     log_token_table,
     mcp_http_server_entry,
-    spawn_agent_cli,
-    start_stderr_drain,
 )
 from mergecraft.agents.verifier import (
     VERIFIER_AGENT_NAME,
@@ -71,7 +64,6 @@ from mergecraft.tracing.tracer import (
 )
 from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME, format_mcp_tool_ref
 from mergecraft.utils.privilege import prepare_workspace_for_agent, wrap_agent_command
-from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
 
@@ -1124,26 +1116,6 @@ def _run_claude_once(
 
     tracer = _resolve_active_tracer()
 
-    try:
-        process = spawn_agent_cli(cmd, env=_build_env(ctx), stdin_text=user_prompt)
-    except FileNotFoundError:
-        # W5.4 / W5.5 regression pins and the W5.7 equivalence test patch
-        # only ``subprocess.run``. When the real CLI is missing AND the
-        # streaming ``Popen`` path is unavailable, fall back to the
-        # legacy buffered call so the failure-diagnosis contract (D13,
-        # PR #16's ``_build_claude_failure_error``) and the legacy
-        # ``subprocess.run`` shape both survive.
-        return _run_claude_legacy_subprocess(
-            cmd=cmd,
-            ctx=ctx,
-            model=model,
-            skip_permissions=skip_permissions,
-            stdin_text=user_prompt,
-        )
-
-    assert process.stdout is not None
-    assert process.stderr is not None
-
     # OB3 — resolve the content-capture policy only when a tracer is live;
     # the trust tier is ``derive_trust_tier()``'s output carried on the tool
     # state, never an env fallback (D7 — the cap must not be env-defeatable).
@@ -1162,168 +1134,130 @@ def _run_claude_once(
         tool_state=ctx.tool_state,
     )
 
-    stderr_text = ""
-    returncode: int = -1
-    # P4 / AR-D2 — drain stderr concurrently from spawn. Reading stdout to EOF
-    # first would deadlock a child that fills the stderr pipe buffer.
-    stderr_drain = start_stderr_drain(process.stderr)
-    watchdog = watchdog_for_process(
-        process,
-        label="claude",
-        interval_s=ctx.idle_timeout_s,
-        accumulator=accumulator,
-        stderr_text=stderr_drain.text,
-        deadline_s=AgentRuntimeEnv().agent_timeout,
-    )
-
-    def _watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
-        watchdog.touch(
-            model_output=event_has_model_output(event), event_type=event_type_name(event)
-        )
+    def session_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
         if session is not None:
             session_id = event.get("session_id")
             if isinstance(session_id, str) and session_id.strip():
                 session.setdefault("session_id", session_id.strip())
         handler(acc, event)
 
-    try:
-        with track_process_group(process):
-            try:
-                consume_stream(
-                    raw_stream=process.stdout,
-                    accumulator=accumulator,
-                    handler=_watched_handler,
-                )
-                returncode = wait_or_kill_process_group(
-                    process,
-                    timeout=AgentRuntimeEnv().agent_timeout,
-                )
-            except subprocess.TimeoutExpired:
-                return AgentResult(
-                    success=False,
-                    error="claude CLI timed out",
-                    metadata={"timeout": True, "retryable": True},
-                    usage=accumulator.to_usage(),
-                )
-            finally:
-                # The process group is gone; collect the drained tail so the
-                # reader thread never outlives it.
-                watchdog.stop()
-                stderr_drain.join(timeout=STDERR_DRAIN_JOIN_TIMEOUT_S)
-        stderr_text = stderr_drain.text()
-    finally:
-        watchdog.stop()
-        # Defensive close: the streaming event order does not guarantee
-        # LIFO span closure (e.g. ``message_stop`` before ``tool_result``
-        # for the same assistant turn), so any still-open spans must be
-        # closed here so ``_ACTIVE_SPAN`` does not leak into the next
-        # test's context. See the handler's ``close_all`` docstring.
-        try:
-            close_all_open_spans()
-        except Exception as exc:
-            logger.debug("claude stream handler cleanup failed: {}", exc)
-
-    if watchdog.stalled:
-        diagnostic = watchdog.diagnostic()
-        return AgentResult(
-            success=False,
-            error=diagnostic.render(),
-            metadata=diagnostic.as_metadata(),
-            usage=accumulator.to_usage(),
-        )
-
-    # HS4 — detection over the reads that actually happened: any ``Read`` /
-    # ``Glob`` / ``Grep`` path outside the checkout and run tmpdir becomes a
-    # run-record warning naming it. Total and non-throwing — a detection
-    # failure is a debug line, never a failed review.
-    try:
-        from mergecraft.mcp.tool_state import primary_repo_state
-
-        audit_read_boundary(
-            read_records,
-            checkout=Path(primary_repo_state(ctx.tool_state).dir),
-            tmpdir=Path(ctx.tmpdir),
-        )
-    except Exception as exc:
-        logger.debug("claude read boundary audit failed: {}", exc)
-
-    if returncode == 0 and stderr_text.strip():
-        for line in stderr_text.strip().splitlines()[-_STDERR_TAIL_LINES:]:
-            logger.debug("[claude] {}", line)
-
-    # If the streaming read observed at least one parsed event, the
-    # accumulator already holds the canonical output and usage. Surface
-    # them directly. Otherwise fall back to the legacy last-line parse
-    # so a non-streaming claude binary (older CLI, custom build) keeps
-    # working unchanged — the recorded stream the test delivers carries
-    # multiple events, so this branch is reached only on an unexpected
-    # empty stream.
-    if accumulator.parsed_event_count > 0:
-        if returncode != 0:
-            logger.warning(
-                "claude CLI failed (exit={}); stderr={!r}",
-                returncode,
-                stderr_text,
-            )
-            retryable = is_retryable_cli_failure(returncode=returncode, stderr=stderr_text)
-            return AgentResult(
-                success=False,
-                output=accumulator.final_output,
-                error=_build_claude_failure_error(
-                    returncode=returncode,
-                    stderr=stderr_text,
-                    model=model,
-                    skip_permissions=skip_permissions,
-                ),
-                usage=accumulator.to_usage(),
-                metadata={"retryable": True} if retryable else {},
-            )
-        return AgentResult(
-            success=True,
-            output=accumulator.final_output,
-            usage=accumulator.to_usage(),
-        )
-
-    # Zero parsed events is not the same as "nothing went wrong". The CLI can
-    # exit immediately -- a rejected credential, an unrecognised flag, a broken
-    # install -- with its explanation on stderr and a non-zero code. Both are
-    # already in hand here, and both used to be dropped: the run reported only
-    # "claude CLI produced no events", which names a symptom and deletes the
-    # evidence for it. Observed on run 33208727218, where the Claude backstop
-    # engaged correctly and then failed with nothing to diagnose from.
-    #
-    # It also skipped ``is_retryable_cli_failure`` entirely, so a transient
-    # failure was classified non-retryable and the model chain abandoned the
-    # rung after one attempt. Closed issue #445 is the same defect in the codex
-    # driver ("stdout error and turn.failed events are discarded, masking the
-    # real failure"); this is its Claude twin.
-    if stderr_text.strip():
-        for line in stderr_text.strip().splitlines()[-_STDERR_TAIL_LINES:]:
-            logger.warning("[claude] {}", line)
-    if returncode != 0:
-        error = _build_claude_failure_error(
-            returncode=returncode,
-            stderr=stderr_text,
+    def missing_binary() -> AgentResult:
+        return _run_claude_legacy_subprocess(
+            cmd=cmd,
+            ctx=ctx,
             model=model,
             skip_permissions=skip_permissions,
+            stdin_text=user_prompt,
         )
-    else:
-        # Exited cleanly and said nothing. Rare, and worth distinguishing from
-        # a crash so the reader does not go looking for an exit code.
-        context = _claude_attempt_context(model=model, skip_permissions=skip_permissions)
-        lines = [line for line in stderr_text.strip().splitlines() if line.strip()]
-        detail = (
-            "; stderr tail: " + " | ".join(lines[-_STDERR_TAIL_LINES:])
-            if lines
-            else " (no stderr output)"
+
+    def classify(returncode: int, stderr_text: str) -> AgentResult:
+        # HS4 — detection over the reads that actually happened: any ``Read`` /
+        # ``Glob`` / ``Grep`` path outside the checkout and run tmpdir becomes a
+        # run-record warning naming it. Total and non-throwing — a detection
+        # failure is a debug line, never a failed review.
+        try:
+            from mergecraft.mcp.tool_state import primary_repo_state
+
+            audit_read_boundary(
+                read_records,
+                checkout=Path(primary_repo_state(ctx.tool_state).dir),
+                tmpdir=Path(ctx.tmpdir),
+            )
+        except Exception as exc:
+            logger.debug("claude read boundary audit failed: {}", exc)
+
+        if returncode == 0 and stderr_text.strip():
+            for line in stderr_text.strip().splitlines()[-_STDERR_TAIL_LINES:]:
+                logger.debug("[claude] {}", line)
+
+        # If the streaming read observed at least one parsed event, the
+        # accumulator already holds the canonical output and usage. Surface
+        # them directly. Otherwise fall back to the legacy last-line parse
+        # so a non-streaming claude binary (older CLI, custom build) keeps
+        # working unchanged — the recorded stream the test delivers carries
+        # multiple events, so this branch is reached only on an unexpected
+        # empty stream.
+        if accumulator.parsed_event_count > 0:
+            if returncode != 0:
+                logger.warning(
+                    "claude CLI failed (exit={}); stderr={!r}",
+                    returncode,
+                    stderr_text,
+                )
+                retryable = is_retryable_cli_failure(returncode=returncode, stderr=stderr_text)
+                return AgentResult(
+                    success=False,
+                    output=accumulator.final_output,
+                    error=_build_claude_failure_error(
+                        returncode=returncode,
+                        stderr=stderr_text,
+                        model=model,
+                        skip_permissions=skip_permissions,
+                    ),
+                    usage=accumulator.to_usage(),
+                    metadata={"retryable": True} if retryable else {},
+                )
+            return AgentResult(
+                success=True,
+                output=accumulator.final_output,
+                usage=accumulator.to_usage(),
+            )
+
+        # Zero parsed events is not the same as "nothing went wrong". The CLI can
+        # exit immediately -- a rejected credential, an unrecognised flag, a broken
+        # install -- with its explanation on stderr and a non-zero code. Both are
+        # already in hand here, and both used to be dropped: the run reported only
+        # "claude CLI produced no events", which names a symptom and deletes the
+        # evidence for it. Observed on run 33208727218, where the Claude backstop
+        # engaged correctly and then failed with nothing to diagnose from.
+        #
+        # It also skipped ``is_retryable_cli_failure`` entirely, so a transient
+        # failure was classified non-retryable and the model chain abandoned the
+        # rung after one attempt. Closed issue #445 is the same defect in the codex
+        # driver ("stdout error and turn.failed events are discarded, masking the
+        # real failure"); this is its Claude twin.
+        if stderr_text.strip():
+            for line in stderr_text.strip().splitlines()[-_STDERR_TAIL_LINES:]:
+                logger.warning("[claude] {}", line)
+        if returncode != 0:
+            error = _build_claude_failure_error(
+                returncode=returncode,
+                stderr=stderr_text,
+                model=model,
+                skip_permissions=skip_permissions,
+            )
+        else:
+            # Exited cleanly and said nothing. Rare, and worth distinguishing from
+            # a crash so the reader does not go looking for an exit code.
+            context = _claude_attempt_context(model=model, skip_permissions=skip_permissions)
+            lines = [line for line in stderr_text.strip().splitlines() if line.strip()]
+            detail = (
+                "; stderr tail: " + " | ".join(lines[-_STDERR_TAIL_LINES:])
+                if lines
+                else " (no stderr output)"
+            )
+            error = f"claude CLI produced no events and exited 0 ({context}){detail}"
+        retryable = is_retryable_cli_failure(returncode=returncode, stderr=stderr_text)
+        return AgentResult(
+            success=False,
+            error=error,
+            usage=accumulator.to_usage(),
+            metadata={"retryable": True} if retryable else {},
         )
-        error = f"claude CLI produced no events and exited 0 ({context}){detail}"
-    retryable = is_retryable_cli_failure(returncode=returncode, stderr=stderr_text)
-    return AgentResult(
-        success=False,
-        error=error,
-        usage=accumulator.to_usage(),
-        metadata={"retryable": True} if retryable else {},
+
+    return run_cli_attempt(
+        CliHarnessSpec(
+            label="claude",
+            command=cmd,
+            env=_build_env(ctx),
+            accumulator=accumulator,
+            handler=session_handler,
+            classify=classify,
+            close_spans=close_all_open_spans,
+            stdin_text=user_prompt,
+            missing_binary=missing_binary,
+        ),
+        ctx,
     )
 
 

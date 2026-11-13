@@ -30,6 +30,7 @@ import pytest
 from tests.agents.conftest import make_agent_run_context
 
 import mergecraft.agents.opencode as oc
+from mergecraft.agents import shared
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -151,7 +152,7 @@ class _FakeServeProc:
 
 
 def _shim_popen(monkeypatch: MonkeyPatch, factory: Callable[..., Any]) -> None:
-    monkeypatch.setattr(oc, "subprocess", _SubprocessShim(factory))
+    monkeypatch.setattr(shared, "subprocess", _SubprocessShim(factory))
 
 
 def _spawn_real_child(
