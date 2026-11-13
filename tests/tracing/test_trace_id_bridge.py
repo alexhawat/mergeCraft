@@ -16,6 +16,7 @@ resolver, event, JSONL, and in-process OTel bridge contracts.
 from __future__ import annotations
 
 import json
+import os
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -95,6 +96,23 @@ def test_trace_id_is_uuid4_when_no_env(monkeypatch: pytest.MonkeyPatch) -> None:
     # 32 hex chars (uuid4().hex); valid hex parses as int.
     assert len(tracer.trace_id) == 32
     int(tracer.trace_id, 16)
+
+
+def test_trace_id_pins_only_when_explicitly_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Legacy callers can opt into the process override through the resolver."""
+    from mergecraft.tracing.tracer import resolve_trace_id
+
+    # Track the override so teardown restores it even if it starts absent.
+    monkeypatch.setenv("MERGECRAFT_TRACE_ID", "")
+    _strip_trace_id_env(monkeypatch)
+    monkeypatch.setenv("MERGECRAFT_TRACE_SESSION_ID", "legacy-session")
+    assert resolve_trace_id() == "legacy-session"
+    assert "MERGECRAFT_TRACE_ID" not in os.environ
+
+    assert resolve_trace_id(pin=True) == "legacy-session"
+    assert os.environ["MERGECRAFT_TRACE_ID"] == "legacy-session"
+    monkeypatch.setenv("MERGECRAFT_TRACE_SESSION_ID", "other-session")
+    assert resolve_trace_id() == "legacy-session"
 
 
 # ---------------------------------------------------------------------------

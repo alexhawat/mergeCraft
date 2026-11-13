@@ -510,9 +510,9 @@ def resolve_trace_id(*, pin: bool = False) -> str:
     3. ``GITHUB_RUN_ID`` — the Actions run id, monotonic and unique.
     4. ``uuid.uuid4().hex`` — local fallback when no env vars are set.
 
-    When ``pin`` is true and ``MERGECRAFT_TRACE_ID`` is unset, the resolved
-    value is written to ``os.environ`` so MCP-style repeated
-    ``get_tracer_from_settings`` calls share one id (#292).
+    Explicit ``pin=True`` preserves the exported resolver's legacy contract
+    for callers that intentionally want a process-wide override. Review
+    lifecycle code allocates its own trace ID without pinning the environment.
 
     Args:
         pin: Persist the resolved id in ``MERGECRAFT_TRACE_ID`` when minting.
