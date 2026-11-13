@@ -1659,6 +1659,11 @@ def checkout_pr_tool(ctx: ToolContext):
         baseline = ctx.tool_state.review_tree_baseline
         if baseline is not None:
             await run_blocking(baseline.before_checkout)
+            # Publication may also complete during the offloaded integrity hash.
+            # Refuse before invalidating its receipt or changing the checkout.
+            if ctx.tool_state.review is not None:
+                msg = "cannot restart checkout after this run has published a review"
+                raise RuntimeError(msg)
         invalidate_checkout_review_state(ctx.tool_state)
         try:
             result = await _checkout(pull_number, pr)

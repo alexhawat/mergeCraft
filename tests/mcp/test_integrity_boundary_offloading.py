@@ -251,3 +251,47 @@ async def test_cancelled_static_gate_finishes_queued_integrity_cleanup(
     assert pending.cancelled()
     assert (tmp_path / "generated.txt").read_text() == "gate"
     baseline.verify()
+
+
+async def test_publication_during_precheckout_hash_must_refuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.mcp.git import _run_git
+    from mergecraft.mcp.tool_state import ReviewRecord, primary_repo_state
+
+    repo, _, sha = await asyncio.to_thread(_pr_repo_with_two_commits, tmp_path)
+    await asyncio.to_thread(_git, repo, "checkout", "base")
+    before = await asyncio.to_thread(_run_git, ["rev-parse", "HEAD"], cwd=str(repo))
+    ctx = _ctx_for(
+        repo, _StubGitHub(head_sha=sha, reviews=[]), tmp_path, mode="Review", analyzers_mode="off"
+    )
+    ctx.tool_state.review_tree_baseline = review_integrity.TreeBaseline(
+        repo, review_integrity.hash_tree(repo)
+    )
+    entered, release = threading.Event(), threading.Event()
+    original = review_integrity.hash_tree
+
+    def delayed_hash(root: Path) -> str:
+        entered.set()
+        assert release.wait(5)
+        return original(root)
+
+    monkeypatch.setattr(review_integrity, "hash_tree", delayed_hash)
+    pending = asyncio.create_task(checkout_pr_tool(ctx).execute({"pull_number": 1}))
+    receipt = ReviewRecord(id=1, node_id="R1", reviewed_sha=before.strip(), verdict="approve")
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        ctx.tool_state.review = receipt
+    finally:
+        release.set()
+        result = await pending
+    after = await asyncio.to_thread(_run_git, ["rev-parse", "HEAD"], cwd=str(repo))
+    assert result.is_error, (
+        before.strip(),
+        after.strip(),
+        primary_repo_state(ctx.tool_state).checkout_sha,
+    )
+    assert "published a review" in str(result.content)
+    assert ctx.tool_state.review is receipt
+    assert not ctx.tool_state.checkout_scope_invalidated
+    assert after == before
