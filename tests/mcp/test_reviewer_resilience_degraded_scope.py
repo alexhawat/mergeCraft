@@ -31,7 +31,7 @@ class _StubGitHub(GitHubClient):
         repo_ref = {"full_name": f"{owner}/{repo}"}
         return {
             "head": {"ref": "feature", "sha": self._head_sha, "repo": repo_ref},
-            "base": {"ref": "main", "repo": repo_ref},
+            "base": {"ref": "main", "sha": "0" * 40, "repo": repo_ref},
             "title": "PR",
             "html_url": "https://x/1",
         }
