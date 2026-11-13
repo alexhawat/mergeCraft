@@ -2362,26 +2362,21 @@ def _is_completed_review(review: dict[str, Any]) -> bool:
     record, separator, _prose = body.partition(REVIEW_BODY_MARKER)
     if not separator:
         return False
-    lines = set(record.splitlines())
+    header, boundary, _pre_merge = record.partition("\n### Pre-merge checks\n")
+    lines = header.splitlines()
+    if not boundary or len(lines) < 6:
+        return False
     if "- **Publication path:** `publish_pull_request_review`" not in lines or any(
         line.startswith(("- **Tier:** skip", "- **Tier:** lite")) for line in lines
     ):
         return False
-    completed_pass = {
-        "- **Outcome:** `passed`",
-        "- **Verdict diagnostic:** `approved`",
-    } <= lines
-    completed_request = (
-        "- **Outcome:** `failed`" in lines
-        and any(line.startswith("- **Decision:** `failure`") for line in lines)
-        and any(
-            line.startswith(
-                "- **Review integrity:** the reviewer's terminal verdict was `request_changes`"
-            )
-            for line in lines
-        )
+    # The renderer writes these fields before any variable record content.
+    outcome, diagnostic, decision = lines[3:6]
+    return (
+        outcome == "- **Outcome:** `passed`"
+        and diagnostic == "- **Verdict diagnostic:** `approved`"
+        and decision.startswith("- **Decision:** `success` — ")
     )
-    return completed_pass or completed_request
 
 
 async def _automatic_review_policy(

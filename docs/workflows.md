@@ -390,7 +390,7 @@ review:
 - `review.triggers.frequency` accepts `everyPush`, `oncePerPr`, and
   `onRequest`. With `oncePerPr`, a push is skipped only after a verified
   mergeCraft review has completed, including a formal review published as a
-  comment with a completed run record. Opening, reopening, and
+  comment with a successful deterministic run record. Opening, reopening, and
   marking the PR ready still trigger a review if the workflow sends those
   events. Missing or unverifiable review history allows a review.
   `onRequest` suppresses automatic PR reviews, including ready events.
