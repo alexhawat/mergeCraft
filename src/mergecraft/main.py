@@ -1563,7 +1563,6 @@ def _render_run_modes(ctx: RunContext, agent_id: AgentId) -> list[Mode]:
     return [
         *compute_modes(
             agent_id,
-            settings.signed_commits,
             inline_budget=settings.analyzers.inline_budget,
             time_budget_minutes=None if agent_timeout_ms is None else agent_timeout_ms // 60_000,
         ),

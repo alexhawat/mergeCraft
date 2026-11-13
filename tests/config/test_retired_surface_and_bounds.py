@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
+from loguru import logger
 from pydantic import ValidationError
 
-from mergecraft.config.settings import RepoSettings
+from mergecraft.config.settings import RepoSettings, load_repo_settings
 
 
 @pytest.mark.parametrize(
@@ -15,6 +17,8 @@ from mergecraft.config.settings import RepoSettings
     [
         pytest.param("autoMergeEnabled", False, id="old-scaffold-auto-merge"),
         pytest.param("auto_merge_enabled", True, id="python-auto-merge-alias"),
+        pytest.param("signedCommits", False, id="old-scaffold-signed-commits"),
+        pytest.param("signed_commits", True, id="python-signed-commits-alias"),
         pytest.param("operatorPipeline", "preview.yaml", id="operator-preview"),
         pytest.param("pipeline", "preview.yaml", id="repo-preview"),
         pytest.param("orchestrator", "deterministic", id="preview-orchestrator"),
@@ -58,6 +62,30 @@ def test_unwired_alignment_overrides_are_discarded() -> None:
     assert settings.jev.thresholds == {"evidence/v1.relation": 0.8}
 
 
-def test_retirement_does_not_ignore_unknown_configuration() -> None:
+@pytest.mark.parametrize("unknown", ["autoMergeEnabeld", "signedCommit", "signed_commmit"])
+def test_retirement_does_not_ignore_unknown_configuration(unknown: str) -> None:
     with pytest.raises(ValidationError, match="extra_forbidden"):
-        RepoSettings.model_validate({"autoMergeEnabeld": True})
+        RepoSettings.model_validate({unknown: True})
+
+
+@pytest.mark.parametrize("key", ["signedCommits", "signed_commits"])
+@pytest.mark.parametrize("enabled", [False, True], ids=["legacy-default", "enabled"])
+def test_retired_signed_commits_file_loads_with_nondefault_warning(
+    tmp_path: Path, key: str, enabled: bool
+) -> None:
+    config = tmp_path / ".mergecraft" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text(f"{key}: {str(enabled).lower()}\n", encoding="utf-8")
+    messages: list[str] = []
+    sink = logger.add(lambda record: messages.append(record.record["message"]), level="WARNING")
+    try:
+        settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
+    finally:
+        logger.remove(sink)
+    warnings = [message for message in messages if key in message]
+    assert len(warnings) == int(enabled), warnings
+    if enabled:
+        assert "has no effect" in warnings[0]
+    assert "signedCommits" not in settings.model_dump(by_alias=True)
+    assert "signed_commits" not in settings.model_dump()
+    assert not hasattr(settings, "signed_commits")

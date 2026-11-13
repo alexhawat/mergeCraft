@@ -46,7 +46,7 @@ def minimal_tool_context(
         github_installation_token="",
         git_token="",
         api_token="",
-        modes=compute_modes("claude", signed_commits=False),
+        modes=compute_modes("claude"),
         tool_state=state,
         mcp_server_url="",
         mcp_auth_token=mcp_auth_token,

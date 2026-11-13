@@ -23,7 +23,6 @@ DEFAULT_CONFIG: dict[str, object] = {
     "models": ["anthropic/claude-sonnet"],
     "push": "restricted",
     "shell": "restricted",
-    "signedCommits": False,
     "prApproveEnabled": False,
 }
 
@@ -40,7 +39,6 @@ models:
 - {_DEFAULT_MODEL}
 push: restricted
 shell: restricted
-signedCommits: false
 prApproveEnabled: false
 trust:
   # trust.agentSandbox decides whether MERGECRAFT_CODEX_SANDBOX=danger-full-access

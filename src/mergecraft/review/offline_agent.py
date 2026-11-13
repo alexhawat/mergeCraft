@@ -232,7 +232,6 @@ async def run_offline_agent_review(
         agent = resolve_agent(resolve_harness(settings, chain[0]))
         modes = compute_modes(
             agent.name,
-            signed_commits=False,
             inline_budget=settings.analyzers.inline_budget,
         )
         bounds = run_bounds or resolve_run_bounds(settings=settings)
@@ -356,7 +355,6 @@ async def run_offline_agent_review(
             attempt_agent = resolve_runtime_agent(model=attempt_model, settings=settings)
             attempt_modes = compute_modes(
                 attempt_agent.name,
-                signed_commits=False,
                 inline_budget=settings.analyzers.inline_budget,
             )
             tool_context.agent_id = attempt_agent.name

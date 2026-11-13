@@ -1147,6 +1147,8 @@ class RepoSettings(BaseModel):
             return value
         result = dict(value)
         for key in (
+            "signedCommits",
+            "signed_commits",
             "autoMergeEnabled",
             "auto_merge_enabled",
             "operatorPipeline",
@@ -1227,7 +1229,6 @@ class RepoSettings(BaseModel):
             "standalone runtime; setting it only logs a warning."
         ),
     )
-    signed_commits: bool = Field(default=False, alias="signedCommits")
     mode_instructions: dict[str, str] = Field(default_factory=dict, alias="modeInstructions")
     static_checks: list[StaticCheckDefinition] = Field(default_factory=list, alias="staticChecks")
     # #36 / D10 — declared-only reuse of the repo's finished CI. Default empty:
@@ -1415,7 +1416,6 @@ def default_settings() -> RepoSettings:
             "shell": "restricted",
             "pr_approve_enabled": False,
             "blast_radius_override": {},
-            "signed_commits": False,
             "mode_instructions": {},
             "static_checks": [],
             "analyzers": {},

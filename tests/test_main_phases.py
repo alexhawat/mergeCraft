@@ -90,7 +90,6 @@ async def test_run_context_carries_every_phase_input(
     a phase boundary, or fails to carry it forward at all, turns this red.
     """
     settings = RepoSettings(
-        signed_commits=True,
         analyzers=AnalyzersSettings(sarif_upload=True),
     )
     explicit_model = "anthropic/claude-sonnet"

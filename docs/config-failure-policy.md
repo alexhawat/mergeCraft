@@ -203,8 +203,9 @@ Both checks fail closed: no `file://` URI is emitted and no bytes are read from 
 
 ## Retired preview configuration
 
-The unused `autoMergeEnabled` setting and preview `orchestrator`, `pipeline`,
-and `operatorPipeline` settings are removed from the runtime model and new
+The unused `autoMergeEnabled` and `signedCommits` settings (including their
+snake-case aliases) and preview `orchestrator`, `pipeline`, and
+`operatorPipeline` settings are removed from the runtime model and new
 scaffolds. Existing configurations still load: these exact keys are discarded,
 and non-default values produce a warning. Unknown keys still fail validation.
 

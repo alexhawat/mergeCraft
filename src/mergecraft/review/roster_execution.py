@@ -343,7 +343,6 @@ async def _dispatch_reviewer(
     attempt_agent = resolve_runtime_agent(model=attempt_model, settings=settings)
     attempt_modes = compute_modes(
         attempt_agent.name,
-        settings.signed_commits,
         inline_budget=settings.analyzers.inline_budget,
     )
     from mergecraft.config.settings import RepoInfo

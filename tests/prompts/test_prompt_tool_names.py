@@ -173,10 +173,11 @@ def test_full_system_prompt_names_only_live_git_tools(agent_id: str, signed: boo
     from mergecraft.utils.instructions import resolve_instructions
 
     settings = RepoSettings(signedCommits=signed)
+    assert "signedCommits" not in settings.model_dump(by_alias=True)
     rendered = resolve_instructions(
         payload={"event": {"trigger": "pull_request"}, "shell": "restricted"},
         repo=RepoInfo(owner="acme", name="demo"),
-        modes=compute_modes(agent_id, settings.signed_commits),
+        modes=compute_modes(agent_id),
         agent_id=agent_id,
     ).full
     registered = _registered_tool_names()

@@ -222,6 +222,9 @@ def compute_modes(
 ) -> list[Mode]:
     """Return built-in modes with tool refs formatted for ``agent_id``.
 
+    ``signed_commits`` remains accepted for callers of this public renderer,
+    but has no effect because all production modes are read-only.
+
     ``inline_budget`` is the repo's ``analyzers.inlineBudget`` resolved by the
     caller. When omitted the prompt names the config key instead of baking in a
     number. ``time_budget_minutes`` is the agent deadline the caller enforces;

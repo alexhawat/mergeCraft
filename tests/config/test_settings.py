@@ -30,7 +30,7 @@ def test_default_settings_match_upstream() -> None:
     assert settings.pr_approve_enabled is False
     assert not hasattr(settings, "auto_merge_enabled")
     assert settings.blast_radius_override == {}
-    assert settings.signed_commits is False
+    assert not hasattr(settings, "signed_commits")
     assert settings.mode_instructions == {}
     assert settings.static_checks == []
     assert settings.learnings is None
