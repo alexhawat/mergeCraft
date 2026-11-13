@@ -380,7 +380,8 @@ def _maybe_suggest_eval_add(ctx: ToolContext) -> None:
         return
     logger.info(
         "» suggest_eval_add: re-review produced no positive findings; "
-        "consider capturing this run as a case via `mergecraft eval add` "
+        "consider capturing this run with `uv run mergecraft eval add` "
+        "from a mergeCraft source checkout "
         "(never auto-added; #44, W12.4)",
     )
 

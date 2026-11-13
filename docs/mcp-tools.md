@@ -7,7 +7,7 @@ Install and connect via `docs/mcp.md`.
 
 ## `review_change`
 
-Run a read-only mergeCraft review on the workspace change and persist a durable review id. Do not use when you need to commit, push, or open a PR — use runtime reviewer tools instead.
+Run a read-only mergeCraft review on the workspace change and persist a durable review id with the findings.
 
 ### Input schema
 
