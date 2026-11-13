@@ -27,6 +27,23 @@ prApproveEnabled: false
 # cap of 3 a PR reaches the blocking round-cap finding from branch updates alone.
 review:
   maxReviewRounds: 10
+  # Re-approval fast path (#1285): a pull request mergeCraft already passed,
+  # whose only PR-authored change since is prose in CHANGELOG.md (a base merge
+  # included, when its only conflict was the changelog), reuses the prior
+  # verdict with no LLM call. main requires up-to-date branches plus
+  # `mergecraft review`, so every merge sends each open PR through another
+  # round; this drops the rounds that would only re-read a changelog edit.
+  # `mergecraft-reviewer` is the App that publishes `mergecraft-approval`
+  # (app id 4594529). `github-actions` is refused on purpose: a `pull_request`
+  # workflow on the head ref can publish a check under that name. Every other
+  # case stays a full review — a non-prose edit, an ambiguous diff, a changed
+  # review policy, or a new pin all invalidate the prior pass.
+  fastPath:
+    enabled: true
+    reapproval:
+      enabled: true
+      trustedCheckApps:
+        - mergecraft-reviewer
 
 runBounds:
   tokenBudget: 8000000
