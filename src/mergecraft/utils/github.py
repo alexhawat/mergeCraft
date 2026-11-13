@@ -23,6 +23,7 @@ from mergecraft.utils.retry_policy import (
     is_safe_http_method,
     is_transient_http_error,
 )
+from mergecraft.utils.run_memo import RunMemo
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -355,6 +356,7 @@ class GitHubClient:
         user_agent: str = "mergeCraft",
         client: httpx.AsyncClient | None = None,
     ) -> None:
+        self.run_memo = RunMemo()
         self.token = usable_github_token(token)
         self.base_url = (base_url or _default_api_base_url()).rstrip("/")
         # GHES exposes REST at /api/v3 and GraphQL at /api/graphql. An explicit
@@ -423,6 +425,7 @@ class GitHubClient:
         raises the very error this class exists to avoid. At most one such
         transport is ever left over, and the process exits at the end of a run.
         """
+        self.run_memo.close()
         if not self._owns_client:
             return
         running = None
@@ -510,10 +513,23 @@ class GitHubClient:
         retried blindly (W9.3 / ``#34``); the one POST that retries is a
         read-only GraphQL query to :attr:`graphql_url`.
         """
-        response = await self._send(method, path, params=params, json=json, headers=headers)
+        changes_workflows = method.upper() not in {"GET", "HEAD", "OPTIONS"} and "/actions/" in path
+        if changes_workflows:
+            self._invalidate_workflow_snapshots()
+        try:
+            response = await self._send(method, path, params=params, json=json, headers=headers)
+        finally:
+            # A failed response can follow a successful server-side mutation.
+            # Also evict readers that started while the mutation was in flight.
+            if changes_workflows:
+                self._invalidate_workflow_snapshots()
         if response.status_code == 204 or not response.content:
             return None
         return response.json()
+
+    def _invalidate_workflow_snapshots(self) -> None:
+        self.run_memo.clear(category="workflow-runs")
+        self.run_memo.clear(category="workflow-artifacts")
 
     async def get(self, path: str, **kwargs: Any) -> Any:
         return await self.request("GET", path, **kwargs)
@@ -952,7 +968,7 @@ class GitHubClient:
             total_count=total,
         )
 
-    async def _list_workflow_runs(
+    async def _fetch_workflow_runs(
         self,
         owner: str,
         repo: str,
@@ -983,6 +999,21 @@ class GitHubClient:
 
         return await paginate_github_list_pages(_fetch_page, item_key="workflow_runs")
 
+    async def _list_workflow_runs(
+        self,
+        owner: str,
+        repo: str,
+        *,
+        check_suite_id: int | None = None,
+        head_sha: str | None = None,
+    ) -> ListedItems:
+        return await self.run_memo.read(
+            ("workflow-runs", owner, repo, check_suite_id, head_sha),
+            lambda: self._fetch_workflow_runs(
+                owner, repo, check_suite_id=check_suite_id, head_sha=head_sha
+            ),
+        )
+
     async def list_workflow_runs_for_check_suite(
         self,
         owner: str,
@@ -992,7 +1023,7 @@ class GitHubClient:
         """List workflow runs for a check suite (every page, not only the first 100)."""
         return await self._list_workflow_runs(owner, repo, check_suite_id=check_suite_id)
 
-    async def list_workflow_runs_for_branch(
+    async def _fetch_workflow_runs_for_branch(
         self,
         owner: str,
         repo: str,
@@ -1028,6 +1059,24 @@ class GitHubClient:
             total_count=total if isinstance(total, int) else None,
         )
 
+    async def list_workflow_runs_for_branch(
+        self,
+        owner: str,
+        repo: str,
+        branch: str,
+        *,
+        workflow_id: int | None = None,
+        event: str | None = None,
+        per_page: int = 10,
+    ) -> ListedItems:
+        """Share bounded base-branch history with matching query parameters."""
+        return await self.run_memo.read(
+            ("workflow-runs", owner, repo, branch, workflow_id, event, per_page),
+            lambda: self._fetch_workflow_runs_for_branch(
+                owner, repo, branch, workflow_id=workflow_id, event=event, per_page=per_page
+            ),
+        )
+
     async def list_workflow_runs_for_head_sha(
         self,
         owner: str,
@@ -1037,7 +1086,7 @@ class GitHubClient:
         """List workflow runs for a commit SHA (every page, not only the first 100)."""
         return await self._list_workflow_runs(owner, repo, head_sha=head_sha)
 
-    async def list_workflow_run_artifacts(
+    async def _fetch_workflow_run_artifacts(
         self,
         owner: str,
         repo: str,
@@ -1052,6 +1101,18 @@ class GitHubClient:
             )
 
         return await paginate_github_list_pages(_fetch_page, item_key="artifacts")
+
+    async def list_workflow_run_artifacts(
+        self,
+        owner: str,
+        repo: str,
+        run_id: int,
+    ) -> ListedItems:
+        """Share the run's complete artifact listing across evidence consumers."""
+        return await self.run_memo.read(
+            ("workflow-artifacts", owner, repo, run_id),
+            lambda: self._fetch_workflow_run_artifacts(owner, repo, run_id),
+        )
 
     async def download_artifact_zip(
         self,
