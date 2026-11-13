@@ -269,6 +269,19 @@ changed.
 `make lint` now includes ``scripts/check_called_workflow_permissions.py`` to catch
 the permissions mismatch at authoring time.
 
+## CLI startup
+
+The installed `mergecraft --version` and `mergecraft -v` forms report the
+package version and build commit without loading repository `.env` files or
+initializing command logging. Other argument combinations use the regular CLI
+parser, including `version --format json` and global formatting options.
+
+Root help and root shell completion use the import-free command catalog in
+`src/mergecraft/cli/command_catalog.py`. Adding a root command requires a catalog
+entry with its existing help summary; the implementation is imported only when
+selected. Tools that enumerate all commands, including the reference generator,
+must use Click's `list_commands` and `get_command` APIs to resolve lazy groups.
+
 ## Commits
 
 Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`,

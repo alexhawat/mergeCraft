@@ -134,31 +134,24 @@ def _render_action_outputs(outputs: dict[str, dict[str, Any]]) -> str:
 def _walk_typer_commands(
     app: typer.Typer, prefix: CommandPath = ()
 ) -> list[tuple[CommandPath, Any]]:
-    """Recursively collect every leaf command's path + callback from a Typer app.
+    """Collect leaf callbacks through Click's lazy-command resolution API."""
+    import click
+    from typer.main import get_group
 
-    Mirrors ``tests/docs/test_reference_docs.py::_walk_typer_commands`` (never
-    invoke the CLI as a subprocess to discover commands — walk the live
-    ``registered_commands`` / ``registered_groups`` objects).
-    """
-    commands: list[tuple[CommandPath, Any]] = []
-    for command in app.registered_commands:
-        if command.hidden:
-            continue
-        name = command.name
-        if name is None and command.callback is not None:
-            name = command.callback.__name__.replace("_", "-")
-        if not name:
-            msg = f"unnamed command under {prefix}"
-            raise ValueError(msg)
-        commands.append(((*prefix, name), command.callback))
-    for group in app.registered_groups:
-        if group.hidden:
-            continue
-        if not group.name or group.typer_instance is None:
-            msg = f"malformed group under {prefix}: {group.name!r}"
-            raise ValueError(msg)
-        commands.extend(_walk_typer_commands(group.typer_instance, (*prefix, group.name)))
-    return commands
+    def walk(group: click.Group, path: CommandPath) -> list[tuple[CommandPath, Any]]:
+        commands: list[tuple[CommandPath, Any]] = []
+        context = click.Context(group)
+        for name in group.list_commands(context):
+            command = group.get_command(context, name)
+            if command is None or command.hidden:
+                continue
+            if isinstance(command, click.Group):
+                commands.extend(walk(command, (*path, name)))
+            else:
+                commands.append(((*path, name), inspect.unwrap(command.callback)))
+        return commands
+
+    return walk(get_group(app), prefix)
 
 
 def _typer_info(param: inspect.Parameter, hint: Any) -> Any:

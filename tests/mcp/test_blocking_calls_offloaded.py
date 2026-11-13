@@ -6,8 +6,10 @@ import asyncio
 import subprocess
 import threading
 import time
+from io import BytesIO
 from typing import TYPE_CHECKING, Any
 
+import pytest
 from tests.mcp.test_shell_git_guard import _ctx
 from tests.support.tool_context import inner_mutation_guard_probe
 
@@ -18,8 +20,6 @@ from mergecraft.mcp.shell import shell_tool
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 async def _ticks_while(work: Any) -> tuple[Any, int]:
@@ -93,7 +93,14 @@ def test_second_timeout_after_kill_is_contained_and_reaped(
 
     class _Stuck:
         pid = 0
+        stdin = stdout = stderr = None
         returncode: int | None = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            pass
 
         def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
             calls["communicate"] += 1
@@ -117,3 +124,116 @@ def test_second_timeout_after_kill_is_contained_and_reaped(
     assert stdout_b == b"partial"
     assert returncode == -9
     assert calls == {"communicate": 2, "kill": 1, "wait": 1}
+
+
+async def test_rpc_deadline_reaps_foreground_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+    import shlex
+    import sys
+
+    import pytest
+
+    from mergecraft.mcp.rpc import dispatch_mcp_rpc
+
+    monkeypatch.setenv("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL", "1")
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "none")
+    ctx = _ctx(tmp_path, shell="enabled")
+    spec = shell_tool(ctx)
+    spec.timeout_ms = 500
+    script = tmp_path / "slow.py"
+    script.write_text(
+        "import os,time\nfrom pathlib import Path\n"
+        "Path('started').write_text(str(os.getpid()))\n"
+        "time.sleep(5)\nPath('finished').write_text('late')\n"
+    )
+    with inner_mutation_guard_probe():
+        response = await dispatch_mcp_rpc(
+            1,
+            "tools/call",
+            {
+                "name": spec.name,
+                "arguments": {
+                    "command": shlex.join([sys.executable, str(script)]),
+                    "description": "slow",
+                },
+            },
+            tools=[spec],
+            by_name={spec.name: spec},
+            tool_ctx=ctx,
+            validators={},
+        )
+    assert response["error"]["code"] == -32000
+    assert not (tmp_path / "finished").exists()
+    with pytest.raises(ProcessLookupError):
+        os.kill(int((tmp_path / "started").read_text()), 0)
+
+
+@pytest.mark.parametrize("failure", ["timeout", "communication"])
+async def test_foreground_cleanup_never_reintroduces_an_unbounded_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    """RPC cleanup stays bounded even when the OS cannot reap a killed child."""
+    from mergecraft.mcp.rpc import dispatch_mcp_rpc
+    from mergecraft.utils.process_group import active_process_groups
+
+    waits: list[float | None] = []
+    killed_groups: list[int | None] = []
+    kills: list[bool] = []
+
+    class Unreapable(subprocess.Popen[bytes]):
+        def __init__(self) -> None:
+            self.pid = 4242
+            self.returncode = None
+            self.stdin = None
+            self.stdout = BytesIO()
+            self.stderr = BytesIO()
+
+        def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
+            if failure == "communication":
+                raise OSError("communication failed")
+            raise subprocess.TimeoutExpired("shell", timeout or 0, output=b"partial", stderr=b"")
+
+        def kill(self) -> None:
+            kills.append(True)
+
+        def wait(self, timeout: float | None = None) -> int:
+            waits.append(timeout)
+            assert timeout is not None, "cleanup attempted an unbounded process wait"
+            raise subprocess.TimeoutExpired("shell", timeout)
+
+    process = Unreapable()
+    groups_before = active_process_groups()
+    monkeypatch.setattr(shell_mod, "_spawn_shell", lambda *a, **k: process)
+    monkeypatch.setattr(shell_mod, "kill_process_group", killed_groups.append)
+    ctx = _ctx(tmp_path, shell="enabled")
+    spec = shell_tool(ctx)
+    with inner_mutation_guard_probe():
+        response = await dispatch_mcp_rpc(
+            1,
+            "tools/call",
+            {
+                "name": spec.name,
+                "arguments": {"command": "probe", "description": "probe", "timeout": 1},
+            },
+            tools=[spec],
+            by_name={spec.name: spec},
+            tool_ctx=ctx,
+            validators={},
+        )
+    assert waits, response
+    assert all(timeout is not None for timeout in waits), response
+    assert killed_groups
+    assert all(pid == process.pid for pid in killed_groups)
+    assert kills
+    assert process.stdout.closed
+    assert process.stderr.closed
+    assert active_process_groups() == groups_before
+    rendered = response["result"]
+    if failure == "communication":
+        assert rendered["isError"] is True
+        assert "communication failed" in rendered["content"][0]["text"]
+    else:
+        assert rendered.get("isError") is not True, response
+        assert "timed out" in rendered["content"][0]["text"]

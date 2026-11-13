@@ -20,6 +20,7 @@ from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.modes._api_only_scope import API_ONLY_SCOPE
 from mergecraft.review_checks import declared_cannot_run_outcomes, plan_checks, run_checks
+from mergecraft.utils.blocking import run_blocking, run_blocking_cleanup
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.sandbox import SandboxPlan
@@ -233,14 +234,16 @@ async def _run_untrusted_checks(
     from mergecraft.analyzers.sandbox import plan_sandbox
 
     scratch_dir = _sandbox_scratch_dir(ctx)
-    plan = plan_sandbox(
+    plan = await run_blocking(
+        plan_sandbox,
         repo_root=root,
         scratch_dir=scratch_dir,
         tier="untrusted",
         copy_on_write_repo=True,
     )
     if plan.can_run and plan.context is not None:
-        outcomes = run_checks(
+        outcomes = await run_blocking(
+            run_checks,
             checks,
             root=root,
             tier="untrusted",
@@ -273,7 +276,7 @@ async def _run_untrusted_checks(
 
 
 def run_static_checks_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+    async def _run_in_scope(params: dict[str, Any]):
         # Recorded before the early returns: a repo that declares no gate still
         # completed the deterministic pass, and the D14 ordering gate asks
         # whether that pass happened, not whether it found anything.
@@ -322,12 +325,12 @@ def run_static_checks_tool(ctx: ToolContext):
         # does, after first checking the agent changed nothing before the call.
         baseline = ctx.tool_state.review_tree_baseline
         if baseline is not None:
-            baseline.before_boundary("run_static_checks")
+            await run_blocking(baseline.before_boundary, "run_static_checks")
         try:
-            outcomes = run_checks(checks, root=root, tier=tier)
+            outcomes = await run_blocking(run_checks, checks, root=root, tier=tier)
         finally:
             if baseline is not None:
-                baseline.after_boundary()
+                await run_blocking_cleanup(baseline.after_boundary)
         outcomes, substitutions = await _apply_ci_evidence(ctx, outcomes)
         executed = [o for o in outcomes if o.ran]
         logger.info(
@@ -337,6 +340,13 @@ def run_static_checks_tool(ctx: ToolContext):
             len(outcomes) - len(executed),
         )
         return _report(ctx, outcomes, substitutions, reason=_UNAVAILABLE_REASON)
+
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
+        from mergecraft.analyzers.sandbox import isolated_analyzer_run_root
+
+        async with ctx.tool_state.checkout_operation_lock:
+            with isolated_analyzer_run_root():
+                return await _run_in_scope(params)
 
     return tool(
         name="run_static_checks",

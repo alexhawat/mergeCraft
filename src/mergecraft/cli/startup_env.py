@@ -12,7 +12,6 @@ from click.core import ParameterSource
 from typer.main import get_command
 
 from mergecraft.utils.git_hardening import git_argv
-from mergecraft.utils.source_resolve import _is_remote_source
 from mergecraft.utils.workspace import git_repo_root
 
 if TYPE_CHECKING:
@@ -76,6 +75,8 @@ def startup_local_target(app: typer.Typer, args: list[str]) -> Path | None:
     # full grammar pass when they occur, including as another option's value.
     if not any(arg.split("=", 1)[0] in {"--cwd", "--repo"} for arg in args):
         return None
+    from mergecraft.utils.source_resolve import _is_remote_source
+
     command: click.Command | None = get_command(app)
     remaining = list(args)
     target: Path | None = None
@@ -103,6 +104,6 @@ def startup_local_target(app: typer.Typer, args: list[str]) -> Path | None:
             remaining = context.args
         if not isinstance(command, click.Group) or not remaining:
             break
-        command = command.commands.get(remaining[0])
+        command = command.get_command(context, remaining[0])
         remaining = remaining[1:]
     return target

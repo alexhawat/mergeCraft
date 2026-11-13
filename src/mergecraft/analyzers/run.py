@@ -362,20 +362,19 @@ def _run_in_own_session(
             memory_mb=preexec_fn.context.memory_mb,
         )
     check_process_cancelled()
-    with (
-        subprocess.Popen(
-            run_argv,
-            cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=env,
-            pass_fds=pass_fds,
-            start_new_session=True,
-        ) as proc,
-        track_process_group(proc),
-    ):
+    proc = subprocess.Popen(
+        run_argv,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        pass_fds=pass_fds,
+        start_new_session=True,
+    )
+    with contextlib.ExitStack() as scope:
         try:
+            scope.enter_context(track_process_group(proc))
             stdout, stderr = proc.communicate(timeout=timeout_s)
             check_process_cancelled()
         except BaseException:
@@ -389,6 +388,11 @@ def _run_in_own_session(
                 with contextlib.suppress(subprocess.TimeoutExpired):
                     proc.wait(timeout=1)
             raise
+        finally:
+            # Popen.__exit__ can wait indefinitely for an unreapable child.
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                if pipe is not None:
+                    pipe.close()
         return subprocess.CompletedProcess(run_argv, proc.returncode, stdout, stderr)
 
 

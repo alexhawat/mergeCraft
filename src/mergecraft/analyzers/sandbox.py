@@ -11,6 +11,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -22,6 +24,8 @@ from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.config.env import ALLOW_UNSANDBOXED_SHELL_ENV, ControlSwitches
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from mergecraft.analyzers.egress import EgressSession
     from mergecraft.analyzers.manifest import AnalyzerManifest, TrustTier
 
@@ -573,6 +577,26 @@ def build_sandbox_context(
 
 
 _RUN_ROOT: tuple[int, Path] | None = None
+_BOUND_RUN_ROOT: ContextVar[Path | None] = ContextVar("analyzer_run_root", default=None)
+
+
+@contextmanager
+def isolated_analyzer_run_root() -> Iterator[None]:
+    """Keep concurrent MCP runs from replacing one another's scratch/output.
+
+    Files remain available to artifact consumers until normal process-exit cleanup.
+    Context propagation also isolates adapters dispatched to worker threads.
+    """
+    root = Path(tempfile.mkdtemp(prefix="mergecraft-analyzers-")).resolve()
+    root.chmod(0o711)
+    atexit.register(shutil.rmtree, root, True)
+    token = _BOUND_RUN_ROOT.set(root)
+    try:
+        yield
+    finally:
+        _BOUND_RUN_ROOT.reset(token)
+
+
 _SCRATCH_NAME_RE = re.compile(r"[^A-Za-z0-9._-]")
 
 
@@ -587,6 +611,9 @@ def analyzer_run_root() -> Path:
     output. The root is ``0711`` — traversable by a dropped payload, not
     listable — and is removed when the process exits.
     """
+    bound = _BOUND_RUN_ROOT.get()
+    if bound is not None:
+        return bound
     global _RUN_ROOT
     pid = os.getpid()
     if _RUN_ROOT is not None and _RUN_ROOT[0] == pid and _RUN_ROOT[1].is_dir():
@@ -1559,6 +1586,7 @@ __all__ = [
     "evaluate_analyzer_egress_policy",
     "fresh_analyzer_scratch_dir",
     "hand_tree_to_drop_target",
+    "isolated_analyzer_run_root",
     "plan_sandbox",
     "probe_capabilities",
     "process_count_for_uid",
