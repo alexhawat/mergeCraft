@@ -238,8 +238,19 @@ def _probe_kernel_filtered_egress() -> FilteredEgressProbe:
     )
 
 
-@functools.lru_cache(maxsize=1)
+_FILTERED_EGRESS_PROBE_LOCK = threading.Lock()
+
+
 def probe_filtered_egress() -> FilteredEgressProbe:
+    """Share one cached availability check across analyzer workers."""
+    # The kernel probe names temporary resources by PID. Even a cache miss
+    # must be serialized so two threads cannot contend for the same names.
+    with _FILTERED_EGRESS_PROBE_LOCK:
+        return _probe_filtered_egress_cached()
+
+
+@functools.lru_cache(maxsize=1)
+def _probe_filtered_egress_cached() -> FilteredEgressProbe:
     """Probe userspace first, then the opt-in kernel backend."""
     from mergecraft.analyzers.egress_userspace import probe_userspace_egress
 
@@ -279,7 +290,8 @@ def filtered_egress_available() -> bool:
 
 def reset_filtered_egress_cache() -> None:
     """Clear the filtered-egress probe cache (tests / xdist)."""
-    probe_filtered_egress.cache_clear()
+    with _FILTERED_EGRESS_PROBE_LOCK:
+        _probe_filtered_egress_cached.cache_clear()
 
 
 def resolve_allowlist_host_ips(entries: Iterable[str]) -> dict[str, frozenset[str]]:

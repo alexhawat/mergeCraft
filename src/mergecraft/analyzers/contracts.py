@@ -133,6 +133,7 @@ def _run_argv(
     changed_files: list[str],
     tier: TrustTier,
     scratch_suffix: str = "",
+    provisioned_plan: AnalyzerPlan | None = None,
 ) -> ArgvRun:
     run = run_argv_result(
         manifest=manifest,
@@ -141,6 +142,7 @@ def _run_argv(
         changed_files=changed_files,
         tier=tier,
         scratch_suffix=scratch_suffix,
+        provisioned_plan=provisioned_plan,
     )
     benign = manifest.benign_exit_reason(run.exit_code, run.raw or "")
     if benign is not None:
@@ -216,6 +218,7 @@ def _run_oasdiff(
 
     findings: list[Finding] = []
     pass_reason: str | None = None
+    provisioned: AnalyzerPlan | None = None
     for head_rel in scoped:
         base_path = _resolve_base_file(repo_root, head_rel, base_ref)
         if base_path is None:
@@ -228,27 +231,31 @@ def _run_oasdiff(
             return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
         head_path = repo_root / head_rel
-        plan = resolve_analyzer(
-            manifest=manifest,
-            repo_root=repo_root,
-            managed_available=True,
-            allow_repo_binaries=allow_repo_binaries,
-        )
-        provisioned, provision_failure = _provision_plan(
-            plan, manifest=manifest, repo_root=repo_root
-        )
         if provisioned is None:
-            reason = (
-                provision_failure or plan.reason or f"skipped {manifest.id}: provisioning failed"
+            plan = resolve_analyzer(
+                manifest=manifest,
+                repo_root=repo_root,
+                managed_available=True,
+                allow_repo_binaries=allow_repo_binaries,
+                tier=tier,
             )
-            return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
-
+            provisioned, provision_failure = _provision_plan(
+                plan, manifest=manifest, repo_root=repo_root
+            )
+            if provisioned is None:
+                reason = (
+                    provision_failure
+                    or plan.reason
+                    or f"skipped {manifest.id}: provisioning failed"
+                )
+                return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
         binary = provisioned.argv[0] if provisioned.argv else "oasdiff"
         argv = (binary, "breaking", "--format", "json", str(base_path), str(head_path))
         run = _run_argv(
             manifest=manifest,
             repo_root=repo_root,
             argv=argv,
+            provisioned_plan=provisioned,
             changed_files=[head_rel],
             tier=tier,
             scratch_suffix=f"-{Path(head_rel).stem}",
@@ -304,6 +311,7 @@ def _run_squawk(
         repo_root=repo_root,
         managed_available=True,
         allow_repo_binaries=allow_repo_binaries,
+        tier=tier,
     )
     provisioned, provision_failure = _provision_plan(plan, manifest=manifest, repo_root=repo_root)
     if provisioned is None:
@@ -316,6 +324,7 @@ def _run_squawk(
         manifest=manifest,
         repo_root=repo_root,
         argv=argv,
+        provisioned_plan=provisioned,
         changed_files=scoped,
         tier=tier,
     )
@@ -363,6 +372,7 @@ def _run_buf(
 
     findings: list[Finding] = []
     pass_reason: str | None = None
+    provisioned: AnalyzerPlan | None = None
     for head_rel in scoped:
         base_path = _resolve_base_file(repo_root, head_rel, base_ref)
         if base_path is None:
@@ -375,21 +385,24 @@ def _run_buf(
             return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
         head_path = repo_root / head_rel
-        plan = resolve_analyzer(
-            manifest=manifest,
-            repo_root=repo_root,
-            managed_available=True,
-            allow_repo_binaries=allow_repo_binaries,
-        )
-        provisioned, provision_failure = _provision_plan(
-            plan, manifest=manifest, repo_root=repo_root
-        )
         if provisioned is None:
-            reason = (
-                provision_failure or plan.reason or f"skipped {manifest.id}: provisioning failed"
+            plan = resolve_analyzer(
+                manifest=manifest,
+                repo_root=repo_root,
+                managed_available=True,
+                allow_repo_binaries=allow_repo_binaries,
+                tier=tier,
             )
-            return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
-
+            provisioned, provision_failure = _provision_plan(
+                plan, manifest=manifest, repo_root=repo_root
+            )
+            if provisioned is None:
+                reason = (
+                    provision_failure
+                    or plan.reason
+                    or f"skipped {manifest.id}: provisioning failed"
+                )
+                return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
         binary = provisioned.argv[0] if provisioned.argv else "buf"
         breaking_argv = (
             binary,
@@ -404,6 +417,7 @@ def _run_buf(
             manifest=manifest,
             repo_root=repo_root,
             argv=breaking_argv,
+            provisioned_plan=provisioned,
             changed_files=[head_rel],
             tier=tier,
             scratch_suffix=f"-breaking-{Path(head_rel).stem}",
@@ -431,6 +445,7 @@ def _run_buf(
             manifest=manifest,
             repo_root=repo_root,
             argv=lint_argv,
+            provisioned_plan=provisioned,
             changed_files=[head_rel],
             tier=tier,
             scratch_suffix=f"-lint-{Path(head_rel).stem}",

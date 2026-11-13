@@ -271,7 +271,7 @@ class Span:
         self.status = status
         self.error = error
 
-    def close(self) -> None:
+    def close(self, *, ended_ns: int | None = None) -> None:
         """End the span: stamp end time + emit the TraceEvent + reset the active ContextVar.
 
         Callers that build a span outside a ``with`` block (the verb sub-event
@@ -294,10 +294,13 @@ class Span:
         frame like any other span (so parent/child bookkeeping stays sound),
         but skips ``attrs_source`` evaluation and the sink write entirely,
         mirroring ``NullSpan``'s true no-op contract for the disabled path.
+
+        Args:
+            ended_ns: Optional recorded completion time for work already finished.
         """
         if self._closed:
             return
-        self.ts_end_ns = time.time_ns()
+        self.ts_end_ns = time.time_ns() if ended_ns is None else ended_ns
 
         if self._suppressed:
             if self._context_token is not None:
@@ -393,8 +396,8 @@ class NullSpan:
             *args (Any): Context-manager exception state.
         """
 
-    def close(self) -> None:
-        """No-op close (W4 / M6 — mirrors :meth:`Span.close`)."""
+    def close(self, *, ended_ns: int | None = None) -> None:
+        """Ignore a recorded completion time while tracing is disabled."""
 
     def set_attribute(self, *args: Any) -> None:
         """Ignore an attribute update.

@@ -79,7 +79,74 @@ def test_analyzer_run_span_reports_adapter_invocation_status(
     assert run.attrs["analyzer.exit_code"] == expected_exit
     assert run.attrs["analyzer.findings_count"] == expected_count
     assert run.status == expected_status
+    if adapter_result == "error":
+        assert run.attrs["error"] == "adapter unavailable"
     pipelines = captured_sink.by_kind.get("mergecraft.analyzers.pipeline", [])
     assert len(pipelines) == 1
     assert run.parent_span_id == pipelines[0].span_id
     assert len(state.findings) == expected_count
+
+
+def test_concurrent_analyzer_spans_enclose_adapter_work(
+    captured_sink: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Sibling spans record each worker interval under the pipeline span."""
+    from threading import Barrier, Event, local
+    from time import time_ns
+
+    from mergecraft.analyzers import adapters, pipeline
+    from mergecraft.analyzers.registry import get_manifest
+    from mergecraft.config import RepoSettings
+    from mergecraft.tracing.tracer import get_tracer_from_settings, run_root_span
+
+    settings = RepoSettings.model_validate(
+        {"tracing": {"enabled": True, "sinks": [{"type": "memory"}]}}
+    )
+    monkeypatch.setattr(pipeline, "load_repo_settings", lambda **_kwargs: settings)
+    tools = ("ruff", "bandit")
+    monkeypatch.setattr(
+        pipeline, "detect_enabled", lambda **_kwargs: [get_manifest(tool) for tool in tools]
+    )
+    tracer = get_tracer_from_settings(settings)
+    entered = Barrier(len(tools), timeout=5)
+    windows: dict[str, tuple[int, int]] = {}
+    fast_recorded = Event()
+    worker = local()
+    timed_adapter = pipeline._timed_adapter
+
+    def run_adapter(*, tool_id: str, **_kwargs: Any) -> adapters.AdapterRunResult:
+        worker.tool_id = tool_id
+        started_ns = time_ns()
+        entered.wait()
+        if tool_id == "bandit":
+            assert fast_recorded.wait(5)
+        windows[tool_id] = (started_ns, time_ns())
+        return adapters.AdapterRunResult(findings=[])
+
+    def record_timing(run: Any) -> pipeline._AdapterExecution:
+        execution = timed_adapter(run)
+        if worker.tool_id == "ruff":
+            fast_recorded.set()
+        return execution
+
+    monkeypatch.setattr(adapters, "run_adapter", run_adapter)
+    monkeypatch.setattr(pipeline, "_timed_adapter", record_timing)
+    with run_root_span(tracer):
+        state = pipeline.run_analyzer_pipeline(
+            repo_root=tmp_path, changed_files=["a.py"], tier="trusted", shell="restricted"
+        )
+
+    captured_sink.record()
+    (parent,) = captured_sink.by_kind["mergecraft.analyzers.pipeline"]
+    spans = {span.attrs["analyzer.id"]: span for span in captured_sink.by_kind["analyzer.run"]}
+    assert [row.id for row in state.analyzers] == list(tools)
+    assert set(spans) == set(tools)
+    for tool in tools:
+        span = spans[tool]
+        started_ns, ended_ns = windows[tool]
+        assert span.parent_span_id == parent.span_id
+        assert span.ts_start_ns <= started_ns <= ended_ns <= span.ts_end_ns
+    assert max(span.ts_start_ns for span in spans.values()) < min(
+        span.ts_end_ns for span in spans.values()
+    )
+    assert spans["ruff"].ts_end_ns < windows["bandit"][1]
