@@ -2098,7 +2098,7 @@ def _promote_and_finalize_agent_result(
     from mergecraft.utils.llm_review_timing import snapshot_llm_review_timing
 
     timing_snapshot = snapshot_llm_review_timing()
-    if timing_snapshot is not None:
+    if timing_snapshot is not None and tool_state.selected_mode in {"Review", "IncrementalReview"}:
         tool_state.llm_review_timing = timing_snapshot
 
     if output_schema and result.success:
@@ -2139,10 +2139,11 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
     selected_slug = ctx.selected_slug
     output_schema = ctx.output_schema
 
-    if tool_state.selected_mode in {"Review", "IncrementalReview"}:
-        from mergecraft.utils.llm_review_timing import bind_llm_review_timing_tracker
+    from mergecraft.utils.llm_review_timing import bind_llm_review_timing_tracker
 
-        bind_llm_review_timing_tracker()
+    # The reviewer normally selects its mode during dispatch. Bind before the
+    # task is created so its first generation and every secondary share a tracker.
+    bind_llm_review_timing_tracker()
 
     async def _run_agent_once(slug: str) -> AgentResult:
         attempt_model = resolve_model(slug=slug, respect_env_override=False)
@@ -2982,6 +2983,13 @@ async def _run_review_after_analyze(
         dispatch_started = time.perf_counter()
         result = await _dispatch_agent_with_deadline(ctx)
         roster = await _run_server_roster_reviewers_if_needed(ctx)
+        from mergecraft.utils.llm_review_timing import snapshot_llm_review_timing
+
+        if ctx.tool_state is not None and ctx.tool_state.selected_mode in {
+            "Review",
+            "IncrementalReview",
+        }:
+            ctx.tool_state.llm_review_timing = snapshot_llm_review_timing()
         # The review diff, ignored paths and unreviewable paths exist now, so the
         # declared workflow can be shown untouched before the packet is assembled.
         await ingest_red_green_after_review(
@@ -3342,6 +3350,9 @@ def _coverage_gate_reason(tool_context: ToolContext, settings: RepoSettings) -> 
         coverage_section_for_state,
     )
 
+    # A hard diff budget cannot be relaxed by the advisory coverage policy.
+    if tool_context.tool_state.diff_budget_reason:
+        return tool_context.tool_state.diff_budget_reason
     try:
         return coverage_gate_reason(
             coverage_section_for_state(tool_context.tool_state),
@@ -3456,6 +3467,7 @@ async def _finalize(
         prep_reason=prep_reason,
         final_summary_written=tool_state.final_summary_written,
         coverage_incomplete_reason=_coverage_gate_reason(tool_context, settings),
+        diff_budget_reason=tool_state.diff_budget_reason,
         terminal_rejection=tool_state.last_terminal_rejection,
         budget_exhaustion=budget_exhaustion,
         finalize_failure=finalize_failure,
