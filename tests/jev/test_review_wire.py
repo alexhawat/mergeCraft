@@ -180,7 +180,12 @@ async def test_agent_only_finding_reaches_shadow_judge(
     original = judge_mod.run_parallel_judge
 
     async def _watch(
-        *, findings: Any, review_body: str, client: Any, trust_tier: str = "untrusted"
+        *,
+        findings: Any,
+        review_body: str,
+        client: Any,
+        trust_tier: str = "untrusted",
+        settings: Any = None,
     ) -> Any:
         seen.append(list(findings))
         return await original(
@@ -188,6 +193,7 @@ async def test_agent_only_finding_reaches_shadow_judge(
             review_body=review_body,
             client=client,
             trust_tier=trust_tier,
+            settings=settings,
         )
 
     monkeypatch.setattr(judge_mod, "run_parallel_judge", _watch)
@@ -331,3 +337,42 @@ async def test_shadow_judge_uses_temp_fallback_without_packet(
     assert result.success is True
     shadow = _assert_shadow_judge_persisted(result)
     assert shadow.name == "jev-shadow.jsonl"
+
+
+@pytest.mark.parametrize(
+    ("thresholds", "expected_confidence"),
+    [
+        pytest.param("    evidence/v1.relation: 0.95\n", None, id="configured-relation-floor"),
+        pytest.param(
+            "    unit/v1.certain: 0.95\n    unit/v1.likely: 0.9\n",
+            "likely",
+            id="configured-confidence-bucket",
+        ),
+    ],
+)
+async def test_offline_judge_applies_configured_thresholds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    thresholds: str,
+    expected_confidence: str | None,
+) -> None:
+    _prepare_shadow_review(monkeypatch)
+    config = _shadow_enabled_yaml() + "  thresholds:\n" + thresholds
+    repo, diff = _repo_with_jev(tmp_path, enabled=True, config_yaml=config)
+    inject_recorded_jev_client(monkeypatch, "evidence_says_nothing.json")
+    result = await run_offline_diff_review(
+        cwd=repo,
+        diff_file=diff,
+        dry_run=False,
+        engine=published_review_engine(_agent_only_published()),
+    )
+    assert result.success
+    assert result.jev_judge is not None
+    findings = [
+        row for row in result.jev_judge["findings"] if row["rule_id"] == "jev-evidence-unsupported"
+    ]
+    if expected_confidence is None:
+        assert findings == []
+    else:
+        assert len(findings) == 1
+        assert findings[0]["confidence"] == expected_confidence

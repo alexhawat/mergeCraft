@@ -81,7 +81,6 @@ class ToolContext:
     xrepo: XrepoConfig | None = None
     prepush_script: str | None = None
     pr_approve_enabled: bool = False
-    auto_merge_enabled: bool = False
     signed_commits: bool = False
     mode_instructions: dict[str, str] = field(default_factory=dict)
     static_checks: list[StaticCheckConfig] = field(default_factory=list)
@@ -138,7 +137,6 @@ class ToolContext:
         xrepo: XrepoConfig | None = None,
         prepush_script: str | None = None,
         pr_approve_enabled: bool = False,
-        auto_merge_enabled: bool = False,
         signed_commits: bool = False,
         mode_instructions: dict[str, str] | None = None,
         static_checks: list[StaticCheckConfig] | None = None,
@@ -193,7 +191,6 @@ class ToolContext:
         self.xrepo = xrepo
         self.prepush_script = prepush_script
         self.pr_approve_enabled = pr_approve_enabled
-        self.auto_merge_enabled = auto_merge_enabled
         self.signed_commits = signed_commits
         self.mode_instructions = dict(mode_instructions or {})
         self.static_checks = list(static_checks or [])

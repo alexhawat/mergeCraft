@@ -263,7 +263,6 @@ async def run_offline_agent_review(
             tmpdir=str(tmpdir),
             signed_commits=False,
             pr_approve_enabled=False,
-            auto_merge_enabled=False,
             static_checks=[
                 StaticCheckConfig(
                     name=check.name,

@@ -105,6 +105,26 @@ ignore = [
 - Keep the Ruff version in `pyproject.toml` `[project.optional-dependencies].dev` and the `.pre-commit-config.yaml` `rev` aligned so local hooks and CI use the same rule set.
 - Run format as part of the lint workflow (`make lint` does `ruff check` **and** `ruff format --check`) so style never drifts.
 
+### Dead-code gate
+
+`make dead-code-check` runs the pinned Vulture scanner over `src/` at minimum
+confidence 60, including unused functions. `make lint` and therefore `make ci`
+include this check. Scanner syntax/input failures remain failures.
+
+`scripts/dead_code_allowlist.json` records reviewed dynamic-framework and public
+contract exceptions as exact source path, diagnostic kind, and symbol names,
+with a reason for each group. It does not exclude whole modules, match symbol
+patterns, or globally suppress a name. A new unused helper still fails even
+when another field in its file is allowed. Stale entries fail too, so remove an
+exception when its definition disappears or acquires a visible caller.
+
+Review each finding before adding an entry. Typer callbacks, Pydantic serialized
+fields/validators, protocol implementations and explicit compatibility exports
+can need exceptions; callerless private helpers and write-only private state
+should be removed instead. Do not generate an allow-list from all diagnostics.
+Vulture's underlying use analysis is name-based, so this gate complements
+production-path tests and review rather than proving reachability.
+
 ### Naming Conventions
 
 | Element | Convention | Example |

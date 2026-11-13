@@ -62,7 +62,7 @@ def test_resolve_path_under_root_rejects_escape(tmp_path: Path) -> None:
     checkout.mkdir()
     (checkout / "README.md").write_text("safe\n", encoding="utf-8")
 
-    with pytest.raises(FileNotFoundError, match="escapes checkout root"):
+    with pytest.raises(FileNotFoundError, match="escapes the repository root"):
         resolve_path_under_root(checkout, "../../secret")
 
 

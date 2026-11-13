@@ -19,7 +19,7 @@ from mergecraft.agents.shared import (
     AgentRunContext,
     PostRunIssues,
     ResolvedInstructions,
-    StopHookFailure,
+    SummaryStale,
 )
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import ReviewRecord, TerminalSubmission, init_tool_state
@@ -147,7 +147,6 @@ async def test_retry_exhaustion_yields_inconclusive_not_passed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """V4: exhausting the post-run retry loop must not fall through to ``passed``."""
-    monkeypatch.setattr("mergecraft.agents.post_run.get_git_status", lambda: "")
 
     tool_ctx = _tool_ctx(tmp_path)
     tool_ctx.tool_state.selected_mode = "Review"
@@ -192,19 +191,18 @@ async def test_retry_loop_keeps_going_while_the_issue_set_changes(
     A resume that resolves one issue and leaves another still earns the next
     attempt — only an unchanged issue set ends the loop early.
     """
-    monkeypatch.setattr("mergecraft.agents.post_run.get_git_status", lambda: "")
 
     tool_ctx = _tool_ctx(tmp_path)
     tool_ctx.tool_state.selected_mode = "Review"
     tool_ctx.tool_state.had_progress_comment = False
 
-    stop_hook_failures = [StopHookFailure(exit_code=2, output="first"), None]
+    summary_issues = [SummaryStale(file_path="summary.md"), None]
     prompts: list[str] = []
 
     async def collect(ctx: AgentRunContext, *, skip_summary_stale: bool = False) -> PostRunIssues:
         del ctx, skip_summary_stale
-        failure = stop_hook_failures.pop(0) if stop_hook_failures else None
-        return PostRunIssues(stop_hook=failure, unsubmitted_review="Review")
+        failure = summary_issues.pop(0) if summary_issues else None
+        return PostRunIssues(summary_stale=failure, unsubmitted_review="Review")
 
     monkeypatch.setattr("mergecraft.agents.post_run.collect_post_run_issues", collect)
 
@@ -218,7 +216,7 @@ async def test_retry_loop_keeps_going_while_the_issue_set_changes(
         resume=resume,
     )
 
-    # Attempt 1 (stop hook + unsubmitted) → attempt 2 (unsubmitted only, a
+    # Attempt 1 (stale summary + unsubmitted) → attempt 2 (unsubmitted only, a
     # changed set) → attempt 3 collects the same set as attempt 2 and stops.
     assert len(prompts) == 2
 

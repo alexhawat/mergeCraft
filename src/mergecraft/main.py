@@ -1624,7 +1624,6 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         xrepo=payload.get("xrepo"),
         prepush_script=settings.prepush_script,
         pr_approve_enabled=settings.pr_approve_enabled,
-        auto_merge_enabled=settings.auto_merge_enabled,
         signed_commits=settings.signed_commits,
         mode_instructions=settings.mode_instructions,
         static_checks=[

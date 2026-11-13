@@ -25,7 +25,6 @@ DEFAULT_CONFIG: dict[str, object] = {
     "shell": "restricted",
     "signedCommits": False,
     "prApproveEnabled": False,
-    "autoMergeEnabled": False,
 }
 
 _DEFAULT_MODELS = DEFAULT_CONFIG["models"]
@@ -43,7 +42,6 @@ push: restricted
 shell: restricted
 signedCommits: false
 prApproveEnabled: false
-autoMergeEnabled: false
 trust:
   # trust.agentSandbox decides whether MERGECRAFT_CODEX_SANDBOX=danger-full-access
   # is honoured. Tiers (tightest first): never | merged-only | dispatch | same-repo.

@@ -36,7 +36,6 @@ from mergecraft.mcp.context import (
     ToolContext,
 )
 from mergecraft.mcp.endpoints import MCP_REVIEWER_ENDPOINT
-from mergecraft.mcp.git import commit_changes_tool, push_branch_tool
 from mergecraft.mcp.server import build_reviewer_tools
 from mergecraft.mcp.shared import PRIMARY_REVIEWER_ALLOWED_TOOL_CLASSES, ToolClass
 from mergecraft.mcp.shell import shell_tool
@@ -349,40 +348,6 @@ async def test_coding_agent_cannot_edit_tracked_file_via_shell(
     assert result.is_error is True, _tool_text(result)
     assert "review-only" in _tool_text(result).lower()
     assert tracked.read_text(encoding="utf-8") == before
-
-
-@pytest.mark.parametrize("agent_id", CODING_AGENT_IDS)
-async def test_coding_agent_cannot_commit_changes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent_id: str
-) -> None:
-    """Error: ``commit_changes`` refuses a coding-agent reviewer run."""
-    recorder = _GitRecorder()
-    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
-    result = await commit_changes_tool(_ctx(tmp_path, agent_id=agent_id)).execute(
-        {"message": "chore: must not land"}
-    )
-    assert result.is_error is True, _tool_text(result)
-    text = _tool_text(result).lower()
-    assert "review-only" in text
-    assert "commit" in text
-    assert not any("commit" in call for call in recorder.calls), recorder.calls
-
-
-@pytest.mark.parametrize("agent_id", CODING_AGENT_IDS)
-async def test_coding_agent_cannot_push_branch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent_id: str
-) -> None:
-    """Error: ``push_branch`` refuses a coding-agent reviewer run."""
-    recorder = _GitRecorder()
-    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
-    result = await push_branch_tool(_ctx(tmp_path, agent_id=agent_id)).execute(
-        {"branchName": "feature"}
-    )
-    assert result.is_error is True, _tool_text(result)
-    text = _tool_text(result).lower()
-    assert "review-only" in text
-    assert "push" in text
-    assert not any("push" in call for call in recorder.calls), recorder.calls
 
 
 # ── Source scan: --agent path never invokes git write ─────────────────────────

@@ -110,9 +110,9 @@ _READONLY_SUBCOMMANDS: frozenset[str] = frozenset(
 # table, consulted before the allowlist so the agent is told where to go rather
 # than only that it cannot go here.
 _REDIRECT_TO_TOOL: dict[str, str] = {
-    "push": "use push_branch instead",
+    "push": "repository mutation is not available in review-only runs",
     "fetch": "use git_fetch instead",
-    "pull": "use git_fetch then git merge",
+    "pull": "use git_fetch to read remote refs; merging is not available",
     "clone": "use checkout_repo / checkout_pr",
 }
 # Flags that enable arbitrary code execution via git alias expansion.

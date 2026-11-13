@@ -72,22 +72,6 @@ def _read_logfire_region() -> Literal["us", "eu"] | None:
     return None
 
 
-def _parse_bool(value: str | None) -> bool | None:
-    """Parse a tri-state bool string (true / false / unset-or-garbage → None).
-
-    Unset and unrecognized values return ``None`` so callers can distinguish
-    "defer to the next precedence layer" from an explicit ``false`` (W6.4).
-    """
-    if value is None or value == "":
-        return None
-    lowered = value.strip().lower()
-    if lowered in {"true", "1", "yes", "on"}:
-        return True
-    if lowered in {"false", "0", "no", "off"}:
-        return False
-    return None
-
-
 def _resolve_local_path(raw_path: str | None) -> str:
     """Resolve ``local_files`` ``path`` against ``GITHUB_WORKSPACE``."""
     workspace = os.environ.get("GITHUB_WORKSPACE")

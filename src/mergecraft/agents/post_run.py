@@ -13,15 +13,11 @@ from mergecraft.agents.shared import (
     AgentResult,
     AgentRunContext,
     PostRunIssues,
-    StopHookFailure,
     SummaryStale,
-    build_commit_prompt,
-    get_git_status,
     has_post_run_issues,
     merge_agent_usage,
 )
 from mergecraft.mcp.tool_state import ToolState  # noqa: TC001 — runtime helpers below
-from mergecraft.modes import NON_COMMITTING_MODES
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -31,8 +27,6 @@ def _post_run_issues_retryable(issues: PostRunIssues, tool_state: ToolState) -> 
     """Classify whether a post-run resume can change the outcome (D5)."""
     from mergecraft.mcp.verdict import REJECTION_SCOPE_UNAVAILABLE
 
-    if issues.stop_hook is not None or issues.dirty_tree is not None:
-        return True
     if issues.unsubmitted_review is not None:
         return tool_state.last_terminal_rejection is None
     return tool_state.last_terminal_rejection != REJECTION_SCOPE_UNAVAILABLE
@@ -69,20 +63,6 @@ def get_unsubmitted_review(tool_state: ToolState) -> str | None:
             return None
         return "IncrementalReview"
     return None
-
-
-def build_stop_hook_prompt(failure: StopHookFailure) -> str:
-    return "\n".join(
-        [
-            f"STOP HOOK FAILED — the repo-configured stop hook exited with code "
-            f"{failure.exit_code}. your work is not done until the hook exits cleanly. "
-            "address the issue below and push any resulting changes to a pull request.",
-            "",
-            "```",
-            failure.output or "(no output)",
-            "```",
-        ]
-    )
 
 
 async def _is_summary_unchanged(file_path: str, seed: str) -> bool:
@@ -146,18 +126,6 @@ async def collect_post_run_issues(
     from mergecraft.mcp.verdict import record_scope_rejection_if_blocked
 
     record_scope_rejection_if_blocked(ctx.tool_state)
-    status = get_git_status()
-    mode = ctx.tool_state.selected_mode
-    if status:
-        if mode and mode in NON_COMMITTING_MODES:
-            logger.info("dirty-tree gate suppressed: mode `{}` does not commit", mode)
-        elif ctx.tool_state.offline_review:
-            # An offline review (``mergecraft review``) is read-only whether or not the
-            # agent selected a mode; asking it to commit and push only derails the
-            # retry turn that should recover a missing verdict.
-            logger.info("dirty-tree gate suppressed: offline review does not commit")
-        else:
-            issues.dirty_tree = status
     summary_file = ctx.tool_state.summary_file_path
     summary_seed = ctx.tool_state.summary_seed
     if not skip_summary_stale and summary_file and summary_seed is not None:
@@ -175,12 +143,8 @@ async def collect_post_run_issues(
 
 def build_post_run_prompt(issues: PostRunIssues) -> str:
     parts: list[str] = []
-    if issues.stop_hook:
-        parts.append(build_stop_hook_prompt(issues.stop_hook))
     if issues.unsubmitted_review:
         parts.append(build_unsubmitted_review_prompt(issues.unsubmitted_review))
-    if issues.dirty_tree:
-        parts.append(build_commit_prompt(issues.dirty_tree))
     if issues.summary_stale:
         parts.append(build_summary_stale_prompt(issues.summary_stale.file_path))
     parts.append(_LEARNINGS_PROVENANCE_NOTE)
@@ -282,8 +246,6 @@ async def finalize_agent_result(ctx: AgentRunContext, result: AgentResult) -> Ag
 def _post_run_issue_signature(issues: PostRunIssues) -> tuple[Any, ...]:
     """Identity of an issue set, for detecting a retry that changed nothing."""
     return (
-        issues.stop_hook.exit_code if issues.stop_hook else None,
-        issues.dirty_tree,
         issues.summary_stale.file_path if issues.summary_stale else None,
         issues.unsubmitted_review,
     )
@@ -337,9 +299,7 @@ async def run_post_run_retry_loop(
             )
             break
         previous_signature = signature
-        if issues.summary_stale and not (
-            issues.stop_hook or issues.dirty_tree or issues.unsubmitted_review
-        ):
+        if issues.summary_stale and not issues.unsubmitted_review:
             # soft gate — nudge once
             skip_summary = True
         prompt = build_post_run_prompt(issues)

@@ -2,7 +2,7 @@
 
 Wave plan: ``.ignorelocal/waves/open-issues-sweep-2026-08-20c-wave-plan.md``
 (W2.2 recon). Production registry is Review / IncrementalReview / Plan only.
-Write-capable modules stay importable (D12). A reviewer-shaped run cannot
+Former write-capable names remain reserved. A reviewer-shaped run cannot
 edit a tracked file, ``git commit``, ``git push``, or open a code-changing PR.
 Out of scope (#350): MCP transport auth (#345/#346) and trust/privilege drop.
 """
@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -23,8 +22,7 @@ from mergecraft.mcp.context import (
     ResolvedPayload,
     ToolContext,
 )
-from mergecraft.mcp.git import commit_changes_tool, git_tool, push_branch_tool
-from mergecraft.mcp.pr import create_pull_request_tool
+from mergecraft.mcp.git import git_tool
 from mergecraft.mcp.select_mode import select_mode_tool
 from mergecraft.mcp.shell import shell_tool
 from mergecraft.mcp.tool_state import init_tool_state
@@ -137,36 +135,6 @@ class _GitRecorder:
         return "ok\n"
 
 
-class _RecordingScm:
-    def __init__(self) -> None:
-        self.posts: list[str] = []
-
-    async def post(self, path: str, **kwargs: Any) -> dict[str, Any]:
-        self.posts.append(path)
-        return {
-            "id": 1,
-            "number": 99,
-            "html_url": "https://example.test/acme/demo/pull/99",
-            "title": kwargs.get("json", {}).get("title", "x"),
-            "head": {"ref": "feature"},
-            "base": {"ref": "main"},
-        }
-
-
-# ── D12: unregistered write-mode modules stay importable ───────────────────────
-
-
-def test_write_mode_modules_remain_importable_as_negative_fixtures() -> None:
-    """D12: ``modes/Fix.py`` (and siblings) stay importable even after un-registering."""
-    from mergecraft.modes import AddressReviews, Build, Fix, ResolveConflicts, Task
-
-    assert Fix.NAME == "Fix"
-    assert Build.NAME == "Build"
-    assert Task.NAME == "Task"
-    assert AddressReviews.NAME == "AddressReviews"
-    assert ResolveConflicts.NAME == "ResolveConflicts"
-
-
 # ── W2 production registry ─────────────────────────────────────────────────────
 
 
@@ -244,55 +212,6 @@ async def test_reviewer_shaped_run_cannot_edit_tracked_file(
     assert result.is_error is True, _tool_text(result)
     assert "review-only" in _tool_text(result).lower()
     assert tracked.read_text(encoding="utf-8") == before
-
-
-@pytest.mark.parametrize("selected_mode", _REVIEWER_SHAPED)
-async def test_reviewer_shaped_run_cannot_git_commit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected_mode: str
-) -> None:
-    """``commit_changes`` must refuse a reviewer-shaped run and not invoke git."""
-    recorder = _GitRecorder()
-    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
-    ctx = _ctx(tmp_path, selected_mode=selected_mode)
-    result = await commit_changes_tool(ctx).execute({"message": "chore: must not land"})
-    assert result.is_error is True, _tool_text(result)
-    text = _tool_text(result).lower()
-    assert "review-only" in text
-    assert "commit" in text
-    assert not any("commit" in call for call in recorder.calls), recorder.calls
-
-
-@pytest.mark.parametrize("selected_mode", _REVIEWER_SHAPED)
-async def test_reviewer_shaped_run_cannot_git_push(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected_mode: str
-) -> None:
-    """``push_branch`` must refuse a reviewer-shaped run and not invoke git push."""
-    recorder = _GitRecorder()
-    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
-    ctx = _ctx(tmp_path, selected_mode=selected_mode)
-    result = await push_branch_tool(ctx).execute({"branchName": "feature"})
-    assert result.is_error is True, _tool_text(result)
-    text = _tool_text(result).lower()
-    assert "review-only" in text
-    assert "push" in text
-    assert not any("push" in call for call in recorder.calls), recorder.calls
-
-
-@pytest.mark.parametrize("selected_mode", _REVIEWER_SHAPED)
-async def test_reviewer_shaped_run_cannot_open_code_changing_pr(
-    tmp_path: Path, selected_mode: str
-) -> None:
-    """``create_pull_request`` must refuse a reviewer-shaped run (code-changing PR)."""
-    scm = _RecordingScm()
-    ctx = _ctx(tmp_path, selected_mode=selected_mode)
-    ctx.scm = scm
-    result = await create_pull_request_tool(ctx).execute(
-        {"title": "apply the fix", "body": "code change", "base": "main"}
-    )
-    assert result.is_error is True, _tool_text(result)
-    text = _tool_text(result).lower()
-    assert "review-only" in text
-    assert scm.posts == []
 
 
 # ── Already-true supporting pin (git MCP never forwards ``commit``) ───────────

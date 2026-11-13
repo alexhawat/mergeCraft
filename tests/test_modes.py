@@ -9,13 +9,8 @@ from pathlib import Path
 from typing import Final
 
 from mergecraft.modes import (
-    NON_COMMITTING_MODES,
     PR_SUMMARY_FORMAT,
-    AddressReviews,
-    Build,
     Mode,
-    ResolveConflicts,
-    _expand_template,
     compute_modes,
     modes,
 )
@@ -29,41 +24,14 @@ from mergecraft.review_taxonomy import (
     VERIFY_FIRST_PREAMBLE,
     WITHDRAWN_FINDINGS_HEADING,
 )
-from mergecraft.types import AgentId, format_mcp_tool_ref
+from mergecraft.types import format_mcp_tool_ref
 
-# Production registry after #350 / W2 — write-capable names stay importable (D12).
+# Production registry is review-only.
 EXPECTED_MODE_NAMES = [
     "Review",
     "IncrementalReview",
     "Plan",
 ]
-
-
-def _render_unregistered(template: str, agent_id: AgentId, *, signed_commits: bool = False) -> str:
-    """Expand a D12 unregistered write-mode template with the production renderer."""
-
-    def t(tool_name: str) -> str:
-        return format_mcp_tool_ref(agent_id, tool_name)
-
-    if signed_commits:
-        commit_step = (
-            f"commit via `{t('commit_changes')}` — it lands a GitHub-signed commit "
-            "directly on the remote branch (no push step)"
-        )
-        finalize_step = (
-            f"confirm a clean working tree (`git status`) — your `{t('commit_changes')}` "
-            "calls already landed the work on the remote"
-        )
-    else:
-        commit_step = 'commit locally via shell (`git add . && git commit -m "..."`)'
-        finalize_step = f"confirm a clean working tree, then push via `{t('push_branch')}`"
-    return _expand_template(
-        template,
-        t=t,
-        commit_step=commit_step,
-        finalize_step=finalize_step,
-        signed_commits=signed_commits,
-    )
 
 
 def test_compute_modes_returns_all_built_ins() -> None:
@@ -82,34 +50,12 @@ def test_claude_tool_refs_use_mcp_prefix() -> None:
     review = next(m for m in compute_modes("claude") if m.name == "Review")
     assert "mcp__mergecraft__checkout_pr" in (review.prompt or "")
     assert "mergecraft_checkout_pr" not in (review.prompt or "")
-    build = _render_unregistered(Build.TEMPLATE, "claude")
-    assert "mcp__mergecraft__push_branch" in build
-    assert "mergecraft_push_branch" not in build
 
 
 def test_opencode_tool_refs_use_underscore() -> None:
     review = next(m for m in compute_modes("opencode") if m.name == "Review")
     assert "mergecraft_checkout_pr" in (review.prompt or "")
     assert "mcp__mergecraft__" not in (review.prompt or "")
-
-
-def test_signed_commits_swaps_commit_and_push_flow() -> None:
-    unsigned = _render_unregistered(Build.TEMPLATE, "opencode", signed_commits=False)
-    signed = _render_unregistered(Build.TEMPLATE, "opencode", signed_commits=True)
-    assert "git add . && git commit" in unsigned
-    assert "mergecraft_push_branch" in unsigned
-    assert "mergecraft_commit_changes" in signed
-    assert "no push step" in signed
-
-
-def test_resolve_conflicts_signed_commits_uses_no_commit_merge() -> None:
-    rc = _render_unregistered(ResolveConflicts.TEMPLATE, "claude", signed_commits=True)
-    assert "git merge --no-commit origin/<base_branch>" in rc
-    assert "mcp__mergecraft__commit_changes" in rc
-
-
-def test_non_committing_modes() -> None:
-    assert frozenset({"Review", "IncrementalReview", "Plan"}) == NON_COMMITTING_MODES
 
 
 def test_pr_summary_format_embedded_in_review_modes() -> None:
@@ -197,11 +143,6 @@ def test_review_modes_run_static_checks_and_read_withdrawn_findings() -> None:
             assert WITHDRAWN_FINDINGS_HEADING in prompt, (agent, name)
 
 
-def test_address_reviews_records_withdrawn_findings() -> None:
-    prompt = _render_unregistered(AddressReviews.TEMPLATE, "opencode")
-    assert WITHDRAWN_FINDINGS_HEADING in prompt
-
-
 def test_review_mode_has_data_integrity_and_copy_lenses() -> None:
     prompt = next(m for m in modes if m.name == "Review").prompt or ""
     assert "**data integrity & atomicity**" in prompt
@@ -224,9 +165,7 @@ def test_review_mode_has_privilege_drop_ordering_lens() -> None:
 
 
 def test_mergecraft_reviewer_subagent_referenced() -> None:
-    build = _render_unregistered(Build.TEMPLATE, "opencode")
     review = next(m for m in modes if m.name == "Review")
-    assert "mergecraft-reviewer" in build
     assert "mergecraft-reviewer" in (review.prompt or "")
 
 
@@ -527,3 +466,7 @@ def test_custom_modes_from_config_still_merge() -> None:
     assert "MyMode" in combined_names
     assert "Review" in combined_names
     assert "Build" not in combined_names
+
+
+def test_signed_commits_does_not_change_read_only_modes() -> None:
+    assert compute_modes("claude", signed_commits=True) == compute_modes("claude")

@@ -251,7 +251,6 @@ def test_setup_run_resolves_prompt_and_mode(tmp_path: Path) -> None:
 
 def _reset_token_module_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(token_mod, "_mcp_token_value", None)
-    monkeypatch.setattr(token_mod, "_mcp_token_refresh", None)
     for key in (
         "INPUT_TOKEN",
         "GH_TOKEN",

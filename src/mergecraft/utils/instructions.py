@@ -293,19 +293,6 @@ def _standalone_mode_instructions(
     return f"### Standalone mode\n\nYou are running as a step in a user-defined CI workflow. {output_requirement}"
 
 
-def _quote_user(prompt: str) -> str:
-    """Retained only for the maintainer-authored exemption path.
-
-    The untrusted path now goes through ``render_untrusted`` (see
-    ``resolve_instructions()``). ``_quote_user`` survives as a thin
-    markdown-decoration helper for the cases where the caller knows the
-    text is operator-owned (e.g. baseInstructions, which is set in the
-    repo config by a maintainer). New untrusted call sites must use the
-    fence instead — see ``mergecraft.utils.fence``.
-    """
-    return "\n".join(f"> {line}" for line in prompt.split("\n"))
-
-
 def _load_review_instruction_settings(repo_root: Any) -> tuple[int, tuple[str, ...]]:
     from pathlib import Path as PathType
 

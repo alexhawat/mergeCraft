@@ -109,7 +109,7 @@ def test_subagent_deny_list_always_carries_the_terminal_protocol_tools(tmp_path:
 def test_deny_list_is_the_complement_of_the_admitted_surface(tmp_path: Path) -> None:
     denied = set(subagent_denied_tool_names(_tool_ctx(tmp_path)))
     # Read-only reviewer tools stay available; mutating ones are denied.
-    assert "push_branch" in denied
+    assert "report_progress" in denied
     assert "checkout_pr" not in denied
     assert "read_file" not in denied
 

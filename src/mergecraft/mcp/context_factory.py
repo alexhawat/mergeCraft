@@ -54,7 +54,6 @@ def minimal_tool_context(
         tmpdir=tmpdir,
         signed_commits=False,
         pr_approve_enabled=False,
-        auto_merge_enabled=False,
         static_checks_enabled=static_checks_enabled,
         analyzers_mode="auto",
         trust_tier=trust_tier,

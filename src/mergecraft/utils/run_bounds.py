@@ -269,7 +269,7 @@ def resolve_run_bounds(
     )
 
     # ``cost_budget_usd`` scales with the round multiplier when ``roundBudgets`` is
-    # enabled — operators who need a flat cost cap should set ``roundBudgets: false``.
+    # enabled — operators who need a flat cost cap should set ``roundBudgets: {multipliers: [1.0]}``.
     return RunBounds(
         token_budget=_scale_budget_int(token_budget, multiplier),
         cost_budget_usd=cost_budget * multiplier,

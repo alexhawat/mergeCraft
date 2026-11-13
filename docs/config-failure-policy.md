@@ -200,3 +200,21 @@ Both checks fail closed: no `file://` URI is emitted and no bytes are read from 
    collide exactly.
 9. Prep install failed → treat the check conclusion as inconclusive/neutral
    and re-run after fixing the install error.
+
+## Retired preview configuration
+
+The unused `autoMergeEnabled` setting and preview `orchestrator`, `pipeline`,
+and `operatorPipeline` settings are removed from the runtime model and new
+scaffolds. Existing configurations still load: these exact keys are discarded,
+and non-default values produce a warning. Unknown keys still fail validation.
+
+`review.roundBudgets.multipliers` must contain at least one value, each greater
+than zero and at most 10. Use `multipliers: [1.0]` for a flat budget. Instruction
+byte caps, verification budgets, and file-group thresholds must be nonnegative;
+`verificationBudget: 0` retains its existing uncapped meaning.
+
+Jev threshold names must match supported pack keys, values must be in `[0, 1]`,
+and the effective `unit/v1.certain` floor must be at least `unit/v1.likely`.
+Configured evidence floors and confidence buckets apply to the live shadow
+judge. The two unwired `align/v1` overrides are discarded with a warning;
+fixed alignment calibration metadata remains available for the pack corpus.

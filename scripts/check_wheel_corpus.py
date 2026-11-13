@@ -46,6 +46,10 @@ from pathlib import Path
 import mergecraft
 assert Path(mergecraft.__file__).is_relative_to(Path(sys.prefix))
 assert importlib.util.find_spec('pytest') is None
+for module in ('mergecraft.cli.eval_cmd', 'mergecraft.analyzers.catalog_docs',
+               'mergecraft.cli.pipeline_cmd', 'mergecraft.orchestrator',
+               'mergecraft.scm.webhooks', 'mergecraft.scm.errors'):
+    assert importlib.util.find_spec(module) is None, f'wheel ships {module}'
 from mergecraft.evals.convergence_benchmark import replay_convergence
 result, path = replay_convergence(results_dir=Path('results'))
 assert result.convergence is not None and result.convergence.cases_total > 0
@@ -53,8 +57,20 @@ assert path.is_file()
 print('installed wheel convergence passed')
 """
         subprocess.run([str(python), "-I", "-c", code], cwd=root, env=env, check=True)
-        for args in (["--help"], ["eval", "--help"], ["config", "validate"], ["--version"]):
+        for args in (
+            ["--help"],
+            ["review", "--help"],
+            ["analyzers", "list"],
+            ["config", "validate"],
+            ["--version"],
+        ):
             subprocess.run([str(cli), *args], cwd=root, env=env, check=True)
+        for args in (["eval", "--help"], ["pipeline", "--help"], ["analyzers", "docs", "--help"]):
+            unavailable = subprocess.run(
+                [str(cli), *args], cwd=root, env=env, text=True, capture_output=True, check=False
+            )
+            assert unavailable.returncode == 2, unavailable.stdout + unavailable.stderr
+            assert "No such command" in unavailable.stdout + unavailable.stderr
         result = subprocess.run(
             [str(cli), "--format", "json", "capabilities"],
             cwd=root,

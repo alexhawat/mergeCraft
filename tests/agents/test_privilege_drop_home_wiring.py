@@ -10,10 +10,10 @@ dotfiles/config under it — this is the exact failure behind the observed
 
 These tests drive the three real subprocess-launch call sites — the shared
 ``spawn_agent_cli`` (covers Codex/Gemini/Claude's primary streaming path/most
-of OpenCode), OpenCode's ``_boot_opencode_server`` bypass, and Claude's legacy
-``subprocess.run`` bypass — with root simulated via monkeypatched
+of OpenCode), OpenCode's ``_boot_opencode_server`` bypass, and Claude's streaming
+driver — with root simulated via monkeypatched
 ``os.getuid``/``pwd.getpwnam``, and assert the env actually handed to
-``Popen``/``subprocess.run`` has ``HOME``/``USER``/``LOGNAME`` redirected to
+``Popen`` has ``HOME``/``USER``/``LOGNAME`` redirected to
 the resolved agent user, while argv is still ``setpriv``-wrapped exactly as
 before.
 
@@ -188,40 +188,31 @@ def test_boot_opencode_server_redirects_home_under_privilege_drop(
     assert handle.base_url == "http://127.0.0.1:12345"
 
 
-# ---------------------------------------------------------------------------
-# claude.py::_run_claude_legacy_subprocess — the FileNotFoundError fallback
-# ---------------------------------------------------------------------------
-
-
-def test_claude_legacy_subprocess_redirects_home_under_privilege_drop(
+def test_claude_stream_redirects_home_under_privilege_drop(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
-    _simulate_root_privilege_drop(monkeypatch)
+    from tests.agents.test_claude_review_tool_boundary import _EmptyProcess, _NullProcessGroup
 
+    _simulate_root_privilege_drop(monkeypatch)
     captured: dict[str, Any] = {}
 
-    def _fake_run(cmd: list[str], **kwargs: object) -> object:
+    def popen(cmd: list[str], **kwargs: object) -> _EmptyProcess:
         captured["cmd"] = cmd
         captured["kwargs"] = kwargs
-        return MagicMock(returncode=0, stdout="", stderr="")
+        return _EmptyProcess()
 
-    monkeypatch.setattr(claude_module.subprocess, "run", _fake_run)
-    monkeypatch.setenv("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "0")
-
+    monkeypatch.setattr(claude_module.subprocess, "Popen", popen)
+    monkeypatch.setattr(claude_module, "track_process_group", _NullProcessGroup)
+    monkeypatch.setattr(claude_module, "wait_or_kill_process_group", lambda process, timeout: 0)
     ctx = make_agent_run_context(tmp_path, resolved_model="claude-sonnet")
-    result = claude_module._run_claude_legacy_subprocess(
-        cmd=["claude", "--print"],
-        ctx=ctx,
-        model="claude-sonnet",
-        skip_permissions=False,
+    claude_module._run_claude_once(
+        cli="claude", prompt="review", ctx=ctx, mcp_config=str(tmp_path / "mcp.json")
     )
-
     assert captured["cmd"][0] == "setpriv"
     resolved_env = captured["kwargs"]["env"]
     assert resolved_env["HOME"] == "/home/mergecraft"
     assert resolved_env["USER"] == "mergecraft"
     assert resolved_env["LOGNAME"] == "mergecraft"
-    assert result.success is True
 
 
 # ---------------------------------------------------------------------------

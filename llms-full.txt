@@ -941,8 +941,8 @@ The packet's blast-radius classification is an evidence-weighted policy signal,
 not an instruction to merge. `low` means the change is eligible for the
 auto-merge lane after required checks pass, `medium` means assisted review, and
 `high` means automatic merge is forbidden. These semantics do not enable or
-disable auto-merge; `autoMergeEnabled` remains `false`, and Batch D (#46) owns
-the separate mapping from evidence outcomes to workflow actions.
+disable auto-merge. mergeCraft publishes review outcomes; repository policy
+controls whether and when a pull request can merge.
 
 A pull request can declare the paths it is expected to touch with a
 `Scope paths:` block of globs at the end of its body (or of an issue it
