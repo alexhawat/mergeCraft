@@ -12,6 +12,9 @@ import pytest
 from click.testing import CliRunner
 from typer.main import get_command
 
+from mergecraft.cli.command_catalog import COMMANDS
+from mergecraft.cli.help_text import terminal_help
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -106,3 +109,19 @@ def test_completion_leaves_selected_command_ready_for_execution() -> None:
     result = CliRunner().invoke(root, ["review", "--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
     assert result.exit_code == 0, result.output
     assert "--diff" in result.output
+
+
+@pytest.mark.parametrize("command_name", sorted(COMMANDS), ids=sorted(COMMANDS))
+def test_catalog_summary_matches_resolved_command_help(command_name: str) -> None:
+    """Import-free discovery text stays aligned with the command's own help."""
+    from mergecraft.cli.app import app
+
+    root = get_command(app)
+    assert isinstance(root, click.Group)
+    with click.Context(root) as ctx:
+        command = root.get_command(ctx, command_name)
+    assert command is not None
+    assert command.help
+    summary = command.help.strip().splitlines()[0]
+    assert terminal_help(COMMANDS[command_name].help) == terminal_help(summary)
+    assert command.hidden is COMMANDS[command_name].hidden
