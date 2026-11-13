@@ -2938,41 +2938,26 @@ truth.
 
 ## One trace per run (T3)
 
-One `mergecraft review` run emits one Logfire trace. Every span
-emitted by the run — `mergecraft.run`, `mergecraft.prep`,
-`mergecraft.publish`, `mergecraft.analyzers.pipeline`, `analyzer.run`,
-`agent.attempt`, `llm.call`, `tool.call`, plus the future `provider.call`
-and `http.client.request` — shares one Logfire `trace_id`. The UI groups
-spans by `trace_id` (the OTel `trace_id` field on the produced span), so
-a single click in the Logfire tree shows the full run — a feature the
-pre-#137 tree did not deliver because `mergecraft.trace_id` was just an
-attribute on every span rather than the OTel `trace_id` itself.
+Each Action or offline review owns a tracer and a span budget. The
+`mergecraft.run` root and its child spans share an OpenTelemetry `trace_id`,
+which Logfire uses to group the run's preparation, analyzer, agent, tool,
+and publication spans.
 
-### What `trace_id` is
+### How the trace ID is assigned
 
-`trace_id` is the Logfire / OpenTelemetry trace identifier shared by every
-span in one run. The mergeCraft run resolves it once per process (via
-`resolve_trace_id()` in `tracing/tracer.py`) and propagates it onto every
-child span via the `Tracer` (`self.trace_id`) and the `Span`
-(`self.trace_id`). The OTel exporter (`OTLPSink`) forwards it as the
-real OTel `trace_id` on the produced span so Logfire groups by it
-automatically — no attribute search required.
+A new review uses a nonempty `MERGECRAFT_TRACE_ID` when supplied. Otherwise,
+it generates a fresh `uuid.uuid4().hex` without writing it to the process
+environment. `MERGECRAFT_TRACE_SESSION_ID` and `GITHUB_RUN_ID` supply session
+and workflow correlation for review runs. Standalone tracer lookups
+outside a review lifecycle still use the legacy `resolve_trace_id()`
+precedence.
 
-### How it is generated
-
-The resolver follows the same precedence as the existing session-id
-resolver:
-
-1. `MERGECRAFT_TRACE_ID` — explicit per-run override.
-2. `MERGECRAFT_TRACE_SESSION_ID` — alias preserving the pre-#137 contract
-   so existing pipelines keep working.
-3. `GITHUB_RUN_ID` — the Actions run id, monotonic and unique.
-4. `uuid.uuid4().hex` — local fallback when no env vars are set.
-
-`session_id` remains the per-process correlation id (the W4 batch-B
-session correlation) and `turn_id` is the per-span `uuid4().hex`. The
-three fields are orthogonal: change the env precedence and the run still
-groups under one trace.
+Nested model fallback attempts reuse the active review's tracer. Detached
+MCP requests carry the review root's trace ID and span ID. The active run
+registry matches both identifiers so concurrent reviews with the same
+explicit trace ID keep their own root and span budget. A shared explicit
+ID groups those reviews under one trace in Logfire, with a separate root
+for each review.
 
 ### How Logfire groups by it
 
@@ -2999,17 +2984,14 @@ describe that shape:
 | Identifier | Scope | Source |
 | --- | --- | --- |
 | `review.id` | **One logical review**, across every process and agent run | `tracing/review_context.py::resolve_review_id()` — `MERGECRAFT_REVIEW_ID` inherited verbatim, else a fresh `uuid4` per review |
-| `trace_id` | **One agent run** (one process) | `tracing/tracer.py::resolve_trace_id()` — see *One trace per run (T3)* above |
+| `trace_id` | **One review run by default** | `get_tracer_from_settings(..., new_run=True)` — see *One trace per run (T3)* above |
 | `review.correlation_key` | **Every attempt at one commit** — deliberately collides | `correlation_key_for()` — deterministic `sha256(repo\|pr\|head_sha)` |
 
-The shape to remember: **one review with three agent runs has one
-`review.id` and three `trace_id` values.** One `review.id` filter returns
-the entire review — every agent, every tool call, the verdict — across
-every process. `review.correlation_key` answers the orthogonal query:
-"every attempt at this commit", because two reviews of one commit are two
-reviews (distinct `review.id`s) but share the key. A local patch
-review has no repo/pr/head context, so its key is empty and the attribute
-is omitted rather than emitted as a misleading constant.
+Filter by `review.id` to find the logical review across processes. In the
+orchestrating process, its nested agent attempts share the active review
+trace. Filter by `review.correlation_key` to find every review of the same
+commit. A local patch review omits this key because it has no repository,
+PR, and head SHA to derive it from.
 
 ### How the identity travels
 
@@ -3215,12 +3197,7 @@ forensic surface for tool identity, outcomes, paths, and failure class.
 Loguru queue drain is registered beside the existing temp-dir `atexit` hook so
 Docker action tails are not lost when the container exits.
 
-### Repeated reviews in one process
-
-Each Action or offline review owns a fresh tracer, trace identifier, and span
-limit. Nested model fallback and MCP calls retain that run's trace. Session and
-GitHub workflow identifiers remain correlation attributes across reviews; an
-explicit `MERGECRAFT_TRACE_ID` still overrides the generated identifier.
+### Local trace retention and enterprise audit
 
 JSONL retention runs once when a sink opens, using the configured retention
 period. It removes only daily `YYYY-MM-DD.jsonl` trace files; unrelated JSONL
