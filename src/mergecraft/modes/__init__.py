@@ -9,7 +9,6 @@ of the codebase already imports:
 - :data:`PR_SUMMARY_FORMAT` (the review body format constant)
 - :func:`compute_modes` (the renderer)
 - :data:`modes` (the static, UI-facing list)
-- :data:`NON_COMMITTING_MODES` (the closed set of non-mutating mode names)
 - :func:`_custom_modes` (the helper that projects ``settings.modes`` — see
   ``main.py`` — into ``Mode`` objects; now exported from the package root
   so the existing call sites do not change)
@@ -39,14 +38,9 @@ if TYPE_CHECKING:
 
 # Per-mode modules — each carries ``NAME`` / ``DESCRIPTION`` / ``TEMPLATE``.
 from mergecraft.modes import (
-    AddressReviews,
-    Build,
-    Fix,
     IncrementalReview,
     Plan,
-    ResolveConflicts,
     Review,
-    Task,
 )
 from mergecraft.modes._pr_summary_format import PR_SUMMARY_FORMAT
 from mergecraft.modes._time_budget import render_time_budget
@@ -72,15 +66,14 @@ class Mode(BaseModel):
     version: str = ""
 
 
-# Write-capable built-ins stay importable as negative fixtures (D12 / #350)
-# but are not registered for production review.
+# Reserved former mode names cannot be reintroduced through custom config.
 WRITE_CAPABLE_MODE_NAMES: Final[frozenset[str]] = frozenset(
     {
-        Build.NAME,
-        AddressReviews.NAME,
-        Fix.NAME,
-        ResolveConflicts.NAME,
-        Task.NAME,
+        "Build",
+        "AddressReviews",
+        "Fix",
+        "ResolveConflicts",
+        "Task",
     }
 )
 _WRITE_CAPABLE_MODE_NAMES_CF: Final[frozenset[str]] = frozenset(
@@ -93,8 +86,7 @@ REVIEWER_SHAPED_MODE_NAMES: Final[frozenset[str]] = frozenset(
     }
 )
 
-# Production registry is review-only (#350). Write-capable modules remain
-# on disk and importable; they are not listed here.
+# Production registry is review-only.
 _MODE_DEFS: Final[list[tuple[str, str, str]]] = [
     (Review.NAME, Review.DESCRIPTION, Review.TEMPLATE),
     (IncrementalReview.NAME, IncrementalReview.DESCRIPTION, IncrementalReview.TEMPLATE),
@@ -113,7 +105,7 @@ def is_write_capable_mode_name(name: str) -> bool:
 
 
 def refuse_review_only_mutation(selected_mode: str | None, *, action: str) -> None:
-    """Raise unless a write-capable mode is selected (default-deny).
+    """Refuse repository mutation in every production mode (default-deny).
 
     Unset ``selected_mode`` (orchestrator before ``select_mode``) is treated
     as review-only. Production has no write-capable modes registered.
@@ -122,21 +114,14 @@ def refuse_review_only_mutation(selected_mode: str | None, *, action: str) -> No
         selected_mode: The mode currently selected for the run, if any.
         action: Short description of the refused verb (must name it).
     """
-    if selected_mode is not None and is_write_capable_mode_name(selected_mode):
-        return
     if selected_mode is None:
-        msg = f"review-only: {action} is not allowed until a write-capable mode is selected"
+        msg = f"review-only: {action} is not allowed before mode selection"
         raise RuntimeError(msg)
     msg = f"review-only: {action} is not allowed in {selected_mode} mode"
     raise RuntimeError(msg)
 
 
 _T_CALL_RE = re.compile(r"\$\{t\(\"([^\"]+)\"\)\}")
-_SIGNED_SIMPLE_RE = re.compile(r'\$\{signedCommits \? "(.*?)" : "(.*?)"\}')
-_SIGNED_NEST_RE = re.compile(
-    r"\$\{signedCommits \? <<<NEST>>>(.*?)<<</NEST>>> : <<<NEST>>>(.*?)<<</NEST>>>\}",
-    re.DOTALL,
-)
 
 
 def compute_prompt_version(body: str) -> str:
@@ -175,14 +160,9 @@ def prompt_version_for(name: str) -> str:
         def t(tool_name: str, _agent: AgentId = "opencode") -> str:
             return format_mcp_tool_ref(_agent, tool_name)
 
-        commit_step = 'commit locally via shell (`git add . && git commit -m "..."`)'
-        finalize_step = f"confirm a clean working tree, then push via `{t('push_branch')}`"
         rendered = _expand_template(
             template,
             t=t,
-            commit_step=commit_step,
-            finalize_step=finalize_step,
-            signed_commits=False,
             inline_budget=None,
         )
         return compute_prompt_version(rendered)
@@ -213,9 +193,6 @@ def _expand_template(
     template: str,
     *,
     t: Callable[[str], str],
-    commit_step: str,
-    finalize_step: str,
-    signed_commits: bool,
     inline_budget: int | None = None,
     time_budget_minutes: int | None = None,
 ) -> str:
@@ -225,8 +202,6 @@ def _expand_template(
     text = text.replace("${DIFF_FIRST_INSTRUCTION}", DIFF_FIRST_INSTRUCTION)
     text = text.replace("${REVIEWER_AGENT_NAME}", REVIEWER_AGENT_NAME)
     text = text.replace("${mergecraftMcpName}", MERGECRAFT_MCP_NAME)
-    text = text.replace("${commitStep}", commit_step)
-    text = text.replace("${finalizeStep}", finalize_step)
     text = text.replace("${PR_SUMMARY_FORMAT}", PR_SUMMARY_FORMAT)
     # PR_SUMMARY_FORMAT embeds ${VERIFIER_AGENT_NAME}; expand after injection.
     text = text.replace("${VERIFIER_AGENT_NAME}", VERIFIER_AGENT_NAME)
@@ -235,17 +210,6 @@ def _expand_template(
     text = text.replace("${INLINE_BUDGET}", _render_inline_budget(inline_budget))
     text = text.replace("${TIME_BUDGET}", render_time_budget(time_budget_minutes))
 
-    def signed_simple(m: re.Match[str]) -> str:
-        return m.group(1) if signed_commits else m.group(2)
-
-    text = _SIGNED_SIMPLE_RE.sub(signed_simple, text)
-
-    def signed_nest(m: re.Match[str]) -> str:
-        branch = m.group(1) if signed_commits else m.group(2)
-        # Nested branches may contain `${t("tool")}` (optionally backtick-wrapped).
-        return _T_CALL_RE.sub(lambda tm: t(tm.group(1)), branch)
-
-    text = _SIGNED_NEST_RE.sub(signed_nest, text)
     return _T_CALL_RE.sub(lambda m: t(m.group(1)), text)
 
 
@@ -258,6 +222,9 @@ def compute_modes(
 ) -> list[Mode]:
     """Return built-in modes with tool refs formatted for ``agent_id``.
 
+    ``signed_commits`` remains accepted for callers of this public renderer,
+    but has no effect because all production modes are read-only.
+
     ``inline_budget`` is the repo's ``analyzers.inlineBudget`` resolved by the
     caller. When omitted the prompt names the config key instead of baking in a
     number. ``time_budget_minutes`` is the agent deadline the caller enforces;
@@ -269,19 +236,7 @@ def compute_modes(
     def t(tool_name: str) -> str:
         return format_mcp_tool_ref(agent_id, tool_name)
 
-    if signed_commits:
-        commit_step = (
-            f"commit via `{t('commit_changes')}` — it lands a GitHub-signed commit "
-            "directly on the remote branch (no push step)"
-        )
-        finalize_step = (
-            f"confirm a clean working tree (`git status`) — your `{t('commit_changes')}` "
-            "calls already landed the work on the remote"
-        )
-    else:
-        commit_step = 'commit locally via shell (`git add . && git commit -m "..."`)'
-        finalize_step = f"confirm a clean working tree, then push via `{t('push_branch')}`"
-
+    del signed_commits  # Retained keyword for existing callers; all modes are read-only.
     result: list[Mode] = []
     for name, description, template in _MODE_DEFS:
         # ``compute_prompt_version`` hashes the *rendered* body, so the version
@@ -292,9 +247,6 @@ def compute_modes(
         prompt = _expand_template(
             template,
             t=t,
-            commit_step=commit_step,
-            finalize_step=finalize_step,
-            signed_commits=signed_commits,
             inline_budget=inline_budget,
             time_budget_minutes=time_budget_minutes,
         )
@@ -338,17 +290,8 @@ def _custom_modes(defs: Sequence[ModeDefinition]) -> list[Mode]:
 # Static export for UI display — uses opencode format as the readable default.
 modes: list[Mode] = compute_modes("opencode")
 
-NON_COMMITTING_MODES: frozenset[str] = frozenset(
-    {
-        "Review",
-        "IncrementalReview",
-        "Plan",
-    }
-)
-
 
 __all__ = [
-    "NON_COMMITTING_MODES",
     "PR_SUMMARY_FORMAT",
     "REVIEWER_SHAPED_MODE_NAMES",
     "WRITE_CAPABLE_MODE_NAMES",

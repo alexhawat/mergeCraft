@@ -25,6 +25,8 @@ performance, dependency, and **clean** PRs (expected empty blocker set).
 Extra benchmark kinds (also packaged): historical PR, cross-repo (`xrepo`),
 requirements, large-PR, and incremental-review.
 
+Run the `mergecraft eval` examples from a source checkout with `uv run`.
+
 **Incident-derived structural cases** (`category: incident_derived`) live in the
 main bank under `evals/cases/`. Seed them with `mergecraft eval add-incident`
 from the incident PR, the revert or fix-forward PR, and a confirmed bug path plus

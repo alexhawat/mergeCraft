@@ -204,7 +204,6 @@ class Span:
     ts_start_ns: int = 0
     ts_end_ns: int = 0
     _attrs: dict[str, Any] = field(default_factory=dict)
-    _exc: BaseException | None = None
     _context_token: Token[Span | NullSpan | None] | None = None
     _closed: bool = False
     _suppressed: bool = False
@@ -260,7 +259,6 @@ class Span:
         Args:
             exc (BaseException): Exception observed by the span.
         """
-        self._exc = exc
         self.set_status("error", str(exc) or type(exc).__name__)
 
     def set_status(self, status: str, error: str | None = None) -> None:

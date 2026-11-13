@@ -530,7 +530,6 @@ class FilteredNetnsSession:
     _cidr: str = field(init=False)
     _comment: str = field(init=False)
     _chain: str = field(init=False)
-    _chain_created: bool = field(default=False, init=False)
     _cleanup_commands: list[list[str]] = field(default_factory=list, init=False)
     _netns_created: bool = field(default=False, init=False)
     _veth_created: bool = field(default=False, init=False)
@@ -791,7 +790,6 @@ class FilteredNetnsSession:
         """
         comment = ["-m", "comment", "--comment", self._comment]
         self._cmd(["iptables", "-N", self._chain])
-        self._chain_created = True
         self._cleanup_commands.extend(
             [["iptables", "-X", self._chain], ["iptables", "-F", self._chain]]
         )
@@ -825,7 +823,6 @@ class FilteredNetnsSession:
             if not self._cleanup_command(command):
                 failed.append(command)
         self._cleanup_commands = list(reversed(failed))
-        self._chain_created = bool(failed)
 
 
 def start_filtered_egress_session(allowed_hosts: list[str]) -> EgressSession:

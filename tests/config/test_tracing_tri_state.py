@@ -2,14 +2,14 @@
 
 Contracts:
 
-- ``_parse_bool(None)`` is ``None`` — unset is distinguishable from ``false``
-  (``action/inputs.py``).
+- The production action-input model preserves unset separately from ``false``
+  and rejects non-empty invalid values.
 - Precedence: action input > env > YAML > default; unset defers, it does not
   force ``False``.
 - ``TracingSettings.enabled`` is ``bool | None`` so "unset" survives the
   config model.
 - ``apply_tracing_overrides`` / ``resolve_tracing_from_action_inputs`` are
-  wired into the live ``main()`` path (preferred over deleting the parser).
+  wired into the live ``main()`` path.
 """
 
 from __future__ import annotations
@@ -22,13 +22,18 @@ if TYPE_CHECKING:
     import pytest
 
 
-def test_parse_bool_unset_is_none_not_false() -> None:
-    """W6.4 — the action-input parser must distinguish unset from false."""
-    from mergecraft.action.inputs import _parse_bool
+def test_action_parser_preserves_tri_state_and_rejects_invalid_values() -> None:
+    """The production input model distinguishes unset, true, false, and typos."""
+    import pytest
 
-    assert _parse_bool(None) is None
-    assert _parse_bool("false") is False
-    assert _parse_bool("true") is True
+    from mergecraft.config.env import ActionInputEnv, EnvSettingsError
+
+    assert ActionInputEnv.from_env({}).tracing_enabled is None
+    assert ActionInputEnv.from_env({"INPUT_TRACING": ""}).tracing_enabled is None
+    assert ActionInputEnv.from_env({"INPUT_TRACING": "false"}).tracing_enabled is False
+    assert ActionInputEnv.from_env({"INPUT_TRACING": "true"}).tracing_enabled is True
+    with pytest.raises(EnvSettingsError, match="INPUT_TRACING"):
+        ActionInputEnv.from_env({"INPUT_TRACING": "garbage"})
 
 
 def test_action_inputs_unset_tracing_resolves_to_none(

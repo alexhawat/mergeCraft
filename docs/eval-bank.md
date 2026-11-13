@@ -9,8 +9,8 @@ The bank is **local**. There is no database, no hosted service,
 no sync. The bank lives under `evals/cases/` in the repo, and the CLI
 walks the directory directly. The CLI is the only I/O surface.
 
-This document is the user-facing manual for the bank. The schema and
-the cross-file contract are normative; the CLI reference is descriptive.
+The CLI examples require a mergeCraft source checkout. The installed
+package omits the maintainer-only `eval` command.
 
 ## Why a file-backed store?
 
@@ -127,9 +127,9 @@ invalid — there is no file at that path to delete.
 
 ## CLI
 
-The bank ships four subcommands under `mergecraft eval`. All four
-operate on the default `evals/cases/` directory; pass `--bank` to
-override.
+From a source checkout, run the bank commands with `uv run mergecraft eval`.
+The commands below use `evals/cases/` by default. Pass `--bank` to select
+a different directory where supported.
 
 ### `mergecraft eval add`
 

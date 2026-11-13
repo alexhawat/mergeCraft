@@ -3,7 +3,7 @@
 Reads ``claude`` stdout as an incremental NDJSON stream (``stream-json``
 output format) so per-tool-call and per-message spans can be emitted
 during the run rather than after a full-buffer parse. Falls back to a
-legacy last-line-JSON parse when the streaming read returns no events.
+explicit failure diagnostics when the streaming read returns no events.
 """
 
 from __future__ import annotations
@@ -33,9 +33,7 @@ from mergecraft.agents.shared import (
     STDERR_DRAIN_JOIN_TIMEOUT_S,
     AgentResult,
     AgentRunContext,
-    AgentUsage,
     agent,
-    log_token_table,
     mcp_http_server_entry,
     spawn_agent_cli,
     start_stderr_drain,
@@ -70,7 +68,7 @@ from mergecraft.tracing.tracer import (
     _open_provider_llm_pair,
 )
 from mergecraft.types import MERGECRAFT_MCP_NAME, MERGECRAFT_VERIFIER_MCP_NAME, format_mcp_tool_ref
-from mergecraft.utils.privilege import prepare_workspace_for_agent, wrap_agent_command
+from mergecraft.utils.privilege import prepare_workspace_for_agent
 from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env
@@ -893,9 +891,7 @@ def _claude_stream_event_handler(
             # The ``result`` event's ``usage`` is the authoritative final
             # total — replacing (not absorbing) avoids double-counting the
             # token usage that ``message_start`` / ``message_delta`` events
-            # already folded into the accumulator. W5.7's equivalence test
-            # pins this: the streaming ``AgentResult.usage`` must match the
-            # legacy blob parser's last-line JSON parse.
+            # already folded into the accumulator.
             accumulator.replace_usage(event.get("usage") or {})
             cost = event.get("total_cost_usd")
             if isinstance(cost, (int, float)):
@@ -939,84 +935,6 @@ def _claude_stream_event_handler(
             _ACTIVE_SPAN.set(None)
 
     return _handler, close_all
-
-
-def _run_claude_legacy_blob_parse(
-    *, stdout: str, model: str | None, skip_permissions: bool, stderr: str, returncode: int
-) -> AgentResult:
-    """Preserved legacy path: parse the last JSON line and build ``AgentResult``.
-
-    The W5.7 equivalence test pins that the streaming path and the legacy
-    blob path produce the same ``AgentResult`` for the same recorded session.
-    When the streaming path sees a single ``result`` event on the last line
-    (which is the shape the legacy driver always parsed), the two paths
-    converge on the same output and usage.
-    """
-    del skip_permissions  # legacy path did not embed this in the error string
-    output = stdout.strip()
-    usage: AgentUsage | None = None
-    try:
-        data = json.loads(stdout.strip().splitlines()[-1]) if stdout.strip() else {}
-        if isinstance(data, dict):
-            output = str(data.get("result") or data.get("output") or output)
-            usage_raw = data.get("usage") or {}
-            if usage_raw or data.get("total_cost_usd") is not None:
-                input_tokens = int(
-                    usage_raw.get("input_tokens") or usage_raw.get("inputTokens") or 0
-                )
-                output_tokens = int(
-                    usage_raw.get("output_tokens") or usage_raw.get("outputTokens") or 0
-                )
-                cache_read = int(
-                    usage_raw.get("cache_read_input_tokens")
-                    or usage_raw.get("cacheReadTokens")
-                    or 0
-                )
-                cache_write = int(
-                    usage_raw.get("cache_creation_input_tokens")
-                    or usage_raw.get("cacheWriteTokens")
-                    or 0
-                )
-                cost = data.get("total_cost_usd")
-                usage = AgentUsage(
-                    agent="claude",
-                    input_tokens=input_tokens + cache_read + cache_write,
-                    output_tokens=output_tokens,
-                    cache_read_tokens=cache_read or None,
-                    cache_write_tokens=cache_write or None,
-                    cost_usd=float(cost) if cost is not None else None,
-                )
-                log_token_table(
-                    input_tokens=input_tokens,
-                    cache_read=cache_read,
-                    cache_write=cache_write,
-                    output=output_tokens,
-                    cost_usd=usage.cost_usd,
-                )
-    except json.JSONDecodeError:
-        pass
-
-    if returncode != 0:
-        context = _claude_attempt_context(model=model, skip_permissions=False)
-        logger.warning(
-            "claude CLI failed (exit={}, {}); stdout={!r}; stderr={!r}",
-            returncode,
-            context,
-            stdout,
-            stderr,
-        )
-        return AgentResult(
-            success=False,
-            output=output or None,
-            error=_build_claude_failure_error(
-                returncode=returncode,
-                stderr=stderr,
-                model=model,
-                skip_permissions=False,
-            ),
-            usage=usage,
-        )
-    return AgentResult(success=True, output=output or None, usage=usage)
 
 
 def _resolve_active_tracer() -> Tracer | None:
@@ -1126,20 +1044,8 @@ def _run_claude_once(
 
     try:
         process = spawn_agent_cli(cmd, env=_build_env(ctx), stdin_text=user_prompt)
-    except FileNotFoundError:
-        # W5.4 / W5.5 regression pins and the W5.7 equivalence test patch
-        # only ``subprocess.run``. When the real CLI is missing AND the
-        # streaming ``Popen`` path is unavailable, fall back to the
-        # legacy buffered call so the failure-diagnosis contract (D13,
-        # PR #16's ``_build_claude_failure_error``) and the legacy
-        # ``subprocess.run`` shape both survive.
-        return _run_claude_legacy_subprocess(
-            cmd=cmd,
-            ctx=ctx,
-            model=model,
-            skip_permissions=skip_permissions,
-            stdin_text=user_prompt,
-        )
+    except FileNotFoundError as err:
+        return AgentResult(success=False, error=str(err))
 
     assert process.stdout is not None
     assert process.stderr is not None
@@ -1252,12 +1158,8 @@ def _run_claude_once(
             logger.debug("[claude] {}", line)
 
     # If the streaming read observed at least one parsed event, the
-    # accumulator already holds the canonical output and usage. Surface
-    # them directly. Otherwise fall back to the legacy last-line parse
-    # so a non-streaming claude binary (older CLI, custom build) keeps
-    # working unchanged — the recorded stream the test delivers carries
-    # multiple events, so this branch is reached only on an unexpected
-    # empty stream.
+    # accumulator holds the canonical output and usage. An empty stream
+    # follows the explicit failure path below.
     if accumulator.parsed_event_count > 0:
         if returncode != 0:
             logger.warning(
@@ -1324,72 +1226,6 @@ def _run_claude_once(
         error=error,
         usage=accumulator.to_usage(),
         metadata={"retryable": True} if retryable else {},
-    )
-
-
-def _run_claude_legacy_subprocess(
-    *,
-    cmd: list[str],
-    ctx: AgentRunContext,
-    model: str | None,
-    skip_permissions: bool,
-    stdin_text: str | None = None,
-) -> AgentResult:
-    """Legacy ``subprocess.run`` path — preserved for the regression pins.
-
-    W5.4 (idle detection) and W5.5 (failure diagnosis at warning) only
-    monkey-patch ``subprocess.run`` on the driver module; they do not
-    patch ``Popen``. When the real CLI binary is missing (i.e. the test
-    environment without ``/usr/bin/claude``), the streaming Popen path
-    raises ``FileNotFoundError``; this fallback keeps the legacy
-    ``capture_output=True`` read loop reachable so PR #16's
-    ``_build_claude_failure_error`` semantics and the failure-diagnosis
-    contract continue to hold.
-
-    In the real action image this path is not expected to be reached at all
-    — ``claude`` ships on PATH there, so the streaming ``Popen`` above only
-    raises ``FileNotFoundError`` in a stripped-down test environment. It
-    still goes through the same ``wrap_agent_command`` + ``agent_subprocess_env``
-    privilege-drop pairing as the primary path, for defense-in-depth and so a
-    future change that makes this path reachable in production does not
-    silently reintroduce the ``$HOME`` bug.
-    """
-    from mergecraft.utils.privilege import agent_subprocess_env
-
-    try:
-        wrapped_cmd = wrap_agent_command(cmd)
-        resolved_env = agent_subprocess_env(_build_env(ctx))
-        completed = subprocess.run(
-            wrapped_cmd,
-            cwd=os.getcwd(),
-            env=resolved_env,
-            capture_output=True,
-            text=True,
-            input=stdin_text,
-            timeout=AgentRuntimeEnv().agent_timeout,
-            check=False,
-        )
-    except FileNotFoundError as err:
-        return AgentResult(success=False, error=str(err))
-    except subprocess.TimeoutExpired:
-        return AgentResult(
-            success=False,
-            error="claude CLI timed out",
-            metadata={"timeout": True, "retryable": True},
-        )
-
-    stdout = completed.stdout or ""
-    stderr = completed.stderr or ""
-    if completed.returncode == 0 and stderr.strip():
-        for line in stderr.strip().splitlines()[-_STDERR_TAIL_LINES:]:
-            logger.debug("[claude] {}", line)
-
-    return _run_claude_legacy_blob_parse(
-        stdout=stdout,
-        model=model,
-        skip_permissions=skip_permissions,
-        stderr=stderr,
-        returncode=completed.returncode,
     )
 
 

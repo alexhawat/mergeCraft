@@ -1,15 +1,8 @@
-"""The final record write must not erase the ledger or the learnings delta.
+"""Final review publication preserves the ledger and any reported learnings delta.
 
-Three writers share one base body. ``report_progress`` posts the agent body,
-the ledger and the learnings delta; ``persist_finding_ledger_to_progress_comment``
-re-merges the ledger; ``upsert_sticky_progress_comment`` (the deterministic
-record) rebuilds the comment from ``last_progress_body``. When no writer stores
-the body it actually posted, the last writer rebuilds from the agent's raw
-prose and drops both the ledger markers and the learnings delta.
-
-Both paths are pinned here: **path A** where the agent called
-``report_progress``, and **path B** where it never did (``persist`` creates the
-sticky). A second-run ``hydrate`` of the final body must recover every record.
+The report-progress path retains its posted body in the formal review. A run
+without progress still publishes its ledger directly, and the next run hydrates
+that evidence from the review history.
 """
 
 from __future__ import annotations
@@ -235,7 +228,6 @@ async def test_path_a_report_progress_then_record_keeps_ledger(tmp_path: Path) -
     assert progress.is_error is False
     assert isinstance(ctx.tool_state.progress_comment, ProgressComment)
 
-    await ledger.persist_finding_ledger_to_progress_comment(ctx)
     await publish_deterministic_record(
         pull_number=_PR_NUMBER,
         packet=_packet(),
@@ -245,23 +237,18 @@ async def test_path_a_report_progress_then_record_keeps_ledger(tmp_path: Path) -
     body = _posted_body(scm)
     _assert_ledger_and_delta_survive(body, fingerprints)
     assert scm.creates == 1, "path A reuses the comment report_progress created"
-    assert scm.updates >= 1
+    assert len(scm.reviews) == 1
 
     recovered = await _hydrate_second_run(scm, tmp_path)
     assert set(recovered) == set(fingerprints)
 
 
 @pytest.mark.asyncio
-async def test_path_b_persist_creates_then_record_keeps_ledger(tmp_path: Path) -> None:
-    """Agent never called ``report_progress``: ``persist`` creates the sticky."""
+async def test_path_b_record_without_progress_keeps_ledger(tmp_path: Path) -> None:
+    """Publication retains the ledger even without an earlier progress call."""
     scm = _FakeScm()
     ctx = _ctx(tmp_path, scm)
     fingerprints = _seed_records(ctx)
-    _seed_learnings_delta(ctx, tmp_path)
-
-    await ledger.persist_finding_ledger_to_progress_comment(ctx)
-    assert isinstance(ctx.tool_state.progress_comment, ProgressComment)
-    assert scm.creates == 1
 
     await publish_deterministic_record(
         pull_number=_PR_NUMBER,
@@ -270,8 +257,12 @@ async def test_path_b_persist_creates_then_record_keeps_ledger(tmp_path: Path) -
     )
 
     body = _posted_body(scm)
-    _assert_ledger_and_delta_survive(body, fingerprints)
-    assert scm.creates == 1, "the record upsert must update the sticky, not post again"
+    assert ledger.DETERMINISTIC_RECORD_MARKER in body
+    assert {
+        record.fingerprint for record in ledger.FindingLedger.from_comment_body(body).records()
+    } == set(fingerprints)
+    assert scm.creates == 0, "direct final publication does not need a progress comment"
+    assert len(scm.reviews) == 1
 
     recovered = await _hydrate_second_run(scm, tmp_path)
     assert set(recovered) == set(fingerprints)

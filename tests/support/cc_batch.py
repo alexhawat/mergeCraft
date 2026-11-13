@@ -56,15 +56,6 @@ POLICY_PACK_IDS = (
     "operational_readiness",
 )
 
-MEMORY_KINDS = frozenset(
-    {
-        "factual_repository",
-        "engineering_policy",
-        "reviewer_preference",
-        "false_positive_suppression",
-    }
-)
-
 
 def plain(text: str) -> str:
     return ANSI.sub("", text)

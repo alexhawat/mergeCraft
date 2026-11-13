@@ -380,7 +380,8 @@ def _maybe_suggest_eval_add(ctx: ToolContext) -> None:
         return
     logger.info(
         "» suggest_eval_add: re-review produced no positive findings; "
-        "consider capturing this run as a case via `mergecraft eval add` "
+        "consider capturing this run with `uv run mergecraft eval add` "
+        "from a mergeCraft source checkout "
         "(never auto-added; #44, W12.4)",
     )
 
@@ -1884,24 +1885,8 @@ async def publish_pull_request_review(
     return result
 
 
-def _wants_approve_review(params: dict[str, Any]) -> bool:
-    if bool(params.get("approved")):
-        return True
-    event = params.get("event")
-    return isinstance(event, str) and event.upper() == "APPROVE"
-
-
-def _normalize_review_params(params: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(params)
-    event = normalized.get("event")
-    if isinstance(event, str) and event.upper() == "APPROVE" and "approved" not in normalized:
-        normalized["approved"] = True
-    return normalized
-
-
 def create_pull_request_review_tool(ctx: ToolContext):
     async def _run(params: dict[str, Any]):
-        params = _normalize_review_params(params)
         from mergecraft.analyzers.trust_posture import trust_posture_from_tool_state
 
         posture = trust_posture_from_tool_state(
@@ -1910,7 +1895,7 @@ def create_pull_request_review_tool(ctx: ToolContext):
             execution_trust=ctx.trust_tier,
             authority_trust=ctx.authority_trust,
         )
-        if _wants_approve_review(params) and not posture.may_approve_on_github():
+        if bool(params.get("approved")) and not posture.may_approve_on_github():
             msg = (
                 "APPROVE is not permitted on this run: authority trust is untrusted "
                 "(trust.selfReview must be full with explicit operator confirmation)"

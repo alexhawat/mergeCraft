@@ -9,7 +9,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from tests.mcp.test_shell_git_guard import _ctx
-from tests.support.tool_context import write_capable_mcp_mode
+from tests.support.tool_context import inner_mutation_guard_probe
 
 from mergecraft.mcp import git as git_mod
 from mergecraft.mcp import shell as shell_mod
@@ -57,7 +57,7 @@ async def test_shell_foreground_command_does_not_block_the_loop(
 
     monkeypatch.setattr(shell_mod, "_spawn_shell", spawn)
     spec = shell_tool(_ctx(tmp_path, shell="enabled"))
-    with write_capable_mcp_mode():
+    with inner_mutation_guard_probe():
         result, ticks = await _ticks_while(
             spec.execute({"command": "sleep 1; echo done", "description": "slow"})
         )

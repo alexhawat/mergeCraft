@@ -16,6 +16,7 @@ from typing import Any
 
 from mergecraft.analyzers import finding as finding_mod
 from mergecraft.evidence import packet as packet_mod
+from tests.evidence.schema_support import packet_output_schema
 
 _FINGERPRINTS = Path(__file__).with_name("packet_schema_fingerprints.json")
 
@@ -26,13 +27,13 @@ def _fingerprint(schema: dict[str, Any]) -> str:
 
 
 def _schema_fingerprint() -> str:
-    return _fingerprint(packet_mod.packet_output_schema())
+    return _fingerprint(packet_output_schema())
 
 
 def test_evidence_packet_schema_is_derived_not_handwritten() -> None:
     """The packet's JSON Schema must be derived from the Pydantic models (D3)."""
 
-    schema = packet_mod.packet_output_schema()
+    schema = packet_output_schema()
     assert isinstance(schema, dict)
     assert schema.get("type") == "object"
 
@@ -88,7 +89,7 @@ def test_packet_schema_declares_run_bound_review_fields() -> None:
     assert "reviewed_head_sha" in fields
     assert "progress_comment_id" in fields
 
-    schema = packet_mod.packet_output_schema()
+    schema = packet_output_schema()
     properties = schema.get("properties")
     assert isinstance(properties, dict)
     assert "reviewed_head_sha" in properties
@@ -132,14 +133,14 @@ def test_packet_schema_version_is_pinned() -> None:
 
 def test_packet_schema_fingerprint_is_stable_and_sensitive() -> None:
     """An unchanged rebuild hashes identically; adding or removing one property changes it."""
-    baseline = _fingerprint(packet_mod.packet_output_schema())
-    assert _fingerprint(packet_mod.packet_output_schema()) == baseline
+    baseline = _fingerprint(packet_output_schema())
+    assert _fingerprint(packet_output_schema()) == baseline
 
-    added = copy.deepcopy(packet_mod.packet_output_schema())
+    added = copy.deepcopy(packet_output_schema())
     added["properties"]["extra_wire_field"] = {"type": "string"}
     assert _fingerprint(added) != baseline
 
-    removed = copy.deepcopy(packet_mod.packet_output_schema())
+    removed = copy.deepcopy(packet_output_schema())
     removed["properties"].pop("reviewed_head_sha")
     assert _fingerprint(removed) != baseline
 
