@@ -152,6 +152,8 @@ def _walk_typer_commands(
             raise ValueError(msg)
         commands.append(((*prefix, name), command.callback))
     for group in app.registered_groups:
+        if group.hidden:
+            continue
         if not group.name or group.typer_instance is None:
             msg = f"malformed group under {prefix}: {group.name!r}"
             raise ValueError(msg)

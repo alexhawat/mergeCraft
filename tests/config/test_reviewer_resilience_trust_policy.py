@@ -173,7 +173,7 @@ async def test_analyzers_level_blocks_create_pull_request_review_approve(
         trust_tier="trusted",
     )
     result = await create_pull_request_review_tool(ctx).execute(
-        {"event": "APPROVE", "body": "LGTM", "comments": []}
+        {"approved": True, "body": "LGTM", "comments": []}
     )
     assert result.is_error is True
 

@@ -299,7 +299,7 @@ async def test_persist_with_an_empty_publisher_set_creates_and_warns(
     forged_body_before = str(forged["body"])
 
     with _capture_warnings() as warnings:
-        await ledger.persist_finding_ledger_to_progress_comment(ctx)
+        await ledger.upsert_sticky_progress_comment(ctx, "### mergeCraft run record")
 
     scm = ctx.scm
     assert isinstance(scm, _FakeScm)
@@ -431,7 +431,7 @@ async def test_persist_ignores_a_human_ledger_marker(
     fingerprint = _seed_record(ctx)
     human_body_before = scm.comments[_HUMAN_COMMENT_ID]["body"]
 
-    await ledger.persist_finding_ledger_to_progress_comment(ctx)
+    await ledger.upsert_sticky_progress_comment(ctx, "### mergeCraft run record")
 
     assert scm.creates == 1, "the ledger must land in a new comment"
     assert scm.updates == 0, "the human's comment must not be written to"

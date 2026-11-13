@@ -29,7 +29,6 @@ from mergecraft.agents.openai_compatible_gateways import (
     SINGLETON_PROVIDER_ID,
     ProviderConfig,
     _provider_config_for_model,
-    resolve_gateway_endpoint,
     resolve_gateway_endpoints,
 )
 from mergecraft.agents.opencode_otel import apply_otel_plugin, opencode_otel_plugin_wiring
@@ -624,27 +623,6 @@ def build_custom_provider(model: str | None) -> dict[str, object] | None:
             model_slug=model,
         )
     }
-
-
-def _custom_provider_ids(model: str | None) -> list[str]:
-    """Return provider ids to register as ``enabled_providers`` for the model.
-
-    Mirrors :func:`build_custom_provider`'s resolution order — multi-provider
-    (W3), then singleton, then named presets — so the harness enables every
-    provider the configuration surfaces, including fallbacks for the chain
-    walk.
-    """
-    providers = resolve_gateway_endpoints()
-    if providers:
-        slash = model.find("/") if model else -1
-        active = model[:slash].lower() if (model and slash > 0) else None
-        if active is not None and active in providers:
-            return sorted(providers.keys())
-        # Fall through to legacy resolution.
-    endpoint = resolve_gateway_endpoint(model)
-    if endpoint is None:
-        return []
-    return [endpoint[0]]
 
 
 def _checkout_root(ctx: AgentRunContext) -> Path:

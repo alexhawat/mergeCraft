@@ -248,20 +248,7 @@ def test_streaming_result_parsing_matches_previous_final_result(
     patch_driver_subprocess: Any,
     make_agent_run_context: Any,
 ) -> None:
-    """W5.7 — ``AgentResult`` is equivalent before and after the migration.
-
-    Captures the canonical ``AgentResult`` from the **current** blob-parsing
-    path (last-line JSON) and the **W6** streaming path against the same
-    recorded session, and asserts they match on the contract surface:
-
-    - ``success`` is True.
-    - ``output`` carries the ``result`` event's text.
-    - ``usage.input_tokens`` / ``output_tokens`` / ``cost_usd`` are equal.
-
-    Tests the "did we break the actual review" property: a streaming parser
-    that drops the final ``result`` event (or fumbles the cost accounting)
-    is functionally equivalent to a broken review.
-    """
+    """A full stream and its final result event produce identical output and usage."""
     from mergecraft.agents.claude import _run_claude_once
 
     # Drive the streaming-shaped path.
@@ -281,25 +268,22 @@ def test_streaming_result_parsing_matches_previous_final_result(
         mcp_config=str(ctx.tmpdir) + "/mcp.json",
     )
 
-    # Drive the legacy blob-parsing path against the same data: the current
-    # claude driver reads the **last** JSON line and decodes it as the
-    # result payload. The recorded stream's last line is the ``result``
-    # event, so the legacy path must surface the same fields.
-    legacy_blob = json.dumps(CLAUDE_TOOL_CALL_STREAM[-1])
+    # A one-event stream is valid and uses the same streaming decoder.
+    single_result_event = json.dumps(CLAUDE_TOOL_CALL_STREAM[-1])
 
     def _patch_driver_subprocess_for_blob(
-        legacy_blob: str,
+        single_result_event: str,
         patch_driver_subprocess: Any,
     ) -> Any:
         return patch_driver_subprocess(
             "mergecraft.agents.claude",
-            stdout=legacy_blob,
+            stdout=single_result_event,
             stderr="",
             returncode=0,
         )
 
-    _patch_driver_subprocess_for_blob(legacy_blob, patch_driver_subprocess)
-    legacy_result = _run_claude_once(
+    _patch_driver_subprocess_for_blob(single_result_event, patch_driver_subprocess)
+    single_result = _run_claude_once(
         cli="/usr/bin/claude",
         prompt="review this diff",
         ctx=ctx,
@@ -308,29 +292,29 @@ def test_streaming_result_parsing_matches_previous_final_result(
 
     # Both paths must succeed.
     assert streaming_result.success is True
-    assert legacy_result.success is True
+    assert single_result.success is True
 
     # Output must match on the contract surface.
     assert streaming_result.output is not None
-    assert legacy_result.output is not None
-    assert streaming_result.output == legacy_result.output, (
-        f"output mismatch: streaming={streaming_result.output!r} legacy={legacy_result.output!r}"
+    assert single_result.output is not None
+    assert streaming_result.output == single_result.output, (
+        f"output mismatch: streaming={streaming_result.output!r} single-event={single_result.output!r}"
     )
 
     # Token / cost accounting must match.
     assert streaming_result.usage is not None
-    assert legacy_result.usage is not None
-    assert streaming_result.usage.input_tokens == legacy_result.usage.input_tokens, (
+    assert single_result.usage is not None
+    assert streaming_result.usage.input_tokens == single_result.usage.input_tokens, (
         f"input_tokens mismatch: streaming={streaming_result.usage.input_tokens} "
-        f"legacy={legacy_result.usage.input_tokens}"
+        f"single-event={single_result.usage.input_tokens}"
     )
-    assert streaming_result.usage.output_tokens == legacy_result.usage.output_tokens, (
+    assert streaming_result.usage.output_tokens == single_result.usage.output_tokens, (
         f"output_tokens mismatch: streaming={streaming_result.usage.output_tokens} "
-        f"legacy={legacy_result.usage.output_tokens}"
+        f"single-event={single_result.usage.output_tokens}"
     )
-    assert streaming_result.usage.cost_usd == legacy_result.usage.cost_usd, (
+    assert streaming_result.usage.cost_usd == single_result.usage.cost_usd, (
         f"cost_usd mismatch: streaming={streaming_result.usage.cost_usd} "
-        f"legacy={legacy_result.usage.cost_usd}"
+        f"single-event={single_result.usage.cost_usd}"
     )
 
 

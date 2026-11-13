@@ -144,7 +144,7 @@ def test_packet_round_trips_with_the_analyzers_section(tmp_path: Path) -> None:
 
 
 def test_packet_json_schema_describes_the_analyzers_section() -> None:
-    from mergecraft.evidence.packet import packet_output_schema
+    from tests.evidence.schema_support import packet_output_schema
 
     schema = packet_output_schema()
     assert "analyzers" in schema["properties"]

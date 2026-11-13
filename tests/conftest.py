@@ -16,7 +16,6 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 pytest_plugins = [
-    "tests.orchestrator.conftest",
     "tests.support.hermetic",
     "tests.support.github_fakes",
     "tests.support.tracing",

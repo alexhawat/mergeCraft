@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from importlib.util import find_spec
 
 import typer
 
@@ -24,7 +25,6 @@ from mergecraft.cli import (
     describe_cmd,
     diff_review_cmd,
     doctor_cmd,
-    eval_cmd,
     evidence_cmd,
     explain_cmd,
     findings_cmd,
@@ -39,7 +39,6 @@ from mergecraft.cli import (
     model_cmd,
     models_cmd,
     opencode_cmd,
-    pipeline_cmd,
     plan_cmd,
     policy_cmd,
     profile_cmd,
@@ -113,7 +112,6 @@ app.add_typer(agent_cmd.app, name="agent")
 app.add_typer(agent_local_cmd.app, name="agent-local")
 app.add_typer(agents_cmd.app, name="agents")
 app.add_typer(lens_cmd.app, name="lens")
-app.add_typer(pipeline_cmd.app, name="pipeline")
 app.add_typer(mcp_cmd.app, name="mcp")
 app.add_typer(cache_cmd.app, name="cache")
 app.add_typer(context_cmd.app, name="context")
@@ -148,7 +146,11 @@ app.add_typer(requirements_cmd.app, name="requirements")
 app.add_typer(xrepo_cmd.app, name="xrepo")
 app.add_typer(evidence_cmd.app, name="evidence")
 app.add_typer(findings_cmd.app, name="findings")
-app.add_typer(eval_cmd.app, name="eval")
+# Maintainer commands are available from source, but excluded from consumer wheels.
+if find_spec("mergecraft.cli.eval_cmd") is not None:
+    from mergecraft.cli import eval_cmd
+
+    app.add_typer(eval_cmd.app, name="eval", hidden=True)
 app.add_typer(run_cmd.app, name="run")
 # W8.4 — ``mergecraft config tracing`` + ``mergecraft traces <run-id>``.
 tracing_cmd.config_app.command("show")(config_surface_cmd.config_show)

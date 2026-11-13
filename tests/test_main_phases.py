@@ -83,14 +83,13 @@ async def test_run_context_carries_every_phase_input(
     """The local-variable sprawl G4.2's `RunContext` will carry, pinned today.
 
     Drives one full run with non-default settings/inputs for each phase
-    (setup: signed_commits + analyzers mode; credentials: trust tier +
+    (setup: analyzers mode; credentials: trust tier +
     tokens; execute: an explicit model) and asserts every value lands on
     `ToolContext` — the object `main()` builds once and mutates across
     phases today. A refactor that drops one of these onto the wrong side of
     a phase boundary, or fails to carry it forward at all, turns this red.
     """
     settings = RepoSettings(
-        signed_commits=True,
         analyzers=AnalyzersSettings(sarif_upload=True),
     )
     explicit_model = "anthropic/claude-sonnet"
@@ -120,7 +119,6 @@ async def test_run_context_carries_every_phase_input(
     assert {m.name for m in ctx.modes} == expected_mode_names
     assert ctx.analyzers_mode == "full"
     assert ctx.sarif_upload_enabled is True
-    assert ctx.signed_commits is True
 
     # -- credential-phase locals ---------------------------------------------
     assert ctx.trust_tier == "trusted"
@@ -251,7 +249,6 @@ def test_setup_run_resolves_prompt_and_mode(tmp_path: Path) -> None:
 
 def _reset_token_module_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(token_mod, "_mcp_token_value", None)
-    monkeypatch.setattr(token_mod, "_mcp_token_refresh", None)
     for key in (
         "INPUT_TOKEN",
         "GH_TOKEN",

@@ -38,7 +38,6 @@ _API = "https://api.github.com"
 def _reset_token_module_state(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset module globals and token env between tests (mirrors G4.1)."""
     monkeypatch.setattr(token_mod, "_mcp_token_value", None)
-    monkeypatch.setattr(token_mod, "_mcp_token_refresh", None)
     for key in (
         "INPUT_TOKEN",
         "GH_TOKEN",

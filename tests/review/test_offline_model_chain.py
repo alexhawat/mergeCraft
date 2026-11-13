@@ -170,18 +170,14 @@ async def test_offline_real_resolver_cross_harness_and_credential_status(
 
     async def claude_run(ctx: Any) -> AgentResult:
         seen.append("claude")
-        assert ctx.tool_state.modes == compute_modes(
-            "claude", signed_commits=False, inline_budget=inline_budget
-        )
+        assert ctx.tool_state.modes == compute_modes("claude", inline_budget=inline_budget)
         return AgentResult(
             success=False, error="temporary provider failure", metadata={"retryable": True}
         )
 
     async def codex_run(ctx: Any) -> AgentResult:
         seen.append("codex")
-        assert ctx.tool_state.modes == compute_modes(
-            "codex", signed_commits=False, inline_budget=inline_budget
-        )
+        assert ctx.tool_state.modes == compute_modes("codex", inline_budget=inline_budget)
         return AgentResult(success=True, terminal_submission_received=True)
 
     monkeypatch.setattr(

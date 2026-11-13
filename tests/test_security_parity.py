@@ -47,16 +47,27 @@ def tool_ctx(tmp_path: Path) -> ToolContext:
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
-        signed_commits=True,
         trust_tier="trusted",
     )
 
 
 def test_mutating_tools_flagged_for_subagent_deny(tool_ctx: ToolContext) -> None:
+    registered = {tool.name for tool in build_orchestrator_tools(tool_ctx)}
+    assert registered.isdisjoint(
+        {
+            "push_branch",
+            "push_tags",
+            "delete_branch",
+            "commit_changes",
+            "create_pull_request",
+            "update_pull_request_body",
+            "close_pull_request",
+        }
+    )
     names = subagent_denied_tool_names(tool_ctx)
-    assert "push_branch" in names
-    assert "create_issue" in names
-    assert "commit_changes" in names
+    assert {"create_issue", "create_pull_request_review"} <= registered
+    assert {"create_issue", "create_pull_request_review"} <= set(names)
+    assert "get_pull_request" in registered
     assert "get_pull_request" not in names
 
 

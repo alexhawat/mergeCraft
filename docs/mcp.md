@@ -234,7 +234,7 @@ Cursor or Claude Desktop.
 Through the **public** MCP catalog, mergeCraft **will not**:
 
 - Commit, push, or open a code-changing pull request on your behalf
-- Expose runtime harness tools (`push_branch`, `commit_changes`, `create_pull_request`, …)
+- Expose tools that commit, push, or mutate pull requests
 - Mutate gate policy or trust tier (`get_policy` is read-only)
 - Start a nested reviewer MCP that widens the tool surface onto `/mcp/public`
 - Run without your provider credentials — `review_change` needs the same auth as CLI review

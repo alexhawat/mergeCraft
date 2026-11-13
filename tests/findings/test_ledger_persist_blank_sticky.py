@@ -1,11 +1,7 @@
-"""A selected sticky is always updated — a blank body must not create a duplicate.
+"""Live sticky upsert updates a selected blank body without creating a duplicate.
 
-``persist_finding_ledger_to_progress_comment`` guarded its update branch on a
-non-empty existing body, so a sticky the selector returned with a blank body
-fell through to ``create_issue_comment``. The guard is latent while selection
-requires a marker or heading, but it becomes live the moment selection pins a
-comment by id or author. The fix removes the guard; it does not widen selection
-to blank bodies (a blank comment is not a sticky).
+The selector still refuses unmarked blank comments. A known selected comment
+must be updated in place even if its body is blank.
 """
 
 from __future__ import annotations
@@ -134,7 +130,7 @@ async def test_blank_body_selected_sticky_is_updated_not_duplicated(
 
     monkeypatch.setattr(ledger, "fetch_sticky_progress_comment", _select_blank)
 
-    await ledger.persist_finding_ledger_to_progress_comment(ctx)
+    await ledger.upsert_sticky_progress_comment(ctx, "### mergeCraft run record")
 
     assert scm.updates == 1, "a selected sticky must be updated in place"
     assert scm.creates == 0, "a blank selected sticky must not produce a second comment"

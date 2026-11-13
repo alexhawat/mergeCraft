@@ -1,41 +1,23 @@
-"""Memory validation, kinds, org backend, and effectiveness (#360).
+"""Repository memory validation and dismissal-signal eligibility.
 
-Consumes dismissal reason codes from findings; does not define them.
-Does not call ``decide_approval()`` (D14). TTL / contradiction helpers
-live in ``mergecraft.utils.memory`` and are reused here.
-
-Module: mergecraft.memory.store
-Depends: dataclasses, abc
+Live validation consumes the learnings document. Dismissal ingestion exposes
+only an evidence/approval eligibility result; it does not write learnings.
+Negative-memory filtering, TTLs and contradictions live in utils.memory.
 
 Exports:
-    Classes:
-        FalsePositiveMemory — Scoped FP suppression with TTL.
-        OrganizationMemoryBackend — Pluggable org-level memory API.
-        LocalMemoryBackend — In-process backend beside the local store.
-        IngestResult — Whether a signal became durable memory.
-        OverSuppressionReport — Guard when FP memory hides too much.
-        MemoryEffectivenessReport — Precision/recall deltas from memory.
-        MemoryValidationReport — Structure, staleness, and conflicts.
-    Functions:
-        validate_memory_store — Fail closed on a corrupt learnings file.
-        activate_learned_behaviour — Require historical validation first.
-        ingest_reviewer_signal — One action is not silently durable.
-        ingest_dismissal_signal — Consume a #355 dismissal code.
-        detect_over_suppression — Guard FP memory over-suppression.
-        evaluate_memory_effectiveness — Precision up, recall not down.
+    IngestResult — Whether a dismissal satisfies the evidence/approval requirement.
+    MemoryValidationReport — Structure, staleness and conflict status.
+    MemoryStoreError — Missing or invalid learnings document.
+    validate_memory_store — Validate a repository's learnings file.
+    ingest_dismissal_signal — Evaluate repeated evidence or explicit approval.
 """
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
-from fnmatch import fnmatch
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
+from typing import Final
 
 from mergecraft.utils.learnings import ACTIVE_SECTION_HEADING, STAGING_SECTION_HEADING
 from mergecraft.utils.memory import (
@@ -45,40 +27,15 @@ from mergecraft.utils.memory import (
     parse_memory_entries_from_learnings,
 )
 
-MEMORY_KINDS: Final[frozenset[str]] = frozenset(
-    {
-        "factual_repository",
-        "engineering_policy",
-        "reviewer_preference",
-        "false_positive_suppression",
-    }
-)
-
 MIN_HISTORICAL_EVIDENCE: Final[int] = 2
-_OVER_SUPPRESSION_RATIO: Final[float] = 0.5
 _SECTION_HEADING_PREFIX: Final[str] = "## "
 
 
 @dataclass(frozen=True, slots=True)
 class IngestResult:
-    """Outcome of ingesting a reviewer or dismissal signal."""
+    """Eligibility result for a dismissal signal; does not itself persist memory."""
 
     durable: bool
-
-
-@dataclass(frozen=True, slots=True)
-class OverSuppressionReport:
-    """Whether false-positive memory is hiding too large a share of findings."""
-
-    is_over_suppressed: bool
-
-
-@dataclass(frozen=True, slots=True)
-class MemoryEffectivenessReport:
-    """Precision and recall change when memory is applied to a held-out corpus."""
-
-    precision_delta: float
-    recall_delta: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,76 +45,6 @@ class MemoryValidationReport:
     valid: bool
     stale_ids: tuple[str, ...]
     conflict_ids: tuple[str, ...]
-
-
-@dataclass
-class FalsePositiveMemory:
-    """False-positive suppression memory with expiry and path scope."""
-
-    ttl_days: int
-    scope: str
-    _rules: list[tuple[str, str, datetime]] = field(default_factory=list)
-
-    def add(self, *, pattern: str, path_scope: str) -> None:
-        """Record a scoped suppression pattern."""
-        self._rules.append((pattern, path_scope, datetime.now(UTC)))
-
-    def is_expired(self, *, now: datetime | None = None) -> bool:
-        """Return whether this store's TTL has elapsed since the first add."""
-        if not self._rules:
-            return False
-        stamp = now or datetime.now(UTC)
-        first = self._rules[0][2]
-        return stamp - first > timedelta(days=self.ttl_days)
-
-    def matches(self, *, path: str, message: str) -> bool:
-        """Return whether ``path``/``message`` match a recorded suppression rule.
-
-        An empty rule list never suppresses. Scope glob alone is not a match.
-        """
-        if self.is_expired() or not self._rules:
-            return False
-        for pattern, path_scope, _recorded in self._rules:
-            if not pattern:
-                continue
-            if fnmatch(path, path_scope) and pattern.lower() in message.lower():
-                return True
-        return False
-
-
-class OrganizationMemoryBackend(ABC):
-    """Pluggable organization memory beside the local / self-hosted store."""
-
-    @abstractmethod
-    def get(self, key: str) -> object | None:
-        """Return the value stored under ``key``, if any."""
-
-    @abstractmethod
-    def put(self, key: str, value: object) -> None:
-        """Store ``value`` under ``key``."""
-
-    @abstractmethod
-    def list(self) -> list[str]:
-        """Return known keys."""
-
-
-class LocalMemoryBackend(OrganizationMemoryBackend):
-    """In-process organization memory backend."""
-
-    def __init__(self) -> None:
-        self._items: dict[str, object] = {}
-
-    def get(self, key: str) -> object | None:
-        return self._items.get(key)
-
-    def put(self, key: str, value: object) -> None:
-        self._items[key] = value
-
-    def list(self) -> list[str]:
-        return list(self._items)
-
-
-MemoryBackend = OrganizationMemoryBackend
 
 
 class MemoryStoreError(ValueError):
@@ -216,33 +103,6 @@ def validate_memory_store(repo: object) -> MemoryValidationReport:
     return MemoryValidationReport(valid=True, stale_ids=stale, conflict_ids=conflict_ids)
 
 
-def activate_learned_behaviour(
-    *,
-    entry: Mapping[str, object],
-    evidence_count: int,
-    approved: bool = False,
-) -> None:
-    """Activate learned behaviour only after historical validation or approval."""
-    del entry
-    if approved:
-        return
-    if evidence_count < MIN_HISTORICAL_EVIDENCE:
-        msg = "learned behaviour requires historical validation evidence"
-        raise PermissionError(msg)
-
-
-def ingest_reviewer_signal(
-    *,
-    action: str,
-    evidence_count: int,
-    approved: bool = False,
-) -> IngestResult:
-    """Refuse durable memory from a single unapproved reviewer action."""
-    del action
-    durable = approved or evidence_count >= MIN_HISTORICAL_EVIDENCE
-    return IngestResult(durable=durable)
-
-
 def ingest_dismissal_signal(
     *,
     reason_code: str,
@@ -250,7 +110,7 @@ def ingest_dismissal_signal(
     evidence_count: int,
     approved: bool = False,
 ) -> IngestResult:
-    """Consume a findings dismissal code; persist only with repeated evidence."""
+    """Evaluate a dismissal code against repeated evidence or explicit approval."""
     del fingerprint
     if not reason_code.strip():
         msg = "dismissal reason_code is required"
@@ -259,72 +119,11 @@ def ingest_dismissal_signal(
     return IngestResult(durable=durable)
 
 
-def detect_over_suppression(
-    store: FalsePositiveMemory,
-    *,
-    total_findings: int,
-    suppressed: int,
-) -> OverSuppressionReport:
-    """Flag when FP memory suppresses more than half of findings."""
-    del store
-    if total_findings <= 0:
-        return OverSuppressionReport(is_over_suppressed=False)
-    ratio = suppressed / total_findings
-    return OverSuppressionReport(is_over_suppressed=ratio > _OVER_SUPPRESSION_RATIO)
-
-
-def evaluate_memory_effectiveness(
-    *,
-    baseline_true_positives: int | None = None,
-    baseline_false_positives: int | None = None,
-    baseline_false_negatives: int | None = None,
-    memory_true_positives: int | None = None,
-    memory_false_positives: int | None = None,
-    memory_false_negatives: int | None = None,
-) -> MemoryEffectivenessReport:
-    """Precision/recall deltas from labeled counts; zeros when no corpus is given."""
-    required = (
-        baseline_true_positives,
-        baseline_false_positives,
-        baseline_false_negatives,
-        memory_true_positives,
-        memory_false_positives,
-        memory_false_negatives,
-    )
-    if any(value is None for value in required):
-        return MemoryEffectivenessReport(precision_delta=0.0, recall_delta=0.0)
-    b_tp = int(baseline_true_positives or 0)
-    b_fp = int(baseline_false_positives or 0)
-    b_fn = int(baseline_false_negatives or 0)
-    m_tp = int(memory_true_positives or 0)
-    m_fp = int(memory_false_positives or 0)
-    m_fn = int(memory_false_negatives or 0)
-    baseline_precision = b_tp / (b_tp + b_fp) if (b_tp + b_fp) else 0.0
-    memory_precision = m_tp / (m_tp + m_fp) if (m_tp + m_fp) else 0.0
-    baseline_recall = b_tp / (b_tp + b_fn) if (b_tp + b_fn) else 0.0
-    memory_recall = m_tp / (m_tp + m_fn) if (m_tp + m_fn) else 0.0
-    return MemoryEffectivenessReport(
-        precision_delta=memory_precision - baseline_precision,
-        recall_delta=memory_recall - baseline_recall,
-    )
-
-
 __all__ = [
-    "MEMORY_KINDS",
     "MIN_HISTORICAL_EVIDENCE",
-    "FalsePositiveMemory",
     "IngestResult",
-    "LocalMemoryBackend",
-    "MemoryBackend",
-    "MemoryEffectivenessReport",
     "MemoryStoreError",
     "MemoryValidationReport",
-    "OrganizationMemoryBackend",
-    "OverSuppressionReport",
-    "activate_learned_behaviour",
-    "detect_over_suppression",
-    "evaluate_memory_effectiveness",
     "ingest_dismissal_signal",
-    "ingest_reviewer_signal",
     "validate_memory_store",
 ]

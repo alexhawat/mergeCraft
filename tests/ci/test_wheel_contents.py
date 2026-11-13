@@ -1,16 +1,7 @@
-"""The wheel's packaging config excludes exactly the modules with no runtime caller.
+"""Pin maintainer-only exclusions and retain shipped benchmark corpus support.
 
-Plan 46's Appendix A lists test/script-support modules that ship today. Screening
-each one's callers showed that only ``evals/corpora.py`` has a shipped runtime
-caller (``cli/eval_cmd.py`` and ``evals/human_batch.py`` import it); the rest are
-reached only from tests, scripts, or the Make surface, so they can leave the
-wheel.
-
-This test pins the packaging config itself — it does **not** build a wheel. The
-real, installed-wheel proof is ``make test-wheel-corpus`` (the corpus check plus
-``mergecraft --help`` / ``mergecraft eval --help`` from a scratch venv), which CI
-runs in PR static jobs and release ``build-dist``. If a module's absence breaks the installed CLI, this list
-must shrink.
+The installed proof is ``make test-wheel-corpus``: a fresh runtime-only virtualenv
+must reject maintainer commands while ordinary CLI and corpus replay still work.
 """
 
 from __future__ import annotations
@@ -21,25 +12,21 @@ from tests.ci.workflow_support import REPO_ROOT
 
 _PYPROJECT = REPO_ROOT / "pyproject.toml"
 
-# The twelve modules the installed-wheel smoke tolerates dropping. The last five
-# were re-measured on the tree that landed them (#947): none has a production
-# importer, and every caller is a Make target, ``scripts/``, a workflow step
-# run from the checkout, or a test.
 _EXCLUDED = (
+    "src/mergecraft/cli/eval_cmd.py",
+    "src/mergecraft/analyzers/catalog_docs.py",
     "src/mergecraft/evals/mcp_public.py",
     "src/mergecraft/evals/skill_taxonomy_gate.py",
     "src/mergecraft/utils/git_ref.py",
     "src/mergecraft/integrations/live_providers.py",
     "src/mergecraft/mcp/codegen.py",
-    "src/mergecraft/scm/errors.py",
-    "src/mergecraft/scm/webhooks.py",
     "src/mergecraft/evidence/shadow_compare.py",
     "src/mergecraft/evals/human_batch.py",
     "src/mergecraft/evals/skill.py",
     "src/mergecraft/agents/catalog_docs.py",
 )
 
-# A shipped CLI path imports this one, so it must stay in the wheel.
+# Installed benchmark and live-evaluation code still require this corpus reader.
 _KEPT = "src/mergecraft/evals/corpora.py"
 
 
@@ -74,8 +61,7 @@ def test_wheel_keeps_the_module_with_a_runtime_caller() -> None:
     assert isinstance(exclude, list)
     normalized = {_normalize(str(pattern)) for pattern in exclude}
     assert _KEPT not in normalized, (
-        "evals/corpora.py has shipped runtime callers (cli/eval_cmd.py, "
-        "evals/human_batch.py) and must stay in the wheel"
+        "evals/corpora.py supports installed benchmark/live evaluation and must stay in the wheel"
     )
 
 
@@ -92,7 +78,6 @@ def test_the_kept_runtime_module_exists() -> None:
 # Each re-measured module is reached only from the checkout; if a shipped module
 # starts importing one, excluding it would break the installed CLI.
 _CHECKOUT_ONLY = (
-    "mergecraft.scm.webhooks",
     "mergecraft.evidence.shadow_compare",
     "mergecraft.evals.human_batch",
     "mergecraft.evals.skill",
@@ -101,7 +86,7 @@ _CHECKOUT_ONLY = (
 
 
 def test_no_shipped_module_imports_a_checkout_only_module() -> None:
-    """The exclusion is only safe while nothing the wheel ships imports these five."""
+    """The exclusion is only safe while nothing the wheel ships imports these modules."""
     import ast
 
     src = REPO_ROOT / "src" / "mergecraft"
