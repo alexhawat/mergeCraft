@@ -7,6 +7,7 @@ Exports:
 from __future__ import annotations
 
 from importlib import import_module
+from importlib.util import find_spec
 from typing import TYPE_CHECKING, Any
 
 import click
@@ -28,13 +29,15 @@ class LazyRootGroup(MergecraftTyperGroup):
         self._loaded: set[str] = set()
         self._discovery = False
         for name, entry in COMMANDS.items():
+            if name == "eval" and find_spec("mergecraft.cli.eval_cmd") is None:
+                continue
             command_type = click.Group if entry.group else click.Command
             self.commands[name] = command_type(name, help=entry.help, hidden=entry.hidden)
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
         if self._discovery:
             return self.commands.get(cmd_name)
-        if cmd_name in COMMANDS and cmd_name not in self._loaded:
+        if cmd_name in self.commands and cmd_name in COMMANDS and cmd_name not in self._loaded:
             entry = COMMANDS[cmd_name]
             module = import_module(f"mergecraft.cli.{entry.module}")
             target = getattr(module, entry.attribute)

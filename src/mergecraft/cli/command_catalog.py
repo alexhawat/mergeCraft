@@ -43,9 +43,6 @@ COMMANDS: dict[str, CommandEntry] = {
         "agents_cmd", "app", True, "Inspect and override the mergeCraft agent registry.", False
     ),
     "lens": CommandEntry("lens_cmd", "app", True, "Inspect and test bundled review lenses.", False),
-    "pipeline": CommandEntry(
-        "pipeline_cmd", "app", True, "Lint and preview declarative review pipelines.", False
-    ),
     "mcp": CommandEntry(
         "mcp_cmd", "app", True, "Serve mergeCraft MCP tools to external clients.", False
     ),
@@ -239,7 +236,7 @@ COMMANDS: dict[str, CommandEntry] = {
         "app",
         True,
         "Manage the file-backed Failure Memory and Eval Bank. Cases live under evals/cases/ by default.",
-        False,
+        True,
     ),
     "run": CommandEntry(
         "run_cmd",

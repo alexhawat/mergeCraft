@@ -152,7 +152,7 @@ def test_multi_service_fixture_reports_producer_consumer_breakage(tmp_path: Path
 
 def test_pr_manifest_cannot_authorize_an_ungranted_sibling(tmp_path: Path) -> None:
     """D9 — checkout grant is the operator set, not names from the PR manifest."""
-    from mergecraft.review.linked_repos import attach_linked_repo_review
+    from mergecraft.review.linked_repos import linked_repo_review_with_payload
 
     primary = tmp_path / "primary"
     secrets = tmp_path / "secrets-store"
@@ -170,10 +170,14 @@ def test_pr_manifest_cannot_authorize_an_ungranted_sibling(tmp_path: Path) -> No
             {"owner": "acme", "name": "secrets-store", "commit": secret_commit},
         ],
     )
-    denied = attach_linked_repo_review(primary)
+    denied = linked_repo_review_with_payload(primary)
+    denied = denied[1] if denied is not None else None
     assert denied is not None
     assert denied["linkedRepoFindings"] == []
-    granted = attach_linked_repo_review(primary, authorized_repos=frozenset({"acme/api-contracts"}))
+    granted = linked_repo_review_with_payload(
+        primary, authorized_repos=frozenset({"acme/api-contracts"})
+    )
+    granted = granted[1] if granted is not None else None
     assert granted is not None
     joined = " ".join(
         f"{row['consumer']} {row['producer']}" for row in granted["linkedRepoFindings"]

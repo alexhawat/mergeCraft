@@ -568,12 +568,6 @@ ALLOWED_READS: Final[tuple[AllowedRead, ...]] = (
     ),
     # ── classes that stay out by decision ──────────────────────────────────
     AllowedRead(
-        "src/mergecraft/analyzers/sandbox.py",
-        "MERGECRAFT_PROBE_TEST_DOUBLE",
-        "test seam",
-        "selects the recorded probe output under pytest only",
-    ),
-    AllowedRead(
         "src/mergecraft/harbor/agent.py",
         "MERGECRAFT_MODEL",
         "generated",

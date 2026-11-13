@@ -51,8 +51,8 @@ def test_verifier_deny_list_is_independent_and_non_empty(tmp_path: Path) -> None
     subagent_denied = subagent_denied_tool_names(ctx)
     assert denied
     assert denied != subagent_denied
-    assert "push_branch" in denied
-    assert "push_branch" in subagent_denied
+    assert "create_pull_request_review" in denied
+    assert "create_pull_request_review" in subagent_denied
     # Verifier deny list includes scope tools the reviewer allow-list keeps.
     assert "checkout_pr" in denied
     assert "checkout_pr" not in subagent_denied
@@ -163,7 +163,7 @@ def test_claude_verifier_agent_receives_class_derived_disallowed_tools(tmp_path:
     agents = json.loads(claude.build_agents_json(verifier_denied_tools=denied))
     disallowed = agents[verifier.VERIFIER_AGENT_NAME]["disallowedTools"]
     assert format_mcp_tool_ref("claude", "record_finding_verdict") in disallowed
-    assert format_mcp_tool_ref("claude", "push_branch") in disallowed
+    assert format_mcp_tool_ref("claude", "create_pull_request_review") in disallowed
     assert format_mcp_tool_ref("claude", "checkout_pr") in disallowed
 
 
@@ -180,7 +180,7 @@ def test_claude_reviewer_agent_receives_class_derived_disallowed_tools(tmp_path:
     disallowed = agents[REVIEWER_AGENT_NAME]["disallowedTools"]
     assert format_mcp_tool_ref("claude", "select_mode") in disallowed
     assert format_mcp_tool_ref("claude", "start_dependency_installation") in disallowed
-    assert format_mcp_tool_ref("claude", "push_branch") in disallowed
+    assert format_mcp_tool_ref("claude", "create_pull_request_review") in disallowed
     assert format_mcp_tool_ref("claude", "checkout_pr") not in disallowed
 
 
@@ -206,7 +206,7 @@ def test_opencode_reviewer_agent_receives_class_derived_permission_denies(
     permission = config["agent"][REVIEWER_AGENT_NAME]["permission"]
     assert permission[format_mcp_tool_ref("opencode", "select_mode")] == "deny"
     assert permission[format_mcp_tool_ref("opencode", "start_dependency_installation")] == "deny"
-    assert permission[format_mcp_tool_ref("opencode", "push_branch")] == "deny"
+    assert permission[format_mcp_tool_ref("opencode", "create_pull_request_review")] == "deny"
     assert format_mcp_tool_ref("opencode", "checkout_pr") not in permission
 
 

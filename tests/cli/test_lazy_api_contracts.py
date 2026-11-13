@@ -125,3 +125,19 @@ def test_catalog_summary_matches_resolved_command_help(command_name: str) -> Non
     summary = command.help.strip().splitlines()[0]
     assert terminal_help(COMMANDS[command_name].help) == terminal_help(summary)
     assert command.hidden is COMMANDS[command_name].hidden
+
+
+def test_maintainer_commands_hidden_and_removed_pipeline_unavailable() -> None:
+    from mergecraft.cli.app import app
+
+    root = get_command(app)
+    runner = CliRunner()
+    root_help = runner.invoke(root, ["--help"])
+    analyzers_help = runner.invoke(root, ["analyzers", "--help"])
+    assert root_help.exit_code == analyzers_help.exit_code == 0
+    assert "pipeline" not in root_help.output
+    assert "eval" not in root_help.output
+    assert "docs" not in analyzers_help.output
+    assert runner.invoke(root, ["pipeline", "--help"]).exit_code == 2
+    assert runner.invoke(root, ["eval", "--help"]).exit_code == 0
+    assert runner.invoke(root, ["analyzers", "docs", "--help"]).exit_code == 0

@@ -63,7 +63,6 @@ def _tool_ctx(
     *,
     shell: Literal["disabled", "restricted", "enabled"] = "restricted",
     push: Literal["disabled", "restricted", "enabled"] = "restricted",
-    signed_commits: bool = True,
 ) -> ToolContext:
     """Full-surface context so a class cannot hide behind a disabled flag."""
     state = init_tool_state(owner="acme", name="demo", dir=str(tmp_path))
@@ -83,7 +82,6 @@ def _tool_ctx(
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
-        signed_commits=signed_commits,
         xrepo=XrepoConfig(mode="explicit", read=["other"], write=["other"]),
         static_checks_enabled=True,
         trust_tier="trusted",
@@ -287,22 +285,7 @@ def test_orchestrator_receives_only_policy_allowed_classes(tmp_path: Path) -> No
     _assert_real_toolspecs(enabled)
     for spec in enabled:
         assert _class_value(spec) in declared
-    assert "repository-mutation" in {_class_value(spec) for spec in enabled}, (
-        "push=enabled must admit repository-mutation; otherwise the restricted exclusion is vacuous"
-    )
-
-
-def test_repository_mutation_class_for_push() -> None:
-    """Direct pin: push tools are repository-mutation only when push is enabled.
-
-    Deleting ``repository_mutation_class_for_push`` (or swapping the two
-    branches) must fail this test even if orchestrator filtering still looks
-    right via another path.
-    """
-    from mergecraft.mcp.shared import ToolClass, repository_mutation_class_for_push
-
-    assert repository_mutation_class_for_push("enabled") is ToolClass.REPOSITORY_MUTATION
-    assert repository_mutation_class_for_push("restricted") is ToolClass.GITHUB_MUTATION
+    assert "repository-mutation" not in {_class_value(spec) for spec in enabled}
 
 
 def test_shell_disabled_run_exposes_no_execution_tool(tmp_path: Path) -> None:
@@ -435,7 +418,7 @@ def test_live_verifier_mcp_lists_class_filtered_tools(tool_ctx: ToolContext) -> 
             orchestrator = json.loads(resp.read().decode())
         orch_names = {entry["name"] for entry in orchestrator["result"]["tools"]}
         assert "record_finding_verdict" in orch_names
-        assert "push_branch" in orch_names
+        assert "push_branch" not in orch_names
 
         call_body = json.dumps(
             {

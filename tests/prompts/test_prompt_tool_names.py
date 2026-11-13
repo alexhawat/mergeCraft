@@ -63,8 +63,8 @@ _TEMPLATE_BY_NAME: dict[str, str] = {module.NAME: module.TEMPLATE for module in 
 def _registered_tool_names() -> set[str]:
     """Return every tool ``build_orchestrator_tools`` registers, all options on.
 
-    ``signed_commits`` (commit_changes), static checks, analyzers, cross-repo
-    and shell tools are all enabled so the set is the union a production run
+    Static checks, analyzers, cross-repo and shell tools are all enabled
+    so the set is the union a production run
     could ever present to the model.
     """
     with tempfile.TemporaryDirectory() as tmp:
@@ -81,7 +81,6 @@ def _registered_tool_names() -> set[str]:
             modes=compute_modes("claude"),
             tool_state=state,
             tmpdir=tmp,
-            signed_commits=True,
             static_checks_enabled=True,
             analyzers_settings_enabled=True,
             analyzers_mode="full",
@@ -160,3 +159,43 @@ def test_pr_summary_format_has_no_bare_registered_tool_names() -> None:
     spans = set(_BACKTICK_RE.findall(PR_SUMMARY_FORMAT))
     bare = sorted(spans & registered)
     assert not bare, f"PR_SUMMARY_FORMAT renders registered tool names bare: {bare}"
+
+
+@pytest.mark.parametrize(
+    "agent_id",
+    ["claude", "codex", "opencode", "gemini"],
+    ids=["claude", "codex", "opencode", "gemini"],
+)
+@pytest.mark.parametrize("signed", [False, True], ids=["unsigned", "signed"])
+def test_full_system_prompt_names_only_live_git_tools(agent_id: str, signed: bool) -> None:
+    from mergecraft.config.settings import RepoInfo, RepoSettings
+    from mergecraft.types import format_mcp_tool_ref
+    from mergecraft.utils.instructions import resolve_instructions
+
+    settings = RepoSettings(signedCommits=signed)
+    assert "signedCommits" not in settings.model_dump(by_alias=True)
+    rendered = resolve_instructions(
+        payload={"event": {"trigger": "pull_request"}, "shell": "restricted"},
+        repo=RepoInfo(owner="acme", name="demo"),
+        modes=compute_modes(agent_id),
+        agent_id=agent_id,
+    ).full
+    registered = _registered_tool_names()
+    referenced = set(
+        re.findall(r"(?:mcp__mergecraft__|mcp_mergecraft_|mergecraft_)([a-z_]+)", rendered)
+    )
+    assert not referenced - registered, referenced - registered
+    for name in ("git", "git_fetch", "checkout_pr"):
+        assert format_mcp_tool_ref(agent_id, name) in rendered
+    for name in (
+        "push_branch",
+        "push_tags",
+        "delete_branch",
+        "commit_changes",
+        "create_pull_request",
+        "update_pull_request_body",
+        "close_pull_request",
+    ):
+        assert name not in referenced
+    assert "All code changes must be pushed" not in rendered
+    assert "Never push directly" not in rendered
