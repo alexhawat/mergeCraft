@@ -310,3 +310,21 @@ def test_a_fallback_rung_does_not_inherit_the_reporting_of_the_rung_before_it(
     _prepare_chain_attempt(ctx.tool_state, 1)
 
     assert ctx.tool_state.driver_reports_reads is False
+
+
+async def test_diff_budget_omissions_withhold_approval_even_with_warn_coverage(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A partial diff must not produce formal approval under an advisory policy."""
+    github = RecordingReviewGitHub()
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
+    await submit_verdict(ctx, "approve", [])
+    ctx.tool_state.diff_budget_reason = "diff exceeded max_diff_lines; scope reduced"
+    settings = RepoSettings.model_validate({"review": {"coverage": {"onIncomplete": "warn"}}})
+
+    record = await run_finalize(ctx, monkeypatch=monkeypatch, settings=settings, real_publish=True)
+
+    assert record.outcome is RunOutcome.inconclusive
+    assert record.failure_reason == ctx.tool_state.diff_budget_reason
+    assert github.review_payloads
+    assert all(payload["event"] != "APPROVE" for payload in github.review_payloads)
