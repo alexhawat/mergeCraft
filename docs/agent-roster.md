@@ -103,6 +103,14 @@ GitHub Actions job per reviewer.
 **Findings merge** across reviewers by `(path, body, line)` — the same key
 `ensemble` uses. Duplicate findings keep the **strictest severity**.
 
+The server dispatches pending secondary reviewers after the primary finishes,
+with peers in each level running concurrently. It waits for every peer's outcome
+before starting the next level, including when a required reviewer fails.
+Concurrent secondary reviewers must call `record_reviewer_dispatch_run` with
+their own agent id and findings (an empty list for a clean review). A reviewer
+that finishes without that record is reported as a dispatch error: findings in
+shared tool state cannot prove which concurrent reviewer raised them.
+
 **Attribution (`raised_by`).** Dispatch stamps `raised_by` server-side when
 findings merge — agents cannot supply it on `submit_review_verdict`. Identical
 findings from two reviewers list both agent ids; unknown provenance reads
