@@ -870,8 +870,14 @@ def git_tool(ctx: ToolContext):
         cwd = _repo_dir_for(ctx, params.get("repo"))
         tmpdir = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
         checkout_roots = [state.dir for state in ctx.tool_state.repos.values()]
-        _validate_git_invocation(
-            command, args, global_opts, cwd, tmpdir=tmpdir, checkout_roots=checkout_roots
+        await run_blocking(
+            _validate_git_invocation,
+            command,
+            args,
+            global_opts,
+            cwd,
+            tmpdir=tmpdir,
+            checkout_roots=checkout_roots,
         )
         show_target = _parse_show_rev_path(args) if command == "show" else None
         cache_key: str | None = None

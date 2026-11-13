@@ -390,3 +390,102 @@ async def test_deadline_cleanup_does_not_queue_behind_saturated_workers(tmp_path
         response = await pending
     assert response["error"]["code"] == -32000
     assert not (tmp_path / "finished").exists()
+
+
+async def test_queued_deadline_does_not_wait_for_an_unrelated_worker() -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from mergecraft.utils.blocking import run_blocking
+
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
+    sibling_started, release_sibling = asyncio.Event(), threading.Event()
+    ran: list[bool] = []
+
+    def sibling_work() -> None:
+        loop.call_soon_threadsafe(sibling_started.set)
+        assert release_sibling.wait(5)
+
+    async def queued(_params: Any) -> dict[str, Any]:
+        await run_blocking(lambda: ran.append(True))
+        return {}
+
+    sibling = asyncio.create_task(run_blocking(sibling_work))
+    await asyncio.wait_for(sibling_started.wait(), timeout=5)
+    spec = ToolSpec(
+        "queued", "queued", {"type": "object"}, queued, ToolClass.ANALYSIS, timeout_ms=30
+    )
+    pending = asyncio.create_task(_dispatch(spec))
+    try:
+        done, _ = await asyncio.wait({pending}, timeout=0.5)
+        assert done, "queued cancellation waited for an unrelated executor worker"
+        assert not sibling.done()
+        assert not ran
+    finally:
+        release_sibling.set()
+        await sibling
+        result = await pending
+    assert result["error"]["code"] == -32000
+    assert not ran, "cancelled queued work started after its timeout response"
+
+
+@pytest.mark.parametrize("started_before_cancel", [False, True], ids=["queued", "running"])
+async def test_repeated_cancellation_joins_only_started_work(started_before_cancel: bool) -> None:
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from mergecraft.utils.blocking import run_blocking
+
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
+    sibling_started, release_sibling = asyncio.Event(), threading.Event()
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    work_started = asyncio.Event()
+    published: list[bool] = []
+
+    def sibling_work() -> None:
+        loop.call_soon_threadsafe(sibling_started.set)
+        assert release_sibling.wait(5)
+
+    def work() -> None:
+        started.set()
+        loop.call_soon_threadsafe(work_started.set)
+        assert release.wait(5)
+        finished.set()
+
+    async def operation() -> None:
+        await run_blocking(work)
+        published.append(True)
+
+    sibling = None
+    if not started_before_cancel:
+        sibling = asyncio.create_task(run_blocking(sibling_work))
+        await asyncio.wait_for(sibling_started.wait(), timeout=5)
+    pending = asyncio.create_task(operation())
+    if started_before_cancel:
+        await asyncio.wait_for(work_started.wait(), timeout=5)
+    else:
+        await asyncio.sleep(0.02)
+    try:
+        pending.cancel()
+        await asyncio.sleep(0)
+        pending.cancel()
+        done, _ = await asyncio.wait({pending}, timeout=0.3)
+        if started_before_cancel:
+            assert not done, "cancellation detached the already-running worker"
+            assert not finished.is_set()
+        else:
+            assert done, "repeated queued cancellation waited for a sibling"
+            assert not started.is_set()
+    finally:
+        release.set()
+        release_sibling.set()
+        if sibling is not None:
+            await sibling
+        with contextlib.suppress(asyncio.CancelledError):
+            await pending
+    assert pending.cancelled()
+    assert not published
+    assert started.is_set() is started_before_cancel
+    assert finished.is_set() is started_before_cancel

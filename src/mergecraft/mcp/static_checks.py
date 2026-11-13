@@ -20,7 +20,7 @@ from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.modes._api_only_scope import API_ONLY_SCOPE
 from mergecraft.review_checks import declared_cannot_run_outcomes, plan_checks, run_checks
-from mergecraft.utils.blocking import run_blocking
+from mergecraft.utils.blocking import run_blocking, run_blocking_cleanup
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.sandbox import SandboxPlan
@@ -325,12 +325,12 @@ def run_static_checks_tool(ctx: ToolContext):
         # does, after first checking the agent changed nothing before the call.
         baseline = ctx.tool_state.review_tree_baseline
         if baseline is not None:
-            baseline.before_boundary("run_static_checks")
+            await run_blocking(baseline.before_boundary, "run_static_checks")
         try:
             outcomes = await run_blocking(run_checks, checks, root=root, tier=tier)
         finally:
             if baseline is not None:
-                baseline.after_boundary()
+                await run_blocking_cleanup(baseline.after_boundary)
         outcomes, substitutions = await _apply_ci_evidence(ctx, outcomes)
         executed = [o for o in outcomes if o.ran]
         logger.info(

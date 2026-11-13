@@ -26,7 +26,7 @@ from mergecraft.mcp.tool_call import normalize_pull_number_aliases
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
 from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, degraded_checkout_reason
 from mergecraft.review_policy.ignore_paths import ReviewIgnore, filter_diff, rename_sources
-from mergecraft.utils.blocking import run_blocking
+from mergecraft.utils.blocking import run_blocking, run_blocking_cleanup
 from mergecraft.utils.gha_log import warning
 from mergecraft.utils.git_hardening import read_remote_origin_url
 from mergecraft.utils.github import GitHubClient
@@ -1295,7 +1295,7 @@ def checkout_pr_tool(ctx: ToolContext):
                 provenance="api",
                 review_scope=API_ONLY_SCOPE,
             )
-            _rebaseline_config_after_checkout(ctx)
+            await run_blocking_cleanup(_rebaseline_config_after_checkout, ctx)
             prior_reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
             publishers = expected_publisher_logins(ctx) if prior_reviews else frozenset()
             round_index = _round_index(run_bound, prior_reviews, publishers=publishers)
@@ -1355,11 +1355,24 @@ def checkout_pr_tool(ctx: ToolContext):
                 "retry checkout before reviewing this revision."
             )
             raise RuntimeError(msg)
-        await run_blocking(_run_git, ["checkout", "-B", local_branch, checkout_sha], cwd=cwd)
+        try:
+            await run_blocking(_run_git, ["checkout", "-B", local_branch, checkout_sha], cwd=cwd)
+        except BaseException:
+            # Cancellation can arrive after Git changes the tree but before its
+            # worker returns. Join the boundary re-pin while retaining the lock;
+            # the outer handler still invalidates all authoritative review proof.
+            try:
+                await run_blocking_cleanup(_rebaseline_config_after_checkout, ctx)
+            except BaseException as cleanup_error:
+                logger.warning(
+                    "checkout rebaseline cleanup failed ({}); preserving checkout failure",
+                    type(cleanup_error).__name__,
+                )
+            raise
         # Configuration and tree bytes may change at this controlled boundary.
         # Re-pin their hashes before later API calls can fail or be cancelled;
         # the run's trusted settings/policy values remain pinned across retries.
-        _rebaseline_config_after_checkout(ctx)
+        await run_blocking_cleanup(_rebaseline_config_after_checkout, ctx)
         # Ensure base is available for merge-base diffs
         base_env, base_remote_url = await run_blocking(_git_env_for_cwd, cwd, ctx.git_token)
         base_fetch_failure: str | None = None
@@ -1455,7 +1468,7 @@ def checkout_pr_tool(ctx: ToolContext):
                 degraded_reason = _stale_base_reason(base_fetch_failure)
                 warning(degraded_reason)
             register_review_scope(ctx.tool_state, diff_path=diff_path, provenance="checkout")
-        _rebaseline_config_after_checkout(ctx)
+        await run_blocking_cleanup(_rebaseline_config_after_checkout, ctx)
 
         result = {
             "pullNumber": pull_number,
@@ -1645,7 +1658,7 @@ def checkout_pr_tool(ctx: ToolContext):
             raise RuntimeError(msg)
         baseline = ctx.tool_state.review_tree_baseline
         if baseline is not None:
-            baseline.before_checkout()
+            await run_blocking(baseline.before_checkout)
         invalidate_checkout_review_state(ctx.tool_state)
         try:
             result = await _checkout(pull_number, pr)
