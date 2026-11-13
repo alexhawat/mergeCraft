@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Event
 from types import SimpleNamespace
 
 import pytest
@@ -92,3 +94,34 @@ def test_reset_detection_cache_clears_probe_cache(monkeypatch: pytest.MonkeyPatc
     shell_mod.reset_detection_cache()
     sandbox_mod.probe_capabilities()
     assert calls == 2, "reset_detection_cache must clear probe_capabilities cache"
+
+
+def test_concurrent_capability_probes_share_one_cold_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    first_probe = Event()
+    duplicate_probe = Event()
+    start = Barrier(4)
+    calls: list[object] = []
+
+    def probe_subprocess(*_args: object, **_kwargs: object) -> object:
+        calls.append(object())
+        if len(calls) == 1:
+            first_probe.set()
+            duplicate_probe.wait(timeout=0.3)
+        else:
+            duplicate_probe.set()
+        return SimpleNamespace(returncode=0, stdout=b"pid=1 pid_method=unshare")
+
+    def read() -> sandbox_mod.SandboxCapabilities:
+        start.wait(timeout=5)
+        return sandbox_mod.probe_capabilities()
+
+    monkeypatch.setattr(sandbox_mod.subprocess, "run", probe_subprocess)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = [pool.submit(read) for _ in range(4)]
+        assert first_probe.wait(timeout=5)
+        capabilities = [future.result(timeout=5) for future in results]
+    assert len(calls) == 1
+    assert all(item.pid_namespace for item in capabilities)
+    shell_mod.reset_detection_cache()
+    assert sandbox_mod.probe_capabilities().pid_namespace
+    assert len(calls) == 2

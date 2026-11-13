@@ -545,21 +545,29 @@ def run_argv_result(
     changed_files: list[str],
     tier: TrustTier,
     scratch_suffix: str = "",
+    provisioned_plan: AnalyzerPlan | None = None,
 ) -> ArgvRun:
-    """Provision, sandbox, run, and return the raw output with the exit code."""
+    """Provision, sandbox, run, and return the raw output with the exit code.
+
+    Internal adapters may reuse a plan provisioned for this manifest and checkout
+    during the same invocation. Configuration and sandbox checks still run for
+    every command; no plan is cached across trust tiers or review invocations.
+    """
     from mergecraft.analyzers.sandbox import sandbox_skip_findings
 
-    plan = resolve_analyzer(
-        manifest=manifest, repo_root=repo_root, managed_available=True, tier=tier
-    )
-    try:
-        provisioned = provision_resolved_plan(plan, manifest=manifest, repo_root=repo_root)
-    except ProvisionError as exc:
-        return ArgvRun(raw=None, reason=provisioning_failure_reason(manifest.id, exc))
+    provisioned = provisioned_plan
     if provisioned is None:
-        return ArgvRun(
-            raw=None, reason=plan.reason or f"skipped {manifest.id}: provisioning failed"
+        plan = resolve_analyzer(
+            manifest=manifest, repo_root=repo_root, managed_available=True, tier=tier
         )
+        try:
+            provisioned = provision_resolved_plan(plan, manifest=manifest, repo_root=repo_root)
+        except ProvisionError as exc:
+            return ArgvRun(raw=None, reason=provisioning_failure_reason(manifest.id, exc))
+        if provisioned is None:
+            return ArgvRun(
+                raw=None, reason=plan.reason or f"skipped {manifest.id}: provisioning failed"
+            )
 
     finalized = finalize_plan(
         replace(provisioned, argv=argv, cwd=repo_root),

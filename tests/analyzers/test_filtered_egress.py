@@ -11,12 +11,14 @@ import sys
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
 import pytest
 
 from mergecraft.analyzers.egress import (
+    FilteredEgressProbe,
     FilteredEgressSetupError,
     FilteredNetnsSession,
     _delete_rules_matching,
@@ -160,6 +162,47 @@ def test_non_allowlisted_connect_is_forbidden() -> None:
         status = client.recv(1024)
         assert status.startswith(b"HTTP/1.1 403"), status
         client.close()
+
+
+def test_concurrent_filtered_egress_calls_share_cold_kernel_probe(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A second caller must reuse the result while the first probes kernel resources."""
+    from mergecraft.analyzers import egress, egress_userspace
+
+    monkeypatch.setenv("MERGECRAFT_FILTERED_EGRESS_ISOLATED_RUNTIME", "1")
+    unavailable = FilteredEgressProbe(False, False, False, False, False, "unavailable")
+    available = FilteredEgressProbe(True, True, True, True, True, "", backend="kernel")
+    monkeypatch.setattr(egress_userspace, "probe_userspace_egress", lambda: unavailable)
+    callers = threading.Barrier(2, timeout=5)
+    second_kernel_probe = threading.Event()
+    invocation_lock = threading.Lock()
+    invocations = 0
+
+    def probe_kernel() -> FilteredEgressProbe:
+        nonlocal invocations
+        with invocation_lock:
+            invocations += 1
+            first = invocations == 1
+        if first:
+            second_kernel_probe.wait(0.2)
+            return available
+        second_kernel_probe.set()
+        return unavailable
+
+    def check() -> bool:
+        callers.wait()
+        return filtered_egress_available()
+
+    monkeypatch.setattr(egress, "_probe_kernel_filtered_egress", probe_kernel)
+    reset_filtered_egress_cache()
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first, second = pool.submit(check), pool.submit(check)
+            assert [first.result(timeout=5), second.result(timeout=5)] == [True, True]
+        assert invocations == 1
+    finally:
+        reset_filtered_egress_cache()
 
 
 def test_probe_does_not_fake_availability_on_this_host() -> None:
