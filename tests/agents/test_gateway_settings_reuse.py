@@ -120,7 +120,7 @@ def test_derived_gateway_cache_reloads_after_config_changes(
     assert "tokenhub" in tokenhub
 
 
-_GATEWAY_CALLERS = frozenset({"build_custom_provider", "_custom_provider_ids"})
+_GATEWAY_CALLERS = frozenset({"build_custom_provider"})
 
 
 def _gateway_caller_signatures(source: str) -> dict[str, str]:
@@ -145,8 +145,8 @@ def test_no_caller_signature_changed() -> None:
     lane E (plan 18) rewires Codex for the credential broker; broker behavior is
     pinned in ``test_codex_credential_broker.py``. Whole-file freeze of
     ``opencode.py`` is too blunt: prompt-body stamping on the HTTP return path
-    is allowed; only ``build_custom_provider`` / ``_custom_provider_ids``
-    signatures stay pinned to ``origin/pre-0.0.1``.
+    is allowed; only ``build_custom_provider``
+    signature stays pinned to ``origin/pre-0.0.1``.
     """
     rel = "src/mergecraft/agents/opencode.py"
     proc = subprocess.run(

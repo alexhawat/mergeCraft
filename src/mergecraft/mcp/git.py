@@ -1,4 +1,4 @@
-"""Git MCP tools: git, git_fetch, push_branch, push_tags, delete_branch, commit_changes."""
+"""Read-only Git inspection and bounded fetch tools."""
 
 from __future__ import annotations
 
@@ -49,7 +49,6 @@ from mergecraft.mcp.shared import (
     ToolClass,
     ToolRefusedError,
     execute,
-    repository_mutation_class_for_push,
     tool,
 )
 from mergecraft.mcp.tool_state import primary_repo_state, require_repo_state
@@ -953,7 +952,7 @@ def git_tool(ctx: ToolContext):
         tool_class=ToolClass.REPOSITORY_READ,
         description=(
             "Run a git subcommand. `command` is the subcommand ONLY. "
-            "For push/fetch use push_branch / git_fetch."
+            "Use git_fetch to read remote refs; repository writes are not available."
         ),
         input_schema={
             "type": "object",
@@ -1046,199 +1045,4 @@ def git_fetch_tool(ctx: ToolContext):
             "additionalProperties": False,
         },
         execute=execute(_run, "git_fetch"),
-    )
-
-
-def _require_push_allowed(
-    ctx: ToolContext,
-    *,
-    branch: str | None,
-    action: str,
-) -> None:
-    """Enforce ``push`` disabled / restricted-default-branch policy (W2 / Final)."""
-    if ctx.payload.push == "disabled":
-        msg = "push is disabled for this run"
-        raise ToolRefusedError(msg)
-    state = primary_repo_state(ctx.tool_state)
-    if (
-        ctx.payload.push == "restricted"
-        and branch
-        and state.default_branch
-        and branch == state.default_branch
-    ):
-        verb = {
-            "push": "push to",
-            "delete": "delete",
-            "update": "update",
-            "tag": "push tags affecting",
-        }.get(action, "mutate")
-        msg = (
-            f"Push blocked: cannot {verb} default branch "
-            f"'{state.default_branch}' in restricted mode"
-        )
-        raise ToolRefusedError(msg)
-
-
-def push_branch_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
-        cwd = primary_repo_state(ctx.tool_state).dir
-        branch = params.get("branchName")
-        if not branch:
-            branch = (
-                await asyncio.to_thread(_run_git, ["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd)
-            ).strip()
-        reject_special_ref(str(branch), "branch")
-        _require_push_allowed(ctx, branch=str(branch), action="push")
-        force = bool(params.get("force", False))
-        args = ["push", "origin", str(branch)]
-        if force:
-            args.insert(1, "--force-with-lease")
-        trusted = primary_repo_state(ctx.tool_state).push_url
-        output = await asyncio.to_thread(
-            _run_authenticated_git, args, cwd=cwd, token=ctx.git_token, trusted_remote_url=trusted
-        )
-        logger.info("pushed branch {}", branch)
-        return {"success": True, "branch": branch, "output": output}
-
-    repo_class = repository_mutation_class_for_push(ctx.payload.push)
-    return tool(
-        name="push_branch",
-        tool_class=repo_class,
-        mutates=True,
-        description="Push a branch to the remote (handles authentication).",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "branchName": {"type": "string"},
-                "force": {"type": "boolean"},
-            },
-            "additionalProperties": False,
-        },
-        execute=execute(_run, "push_branch"),
-    )
-
-
-def push_tags_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
-        _require_push_allowed(ctx, branch=None, action="tag")
-        cwd = primary_repo_state(ctx.tool_state).dir
-        tags = list(params.get("tags") or [])
-        if not tags:
-            msg = "tags array is required"
-            raise ValueError(msg)
-        for tag in tags:
-            validate_tag_name(str(tag))
-        refspecs = [f"refs/tags/{tag}" for tag in tags]
-        trusted = primary_repo_state(ctx.tool_state).push_url
-        output = await asyncio.to_thread(
-            _run_authenticated_git,
-            ["push", "origin", *refspecs],
-            cwd=cwd,
-            token=ctx.git_token,
-            trusted_remote_url=trusted,
-        )
-        return {"success": True, "tags": tags, "output": output}
-
-    repo_class = repository_mutation_class_for_push(ctx.payload.push)
-    return tool(
-        name="push_tags",
-        tool_class=repo_class,
-        mutates=True,
-        description="Push one or more tags to the remote.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "tags": {"type": "array", "items": {"type": "string"}, "minItems": 1},
-            },
-            "required": ["tags"],
-            "additionalProperties": False,
-        },
-        execute=execute(_run, "push_tags"),
-    )
-
-
-def delete_branch_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
-        branch = str(params["branchName"])
-        reject_special_ref(branch, "branch")
-        cwd = primary_repo_state(ctx.tool_state).dir
-        remote = bool(params.get("remote", False))
-        if remote:
-            _require_push_allowed(ctx, branch=branch, action="delete")
-            trusted = primary_repo_state(ctx.tool_state).push_url
-            output = await asyncio.to_thread(
-                _run_authenticated_git,
-                ["push", "origin", "--delete", branch],
-                cwd=cwd,
-                token=ctx.git_token,
-                trusted_remote_url=trusted,
-            )
-        else:
-            output = await asyncio.to_thread(_run_git, ["branch", "-D", branch], cwd=cwd)
-        return {"success": True, "branch": branch, "remote": remote, "output": output}
-
-    repo_class = repository_mutation_class_for_push(ctx.payload.push)
-    return tool(
-        name="delete_branch",
-        tool_class=repo_class,
-        mutates=True,
-        description="Delete a local or remote branch.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "branchName": {"type": "string"},
-                "remote": {"type": "boolean"},
-            },
-            "required": ["branchName"],
-            "additionalProperties": False,
-        },
-        execute=execute(_run, "delete_branch"),
-    )
-
-
-def commit_changes_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
-        message = str(params["message"])
-        cwd = primary_repo_state(ctx.tool_state).dir
-        branch = (
-            await asyncio.to_thread(_run_git, ["rev-parse", "--abbrev-ref", "HEAD"], cwd=cwd)
-        ).strip()
-        # Local commit is always allowed; push policy gates only the remote ref
-        # update (W4.2 — same local-vs-remote split as ``delete_branch``).
-        status = await asyncio.to_thread(_run_git, ["status", "--porcelain"], cwd=cwd)
-        if not status.strip():
-            return {
-                "success": True,
-                "skipped": True,
-                "pushed": False,
-                "reason": "nothing to commit",
-            }
-        await asyncio.to_thread(_run_git, ["add", "-A"], cwd=cwd)
-        await asyncio.to_thread(_run_git, ["commit", "-m", message], cwd=cwd)
-        sha = (await asyncio.to_thread(_run_git, ["rev-parse", "HEAD"], cwd=cwd)).strip()
-        # The commit is local either way — the push policy decides nothing about
-        # the response, it only records why no remote update was attempted.
-        try:
-            _require_push_allowed(ctx, branch=branch, action="update")
-        except ToolRefusedError as err:
-            logger.info("API ref update skipped (push policy): {}", err)
-        return {"success": True, "sha": sha, "branch": branch, "message": message, "pushed": False}
-
-    repo_class = repository_mutation_class_for_push(ctx.payload.push)
-    return tool(
-        name="commit_changes",
-        tool_class=repo_class,
-        mutates=True,
-        description=(
-            "Commit working-tree changes as a local commit (no push, no remote ref update)."
-        ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "message": {"type": "string"},
-            },
-            "required": ["message"],
-            "additionalProperties": False,
-        },
-        execute=execute(_run, "commit_changes"),
     )

@@ -76,27 +76,6 @@ def _intersect_manifest_grant(
     return frozenset(allowed)
 
 
-def attach_linked_repo_review(
-    repo_root: Path,
-    *,
-    authorized_repos: frozenset[str] | None = None,
-    base_manifest: LinkedReposManifest | None = None,
-    base_manifest_error: str | None = None,
-) -> dict[str, Any] | None:
-    """Return the ``checkout_pr`` payload of :func:`linked_repo_review_with_payload`.
-
-    Returns:
-        The payload when ``.mergecraft/linked-repos.yaml`` exists, otherwise ``None``.
-    """
-    reviewed = linked_repo_review_with_payload(
-        repo_root,
-        authorized_repos=authorized_repos,
-        base_manifest=base_manifest,
-        base_manifest_error=base_manifest_error,
-    )
-    return reviewed[1] if reviewed is not None else None
-
-
 def linked_repo_review_with_payload(
     repo_root: Path,
     *,
@@ -172,7 +151,6 @@ def linked_repo_review_with_payload(
 
 
 __all__ = [
-    "attach_linked_repo_review",
     "linked_repo_review_with_payload",
     "operator_authorized_linked_repos",
 ]

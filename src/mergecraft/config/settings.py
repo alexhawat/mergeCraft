@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Final, Literal
+from typing import Annotated, Any, Final, Literal
 
 import yaml
 from loguru import logger
@@ -286,9 +286,6 @@ class LensTriggerOverride(BaseModel):
     min_risk_band: RiskBand | None = Field(default=None, alias="minRiskBand")
 
 
-OrchestratorKind = Literal["llm", "deterministic", "hybrid"]
-
-
 class AgentBindingOverride(BaseModel):
     """Partial override for one agent entry under ``agents:`` in config (AP1)."""
 
@@ -359,7 +356,9 @@ class RoundBudgetsSettings(BaseModel):
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
 
-    multipliers: list[float] = Field(default_factory=lambda: [1.0])
+    multipliers: list[Annotated[float, Field(gt=0, le=10)]] = Field(
+        default_factory=lambda: [1.0], min_length=1
+    )
 
 
 class ReviewCoverageSettings(BaseModel):
@@ -507,8 +506,8 @@ class FileGroupFanoutSettings(BaseModel):
 
     enabled: bool = False
     max_groups: int = Field(default=6, alias="maxGroups", ge=1, le=12)
-    min_diff_lines: int = Field(default=800, alias="minDiffLines")
-    min_files: int = Field(default=20, alias="minFiles")
+    min_diff_lines: int = Field(default=800, alias="minDiffLines", ge=0)
+    min_files: int = Field(default=20, alias="minFiles", ge=0)
     binding: str | None = None
     concurrency: int = Field(default=1, ge=1, le=6)
     per_group_timeout_s: int = Field(default=600, alias="perGroupTimeoutS", ge=1, le=900)
@@ -522,7 +521,7 @@ class ReviewSettings(BaseModel):
 
     # RC3 / D2 — how many Critical/Major findings earn a verifier dispatch per run.
     # ``0`` means verify every eligible finding (no cap).
-    verification_budget: int = Field(default=24, alias="verificationBudget")
+    verification_budget: int = Field(default=24, alias="verificationBudget", ge=0)
     # RC10 / D7 — optional adversarial recall pass after aggregation (default off).
     recall_pass: bool = Field(default=False, alias="recallPass")
     # Changed-line coverage gate (default: an incomplete run is ``inconclusive``).
@@ -601,6 +600,7 @@ class ReviewSettings(BaseModel):
     instruction_bundle_byte_cap: int = Field(
         default=65536,
         alias="instructionBundleByteCap",
+        ge=0,
         description=(
             "Maximum UTF-8 byte size for the rendered review instruction bundle "
             "(review skills, references, and repo instructions). Review skills and "
@@ -1074,16 +1074,42 @@ class JevSettings(BaseModel):
     packs: dict[str, bool] = Field(default_factory=_default_jev_packs)
     # D15 — floors recorded beside pack version and the J1 corpus rows.
     # Source of truth for corpus ids is ``jev.policy.iter_thresholds``.
-    thresholds: dict[str, float] = Field(
+    thresholds: dict[str, Annotated[float, Field(ge=0, le=1)]] = Field(
         default_factory=lambda: {
             "unit/v1.certain": 0.9,
             "unit/v1.likely": 0.6,
             "lens/v1.likely": 0.6,
-            "align/v1.same_defect": 0.6,
-            "align/v1.is_withdrawn_reraise": 0.5,
             "evidence/v1.relation": 0.5,
         }
     )
+
+    @field_validator("thresholds", mode="before")
+    @classmethod
+    def _discard_unwired_alignment_floors(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        result = dict(value)
+        for key in ("align/v1.same_defect", "align/v1.is_withdrawn_reraise"):
+            if key in result:
+                result.pop(key)
+                logger.warning(
+                    "retired Jev threshold {!r} has no runtime consumer and is ignored", key
+                )
+        return result
+
+    @field_validator("thresholds")
+    @classmethod
+    def _validate_runtime_thresholds(cls, value: dict[str, float]) -> dict[str, float]:
+        from mergecraft.jev.pack_registry import DEFAULT_THRESHOLDS
+
+        unknown = sorted(set(value) - DEFAULT_THRESHOLDS.keys())
+        if unknown:
+            raise ValueError(f"unknown Jev threshold(s): {', '.join(unknown)}")
+        certain = value.get("unit/v1.certain", DEFAULT_THRESHOLDS["unit/v1.certain"])
+        likely = value.get("unit/v1.likely", DEFAULT_THRESHOLDS["unit/v1.likely"])
+        if certain < likely:
+            raise ValueError("unit/v1.certain must be greater than or equal to unit/v1.likely")
+        return value
 
     @field_validator("model")
     @classmethod
@@ -1112,6 +1138,30 @@ class RepoSettings(BaseModel):
     """
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _discard_retired_preview_settings(cls, value: Any) -> Any:
+        """Load old scaffolds without retaining retired runtime capabilities."""
+        if not isinstance(value, dict):
+            return value
+        result = dict(value)
+        for key in (
+            "signedCommits",
+            "signed_commits",
+            "autoMergeEnabled",
+            "auto_merge_enabled",
+            "operatorPipeline",
+            "operator_pipeline",
+            "orchestrator",
+            "pipeline",
+        ):
+            if key not in result:
+                continue
+            retired = result.pop(key)
+            if retired is not None and retired is not False and retired != "llm":
+                logger.warning("retired config key {!r} has no effect and is ignored", key)
+        return result
 
     schema_version: str = Field(default=CONFIG_SCHEMA_VERSION, alias="schemaVersion")
     # HA3 / D11 — explicit harness selection. When unset, ``utils/agent_resolve``
@@ -1171,14 +1221,6 @@ class RepoSettings(BaseModel):
     # ``findings carryover`` have no such env and read this instead. Unset
     # means the job-token bot, ``github-actions[bot]``.
     reviewer_bot_login: str | None = Field(default=None, alias="reviewerBotLogin")
-    auto_merge_enabled: bool = Field(
-        default=False,
-        alias="autoMergeEnabled",
-        description=(
-            "Plumbed only — no consumer in the standalone runtime. ``init`` "
-            "scaffolds ``false``; setting it to ``true`` only logs a warning."
-        ),
-    )
     blast_radius_override: RuleSet = Field(
         default_factory=RuleSet,
         alias="blastRadiusOverride",
@@ -1187,7 +1229,6 @@ class RepoSettings(BaseModel):
             "standalone runtime; setting it only logs a warning."
         ),
     )
-    signed_commits: bool = Field(default=False, alias="signedCommits")
     mode_instructions: dict[str, str] = Field(default_factory=dict, alias="modeInstructions")
     static_checks: list[StaticCheckDefinition] = Field(default_factory=list, alias="staticChecks")
     # #36 / D10 — declared-only reuse of the repo's finished CI. Default empty:
@@ -1198,22 +1239,6 @@ class RepoSettings(BaseModel):
     analyzers: AnalyzersSettings = Field(default_factory=AnalyzersSettings)
     review: ReviewSettings = Field(default_factory=ReviewSettings)
     agents: dict[str, AgentBindingOverride] = Field(default_factory=dict)
-    # AP6 / D10 — orchestrator kind. Default ``llm`` preserves today's prompt-driven
-    # orchestrator; ``deterministic`` walks a declarative pipeline file; ``hybrid``
-    # is the AP7 decision-node seam (declared here for forward compatibility).
-    orchestrator: OrchestratorKind = "llm"
-    # AP6 / D9 — operator-authored pipeline used when the repo pipeline is untrusted
-    # or absent. Path relative to repo root or absolute.
-    operator_pipeline: str | None = Field(
-        default=None,
-        alias="operatorPipeline",
-        description=(
-            "Reserved — no effect. The operator-authored pipeline path is not "
-            "consumed by the standalone runtime; setting it only logs a warning."
-        ),
-    )
-    # AP6 — optional repo-local pipeline file path (default ``.mergecraft/pipeline.yaml``).
-    pipeline: str | None = None
     learnings: str | None = None
     learnings_headings: list[LearningsHeading] = Field(
         default_factory=list, alias="learningsHeadings"
@@ -1390,9 +1415,7 @@ def default_settings() -> RepoSettings:
             "push": "restricted",
             "shell": "restricted",
             "pr_approve_enabled": False,
-            "auto_merge_enabled": False,
             "blast_radius_override": {},
-            "signed_commits": False,
             "mode_instructions": {},
             "static_checks": [],
             "analyzers": {},
@@ -1556,10 +1579,6 @@ def _warn_reserved_settings(raw: dict[str, Any]) -> None:
         reserved.append("stopScript")
     if _value_differs_from_default(raw, "blastRadiusOverride", {}):
         reserved.append("blastRadiusOverride")
-    if _value_differs_from_default(raw, "operatorPipeline", None):
-        reserved.append("operatorPipeline")
-    if raw.get("autoMergeEnabled") is True:
-        reserved.append("autoMergeEnabled")
     for key in reserved:
         logger.warning(
             "reserved config key {!r} has no effect — it is accepted for "

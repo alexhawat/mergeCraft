@@ -1563,7 +1563,6 @@ def _render_run_modes(ctx: RunContext, agent_id: AgentId) -> list[Mode]:
     return [
         *compute_modes(
             agent_id,
-            settings.signed_commits,
             inline_budget=settings.analyzers.inline_budget,
             time_budget_minutes=None if agent_timeout_ms is None else agent_timeout_ms // 60_000,
         ),
@@ -1624,8 +1623,6 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         xrepo=payload.get("xrepo"),
         prepush_script=settings.prepush_script,
         pr_approve_enabled=settings.pr_approve_enabled,
-        auto_merge_enabled=settings.auto_merge_enabled,
-        signed_commits=settings.signed_commits,
         mode_instructions=settings.mode_instructions,
         static_checks=[
             StaticCheckConfig(
@@ -1901,7 +1898,6 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
         modes=ctx.modes,
         agent_id=ctx.agent_id,
         output_schema=ctx.output_schema,
-        signed_commits=settings.signed_commits,
         learnings_file_path=tool_state.learnings_file_path,
         learnings_headings=settings.learnings_headings,
         setup_hook_failure=ctx.setup_hook_failure,
@@ -1966,7 +1962,6 @@ def _render_agent_instructions(
         modes=modes,
         agent_id=agent_id,
         output_schema=ctx.output_schema,
-        signed_commits=settings.signed_commits,
         learnings_file_path=tool_state.learnings_file_path,
         learnings_headings=settings.learnings_headings,
         setup_hook_failure=ctx.setup_hook_failure,

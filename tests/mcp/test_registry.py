@@ -50,17 +50,11 @@ EXPECTED_CORE_TOOLS = {
     "git",
     "git_fetch",
     "run_static_checks",
-    "push_branch",
-    "push_tags",
-    "delete_branch",
     "upload_file",
     "set_output",
     "shell",
     "kill_background",
     "select_mode",
-    "create_pull_request",
-    "update_pull_request_body",
-    "close_pull_request",
 }
 
 
@@ -83,7 +77,6 @@ def tool_ctx(tmp_path: Path) -> ToolContext:
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
-        signed_commits=True,
         xrepo=XrepoConfig(mode="explicit", read=["other"], write=["other"]),
         static_checks_enabled=True,
         trust_tier="trusted",
@@ -95,7 +88,7 @@ def test_orchestrator_tool_registry_lists_expected_names(tool_ctx: ToolContext) 
     names = {t.name for t in tools}
     missing = EXPECTED_CORE_TOOLS - names
     assert not missing, f"missing tools: {sorted(missing)}"
-    assert "commit_changes" in names  # signed_commits=True
+    assert "commit_changes" not in names  # no committing modes ship
     assert "list_repos" in names
     assert "checkout_repo" in names
     assert len(tools) >= len(EXPECTED_CORE_TOOLS)
@@ -114,7 +107,7 @@ def test_tool_list_entries_have_schemas(tool_ctx: ToolContext) -> None:
 def test_mutates_flag_marks_state_changing_tools(tool_ctx: ToolContext) -> None:
     tools = {t.name: t for t in build_orchestrator_tools(tool_ctx)}
     assert tools["create_issue_comment"].mutates is True
-    assert tools["push_branch"].mutates is True
+    assert tools["create_pull_request_review"].mutates is True
     assert tools["get_issue"].mutates is False
     assert tools["git"].mutates is False
     assert tools["shell"].mutates is True

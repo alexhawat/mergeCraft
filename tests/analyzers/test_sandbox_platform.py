@@ -24,7 +24,6 @@ def test_unsupported_platform_never_launches_linux_probe(
     monkeypatch: pytest.MonkeyPatch, platform: str
 ) -> None:
     monkeypatch.setattr(sandbox, "sys", SimpleNamespace(platform=platform))
-    monkeypatch.delenv("MERGECRAFT_PROBE_TEST_DOUBLE", raising=False)
     monkeypatch.setattr(
         sandbox.subprocess, "run", lambda *a, **k: pytest.fail("Linux probe launched")
     )

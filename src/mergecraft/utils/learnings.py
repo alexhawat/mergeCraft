@@ -551,20 +551,6 @@ def collapse_learnings_sections(text: str) -> tuple[str, str, str, str]:
     )
 
 
-def split_learnings_for_persist(
-    current: str,
-    seed: str,
-) -> tuple[str, str]:
-    """Return ``(seed_part, new_part)`` by line-level diff (D10 helper).
-
-    Used by callers that want the agent's net-new content as a
-    standalone string (the influence CLI; tests). The default
-    persist path uses ``route_learnings_for_persist`` directly.
-    """
-    entries = _extract_new_entries(current, seed)
-    return seed, "\n\n".join(entries)
-
-
 def list_active_entries(text: str) -> list[dict[str, object | None]]:
     """List active (promoted) entries with their provenance records (D11).
 
@@ -1019,7 +1005,6 @@ __all__ = [
     "seed_learnings_file",
     "seed_xrepo_learnings_file",
     "split_learnings_by_section",
-    "split_learnings_for_persist",
     "tail_after_staging_section",
     "truncate_at_line_boundary",
     "xrepo_learnings_file_path",

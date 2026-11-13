@@ -459,7 +459,7 @@ To discover a `check_suite_id` for a commit, call `list_check_runs` with the PR 
 - A failure's fingerprint is its command plus its specific diagnostic line — GitHub's `Process completed with exit code N` trailer, `make: ***` and "Found N errors" summaries never count as the signature. A log with nothing but such lines also hashes the job and step, so two unrelated jobs never share an identity
 - Flaky failures are named flaky rather than treated as the author's defect
 
-The review publishes `### 🚨 CI failures` with clustered root causes, flaky/blame verdicts, and redacted excerpts. The pre-merge **CI** row reports failure count, cluster count, flaky count, PR-attributed count, unattributed count, and whether truncation occurred. Inline CI comments may carry a one-click `suggestion` when the fix is a contained single-hunk edit; pushing a fix commit stays behind the existing `push` permission. Only an inline comment is posted for a `caused_by_pr` failure: an unattributed one has no proven hunk to anchor to.
+The review publishes `### 🚨 CI failures` with clustered root causes, flaky/blame verdicts, and redacted excerpts. The pre-merge **CI** row reports failure count, cluster count, flaky count, PR-attributed count, unattributed count, and whether truncation occurred. Inline CI comments may carry a one-click `suggestion` when the fix is a contained single-hunk edit. Only an inline comment is posted for a `caused_by_pr` failure: an unattributed one has no proven hunk to anchor to.
 
 **Recorded as evidence (#36).** Each clustered CI failure is also recorded as a `source: ci` finding on the run and carried into the [merge evidence packet](REVIEW-DOCTRINE.md), keeping the blame verdict it was given: a failure attributed to this PR is `Major` / `introduced_by_pr: true`; a flaky or pre-existing one is `Minor` / `introduced_by_pr: false`; and an **unattributed** one — no diff overlap and no same-fingerprint base-branch failure — is `Major` / `introduced_by_pr: unknown`. Since every gate that consumes findings is monotone in blockers, the annotation is what makes the verdict mechanical rather than a matter of wording — a flaky pipeline cannot block a clean pull request, and an unattributed failure cannot be cleared without evidence. Failed runs past the log-analysis cap (three per check suite) are recorded too, one `Major` / `introduced_by_pr: unknown` finding per run naming it, since no log was read that could clear them.
 
@@ -509,8 +509,8 @@ The packet's blast-radius classification is an evidence-weighted policy signal,
 not an instruction to merge. `low` means the change is eligible for the
 auto-merge lane after required checks pass, `medium` means assisted review, and
 `high` means automatic merge is forbidden. These semantics do not enable or
-disable auto-merge; `autoMergeEnabled` remains `false`, and Batch D (#46) owns
-the separate mapping from evidence outcomes to workflow actions.
+disable auto-merge. mergeCraft publishes review outcomes; repository policy
+controls whether and when a pull request can merge.
 
 A pull request can declare the paths it is expected to touch with a
 `Scope paths:` block of globs at the end of its body (or of an issue it

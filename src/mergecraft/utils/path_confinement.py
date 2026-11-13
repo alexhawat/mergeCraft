@@ -184,26 +184,44 @@ def resolve_confined_path(
     untrusted_path: str,
     *,
     changed_paths: frozenset[str] | None = None,
+    allow_absolute: bool = False,
+    allow_internal_symlinks: bool = True,
+    require_file: bool = True,
 ) -> str:
     """Resolve ``untrusted_path`` inside ``root`` or raise ``ValueError``.
 
     Rejects absolute paths, traversal, NUL bytes, prefix collisions
     (``/repo`` vs ``/repo2``), symlinks that resolve outside ``root``, and
-    (when provided) paths outside ``changed_paths``.
+    (when provided) paths outside ``changed_paths``. Callers may explicitly
+    allow absolute paths or missing/directory paths; symlinks always remain
+    confined, and can additionally be refused at every path component.
     """
     if "\x00" in untrusted_path:
         msg = "path contains a NUL byte"
         raise ValueError(msg)
-    if Path(untrusted_path).is_absolute():
+    if not allow_absolute and Path(untrusted_path).is_absolute():
         msg = "absolute paths are not allowed"
         raise ValueError(msg)
 
     repo_root = Path(root).resolve()
-    candidate = (repo_root / untrusted_path).resolve()
+    unresolved = repo_root / untrusted_path
+    candidate = unresolved.resolve()
     if not _is_under_root(candidate, repo_root):
         msg = f"path {untrusted_path!r} escapes the repository root"
         raise ValueError(msg)
-    if not candidate.is_file():
+    if not allow_internal_symlinks:
+        try:
+            parts = unresolved.relative_to(repo_root).parts
+        except ValueError as exc:
+            msg = f"path {untrusted_path!r} escapes the repository root"
+            raise ValueError(msg) from exc
+        current = repo_root
+        for part in parts:
+            current = current / part
+            if current.is_symlink():
+                msg = f"path {untrusted_path!r} is a symlink"
+                raise ValueError(msg)
+    if require_file and not candidate.is_file():
         msg = f"path {untrusted_path!r} is not a file in the checkout"
         raise ValueError(msg)
 
@@ -225,8 +243,8 @@ def resolved_within_root(path: Path, root: Path) -> bool:
     an escape.
     """
     try:
-        path.resolve().relative_to(root)
-    except (OSError, ValueError):
+        resolve_confined_path(root, str(path.resolve()), allow_absolute=True, require_file=False)
+    except (OSError, ValueError, RuntimeError):
         return False
     return True
 
