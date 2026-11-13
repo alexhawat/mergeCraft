@@ -45,6 +45,30 @@ event  ->  setup  ->  trust tier  ->  analyzers  ->  triage / skip gates
 | `verify/`, `browser/` | Behaviour verification ([verify-behavior](verify-behavior.md)). |
 | `cli/` | The Typer command tree; the generated reference is [cli](cli.md), and exit codes are in [EXIT-CODES](EXIT-CODES.md). |
 
+## Repeated API reads within a run
+
+Each GitHub client owns a `RunMemo` shared by its main and MCP event loops.
+Workflow-run queries and artifact listings reuse matching repository/query
+snapshots. The three base-policy readers share one parsed config per repository
+and base SHA, including a stable fail-closed result when that config is missing,
+unreadable, or invalid. Every consumer receives a copy. Providers without this
+optional memo continue to read directly.
+
+PR-file consumers share one bounded listing keyed by repository, PR number,
+head SHA, base SHA, and pagination bounds. Live PR reads verify that identity
+before reuse and after a new page walk. Checkout and verdict head checks remain
+live. The initial PR payload supplies title, labels, and scope-body readers from
+a separate run-context snapshot; those author fields never enter the narrowed
+trust-binding event.
+
+Workflow mutations invalidate workflow/artifact snapshots. Closing a client
+ends the current memo generation and cancels its pending readers, including
+invalidated producers still in flight. Reusing the client starts fresh; closing
+only a temporary worker loop's transport preserves the run snapshot. Cancelling
+one waiting consumer does not cancel a producer needed by another consumer.
+Transport failures retain their existing retry behavior and are not cached as
+successful listings.
+
 ## Boundaries that matter
 
 - **Pull-request-controlled input is data.** `.mergecraft/config.yaml` and the
