@@ -18,6 +18,7 @@ from mergecraft.mcp.tool_state import (
     primary_repo_state,
 )
 from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, API_ONLY_SCOPE_GUIDANCE
+from mergecraft.utils.blocking import run_blocking
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
@@ -208,7 +209,7 @@ API_ONLY_SKIP_REASON = (
 
 
 def run_analyzers_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]) -> dict[str, Any]:
+    async def _run_in_scope(params: dict[str, Any]) -> dict[str, Any]:
         if ctx.tool_state.review_scope == API_ONLY_SCOPE:
             # The PR head was never materialized, so the local tree is the base or
             # an earlier head. Scanning it would attribute findings to code that
@@ -230,9 +231,9 @@ def run_analyzers_tool(ctx: ToolContext):
         diff_text = _load_diff_text(Path(diff_path) if diff_path else None, ctx=ctx)
 
         # #942 — analyzer settings come from the PR's base, never the head checkout.
-        from mergecraft.analyzers.settings_pin import resolve_pinned_analyzer_settings
+        from mergecraft.analyzers.settings_pin import resolve_pinned_analyzer_settings_async
 
-        pinned = resolve_pinned_analyzer_settings(ctx, repo_root)
+        pinned = await resolve_pinned_analyzer_settings_async(ctx, repo_root)
         settings = pinned.settings
         offline = ctx.payload.event.trigger == "unknown"
         from mergecraft.analyzers.pipeline import run_analyzer_pipeline
@@ -263,7 +264,8 @@ def run_analyzers_tool(ctx: ToolContext):
             logger.info("analyzers: reusing pre-computed run (inputs unchanged)")
             run_state = prior
         else:
-            run_state = run_analyzer_pipeline(
+            run_state = await run_blocking(
+                run_analyzer_pipeline,
                 repo_root=repo_root,
                 changed_files=changed,
                 tier=_resolve_tier(ctx),  # type: ignore[arg-type]  # — _resolve_tier returns str; run_analyzer_pipeline expects AnalyzerTier literal
@@ -334,6 +336,13 @@ def run_analyzers_tool(ctx: ToolContext):
             scan_status,
         )
         return payload
+
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
+        from mergecraft.analyzers.sandbox import isolated_analyzer_run_root
+
+        async with ctx.tool_state.checkout_operation_lock:
+            with isolated_analyzer_run_root():
+                return await _run_in_scope(params)
 
     return tool(
         name="run_analyzers",

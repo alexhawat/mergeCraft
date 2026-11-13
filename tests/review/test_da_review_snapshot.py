@@ -13,7 +13,9 @@ import inspect
 import re
 from pathlib import Path
 
+import click
 import pytest
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -44,11 +46,13 @@ def test_hidden_diff_review_alias_remains_invocable() -> None:
     result = runner.invoke(app, ["diff-review", "--help"], env=_DUMB_ENV)
     combined = _plain(result.stdout + result.stderr)
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, combined
-    names = {cmd.name for cmd in app.registered_commands if cmd.name}
-    assert "diff-review" in names
-    hidden = [cmd for cmd in app.registered_commands if cmd.name == "diff-review"]
-    assert hidden
-    assert hidden[0].hidden is True
+    root = get_command(app)
+    assert isinstance(root, click.Group)
+    with click.Context(root) as ctx:
+        name, command, _ = root.resolve_command(ctx, ["diff-review"])
+    assert name == "diff-review"
+    assert command is not None
+    assert command.hidden is True
 
 
 def test_review_snapshot_type_exists() -> None:

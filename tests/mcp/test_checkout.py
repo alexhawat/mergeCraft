@@ -701,6 +701,43 @@ async def test_impact_path_omitted_when_operator_disables_analyzers(
     assert "impactPath" not in payload
 
 
+async def test_impact_defaults_do_not_repeat_base_git_probe_on_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unusable base config disables impact without a second Git lookup."""
+    import threading
+
+    from mergecraft.analyzers import settings_pin
+
+    repo, head_sha = _pr_repo_with_impact_enabled(tmp_path)
+    base_repo = tmp_path / "work"
+    _git(base_repo, "checkout", "base")
+    config = base_repo / ".mergecraft" / "config.yaml"
+    config.parent.mkdir()
+    config.symlink_to("../README.md")
+    _git(base_repo, "add", ".mergecraft/config.yaml")
+    _git(base_repo, "commit", "-m", "refuse symlinked base config")
+    _git(base_repo, "push", str(tmp_path / "origin.git"), "base")
+    github = _StubGitHub(head_sha=head_sha, reviews=[])
+    ctx = _ctx_for(repo, github, tmp_path, mode="Review")
+    object.__setattr__(ctx, "analyzers_settings_enabled", False)
+    object.__setattr__(ctx, "gh_event", {"pull_request": {"base": {"ref": "base"}}})
+    loop_thread = threading.get_ident()
+    lookup_threads: list[int] = []
+    git = settings_pin._git
+
+    def track_git(*args: Any) -> subprocess.CompletedProcess[bytes]:
+        lookup_threads.append(threading.get_ident())
+        return git(*args)
+
+    monkeypatch.setattr(settings_pin, "_git", track_git)
+    payload = await _checkout(ctx)
+
+    assert "impactPath" not in payload
+    assert lookup_threads
+    assert loop_thread not in lookup_threads
+
+
 def _baseline_on_base_branch(ctx: ToolContext, repo: Path) -> TreeBaseline:
     """Pin the review baseline on the base branch, as the Action's merge-ref checkout does."""
     _git(repo, "checkout", "-q", "base")

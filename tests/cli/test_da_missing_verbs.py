@@ -70,11 +70,11 @@ def _root_help_command_names(help_text: str) -> set[str]:
 
 
 def _root_command_names() -> set[str]:
-    return {cmd.name for cmd in app.registered_commands if cmd.name}
+    return _root_help_command_names(_root_help())
 
 
 def _root_group_names() -> set[str]:
-    return {group.name for group in app.registered_groups if group.name}
+    return _root_help_command_names(_root_help())
 
 
 # ── D8 inherit (already green — do not xfail) ─────────────────────────────────

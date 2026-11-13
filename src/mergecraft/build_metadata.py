@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from functools import lru_cache
 from pathlib import Path
@@ -26,9 +27,13 @@ def resolve_action_deployment_identity() -> tuple[str | None, str | None]:
 @lru_cache(maxsize=1)
 def resolve_build_commit() -> str | None:
     """Return the full git SHA baked at build time, or from a source checkout."""
-    from mergecraft.config.env import RunInputsEnv
-
-    env_commit = RunInputsEnv().build_commit or ""
+    # Version bootstrap must not import all application settings. Match
+    # RunInputsEnv's alias priority, empty-value fallback and stripped strings.
+    env_commit = (
+        os.environ.get("MERGECRAFT_BUILD_COMMIT")
+        or os.environ.get("build_commit")  # noqa: SIM112 — preserve RunInputsEnv's field-name alias.
+        or ""
+    ).strip()
     if env_commit:
         return env_commit
     if _baked_commit:

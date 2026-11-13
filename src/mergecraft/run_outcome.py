@@ -21,7 +21,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, Literal
 
-from mergecraft.agents.gates import BLOCKING_SEVERITIES
+from mergecraft.findings.severity import BLOCKING_SEVERITIES
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
