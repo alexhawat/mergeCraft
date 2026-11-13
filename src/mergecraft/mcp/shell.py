@@ -7,7 +7,6 @@ TERM → grace → KILL), matching agent CLI teardown (W9 / ``#14``).
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import os
 import re
@@ -23,7 +22,9 @@ from loguru import logger
 from mergecraft.mcp.git_guards import shell_command_denies_credential_paths
 from mergecraft.mcp.shared import ToolClass, ToolRefusedError, execute, tool
 from mergecraft.mcp.tool_state import BackgroundProcess, primary_repo_state
-from mergecraft.utils.process_group import kill_process_group
+from mergecraft.utils.blocking import run_blocking
+from mergecraft.utils.process_group import kill_process_group, track_process_group
+from mergecraft.utils.process_scope import check_process_cancelled
 from mergecraft.utils.secrets import resolve_env
 from mergecraft.utils.workspace import (
     WorkspacePathError,
@@ -434,6 +435,7 @@ def _run_foreground(
     killed again and whatever output was gathered so far is returned, rather
     than letting a second ``TimeoutExpired`` escape with the child unreaped.
     """
+    check_process_cancelled()
     proc = _spawn_shell(
         command,
         env=env,
@@ -444,23 +446,25 @@ def _run_foreground(
     )
     stdout_b: bytes | None
     stderr_b: bytes | None
-    try:
-        stdout_b, stderr_b = proc.communicate(timeout=timeout_s)
-        return stdout_b, stderr_b, proc.returncode, False
-    except subprocess.TimeoutExpired as first:
-        kill_process_group(proc.pid)
-        stdout_b, stderr_b = first.stdout, first.stderr
+    with proc, track_process_group(proc):
         try:
-            stdout_b, stderr_b = proc.communicate(timeout=5)
-        except subprocess.TimeoutExpired as second:
-            # A descendant escaped the group and holds the pipes open.
-            stdout_b = second.stdout if second.stdout is not None else stdout_b
-            stderr_b = second.stderr if second.stderr is not None else stderr_b
-            with contextlib.suppress(OSError):
-                proc.kill()
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                proc.wait(timeout=2)
-        return stdout_b, stderr_b, proc.returncode, True
+            stdout_b, stderr_b = proc.communicate(timeout=timeout_s)
+            check_process_cancelled()
+            return stdout_b, stderr_b, proc.returncode, False
+        except subprocess.TimeoutExpired as first:
+            kill_process_group(proc.pid)
+            stdout_b, stderr_b = first.stdout, first.stderr
+            try:
+                stdout_b, stderr_b = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired as second:
+                # A descendant escaped the group and holds the pipes open.
+                stdout_b = second.stdout if second.stdout is not None else stdout_b
+                stderr_b = second.stderr if second.stderr is not None else stderr_b
+                with contextlib.suppress(OSError):
+                    proc.kill()
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    proc.wait(timeout=2)
+            return stdout_b, stderr_b, proc.returncode, True
 
 
 def shell_tool(ctx: ToolContext):
@@ -527,7 +531,7 @@ def shell_tool(ctx: ToolContext):
 
         # Spawn + wait are blocking; run them off the event loop so a slow
         # command does not stall every other MCP request on this loop.
-        stdout_b, stderr_b, returncode, timed_out = await asyncio.to_thread(
+        stdout_b, stderr_b, returncode, timed_out = await run_blocking(
             _run_foreground,
             command,
             env=env,

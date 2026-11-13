@@ -26,6 +26,8 @@ from mergecraft.security.egress import (
     inspect_external_url,
     pinned_http_transport,
 )
+from mergecraft.utils.file_lock import acquire_file_lock
+from mergecraft.utils.process_scope import check_process_cancelled
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -205,6 +207,7 @@ def _download_pinned_url(url: str, dest: Path) -> None:
     transport_key = None
     try:
         for _ in range(8):
+            check_process_cancelled()
             parsed = urlparse(current)
             if parsed.scheme != "https" or not parsed.netloc:
                 msg = f"refusing unpinned or non-https download url: {current!r}"
@@ -248,6 +251,7 @@ def _download_pinned_url(url: str, dest: Path) -> None:
                     response.raise_for_status()
                     with dest.open("wb") as handle:
                         for chunk in response.iter_bytes():
+                            check_process_cancelled()
                             handle.write(chunk)
                     return
             except httpx.HTTPError as exc:
@@ -308,7 +312,7 @@ def _cache_provision_lock(cache_root: Path) -> Iterator[None]:
     lock_path = cache_root / _PROVISION_LOCK_NAME
     with lock_path.open("a+", encoding="utf-8") as lock_file:
         if sys.platform != "win32":
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            acquire_file_lock(lock_file.fileno())
         try:
             yield
         finally:

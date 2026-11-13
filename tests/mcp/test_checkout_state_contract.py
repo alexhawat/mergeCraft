@@ -33,6 +33,7 @@ RETAINED_TOOL_FIELDS = {
     "background_processes",
     "browser_daemon",
     "capture_verdicts",
+    "checkout_operation_lock",
     "credential_degradations",
     "dependency_installation",
     "driver_reports_reads",

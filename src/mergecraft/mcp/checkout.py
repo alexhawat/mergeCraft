@@ -26,6 +26,7 @@ from mergecraft.mcp.tool_call import normalize_pull_number_aliases
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
 from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, degraded_checkout_reason
 from mergecraft.review_policy.ignore_paths import ReviewIgnore, filter_diff, rename_sources
+from mergecraft.utils.blocking import run_blocking
 from mergecraft.utils.gha_log import warning
 from mergecraft.utils.git_hardening import read_remote_origin_url
 from mergecraft.utils.github import GitHubClient
@@ -1182,7 +1183,7 @@ def checkout_pr_tool(ctx: ToolContext):
         state = primary_repo_state(ctx.tool_state)
         cwd = state.dir
 
-        dirty = get_git_status(cwd)
+        dirty = await run_blocking(get_git_status, cwd)
         if dirty:
             msg = (
                 f"cannot checkout PR #{pull_number} while the working tree has "
@@ -1252,7 +1253,8 @@ def checkout_pr_tool(ctx: ToolContext):
         # ``_fetch_head_with_retry`` detaches before retrying on the
         # "refusing to fetch into branch" error — safe because the dirty check
         # above already guarantees no uncommitted work to lose.
-        fetched, fetch_err = _fetch_head_with_retry(
+        fetched, fetch_err = await run_blocking(
+            _fetch_head_with_retry,
             cwd=cwd,
             pull_number=pull_number,
             local_branch=local_branch,
@@ -1342,8 +1344,10 @@ def checkout_pr_tool(ctx: ToolContext):
 
         # The API lookup and refs/pull/N/head fetch can straddle a push. Bind
         # the checkout to the verified immutable object before exposing scope.
-        checkout_sha = _run_git(
-            ["rev-parse", "--verify", f"{local_branch}^{{commit}}"], cwd=cwd
+        checkout_sha = (
+            await run_blocking(
+                _run_git, ["rev-parse", "--verify", f"{local_branch}^{{commit}}"], cwd=cwd
+            )
         ).strip()
         if head_sha and checkout_sha.lower() != head_sha.lower():
             msg = (
@@ -1351,33 +1355,36 @@ def checkout_pr_tool(ctx: ToolContext):
                 "retry checkout before reviewing this revision."
             )
             raise RuntimeError(msg)
-        _run_git(["checkout", "-B", local_branch, checkout_sha], cwd=cwd)
+        await run_blocking(_run_git, ["checkout", "-B", local_branch, checkout_sha], cwd=cwd)
         # Configuration and tree bytes may change at this controlled boundary.
         # Re-pin their hashes before later API calls can fail or be cancelled;
         # the run's trusted settings/policy values remain pinned across retries.
         _rebaseline_config_after_checkout(ctx)
         # Ensure base is available for merge-base diffs
-        base_env, base_remote_url = _git_env_for_cwd(cwd, ctx.git_token)
+        base_env, base_remote_url = await run_blocking(_git_env_for_cwd, cwd, ctx.git_token)
         base_fetch_failure: str | None = None
         try:
-            _run_git(
-                [
-                    "fetch",
-                    "--no-tags",
-                    *_depth_flags(cwd),
-                    "origin",
-                    f"{base_ref}:refs/remotes/origin/{base_ref}",
-                ],
-                cwd=cwd,
-                env=base_env,
-                remote_url=base_remote_url or None,
+            (
+                await run_blocking(
+                    _run_git,
+                    [
+                        "fetch",
+                        "--no-tags",
+                        *(await run_blocking(_depth_flags, cwd)),
+                        "origin",
+                        f"{base_ref}:refs/remotes/origin/{base_ref}",
+                    ],
+                    cwd=cwd,
+                    env=base_env,
+                    remote_url=base_remote_url or None,
+                )
             )
         except Exception as err:
             base_fetch_failure = str(err).splitlines()[0] if str(err) else "git fetch failed"
             logger.info("base fetch soft-failed: {}", err)
         if base_ref:
             try:
-                ensure_local_base_branch_alias(cwd=cwd, base_ref=base_ref)
+                await run_blocking(ensure_local_base_branch_alias, cwd=cwd, base_ref=base_ref)
             except Exception as err:
                 logger.info("base branch alias soft-failed: {}", err)
 
@@ -1389,7 +1396,7 @@ def checkout_pr_tool(ctx: ToolContext):
             local_branch=local_branch,
         )
         try:
-            state.push_url = read_remote_origin_url(cwd)
+            state.push_url = await run_blocking(read_remote_origin_url, cwd)
         except RuntimeError:
             if is_fork and head.get("repo"):
                 clone_url = (head["repo"].get("clone_url") or "").rstrip("/")
@@ -1404,7 +1411,8 @@ def checkout_pr_tool(ctx: ToolContext):
         unreviewable: list[str] = []
         diff_truncated = False
         try:
-            diff = _run_git(
+            diff = await run_blocking(
+                _run_git,
                 ["diff", "--merge-base", f"origin/{base_ref}", "HEAD"],
                 cwd=cwd,
             )
@@ -1488,7 +1496,8 @@ def checkout_pr_tool(ctx: ToolContext):
             or ""
         )
         if prior_sha:
-            incremental = _write_incremental_diff(
+            incremental = await run_blocking(
+                _write_incremental_diff,
                 cwd=cwd,
                 temp=temp,
                 pull_number=pull_number,
@@ -1544,18 +1553,21 @@ def checkout_pr_tool(ctx: ToolContext):
         # available (D7).
         try:
             repo_root = Path(cwd)
-            from mergecraft.analyzers.settings_pin import resolve_pinned_analyzer_settings
+            from mergecraft.analyzers.settings_pin import resolve_pinned_analyzer_settings_async
 
-            pinned_settings = resolve_pinned_analyzer_settings(ctx, repo_root).settings
+            pinned_settings = (
+                await resolve_pinned_analyzer_settings_async(ctx, repo_root)
+            ).settings
             if analyzers_enabled(ctx) and pinned_settings.impact:
-                ast_grep_binary = resolve_ast_grep_binary()
+                ast_grep_binary = await run_blocking(resolve_ast_grep_binary)
                 if ast_grep_binary is None:
                     logger.info(
                         "impactPath skipped for PR #{}: managed ast-grep binary unavailable",
                         pull_number,
                     )
                 else:
-                    impact_result = write_impact(
+                    impact_result = await run_blocking(
+                        write_impact,
                         diff,
                         cwd,
                         temp,
@@ -1583,8 +1595,11 @@ def checkout_pr_tool(ctx: ToolContext):
                 operator_authorized_linked_repos,
             )
 
-            base_lookup = _base_linked_repo_manifest(
-                cwd=cwd, base_ref=base_ref, base_fetch_failure=base_fetch_failure
+            base_lookup = await run_blocking(
+                _base_linked_repo_manifest,
+                cwd=cwd,
+                base_ref=base_ref,
+                base_fetch_failure=base_fetch_failure,
             )
             # Recorded for the ``xrepo`` policy evidence producer, which reads
             # what this checkout computed instead of walking git a second time.
@@ -1617,7 +1632,7 @@ def checkout_pr_tool(ctx: ToolContext):
         )
         return result
 
-    async def _run(params: dict[str, Any]):
+    async def _run_locked(params: dict[str, Any]):
         if ctx.tool_state.review is not None:
             msg = "cannot restart checkout after this run has published a review"
             raise RuntimeError(msg)
@@ -1643,6 +1658,10 @@ def checkout_pr_tool(ctx: ToolContext):
             # state changed. Neither the previous nor partial new proof is valid.
             invalidate_checkout_review_state(ctx.tool_state)
             raise
+
+    async def _run(params: dict[str, Any]):
+        async with ctx.tool_state.checkout_operation_lock:
+            return await _run_locked(params)
 
     return tool(
         name="checkout_pr",

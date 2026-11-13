@@ -95,6 +95,12 @@ def test_second_timeout_after_kill_is_contained_and_reaped(
         pid = 0
         returncode: int | None = None
 
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            pass
+
         def communicate(self, timeout: float | None = None) -> tuple[bytes, bytes]:
             calls["communicate"] += 1
             raise subprocess.TimeoutExpired("sh", timeout or 0, output=b"partial", stderr=b"")
@@ -117,3 +123,47 @@ def test_second_timeout_after_kill_is_contained_and_reaped(
     assert stdout_b == b"partial"
     assert returncode == -9
     assert calls == {"communicate": 2, "kill": 1, "wait": 1}
+
+
+async def test_rpc_deadline_reaps_foreground_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+    import shlex
+    import sys
+
+    import pytest
+
+    from mergecraft.mcp.rpc import dispatch_mcp_rpc
+
+    monkeypatch.setenv("MERGECRAFT_ALLOW_UNSANDBOXED_SHELL", "1")
+    monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "none")
+    ctx = _ctx(tmp_path, shell="enabled")
+    ctx.tool_state.selected_mode = "Fix"
+    spec = shell_tool(ctx)
+    spec.timeout_ms = 500
+    script = tmp_path / "slow.py"
+    script.write_text(
+        "import os,time\nfrom pathlib import Path\n"
+        "Path('started').write_text(str(os.getpid()))\n"
+        "time.sleep(5)\nPath('finished').write_text('late')\n"
+    )
+    response = await dispatch_mcp_rpc(
+        1,
+        "tools/call",
+        {
+            "name": spec.name,
+            "arguments": {
+                "command": shlex.join([sys.executable, str(script)]),
+                "description": "slow",
+            },
+        },
+        tools=[spec],
+        by_name={spec.name: spec},
+        tool_ctx=ctx,
+        validators={},
+    )
+    assert response["error"]["code"] == -32000
+    assert not (tmp_path / "finished").exists()
+    with pytest.raises(ProcessLookupError):
+        os.kill(int((tmp_path / "started").read_text()), 0)

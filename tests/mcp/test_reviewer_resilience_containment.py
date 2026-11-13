@@ -20,7 +20,14 @@ class _RunGitRecorder:
         self.fail_stderr = fail_stderr
         self.output = output
 
-    def __call__(self, args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
+    def __call__(
+        self,
+        args: list[str],
+        *,
+        cwd: str,
+        env: dict[str, str] | None = None,
+        input_text: str | None = None,
+    ) -> str:
         self.calls.append([str(a) for a in args])
         if self.fail_stderr:
             from mergecraft.mcp import git as git_mod
@@ -200,7 +207,7 @@ async def test_legitimate_readonly_invocations_still_forwarded(
     assert "ok" in payload["output"]
     expected = [expected_prefix]
     if command == "show":
-        expected.insert(0, ["rev-parse", "--verify", "--end-of-options", *args])
+        expected.insert(0, ["cat-file", "--batch-check=%(objectname) %(objecttype)"])
     assert recorder.calls == expected
 
 

@@ -7,6 +7,26 @@ the six-tool **public** profile above.
 
 Install surface: [`docs/mcp.md`](mcp.md) (runtime harness vs public stdio).
 
+## Execution deadlines and concurrency
+
+Checkout, analyzers, static checks, and foreground shell commands run blocking
+work in worker threads, keeping the MCP event loop available to other requests.
+Each declared tool timeout is enforced at RPC dispatch. Expiry requests
+cancellation and returns JSON-RPC error `-32000` after cleanup, with the tool name
+and timeout in milliseconds. Client cancellation remains cancellation.
+
+Cancellation stops only that operation's registered process groups, including
+nested analyzer workers. Cleanup joins the worker before tool state is reused;
+late worker results cannot become successful tool results. Noninterruptible
+synchronous filesystem or network I/O must finish or reach its own timeout before
+cleanup returns, so the response may arrive after the declared deadline. Analyzer
+downloads check cancellation between redirects and chunks (individual HTTP I/O
+has a 120-second timeout), and cache-lock waits check cancellation while waiting.
+Analyzer calls from independent contexts use separate scratch and artifact
+directories. Checkout, analyzer, and static-check operations sharing a tool state
+are serialized until the prior operation and its cancellation cleanup finish;
+unrelated requests remain responsive.
+
 ## Git tool — read-only verbs and guards
 
 The `git` MCP tool (`ToolClass.REPOSITORY_READ`) enforces fail-closed restrictions
@@ -21,6 +41,12 @@ regardless of `payload.shell`. Full guard tables:
 | `for-each-ref` | Structured ref listing |
 | `ls-remote` | Remote refs when fetch is blocked |
 | `config` | **Lookup only** — `--get`, `--get-all` (credential-bearing keys denied) |
+
+Read-only `git` calls have a 120-second RPC deadline. Each Git subprocess captures
+at most 20 MiB of combined stdout and stderr; exceeding the limit kills its process
+group and refuses the partial output. Refused output is never cached. `git show`
+resolves a blob's object ID and type in one query; symbolic refs are resolved again
+on each call so an external ref move cannot return stale cached content.
 
 Credential-bearing `config` keys (`credential.*`, `url.*`) are refused. Writes
 (`--set`, `--unset`, …) are refused.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -371,6 +372,10 @@ class ToolState:
     repos: dict[str, RepoToolState]
     primary_repo_key: str
     prepush_failure_count: int = 0
+    # Offloaded checkout/analysis operations must not race on this run's tree or state.
+    checkout_operation_lock: asyncio.Lock = field(
+        default_factory=asyncio.Lock, repr=False, compare=False
+    )
     # #942 — cache for ``analyzers.settings_pin.resolve_pinned_analyzer_settings``:
     # a ``(key, PinnedAnalyzerSettings)`` pair, so ``git`` reads the PR base once.
     pinned_analyzer_settings: Any = None
