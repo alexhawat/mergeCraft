@@ -34,6 +34,16 @@ def _invoke(*argv: str) -> tuple[int, str]:
     return result.exit_code, _ANSI.sub("", result.stdout + result.stderr)
 
 
+def _flat(out: str) -> str:
+    """Collapse a Rich table to one line so a wrapped cell stays contiguous.
+
+    A cell that wraps puts ``│`` between the fragments, so ``" ".join(split())``
+    alone leaves the table borders inside the sentence and a phrase that spans a
+    line break no longer matches.
+    """
+    return " ".join(out.replace("│", " ").split())
+
+
 @pytest.fixture
 def consumer_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A fresh consumer checkout after ``mergecraft init``."""
@@ -131,8 +141,9 @@ def test_doctor_fails_when_the_roster_provider_is_not_wired(
     )
     code, out = _invoke("doctor")
     assert code == CLI_CONFIGURATION_EXIT_CODE, out
-    assert "google" in out
-    assert "workflow sync --apply" in out or "provider auth google" in out
+    quoted = _flat(out)
+    assert "google" in quoted
+    assert "workflow sync --apply" in quoted or "provider auth google" in quoted
 
 
 def test_doctor_reports_unverified_secrets_without_gh(
@@ -183,4 +194,4 @@ def test_doctor_names_the_roster_slot_for_a_flat_only_oauth_binding(
     code, out = _invoke("doctor")
 
     assert code == CLI_CONFIGURATION_EXIT_CODE, out
-    assert "no credential this roster slot accepts" in " ".join(out.split()), out
+    assert "no credential this roster slot accepts" in _flat(out), out
