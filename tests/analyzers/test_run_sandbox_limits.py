@@ -1,4 +1,4 @@
-"""The sandbox pre-exec must widen ``RLIMIT_NPROC`` for a shared drop target.
+"""The sandbox child launcher must widen ``RLIMIT_NPROC`` for a shared drop target.
 
 The sudo-elevated drop lands on the orchestrator's own uid. A credential-changing
 ``execve`` (``setpriv --reuid``) is refused with ``EAGAIN`` when that target
@@ -11,7 +11,7 @@ harness runs pytest under ``unshare --pid --mount-proc`` — that count reads ze
 for a uid the kernel still knows is busy in the parent namespace. The runner
 therefore resolves the target identity and derives the pair by probing the
 kernel's own answer (the real credential-changing exec, stepped upward while it
-is refused) in the parent, before the fork, and hands the pair to the pre-exec.
+is refused) in the parent, before the fork, and hands the pair to the child launcher.
 The accepted candidate is only a floor: a further ``max_processes`` is added so
 the dropped payload's own ``fork`` still lands (a zero-headroom limit makes
 ``bash`` retry ``fork`` in a sleep loop until the run times out). With no drop it
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import resource
 import subprocess
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -123,7 +124,7 @@ def _drive_sandboxed_spawn(
     before_fork: Callable[[], None],
     max_processes: int = _MAX_PROCESSES,
 ) -> Callable[[], None]:
-    """Run a sandboxed plan and return the pre-exec it passes to ``subprocess.run``."""
+    """Run a sandboxed plan and return the child launcher it passes to ``subprocess.run``."""
     monkeypatch.setattr(resource, "setrlimit", lambda which, value: limits.append((which, value)))
     _install_sandbox_spawn(monkeypatch)
     captured: dict[str, object] = {}
@@ -131,14 +132,25 @@ def _drive_sandboxed_spawn(
     def _run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         before_fork()
         captured.update(kwargs)
+        captured["argv"] = argv
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     patch_analyzer_spawn(monkeypatch, _run)
     plan = AnalyzerPlan(manifest_id="probe", argv=("true",), cwd=tmp_path, mode="native")
     run_plan(plan, sandbox_context=_sandbox_context(tmp_path, max_processes=max_processes))
-    preexec = captured.get("preexec_fn")
-    assert callable(preexec), "the sandboxed spawn must carry a pre-exec"
-    return preexec
+    assert captured.get("preexec_fn") is None
+    argv = captured["argv"]
+    assert isinstance(argv, list)
+    assert Path(argv[3]).name == "_resource_limits.py"
+
+    def launch() -> None:
+        from mergecraft.analyzers import _resource_limits
+
+        monkeypatch.setattr(sys, "argv", argv[3:])
+        monkeypatch.setattr(_resource_limits.os, "execvpe", lambda *_args: None)
+        _resource_limits.main()
+
+    return launch
 
 
 def _nproc_limits(limits: list[tuple[int, tuple[int, int]]]) -> list[tuple[int, int]]:
@@ -148,7 +160,7 @@ def _nproc_limits(limits: list[tuple[int, tuple[int, int]]]) -> list[tuple[int, 
 def test_sandboxed_preexec_widens_nproc_for_the_drop_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The resolved drop identity drives the pair the pre-exec installs, before the fork."""
+    """The resolved drop identity drives the pair the child launcher installs, before the fork."""
     calls = _pin_resolved_pair(monkeypatch, target_uid=1001, target_gid=2002, pair=(56, 56))
     limits: list[tuple[int, tuple[int, int]]] = []
 
@@ -197,7 +209,7 @@ def test_sandboxed_preexec_no_drop_never_reaches_the_probe(
 def test_sandboxed_preexec_probes_the_drop_cap_before_the_fork(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The kernel probe runs in the parent before the fork and never inside the pre-exec."""
+    """The kernel probe runs in the parent before the fork and never inside the child launcher."""
     _pin_resolvers(monkeypatch, target_uid=1001, target_gid=2002)
     monkeypatch.setattr(sandbox_mod, "process_count_for_uid", lambda *_a, **_k: 0, raising=False)
     attempt = ProbeAttempt(succeed_at=48)
@@ -213,9 +225,9 @@ def test_sandboxed_preexec_probes_the_drop_cap_before_the_fork(
     assert attempts_before_fork[0] >= 1
     preexec()
 
-    assert attempt.attempts == [16, 32, 48], "the pre-exec must not probe again"
+    assert attempt.attempts == [16, 32, 48], "the child launcher must not probe again"
     assert _nproc_limits(limits) == [(64, 64)], (
-        "the accepted candidate 48 is a floor; the pre-exec adds max_processes of headroom"
+        "the accepted candidate 48 is a floor; the child launcher adds max_processes of headroom"
     )
 
 
@@ -227,7 +239,7 @@ def test_sandboxed_preexec_adds_headroom_when_the_proc_hint_under_reports(
     A stale ``/proc`` hint of 16 while the kernel knows the target uid carries 24,
     with ``max_processes`` 8: the probe accepts its first candidate (16 + 8 = 24)
     because ``/bin/true`` never forks, so a bare 24 would leave the payload no
-    room and hang ``bash`` in its fork-retry loop. The pre-exec must install the
+    room and hang ``bash`` in its fork-retry loop. The child launcher must install the
     pair with the allowance added again — ``(32, 32)``.
     """
     _pin_resolvers(monkeypatch, target_uid=1001, target_gid=2002)

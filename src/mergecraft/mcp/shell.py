@@ -7,7 +7,6 @@ TERM → grace → KILL), matching agent CLI teardown (W9 / ``#14``).
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import os
 import re
@@ -23,7 +22,9 @@ from loguru import logger
 from mergecraft.mcp.git_guards import shell_command_denies_credential_paths
 from mergecraft.mcp.shared import ToolClass, ToolRefusedError, execute, tool
 from mergecraft.mcp.tool_state import BackgroundProcess, primary_repo_state
-from mergecraft.utils.process_group import kill_process_group
+from mergecraft.utils.blocking import run_blocking
+from mergecraft.utils.process_group import kill_process_group, track_process_group
+from mergecraft.utils.process_scope import check_process_cancelled
 from mergecraft.utils.secrets import resolve_env
 from mergecraft.utils.workspace import (
     WorkspacePathError,
@@ -36,6 +37,8 @@ if TYPE_CHECKING:
 
 SandboxMethod = Literal["unshare", "sudo-unshare", "sandbox-exec", "none"]
 MAX_OUTPUT_CHARS = 5000
+_MAX_COMMAND_TIMEOUT_MS = 120_000
+_RPC_CLEANUP_HEADROOM_MS = 30_000
 
 _detected_sandbox: SandboxMethod | None = None
 _detected_netns: bool | None = None
@@ -427,13 +430,14 @@ def _run_foreground(
     timeout_s: float,
     isolate_network: bool,
 ) -> tuple[bytes | None, bytes | None, int | None, bool]:
-    """Run ``command`` to completion or timeout; always reap the process group.
+    """Run ``command`` with bounded process-group termination and reaping.
 
     Returns ``(stdout, stderr, returncode, timed_out)``. After a timeout the
-    group is killed and reaped; if even that wait times out the process is
-    killed again and whatever output was gathered so far is returned, rather
-    than letting a second ``TimeoutExpired`` escape with the child unreaped.
+    group is killed and reaping is attempted. If that wait times out, the
+    process is killed again and the available output is returned. Final
+    cleanup closes the pipes and never waits indefinitely for an unreapable child.
     """
+    check_process_cancelled()
     proc = _spawn_shell(
         command,
         env=env,
@@ -445,22 +449,39 @@ def _run_foreground(
     stdout_b: bytes | None
     stderr_b: bytes | None
     try:
-        stdout_b, stderr_b = proc.communicate(timeout=timeout_s)
-        return stdout_b, stderr_b, proc.returncode, False
-    except subprocess.TimeoutExpired as first:
-        kill_process_group(proc.pid)
-        stdout_b, stderr_b = first.stdout, first.stderr
+        with track_process_group(proc):
+            try:
+                stdout_b, stderr_b = proc.communicate(timeout=timeout_s)
+                check_process_cancelled()
+                return stdout_b, stderr_b, proc.returncode, False
+            except subprocess.TimeoutExpired as first:
+                kill_process_group(proc.pid)
+                stdout_b, stderr_b = first.stdout, first.stderr
+                try:
+                    stdout_b, stderr_b = proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired as second:
+                    # A descendant escaped the group and holds the pipes open.
+                    stdout_b = second.stdout if second.stdout is not None else stdout_b
+                    stderr_b = second.stderr if second.stderr is not None else stderr_b
+                    with contextlib.suppress(OSError):
+                        proc.kill()
+                    with contextlib.suppress(subprocess.TimeoutExpired):
+                        proc.wait(timeout=2)
+                return stdout_b, stderr_b, proc.returncode, True
+    finally:
+        # Popen.__exit__ waits without a timeout. Keep cleanup bounded even
+        # when a killed child cannot be reaped, including registration failure.
         try:
-            stdout_b, stderr_b = proc.communicate(timeout=5)
-        except subprocess.TimeoutExpired as second:
-            # A descendant escaped the group and holds the pipes open.
-            stdout_b = second.stdout if second.stdout is not None else stdout_b
-            stderr_b = second.stderr if second.stderr is not None else stderr_b
-            with contextlib.suppress(OSError):
-                proc.kill()
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                proc.wait(timeout=2)
-        return stdout_b, stderr_b, proc.returncode, True
+            if proc.returncode is None:
+                kill_process_group(proc.pid)
+                with contextlib.suppress(OSError):
+                    proc.kill()
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    proc.wait(timeout=2)
+        finally:
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                if pipe is not None:
+                    pipe.close()
 
 
 def shell_tool(ctx: ToolContext):
@@ -473,7 +494,7 @@ def shell_tool(ctx: ToolContext):
                 "git tools instead"
             )
             raise ToolRefusedError(msg)
-        timeout_ms = min(int(params.get("timeout") or 30_000), 120_000)
+        timeout_ms = min(int(params.get("timeout") or 30_000), _MAX_COMMAND_TIMEOUT_MS)
         default_dir = primary_repo_state(ctx.tool_state).dir
         working_directory = params.get("working_directory")
         try:
@@ -527,7 +548,7 @@ def shell_tool(ctx: ToolContext):
 
         # Spawn + wait are blocking; run them off the event loop so a slow
         # command does not stall every other MCP request on this loop.
-        stdout_b, stderr_b, returncode, timed_out = await asyncio.to_thread(
+        stdout_b, stderr_b, returncode, timed_out = await run_blocking(
             _run_foreground,
             command,
             env=env,
@@ -555,7 +576,8 @@ def shell_tool(ctx: ToolContext):
         name="shell",
         tool_class=ToolClass.SHELL,
         mutates=True,
-        timeout_ms=120_000,
+        # Leave time for dispatch and bounded reaping before returning partial output.
+        timeout_ms=_MAX_COMMAND_TIMEOUT_MS + _RPC_CLEANUP_HEADROOM_MS,
         description=(
             f"Execute shell commands securely. Environment is filtered to remove API "
             f"keys and secrets. Output capped at {MAX_OUTPUT_CHARS} chars. "

@@ -262,11 +262,9 @@ def patch_analyzer_spawn(monkeypatch: Any, run_like: Any) -> None:
             self._completed = run_like(argv, **kwargs)
             self.returncode = self._completed.returncode
 
-        def __enter__(self) -> _FakePopen:
-            return self
-
-        def __exit__(self, *exc: object) -> None:
-            return None
+        stdin = None
+        stdout = None
+        stderr = None
 
         def communicate(self, timeout: float | None = None) -> tuple[Any, Any]:
             _ = timeout
