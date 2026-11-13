@@ -288,6 +288,19 @@ def _repo_settings_from_text(text: str) -> RepoSettings:
 async def _base_repo_settings(
     scm: ScmProvider, owner: str, repo: str, base_sha: str
 ) -> tuple[RepoSettings | None, str, str | None]:
+    """Share one parsed base config or fail-closed outcome for this run."""
+    from mergecraft.scm.run_data import read_run_data
+
+    return await read_run_data(
+        scm,
+        ("base-settings", owner, repo, base_sha),
+        lambda: _read_base_repo_settings(scm, owner, repo, base_sha),
+    )
+
+
+async def _read_base_repo_settings(
+    scm: ScmProvider, owner: str, repo: str, base_sha: str
+) -> tuple[RepoSettings | None, str, str | None]:
     """Read the base commit's whole config through the contents API.
 
     A base without the file is the defaults; an unreadable, oversized or invalid one
@@ -381,26 +394,27 @@ async def list_pull_request_paths(
     ``None`` (a failed read, or the listing hit its page cap) means the caller cannot
     prove every file is ignored and must run the review.
     """
-    endpoint = f"/repos/{owner}/{repo}/pulls/{pull_number}/files"
+    from mergecraft.scm.pull_files import list_pull_files
+
     paths: list[str] = []
     try:
-        for page in range(1, _FILES_MAX_PAGES + 1):
-            batch = list(
-                await scm.get(endpoint, params={"per_page": _FILES_PAGE_SIZE, "page": page}) or []
-            )
-            for entry in batch:
-                if not isinstance(entry, dict):
-                    continue
-                # A rename names its source too: it is in scope unless both are ignored.
-                for key in ("filename", "previous_filename"):
-                    name = str(entry.get(key) or "").strip()
-                    if name:
-                        paths.append(name)
-            if len(batch) < _FILES_PAGE_SIZE:
-                return list(dict.fromkeys(paths))
+        listing = await list_pull_files(
+            scm,
+            owner,
+            repo,
+            pull_number,
+            page_size=_FILES_PAGE_SIZE,
+            max_pages=_FILES_MAX_PAGES,
+        )
+        for entry in listing.items:
+            for key in ("filename", "previous_filename"):
+                name = str(entry.get(key) or "").strip()
+                if name:
+                    paths.append(name)
+        if not listing.incomplete:
+            return list(dict.fromkeys(paths))
     except Exception as err:  # a failed listing proves nothing; the review runs
         logger.info("ignore_paths: PR #{} file listing failed: {}", pull_number, err)
-        return None
     return None
 
 
