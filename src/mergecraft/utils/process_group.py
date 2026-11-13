@@ -92,11 +92,20 @@ def kill_all_active_process_groups(*, grace_s: float = 0.2) -> None:
 @contextmanager
 def track_process_group(process: subprocess.Popen[Any]) -> Iterator[subprocess.Popen[Any]]:
     """Register ``process.pid`` for the lifetime of the ``with`` block."""
+    from mergecraft.utils.process_scope import current_process_group_scopes
+
     pid = getattr(process, "pid", None)
+    scopes = current_process_group_scopes()
     register_process_group(pid if isinstance(pid, int) else None)
     try:
+        if isinstance(pid, int):
+            for scope in scopes:
+                scope.add(pid)
         yield process
     finally:
+        if isinstance(pid, int):
+            for scope in scopes:
+                scope.remove(pid)
         unregister_process_group(pid if isinstance(pid, int) else None)
 
 

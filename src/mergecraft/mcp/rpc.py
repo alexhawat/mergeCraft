@@ -9,6 +9,7 @@ Exports:
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -148,20 +149,30 @@ async def dispatch_mcp_rpc(
             mode_token = bind_selected_mode(mode)
             started = time.perf_counter()
             try:
-                result = await tool.execute(arguments)
+                deadline = asyncio.timeout(
+                    tool.timeout_ms / 1000 if tool.timeout_ms is not None else None
+                )
+                async with deadline:
+                    result = await tool.execute(arguments)
             except Exception as exc:
-                span.set_status("error", str(exc))
+                timed_out = isinstance(exc, TimeoutError) and deadline.expired()
+                message = (
+                    f"Tool {name} timed out after {tool.timeout_ms} ms" if timed_out else str(exc)
+                )
+                span.set_status("error", message)
                 enrich_tool_response(span, output=None, error=exc)
                 record_trajectory(
                     tool_ctx,
                     name,
                     arguments,
                     ok=False,
-                    error=str(exc),
+                    error=message,
                     duration_ms=int((time.perf_counter() - started) * 1000),
                 )
+                if timed_out:
+                    return rpc_error(req_id, RpcError(-32000, message))
                 if return_tool_errors:
-                    return rpc_error(req_id, RpcError(-32603, str(exc)))
+                    return rpc_error(req_id, RpcError(-32603, message))
                 raise
             finally:
                 reset_selected_mode(mode_token)

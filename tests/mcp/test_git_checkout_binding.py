@@ -165,7 +165,7 @@ async def test_global_and_system_config_are_not_read(
 
 
 class _SpawnSpy:
-    """Wrap ``subprocess.run`` and keep each git child's argv and env."""
+    """Wrap ``subprocess.Popen`` and keep each git child's argv and env."""
 
     def __init__(self, real: Any) -> None:
         self.real = real
@@ -201,8 +201,8 @@ async def test_every_git_tool_spawn_uses_the_hardened_configuration(
 ) -> None:
     ctx, root, _nested = await asyncio.to_thread(_setup, tmp_path, monkeypatch)
     monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'mc.ambient'='env'")
-    spy = _SpawnSpy(subprocess.run)
-    monkeypatch.setattr(subprocess, "run", spy)
+    spy = _SpawnSpy(subprocess.Popen)
+    monkeypatch.setattr(subprocess, "Popen", spy)
     _ok(await _run(ctx, ["-C", "src", "--get", "mc.probe"]))
     _ok(await _run(ctx, ["HEAD:src/app.py"], command="show"))
     _ok(await _run(ctx, ["-1", "-Sx"], command="log"))
@@ -219,8 +219,8 @@ async def test_git_fetch_spawns_use_the_hardened_configuration(
     remote = (tmp_path / "remote.git").resolve()
     await asyncio.to_thread(_git, tmp_path, "clone", "-q", "--bare", str(root), str(remote))
     await asyncio.to_thread(_git, root, "remote", "add", "origin", str(remote))
-    spy = _SpawnSpy(subprocess.run)
-    monkeypatch.setattr(subprocess, "run", spy)
+    spy = _SpawnSpy(subprocess.Popen)
+    monkeypatch.setattr(subprocess, "Popen", spy)
     result = await git_fetch_tool(ctx).execute({})
     assert result.is_error is False, result.content[0]["text"]
     _assert_hardened(spy.calls)

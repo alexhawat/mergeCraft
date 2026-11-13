@@ -259,7 +259,7 @@ def test_analyzer_binary_source_and_isolation_follow_the_resolved_tier(
         assert str(managed) in joined
         assert analyzer.argv[0] == "unshare"
         assert "--net" in analyzer.argv
-        assert isinstance(analyzer.preexec_fn, run_mod._SandboxPreexec)
+        assert isinstance(analyzer.preexec_fn, run_mod._SandboxLimits)
     else:
         probe, run = spawns[0], spawns[-1]
         assert probe.argv == [str(planted), "--version"]
@@ -318,7 +318,7 @@ def test_filtered_egress_and_limits_follow_the_egress_decision(
     if row.filtered_egress:
         assert argv[0] == "fake-filtered-egress", argv
         assert "unshare" in argv
-        assert isinstance(spawns[0].preexec_fn, run_mod._SandboxPreexec)
+        assert isinstance(spawns[0].preexec_fn, run_mod._SandboxLimits)
         # The scrubbed payload environment travels by descriptor, not in env.
         assert "MERGECRAFT_PAYLOAD_ENV_FD" in spawns[0].env
     elif row.tier == "untrusted":

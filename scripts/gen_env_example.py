@@ -62,6 +62,12 @@ _HEADER = """\
 # The easy path is `mergecraft provider auth <label> --scope local`, which writes
 # the indexed `LLM_PROVIDER_<N>_*` layout below for you. In GitHub Actions the same
 # names come from `secrets.*` in your workflow, not from this file.
+#
+# Build provenance: MERGECRAFT_BUILD_COMMIT is supplied by build/runtime tooling.
+# Version bootstrap checks that process value, then baked metadata, then Git.
+# The existing build_commit compatibility alias is used only when the uppercase
+# value is unset or empty. Values are stripped; whitespace means no override.
+# This bootstrap read does not load .env; do not add either value here.
 """
 
 _INDEXED = """\
