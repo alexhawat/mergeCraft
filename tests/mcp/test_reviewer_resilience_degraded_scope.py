@@ -31,7 +31,7 @@ class _StubGitHub(GitHubClient):
         repo_ref = {"full_name": f"{owner}/{repo}"}
         return {
             "head": {"ref": "feature", "sha": self._head_sha, "repo": repo_ref},
-            "base": {"ref": "main", "repo": repo_ref},
+            "base": {"ref": "main", "sha": "0" * 40, "repo": repo_ref},
             "title": "PR",
             "html_url": "https://x/1",
         }
@@ -369,11 +369,17 @@ async def test_git_show_immutable_read_returns_cached_on_repeat(
 
     calls = {"n": 0}
 
-    def _run(args: list[str], *, cwd: str, env: dict[str, str] | None = None) -> str:
+    def _run(
+        args: list[str],
+        *,
+        cwd: str,
+        env: dict[str, str] | None = None,
+        input_text: str | None = None,
+    ) -> str:
         if args[0] == "rev-parse":
             return "a" * 40
         if args[0] == "cat-file":
-            return "blob"
+            return "a" * 40 + " blob"
         calls["n"] += 1
         return "file contents\n"
 

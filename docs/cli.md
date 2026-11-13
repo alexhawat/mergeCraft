@@ -83,7 +83,6 @@ needs a new review.
 | `mergecraft agents setmodel` | Replace the primary model for an agent role; backups are preserved. |
 | `mergecraft agents show <role>` | Show resolved prompt text and MCP tool names for one role. |
 | `mergecraft analyzers detect` | Show analyzers that would run for changed paths in this repo. |
-| `mergecraft analyzers docs` | Regenerate `ANALYZERS.md` from manifests. |
 | `mergecraft analyzers explain <analyzer-id>` | Print manifest fields and notes for one analyzer. |
 | `mergecraft analyzers export <analyzer-id>` | Run one analyzer and export findings as SARIF. |
 | `mergecraft analyzers list` | List catalog analyzers and whether they would enable here. |
@@ -114,23 +113,6 @@ needs a new review.
 | `mergecraft context search <query>` | Search retrieved review context for a query. |
 | `mergecraft describe` | Print a PR title, summary, walkthrough, risk areas, and testing notes. |
 | `mergecraft doctor` | Diagnose git, providers, analyzers, auth, config, workflow auth, and MCP wiring. |
-| `mergecraft eval add` | Add a case to the bank. |
-| `mergecraft eval add-incident` | Add an incident-derived structural case (postmortem PR + revert/fix). |
-| `mergecraft eval adjudicate <baseline>` | Record who adjudicated one baseline label, enforcing repo policy. |
-| `mergecraft eval bench` | Join structural decision replay with a live finding-location run. |
-| `mergecraft eval convergence` | Score multi-round convergence scenarios and write a versioned result set. |
-| `mergecraft eval gate` | Check the eval bank's integrity and adversarial corpora — the CI-safe half. |
-| `mergecraft eval ingest` | Ingest recorded dismissal signals into the structural eval bank. |
-| `mergecraft eval judge-calibration` | Evaluate saved judge verdicts offline against frozen human references. |
-| `mergecraft eval list` | List cases in the bank. |
-| `mergecraft eval promote <case-id>` | Promote a case into a permanent pytest test file. |
-| `mergecraft eval publish-benchmark` | Validate two saved provider runs and write an auditable report. |
-| `mergecraft eval replay <case-id>` | Replay a case and report the diff. |
-| `mergecraft eval replay-bank` | Replay the eval bank and write a versioned benchmark result set. |
-| `mergecraft eval rescore-delta` | Compare two structural replay result sets (base vs head); advisory. |
-| `mergecraft eval score <actual> <expected>` | Score review findings against a frozen benchmark baseline. |
-| `mergecraft eval trajectory-gate` | Compare a candidate trajectory report against a frozen baseline. |
-| `mergecraft eval trajectory-score --labels LABELS` | Score the deterministic trajectory auditor against frozen labels. |
 | `mergecraft evidence show <finding-id>` | Show the evidence packet for a finding. |
 | `mergecraft evidence verify <finding-id>` | Replay verification for a finding's evidence packet (not an approval). |
 | `mergecraft explain` | Explain a stored finding or the current working-tree change. |
@@ -168,9 +150,6 @@ needs a new review.
 | `mergecraft models show` | Show effective model order, env override, and the slug that would win now. |
 | `mergecraft opencode doctor` | Report whether the OpenCode integration is fully wired. |
 | `mergecraft opencode install` | Install OpenCode commands, subagents, plugin, and MCP config. |
-| `mergecraft pipeline explain` | Print pipeline step ids and predicate vocabulary. |
-| `mergecraft pipeline lint` | Validate the pipeline file and registry agent references. |
-| `mergecraft pipeline show --diff DIFF` | Preview which pipeline steps would run or skip for a diff. |
 | `mergecraft plan` | Preview model chain, toolset, analyzers, and token estimate without provider calls. |
 | `mergecraft policy effective` | Show the effective policy set and the source of every rule. |
 | `mergecraft policy explain --path PATH` | List effective rules for a path and name each rule's source layer. |
@@ -241,6 +220,16 @@ and of the agent JSONL protocol: bumping it announces a change to the shape of
 CLI JSON output only, and does **not** by itself mean the review snapshot or the
 agent wire format changed. The converse also holds — a change to either of those
 contracts does not move the CLI stamp.
+
+## Version startup
+
+Standalone `mergecraft --version` and `mergecraft -v` read package/build identity
+without loading application settings or repository `.env` files. Build identity
+uses the process `MERGECRAFT_BUILD_COMMIT` value first, then baked build metadata,
+then the source checkout's Git HEAD. The existing `build_commit` field-name alias
+is a fallback only when the uppercase variable is absent or empty. Values are
+stripped; a whitespace-only primary value supplies no override. These names are
+build provenance, not operator settings to add to `.env`.
 
 ## Environment variables
 

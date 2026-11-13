@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Final, Literal
+from typing import Any, Final
 
 from loguru import logger
 
@@ -107,8 +107,7 @@ PRIMARY_MUTATING_ALLOWLIST: Final[frozenset[str]] = READONLY_MUTATING_ALLOWLIST 
 # Session tools that must run in review-only (including before select_mode).
 # Publication and labeling do not edit the reviewed tree; they stay available
 # after write-capable modes were dropped from the production registry.
-# Every other mutates=True tool is default-denied unless a write-capable mode
-# is selected (none are registered in production).
+# Every other mutates=True tool is default-denied.
 _REVIEW_SESSION_MUTATIONS: Final[frozenset[str]] = PRIMARY_MUTATING_ALLOWLIST | frozenset(
     {
         "upload_file",
@@ -151,22 +150,13 @@ def reset_mcp_process_state() -> None:
 
 
 def guard_mutating_tool(tool_name: str, *, selected_mode: str | None = None) -> None:
-    """Refuse tree/repo mutations unless a write-capable mode is selected."""
+    """Refuse tree/repo mutations in every production mode."""
     if tool_name in _REVIEW_SESSION_MUTATIONS:
         return
     from mergecraft.modes import refuse_review_only_mutation
 
     mode = selected_mode if selected_mode is not None else _selected_mode_var.get()
     refuse_review_only_mutation(mode, action=tool_name)
-
-
-def repository_mutation_class_for_push(
-    push: Literal["disabled", "restricted", "enabled"],
-) -> ToolClass:
-    """Classify push/commit tools: ``repository-mutation`` only when push is enabled."""
-    if push == "enabled":
-        return ToolClass.REPOSITORY_MUTATION
-    return ToolClass.GITHUB_MUTATION
 
 
 @dataclass(slots=True)

@@ -69,7 +69,6 @@ def test_darwin_does_not_run_linux_isolation_probe(
 ) -> None:
     """Decision 1 — Darwin is detected up front; the Linux unshare/mount probe never runs."""
     monkeypatch.setattr(sandbox_mod, "sys", SimpleNamespace(platform="darwin"))
-    monkeypatch.delenv("MERGECRAFT_PROBE_TEST_DOUBLE", raising=False)
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
 
     def _fail_run(*_a: object, **_k: object) -> None:
@@ -219,7 +218,6 @@ def test_probe_reasons_include_the_named_execution_context(
 ) -> None:
     monkeypatch.setattr(sandbox_mod, "sys", SimpleNamespace(platform="darwin"))
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    monkeypatch.delenv("MERGECRAFT_PROBE_TEST_DOUBLE", raising=False)
     monkeypatch.setattr(
         sandbox_mod.subprocess, "run", lambda *_a, **_k: pytest.fail("Linux probe launched")
     )

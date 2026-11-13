@@ -10,9 +10,8 @@ on purpose, to pin what the default is. Every other test states its tier.
 
 The constructors that relied on the default are decided, not listed: the
 ``publish_deterministic_record`` fallback (no event to derive trust from) is
-``untrusted``; the local ``acme/demo`` contexts of ``mergecraft agents`` and
-the pipeline executor pass ``trusted`` explicitly, so their behaviour does not
-change.
+``untrusted``; the local ``acme/demo`` context of ``mergecraft agents`` passes ``trusted``
+explicitly, so its behaviour does not change.
 """
 
 from __future__ import annotations
@@ -93,15 +92,6 @@ def test_mergecraft_agents_local_context_stays_trusted(tmp_path: Path) -> None:
     from mergecraft.cli import agents_cmd
 
     ctx = agents_cmd._tool_ctx(tmp_path)
-    assert ctx.trust_tier == "trusted"
-    assert ctx.authority_trust == "trusted"
-
-
-def test_pipeline_executor_local_context_stays_trusted(tmp_path: Path) -> None:
-    """Green guard: the local pipeline executor context keeps its tier."""
-    from mergecraft.orchestrator import executor
-
-    ctx = executor._tool_ctx(tmp_path)
     assert ctx.trust_tier == "trusted"
     assert ctx.authority_trust == "trusted"
 

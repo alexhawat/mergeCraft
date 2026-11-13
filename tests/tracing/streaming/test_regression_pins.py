@@ -24,12 +24,11 @@ either, the test fails and the operator sees the regression.
 
 from __future__ import annotations
 
-import importlib
 import json
-import subprocess
 from typing import TYPE_CHECKING
 
 from loguru import logger
+from tests.agents.support_claude_stream import write_claude_cli
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -101,8 +100,7 @@ def test_nonzero_exit_still_surfaces_stderr_at_warning(
       the stderr content, so a CI operator can diagnose the failure from
       the job log.
 
-    The test uses the production ``_run_claude_once`` against a fake
-    ``subprocess.run`` that exits 1 with a recognisable stderr payload.
+    The test runs a real local CLI process that exits 1 with recognizable stderr.
     """
     from mergecraft.agents.claude import _run_claude_once
     from mergecraft.agents.shared import AgentRunContext, ResolvedInstructions
@@ -116,20 +114,6 @@ def test_nonzero_exit_still_surfaces_stderr_at_warning(
         "Detail: API rejected the token at 2026-08-09T01:23:45Z",
         "Hint: rotate the API key in your repo's secrets",
     ]
-
-    def _fake_run(
-        cmd: list[str],
-        **kwargs: object,
-    ) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(
-            args=cmd,
-            returncode=1,
-            stdout="",
-            stderr="\n".join(stderr_lines),
-        )
-
-    claude_module = importlib.import_module("mergecraft.agents.claude")
-    monkeypatch.setattr(claude_module.subprocess, "run", _fake_run)
 
     # Capture loguru warnings/errors emitted during the driver run.
     log_records: list[tuple[str, str]] = []
@@ -150,7 +134,7 @@ def test_nonzero_exit_still_surfaces_stderr_at_warning(
             resolved_model="anthropic/claude-sonnet-5",
         )
         result = _run_claude_once(
-            cli="/usr/bin/claude",
+            cli=write_claude_cli(tmp_path, stderr="\n".join(stderr_lines), returncode=1),
             prompt="review this diff",
             ctx=ctx,
             mcp_config=str(tmp_path / "mcp.json"),
@@ -189,13 +173,7 @@ def test_nonzero_exit_with_json_blob_still_surfaces_stderr(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """W5.5 (edge — stdout has a JSON blob) — the legacy last-line parse must not eat the error.
-
-    A non-zero ``claude`` exit with a non-empty stdout (the legacy
-    driver parses the last line as a JSON result) must still surface
-    stderr at warning. The W6 read loop must not regress this when it
-    replaces the last-line parse with a streaming read.
-    """
+    """A failed real CLI stream preserves partial result and stderr diagnostics."""
     from mergecraft.agents.claude import _run_claude_once
     from mergecraft.agents.shared import AgentRunContext, ResolvedInstructions
     from mergecraft.mcp.context import PayloadEvent, ResolvedPayload
@@ -203,22 +181,8 @@ def test_nonzero_exit_with_json_blob_still_surfaces_stderr(
 
     monkeypatch.setenv("CI", "true")
 
-    stdout_blob = '{"result": "partial review", "usage": {"input_tokens": 10, "output_tokens": 5}}'
+    stdout_blob = '{"type": "result", "result": "partial review", "usage": {"input_tokens": 10, "output_tokens": 5}}'
     stderr_blob = "Upstream timeout after 30s"
-
-    def _fake_run(
-        cmd: list[str],
-        **kwargs: object,
-    ) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(
-            args=cmd,
-            returncode=2,
-            stdout=stdout_blob,
-            stderr=stderr_blob,
-        )
-
-    claude_module = importlib.import_module("mergecraft.agents.claude")
-    monkeypatch.setattr(claude_module.subprocess, "run", _fake_run)
 
     log_records: list[tuple[str, str]] = []
 
@@ -238,7 +202,9 @@ def test_nonzero_exit_with_json_blob_still_surfaces_stderr(
             resolved_model="anthropic/claude-sonnet-5",
         )
         result = _run_claude_once(
-            cli="/usr/bin/claude",
+            cli=write_claude_cli(
+                tmp_path, stdout=stdout_blob + "\n", stderr=stderr_blob, returncode=2
+            ),
             prompt="review this diff",
             ctx=ctx,
             mcp_config=str(tmp_path / "mcp.json"),

@@ -27,7 +27,6 @@ from mergecraft.review.snapshot import (
     canonical_review_snapshot,
 )
 from mergecraft.run_outcome import RunOutcome
-from mergecraft.scm.webhooks import conforming_review_request
 from tests.review.hook_review_run import HookReviewRun
 
 runner = CliRunner()
@@ -405,27 +404,6 @@ def test_cli_review_timeout_cleans_up_subprocesses(
         catch_exceptions=True,
     )
     assert cleaned == ["cleanup"]
-
-
-def test_scm_conforming_request_runs_engine_and_exposes_stage_specs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Integration: SCM maps identity onto a snapshot; engine is not fake-run."""
-    runs: list[str] = []
-
-    async def boom_run(self: ReviewEngine, driver: object, /, **_kwargs: Any) -> ReviewEngineResult:
-        runs.append("run")
-        raise AssertionError("conforming_review_request must not run the engine")
-
-    monkeypatch.setattr(ReviewEngine, "run", boom_run)
-    request = conforming_review_request("github", event="pull_request", body={})
-    assert request.snapshot.entry == "scm"
-    assert isinstance(request.snapshot, ReviewSnapshot)
-    assert request.mode == "Review"
-    assert isinstance(request.stages[0], ReviewStageSpec)
-    assert tuple(stage.name for stage in request.stages) == CANONICAL_STAGE_NAMES
-    assert request.stages_ran == ()
-    assert runs == []
 
 
 def test_cli_review_drives_engine_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

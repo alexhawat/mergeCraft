@@ -3,9 +3,8 @@
 Wave plan: ``.ignorelocal/waves/open-issues-sweep-2026-08-20d-a-engine-wave-plan.md``
 Authoring wave: **W2**. Implementation: **W6** (xfail markers removed after W6).
 
-CLI (``review``), Action (``mergecraft.main`` / ``gha``), and SCM
-(``conforming_review_request``) enter one engine over one snapshot. Hidden
-``diff-review`` must remain.
+CLI (``review``) and Action (``mergecraft.main`` / ``gha``) enter one engine
+over one snapshot. Hidden ``diff-review`` must remain.
 """
 
 from __future__ import annotations
@@ -14,14 +13,15 @@ import inspect
 import re
 from pathlib import Path
 
+import click
 import pytest
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 from mergecraft.review.engine import ReviewEngine
 from mergecraft.review.snapshot import ReviewSnapshot
-from mergecraft.scm.webhooks import ConformingReviewRequest, conforming_review_request
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -46,11 +46,13 @@ def test_hidden_diff_review_alias_remains_invocable() -> None:
     result = runner.invoke(app, ["diff-review", "--help"], env=_DUMB_ENV)
     combined = _plain(result.stdout + result.stderr)
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, combined
-    names = {cmd.name for cmd in app.registered_commands if cmd.name}
-    assert "diff-review" in names
-    hidden = [cmd for cmd in app.registered_commands if cmd.name == "diff-review"]
-    assert hidden
-    assert hidden[0].hidden is True
+    root = get_command(app)
+    assert isinstance(root, click.Group)
+    with click.Context(root) as ctx:
+        name, command, _ = root.resolve_command(ctx, ["diff-review"])
+    assert name == "diff-review"
+    assert command is not None
+    assert command.hidden is True
 
 
 def test_review_snapshot_type_exists() -> None:
@@ -124,11 +126,3 @@ async def test_action_path_builds_a_review_snapshot(
     assert seen
     assert isinstance(seen[0], ReviewSnapshot)
     assert seen[0].entry == "action"
-
-
-def test_scm_conforming_request_builds_or_feeds_a_review_snapshot() -> None:
-    """Integration: SCM webhook review requests enter the same snapshot type."""
-    request = conforming_review_request("github", event="pull_request", body={})
-    assert isinstance(request, ConformingReviewRequest)
-    assert isinstance(request.snapshot, ReviewSnapshot)
-    assert request.snapshot.entry == "scm"

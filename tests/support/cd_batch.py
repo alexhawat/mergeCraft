@@ -10,13 +10,11 @@ import pytest
 from tests.support.cc_batch import load_module, require_callable
 from tests.support.dead_package_wiring import root_callback_source
 
-WEBHOOK_MODULE = "mergecraft.scm.webhooks"
 EGRESS_MODULE = "mergecraft.security.egress"
 ADVERSARIAL_CORPORA_MODULE = "mergecraft.evals.adversarial_corpora"
 RECOVERY_MODULE = "mergecraft.reliability.recovery"
 BUNDLE_MODULE = "mergecraft.reliability.diagnostic_bundle"
 
-SUPPORTED_WEBHOOK_PROVIDERS = frozenset({"github", "gitlab"})
 ADVERSARIAL_CORPUS_KINDS = frozenset(
     {
         "prompt_injection",
@@ -76,8 +74,6 @@ __all__ = [
     "EGRESS_MODULE",
     "ISSUE_140_GATE_METRICS",
     "RECOVERY_MODULE",
-    "SUPPORTED_WEBHOOK_PROVIDERS",
-    "WEBHOOK_MODULE",
     "d10_root_callback_owns_globals",
     "module_exists",
     "require_callable",

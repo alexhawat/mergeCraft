@@ -85,7 +85,6 @@ def _tool_ctx(tmp_path: Path) -> ToolContext:
         tool_state=state,
         mcp_server_url="http://127.0.0.1:0/mcp",
         tmpdir=str(tmp_path),
-        signed_commits=True,
         xrepo=None,
         static_checks_enabled=True,
         trust_tier="trusted",

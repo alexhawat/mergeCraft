@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
+    from mergecraft.config.settings import RepoSettings
     from mergecraft.evidence.packet import MergeEvidencePacket
     from mergecraft.jev.client import AsyncJevClient
 
@@ -146,6 +147,7 @@ async def judge_finding_evidence(
     cited_section: str,
     client: AsyncJevClient,
     trust_tier: str = "untrusted",
+    settings: RepoSettings | None = None,
 ) -> EvidenceJudgeResult:
     """Run ``evidence/v1`` over one finding (T12 citation-check).
 
@@ -190,6 +192,7 @@ async def judge_finding_evidence(
     relation_floor = confidence_floor(
         stakes="read_only",
         threshold_key="evidence/v1.relation",
+        settings=settings,
     )
     if route_choice(
         choice=relation,
@@ -199,6 +202,7 @@ async def judge_finding_evidence(
     ):
         attestations.append(
             _attest(
+                settings=settings,
                 rule_id="jev-evidence-unsupported",
                 message=(f"Finding is not supported by the cited code (relation={relation})"),
                 path=finding.path,
@@ -223,6 +227,7 @@ async def judge_prose_claims(
     findings: Sequence[Finding],
     client: AsyncJevClient,
     trust_tier: str = "untrusted",
+    settings: RepoSettings | None = None,
 ) -> ClaimJudgeResult:
     """Run ``claim/v1`` once per extracted prose claim (D12, plan 21 D6 1/3/4).
 
@@ -280,6 +285,7 @@ async def judge_prose_claims(
         ):
             attestations.append(
                 _attest(
+                    settings=settings,
                     rule_id="jev-claim-unbacked-blocker",
                     message="Blocking prose is not backed by a findings-table row",
                     path="",
@@ -289,6 +295,7 @@ async def judge_prose_claims(
         if route_noul(noul=contradicts_verdict, floor=_ACT_FLOOR):
             attestations.append(
                 _attest(
+                    settings=settings,
                     rule_id="jev-claim-verdict-mismatch",
                     message="Prose claim is inconsistent with the stated terminal verdict",
                     path="",
@@ -301,6 +308,7 @@ async def judge_prose_claims(
     ):
         attestations.append(
             _attest(
+                settings=settings,
                 rule_id="jev-claim-verdict-mismatch",
                 message="Review body names more than one terminal verdict",
                 path="",
@@ -326,6 +334,7 @@ async def run_parallel_judge(
     review_body: str,
     client: AsyncJevClient,
     trust_tier: str = "untrusted",
+    settings: RepoSettings | None = None,
 ) -> ParallelJudgeResult:
     """Run the Jev judge beside the verifier. Never replaces ``should_verify``.
 
@@ -343,11 +352,15 @@ async def run_parallel_judge(
         cited = finding.evidence[0] if finding.evidence else ""
         evidence_results.append(
             await judge_finding_evidence(
-                finding, cited_section=cited, client=client, trust_tier=trust_tier
+                finding,
+                cited_section=cited,
+                client=client,
+                trust_tier=trust_tier,
+                settings=settings,
             )
         )
     claims = await judge_prose_claims(
-        review_body, findings=findings, client=client, trust_tier=trust_tier
+        review_body, findings=findings, client=client, trust_tier=trust_tier, settings=settings
     )
     attestations = [row for item in evidence_results for row in item.findings]
     attestations.extend(claims.findings)
@@ -485,9 +498,16 @@ def _noul(response: SystemOneResponse, name: str) -> float:
     return 0.0
 
 
-def _attest(*, rule_id: str, message: str, path: str, confidence: float) -> Finding:
+def _attest(
+    *,
+    rule_id: str,
+    message: str,
+    path: str,
+    confidence: float,
+    settings: RepoSettings | None = None,
+) -> Finding:
     try:
-        ordinal = bucket_confidence(confidence)
+        ordinal = bucket_confidence(confidence, settings=settings)
     except JevError:
         ordinal = "possible"
     return make_finding(

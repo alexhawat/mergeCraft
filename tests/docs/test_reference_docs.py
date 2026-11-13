@@ -77,21 +77,24 @@ def _action_reference_input_table() -> dict[str, str]:
 
 
 def _walk_typer_commands(app: typer.Typer, prefix: tuple[str, ...] = ()) -> set[tuple[str, ...]]:
-    """Recursively collect every leaf command's full path from a Typer app."""
-    paths: set[tuple[str, ...]] = set()
-    for command in app.registered_commands:
-        if command.hidden:
-            continue
-        name = command.name
-        if name is None and command.callback is not None:
-            name = command.callback.__name__.replace("_", "-")
-        assert name, f"unnamed command under {prefix}"
-        paths.add((*prefix, name))
-    for group in app.registered_groups:
-        assert group.name, f"unnamed group under {prefix}"
-        assert group.typer_instance is not None, f"group {group.name!r} has no typer_instance"
-        paths |= _walk_typer_commands(group.typer_instance, (*prefix, group.name))
-    return paths
+    """Collect every leaf command through Click's lazy resolution API."""
+    import click
+    from typer.main import get_group
+
+    def walk(group: click.Group, path: tuple[str, ...]) -> set[tuple[str, ...]]:
+        paths: set[tuple[str, ...]] = set()
+        context = click.Context(group)
+        for name in group.list_commands(context):
+            command = group.get_command(context, name)
+            if command is None or command.hidden:
+                continue
+            if isinstance(command, click.Group):
+                paths |= walk(command, (*path, name))
+            else:
+                paths.add((*path, name))
+        return paths
+
+    return walk(get_group(app), prefix)
 
 
 _PLACEHOLDER = re.compile(r"^<[^>]+>$")

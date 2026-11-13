@@ -26,6 +26,8 @@ from mergecraft.mcp.tool_call import normalize_pull_number_aliases
 from mergecraft.mcp.tool_state import StoredPushDest, primary_repo_state
 from mergecraft.modes._api_only_scope import API_ONLY_SCOPE, degraded_checkout_reason
 from mergecraft.review_policy.ignore_paths import ReviewIgnore, filter_diff, rename_sources
+from mergecraft.scm.pull_files import list_pull_files
+from mergecraft.utils.blocking import run_blocking, run_blocking_cleanup
 from mergecraft.utils.gha_log import warning
 from mergecraft.utils.git_hardening import read_remote_origin_url
 from mergecraft.utils.github import GitHubClient
@@ -753,26 +755,26 @@ async def pull_request_path_expectations(
     ``<old>`` as required would reject an honest rename. ``renames``, when given,
     is filled with each renamed post-image path's source.
     """
-    endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/files"
+    listing = await list_pull_files(
+        ctx.scm,
+        ctx.repo.owner,
+        ctx.repo.name,
+        pull_number,
+        page_size=_PULL_FILES_PAGE_SIZE,
+        max_pages=_PULL_FILES_MAX_PAGES,
+    )
     required: set[str] = set()
     allowed: set[str] = set()
-    for page in range(1, _PULL_FILES_MAX_PAGES + 1):
-        files = await ctx.scm.get(
-            endpoint, params={"per_page": _PULL_FILES_PAGE_SIZE, "page": page}
-        )
-        batch = list(files or [])
-        for f in batch:
-            filename = str(f.get("filename") or "")
-            if filename:
-                required.add(filename)
-                allowed.add(filename)
-            previous = str(f.get("previous_filename") or "")
-            if previous:
-                allowed.add(previous)
-                if renames is not None and filename:
-                    renames[filename] = previous
-        if len(batch) < _PULL_FILES_PAGE_SIZE:
-            break
+    for f in listing.items:
+        filename = str(f.get("filename") or "")
+        if filename:
+            required.add(filename)
+            allowed.add(filename)
+        previous = str(f.get("previous_filename") or "")
+        if previous:
+            allowed.add(previous)
+            if renames is not None and filename:
+                renames[filename] = previous
     return required, allowed
 
 
@@ -836,36 +838,36 @@ async def _diff_from_pull_files(ctx: ToolContext, *, pull_number: int) -> _Files
     A file with no ``patch`` **and** no line changes is a binary (or empty)
     header, written as today and not flagged.
     """
+    listing = await list_pull_files(
+        ctx.scm,
+        ctx.repo.owner,
+        ctx.repo.name,
+        pull_number,
+        page_size=_PULL_FILES_PAGE_SIZE,
+        max_pages=_PULL_FILES_MAX_PAGES,
+    )
     parts: list[str] = []
     unreviewable: list[str] = []
-    truncated = False
-    endpoint = f"/repos/{ctx.repo.owner}/{ctx.repo.name}/pulls/{pull_number}/files"
-    for page in range(1, _PULL_FILES_MAX_PAGES + 1):
-        files = await ctx.scm.get(
-            endpoint, params={"per_page": _PULL_FILES_PAGE_SIZE, "page": page}
-        )
-        batch = list(files or [])
-        for f in batch:
-            filename = str(f.get("filename") or "")
-            # A rename keeps its source on the ``a/`` side, as ``git diff`` writes it, so
-            # the pre-image is never lost to readers of the header.
-            previous = str(f.get("previous_filename") or "") or filename
-            old_image = _quote_diff_path(f"a/{previous}")
-            new_image = _quote_diff_path(f"b/{filename}")
-            parts.append(f"diff --git {old_image} {new_image}\n")
-            if previous != filename:
-                parts.append(f"rename from {_quote_diff_path(previous)}\n")
-                parts.append(f"rename to {_quote_diff_path(filename)}\n")
-            if f.get("patch"):
-                parts.append(f.get("patch") + "\n")
-            elif filename and _line_change_count(f) > 0:
-                # GitHub omits ``patch`` for binary files *and* for text diffs
-                # too large to inline; the line counts tell them apart.
-                unreviewable.append(filename)
-        if len(batch) < _PULL_FILES_PAGE_SIZE:
-            break
-    else:
-        truncated = True
+    truncated = listing.incomplete
+    for f in listing.items:
+        filename = str(f.get("filename") or "")
+        # A rename keeps its source on the ``a/`` side, as ``git diff`` writes it, so
+        # the pre-image is never lost to readers of the header.
+        previous = str(f.get("previous_filename") or "") or filename
+        old_image = _quote_diff_path(f"a/{previous}")
+        new_image = _quote_diff_path(f"b/{filename}")
+        parts.append(f"diff --git {old_image} {new_image}\n")
+        if previous != filename:
+            parts.append(f"rename from {_quote_diff_path(previous)}\n")
+            parts.append(f"rename to {_quote_diff_path(filename)}\n")
+        patch = f.get("patch")
+        if patch:
+            parts.append(patch + "\n")
+        elif filename and _line_change_count(f) > 0:
+            # GitHub omits ``patch`` for binary files *and* for text diffs
+            # too large to inline; the line counts tell them apart.
+            unreviewable.append(filename)
+    if truncated:
         logger.warning(
             "api-only diff: stopped after {} pages of pull files for #{}; "
             "the diff may be incomplete",
@@ -1210,7 +1212,7 @@ def checkout_pr_tool(ctx: ToolContext):
         state = primary_repo_state(ctx.tool_state)
         cwd = state.dir
 
-        dirty = get_git_status(cwd)
+        dirty = await run_blocking(get_git_status, cwd)
         if dirty:
             msg = (
                 f"cannot checkout PR #{pull_number} while the working tree has "
@@ -1280,7 +1282,8 @@ def checkout_pr_tool(ctx: ToolContext):
         # ``_fetch_head_with_retry`` detaches before retrying on the
         # "refusing to fetch into branch" error — safe because the dirty check
         # above already guarantees no uncommitted work to lose.
-        fetched, fetch_err = _fetch_head_with_retry(
+        fetched, fetch_err = await run_blocking(
+            _fetch_head_with_retry,
             cwd=cwd,
             pull_number=pull_number,
             local_branch=local_branch,
@@ -1324,7 +1327,7 @@ def checkout_pr_tool(ctx: ToolContext):
                 provenance="api",
                 review_scope=API_ONLY_SCOPE,
             )
-            _rebaseline_config_after_checkout(ctx)
+            await run_blocking_cleanup(_rebaseline_config_after_checkout, ctx)
             prior_reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
             publishers = expected_publisher_logins(ctx) if prior_reviews else frozenset()
             round_index = _round_index(run_bound, prior_reviews, publishers=publishers)
@@ -1373,8 +1376,10 @@ def checkout_pr_tool(ctx: ToolContext):
 
         # The API lookup and refs/pull/N/head fetch can straddle a push. Bind
         # the checkout to the verified immutable object before exposing scope.
-        checkout_sha = _run_git(
-            ["rev-parse", "--verify", f"{local_branch}^{{commit}}"], cwd=cwd
+        checkout_sha = (
+            await run_blocking(
+                _run_git, ["rev-parse", "--verify", f"{local_branch}^{{commit}}"], cwd=cwd
+            )
         ).strip()
         if head_sha and checkout_sha.lower() != head_sha.lower():
             msg = (
@@ -1382,33 +1387,49 @@ def checkout_pr_tool(ctx: ToolContext):
                 "retry checkout before reviewing this revision."
             )
             raise RuntimeError(msg)
-        _run_git(["checkout", "-B", local_branch, checkout_sha], cwd=cwd)
+        try:
+            await run_blocking(_run_git, ["checkout", "-B", local_branch, checkout_sha], cwd=cwd)
+        except BaseException:
+            # Cancellation can arrive after Git changes the tree but before its
+            # worker returns. Join the boundary re-pin while retaining the lock;
+            # the outer handler still invalidates all authoritative review proof.
+            try:
+                await run_blocking_cleanup(_rebaseline_config_after_checkout, ctx)
+            except BaseException as cleanup_error:
+                logger.warning(
+                    "checkout rebaseline cleanup failed ({}); preserving checkout failure",
+                    type(cleanup_error).__name__,
+                )
+            raise
         # Configuration and tree bytes may change at this controlled boundary.
         # Re-pin their hashes before later API calls can fail or be cancelled;
         # the run's trusted settings/policy values remain pinned across retries.
-        _rebaseline_config_after_checkout(ctx)
+        await run_blocking_cleanup(_rebaseline_config_after_checkout, ctx)
         # Ensure base is available for merge-base diffs
-        base_env, base_remote_url = _git_env_for_cwd(cwd, ctx.git_token)
+        base_env, base_remote_url = await run_blocking(_git_env_for_cwd, cwd, ctx.git_token)
         base_fetch_failure: str | None = None
         try:
-            _run_git(
-                [
-                    "fetch",
-                    "--no-tags",
-                    *_depth_flags(cwd),
-                    "origin",
-                    f"{base_ref}:refs/remotes/origin/{base_ref}",
-                ],
-                cwd=cwd,
-                env=base_env,
-                remote_url=base_remote_url or None,
+            (
+                await run_blocking(
+                    _run_git,
+                    [
+                        "fetch",
+                        "--no-tags",
+                        *(await run_blocking(_depth_flags, cwd)),
+                        "origin",
+                        f"{base_ref}:refs/remotes/origin/{base_ref}",
+                    ],
+                    cwd=cwd,
+                    env=base_env,
+                    remote_url=base_remote_url or None,
+                )
             )
         except Exception as err:
             base_fetch_failure = str(err).splitlines()[0] if str(err) else "git fetch failed"
             logger.info("base fetch soft-failed: {}", err)
         if base_ref:
             try:
-                ensure_local_base_branch_alias(cwd=cwd, base_ref=base_ref)
+                await run_blocking(ensure_local_base_branch_alias, cwd=cwd, base_ref=base_ref)
             except Exception as err:
                 logger.info("base branch alias soft-failed: {}", err)
 
@@ -1420,7 +1441,7 @@ def checkout_pr_tool(ctx: ToolContext):
             local_branch=local_branch,
         )
         try:
-            state.push_url = read_remote_origin_url(cwd)
+            state.push_url = await run_blocking(read_remote_origin_url, cwd)
         except RuntimeError:
             if is_fork and head.get("repo"):
                 clone_url = (head["repo"].get("clone_url") or "").rstrip("/")
@@ -1435,7 +1456,8 @@ def checkout_pr_tool(ctx: ToolContext):
         unreviewable: list[str] = []
         diff_truncated = False
         try:
-            diff = _run_git(
+            diff = await run_blocking(
+                _run_git,
                 ["diff", "--merge-base", f"origin/{base_ref}", "HEAD"],
                 cwd=cwd,
             )
@@ -1479,7 +1501,7 @@ def checkout_pr_tool(ctx: ToolContext):
                 degraded_reason = _stale_base_reason(base_fetch_failure)
                 warning(degraded_reason)
             register_review_scope(ctx.tool_state, diff_path=diff_path, provenance="checkout")
-        _rebaseline_config_after_checkout(ctx)
+        await run_blocking_cleanup(_rebaseline_config_after_checkout, ctx)
 
         result = {
             "pullNumber": pull_number,
@@ -1520,7 +1542,8 @@ def checkout_pr_tool(ctx: ToolContext):
             or ""
         )
         if prior_sha:
-            incremental = _write_incremental_diff(
+            incremental = await run_blocking(
+                _write_incremental_diff,
                 cwd=cwd,
                 temp=temp,
                 pull_number=pull_number,
@@ -1575,28 +1598,29 @@ def checkout_pr_tool(ctx: ToolContext):
         # Emitted only when enabled; returns None (-> no key) when the diff
         # has zero declarations, matching the incrementalDiffPath convention.
         # The analyzers.impact toggle is read from the PR's pinned (base-side) settings,
-        # never the head checkout (#942), and gated
-        # behind analyzers_enabled(ctx) first so the operator's effective
-        # policy (analyzers: off, or analyzers.enabled: false) always wins over
-        # whatever a PR sets in its own config — mirrors run_analyzers_tool's
-        # gate (mcp/analyzers.py). ast-grep execution itself is further gated
+        # never the head checkout (#942). Impact requires the pinned toggle and
+        # the effective analyzer policy, mirroring run_analyzers_tool's gate
+        # (mcp/analyzers.py). ast-grep execution itself is further gated
         # on ctx.trust_tier inside write_impact, which fails closed (omits
         # impactPath) when sandbox isolation for an untrusted checkout isn't
         # available (D7).
         try:
             repo_root = Path(cwd)
-            from mergecraft.analyzers.settings_pin import resolve_pinned_analyzer_settings
+            from mergecraft.analyzers.settings_pin import resolve_pinned_analyzer_settings_async
 
-            pinned_settings = resolve_pinned_analyzer_settings(ctx, repo_root).settings
-            if analyzers_enabled(ctx) and pinned_settings.impact:
-                ast_grep_binary = resolve_ast_grep_binary()
+            pinned_settings = (
+                await resolve_pinned_analyzer_settings_async(ctx, repo_root)
+            ).settings
+            if pinned_settings.impact and analyzers_enabled(ctx):
+                ast_grep_binary = await run_blocking(resolve_ast_grep_binary)
                 if ast_grep_binary is None:
                     logger.info(
                         "impactPath skipped for PR #{}: managed ast-grep binary unavailable",
                         pull_number,
                     )
                 else:
-                    impact_result = write_impact(
+                    impact_result = await run_blocking(
+                        write_impact,
                         diff,
                         cwd,
                         temp,
@@ -1624,8 +1648,11 @@ def checkout_pr_tool(ctx: ToolContext):
                 operator_authorized_linked_repos,
             )
 
-            base_lookup = _base_linked_repo_manifest(
-                cwd=cwd, base_ref=base_ref, base_fetch_failure=base_fetch_failure
+            base_lookup = await run_blocking(
+                _base_linked_repo_manifest,
+                cwd=cwd,
+                base_ref=base_ref,
+                base_fetch_failure=base_fetch_failure,
             )
             # Recorded for the ``xrepo`` policy evidence producer, which reads
             # what this checkout computed instead of walking git a second time.
@@ -1658,7 +1685,7 @@ def checkout_pr_tool(ctx: ToolContext):
         )
         return result
 
-    async def _run(params: dict[str, Any]):
+    async def _run_locked(params: dict[str, Any]):
         if ctx.tool_state.review is not None:
             msg = "cannot restart checkout after this run has published a review"
             raise RuntimeError(msg)
@@ -1671,7 +1698,12 @@ def checkout_pr_tool(ctx: ToolContext):
             raise RuntimeError(msg)
         baseline = ctx.tool_state.review_tree_baseline
         if baseline is not None:
-            baseline.before_checkout()
+            await run_blocking(baseline.before_checkout)
+            # Publication may also complete during the offloaded integrity hash.
+            # Refuse before invalidating its receipt or changing the checkout.
+            if ctx.tool_state.review is not None:
+                msg = "cannot restart checkout after this run has published a review"
+                raise RuntimeError(msg)
         invalidate_checkout_review_state(ctx.tool_state)
         try:
             result = await _checkout(pull_number, pr)
@@ -1684,6 +1716,10 @@ def checkout_pr_tool(ctx: ToolContext):
             # state changed. Neither the previous nor partial new proof is valid.
             invalidate_checkout_review_state(ctx.tool_state)
             raise
+
+    async def _run(params: dict[str, Any]):
+        async with ctx.tool_state.checkout_operation_lock:
+            return await _run_locked(params)
 
     return tool(
         name="checkout_pr",

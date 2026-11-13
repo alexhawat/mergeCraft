@@ -239,32 +239,6 @@ def classify_pull_request_outcomes(
     )
 
 
-def flywheel_candidate_from_outcome(
-    row: FindingOutcomeRow,
-    *,
-    case_id: str,
-    run_id: str,
-    author_login: str,
-    pr_number: int | None,
-) -> dict[str, Any] | None:
-    """Map rejected/intentional outcomes to flywheel ingest payloads (provenance required)."""
-    if row.outcome not in {"rejected", "intentional"}:
-        return None
-    return {
-        "case_id": case_id,
-        "title": f"Human {row.outcome} finding {row.fingerprint[:8]}",
-        "category": "false_positive" if row.outcome == "rejected" else "intentional_accept",
-        "failure_mode": row.outcome,
-        "expected_finding": row.path or row.fingerprint,
-        "expected_decision": "neutral",
-        "provenance": "agent-seeded",
-        "run_id": run_id,
-        "author_login": author_login,
-        "pr_number": pr_number,
-        "body": row.reason,
-    }
-
-
 __all__ = [
     "FindingOutcomeKind",
     "FindingOutcomeReport",
@@ -272,6 +246,5 @@ __all__ = [
     "FindingOutcomeSummary",
     "classify_pull_request_outcomes",
     "classify_thread_outcome",
-    "flywheel_candidate_from_outcome",
     "summarize_outcomes",
 ]

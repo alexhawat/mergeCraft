@@ -11,12 +11,8 @@ from tests.mcp.test_git_tool import _ctx
 from tests.support.policy_fixtures import commit_all, init_git_repo
 
 from mergecraft.mcp.git import (
-    commit_changes_tool,
-    delete_branch_tool,
     git_fetch_tool,
     git_tool,
-    push_branch_tool,
-    push_tags_tool,
 )
 from mergecraft.mcp.tool_state import ensure_repo_state
 
@@ -84,10 +80,6 @@ async def test_non_string_repo_is_refused(tmp_path: Path, monkeypatch: pytest.Mo
     "factory",
     [
         git_fetch_tool,
-        push_branch_tool,
-        push_tags_tool,
-        delete_branch_tool,
-        commit_changes_tool,
     ],
 )
 def test_tools_that_always_act_on_the_primary_checkout_do_not_advertise_repo(

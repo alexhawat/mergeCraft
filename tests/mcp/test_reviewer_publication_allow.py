@@ -68,7 +68,6 @@ def _tool_ctx(tmp_path: Path) -> ToolContext:
         tool_state=state,
         mcp_server_url="",
         tmpdir=str(tmp_path),
-        signed_commits=True,
         xrepo=XrepoConfig(mode="explicit", read=["other"], write=["other"]),
         static_checks_enabled=True,
         trust_tier="trusted",
@@ -154,7 +153,7 @@ def test_subagent_deny_list_still_contains_create_pull_request_review(tmp_path: 
     ctx = _tool_ctx(tmp_path)
     denied = subagent_denied_tool_names(ctx)
     assert "create_pull_request_review" in denied
-    assert "push_branch" in denied
+    assert "report_progress" in denied
     assert "checkout_pr" not in denied
     _assert_real_orchestrator_has_publication(ctx)
 

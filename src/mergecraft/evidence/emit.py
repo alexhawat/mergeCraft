@@ -7,13 +7,10 @@ attached as a CI artifact. All I/O lives here; the builder is pure.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from loguru import logger
-
-from mergecraft.evidence.build import build_packet
 
 if TYPE_CHECKING:
     from mergecraft.evidence.packet import MergeEvidencePacket
@@ -45,31 +42,4 @@ def write_packet(
     return output_path
 
 
-def write_packet_from_sources(
-    *,
-    output_path: Path,
-    **build_kwargs: object,
-) -> Path:
-    """Compose a packet from sources and write it to ``output_path``.
-
-    Convenience wrapper that ties the pure builder to the I/O shell —
-    callers should prefer this when the source data is already in hand
-    and only the artifact is needed.
-    """
-    packet = build_packet(**build_kwargs)  # type: ignore[arg-type]  # — build_kwargs matches build_packet signature; TypedDict ** spread not fully supported by mypy
-    return write_packet(packet, output_path=output_path)
-
-
-def load_packet(path: Path) -> dict[str, Any]:
-    """Load a packet from a JSON file and return it as a dict.
-
-    Pure-deserialisation; re-validating against ``MergeEvidencePacket`` is
-    the caller's job (the emitter does not validate the round-trip — the
-    separate tests at ``tests/evidence/test_packet_round_trip.py`` do).
-    """
-    return cast(  # json.loads returns Any; packet files are always JSON objects
-        "dict[str, Any]", json.loads(Path(path).read_text(encoding="utf-8"))
-    )
-
-
-__all__ = ["load_packet", "write_packet", "write_packet_from_sources"]
+__all__ = ["write_packet"]

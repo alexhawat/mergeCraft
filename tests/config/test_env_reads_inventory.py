@@ -274,6 +274,19 @@ ALLOWED_KINDS: Final = frozenset(
 #: owner, never by an implementation wave.
 ALLOWED_READS: Final[tuple[AllowedRead, ...]] = (
     AllowedRead(
+        "src/mergecraft/build_metadata.py",
+        "MERGECRAFT_BUILD_COMMIT",
+        "generated",
+        "version bootstrap reads build provenance without importing application settings; "
+        "parity with RunInputsEnv is pinned in test_version_bootstrap",
+    ),
+    AllowedRead(
+        "src/mergecraft/build_metadata.py",
+        "build_commit",
+        "generated",
+        "preserve RunInputsEnv's existing field-name fallback during lightweight bootstrap",
+    ),
+    AllowedRead(
         "src/mergecraft/mcp/verdict.py",
         "MERGECRAFT_TEMP_DIR",
         "message bus",
@@ -554,12 +567,6 @@ ALLOWED_READS: Final[tuple[AllowedRead, ...]] = (
         "the workflow writer checks its own YAML env mapping, not the process environment",
     ),
     # ── classes that stay out by decision ──────────────────────────────────
-    AllowedRead(
-        "src/mergecraft/analyzers/sandbox.py",
-        "MERGECRAFT_PROBE_TEST_DOUBLE",
-        "test seam",
-        "selects the recorded probe output under pytest only",
-    ),
     AllowedRead(
         "src/mergecraft/harbor/agent.py",
         "MERGECRAFT_MODEL",

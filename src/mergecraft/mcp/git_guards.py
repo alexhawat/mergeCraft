@@ -110,9 +110,9 @@ _READONLY_SUBCOMMANDS: frozenset[str] = frozenset(
 # table, consulted before the allowlist so the agent is told where to go rather
 # than only that it cannot go here.
 _REDIRECT_TO_TOOL: dict[str, str] = {
-    "push": "use push_branch instead",
+    "push": "repository mutation is not available in review-only runs",
     "fetch": "use git_fetch instead",
-    "pull": "use git_fetch then git merge",
+    "pull": "use git_fetch to read remote refs; merging is not available",
     "clone": "use checkout_repo / checkout_pr",
 }
 # Flags that enable arbitrary code execution via git alias expansion.
@@ -955,9 +955,7 @@ def _reject_config_invocation(args: list[str]) -> None:
 def _reject_branch_writes(args: list[str]) -> None:
     """Keep ``git branch`` to listing only (H2, #257 / D7).
 
-    Deletion, rename and copy all write refs, and a rename of the checked-out
-    branch changes what ``commit_changes`` / ``push_branch`` later resolve
-    through ``rev-parse --abbrev-ref HEAD``. Bare ``git branch <name>`` creates a
+    Deletion, rename and copy all write refs. Bare ``git branch <name>`` creates a
     branch, so a positional argument is a write too unless a listing flag that
     takes a value consumed it.
     """
