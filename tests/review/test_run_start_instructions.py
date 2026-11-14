@@ -14,8 +14,10 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 import mergecraft.main as main_mod
+from mergecraft.action import review_dispatch
 from mergecraft.agents.shared import AgentResult, ResolvedInstructions
 from mergecraft.config.settings import RepoInfo, RepoSettings, RunContextData
+from mergecraft.review.pipeline import dispatch as pipeline_dispatch
 from tests.support.publication import RecordingReviewGitHub, publication_ctx, run_ctx_for
 
 if TYPE_CHECKING:
@@ -63,9 +65,9 @@ def _fallback_ctx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness: _Har
     async def _chain(*, run_once: Any, **_kwargs: Any) -> tuple[str, AgentResult]:
         return "openai/gpt-5.3-codex", await run_once("openai/gpt-5.3-codex")
 
-    monkeypatch.setattr(main_mod, "run_with_model_chain", _chain)
-    monkeypatch.setattr(main_mod, "resolve_runtime_agent", lambda **_: harness)
-    monkeypatch.setattr(main_mod, "resolve_instructions", _no_render)
+    monkeypatch.setattr(pipeline_dispatch, "run_with_model_chain", _chain)
+    monkeypatch.setattr(review_dispatch, "resolve_runtime_agent", lambda **_: harness)
+    monkeypatch.setattr(review_dispatch, "resolve_instructions", _no_render)
     return run
 
 
@@ -245,16 +247,18 @@ review:
         payload={"event": {"trigger": "pull_request", "headSha": head_sha}},
     )
     monkeypatch.setattr(
-        main_mod, "start_mcp_http_server", lambda *a, **kw: ("http://local/mcp", lambda: None)
+        review_dispatch,
+        "start_mcp_http_server",
+        lambda *a, **kw: ("http://local/mcp", lambda: None),
     )
-    monkeypatch.setattr(main_mod, "start_installation", lambda *_: None)
-    monkeypatch.setattr(main_mod, "install_bundled_skills", lambda **_: None)
-    monkeypatch.setattr(main_mod, "_run_start_harnesses", lambda _: ["claude", "codex"])
+    monkeypatch.setattr(review_dispatch, "start_installation", lambda *_: None)
+    monkeypatch.setattr(review_dispatch, "install_bundled_skills", lambda **_: None)
+    monkeypatch.setattr(review_dispatch, "_run_start_harnesses", lambda _: ["claude", "codex"])
 
     async def seed(**kwargs: Any) -> str:
         return ""
 
-    monkeypatch.setattr(main_mod, "seed_learnings_file", seed)
+    monkeypatch.setattr(review_dispatch, "seed_learnings_file", seed)
 
     await main_mod._prepare_agent_dispatch(run)
 

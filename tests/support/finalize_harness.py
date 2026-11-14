@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import mergecraft.main as main_mod
+from mergecraft.action import review_finalize, review_publish
 from mergecraft.agents.shared import AgentResult
 from mergecraft.config.settings import RepoSettings
 from tests.support.publication import run_ctx_for
@@ -78,14 +79,14 @@ async def run_finalize(
         return None
 
     if real_publish:
-        monkeypatch.setattr(main_mod, "report_status_checks", _record)
-        monkeypatch.setattr(main_mod, "persist_learnings", _noop)
+        monkeypatch.setattr(review_publish, "report_status_checks", _record)
+        monkeypatch.setattr(review_publish, "persist_learnings", _noop)
         monkeypatch.setattr(main_mod, "report_sarif_upload", _noop)
         if not real_emission:
-            monkeypatch.setattr(main_mod, "emit_run_packet", lambda *_a, **_k: None)
+            monkeypatch.setattr(review_publish, "emit_run_packet", lambda *_a, **_k: None)
     else:
         monkeypatch.setattr(main_mod, "_publish", _record)
-    monkeypatch.setattr(main_mod, "_scan_sinks_after_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(review_finalize, "_scan_sinks_after_run", lambda *_a, **_k: None)
 
     run_settings = settings or RepoSettings()
     run_settings.gates = run_settings.gates.model_copy(

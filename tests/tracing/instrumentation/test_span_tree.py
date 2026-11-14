@@ -33,6 +33,8 @@ from tests.tracing.instrumentation.conftest import (
     make_agent_usage,
 )
 
+from mergecraft.action import review_dispatch
+
 
 def _assert_closed_tree(events: list[Any]) -> None:
     roots = [event for event in events if event.parent_span_id is None]
@@ -154,20 +156,19 @@ async def test_action_lifecycle_and_detached_mcp_tool_share_one_root(
 
     from tests.support.run_main_harness import FakeAgent, run_main_for_test
 
-    import mergecraft.main as main_mod
     from mergecraft.config import RepoSettings
     from mergecraft.mcp.rpc import dispatch_mcp_rpc
     from mergecraft.mcp.shared import ToolClass, ToolResult, ToolSpec
 
     contexts: list[Any] = []
-    real_tool_context = main_mod.ToolContext
+    real_tool_context = review_dispatch.ToolContext
 
     def _capture_tool_context(**kwargs: Any) -> Any:
         context = real_tool_context(**kwargs)
         contexts.append(context)
         return context
 
-    monkeypatch.setattr(main_mod, "ToolContext", _capture_tool_context)
+    monkeypatch.setattr(review_dispatch, "ToolContext", _capture_tool_context)
 
     async def _execute(_arguments: dict[str, Any]) -> ToolResult:
         return ToolResult(content=[{"type": "text", "text": "ok"}])

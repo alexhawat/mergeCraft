@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-import mergecraft.main as main_mod
+from mergecraft.action import review_policy
 from mergecraft.config.settings import RepoSettings
 from mergecraft.run_outcome import RunOutcome
 from tests.support.run_main_harness import FakeAgent, run_main_for_test
@@ -74,7 +74,7 @@ def triage_inputs(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]]:
         calls.append(args)
         return TriageInputs(diff_text=_PIN_DIFF, head_files={}, passed_checks=(_VERIFIER,))
 
-    monkeypatch.setattr(main_mod, "load_triage_inputs", _fake_inputs, raising=False)
+    monkeypatch.setattr(review_policy, "load_triage_inputs", _fake_inputs, raising=False)
     return calls
 
 

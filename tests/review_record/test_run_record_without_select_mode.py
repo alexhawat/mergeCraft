@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from mergecraft.action import review_publish
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator
 from mergecraft.agents.opencode import _session_event_handler
 from mergecraft.agents.shared import AgentUsage
@@ -147,9 +148,9 @@ async def test_publish_posts_the_run_record_after_a_modeless_submission(
     async def _noop(*_args: Any, **_kwargs: Any) -> None:
         return None
 
-    monkeypatch.setattr(main_mod, "persist_learnings", _noop)
-    monkeypatch.setattr(main_mod, "report_status_checks", _noop)
-    monkeypatch.setattr(main_mod, "publish_deterministic_record", _capture)
+    monkeypatch.setattr(review_publish, "persist_learnings", _noop)
+    monkeypatch.setattr(review_publish, "report_status_checks", _noop)
+    monkeypatch.setattr(review_publish, "publish_deterministic_record", _capture)
     monkeypatch.setattr(step_summary_mod, "append_step_summary", lambda _body: None)
 
     run_ctx = main_mod.RunContext(tool_context=ctx)

@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 import mergecraft.main as main_mod
+from mergecraft.action import review_policy, review_publish
 from mergecraft.config.settings import RepoSettings
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.run_outcome import RunOutcome
@@ -218,7 +219,7 @@ class _LiteDriver:
 @pytest.fixture
 def lite_driver(monkeypatch: pytest.MonkeyPatch) -> _LiteDriver:
     driver = _LiteDriver()
-    monkeypatch.setattr(main_mod, "run_lite_review", driver, raising=False)
+    monkeypatch.setattr(review_policy, "run_lite_review", driver, raising=False)
     return driver
 
 
@@ -234,7 +235,7 @@ def triage_inputs(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             diff_text=state["diff"], head_files={}, passed_checks=tuple(state["checks"])
         )
 
-    monkeypatch.setattr(main_mod, "load_triage_inputs", _fake_inputs, raising=False)
+    monkeypatch.setattr(review_policy, "load_triage_inputs", _fake_inputs, raising=False)
     return state
 
 
@@ -783,7 +784,7 @@ def publication(monkeypatch: pytest.MonkeyPatch) -> _Publication:
         spy.updated.append(body)
         return {"id": _review_id}
 
-    monkeypatch.setattr(main_mod, "publish_deterministic_record", _publish)
+    monkeypatch.setattr(review_publish, "publish_deterministic_record", _publish)
     monkeypatch.setattr(GitHubScmAdapter, "create_review", _create_review)
     monkeypatch.setattr(GitHubScmAdapter, "update_review", _update_review)
     return spy

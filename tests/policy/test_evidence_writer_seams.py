@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import pytest
 
+from mergecraft.action import review_prep
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.scm.github import create_github_scm
 from mergecraft.utils.github import GitHubClient
@@ -206,9 +207,9 @@ async def test_the_credential_phase_reads_the_closing_issues_once(
     async def _fake_resolve_tokens(**_kwargs: Any) -> _FakeTokenRef:
         return _FakeTokenRef()
 
-    monkeypatch.setattr(main, "resolve_tokens", _fake_resolve_tokens)
-    monkeypatch.setattr(main, "GitHubClient", lambda *a, **k: client)
-    monkeypatch.setattr(main, "create_github_scm", lambda *a, **k: GitHubScmAdapter(client))
+    monkeypatch.setattr(review_prep, "resolve_tokens", _fake_resolve_tokens)
+    monkeypatch.setattr(review_prep, "GitHubClient", lambda *a, **k: client)
+    monkeypatch.setattr(review_prep, "create_github_scm", lambda *a, **k: GitHubScmAdapter(client))
     ctx = RunContext(
         settings=RepoSettings(),
         tool_state=init_tool_state(owner="acme", name="demo", dir=str(tmp_path)),

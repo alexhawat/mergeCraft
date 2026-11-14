@@ -1040,7 +1040,7 @@ def _patch_main_dispatchers(
     fanout_summary: FanoutSummary,
     roster_summary: RosterExecutionSummary,
 ) -> tuple[list[str], list[dict[str, Any]]]:
-    import mergecraft.main as main_module
+    from mergecraft.action import review_dispatch
 
     order: list[str] = []
     fanout_kwargs: list[dict[str, Any]] = []
@@ -1054,7 +1054,7 @@ def _patch_main_dispatchers(
         order.append("secondary-roster")
         return roster_summary
 
-    for target in (roster_execution, main_module):
+    for target in (roster_execution, review_dispatch):
         monkeypatch.setattr(target, "run_file_group_reviewers", _fake_fanout, raising=False)
         monkeypatch.setattr(target, "run_pending_roster_reviewers", _fake_roster, raising=False)
     return order, fanout_kwargs

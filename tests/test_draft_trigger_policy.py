@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from mergecraft.action import review_policy
 from mergecraft.config import RepoSettings
 from tests.support.run_main_harness import FakeGitHubClient, run_main_for_test
 
@@ -312,7 +313,6 @@ async def test_frequency_uses_verified_formal_review_history(
 async def test_draft_lite_uses_base_provider_settings_without_full_dispatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revision: str, lite_status: str
 ) -> None:
-    from mergecraft import main as main_module
     from mergecraft.agents.lite import LiteOutcome
 
     base = b"""review:
@@ -352,7 +352,7 @@ async def test_draft_lite_uses_base_provider_settings_without_full_dispatch(
 
     monkeypatch.setattr(FakeGitHubClient, "get", get)
     monkeypatch.setattr(FakeGitHubClient, "get_pull", get_pull, raising=False)
-    monkeypatch.setattr(main_module, "run_lite_review", lite)
+    monkeypatch.setattr(review_policy, "run_lite_review", lite)
     record = await run_main_for_test(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,

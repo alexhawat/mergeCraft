@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 import mergecraft.main as main_mod
+from mergecraft.action import review_finalize
 from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import AgentResult
 from mergecraft.analyzers.finding import make_finding
@@ -64,7 +65,7 @@ async def _finalize(
         return None
 
     monkeypatch.setattr(main_mod, "_publish", _record)
-    monkeypatch.setattr(main_mod, "_scan_sinks_after_run", lambda *_a, **_k: sink)
+    monkeypatch.setattr(review_finalize, "_scan_sinks_after_run", lambda *_a, **_k: sink)
     run = main_mod.RunContext(
         settings=RepoSettings(),
         tool_context=ctx,
@@ -110,10 +111,10 @@ async def _run_gate(
         async def _prep(_tool_context: Any, **_kwargs: Any) -> str:
             return "dependency installation failed: npm ci exited 1"
 
-        monkeypatch.setattr(main_mod, "_prep_failure_reason", _prep)
+        monkeypatch.setattr(review_finalize, "_prep_failure_reason", _prep)
     elif gate == "coverage":
         monkeypatch.setattr(
-            main_mod, "_coverage_gate_reason", lambda *_a: "changed-line coverage incomplete"
+            review_finalize, "_coverage_gate_reason", lambda *_a: "changed-line coverage incomplete"
         )
     elif gate == "sink":
         kwargs["sink"] = "credential material found in local sink(s) after the run: x"
@@ -126,7 +127,7 @@ async def _run_gate(
             ),
         )
     elif gate == "finalize":
-        monkeypatch.setattr(main_mod, "finalize_agent_result", _raise)
+        monkeypatch.setattr(review_finalize, "finalize_agent_result", _raise)
     return await _finalize(ctx, result, monkeypatch, **kwargs)
 
 
@@ -173,7 +174,7 @@ async def test_the_withheld_approval_is_named_in_the_run_record(
     ctx = _approving_ctx(tmp_path, github)
     await submit_verdict(ctx, "approve", [])
     monkeypatch.setattr(
-        main_mod, "_coverage_gate_reason", lambda *_a: "changed-line coverage incomplete"
+        review_finalize, "_coverage_gate_reason", lambda *_a: "changed-line coverage incomplete"
     )
 
     record = await run_finalize(
@@ -222,7 +223,7 @@ async def test_a_finalize_failure_with_a_driver_result_is_inconclusive_and_posts
     await submit_verdict(ctx, "approve", [])
     result = await _driver_result(ctx)
     assert result.terminal_submission_received is True
-    monkeypatch.setattr(main_mod, "finalize_agent_result", _raise)
+    monkeypatch.setattr(review_finalize, "finalize_agent_result", _raise)
 
     outcome = await _finalize(ctx, result, monkeypatch)
 

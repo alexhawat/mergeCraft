@@ -15,8 +15,8 @@ from typing import Any
 
 import pytest
 
-import mergecraft.main as main_mod
 import mergecraft.reapproval as reapproval_mod
+from mergecraft.action import review_policy
 from mergecraft.classify.reapproval import (
     ReapprovalRecord,
     ReapprovalVerdict,
@@ -121,7 +121,7 @@ def no_triage_read(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
         reads.append(args)
         return TriageInputs(diff_text="", head_files={}, passed_checks=())
 
-    monkeypatch.setattr(main_mod, "load_triage_inputs", _inputs, raising=False)
+    monkeypatch.setattr(review_policy, "load_triage_inputs", _inputs, raising=False)
     return reads
 
 

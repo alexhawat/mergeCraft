@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 
+from mergecraft.action import review_publish
 from mergecraft.agents.shared import AgentResult
 from mergecraft.main import RunOutcome
 from mergecraft.utils.status_checks import APPROVAL_CHECK, COMPLETION_CHECK
@@ -156,9 +157,7 @@ async def test_canary_in_a_generated_artifact_fails_before_upload(
 
         class _PublishWithBrief(_SinkWritingAgent):
             async def run(self, ctx: Any) -> AgentResult:
-                from mergecraft import main as main_module
-
-                emit = main_module.emit_run_packet
+                emit = review_publish.emit_run_packet
 
                 def _emit_with_brief(*args: Any, **kwargs: Any) -> Path | None:
                     written = emit(*args, **kwargs)
@@ -166,7 +165,7 @@ async def test_canary_in_a_generated_artifact_fails_before_upload(
                         fix_brief_path(written).write_text(payload, encoding="utf-8")
                     return written
 
-                monkeypatch.setattr(main_module, "emit_run_packet", _emit_with_brief)
+                monkeypatch.setattr(review_publish, "emit_run_packet", _emit_with_brief)
                 return await super().run(ctx)
 
         agent = _PublishWithBrief(run_tmpdir_sink=False)

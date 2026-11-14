@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from mergecraft.action import review_dispatch
 from mergecraft.config.settings import RepoInfo, RepoSettings
 from mergecraft.modes import Mode
 from mergecraft.utils.instructions import resolve_instructions
@@ -78,7 +79,6 @@ def _patch_resolve_for_capture(
         "all_system": [],
     }
 
-    import mergecraft.main as main_mod
     import mergecraft.utils.instructions as instructions_mod
 
     real_resolve = instructions_mod.resolve_instructions
@@ -93,7 +93,7 @@ def _patch_resolve_for_capture(
         captured["all_system"].append(system)
         return result
 
-    monkeypatch.setattr(main_mod, "resolve_instructions", _patched_resolve)
+    monkeypatch.setattr(review_dispatch, "resolve_instructions", _patched_resolve)
     monkeypatch.setattr(instructions_mod, "resolve_instructions", _patched_resolve)
     return captured
 

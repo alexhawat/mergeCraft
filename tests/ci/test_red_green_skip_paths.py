@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 import mergecraft.main as main_mod
+from mergecraft.action import review_policy
 from mergecraft.ci.red_green import RedGreenEvidence
 from mergecraft.config.settings import RepoSettings, default_settings
 from mergecraft.mcp.tool_state import init_tool_state
@@ -273,8 +274,8 @@ def lite_phases(monkeypatch: pytest.MonkeyPatch, phases: dict[str, Any]) -> _Lit
         return TriageInputs(diff_text=_PIN_DIFF, head_files={}, passed_checks=())
 
     monkeypatch.setattr(main_mod, "_triage_gate", _REAL_TRIAGE_GATE)
-    monkeypatch.setattr(main_mod, "run_lite_review", driver, raising=False)
-    monkeypatch.setattr(main_mod, "load_triage_inputs", _fake_inputs, raising=False)
+    monkeypatch.setattr(review_policy, "run_lite_review", driver, raising=False)
+    monkeypatch.setattr(review_policy, "load_triage_inputs", _fake_inputs, raising=False)
     return driver
 
 

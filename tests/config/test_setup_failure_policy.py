@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from mergecraft.action import review_dispatch
 from mergecraft.config.settings import RepoSettings
 from mergecraft.run_outcome import RunOutcome
 from tests.support.run_main_harness import FakeAgent, run_main_for_test
@@ -108,7 +109,6 @@ async def test_policy_warn_reproduces_legacy_continue(
     """
     captured: dict[str, str] = {}
 
-    import mergecraft.main as main_mod
     import mergecraft.utils.instructions as instructions_mod
 
     real_resolve = instructions_mod.resolve_instructions
@@ -125,7 +125,7 @@ async def test_policy_warn_reproduces_legacy_continue(
             captured["setup_hook_failure"] = str(kwargs["setup_hook_failure"])
         return result
 
-    monkeypatch.setattr(main_mod, "resolve_instructions", _patched_resolve)
+    monkeypatch.setattr(review_dispatch, "resolve_instructions", _patched_resolve)
     monkeypatch.setattr(instructions_mod, "resolve_instructions", _patched_resolve)
 
     rec = await run_main_for_test(
@@ -557,7 +557,9 @@ async def test_inconclusive_policy_does_not_invoke_review_or_mutation_tools(
         mcp_starts.append("started")
         return "http://127.0.0.1:0/mcp", lambda: None
 
-    monkeypatch.setattr("mergecraft.main.start_mcp_http_server", _tracking_mcp_server)
+    monkeypatch.setattr(
+        "mergecraft.action.review_dispatch.start_mcp_http_server", _tracking_mcp_server
+    )
 
     rec = await run_main_for_test(
         monkeypatch=monkeypatch,
