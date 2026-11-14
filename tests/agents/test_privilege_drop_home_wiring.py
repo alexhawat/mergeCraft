@@ -40,6 +40,7 @@ from unittest.mock import MagicMock
 
 from tests.agents.conftest import make_agent_run_context
 
+from mergecraft.agents import cli_runner, shared
 from mergecraft.agents.shared import spawn_agent_cli
 from mergecraft.utils import privilege as privilege_module
 
@@ -212,9 +213,9 @@ def test_claude_stream_redirects_home_under_privilege_drop(
         captured["kwargs"] = kwargs
         return _EmptyProcess()
 
-    monkeypatch.setattr(claude_module.subprocess, "Popen", popen)
-    monkeypatch.setattr(claude_module, "track_process_group", _NullProcessGroup)
-    monkeypatch.setattr(claude_module, "wait_or_kill_process_group", lambda process, timeout: 0)
+    monkeypatch.setattr(shared.subprocess, "Popen", popen)
+    monkeypatch.setattr(cli_runner, "track_process_group", _NullProcessGroup)
+    monkeypatch.setattr(cli_runner, "wait_or_kill_process_group", lambda process, timeout: 0)
     ctx = make_agent_run_context(tmp_path, resolved_model="claude-sonnet")
     claude_module._run_claude_once(
         cli="claude", prompt="review", ctx=ctx, mcp_config=str(tmp_path / "mcp.json")

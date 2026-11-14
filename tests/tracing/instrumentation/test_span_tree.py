@@ -380,17 +380,27 @@ async def test_offline_lifecycle_has_one_root_through_publish(
     monkeypatch.setattr(offline_mod, "run_offline_agent_review", _review)
     workspace = ResolvedWorkspace(cwd=repo, git_common_dir=repo / ".git", cloned=False)
     spec = SourceResolverSpec(cwd=repo, invocation_root=repo)
-    result = await offline_mod._run_offline_diff_review(
-        cwd=repo,
-        workspace=workspace,
-        spec=spec,
-        review_root=repo,
+    # Each real lifecycle gets its own span budget and trace, even in one process.
+    monkeypatch.setattr(
+        "mergecraft.tracing.tracer.claim_sink", lambda _settings: captured_sink.memory
     )
-    assert result.success
-
-    captured_sink.record()
-    _assert_closed_tree(captured_sink.events)
-    assert "mergecraft.publish" in captured_sink.by_kind
+    for key in ("MERGECRAFT_TRACE_ID", "MERGECRAFT_TRACE_SESSION_ID", "GITHUB_RUN_ID"):
+        monkeypatch.delenv(key, raising=False)
+    trace_ids = []
+    for _ in range(2):
+        captured_sink.memory.events.clear()
+        result = await offline_mod._run_offline_diff_review(
+            cwd=repo,
+            workspace=workspace,
+            spec=spec,
+            review_root=repo,
+        )
+        assert result.success
+        captured_sink.record()
+        _assert_closed_tree(captured_sink.events)
+        assert "mergecraft.publish" in captured_sink.by_kind
+        trace_ids.append(captured_sink.by_kind["mergecraft.run"][0].trace_id)
+    assert len(set(trace_ids)) == 2
 
 
 # Re-export for tests that import from this module.

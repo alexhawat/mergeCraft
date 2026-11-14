@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from tests.agents.conftest import make_agent_run_context
 
+from mergecraft.agents import cli_runner
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -77,7 +79,7 @@ def test_gemini_harness_invokes_cli_and_parses_agent_result(
         proc.stdin = _Stdin()
         return proc
 
-    monkeypatch.setattr(gemini_module.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(cli_runner.subprocess, "Popen", _fake_popen)
 
     ctx = make_agent_run_context(tmp_path, resolved_model="google/gemini-3.1-pro-preview")
     mcp_config = str(tmp_path / "mcp.json")

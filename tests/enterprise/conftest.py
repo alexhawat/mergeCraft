@@ -18,6 +18,7 @@ _NETWORK_ENV = (
     "all_proxy",
     "SSL_CERT_FILE",
     "REQUESTS_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
 )
 
 

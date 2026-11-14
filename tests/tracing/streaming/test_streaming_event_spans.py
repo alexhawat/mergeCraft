@@ -67,7 +67,7 @@ def test_streaming_events_produce_tool_call_spans(
 
     recorded_stdout = serialize_stream(CLAUDE_TOOL_CALL_STREAM)
     recorded = patch_driver_subprocess(
-        "mergecraft.agents.claude",
+        "mergecraft.agents.shared",
         stdout=recorded_stdout,
         stderr="",
         returncode=0,
@@ -129,7 +129,7 @@ def test_streaming_events_produce_llm_call_spans(
 
     recorded_stdout = serialize_stream(CLAUDE_TOOL_CALL_STREAM)
     patch_driver_subprocess(
-        "mergecraft.agents.claude",
+        "mergecraft.agents.shared",
         stdout=recorded_stdout,
         stderr="",
         returncode=0,
@@ -205,7 +205,7 @@ def test_malformed_stream_event_is_skipped_not_fatal(
 
     recorded_stdout = serialize_stream(MALFORMED_STREAM)
     patch_driver_subprocess(
-        "mergecraft.agents.claude",
+        "mergecraft.agents.shared",
         stdout=recorded_stdout,
         stderr="",
         returncode=0,
@@ -254,7 +254,7 @@ def test_streaming_result_parsing_matches_previous_final_result(
     # Drive the streaming-shaped path.
     recorded_stdout = serialize_stream(CLAUDE_TOOL_CALL_STREAM)
     patch_driver_subprocess(
-        "mergecraft.agents.claude",
+        "mergecraft.agents.shared",
         stdout=recorded_stdout,
         stderr="",
         returncode=0,
@@ -276,7 +276,7 @@ def test_streaming_result_parsing_matches_previous_final_result(
         patch_driver_subprocess: Any,
     ) -> Any:
         return patch_driver_subprocess(
-            "mergecraft.agents.claude",
+            "mergecraft.agents.shared",
             stdout=single_result_event,
             stderr="",
             returncode=0,

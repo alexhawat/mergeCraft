@@ -4019,7 +4019,7 @@ async def main() -> MainResult:
             assert ctx.settings is not None
             from mergecraft.tracing.tracer import get_tracer_from_settings, run_root_span
 
-            tracer = get_tracer_from_settings(ctx.settings)
+            tracer = get_tracer_from_settings(ctx.settings, new_run=True)
             with run_root_span(
                 tracer,
                 attrs_source=lambda: dict(resolve_correlation_from_env()),

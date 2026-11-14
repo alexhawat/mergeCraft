@@ -22,6 +22,7 @@ import httpx
 import pytest
 from tests.agents.conftest import make_agent_run_context
 
+from mergecraft.agents import cli_runner
 from mergecraft.agents import opencode as oc
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator
 from mergecraft.agents.curated_model_catalog import cost_summary_from_usage_entries
@@ -50,11 +51,13 @@ def test_major_version_is_read_from_the_cli(
 ) -> None:
     calls: list[list[str]] = []
 
-    def _run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def _spawn(cmd: list[str], **kwargs: Any) -> Any:
         calls.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, stdout=printed, stderr="")
+        process = Mock()
+        process.communicate.return_value = (printed, "")
+        return process
 
-    monkeypatch.setattr(oc.subprocess, "run", _run)
+    monkeypatch.setattr(oc, "spawn_agent_cli", _spawn)
 
     assert oc._opencode_major_version("/bin/opencode") == expected
     assert oc._opencode_major_version("/bin/opencode") == expected
@@ -65,7 +68,7 @@ def test_an_unrunnable_cli_reads_as_no_version(monkeypatch: MonkeyPatch) -> None
     def _run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         raise OSError("no such file")
 
-    monkeypatch.setattr(oc.subprocess, "run", _run)
+    monkeypatch.setattr(oc, "spawn_agent_cli", _run)
 
     assert oc._opencode_major_version("/missing/opencode") is None
 
@@ -315,7 +318,7 @@ async def test_failed_cli_finalizes_the_recorded_verdict(
         process.stderr = StringIO("rate limit exceeded")
         return process
 
-    monkeypatch.setattr(oc, "spawn_agent_cli", _spawn)
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", _spawn)
 
     result = await oc._run(ctx)
 
@@ -445,7 +448,7 @@ def test_a_2x_turn_records_token_usage_from_step_finish(
         )
         + "\n"
     )
-    monkeypatch.setattr(oc, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 0))
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 0))
 
     result = oc._run_opencode_cli_streaming(
         cmd=["opencode"],
@@ -477,7 +480,7 @@ def test_a_2x_turn_sums_the_tokens_of_every_step(tmp_path: Path, monkeypatch: Mo
         )
 
     stdout = "\n".join([_step(100, 5), _step(250, 8)]) + "\n"
-    monkeypatch.setattr(oc, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 0))
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 0))
 
     result = oc._run_opencode_cli_streaming(
         cmd=["opencode"],
@@ -495,7 +498,7 @@ def test_a_2x_turn_without_reported_tokens_carries_no_usage(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     stdout = json.dumps({"type": "text", "sessionID": "ses_9", "part": {"text": "ok"}}) + "\n"
-    monkeypatch.setattr(oc, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 0))
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 0))
 
     result = oc._run_opencode_cli_streaming(
         cmd=["opencode"],
@@ -525,7 +528,7 @@ def test_a_zero_cost_step_is_priced_from_the_catalog(
         )
         + "\n"
     )
-    monkeypatch.setattr(oc, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 0))
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 0))
 
     result = oc._run_opencode_cli_streaming(
         cmd=["opencode"],
@@ -568,7 +571,7 @@ def test_go_fills_each_missing_step_cost_and_preserves_reported_cost(
             )
         )
     monkeypatch.setattr(
-        oc, "spawn_agent_cli", lambda cmd, **kwargs: _Proc("\n".join(steps), returncode)
+        cli_runner, "spawn_agent_cli", lambda cmd, **kwargs: _Proc("\n".join(steps), returncode)
     )
     result = oc._run_opencode_cli_streaming(
         cmd=["opencode"],
@@ -641,7 +644,7 @@ def test_a_failed_2x_turn_still_reports_the_tokens_it_burned(
         )
         + "\n"
     )
-    monkeypatch.setattr(oc, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 1))
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 1))
 
     result = oc._run_opencode_cli_streaming(
         cmd=["opencode"],
@@ -660,7 +663,7 @@ def test_a_failed_2x_turn_without_stderr_names_the_exit_code(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     """An empty stderr must not hide why the turn failed."""
-    monkeypatch.setattr(oc, "spawn_agent_cli", lambda cmd, **kwargs: _Proc("", 3))
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda cmd, **kwargs: _Proc("", 3))
 
     result = oc._run_opencode_cli_streaming(
         cmd=["opencode"],
@@ -678,7 +681,7 @@ def test_a_failed_2x_turn_names_its_stream_error(tmp_path: Path, monkeypatch: Mo
     stdout = json.dumps(
         {"type": "error", "sessionID": "ses_9", "error": {"message": "model overloaded"}}
     )
-    monkeypatch.setattr(oc, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 1))
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 1))
     session: dict[str, str] = {}
 
     result = oc._run_opencode_cli_streaming(
