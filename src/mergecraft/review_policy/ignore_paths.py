@@ -384,7 +384,13 @@ async def resolve_review_ignore(
 
 
 async def list_pull_request_paths(
-    scm: ScmProvider, owner: str, repo: str, pull_number: int
+    scm: ScmProvider,
+    owner: str,
+    repo: str,
+    pull_number: int,
+    *,
+    head_sha: str | None = None,
+    base_sha: str | None = None,
 ) -> list[str] | None:
     """Return every path a pull request changes, or ``None`` on any doubt.
 
@@ -403,16 +409,26 @@ async def list_pull_request_paths(
             owner,
             repo,
             pull_number,
+            head_sha=head_sha,
+            base_sha=base_sha,
             page_size=_FILES_PAGE_SIZE,
             max_pages=_FILES_MAX_PAGES,
         )
+        if listing.incomplete:
+            return None
         for entry in listing.items:
-            for key in ("filename", "previous_filename"):
-                name = str(entry.get(key) or "").strip()
-                if name:
-                    paths.append(name)
-        if not listing.incomplete:
-            return list(dict.fromkeys(paths))
+            name = entry.get("filename")
+            previous_name = entry.get("previous_filename")
+            if not isinstance(name, str) or not name:
+                return None
+            if previous_name is not None and (
+                not isinstance(previous_name, str) or not previous_name
+            ):
+                return None
+            paths.append(name)
+            if previous_name is not None:
+                paths.append(previous_name)
+        return list(dict.fromkeys(paths))
     except Exception as err:  # a failed listing proves nothing; the review runs
         logger.info("ignore_paths: PR #{} file listing failed: {}", pull_number, err)
     return None

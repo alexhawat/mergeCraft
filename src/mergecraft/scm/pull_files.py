@@ -36,6 +36,7 @@ async def list_pull_files(
     pull_number: int,
     *,
     head_sha: str | None = None,
+    base_sha: str | None = None,
     page_size: int = 100,
     max_pages: int = 30,
 ) -> ListedItems:
@@ -47,6 +48,7 @@ async def list_pull_files(
         repo: Repository name.
         pull_number: Pull request number.
         head_sha: Required head when the caller is already bound to a revision.
+        base_sha: Required base when the caller is already bound to a revision.
         page_size: Number of entries requested per page.
         max_pages: Bounded number of pages; reaching the cap marks the result incomplete.
 
@@ -73,12 +75,16 @@ async def list_pull_files(
         return ListedItems(items=items, incomplete=True)
 
     memo = run_memo(scm)
-    if memo is None:
+    # Preserve the legacy unbound provider path. A caller pinned to the
+    # base requires an identity check even when the provider has no memo.
+    if memo is None and base_sha is None:
         return await fetch()
     # get_pull intentionally stays live: cached metadata must never satisfy a guard.
     before = _identity(await scm.get_pull(owner, repo, pull_number))
     if head_sha and before[0] != head_sha.lower():
         raise RuntimeError("the PR head changed before reading its files")
+    if base_sha and before[1] != base_sha.lower():
+        raise RuntimeError("the PR base changed before reading its files")
 
     async def verified_fetch() -> ListedItems:
         result = await fetch()
@@ -87,6 +93,8 @@ async def list_pull_files(
             raise RuntimeError("the PR head changed or its base changed while reading its files")
         return result
 
+    if memo is None:
+        return await verified_fetch()
     return await memo.read(
         ("pull-files", owner, repo, pull_number, *before, page_size, max_pages), verified_fetch
     )

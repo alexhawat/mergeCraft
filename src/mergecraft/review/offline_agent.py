@@ -44,6 +44,7 @@ from mergecraft.utils.agent_resolve import (
     resolve_runtime_agent,
     run_with_model_chain,
 )
+from mergecraft.utils.diff_paths import changed_paths_from_diff
 from mergecraft.utils.github import GitHubClient
 from mergecraft.utils.instructions import resolve_instructions
 from mergecraft.utils.run_bounds import (
@@ -313,6 +314,14 @@ async def run_offline_agent_review(
         await asyncio.to_thread(Path(skills_home).mkdir, parents=True, exist_ok=True)
         await asyncio.to_thread(install_bundled_skills, home=skills_home)
 
+        try:
+            changed_paths = changed_paths_from_diff(
+                materialization.path.read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            logger.debug("Offline diff paths unavailable for instruction ranking")
+            changed_paths = []
+
         instructions = resolve_instructions(
             payload={
                 "event": {"trigger": "unknown", "title": "offline diff-review"},
@@ -327,6 +336,8 @@ async def run_offline_agent_review(
             setup_script_skip_reason=setup_script_skip_reason,
             repo_root=cwd,
             trust_tier=resolved_tier,
+            changed_paths=changed_paths,
+            review_instruction_settings=settings.review,
         )
         run_ctx = AgentRunContext(
             payload=payload,
@@ -375,6 +386,8 @@ async def run_offline_agent_review(
                 setup_script_skip_reason=setup_script_skip_reason,
                 repo_root=cwd,
                 trust_tier=resolved_tier,
+                changed_paths=changed_paths,
+                review_instruction_settings=settings.review,
             )
             attempt_ctx = replace(
                 run_ctx,

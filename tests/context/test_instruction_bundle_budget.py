@@ -133,3 +133,31 @@ def test_a_repo_with_no_instruction_files_renders_nothing(tmp_path: Path) -> Non
         commit_sha=sha,
     )
     assert prompt == ""
+
+
+def test_changed_directories_are_ranked_by_ancestry_and_keep_fences_closed(tmp_path: Path) -> None:
+    from mergecraft.context.instruction_discovery import render_review_context
+    from tests.context.support import fenced_blocks
+
+    rules = {
+        "packages/app/AGENTS.md": "SIBLING_PACKAGE " + "filler " * 1000,
+        "packages/application/AGENTS.md": "CHANGED_PACKAGE " + "你好 " * 1000,
+    }
+    for name, body in rules.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True)
+        path.write_text(body, encoding="utf-8")
+    prompt = render_review_context(
+        repo_root=tmp_path,
+        trust_tier="untrusted",
+        repo="acme/mono",
+        commit_sha="a" * 40,
+        byte_cap=900,
+        changed_paths=["packages/application/src/module.py"],
+    )
+
+    assert len(prompt.encode("utf-8")) <= 900
+    blocks = fenced_blocks(prompt)
+    assert any("CHANGED_PACKAGE" in block for block in blocks)
+    assert not any("SIBLING_PACKAGE" in block for block in blocks)
+    assert "你好" in blocks[0]

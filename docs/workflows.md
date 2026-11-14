@@ -409,3 +409,27 @@ neutral evidence packet for the event's head and an attributable check. The
 hardened workflow gate reports that result as not reviewed and leaves approval
 to a human. An unavailable lite review remains inconclusive and does not
 qualify for the policy skip exception.
+
+## Path-scoped review instructions
+
+On a pull request, mergeCraft prioritizes discovered guidance from the changed
+files' nearest ancestor directories when filling the instruction bundle. Review
+skills and their references retain first priority. When changed paths are
+unavailable, discovery keeps its default order.
+
+Add a `review.pathInstructions` entry to provide guidance for changes that
+match a repository-relative glob. A rule is included only when a changed path
+matches. The prompt labels the glob so the reviewer can apply the guidance to
+the matching paths.
+
+```yaml
+review:
+  pathInstructions:
+    - glob: "packages/payments/**/*.py"
+      text: Check that changes to payment retries preserve idempotency.
+```
+
+Action reviews load these rules from the PR's base configuration. A local
+`mergecraft review` uses the local configuration and paths from the materialized
+diff. Configured rules share the instruction bundle byte cap with discovered
+files and use the same trust-tier handling.

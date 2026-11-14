@@ -15,7 +15,14 @@ from mergecraft.utils.fence import Fence, fence_unless_trusted, render_untrusted
 from mergecraft.utils.git_hardening import git_argv
 
 if TYPE_CHECKING:
-    from mergecraft.config.settings import LearningsHeading, RepoInfo
+    from collections.abc import Sequence
+
+    from mergecraft.config.settings import (
+        LearningsHeading,
+        PathInstruction,
+        RepoInfo,
+        ReviewSettings,
+    )
     from mergecraft.modes import Mode
     from mergecraft.types import AgentId
 
@@ -325,6 +332,8 @@ def _render_review_context_bundle(
     commit_sha: str,
     byte_cap: int,
     extra_filenames: tuple[str, ...],
+    changed_paths: Sequence[str],
+    path_instructions: Sequence[PathInstruction],
 ) -> tuple[str, list[str], list[str]]:
     from pathlib import Path as PathType
 
@@ -337,6 +346,8 @@ def _render_review_context_bundle(
         commit_sha=commit_sha,
         byte_cap=byte_cap,
         extra_filenames=extra_filenames,
+        changed_paths=changed_paths,
+        path_instructions=path_instructions,
     )
     return rendered, list(record.injected), list(record.ledger_review_skills)
 
@@ -422,6 +433,8 @@ def resolve_instructions(
     repo_root: Any | None = None,
     trust_tier: str = "untrusted",
     review_mcp_names: list[str] | None = None,
+    changed_paths: Sequence[str] = (),
+    review_instruction_settings: ReviewSettings | None = None,
 ) -> ResolvedInstructions:
     """Assemble the full agent prompt from payload + modes + learnings."""
     headings = learnings_headings or []
@@ -735,9 +748,17 @@ Trust the tools — do not repeatedly verify after successful operations.
     if repo_root is not None:
         from mergecraft.context.instruction_discovery import DEFAULT_INSTRUCTION_BUNDLE_BYTE_CAP
 
-        instruction_bundle_byte_cap, instruction_extra_filenames = (
-            _load_review_instruction_settings(repo_root)
-        )
+        path_instructions: Sequence[PathInstruction] = ()
+        if review_instruction_settings is None:
+            instruction_bundle_byte_cap, instruction_extra_filenames = (
+                _load_review_instruction_settings(repo_root)
+            )
+        else:
+            instruction_bundle_byte_cap = review_instruction_settings.instruction_bundle_byte_cap
+            instruction_extra_filenames = tuple(
+                review_instruction_settings.instruction_extra_filenames
+            )
+            path_instructions = review_instruction_settings.path_instructions
         commit_sha = str(event.get("headSha") or event.get("head_sha") or "")
         review_context, review_skill_paths, review_skill_ledger = _render_review_context_bundle(
             repo_root,
@@ -746,6 +767,8 @@ Trust the tools — do not repeatedly verify after successful operations.
             commit_sha=commit_sha,
             byte_cap=instruction_bundle_byte_cap or DEFAULT_INSTRUCTION_BUNDLE_BYTE_CAP,
             extra_filenames=instruction_extra_filenames,
+            changed_paths=changed_paths,
+            path_instructions=path_instructions,
         )
     mcp_note = ""
     if review_mcp_names:
