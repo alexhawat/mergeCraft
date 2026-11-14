@@ -313,10 +313,10 @@ Target API (CC3.2):
 
 | # | Contract | Layer | Primary test |
 |---|----------|-------|--------------|
-| CC3.1a | token budget enforced | unit | `test_token_budget_per_run_is_enforced` |
+| CC3.1a | token target advisory; full usage retained | unit | `test_token_budget_per_run_is_advisory` |
 | CC3.1b | cost budget enforced | unit | `test_cost_budget_per_run_is_enforced` |
 | CC3.1c | tool-call budget enforced | unit | `test_tool_call_budget_is_enforced` |
-| CC3.1d | exhaustion → inconclusive | unit | `test_budget_exhaustion_yields_inconclusive_not_a_partial_approval` |
+| CC3.1d | enforced budget exhaustion → inconclusive | unit | `test_budget_exhaustion_yields_inconclusive_not_a_partial_approval` |
 | CC3.1e | external ops bounded | unit | `test_every_external_operation_has_a_timeout` |
 | CC3.1f | context retrieval timeout | unit | `test_context_retrieval_timeout_is_bounded` |
 | CC3.1g | D12 reduced scope reported | unit | `test_oversized_diff_degrades_and_reports_reduced_scope` |

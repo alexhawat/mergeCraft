@@ -798,7 +798,7 @@ def test_unreported_cost_stays_unknown_not_zero(tmp_path: Path) -> None:
     )
 
 
-def test_per_review_cost_and_token_bounds_fail_the_case(tmp_path: Path) -> None:
+def test_per_review_cost_is_enforced_but_token_overruns_are_advisory(tmp_path: Path) -> None:
     from mergecraft.evals.live_run import ReviewBudget, ReviewOutcome
 
     def review_fn(case: DetectionCase) -> ReviewOutcome:
@@ -817,10 +817,18 @@ def test_per_review_cost_and_token_bounds_fail_the_case(tmp_path: Path) -> None:
         budget=ReviewBudget(per_review_cost_budget_usd=1.0, per_review_token_limit=1000),
     )
 
-    assert metrics.failed_case_ids == ["bench-a-001", "bench-b-002"]
+    assert metrics.failed_case_ids == ["bench-a-001"]
     assert "cost" in metrics.failed_case_errors["bench-a-001"]
-    assert "tokens" in metrics.failed_case_errors["bench-b-002"]
-    assert metrics.cases_run == 1
+    assert metrics.cases_run == 2
+    assert metrics.total_cost_usd == pytest.approx(5.2)
+    journal = [
+        json.loads(line)
+        for line in (Path(metrics.raw_findings_dir) / "journal.jsonl").read_text().splitlines()
+    ]
+    over_target = next(row for row in journal if row["case_id"] == "bench-b-002")
+    assert over_target["status"] == "scored"
+    assert over_target["total_tokens"] == 999_999
+    assert over_target["token_target"] == 1000
 
 
 def test_campaign_cost_ceiling_stops_spending(tmp_path: Path) -> None:

@@ -381,9 +381,9 @@ with these fields.
 Compute each context digest with `make --no-print-directory -C evals detection-context-sha256
 CONTEXT=/path/to/case/repo`. The approved group spend ceiling in the campaign
 manifest must cover `models × cases × repetitions × per_review_cost_budget_usd`.
-The harness passes the configured time, token and cost bounds to the existing
-offline evaluator. Measured spend is recorded only when the evaluator reports
-it. Each recorded amount, including a partial cost, counts toward the
+The harness passes the configured time and cost limits and the advisory token
+target to the offline evaluator. The harness records spend reported by the
+evaluator. Each recorded amount, including a partial cost, counts toward the
 per-review and cumulative spend checks. The cumulative known spend stops
 later attempts at the approved ceiling. Reported cost can include provider or
 catalog estimates. Total tokens are unavailable in the offline receipt. The

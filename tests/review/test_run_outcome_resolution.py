@@ -93,7 +93,7 @@ async def _raise(*_args: Any, **_kwargs: Any) -> Any:
     raise RuntimeError(msg)
 
 
-_GATES = ("token_budget", "tool_call_budget", "prep", "coverage", "sink", "roster", "finalize")
+_GATES = ("cost_budget", "tool_call_budget", "prep", "coverage", "sink", "roster", "finalize")
 
 
 async def _run_gate(
@@ -101,8 +101,8 @@ async def _run_gate(
 ) -> main_mod.MainResult:
     result = await _driver_result(ctx)
     kwargs: dict[str, Any] = {}
-    if gate == "token_budget":
-        kwargs["budget_exhaustion"] = BudgetExhausted("token", "token budget exhausted")
+    if gate == "cost_budget":
+        kwargs["budget_exhaustion"] = BudgetExhausted("cost", "cost budget exhausted")
     elif gate == "tool_call_budget":
         kwargs["budget_tracker"] = _tool_call_tracker()
     elif gate == "prep":
@@ -200,7 +200,7 @@ async def test_an_approval_posted_mid_run_is_dismissed_when_the_run_does_not_pas
         ctx,
         await _driver_result(ctx),
         monkeypatch,
-        budget_exhaustion=BudgetExhausted("token", "token budget exhausted"),
+        budget_exhaustion=BudgetExhausted("cost", "cost budget exhausted"),
     )
 
     assert outcome.outcome is RunOutcome.inconclusive
@@ -208,7 +208,7 @@ async def test_an_approval_posted_mid_run_is_dismissed_when_the_run_does_not_pas
     assert len(github.dismissals) == 1
     path, kwargs = github.dismissals[0]
     assert path.endswith("/pulls/7/reviews/1/dismissals")
-    assert "token budget exhausted" in kwargs["json"]["message"]
+    assert "cost budget exhausted" in kwargs["json"]["message"]
 
 
 # --------------------------------------------------------------------- finalize failure
@@ -610,7 +610,7 @@ async def test_a_passing_rereview_resolves_the_threads_whose_findings_are_gone(
     assert github.resolved == ["T-stale"]
 
 
-@pytest.mark.parametrize("gate", ["coverage", "prep", "token_budget", "roster"])
+@pytest.mark.parametrize("gate", ["coverage", "prep", "cost_budget", "roster"])
 async def test_a_withheld_approval_resolves_no_threads_as_fixed(
     gate: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

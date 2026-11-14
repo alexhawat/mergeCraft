@@ -1,8 +1,9 @@
 """Shared J2 ``TokenBudget`` + kill-switch for every provider path (E-D9).
 
 Re-exports plan 23 J2's budget and cost helpers — this module does not
-invent a second cap. Agent dispatch binds one budget per run; concurrent
-callers that share the bound object share one cap. Unreported token fields
+invent a second counter. Agent dispatch binds one budget per run; concurrent
+callers share its accounting. Review run bounds select advisory mode so token
+usage cannot stop fallback or required secondary reviewers. Unreported token fields
 stay ``None`` (``cost_known=False``), never coerced to zero.
 
 Exports:
@@ -83,18 +84,20 @@ def record_provider_usage(
     return budget.record_usage(input_tokens=input_tokens, output_tokens=output_tokens)
 
 
-def token_budget_for(*, model: str, max_tokens: int) -> TokenBudget:
+def token_budget_for(*, model: str, max_tokens: int, advisory: bool = False) -> TokenBudget:
     """Return J2's ``TokenBudget`` for a pinned model id.
 
     Price lookup stays on ``compute_cost`` / ``PRICE_TABLE``, keyed by ``model``.
-    The budget object itself is the J2 token cap (E-D9 — no fork).
+    The budget object itself is shared with J2. Review run bounds select
+    advisory accounting; independent, explicit caps keep enforcement.
 
     Args:
         model: Pinned model id used for price-table lookup.
-        max_tokens: Per-run token ceiling.
+        max_tokens: Token target, or ceiling for an explicitly enforced cap.
+        advisory: Record overruns without stopping subsequent dispatches.
 
     Returns:
-        TokenBudget: J2 budget with ``max_tokens`` set.
+        TokenBudget: Shared budget with the requested accounting policy.
 
     Raises:
         ValueError: ``model`` is empty.
@@ -104,7 +107,7 @@ def token_budget_for(*, model: str, max_tokens: int) -> TokenBudget:
         raise ValueError(msg)
     from mergecraft.jev.cost import TokenBudget as JevTokenBudget
 
-    return JevTokenBudget(max_tokens=max_tokens)
+    return JevTokenBudget(max_tokens=max_tokens, advisory=advisory)
 
 
 def __getattr__(name: str) -> object:
