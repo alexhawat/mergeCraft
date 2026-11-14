@@ -14,12 +14,13 @@ from mergecraft.scm.github import github_client_from_scm
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 _GITHUB_PROVIDER = GitHubActionsProvider()
 
 
-def get_check_suite_logs_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def get_check_suite_logs_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         check_suite_id = int(params["check_suite_id"])
         client = github_client_from_scm(ctx.scm)
         if client is None:

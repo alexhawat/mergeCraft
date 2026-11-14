@@ -9,10 +9,11 @@ from mergecraft.mcp.shared import ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 
-def get_issue_comments_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def get_issue_comments_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         issue_number = int(params["issue_number"])
 
         async def _page(query: dict[str, Any]) -> list[dict[str, Any]]:

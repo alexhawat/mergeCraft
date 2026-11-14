@@ -22,6 +22,7 @@ from mergecraft.utils.blocking import run_blocking
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 
 def _authorized_repo_dirs(ctx: ToolContext) -> tuple[Path, ...]:
@@ -208,7 +209,7 @@ API_ONLY_SKIP_REASON = (
 )
 
 
-def run_analyzers_tool(ctx: ToolContext):
+def run_analyzers_tool(ctx: ToolContext) -> ToolSpec:
     async def _run_in_scope(params: dict[str, Any]) -> dict[str, Any]:
         if ctx.tool_state.review_scope == API_ONLY_SCOPE:
             # The PR head was never materialized, so the local tree is the base or
@@ -396,7 +397,7 @@ def run_analyzers_tool(ctx: ToolContext):
     )
 
 
-def analyzer_findings_tool(ctx: ToolContext):
+def analyzer_findings_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         run_state = ctx.tool_state.analyzer_run
         if run_state is None:

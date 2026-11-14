@@ -10,10 +10,11 @@ from mergecraft.mcp.shared import ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 
-def create_issue_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def create_issue_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         result = await ctx.scm.create_issue(
             ctx.repo.owner,
             ctx.repo.name,
@@ -55,8 +56,8 @@ def create_issue_tool(ctx: ToolContext):
     )
 
 
-def close_issue_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def close_issue_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         result = await ctx.scm.update_issue(
             ctx.repo.owner,
             ctx.repo.name,
@@ -95,8 +96,8 @@ def close_issue_tool(ctx: ToolContext):
     )
 
 
-def reopen_issue_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def reopen_issue_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         result = await ctx.scm.update_issue(
             ctx.repo.owner,
             ctx.repo.name,

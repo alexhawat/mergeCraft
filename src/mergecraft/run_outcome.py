@@ -28,6 +28,28 @@ if TYPE_CHECKING:
 
     from mergecraft.analyzers.finding import Finding
     from mergecraft.evidence.packet import MergeEvidencePacket
+    from mergecraft.modes import Mode
+
+
+_REVIEW_MODE_NAMES = frozenset({"Review", "IncrementalReview"})
+_INCREMENTAL_REVIEW_NAMES = frozenset({"IncrementalReview"})
+
+
+def is_review_mode(mode: str | Mode | None) -> bool:
+    """Return whether the selected mode runs a review."""
+    if mode is None:
+        return False
+    if isinstance(mode, str):
+        return mode in _REVIEW_MODE_NAMES
+    return mode.name in _REVIEW_MODE_NAMES
+
+
+def is_incremental_review(mode: str | Mode | None) -> bool:
+    """Return whether the selected mode reviews an incremental range."""
+    if mode is None:
+        return False
+    name = mode if isinstance(mode, str) else mode.name
+    return name in _INCREMENTAL_REVIEW_NAMES
 
 
 class RunOutcome(StrEnum):
@@ -195,6 +217,8 @@ __all__ = [
     "cli_exit_code_for_review",
     "error_code_for_outcome",
     "exit_code_for_outcome",
+    "is_incremental_review",
+    "is_review_mode",
     "outcome_with_disposition_ledger",
     "packet_orphaned_hit_ids",
     "run_succeeded_for_outcome",

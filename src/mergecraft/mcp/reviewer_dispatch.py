@@ -17,6 +17,7 @@ from mergecraft.mcp.tool_state import (
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 
 def _validate_reviewer_agent_id(ctx: ToolContext, agent_id: str) -> None:
@@ -74,7 +75,7 @@ class RecordReviewerDispatchRunParams(BaseModel):
     )
 
 
-def record_reviewer_dispatch_error_tool(ctx: ToolContext):
+def record_reviewer_dispatch_error_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         validated = RecordReviewerDispatchErrorParams.model_validate(params)
         _refuse_during_file_group(ctx, "record_reviewer_dispatch_error")
@@ -117,7 +118,7 @@ def record_reviewer_dispatch_error_tool(ctx: ToolContext):
     )
 
 
-def record_reviewer_dispatch_run_tool(ctx: ToolContext):
+def record_reviewer_dispatch_run_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         validated = RecordReviewerDispatchRunParams.model_validate(params)
         _refuse_during_file_group(ctx, "record_reviewer_dispatch_run")

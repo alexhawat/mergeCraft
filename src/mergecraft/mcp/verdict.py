@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from mergecraft.agents.shared import AgentRunContext
     from mergecraft.analyzers.finding import Finding
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 _ALLOWED_VERDICTS = frozenset({"approve", "request_changes"})
 _ALLOWED_TOP_LEVEL_KEYS = frozenset({"verdict", "summary", "findings"})
@@ -1365,7 +1366,7 @@ def _adopt_review_mode_for_accepted_verdict(ctx: ToolContext) -> None:
     )
 
 
-def submit_review_verdict_tool(ctx: ToolContext):
+def submit_review_verdict_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         ensure_review_scope_for_terminal(ctx.tool_state, "submit_review_verdict")
         coverage_nudge = diff_coverage_nudge_for_state(ctx.tool_state)
@@ -1564,7 +1565,7 @@ def submit_review_verdict_tool(ctx: ToolContext):
     )
 
 
-def establish_review_scope_tool(ctx: ToolContext):
+def establish_review_scope_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         diff_path = str(params["diff_path"])
         head_sha = str(params["head_sha"])

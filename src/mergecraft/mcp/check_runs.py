@@ -8,6 +8,7 @@ from mergecraft.mcp.shared import ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 
 def _summarize_run(run: dict[str, Any]) -> dict[str, Any]:
@@ -42,8 +43,8 @@ def _summarize_run(run: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def list_check_runs_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def list_check_runs_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         ref = str(params["ref"])
         listed = await ctx.scm.list_check_runs_for_ref(ctx.repo.owner, ctx.repo.name, ref)
         if listed.incomplete:
@@ -80,8 +81,8 @@ def list_check_runs_tool(ctx: ToolContext):
     )
 
 
-def get_check_suite_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def get_check_suite_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         check_suite_id = int(params["check_suite_id"])
         return await ctx.scm.get_check_suite(
             ctx.repo.owner,

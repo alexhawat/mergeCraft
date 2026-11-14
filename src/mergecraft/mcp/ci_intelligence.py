@@ -8,9 +8,10 @@ from mergecraft.mcp.shared import ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 
-def analyze_ci_failures_tool(ctx: ToolContext):
+def analyze_ci_failures_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         from mergecraft.ci.intelligence import run_ci_intelligence
 

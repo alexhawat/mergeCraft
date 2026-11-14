@@ -68,6 +68,7 @@ from mergecraft.utils.learnings import (
 if TYPE_CHECKING:
     from mergecraft.analyzers.finding import Finding
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
     from mergecraft.mcp.verdict import VerdictDiagnostic
     from mergecraft.run_outcome import RunOutcome
 
@@ -1885,8 +1886,8 @@ async def publish_pull_request_review(
     return result
 
 
-def create_pull_request_review_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def create_pull_request_review_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         from mergecraft.analyzers.trust_posture import trust_posture_from_tool_state
 
         posture = trust_posture_from_tool_state(

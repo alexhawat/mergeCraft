@@ -10,10 +10,11 @@ from mergecraft.types import format_mcp_tool_ref
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 
-def select_mode_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def select_mode_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         if ctx.tool_state.selected_mode:
             return {
                 "error": (

@@ -41,6 +41,7 @@ from mergecraft.utils.learnings import learnings_file_path
 if TYPE_CHECKING:
     from mergecraft.config.settings import RepoSettings
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 _NOT_READY_REASON = (
     "no deterministic check has run yet. LLM judges are secondary evaluators — call "
@@ -342,7 +343,7 @@ def emit_published_findings(ctx: ToolContext) -> None:
     )
 
 
-def verify_agent_findings_tool(ctx: ToolContext):
+def verify_agent_findings_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         from mergecraft.agents.verifier import (
             VERIFIER_AGENT_NAME,
@@ -572,7 +573,7 @@ def _record_verifier_disposition(
         logger.warning("verifier disposition not recorded: {}", err)
 
 
-def record_finding_verdict_tool(ctx: ToolContext):
+def record_finding_verdict_tool(ctx: ToolContext) -> ToolSpec:
     async def _run(params: dict[str, Any]) -> dict[str, Any]:
         from mergecraft.agents.gates import BLOCKING_SEVERITIES
         from mergecraft.agents.verifier import JudgeVerdict, judge_pin, record_verifier_verdict

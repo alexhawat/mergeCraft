@@ -11,6 +11,7 @@ from mergecraft.mcp.shared import ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 _CLOSING_ISSUES_QUERY = """
 query($owner: String!, $repo: String!, $number: Int!) {
@@ -39,8 +40,8 @@ def _closing_issues_from(gql: Any) -> list[dict[str, Any]]:
     ]
 
 
-def get_pull_request_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def get_pull_request_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         pull_number = int(params["pull_number"])
         data = await ctx.scm.get_pull(ctx.repo.owner, ctx.repo.name, pull_number)
         closing: list[dict[str, Any]] = []

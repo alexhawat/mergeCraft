@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Final, NamedTuple, Protocol
 from loguru import logger
 
 from mergecraft.agents.activity_watchdog import DEFAULT_IDLE_TIMEOUT_S
+from mergecraft.errors import ConfigurationError
 from mergecraft.mcp.endpoints import mcp_role_url as _mcp_role_url
 
 if TYPE_CHECKING:
@@ -632,14 +633,7 @@ def _is_run_abort(exc: Exception) -> bool:
     from mergecraft.utils.agent_resolve import ModelFallbackPolicyError
     from mergecraft.utils.run_bounds import BudgetExhausted
 
-    if isinstance(exc, ModelFallbackPolicyError | BudgetExhausted):
-        return True
-    # ``main._ConfigurationError`` is matched by name: importing ``main`` here
-    # would invert the dependency direction (``main`` imports the agents).
-    return any(
-        cls.__name__ == "_ConfigurationError" and cls.__module__ == "mergecraft.main"
-        for cls in type(exc).__mro__
-    )
+    return isinstance(exc, ModelFallbackPolicyError | BudgetExhausted | ConfigurationError)
 
 
 def agent(

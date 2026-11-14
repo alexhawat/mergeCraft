@@ -15,7 +15,7 @@ from loguru import logger
 
 from mergecraft.agents import agents, resolve_agent
 from mergecraft.agents.shared import AgentResult
-from mergecraft.config.env import AgentRuntimeEnv
+from mergecraft.config.env import CUSTOM_PROVIDER_API_KEY_ENV, AgentRuntimeEnv
 from mergecraft.models import (
     _MAX_FALLBACK_DEPTH,
     BEDROCK_MODEL_ID_ENV,
@@ -28,6 +28,7 @@ from mergecraft.models import (
     resolve_cli_model,
     resolve_display_alias,
 )
+from mergecraft.run_outcome import is_incremental_review, is_review_mode
 from mergecraft.tracing.genai import (
     input_messages_attrs,
     output_messages_attrs,
@@ -175,7 +176,6 @@ def _honours_gateway_env_credentials(provider: str, settings: RepoSettings) -> b
 
 
 def _credential_looked_for_envs(provider: str, *, settings: RepoSettings) -> tuple[str, ...]:
-    from mergecraft.agents.openai_compatible_gateways import CUSTOM_PROVIDER_API_KEY_ENV
     from mergecraft.config.runtime_provider_registry import (
         credential_env_keys_for_entry,
         lookup_registry_entry,
@@ -222,12 +222,11 @@ def credential_status_for_slug(
     looked_for = _credential_looked_for_envs(provider, settings=settings)
 
     from mergecraft.agents.openai_compatible_gateways import (
-        CUSTOM_PROVIDER_API_KEY_ENV,
-        _legacy_gateway_preset_credentials,
-        _resolve_indexed_providers,
+        _has_env as _gateway_has_env,
     )
     from mergecraft.agents.openai_compatible_gateways import (
-        _has_env as _gateway_has_env,
+        _legacy_gateway_preset_credentials,
+        _resolve_indexed_providers,
     )
     from mergecraft.config.runtime_provider_registry import (
         indexed_credential_for_entry,
@@ -875,12 +874,11 @@ def _is_incomplete_review_success(
     """
     if tool_state is None or not result.success or result.terminal_submission_received:
         return False
-    from mergecraft.main_outcome import _is_incremental_review, _is_review_mode
 
     mode = tool_state.selected_mode
-    if mode is not None and not _is_review_mode(mode):
+    if mode is not None and not is_review_mode(mode):
         return False
-    if _is_incremental_review(mode) and tool_state.final_summary_written:
+    if is_incremental_review(mode) and tool_state.final_summary_written:
         return False
     submission = tool_state.terminal_submission
     if submission is not None and not tool_state.terminal_submission_conflict:

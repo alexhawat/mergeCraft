@@ -11,10 +11,11 @@ from mergecraft.mcp.shared import ToolClass, execute, get_http_status, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 
-def add_labels_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def add_labels_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         issue_number = int(params["issue_number"])
         labels = list(params["labels"])
         result = await ctx.scm.add_labels(ctx.repo.owner, ctx.repo.name, issue_number, labels)
@@ -46,8 +47,8 @@ def add_labels_tool(ctx: ToolContext):
     )
 
 
-def remove_labels_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def remove_labels_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         issue_number = int(params["issue_number"])
         await ctx.scm.get_issue(ctx.repo.owner, ctx.repo.name, issue_number)
         removed: list[str] = []
