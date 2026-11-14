@@ -195,7 +195,7 @@ def test_claude_streaming_llm_call_stamps_gen_ai_system_on_llm_span(
     from mergecraft.agents.claude import _run_claude_once
 
     patch_driver_subprocess(
-        "mergecraft.agents.claude",
+        "mergecraft.agents.shared",
         stdout=serialize_stream(CLAUDE_TOOL_CALL_STREAM),
         stderr="",
         returncode=0,

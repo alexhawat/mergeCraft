@@ -329,11 +329,10 @@ def test_non_positive_retention_days_fail_at_config_load() -> None:
         RepoSettings.model_validate({"tracing": {"retentionDays": 0}})
 
 
-def test_enterprise_retention_purges_expired_jsonl_on_write(
+def test_enterprise_retention_purges_expired_jsonl_on_open(
     tmp_path: Path,
 ) -> None:
-    """enterprise.retentionDays deletes expired JSONL files on the write path."""
-    from mergecraft.tracing.event import TraceEvent
+    """enterprise.retentionDays deletes expired daily trace files when a sink opens."""
     from mergecraft.tracing.sinks import sink_factory
 
     bind_enterprise_from_settings(EnterpriseSettings(retention_days=1))
@@ -353,18 +352,19 @@ def test_enterprise_retention_purges_expired_jsonl_on_write(
             }
         }
     )
-    sink = sink_factory(settings.tracing)
-    sink.write(
-        TraceEvent(
-            kind="mergecraft.run",
-            span_id="span-retention",
-            session_id="sess",
-            turn_id="turn",
-            trace_id="trace",
-            tier="trusted",
-            ts_start_ns=1,
-            ts_end_ns=2,
-            status="ok",
-        )
-    )
+    sink_factory(settings.tracing)
     assert not expired.exists()
+
+
+def test_custom_ca_reaches_node_agent_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Validated custom trust reaches the restricted Node CLI environment."""
+    from mergecraft.enterprise.runtime import agent_network_env
+    from tests.enterprise.test_certificates import _write_self_signed_ca
+
+    monkeypatch.delenv("NODE_EXTRA_CA_CERTS", raising=False)
+    pem = tmp_path / "ca.pem"
+    _write_self_signed_ca(pem)
+    bind_enterprise_from_settings(EnterpriseSettings(ca_file=str(pem)))
+    assert agent_network_env()["NODE_EXTRA_CA_CERTS"] == str(pem)

@@ -51,3 +51,38 @@ these tools locally; mergeCraft still skips them with the standard
 
 Do **not** flip these manifests to `runtime: managed` or add darwin provenance —
 they stay `runtime: repo-native` per catalog policy.
+
+## Analyzer latency and managed caches
+
+The catalog pipeline runs up to four independent adapters concurrently. Trust,
+shell and analyzer-mode checks happen before scheduling; results retain catalog
+order. Contract adapters reuse their provisioned binary across changed files,
+while each invocation still goes through configuration and sandbox checks.
+
+A fatal pipeline error cancels queued adapters, kills that pipeline's child
+process groups, and joins worker cleanup before propagating. Nested operation
+scopes keep cancellation separate from other reviews. Resource limits and
+privilege-drop calibration probes use a fresh isolated interpreter instead of
+Python callbacks after fork, so worker threads cannot inherit locked callback
+state. Payload environment file descriptors and process sessions survive the
+launcher unchanged.
+
+Managed downloads are already reused across CLI runs under
+`$XDG_CACHE_HOME/mergecraft/analyzer-cache` (or
+`~/.cache/mergecraft/analyzer-cache`). The cache is keyed by tool, platform and
+pinned artifact digest; cached binaries are checked against their pin-bound
+receipts before reuse. Keep this directory outside the reviewed checkout: a
+cache inside the checkout is refused. The checkout's
+`.mergecraft/analyzers.lock` records resolutions; it is not a trusted cache.
+
+Docker Action jobs have fresh filesystems, so the default `auto` mode may
+provision again on each job. For latency-sensitive deployments, use the baked
+analyzer image built from `docker/Dockerfile.analyzers`; it sets
+`MERGECRAFT_ANALYZERS=full`. Selecting `full` alone does not install tools into
+the slim image. See [distribution](../distribution.md) for image tags.
+
+If an operator persists the managed cache across jobs, mount it outside the
+checkout and key the restore by platform and the trusted catalog's provenance
+digests. Save only from trusted jobs; untrusted and fork jobs must be restore-only
+and must never update a cache consumed by trusted jobs. The Action does not
+configure an Actions cache automatically.

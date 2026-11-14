@@ -1,4 +1,4 @@
-"""Enterprise audit records every terminal non-approve verdict (#417)."""
+"""Enterprise audit records every terminal verdict (#417)."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def test_maybe_audit_records_request_changes(tmp_path: Path) -> None:
     assert events[0]["artifact_id"] == "artifact-rc"
 
 
-def test_maybe_audit_skips_approve(tmp_path: Path) -> None:
+def test_maybe_audit_records_approve(tmp_path: Path) -> None:
     recorded = TerminalSubmission(
         id="artifact-ok",
         verdict="approve",
@@ -44,7 +44,9 @@ def test_maybe_audit_skips_approve(tmp_path: Path) -> None:
 
     maybe_audit_blocking_terminal_submission(ctx, recorded)  # type: ignore[arg-type]
 
-    assert load_audit_events(root=tmp_path) == []
+    events = load_audit_events(root=tmp_path)
+    assert len(events) == 1
+    assert events[0]["outcome"] == "approve"
 
 
 def test_after_terminal_submission_recorded_skips_replayed_audit(tmp_path: Path) -> None:

@@ -502,9 +502,9 @@ async def run_main_for_test(
 
     real_tracer_factory = tracer_mod.get_tracer_from_settings
 
-    def _tracer_factory(captured: RepoSettings) -> Any:
+    def _tracer_factory(captured: RepoSettings, *, new_run: bool = False) -> Any:
         tracer_settings.append(captured)
-        return real_tracer_factory(captured)
+        return real_tracer_factory(captured, new_run=new_run)
 
     monkeypatch.setattr(tracer_mod, "get_tracer_from_settings", _tracer_factory)
 

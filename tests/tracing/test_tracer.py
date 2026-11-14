@@ -180,6 +180,7 @@ def test_null_tracer_is_a_true_noop() -> None:
         span.set_attribute("model.id", "anthropic/claude-sonnet")
         span.record_exception(RuntimeError("ignored"))
         span.set_status("error", "ignored")
+        span.close(ended_ns=123)
 
     assert attrs_calls == 0, "NullTracer must never evaluate attrs_source"
     assert tracer.current_span() is None

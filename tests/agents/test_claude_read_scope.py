@@ -22,13 +22,13 @@ CLI invocation (argv, or a settings file written beside the MCP config).
 
 from __future__ import annotations
 
-import importlib
 import re
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from mergecraft.agents import cli_runner
 from mergecraft.agents.claude import _run_claude_once
 from mergecraft.agents.shared import AgentRunContext, ResolvedInstructions
 from mergecraft.mcp.context import PayloadEvent, ResolvedPayload
@@ -87,16 +87,15 @@ def _run_ctx(tmp_path: Path) -> AgentRunContext:
 
 
 def _captured_argv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    module = importlib.import_module("mergecraft.agents.claude")
     seen: list[list[str]] = []
 
     def _spawn(cmd: list[str], **_k: Any) -> _EmptyProcess:
         seen.append(list(cmd))
         return _EmptyProcess()
 
-    monkeypatch.setattr(module, "spawn_agent_cli", _spawn)
-    monkeypatch.setattr(module, "track_process_group", _noop_ctx)
-    monkeypatch.setattr(module, "wait_or_kill_process_group", lambda proc, timeout: proc.wait())
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", _spawn)
+    monkeypatch.setattr(cli_runner, "track_process_group", _noop_ctx)
+    monkeypatch.setattr(cli_runner, "wait_or_kill_process_group", lambda proc, timeout: proc.wait())
 
     _run_claude_once(
         cli="/usr/bin/claude",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -23,6 +24,7 @@ from mergecraft.tracing.genai import (
 from mergecraft.tracing.redaction import redact_tool_payload
 from mergecraft.tracing.tracer import (
     ProviderLLMPair,
+    Span,
     _close_provider_llm_pair,
     _open_provider_llm_pair,
 )
@@ -158,7 +160,9 @@ def codex_stream_event_handler(
 
     Codex ``--json`` events:
       - ``thread.started``: open a ``llm.call`` span for the thread.
-      - ``item.started`` with ``item.type == "tool_call"``: open a
+      - ``mcp_tool_call`` items carry the request and terminal response for an
+        MCP tool. Open on ``item.started`` and close on ``item.completed``.
+      - ``item.started`` with legacy ``item.type == "tool_call"``: open a
         ``tool.call`` span keyed on the tool call id.
       - ``item.completed`` with ``item.type == "tool_call"``: stamp
         the tool call's name + input on the open span.
@@ -187,6 +191,23 @@ def codex_stream_event_handler(
     open_tool_spans: dict[str, dict[str, Any]] = {}
     open_pairs: dict[str, ProviderLLMPair | None] = {}
     open_pair_bookkeeping: dict[str, dict[str, Any]] = {}
+
+    def close_tool_span(tool_id: str, output: Any, *, failed: bool) -> None:
+        entry = open_tool_spans.pop(tool_id, None)
+        if entry is None:
+            return
+        span = entry["span"]
+        enrich_tool_response(span, output=output)
+        if failed:
+            span.set_attribute("tool.exit_code", "error")
+            span.set_status("error", "tool result reported failure")
+        span.close()
+        emit_verb_subevent(
+            tracer,
+            parent_span_id=span.span_id,
+            tool_name=entry["name"],
+            attrs=dict(span._attrs),
+        )
 
     def handler(
         accumulator: StreamSpanAccumulator,
@@ -259,20 +280,23 @@ def codex_stream_event_handler(
 
         if event_type == "item.started":
             item = event.get("item") or {}
-            if not isinstance(item, dict) or item.get("type") != "tool_call":
+            if not isinstance(item, dict) or item.get("type") not in ("tool_call", "mcp_tool_call"):
                 return
             tool_id = str(item.get("id") or "")
-            tool_name = str(item.get("name") or "unknown")
+            tool_name = str(item.get("tool") or item.get("name") or "unknown")
             if not tool_id:
                 return
             if tool_id in open_tool_spans:
                 return
             if tracer is not None:
                 span = tracer.start_span("tool.call")
-                span.__enter__()
+                # Results can arrive out of order. Keep the explicit parent
+                # without holding a ContextVar frame across stream callbacks.
+                if isinstance(span, Span):
+                    span.ts_start_ns = time.time_ns()
                 span.set_attribute("tool.name", tool_name)
                 span.set_attribute("tool.id", tool_id)
-                span.set_attribute("tool.server", "codex")
+                span.set_attribute("tool.server", str(item.get("server") or "codex"))
                 span.set_attribute("gen_ai.operation.name", "execute_tool")
                 span.set_attribute("gen_ai.tool.name", tool_name)
                 span.set_attribute("gen_ai.tool.call.id", tool_id)
@@ -284,30 +308,49 @@ def codex_stream_event_handler(
             if not isinstance(item, dict):
                 return
             item_type = item.get("type")
+            if item_type == "mcp_tool_call":
+                tool_id = str(item.get("id") or "")
+                entry = open_tool_spans.get(tool_id)
+                if entry is None:
+                    return
+                span = entry["span"]
+                arguments = item.get("arguments")
+                span.set_attribute("tool.input", arguments)
+                span.set_attribute("gen_ai.tool.input", redact_tool_payload(arguments))
+                enrich_tool_request(span, arguments=arguments)
+                # MCP tool errors still carry a result. Transport errors carry an error object.
+                result = item.get("result")
+                close_tool_span(
+                    tool_id,
+                    result if result is not None else item.get("error"),
+                    failed=item.get("status") == "failed",
+                )
+                return
             if item_type == "tool_call":
                 tool_id = str(item.get("id") or "")
-                entry = open_tool_spans.pop(tool_id, None)
+                entry = open_tool_spans.get(tool_id)
                 if entry is None:
                     return
                 span_obj = entry.get("span")
                 if span_obj is not None:
                     resolved_name = str(item.get("name") or entry.get("name") or "unknown")
+                    entry["name"] = resolved_name
                     span_obj.set_attribute("tool.name", resolved_name)
                     span_obj.set_attribute("gen_ai.tool.name", resolved_name)
                     tool_input = str(item.get("input") or "")
                     span_obj.set_attribute("tool.input", tool_input)
                     span_obj.set_attribute("gen_ai.tool.input", redact_tool_payload(tool_input))
                     enrich_tool_request(span_obj, arguments=tool_input)
-                    enrich_tool_response(span_obj, output=tool_input)
-                    span_obj.close()
-                    emit_verb_subevent(
-                        tracer,
-                        parent_span_id=span_obj.span_id,
-                        tool_name=resolved_name,
-                        attrs=dict(span_obj._attrs),
-                    )
                 return
             if item_type == "tool_result":
+                tool_id = str(
+                    item.get("tool_call_id") or item.get("call_id") or item.get("id") or ""
+                )
+                close_tool_span(
+                    tool_id,
+                    item.get("output", item.get("content", "")),
+                    failed=bool(item.get("is_error")),
+                )
                 return
             if item_type == "command_execution":
                 from mergecraft.agents.codex import (

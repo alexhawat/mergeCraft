@@ -78,10 +78,11 @@ def test_span_close_is_idempotent(tracer_and_sink: Any) -> None:
     tracer = tracer_and_sink["tracer"]
 
     span = tracer.start_span("verb.subevent")
-    span.close()
-    # Second close — must not raise and must not emit a duplicate.
-    span.close()
+    span.close(ended_ns=123)
+    # A later close cannot replace the recorded end or emit another event.
+    span.close(ended_ns=456)
 
     assert len(sink.events) == 1, (
         f"expected exactly one TraceEvent after two close() calls, got {len(sink.events)}"
     )
+    assert span.ts_end_ns == sink.events[0].ts_end_ns == 123

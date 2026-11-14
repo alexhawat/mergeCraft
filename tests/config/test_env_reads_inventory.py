@@ -423,7 +423,7 @@ ALLOWED_READS: Final[tuple[AllowedRead, ...]] = (
         "src/mergecraft/tracing/tracer.py",
         "MERGECRAFT_TRACE_ID",
         "message bus",
-        "the tracer writes its own trace identity and reads it back",
+        "the caller may provide an explicit trace identity; generated per-run ids stay local",
     ),
     AllowedRead(
         "src/mergecraft/tracing/tracer.py",
@@ -1490,3 +1490,12 @@ def test_scan_reports_helper_and_iteration_reads_in_a_scratch_tree(
     reported = {(site.name, site.kind) for site in sites}
 
     assert (expected, kind) in reported, reported
+
+
+def test_node_ca_passthrough_is_documented(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Node CA is a child-process passthrough, not a parsed mergeCraft setting."""
+    from mergecraft.enterprise.runtime import agent_network_env
+
+    monkeypatch.setenv("NODE_EXTRA_CA_CERTS", "/operator/extra-ca.pem")
+    assert agent_network_env()["NODE_EXTRA_CA_CERTS"] == "/operator/extra-ca.pem"
+    assert "# NODE_EXTRA_CA_CERTS=" in (_REPO_ROOT / ".env.example").read_text()
