@@ -353,7 +353,8 @@ used to tune the reviewer or the judge.
 Each case needs a unified diff, a `baseline.json` with an explicit
 `closed_world: true` and an `issues` array, and a `repo/` directory next to
 the patch with the files from before the patch. An empty issues array denotes
-an independently adjudicated clean case. Every positive issue needs
+an independently adjudicated clean case. Repository context must exclude symlinks, Git metadata,
+and files named `.env` or beginning with `.env.`. Every positive issue needs
 `provenance: human` and a valid path and line range. Include both defect and
 clean cases. Repository context is copied into a fresh scratch directory
 for each review and verified against its approved hash. The review runs with

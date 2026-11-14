@@ -176,7 +176,7 @@ def context_sha256(root: Path) -> str:
     file_count = 0
     for path in sorted(root.rglob("*")):
         name = path.relative_to(root).as_posix()
-        if path.is_symlink() or path.name in {".git", ".env"}:
+        if path.is_symlink() or path.name in {".git", ".env"} or path.name.startswith(".env."):
             raise ValueError(f"unsupported repository context entry: {name}")
         if path.is_dir():
             inventory.append((name, "directory", False))
@@ -579,7 +579,6 @@ def _summarize_provider(
         "model": model,
         "provider": model.split("/", 1)[0],
         "completed_reviews": reviews,
-        "incomplete_review_rate": 0.0,
         "counts": total._asdict(),
         "precision": _ratio(total.found, total.reported),
         "recall": _ratio(total.found, total.issues),

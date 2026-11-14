@@ -108,7 +108,7 @@ def _protocol(tmp_path: Path) -> tuple[Path, list[str]]:
 
 @pytest.mark.parametrize(
     "failure",
-    [None, "campaign-cap", "partial-review-cap", "scope", "altered-patch", "retry"],
+    [None, "campaign-cap", "partial-review-cap", "scope", "altered-patch", "retry", "round-budget"],
     ids=[
         "scored",
         "spent-ceiling",
@@ -116,6 +116,7 @@ def _protocol(tmp_path: Path) -> tuple[Path, list[str]]:
         "scope-reduction",
         "filtered-patch",
         "hidden-retry",
+        "scaled-round-budget",
     ],
 )
 def test_campaign_reuses_receipts_and_scores_by_case(
@@ -128,6 +129,14 @@ def test_campaign_reuses_receipts_and_scores_by_case(
     monkeypatch.setattr("evals.repeated_detection.has_credentials_for_slug", lambda _slug: True)
     monkeypatch.setattr("mergecraft.evals.benchmark.git_tracked_tree_clean", lambda: True)
     seen: dict[tuple[str, int], int] = {}
+    if failure == "round-budget":
+        repo = tmp_path / "corpus/case-1/repo"
+        config = repo / ".mergecraft/config.yaml"
+        config.parent.mkdir()
+        config.write_text("review:\n  roundBudgets:\n    multipliers: [1.5]\n", encoding="utf-8")
+        payload = json.loads(protocol.read_bytes())
+        payload["context_sha256"]["case-1"] = context_sha256(repo)
+        _write(protocol, payload)
 
     async def review(**kwargs: Any) -> OfflineReviewResult:
         """Replace only the offline review boundary that would invoke a provider."""
@@ -235,11 +244,14 @@ def test_campaign_reuses_receipts_and_scores_by_case(
             "scope": "review did not complete",
             "altered-patch": "reviewed diff does not match the approved patch",
             "retry": "exactly one successful pinned model attempt",
+            "round-budget": "configured round budget changes review limits",
         }
         if failure == "partial-review-cap":
             receipt = results / "repeat-001-anthropic.receipt.json"
             assert json.loads(receipt.read_bytes())["recorded_costs"]["case-1"] == 1.25
         result = json.loads((results / "repeat-001-anthropic.json").read_bytes())
+        if failure == "round-budget":
+            assert set(seen) == {(model, case) for model in models for case in (2, 3)}
         assert expected_message[failure] in result["detection"]["failed_case_errors"]["case-1"]
         return
     report = summarize_campaign(protocol, results)
@@ -281,10 +293,68 @@ def test_campaign_reuses_receipts_and_scores_by_case(
         summarize_campaign(different, results)
     (context / "context.txt").write_text("case 1", encoding="utf-8")
 
+    cost_receipt = results / "repeat-001-anthropic.receipt.json"
+    original_receipt = cost_receipt.read_bytes()
+    mismatched_cost = json.loads(original_receipt)
+    mismatched_cost["recorded_costs"]["case-1"] = 0.13
+    _write(cost_receipt, mismatched_cost)
+    with pytest.raises(ValueError, match="case case-1 recorded cost disagrees with receipt"):
+        summarize_campaign(protocol, results)
+    cost_receipt.write_bytes(original_receipt)
+
     raw_path = next(results.glob("raw-findings/*/case-1.json"))
     raw_path.write_text('{"findings": []}', encoding="utf-8")
     with pytest.raises(ValueError, match="raw findings hash drift"):
         summarize_campaign(protocol, results)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [".git", ".env", ".env.local", ".env.production", ".env.test"],
+    ids=["git-metadata", "dotenv", "local-dotenv", "production-dotenv", "test-dotenv"],
+)
+def test_context_rejects_metadata_and_dotenv_files(tmp_path: Path, name: str) -> None:
+    """Reject these names anywhere in a repository snapshot."""
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "ordinary.txt").write_text("test-only file", encoding="utf-8")
+    (nested / name).write_text("test-only metadata", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unsupported repository context entry") as caught:
+        context_sha256(tmp_path)
+    assert str(caught.value).endswith(f"nested/{name}")
+
+
+def test_context_rejects_links_and_trees_without_files(tmp_path: Path) -> None:
+    """A directory tree needs real files and cannot point outside its root."""
+    root = tmp_path / "repo"
+    (root / "nested").mkdir(parents=True)
+    with pytest.raises(ValueError, match="empty repository context"):
+        context_sha256(root)
+
+    external = tmp_path / "outside.txt"
+    external.write_text("test-only context", encoding="utf-8")
+    link = root / "nested" / "link.txt"
+    link.symlink_to(external)
+    with pytest.raises(ValueError, match=r"unsupported repository context entry: nested/link\.txt"):
+        context_sha256(root)
+
+
+def test_missing_provider_credentials_refuse_the_campaign(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Require credentials for all campaign models before creating the run directory."""
+    protocol, models = _protocol(tmp_path)
+    monkeypatch.setattr("mergecraft.evals.benchmark.git_tracked_tree_clean", lambda: True)
+    monkeypatch.setattr(
+        "evals.repeated_detection.has_credentials_for_slug", lambda model: model == models[0]
+    )
+    results = tmp_path / "results"
+    with pytest.raises(
+        ValueError, match="live credentials must be available for each pinned model"
+    ):
+        run_campaign(protocol, results)
+    assert not results.exists()
 
 
 def test_changed_context_is_refused_before_review(tmp_path: Path) -> None:
