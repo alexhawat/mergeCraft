@@ -15,6 +15,8 @@ if [ -n "${opencode_go_packet}" ]; then
     echo "packet decision.verdict=${verdict} — OpenCode Go review posted a verdict; not falling back to Codex."
   elif packet_is_all_ignored "${opencode_go_packet}"; then
     echo "packet decision.verdict=${verdict} (triage skip: ignorePaths) — every changed file is ignored, so no rung has anything to review; not falling back to Codex."
+  elif packet_is_policy_skip "${opencode_go_packet}"; then
+    echo "A current, attributable review-policy skip is final; not falling back to Codex."
   elif neutral_is_untrusted_tier "${verdict}" "${reason}"; then
     echo "packet decision.verdict=${verdict} (${reason}) — an untrusted-tier run is structurally inert, so a fallback rung cannot change the verdict; not falling back to Codex."
   else

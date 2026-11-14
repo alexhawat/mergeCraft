@@ -514,10 +514,21 @@ class FileGroupFanoutSettings(BaseModel):
     budget_share: float = Field(default=0.5, alias="budgetShare", gt=0, le=0.9)
 
 
+class ReviewTriggerSettings(BaseModel):
+    """Frequency of automatic pull-request reviews."""
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    frequency: Literal["everyPush", "oncePerPr", "onRequest"] = "everyPush"
+
+
 class ReviewSettings(BaseModel):
     """Review-depth knobs that are separate from analyzer placement (RC3, D2)."""
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    drafts: Literal["skip", "lite", "full"] = "skip"
+    triggers: ReviewTriggerSettings = Field(default_factory=ReviewTriggerSettings)
 
     # RC3 / D2 — how many Critical/Major findings earn a verifier dispatch per run.
     # ``0`` means verify every eligible finding (no cap).

@@ -111,6 +111,22 @@ packet_is_all_ignored() {
   ' >/dev/null 2>&1
 }
 
+# A policy skip requires a packet for this head and a fresh neutral check
+# attributable to this workflow run and attempt.
+packet_is_policy_skip() {
+  local packet="$1" latest=""
+  [ -n "${HEAD_SHA:-}" ] && [ -n "${GITHUB_RUN_ID:-}" ] &&
+    [ -n "${GITHUB_RUN_ATTEMPT:-}" ] || return 1
+  printf '%s' "${packet}" | jq -e --arg head "${HEAD_SHA}" '
+    .decision.verdict == "neutral"
+    and .triage.tier == "skip"
+    and .triage.recognizer == "reviewPolicy"
+    and .reviewed_head_sha == $head
+  ' >/dev/null 2>&1 || return 1
+  latest="$(latest_mergecraft_approval)"
+  [ "$(discard_baseline_verdict "${latest}")" = "neutral" ]
+}
+
 # Claude backstop: failure|success|neutral all count as a posted verdict.
 verdict_blocks_claude_backstop() {
   case "$1" in
