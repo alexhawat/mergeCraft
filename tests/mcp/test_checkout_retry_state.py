@@ -17,7 +17,11 @@ from tests.mcp.test_checkout import (
 )
 
 from mergecraft.ci.red_green import RedGreenEvidence
-from mergecraft.config.settings_snapshot import assert_config_unchanged
+from mergecraft.config.settings import RepoSettings
+from mergecraft.config.settings_snapshot import (
+    RepoSettingsSnapshot,
+    assert_config_unchanged,
+)
 from mergecraft.evidence.coverage import _read_evidence
 from mergecraft.evidence.trajectory import ToolCallRecord
 from mergecraft.mcp import checkout as checkout_module
@@ -100,6 +104,7 @@ async def test_checkout_retry_invalidates_old_scope_and_can_recover(
     state = ctx.tool_state
     primary = primary_repo_state(state)
     assert primary.checkout_sha == old_sha
+    primary.reviewed_merge_base = old_sha
     assert primary.diff_path is not None
     old_diff = await asyncio.to_thread(Path(primary.diff_path).read_text)
     assert "new.py" not in old_diff
@@ -151,6 +156,7 @@ async def test_checkout_retry_invalidates_old_scope_and_can_recover(
             assert "head changed" in str(failed.content)
 
     assert primary.checkout_sha is None
+    assert primary.reviewed_merge_base is None
     assert primary.diff_path is None
     assert primary.incremental_changed_paths is None
     assert state.scope_provenance is None
@@ -297,3 +303,38 @@ async def test_preflight_refusal_preserves_the_existing_review(
     for name, value in saved_repo.items():
         assert getattr(primary, name) is value, f"preflight refusal replaced repo.{name}"
     fetch.assert_not_called()
+
+
+async def test_queue_enabled_checkout_records_the_actual_diff_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _pin_publishers(monkeypatch, frozenset())
+    monkeypatch.setattr("mergecraft.mcp.review_context.hydrate_review_context", AsyncMock())
+    repo, _, head = await asyncio.to_thread(_pr_repo_with_two_commits, tmp_path)
+    base = (
+        await asyncio.to_thread(
+            checkout_module._run_git, ["rev-parse", "origin/base"], cwd=str(repo)
+        )
+    ).strip()
+    ctx = _ctx_for(repo, _StubGitHub(head_sha=head, reviews=[]), tmp_path, mode="Review")
+    ctx.repo_settings_snapshot = RepoSettingsSnapshot(
+        settings=RepoSettings.model_validate(
+            {"review": {"mergeQueue": {"trustedCheckApps": ["mergecraft-reviewer"]}}}
+        ),
+        config_hash="pinned",
+        repo_root=repo,
+        operator_owned=True,
+    )
+
+    result = await checkout_module.checkout_pr_tool(ctx).execute({"pull_number": 1})
+
+    assert not result.is_error, result.content
+    primary = primary_repo_state(ctx.tool_state)
+    assert primary.reviewed_merge_base == base
+    assert primary.checkout_sha == head
+    assert primary.diff_path is not None
+    actual = await asyncio.to_thread(Path(primary.diff_path).read_text, encoding="utf-8")
+    expected = await asyncio.to_thread(
+        checkout_module._run_git, ["diff", base, head], cwd=str(repo)
+    )
+    assert actual == expected

@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from mergecraft.evidence.packet import MergeEvidencePacket
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import ApprovalRecord
+    from mergecraft.scm.protocol import ScmProvider
 
 COMPLETION_CHECK = "mergecraft"
 APPROVAL_CHECK = "mergecraft-approval"
@@ -270,9 +271,12 @@ def _build_approval_summary(
     return "\n".join(lines)
 
 
-async def _create_check_run(
-    ctx: ToolContext,
+async def create_check_run(
+    scm: ScmProvider,
     *,
+    owner: str,
+    repo: str,
+    run_id: int | str | None,
     name: str,
     head_sha: str,
     conclusion: CompletionConclusion,
@@ -286,15 +290,38 @@ async def _create_check_run(
         "conclusion": conclusion,
         "output": {"title": title, "summary": summary},
     }
-    if ctx.run_id:
-        body["external_id"] = f"{ctx.run_id}:{os.environ.get('GITHUB_RUN_ATTEMPT', '1')}"
-        body["details_url"] = _run_url(ctx)
-    await ctx.scm.post(f"/repos/{ctx.repo.owner}/{ctx.repo.name}/check-runs", json=body)
+    if run_id:
+        body["external_id"] = f"{run_id}:{os.environ.get('GITHUB_RUN_ATTEMPT', '1')}"
+        server = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+        body["details_url"] = f"{server}/{owner}/{repo}/actions/runs/{run_id}"
+    await scm.post(f"/repos/{owner}/{repo}/check-runs", json=body)
     logger.info(
         "» posted {} check ({}) on {}",
         name,
         conclusion,
         head_sha[:7],
+    )
+
+
+async def _create_check_run(
+    ctx: ToolContext,
+    *,
+    name: str,
+    head_sha: str,
+    conclusion: CompletionConclusion,
+    title: str,
+    summary: str,
+) -> None:
+    await create_check_run(
+        ctx.scm,
+        owner=ctx.repo.owner,
+        repo=ctx.repo.name,
+        run_id=ctx.run_id,
+        name=name,
+        head_sha=head_sha,
+        conclusion=conclusion,
+        title=title,
+        summary=summary,
     )
 
 
@@ -518,6 +545,17 @@ async def report_status_checks(
         else:
             approval_title = "mergeCraft review did not complete"
 
+        stamp_lines = _review_stamp_lines(ctx)
+        if approval_conclusion == "success" and run_succeeded:
+            from mergecraft.merge_queue import queue_review_stamp
+
+            try:
+                queue_stamp = await queue_review_stamp(ctx, head_sha)
+            except Exception as err:
+                logger.warning("Merge queue review stamp unavailable ({})", type(err).__name__)
+            else:
+                if queue_stamp is not None:
+                    stamp_lines = queue_stamp.lines()
         approval_summary = _build_approval_summary(
             approval_conclusion=approval_conclusion,
             findings=findings,
@@ -528,7 +566,7 @@ async def report_status_checks(
             reviewed_sha=reviewed_sha,
             coverage_line=coverage_line,
             triage_lines=_triage_lines(packet),
-            stamp_lines=_review_stamp_lines(ctx),
+            stamp_lines=stamp_lines,
         )
 
         await _create_check_run(

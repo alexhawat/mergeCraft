@@ -3992,6 +3992,64 @@ def _stamp_review_trust_tier(ctx: RunContext) -> None:
         stamp_review_context(trust_tier=tier)
 
 
+_MERGE_GROUP_PROOF_TIMEOUT_S = 120
+
+
+async def _run_merge_group() -> MainResult:
+    """Handle the native queue event with GitHub evidence only."""
+    from mergecraft.merge_queue import bind_merge_group, prove_merge_group
+    from mergecraft.reapproval import ReapprovalUnavailableError
+    from mergecraft.utils.status_checks import APPROVAL_CHECK, create_check_run
+
+    try:
+        group = bind_merge_group(read_github_event(), os.environ)
+        if (ActionInputEnv().status_checks or "").lower() != "enabled":
+            msg = "The merge group job requires status_checks: enabled"
+            raise ReapprovalUnavailableError(msg)
+        token = get_job_token()
+    except (ValueError, ReapprovalUnavailableError) as error:
+        return MainResult(success=False, error=str(error), outcome=RunOutcome.configuration_error)
+    scm = create_github_scm(token, client=GitHubClient(token))
+    failure: str | None = None
+    summary = ""
+    try:
+        try:
+            approvals = await asyncio.wait_for(
+                prove_merge_group(scm, group, os.environ.get("GITHUB_WORKFLOW_REF")),
+                timeout=_MERGE_GROUP_PROOF_TIMEOUT_S,
+            )
+            summary = "\n".join(
+                ["All queue layers match trusted pull request approvals.", *approvals]
+            )
+        except TimeoutError:
+            failure = "Merge group evidence verification timed out."
+        except ReapprovalUnavailableError as error:
+            failure = str(error)
+        except Exception as error:
+            failure = f"Merge group evidence could not be read ({type(error).__name__})."
+        try:
+            await create_check_run(
+                scm,
+                owner=group.owner,
+                repo=group.repo,
+                run_id=os.environ.get("GITHUB_RUN_ID"),
+                name=APPROVAL_CHECK,
+                head_sha=group.layer.head,
+                conclusion="failure" if failure else "success",
+                title="Merge group approval unavailable" if failure else "Merge group approved",
+                summary=failure or summary,
+            )
+        except Exception as error:
+            failure = f"Merge group approval could not be posted ({type(error).__name__})."
+    finally:
+        await _run_cleanup_step_async("scm.aclose", scm.aclose)
+    return MainResult(
+        success=failure is None,
+        error=failure,
+        outcome=RunOutcome.failed if failure else RunOutcome.passed,
+    )
+
+
 async def main() -> MainResult:
     """Orchestrates the four engine stages — materialize (setup + credentials),
     analyze (model chain + tool context), review (setup script + payload-timed
@@ -4004,6 +4062,8 @@ async def main() -> MainResult:
     """
     install_loguru_redaction_filter()
     normalize_env()
+    if os.environ.get("GITHUB_EVENT_NAME") == "merge_group":
+        return await _run_merge_group()
     snapshot: ReviewSnapshot = canonical_review_snapshot(
         entry="action",
         source=os.environ.get("GITHUB_REPOSITORY") or None,

@@ -551,6 +551,14 @@ class PathInstruction(_OptionalFeatureModel):
         return value
 
 
+class MergeQueueSettings(BaseModel):
+    """Dedicated GitHub Apps allowed to vouch for pull requests in a merge group."""
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    trusted_check_apps: list[str] = Field(default_factory=list, alias="trustedCheckApps")
+
+
 class ReviewSettings(BaseModel):
     """Review-depth knobs that are separate from analyzer placement (RC3, D2)."""
 
@@ -568,6 +576,7 @@ class ReviewSettings(BaseModel):
     coverage: ReviewCoverageSettings = Field(default_factory=ReviewCoverageSettings)
     # Deterministic triage before dispatch (default off; base-side config only).
     fast_path: FastPathSettings = Field(default_factory=FastPathSettings, alias="fastPath")
+    merge_queue: MergeQueueSettings = Field(default_factory=MergeQueueSettings, alias="mergeQueue")
     # Bounded read-only file-group fan-out on large diffs (default off).
     file_group_fanout: FileGroupFanoutSettings = Field(
         default_factory=FileGroupFanoutSettings, alias="fileGroupFanout"

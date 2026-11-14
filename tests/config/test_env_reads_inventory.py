@@ -52,6 +52,8 @@ _ENV_PACKAGE: Final = "config/env/"
 _ENV_PREFIXES: Final = ("MERGECRAFT_", "INPUT_", "TYPESAFE_")
 #: Fallback aliases that are read directly today; they carry no prefix of their own.
 _FALLBACK_ALIASES: Final = frozenset({"LOG_LEVEL", "LOG_FORMAT", "CI_STATE", "CI_FAILED_COUNT"})
+#: Platform provenance introduced by merge-queue approval reuse.
+_PLATFORM_CONTEXT_NAMES: Final = frozenset({"GITHUB_WORKFLOW_SHA"})
 
 _MAPPING_NAMES: Final = frozenset({"environ", "os_environ", "env", "env_map", "envmap"})
 _MAPPING_SUFFIXES: Final = ("_env", "_environ", "_env_map")
@@ -273,6 +275,12 @@ ALLOWED_KINDS: Final = frozenset(
 #: unclassified read. Stale rows (a read that has moved) are pruned by the test
 #: owner, never by an implementation wave.
 ALLOWED_READS: Final[tuple[AllowedRead, ...]] = (
+    AllowedRead(
+        "src/mergecraft/merge_queue.py",
+        "GITHUB_WORKFLOW_SHA",
+        "platform",
+        "GitHub supplies the immutable workflow revision used to bind approval provenance",
+    ),
     AllowedRead(
         "src/mergecraft/build_metadata.py",
         "MERGECRAFT_BUILD_COMMIT",
@@ -613,7 +621,11 @@ def _is_env_name(value: object) -> bool:
     if value.endswith("_"):
         # A prefix fragment (``MERGECRAFT_CUSTOM_PROVIDER_``), not a name.
         return False
-    return value.startswith(_ENV_PREFIXES) or value in _FALLBACK_ALIASES
+    return (
+        value.startswith(_ENV_PREFIXES)
+        or value in _FALLBACK_ALIASES
+        or value in _PLATFORM_CONTEXT_NAMES
+    )
 
 
 def _names(node: ast.AST) -> list[str]:

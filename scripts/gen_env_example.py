@@ -106,6 +106,8 @@ _GITHUB = """\
 # the workflow's job token)
 # ---------------------------------------------------------------------------
 # GITHUB_TOKEN=
+# GITHUB_WORKFLOW_SHA is supplied by GitHub Actions for approval provenance.
+# Do not configure this platform value in a local .env file.
 """
 
 

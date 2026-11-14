@@ -217,10 +217,17 @@ def _app_slug(row: dict[str, Any]) -> str:
 
 
 async def _prior_pass(
-    scm: ScmProvider, owner: str, repo: str, prior_head: str, *, trusted: frozenset[str]
+    scm: ScmProvider,
+    owner: str,
+    repo: str,
+    prior_head: str,
+    *,
+    trusted: frozenset[str],
+    all_runs: bool = False,
 ) -> PriorPass:
     """The newest trusted ``mergecraft-approval`` check on ``prior_head``; it must pass."""
-    listing = await scm.list_check_runs_for_ref(owner, repo, prior_head)
+    params = {"params": {"filter": "all", "check_name": APPROVAL_CHECK_NAME}} if all_runs else {}
+    listing = await scm.list_check_runs_for_ref(owner, repo, prior_head, **params)
     rows = getattr(listing, "items", None)
     if not isinstance(rows, list) or getattr(listing, "incomplete", False):
         raise ReapprovalUnavailableError("the check-run listing was incomplete")
