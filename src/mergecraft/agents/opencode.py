@@ -1677,8 +1677,8 @@ def _priced_stream_usage(
     """Return the stream's token usage, priced from the catalog when unpriced.
 
     OpenCode 2.x reports its own cost per step; when a provider omits it, the
-    catalog fills it in the same way the session path does, so the run record's
-    ``Cost:`` line and the packet agree.
+    catalog fills it in the same way the session path does, so the run record
+    and the packet agree on their recorded reviewer model costs.
     """
     usage = accumulator.to_usage()
     if usage is None:

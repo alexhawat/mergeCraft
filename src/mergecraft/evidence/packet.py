@@ -135,7 +135,9 @@ from mergecraft.evidence.trajectory import TrajectoryRecord  # noqa: TC001 — P
 #   carried over to a new head whose only PR-authored change is changelog prose, the
 #   prior review link, the compared SHAs, the qualifying, preserved and inherited
 #   paths, and the work that was skipped. Additive; ``None`` everywhere else.
-PACKET_SCHEMA_VERSION = "1.20.0"
+# - 1.21.0 — #1381 adds optional run identity and recorded reviewer cost
+#   with coverage and qualifiers. These measurements do not feed the gate.
+PACKET_SCHEMA_VERSION = "1.21.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
@@ -288,6 +290,9 @@ class RunMetrics(BaseModel):
     diff_deleted_lines: int = Field(ge=0)
     phase_elapsed_s: dict[str, float] = Field(default_factory=dict)
     agent_diagnostic: str | None = None
+    recorded_cost_usd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    cost_availability: Literal["available", "partial", "unavailable"] | None = None
+    cost_notes: list[str] = Field(default_factory=list)
 
 
 class ModePromptVersion(BaseModel):
@@ -473,6 +478,8 @@ class MergeEvidencePacket(BaseModel):
     # Slice 7 — measurement only: tool calls, distinct reads, diff size, and
     # elapsed time by phase. Never an input to ``decide_approval``.
     run_metrics: RunMetrics | None = None
+    # Opaque identity for detecting multiple stored copies of one invocation.
+    run_id: str | None = None
 
 
 __all__ = [

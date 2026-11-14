@@ -176,7 +176,7 @@ async def test_run_record_carries_the_cost_line(tmp_path: Path) -> None:
         ctx=ctx,
     )
 
-    assert "- **Cost:** $0.0123" in scm.reviews[1]
+    assert "- **Recorded reviewer model cost:** $0.0123" in scm.reviews[1]
 
 
 @pytest.mark.parametrize("with_budget", [False, True])
@@ -216,6 +216,104 @@ async def test_go_estimate_reaches_the_published_record(tmp_path: Path, with_bud
         ctx=ctx,
     )
     assert (
-        "- **Cost:** $0.7530 (includes estimated OpenCode Go usage value; "
+        "- **Recorded reviewer model cost:** $0.7530 (includes estimated OpenCode Go usage value; "
         "subscription billed separately)"
     ) in scm.reviews[1]
+
+
+@pytest.mark.parametrize(
+    ("cost", "expected"),
+    [
+        (0.0, "$0.0000"),
+        (None, "unavailable"),
+        (float("nan"), "unavailable"),
+        (float("inf"), "unavailable"),
+        (-0.1, "unavailable"),
+    ],
+)
+async def test_run_record_distinguishes_zero_from_unavailable(
+    tmp_path: Path, cost: float | None, expected: str
+) -> None:
+    scm = _Scm()
+    ctx = _context(tmp_path, scm)
+    ctx.tool_state.usage_entries = [
+        AgentUsage(agent="codex", input_tokens=100, output_tokens=10, cost_usd=cost)
+    ]
+
+    await _publish_deterministic_record()(
+        pull_number=546,
+        packet=_sample_packet(findings=[], verdict="success", reason="approved"),
+        ctx=ctx,
+    )
+
+    assert f"- **Recorded reviewer model cost:** {expected}" in scm.reviews[1]
+
+
+def test_recorded_cost_uses_saved_usage_when_token_charge_interrupts_tracker() -> None:
+    from mergecraft.agents.curated_model_catalog import cost_summary_from_usage_entries
+    from mergecraft.utils.review_cost import recorded_run_cost
+    from mergecraft.utils.run_bounds import (
+        BudgetExhausted,
+        BudgetTracker,
+        record_agent_usage,
+        resolve_run_bounds,
+    )
+
+    tracker = BudgetTracker(resolve_run_bounds(env={"MERGECRAFT_TOKEN_BUDGET": "200"}))
+    first = AgentUsage(agent="opencode", input_tokens=100, output_tokens=10, cost_usd=0.25)
+    second = AgentUsage(agent="opencode", input_tokens=150, output_tokens=10, cost_usd=0.50)
+    unpriced = AgentUsage(
+        agent="codex", input_tokens=100, output_tokens=10, cost_note="subscription"
+    )
+    usage = [first, second, unpriced]
+    record_agent_usage(tracker, first)
+    with pytest.raises(BudgetExhausted):
+        record_agent_usage(tracker, second)
+    assert tracker.cost_used == 0.25
+
+    cost = recorded_run_cost(usage, budget_tracker=tracker)
+
+    assert cost.amount_usd == 0.75
+    assert cost.availability == "partial"
+    assert cost.notes == ("subscription",)
+    assert cost_summary_from_usage_entries(usage, budget_tracker=tracker) == (
+        "$0.7500 (partial: some costs are unavailable; subscription)"
+    )
+
+
+def test_recorded_cost_from_tracker_requires_a_positive_charge() -> None:
+    from mergecraft.utils.review_cost import recorded_run_cost
+    from mergecraft.utils.run_bounds import BudgetTracker, resolve_run_bounds
+
+    tracker = BudgetTracker(resolve_run_bounds(env={}))
+    assert recorded_run_cost([], budget_tracker=tracker).amount_usd is None
+
+    tracker.record_cost(0.25)
+    tracker_only = recorded_run_cost([], budget_tracker=tracker)
+    assert tracker_only.amount_usd == 0.25
+    assert tracker_only.availability == "available"
+
+    usage = [AgentUsage(agent="opencode", input_tokens=100, output_tokens=10, cost_usd=0.25)]
+    assert recorded_run_cost(usage, budget_tracker=tracker) == tracker_only
+
+
+@pytest.mark.parametrize("invalid", [None, float("nan"), float("inf"), -0.1])
+def test_recorded_cost_keeps_a_valid_zero_among_unavailable_values(
+    invalid: float | None,
+) -> None:
+    from mergecraft.agents.curated_model_catalog import cost_summary_from_usage_entries
+    from mergecraft.utils.review_cost import recorded_run_cost
+    from mergecraft.utils.run_bounds import BudgetTracker, resolve_run_bounds
+
+    usage = [
+        AgentUsage(agent="gemini", input_tokens=100, output_tokens=10, cost_usd=0.0),
+        AgentUsage(agent="codex", input_tokens=100, output_tokens=10, cost_usd=invalid),
+    ]
+    tracker = BudgetTracker(resolve_run_bounds(env={}), cost_used=float("nan"))
+
+    cost = recorded_run_cost(usage, budget_tracker=tracker)
+    assert cost.amount_usd == 0.0
+    assert cost.availability == "partial"
+    assert cost_summary_from_usage_entries(usage, budget_tracker=tracker) == (
+        "$0.0000 (partial: some costs are unavailable)"
+    )

@@ -94,7 +94,7 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.20.0`.
+The current version is `1.21.0`.
 
 Wiring a consumer is **not** a shape change: #96 gave these models their first
 runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
@@ -171,6 +171,9 @@ not move.
   prior mergeCraft pass carried over to a head whose only PR-authored change is
   changelog prose, the prior review link, the compared SHAs, the qualifying,
   preserved and inherited paths, and the skipped work. Additive; `null` otherwise.
+
+- `1.21.0` — adds optional run identity and recorded reviewer model cost
+  (#1381), with cost coverage and billing qualifiers.
 
 ## Top-level fields
 
@@ -310,6 +313,12 @@ approval is left to a human. The one exception is a `skip (reapproval)` run on a
 trusted authority, which carries the prior `success` over to the new head and says
 so in `decision.reason`. A `lite` run with a Critical or Major finding still carries
 `failure`.
+
+### `run_id` — `str | None` (added in `1.21.0`)
+
+Opaque identity assigned by the orchestrator. Stored copies of one invocation
+share an ID. Earlier packets may omit it.
+
 ### `run_metrics` — `RunMetrics | None` (added in `1.15.0`)
 
 Measurement only. It records how the review spent its time and its reads so the
@@ -318,6 +327,9 @@ verdict.**
 
 | Field | Type | Notes |
 |------|------|-------|
+| `recorded_cost_usd` | `float \| null` | Recorded reviewer model cost, when available. |
+| `cost_availability` | `str \| null` | `available`, `partial`, or `unavailable`. Older packets omit it. |
+| `cost_notes` | `list[str]` | Qualifiers such as pricing estimates or subscription terms. |
 | `tool_calls` | `int` | Mediated MCP tool calls recorded in the trajectory. |
 | `read_tool_calls` | `int` | Calls the trajectory classified as `read`. |
 | `read_tool_turns` | `int` | Runs of consecutive read-intent calls — the cheap batching signal. |

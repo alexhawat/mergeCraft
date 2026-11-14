@@ -1489,7 +1489,7 @@ def render_deterministic_review_block(
     if token_summary:
         header_lines.append(f"- **Tokens:** {token_summary}")
     if cost_summary:
-        header_lines.append(f"- **Cost:** {cost_summary}")
+        header_lines.append(f"- **Recorded reviewer model cost:** {cost_summary}")
     metrics = getattr(packet, "run_metrics", None)
     if metrics is not None:
         phase_elapsed = getattr(metrics, "phase_elapsed_s", {}) or {}

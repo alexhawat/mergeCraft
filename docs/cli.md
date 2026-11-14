@@ -168,6 +168,7 @@ needs a new review.
 | `mergecraft provider migrate` | Migrate legacy `*_API_KEY` env vars into indexed provider registry layout. |
 | `mergecraft provider status` | Show the reviewer roster, credentials, wiring, and dispatch order. |
 | `mergecraft replay` | Replay a stored review run from local traces (read-only). |
+| `mergecraft report <packets>` | Write review metrics from stored evidence packets. |
 | `mergecraft requirements explain <requirement-id>` | Explain one requirement by id; unknown ids are an error. |
 | `mergecraft requirements inspect` | List ingested requirements and their states. |
 | `mergecraft review` | Review a local git diff offline (no GitHub Action / PR posting). |
@@ -200,6 +201,48 @@ The bare `gha` group invocation (no subcommand) is the Docker action's runtime
 entry point — it is a Typer group callback, not a `registered_commands` leaf
 itself, so it is described here in prose rather than as its own table row;
 `mergecraft gha token` above is the one real leaf command under that group.
+
+## Reports from stored review packets
+
+`mergecraft report` reads packet files or directories of downloaded artifacts and
+writes a new JSON file. It runs locally without provider calls:
+
+```sh
+mergecraft report ./review-artifacts --output ./review-report.json
+```
+
+The output path must not already exist. Directory discovery includes
+`*-merge-evidence-packet.json`, `merge-evidence-packet.json`, `run-packet.json`,
+and `packet-*.json`; explicit file arguments can use other names. Symlinked
+packet files and non-regular files are not read. Invalid packets and non-PR
+packets are counted separately.
+
+The three metrics have deliberately narrow definitions:
+
+- `acceptance_rate` is the **review pass rate** among full reviews with a decisive
+  success or failure verdict. It does not measure whether a human accepted a
+  finding. Neutral outcomes, unknown verdicts, lite reviews, and skips are
+  reported separately and excluded from this denominator.
+- `cost_per_pr_usd` is the mean sum of recorded reviewer model costs per PR,
+  including distinct runs, for PRs whose included non-skip runs all have known
+  cost. Partial or unavailable costs remain explicit; they are not treated as
+  zero. Estimate and subscription-equivalent qualifications are retained. This
+  is recorded reviewer usage, not a provider invoice or a complete accounting of
+  every auxiliary model call.
+- `time_to_review_seconds` is mean recorded reviewer execution duration for
+  measured non-skip runs. It is not the wait between opening a PR and receiving
+  its first review, and overlapping analyzer or judge timings are not added.
+
+Sample counts accompany each metric. A metric without observations is `null`.
+Copied packets from the same run are deduplicated; conflicting snapshots of one
+run are excluded and counted. Older packets without run identity are deduplicated
+by content, so identical historical runs cannot be distinguished from copies.
+Older packets also lack cost measurements and contribute no invented cost.
+
+Keep separate downloaded artifact directories for the runs you want to compare.
+The report describes the files supplied to it; it does not fetch missing history.
+Repeated runs written to the same evidence directory can overwrite the previous
+packet for that PR.
 
 ## Local coverage toolchain
 
@@ -248,7 +291,7 @@ not part of the operator contract.
 | `MERGECRAFT_CDP_URL` | Chrome DevTools Protocol base URL for the browser driver | `http://127.0.0.1:9222` | `verify-behavior` browser driver |
 | `MERGECRAFT_CONFIG` | Explicit path to the repo config file | unset — discovered at `<repo>/.mergecraft/config.yaml` | config resolution and the `config`/`tracing` commands |
 | `MERGECRAFT_CONTEXT_RETRIEVAL_TIMEOUT_S` | Seconds allowed for one context-retrieval call | `30` | review context retrieval |
-| `MERGECRAFT_COST_BUDGET_USD` | Per-run spend ceiling, in US dollars | `50.0` | budget enforcement (exhaustion maps to inconclusive) |
+| `MERGECRAFT_COST_BUDGET_USD` | Per-run spend ceiling, in US dollars | `3.0` | budget enforcement (exhaustion maps to inconclusive) |
 | `MERGECRAFT_EGRESS_DNS_RESOLVERS` | Comma-separated IPv4 resolvers allowed inside the analyzer network namespace | host `/etc/resolv.conf` nameservers (fallback `1.1.1.1`) | isolated analyzers |
 | `MERGECRAFT_ENV` | Explicit path to the `.env` file loaded at CLI startup | unset — git-root `.env`, skipped inside GitHub Actions | CLI startup and credential writers |
 | `MERGECRAFT_EVIDENCE_DIR` | Parent directory for the emitted evidence packet and the captured `judge-verdicts.jsonl` | unset — `$RUNNER_TEMP/mergecraft`, else the run temp dir | review evidence-packet emission |

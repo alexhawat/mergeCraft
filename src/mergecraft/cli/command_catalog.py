@@ -102,6 +102,9 @@ COMMANDS: dict[str, CommandEntry] = {
         "Scaffold ``.mergecraft/config.yaml`` and an example workflow (local, no API).",
         False,
     ),
+    "report": CommandEntry(
+        "report_cmd", "run", False, "Write review metrics from stored evidence packets."
+    ),
     "watch": CommandEntry(
         "watch_cmd",
         "run",

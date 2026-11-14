@@ -208,28 +208,16 @@ def cost_summary_from_usage_entries(
     usage_entries: list[AgentUsage | object],
     *,
     budget_tracker: object | None = None,
-) -> str | None:
-    """Render reported/estimated usage costs, retaining billing qualifications."""
-    from mergecraft.utils.run_bounds import BudgetTracker
+) -> str:
+    """Render recorded reviewer model costs and their billing qualifications."""
+    from mergecraft.utils.review_cost import recorded_run_cost
 
-    total = 0.0
-    known = False
-    notes: list[str] = []
-    for row in usage_entries:
-        if not isinstance(row, AgentUsage):
-            continue
-        if row.cost_usd is not None and row.cost_usd > 0:
-            total += row.cost_usd
-            known = True
-            if row.cost_note and row.cost_note not in notes:
-                notes.append(row.cost_note)
-    if isinstance(budget_tracker, BudgetTracker) and budget_tracker.cost_used > 0:
-        total = budget_tracker.cost_used
-        known = True
-    if not known:
-        return None
-    suffix = f" ({'; '.join(notes)})" if notes else ""
-    return f"${format_cost_usd(total)}{suffix}"
+    cost = recorded_run_cost(usage_entries, budget_tracker=budget_tracker)
+    value = "unavailable" if cost.amount_usd is None else f"${format_cost_usd(cost.amount_usd)}"
+    notes = cost.notes
+    if cost.availability == "partial":
+        notes = ("partial: some costs are unavailable", *notes)
+    return f"{value} ({'; '.join(notes)})" if notes else value
 
 
 __all__ = [

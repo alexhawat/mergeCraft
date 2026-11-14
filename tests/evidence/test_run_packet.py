@@ -960,3 +960,175 @@ def test_malformed_diff_preserves_packet_but_cannot_approve(tmp_path: Path) -> N
     assert packet.decision.verdict != "success"
     assert packet.blast_radius is None
     assert any(row.rule_id == "unparseable-diff-paths" for row in packet.run_health.findings)
+
+
+def test_report_summarizes_emitted_packets_and_deduplicates_copies(tmp_path: Path) -> None:
+    from shutil import copyfile
+
+    from typer.testing import CliRunner
+
+    from mergecraft.agents.shared import AgentUsage
+    from mergecraft.cli.app import app
+
+    for filename, change, cost, duration in (
+        ("packet-opencode-go.json", 42, 1.25, 10.0),
+        ("packet-codex.json", 42, 0.75, 30.0),
+        ("other-merge-evidence-packet.json", 43, 0.0, 20.0),
+        ("run-packet.json", 44, None, 0.0),
+    ):
+        ctx = _make_ctx(tmp_path)
+        packet = prepare_run_packet(ctx, run_succeeded=True, change_id=f"acme/demo#{change}")
+        assert packet is not None
+        if duration:
+            ctx.tool_state.phase_elapsed_s["agent"] = duration
+        if cost is not None:
+            ctx.tool_state.usage_entries.append(AgentUsage("claude", 1, 1, cost_usd=cost))
+        assert emit_run_packet(ctx, packet=packet, output_path=tmp_path / filename)
+
+    duplicate_dir = tmp_path / "copy"
+    duplicate_dir.mkdir()
+    copyfile(tmp_path / "packet-opencode-go.json", duplicate_dir / "run-packet.json")
+    output = tmp_path / "report.json"
+
+    runner = CliRunner()
+    invocation = ["report", str(tmp_path), "--output", str(output)]
+    result = runner.invoke(app, invocation)
+    assert result.exit_code == 0, result.output
+    data = json.loads(output.read_text())
+    assert data["cost_per_pr_usd"] == 1.0
+    assert data["time_to_review_seconds"] == 20.0
+    assert data["runs"] == 4
+    assert data["pull_requests"] == 3
+    assert data["costed_pull_requests"] == 2
+    assert data["timed_runs"] == 3
+    assert runner.invoke(app, invocation).exit_code != 0
+    assert json.loads(output.read_text()) == data
+
+
+def test_report_counts_legacy_and_conflicting_packets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typer.testing import CliRunner
+
+    from mergecraft.agents.shared import AgentUsage
+    from mergecraft.cli.app import app
+
+    monkeypatch.chdir(tmp_path)
+    artifacts = Path("artifacts")
+    artifacts.mkdir()
+    for change, success, tier in ((42, True, None), (43, False, None), (44, True, "skip")):
+        ctx = _make_ctx(tmp_path)
+        ctx.tool_state.phase_elapsed_s["agent"] = 5
+        ctx.tool_state.usage_entries.append(AgentUsage("claude", 1, 1, cost_usd=1))
+        path = artifacts / f"packet-{change}.json"
+        assert _emit(ctx, run_succeeded=success, change_id=f"acme/demo#{change}", output_path=path)
+        payload = json.loads(path.read_text())
+        if change == 43:
+            # Older packets did not identify the invocation or record cost.
+            payload.pop("run_id")
+            for key in ("recorded_cost_usd", "cost_availability", "cost_notes"):
+                payload["run_metrics"].pop(key)
+            payload["schema_version"] = "1.19.0"
+        if tier is not None:
+            payload["triage"] = {"tier": tier}
+        path.write_text(json.dumps(payload))
+
+    conflict = json.loads((artifacts / "packet-42.json").read_text())
+    conflict["run_metrics"]["recorded_cost_usd"] = 2
+    (artifacts / "packet-conflict.json").write_text(json.dumps(conflict))
+    (artifacts / "packet-broken.json").write_text("{")
+    (artifacts / "packet-symlink.json").symlink_to("packet-43.json")
+    linked_dir = artifacts / "linked"
+    linked_dir.symlink_to(".", target_is_directory=True)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["report", "artifacts", "-o", "summary.json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(Path("summary.json").read_text())
+    assert data["acceptance_rate"] is None
+    assert data["cost_per_pr_usd"] is None
+    assert data["time_to_review_seconds"] == 5
+    assert data["runs"] == 2
+    assert data["skipped_runs"] == 1
+    assert data["timed_runs"] == 1
+    assert data["conflicting_runs"] == 1
+    assert data["invalid_packets"] == 2
+    assert data["unknown_cost_runs"] == 1
+
+    destination = Path("keep.json")
+    destination.write_text("preserve")
+    Path("link.json").symlink_to(destination)
+    result = runner.invoke(app, ["report", "artifacts", "-o", "link.json"])
+    assert result.exit_code != 0
+    assert destination.read_text() == "preserve"
+
+
+def test_emit_leaves_unfinalized_agent_timing_unknown_across_copies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from time import monotonic
+
+    ctx = _make_ctx(tmp_path)
+    start = monotonic()
+    ctx.tool_state.agent_started_monotonic = start
+    prepared = prepare_run_packet(ctx, run_succeeded=False)
+    assert prepared is not None
+    for filename, after_start in (("first.json", 5), ("second.json", 120)):
+        monkeypatch.setattr(
+            "mergecraft.evidence.run_packet.time.monotonic",
+            lambda after_start=after_start: start + after_start,
+        )
+        assert emit_run_packet(ctx, packet=prepared, output_path=tmp_path / filename)
+
+    first = json.loads((tmp_path / "first.json").read_text())
+    second = json.loads((tmp_path / "second.json").read_text())
+    assert first["run_id"] == second["run_id"]
+    assert "agent" not in first["run_metrics"]["phase_elapsed_s"]
+    assert first["run_metrics"] == second["run_metrics"]
+
+
+def test_report_labels_and_calculates_review_pass_rate(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from mergecraft.cli.app import app
+
+    ctx = _make_ctx(tmp_path)
+    seed = tmp_path / "seed.json"
+    assert _emit(ctx, run_succeeded=True, output_path=seed)
+    packet = json.loads(seed.read_text())
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    for index, (verdict, tier, version) in enumerate(
+        (
+            ("success", "full", PACKET_SCHEMA_VERSION),
+            ("success", None, "1.19.0"),
+            ("failure", "full", PACKET_SCHEMA_VERSION),
+            ("neutral", None, PACKET_SCHEMA_VERSION),
+            (None, None, PACKET_SCHEMA_VERSION),
+            ("failure", "lite", PACKET_SCHEMA_VERSION),
+            ("success", "skip", PACKET_SCHEMA_VERSION),
+            ("failure", "full", "2.0.0"),
+        )
+    ):
+        stored = {
+            **packet,
+            "run_id": None if version == "1.19.0" else f"test-run-{index}",
+            "schema_version": version,
+            "decision": {**packet["decision"], "verdict": verdict} if verdict else None,
+            "triage": {"tier": tier} if tier else None,
+        }
+        (artifacts / f"packet-{index}.json").write_text(json.dumps(stored))
+
+    output = tmp_path / "report.json"
+    result = CliRunner().invoke(app, ["report", str(artifacts), "--output", str(output)])
+    assert result.exit_code == 0, result.output
+    report = json.loads(output.read_text())
+    assert report["acceptance_rate"] == pytest.approx(2 / 3)
+    assert "review pass rate" in report["metric_definitions"]["acceptance_rate"].lower()
+    assert report["passed_runs"] == 2
+    assert report["failed_runs"] == 1
+    assert report["neutral_runs"] == 1
+    assert report["unknown_verdict_runs"] == 1
+    assert report["lite_runs"] == 1
+    assert report["skipped_runs"] == 1
+    assert report["invalid_packets"] == 1
