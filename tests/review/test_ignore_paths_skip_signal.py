@@ -47,7 +47,9 @@ def _listing(monkeypatch: pytest.MonkeyPatch, paths: list[str]) -> list[int]:
     """Answer the pull request file listing; the SCM fake has no ``/files`` route."""
     calls: list[int] = []
 
-    async def _paths(_scm: Any, _owner: str, _repo: str, number: int) -> list[str]:
+    async def _paths(
+        _scm: Any, _owner: str, _repo: str, number: int, **_identity: Any
+    ) -> list[str]:
         calls.append(number)
         return list(paths)
 

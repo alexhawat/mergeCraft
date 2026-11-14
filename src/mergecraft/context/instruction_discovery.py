@@ -21,16 +21,19 @@ import hashlib
 import os
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import unquote
 
 from mergecraft.analyzers.agentsec.skill_manifest import parse_skill_file
+from mergecraft.classify.path_globs import path_full_matches_glob
 from mergecraft.utils.fence import SAFETY_NOTE, Fence, render_untrusted
 from mergecraft.utils.path_confinement import resolved_within_root
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping, Sequence
+
+    from mergecraft.config.settings import PathInstruction
 
 _REPO_INSTRUCTIONS_HEADER = "************* REPO INSTRUCTIONS *************"
 _REVIEW_SKILLS_HEADER = "************* REVIEW SKILLS *************"
@@ -297,6 +300,8 @@ def assemble_review_instruction_bundle(
     byte_cap: int = DEFAULT_INSTRUCTION_BUNDLE_BYTE_CAP,
     extra_filenames: Sequence[str] = (),
     reference_byte_cap: int = _DEFAULT_REFERENCE_BYTE_CAP,
+    changed_paths: Sequence[str] = (),
+    path_instructions: Sequence[PathInstruction] = (),
 ) -> tuple[str, ReviewSkillRecord]:
     """Assemble the review instruction bundle once, returning rendered text and record."""
     bundle = _assemble_instruction_bundle(
@@ -307,6 +312,8 @@ def assemble_review_instruction_bundle(
         byte_cap=byte_cap,
         extra_filenames=extra_filenames,
         reference_byte_cap=reference_byte_cap,
+        changed_paths=changed_paths,
+        path_instructions=path_instructions,
     )
     return bundle.rendered, bundle.record
 
@@ -320,6 +327,8 @@ def build_review_skill_record(
     byte_cap: int = DEFAULT_INSTRUCTION_BUNDLE_BYTE_CAP,
     extra_filenames: Sequence[str] = (),
     reference_byte_cap: int = _DEFAULT_REFERENCE_BYTE_CAP,
+    changed_paths: Sequence[str] = (),
+    path_instructions: Sequence[PathInstruction] = (),
 ) -> ReviewSkillRecord:
     """Return the honest injection record for review-tier skills."""
     _, record = assemble_review_instruction_bundle(
@@ -330,6 +339,8 @@ def build_review_skill_record(
         byte_cap=byte_cap,
         extra_filenames=extra_filenames,
         reference_byte_cap=reference_byte_cap,
+        changed_paths=changed_paths,
+        path_instructions=path_instructions,
     )
     return record
 
@@ -343,6 +354,8 @@ def render_review_context(
     byte_cap: int = DEFAULT_INSTRUCTION_BUNDLE_BYTE_CAP,
     extra_filenames: Sequence[str] = (),
     reference_byte_cap: int = _DEFAULT_REFERENCE_BYTE_CAP,
+    changed_paths: Sequence[str] = (),
+    path_instructions: Sequence[PathInstruction] = (),
 ) -> str:
     """Render discovered repo instructions/skills for one review prompt."""
     rendered, _record = assemble_review_instruction_bundle(
@@ -353,6 +366,8 @@ def render_review_context(
         byte_cap=byte_cap,
         extra_filenames=extra_filenames,
         reference_byte_cap=reference_byte_cap,
+        changed_paths=changed_paths,
+        path_instructions=path_instructions,
     )
     return rendered
 
@@ -400,7 +415,7 @@ class _Budget:
 def _estimated_section_header_bytes(
     *,
     review_rels: Sequence[str],
-    other_rels: Sequence[str],
+    has_repo_instructions: bool,
     trust_tier: str,
 ) -> int:
     """Estimate framing bytes for sections that will wrap discovered items."""
@@ -421,11 +436,40 @@ def _estimated_section_header_bytes(
     total = 0
     if review_rels:
         total += len(f"{_REVIEW_SKILLS_HEADER}\n\n{review_intro}".encode())
-    if trust_tier == "trusted" and other_rels:
+    if trust_tier == "trusted" and has_repo_instructions:
         total += len(f"{_REPO_INSTRUCTIONS_HEADER}\n\n{repo_intro}\n\n".encode())
-    if trust_tier != "trusted" and (review_rels or other_rels):
+    if trust_tier != "trusted" and (review_rels or has_repo_instructions):
         total += len(f"{_UNTRUSTED_EVIDENCE_HEADER}\n\n{untrusted_intro}".encode())
     return total
+
+
+def _scope_paths(changed_paths: Sequence[str]) -> set[PurePosixPath]:
+    return {
+        PurePosixPath(path)
+        for path in changed_paths
+        if path
+        and not path.startswith("/")
+        and "\\" not in path
+        and not re.match(r"^[A-Za-z]:", path)
+        and "\x00" not in path
+        and ".." not in path.split("/")
+        and PurePosixPath(path).name
+    }
+
+
+def _rank_repo_instructions(paths: list[str], scope: set[PurePosixPath]) -> list[str]:
+    if not scope:
+        return paths
+    distances: dict[PurePosixPath, int] = {}
+    for path in scope:
+        for distance, parent in enumerate(path.parents):
+            distances[parent] = min(distance, distances.get(parent, distance))
+    repository_root = PurePosixPath()
+    distances[repository_root] = max(distances.values(), default=0) + 1
+    unrelated = distances[repository_root] + 1
+    return sorted(
+        paths, key=lambda path: (distances.get(PurePosixPath(path).parent, unrelated), path)
+    )
 
 
 def _assemble_instruction_bundle(
@@ -437,13 +481,24 @@ def _assemble_instruction_bundle(
     byte_cap: int,
     extra_filenames: Sequence[str],
     reference_byte_cap: int,
+    changed_paths: Sequence[str],
+    path_instructions: Sequence[PathInstruction],
 ) -> _InstructionBundle:
     root = repo_root.resolve()
     accepted, scan_refusals = _scan_instruction_candidates(root, extra_filenames)
     discovered = [rel for _path, rel in accepted]
     review_rels = [rel for rel in discovered if is_review_skill_path(rel)]
     review_rels.sort(key=review_skill_sort_key)
-    other_rels = [rel for rel in discovered if rel not in review_rels]
+    scope = _scope_paths(changed_paths)
+    review_rel_set = set(review_rels)
+    other_rels = _rank_repo_instructions(
+        [rel for rel in discovered if rel not in review_rel_set], scope
+    )
+    matching_rules = [
+        rule
+        for rule in path_instructions
+        if any(path_full_matches_glob(rule.glob, path.as_posix()) for path in scope)
+    ]
 
     limitations: list[str] = []
     refusals: list[str] = list(scan_refusals)
@@ -460,7 +515,7 @@ def _assemble_instruction_bundle(
 
     estimated_headers = _estimated_section_header_bytes(
         review_rels=review_rels,
-        other_rels=other_rels,
+        has_repo_instructions=bool(other_rels or matching_rules),
         trust_tier=trust_tier,
     )
     header_reserve = min(estimated_headers, max(byte_cap - _MIN_CONTENT_BYTES, 0))
@@ -507,6 +562,27 @@ def _assemble_instruction_bundle(
                 )
             )
             untrusted_origins.append(rel_path)
+
+    for rule in matching_rules:
+        block = (
+            "### Path instructions from `.mergecraft/config.yaml`\n\n"
+            f"Apply only to changed paths matching this glob: {rule.glob}\n\n{rule.text.strip()}"
+        )
+        if trust_tier != "trusted":
+            block = render_untrusted(
+                block,
+                author=repo,
+                tier="untrusted",
+                label="repo_path_instruction",
+                nonce=fence.nonce,
+            )
+        block, kept = budget.take(block, label="configured path instruction")
+        if kept:
+            if trust_tier == "trusted":
+                trusted_blocks.append(block)
+            else:
+                untrusted_blocks.append(block)
+                untrusted_origins.append(None)
 
     for rel_path in other_rels:
         instruction_block = _block_for_instruction(

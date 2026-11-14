@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from mergecraft.agents.shared import AgentResult
-from mergecraft.config.settings import RepoSettings
+from mergecraft.config.settings import RepoSettings, ReviewSettings
 from mergecraft.review import offline_agent
 from mergecraft.run_outcome import RunOutcome
 from mergecraft.utils.agent_resolve import CredentialStatus
@@ -20,7 +20,7 @@ BACKUP = "openai/gpt-5.3-codex"
 
 @pytest.fixture
 def dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    seen: dict[str, Any] = {"models": [], "results": {}, "available": True}
+    seen: dict[str, Any] = {"models": [], "prompts": [], "results": {}, "available": True}
     monkeypatch.delenv("MERGECRAFT_MODEL", raising=False)
     monkeypatch.setattr(offline_agent, "load_repo_settings", lambda **_: seen["settings"])
     monkeypatch.setattr(
@@ -44,6 +44,7 @@ def dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
         async def run(self, ctx: Any) -> AgentResult:
             seen["models"].append(ctx.resolved_model)
+            seen["prompts"].append(ctx.instructions.full)
             assert ctx.tool_state.terminal_submission is None
             assert ctx.tool_state.output is None
             ctx.tool_state.output = "attempt output"
@@ -264,3 +265,44 @@ async def test_offline_fallback_budget_is_cumulative(
     assert not result.success
     assert len(dispatch["models"]) == 2
     assert "budget" in result.error.lower()
+
+
+async def test_offline_attempts_keep_the_nearest_instructions_under_a_tight_cap(
+    dispatch: dict[str, Any], tmp_path: Path
+) -> None:
+    from tests.context.support import REPO_INSTRUCTIONS_HEADER, section_text
+
+    config = tmp_path / ".mergecraft" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text("review:\n  instructionBundleByteCap: 768\n", encoding="utf-8")
+    dispatch["settings"] = RepoSettings(
+        models=[PRIMARY, BACKUP],
+        allow_fallback=True,
+        review=ReviewSettings(instructionBundleByteCap=768),
+    )
+    dispatch["materialization"].path.write_text(
+        "diff --git a/packages/z/src.py b/packages/z/src.py\n"
+        "--- a/packages/z/src.py\n+++ b/packages/z/src.py\n@@ -1 +1 @@\n-old\n+new\n"
+        "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n"
+        "@@ -1 +1 @@\n-old\n+new\n",
+        encoding="utf-8",
+    )
+    unrelated = tmp_path / "packages" / "a" / "AGENTS.md"
+    unrelated.parent.mkdir(parents=True)
+    unrelated.write_text("UNRELATED_INSTRUCTION " + "filler " * 1000, encoding="utf-8")
+    closest = tmp_path / "packages" / "z" / "AGENTS.md"
+    closest.parent.mkdir()
+    closest.write_text("NEAREST_PACKAGE_RULE", encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text("ROOT_INSTRUCTION " + "filler " * 1000, encoding="utf-8")
+    primary = offline_agent.resolve_model(slug=PRIMARY, respect_env_override=False)
+    dispatch["results"][primary] = AgentResult(
+        success=False, error="temporary provider failure", metadata={"retryable": True}
+    )
+
+    result = await run(dispatch, tmp_path)
+
+    assert result.success, result.error
+    assert len(dispatch["prompts"]) == 2
+    for prompt in dispatch["prompts"]:
+        section = section_text(prompt, REPO_INSTRUCTIONS_HEADER)
+        assert "NEAREST_PACKAGE_RULE" in section

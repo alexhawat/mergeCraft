@@ -522,6 +522,35 @@ class ReviewTriggerSettings(BaseModel):
     frequency: Literal["everyPush", "oncePerPr", "onRequest"] = "everyPush"
 
 
+class PathInstruction(_OptionalFeatureModel):
+    """Extra review guidance for changed paths matching one glob."""
+
+    glob: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+
+    @field_validator("glob")
+    @classmethod
+    def _relative_glob(cls, value: str) -> str:
+        value = value.strip()
+        if (
+            not value
+            or value.startswith("/")
+            or "\\" in value
+            or "\x00" in value
+            or re.match(r"^[A-Za-z]:", value)
+            or ".." in value.split("/")
+        ):
+            raise ValueError("glob must be repository-relative")
+        return value
+
+    @field_validator("text")
+    @classmethod
+    def _nonblank_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("instruction text must not be blank")
+        return value
+
+
 class ReviewSettings(BaseModel):
     """Review-depth knobs that are separate from analyzer placement (RC3, D2)."""
 
@@ -617,6 +646,11 @@ class ReviewSettings(BaseModel):
             "(review skills, references, and repo instructions). Review skills and "
             "their references are retained first when truncation is required."
         ),
+    )
+    path_instructions: list[PathInstruction] = Field(
+        default_factory=list,
+        alias="pathInstructions",
+        description="Additional review guidance scoped to changed repository paths.",
     )
     instruction_extra_filenames: list[str] = Field(
         default_factory=list,

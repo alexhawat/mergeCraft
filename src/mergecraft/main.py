@@ -37,6 +37,7 @@ from mergecraft.ci.sarif_ingest import (
 )
 from mergecraft.classify.triage import TriageDecision
 from mergecraft.config.env import ActionInputEnv, EnvSettingsError, validate_env_settings
+from mergecraft.config.settings import ReviewSettings
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.fast_path import load_triage_inputs, triage_pull_request
 from mergecraft.main_outcome import (
@@ -1823,6 +1824,35 @@ async def _run_setup_script_phase(ctx: RunContext) -> None:
     tool_state.phase_elapsed_s["setup"] = round(setup_elapsed_s, 3)
 
 
+async def _run_start_instruction_scope(
+    ctx: RunContext,
+) -> tuple[list[str], ReviewSettings | None]:
+    """Resolve ranking paths and config for the bound PR before any harness runs."""
+    from mergecraft.config.trust_policy import bound_head_sha
+    from mergecraft.review_policy.ignore_paths import _base_review_settings, _event_base_sha
+
+    event = ctx.gh_event or {}
+    pull = event.get("pull_request")
+    if not isinstance(pull, dict):
+        return [], None
+    assert ctx.tool_context is not None
+    scm, repo = ctx.tool_context.scm, ctx.tool_context.repo
+    base_sha = _event_base_sha(event)
+    review = None
+    if base_sha:
+        review, _source, _detail = await _base_review_settings(scm, repo.owner, repo.name, base_sha)
+    review = review if review is not None else ReviewSettings()
+
+    head_sha = bound_head_sha(event, event_name=os.environ.get("GITHUB_EVENT_NAME", ""))
+    number = pull.get("number")
+    if not base_sha or not head_sha or not isinstance(number, int):
+        return [], review
+    paths = await list_pull_request_paths(
+        scm, repo.owner, repo.name, number, head_sha=head_sha, base_sha=base_sha
+    )
+    return paths or [], review
+
+
 async def _prepare_agent_dispatch(ctx: RunContext) -> None:
     """Start the MCP server, seed learnings/skills, resolve instructions, build ``run_ctx``.
 
@@ -1915,6 +1945,7 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
     )
     tool_state.review_mcp_names = tuple(server.name for server in consumer_mcp)
     tool_state.review_mcp_servers = tuple(consumer_mcp)
+    changed_paths, review_instruction_settings = await _run_start_instruction_scope(ctx)
     instructions = resolve_instructions(
         payload=payload,
         repo=run_context.repo,
@@ -1931,6 +1962,8 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
         repo_root=repo_root,
         trust_tier=trust_tier,
         review_mcp_names=list(tool_state.review_mcp_names),
+        changed_paths=changed_paths,
+        review_instruction_settings=review_instruction_settings,
     )
     ctx.run_start_instructions = {str(ctx.agent_id): instructions}
     for other_agent_id in _run_start_harnesses(ctx):
@@ -1941,6 +1974,8 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
             agent_id=other_agent_id,
             modes=_render_run_modes(ctx, other_agent_id),  # type: ignore[arg-type]  # — str from Agent.name is an AgentId at runtime
             repo_root=repo_root,
+            changed_paths=changed_paths,
+            review_instruction_settings=review_instruction_settings,
         )
     tool_state.review_skill_paths = tuple(
         str(item) for item in instructions.extra.get("review_skills") or []
@@ -1972,6 +2007,8 @@ def _render_agent_instructions(
     agent_id: str,
     modes: list[Mode],
     repo_root: Path,
+    changed_paths: Sequence[str],
+    review_instruction_settings: ReviewSettings | None,
 ) -> Any:
     """Render one harness's instructions with this run's run-start inputs."""
     assert ctx.settings is not None
@@ -1995,6 +2032,8 @@ def _render_agent_instructions(
         repo_root=repo_root,
         trust_tier=str(tool_state.trust_tier or "untrusted"),
         review_mcp_names=list(tool_state.review_mcp_names),
+        changed_paths=changed_paths,
+        review_instruction_settings=review_instruction_settings,
     )
 
 
