@@ -117,6 +117,19 @@ def _write_evidence_packet_output(packet_path: str) -> None:
         logger.warning("evidence_packet output: could not read {} — {}", packet_path, err)
         return
     _set_output("evidence_packet", packet_json)
+    from mergecraft.findings.fix_brief import action_fix_brief_output, fix_brief_path
+
+    brief_path = fix_brief_path(Path(packet_path))
+    if brief_path.is_file():
+        try:
+            brief_json = action_fix_brief_output(brief_path)
+        except (OSError, ValueError):
+            logger.warning("fix_brief output: could not read a valid brief")
+            return
+        if brief_json is None:
+            logger.warning("fix_brief output: brief is too large; use the file artifact")
+        else:
+            _set_output("fix_brief", brief_json)
 
 
 async def _run_main() -> None:

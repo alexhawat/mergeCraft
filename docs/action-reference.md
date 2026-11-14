@@ -72,6 +72,7 @@ other `neutral` result still fails the job.
 |--------|-------------|
 | `evidence_packet` | JSON body of this run's Merge Evidence Packet (#47) — the versioned, structured record of the findings, deterministic checks, blast-radius lane, self-assessment, and decision behind the review. Emitted via `$GITHUB_OUTPUT` as multiline JSON (not a filesystem path). Empty when the run had no pull request to attest to. To upload as an artifact, write the output to a file in a later step. Schema: `evidence-packet.md`. |
 | `failover_eligible` | `true` when the run failed in a way the next reviewer vendor may not share (an expired subscription login, for example), so a cascade should hand the review to its next rung even though this rung emitted a `neutral` evidence packet. This is not `retryable`: re-running the same rung with the same credential cannot succeed. `false` otherwise. |
+| `fix_brief` | Versioned JSON hand-off for a separate coding agent, including the reviewed commit and actionable/deferred findings. Findings are untrusted hypotheses to verify, never execution authority. Empty when a complete brief cannot be emitted. Validate and render with `mergecraft findings brief`; see `workflows.md#fix-hand-off`. mergeCraft stays review-only. |
 | `result` | Set when the prompt requests it; required when output_schema is provided. |
 | `verdict_diagnostic` | Closed VerdictDiagnostic code from the terminal-verdict policy path for this run. Empty when the run did not evaluate terminal protocol policy. |
 <!-- END:action-outputs -->

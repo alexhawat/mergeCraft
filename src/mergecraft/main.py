@@ -40,6 +40,7 @@ from mergecraft.config.env import ActionInputEnv, EnvSettingsError, validate_env
 from mergecraft.config.settings import ReviewSettings
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.fast_path import load_triage_inputs, triage_pull_request
+from mergecraft.findings.fix_brief import fix_brief_path
 from mergecraft.main_outcome import (
     _is_review_mode,
     _publication_outcome_inputs,
@@ -998,6 +999,11 @@ async def _publish(
             packet=prepared,
             verdict_prediction=verdict_prediction,
             actual_outcome=actual_outcome,
+            completed_review=(
+                effective_outcome is RunOutcome.passed
+                and effective_sink_error is None
+                and _is_review_mode(tool_context.tool_state.selected_mode)
+            ),
         )
         if sink_scan is not None:
             post_error = sink_scan(Path(written) if written else None)
@@ -2510,7 +2516,9 @@ async def _publish_policy_skip(ctx: RunContext, reason: str) -> MainResult:
         ):
             packet_path = await asyncio.to_thread(emit_run_packet, tool_context, packet=packet)
             if packet_path is not None:
-                sink_error = _scan_sinks_after_run(ctx, extra_paths=[packet_path])
+                sink_error = _scan_sinks_after_run(
+                    ctx, extra_paths=[packet_path, fix_brief_path(packet_path)]
+                )
 
     if sink_error is not None or packet_path is None:
         error = sink_error or "Could not record the review policy skip in the evidence packet."
@@ -3338,6 +3346,7 @@ def _runner_temp_artifact_sources() -> list[Path]:
     # missed (a publication-time packet is caught by the post-emission scan).
     sources.extend(sorted((base / "mergecraft").glob("*-merge-evidence-packet.json")))
     sources.extend(sorted((base / "mergecraft").glob("*run-packet.json")))
+    sources.extend(sorted((base / "mergecraft").glob("*-fix-brief.json")))
     sources.extend(sorted((base / "mergecraft").glob("*.jsonl")))
     return list(dict.fromkeys(sources))
 
@@ -3841,7 +3850,7 @@ async def _finalize(
     post_emission_sink: list[str] = []
 
     def _scan_emitted_sink(written: Path | None) -> str | None:
-        extra = [written] if written is not None else []
+        extra = [written, fix_brief_path(written)] if written is not None else []
         post_error = _scan_sinks_after_run(ctx, extra_paths=extra)
         if post_error is not None:
             post_emission_sink.append(post_error)
@@ -4216,7 +4225,9 @@ async def _emit_packet_after_publish_failure(
         tool_context, run_succeeded=run_succeeded_for_outcome(outcome)
     )
     written = await asyncio.to_thread(emit_run_packet, tool_context, packet=prepared)
-    sink_error = _scan_sinks_after_run(ctx, extra_paths=[Path(written)] if written else [])
+    sink_error = _scan_sinks_after_run(
+        ctx, extra_paths=[written, fix_brief_path(written)] if written else []
+    )
     if sink_error is not None or not written:
         return None, sink_error
     return str(written), None

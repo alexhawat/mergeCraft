@@ -34,6 +34,7 @@ _ARTIFACT_SOURCES = (
     "packet-codex.json",
     "packet-claude.json",
     "mergecraft/run-packet.json",
+    "mergecraft/acme-demo-42-merge-evidence-packet-fix-brief.json",
     "shadow-compare.jsonl",
 )
 
@@ -125,8 +126,9 @@ async def test_canary_sink_fails_the_run_names_the_path_and_is_deleted(
 
 
 @pytest.mark.asyncio
-async def test_canary_in_the_generated_packet_fails_before_upload(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("in_brief", [False, True], ids=["packet", "brief"])
+async def test_canary_in_a_generated_artifact_fails_before_upload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, in_brief: bool
 ) -> None:
     """A credential the run writes into its own packet is caught after publication.
 
@@ -143,6 +145,31 @@ async def test_canary_in_the_generated_packet_fails_before_upload(
     packet_path = runner_temp / _GENERATED_PACKET
     payload = f"scm={_SCM_CANARY}\nprovider={_PROVIDER_CANARY}\n"
     agent = _SinkWritingAgent(run_tmpdir_sink=False)
+    expected_path = packet_path
+    if in_brief:
+        from mergecraft.findings.fix_brief import fix_brief_path
+
+        # An override directory outside RUNNER_TEMP is covered only by explicitly
+        # adding the brief beside the freshly emitted packet.
+        packet_path = tmp_path / "override" / "packet.json"
+        expected_path = fix_brief_path(packet_path)
+
+        class _PublishWithBrief(_SinkWritingAgent):
+            async def run(self, ctx: Any) -> AgentResult:
+                from mergecraft import main as main_module
+
+                emit = main_module.emit_run_packet
+
+                def _emit_with_brief(*args: Any, **kwargs: Any) -> Path | None:
+                    written = emit(*args, **kwargs)
+                    if written is not None:
+                        fix_brief_path(written).write_text(payload, encoding="utf-8")
+                    return written
+
+                monkeypatch.setattr(main_module, "emit_run_packet", _emit_with_brief)
+                return await super().run(ctx)
+
+        agent = _PublishWithBrief(run_tmpdir_sink=False)
 
     rec = await run_main_for_test(
         monkeypatch=monkeypatch,
@@ -152,7 +179,7 @@ async def test_canary_in_the_generated_packet_fails_before_upload(
         env={"ANTHROPIC_API_KEY": _PROVIDER_CANARY},
         capture_status_checks=True,
         packet_path=packet_path,
-        packet_payload=payload,
+        packet_payload="{}" if in_brief else payload,
     )
 
     assert rec.raised is None, rec.raised
@@ -160,7 +187,7 @@ async def test_canary_in_the_generated_packet_fails_before_upload(
     assert rec.result.success is False
     assert rec.result.outcome is RunOutcome.failed
     error = rec.result.error or ""
-    assert str(packet_path) in error, error
+    assert str(expected_path) in error, error
     assert _SCM_CANARY not in error, error
     assert _PROVIDER_CANARY not in error, error
 
@@ -171,8 +198,8 @@ async def test_canary_in_the_generated_packet_fails_before_upload(
     assert approval_runs, rec.status_check_runs
     assert approval_runs[-1].get("conclusion") == "failure", approval_runs
 
-    assert not packet_path.exists(), (
-        "the run-generated packet holding credential material must be removed "
+    assert not expected_path.exists(), (
+        "the run-generated artifact holding credential material must be removed "
         "before the workflow's artifact upload"
     )
 

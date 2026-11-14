@@ -24,11 +24,13 @@ DEFAULTS_PATH = TEMPLATE_DIR / "defaults.yaml"
 OUTPUTS: Final[dict[str, Path]] = {
     "minimal": REPO / "examples" / "workflows" / "mergecraft.yml",
     "hardened": REPO / "examples" / "workflows" / "mergecraft-hardened.yml",
+    "fix": REPO / "examples" / "workflows" / "mergecraft-fix.yml",
 }
 TEMPLATES: Final[dict[str, Path]] = {
     # One source: the minimal template ships in the package so `mergecraft init` renders it too.
     "minimal": REPO / "src" / "mergecraft" / "data" / MINIMAL_TEMPLATE_RESOURCE,
     "hardened": TEMPLATE_DIR / "hardened.yml.tpl",
+    "fix": TEMPLATE_DIR / "fix.yml.tpl",
 }
 
 
