@@ -38,6 +38,7 @@
       "src/mergecraft/cli/eval_cmd.py:function:trajectory_gate_cmd",
       "src/mergecraft/cli/eval_cmd.py:function:trajectory_score_cmd",
       "src/mergecraft/cli/findings_cmd.py:function:_by_review_id",
+      "src/mergecraft/cli/findings_cmd.py:function:brief_schema",
       "src/mergecraft/cli/findings_cmd.py:function:carryover",
       "src/mergecraft/cli/findings_cmd.py:function:export",
       "src/mergecraft/cli/gha_cmd.py:function:gha_root",
@@ -75,6 +76,7 @@
   {
     "reason": "Pydantic invokes these explicitly decorated validators and serializers during model construction or serialization.",
     "symbols": [
+      "src/mergecraft/findings/fix_brief.py:method:_unique_findings",
       "src/mergecraft/agents/openai_compatible_gateways.py:method:_validate_base_url",
       "src/mergecraft/agents/verifier.py:method:_require_severity_on_downgrade",
       "src/mergecraft/analyzers/dispositions.py:method:_reason_is_not_blank",

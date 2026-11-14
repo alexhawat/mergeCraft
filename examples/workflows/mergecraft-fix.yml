@@ -1,0 +1,69 @@
+# Opt in by copying this workflow to .github/workflows/mergecraft-fix.yml.
+# Set MERGECRAFT_FIX_CLI_SHA to a full mergeCraft commit SHA supporting `findings brief`.
+name: mergeCraft fix handoff
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        description: Pull request number
+        required: true
+        type: string
+      fix-brief:
+        description: JSON from the review Action's fix_brief output
+        required: true
+        type: string
+
+permissions:
+  pull-requests: read
+
+jobs:
+  prepare-brief:
+    if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install pinned mergeCraft CLI
+        env:
+          MERGECRAFT_FIX_CLI_SHA: ${{ vars.MERGECRAFT_FIX_CLI_SHA }}
+        shell: bash
+        run: |
+          if [[ ! "$MERGECRAFT_FIX_CLI_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo '::error::Set MERGECRAFT_FIX_CLI_SHA to a full mergeCraft commit SHA with findings brief support.'
+            exit 1
+          fi
+          python3 -m venv "$RUNNER_TEMP/mergecraft-fix-venv"
+          "$RUNNER_TEMP/mergecraft-fix-venv/bin/python" -m pip install --disable-pip-version-check \
+            "mergecraft-action @ git+https://github.com/alexhawat/mergeCraft@${MERGECRAFT_FIX_CLI_SHA}"
+
+      - name: Validate fix brief for the current pull request head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          pr_number="$(jq -er '.inputs["pr-number"]' "$GITHUB_EVENT_PATH")"
+          if [[ ! "$pr_number" =~ ^[1-9][0-9]*$ ]]; then
+            echo '::error::Enter a positive pull request number.'
+            exit 1
+          fi
+          head_sha="$(gh api "repos/$GH_REPO/pulls/$pr_number" --jq 'select(.state == "open") | .head.sha')"
+          if [[ ! "$head_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo '::error::The pull request must be open with a known head commit.'
+            exit 1
+          fi
+          input="$RUNNER_TEMP/mergecraft-fix-input.json"
+          jq -er '.inputs["fix-brief"] | strings | select(length > 0 and length <= 65535)' \
+            "$GITHUB_EVENT_PATH" > "$input"
+          unset GH_TOKEN
+          "$RUNNER_TEMP/mergecraft-fix-venv/bin/mergecraft" findings brief "$input" \
+            --format json --expect-change-id "$GH_REPO#$pr_number" --expect-head "$head_sha" \
+            > "$RUNNER_TEMP/fix-brief.json"
+
+      - name: Upload validated fix brief
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: mergecraft-fix-brief
+          path: ${{ runner.temp }}/fix-brief.json
+          if-no-files-found: error
+          retention-days: 1

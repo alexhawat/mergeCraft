@@ -441,3 +441,95 @@ class TestFailoverEligibleOutput:
 
         manifest = yaml.safe_load((_REPO_ROOT / "action.yml").read_text(encoding="utf-8"))
         assert "failover_eligible" in manifest["outputs"]
+
+
+class TestFixBriefOutput:
+    """Only complete, bounded briefs cross the GitHub Actions output boundary."""
+
+    @staticmethod
+    def _brief_payload(message: str = "Verify the changed behavior.") -> dict[str, object]:
+        return {
+            "schema_version": "1.0.0",
+            "change_id": "acme/app#42",
+            "reviewed_head_sha": "a" * 40,
+            "findings": [
+                {
+                    "fingerprint": "b" * 24,
+                    "status": "actionable",
+                    "severity": "Major",
+                    "path": "app.py",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "message": message,
+                    "evidence": [],
+                    "remediation": None,
+                }
+            ],
+        }
+
+    def test_brief_round_trips_without_injecting_output_keys(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from mergecraft.findings.fix_brief import FixBrief, fix_brief_path
+        from mergecraft.main import MainResult
+
+        packet_path = tmp_path / "packet.json"
+        packet_path.write_text('{"change_id":"acme/app#42"}', encoding="utf-8")
+        payload = self._brief_payload("Opaque text\nforged=yes\n::error::not a command")
+        fix_brief_path(packet_path).write_text(json.dumps(payload), encoding="utf-8")
+        out = tmp_path / "github_output"
+        monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+        _patch_main(
+            monkeypatch,
+            MainResult(success=True, output="ok", evidence_packet_path=str(packet_path)),
+        )
+
+        asyncio.run(_run_main())
+
+        entries = _read_output_file(out)
+        assert FixBrief.model_validate_json(entries["fix_brief"]).model_dump() == payload
+        assert "forged" not in entries
+        assert set(entries) == {
+            "evidence_packet",
+            "fix_brief",
+            "verdict_diagnostic",
+            "failover_eligible",
+        }
+
+    @pytest.mark.parametrize("kind", ["missing", "invalid", "oversize"], ids=str)
+    def test_unusable_brief_does_not_replace_packet_output(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+    ) -> None:
+        from mergecraft.findings.fix_brief import fix_brief_path
+
+        packet_path = tmp_path / "packet.json"
+        packet_json = '{"change_id":"acme/app#42"}'
+        packet_path.write_text(packet_json, encoding="utf-8")
+        path = fix_brief_path(packet_path)
+        if kind == "invalid":
+            path.write_text('{"schema_version":"unsupported"}', encoding="utf-8")
+        elif kind == "oversize":
+            path.write_text(json.dumps(self._brief_payload("x" * 50_000)), encoding="utf-8")
+        out = tmp_path / "github_output"
+        monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+
+        _write_evidence_packet_output(str(packet_path))
+
+        assert _read_output_file(out) == {"evidence_packet": packet_json}
+        if kind == "oversize":
+            assert path.is_file(), "a large complete brief remains available as a file"
+
+    def test_missing_packet_cannot_publish_a_leftover_brief(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from mergecraft.findings.fix_brief import fix_brief_path
+
+        packet_path = tmp_path / "packet.json"
+        fix_brief_path(packet_path).write_text(json.dumps(self._brief_payload()), encoding="utf-8")
+        out = tmp_path / "github_output"
+        out.touch()
+        monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+
+        _write_evidence_packet_output(str(packet_path))
+
+        assert not _read_output_file(out)

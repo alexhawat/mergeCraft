@@ -1194,3 +1194,68 @@ def test_report_does_not_write_output_when_input_limit_is_exceeded(
     assert "exceed" in result.output
     assert limit_message in result.output
     assert not output.exists()
+
+
+def test_fix_brief_keeps_current_actionable_and_deferred_findings(tmp_path: Path) -> None:
+    from mergecraft.analyzers.budget import finding_to_deferred_row
+    from mergecraft.analyzers.finding import Finding
+    from mergecraft.mcp.tool_state import ReviewRecord, TerminalSubmission
+
+    ctx = _make_ctx(tmp_path)
+    primary_repo_state(ctx.tool_state).checkout_sha = "a" * 40
+    ctx.tool_state.terminal_submission = TerminalSubmission(
+        id="submission",
+        verdict="request_changes",
+        summary="reviewed",
+        findings=[],
+        payload_hash="hash",
+        submitted_at="2026-11-14T00:00:00Z",
+        attempt_id=1,
+    )
+    ctx.tool_state.review = ReviewRecord(
+        id=1,
+        node_id="receipt",
+        reviewed_sha="a" * 40,
+        verdict="request_changes",
+    )
+    run = ctx.tool_state.analyzer_run
+    assert run is not None
+    sample = Finding.model_validate(_sample_finding())
+    deferred = sample.model_copy(update={"fingerprint": "b" * 24, "message": "Recall finding"})
+    overflow = sample.model_copy(
+        update={"fingerprint": "e" * 16, "message": "Analyzer overflow", "evidence": ["proof"]}
+    )
+    nit = sample.model_copy(update={"fingerprint": "c" * 24, "severity": "Trivial"})
+    withdrawn = sample.model_copy(update={"fingerprint": "d" * 24})
+    run.findings.extend([nit.model_dump(), withdrawn.model_dump(), overflow.model_dump()])
+    run.deferred_findings.extend(
+        [finding_to_deferred_row(row) for row in (deferred, withdrawn, overflow)]
+    )
+    ctx.tool_state.withdrawn_fingerprints.add(withdrawn.fingerprint)
+
+    written = _emit(ctx, run_succeeded=True, completed_review=True)
+
+    assert written is not None
+    path = written.with_stem(f"{written.stem}-fix-brief")
+    brief = json.loads(path.read_text(encoding="utf-8"))
+    assert brief["reviewed_head_sha"] == "a" * 40
+    assert brief["change_id"] == "acme/demo#42"
+    rows = {row["fingerprint"]: row for row in brief["findings"]}
+    assert {fp: row["status"] for fp, row in rows.items()} == {
+        sample.fingerprint: "actionable",
+        deferred.fingerprint: "deferred",
+        overflow.fingerprint: "deferred",
+    }
+    assert rows[overflow.fingerprint]["evidence"] == ["proof"]
+    assert all("autofix" not in row for row in brief["findings"])
+
+
+def test_fix_brief_is_unavailable_without_a_reviewed_head(tmp_path: Path) -> None:
+    packet_path = tmp_path / "packet.json"
+    stale = packet_path.with_name("packet-fix-brief.json")
+    stale.write_text("old brief", encoding="utf-8")
+
+    written = _emit(_make_ctx(tmp_path), run_succeeded=True, output_path=packet_path)
+
+    assert written == packet_path
+    assert not stale.exists()
