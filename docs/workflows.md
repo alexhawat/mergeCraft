@@ -575,3 +575,58 @@ The dispatch form is for small briefs within GitHub's input-size limit. Use the
 local file path for larger briefs. The workflow checks identifiers but cannot
 authenticate pasted JSON; the maintainer selecting the source review remains
 responsible for that choice. It prepares a hand-off, not an unattended fix.
+
+## Learn from review feedback
+
+A full GitHub Actions review targeting the default branch looks for recurring
+feedback on mergeCraft inline findings. It reads the current PR and recent PRs
+targeting the same branch, up to 12 PRs in total. The review needs an attributable
+publisher, such as a dedicated reviewer App or a PAT identity. For an App whose
+installation token cannot identify its publisher, set
+`MERGECRAFT_REVIEWER_BOT_LOGIN` to the App's `<slug>[bot]` login in the trusted
+workflow. The shared `github-actions[bot]` identity cannot establish authorship.
+Feedback lookups are time-bounded and the review can proceed without them.
+
+To dismiss a finding with a reason, start a reply on its inline thread with
+`@mergecraft dismiss by_design`. The supported reason codes are `false_positive`,
+`wont_fix`, `by_design`, `duplicate`, `out_of_scope`, `accepted_risk`, and
+`superseded`. A dismissal reply must come from an `OWNER`, `MEMBER`, or
+`COLLABORATOR` with current repository write access. A thumbs-down on the root
+comment or a resolved thread also supplies evidence if GitHub identifies the
+actor as a user with write access. These observations say the user reacted or
+closed the thread. Whether the finding was valid or fixed still needs review.
+
+The **Review feedback proposals** section of the Actions job summary contains
+copyable JSON. Two different PRs must supply the same reason for the same
+fingerprint and exact file path. Repeated runs, comments, or findings on one PR
+count once. For a thread with multiple types of feedback, a reason-coded
+dismissal takes precedence over a resolution, which takes precedence over a
+reaction. Conflicting reasons for the same finding on one PR leave that PR out.
+GitHub threads retain the evidence across runs. The report names the examined
+and incomplete PRs and indicates when the history or proposal list was capped.
+`complete` means the bounded scan finished. It is scoped to that scan window.
+
+To approve a proposal, a maintainer should open each source discussion using
+`/pull/<pull>#discussion_r<comment>` in the repository, check that the pattern
+recurs, and copy the selected item from `staged` into `entries` in
+`.mergecraft/approved-feedback.json`. Add `guidance` in your own words. Keep the
+proposal's ID, exact path, fingerprint, reason, and evidence unchanged. The ID
+binds the repository, fingerprint, exact path, and reason.
+
+```json
+{
+  "version": 1,
+  "repository": "owner/repo",
+  "entries": []
+}
+```
+
+Merge the approval file into the default branch through your maintainer review
+process. It must be a regular UTF-8 JSON file up to 32 KiB with at most 32
+entries. Each entry needs guidance of 1–500 characters and at least two different
+source PRs. On subsequent runs, mergeCraft reads approval only from the verified
+PR base commit on that branch. It shares the guidance as advisory context when
+its exact path appears in the current change. The reviewer still verifies the
+current diff, and the usual evidence and verdict rules apply. Proposals and
+reply text do not enter the review prompt. `autopromoteLearnings` has no effect
+on review feedback approval. Remove the entry from the default branch to revoke it.

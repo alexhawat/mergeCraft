@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from mergecraft.evidence.packet import MergeEvidencePacket
     from mergecraft.evidence.shadow import VerdictProtocolPrediction
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.memory.feedback import FeedbackReport
 
 from mergecraft.action.review_policy import _lite_completion_conclusion
 from mergecraft.action.review_record import (
@@ -117,6 +118,7 @@ async def _publish(
             effective_sink_error=effective_sink_error,
             verdict_diagnostic=verdict_diagnostic,
             approval_withheld_reason=ctx.approval_withheld_reason,
+            feedback_report=ctx.feedback_report,
         )
 
     if not emit:
@@ -243,6 +245,7 @@ async def _publish_learnings_and_status(
     effective_sink_error: str | None,
     verdict_diagnostic: Any | None,
     approval_withheld_reason: str | None,
+    feedback_report: FeedbackReport | None,
 ) -> None:
     await persist_learnings(tool_context)
     pull_number = tool_context.tool_state.pr_number
@@ -358,5 +361,6 @@ async def _publish_learnings_and_status(
             ),
             llm_review_timing=tool_context.tool_state.llm_review_timing,
             credential_degradations=list(tool_context.tool_state.credential_degradations),
+            feedback_report=feedback_report if effective_sink_error is None else None,
         )
         append_step_summary(summary_body)

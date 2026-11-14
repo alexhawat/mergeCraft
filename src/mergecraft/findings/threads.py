@@ -42,10 +42,11 @@ THREADS_PAGE_SIZE: Final[int] = 100
 THREADS_MAX_PAGES: Final[int] = 10
 COMMENTS_PAGE_SIZE: Final[int] = 100
 COMMENTS_MAX_PAGES: Final[int] = 10
+_FEEDBACK_THREADS_PAGE_SIZE: Final[int] = 50
+_FEEDBACK_COMMENTS_PAGE_SIZE: Final[int] = 20
 _BOT_SUFFIX: Final[str] = "[bot]"
 
-_COMMENT_FIELDS: Final[str] = """
-              databaseId
+_COMMON_COMMENT_FIELDS: Final[str] = """
               body
               author { __typename login }
               path
@@ -54,25 +55,31 @@ _COMMENT_FIELDS: Final[str] = """
               url
               createdAt
 """
-
-THREADS_QUERY: Final[str] = (
-    """
+_FEEDBACK_COMMENT_FIELDS: Final[str] = """
+              fullDatabaseId
+              id
+              authorAssociation
+              state
+              feedbackActor: author { ... on User { login databaseId } }
+              replyTo { id }
+              negativeReactions: reactions(first: 1, content: THUMBS_DOWN) { totalCount }
+"""
+_THREADS_TEMPLATE: Final[str] = """
 query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
-      reviewThreads(first: 100, after: $cursor) {
+      reviewThreads(first: THREADS_COUNT, after: $cursor) {
         totalCount
         pageInfo { hasNextPage endCursor }
         nodes {
           id
           isResolved
           isOutdated
-          comments(first: 100) {
+          THREAD_FIELDS
+          comments(first: COMMENTS_COUNT) {
             totalCount
             pageInfo { hasNextPage endCursor }
-            nodes {"""
-    + _COMMENT_FIELDS
-    + """            }
+            nodes {COMMENT_FIELDS}
           }
         }
       }
@@ -80,25 +87,40 @@ query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   }
 }
 """
-)
-
-THREAD_COMMENTS_QUERY: Final[str] = (
-    """
+_THREAD_COMMENTS_TEMPLATE: Final[str] = """
 query($threadId: ID!, $cursor: String) {
   node(id: $threadId) {
     ... on PullRequestReviewThread {
-      comments(first: 100, after: $cursor) {
+      comments(first: COMMENTS_COUNT, after: $cursor) {
         totalCount
         pageInfo { hasNextPage endCursor }
-        nodes {"""
-    + _COMMENT_FIELDS
-    + """        }
+        nodes {COMMENT_FIELDS}
       }
     }
   }
 }
 """
-)
+
+
+def _thread_queries(*, feedback: bool) -> tuple[str, str]:
+    comment_size = _FEEDBACK_COMMENTS_PAGE_SIZE if feedback else COMMENTS_PAGE_SIZE
+    thread_size = _FEEDBACK_THREADS_PAGE_SIZE if feedback else THREADS_PAGE_SIZE
+    resolver = "resolvedBy { login databaseId }" if feedback else ""
+    fields = _COMMON_COMMENT_FIELDS + (
+        _FEEDBACK_COMMENT_FIELDS if feedback else "              databaseId\n"
+    )
+    threads = _THREADS_TEMPLATE.replace("THREAD_FIELDS", resolver).replace(
+        "THREADS_COUNT", str(thread_size)
+    )
+    comments = _THREAD_COMMENTS_TEMPLATE
+    return (
+        threads.replace("COMMENTS_COUNT", str(comment_size)).replace("COMMENT_FIELDS", fields),
+        comments.replace("COMMENTS_COUNT", str(comment_size)).replace("COMMENT_FIELDS", fields),
+    )
+
+
+THREADS_QUERY, THREAD_COMMENTS_QUERY = _thread_queries(feedback=False)
+_FEEDBACK_THREADS_QUERY, _FEEDBACK_THREAD_COMMENTS_QUERY = _thread_queries(feedback=True)
 
 
 def rest_style_login(author: object) -> str:
@@ -156,8 +178,22 @@ def _has_next(connection: dict[str, Any]) -> tuple[bool, str | None]:
     return True, str(cursor) if cursor else None
 
 
+def _complete_connection_shape(connection: object) -> bool:
+    if not isinstance(connection, dict):
+        return False
+    nodes, page, count = (connection.get(key) for key in ("nodes", "pageInfo", "totalCount"))
+    return (
+        isinstance(nodes, list)
+        and all(isinstance(node, dict) for node in nodes)
+        and isinstance(page, dict)
+        and isinstance(page.get("hasNextPage"), bool)
+        and type(count) is int
+        and count >= len(nodes)
+    )
+
+
 async def _read_all_comments(
-    scm: ScmProvider, thread_id: str, first_page: dict[str, Any]
+    scm: ScmProvider, thread_id: str, first_page: dict[str, Any], *, feedback: bool
 ) -> tuple[list[dict[str, Any]], int, bool]:
     """Return ``(comment nodes, total count, truncated)`` for one thread.
 
@@ -170,15 +206,23 @@ async def _read_all_comments(
     more, cursor = _has_next(first_page)
     pages = 1
     while more and cursor and pages < COMMENTS_MAX_PAGES:
-        data = await scm.graphql(THREAD_COMMENTS_QUERY, {"threadId": thread_id, "cursor": cursor})
+        query = _FEEDBACK_THREAD_COMMENTS_QUERY if feedback else THREAD_COMMENTS_QUERY
+        data = await scm.graphql(query, {"threadId": thread_id, "cursor": cursor})
         page = _connection(data, "node", "comments")
+        if feedback and not _complete_connection_shape(page):
+            break
         batch = list(page.get("nodes") or [])
         if not batch:
             break
         nodes.extend(batch)
+        if feedback and total != page["totalCount"]:
+            break
         pages += 1
         more, cursor = _has_next(page)
     truncated = total > len(nodes) or more
+    if feedback:
+        comment_ids = {item.get("id") for item in nodes if isinstance(item.get("id"), str)}
+        truncated = truncated or len(comment_ids) != len(nodes) or total != len(nodes)
     if truncated:
         logger.warning(
             "review thread {}: read {} of {} comments (page cap {}); the thread is incomplete",
@@ -197,6 +241,7 @@ async def fetch_review_threads(
     pull_number: int,
     *,
     include_resolved: bool = False,
+    include_feedback: bool = False,
 ) -> ReviewThreadPage:
     """Return a pull request's review threads, normalized for every caller.
 
@@ -210,6 +255,7 @@ async def fetch_review_threads(
         repo: Repository name.
         pull_number: Pull request number.
         include_resolved: Keep threads GitHub reports as resolved.
+        include_feedback: Request author, resolver and reaction metadata for evidence collection.
 
     Returns:
         A :class:`ReviewThreadPage`. ``threads`` is empty when the pull request
@@ -222,26 +268,35 @@ async def fetch_review_threads(
     cursor: str | None = None
     more = True
     pages = 0
+    invalid = False
     while more and pages < THREADS_MAX_PAGES:
+        query = _FEEDBACK_THREADS_QUERY if include_feedback else THREADS_QUERY
         data = await scm.graphql(
-            THREADS_QUERY,
-            {"owner": owner, "repo": repo, "number": pull_number, "cursor": cursor},
+            query, {"owner": owner, "repo": repo, "number": pull_number, "cursor": cursor}
         )
         connection = _connection(data, "repository", "pullRequest", "reviewThreads")
+        invalid = include_feedback and not _complete_connection_shape(connection)
+        if invalid:
+            break
         batch = list(connection.get("nodes") or [])
         pages += 1
-        total_count = max(total_count, int(connection.get("totalCount") or 0))
+        page_total = int(connection.get("totalCount") or 0)
+        if include_feedback and pages > 1 and page_total != total_count:
+            invalid = True
+            break
+        total_count = max(total_count, page_total)
         for node in batch:
             node_id = str(node.get("id") or "")
             if node_id and node_id in seen:
+                invalid = invalid or include_feedback
                 continue
             seen.add(node_id)
             nodes.append(node)
         more, cursor = _has_next(connection)
-        if not batch or not cursor:
+        if invalid or not batch or not cursor:
             break
     total_count = max(total_count, len(nodes))
-    incomplete = total_count > len(nodes) or more
+    incomplete = invalid or total_count > len(nodes) or more
     if incomplete:
         logger.warning(
             "PR #{}: read {} of {} review threads (page cap {} x {}); the listing is "
@@ -250,7 +305,7 @@ async def fetch_review_threads(
             len(nodes),
             total_count,
             THREADS_MAX_PAGES,
-            THREADS_PAGE_SIZE,
+            _FEEDBACK_THREADS_PAGE_SIZE if include_feedback else THREADS_PAGE_SIZE,
         )
 
     threads: list[dict[str, Any]] = []
@@ -258,8 +313,12 @@ async def fetch_review_threads(
         if node.get("isResolved") and not include_resolved:
             continue
         thread_id = str(node.get("id") or "")
+        connection = node.get("comments") or {}
+        if include_feedback and (not thread_id or not _complete_connection_shape(connection)):
+            incomplete = True
+            continue
         comment_nodes, _comment_total, comments_truncated = await _read_all_comments(
-            scm, thread_id, node.get("comments") or {}
+            scm, thread_id, connection, feedback=include_feedback
         )
         incomplete = incomplete or comments_truncated
         comments = [
@@ -271,6 +330,22 @@ async def fetch_review_threads(
                 "line": c.get("line") or c.get("originalLine"),
                 "url": c.get("url"),
                 "createdAt": c.get("createdAt"),
+                **(
+                    {
+                        key: c[key]
+                        for key in (
+                            "fullDatabaseId",
+                            "authorAssociation",
+                            "state",
+                            "feedbackActor",
+                            "replyTo",
+                            "negativeReactions",
+                        )
+                        if key in c
+                    }
+                    if include_feedback
+                    else {}
+                ),
             }
             for c in comment_nodes
         ]
@@ -281,6 +356,7 @@ async def fetch_review_threads(
                 "isOutdated": node.get("isOutdated"),
                 "comments": comments,
                 "commentsTruncated": comments_truncated,
+                **({"resolvedBy": node.get("resolvedBy")} if include_feedback else {}),
             }
         )
     return ReviewThreadPage(threads=threads, total_count=total_count, incomplete=incomplete)
