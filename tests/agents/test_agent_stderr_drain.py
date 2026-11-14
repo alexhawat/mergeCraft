@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 import pytest
 from tests.agents.conftest import make_agent_run_context
 
+from mergecraft.agents import cli_runner
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from pathlib import Path
@@ -146,7 +148,7 @@ _DRIVERS = (
     _DriverSpec("codex", "mergecraft.agents.codex", _invoke_codex, "codex CLI timed out"),
     _DriverSpec("gemini", "mergecraft.agents.gemini", _invoke_gemini, "gemini CLI timed out"),
     _DriverSpec(
-        "opencode", "mergecraft.agents.opencode", _invoke_opencode, "opencode run timed out"
+        "opencode", "mergecraft.agents.opencode", _invoke_opencode, "opencode CLI timed out"
     ),
 )
 _DRIVER_IDS = tuple(spec.name for spec in _DRIVERS)
@@ -180,17 +182,17 @@ def _patch_driver(
     wait_raises: bool = False,
 ) -> None:
     module = importlib.import_module(spec.module_name)
-    monkeypatch.setattr(module, "spawn_agent_cli", lambda *_a, **_k: child)
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda *_a, **_k: child)
     if hasattr(module, "_build_env"):
         monkeypatch.setattr(module, "_build_env", lambda _ctx: {})
-    monkeypatch.setattr(module, "track_process_group", _NullProcessGroup)
+    monkeypatch.setattr(cli_runner, "track_process_group", _NullProcessGroup)
 
     def _wait(process: Any, *, timeout: float | None = None) -> int:
         if wait_raises:
             raise subprocess.TimeoutExpired(cmd=spec.name, timeout=timeout or 1)
         return process.wait(timeout=timeout)
 
-    monkeypatch.setattr(module, "wait_or_kill_process_group", _wait)
+    monkeypatch.setattr(cli_runner, "wait_or_kill_process_group", _wait)
 
 
 def _run_in_thread(call: Callable[[], Any], *, bound_s: float) -> tuple[dict[str, Any], Any]:

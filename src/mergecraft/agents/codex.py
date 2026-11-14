@@ -7,7 +7,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,12 +14,7 @@ from typing import TYPE_CHECKING, Any, TypeAlias
 
 from loguru import logger
 
-from mergecraft.agents._stream_consumer import StreamSpanAccumulator, consume_stream
-from mergecraft.agents.activity_watchdog import (
-    event_has_model_output,
-    event_type_name,
-    watchdog_for_process,
-)
+from mergecraft.agents.cli_runner import CliHarnessSpec, run_cli_attempt
 from mergecraft.agents.codex_broker import (
     OPENAI_API_KEY_ENV,
     active_broker_handle,
@@ -53,13 +47,10 @@ from mergecraft.agents.reviewer import REVIEWER_AGENT_NAME, REVIEWER_SYSTEM_PROM
 from mergecraft.agents.shared import (
     FAILOVER_ELIGIBLE_KEY,
     INFRA_REASON_KEY,
-    STDERR_DRAIN_JOIN_TIMEOUT_S,
     AgentResult,
     AgentRunContext,
     agent,
     payload_shell_mode,
-    spawn_agent_cli,
-    start_stderr_drain,
     stderr_tail_for_error,
     with_prompt,
 )
@@ -75,7 +66,6 @@ from mergecraft.types import (
     MERGECRAFT_VERIFIER_MCP_NAME,
     format_mcp_tool_ref,
 )
-from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.provider_failure import (
     is_expired_subscription_credential,
     is_retryable_cli_failure,
@@ -559,24 +549,6 @@ def _uses_subscription_login(ctx: AgentRunContext) -> bool:
     return posture.auth_mode == "subscription"
 
 
-def _codex_working_dir(ctx: AgentRunContext) -> str:
-    """Return the directory Codex runs in: the review's primary repo, else this process's.
-
-    ``codex exec`` refuses to start outside a git repository ("Not inside a
-    trusted directory"). In the Action the process already runs in the PR
-    checkout, so this is the same directory; an offline review started from
-    elsewhere (the image's ``/opt/mergecraft`` in the live smoke) must still
-    hand Codex the repo it reviews (#884).
-    """
-    from mergecraft.mcp.tool_state import primary_repo_state
-
-    try:
-        repo_dir = primary_repo_state(ctx.tool_state).dir
-    except RuntimeError:
-        repo_dir = ""
-    return repo_dir or os.getcwd()
-
-
 def _codex_mcp_tool_preamble() -> str:
     """Steer Codex away from the interactive GitHub *plugin* install path.
 
@@ -1057,169 +1029,113 @@ def _run_codex_streaming(
         tool_state=ctx.tool_state,
     )
 
-    try:
-        process = spawn_agent_cli(
-            cmd, env=_build_env(ctx), cwd=_codex_working_dir(ctx), stdin_text=stdin_text
-        )
-    except FileNotFoundError as err:
-        return with_prompt(AgentResult(success=False, error=str(err)), prompt)
-
-    assert process.stdout is not None
-    assert process.stderr is not None
-
-    stderr_text = ""
-    returncode: int = -1
-    # P4 / AR-D2 — drain stderr concurrently from spawn. Reading stdout to EOF
-    # first would deadlock a child that fills the stderr pipe buffer.
-    stderr_drain = start_stderr_drain(process.stderr)
-    watchdog = watchdog_for_process(
-        process,
-        label="codex",
-        interval_s=ctx.idle_timeout_s,
-        accumulator=accumulator,
-        stderr_text=stderr_drain.text,
-        deadline_s=AgentRuntimeEnv().agent_timeout,
-    )
-
-    def _watched_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
-        watchdog.touch(
-            model_output=event_has_model_output(event), event_type=event_type_name(event)
-        )
+    def session_handler(acc: StreamSpanAccumulator, event: dict[str, Any]) -> None:
         if session is not None and event.get("type") == "thread.started":
             thread_id = event.get("thread_id")
             if isinstance(thread_id, str) and thread_id.strip():
                 session.setdefault("thread_id", thread_id.strip())
         handler(acc, event)
 
-    try:
-        with track_process_group(process):
-            try:
-                consume_stream(
-                    raw_stream=process.stdout,
-                    accumulator=accumulator,
-                    handler=_watched_handler,
+    def classify(returncode: int, stderr_text: str) -> AgentResult:
+        if stderr_text.strip():
+            for line in stderr_text.strip().splitlines()[-20:]:
+                logger.debug("[codex] {}", line)
+
+        if accumulator.parsed_event_count > 0:
+            output = accumulator.final_output
+            usage = accumulator.to_usage()
+        else:
+            output = None
+            usage = None
+
+        if returncode != 0:
+            # The provider's own event is the authoritative reason; stderr is the
+            # fallback, because it routinely carries benign CLI chatter (#445).
+            stream_error = accumulator.stream_error
+            error = (
+                stream_error or stderr_tail_for_error(stderr_text) or f"codex exited {returncode}"
+            )
+            # bwrap fails on the very first exec, so this is the difference between
+            # "the environment cannot run Codex" and "the reviewer errored" (#70).
+            if is_user_namespace_failure(f"{stderr_text}\n{output or ''}"):
+                decision = _resolve_agent_sandbox_decision(ctx)
+                hint = user_namespace_failure_hint(
+                    configured_tier=decision.configured_tier if decision else None,
+                    granting_tier=decision.granting_tier if decision else None,
                 )
-                returncode = wait_or_kill_process_group(
-                    process,
-                    timeout=AgentRuntimeEnv().agent_timeout,
+                logger.error(
+                    "codex platform sandbox could not start; no review ran. Set {}={} "
+                    "if this runner should request unsandboxed Codex (trust.agentSandbox decides).",
+                    CODEX_SANDBOX_ENV,
+                    CODEX_SANDBOX_UNSANDBOXED,
                 )
-            except subprocess.TimeoutExpired:
+                error = (
+                    f"{hint}\n\n"
+                    "No review ran: the sandbox failure happened on Codex's first exec, "
+                    f"before any review could start.\n\ncodex stderr:\n{error}"
+                )
+            # A retired subscription login is infrastructure, not a review failure,
+            # and no retry against the same login can succeed (#922), so it is
+            # explicitly not ``retryable``. It is ``failover_eligible`` though: the
+            # next vendor's credential is independent of this one, so the cascade
+            # must still hand the review on (#1009). Only a run
+            # actually using that login can see this: an API-key run that merely
+            # quotes the phrase (a review of this very code does) must fall through
+            # to the ordinary classification below.
+            if _uses_subscription_login(ctx) and is_expired_subscription_credential(
+                stream_error, stderr_text
+            ):
+                logger.error(
+                    "codex credential expired: {} — {}",
+                    CODEX_CREDENTIAL_EXPIRED_REASON,
+                    (stream_error or stderr_text.strip() or "no provider message")[:300],
+                )
                 return with_prompt(
                     AgentResult(
                         success=False,
-                        error="codex CLI timed out",
-                        metadata={"timeout": True, "retryable": True},
-                        usage=accumulator.to_usage(),
+                        output=output or None,
+                        error=f"{CODEX_CREDENTIAL_EXPIRED_REASON}\n\ncodex reported: {error}",
+                        usage=usage,
+                        metadata={
+                            INFRA_REASON_KEY: CODEX_CREDENTIAL_EXPIRED_KIND,
+                            "retryable": False,
+                            FAILOVER_ELIGIBLE_KEY: True,
+                        },
                     ),
                     prompt,
                 )
-            finally:
-                # The process group is gone; collect the drained tail so the
-                # reader thread never outlives it.
-                watchdog.stop()
-                stderr_drain.join(timeout=STDERR_DRAIN_JOIN_TIMEOUT_S)
-        stderr_text = stderr_drain.text()
-    finally:
-        watchdog.stop()
-        try:
-            close_all_open_spans()
-        except Exception as exc:
-            logger.debug("codex stream handler cleanup failed: {}", exc)
-
-    if watchdog.stalled:
-        diagnostic = watchdog.diagnostic()
-        return with_prompt(
-            AgentResult(
-                success=False,
-                error=diagnostic.render(),
-                metadata=diagnostic.as_metadata(),
-                usage=accumulator.to_usage(),
-            ),
-            prompt,
-        )
-
-    if stderr_text.strip():
-        for line in stderr_text.strip().splitlines()[-20:]:
-            logger.debug("[codex] {}", line)
-
-    if accumulator.parsed_event_count > 0:
-        output = accumulator.final_output
-        usage = accumulator.to_usage()
-    else:
-        output = None
-        usage = None
-
-    if returncode != 0:
-        # The provider's own event is the authoritative reason; stderr is the
-        # fallback, because it routinely carries benign CLI chatter (#445).
-        stream_error = accumulator.stream_error
-        error = stream_error or stderr_tail_for_error(stderr_text) or f"codex exited {returncode}"
-        # bwrap fails on the very first exec, so this is the difference between
-        # "the environment cannot run Codex" and "the reviewer errored" (#70).
-        if is_user_namespace_failure(f"{stderr_text}\n{output or ''}"):
-            decision = _resolve_agent_sandbox_decision(ctx)
-            hint = user_namespace_failure_hint(
-                configured_tier=decision.configured_tier if decision else None,
-                granting_tier=decision.granting_tier if decision else None,
-            )
-            logger.error(
-                "codex platform sandbox could not start; no review ran. Set {}={} "
-                "if this runner should request unsandboxed Codex (trust.agentSandbox decides).",
-                CODEX_SANDBOX_ENV,
-                CODEX_SANDBOX_UNSANDBOXED,
-            )
-            error = (
-                f"{hint}\n\n"
-                "No review ran: the sandbox failure happened on Codex's first exec, "
-                f"before any review could start.\n\ncodex stderr:\n{error}"
-            )
-        # A retired subscription login is infrastructure, not a review failure,
-        # and no retry against the same login can succeed (#922), so it is
-        # explicitly not ``retryable``. It is ``failover_eligible`` though: the
-        # next vendor's credential is independent of this one, so the cascade
-        # must still hand the review on (#1009). Only a run
-        # actually using that login can see this: an API-key run that merely
-        # quotes the phrase (a review of this very code does) must fall through
-        # to the ordinary classification below.
-        if _uses_subscription_login(ctx) and is_expired_subscription_credential(
-            stream_error, stderr_text
-        ):
-            logger.error(
-                "codex credential expired: {} — {}",
-                CODEX_CREDENTIAL_EXPIRED_REASON,
-                (stream_error or stderr_text.strip() or "no provider message")[:300],
+            # Classify against the provider's message too — a stdout-only failure
+            # is invisible to a stderr-only classifier (#445, #446).
+            retryable = is_retryable_cli_failure(
+                returncode=returncode,
+                stderr=f"{stream_error or ''}\n{stderr_text}",
             )
             return with_prompt(
                 AgentResult(
                     success=False,
                     output=output or None,
-                    error=f"{CODEX_CREDENTIAL_EXPIRED_REASON}\n\ncodex reported: {error}",
+                    error=error,
                     usage=usage,
-                    metadata={
-                        INFRA_REASON_KEY: CODEX_CREDENTIAL_EXPIRED_KIND,
-                        "retryable": False,
-                        FAILOVER_ELIGIBLE_KEY: True,
-                    },
+                    metadata={"retryable": True} if retryable else {},
                 ),
                 prompt,
             )
-        # Classify against the provider's message too — a stdout-only failure
-        # is invisible to a stderr-only classifier (#445, #446).
-        retryable = is_retryable_cli_failure(
-            returncode=returncode,
-            stderr=f"{stream_error or ''}\n{stderr_text}",
-        )
-        return with_prompt(
-            AgentResult(
-                success=False,
-                output=output or None,
-                error=error,
-                usage=usage,
-                metadata={"retryable": True} if retryable else {},
-            ),
-            prompt,
-        )
-    return with_prompt(AgentResult(success=True, output=output or None, usage=usage), prompt)
+        return with_prompt(AgentResult(success=True, output=output or None, usage=usage), prompt)
+
+    return run_cli_attempt(
+        CliHarnessSpec(
+            label="codex",
+            command=cmd,
+            env=_build_env(ctx),
+            accumulator=accumulator,
+            handler=session_handler,
+            classify=classify,
+            close_spans=close_all_open_spans,
+            stdin_text=stdin_text,
+            prompt=prompt,
+        ),
+        ctx,
+    )
 
 
 async def _run(ctx: AgentRunContext) -> AgentResult:

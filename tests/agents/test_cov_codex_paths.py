@@ -18,6 +18,7 @@ import pytest
 from loguru import logger
 from tests.agents.conftest import attach_honoured_sandbox_decision, make_agent_run_context
 
+from mergecraft.agents import cli_runner
 from mergecraft.agents import codex as codex_module
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator
 from mergecraft.agents.codex_stream import codex_stream_event_handler, parse_codex_payload
@@ -418,7 +419,7 @@ def _run_once(
             raise process
         return process
 
-    monkeypatch.setattr(codex_module, "spawn_agent_cli", _fake_spawn)
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", _fake_spawn)
     result = codex_module._run_codex_once(
         cli="/usr/bin/codex",
         prompt="",
@@ -447,7 +448,7 @@ def test_codex_runs_in_the_reviewed_repo_not_the_process_directory(
         seen.update(kwargs)
         return _FakeProcess(stdout="", stderr="", returncode=0)
 
-    monkeypatch.setattr(codex_module, "spawn_agent_cli", _fake_spawn)
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", _fake_spawn)
     codex_module._run_codex_once(
         cli="/usr/bin/codex", prompt="", ctx=ctx, mcp_config="unused", continue_session=False
     )
@@ -463,7 +464,7 @@ def test_codex_falls_back_to_the_process_directory_without_a_repo(
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
     ctx.tool_state.repos.clear()
 
-    assert codex_module._codex_working_dir(ctx) == os.getcwd()
+    assert cli_runner.cli_working_directory(ctx) == os.getcwd()
 
 
 def test_missing_codex_binary_surfaces_the_spawn_error(
@@ -620,7 +621,7 @@ def test_resume_names_the_recorded_thread_not_the_last_session(
         captured.append(list(cmd))
         return _FakeProcess(stdout=started, stderr="", returncode=0)
 
-    monkeypatch.setattr(codex_module, "spawn_agent_cli", _fake_spawn)
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", _fake_spawn)
     for continue_session in (False, True):
         codex_module._run_codex_once(
             cli="/usr/bin/codex",

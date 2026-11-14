@@ -7,6 +7,7 @@ import threading
 import time
 from typing import Any
 
+from mergecraft.agents import cli_runner
 from mergecraft.agents import codex as codex_module
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator
 from mergecraft.agents.activity_watchdog import AgentDiagnostic, IdleWatchdog
@@ -288,7 +289,7 @@ def test_codex_driver_fails_fast_when_the_stream_goes_quiet(monkeypatch: Any) ->
 
     monkeypatch.setattr("mergecraft.utils.process_group.kill_process_group", _kill)
     monkeypatch.setattr(
-        codex_module,
+        cli_runner,
         "spawn_agent_cli",
         lambda *args, **kwargs: _FakeProcess(_StallingStream(stop)),
     )
@@ -308,7 +309,7 @@ def test_codex_driver_fails_fast_when_the_stream_goes_quiet(monkeypatch: Any) ->
 
 def test_codex_driver_survives_a_slow_but_streaming_run(monkeypatch: Any) -> None:
     monkeypatch.setattr(
-        codex_module,
+        cli_runner,
         "spawn_agent_cli",
         lambda *args, **kwargs: _FakeProcess(_StreamingStream()),
     )

@@ -12,8 +12,8 @@ import pytest
 from tests.agents.conftest import make_agent_run_context
 
 from mergecraft.agents import claude as claude_module
+from mergecraft.agents import cli_runner, codex_broker
 from mergecraft.agents import codex as codex_module
-from mergecraft.agents import codex_broker
 from mergecraft.security.broker import CodexBrokerPosture
 
 if TYPE_CHECKING:
@@ -160,7 +160,7 @@ def test_claude_resume_names_the_recorded_session(tmp_path: Path, monkeypatch: M
         captured.append(list(cmd))
         return _Proc()
 
-    monkeypatch.setattr(claude_module, "spawn_agent_cli", _spawn)
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", _spawn)
     monkeypatch.setattr(claude_module, "_build_env", lambda _ctx: {})
     ctx = make_agent_run_context(tmp_path, resolved_model="anthropic/claude-opus")
     session: dict[str, str] = {}

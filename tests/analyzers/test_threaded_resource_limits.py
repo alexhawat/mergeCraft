@@ -6,6 +6,7 @@ import json
 import resource
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -46,24 +47,30 @@ def test_threaded_launch_applies_limits_without_preexec(
 
     monkeypatch.setattr(subprocess, "Popen", popen)
     script = (
-        "import json,resource; print(json.dumps([resource.getrlimit(resource.RLIMIT_NPROC), "
-        "resource.getrlimit(resource.RLIMIT_AS)]))"
+        "import json,os,resource,sys; print(json.dumps([resource.getrlimit(resource.RLIMIT_NPROC), "
+        "resource.getrlimit(resource.RLIMIT_AS), os.read(int(sys.argv[1]), 100).decode(), "
+        "os.getsid(0) == os.getpid()]))"
     )
 
     def launch(_: int) -> subprocess.CompletedProcess[str]:
-        return _run_in_own_session(
-            [sys.executable, "-I", "-c", script],
-            cwd=tmp_path,
-            timeout_s=5,
-            env={"PATH": "/usr/bin:/bin"},
-            pass_fds=(),
-            preexec_fn=limits,
-        )
+        with tempfile.TemporaryFile() as payload:
+            payload.write(b"private-payload")
+            payload.seek(0)
+            return _run_in_own_session(
+                [sys.executable, "-I", "-c", script, str(payload.fileno())],
+                cwd=tmp_path,
+                timeout_s=5,
+                env={"PATH": "/usr/bin:/bin"},
+                pass_fds=(payload.fileno(),),
+                preexec_fn=limits,
+            )
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(launch, range(8)))
     assert all(result.returncode == 0 for result in results)
-    assert [json.loads(result.stdout) for result in results] == [[list(pair), expected_memory]] * 8
+    assert [json.loads(result.stdout) for result in results] == [
+        [list(pair), expected_memory, "private-payload", True]
+    ] * 8
     assert callbacks == [None] * 8
 
 
@@ -159,3 +166,30 @@ def test_threaded_sandbox_calibration_never_uses_preexec(
     assert all(thread.startswith("analyzer") for thread, _ in launches)
     assert all(limits is not None and limits.process_limit == (32, 32) for _, limits in results)
     assert all(options.get("preexec_fn") is None for _, options in launches)
+
+
+def test_real_drop_probe_applies_its_candidate_limit_in_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fake credential switch observes the real launcher's kernel limit."""
+    from mergecraft.analyzers import sandbox
+
+    recorded = tmp_path / "probe-limit.json"
+    switch = tmp_path / "setpriv"
+    switch.write_text(
+        f"#!{sys.executable}\n"
+        "import json, resource\n"
+        f"with open({str(recorded)!r}, 'w') as output:\n"
+        "    json.dump(resource.getrlimit(resource.RLIMIT_NPROC), output)\n"
+    )
+    switch.chmod(0o755)
+    current_soft = resource.getrlimit(resource.RLIMIT_NPROC)[0]
+    candidate = current_soft - 1 if current_soft > 1 else 4096
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setattr(sandbox.os, "geteuid", lambda: 0)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        accepted = pool.submit(
+            sandbox._drop_exec_succeeds_at_limit, 1001, 1001, limit=candidate
+        ).result(timeout=10)
+    assert accepted is True
+    assert json.loads(recorded.read_text()) == [candidate, candidate]

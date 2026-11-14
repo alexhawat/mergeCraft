@@ -30,6 +30,7 @@ import pytest
 from tests.agents.conftest import make_agent_run_context
 
 import mergecraft.agents.opencode as oc
+from mergecraft.agents import shared
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -151,7 +152,7 @@ class _FakeServeProc:
 
 
 def _shim_popen(monkeypatch: MonkeyPatch, factory: Callable[..., Any]) -> None:
-    monkeypatch.setattr(oc, "subprocess", _SubprocessShim(factory))
+    monkeypatch.setattr(shared, "subprocess", _SubprocessShim(factory))
 
 
 def _spawn_real_child(
@@ -374,6 +375,33 @@ def _spy_on_boot(
             ends.append(time.monotonic())
 
     monkeypatch.setattr(oc, "_boot_opencode_server", _spy)
+
+
+async def test_run_boots_serve_in_review_checkout(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    children: list[subprocess.Popen[bytes]],
+) -> None:
+    """An offline review may be launched outside its checkout."""
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    monkeypatch.chdir(caller)
+    ctx, child = _wire_run(checkout, monkeypatch, children, "pass")
+    server_directories: list[object] = []
+
+    def _factory(cmd: list[str], **kwargs: object) -> subprocess.Popen[bytes]:
+        assert cmd[1] == "serve"
+        server_directories.append(kwargs["cwd"])
+        return child
+
+    _shim_popen(monkeypatch, _factory)
+
+    result = await oc._run(ctx)
+
+    assert result.success
+    assert server_directories == [str(checkout)]
 
 
 async def test_run_keeps_the_event_loop_alive_during_boot(
