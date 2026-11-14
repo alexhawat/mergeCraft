@@ -385,18 +385,20 @@ def _bounded_preview(text: str, *, max_lines: int, saved_to: str) -> tuple[str, 
     lines = text.splitlines()
     shown: list[str] = []
     used = 0
+    clipped = False
     for line in lines[:max_lines]:
         used += len(line) + 1
         if shown and used > _GIT_SHOW_PREVIEW_CHARS:
             break
+        # A single line can exceed the bound on its own (minified JSON/JS).
+        clipped = clipped or len(line) > _GIT_SHOW_PREVIEW_CHARS
         shown.append(line[:_GIT_SHOW_PREVIEW_CHARS])
-    truncated = len(shown) < len(lines) or any(
-        len(line) > _GIT_SHOW_PREVIEW_CHARS for line in shown
-    )
+    truncated = clipped or len(shown) < len(lines)
     preview = "\n".join(shown)
     if truncated:
+        cut = f", long lines cut at {_GIT_SHOW_PREVIEW_CHARS} characters" if clipped else ""
         preview = (
-            f"{preview}\n... [truncated: lines 1-{len(shown)} of {len(lines)} shown; "
+            f"{preview}\n... [truncated: lines 1-{len(shown)} of {len(lines)} shown{cut}; "
             f"the full body is saved to {saved_to} — read it with your file-read "
             "tool (offset/limit) instead of re-running git] ..."
         )

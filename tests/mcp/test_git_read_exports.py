@@ -114,6 +114,48 @@ def test_a_short_historical_file_is_returned_whole(
     assert shown["truncated"] is False
 
 
+def test_a_single_overlong_line_is_reported_as_truncated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A one-line blob past the character bound (minified JSON) must say it was cut."""
+    repo, temp = _production_split(tmp_path, monkeypatch)
+    minified = "{" + ",".join(f'"k{n}":{n}' for n in range(4000)) + "}"
+    (repo / "bundle.min.json").write_text(minified)
+    commit_all(repo, "add minified file")
+
+    shown = _git(repo, temp, "show", ["HEAD:bundle.min.json"])
+
+    exported = Path(shown["outputPath"])
+    assert exported.read_text(encoding="utf-8") == minified
+    assert shown["totalLines"] == 1
+    assert shown["truncated"] is True
+    head, marker = shown["output"].split("\n")
+    assert len(head) == 12_000
+    assert minified.startswith(head)
+    assert "long lines cut at 12000 characters" in marker
+    assert str(exported) in marker
+
+
+def test_the_preview_stops_at_the_character_bound_before_the_line_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, temp = _production_split(tmp_path, monkeypatch)
+    wide = [f"{n:03d} " + "y" * 496 for n in range(100)]
+    (repo / "wide-lines.txt").write_text("\n".join(wide) + "\n")
+    commit_all(repo, "add wide-line file")
+
+    shown = _git(repo, temp, "show", ["HEAD:wide-lines.txt"])
+
+    *head, marker = shown["output"].splitlines()
+    assert head == wide[: len(head)]
+    assert 0 < len(head) < 100
+    assert sum(len(line) + 1 for line in head) <= 12_000
+    assert shown["truncated"] is True
+    assert f"lines 1-{len(head)} of 100 shown" in marker
+    assert "long lines cut" not in marker
+    assert Path(shown["outputPath"]).read_text(encoding="utf-8").splitlines() == wide
+
+
 def test_a_large_git_output_export_is_complete_and_readable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
