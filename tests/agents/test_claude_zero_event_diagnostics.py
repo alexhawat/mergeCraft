@@ -13,15 +13,16 @@ defect in the codex driver.
 
 from __future__ import annotations
 
-import importlib
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.agents import cli_runner
 from mergecraft.agents.claude import _run_claude_once
 from mergecraft.agents.shared import AgentRunContext, ResolvedInstructions
 from mergecraft.mcp.context import PayloadEvent, ResolvedPayload
 from mergecraft.mcp.tool_state import init_tool_state
+from mergecraft.utils.provider_failure import is_retryable_cli_failure
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -77,14 +78,13 @@ def _drive(
     returncode: int,
     stderr: str,
 ) -> tuple[Any, list[tuple[str, str]]]:
-    module = importlib.import_module("mergecraft.agents.claude")
     monkeypatch.setattr(
-        module,
+        cli_runner,
         "spawn_agent_cli",
         lambda *_a, **_k: _SilentProcess(returncode=returncode, stderr=stderr),
     )
-    monkeypatch.setattr(module, "track_process_group", _noop_ctx)
-    monkeypatch.setattr(module, "wait_or_kill_process_group", lambda proc, timeout: proc.wait())
+    monkeypatch.setattr(cli_runner, "track_process_group", _noop_ctx)
+    monkeypatch.setattr(cli_runner, "wait_or_kill_process_group", lambda proc, timeout: proc.wait())
 
     records: list[tuple[str, str]] = []
     sink = logger.add(
@@ -159,9 +159,8 @@ def test_a_retryable_zero_event_failure_keeps_its_retry(
     stderr the classifier already considers terminal would have compared
     ``False == False`` and passed against the bug.
     """
-    module = importlib.import_module("mergecraft.agents.claude")
     retryable_stderr = "429 Too Many Requests\n"
-    assert module.is_retryable_cli_failure(returncode=1, stderr=retryable_stderr) is True
+    assert is_retryable_cli_failure(returncode=1, stderr=retryable_stderr) is True
 
     result, _ = _drive(tmp_path, monkeypatch, returncode=1, stderr=retryable_stderr)
 
@@ -175,8 +174,7 @@ def test_a_terminal_zero_event_failure_is_not_retried(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Guard the guard: classifying must not mark everything retryable."""
-    module = importlib.import_module("mergecraft.agents.claude")
-    assert module.is_retryable_cli_failure(returncode=1, stderr=_AUTH_STDERR) is False
+    assert is_retryable_cli_failure(returncode=1, stderr=_AUTH_STDERR) is False
 
     result, _ = _drive(tmp_path, monkeypatch, returncode=1, stderr=_AUTH_STDERR)
 

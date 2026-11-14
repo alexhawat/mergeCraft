@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from tests.agents.conftest import attach_honoured_sandbox_decision, make_agent_run_context
 
+from mergecraft.agents import cli_runner
+
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
@@ -74,7 +76,7 @@ def test_codex_harness_invokes_cli_and_parses_agent_result(
         captured.append(list(cmd))
         return _FakeCodexProcess(stdout=json.dumps(payload), stderr="", returncode=0)
 
-    monkeypatch.setattr(codex_module.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(cli_runner.subprocess, "Popen", _fake_popen)
 
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
     mcp_config = str(tmp_path / "mcp.json")
@@ -228,7 +230,7 @@ def test_run_codex_once_omits_sandbox_flag_for_permission_profiles(
         captured.append(list(cmd))
         return _FakeCodexProcess(stdout='{"result":"ok"}', stderr="", returncode=0)
 
-    monkeypatch.setattr(codex_module.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(cli_runner.subprocess, "Popen", _fake_popen)
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
     ctx.payload.shell = "disabled"
     codex_module.write_mcp_config(ctx)
@@ -350,7 +352,7 @@ def test_bwrap_failure_returns_an_actionable_error(
             returncode=1,
         )
 
-    monkeypatch.setattr(codex_module.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(cli_runner.subprocess, "Popen", _fake_popen)
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
 
     result = codex_module._run_codex_once(cli="codex", prompt="p", ctx=ctx, mcp_config="")
@@ -372,7 +374,7 @@ def test_ordinary_failures_do_not_get_the_sandbox_hint(
         del cmd, kwargs
         return _FakeCodexProcess(stdout="", stderr="model overloaded", returncode=1)
 
-    monkeypatch.setattr(codex_module.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(cli_runner.subprocess, "Popen", _fake_popen)
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-5.3-codex")
 
     result = codex_module._run_codex_once(cli="codex", prompt="p", ctx=ctx, mcp_config="")

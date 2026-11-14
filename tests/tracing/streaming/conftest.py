@@ -374,7 +374,7 @@ def patch_driver_subprocess(
 
         def test_xxx(patch_driver_subprocess):
             recorded = patch_driver_subprocess(
-                "mergecraft.agents.claude",
+                "mergecraft.agents.shared",
                 stdout="<recorded stream>",
                 stderr="",
                 returncode=0,

@@ -19,6 +19,7 @@ import httpx
 import pytest
 from tests.agents.conftest import make_agent_run_context
 
+from mergecraft.agents import cli_runner
 from mergecraft.agents.post_run import run_post_run_retry_loop
 from mergecraft.agents.shared import AgentResult, agent
 from mergecraft.utils.agent_resolve import _may_advance_chain
@@ -109,7 +110,7 @@ _FAILURES = (
 
 
 def _patch_spawn(monkeypatch: MonkeyPatch, module: Any, process: Any) -> None:
-    monkeypatch.setattr(module, "spawn_agent_cli", lambda *_a, **_k: process)
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda *_a, **_k: process)
     if hasattr(module, "_build_env"):
         monkeypatch.setattr(module, "_build_env", lambda _ctx: {})
 

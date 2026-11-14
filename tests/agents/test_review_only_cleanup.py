@@ -90,7 +90,7 @@ async def test_dirty_online_review_does_not_request_a_commit(
 def test_missing_claude_binary_does_not_try_buffered_execution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from mergecraft.agents import claude
+    from mergecraft.agents import claude, shared
 
     calls: list[object] = []
 
@@ -101,8 +101,8 @@ def test_missing_claude_binary_does_not_try_buffered_execution(
         calls.append(args)
         return subprocess.CompletedProcess(args, 0, stdout='{"result": "fake success"}', stderr="")
 
-    monkeypatch.setattr(claude, "spawn_agent_cli", missing)
-    monkeypatch.setattr(claude.subprocess, "run", buffered)
+    monkeypatch.setattr(shared.subprocess, "Popen", missing)
+    monkeypatch.setattr(shared.subprocess, "run", buffered)
     result = claude._run_claude_once(
         cli="/missing/claude",
         prompt="review",

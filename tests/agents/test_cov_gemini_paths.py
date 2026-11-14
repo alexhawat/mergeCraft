@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from tests.agents.conftest import make_agent_run_context
 
+from mergecraft.agents import cli_runner
 from mergecraft.agents import gemini as gemini_mod
 from mergecraft.agents._stream_consumer import StreamSpanAccumulator
 from mergecraft.types import MERGECRAFT_MCP_NAME
@@ -444,7 +445,7 @@ def test_streaming_returns_a_failed_result_when_the_cli_cannot_be_spawned(
         msg = "no such file: gemini"
         raise FileNotFoundError(msg)
 
-    monkeypatch.setattr(gemini_mod, "spawn_agent_cli", _boom)
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", _boom)
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
 
     result = gemini_mod._run_gemini_streaming(cmd=["gemini"], ctx=ctx, model=None)
@@ -459,13 +460,13 @@ def test_streaming_reports_a_timeout_as_a_clean_failed_result(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     """``TimeoutExpired`` from the group wait becomes a named failure, not a traceback."""
-    monkeypatch.setattr(gemini_mod, "spawn_agent_cli", _spawn(_FakeProcess(stdout="")))
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", _spawn(_FakeProcess(stdout="")))
 
     def _timeout(process: Any, *, timeout: float | None) -> int:
         del process, timeout
         raise subprocess.TimeoutExpired(cmd="gemini", timeout=1)
 
-    monkeypatch.setattr(gemini_mod, "wait_or_kill_process_group", _timeout)
+    monkeypatch.setattr(cli_runner, "wait_or_kill_process_group", _timeout)
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
 
     result = gemini_mod._run_gemini_streaming(cmd=["gemini"], ctx=ctx, model=None)
@@ -484,7 +485,7 @@ def test_nonzero_exit_with_rate_limit_stderr_is_marked_retryable(
         stderr="Error: 429 Too Many Requests\n",
         returncode=1,
     )
-    monkeypatch.setattr(gemini_mod, "spawn_agent_cli", _spawn(process))
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", _spawn(process))
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
 
     result = gemini_mod._run_gemini_streaming(cmd=["gemini"], ctx=ctx, model=None)
@@ -502,7 +503,7 @@ def test_nonzero_exit_without_stderr_names_the_exit_code(
 ) -> None:
     """A silent non-zero exit still produces a diagnosable error string."""
     monkeypatch.setattr(
-        gemini_mod,
+        cli_runner,
         "spawn_agent_cli",
         _spawn(_FakeProcess(stdout="", stderr="   \n", returncode=7)),
     )
@@ -522,7 +523,7 @@ def test_successful_run_with_no_stream_output_reports_none_not_empty_string(
 ) -> None:
     """An empty stream on a clean exit is ``output=None``, not ``""``."""
     monkeypatch.setattr(
-        gemini_mod,
+        cli_runner,
         "spawn_agent_cli",
         _spawn(_FakeProcess(stdout="\n\n", stderr="", returncode=0)),
     )
@@ -555,7 +556,7 @@ def test_span_cleanup_failure_does_not_fail_an_otherwise_successful_run(
 
     monkeypatch.setattr(gemini_mod, "_gemini_stream_event_handler", _handler_factory)
     monkeypatch.setattr(
-        gemini_mod,
+        cli_runner,
         "spawn_agent_cli",
         _spawn(_FakeProcess(stdout=json.dumps({"content": "done"}) + "\n", returncode=0)),
     )
