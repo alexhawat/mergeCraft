@@ -195,6 +195,15 @@ group and refuses the partial output. Refused output is never cached. `git show`
 resolves a blob's object ID and type in one query; symbolic refs are resolved again
 on each call so an external ref move cannot return stale cached content.
 
+`git show <rev>:<path>` returns the first 120 lines (12,000 characters at most)
+with `totalLines` and `truncated`, and saves the whole file to `outputPath`. Any
+other output over 50,000 characters is saved the same way with a 40-line preview.
+Saved output goes to a private `git-read-*` directory that the run creates inside
+its temp directory and removes at exit; the reviewing agent's file-read tool is
+granted that directory alone, so the path is readable even when the temp
+directory is operator-chosen and not opened as a whole. The preview is the only
+thing truncated; the saved file is always complete.
+
 Credential-bearing `config` keys (`credential.*`, `url.*`) are refused. Writes
 (`--set`, `--unset`, …) are refused.
 

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The full file that `git show <rev>:<path>` saves, and any other oversized `git`
+  output, is now readable by an OpenCode reviewer in every run. The files were
+  written to the top of the run temp directory, which OpenCode may only read when
+  mergeCraft created that directory itself; with an operator-set
+  `MERGECRAFT_TEMP_DIR` the agent got a five-line preview and a path it could not
+  open, and re-queried Git in small pieces instead (162 Git calls in one
+  38-minute review). Saved output now goes to a private `git-read-*` child that
+  is granted on its own, and the preview is 120 lines with the total line count
+  (#1474).
+
 - The pin freshness gate exempts a branch whose pin is itself on the default
   branch. It used to fail on the pin bump that clears a stale backlog, because
   it measured the default branch's own debt: the same trap rule 4 was moved off
