@@ -195,7 +195,9 @@ import json
 
 **mypy is `strict` on `src/mergecraft`** with the `pydantic.mypy` plugin (`init_forbid_extra`, `init_typed`, `warn_required_dynamic_aliases`). A supplemental **Pyright** pass runs via `make pyright`.
 
-**Existing overrides** (`pyproject.toml`) relax `disallow_untyped_defs` for `mergecraft.mcp.*` and decorator/return strictness for `mergecraft.yes.*`. These are debt, not licence: **new** code in those packages should still be fully annotated, and removing an override is a welcome PR.
+The MCP package uses the repository's strict mypy settings. The remaining
+overrides in `pyproject.toml` apply to `mergecraft.agents_sdk.*`,
+`mergecraft.yes.*`, and `mergecraft.harbor.*`.
 
 ```python
 # Good — modern builtins and unions
@@ -221,7 +223,11 @@ def bad_ids(raw: Optional[str]) -> List[str]: ...
 - Never call `asyncio.run()` from inside async code — `await` or `create_task()`
 - Always set a timeout on outbound HTTP and on subprocess execution
 
-**Known sync islands.** `mergecraft.mcp.*`, `mergecraft.agents.*`, `mergecraft.ci.*`, and parts of `mergecraft.cli.*` deliberately use sync `subprocess` / `Path` I/O — they run one-shot inside the Action, where an event loop buys nothing. Those packages carry targeted `ASYNC*` ignores in `per-file-ignores`. **Do not** add new `ASYNC` ignores elsewhere; if a new module needs blocking I/O inside `async def`, that is a design smell — hoist the blocking call out, or make the function sync.
+**Known sync islands.** Some agent, CI, CLI, and MCP modules deliberately use
+synchronous subprocess or path operations. The MCP `ASYNC*` exceptions in
+`pyproject.toml` name the files and rules needed for existing synchronous
+checkout metadata and local artifact I/O. Keep blocking work in synchronous
+helpers, and **do not** add new `ASYNC` ignores elsewhere.
 
 ```python
 import asyncio
@@ -592,6 +598,14 @@ async def test_live_review_against_real_pr() -> None:
 - `__init__.py` is minimal — re-exports only, no logic
 - Constants at module level, not inside classes (unless class-specific)
 - Configuration defaults live in `src/mergecraft/config/`, not scattered
+
+`make import-layer-check` runs in `make lint` and the required static CI jobs.
+It checks absolute and relative import statements, including those inside
+functions and `TYPE_CHECKING` blocks. Only `cli/` may import `mergecraft.main`,
+and `mergecraft.errors` has no internal package dependencies. Utility modules
+may import an agent, MCP, or CLI symbol only where the checker lists that
+exact existing import. A duplicate import or an exception left behind after
+an import is removed fails the check.
 
 **Package map:**
 

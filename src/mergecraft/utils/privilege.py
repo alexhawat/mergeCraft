@@ -28,16 +28,13 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from mergecraft.errors import ConfigurationError
+
 _DEFAULT_AGENT_USER = "mergecraft"
 _ALLOW_ROOT_ENV = "MERGECRAFT_ALLOW_ROOT"
 
 if TYPE_CHECKING:
     import pwd
-
-    # Imported lazily inside the failure paths to avoid a circular import:
-    # ``mergecraft.main`` already imports ``prepare_workspace_for_agent`` from
-    # this module, so the class symbol is looked up at raise-time only.
-    from mergecraft.main import _ConfigurationError
 
 
 def agent_user_name() -> str:
@@ -99,17 +96,9 @@ def _setpriv_supports_bounding_set() -> bool:
     return "--bounding-set" in proc.stdout + proc.stderr
 
 
-def _raise_configuration_error(message: str) -> _ConfigurationError:
-    """Return a ``main._ConfigurationError`` instance, importing lazily.
-
-    The deferred import keeps the dependency direction one-way
-    (``main`` → ``utils``) while letting the failure surface the same
-    exception type ``_classify_error_outcome`` already maps to
-    ``RunOutcome.configuration_error``.
-    """
-    from mergecraft.main import _ConfigurationError
-
-    return _ConfigurationError(message)
+def _raise_configuration_error(message: str) -> ConfigurationError:
+    """Build the configuration error reported when a privilege drop is refused."""
+    return ConfigurationError(message)
 
 
 def _resolve_privilege_drop_user() -> pwd.struct_passwd | None:
@@ -121,7 +110,7 @@ def _resolve_privilege_drop_user() -> pwd.struct_passwd | None:
     and cannot drift apart. Mirrors ``wrap_agent_command``'s original inline
     resolution exactly (same log/error text): non-root returns ``None`` (no drop
     applies); a missing ``pwd`` module, a missing user, or a user that resolves to
-    UID/GID 0 all raise ``main._ConfigurationError`` — the username is not the
+    UID/GID 0 all raise ``ConfigurationError`` — the username is not the
     security boundary, the UID is, so a configured user that happens to map to
     ``root`` is rejected the same as a genuinely missing one.
     """
@@ -171,7 +160,7 @@ def _resolve_privilege_drop_user() -> pwd.struct_passwd | None:
 def wrap_agent_command(cmd: list[str]) -> list[str]:
     """Prefix ``cmd`` with ``setpriv`` when running as root in the action image.
 
-    Fails closed with ``main._ConfigurationError`` if ``setpriv`` or the agent
+    Fails closed with ``ConfigurationError`` if ``setpriv`` or the agent
     user is unavailable — never silently returns the unwrapped command (the
     F4' fail-open default this contract replaces). Resolves the user record via
     ``pwd.getpwnam`` and additionally rejects UID/GID 0 — the username is not
@@ -262,7 +251,7 @@ def agent_subprocess_env(env: dict[str, str]) -> dict[str, str]:
     :func:`_resolve_privilege_drop_user`): when the current process is not
     root, this is a no-op copy — no privilege drop applies, so there is
     nothing to redirect. When it *is* root, the same conditions that make
-    ``wrap_agent_command`` raise ``main._ConfigurationError`` (missing ``pwd``
+    ``wrap_agent_command`` raise ``ConfigurationError`` (missing ``pwd``
     module, missing agent user, or a user resolving to UID/GID 0) make this
     function raise too, rather than silently leaving a wrong ``HOME`` in
     place. In practice every real call site invokes this immediately

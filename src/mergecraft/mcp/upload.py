@@ -17,6 +17,7 @@ from mergecraft.security.egress import guard_external_url
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 
 def _check_upload_path(
@@ -55,8 +56,8 @@ def _check_upload_path(
         raise ToolRefusedError(msg) from exc
 
 
-def upload_file_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def upload_file_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, bool | str | int]:
         path = Path(str(params["path"]))
         resolved_repo_root = str(Path(primary_repo_state(ctx.tool_state).dir).resolve())
         resolved_tmpdir = str(Path(ctx.tmpdir).resolve()) if ctx.tmpdir else ""

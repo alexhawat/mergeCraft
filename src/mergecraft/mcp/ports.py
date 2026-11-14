@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import socket
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import httpx
 from loguru import logger
@@ -84,7 +84,8 @@ def select_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((MCP_HOST, 0))
-        return sock.getsockname()[1]
+        # This socket was created with AF_INET, so its address is (host, port).
+        return cast("tuple[str, int]", sock.getsockname())[1]
 
 
 def _bound_port_from_uvicorn_server(server: uvicorn.Server, configured_port: int) -> int:
@@ -150,7 +151,8 @@ def _health_identity_ok(client: httpx.Client, host: str, port: int, health_nonce
     try:
         response = client.get(url)
         response.raise_for_status()
-        payload = response.json()
+        # The MCP server health route returns a JSON object with status and nonce.
+        payload = cast("dict[str, object]", response.json())
     except (httpx.HTTPError, json.JSONDecodeError, ValueError):
         return False
     return payload.get("status") == "ok" and payload.get("nonce") == health_nonce

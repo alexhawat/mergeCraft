@@ -13,10 +13,11 @@ from mergecraft.mcp.tool_state import primary_repo_state
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 
-def get_commit_info_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def get_commit_info_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         sha = str(params["sha"])
         data = await ctx.scm.get_commit(ctx.repo.owner, ctx.repo.name, sha)
         files = data.get("files") or []

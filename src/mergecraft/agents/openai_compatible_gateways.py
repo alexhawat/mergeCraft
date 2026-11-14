@@ -27,6 +27,7 @@ from mergecraft.config.env import (
     CUSTOM_PROVIDER_BASE_URL_ENV,
     ProviderGatewayEnv,
 )
+from mergecraft.errors import ConfigurationError
 
 CUSTOM_PROVIDER_EXTRA_OPTIONS_ENV = "MERGECRAFT_CUSTOM_PROVIDER_EXTRA_OPTIONS"
 PROVIDER_EXTRA_OPTIONS_ENV = "MERGECRAFT_PROVIDER_EXTRA_OPTIONS"
@@ -194,13 +195,11 @@ def require_capabilities(config: ProviderConfig, required: frozenset[str]) -> No
     Production harnesses do not call this yet; HA1 lands the gate so a later
     wiring wave can require capabilities at resolve time without a new type.
     """
-    from mergecraft.main import _ConfigurationError
-
     missing = required - config.capabilities
     if missing:
         names = ", ".join(sorted(missing))
         msg = f"provider {config.provider_id!r} missing required capabilities: {names}"
-        raise _ConfigurationError(msg)
+        raise ConfigurationError(msg)
 
 
 def _has_env(name: str) -> bool:

@@ -34,6 +34,7 @@ from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
     from mergecraft.xrepo.review import BaseManifestLookup
 
 __all__ = [
@@ -1205,7 +1206,7 @@ async def _verify_files_api_head(ctx: ToolContext, *, pull_number: int, head_sha
         raise RuntimeError(msg)
 
 
-def checkout_pr_tool(ctx: ToolContext):
+def checkout_pr_tool(ctx: ToolContext) -> ToolSpec:
     async def _preflight(params: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         params = normalize_pull_number_aliases(params, _CHECKOUT_PR_INPUT_SCHEMA)
         pull_number = int(params["pull_number"])
@@ -1257,7 +1258,7 @@ def checkout_pr_tool(ctx: ToolContext):
 
         return pull_number, pr
 
-    async def _checkout(pull_number: int, pr: dict[str, Any]):
+    async def _checkout(pull_number: int, pr: dict[str, Any]) -> dict[str, Any]:
         state = primary_repo_state(ctx.tool_state)
         cwd = state.dir
         prior_reviews: list[dict[str, Any]] = []
@@ -1701,7 +1702,7 @@ def checkout_pr_tool(ctx: ToolContext):
         )
         return result
 
-    async def _run_locked(params: dict[str, Any]):
+    async def _run_locked(params: dict[str, Any]) -> dict[str, Any]:
         if ctx.tool_state.review is not None:
             msg = "cannot restart checkout after this run has published a review"
             raise RuntimeError(msg)
@@ -1733,7 +1734,7 @@ def checkout_pr_tool(ctx: ToolContext):
             invalidate_checkout_review_state(ctx.tool_state)
             raise
 
-    async def _run(params: dict[str, Any]):
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         async with ctx.tool_state.checkout_operation_lock:
             return await _run_locked(params)
 
