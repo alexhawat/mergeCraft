@@ -273,6 +273,60 @@ def is_run_owned_directory(path: str) -> bool:
         return False
 
 
+_agent_export_dirs: dict[str, str] = {}
+
+
+def _hand_private_dir_to_agent(path: str) -> None:
+    """Give a root-created ``0o700`` directory to the dropped-UID agent, still ``0o700``."""
+    if os.getuid() != 0:
+        return
+    try:
+        import pwd
+
+        from mergecraft.utils.privilege import agent_user_name
+
+        pw = pwd.getpwnam(agent_user_name())
+    except (ImportError, KeyError):  # fmt: skip
+        return
+    with contextlib.suppress(OSError):
+        os.chown(path, pw.pw_uid, pw.pw_gid)
+
+
+def agent_export_directory(temp: str) -> Path:
+    """The private directory under ``temp`` where tools save output for the agent to read.
+
+    A tool result that is too large to return inline (a historical file from
+    ``git show``, an oversized ``git`` output) is saved here and the agent is
+    pointed at the file. ``temp`` itself may be operator-chosen or shared, so it
+    is never opened to the agent wholesale (#1474); this child is a fresh
+    ``mkdtemp`` — never a pre-existing directory or symlink — and is registered
+    as run-owned, so a harness can grant exactly it. One directory per ``temp``
+    per process; it is removed at exit unless ``MERGECRAFT_KEEP_TMP`` is set.
+    """
+    import tempfile
+
+    key = str(Path(temp).resolve())
+    existing = _agent_export_dirs.get(key)
+    if existing and Path(existing).is_dir() and not Path(existing).is_symlink():
+        return Path(existing)
+    Path(key).mkdir(parents=True, exist_ok=True)
+    created = tempfile.mkdtemp(prefix="git-read-", dir=key)
+    _hand_private_dir_to_agent(created)
+    register_run_owned_directory(created)
+    schedule_directory_cleanup(created)
+    _agent_export_dirs[key] = created
+    return Path(created)
+
+
+def run_export_directory(tmpdir: str) -> Path:
+    """:func:`agent_export_directory` under the temp root the MCP tools write to.
+
+    The tools and the harness permission rules both resolve it here, so the path
+    a tool hands the agent is always the path the harness granted.
+    """
+    return agent_export_directory(os.environ.get("MERGECRAFT_TEMP_DIR") or tmpdir)
+
+
 def create_temp_directory() -> str:
     import tempfile
 
