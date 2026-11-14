@@ -141,6 +141,7 @@ async def _run(
     history_timeout: bool = False,
     declared_publisher: str | None = "demo-reviewer[bot]",
     app_slug: str | None = None,
+    historical_states: dict[int, str] | None = None,
 ) -> tuple[dict[str, Any], _RecordingAgent, str]:
     await asyncio.to_thread(root.mkdir)
     summary = root / "summary.md"
@@ -242,6 +243,13 @@ async def _run(
                     }
                 }
             if "defaultBranchRef" in query:
+                pull_ids = sorted(history, reverse=True)
+                if historical_states:
+                    included = {
+                        "OPEN",
+                        *(state for state in ("CLOSED", "MERGED") if state in query),
+                    }
+                    pull_ids = [n for n in pull_ids if historical_states.get(n, "OPEN") in included]
                 return {
                     "repository": {
                         "nameWithOwner": _REPO,
@@ -253,9 +261,7 @@ async def _run(
                             "baseRefName": "main",
                         },
                         "object": {"oid": _BASE, "file": source_file},
-                        "pullRequests": _connection(
-                            [{"number": n} for n in sorted(history, reverse=True)]
-                        ),
+                        "pullRequests": _connection([{"number": n} for n in pull_ids]),
                     }
                 }
             return {}
@@ -471,6 +477,23 @@ async def test_feedback_checks_later_thread_and_reply_pages(
         monkeypatch, tmp_path / "run", history={8: [_thread(811)], 9: [*distractors, paginated]}
     )
     assert report["status"] == "complete"
+    assert report["staged"][0]["evidence"] == [
+        {"pull": 8, "comment": 811},
+        {"pull": 9, "comment": 911},
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["CLOSED", "MERGED"], ids=["closed", "merged"])
+async def test_feedback_history_includes_completed_pulls(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, state: str
+) -> None:
+    report, _, _ = await _run(
+        monkeypatch,
+        tmp_path / "run",
+        history={8: [_thread(811)], 9: [_thread(911)]},
+        historical_states={8: state},
+    )
     assert report["staged"][0]["evidence"] == [
         {"pull": 8, "comment": 811},
         {"pull": 9, "comment": 911},

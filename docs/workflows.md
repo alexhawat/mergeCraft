@@ -579,10 +579,11 @@ responsible for that choice. It prepares a hand-off, not an unattended fix.
 ## Learn from review feedback
 
 A full GitHub Actions review targeting the default branch looks for recurring
-feedback on mergeCraft inline findings. It reads the current PR and recent PRs
-targeting the same branch, up to 12 PRs in total. The review needs an attributable
-publisher, such as a dedicated reviewer App or a PAT identity. For an App whose
-installation token cannot identify its publisher, set
+feedback on mergeCraft inline findings. It reads the current PR and recent open,
+closed, and merged PRs targeting the same branch, up to 12 PRs in total. The
+review needs an attributable publisher, such as a dedicated reviewer App or a
+PAT identity. For an App whose installation token cannot identify its publisher,
+set
 `MERGECRAFT_REVIEWER_BOT_LOGIN` to the App's `<slug>[bot]` login in the trusted
 workflow. The shared `github-actions[bot]` identity cannot establish authorship.
 Feedback lookups are time-bounded and the review can proceed without them.

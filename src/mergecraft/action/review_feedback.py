@@ -64,7 +64,8 @@ query($owner: String!, $repo: String!, $number: Int!, $baseOid: GitObjectID!,
         }
       }
     }
-    pullRequests(first: $limit, baseRefName: $ref, orderBy: {field: CREATED_AT, direction: DESC}) {
+    pullRequests(first: $limit, baseRefName: $ref, states: [OPEN, CLOSED, MERGED],
+                 orderBy: {field: CREATED_AT, direction: DESC}) {
       totalCount
       pageInfo { hasNextPage }
       nodes { number }
