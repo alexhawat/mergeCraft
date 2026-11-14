@@ -139,7 +139,7 @@ description, and mode prompt all encode this rule.
 **`finding_fingerprint()` = `sha256(path + "\n" + casefolded whitespace-collapsed body)[:24]`.**
 Whitespace and case are normalized so re-wrapping a comment does not change the hash, letting
 a later run recognize a finding it already raised. The marker is stamped server-side in
-`mcp/review.py`. **Cost:** paraphrases and minor rewordings produce new fingerprints; the
+`mcp/review_publish.py`. **Cost:** paraphrases and minor rewordings produce new fingerprints; the
 tradeoff favors stable dedup over semantic similarity.
 
 ## Output cap

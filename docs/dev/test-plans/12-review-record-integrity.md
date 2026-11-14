@@ -70,9 +70,9 @@ Authoring wave: **W1** (`test-creator`). Implementation: **W2–W8**.
 | `TRAJECTORY_CHECKS` stamps | `evidence/trajectory_audit.py` | `test_w12_trajectory_attribution.py` |
 | `failure_class` | `evidence/trajectory.py` | `test_w13_trajectory_classify.py` (via auditor behaviour) |
 | `render_deterministic_review_block` | `findings/ledger.py` | `test_w15_deterministic_record.py` |
-| `merge_deterministic_preamble_into_review_body` | `mcp/review.py` | `test_w15_deterministic_record.py` |
+| `merge_deterministic_preamble_into_review_body` | `mcp/review_body.py` | `test_w15_deterministic_record.py` |
 | `publish_deterministic_record` | `main.py` | `test_w15_deterministic_record.py` |
-| anchor pre-validation | `mcp/review.py` / `convergence_runtime.py` | `test_w16_anchor_422_recovery.py` |
+| anchor pre-validation | `mcp/review_publish.py` / `convergence_runtime.py` | `test_w16_anchor_422_recovery.py` |
 | `run_health` | `evidence/packet.py` | `test_w17_packet_artifact_summary.py` |
 | `resolve_prepared_run_packet` | `evidence/run_packet.py` | `test_run_packet.py::test_resolve_prepared_run_packet_refinalizes_on_outcome_change` |
 | `render_step_summary` / `append_step_summary` | `utils/step_summary.py` | `test_w17_packet_artifact_summary.py` |

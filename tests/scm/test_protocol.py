@@ -116,7 +116,7 @@ _GITHUB_MCP_WRITE_TOOLS: frozenset[str] = frozenset(
 _CORE_SCM_MODULES: tuple[str, ...] = (
     "mergecraft.mcp.pr_info",
     "mergecraft.mcp.checkout",
-    "mergecraft.mcp.review",
+    "mergecraft.mcp.review_publish",
     "mergecraft.mcp.comment",
     "mergecraft.mcp.issue_comments",
     "mergecraft.mcp.issue_events",

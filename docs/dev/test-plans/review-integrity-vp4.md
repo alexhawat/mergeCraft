@@ -43,7 +43,7 @@ Never `strict=True` — `xfail_strict = true` in `pyproject.toml` would turn a l
 | `validate_submission` | `mcp/verdict.py` | `test_create_pull_request_review_delegates_to_recorder` (mapped approve + confirmed blocker is rejected; live tool must not bypass); `test_stale_approve_replay_does_not_github_approve_after_blocker` (same mapped payload must fail after the blocker is attached) |
 | `record_validated_terminal_submission` | `mcp/verdict.py` | `test_create_pull_request_review_delegates_to_recorder` (`callable` pin on the public recorder the delegate uses); `test_stale_approve_replay_does_not_github_approve_after_blocker` (hash-match replay must not skip re-validation before GitHub publish) |
 | `stamp_review_phase_on_active_span` | `mcp/verdict.py` | `test_phase_reaches_the_trace` (`callable` pin; live `checkout_pr` stamps `review.phase`) |
-| `publish_pull_request_review` | `mcp/review.py` | `test_publication_requires_a_validated_submission`, `test_publisher_is_not_an_mcp_tool` |
+| `publish_pull_request_review` | `mcp/review_publish.py` | `test_publication_requires_a_validated_submission`, `test_publisher_is_not_an_mcp_tool` |
 | `ToolSpec` | `mcp/shared.py` | `test_publisher_is_not_an_mcp_tool` (publisher is callable and is not a `ToolSpec`) |
 | `build_common_tools` / `build_orchestrator_tools` | `mcp/server.py` | `test_legacy_tool_still_registered`, `test_publisher_is_not_an_mcp_tool` |
 | `GatesSettings.terminal_verdict` / `default_settings` | `config/settings.py` | `test_enforce_is_default_after_this_pr`, `test_shadow_can_still_be_selected` |
@@ -103,7 +103,7 @@ No source-grep assertions. Delegate and phase tests drive the real tools. Prompt
 
 ## Impl notes for VP4.2
 
-- `create_pull_request_review_tool` constructs the same submission shape (`verdict` / `summary` / `findings`) and routes through `validate_submission` + the recorder used by `submit_review_verdict`. It must not write `ApprovalRecord` on a rejected attempt. GitHub posting moves to `publish_pull_request_review` in `mcp/review.py` (not a `ToolSpec`, not registered).
+- `create_pull_request_review_tool` constructs the same submission shape (`verdict` / `summary` / `findings`) and routes through `validate_submission` + the recorder used by `submit_review_verdict`. It must not write `ApprovalRecord` on a rejected attempt. GitHub posting moves to `publish_pull_request_review` in `mcp/review_publish.py` (not a `ToolSpec`, not registered).
 - `GatesSettings.terminal_verdict` default flips from `"shadow"` to `"enforce"`. `"shadow"` remains a valid `GateMode`.
 - `ReviewPhase` lives in `mcp/verdict.py` and is stored on `ToolState.review_phase`. Guard `submit_review_verdict` until `checkout_pr` has advanced the phase to `ESTABLISH_SCOPE` (or later). Stamp `review.phase` on the active span (`current_tracer()` / `_ACTIVE_SPAN`) so a wrapping `tool.call` span carries it.
 - Prompt File 3/4: replace only the terminal-protocol paragraph so `test_no_other_prompt_content_changed` stays green. Name the terminal act with `${t("submit_review_verdict")}` exactly once in each template.

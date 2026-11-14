@@ -45,7 +45,7 @@ _MISSING_TERMINAL_VERDICT_REASON = "no terminal review verdict was submitted for
 # #619 Task 3a — a distinct reason from the one above: the agent *did* record
 # a terminal verdict, but the review that carries it never reached GitHub
 # (every 422 recovery attempt failed; see
-# ``mcp/review.py::_create_github_review_with_anchor_recovery``). #619 hit
+# ``mcp/review_publish.py::create_github_review_with_anchor_recovery``). #619 hit
 # exactly this: ``create_pull_request_review`` 422'd three times and the run
 # still reported ``RunOutcome.passed`` because nothing downstream of the
 # publish call distinguished "never tried" from "tried and lost the review".

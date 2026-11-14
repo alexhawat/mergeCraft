@@ -49,11 +49,16 @@ APPROVAL_CHECK = "mergecraft-approval"
 Conclusion = Literal["success", "failure", "neutral"]
 
 
-def _run_url(ctx: ToolContext) -> str | None:
+def github_run_url(ctx: ToolContext) -> str | None:
+    """Return the Actions run URL, when the run has an ID."""
     if not ctx.run_id:
         return None
     server = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
     return f"{server}/{ctx.repo.owner}/{ctx.repo.name}/actions/runs/{ctx.run_id}"
+
+
+# Preserve the previous helper name for existing imports.
+_run_url = github_run_url
 
 
 def _reviewed_sha(
@@ -412,7 +417,7 @@ async def report_status_checks(
     if packet is not None and packet.run_health is not None:
         packet_findings.extend(packet.run_health.findings)
     approval = ctx.tool_state.approval
-    run_url = _run_url(ctx)
+    run_url = github_run_url(ctx)
     reviewed_sha = bound_sha or _reviewed_sha(approval, packet)
     coverage_line = _coverage_line(ctx, packet)
     completion_summary = _build_completion_summary(
@@ -590,5 +595,7 @@ __all__ = [
     "COMPLETION_CHECK",
     "CompletionConclusion",
     "Conclusion",
+    "_run_url",
+    "github_run_url",
     "report_status_checks",
 ]

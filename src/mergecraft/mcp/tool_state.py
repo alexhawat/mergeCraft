@@ -414,7 +414,7 @@ class ToolState:
     # 65536-character cap and was truncated before posting.
     review_body_truncated: bool = False
     # #619 Task 3a / #822 — set in the exception path of
-    # ``mcp/review.py::_create_github_review_with_anchor_recovery`` when
+    # ``mcp/review_publish.py::create_github_review_with_anchor_recovery`` when
     # every 422 recovery attempt, including the last resort, still failed:
     # the terminal verdict was recorded but never published to GitHub.
     # ``main_outcome.py`` maps this to ``RunOutcome.inconclusive`` rather
