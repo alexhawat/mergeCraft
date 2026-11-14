@@ -427,7 +427,8 @@ known spend subtotal includes every recorded amount and identifies how many
 reviews have only partial cost coverage. The report is written to stdout
 and the harness leaves the release baseline untouched.
 
-Use `make -C evals check` for the operator harness's lint, type and hermetic
-test checks. The root test target collects `tests/`.
+Run `make evals-check` from the repository root to lint, type-check, and test
+the harness without provider credentials. Both `make ci-static` and
+`make ci-resume` require this check.
 
 See the [1.0 exit criteria](release-criteria.md) for the publication bar.

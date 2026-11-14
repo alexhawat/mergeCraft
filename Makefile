@@ -24,7 +24,7 @@ SHELL := /bin/bash
 	mutation-test-decisions \
 	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-skill-corpus eval-cases-sync eval-cases-sync-check eval-gate eval-replay eval-convergence eval-harvest-failures eval-trajectory eval-trajectory-gate shadow-compare \
 	review-skill-taxonomy-check review-skill-spec-check \
-	bench-detect diagrams diagrams-check \
+	bench-detect evals-check diagrams diagrams-check \
 	test-integration test-integration-live test-otlp-collector test-durations test-durations-check coverage-measure coverage-combine-gate coverage-gate npm-audit workflow-lint \
 	lint-ruff-advisory hook-pins-check pins-check action-pin-check action-pin-staleness-check action-image-digest-check action-image-structure-check action-candidate-check action-images-resolve action-images-verify action-images-publish-canonical action-manifest-prepare action-pin-prepare \
 	tracked-markdown-check dead-code-check
@@ -342,11 +342,14 @@ reference-docs: docs ## Regenerate the README action + CLI reference tables (ali
 
 reference-docs-check: docs-check ## Fail when README reference tables drift (alias)
 
-ci-static: lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check pins-check action-pin-check test-durations-check mcp-server-json-check ## Static/build tier
+evals-check: ## Lint, typecheck, and test the repeated detection harness
+	$(MAKE) -C evals check UV="$(UV)"
+
+ci-static: lockcheck lint typecheck pyright evals-check catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check pins-check action-pin-check test-durations-check mcp-server-json-check ## Static/build tier
 	@echo "ci-static OK"
 
 # Ordered expansion of `make ci`, consumed by the resumable runner (scripts/ci_resume.sh).
-CI_STEPS := lockcheck lint typecheck pyright catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check pins-check action-pin-check test-durations-check security coverage-gate mcp-server-json-check
+CI_STEPS := lockcheck lint typecheck pyright evals-check catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check pins-check action-pin-check test-durations-check security coverage-gate mcp-server-json-check
 
 ci-steps: ## Print the ordered `make ci` step list (consumed by ci-resume)
 	@echo $(CI_STEPS)
