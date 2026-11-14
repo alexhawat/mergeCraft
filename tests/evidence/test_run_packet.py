@@ -1132,3 +1132,65 @@ def test_report_labels_and_calculates_review_pass_rate(tmp_path: Path) -> None:
     assert report["lite_runs"] == 1
     assert report["skipped_runs"] == 1
     assert report["invalid_packets"] == 1
+
+
+def test_report_counts_non_pr_and_oversized_packets(tmp_path: Path) -> None:
+    from typer.testing import CliRunner
+
+    from mergecraft.cli.app import app
+
+    ctx = _make_ctx(tmp_path)
+    assert _emit(ctx, run_succeeded=True, output_path=tmp_path / "packet-pr.json")
+    assert _emit(
+        ctx,
+        run_succeeded=True,
+        change_id="local/demo@main",
+        output_path=tmp_path / "packet-offline.json",
+    )
+    oversized = tmp_path / "packet-large.json"
+    with oversized.open("wb") as packet:
+        packet.truncate(16 * 1024 * 1024 + 1)
+
+    output = tmp_path / "summary.json"
+    result = CliRunner().invoke(app, ["report", str(tmp_path), "-o", str(output)])
+    assert result.exit_code == 0, result.output
+    report = json.loads(output.read_text())
+    assert report["runs"] == 1
+    assert report["non_pr_packets"] == 1
+    assert report["invalid_packets"] == 1
+
+
+@pytest.mark.parametrize(
+    ("limit_name", "limit_message"),
+    [
+        ("_MAX_TOTAL_BYTES", "MiB"),
+        ("_MAX_PACKETS", "files"),
+        ("_MAX_ENTRIES", "entries"),
+    ],
+    ids=["aggregate-bytes", "packet-count", "directory-entries"],
+)
+def test_report_does_not_write_output_when_input_limit_is_exceeded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, limit_name: str, limit_message: str
+) -> None:
+    from typer.testing import CliRunner
+
+    from mergecraft.cli.app import app
+    from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
+    from mergecraft.evidence import report
+
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    ctx = _make_ctx(tmp_path)
+    first = artifacts / "packet-first.json"
+    assert _emit(ctx, run_succeeded=True, output_path=first)
+    second = artifacts / "packet-second.json"
+    second.write_bytes(first.read_bytes())
+    limit = first.stat().st_size if limit_name == "_MAX_TOTAL_BYTES" else 1
+    monkeypatch.setattr(report, limit_name, limit)
+
+    output = tmp_path / "summary.json"
+    result = CliRunner().invoke(app, ["report", str(artifacts), "-o", str(output)])
+    assert result.exit_code == CLI_USAGE_EXIT_CODE, result.output
+    assert "exceed" in result.output
+    assert limit_message in result.output
+    assert not output.exists()
