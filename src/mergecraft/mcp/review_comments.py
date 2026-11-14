@@ -11,6 +11,7 @@ from mergecraft.mcp.shared import ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 _RESOLVE_THREAD = """
 mutation($threadId: ID!) {
@@ -57,8 +58,8 @@ async def resolve_review_thread(ctx: ToolContext, thread_id: str) -> bool:
     return thread.get("isResolved") is True
 
 
-def get_review_comments_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def get_review_comments_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         pull_number = int(params["pull_number"])
         include_resolved = bool(params.get("include_resolved", False))
         page = await fetch_review_thread_page(ctx, pull_number, include_resolved=include_resolved)
@@ -93,8 +94,8 @@ def get_review_comments_tool(ctx: ToolContext):
     )
 
 
-def list_pull_request_reviews_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def list_pull_request_reviews_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         pull_number = int(params["pull_number"])
 
         async def _page(query: dict[str, Any]) -> list[dict[str, Any]]:
@@ -141,8 +142,8 @@ def list_pull_request_reviews_tool(ctx: ToolContext):
     )
 
 
-def resolve_review_thread_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def resolve_review_thread_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, bool | str]:
         thread_id = str(params["thread_id"])
         is_resolved = await resolve_review_thread(ctx, thread_id)
         if is_resolved:

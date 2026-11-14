@@ -38,11 +38,11 @@ from mergecraft.ci.sarif_ingest import (
 from mergecraft.classify.triage import TriageDecision
 from mergecraft.config.env import ActionInputEnv, EnvSettingsError, validate_env_settings
 from mergecraft.config.settings import ReviewSettings
+from mergecraft.errors import AgentTimeoutError, ConfigurationError
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.fast_path import load_triage_inputs, triage_pull_request
 from mergecraft.findings.fix_brief import fix_brief_path
 from mergecraft.main_outcome import (
-    _is_review_mode,
     _publication_outcome_inputs,
     _publication_unproven,
     _publish_span_attrs,
@@ -81,6 +81,7 @@ from mergecraft.run_outcome import (
     outcome_with_disposition_ledger,
     run_succeeded_for_outcome,
 )
+from mergecraft.run_outcome import is_review_mode as _is_review_mode
 from mergecraft.scm.github import (
     create_github_scm,
     github_client_from_scm,
@@ -369,23 +370,9 @@ def _payload_to_ctx(payload: dict[str, Any]) -> ResolvedPayload:
     )
 
 
-class _AgentTimeoutError(RuntimeError):
-    """Marks the ``asyncio.wait_for`` timeout path (D3/W5.2).
-
-    A plain ``RuntimeError`` would be indistinguishable from any other agent
-    crash once it reaches the outer catch-all; this subclass lets
-    ``_classify_error_outcome`` tag it ``RunOutcome.timed_out`` instead of
-    the generic ``infra_error`` default.
-    """
-
-
-class _ConfigurationError(RuntimeError):
-    """Marks fail-closed configuration errors (D4/W6.3).
-
-    Raised for unparseable Action inputs (e.g. ``timeout``) so the outer
-    handler can tag ``RunOutcome.configuration_error`` without confusing
-    them with infra crashes.
-    """
+# Keep these names available for existing callers of the Action entry point.
+_AgentTimeoutError = AgentTimeoutError
+_ConfigurationError = ConfigurationError
 
 
 def _classify_error_outcome(error: BaseException) -> RunOutcome:

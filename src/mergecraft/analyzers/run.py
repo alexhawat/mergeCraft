@@ -16,6 +16,7 @@ from loguru import logger
 
 from mergecraft.analyzers._resource_limits import resource_limited_argv
 from mergecraft.analyzers.redact import redact_analyzer_output, redact_secrets
+from mergecraft.errors import ConfigurationError
 from mergecraft.utils.process_group import kill_process_group, track_process_group
 from mergecraft.utils.process_scope import check_process_cancelled
 from mergecraft.utils.secrets import filter_env
@@ -206,12 +207,11 @@ def _trusted_identity_drop(
     ):
         return plan, None
     from mergecraft.analyzers import sandbox as sandbox_mod
-    from mergecraft.main import _ConfigurationError
     from mergecraft.utils.privilege import _path_owned_by_uid
 
     try:
         drop = sandbox_mod.build_privilege_drop_argv()
-    except _ConfigurationError as exc:
+    except ConfigurationError as exc:
         return plan, f"identity drop unavailable, analyzer not run as root: {exc}"
     if not drop:
         return plan, None
@@ -663,11 +663,10 @@ def run_version_probe(
     prefix: list[str] = []
     if sys.platform != "win32" and os.geteuid() == 0:
         from mergecraft.analyzers.sandbox import build_privilege_drop_argv
-        from mergecraft.main import _ConfigurationError
 
         try:
             prefix = build_privilege_drop_argv()
-        except _ConfigurationError as exc:
+        except ConfigurationError as exc:
             logger.info(
                 "version probe for {} not run: identity drop unavailable ({})", argv[0], exc
             )

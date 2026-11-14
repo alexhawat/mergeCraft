@@ -23,6 +23,7 @@ from mergecraft.utils.learnings import (
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 
 def _footer(ctx: ToolContext) -> str:
@@ -44,8 +45,8 @@ def add_footer(ctx: ToolContext, body: str) -> str:
     return f"{cleaned}{_footer(ctx)}"
 
 
-def create_issue_comment_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def create_issue_comment_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         issue_number = int(params["issueNumber"])
         body = add_footer(ctx, str(params["body"]))
         result = await ctx.scm.create_issue_comment(
@@ -93,8 +94,8 @@ def create_issue_comment_tool(ctx: ToolContext):
     )
 
 
-def edit_issue_comment_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def edit_issue_comment_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         comment_id = int(params["commentId"])
         body = add_footer(ctx, str(params["body"]))
         result = await ctx.scm.update_issue_comment(ctx.repo.owner, ctx.repo.name, comment_id, body)
@@ -124,8 +125,8 @@ def edit_issue_comment_tool(ctx: ToolContext):
     )
 
 
-def reply_to_review_comment_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def reply_to_review_comment_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         pull_number = int(params["pull_number"])
         comment_id = int(params["comment_id"])
         body_with_footer = add_footer(ctx, str(params["body"]))
@@ -182,8 +183,8 @@ def reply_to_review_comment_tool(ctx: ToolContext):
     )
 
 
-def report_progress_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def report_progress_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         body = str(params["body"])
         target_plan = bool(params.get("target_plan_comment"))
         if ctx.tool_state.selected_mode in {"Review", INCREMENTAL_REVIEW_MODE} and not target_plan:

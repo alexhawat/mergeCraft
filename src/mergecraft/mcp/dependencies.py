@@ -18,6 +18,7 @@ from mergecraft.prep import (
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 
 def _format_prep_results(results: list[PrepResult], *, scope_notice: str | None = None) -> str:
@@ -96,8 +97,8 @@ def start_installation(ctx: ToolContext) -> None:
     task.add_done_callback(_done)
 
 
-def start_dependency_installation_tool(ctx: ToolContext):
-    async def _run(_params: dict[str, Any]):
+def start_dependency_installation_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(_params: dict[str, Any]) -> dict[str, str]:
         state = ctx.tool_state.dependency_installation
         if state and state.status in {"completed", "failed"}:
             return {
@@ -136,8 +137,8 @@ def start_dependency_installation_tool(ctx: ToolContext):
     )
 
 
-def await_dependency_installation_tool(ctx: ToolContext):
-    async def _run(_params: dict[str, Any]):
+def await_dependency_installation_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(_params: dict[str, Any]) -> dict[str, str]:
         if ctx.tool_state.dependency_installation is None:
             start_installation(ctx)
         state = ctx.tool_state.dependency_installation

@@ -23,6 +23,7 @@ from loguru import logger
 from mergecraft.analyzers._resource_limits import resource_limited_argv
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.config.env import ALLOW_UNSANDBOXED_SHELL_ENV, ControlSwitches
+from mergecraft.errors import ConfigurationError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -973,11 +974,9 @@ _CAPABILITY_DROP_FLAGS = (
 _PDEATHSIG_FLAGS = ("--pdeathsig", "KILL")
 
 
-def _privilege_configuration_error(message: str) -> Exception:
-    """Return a ``main._ConfigurationError`` (imported lazily; no import cycle)."""
-    from mergecraft.main import _ConfigurationError
-
-    return _ConfigurationError(message)
+def _privilege_configuration_error(message: str) -> ConfigurationError:
+    """Build the configuration error reported when a sandbox privilege drop is refused."""
+    return ConfigurationError(message)
 
 
 def _require_hardened_setpriv() -> None:
@@ -1063,7 +1062,7 @@ def build_privilege_drop_argv(*, to_orchestrator: bool = False) -> list[str]:
       2. otherwise — the agent user, through
          :func:`mergecraft.utils.privilege.wrap_agent_command`, reusing its
          fail-closed resolution (missing ``setpriv``, missing user, or a user
-         resolving to UID/GID 0 all raise ``main._ConfigurationError``).
+         resolving to UID/GID 0 all raise ``ConfigurationError``).
 
     Every returned prefix carries ``--no-new-privs --inh-caps=-all
     --ambient-caps=-all --bounding-set=-all`` and re-arms the parent-death signal
@@ -1106,7 +1105,7 @@ def build_privilege_drop_argv(*, to_orchestrator: bool = False) -> list[str]:
     from mergecraft.utils.privilege import wrap_agent_command
 
     # wrap_agent_command validates setpriv, the user record and the UID/GID and
-    # raises main._ConfigurationError when the drop cannot land.
+    # raises ConfigurationError when the drop cannot land.
     resolved = wrap_agent_command([_DROP_SENTINEL])
     if _DROP_SENTINEL not in resolved:
         return []
@@ -1353,7 +1352,7 @@ def process_limit_for_drop(
     candidate, so it can always fork, and the ``RLIMIT_NPROC`` cap is still
     finite — never removed.
 
-    Fails closed with ``main._ConfigurationError`` when no candidate within the
+    Fails closed with ``ConfigurationError`` when no candidate within the
     bound is accepted — the drop must not be attempted with a cap that cannot
     carry it. When the probe cannot run at all (no ``setpriv``) the drop path
     already fails closed with a named configuration error, so this falls back to

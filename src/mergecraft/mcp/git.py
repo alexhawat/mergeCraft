@@ -70,6 +70,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 __all__ = [
     "_BAD_REF_CHARS",
@@ -878,12 +879,12 @@ def _repo_dir_for(ctx: ToolContext, repo: object) -> str:
     return state.dir
 
 
-def git_tool(ctx: ToolContext):
+def git_tool(ctx: ToolContext) -> ToolSpec:
     # Only immutable revision/path resolutions are reusable. Symbolic refs must
     # still be resolved each time because they can move outside this tool.
     immutable_show_ids: dict[str, tuple[str, str]] = {}
 
-    async def _run(params: dict[str, Any]):
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         command = str(params["command"]).strip()
         args = list(params.get("args") or [])
         # Deliberate tolerance for agent callers: the reviewing agent is often
@@ -1052,8 +1053,8 @@ def _is_shallow_repository(cwd: str) -> bool:
     return out.strip() == "true"
 
 
-def git_fetch_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def git_fetch_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, bool | str]:
         cwd = primary_repo_state(ctx.tool_state).dir
         refspec = params.get("refspec")
         args = ["fetch", "--no-tags"]

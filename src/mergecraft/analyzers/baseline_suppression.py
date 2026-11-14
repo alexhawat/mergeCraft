@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Literal
 from loguru import logger
 
 from mergecraft.analyzers.scope import DiffScope, changed_paths_from_scope, parse_diff_scope
+from mergecraft.errors import ConfigurationError
 from mergecraft.review_policy.paths import normalize_repo_path
 from mergecraft.utils.git_hardening import git_argv
 
@@ -133,7 +134,6 @@ def _hand_worktree_to_drop_target(worktree: Path) -> None:
     if sys.platform == "win32" or os.geteuid() != 0:
         return
     from mergecraft.analyzers import sandbox as sandbox_mod
-    from mergecraft.main import _ConfigurationError
 
     try:
         if not sandbox_mod.build_privilege_drop_argv():
@@ -143,7 +143,7 @@ def _hand_worktree_to_drop_target(worktree: Path) -> None:
         if uid is None or gid is None:
             return
         sandbox_mod.hand_tree_to_drop_target(worktree, boundary=worktree, uid=uid, gid=gid)
-    except (_ConfigurationError, OSError) as exc:
+    except (ConfigurationError, OSError) as exc:
         logger.info("baseline suppression: could not hand {} to the drop target: {}", worktree, exc)
 
 
