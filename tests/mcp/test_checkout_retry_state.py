@@ -85,6 +85,7 @@ async def test_checkout_retry_invalidates_old_scope_and_can_recover(
         _git, tmp_path / "origin.git", "update-ref", "refs/pull/1/head", old_sha
     )
     ctx = _ctx_for(repo, scm, tmp_path, mode="Review", analyzers_mode="off")
+    evidence_run_id = ctx.tool_state.evidence_run_id
     declaration = ScopeDeclaration(
         declared=True, globs=("*.py",), source_ref="pr_description", rejected=()
     )
@@ -156,6 +157,7 @@ async def test_checkout_retry_invalidates_old_scope_and_can_recover(
     assert state.review_phase == "INIT"
     assert state.output is None
     assert state.checkout_scope_invalidated
+    assert state.evidence_run_id == evidence_run_id
     assert state.approval is state.pending_review_publication is state.prepared_run_packet is None
     assert not state.agent_findings
     assert state.red_green is None
@@ -192,6 +194,7 @@ async def test_checkout_retry_invalidates_old_scope_and_can_recover(
     assert "new.py" in await asyncio.to_thread(Path(primary.diff_path).read_text)
     assert state.scope_provenance == "checkout"
     assert not state.checkout_scope_invalidated
+    assert state.evidence_run_id == evidence_run_id
     await asyncio.to_thread(state.review_tree_baseline.verify)
     ensure_review_scope_for_terminal(state, "submit_review_verdict")
     assert any(call.signature == "read-while-checkout-is-pending" for call in state.tool_calls)
