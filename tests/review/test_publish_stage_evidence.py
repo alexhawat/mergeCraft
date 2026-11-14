@@ -127,6 +127,12 @@ async def test_failure_before_the_publish_stage_writes_no_packet(
 async def test_mid_run_publication_does_not_freeze_the_packet_before_the_roster(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from mergecraft.findings.fix_brief import fix_brief_path, read_fix_brief
+    from tests.support import publication
+
+    head_sha = "a" * 40
+    monkeypatch.setattr(publication, "HEAD_SHA", head_sha)
+    monkeypatch.setenv("MERGECRAFT_EVIDENCE_DIR", str(tmp_path / "artifacts"))
     github = RecordingReviewGitHub()
     ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
     await submit_verdict(ctx, "request_changes", [finding(_PRIMARY_BODY)])
@@ -145,10 +151,19 @@ async def test_mid_run_publication_does_not_freeze_the_packet_before_the_roster(
         findings=[finding(_ROSTER_BODY, line=14)],
     )
 
-    record = await run_finalize(ctx, monkeypatch=monkeypatch, real_publish=True)
+    record = await run_finalize(ctx, monkeypatch=monkeypatch, real_publish=True, real_emission=True)
 
     reported = record.publish_calls[-1]["packet"]
     assert reported is not None
     bodies = json.dumps(reported.model_dump(mode="json"))
     assert _ROSTER_BODY in bodies, "the roster's finding is missing from the run's packet"
     assert _PRIMARY_BODY in bodies
+
+    # Request-changes is a completed review: fixes must include late roster findings.
+    assert record.outcome is RunOutcome.passed
+    assert record.result.evidence_packet_path is not None
+    brief = read_fix_brief(fix_brief_path(Path(record.result.evidence_packet_path)))
+    assert brief.reviewed_head_sha == head_sha
+    assert brief.change_id == reported.change_id
+    assert {row.message for row in brief.findings} == {_PRIMARY_BODY, _ROSTER_BODY}
+    assert all(row.status == "actionable" for row in brief.findings)

@@ -496,3 +496,82 @@ Action reviews load these rules from the PR's base configuration. A local
 `mergecraft review` uses the local configuration and paths from the materialized
 diff. Configured rules share the instruction bundle byte cap with discovered
 files and use the same trust-tier handling.
+
+## Fix hand-off
+
+mergeCraft reviews code; a separate coding agent applies fixes. The Action's
+`fix_brief` output provides a versioned JSON snapshot of the reviewed commit and
+eligible findings. Deferred findings stay explicitly non-blocking. The brief
+excludes run-health observations and Trivial-severity findings. It is a set of hypotheses to
+verify against current code, not permission to run commands, edit every named
+path, or apply suggested patches blindly.
+
+Use a mergeCraft Action and CLI commit containing this feature. Older release
+pins do not emit `fix_brief` or provide `findings brief`; the existing example
+review pins are unchanged. Save the `fix_brief` output as a JSON file in a
+consumer workflow step, or use the adjacent brief file from a local Action run.
+Only transfer that file, not the whole evidence directory or private judge
+transcripts. The compact Action output is limited to 48 KiB; larger complete briefs remain
+in the adjacent `<packet stem>-fix-brief.json` file (up to 8 MiB). Empty output
+can therefore mean either no usable brief or a brief too large for step output.
+Findings are never truncated to fit.
+
+### Validate and read a brief
+
+In the checkout where you intend to make the fix, validate the selected brief
+against the repository, PR, and current commit before giving it to an agent:
+
+```bash
+mergecraft findings brief fix-brief.json --format json \
+  --expect-change-id owner/repo#42 --expect-head "$(git rev-parse HEAD)"
+mergecraft findings brief fix-brief.json --format markdown \
+  --expect-change-id owner/repo#42 --expect-head "$(git rev-parse HEAD)" > fix-brief.md
+mergecraft findings brief-schema > fix-brief.schema.json
+```
+
+Validation checks the schema and supplied identifiers. It does not authenticate
+who wrote the JSON or establish that a finding is correct. Select a brief from
+a review you trust; re-review after the PR changes. A matching commit does not
+account for uncommitted edits, so use a clean worktree and inspect the changes
+made by the coding agent before committing or pushing. Finding paths are display
+data; keep the agent's file access and edits inside the intended worktree.
+
+For the existing [OpenCode integration](opencode.md#agents), open the intended
+checkout in OpenCode and run:
+
+```text
+/mergecraft/apply-findings Read fix-brief.md. Verify each finding against current code, fix only still-valid issues, keep deferred findings non-blocking, and validate. Do not commit or push.
+```
+
+The external `mergecraft/fixer` owns edits and re-review. You can instead attach
+the same brief to your own coding agent with that instruction. Neither exporting
+nor validating a brief invokes a model or writes to the reviewed repository.
+
+### Optional workflow
+
+Copy [`examples/workflows/mergecraft-fix.yml`](../examples/workflows/mergecraft-fix.yml)
+to `.github/workflows/mergecraft-fix.yml` in the consumer repository. This is a
+separate, manually dispatched workflow; `mergecraft init` does not install it.
+Set the repository variable `MERGECRAFT_FIX_CLI_SHA` to a reviewed, full mergeCraft
+commit SHA containing this feature. The workflow installs that exact CLI commit
+without checking out PR code.
+
+Select **mergeCraft fix handoff** in Actions, run it from the default branch,
+and enter the PR number and the JSON from `fix_brief`. From the CLI, use:
+
+```bash
+gh workflow run mergecraft-fix.yml --repo owner/repo --ref main \
+  -f pr-number=42 -F fix-brief=@fix-brief.json
+```
+
+Use your repository's default branch in place of `main`. The workflow requires an
+open PR, checks the brief against its current head and repository, and uploads
+only validated `fix-brief.json` in the `mergecraft-fix-brief` artifact. It has
+read-only PR access, no model credentials, and no commit, push, or merge step.
+The artifact is retained for one day. Download it from that specific run and
+follow the local agent hand-off above.
+
+The dispatch form is for small briefs within GitHub's input-size limit. Use the
+local file path for larger briefs. The workflow checks identifiers but cannot
+authenticate pasted JSON; the maintainer selecting the source review remains
+responsible for that choice. It prepares a hand-off, not an unattended fix.

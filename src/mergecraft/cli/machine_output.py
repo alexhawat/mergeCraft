@@ -50,6 +50,8 @@ ROOT_FORMAT_COMMANDS: frozenset[tuple[str, ...]] = frozenset(
         ("evidence", "show"),
         ("evidence", "verify"),
         ("findings", "_by_review_id"),
+        ("findings", "brief"),
+        ("findings", "brief-schema"),
         ("findings", "export"),
         ("findings", "ledger"),
         ("health", "run"),

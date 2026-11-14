@@ -58,6 +58,7 @@ async def run_finalize(
     terminal_verdict: str = "enforce",
     settings: RepoSettings | None = None,
     real_publish: bool = False,
+    real_emission: bool = False,
 ) -> FinalizeRecord:
     """Run Phase 4 for ``ctx`` and return the outcome it handed to ``_publish``.
 
@@ -65,7 +66,8 @@ async def run_finalize(
     record is rendered and upserted onto the posted review through the GitHub
     fake — and records the status-check call instead (its kwargs carry the same
     ``outcome`` / ``failure_reason``). In that mode learnings persistence, SARIF
-    upload and packet emission are replaced with no-ops.
+    upload are replaced with no-ops. ``real_emission=True`` also retains the
+    real evidence/brief emitter; otherwise packet emission is a no-op.
     """
     publish_calls: list[dict[str, Any]] = []
 
@@ -79,7 +81,8 @@ async def run_finalize(
         monkeypatch.setattr(main_mod, "report_status_checks", _record)
         monkeypatch.setattr(main_mod, "persist_learnings", _noop)
         monkeypatch.setattr(main_mod, "report_sarif_upload", _noop)
-        monkeypatch.setattr(main_mod, "emit_run_packet", lambda *_a, **_k: None)
+        if not real_emission:
+            monkeypatch.setattr(main_mod, "emit_run_packet", lambda *_a, **_k: None)
     else:
         monkeypatch.setattr(main_mod, "_publish", _record)
     monkeypatch.setattr(main_mod, "_scan_sinks_after_run", lambda *_a, **_k: None)
