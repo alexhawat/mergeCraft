@@ -65,6 +65,17 @@ def _codex(tracer: Any) -> None:
     item = {"type": "tool_call", "id": "tool-1", "name": "shell", "input": _INPUT_MARKER}
     handler(acc, {"type": "item.started", "item": item})
     handler(acc, {"type": "item.completed", "item": item})
+    handler(
+        acc,
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "tool_result",
+                "tool_call_id": "tool-1",
+                "output": _OUTPUT_MARKER,
+            },
+        },
+    )
     close_all()
 
 

@@ -299,18 +299,16 @@ def maybe_audit_blocking_terminal_submission(
     ctx: ToolContext,
     recorded: TerminalSubmission,
 ) -> None:
-    """Record enterprise audit for every terminal non-approve verdict (#417).
+    """Record enterprise audit for every terminal verdict.
 
-    ``approve`` submissions are omitted. ``request_changes`` and any other
-    non-approve terminal verdict are persisted with ``event_type=terminal_verdict``
+    All terminal verdicts, including ``approve``, are persisted with
+    ``event_type=terminal_verdict``
     so ``mergecraft audit export`` can replay the full decision surface, not only
     runs whose graded state blocks approval.
 
     Fail-open: audit persistence errors are logged and swallowed so a broken
     audit sink cannot block the review terminal path.
     """
-    if recorded.verdict == "approve":
-        return
     from mergecraft.mcp.tool_state import primary_repo_state
 
     try:

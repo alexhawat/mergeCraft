@@ -1,14 +1,12 @@
-"""RED contracts for Batch Q / #292 — pin ``MERGECRAFT_TRACE_ID`` + reuse Tracer (W3).
+"""Repeated tracer lookups share identity without pinning generated IDs in the environment.
 
-MCP ``tools/call`` handlers invoke ``get_tracer_from_settings`` on a worker
-thread with no active span. Today each call mints a fresh ``Tracer`` and a new
-``uuid4`` ``trace_id``, splitting the Logfire tree. W4 must ``setdefault``
-``MERGECRAFT_TRACE_ID`` on first mint and reuse a process-wide ``Tracer`` when
-settings/sink match (D9 — no ``mcp/server.py`` edits).
+Run lifecycle owners request a fresh tracer; detached helpers within the run
+reuse its identity. Generated IDs must not leak into later review lifecycles.
 """
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import pytest
@@ -82,10 +80,10 @@ def test_get_tracer_from_settings_shares_trace_id_without_active_span(
     assert first.trace_id == second.trace_id
 
 
-def test_first_get_tracer_from_settings_sets_mergecraft_trace_id_env(
+def test_first_get_tracer_from_settings_keeps_generated_trace_id_local(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """First mint pins ``MERGECRAFT_TRACE_ID`` for downstream MCP tool calls."""
+    """Cached helper lookups reuse identity without changing process environment."""
     pytest.importorskip("opentelemetry")
 
     from mergecraft.config import RepoSettings
@@ -111,3 +109,4 @@ def test_first_get_tracer_from_settings_sets_mergecraft_trace_id_env(
     assert again is tracer
     assert len(tracer.trace_id) == 32
     int(tracer.trace_id, 16)
+    assert "MERGECRAFT_TRACE_ID" not in os.environ

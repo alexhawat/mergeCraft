@@ -60,6 +60,7 @@ _SCRUB_EXACT = frozenset(
         "SSL_CERT_FILE",
         "SSL_CERT_DIR",
         "REQUESTS_CA_BUNDLE",
+        "NODE_EXTRA_CA_CERTS",
         "CURL_CA_BUNDLE",
         "ANTHROPIC_AUTH_TOKEN",
         "CODEX_HOME",
