@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.findings.threads import fetch_review_threads
+from mergecraft.scm.github import GitHubScmAdapter
 from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
@@ -135,7 +136,7 @@ async def test_feedback_comments_use_full_github_database_ids() -> None:
     ]
     github = PagingGitHub([thread])
 
-    page = await fetch_review_threads(github, "o", "r", 7, include_feedback=True)  # type: ignore[arg-type]
+    page = await fetch_review_threads(GitHubScmAdapter(github), "o", "r", 7, include_feedback=True)
 
     assert page.incomplete is False
     assert page.threads[0]["comments"][0]["id"] == 9_007_199_254_740_993
