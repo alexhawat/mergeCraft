@@ -93,6 +93,7 @@ evals/results/structural-replay-convergence-*.json
 # content under .mergecraft/ stays tracked via the negations below.
 /.mergecraft/*
 !/.mergecraft/config.yaml
+!/.mergecraft/approved-feedback.json
 !/.mergecraft/learnings.md
 !/.mergecraft/xrepo-learnings.md
 !/.mergecraft/xrepo-brief.md

@@ -14,7 +14,7 @@ import httpx
 from loguru import logger
 
 from mergecraft.findings.materiality import DISMISSAL_REASON_CODES
-from mergecraft.findings.threads import fetch_review_threads
+from mergecraft.findings.threads import fetch_review_threads, positive_database_id
 from mergecraft.memory.feedback import (
     APPROVED_FEEDBACK_PATH,
     MAX_APPROVAL_BYTES,
@@ -78,12 +78,6 @@ def _mapping(value: object) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _positive_id(value: object) -> int | None:
-    if isinstance(value, str) and re.fullmatch(r"[1-9][0-9]{0,18}", value):
-        value = int(value)
-    return value if type(value) is int and value > 0 else None
-
-
 def _read_approval(
     blob_commit: object, *, base_sha: str, repository: str
 ) -> tuple[ApprovedFeedback, ...]:
@@ -116,7 +110,7 @@ def _recent_pulls(connection: object, *, current: int) -> tuple[list[int], bool,
     more = _mapping(page.get("pageInfo")).get("hasNextPage")
     if not isinstance(nodes, list) or type(count) is not int or not isinstance(more, bool):
         return [current], False, False
-    numbers = [_positive_id(_mapping(node).get("number")) for node in nodes]
+    numbers = [positive_database_id(_mapping(node).get("number")) for node in nodes]
     if (
         count < len(nodes)
         or None in numbers
@@ -140,7 +134,7 @@ class _GitHubFeedback:
 
     async def _actor_can_write(self, actor: object, *, id_key: str) -> bool:
         user = _mapping(actor)
-        login, actor_id = user.get("login"), _positive_id(user.get(id_key))
+        login, actor_id = user.get("login"), positive_database_id(user.get(id_key))
         if not isinstance(login, str) or not _LOGIN.fullmatch(login) or actor_id is None:
             return False
         if is_publisher_login(login, self.publishers):
@@ -168,7 +162,7 @@ class _GitHubFeedback:
                 and permission in _WRITERS
                 and returned.get("type") == "User"
                 and str(returned.get("login") or "").casefold() == key[0]
-                and _positive_id(returned.get("id")) == actor_id
+                and positive_database_id(returned.get("id")) == actor_id
             ):
                 self.permissions[key] = True
             else:
@@ -252,12 +246,12 @@ class _GitHubFeedback:
                 or not is_publisher_authored_comment(root, self.publishers)
             ):
                 continue
-            path, comment = root.get("path"), _positive_id(root.get("fullDatabaseId"))
+            path, comment = root.get("path"), root.get("id")
             fingerprints = finding_fingerprints_in(str(root.get("body") or ""))
             if (
                 not isinstance(path, str)
                 or not is_feedback_path(path)
-                or comment is None
+                or type(comment) is not int
                 or len(fingerprints) != 1
             ):
                 continue
@@ -308,7 +302,7 @@ async def collect_review_feedback(
         return None, ()
     tool = ctx.tool_context
     pull = _mapping((ctx.gh_event or {}).get("pull_request"))
-    number = _positive_id(pull.get("number"))
+    number = positive_database_id(pull.get("number"))
     base, head = _mapping(pull.get("base")), _mapping(pull.get("head"))
     base_sha, head_sha, ref = base.get("sha"), head.get("sha"), base.get("ref")
     if not isinstance(base_sha, str) or not isinstance(head_sha, str):

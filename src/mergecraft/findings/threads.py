@@ -21,10 +21,12 @@ Exports:
     COMMENTS_PAGE_SIZE, COMMENTS_MAX_PAGES: Per-thread comment paging bounds.
     fetch_review_threads: Read one pull request's review threads.
     rest_style_login: Normalize a GraphQL comment author to its REST login.
+    positive_database_id: Normalize a GitHub numeric identifier to a positive integer.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final
 
@@ -121,6 +123,13 @@ def _thread_queries(*, feedback: bool) -> tuple[str, str]:
 
 THREADS_QUERY, THREAD_COMMENTS_QUERY = _thread_queries(feedback=False)
 _FEEDBACK_THREADS_QUERY, _FEEDBACK_THREAD_COMMENTS_QUERY = _thread_queries(feedback=True)
+
+
+def positive_database_id(value: object) -> int | None:
+    """Normalize GitHub's integer or decimal string IDs without rounding."""
+    if isinstance(value, str) and re.fullmatch(r"[1-9][0-9]{0,18}", value):
+        value = int(value)
+    return value if type(value) is int and value > 0 else None
 
 
 def rest_style_login(author: object) -> str:
@@ -323,7 +332,11 @@ async def fetch_review_threads(
         incomplete = incomplete or comments_truncated
         comments = [
             {
-                "id": c.get("databaseId"),
+                "id": (
+                    positive_database_id(c.get("fullDatabaseId"))
+                    if include_feedback
+                    else c.get("databaseId")
+                ),
                 "body": c.get("body"),
                 "author": rest_style_login(c.get("author")),
                 "path": c.get("path"),
@@ -334,7 +347,6 @@ async def fetch_review_threads(
                     {
                         key: c[key]
                         for key in (
-                            "fullDatabaseId",
                             "authorAssociation",
                             "state",
                             "feedbackActor",
@@ -371,5 +383,6 @@ __all__ = [
     "THREAD_COMMENTS_QUERY",
     "ReviewThreadPage",
     "fetch_review_threads",
+    "positive_database_id",
     "rest_style_login",
 ]
