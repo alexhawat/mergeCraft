@@ -135,3 +135,17 @@ def test_tracker_records_last_exhausted_for_orchestrator_drain() -> None:
     # Draining the tracker surfaces the same outcome mapping the orchestrator
     # would apply (D12 — inconclusive never a partial approval).
     assert budget_exhaustion_outcome(tracker.last_exhausted) is RunOutcome.inconclusive
+
+
+def test_cost_budget_default_and_explicit_overrides() -> None:
+    from mergecraft.config.settings import RepoSettings
+
+    explicit = RepoSettings.model_validate({"runBounds": {"costBudgetUsd": 5.0}})
+    assert resolve_run_bounds(env={}).cost_budget_usd == 3.0
+    assert resolve_run_bounds(settings=explicit, env={}).cost_budget_usd == 5.0
+    assert (
+        resolve_run_bounds(
+            settings=explicit, env={"MERGECRAFT_COST_BUDGET_USD": "4.0"}
+        ).cost_budget_usd
+        == 4.0
+    )

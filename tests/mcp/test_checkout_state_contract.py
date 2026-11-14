@@ -38,6 +38,7 @@ RETAINED_TOOL_FIELDS = {
     "dependency_installation",
     "diff_budget_reason",
     "driver_reports_reads",
+    "evidence_run_id",
     "existing_plan_comment_id",
     "fallback_index",
     "fallback_occurred",

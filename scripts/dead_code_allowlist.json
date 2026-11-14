@@ -352,6 +352,7 @@
       "src/mergecraft/evidence/packet.py:variable:evals",
       "src/mergecraft/evidence/packet.py:variable:read_tool_calls",
       "src/mergecraft/evidence/packet.py:variable:read_tool_turns",
+      "src/mergecraft/evidence/packet.py:variable:recorded_cost_usd",
       "src/mergecraft/evidence/trajectory.py:variable:commands_run",
       "src/mergecraft/evidence/trajectory.py:variable:failures_observed",
       "src/mergecraft/evidence/trajectory.py:variable:fixes_after_failures",

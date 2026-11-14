@@ -994,7 +994,7 @@ class RunBoundsSettings(BaseModel):
             "0 restores strict target enforcement."
         ),
     )
-    cost_budget_usd: float = Field(default=50.0, alias="costBudgetUsd", gt=0)
+    cost_budget_usd: float = Field(default=3.0, alias="costBudgetUsd", gt=0)
     tool_call_budget: int = Field(default=500, alias="toolCallBudget", gt=0)
     max_diff_lines: int = Field(default=50_000, alias="maxDiffLines", gt=0)
     context_retrieval_timeout_s: int = Field(

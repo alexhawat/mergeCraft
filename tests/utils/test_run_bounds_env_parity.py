@@ -61,9 +61,9 @@ _FROZEN: dict[tuple[str, str], int | float] = {
     ("MERGECRAFT_TOKEN_BUDGET", "empty"): 2_000_000,
     ("MERGECRAFT_TOKEN_BUDGET", "blank"): 2_000_000,
     ("MERGECRAFT_TOKEN_BUDGET", "zero"): 2_000_000,  # `or cfg.x` — falls through
-    ("MERGECRAFT_COST_BUDGET_USD", "unset"): 50.0,
-    ("MERGECRAFT_COST_BUDGET_USD", "empty"): 50.0,
-    ("MERGECRAFT_COST_BUDGET_USD", "blank"): 50.0,
+    ("MERGECRAFT_COST_BUDGET_USD", "unset"): 3.0,
+    ("MERGECRAFT_COST_BUDGET_USD", "empty"): 3.0,
+    ("MERGECRAFT_COST_BUDGET_USD", "blank"): 3.0,
     ("MERGECRAFT_COST_BUDGET_USD", "zero"): 0.0,  # `is None` — honoured
     ("MERGECRAFT_TOOL_CALL_BUDGET", "unset"): 500,
     ("MERGECRAFT_TOOL_CALL_BUDGET", "empty"): 500,

@@ -1264,6 +1264,29 @@ def _resolve_shadow_tracer(ctx: ToolContext) -> Any | None:
         return None
 
 
+def _with_recorded_metrics(packet: MergeEvidencePacket, ctx: ToolContext) -> MergeEvidencePacket:
+    """Attach the final measurements without changing the cached verdict packet."""
+    from mergecraft.utils.review_cost import recorded_run_cost
+
+    updates: dict[str, Any] = {"run_id": ctx.tool_state.evidence_run_id}
+    metrics = packet.run_metrics
+    if metrics is not None:
+        cost = recorded_run_cost(ctx.tool_state.usage_entries, budget_tracker=ctx.budget_tracker)
+        phases = {**metrics.phase_elapsed_s, **ctx.tool_state.phase_elapsed_s}
+        # Only finalized execution belongs in the stored report metrics.
+        if "agent" not in ctx.tool_state.phase_elapsed_s:
+            phases.pop("agent", None)
+        updates["run_metrics"] = metrics.model_copy(
+            update={
+                "phase_elapsed_s": phases,
+                "recorded_cost_usd": cost.amount_usd,
+                "cost_availability": cost.availability,
+                "cost_notes": list(cost.notes),
+            }
+        )
+    return packet.model_copy(update=updates)
+
+
 def emit_run_packet(
     ctx: ToolContext,
     *,
@@ -1295,7 +1318,7 @@ def emit_run_packet(
         path = output_path or resolve_packet_path(
             tmpdir=ctx.tmpdir, change_slug=_slugify(resolved_change_id)
         )
-        written = write_packet(assembled, output_path=path)
+        written = write_packet(_with_recorded_metrics(assembled, ctx), output_path=path)
         # W10.2 (#50): in shadow mode the predicted action is recorded as
         # an audit breadcrumb beside the packet. The record is the row
         # the disagreement report reads; the gate itself is never
