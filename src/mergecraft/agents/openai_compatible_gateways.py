@@ -170,11 +170,20 @@ def _warn_legacy_gateway_preset_once(provider_id: str) -> None:
     )
 
 
-def _legacy_gateway_preset_credentials(provider_id: str) -> bool:
+def legacy_gateway_preset_provider_labels() -> frozenset[str]:
+    """Return provider IDs that honor legacy gateway environment credentials."""
+    return frozenset(_LEGACY_GATEWAY_PRESETS)
+
+
+def has_legacy_gateway_preset_credentials(provider_id: str) -> bool:
+    """Return whether the legacy gateway preset has a nonblank key."""
     preset = _LEGACY_GATEWAY_PRESETS.get(provider_id.lower())
     if preset is None:
         return False
     return _has_env(preset.api_key_env)
+
+
+_legacy_gateway_preset_credentials = has_legacy_gateway_preset_credentials
 
 
 def _resolve_legacy_gateway_preset(provider_id: str) -> tuple[str, str, str] | None:
@@ -203,8 +212,12 @@ def require_capabilities(config: ProviderConfig, required: frozenset[str]) -> No
 
 
 def _has_env(name: str) -> bool:
+    """Return whether a gateway environment variable is present and nonblank."""
     val = os.environ.get(name)
     return isinstance(val, str) and bool(val.strip())
+
+
+has_gateway_env = _has_env
 
 
 def has_custom_provider_env() -> bool:
@@ -231,7 +244,7 @@ def has_gateway_credentials(provider_id: str) -> bool:
     settings = repo_settings_for_gateway_resolvers()
     if has_registry_credentials(settings, provider_id.lower()):
         return True
-    return _legacy_gateway_preset_credentials(provider_id)
+    return has_legacy_gateway_preset_credentials(provider_id)
 
 
 def resolve_gateway_endpoint(model: str | None) -> tuple[str, str, str] | None:
@@ -364,7 +377,7 @@ def _indexed_api_key_env(n: int) -> str | None:
     return None
 
 
-def _resolve_indexed_providers() -> dict[str, ProviderConfig]:
+def resolve_indexed_providers() -> dict[str, ProviderConfig]:
     """Enumerate ``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>`` pairs.
 
     Returns a dict keyed by provider id (``"provider_<N>"``). Both halves of a
@@ -387,9 +400,9 @@ def _resolve_indexed_providers() -> dict[str, ProviderConfig]:
         if not base_url or api_key_env is None:
             # Partial pair — drop silently.
             continue
-        from mergecraft.config.runtime_provider_registry import _provider_id_for_env_index
+        from mergecraft.config.runtime_provider_registry import provider_id_for_env_index
 
-        provider_id = _provider_id_for_env_index(n)
+        provider_id = provider_id_for_env_index(n)
         out[provider_id] = _provider_config_from_env_pair(
             provider_id=provider_id,
             base_url=base_url,
@@ -398,6 +411,9 @@ def _resolve_indexed_providers() -> dict[str, ProviderConfig]:
             model_slug=f"{provider_id}/",
         )
     return out
+
+
+_resolve_indexed_providers = resolve_indexed_providers
 
 
 def _resolve_singleton_provider() -> ProviderConfig | None:
@@ -441,7 +457,7 @@ def resolve_gateway_endpoints() -> dict[str, ProviderConfig]:
     present, ``provider_2`` absent). Partial indexed pairs (only one half
     set) are dropped, never half-emitted.
     """
-    indexed = _resolve_indexed_providers()
+    indexed = resolve_indexed_providers()
     if indexed:
         return indexed
     singleton = _resolve_singleton_provider()
@@ -524,7 +540,11 @@ __all__ = [
     "ProviderConfig",
     "has_custom_provider_env",
     "has_gateway_credentials",
+    "has_gateway_env",
+    "has_legacy_gateway_preset_credentials",
+    "legacy_gateway_preset_provider_labels",
     "require_capabilities",
     "resolve_gateway_endpoint",
     "resolve_gateway_endpoints",
+    "resolve_indexed_providers",
 ]

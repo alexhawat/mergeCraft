@@ -66,7 +66,7 @@ async def test_billing_404_advances_the_model_chain(
     monkeypatch.setenv("TOKENHUB_API_KEY", "sk-test")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available", lambda _slug: True
+        "mergecraft.agents.resolution.runtime.agent_binary_available", lambda _slug: True
     )
     attempts: list[str] = []
 
@@ -89,7 +89,7 @@ async def test_generic_404_that_is_not_unknown_model_advances_the_chain(
     monkeypatch.setenv("TOKENHUB_API_KEY", "sk-test")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available", lambda _slug: True
+        "mergecraft.agents.resolution.runtime.agent_binary_available", lambda _slug: True
     )
     attempts: list[str] = []
 
@@ -112,7 +112,7 @@ async def test_unknown_model_404_does_not_fail_over(
     monkeypatch.setenv("TOKENHUB_API_KEY", "sk-test")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available", lambda _slug: True
+        "mergecraft.agents.resolution.runtime.agent_binary_available", lambda _slug: True
     )
     attempts: list[str] = []
 

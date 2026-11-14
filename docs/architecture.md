@@ -38,6 +38,7 @@ event  ->  setup  ->  trust tier  ->  analyzers  ->  triage / skip gates
 | Package | Role |
 |---------|------|
 | `config/` | Settings schema (`RepoSettings` and friends), precedence layers, trust policy. Security and runtime blocks reject unknown keys ([config failure policy](config-failure-policy.md)). |
+| `agents/resolution/` | Credential detection in `credentials.py`, model chain construction and execution in `chain.py`, and model and harness selection in `runtime.py`. |
 | `policy/`, `review_policy/` | Policy-as-code rules, scoping and enforcement ([policy evidence](policy-evidence.md)). |
 | `memory/`, `evals/` | [Learnings](glossary.md#learnings), review memory, and the file-backed eval bank ([eval bank](eval-bank.md)). |
 | `tracing/` | Optional span export to JSONL, Logfire or OTLP ([tracing](TRACING.md)). |

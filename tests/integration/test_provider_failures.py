@@ -23,7 +23,7 @@ async def test_retryable_cli_shaped_failure_advances_chain(monkeypatch: pytest.M
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available", lambda _slug: True
+        "mergecraft.agents.resolution.runtime.agent_binary_available", lambda _slug: True
     )
     settings = RepoSettings.model_validate(
         {"models": ["openai/gpt-5.3-codex", "google/gemini-3.1-pro-preview"]}
@@ -47,7 +47,7 @@ async def test_configured_fallback_slug_is_used(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available", lambda _slug: True
+        "mergecraft.agents.resolution.runtime.agent_binary_available", lambda _slug: True
     )
     settings = RepoSettings.model_validate(
         {"models": ["openai/gpt-5.3-codex", "google/gemini-3.1-pro-preview"]}
@@ -66,7 +66,7 @@ async def test_configured_fallback_slug_is_used(monkeypatch: pytest.MonkeyPatch)
 async def test_auth_failure_is_not_retried_as_transient(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available", lambda _slug: True
+        "mergecraft.agents.resolution.runtime.agent_binary_available", lambda _slug: True
     )
     settings = RepoSettings.model_validate(
         {"models": ["openai/gpt-5.3-codex", "google/gemini-3.1-pro-preview"]}
@@ -127,7 +127,7 @@ async def test_opencode_retries_at_most_once(
     monkeypatch.setenv("LLM_PROVIDER_1", "nous")
     monkeypatch.setenv("LLM_PROVIDER_1_API_KEY", "sk-test")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available", lambda _slug: True
+        "mergecraft.agents.resolution.runtime.agent_binary_available", lambda _slug: True
     )
     from mergecraft.config.settings import load_repo_settings
 
@@ -176,12 +176,12 @@ async def test_chain_stops_advancing_once_the_run_budget_is_spent(
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available", lambda _slug: True
+        "mergecraft.agents.resolution.runtime.agent_binary_available", lambda _slug: True
     )
     # Deadline already in the past: the first attempt still runs, the advance
     # to the second entry must not.
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._chain_deadline",
+        "mergecraft.agents.resolution.chain.chain_deadline",
         lambda: __import__("time").monotonic() - 1.0,
     )
     settings = RepoSettings.model_validate(
@@ -251,7 +251,7 @@ async def test_a_driver_that_forgets_the_flag_does_not_kill_the_chain(
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available", lambda _slug: True
+        "mergecraft.agents.resolution.runtime.agent_binary_available", lambda _slug: True
     )
     settings = RepoSettings.model_validate(
         {"models": ["openai/gpt-5.3-codex", "google/gemini-3.1-pro-preview"]}
@@ -284,7 +284,7 @@ async def test_a_tail_failure_returns_rather_than_exhausting_the_cap(
     """
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available", lambda _slug: True
+        "mergecraft.agents.resolution.runtime.agent_binary_available", lambda _slug: True
     )
     settings = RepoSettings.model_validate({"models": ["openai/gpt-5.3-codex"]})
     attempts: list[str] = []

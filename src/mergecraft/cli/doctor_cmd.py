@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 
+from mergecraft.agents.resolution.credentials import has_credentials_for_slug
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import (
@@ -38,7 +39,6 @@ from mergecraft.config.yaml_unique import ConfigParseError, safe_load_unique
 from mergecraft.evidence.run_manifest import runtime_tool_stamp
 from mergecraft.mcp.ports import port_available, read_env_port
 from mergecraft.models import MODEL_ALIASES, is_auto_tier, resolve_display_alias
-from mergecraft.utils.agent_resolve import has_credentials_for_slug
 from mergecraft.utils.git_hardening import git_argv
 from mergecraft.workflow.auth_manifest import (
     WorkflowAuthManifestError,

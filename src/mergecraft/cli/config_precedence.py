@@ -13,11 +13,14 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from mergecraft.agents.resolution.chain import (
+    configured_model_slugs,
+    resolve_effective_model_slug,
+)
 from mergecraft.cli.tracing_precedence import resolve_tracing_settings
 from mergecraft.config.env import AgentRuntimeEnv, TracingEnv
 from mergecraft.config.layered import load_layered_config_dict, resolved_config_path
 from mergecraft.config.settings import default_settings, load_repo_settings
-from mergecraft.utils.agent_resolve import configured_model_slugs, resolve_effective_model_slug
 
 
 class ConfigLayer(StrEnum):

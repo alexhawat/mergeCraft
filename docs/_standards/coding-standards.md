@@ -616,6 +616,7 @@ src/mergecraft/
   review_checks.py    # pre-merge hygiene checks
   review_taxonomy.py  # finding categories and severities
   agents/             # provider drivers (claude, opencode), reviewer, verifier, gates
+    resolution/      # provider credentials, fallback chains, runtime harness selection
   analyzers/          # catalog, adapters, detection, sandbox, pipeline, budget, cluster
   ci/                 # pipeline intelligence: providers, normalize, cluster, blame, flaky
   mcp/                # tools the reviewing agent calls

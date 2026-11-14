@@ -82,7 +82,7 @@ def test_explicit_model_input_preserves_configured_chain_tail(
     """
     _clear_provider_env(monkeypatch)
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available",
+        "mergecraft.agents.resolution.runtime.agent_binary_available",
         lambda _slug: True,
     )
 
@@ -129,7 +129,7 @@ def test_explicit_pin_opt_in_still_yields_single_entry_chain(
     """
     _clear_provider_env(monkeypatch)
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available",
+        "mergecraft.agents.resolution.runtime.agent_binary_available",
         lambda _slug: True,
     )
 
@@ -182,7 +182,7 @@ async def test_gha_payload_path_walks_the_chain_credential_skip(
     # No Claude credential — anthropic/x should be skipped.
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available",
+        "mergecraft.agents.resolution.runtime.agent_binary_available",
         lambda _slug: True,
     )
 
@@ -231,7 +231,7 @@ async def test_gha_payload_path_walks_the_chain_retryable_failure(
     _clear_provider_env(monkeypatch)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available",
+        "mergecraft.agents.resolution.runtime.agent_binary_available",
         lambda _slug: True,
     )
 

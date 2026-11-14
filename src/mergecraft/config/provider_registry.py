@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from mergecraft.utils import agent_resolve as ar
+from mergecraft.agents.resolution.runtime import (
+    NATIVE_HARNESS_PROVIDERS,
+)
+from mergecraft.agents.resolution.runtime import (
+    harness_supports_provider as harness_supports_provider,
+)
 
 BUILTIN_HARNESS_DEFAULTS: dict[str, str] = {
     "openai": "codex",
@@ -21,9 +26,6 @@ _DEVICE_CODE_LABELS = frozenset({"openai", "codex"})
 _OAUTH_LABELS = frozenset({"anthropic", "claude"})
 _OPENCODE_ZEN_LABELS = frozenset({"opencode"})
 
-# Alias — single predicate for harness/provider validity (D5).
-harness_supports_provider = ar._harness_supports_provider
-
 
 @dataclass(frozen=True, slots=True)
 class HarnessRow:
@@ -35,7 +37,7 @@ class HarnessRow:
 
 def _harness_rows() -> tuple[HarnessRow, ...]:
     """Build harness metadata from the agent-resolve tables (no doc literals)."""
-    native = ar._NATIVE_HARNESS_PROVIDERS
+    native = NATIVE_HARNESS_PROVIDERS
     return (
         HarnessRow(
             "opencode",

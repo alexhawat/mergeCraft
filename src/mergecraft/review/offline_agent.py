@@ -11,10 +11,24 @@ from loguru import logger
 
 from mergecraft.agents import resolve_agent
 from mergecraft.agents.gates import subagent_denied_tool_names
+from mergecraft.agents.resolution.chain import (
+    effective_model_chain,
+    promote_model_evidence,
+)
+from mergecraft.agents.resolution.credentials import (
+    credential_status_for_slug,
+    format_credential_gap_message,
+)
+from mergecraft.agents.resolution.runtime import (
+    resolve_harness,
+    resolve_model,
+    resolve_runtime_agent,
+)
 from mergecraft.agents.shared import AgentResult
 from mergecraft.analyzers.trust import allow_repo_command_overrides
 from mergecraft.config import load_repo_settings
 from mergecraft.config.settings import RepoInfo, apply_trust_tier_to_repo_settings
+from mergecraft.errors import ModelFallbackPolicyError
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.endpoints import mcp_role_url
 from mergecraft.mcp.server import start_mcp_http_server
@@ -35,16 +49,6 @@ from mergecraft.review.pipeline.prep import (
     configured_static_checks,
 )
 from mergecraft.run_outcome import RunOutcome
-from mergecraft.utils.agent_resolve import (
-    ModelFallbackPolicyError,
-    credential_status_for_slug,
-    effective_model_chain,
-    format_credential_gap_message,
-    promote_model_evidence,
-    resolve_harness,
-    resolve_model,
-    resolve_runtime_agent,
-)
 from mergecraft.utils.diff_paths import changed_paths_from_diff
 from mergecraft.utils.github import GitHubClient
 from mergecraft.utils.instructions import resolve_instructions

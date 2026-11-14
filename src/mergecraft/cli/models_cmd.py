@@ -8,6 +8,11 @@ from typing import TYPE_CHECKING
 import typer
 import yaml
 
+from mergecraft.agents.resolution.chain import (
+    effective_model_slugs,
+    resolve_effective_model_slug,
+)
+from mergecraft.agents.resolution.credentials import has_credentials_for_slug
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.typer_group import mergecraft_typer
@@ -15,11 +20,6 @@ from mergecraft.config import load_repo_settings
 from mergecraft.config.env import AgentRuntimeEnv
 from mergecraft.config.settings import _DEFAULT_CONFIG_REL
 from mergecraft.models import MODEL_ALIASES
-from mergecraft.utils.agent_resolve import (
-    effective_model_slugs,
-    has_credentials_for_slug,
-    resolve_effective_model_slug,
-)
 
 if TYPE_CHECKING:
     from mergecraft.config.settings import RepoSettings

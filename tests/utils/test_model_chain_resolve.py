@@ -51,7 +51,7 @@ def test_model_chain_skips_slugs_without_credentials(
     _clear_provider_env(monkeypatch)
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available",
+        "mergecraft.agents.resolution.runtime.agent_binary_available",
         lambda _slug: True,
     )
 
@@ -80,7 +80,7 @@ async def test_model_chain_advances_on_retryable_provider_failure(
     monkeypatch.setenv("CODEX_AUTH_JSON", '{"access_token":"test-token"}')
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available",
+        "mergecraft.agents.resolution.runtime.agent_binary_available",
         lambda _slug: True,
     )
 
@@ -123,7 +123,7 @@ async def test_model_chain_caps_attempts_at_max_depth(
     _clear_provider_env(monkeypatch)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available",
+        "mergecraft.agents.resolution.runtime.agent_binary_available",
         lambda _slug: True,
     )
 

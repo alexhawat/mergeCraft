@@ -9,6 +9,11 @@ from pathlib import Path
 import typer
 from rich.table import Table
 
+from mergecraft.agents.resolution.chain import effective_model_slugs
+from mergecraft.agents.resolution.runtime import (
+    resolve_model,
+    resolve_runtime_agent,
+)
 from mergecraft.analyzers.registry import detect_enabled, load_catalog
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.diff_base import materialize_branch_diff
@@ -17,14 +22,9 @@ from mergecraft.cli.exits import (
 )
 from mergecraft.cli.profiles import ReviewProfile, resolve_profile
 from mergecraft.config.settings import load_repo_settings
+from mergecraft.errors import ModelFallbackPolicyError
 from mergecraft.mcp.shared import REVIEWER_ALLOWED_TOOL_CLASSES
 from mergecraft.offline_review import build_offline_review_prompt
-from mergecraft.utils.agent_resolve import (
-    ModelFallbackPolicyError,
-    effective_model_slugs,
-    resolve_model,
-    resolve_runtime_agent,
-)
 from mergecraft.utils.git_hardening import git_argv
 from mergecraft.utils.run_bounds import resolve_run_bounds
 from mergecraft.utils.source_resolve import SourceResolverSpec, resolve_workspace

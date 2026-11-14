@@ -21,6 +21,14 @@ from loguru import logger
 
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.registry import AgentBinding, AgentRole, Registry, load_registry
+from mergecraft.agents.resolution.credentials import (
+    credential_status_for_slug,
+    format_credential_gap_message,
+)
+from mergecraft.agents.resolution.runtime import (
+    resolve_model,
+    resolve_runtime_agent,
+)
 from mergecraft.agents.verifier import verifier_denied_tool_names
 from mergecraft.mcp.tool_state import (
     record_reviewer_dispatch_error,
@@ -37,12 +45,6 @@ from mergecraft.review.file_group_fanout import (
     plan_file_groups,
 )
 from mergecraft.review.roster_dispatch import reviewer_dispatch_batches
-from mergecraft.utils.agent_resolve import (
-    credential_status_for_slug,
-    format_credential_gap_message,
-    resolve_model,
-    resolve_runtime_agent,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable

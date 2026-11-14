@@ -1235,7 +1235,7 @@ class RepoSettings(BaseModel):
     # semantics: when ``True``, supplying ``model:`` (or ``MERGECRAFT_MODEL``)
     # collapses the chain to a single entry instead of prepending it as the
     # chain head. Default ``False`` keeps the chain-preserving behaviour the
-    # wave introduces — see ``utils/agent_resolve.py::effective_model_chain``.
+    # wave introduces — see ``agents/resolution/chain.py::effective_model_chain``.
     model_pin: bool = Field(default=False, alias="modelPin")
     # W10.1 / #20 — when ``False``, a retryable failure of the primary model
     # is a ``configuration_error`` instead of silently advancing the chain.

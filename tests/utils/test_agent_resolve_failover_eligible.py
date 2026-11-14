@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 
 from mergecraft.agents.codex import CODEX_CREDENTIAL_EXPIRED_KIND, CODEX_CREDENTIAL_EXPIRED_REASON
+from mergecraft.agents.resolution import chain, runtime
 from mergecraft.agents.shared import FAILOVER_ELIGIBLE_KEY, INFRA_REASON_KEY, AgentResult
 from mergecraft.config.settings import RepoSettings
 from mergecraft.utils import agent_resolve as ar
@@ -42,10 +43,10 @@ _HARNESS = {OPENCODE: "opencode", CODEX: "codex", CLAUDE: "claude"}
 def _hermetic_chain(monkeypatch: pytest.MonkeyPatch) -> None:
     # The cascade's three vendors, without a provider registry on disk: the
     # OpenCode Go rung is served by the opencode harness, as in the workflow.
-    monkeypatch.setattr(ar, "_agent_binary_available", lambda _slug: True)
-    monkeypatch.setattr(ar, "_chain_deadline", lambda: None)
-    monkeypatch.setattr(ar, "_agent_mode_for_slug", lambda slug, settings=None: _HARNESS[slug])
-    monkeypatch.setattr(ar, "resolve_harness", lambda _settings, slug: _HARNESS[slug])
+    monkeypatch.setattr(runtime, "agent_binary_available", lambda _slug: True)
+    monkeypatch.setattr(chain, "chain_deadline", lambda: None)
+    monkeypatch.setattr(runtime, "agent_mode_for_slug", lambda slug, settings=None: _HARNESS[slug])
+    monkeypatch.setattr(runtime, "resolve_harness", lambda _settings, slug: _HARNESS[slug])
     monkeypatch.setattr(
         "mergecraft.enterprise.runtime.enforce_routed_model_residency", lambda _slug: None
     )

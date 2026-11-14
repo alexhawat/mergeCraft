@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.agents.resolution.runtime import resolve_model
 from mergecraft.analyzers.finding import (
     STRUCTURED_OUTPUT_REQUIRED_MSG,
     Finding,
@@ -38,7 +39,6 @@ from mergecraft.review.offline_result import (
 )
 from mergecraft.review.pipeline.dispatch import resolve_review_provider_budget
 from mergecraft.run_outcome import RunOutcome
-from mergecraft.utils.agent_resolve import resolve_model
 from mergecraft.utils.fence import Fence, render_untrusted
 from mergecraft.utils.offline_diff import DiffMaterialization, summarize_diff
 from mergecraft.utils.run_bounds import (

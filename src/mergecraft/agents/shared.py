@@ -630,7 +630,7 @@ def _is_run_abort(exc: Exception) -> bool:
     every chain entry, and the chain's own policy and budget errors are
     decisions about the whole run; all three keep propagating.
     """
-    from mergecraft.utils.agent_resolve import ModelFallbackPolicyError
+    from mergecraft.errors import ModelFallbackPolicyError
     from mergecraft.utils.run_bounds import BudgetExhausted
 
     return isinstance(exc, ModelFallbackPolicyError | BudgetExhausted | ConfigurationError)

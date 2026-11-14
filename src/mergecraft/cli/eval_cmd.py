@@ -30,6 +30,8 @@ from typing import Any
 import typer
 from pydantic import ValidationError
 
+from mergecraft.agents.resolution.chain import resolve_effective_model_slug
+from mergecraft.agents.resolution.runtime import resolve_model
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.eval_cli_output import (
@@ -99,7 +101,6 @@ from mergecraft.evals.trajectory_scoring import (
     score_trajectory_labels,
 )
 from mergecraft.models import get_model_provider
-from mergecraft.utils.agent_resolve import resolve_effective_model_slug, resolve_model
 from mergecraft.utils.learnings import LearningProvenance
 
 app = mergecraft_typer(

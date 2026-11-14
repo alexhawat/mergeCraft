@@ -40,6 +40,7 @@ from loguru import logger
 if TYPE_CHECKING:
     from mergecraft.evals.adjudication import IndependenceTier
 
+from mergecraft.agents.resolution.credentials import has_credentials_for_slug
 from mergecraft.evals.adjudication import calibration_status
 from mergecraft.evals.benchmark import (
     DEFAULT_BENCHMARK_PROVIDERS,
@@ -63,7 +64,6 @@ from mergecraft.evals.scoring import (
     score_findings,
 )
 from mergecraft.evals.store import DEFAULT_BANK_DIR
-from mergecraft.utils.agent_resolve import has_credentials_for_slug
 
 # Verbatim from `harbor/agent.py`'s `_PATCH_CANDIDATES` — deliberately
 # duplicated, not imported, since the `harbor` extra is optional and this

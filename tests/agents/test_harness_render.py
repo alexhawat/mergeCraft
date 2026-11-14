@@ -52,11 +52,11 @@ models:
 def _stub_slug_runnability(monkeypatch: MonkeyPatch) -> None:
     """Deterministic model-chain resolution without live credentials or binaries."""
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve.has_credentials_for_slug",
+        "mergecraft.agents.resolution.credentials.has_credentials_for_slug",
         lambda _slug: True,
     )
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available",
+        "mergecraft.agents.resolution.runtime.agent_binary_available",
         lambda _slug: True,
     )
 

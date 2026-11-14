@@ -120,7 +120,8 @@ def lookup_registry_entry_by_env_index(
     return None
 
 
-def _provider_id_for_env_index(env_index: int) -> str:
+def provider_id_for_env_index(env_index: int) -> str:
+    """Return the registry label for an index or the default indexed provider ID."""
     from mergecraft.config.settings_snapshot import repo_settings_for_gateway_resolvers
 
     settings = repo_settings_for_gateway_resolvers()
@@ -128,6 +129,9 @@ def _provider_id_for_env_index(env_index: int) -> str:
     if entry is not None:
         return entry.label.strip().lower()
     return f"provider_{env_index}"
+
+
+_provider_id_for_env_index = provider_id_for_env_index
 
 
 def registry_harness_for_provider(
@@ -215,9 +219,9 @@ def has_registry_credentials(
 
 def legacy_opencode_harness_for_provider(provider: str) -> str | None:
     """Return ``opencode`` when D7 legacy env credentials exist for *provider*."""
-    from mergecraft.agents.openai_compatible_gateways import _legacy_gateway_preset_credentials
+    from mergecraft.agents.openai_compatible_gateways import has_legacy_gateway_preset_credentials
 
-    if _legacy_gateway_preset_credentials(provider):
+    if has_legacy_gateway_preset_credentials(provider):
         return "opencode"
     return None
 
@@ -425,9 +429,8 @@ def infer_harness_for_slug(
     if registry_harness is not None:
         return registry_harness
 
-    # Imported lazily: ``config.provider_registry`` pulls in ``utils.agent_resolve``
-    # which imports this module back. A top-level import would make this module
-    # unusable as the credential authority for ``utils.secrets``.
+    # Import lazily because ``config.provider_registry`` uses the resolver,
+    # which consults this registry to infer harnesses.
     from mergecraft.config.provider_registry import BUILTIN_HARNESS_DEFAULTS
 
     builtin = BUILTIN_HARNESS_DEFAULTS.get(provider)
@@ -474,6 +477,7 @@ __all__ = [
     "lookup_registry_entry_by_env_index",
     "provider_credential_env_names",
     "provider_credential_env_suffixes",
+    "provider_id_for_env_index",
     "registry_harness_for_provider",
     "resolve_registry_gateway_endpoint",
 ]

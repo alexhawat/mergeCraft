@@ -378,7 +378,7 @@ async def test_model_chain_resets_terminal_submission_on_fallback(
     monkeypatch.setenv("CODEX_AUTH_JSON", '{"access_token":"test-token"}')
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available",
+        "mergecraft.agents.resolution.runtime.agent_binary_available",
         lambda _slug: True,
     )
 
@@ -438,7 +438,7 @@ async def test_model_chain_advances_when_first_success_has_no_terminal_verdict(
     monkeypatch.setenv("CODEX_AUTH_JSON", '{"access_token":"test-token"}')
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available",
+        "mergecraft.agents.resolution.runtime.agent_binary_available",
         lambda _slug: True,
     )
 
@@ -492,7 +492,7 @@ async def test_model_chain_does_not_advance_after_incremental_progress(
     monkeypatch.setenv("CODEX_AUTH_JSON", '{"access_token":"test-token"}')
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-key")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve._agent_binary_available",
+        "mergecraft.agents.resolution.runtime.agent_binary_available",
         lambda _slug: True,
     )
 

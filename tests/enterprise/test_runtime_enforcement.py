@@ -182,15 +182,15 @@ def test_residency_blocks_effective_model_chain_and_resolve() -> None:
 
 def test_disallowed_model_is_never_selected_to_start(monkeypatch: pytest.MonkeyPatch) -> None:
     """A residency miss must not pick a runnable slug even when credentials exist."""
-    from mergecraft.utils import agent_resolve
+    from mergecraft.agents.resolution import credentials, runtime
     from mergecraft.utils.agent_resolve import (
         effective_model_chain,
         pick_runnable_slug_from_chain,
     )
 
     bind_enterprise_from_settings(EnterpriseSettings(allowed_regions=("eu-west-1",)))
-    monkeypatch.setattr(agent_resolve, "has_credentials_for_slug", lambda _slug: True)
-    monkeypatch.setattr(agent_resolve, "_agent_binary_available", lambda _slug: True)
+    monkeypatch.setattr(credentials, "has_credentials_for_slug", lambda _slug: True)
+    monkeypatch.setattr(runtime, "agent_binary_available", lambda _slug: True)
     settings = RepoSettings.model_validate({"models": ["anthropic/claude-opus"]})
     with pytest.raises(PermissionError, match=r"allowedRegions|residency"):
         pick_runnable_slug_from_chain(effective_model_chain(settings))

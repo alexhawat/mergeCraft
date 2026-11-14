@@ -303,7 +303,7 @@ def test_model_chain_llm_call_stamps_prompt_and_output_messages(
 
     monkeypatch.setenv("MERGECRAFT_TRACING_CONTENT", "full")
     monkeypatch.setattr(
-        "mergecraft.utils.agent_resolve.resolve_capture_policy",
+        "mergecraft.agents.resolution.chain.resolve_capture_policy",
         lambda _tier: ContentCapture.FULL,
     )
 
