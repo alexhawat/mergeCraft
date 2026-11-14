@@ -2305,6 +2305,7 @@ async def _run_agent_task_with_deadline(ctx: RunContext) -> tuple[str | None, Ag
     provider_budget = current_run_budget() or token_budget_for(
         model=ctx.resolved_model or PINNED_MODEL,
         max_tokens=ctx.run_bounds.token_budget if ctx.run_bounds is not None else 250_000,
+        advisory=True,
     )
     with bind_run_budget(provider_budget):
         agent_task = asyncio.create_task(_dispatch_selected_agent())

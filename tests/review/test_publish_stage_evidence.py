@@ -18,7 +18,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -171,7 +171,9 @@ async def test_mid_run_publication_does_not_freeze_the_packet_before_the_roster(
 
 @pytest.mark.parametrize("verdict", ["approve", "request_changes"])
 async def test_token_overrun_preserves_completed_review_and_packet(
-    verdict: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    verdict: Literal["approve", "request_changes"],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """PR #1477: final usage must not turn a completed review into a fallback."""
     from mergecraft.agents.shared import AgentUsage
@@ -185,7 +187,7 @@ async def test_token_overrun_preserves_completed_review_and_packet(
     ctx.authority_trust = "trusted"
     await submit_verdict(
         ctx,
-        verdict,  # type: ignore[arg-type]  # parametrized closed verdict vocabulary
+        verdict,
         [finding(_PRIMARY_BODY)] if verdict == "request_changes" else [],
     )
     settings = RepoSettings.model_validate(

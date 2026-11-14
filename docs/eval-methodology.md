@@ -170,7 +170,10 @@ Start with a small corpus containing a labelled defect and a clean case. Obtain
 a spend ceiling and provider/model choices before expanding to the full bank.
 `MERGECRAFT_RUN_TIMEOUT_S` and `MERGECRAFT_COST_BUDGET_USD` bound each review.
 `MERGECRAFT_TOKEN_BUDGET` is an advisory usage target; exceeding it does not
-fail the review. The operator must also cap total campaign size. Preserve raw
+fail the review. The campaign's `per_review_token_limit` is likewise an advisory
+target: overages warn, retain the completed case's score, and record actual
+tokens and the target in `journal.jsonl`. Timeout, per-review cost, and total
+campaign cost ceilings remain enforced. The operator must also cap total campaign size. Preserve raw
 case results for adjudication. Unmatched findings remain unadjudicated when
 the reference labels are incomplete. Publish measured
 results here or under `evals/results`, with a README link rather than unsupported

@@ -727,7 +727,9 @@ optionally `over target` when spend crossed `runBounds.tokenBudget`, and
 `0.10`) defines the advisory ceiling as `target × (1 + tolerance)`. Both are
 reporting thresholds: even above the ceiling, complete token totals are
 preserved and the review verdict is unchanged. Tolerance `0` makes the
-thresholds equal. Cost and tool-call limits remain enforced.
+thresholds equal. Shared provider accounting likewise keeps fallback and
+required-reviewer dispatch available after an overage. Cost and tool-call
+limits remain enforced.
 
 **`raised_by` on the record.** Terminal-submission finding rows and the
 published review body carry `raised_by` for multi-reviewer attribution (see §8).

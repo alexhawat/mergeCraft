@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from mergecraft.agents.shared import AgentResult
+from mergecraft.agents.shared import AgentImpl, AgentResult
 from mergecraft.config.settings import RepoSettings, ReviewSettings
 from mergecraft.review import offline_agent
 from mergecraft.run_outcome import RunOutcome
@@ -52,7 +52,11 @@ def dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
                 ctx.resolved_model, AgentResult(success=True, terminal_submission_received=True)
             )
 
-    monkeypatch.setattr(offline_agent, "resolve_runtime_agent", lambda **_: Agent())
+    async def install(_token: str | None = None) -> str:
+        return "fake"
+
+    impl = AgentImpl(name="claude", _install=install, _run=Agent().run)
+    monkeypatch.setattr(offline_agent, "resolve_runtime_agent", lambda **_: impl)
     # Keep catalog alias resolution real, and identify the concrete IDs in assertions.
     patch = tmp_path / "diff.patch"
     patch.write_text("diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b\n")
@@ -249,7 +253,12 @@ async def test_offline_fallback_budget_is_cumulative(
             success=slug == BACKUP,
             error="temporary" if slug == PRIMARY else None,
             metadata={"retryable": True},
-            usage=AgentUsage(agent="claude", input_tokens=6, output_tokens=0, cost_usd=0.006),
+            usage=AgentUsage(
+                agent="claude",
+                input_tokens=12 if slug == PRIMARY else 6,
+                output_tokens=0,
+                cost_usd=0.006,
+            ),
             terminal_submission_received=slug == BACKUP,
         )
     bounds = replace(
@@ -270,7 +279,7 @@ async def test_offline_fallback_budget_is_cumulative(
     )
     assert result.success is (kind == "token")
     assert len(dispatch["models"]) == 2
-    assert tracker.tokens_used == 12
+    assert tracker.tokens_used == 18
     assert tracker.cost_used == pytest.approx(0.012)
     if kind == "cost":
         assert result.outcome is RunOutcome.inconclusive

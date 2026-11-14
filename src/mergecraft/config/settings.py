@@ -1000,7 +1000,8 @@ class RunBoundsSettings(BaseModel):
         ge=0.0,
         description=(
             "Fraction above tokenBudget defining the advisory ceiling (default 10%). "
-            "Token overages are reported without failing the review, including at 0."
+            "Token overages are reported without failing the review or stopping later reviewers, "
+            "including at 0."
         ),
     )
     cost_budget_usd: float = Field(default=3.0, alias="costBudgetUsd", gt=0)

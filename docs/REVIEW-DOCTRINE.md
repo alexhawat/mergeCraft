@@ -592,7 +592,11 @@ mergeCraft separates three layers that older review flows conflated:
 run record. Exceeding either value, including with tolerance `0`, records the
 full usage without failing the run or overriding its review verdict. Token
 usage may arrive only after a completed review; an overage alone must not
-trigger a provider fallback. Cost and tool-call budgets remain enforced.
+trigger a provider fallback. The shared provider counter also uses advisory
+accounting: exceeding the target cannot suppress a retry, model fallback,
+required secondary reviewer, or a Jev call bound to that review. Independently
+configured Jev caps remain enforced outside this run-bound policy. Cost and
+tool-call budgets remain enforced.
 The run-record **Tokens** row and job step summary name target, ceiling,
 over-target status, and per-phase totals
 when `record_tokens(…, phase=…)` was used.

@@ -93,11 +93,12 @@ SKIP_REASON_NO_CASES: Final[str] = "no patch-bearing cases"
 
 @dataclass(frozen=True)
 class ReviewBudget:
-    """Per-review and campaign bounds a detection run enforces and records (W3.3-5).
+    """Per-review token target and enforced time/cost bounds for detection runs.
 
     Mirrors the campaign manifest's ``per_review_*`` and
-    ``total_campaign_spend_ceiling_usd`` fields. ``None`` leaves that bound
-    unenforced (the ad-hoc ``eval bench`` default).
+    ``total_campaign_spend_ceiling_usd`` fields. ``per_review_token_limit`` is
+    an advisory target; its legacy field name remains compatible with manifests.
+    ``None`` leaves a bound or target unset (the ad-hoc ``eval bench`` default).
     """
 
     per_review_timeout_seconds: float | None = None
@@ -111,7 +112,7 @@ class ReviewOutcome:
     """A review's findings plus the usage it reported, when the runner knows it.
 
     A ``ReviewFn`` may return this instead of a bare findings list so the
-    campaign can record (and bound) cost and tokens. ``None`` means the runner
+    campaign can record token usage and enforce cost bounds. ``None`` means the runner
     did not report that figure; it is never recorded as zero.
     """
 
@@ -228,13 +229,17 @@ def _budget_overrun(
     cost_usd: float | None,
     tokens: int | None,
 ) -> str | None:
-    """Describe the first per-review bound a finished review exceeded, or ``None``."""
+    """Warn on advisory usage and describe an enforced time/cost overrun, if any."""
     limit = budget.per_review_timeout_seconds
     if limit is not None and elapsed_seconds > limit:
         return f"TimeoutError: review took {elapsed_seconds:.1f}s (limit {limit}s)"
     token_limit = budget.per_review_token_limit
     if token_limit is not None and tokens is not None and tokens > token_limit:
-        return f"BudgetExceeded: review used {tokens} tokens (limit {token_limit})"
+        logger.warning(
+            "detection review used {} tokens (advisory target {}); token usage is non-fatal",
+            tokens,
+            token_limit,
+        )
     cost_limit = budget.per_review_cost_budget_usd
     if cost_limit is not None and cost_usd is not None and cost_usd > cost_limit:
         return f"BudgetExceeded: review cost ${cost_usd:.4f} (limit ${cost_limit:.4f})"
@@ -272,7 +277,8 @@ def run_live_detection(
     ``failed_case_errors`` with its class, so one flaky case cannot abort the
     campaign and orphan the raw findings already paid for. Each outcome is also
     appended to ``<raw dir>/journal.jsonl`` as it happens. ``budget`` bounds are
-    enforced: a case over its timeout, token or cost bound is recorded as
+    enforced for timeout and cost; token overages are advisory. A case over
+    its timeout or cost bound is recorded as
     failed, and once the campaign cost ceiling is reached the remaining cases
     are recorded as failed without running. Reported cost is recorded on each
     receipt (``cost_known``) and folded into ``total_cost_usd``.
@@ -458,7 +464,14 @@ def run_live_detection(
         )
         case_elapsed_ms.append(elapsed_seconds * 1000.0)
         _append_journal(
-            journal_path, {"case_id": case.case_id, "status": "scored", "cost_usd": case_cost_usd}
+            journal_path,
+            {
+                "case_id": case.case_id,
+                "status": "scored",
+                "cost_usd": case_cost_usd,
+                "total_tokens": case_tokens,
+                "token_target": budget.per_review_token_limit,
+            },
         )
 
     return DetectionMetrics(
@@ -500,7 +513,7 @@ async def _run_with_timeout(awaitable: Awaitable[_T], timeout_seconds: float | N
 
 @contextlib.contextmanager
 def _bounded_environment(budget: ReviewBudget | None) -> Iterator[None]:
-    """Pass the per-review token/cost bounds to the in-process review run.
+    """Pass the advisory token target and enforced cost bound into the review.
 
     ``run_offline_diff_review`` resolves its run bounds from settings and the
     existing ``MERGECRAFT_TOKEN_BUDGET`` / ``MERGECRAFT_COST_BUDGET_USD``
