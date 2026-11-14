@@ -8,12 +8,13 @@ from mergecraft.mcp.shared import ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 _RELEVANT = frozenset({"cross_referenced", "referenced"})
 
 
-def get_issue_events_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def get_issue_events_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         issue_number = int(params["issue_number"])
         raw = await ctx.scm.get(
             f"/repos/{ctx.repo.owner}/{ctx.repo.name}/issues/{issue_number}/timeline",

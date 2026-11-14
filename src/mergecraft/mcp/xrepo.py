@@ -17,6 +17,7 @@ from mergecraft.utils.workspace import register_workspace_root
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 
 def _assert_valid_repo_name(name: str) -> None:
@@ -37,8 +38,8 @@ def _access_for(ctx: ToolContext, name: str) -> RepoAccess:
     return "read"
 
 
-def list_repos_tool(ctx: ToolContext):
-    async def _run(_params: dict[str, Any]):
+def list_repos_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(_params: dict[str, Any]) -> dict[str, Any]:
         if not ctx.xrepo:
             return {
                 "repos": [],
@@ -73,8 +74,8 @@ def list_repos_tool(ctx: ToolContext):
     )
 
 
-def checkout_repo_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def checkout_repo_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, str]:
         if not ctx.xrepo:
             msg = "cross-repo is not enabled for this run (no --xrepo)."
             raise RuntimeError(msg)

@@ -199,8 +199,16 @@ ignore = [
 # Catalog prompts intentionally retain upstream emoji / typography.
 "src/mergecraft/modes.py" = ["RUF001", "TC003"]
 "src/mergecraft/modes/**" = ["RUF001", "TC003"]
-# MCP tool handlers and agent CLI harnesses use sync subprocess/Path I/O by design.
-"src/mergecraft/mcp/**" = ["ASYNC221", "ASYNC230", "ASYNC240", "SIM105", "SIM102", "RUF001"]
+"src/mergecraft/mcp/**" = ["SIM105", "SIM102", "RUF001"]
+# These MCP handlers keep synchronous checkout metadata and local artifact I/O.
+"src/mergecraft/mcp/checkout.py" = ["ASYNC240"]
+"src/mergecraft/mcp/commit_info.py" = ["ASYNC240"]
+"src/mergecraft/mcp/git.py" = ["ASYNC240"]
+"src/mergecraft/mcp/review.py" = ["ASYNC240"]
+"src/mergecraft/mcp/shell.py" = ["ASYNC230", "ASYNC240"]
+"src/mergecraft/mcp/upload.py" = ["ASYNC240"]
+"src/mergecraft/mcp/verification.py" = ["ASYNC240"]
+# Agent CLI harnesses and CI helpers use synchronous subprocess/Path I/O.
 "src/mergecraft/ci/**" = ["ASYNC240", "RUF001"]
 "src/mergecraft/agents/**" = ["ASYNC221", "ASYNC230", "ASYNC240", "SIM105", "SIM102", "FLY002", "RUF001"]
 "src/mergecraft/cli/**" = ["T20", "ASYNC221", "ASYNC230", "ASYNC240", "TC003"]
@@ -224,12 +232,6 @@ ignore_missing_imports = true
 mypy_path = ["src"]
 packages = ["mergecraft"]
 plugins = ["pydantic.mypy"]
-
-[[tool.mypy.overrides]]
-module = ["mergecraft.mcp.*"]
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-warn_return_any = false
 
 [[tool.mypy.overrides]]
 module = ["mergecraft.agents_sdk.*"]

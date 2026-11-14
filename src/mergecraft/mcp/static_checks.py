@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from mergecraft.analyzers.sandbox import SandboxPlan
     from mergecraft.ci.evidence import GateSubstitution
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
     from mergecraft.review_checks import StaticCheck, StaticCheckOutcome
 
 
@@ -275,8 +276,8 @@ async def _run_untrusted_checks(
     return outcomes, substitutions, reason
 
 
-def run_static_checks_tool(ctx: ToolContext):
-    async def _run_in_scope(params: dict[str, Any]):
+def run_static_checks_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run_in_scope(params: dict[str, Any]) -> dict[str, Any]:
         # Recorded before the early returns: a repo that declares no gate still
         # completed the deterministic pass, and the D14 ordering gate asks
         # whether that pass happened, not whether it found anything.

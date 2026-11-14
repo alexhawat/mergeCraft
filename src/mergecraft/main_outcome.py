@@ -14,6 +14,8 @@ from loguru import logger
 
 from mergecraft.agents.shared import INFRA_REASON_KEY
 from mergecraft.run_outcome import RunOutcome
+from mergecraft.run_outcome import is_incremental_review as _is_incremental_review
+from mergecraft.run_outcome import is_review_mode as _is_review_mode
 from mergecraft.tracing.event import trace_attrs_for_mode
 
 if TYPE_CHECKING:
@@ -39,8 +41,6 @@ class VerdictProtocolPublish(NamedTuple):
     prediction: VerdictProtocolPrediction | None
 
 
-_REVIEW_MODE_NAMES = frozenset({"Review", "IncrementalReview"})
-_INCREMENTAL_REVIEW_NAMES = frozenset({"IncrementalReview"})
 _MISSING_TERMINAL_VERDICT_REASON = "no terminal review verdict was submitted for this attempt"
 # #619 Task 3a — a distinct reason from the one above: the agent *did* record
 # a terminal verdict, but the review that carries it never reached GitHub
@@ -85,21 +85,6 @@ def _publication_mismatch_reason(published: str, recorded: str) -> str:
         f"GitHub shows the {published} review this run published earlier on this head, "
         f"but the final recorded verdict is {recorded}; it was not published"
     )
-
-
-def _is_review_mode(mode: str | Mode | None) -> bool:
-    if mode is None:
-        return False
-    if isinstance(mode, str):
-        return mode in _REVIEW_MODE_NAMES
-    return mode.name in _REVIEW_MODE_NAMES
-
-
-def _is_incremental_review(mode: str | Mode | None) -> bool:
-    if mode is None:
-        return False
-    name = mode if isinstance(mode, str) else mode.name
-    return name in _INCREMENTAL_REVIEW_NAMES
 
 
 def _publication_outcome_inputs(

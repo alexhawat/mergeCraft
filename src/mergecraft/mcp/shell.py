@@ -34,6 +34,7 @@ from mergecraft.utils.workspace import (
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 SandboxMethod = Literal["unshare", "sudo-unshare", "sandbox-exec", "none"]
 MAX_OUTPUT_CHARS = 5000
@@ -484,8 +485,8 @@ def _run_foreground(
                     pipe.close()
 
 
-def shell_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def shell_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, Any]:
         command = str(params["command"])
         tmpdir = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
         if _is_git_command(command):
@@ -602,8 +603,8 @@ def shell_tool(ctx: ToolContext):
     )
 
 
-def kill_background_tool(ctx: ToolContext):
-    async def _run(params: dict[str, Any]):
+def kill_background_tool(ctx: ToolContext) -> ToolSpec:
+    async def _run(params: dict[str, Any]) -> dict[str, bool | str]:
         handle = str(params["handle"])
         proc = ctx.tool_state.background_processes.get(handle)
         if proc is None:

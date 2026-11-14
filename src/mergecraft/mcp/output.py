@@ -9,12 +9,13 @@ from mergecraft.mcp.shared import JsonSchema, ToolClass, execute, tool
 
 if TYPE_CHECKING:
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.mcp.shared import ToolSpec
 
 
-def set_output_tool(ctx: ToolContext, output_schema: JsonSchema | None = None):
+def set_output_tool(ctx: ToolContext, output_schema: JsonSchema | None = None) -> ToolSpec:
     if output_schema is not None:
 
-        async def _run_schema(params: dict[str, Any]):
+        async def _run_schema(params: dict[str, Any]) -> dict[str, bool]:
             ctx.tool_state.output = json.dumps(params)
             _notify_set_output_findings(ctx, params)
             return {"success": True}
@@ -31,7 +32,7 @@ def set_output_tool(ctx: ToolContext, output_schema: JsonSchema | None = None):
             execute=execute(_run_schema, "set_output"),
         )
 
-    async def _run(params: dict[str, Any]):
+    async def _run(params: dict[str, Any]) -> dict[str, bool]:
         ctx.tool_state.output = str(params["value"])
         return {"success": True}
 
