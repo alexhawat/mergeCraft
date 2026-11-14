@@ -1,4 +1,4 @@
-"""W1.4 — soft target / hard ceiling budget band (wave plan 14, implementation W5)."""
+"""Token usage bands are advisory and preserve complete accounting."""
 
 from __future__ import annotations
 
@@ -27,13 +27,6 @@ def _base_bounds(**overrides: Any) -> RunBounds:
         defaults["token_budget_tolerance"] = 0.10
     defaults.update(overrides)
     return RunBounds(**defaults)
-
-
-def _token_ceiling(bounds: RunBounds) -> int:
-    if hasattr(bounds, "token_ceiling"):
-        return int(bounds.token_ceiling)
-    tolerance = getattr(bounds, "token_budget_tolerance", 0.0)
-    return int(bounds.token_budget * (1.0 + tolerance))
 
 
 def test_crossing_target_under_ceiling_warns_once_without_raise() -> None:
@@ -70,43 +63,19 @@ def test_over_target_warning_emitted_only_once() -> None:
     assert len(over_target) == 1
 
 
-def test_crossing_ceiling_raises_with_target_ceiling_and_tolerance() -> None:
-    """D9 — ceiling breach names used / target / ceiling / tolerance."""
-    bounds = _base_bounds(token_budget=100, token_budget_tolerance=0.10)
-    tracker = BudgetTracker(bounds)
-    tracker.record_tokens(100)
-    with pytest.raises(BudgetExhausted) as exc_info:
-        tracker.record_tokens(11)
-    message = str(exc_info.value)
-    assert "100" in message
-    assert "110" in message
-    assert "0.1" in message or "10%" in message or "tolerance" in message.lower()
-
-
-def test_zero_tolerance_restores_strict_greater_than_target() -> None:
-    """Regression — tolerance ``0`` reproduces today's strict ``>`` cliff."""
-    bounds = _base_bounds(token_budget=100, token_budget_tolerance=0.0)
-    tracker = BudgetTracker(bounds)
-    tracker.record_tokens(100)
-    with pytest.raises(BudgetExhausted) as exc_info:
-        tracker.record_tokens(1)
-    assert exc_info.value.kind == "token"
-    assert "100" in str(exc_info.value)
-    assert "101" in str(exc_info.value)
-
-
-def test_single_increment_over_ceiling_has_distinct_message_from_steady_drift() -> None:
-    """D10 — one pathological increment must not share the steady-drift message."""
-    bounds = _base_bounds(token_budget=100, token_budget_tolerance=0.10)
-    drift = BudgetTracker(bounds)
-    drift.record_tokens(50)
-    drift.record_tokens(60)
-    with pytest.raises(BudgetExhausted) as drift_exc:
-        drift.record_tokens(1)
-    vault = BudgetTracker(bounds)
-    with pytest.raises(BudgetExhausted) as vault_exc:
-        vault.record_tokens(_token_ceiling(bounds) + 1)
-    assert str(drift_exc.value) != str(vault_exc.value)
+@pytest.mark.parametrize("tolerance", [0.0, 0.10])
+@pytest.mark.parametrize("increments", [(111,), (100, 11), (95, 20)])
+def test_token_overruns_record_full_usage_without_failing(
+    tolerance: float, increments: tuple[int, ...]
+) -> None:
+    """Both aggregate and incremental overages remain advisory."""
+    tracker = BudgetTracker(_base_bounds(token_budget_tolerance=tolerance))
+    for count in increments:
+        tracker.record_tokens(count, phase="reviewer_dispatch")
+    assert tracker.tokens_used == sum(increments)
+    assert tracker.phase_totals == {"reviewer_dispatch": sum(increments)}
+    assert tracker.over_target is True
+    assert tracker.last_exhausted is None
 
 
 def test_record_tokens_without_phase_attributes_to_unattributed() -> None:
@@ -139,17 +108,3 @@ def test_record_cost_path_is_untouched_by_token_band_changes() -> None:
         tracker.record_cost(0.02)
     assert exc_info.value.kind == "cost"
     assert tracker.cost_used == pytest.approx(0.06)
-
-
-def test_two_call_crossing_ceiling_raises_instead_of_truncating() -> None:
-    """D10 — crossing remaining ceiling on a second call must raise, not cap silently."""
-    bounds = _base_bounds(token_budget=100, token_budget_tolerance=0.10)
-    tracker = BudgetTracker(bounds)
-    tracker.record_tokens(95)
-    with pytest.raises(BudgetExhausted) as exc_info:
-        tracker.record_tokens(20)
-    assert tracker.tokens_used == 95
-    message = str(exc_info.value)
-    assert "20" in message
-    assert "15" in message or "remaining" in message.lower()
-    assert "110" in message

@@ -1153,11 +1153,13 @@ The same block is merged into the review body as a mandatory preamble through
 last so nothing can be appended above it.
 
 **Token summary band.** The **Tokens** row reports `used (target N, ceiling M)`,
-optionally `over target` when spend crossed `runBounds.tokenBudget` but remains
-below the ceiling, and `by phase: …` when call sites annotated `record_tokens(…,
-phase=…)`. `tokenBudget` is the soft target; `tokenBudgetTolerance` (default
-`0.10`) defines the hard ceiling as `target × (1 + tolerance)`. Tolerance `0`
-restores strict enforcement at the target.
+optionally `over target` when spend crossed `runBounds.tokenBudget`, and
+`by phase: …` when call sites annotated `record_tokens(…, phase=…)`.
+`tokenBudget` is the soft target; `tokenBudgetTolerance` (default
+`0.10`) defines the advisory ceiling as `target × (1 + tolerance)`. Both are
+reporting thresholds: even above the ceiling, complete token totals are
+preserved and the review verdict is unchanged. Tolerance `0` makes the
+thresholds equal. Cost and tool-call limits remain enforced.
 
 **`raised_by` on the record.** Terminal-submission finding rows and the
 published review body carry `raised_by` for multi-reviewer attribution (see §8).
@@ -2195,11 +2197,14 @@ mergeCraft separates three layers that older review flows conflated:
    review; there is no memory across runs.
 
 **Per-run token band (`runBounds`).** `tokenBudget` is the soft target.
-`tokenBudgetTolerance` (default `0.10`) defines the hard ceiling as
+`tokenBudgetTolerance` (default `0.10`) defines an advisory ceiling as
 `target × (1 + tolerance)`. Crossing the target warns once and annotates the
-run record; crossing the ceiling raises `BudgetExhausted`. Tolerance `0`
-restores strict enforcement at the target. The run-record **Tokens** row and
-job step summary name target, ceiling, over-target status, and per-phase totals
+run record. Exceeding either value, including with tolerance `0`, records the
+full usage without failing the run or overriding its review verdict. Token
+usage may arrive only after a completed review; an overage alone must not
+trigger a provider fallback. Cost and tool-call budgets remain enforced.
+The run-record **Tokens** row and job step summary name target, ceiling,
+over-target status, and per-phase totals
 when `record_tokens(…, phase=…)` was used.
 
 **Enforcement default (VP4).** `gates.terminal_verdict` defaults to `enforce`.

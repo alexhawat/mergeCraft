@@ -308,7 +308,7 @@ not part of the operator contract.
 | `MERGECRAFT_RUN_TIMEOUT_S` | Whole-run wall-clock ceiling, in seconds | `3600` | run bounds |
 | `MERGECRAFT_TEMP_DIR` | Run temp directory override | unset — the run's own temp dir, else `/tmp` | checkout, MCP shell, git, and agent seams |
 | `MERGECRAFT_TEMP_PARENT` | Preferred parent directory for created temp dirs (avoids world-writable `/tmp`) | unset — `$RUNNER_TEMP`, else `~/.cache/mergecraft/tmp` | temp-dir creation |
-| `MERGECRAFT_TOKEN_BUDGET` | Per-run token ceiling | `2000000` | budget enforcement (scaled by `review.roundBudgets`) |
+| `MERGECRAFT_TOKEN_BUDGET` | Advisory per-run token target | `2000000` | usage reporting; overages do not fail the review (scaled by `review.roundBudgets`) |
 | `MERGECRAFT_TOOL_CALL_BUDGET` | Per-run tool-call ceiling | `500` | budget enforcement (scaled by `review.roundBudgets`) |
 | `MERGECRAFT_TRACE_DIR` | Directory for local JSONL traces | `.mergecraft/traces` | tracing and the `replay`/`run inspect` commands |
 | `MERGECRAFT_TRACING` | Boolean toggle for tracing | unset — disabled unless config enables it | tracing resolution |

@@ -249,11 +249,11 @@ async def test_run_record_distinguishes_zero_from_unavailable(
     assert f"- **Recorded reviewer model cost:** {expected}" in scm.reviews[1]
 
 
-def test_recorded_cost_uses_saved_usage_when_token_charge_interrupts_tracker() -> None:
+@pytest.mark.parametrize("charge_second", [True, False])
+def test_recorded_cost_keeps_all_usage_across_token_overruns(charge_second: bool) -> None:
     from mergecraft.agents.curated_model_catalog import cost_summary_from_usage_entries
     from mergecraft.utils.review_cost import recorded_run_cost
     from mergecraft.utils.run_bounds import (
-        BudgetExhausted,
         BudgetTracker,
         record_agent_usage,
         resolve_run_bounds,
@@ -267,9 +267,11 @@ def test_recorded_cost_uses_saved_usage_when_token_charge_interrupts_tracker() -
     )
     usage = [first, second, unpriced]
     record_agent_usage(tracker, first)
-    with pytest.raises(BudgetExhausted):
+    if charge_second:
         record_agent_usage(tracker, second)
-    assert tracker.cost_used == 0.25
+        assert tracker.tokens_used == 270
+        assert tracker.over_target is True
+    assert tracker.cost_used == (0.75 if charge_second else 0.25)
 
     cost = recorded_run_cost(usage, budget_tracker=tracker)
 

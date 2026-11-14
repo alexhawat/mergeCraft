@@ -234,8 +234,9 @@ async def test_offline_residency_rejection_never_dispatches(
         bind_enterprise_from_settings(EnterpriseSettings())
 
 
+@pytest.mark.parametrize("kind", ["token", "cost"])
 async def test_offline_fallback_budget_is_cumulative(
-    dispatch: dict[str, Any], tmp_path: Path
+    dispatch: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
     from dataclasses import replace
 
@@ -248,12 +249,17 @@ async def test_offline_fallback_budget_is_cumulative(
             success=slug == BACKUP,
             error="temporary" if slug == PRIMARY else None,
             metadata={"retryable": True},
-            usage=AgentUsage(agent="claude", input_tokens=6, output_tokens=0),
+            usage=AgentUsage(agent="claude", input_tokens=6, output_tokens=0, cost_usd=0.006),
             terminal_submission_received=slug == BACKUP,
         )
     bounds = replace(
-        resolve_run_bounds(settings=dispatch["settings"]), token_budget=10, token_budget_tolerance=0
+        resolve_run_bounds(settings=dispatch["settings"]),
+        token_budget=10,
+        token_budget_tolerance=0,
+        cost_budget_usd=0.01 if kind == "cost" else 1.0,
     )
+    tracker = offline_agent.BudgetTracker(bounds)
+    monkeypatch.setattr(offline_agent, "BudgetTracker", lambda _bounds: tracker)
     result = await offline_agent.run_offline_agent_review(
         cwd=tmp_path,
         materialization=dispatch["materialization"],
@@ -262,9 +268,16 @@ async def test_offline_fallback_budget_is_cumulative(
         tmpdir=tmp_path,
         run_bounds=bounds,
     )
-    assert not result.success
+    assert result.success is (kind == "token")
     assert len(dispatch["models"]) == 2
-    assert "budget" in result.error.lower()
+    assert tracker.tokens_used == 12
+    assert tracker.cost_used == pytest.approx(0.012)
+    if kind == "cost":
+        assert result.outcome is RunOutcome.inconclusive
+        assert "cost budget" in result.error.lower()
+    else:
+        assert result.outcome is RunOutcome.passed
+        assert tracker.over_target is True
 
 
 async def test_offline_attempts_keep_the_nearest_instructions_under_a_tight_cap(
