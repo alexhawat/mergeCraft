@@ -333,7 +333,7 @@ async def _publish_learnings_and_status(
         approval_failure_reason=effective_sink_error,
     )
     if prepared is not None:
-        from mergecraft.utils.status_checks import _run_url
+        from mergecraft.utils.status_checks import github_run_url
         from mergecraft.utils.step_summary import append_step_summary, render_step_summary
 
         submission = tool_context.tool_state.terminal_submission
@@ -345,7 +345,7 @@ async def _publish_learnings_and_status(
             packet=prepared,
             outcome_label=outcome_label,
             rejection_reason=rejection_reason,
-            run_url=_run_url(tool_context),
+            run_url=github_run_url(tool_context),
             run_outcome=effective_outcome,
             verdict_diagnostic=verdict_diagnostic,
             analyzer_summary=analyzer_run.pre_merge_summary if analyzer_run is not None else None,

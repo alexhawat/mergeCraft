@@ -717,7 +717,7 @@ The block always contains, in order:
    `No verdict recorded — reason: <typed rejection>` line.
 
 The same block is merged into the review body as a mandatory preamble through
-`merge_deterministic_preamble_into_review_body` in `mcp/review.py`, applied
+`merge_deterministic_preamble_into_review_body` in `mcp/review_body.py`, applied
 last so nothing can be appended above it.
 
 **Token summary band.** The **Tokens** row reports `used (target N, ceiling M)`,

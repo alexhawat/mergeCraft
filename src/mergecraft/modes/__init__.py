@@ -42,7 +42,10 @@ from mergecraft.modes import (
     Plan,
     Review,
 )
-from mergecraft.modes._pr_summary_format import PR_SUMMARY_FORMAT
+from mergecraft.modes._pr_summary_format import (
+    PR_SUMMARY_FORMAT,
+    merge_dispatched_lenses_into_review_metadata,
+)
 from mergecraft.modes._time_budget import render_time_budget
 from mergecraft.types import (
     MERGECRAFT_MCP_NAME,
@@ -301,6 +304,7 @@ __all__ = [
     "compute_modes",
     "compute_prompt_version",
     "is_write_capable_mode_name",
+    "merge_dispatched_lenses_into_review_metadata",
     "modes",
     "production_mode_names",
     "prompt_version_for",

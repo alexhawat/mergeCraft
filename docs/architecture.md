@@ -31,7 +31,7 @@ event  ->  setup  ->  trust tier  ->  analyzers  ->  triage / skip gates
 | [Verifier](glossary.md#verifier) | A read-only second pass re-reads Critical and Major findings before publication. | `agents/verifier.py`; the optional Jev screening gate in `jev/` runs before the reviewer ([Jev gate patterns](jev-gate-patterns.md)); [REVIEW-DOCTRINE](REVIEW-DOCTRINE.md) |
 | [Typed findings](glossary.md#typed-finding) | One schema for analyzer and model findings: severity, location, evidence, scope. | `findings/`, `evidence/`, `review_taxonomy.py` |
 | Verdict | `mergecraft-approval` is a pure function of typed findings, run state and trust tier, never of prose. | `agents/gates.py` (`decide_approval`), `review_checks.py`, `review/pipeline/finalize.py`, `run_outcome.py`; [REVIEW-CHECKS](REVIEW-CHECKS.md) |
-| Publish | Inline comments, the `mergecraft` and `mergecraft-approval` checks, optional SARIF upload, the run record, and the [evidence packet](glossary.md#evidence-packet). | `action/review_finalize.py` (post-run validation), `action/review_publish.py` (checks and packet), `action/review_verdict.py` (formal verdict), `action/review_record.py` (run record), `evidence/run_packet.py`, `utils/code_scanning.py` (SARIF) |
+| Publish | Inline comments, the `mergecraft` and `mergecraft-approval` checks, optional SARIF upload, the run record, and the [evidence packet](glossary.md#evidence-packet). | `action/review_finalize.py` (post-run validation), `action/review_publish.py` (checks and packet), `action/review_verdict.py` (formal verdict), `mcp/review_publish.py` (GitHub review and receipt), `mcp/review_body.py` (review rendering), `mcp/review_threads.py` (fixed finding threads), `action/review_record.py` (run record), `evidence/run_packet.py`, `utils/code_scanning.py` (SARIF) |
 
 ## Supporting packages
 
@@ -42,7 +42,7 @@ event  ->  setup  ->  trust tier  ->  analyzers  ->  triage / skip gates
 | `memory/`, `evals/` | [Learnings](glossary.md#learnings), review memory, and the file-backed eval bank ([eval bank](eval-bank.md)). |
 | `tracing/` | Optional span export to JSONL, Logfire or OTLP ([tracing](TRACING.md)). |
 | `security/`, `reliability/`, `enterprise/` | Network-boundary and publication surfaces, redacted diagnostic bundles, self-hosted controls. |
-| `mcp/`, `capabilities/` | The review-only tool surface shared by the public stdio MCP server and the reviewer's in-run MCP tools ([MCP](mcp.md)). |
+| `mcp/`, `capabilities/` | The review-only tool surface shared by the public stdio MCP server and the reviewer's in-run MCP tools ([MCP](mcp.md)). The legacy publication tool is defined in `mcp/review.py`. |
 | `verify/`, `browser/` | Behaviour verification ([verify-behavior](verify-behavior.md)). |
 | `cli/` | The Typer command tree; the generated reference is [cli](cli.md), and exit codes are in [EXIT-CODES](EXIT-CODES.md). |
 

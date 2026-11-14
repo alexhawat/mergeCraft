@@ -49,7 +49,7 @@ from mergecraft.analyzers.trust import (
 )
 from mergecraft.config import load_repo_settings
 from mergecraft.findings.dedup import dedupe_findings
-from mergecraft.mcp.review import format_analyzer_inline_body
+from mergecraft.mcp.review_body import format_analyzer_inline_body
 from mergecraft.mcp.tool_state import AnalyzerRunState, AnalyzerStatusRow
 from mergecraft.utils.process_scope import (
     ProcessGroupScope,
