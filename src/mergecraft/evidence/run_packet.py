@@ -49,6 +49,7 @@ from mergecraft.evidence.packet import (
     RunMetrics,
     TriageSection,
 )
+from mergecraft.findings.fix_brief import fix_brief_path, write_run_fix_brief
 from mergecraft.utils.diff_paths import changed_paths_from_diff
 
 if TYPE_CHECKING:
@@ -1295,6 +1296,7 @@ def emit_run_packet(
     verdict_prediction: Any | None = None,
     actual_outcome: str | None = None,
     packet: MergeEvidencePacket | None = None,
+    completed_review: bool = False,
 ) -> Path | None:
     """Write this run's evidence packet; return its path.
 
@@ -1304,7 +1306,8 @@ def emit_run_packet(
     "the run is broken".
 
     Assembly belongs on :func:`prepare_run_packet` / :func:`build_run_packet`.
-    Pass that result as ``packet``; this function does not rebuild.
+    Pass that result as ``packet``; this function does not rebuild. Set
+    ``completed_review`` only from the successful final publication path.
     """
     assembled = packet
     if assembled is None:
@@ -1318,7 +1321,15 @@ def emit_run_packet(
         path = output_path or resolve_packet_path(
             tmpdir=ctx.tmpdir, change_slug=_slugify(resolved_change_id)
         )
+        # The Actions output reader finds the brief via its packet path. If a
+        # previous brief cannot be removed, do not expose that path for this run.
+        fix_brief_path(path).unlink(missing_ok=True)
         written = write_packet(_with_recorded_metrics(assembled, ctx), output_path=path)
+        if completed_review:
+            try:
+                write_run_fix_brief(written, packet=assembled, state=ctx.tool_state)
+            except (OSError, ValueError):
+                logger.warning("fix brief: could not emit a complete brief for this review")
         # W10.2 (#50): in shadow mode the predicted action is recorded as
         # an audit breadcrumb beside the packet. The record is the row
         # the disagreement report reads; the gate itself is never

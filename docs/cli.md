@@ -116,6 +116,8 @@ needs a new review.
 | `mergecraft evidence show <finding-id>` | Show the evidence packet for a finding. |
 | `mergecraft evidence verify <finding-id>` | Replay verification for a finding's evidence packet (not an approval). |
 | `mergecraft explain` | Explain a stored finding or the current working-tree change. |
+| `mergecraft findings brief <source>` | Validate and export a fix brief. Never invokes an agent or writes files. |
+| `mergecraft findings brief-schema` | Print the machine-readable schema for a fix brief. |
 | `mergecraft findings carryover --pr N` | File one issue per unresolved mergeCraft finding. Dry run unless `--apply`. |
 | `mergecraft findings export --pr N` | Print the findings a merge would bury. Never writes anything. |
 | `mergecraft findings ledger --pr N` | Print the open-PR finding ledger from formal reviews. Never writes. |
