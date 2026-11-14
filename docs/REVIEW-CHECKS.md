@@ -721,11 +721,15 @@ The same block is merged into the review body as a mandatory preamble through
 last so nothing can be appended above it.
 
 **Token summary band.** The **Tokens** row reports `used (target N, ceiling M)`,
-optionally `over target` when spend crossed `runBounds.tokenBudget` but remains
-below the ceiling, and `by phase: …` when call sites annotated `record_tokens(…,
-phase=…)`. `tokenBudget` is the soft target; `tokenBudgetTolerance` (default
-`0.10`) defines the hard ceiling as `target × (1 + tolerance)`. Tolerance `0`
-restores strict enforcement at the target.
+optionally `over target` when spend crossed `runBounds.tokenBudget`, and
+`by phase: …` when call sites annotated `record_tokens(…, phase=…)`.
+`tokenBudget` is the soft target; `tokenBudgetTolerance` (default
+`0.10`) defines the advisory ceiling as `target × (1 + tolerance)`. Both are
+reporting thresholds: even above the ceiling, complete token totals are
+preserved and the review verdict is unchanged. Tolerance `0` makes the
+thresholds equal. Shared provider accounting likewise keeps fallback and
+required-reviewer dispatch available after an overage. Cost and tool-call
+limits remain enforced.
 
 **`raised_by` on the record.** Terminal-submission finding rows and the
 published review body carry `raised_by` for multi-reviewer attribution (see §8).

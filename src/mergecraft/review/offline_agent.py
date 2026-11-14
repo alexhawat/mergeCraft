@@ -425,6 +425,7 @@ async def run_offline_agent_review(
         provider_budget = current_run_budget() or token_budget_for(
             model=resolved_model or PINNED_MODEL,
             max_tokens=bounds.token_budget,
+            advisory=True,
         )
         from mergecraft.utils.llm_review_timing import (
             bind_llm_review_timing_tracker,

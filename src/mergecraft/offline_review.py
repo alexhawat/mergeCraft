@@ -1098,6 +1098,7 @@ async def _run_offline_diff_review(
         provider_budget = current_run_budget() or token_budget_for(
             model=settings.jev.model,
             max_tokens=run_bounds.token_budget,
+            advisory=True,
         )
 
         out_dir = Path(tempfile.mkdtemp(prefix="mergecraft-diff-review-"))

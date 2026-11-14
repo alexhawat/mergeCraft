@@ -16,7 +16,7 @@ import pytest
 from tests.agents.conftest import make_agent_run_context
 from tests.evals.support_eval_calibration import PROVIDER_PATHS
 
-from mergecraft.agents.shared import AgentImpl, AgentResult
+from mergecraft.agents.shared import AgentImpl, AgentResult, AgentUsage
 from mergecraft.jev.cost import TokenBudget as JevTokenBudget
 from mergecraft.jev.cost import compute_cost as jev_compute_cost
 
@@ -180,3 +180,36 @@ def test_kill_switch_status_is_the_j2_literal_pair() -> None:
     statuses = get_args(module.KillSwitchStatus)
     assert module.apply_kill_switch(stopped) in statuses
     assert module.apply_kill_switch(JevTokenBudget(max_tokens=100)) in statuses
+
+
+@pytest.mark.parametrize("provider", sorted(PROVIDER_PATHS - {"jev"}))
+async def test_advisory_run_budget_keeps_dispatching_after_an_overrun(
+    tmp_path: Path, provider: str
+) -> None:
+    module = _budget_mod()
+    budget = module.token_budget_for(model=f"{provider}-pinned", max_tokens=10, advisory=True)
+    calls: list[str] = []
+
+    async def run(_ctx: object) -> AgentResult:
+        calls.append(provider)
+        return AgentResult(
+            success=len(calls) > 1,
+            error="retryable" if len(calls) == 1 else None,
+            metadata={"retryable": True},
+            usage=AgentUsage(agent=provider, input_tokens=12, output_tokens=3),
+        )
+
+    async def install(_token: str | None = None) -> str:
+        return "fake"
+
+    impl = AgentImpl(name=provider, _install=install, _run=run)
+    ctx = make_agent_run_context(tmp_path, resolved_model=f"{provider}-pinned")
+    with module.bind_run_budget(budget):
+        first = await impl.run(ctx)
+        second = await impl.run(ctx)
+    assert first.success is False
+    assert second.success is True
+    assert calls == [provider, provider]
+    assert budget.tokens_used == 30
+    assert budget.should_stop() is False
+    assert budget.stop_reason is None

@@ -30,14 +30,15 @@ def _tight_bounds() -> RunBounds:
     )
 
 
-def test_token_budget_per_run_is_enforced() -> None:
-    """Token usage beyond the resolved budget raises ``BudgetExhausted``."""
+def test_token_budget_per_run_is_advisory() -> None:
+    """Token overages are recorded without invalidating the review."""
     tracker = BudgetTracker(_tight_bounds())
     tracker.record_tokens(99)
     tracker.record_tokens(1)
-    with pytest.raises(BudgetExhausted) as exc_info:
-        tracker.record_tokens(1)
-    assert exc_info.value.kind == "token"
+    tracker.record_tokens(1)
+    assert tracker.tokens_used == 101
+    assert tracker.over_target is True
+    assert tracker.last_exhausted is None
 
 
 def test_cost_budget_per_run_is_enforced() -> None:
@@ -78,12 +79,13 @@ def test_record_agent_usage_charges_token_and_cost_budgets() -> None:
         tracker,
         AgentUsage(agent="test", input_tokens=50, output_tokens=49, cost_usd=0.005),
     )
-    with pytest.raises(BudgetExhausted) as exc_info:
-        record_agent_usage(
-            tracker,
-            AgentUsage(agent="test", input_tokens=2, output_tokens=0, cost_usd=0.0),
-        )
-    assert exc_info.value.kind == "token"
+    record_agent_usage(
+        tracker,
+        AgentUsage(agent="test", input_tokens=2, output_tokens=0, cost_usd=0.001),
+    )
+    assert tracker.tokens_used == 101
+    assert tracker.cost_used == pytest.approx(0.006)
+    assert tracker.last_exhausted is None
 
 
 def test_record_agent_usage_does_not_double_count_cached_input() -> None:
@@ -101,12 +103,12 @@ def test_record_agent_usage_does_not_double_count_cached_input() -> None:
         ),
     )
     assert tracker.tokens_used == 95
-    with pytest.raises(BudgetExhausted) as exc_info:
-        record_agent_usage(
-            tracker,
-            AgentUsage(agent="test", input_tokens=6, output_tokens=0, cache_read_tokens=40),
-        )
-    assert exc_info.value.kind == "token"
+    record_agent_usage(
+        tracker,
+        AgentUsage(agent="test", input_tokens=6, output_tokens=0, cache_read_tokens=40),
+    )
+    assert tracker.tokens_used == 101
+    assert tracker.last_exhausted is None
 
 
 def test_tracker_records_last_exhausted_for_orchestrator_drain() -> None:
@@ -149,3 +151,18 @@ def test_cost_budget_default_and_explicit_overrides() -> None:
         ).cost_budget_usd
         == 4.0
     )
+
+
+def test_token_overrun_does_not_skip_cost_enforcement() -> None:
+    from mergecraft.agents.shared import AgentUsage
+
+    tracker = BudgetTracker(_tight_bounds())
+    with pytest.raises(BudgetExhausted) as exc_info:
+        record_agent_usage(
+            tracker,
+            AgentUsage(agent="test", input_tokens=200, output_tokens=10, cost_usd=0.02),
+            phase="reviewer_dispatch",
+        )
+    assert exc_info.value.kind == "cost"
+    assert tracker.tokens_used == 210
+    assert tracker.cost_used == pytest.approx(0.02)

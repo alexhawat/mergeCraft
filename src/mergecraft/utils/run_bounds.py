@@ -1,8 +1,8 @@
 """Per-run budgets, external-operation timeouts, and large-input degradation.
 
 A single resolved :class:`RunBounds` object is threaded from settings through
-the offline review and Action orchestrators. Budget exhaustion maps to
-``RunOutcome.inconclusive`` — never a partial approval.
+the offline review and Action orchestrators. Token usage is advisory; cost
+and tool-call exhaustion map to ``RunOutcome.inconclusive``.
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ class RunBounds:
 
     @property
     def token_ceiling(self) -> int:
-        """Hard token ceiling: target plus configured tolerance band."""
+        """Advisory token ceiling: target plus configured tolerance band."""
         if self.token_budget_tolerance <= 0.0:
             return self.token_budget
         return int(self.token_budget * (1.0 + self.token_budget_tolerance))
@@ -107,61 +107,40 @@ class BudgetTracker:
     _over_target_warned: bool = field(default=False, repr=False)
 
     def record_tokens(self, count: int, *, phase: str | None = None) -> None:
+        """Record all reported tokens and warn once when the target is exceeded.
+
+        Usage can arrive as one aggregate after a reviewer completes. Crossing
+        either edge of the advisory band must not invalidate its verdict or
+        prevent cost accounting. Cost and tool-call limits remain enforced.
+
+        Args:
+            count: Reported token increment; nonpositive values are ignored.
+            phase: Optional phase label for the usage breakdown.
+
+        Returns:
+            None. Updates usage totals and the over-target warning state.
+
+        Examples:
+            >>> tracker = BudgetTracker(resolve_run_bounds(env={}))
+            >>> tracker.record_tokens(25, phase="reviewer_dispatch")
+            >>> tracker.tokens_used
+            25
+        """
         if count <= 0:
             return
-        phase_key = phase or "unattributed"
-        target = self.bounds.token_budget
-        ceiling = self.bounds.token_ceiling
-        tolerance = self.bounds.token_budget_tolerance
-
-        if tolerance <= 0.0:
-            self.tokens_used += count
-            self.phase_totals[phase_key] += count
-            if self.tokens_used > target:
-                msg = f"token budget exhausted ({self.tokens_used} > {target})"
-                self._raise(BudgetExhausted("token", msg))
-            return
-
-        remaining = ceiling - self.tokens_used
-        if count > ceiling:
-            msg = (
-                f"token budget exhausted by single increment ({count} > ceiling {ceiling}; "
-                f"target {target}, tolerance {tolerance})"
-            )
-            self._raise(BudgetExhausted("token", msg))
-
-        prior_used = self.tokens_used
-        charge = count
-        if charge > remaining:
-            msg = (
-                "token budget exhausted by single increment "
-                f"({count} > remaining ceiling {remaining}; used {self.tokens_used}, "
-                f"target {target}, ceiling {ceiling}, tolerance {tolerance})"
-            )
-            self._raise(BudgetExhausted("token", msg))
-
-        self.tokens_used += charge
-        self.phase_totals[phase_key] += charge
-
-        if prior_used <= target < self.tokens_used:
+        self.tokens_used += count
+        self.phase_totals[phase or "unattributed"] += count
+        if self.tokens_used > self.bounds.token_budget:
             self.over_target = True
             if not self._over_target_warned:
                 self._over_target_warned = True
                 logger.warning(
-                    "token budget over target ({} > target {}); continuing to ceiling {}",
+                    "token budget over target ({} > target {}; advisory ceiling {}); "
+                    "usage is advisory and does not invalidate the review",
                     self.tokens_used,
-                    target,
-                    ceiling,
+                    self.bounds.token_budget,
+                    self.bounds.token_ceiling,
                 )
-        elif self.tokens_used > target:
-            self.over_target = True
-
-        if self.tokens_used > ceiling:
-            msg = (
-                f"token budget exhausted ({self.tokens_used} > ceiling {ceiling}; "
-                f"target {target}, tolerance {tolerance})"
-            )
-            self._raise(BudgetExhausted("token", msg))
 
     def record_cost(self, amount: float) -> None:
         if amount <= 0:
