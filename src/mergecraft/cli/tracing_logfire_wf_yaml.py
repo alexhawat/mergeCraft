@@ -352,23 +352,24 @@ def _select_step_indices(
     selector: str,
 ) -> list[int]:
     """Map a ``--step`` selector (``primary`` / ``all`` / exact id or name) to indices."""
-    if not blocks:
+    # The generated merge-group step only reports an existing verdict.
+    # Credential and model wiring applies exclusively to review steps.
+    review_steps = {
+        idx: ident
+        for idx, (start, end, _) in enumerate(blocks)
+        if (ident := _step_identifier(text[start:end], idx)) != "mergecraft_merge_group"
+    }
+    if not review_steps:
         raise LogfireWorkflowError(f"no ``uses: {_ACTION_USES}`` step found in the workflow")
     if selector == "all":
-        return list(range(len(blocks)))
+        return list(review_steps)
     if selector == "primary":
-        return [0]
-    matches: list[int] = []
-    for idx, (start, end, _indent) in enumerate(blocks):
-        block = text[start:end]
-        ident = _step_identifier(block, idx)
-        if ident == selector:
-            matches.append(idx)
+        return [next(iter(review_steps))]
+    matches = [idx for idx, ident in review_steps.items() if ident == selector]
     if not matches:
-        avail = [_step_identifier(text[s:e], i) for i, (s, e, _) in enumerate(blocks)]
         raise LogfireWorkflowError(
             f"--step {selector!r} did not match any ``uses: {_ACTION_USES}`` step; "
-            f"available: {avail}"
+            f"available: {list(review_steps.values())}"
         )
     return matches
 

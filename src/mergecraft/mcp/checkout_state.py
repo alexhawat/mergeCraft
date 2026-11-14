@@ -7,6 +7,7 @@ from mergecraft.mcp.tool_state import RepoToolState, ToolState, primary_repo_sta
 # Every field must be classified by the checkout state contract test.
 RESET_REPO_FIELDS = (
     "checkout_sha",
+    "reviewed_merge_base",
     "before_sha",
     "push_dest",
     "diff_path",

@@ -75,6 +75,7 @@ REGULAR_FILE_MODES: Final[frozenset[str]] = frozenset({"100644", "100755"})
 _SHA: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{40}")
 _STAMP_PULL: Final[re.Pattern[str]] = re.compile(r"Pull request: #([1-9][0-9]*)")
 _STAMP_BASE: Final[re.Pattern[str]] = re.compile(r"Target branch: (\S+)")
+_STAMP_MERGE_BASE: Final[re.Pattern[str]] = re.compile(r"Reviewed merge base: ([0-9a-f]{40})")
 _STAMP_POLICY: Final[re.Pattern[str]] = re.compile(r"Review policy: sha256:([0-9a-f]{64})")
 
 
@@ -89,14 +90,18 @@ class ReviewStamp:
     pull_number: int
     base_ref: str
     policy_digest: str
+    merge_base: str | None = None
 
     def lines(self) -> list[str]:
         """The summary lines :func:`parse_review_stamp` reads back."""
-        return [
+        lines = [
             f"Pull request: #{self.pull_number}",
             f"Target branch: {self.base_ref}",
             f"Review policy: sha256:{self.policy_digest}",
         ]
+        if self.merge_base is not None:
+            lines.append(f"Reviewed merge base: {self.merge_base}")
+        return lines
 
 
 def _single(pattern: re.Pattern[str], lines: list[str]) -> str | None:
@@ -117,7 +122,12 @@ def parse_review_stamp(summary: str) -> ReviewStamp | None:
     policy = _single(_STAMP_POLICY, lines)
     if pull is None or base is None or policy is None:
         return None
-    return ReviewStamp(pull_number=int(pull), base_ref=base, policy_digest=policy)
+    return ReviewStamp(
+        pull_number=int(pull),
+        base_ref=base,
+        policy_digest=policy,
+        merge_base=_single(_STAMP_MERGE_BASE, lines),
+    )
 
 
 @dataclass(frozen=True, slots=True)

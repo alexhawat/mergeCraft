@@ -140,16 +140,6 @@ def test_self_workflow_skip_step_does_not_run_for_image_only_prs() -> None:
     assert "needs.changes.outputs.image_only != 'true'" in step["if"]
 
 
-def _single_action_step(doc: dict[str, Any]) -> dict[str, Any]:
-    jobs = doc["jobs"]
-    assert list(jobs) == ["mergecraft"], list(jobs)
-    steps = [
-        s for s in jobs["mergecraft"]["steps"] if "alexhawat/mergeCraft@" in str(s.get("uses"))
-    ]
-    assert len(steps) == 1, steps
-    return steps[0]
-
-
 @pytest.mark.parametrize(
     "source",
     ["init", "examples/workflows/mergecraft.yml"],
@@ -163,7 +153,14 @@ def test_ungated_templates_always_run_the_action(source: str) -> None:
     )
     doc = yaml.safe_load(text)
     assert "HAS_AUTH" not in text
-    step = _single_action_step(doc)
-    assert "if" not in step
-    assert not step.get("continue-on-error", False)
-    assert "secrets." not in str(doc["jobs"]["mergecraft"].get("if", ""))
+    assert list(doc["jobs"]) == ["mergecraft"]
+    job = doc["jobs"]["mergecraft"]
+    review, queue = [step for step in job["steps"] if "alexhawat/mergeCraft@" in step["uses"]]
+    assert (
+        review["if"]
+        == "github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'"
+    )
+    assert queue["if"] == "github.event_name == 'merge_group'"
+    assert not review.get("continue-on-error", False)
+    assert not queue.get("continue-on-error", False)
+    assert "secrets." not in job["if"]

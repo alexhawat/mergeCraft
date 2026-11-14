@@ -5,6 +5,10 @@ on:
   # GITHUB_EVENT_PATH, so no ~mergecraft JSON payload is needed — just a prompt.
   pull_request:
     types: [opened, ready_for_review, synchronize]
+  # Reports approval on the merge queue's synthetic commit. Use an Action pin
+  # that supports merge_group; see docs/workflows.md before enabling a queue.
+  merge_group:
+    types: [checks_requested]
   # On-demand runs without a comment trigger. To drive mergeCraft interactively,
   # use `workflow_dispatch` (below) or trigger a `pull_request` push — comment
   # triggers are intentionally omitted because any commenter can otherwise steer
@@ -35,16 +39,19 @@ jobs:
   mergecraft:
     if: >
       github.event_name == 'pull_request' ||
-      github.event_name == 'workflow_dispatch'
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@__CHECKOUT_SHA__ # v7.0.1
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         with:
           # Do not persist the checkout token into .git/config: mergeCraft adds
           # its own Authorization header, and git sends both on one request.
           persist-credentials: false
 
       - name: Run mergeCraft
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         uses: __ACTION_REPO__@__ACTION_SHA__ # __ACTION_PIN__
         with:
           prompt: >
@@ -72,3 +79,14 @@ jobs:
           # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           # TOKENHUB_API_KEY: ${{ secrets.TOKENHUB_API_KEY }}   # + model: tokenhub/hy3
           # GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}       # + model: google/gemini-*
+
+      # The event handler uses the GitHub API. It needs neither a checkout nor
+      # any model credentials. Keep the Action pin equal to the PR review pin.
+      - name: Report merge queue approval
+        if: github.event_name == 'merge_group'
+        id: mergecraft_merge_group
+        uses: __ACTION_REPO__@__ACTION_SHA__ # __ACTION_PIN__
+        with:
+          status_checks: enabled
+        env:
+          MERGECRAFT_ACTION_SHA: __ACTION_SHA__
