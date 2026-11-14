@@ -27,6 +27,7 @@ from typing import Any
 
 import pytest
 
+from mergecraft.action import review_pull
 from mergecraft.config.settings import RepoSettings
 from mergecraft.config.trust_policy import bind_target_pull_request
 from mergecraft.evidence.run_packet import classify_run_blast_radius, scope_signal_for_state
@@ -207,7 +208,7 @@ async def test_a_failing_read_leaves_the_scope_unknown_and_never_raises(
         raise RuntimeError(msg)
 
     monkeypatch.setattr(ingest, "parse_scope_paths", _boom)
-    monkeypatch.setattr(main_mod, "parse_scope_paths", _boom, raising=False)
+    monkeypatch.setattr(review_pull, "parse_scope_paths", _boom, raising=False)
     ctx = _ctx(_BODY_SCOPE, (_ISSUE_SCOPE,))
 
     await _record(main_mod, ctx)

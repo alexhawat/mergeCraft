@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from mergecraft.action import review_publish
 from mergecraft.agents.shared import AgentUsage
 from mergecraft.config.settings import RepoSettings
 from mergecraft.evidence.build import build_packet
@@ -69,12 +70,11 @@ async def test_publish_emit_false_writes_deterministic_record_and_step_summary(
     async def _noop(*_args: Any, **_kwargs: Any) -> None:
         return None
 
-    import mergecraft.main as main_mod
     import mergecraft.utils.step_summary as step_summary_mod
 
-    monkeypatch.setattr(main_mod, "persist_learnings", _noop)
-    monkeypatch.setattr(main_mod, "report_status_checks", _noop)
-    monkeypatch.setattr(main_mod, "publish_deterministic_record", _capture_deterministic)
+    monkeypatch.setattr(review_publish, "persist_learnings", _noop)
+    monkeypatch.setattr(review_publish, "report_status_checks", _noop)
+    monkeypatch.setattr(review_publish, "publish_deterministic_record", _capture_deterministic)
     monkeypatch.setattr(step_summary_mod, "append_step_summary", _capture_step_summary)
 
     run_ctx = RunContext(settings=RepoSettings(), tool_context=tool_context)
@@ -112,11 +112,9 @@ async def test_failed_formal_record_update_reports_neutral_status(
     async def _noop(*_args: Any, **_kwargs: Any) -> None:
         return None
 
-    import mergecraft.main as main_mod
-
-    monkeypatch.setattr(main_mod, "persist_learnings", _noop)
-    monkeypatch.setattr(main_mod, "report_status_checks", _status)
-    monkeypatch.setattr(main_mod, "publish_deterministic_record", _boom)
+    monkeypatch.setattr(review_publish, "persist_learnings", _noop)
+    monkeypatch.setattr(review_publish, "report_status_checks", _status)
+    monkeypatch.setattr(review_publish, "publish_deterministic_record", _boom)
 
     with pytest.raises(RuntimeError, match="review update failed"):
         await _publish()(
@@ -146,12 +144,11 @@ async def test_non_review_pr_run_does_not_create_a_formal_review(
     async def _noop(*_args: Any, **_kwargs: Any) -> None:
         return None
 
-    import mergecraft.main as main_mod
     import mergecraft.utils.step_summary as step_summary_mod
 
-    monkeypatch.setattr(main_mod, "persist_learnings", _noop)
-    monkeypatch.setattr(main_mod, "report_status_checks", _noop)
-    monkeypatch.setattr(main_mod, "publish_deterministic_record", _unexpected)
+    monkeypatch.setattr(review_publish, "persist_learnings", _noop)
+    monkeypatch.setattr(review_publish, "report_status_checks", _noop)
+    monkeypatch.setattr(review_publish, "publish_deterministic_record", _unexpected)
     monkeypatch.setattr(step_summary_mod, "append_step_summary", lambda _body: None)
     await _publish()(
         RunContext(settings=RepoSettings(), tool_context=tool_context),
@@ -189,12 +186,11 @@ async def test_publish_names_the_refused_terminal_verdict(
     async def _noop(*_args: Any, **_kwargs: Any) -> None:
         return None
 
-    import mergecraft.main as main_mod
     import mergecraft.utils.step_summary as step_summary_mod
 
-    monkeypatch.setattr(main_mod, "persist_learnings", _noop)
-    monkeypatch.setattr(main_mod, "report_status_checks", _noop)
-    monkeypatch.setattr(main_mod, "publish_deterministic_record", _capture_deterministic)
+    monkeypatch.setattr(review_publish, "persist_learnings", _noop)
+    monkeypatch.setattr(review_publish, "report_status_checks", _noop)
+    monkeypatch.setattr(review_publish, "publish_deterministic_record", _capture_deterministic)
     monkeypatch.setattr(step_summary_mod, "append_step_summary", lambda _body: None)
 
     run_ctx = RunContext(settings=RepoSettings(), tool_context=tool_context)
@@ -251,12 +247,11 @@ async def test_publish_resolves_pull_number_from_issue_number(
     async def _noop(*_args: Any, **_kwargs: Any) -> None:
         return None
 
-    import mergecraft.main as main_mod
     import mergecraft.utils.step_summary as step_summary_mod
 
-    monkeypatch.setattr(main_mod, "persist_learnings", _noop)
-    monkeypatch.setattr(main_mod, "report_status_checks", _noop)
-    monkeypatch.setattr(main_mod, "publish_deterministic_record", _capture_deterministic)
+    monkeypatch.setattr(review_publish, "persist_learnings", _noop)
+    monkeypatch.setattr(review_publish, "report_status_checks", _noop)
+    monkeypatch.setattr(review_publish, "publish_deterministic_record", _capture_deterministic)
     monkeypatch.setattr(step_summary_mod, "append_step_summary", lambda _body: None)
 
     run_ctx = RunContext(settings=RepoSettings(), tool_context=tool_context)
@@ -304,13 +299,12 @@ async def test_publish_passes_rejection_reason_for_no_verdict_packet(
         assert run_succeeded is False
         return no_verdict_packet
 
-    import mergecraft.main as main_mod
     import mergecraft.utils.step_summary as step_summary_mod
 
-    monkeypatch.setattr(main_mod, "resolve_prepared_run_packet", _resolve_packet)
-    monkeypatch.setattr(main_mod, "persist_learnings", _noop)
-    monkeypatch.setattr(main_mod, "report_status_checks", _noop)
-    monkeypatch.setattr(main_mod, "publish_deterministic_record", _capture_deterministic)
+    monkeypatch.setattr(review_publish, "resolve_prepared_run_packet", _resolve_packet)
+    monkeypatch.setattr(review_publish, "persist_learnings", _noop)
+    monkeypatch.setattr(review_publish, "report_status_checks", _noop)
+    monkeypatch.setattr(review_publish, "publish_deterministic_record", _capture_deterministic)
     monkeypatch.setattr(step_summary_mod, "append_step_summary", lambda _body: None)
 
     run_ctx = RunContext(settings=RepoSettings(), tool_context=tool_context)

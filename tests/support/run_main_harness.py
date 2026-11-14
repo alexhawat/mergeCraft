@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 import mergecraft.main as main_mod
+from mergecraft.action import review_dispatch, review_finalize, review_prep, review_publish
 from mergecraft.agents.shared import AgentResult
 from mergecraft.config.settings import RepoSettings, RunContextData
 from mergecraft.mcp.context import PayloadEvent
@@ -288,32 +289,32 @@ async def run_main_for_test(
         events.append("resolve_run_context_data")
         return run_context
 
-    monkeypatch.setattr(main_mod, "resolve_run_context_data", _fake_run_context)
+    monkeypatch.setattr(review_prep, "resolve_run_context_data", _fake_run_context)
     if not real_prompt_input:
         # The default scripts the prompt resolver. ``real_prompt_input=True``
         # leaves the production reader in place so a test can exercise its real
         # ordering (it constructs ``ActionInputEnv``); the prompt then comes from
         # ``INPUT_PROMPT`` / ``INPUT_PROMPT_FILE`` in ``env``.
-        monkeypatch.setattr(main_mod, "resolve_prompt_input", lambda: prompt)
-    monkeypatch.setattr(main_mod, "get_job_token", lambda: "ghs_fake_job_token")
+        monkeypatch.setattr(review_prep, "resolve_prompt_input", lambda: prompt)
+    monkeypatch.setattr(review_prep, "get_job_token", lambda: "ghs_fake_job_token")
 
-    real_create_temp = main_mod.create_temp_directory
+    real_create_temp = review_prep.create_temp_directory
 
     def _create_temp() -> str:
         events.append("create_temp_directory")
         return real_create_temp()
 
-    monkeypatch.setattr(main_mod, "create_temp_directory", _create_temp)
+    monkeypatch.setattr(review_prep, "create_temp_directory", _create_temp)
 
     def _fake_setup_git(**kwargs: Any) -> None:
         events.append("setup_git")
 
-    monkeypatch.setattr(main_mod, "setup_git", _fake_setup_git)
+    monkeypatch.setattr(review_dispatch, "setup_git", _fake_setup_git)
 
     def _fake_wipe() -> None:
         events.append("wipe_runner_leak_surface")
 
-    monkeypatch.setattr(main_mod, "wipe_runner_leak_surface", _fake_wipe)
+    monkeypatch.setattr(review_prep, "wipe_runner_leak_surface", _fake_wipe)
 
     async def _fake_resolve_tokens(**_kwargs: Any) -> FakeTokenRef:
         events.append("resolve_tokens")
@@ -321,14 +322,14 @@ async def run_main_for_test(
         token_holder.append(ref)
         return ref
 
-    monkeypatch.setattr(main_mod, "resolve_tokens", _fake_resolve_tokens)
+    monkeypatch.setattr(review_prep, "resolve_tokens", _fake_resolve_tokens)
 
     def _fake_github(token: str, **kwargs: Any) -> FakeGitHubClient:
         client = FakeGitHubClient(token, **kwargs)
         github_holder.append(client)
         return client
 
-    monkeypatch.setattr(main_mod, "GitHubClient", _fake_github)
+    monkeypatch.setattr(review_prep, "GitHubClient", _fake_github)
 
     real_derive = main_mod.derive_trust_tier
 
@@ -358,7 +359,7 @@ async def run_main_for_test(
 
     # Model resolution is scripted: slugs pass through verbatim and each slug
     # maps to a fake agent, so no real CLI is ever located or spawned.
-    monkeypatch.setattr(main_mod, "resolve_model", lambda slug=None, **kwargs: slug)
+    monkeypatch.setattr(review_dispatch, "resolve_model", lambda slug=None, **kwargs: slug)
 
     agent_map: dict[str, FakeAgent] = dict(agents_by_slug or {})
     default_agent = agent if agent is not None else FakeAgent()
@@ -369,14 +370,13 @@ async def run_main_for_test(
         return default_agent
 
     monkeypatch.setattr(
-        main_mod, "_first_runnable_in_chain", lambda chain: chain[0] if chain else None
+        review_dispatch, "_first_runnable_in_chain", lambda chain: chain[0] if chain else None
     )
-    # ``resolve_runtime_agent`` must be patched on ``main_mod`` itself: the
-    # merged base ``main.py`` imports it by value from
-    # ``mergecraft.utils.agent_resolve`` and calls it at the orchestrator level,
+    # ``review_dispatch`` imports ``resolve_runtime_agent`` by value from
+    # ``mergecraft.utils.agent_resolve`` and calls it during dispatch,
     # so rebinding only the helper modules below would leave the real agent
     # resolver live — the run would then drive the real opencode CLI and hang.
-    monkeypatch.setattr(main_mod, "resolve_runtime_agent", _fake_resolve_runtime_agent)
+    monkeypatch.setattr(review_dispatch, "resolve_runtime_agent", _fake_resolve_runtime_agent)
 
     def _fake_start_mcp(tool_context: Any, **_kwargs: Any) -> tuple[str, Any]:
         events.append("start_mcp_http_server")
@@ -389,7 +389,7 @@ async def run_main_for_test(
 
         return "http://127.0.0.1:0/mcp", _stop
 
-    monkeypatch.setattr(main_mod, "start_mcp_http_server", _fake_start_mcp)
+    monkeypatch.setattr(review_dispatch, "start_mcp_http_server", _fake_start_mcp)
 
     def _fake_start_installation(tool_context: Any) -> None:
         events.append("start_installation")
@@ -431,18 +431,18 @@ async def run_main_for_test(
                 ],
             )
 
-    monkeypatch.setattr(main_mod, "start_installation", _fake_start_installation)
+    monkeypatch.setattr(review_dispatch, "start_installation", _fake_start_installation)
 
     async def _fake_seed_learnings(**_kwargs: Any) -> str:
         return "learnings.md"
 
-    monkeypatch.setattr(main_mod, "seed_learnings_file", _fake_seed_learnings)
-    monkeypatch.setattr(main_mod, "install_bundled_skills", lambda **_kwargs: None)
+    monkeypatch.setattr(review_dispatch, "seed_learnings_file", _fake_seed_learnings)
+    monkeypatch.setattr(review_dispatch, "install_bundled_skills", lambda **_kwargs: None)
 
     async def _fake_finalize(_run_ctx: Any, result: AgentResult) -> AgentResult:
         return result
 
-    monkeypatch.setattr(main_mod, "finalize_agent_result", _fake_finalize)
+    monkeypatch.setattr(review_finalize, "finalize_agent_result", _fake_finalize)
 
     async def _fake_persist_learnings(ctx: Any) -> None:
         # N2 — capture the tool_context on the publish-side call so the
@@ -451,13 +451,13 @@ async def run_main_for_test(
         if ctx is not None:
             ctx_holder.append(ctx)
 
-    monkeypatch.setattr(main_mod, "persist_learnings", _fake_persist_learnings)
+    monkeypatch.setattr(review_publish, "persist_learnings", _fake_persist_learnings)
 
     # The real reporting layer is captured before the patch so
     # ``capture_status_checks`` can drive it against a recording SCM and
     # observe the check-runs it posts (completion + approval), not just the
     # kwargs the orchestrator handed it.
-    real_report_status = main_mod.report_status_checks
+    real_report_status = review_publish.report_status_checks
 
     async def _fake_report_status(ctx: Any, **kwargs: Any) -> None:
         # N2 — same rationale as ``_fake_persist_learnings``: capture
@@ -482,7 +482,7 @@ async def run_main_for_test(
                 ctx.payload.event = original_event
             status_check_runs.extend(recording_scm.check_runs)
 
-    monkeypatch.setattr(main_mod, "report_status_checks", _fake_report_status)
+    monkeypatch.setattr(review_publish, "report_status_checks", _fake_report_status)
 
     async def _fake_sarif(ctx: Any) -> None:
         if ctx is not None:
@@ -499,6 +499,7 @@ async def run_main_for_test(
         return packet_path
 
     if not real_packet_emission:
+        monkeypatch.setattr(review_publish, "emit_run_packet", _fake_emit_packet)
         monkeypatch.setattr(main_mod, "emit_run_packet", _fake_emit_packet)
 
     import mergecraft.tracing.tracer as tracer_mod

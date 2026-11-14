@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-import mergecraft.main as main_mod
+from mergecraft.action import review_finalize
 from mergecraft.agents.post_run import finalize_agent_result
 from mergecraft.agents.shared import AgentResult
 from mergecraft.run_outcome import RunOutcome
@@ -62,7 +62,7 @@ async def test_finalize_failure_logs_a_warning_naming_the_exception_type(
     ctx = publication_ctx(tmp_path, github=RecordingReviewGitHub(), trust_tier="trusted")
     await submit_verdict(ctx, "approve", [])
     driver_result = await _driver_result(ctx)
-    monkeypatch.setattr(main_mod, "finalize_agent_result", _raise_finalize)
+    monkeypatch.setattr(review_finalize, "finalize_agent_result", _raise_finalize)
     captured, sink_id = _warnings()
     try:
         await run_finalize(ctx, monkeypatch=monkeypatch, agent_result=driver_result)
@@ -82,7 +82,7 @@ async def test_finalize_failure_still_fails_closed_and_names_itself_as_the_reaso
     ctx.authority_trust = "trusted"
     await submit_verdict(ctx, "approve", [])
     driver_result = await _driver_result(ctx)
-    monkeypatch.setattr(main_mod, "finalize_agent_result", _raise_finalize)
+    monkeypatch.setattr(review_finalize, "finalize_agent_result", _raise_finalize)
 
     record = await run_finalize(ctx, monkeypatch=monkeypatch, agent_result=driver_result)
 
@@ -99,7 +99,7 @@ async def test_the_published_run_record_names_the_finalize_failure(
     ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
     await submit_verdict(ctx, "approve", [])
     driver_result = await _driver_result(ctx)
-    monkeypatch.setattr(main_mod, "finalize_agent_result", _raise_finalize)
+    monkeypatch.setattr(review_finalize, "finalize_agent_result", _raise_finalize)
 
     await run_finalize(ctx, monkeypatch=monkeypatch, agent_result=driver_result, real_publish=True)
 

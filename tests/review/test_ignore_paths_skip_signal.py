@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import mergecraft.main as main_mod
+from mergecraft.action import review_policy
 from tests.support.run_main_harness import FakeAgent, run_main_for_test
 
 if TYPE_CHECKING:
@@ -53,7 +53,7 @@ def _listing(monkeypatch: pytest.MonkeyPatch, paths: list[str]) -> list[int]:
         calls.append(number)
         return list(paths)
 
-    monkeypatch.setattr(main_mod, "list_pull_request_paths", _paths)
+    monkeypatch.setattr(review_policy, "list_pull_request_paths", _paths)
     return calls
 
 

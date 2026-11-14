@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import mergecraft.main as main_mod
+from mergecraft.action import review_prep
 from mergecraft.config.settings import RepoSettings
 from mergecraft.main import RunContext
 from mergecraft.mcp.tool_state import init_tool_state
@@ -119,9 +120,9 @@ async def _drive(
     async def _fake_resolve_tokens(**_kwargs: Any) -> _FakeTokenRef:
         return _FakeTokenRef()
 
-    monkeypatch.setattr(main_mod, "resolve_tokens", _fake_resolve_tokens)
-    monkeypatch.setattr(main_mod, "GitHubClient", lambda *a, **k: client)
-    monkeypatch.setattr(main_mod, "create_github_scm", lambda *a, **k: scm)
+    monkeypatch.setattr(review_prep, "resolve_tokens", _fake_resolve_tokens)
+    monkeypatch.setattr(review_prep, "GitHubClient", lambda *a, **k: client)
+    monkeypatch.setattr(review_prep, "create_github_scm", lambda *a, **k: scm)
     await main_mod._resolve_credentials(ctx)
     await main_mod._record_scope_declaration(ctx)
     return ctx

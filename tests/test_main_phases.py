@@ -44,6 +44,7 @@ from loguru import logger
 import mergecraft.main as main_mod
 import mergecraft.utils.log as log_mod
 import mergecraft.utils.token as token_mod
+from mergecraft.action import review_prep
 from mergecraft.agents.shared import AgentResult
 from mergecraft.analyzers.trust import derive_trust_tier
 from mergecraft.config.settings import (
@@ -143,17 +144,17 @@ async def test_credential_phase_passes_trusted_capabilities_to_token_resolution(
     real_phase = main_mod._resolve_credentials
 
     async def _capture_phase(ctx: Any) -> Any:
-        harness_resolver = main_mod.resolve_tokens
+        harness_resolver = review_prep.resolve_tokens
 
         async def _capture_resolve_tokens(**kwargs: Any) -> Any:
             captured.update(kwargs)
             return await harness_resolver(**kwargs)
 
-        main_mod.resolve_tokens = _capture_resolve_tokens
+        review_prep.resolve_tokens = _capture_resolve_tokens
         try:
             return await real_phase(ctx)
         finally:
-            main_mod.resolve_tokens = harness_resolver
+            review_prep.resolve_tokens = harness_resolver
 
     monkeypatch.setattr(main_mod, "_resolve_credentials", _capture_phase)
     rec = await run_main_for_test(
@@ -937,9 +938,9 @@ async def _drive_credentials(
     async def _fake_resolve_tokens(**_kwargs: Any) -> _FakeTokenRef:
         return _FakeTokenRef()
 
-    monkeypatch.setattr(main_mod, "resolve_tokens", _fake_resolve_tokens)
-    monkeypatch.setattr(main_mod, "GitHubClient", lambda *a, **k: object())
-    monkeypatch.setattr(main_mod, "create_github_scm", lambda *a, **k: scm)
+    monkeypatch.setattr(review_prep, "resolve_tokens", _fake_resolve_tokens)
+    monkeypatch.setattr(review_prep, "GitHubClient", lambda *a, **k: object())
+    monkeypatch.setattr(review_prep, "create_github_scm", lambda *a, **k: scm)
     await main_mod._resolve_credentials(ctx)
     return ctx
 

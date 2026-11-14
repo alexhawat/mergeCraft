@@ -23,6 +23,7 @@ from typing import Any, Literal
 import pytest
 
 import mergecraft.main as main_mod
+from mergecraft.action import review_finalize, review_publish
 from mergecraft.agents.shared import AgentResult
 from mergecraft.config.settings import RepoSettings
 from mergecraft.mcp.review import create_pull_request_review_tool
@@ -74,8 +75,8 @@ async def test_publish_timeout_after_the_verdict_still_writes_the_packet(
     async def _record_status(_ctx: Any, **kwargs: Any) -> None:
         status_calls.append(kwargs)
 
-    monkeypatch.setattr(main_mod, "report_status_checks", _record_status)
-    monkeypatch.setattr(main_mod, "persist_learnings", _noop)
+    monkeypatch.setattr(review_publish, "report_status_checks", _record_status)
+    monkeypatch.setattr(review_publish, "persist_learnings", _noop)
     monkeypatch.setattr(main_mod, "report_sarif_upload", _noop)
     monkeypatch.setattr(main_mod, "_FAILURE_PUBLISH_TIMEOUT_S", 0.3)
     run = main_mod.RunContext(
@@ -113,8 +114,8 @@ async def test_failure_before_the_publish_stage_writes_no_packet(
     ctx = publication_ctx(tmp_path, github=RecordingReviewGitHub(), trust_tier="trusted")
     emitted: list[Any] = []
     monkeypatch.setattr(main_mod, "emit_run_packet", lambda *a, **k: emitted.append(a))
-    monkeypatch.setattr(main_mod, "report_status_checks", _noop)
-    monkeypatch.setattr(main_mod, "persist_learnings", _noop)
+    monkeypatch.setattr(review_publish, "report_status_checks", _noop)
+    monkeypatch.setattr(review_publish, "persist_learnings", _noop)
     run = main_mod.RunContext(settings=RepoSettings(), tool_context=ctx, tool_state=ctx.tool_state)
 
     result = await main_mod._action_failure_result(run, TimeoutError("agent timed out"))
@@ -197,10 +198,10 @@ async def test_token_overrun_preserves_completed_review_and_packet(
     usage = AgentUsage(agent="opencode", input_tokens=10_199_511, output_tokens=55_181)
     ctx.tool_state.usage_entries.append(usage)
     record_agent_usage(tracker, usage, phase="reviewer_dispatch")
-    monkeypatch.setattr(main_mod, "report_status_checks", _noop)
-    monkeypatch.setattr(main_mod, "persist_learnings", _noop)
+    monkeypatch.setattr(review_publish, "report_status_checks", _noop)
+    monkeypatch.setattr(review_publish, "persist_learnings", _noop)
     monkeypatch.setattr(main_mod, "report_sarif_upload", _noop)
-    monkeypatch.setattr(main_mod, "_scan_sinks_after_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(review_finalize, "_scan_sinks_after_run", lambda *_a, **_k: None)
     run = main_mod.RunContext(
         settings=settings,
         tool_context=ctx,

@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from mergecraft.action import review_publish
 from mergecraft.agents.shared import AgentResult
 from mergecraft.evidence.shadow import predict_verdict_protocol
 from mergecraft.evidence.trajectory import build_trajectory_record
@@ -248,9 +249,9 @@ async def _publish_once(
     async def _capture_checks(_ctx: Any, **kwargs: Any) -> None:
         checks.append(kwargs)
 
-    monkeypatch.setattr(main_mod, "persist_learnings", _noop)
-    monkeypatch.setattr(main_mod, "report_status_checks", _capture_checks)
-    monkeypatch.setattr(main_mod, "resolve_prepared_run_packet", lambda *_a, **_k: packet)
+    monkeypatch.setattr(review_publish, "persist_learnings", _noop)
+    monkeypatch.setattr(review_publish, "report_status_checks", _capture_checks)
+    monkeypatch.setattr(review_publish, "resolve_prepared_run_packet", lambda *_a, **_k: packet)
     monkeypatch.setattr(step_summary_mod, "append_step_summary", lambda _body: None)
 
     result = AgentResult(success=True)

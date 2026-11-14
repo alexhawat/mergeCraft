@@ -7,8 +7,9 @@ How a review run moves from a pull request event to a verdict, and which part of
 This is a map, not a specification. Each stage links to the page that owns the
 detail; the pipeline picture in the [README](../README.md#how-it-works) shows
 the same flow without the code. Package names below are the directories under
-`src/mergecraft/`, and the stage order follows `main()` in
-`src/mergecraft/main.py`.
+`src/mergecraft/`. The Action and offline CLI drive the lifecycle through
+`review/engine.py` and share reviewer preparation, dispatch, and outcome
+resolution in `review/pipeline/`.
 
 ## One run, end to end
 
@@ -20,17 +21,17 @@ event  ->  setup  ->  trust tier  ->  analyzers  ->  triage / skip gates
 
 | Stage | What happens | Where it lives |
 |-------|--------------|----------------|
-| Entry | The Docker Action starts `mergecraft.main`; the CLI's `mergecraft review` runs the same pipeline offline against a local diff and never posts to GitHub. | `action/`, `main.py`, `cli/`, `offline_review.py` |
-| Setup | Resolve the event payload, load settings, resolve credentials, assemble the model chain, build the tool context, check out the pull request, run the optional setup script. | `main.py` (`_setup_run`, `_resolve_credentials`, `_assemble_model_chain`), `config/`, `workflow/`, `prep/` |
-| [Trust tier](glossary.md#trust-tier) | Classify the run from the event and the code it would check out: a same-repository pull request is trusted; a fork or `pull_request_target` run is not. The tier decides secrets, tools and which analyzers may run. | `analyzers/trust.py` (`derive_trust_tier`), `config/trust_policy.py`; see [workflows](workflows.md#security-model) and [trust policy](trust-policy.md) |
-| Gates | Skip when every changed file is ignored, and decide whether the change needs a full review at all. | `main.py` (`_ignore_paths_gate`, `_triage_gate`, `_reapproval_gate`), `reapproval.py` |
+| Entry | The Docker Action starts `mergecraft.main`; the CLI's `mergecraft review` runs the same pipeline offline against a local diff and never posts to GitHub. | `main.py`, `cli/`, `offline_review.py`, `review/engine.py` |
+| Setup | Resolve the event payload, load settings, resolve credentials, assemble the model chain, build the tool context, check out the pull request, run the optional setup script. | `action/review_prep.py` (setup and credentials), `action/review_dispatch.py` (model chain, tool context, and setup script), `mcp/checkout.py`, `config/`, `prep/` |
+| [Trust tier](glossary.md#trust-tier) | Classify the run from the event and the code it would check out: a same-repository pull request is trusted; a fork or `pull_request_target` run is not. The tier decides secrets, tools and which analyzers may run. | `action/review_prep.py` (event binding), `config/trust_policy.py`, `analyzers/trust.py` (`derive_trust_tier`). See [workflows](workflows.md#security-model) and [trust policy](trust-policy.md) |
+| Gates | Skip when every changed file is ignored, and decide whether the change needs a full review at all. | `action/review_policy.py` (`_ignore_paths_gate`, `_triage_gate`, `_reapproval_gate`), `reapproval.py` |
 | [Analyzers](glossary.md#analyzer) | Run the deterministic tools that match the languages and trust tier, and normalize their output to findings. | `analyzers/` (manifests, registry, execution, SARIF); catalog in [ANALYZERS](ANALYZERS.md) |
 | Context | Build the repository map and retrieval context, classify the change, and compute the [blast radius](glossary.md#blast-radius). | `context/`, `classify/`, `requirements/`, `xrepo/` |
-| Review agent | The model, run by a [harness](glossary.md#harness), reads the diff with a set of [lenses](glossary.md#lens) and records a verdict and findings through typed tools. Extra reviewers on the [roster](glossary.md#roster) run in their own dispatches. | `agents/`, `review/` (engine, lens routing, file-group fan-out), `modes/`, `mcp/`; see [agent roster](agent-roster.md) |
+| Review agent | The model, run by a [harness](glossary.md#harness), reads the diff with a set of [lenses](glossary.md#lens) and records a verdict and findings through typed tools. Extra reviewers on the [roster](glossary.md#roster) run in their own dispatches. | `review/pipeline/dispatch.py`, `action/review_dispatch.py`, `review/offline_agent.py`, `review/roster_execution.py`, `agents/`, `modes/`, `mcp/`; see [agent roster](agent-roster.md) |
 | [Verifier](glossary.md#verifier) | A read-only second pass re-reads Critical and Major findings before publication. | `agents/verifier.py`; the optional Jev screening gate in `jev/` runs before the reviewer ([Jev gate patterns](jev-gate-patterns.md)); [REVIEW-DOCTRINE](REVIEW-DOCTRINE.md) |
 | [Typed findings](glossary.md#typed-finding) | One schema for analyzer and model findings: severity, location, evidence, scope. | `findings/`, `evidence/`, `review_taxonomy.py` |
-| Verdict | `mergecraft-approval` is a pure function of typed findings, run state and trust tier, never of prose. | `agents/gates.py` (`decide_approval`), `review_checks.py`, `run_outcome.py`; [REVIEW-CHECKS](REVIEW-CHECKS.md) |
-| Publish | Inline comments, the `mergecraft` and `mergecraft-approval` checks, optional SARIF upload, the run record, and the [evidence packet](glossary.md#evidence-packet). | `main.py` (`_publish`, `_finalize`), `scm/`, `pr/`, `evidence/`, `analyzers/sarif_upload.py` |
+| Verdict | `mergecraft-approval` is a pure function of typed findings, run state and trust tier, never of prose. | `agents/gates.py` (`decide_approval`), `review_checks.py`, `review/pipeline/finalize.py`, `run_outcome.py`; [REVIEW-CHECKS](REVIEW-CHECKS.md) |
+| Publish | Inline comments, the `mergecraft` and `mergecraft-approval` checks, optional SARIF upload, the run record, and the [evidence packet](glossary.md#evidence-packet). | `action/review_finalize.py` (post-run validation), `action/review_publish.py` (checks and packet), `action/review_verdict.py` (formal verdict), `action/review_record.py` (run record), `evidence/run_packet.py`, `utils/code_scanning.py` (SARIF) |
 
 ## Supporting packages
 
