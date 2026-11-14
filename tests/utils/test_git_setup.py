@@ -512,6 +512,114 @@ def test_prepare_temp_dir_for_agent_chowns_when_root(
     assert chown_calls == [(str(tmp_path), 1234, 1234)]
 
 
+def _as_root_with_agent_user(monkeypatch: MonkeyPatch, getpwnam: MagicMock) -> list[tuple]:
+    """Model the Action container: root, with ``getpwnam`` resolving the agent user."""
+    monkeypatch.setattr(os, "getuid", lambda: 0)
+    fake_pwd = MagicMock()
+    fake_pwd.getpwnam = getpwnam
+    monkeypatch.setitem(__import__("sys").modules, "pwd", fake_pwd)
+    monkeypatch.setattr("mergecraft.utils.privilege.agent_user_name", lambda: "mergecraft")
+    chown_calls: list[tuple] = []
+    monkeypatch.setattr(os, "chown", lambda path, uid, gid: chown_calls.append((path, uid, gid)))
+    return chown_calls
+
+
+def test_agent_export_directory_is_private_run_owned_and_reused(tmp_path: Path) -> None:
+    """One fresh ``0o700`` ``mkdtemp`` child per temp root, registered as run-owned (#1474)."""
+    temp = tmp_path / "shared"
+
+    first = git_setup_mod.agent_export_directory(str(temp))
+    second = git_setup_mod.agent_export_directory(str(temp))
+
+    assert first == second
+    assert first.parent == temp.resolve()
+    assert first.name.startswith("git-read-")
+    assert stat.S_IMODE(first.stat().st_mode) == 0o700
+    assert is_run_owned_directory(str(first))
+    assert not is_run_owned_directory(str(temp))
+
+
+def test_agent_export_directory_is_rebuilt_when_removed(tmp_path: Path) -> None:
+    first = git_setup_mod.agent_export_directory(str(tmp_path))
+    shutil.rmtree(first)
+
+    second = git_setup_mod.agent_export_directory(str(tmp_path))
+
+    assert second.is_dir()
+    assert second != first
+
+
+def test_agent_export_directory_drops_a_cached_path_swapped_for_a_symlink(
+    tmp_path: Path,
+) -> None:
+    """A cached directory replaced by a symlink is not reused or written through."""
+    temp = tmp_path / "shared"
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    first = git_setup_mod.agent_export_directory(str(temp))
+    first.rmdir()
+    first.symlink_to(victim, target_is_directory=True)
+
+    second = git_setup_mod.agent_export_directory(str(temp))
+
+    assert second != first
+    assert not second.is_symlink()
+    assert second.resolve().parent == temp.resolve()
+    assert list(victim.iterdir()) == []
+    first.unlink()  # leave nothing for the exit-time cleanup to trip on
+
+
+def test_agent_export_directory_is_handed_to_the_agent_user_when_root(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    pw = MagicMock()
+    pw.pw_uid = 1234
+    pw.pw_gid = 1234
+    chown_calls = _as_root_with_agent_user(monkeypatch, MagicMock(return_value=pw))
+
+    created = git_setup_mod.agent_export_directory(str(tmp_path))
+
+    assert chown_calls == [(str(created), 1234, 1234)]
+    assert stat.S_IMODE(created.stat().st_mode) == 0o700
+
+
+def test_agent_export_directory_is_not_chowned_when_not_root(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(os, "getuid", lambda: 1000)
+    chown_calls: list[str] = []
+    monkeypatch.setattr(os, "chown", lambda path, *_a: chown_calls.append(path))
+
+    assert git_setup_mod.agent_export_directory(str(tmp_path)).is_dir()
+    assert chown_calls == []
+
+
+def test_agent_export_directory_survives_a_missing_agent_user(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """Root without the agent account (local root runs): keep the directory, skip the chown."""
+    chown_calls = _as_root_with_agent_user(monkeypatch, MagicMock(side_effect=KeyError("user")))
+
+    created = git_setup_mod.agent_export_directory(str(tmp_path))
+
+    assert created.is_dir()
+    assert chown_calls == []
+
+
+def test_run_export_directory_follows_the_tools_temp_root(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """``MERGECRAFT_TEMP_DIR`` wins over the context temp dir, as it does in the MCP tools."""
+    env_temp = tmp_path / "env"
+    ctx_temp = tmp_path / "ctx"
+
+    monkeypatch.setenv("MERGECRAFT_TEMP_DIR", str(env_temp))
+    assert git_setup_mod.run_export_directory(str(ctx_temp)).parent == env_temp.resolve()
+
+    monkeypatch.delenv("MERGECRAFT_TEMP_DIR")
+    assert git_setup_mod.run_export_directory(str(ctx_temp)).parent == ctx_temp.resolve()
+
+
 def test_write_askpass_chowns_when_root(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     """Root retains ownership of the credentials dir + askpass file."""
     monkeypatch.setattr(os, "getuid", lambda: 0)

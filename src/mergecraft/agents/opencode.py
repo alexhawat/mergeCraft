@@ -63,7 +63,11 @@ from mergecraft.tracing.genai import (
 )
 from mergecraft.tracing.http import instrument_httpx
 from mergecraft.types import MERGECRAFT_MCP_NAME
-from mergecraft.utils.git_setup import created_temp_directory, is_run_owned_directory
+from mergecraft.utils.git_setup import (
+    created_temp_directory,
+    is_run_owned_directory,
+    run_export_directory,
+)
 from mergecraft.utils.process_group import (
     kill_process_group,
     register_process_group,
@@ -643,12 +647,13 @@ def _build_review_mode_external_directory_allowlist(
     return perms
 
 
-def _build_review_mode_read_allowlist(checkout: Path, evidence: Path) -> dict[str, str]:
-    """Read paths allowlisted to the checkout and evidence scratch (MCB-06 / D4)."""
+def _build_review_mode_read_allowlist(
+    checkout: Path, evidence: Path, exports: tuple[Path, ...] = ()
+) -> dict[str, str]:
+    """Read paths allowlisted to the checkout, evidence scratch and tool exports (MCB-06 / D4)."""
     roots = (checkout.resolve(), evidence.resolve())
     read: dict[str, str] = {}
-    for root in roots:
-        root_posix = root.as_posix()
+    for root_posix in (*(root.as_posix() for root in roots), *_path_forms(exports)):
         read[root_posix] = "allow"
         read[f"{root_posix}/*"] = "allow"
         read[f"{root_posix}/**"] = "allow"
@@ -659,6 +664,37 @@ def _build_review_mode_read_allowlist(checkout: Path, evidence: Path) -> dict[st
         read[f"{root_posix}/.git/config"] = "deny"
         read[f"{root_posix}/.git/**"] = "deny"
     return read
+
+
+def _path_forms(paths: tuple[Path, ...]) -> list[str]:
+    """Literal and resolved spellings (``/var`` vs ``/private/var`` on macOS)."""
+    return sorted({form.as_posix() for path in paths for form in (path, path.resolve())})
+
+
+def _tool_export_dirs(ctx: AgentRunContext) -> tuple[Path, ...]:
+    """The private directory the MCP tools save oversized output into (#1474).
+
+    ``git show <rev>:<path>`` and oversized git output answer with a preview and
+    the path of the full body. That path must be readable even when the temp dir
+    is operator-chosen or shared and so not granted as a whole — otherwise the
+    agent holds a path it cannot open and re-queries git in small pieces. The
+    directory is a fresh ``mkdtemp`` this run owns, resolved from the same temp
+    root the tools use.
+    """
+    try:
+        return (run_export_directory(ctx.tmpdir),)
+    except OSError as err:
+        logger.warning("» could not prepare the tool export directory: {}", err)
+        return ()
+
+
+def _tool_export_external_directory(exports: tuple[Path, ...]) -> dict[str, str]:
+    rules: dict[str, str] = {}
+    for root in _path_forms(exports):
+        rules[root] = "allow"
+        rules[f"{root}/*"] = "allow"
+        rules[f"{root}/**"] = "allow"
+    return rules
 
 
 # Run temp-dir children the agent must never read: the isolated auth store, the
@@ -714,9 +750,13 @@ def _review_diff_external_directory(ctx: AgentRunContext) -> dict[str, str]:
 def _build_review_mode_permissions(ctx: AgentRunContext) -> dict[str, object]:
     checkout = _checkout_root(ctx)
     evidence = _evidence_dir(ctx)
-    read = _build_review_mode_read_allowlist(checkout, evidence)
+    exports = _tool_export_dirs(ctx)
+    read = _build_review_mode_read_allowlist(checkout, evidence, exports)
     external_directory = _build_review_mode_external_directory_allowlist(checkout, evidence)
     external_directory.update(_review_diff_external_directory(ctx))
+    # After the temp-dir rules (last match wins): the export directory is a child
+    # of the temp dir and must stay readable whether or not its parent is granted.
+    external_directory.update(_tool_export_external_directory(exports))
     return {
         "bash": "deny",
         "edit": "deny",

@@ -57,6 +57,7 @@ from mergecraft.utils.git_hardening import (
     read_remote_origin_url,
 )
 from mergecraft.utils.git_process import run_git_process
+from mergecraft.utils.git_setup import run_export_directory
 from mergecraft.utils.path_confinement import (
     checkout_identity_paths,
     is_denied_credential_path,
@@ -313,7 +314,17 @@ _AUTH_FAILURE_HINT = (
 )
 
 _SHOW_REV_PATH_RE = re.compile(r"^([^:]+):(.+)$")
-_GIT_SHOW_PREVIEW_LINES = 5
+# A historical file is returned as a bounded head plus the path of the saved
+# full body. Five lines was too little to act on: run 78b122af spent 162 git
+# calls re-querying context the saved file already held (#1474).
+_GIT_SHOW_PREVIEW_LINES = 120
+_GIT_SHOW_PREVIEW_CHARS = 12_000
+_GIT_OUTPUT_PREVIEW_LINES = 40
+
+
+def _export_dir(ctx: ToolContext) -> Path:
+    """Where this run saves git output for the agent's file-read tool (#1474)."""
+    return run_export_directory(ctx.tmpdir)
 
 
 def _parse_show_rev_path(args: list[str]) -> tuple[str, str] | None:
@@ -359,18 +370,52 @@ def _git_show_cache_identity(
     return key, object_id
 
 
-def _git_show_output_path(temp: str, identity: str) -> str:
+def _git_show_output_path(export_dir: Path, identity: str) -> str:
     digest = hashlib.sha256(identity.encode()).hexdigest()[:16]
-    return str(Path(temp) / f"git-show-{digest}.txt")
+    return str(export_dir / f"git-show-{digest}.txt")
 
 
-def _git_show_preview(output_path: str) -> str:
-    text = Path(output_path).read_text(encoding="utf-8")
+def _bounded_preview(text: str, *, max_lines: int, saved_to: str) -> tuple[str, int, bool]:
+    """Head of ``text`` within the line and character bounds, and whether it was cut.
+
+    Only the returned preview is bounded; the file at ``saved_to`` always holds
+    the whole text. A cut preview ends by naming that file and the line count,
+    so the agent reads the rest with one native read instead of re-querying.
+    """
     lines = text.splitlines()
-    preview = "\n".join(lines[:_GIT_SHOW_PREVIEW_LINES])
-    if len(lines) > _GIT_SHOW_PREVIEW_LINES:
-        preview = f"{preview}\n... [truncated; full body saved to {output_path}] ..."
-    return preview
+    shown: list[str] = []
+    used = 0
+    clipped = False
+    for line in lines[:max_lines]:
+        used += len(line) + 1
+        if shown and used > _GIT_SHOW_PREVIEW_CHARS:
+            break
+        # A single line can exceed the bound on its own (minified JSON/JS).
+        clipped = clipped or len(line) > _GIT_SHOW_PREVIEW_CHARS
+        shown.append(line[:_GIT_SHOW_PREVIEW_CHARS])
+    truncated = clipped or len(shown) < len(lines)
+    preview = "\n".join(shown)
+    if truncated:
+        cut = f", long lines cut at {_GIT_SHOW_PREVIEW_CHARS} characters" if clipped else ""
+        preview = (
+            f"{preview}\n... [truncated: lines 1-{len(shown)} of {len(lines)} shown{cut}; "
+            f"the full body is saved to {saved_to} — read it with your file-read "
+            "tool (offset/limit) instead of re-running git] ..."
+        )
+    return preview, len(lines), truncated
+
+
+def _git_show_result(output_path: str) -> dict[str, Any]:
+    text = Path(output_path).read_text(encoding="utf-8")
+    preview, total, truncated = _bounded_preview(
+        text, max_lines=_GIT_SHOW_PREVIEW_LINES, saved_to=output_path
+    )
+    return {
+        "output": preview,
+        "outputPath": output_path,
+        "totalLines": total,
+        "truncated": truncated,
+    }
 
 
 # Grep context the tool passes through. Past this, grep is being used to read
@@ -904,11 +949,7 @@ def git_tool(ctx: ToolContext):
                 run_args = [object_id]
                 cached_path = ctx.tool_state.git_show_cache.get(cache_key)
                 if cached_path and Path(cached_path).is_file():
-                    return {
-                        "output": _git_show_preview(cached_path),
-                        "outputPath": cached_path,
-                        "cached": True,
-                    }
+                    return {**_git_show_result(cached_path), "cached": True}
         context_dropped = False
         matched = True
         merge_base_found = True
@@ -928,24 +969,23 @@ def git_tool(ctx: ToolContext):
         except RuntimeError as err:
             raise RuntimeError(redact_secrets(str(err))) from err
         if show_target is not None:
-            temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
-            path = _git_show_output_path(temp, cache_key or uuid.uuid4().hex)
+            path = _git_show_output_path(_export_dir(ctx), cache_key or uuid.uuid4().hex)
             Path(path).write_text(output, encoding="utf-8")
             if cache_key is not None:
                 ctx.tool_state.git_show_cache[cache_key] = path
-            return {
-                "output": _git_show_preview(path),
-                "outputPath": path,
-            }
+            return _git_show_result(path)
         result: dict[str, Any] = {"output": output}
         if len(output) > 50_000:
-            temp = os.environ.get("MERGECRAFT_TEMP_DIR") or ctx.tmpdir
-            path = str(Path(temp) / f"git-{command}-{uuid.uuid4().hex[:8]}.txt")
+            path = str(_export_dir(ctx) / f"git-{command}-{uuid.uuid4().hex[:8]}.txt")
             Path(path).write_text(output, encoding="utf-8")
-            preview = "\n".join(output.splitlines()[:40])
+            preview, total, _ = _bounded_preview(
+                output, max_lines=_GIT_OUTPUT_PREVIEW_LINES, saved_to=path
+            )
             result = {
-                "output": (f"{preview}\n\n... [output truncated; full body saved to {path}] ..."),
+                "output": preview,
                 "outputPath": path,
+                "totalLines": total,
+                "truncated": True,
             }
         if context_dropped:
             result["note"] = _GREP_CONTEXT_NOTE
