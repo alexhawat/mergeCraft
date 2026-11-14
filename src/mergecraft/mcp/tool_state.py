@@ -76,6 +76,7 @@ class RepoToolState:
     initial_head: InitialHead | None = None
     issue_number: int | None = None
     checkout_sha: str | None = None
+    reviewed_merge_base: str | None = None
     commentable_lines_by_file: dict[str, CommentableLines] | None = None
     commentable_lines_pull_number: int | None = None
     commentable_lines_checkout_sha: str | None = None

@@ -1456,12 +1456,28 @@ def checkout_pr_tool(ctx: ToolContext):
         unreviewable: list[str] = []
         diff_truncated = False
         try:
-            diff = await run_blocking(
-                _run_git,
-                ["diff", "--merge-base", f"origin/{base_ref}", "HEAD"],
-                cwd=cwd,
+            from mergecraft.classify.triage import trusted_check_apps
+            from mergecraft.config.settings_snapshot import repo_settings_from_context
+
+            queue_apps = repo_settings_from_context(ctx).review.merge_queue.trusted_check_apps
+            if trusted_check_apps(queue_apps):
+                merge_base = (
+                    await run_blocking(
+                        _run_git,
+                        ["merge-base", "--all", f"origin/{base_ref}", checkout_sha],
+                        cwd=cwd,
+                    )
+                ).strip()
+                if re.fullmatch(r"[0-9a-f]{40}", merge_base):
+                    state.reviewed_merge_base = merge_base
+            diff_args = (
+                ["diff", state.reviewed_merge_base, checkout_sha]
+                if state.reviewed_merge_base
+                else ["diff", "--merge-base", f"origin/{base_ref}", "HEAD"]
             )
+            diff = await run_blocking(_run_git, diff_args, cwd=cwd)
         except Exception as err:
+            state.reviewed_merge_base = None
             diff_failure = str(err).splitlines()[0] if str(err) else "git diff failed"
             files_diff = await _diff_from_pull_files(ctx, pull_number=pull_number)
             await _verify_files_api_head(ctx, pull_number=pull_number, head_sha=checkout_sha)

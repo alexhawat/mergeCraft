@@ -16,6 +16,7 @@ from tests.ci.workflow_support import REPO_ROOT, read_text
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+from mergecraft.cli.workflow_wf_yaml import apply_provider_env_wiring
 from mergecraft.models import PROVIDERS
 from mergecraft.pins import action_pin_minimal, load_example_defaults
 
@@ -96,6 +97,73 @@ def test_scaffolded_workflow_triggers_on_pull_request(
     assert re.search(r"^\s*pull_request\s*:", workflow, re.MULTILINE), (
         "init scaffold must include a pull_request trigger (D13)"
     )
+
+
+def test_scaffolded_workflow_handles_merge_groups_without_review_credentials(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    _init_git_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["init", "--force"])
+    assert result.exit_code == 0, result.output
+    workflow_path = tmp_path / ".github" / "workflows" / "mergecraft.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    assert workflow[True]["merge_group"] == {"types": ["checks_requested"]}
+    jobs = workflow["jobs"]
+    assert list(jobs) == ["mergecraft"]
+    job = jobs["mergecraft"]
+    assert "env" not in job
+
+    def enabled(condition: str, event: str) -> bool:
+        allowed_events = [
+            re.fullmatch(r"github[.]event_name == '([a-z_]+)'", clause.strip())
+            for clause in condition.split("||")
+        ]
+        assert all(match is not None for match in allowed_events), condition
+        return any(match is not None and event == match[1] for match in allowed_events)
+
+    checkout, review, queue = job["steps"]
+    for event, expected in (
+        ("merge_group", [queue]),
+        ("pull_request", [checkout, review]),
+        ("workflow_dispatch", [checkout, review]),
+    ):
+        assert enabled(job["if"], event)
+        assert [step for step in job["steps"] if enabled(step["if"], event)] == expected
+
+    assert workflow["permissions"]["checks"] == "write"
+    assert checkout["uses"].startswith("actions/checkout@")
+    assert review["uses"].startswith("alexhawat/mergeCraft@")
+    assert queue["uses"] == review["uses"]
+    assert queue["with"] == {"status_checks": "enabled"}
+    assert queue["env"] == {"MERGECRAFT_ACTION_SHA": queue["uses"].rsplit("@", 1)[1]}
+    assert not queue.get("continue-on-error", False)
+
+
+def test_scaffolded_queue_step_stays_credential_free_when_wiring_all_review_steps(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    _init_git_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["init", "--force"])
+    assert result.exit_code == 0, result.output
+    workflow_path = tmp_path / ".github" / "workflows" / "mergecraft.yml"
+    original = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+
+    change = apply_provider_env_wiring(
+        workflow_path=workflow_path,
+        env_index=1,
+        label="custom",
+        base_url="https://llm.example.test/v1",
+        secret_name="LLM_PROVIDER_1_API_KEY",
+        step_selector="all",
+        force=False,
+    )
+
+    wired = yaml.safe_load(change.new_text)
+    _, review, queue = wired["jobs"]["mergecraft"]["steps"]
+    assert review["env"]["LLM_PROVIDER_1_API_KEY"]
+    assert queue == original["jobs"]["mergecraft"]["steps"][-1]
 
 
 def test_scaffolded_config_uses_models_list(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
