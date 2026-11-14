@@ -114,10 +114,13 @@ async def publish_deterministic_record(
         merge_ledger_into_comment,
     )
     from mergecraft.mcp.comment import add_footer
-    from mergecraft.mcp.review import _truncate_review_body_for_github
+    from mergecraft.mcp.review_publish import (
+        should_publish_sticky_only,
+        truncate_review_body_for_github,
+    )
     from mergecraft.scm.github import create_github_scm
     from mergecraft.utils.learnings import merge_learnings_delta_into_review_body
-    from mergecraft.utils.status_checks import _run_url
+    from mergecraft.utils.status_checks import github_run_url
 
     resolved_ctx = ctx
     if resolved_ctx is None:
@@ -146,8 +149,6 @@ async def publish_deterministic_record(
         verdict_diagnostic=verdict_diagnostic,
         approval_withheld_reason=approval_withheld_reason,
     )
-    from mergecraft.mcp.review import should_publish_sticky_only
-
     if tool_state.review_publication_sticky_only or should_publish_sticky_only(packet):
         # #1078 — this rung is non-terminal (a fallback rung will replace a
         # neutral decision), so its record belongs in the sticky progress
@@ -159,7 +160,7 @@ async def publish_deterministic_record(
         await upsert_sticky_progress_comment(resolved_ctx, block)
         return
     owner, repo = resolved_ctx.repo.owner, resolved_ctx.repo.name
-    run_url = _run_url(resolved_ctx)
+    run_url = github_run_url(resolved_ctx)
     attempt_marker = _record_attempt_marker(resolved_ctx)
     review, existing_body = await _recover_attempt_record(
         resolved_ctx, pull_number, run_url=run_url, attempt_marker=attempt_marker
@@ -187,7 +188,7 @@ async def publish_deterministic_record(
     body = merge_ledger_into_comment(body, records=ensure_finding_ledger(tool_state).records())
     body = add_footer(resolved_ctx, body)
     body = str(
-        _truncate_review_body_for_github(resolved_ctx, {"body": body}, pull_number=pull_number)[
+        truncate_review_body_for_github(resolved_ctx, {"body": body}, pull_number=pull_number)[
             "body"
         ]
     )
@@ -255,12 +256,12 @@ def _lite_record_summary(outcome: LiteOutcome | None) -> str | None:
     The full-review path strips forged or stale deterministic-record markers from
     agent prose before it is rendered; a lite summary is model output too.
     """
-    from mergecraft.findings.ledger import _strip_deterministic_record_markers
+    from mergecraft.findings.ledger import strip_deterministic_record_markers
 
     summary = getattr(outcome, "summary", None)
     if not summary:
         return None
-    return _strip_deterministic_record_markers(str(summary)) or None
+    return strip_deterministic_record_markers(str(summary)) or None
 
 
 async def _render_run_record(
@@ -276,7 +277,7 @@ async def _render_run_record(
         hydrate_finding_ledger_from_progress_comment,
         render_deterministic_review_block,
     )
-    from mergecraft.utils.status_checks import _run_url
+    from mergecraft.utils.status_checks import github_run_url
 
     tool_state = resolved_ctx.tool_state
     await hydrate_finding_ledger_from_progress_comment(resolved_ctx)
@@ -284,7 +285,7 @@ async def _render_run_record(
     block = render_deterministic_review_block(
         packet=packet,
         rejection_reason=rejection_reason,
-        run_url=_run_url(resolved_ctx),
+        run_url=github_run_url(resolved_ctx),
         run_outcome=run_outcome,
         verdict_diagnostic=verdict_diagnostic,
         analyzer_summary=analyzer_run.pre_merge_summary if analyzer_run is not None else None,
@@ -328,7 +329,7 @@ async def _render_run_record(
 async def _recover_attempt_record(
     resolved_ctx: ToolContext, pull_number: int, *, run_url: str | None, attempt_marker: str
 ) -> tuple[ReviewRecord | None, str]:
-    from mergecraft.findings.ledger import DETERMINISTIC_RECORD_MARKER, _is_trusted_sticky_author
+    from mergecraft.findings.ledger import DETERMINISTIC_RECORD_MARKER, is_trusted_sticky_author
 
     tool_state = resolved_ctx.tool_state
     owner, repo = resolved_ctx.repo.owner, resolved_ctx.repo.name
@@ -348,7 +349,7 @@ async def _recover_attempt_record(
             item_body = str(item.get("body") or "")
             item_sha = str(item.get("commit_id") or "")
             return (
-                _is_trusted_sticky_author(item)
+                is_trusted_sticky_author(item)
                 and item_body.lstrip().startswith(DETERMINISTIC_RECORD_MARKER)
                 and f"- **Run:** {run_url}" in item_body
                 and attempt_marker in item_body
@@ -412,7 +413,7 @@ async def _read_legacy_progress(
 async def _retire_legacy_progress(
     resolved_ctx: ToolContext, legacy: dict[str, Any] | None, legacy_body: str
 ) -> None:
-    from mergecraft.findings.ledger import DETERMINISTIC_RECORD_MARKER, _is_trusted_sticky_author
+    from mergecraft.findings.ledger import DETERMINISTIC_RECORD_MARKER, is_trusted_sticky_author
 
     owner, repo = resolved_ctx.repo.owner, resolved_ctx.repo.name
     tool_state = resolved_ctx.tool_state
@@ -422,7 +423,7 @@ async def _retire_legacy_progress(
     # that comment or copy it into the review.
     if (
         legacy is not None
-        and _is_trusted_sticky_author(legacy)
+        and is_trusted_sticky_author(legacy)
         and legacy_body.startswith("## mergeCraft progress")
         and (DETERMINISTIC_RECORD_MARKER in legacy_body or "<!-- mergecraft-ledger:" in legacy_body)
     ):

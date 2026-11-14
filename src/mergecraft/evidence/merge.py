@@ -25,9 +25,9 @@ _LITE_ROW_KEYS: frozenset[str] = frozenset(
 
 def _strip_record_markers(text: str) -> str:
     """Drop deterministic-record markers from lite model output before it is rendered."""
-    from mergecraft.findings.ledger import _strip_deterministic_record_markers
+    from mergecraft.findings.ledger import strip_deterministic_record_markers
 
-    return _strip_deterministic_record_markers(text)
+    return strip_deterministic_record_markers(text)
 
 
 def lite_row_finding(row: dict[str, Any]) -> Finding | None:

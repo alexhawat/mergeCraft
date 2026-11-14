@@ -396,7 +396,7 @@ See `docs/eval-methodology.md` for seeding from postmortems without quality clai
 - `src/mergecraft/evidence/packet.py` — the typed `EvalMetadata`
   breadcrumb on `MergeEvidencePacket.evals` (schema `1.2.0`).
 - `src/mergecraft/mcp/review.py` — the `create_pull_request_review` MCP
-  tool + the `_maybe_suggest_eval_add` auto-prompt.
+  tool. `src/mergecraft/mcp/review_publish.py` logs the eval-add suggestion.
 - `tests/evals/test_store.py`, `tests/evals/test_replay.py`,
   `tests/evals/test_promote.py` — the pinned tests for the store,
   the replay diff, and the promote-to-permanent-test workflow.

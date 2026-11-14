@@ -126,7 +126,8 @@ async def test_unchanged_payload_recovers_via_last_resort_comment_fallback(
         return current
 
     with patch(
-        "mergecraft.mcp.review._demote_inline_comment_from_payload", side_effect=_noop_demote
+        "mergecraft.mcp.review_publish._demote_inline_comment_from_payload",
+        side_effect=_noop_demote,
     ):
         result, _approve_fallback = await _create_github_review_with_anchor_recovery(
             ctx, pull_number=7, payload=payload
@@ -166,7 +167,8 @@ async def test_last_resort_fallback_also_failing_still_raises(tmp_path: Path) ->
 
     with (
         patch(
-            "mergecraft.mcp.review._demote_inline_comment_from_payload", side_effect=_noop_demote
+            "mergecraft.mcp.review_publish._demote_inline_comment_from_payload",
+            side_effect=_noop_demote,
         ),
         pytest.raises(httpx.HTTPStatusError) as exc_info,
     ):

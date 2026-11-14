@@ -370,7 +370,7 @@ async def _publisher_logins_from_approval_checks(
     return frozenset(logins)
 
 
-def _is_trusted_sticky_author(comment: Mapping[str, object]) -> bool:
+def is_trusted_sticky_author(comment: Mapping[str, object]) -> bool:
     """Trust a comment or review only when this run's publisher bot wrote it.
 
     A PR participant can quote the heading, the footer or a ledger marker, so a
@@ -601,7 +601,7 @@ def _select_sticky_progress_comment(
         body = str(comment.get("body") or "")
         if not is_sticky_progress_comment(body):
             continue
-        if not _is_trusted_sticky_author(comment):
+        if not is_trusted_sticky_author(comment):
             logger.warning(
                 "finding ledger: ignoring comment {} as a sticky progress comment: "
                 "author is not a bot",
@@ -1112,7 +1112,7 @@ async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> Find
     return ledger
 
 
-def _strip_deterministic_record_markers(body: str) -> str:
+def strip_deterministic_record_markers(body: str) -> str:
     """Remove forged or stale deterministic-record markers from agent prose.
 
     The passes repeat until nothing changes, so a marker rebuilt by removing
@@ -1128,6 +1128,11 @@ def _strip_deterministic_record_markers(body: str) -> str:
         if stripped == current:
             return stripped.strip()
         current = stripped
+
+
+# Preserve the previous helper names for existing imports.
+_is_trusted_sticky_author = is_trusted_sticky_author
+_strip_deterministic_record_markers = strip_deterministic_record_markers
 
 
 def merge_deterministic_record_into_comment(body: str, *, record_block: str) -> str:
@@ -1770,6 +1775,8 @@ __all__ = [
     "LEDGER_MARKER_V2_PREFIX",
     "LEDGER_SCHEMA_VERSION",
     "FindingLedger",
+    "_is_trusted_sticky_author",
+    "_strip_deterministic_record_markers",
     "configured_publisher_login",
     "ensure_finding_ledger",
     "fetch_review_ledger",
@@ -1778,6 +1785,7 @@ __all__ = [
     "fetch_sticky_progress_comment_body",
     "hydrate_finding_ledger_from_progress_comment",
     "is_sticky_progress_comment",
+    "is_trusted_sticky_author",
     "ledger_round_index",
     "merge_deterministic_record_into_comment",
     "merge_ledger_into_comment",
@@ -1788,5 +1796,6 @@ __all__ = [
     "render_deterministic_review_block",
     "select_sticky_progress_comment",
     "sticky_progress_comment_body",
+    "strip_deterministic_record_markers",
     "upsert_sticky_progress_comment",
 ]

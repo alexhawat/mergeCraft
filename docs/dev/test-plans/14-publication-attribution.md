@@ -40,10 +40,10 @@ Authoring wave: **W1** (`test-creator`). Implementation: **W2–W5**.
 
 | Symbol | Module | Test anchor |
 | --- | --- | --- |
-| `_create_github_review_with_anchor_recovery` | `mcp/review.py` | `test_publication_anchor_recovery.py` |
-| `_payload_signature` / retry ceiling | `mcp/review.py` | `test_publication_anchor_recovery.py` |
-| `_publish_github_review` body guard | `mcp/review.py` | `test_publication_body_integrity.py` |
-| publication idempotency key | `mcp/review.py` / `tool_state` | `test_publication_body_integrity.py` |
+| `create_github_review_with_anchor_recovery` | `mcp/review_publish.py` | `test_publication_anchor_recovery.py` |
+| `_payload_signature` / retry ceiling | `mcp/review_publish.py` | `test_publication_anchor_recovery.py` |
+| `publish_github_review` body guard | `mcp/review_publish.py` | `test_publication_body_integrity.py` |
+| publication idempotency key | `mcp/review_publish.py` / `tool_state` | `test_publication_body_integrity.py` |
 | `_group_findings_by_reviewer` unknown bucket | `review/terminal_submission.py` | `test_publication_raised_by.py` |
 | server-side `raised_by` stamp | dispatch/merge path (W4) | `test_publication_raised_by.py` |
 | `token_budget_tolerance` / `token_ceiling` | `utils/run_bounds.py` | `test_publication_budget_band.py` |

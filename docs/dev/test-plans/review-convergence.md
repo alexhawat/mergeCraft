@@ -377,7 +377,7 @@ Never `strict=True` — impl waves must not touch `tests/`.
 | `FindingPlacement.deferred_section` | `analyzers/budget.py` | budget deferred render tests |
 | `_render_deferred_section` | `analyzers/budget.py` | `test_deferred_section_renders_severity_path_and_body` |
 | `AnalyzerRunState.deferred_section` | `mcp/tool_state.py` | MCP publish tests |
-| `_publish_github_review` deferred append | `mcp/review.py` | MCP publish tests |
+| `publish_github_review` deferred append | `mcp/review_publish.py` | MCP publish tests |
 | `DEFERRED_SECTION_HEADING` | `analyzers/budget.py` (expected) | `### 🗂 Deferred findings` |
 | Fix-all `## Deferred (non-blocking)` | `modes/_pr_summary_format.py` | fix-all brief test |
 
