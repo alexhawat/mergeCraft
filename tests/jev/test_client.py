@@ -255,3 +255,18 @@ def test_package_exports_client_and_result_types() -> None:
     types = import_jev("types")
     assert package.JevCallResult is types.JevCallResult
     assert package.JevError is types.JevError
+
+
+async def test_advisory_run_budget_does_not_skip_later_jev_calls() -> None:
+    from mergecraft.agents.token_budget import bind_run_budget, token_budget_for
+
+    budget = token_budget_for(model="test/model", max_tokens=1, advisory=True)
+    client = _recorded_client("unit_happy.json")
+    with bind_run_budget(budget):
+        first = await client.call(state={"hunk": "a"}, pack_id="unit/v1", unit_id="a")
+        second = await client.call(state={"hunk": "b"}, pack_id="unit/v1", unit_id="b")
+    assert first.skipped is False
+    assert second.skipped is False
+    assert client.transport.calls == 2
+    assert budget.tokens_used > budget.max_tokens
+    assert budget.should_stop() is False

@@ -18,7 +18,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -167,3 +167,69 @@ async def test_mid_run_publication_does_not_freeze_the_packet_before_the_roster(
     assert brief.change_id == reported.change_id
     assert {row.message for row in brief.findings} == {_PRIMARY_BODY, _ROSTER_BODY}
     assert all(row.status == "actionable" for row in brief.findings)
+
+
+@pytest.mark.parametrize("verdict", ["approve", "request_changes"])
+async def test_token_overrun_preserves_completed_review_and_packet(
+    verdict: Literal["approve", "request_changes"],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PR #1477: final usage must not turn a completed review into a fallback."""
+    from mergecraft.agents.shared import AgentUsage
+    from mergecraft.run_outcome import cli_exit_code_for_review
+    from mergecraft.utils.run_bounds import BudgetTracker, record_agent_usage, resolve_run_bounds
+    from tests.ci.support_self_review_cascade import decide_script, run_decide_script
+
+    github = RecordingReviewGitHub()
+    ctx = publication_ctx(tmp_path, github=github, trust_tier="trusted")
+    ctx.pr_approve_enabled = True
+    ctx.authority_trust = "trusted"
+    await submit_verdict(
+        ctx,
+        verdict,
+        [finding(_PRIMARY_BODY)] if verdict == "request_changes" else [],
+    )
+    settings = RepoSettings.model_validate(
+        {"runBounds": {"tokenBudget": 8_000_000, "tokenBudgetTolerance": 0.1}}
+    )
+    tracker = BudgetTracker(resolve_run_bounds(settings=settings, env={}))
+    usage = AgentUsage(agent="opencode", input_tokens=10_199_511, output_tokens=55_181)
+    ctx.tool_state.usage_entries.append(usage)
+    record_agent_usage(tracker, usage, phase="reviewer_dispatch")
+    monkeypatch.setattr(main_mod, "report_status_checks", _noop)
+    monkeypatch.setattr(main_mod, "persist_learnings", _noop)
+    monkeypatch.setattr(main_mod, "report_sarif_upload", _noop)
+    monkeypatch.setattr(main_mod, "_scan_sinks_after_run", lambda *_a, **_k: None)
+    run = main_mod.RunContext(
+        settings=settings,
+        tool_context=ctx,
+        tool_state=ctx.tool_state,
+        run_ctx=run_ctx_for(ctx),
+        tmpdir=ctx.tmpdir,
+        budget_tracker=tracker,
+    )
+
+    result = await main_mod._finalize(run, AgentResult(success=True, output="ok", usage=usage))
+
+    expected_event = "REQUEST_CHANGES" if verdict == "request_changes" else "APPROVE"
+    assert [payload["event"] for payload in github.review_payloads] == [expected_event]
+    assert github.dismissals == []
+    assert result.outcome is RunOutcome.passed
+    assert cli_exit_code_for_review(result.outcome) == 0
+    assert result.evidence_packet_path is not None
+    packet = json.loads(_read_text(result.evidence_packet_path))
+    assert packet["decision"]["verdict"] == (
+        "failure" if verdict == "request_changes" else "success"
+    )
+    assert tracker.tokens_used == 10_254_692
+    assert tracker.phase_totals == {"reviewer_dispatch": 10_254_692}
+    outputs, _ = run_decide_script(
+        tmp_path,
+        decide_script("fallback"),
+        env={
+            "OPENCODE_GO_OUTCOME": "success",
+            "OPENCODE_GO_PACKET_FILE": result.evidence_packet_path,
+        },
+    )
+    assert outputs["need"] == "false"

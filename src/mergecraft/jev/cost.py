@@ -16,6 +16,7 @@ from __future__ import annotations
 import threading
 from typing import Final
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from mergecraft.jev.types import PINNED_MODEL
@@ -43,14 +44,17 @@ class CostAssessment(BaseModel):
 
 
 class TokenBudget:
-    """Per-run token cap. Crossing it stops further dispatch and records why.
+    """Shared token accounting with an optional dispatch cap.
 
-    ``record_usage`` is safe for concurrent callers that share one budget
-    (same API key / same client).
+    ``advisory=True`` records every reported token and warns on crossing the
+    target without stopping later dispatches. Review run bounds use this mode;
+    explicitly constructed caps retain their existing enforcement by default.
+    ``record_usage`` is safe for concurrent callers sharing one budget.
     """
 
-    def __init__(self, max_tokens: int) -> None:
+    def __init__(self, max_tokens: int, *, advisory: bool = False) -> None:
         self.max_tokens = max_tokens
+        self.advisory = advisory
         self.tokens_used = 0
         self.stopped = False
         self.stop_reason: str | None = None
@@ -71,8 +75,9 @@ class TokenBudget:
 
         Returns:
             bool: ``True`` when the usage was accepted (or was unreported).
-            ``False`` when the increment would exceed the cap; the stop is
-            recorded and ``tokens_used`` is left unchanged.
+            In advisory mode, overruns are accepted and recorded in full.
+            For an enforced cap, ``False`` means the increment would exceed it;
+            the stop is recorded and ``tokens_used`` is left unchanged.
         """
         with self._lock:
             if input_tokens is None or output_tokens is None:
@@ -81,11 +86,19 @@ class TokenBudget:
             if self.stopped:
                 return False
             increment = input_tokens + output_tokens
-            if self.tokens_used + increment > self.max_tokens:
-                self.stopped = True
-                self.stop_reason = "budget"
-                return False
-            self.tokens_used += increment
+            total = self.tokens_used + increment
+            if total > self.max_tokens:
+                if not self.advisory:
+                    self.stopped = True
+                    self.stop_reason = "budget"
+                    return False
+                if self.tokens_used <= self.max_tokens:
+                    logger.warning(
+                        "provider token usage over advisory target ({} > {}); continuing dispatch",
+                        total,
+                        self.max_tokens,
+                    )
+            self.tokens_used = total
             return True
 
 

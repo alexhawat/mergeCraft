@@ -378,3 +378,47 @@ def test_apply_roster_failure_leaves_a_clean_run_alone() -> None:
     primary = AgentResult(success=True, output="review text")
     assert apply_roster_failure(primary, None) is primary
     assert apply_roster_failure(primary, RosterExecutionSummary(None, ())) is primary
+
+
+@pytest.mark.parametrize("secondary_succeeds", [True, False])
+async def test_required_roster_runs_after_primary_exceeds_token_target(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, secondary_succeeds: bool
+) -> None:
+    from dataclasses import replace
+
+    from mergecraft.agents.shared import AgentImpl, AgentUsage
+    from mergecraft.agents.token_budget import bind_run_budget, token_budget_for
+    from mergecraft.review.roster_execution import apply_roster_failure
+
+    async def install(_token: str | None = None) -> str:
+        return "fake"
+
+    async def primary_run(_ctx: AgentRunContext) -> AgentResult:
+        return AgentResult(
+            success=True, usage=AgentUsage(agent="opencode", input_tokens=12, output_tokens=0)
+        )
+
+    secondary = _FakeAgent()
+
+    async def secondary_run(ctx: AgentRunContext) -> AgentResult:
+        result = await secondary.run(ctx)
+        return replace(
+            result,
+            success=secondary_succeeds,
+            error=None if secondary_succeeds else "secondary failed",
+            usage=AgentUsage(agent="opencode", input_tokens=6, output_tokens=0),
+        )
+
+    primary = AgentImpl(name="opencode", _install=install, _run=primary_run)
+    impl = AgentImpl(name="opencode", _install=install, _run=secondary_run)
+    budget = token_budget_for(model="opencode/test", max_tokens=10, advisory=True)
+    with bind_run_budget(budget):
+        result = await primary.run(make_agent_run_context(tmp_path, resolved_model="opencode/test"))
+        summary, state = await _dispatch_one_secondary(tmp_path, monkeypatch, impl)
+    combined = apply_roster_failure(result, summary)
+    assert secondary.models
+    assert combined.success is secondary_succeeds
+    assert (summary.hard_error is None) is secondary_succeeds
+    assert "reviewer2" in {run.agent_id for run in state.reviewer_dispatch_runs}
+    assert budget.tokens_used == 18
+    assert budget.should_stop() is False

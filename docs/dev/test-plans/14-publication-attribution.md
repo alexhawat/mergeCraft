@@ -30,9 +30,8 @@ Authoring wave: **W1** (`test-creator`). Implementation: **W2–W5**.
 | **W1.3** inline placement unchanged (D8) | W4 | `…::test_inline_placement_unaffected_by_raised_by` |
 | **W1.4** over target warns once (D9) | W5 | `test_publication_budget_band.py::test_crossing_target_under_ceiling_warns_once_without_raise` |
 | **W1.4** warning once only (D9) | W5 | `…::test_over_target_warning_emitted_only_once` |
-| **W1.4** ceiling message names band (D9) | W5 | `…::test_crossing_ceiling_raises_with_target_ceiling_and_tolerance` |
-| **W1.4** tolerance 0 strict `>` (regression) | W5 | `…::test_zero_tolerance_restores_strict_greater_than_target` |
-| **W1.4** increment vs drift messages (D10) | W5 | `…::test_single_increment_over_ceiling_has_distinct_message_from_steady_drift` |
+| **W1.4** aggregate/incremental overruns retain all usage and stay advisory | W5 / #1478 | `…::test_token_overruns_record_full_usage_without_failing` |
+| **W1.4** tolerance 0 stays advisory | #1478 | `…::test_token_overruns_record_full_usage_without_failing` (tolerance `0.0`) |
 | **W1.4** `unattributed` default phase (D11) | W5 | `…::test_record_tokens_without_phase_attributes_to_unattributed` |
 | **W1.4** phase totals reconcile (D11) | W5 | `…::test_per_phase_totals_sum_to_tokens_used` |
 | **W1.4** `record_cost` untouched (D11) | W5 | `…::test_record_cost_path_is_untouched_by_token_band_changes` |
