@@ -339,3 +339,94 @@ calls the hidden alias).
 - [docs/eval-bank.md](../docs/eval-bank.md) — eval bank layout and CI gate semantics
 - [docs/README.md](../docs/README.md) — generated documentation index
 - [Landing README](../README.md) — consumer install and feature overview
+
+## Repeated held-out detection campaign
+
+Use the operator harness to run the same independently adjudicated,
+closed-world corpus at least three times per provider. Start with the
+[bounded campaign inputs and receipts](../docs/eval-methodology.md#reproducible-live-campaign).
+Keep the actual held-out cases in an access-controlled snapshot until the
+campaign completes. The operator should freeze case selection, prompts and
+model pins before running and confirm that the held-out changes were never
+used to tune the reviewer or the judge.
+
+Each case needs a unified diff, a `baseline.json` with an explicit
+`closed_world: true` and an `issues` array, and a `repo/` directory next to
+the patch with the files from before the patch. An empty issues array denotes
+an independently adjudicated clean case. Every positive issue needs
+`provenance: human` and a valid path and line range. Include both defect and
+clean cases. Repository context is copied into a fresh scratch directory
+for each review and verified against its approved hash. The review runs with
+untrusted repository settings and shell disabled. A private scratch-only
+trace records reviewer dispatches with content capture and remote export
+disabled. The harness requires a completed review of the full pinned patch
+and one successful dispatch to the pinned model. The offline engine can retry
+a transient failure. The harness rejects any resulting multi-attempt review
+after execution, so it cannot prevent the retry from consuming provider quota.
+Provider-internal transport retries are outside that dispatch count.
+
+In the same directory as the campaign manifest, create a repeat protocol
+with these fields.
+
+| Field | Value |
+|---|---|
+| `schema_version` | `"1.0.0"` |
+| `campaign_manifest` | Relative path to the approved campaign manifest |
+| `campaign_sha256` | SHA-256 of the exact manifest bytes |
+| `split` | `"held-out"` |
+| `repetitions` | Integer, at least 3 |
+| `context_sha256` | Object mapping each exact case ID to its `repo/` digest |
+
+Compute each context digest with `make --no-print-directory -C evals detection-context-sha256
+CONTEXT=/path/to/case/repo`. The approved group spend ceiling in the campaign
+manifest must cover `models × cases × repetitions × per_review_cost_budget_usd`.
+The harness passes the configured time, token and cost bounds to the existing
+offline evaluator. Measured spend is recorded only when the evaluator reports
+it. Each recorded amount, including a partial cost, counts toward the
+per-review and cumulative spend checks. The cumulative known spend stops
+later attempts at the approved ceiling. Reported cost can include provider or
+catalog estimates. Total tokens are unavailable in the offline receipt. The
+harness rejects any case configuration that scales the approved review bounds.
+Use provider-side limits to cap actual charges.
+
+From a clean checkout with the development environment installed, supply a
+new results directory outside the held-out corpus.
+
+```bash
+make -C evals detection-run PROTOCOL=/path/to/repeat.json RESULTS=/path/to/results
+make --no-print-directory -C evals detection-summarize \
+  PROTOCOL=/path/to/repeat.json RESULTS=/path/to/results > /path/to/summary.json
+```
+
+The rescore runs without credentials. It checks both prerequisite receipts,
+the approved protocol and context digests, common evaluation pins, the model
+and case sets, and the recomputed scores against each run's hashed raw findings.
+Each run receipt binds the protocol, context hashes, run number, and model to
+its result and records the cases with one observed dispatch. A missing, partial
+or failed run makes the comparison ineligible. Its recorded
+case failures remain available in the individual result sets and journals.
+
+Precision, recall and F1 pool the counts across the completed attempts for
+each provider. Findings on overlapping lines in the same file are collapsed
+using the eval scorer's duplicate rule with zero line slack. This is a location
+surrogate for duplicate reports and can merge distinct findings at one
+location. Issue matching then uses the campaign's recorded line slack. The
+95% percentile intervals for precision and recall draw 2,000 resamples of
+whole case IDs with replacement, carrying all attempts for each sampled case.
+A resample with a zero denominator contributes no value to that metric.
+Between-run sample standard deviations and every run's point estimates show
+how much the reviewer varied across repetitions. Rates with no denominator
+are `null`.
+
+Clean-case false-positive rate counts only completed reviews of zero-issue
+cases with any reported finding. The report also shows deduplicated findings
+per clean review, median latency, and known-cost coverage. Total and median
+cost are `null` if any completed review lacks a fully reported cost. The
+known spend subtotal includes every recorded amount and identifies how many
+reviews have only partial cost coverage. The report is written to stdout
+and the harness leaves the release baseline untouched.
+
+Use `make -C evals check` for the operator harness's lint, type and hermetic
+test checks. The root test target collects `tests/`.
+
+See the [1.0 exit criteria](release-criteria.md) for the publication bar.
