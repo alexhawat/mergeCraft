@@ -2126,6 +2126,17 @@ must anchor every surviving finding. The fence is the technical mechanism that m
 this rule enforceable — without it, prose and instruction share a channel and a
 sufficiently verbose injection can steer a review.
 
+## Review feedback
+
+Recurring GitHub feedback can produce a proposal in the Actions summary. A
+maintainer can inspect its source threads and approve scoped guidance through the
+repository's default branch. Only guidance from the verified PR base enters the
+review prompt, as fenced evidence for the exact affected path. The reviewer
+still needs the current diff to support a finding. Feedback proposals have no
+role in deterministic suppression or verdict calculation.
+
+See [Learn from review feedback](workflows.md#learn-from-review-feedback).
+
 ## Failure memory
 
 The **eval bank** is mergeCraft's failure memory — the durable, file-backed case store

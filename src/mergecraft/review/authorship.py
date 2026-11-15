@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Coroutine, Mapping
 
     from mergecraft.mcp.context import ToolContext
 
@@ -50,6 +50,7 @@ __all__ = [
     "expected_publisher_logins",
     "has_mergecraft_marker",
     "is_mergecraft_authored",
+    "resolve_publisher_logins",
 ]
 
 # A mergeCraft-authored review carries the run footer, or — for a review whose
@@ -104,19 +105,21 @@ def expected_publisher_logins(ctx: ToolContext) -> frozenset[str]:
     """
     cached = ctx.publisher_logins
     if cached is None:
-        cached = _collect_publisher_logins(ctx)
-        ctx.publisher_logins = cached
+        cached = _await_sync(resolve_publisher_logins(ctx))
     return cached
 
 
-def _collect_publisher_logins(ctx: ToolContext) -> frozenset[str]:
-    """Resolve the expected-publisher set, dropping every failed lookup.
+async def resolve_publisher_logins(ctx: ToolContext) -> frozenset[str]:
+    """Resolve and cache the expected-publisher set, dropping every failed lookup.
 
     Only an App or PAT publisher proves mergeCraft authorship. The shared
     Actions job bot is withheld — never added from the declared login or from
     the publication token — so a run that publishes as it yields an empty set,
     warned once with the reason (P-8).
     """
+    if ctx.publisher_logins is not None:
+        return ctx.publisher_logins
+
     logins: set[str] = set()
     withheld_shared_bot = False
 
@@ -140,7 +143,9 @@ def _collect_publisher_logins(ctx: ToolContext) -> frozenset[str]:
     # event loop it blocks) instead of making it unconditionally. A withheld
     # shared-bot declaration answers nothing, so the probe still runs for it.
     app_slug = (
-        "" if declared and declared.casefold() != GITHUB_ACTIONS_BOT_LOGIN else _app_bot_slug(ctx)
+        ""
+        if declared and declared.casefold() != GITHUB_ACTIONS_BOT_LOGIN
+        else await _app_bot_slug(ctx)
     )
     if app_slug:
         logins.add(f"{app_slug}[bot]")
@@ -156,7 +161,7 @@ def _collect_publisher_logins(ctx: ToolContext) -> frozenset[str]:
     if not declared and not app_slug and not _app_configured():
         token = str(ctx.github_installation_token or "").strip()
         if token:
-            viewer = _viewer_login(ctx)
+            viewer = await _viewer_login(ctx)
             if viewer and viewer.casefold() != GITHUB_ACTIONS_BOT_LOGIN:
                 logins.add(viewer)
             else:
@@ -192,7 +197,8 @@ def _collect_publisher_logins(ctx: ToolContext) -> frozenset[str]:
             )
 
     logger.debug("expected mergeCraft publisher logins for this run: {}", sorted(logins))
-    return frozenset(logins)
+    ctx.publisher_logins = frozenset(logins)
+    return ctx.publisher_logins
 
 
 def _app_configured() -> bool:
@@ -203,10 +209,10 @@ def _app_configured() -> bool:
     )
 
 
-def _app_bot_slug(ctx: ToolContext) -> str:
+async def _app_bot_slug(ctx: ToolContext) -> str:
     """Return the reviewer App's bot slug from ``GET /app``, or ``""``."""
     try:
-        payload = _scm_get_sync(ctx, "/app")
+        payload = await _scm_get(ctx, "/app")
     except Exception as err:  # advisory; a failed lookup must not widen the set
         logger.debug("reviewer App lookup failed; dropping its bot login: {}", err)
         return ""
@@ -217,10 +223,10 @@ def _app_bot_slug(ctx: ToolContext) -> str:
     return ""
 
 
-def _viewer_login(ctx: ToolContext) -> str:
+async def _viewer_login(ctx: ToolContext) -> str:
     """Return the login the publication token acts as (``GET /user``), or ``""``."""
     try:
-        payload = _scm_get_sync(ctx, "/user")
+        payload = await _scm_get(ctx, "/user")
     except Exception as err:  # advisory; drop it, never widen
         logger.debug("PAT viewer lookup failed; dropping its login: {}", err)
         return ""
@@ -229,15 +235,12 @@ def _viewer_login(ctx: ToolContext) -> str:
     return ""
 
 
-def _scm_get_sync(ctx: ToolContext, path: str) -> Any:
-    """Drive ``ctx.scm.get(path)`` from sync code and return its result."""
+async def _scm_get(ctx: ToolContext, path: str) -> Any:
     result = ctx.scm.get(path)
-    if not inspect.isawaitable(result):
-        return result
-    return _await_sync(result)
+    return await result if inspect.isawaitable(result) else result
 
 
-def _await_sync(awaitable: Any) -> Any:
+def _await_sync(awaitable: Coroutine[Any, Any, frozenset[str]]) -> frozenset[str]:
     """Run ``awaitable`` to completion from either a sync or async caller."""
     try:
         asyncio.get_running_loop()
@@ -249,6 +252,6 @@ def _await_sync(awaitable: Any) -> Any:
         return pool.submit(_run_coroutine, awaitable).result()
 
 
-def _run_coroutine(awaitable: Any) -> Any:
+def _run_coroutine(awaitable: Coroutine[Any, Any, frozenset[str]]) -> frozenset[str]:
     """Run one awaitable to completion on a fresh event loop."""
     return asyncio.run(awaitable)
