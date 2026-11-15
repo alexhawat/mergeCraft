@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.findings.threads import fetch_review_threads
+from mergecraft.scm.github import GitHubScmAdapter
 from mergecraft.utils.github import GitHubClient
 
 if TYPE_CHECKING:
@@ -124,6 +125,21 @@ async def test_more_than_one_page_of_threads_are_all_returned() -> None:
     assert len(github.thread_calls) == 2
     assert github.thread_calls[0].get("cursor") is None
     assert github.thread_calls[1]["cursor"] == "c100"
+
+
+async def test_feedback_comments_use_full_github_database_ids() -> None:
+    thread = _thread("T1")
+    comment = _comment(1)
+    del comment["databaseId"]
+    thread["_all_comments"] = [
+        {**comment, "id": "github-node", "fullDatabaseId": "9007199254740993"}
+    ]
+    github = PagingGitHub([thread])
+
+    page = await fetch_review_threads(GitHubScmAdapter(github), "o", "r", 7, include_feedback=True)
+
+    assert page.incomplete is False
+    assert page.threads[0]["comments"][0]["id"] == 9_007_199_254_740_993
 
 
 async def test_a_thread_with_more_than_one_page_of_comments_is_read_in_full() -> None:

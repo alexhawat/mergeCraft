@@ -19,6 +19,7 @@ if TYPE_CHECKING:
         ToolState,
     )
     from mergecraft.mcp.verdict import VerdictDiagnostic
+    from mergecraft.memory.feedback import FeedbackReport
     from mergecraft.modes import Mode
     from mergecraft.run_outcome import (
         RunOutcome,
@@ -145,6 +146,7 @@ class RunContext:
     subagent_denied: list[str] = field(default_factory=list)
     verifier_denied: list[str] = field(default_factory=list)
     instructions: ResolvedInstructions | None = None
+    feedback_report: FeedbackReport | None = None
     run_ctx: AgentRunContext | None = None
     run_bounds: RunBounds | None = None
     budget_tracker: BudgetTracker | None = None

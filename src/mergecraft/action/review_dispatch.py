@@ -15,6 +15,7 @@ from loguru import logger
 from mergecraft.action.inputs import (
     apply_setup_overrides,
 )
+from mergecraft.action.review_feedback import collect_review_feedback
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.shared import Agent, AgentResult, AgentRunContext
 from mergecraft.agents.verifier import verifier_denied_tool_names
@@ -76,6 +77,7 @@ if TYPE_CHECKING:
 
     from mergecraft.action.review_state import RunContext
     from mergecraft.config.settings import RepoSettings
+    from mergecraft.memory.feedback import ApprovedFeedback
     from mergecraft.modes import Mode
     from mergecraft.types import AgentId
     from mergecraft.utils.instructions import ResolvedInstructions
@@ -619,6 +621,7 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
     tool_state.review_mcp_names = tuple(server.name for server in consumer_mcp)
     tool_state.review_mcp_servers = tuple(consumer_mcp)
     changed_paths, review_instruction_settings = await _run_start_instruction_scope(ctx)
+    ctx.feedback_report, approved_feedback = await collect_review_feedback(ctx)
     instructions = resolve_instructions(
         payload=payload,
         repo=run_context.repo,
@@ -637,6 +640,7 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
         review_mcp_names=list(tool_state.review_mcp_names),
         changed_paths=changed_paths,
         review_instruction_settings=review_instruction_settings,
+        approved_feedback=approved_feedback,
     )
     ctx.run_start_instructions = {str(ctx.agent_id): instructions}
     for other_agent_id in _run_start_harnesses(ctx):
@@ -649,6 +653,7 @@ async def _prepare_agent_dispatch(ctx: RunContext) -> None:
             repo_root=repo_root,
             changed_paths=changed_paths,
             review_instruction_settings=review_instruction_settings,
+            approved_feedback=approved_feedback,
         )
     tool_state.review_skill_paths = tuple(
         str(item) for item in instructions.extra.get("review_skills") or []
@@ -678,6 +683,7 @@ def _render_agent_instructions(
     repo_root: Path,
     changed_paths: Sequence[str],
     review_instruction_settings: ReviewSettings | None,
+    approved_feedback: Sequence[ApprovedFeedback],
 ) -> ResolvedInstructions:
     """Render one harness's instructions with this run's run-start inputs."""
     assert ctx.settings is not None
@@ -703,6 +709,7 @@ def _render_agent_instructions(
         review_mcp_names=list(tool_state.review_mcp_names),
         changed_paths=changed_paths,
         review_instruction_settings=review_instruction_settings,
+        approved_feedback=approved_feedback,
     )
 
 

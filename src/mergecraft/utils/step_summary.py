@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from mergecraft.evidence.packet import MergeEvidencePacket
+    from mergecraft.memory.feedback import FeedbackReport
 
 _STEP_SUMMARY_MAX_BYTES = 1_048_576
 
@@ -28,6 +29,7 @@ def render_step_summary(
     cost_summary: str | None = None,
     llm_review_timing: Any | None = None,
     credential_degradations: Sequence[str] | None = None,
+    feedback_report: FeedbackReport | None = None,
 ) -> str:
     """Render the step summary body: header table plus the W5 record sections.
 
@@ -109,12 +111,14 @@ def render_step_summary(
         action_pin_sha=action_pin_sha,
         image_source_sha=image_source_sha,
     )
-    return _cap_step_summary("\n".join(header_lines) + record)
+    feedback = "\n\n" + feedback_report.summary() if feedback_report is not None else ""
+    budget = _STEP_SUMMARY_MAX_BYTES - len(feedback.encode("utf-8")) - 2
+    return _cap_step_summary("\n".join(header_lines) + record, max_bytes=budget) + feedback
 
 
-def _cap_step_summary(body: str) -> str:
+def _cap_step_summary(body: str, *, max_bytes: int) -> str:
     """Enforce GitHub's 1 MiB step-summary limit, truncating findings only."""
-    if len(body.encode("utf-8")) <= _STEP_SUMMARY_MAX_BYTES:
+    if len(body.encode("utf-8")) <= max_bytes:
         return body
 
     lines = body.splitlines()
@@ -126,15 +130,17 @@ def _cap_step_summary(body: str) -> str:
             break
 
     if header_end == 0:
-        return body.encode("utf-8")[:_STEP_SUMMARY_MAX_BYTES].decode("utf-8", errors="ignore")
+        return body.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore")
 
     header = "\n".join(lines[:header_end])
     finding_lines = lines[header_end:]
     suffix = "\n\n_(Findings truncated to fit the 1 MiB step summary limit.)_\n"
-    budget = _STEP_SUMMARY_MAX_BYTES - len(suffix.encode("utf-8"))
+    budget = max_bytes - len(suffix.encode("utf-8"))
 
     kept: list[str] = []
-    used = len(header.encode("utf-8"))
+    used = len(header.encode("utf-8")) + 1
+    if used > budget:
+        return body.encode("utf-8")[:budget].decode("utf-8", errors="ignore") + suffix
     for line in finding_lines:
         line_len = len((line + "\n").encode("utf-8"))
         if used + line_len > budget:
