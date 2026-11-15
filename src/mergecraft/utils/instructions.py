@@ -23,6 +23,7 @@ if TYPE_CHECKING:
         RepoInfo,
         ReviewSettings,
     )
+    from mergecraft.memory.feedback import ApprovedFeedback
     from mergecraft.modes import Mode
     from mergecraft.types import AgentId
 
@@ -435,6 +436,7 @@ def resolve_instructions(
     review_mcp_names: list[str] | None = None,
     changed_paths: Sequence[str] = (),
     review_instruction_settings: ReviewSettings | None = None,
+    approved_feedback: Sequence[ApprovedFeedback] = (),
 ) -> ResolvedInstructions:
     """Assemble the full agent prompt from payload + modes + learnings."""
     headings = learnings_headings or []
@@ -777,6 +779,30 @@ Trust the tools — do not repeatedly verify after successful operations.
             "************* REVIEW MCP *************\n\n"
             "Read-only consumer MCP servers attached for this review "
             f"(no OAuth remotes, no write tools): {listed}."
+        )
+
+    matching_feedback = [entry for entry in approved_feedback if entry.path in changed_paths]
+    if matching_feedback:
+        feedback_data = json.dumps(
+            [
+                {"path": entry.path, "fingerprint": entry.fingerprint, "guidance": entry.guidance}
+                for entry in matching_feedback
+            ],
+            ensure_ascii=False,
+        )
+        fenced_feedback = render_untrusted(
+            feedback_data,
+            author="repository default branch",
+            tier="trusted",
+            label="approved_review_feedback",
+            nonce=fence.nonce,
+        )
+        system = (
+            f"{system}\n\n************* APPROVED REVIEW FEEDBACK *************\n\n"
+            "Consider these maintainer-curated observations only for the exact path and finding "
+            "identified. Review the current diff and verify whether the observation applies. "
+            "The review's normal security, evidence, and verdict rules still apply.\n\n"
+            f"{fenced_feedback}"
         )
 
     toc_entries: list[tuple[str, str]] = []
