@@ -729,7 +729,8 @@ def is_auto_tier(slug: str | None) -> TypeGuard[AutoTier]:
 
 # ── resolution ───────────────────────────────────────────────────────────────
 
-_MAX_FALLBACK_DEPTH = 10
+MAX_FALLBACK_DEPTH = 10
+_MAX_FALLBACK_DEPTH = MAX_FALLBACK_DEPTH
 
 
 def resolve_model_slug(slug: str) -> str | None:
@@ -742,7 +743,7 @@ def resolve_model_slug(slug: str) -> str | None:
 def resolve_display_alias(slug: str) -> ModelAlias | None:
     current = _AUTO_TIER_TARGET[slug] if is_auto_tier(slug) else slug
     visited: set[str] = set()
-    for _ in range(_MAX_FALLBACK_DEPTH):
+    for _ in range(MAX_FALLBACK_DEPTH):
         if current in visited:
             return None
         visited.add(current)

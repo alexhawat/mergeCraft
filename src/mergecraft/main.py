@@ -18,7 +18,7 @@ from mergecraft.ci.sarif_ingest import (
     ingest_red_green_after_review,
 )
 from mergecraft.config.env import ActionInputEnv
-from mergecraft.errors import AgentTimeoutError, ConfigurationError
+from mergecraft.errors import AgentTimeoutError, ConfigurationError, ModelFallbackPolicyError
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.findings.fix_brief import fix_brief_path
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ToolContext
@@ -43,9 +43,6 @@ from mergecraft.tracing.review_context import (
 )
 from mergecraft.tracing.tracer import resolve_correlation_from_env
 from mergecraft.utils import gha_log
-from mergecraft.utils.agent_resolve import (
-    ModelFallbackPolicyError,
-)
 from mergecraft.utils.code_scanning import report_sarif_upload
 from mergecraft.utils.git_setup import (
     cleanup_temp_directory,

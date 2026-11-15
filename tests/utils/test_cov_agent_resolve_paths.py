@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from mergecraft.agents.resolution import chain as resolution_chain
+from mergecraft.agents.resolution import runtime
 from mergecraft.agents.shared import AgentResult
 from mergecraft.config.settings import RepoSettings
 from mergecraft.models import BEDROCK_MODEL_ID_ENV, VERTEX_MODEL_ID_ENV
@@ -234,7 +236,7 @@ def test_is_runnable_requires_credentials_before_the_binary_gate(
 ) -> None:
     """The binary gate is never consulted when credentials are missing."""
     calls: list[str] = []
-    monkeypatch.setattr(ar, "_agent_binary_available", lambda slug: calls.append(slug) or True)
+    monkeypatch.setattr(runtime, "agent_binary_available", lambda slug: calls.append(slug) or True)
     assert ar.is_runnable_model_slug("google/gemini-3-pro") is False
     assert calls == []
     monkeypatch.setenv("GEMINI_API_KEY", "g-key")
@@ -304,7 +306,7 @@ def test_catalog_fallback_tail_stops_on_a_cycle(monkeypatch: MonkeyPatch) -> Non
     b = ModelAlias(
         slug="loop/b", provider="loop", display_name="B", resolve="loop-b", fallback="loop/a"
     )
-    monkeypatch.setattr(ar, "MODEL_ALIASES", [a, b])
+    monkeypatch.setattr(resolution_chain, "MODEL_ALIASES", [a, b])
     assert ar._catalog_fallback_tail("loop/a") == ["loop/b", "loop/a"]
 
 
@@ -407,7 +409,9 @@ def test_chain_skips_entries_without_credentials_or_binary(monkeypatch: MonkeyPa
     monkeypatch.setenv("CURSOR_API_KEY", "c-key")
     monkeypatch.setenv("GEMINI_API_KEY", "g-key")
     # Cursor has credentials but no binary; Gemini has both.
-    monkeypatch.setattr(ar, "_agent_binary_available", lambda slug: not slug.startswith("cursor/"))
+    monkeypatch.setattr(
+        runtime, "agent_binary_available", lambda slug: not slug.startswith("cursor/")
+    )
     chain = ["openai/gpt", "cursor/composer", "google/gemini-3-pro"]
     assert ar.pick_runnable_slug_from_chain(chain) == "google/gemini-3-pro"
 
@@ -415,7 +419,7 @@ def test_chain_skips_entries_without_credentials_or_binary(monkeypatch: MonkeyPa
 def test_chain_with_no_runnable_entry_says_to_configure_credentials(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(ar, "_agent_binary_available", lambda _slug: True)
+    monkeypatch.setattr(runtime, "agent_binary_available", lambda _slug: True)
     with pytest.raises(RuntimeError, match="no runnable model slug in chain"):
         ar.pick_runnable_slug_from_chain(["openai/gpt", "google/gemini-3-pro"])
 
@@ -431,7 +435,7 @@ def test_allow_fallback_false_rejects_a_primary_missing_its_binary(
     monkeypatch: MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
-    monkeypatch.setattr(ar, "_agent_binary_available", lambda _slug: False)
+    monkeypatch.setattr(runtime, "agent_binary_available", lambda _slug: False)
     with pytest.raises(ar.ModelFallbackPolicyError, match="agent binary missing"):
         ar.pick_runnable_slug_from_chain(
             ["openai/gpt", "google/gemini-3-pro"], allow_fallback=False
@@ -443,7 +447,7 @@ def test_allow_fallback_false_returns_the_primary_and_never_the_backup(
 ) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
     monkeypatch.setenv("GEMINI_API_KEY", "g-key")
-    monkeypatch.setattr(ar, "_agent_binary_available", lambda _slug: True)
+    monkeypatch.setattr(runtime, "agent_binary_available", lambda _slug: True)
     assert (
         ar.pick_runnable_slug_from_chain(
             ["openai/gpt", "google/gemini-3-pro"], allow_fallback=False
@@ -456,7 +460,7 @@ def test_select_runnable_model_slug_honours_allow_fallback_from_settings(
     monkeypatch: MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("GEMINI_API_KEY", "g-key")
-    monkeypatch.setattr(ar, "_agent_binary_available", lambda _slug: True)
+    monkeypatch.setattr(runtime, "agent_binary_available", lambda _slug: True)
     settings = RepoSettings.model_validate(
         {"models": ["openai/gpt", "google/gemini-3-pro"], "allowFallback": False}
     )

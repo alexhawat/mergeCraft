@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from mergecraft.utils.agent_resolve import run_with_model_chain
+from mergecraft.agents.resolution.chain import run_with_model_chain
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable

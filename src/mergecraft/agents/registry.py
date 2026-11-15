@@ -1,7 +1,7 @@
 """Agent registry — model, prompt, toolset and budget per role and lens.
 
 Loads bundled defaults plus ``.mergecraft/config.yaml`` overrides. Per-agent
-model chains reuse :func:`mergecraft.utils.agent_resolve.effective_model_chain`
+model chains reuse :func:`mergecraft.agents.resolution.chain.effective_model_chain`
 and :func:`pick_runnable_slug_from_chain`.
 """
 
@@ -14,6 +14,10 @@ from pydantic import BaseModel, ConfigDict
 
 from mergecraft.agents.lens_triggers import LensTriggers
 from mergecraft.agents.recall import RECALL_SYSTEM_PROMPT
+from mergecraft.agents.resolution.chain import (
+    effective_model_chain,
+    pick_runnable_slug_from_chain,
+)
 from mergecraft.agents.reviewer import REVIEWER_SYSTEM_PROMPT
 from mergecraft.agents.verifier import VERIFIER_SYSTEM_PROMPT, pinned_judge_model
 from mergecraft.config.roster_graph import (
@@ -38,7 +42,6 @@ from mergecraft.mcp.shared import (
 )
 from mergecraft.models import AUTO_EFFICIENT, MODEL_ALIASES, resolve_display_alias
 from mergecraft.types import RECALL_AGENT_NAME, REVIEWER_AGENT_NAME, VERIFIER_AGENT_NAME
-from mergecraft.utils.agent_resolve import effective_model_chain, pick_runnable_slug_from_chain
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -341,7 +344,13 @@ class Registry:
             return configured_custom[:1]
         return role_named
 
-    def _ordered_role_entries(self, role: AgentRole) -> list[tuple[str, AgentBinding]]:
+    @property
+    def configured_keys(self) -> frozenset[str]:
+        """Return binding keys declared in the repository configuration."""
+        return self._configured_keys
+
+    def ordered_role_entries(self, role: AgentRole) -> list[tuple[str, AgentBinding]]:
+        """Return configuration keys and bindings in role dispatch order."""
         entries = self._by_role.get(role, [])
         if not entries:
             return []
@@ -350,8 +359,10 @@ class Registry:
         others = [entry for entry in entries if entry[0] not in primary_keys]
         return primary + others
 
+    _ordered_role_entries = ordered_role_entries
+
     def _ordered_role_bindings(self, role: AgentRole) -> tuple[AgentBinding, ...]:
-        return tuple(binding for _, binding in self._ordered_role_entries(role))
+        return tuple(binding for _, binding in self.ordered_role_entries(role))
 
     def resolve_role(self, role: AgentRole | str) -> AgentBinding:
         key = AgentRole(role) if isinstance(role, str) else role
@@ -368,7 +379,7 @@ class Registry:
     def resolve_role_levels(self, role: AgentRole | str) -> tuple[tuple[AgentBinding, ...], ...]:
         """Return dispatch levels for *role* derived from ``after:`` edges."""
         key = AgentRole(role) if isinstance(role, str) else role
-        entries = self._ordered_role_entries(key)
+        entries = self.ordered_role_entries(key)
         if not entries:
             return ()
         nodes = tuple(

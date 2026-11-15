@@ -24,7 +24,8 @@ if TYPE_CHECKING:
 
 BudgetKind = Literal["token", "cost", "tool_call"]
 
-_DEFAULT_RUN_TIMEOUT_S: Final[float] = 3600.0
+DEFAULT_RUN_TIMEOUT_S: Final[float] = 3600.0
+_DEFAULT_RUN_TIMEOUT_S = DEFAULT_RUN_TIMEOUT_S
 _DEFAULT_CONTEXT_RETRIEVAL_TIMEOUT_S: Final[float] = 30.0
 _DEFAULT_EXTERNAL_OPERATION_TIMEOUT_S: Final[float] = 600.0
 _DEFAULT_CACHE_MAX_BYTES: Final[int] = 512 * 1024 * 1024
@@ -236,7 +237,7 @@ def resolve_run_bounds(
         context_timeout = float(cfg.context_retrieval_timeout_s)
     run_timeout = env_bounds.run_timeout_s
     if run_timeout is None:
-        run_timeout = _DEFAULT_RUN_TIMEOUT_S
+        run_timeout = DEFAULT_RUN_TIMEOUT_S
     external_timeout = env_bounds.external_operation_timeout_s
     if external_timeout is None:
         external_timeout = _DEFAULT_EXTERNAL_OPERATION_TIMEOUT_S
@@ -459,6 +460,7 @@ def apply_diff_line_budget(
 
 
 __all__ = [
+    "DEFAULT_RUN_TIMEOUT_S",
     "EXTERNAL_OPERATION_TIMEOUTS",
     "BudgetExhausted",
     "BudgetKind",

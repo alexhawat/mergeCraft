@@ -152,6 +152,7 @@ async def test_offline_real_resolver_cross_harness_and_credential_status(
 ) -> None:
     from dataclasses import replace
 
+    from mergecraft.agents.resolution import runtime
     from mergecraft.modes import compute_modes
     from mergecraft.utils import agent_resolve
 
@@ -186,11 +187,11 @@ async def test_offline_real_resolver_cross_harness_and_credential_status(
         return AgentResult(success=True, terminal_submission_received=True)
 
     monkeypatch.setattr(
-        agent_resolve,
+        runtime,
         "agents",
         {
-            "claude": replace(agent_resolve.agents["claude"], _install=install, _run=claude_run),
-            "codex": replace(agent_resolve.agents["codex"], _install=install, _run=codex_run),
+            "claude": replace(runtime.agents["claude"], _install=install, _run=claude_run),
+            "codex": replace(runtime.agents["codex"], _install=install, _run=codex_run),
         },
     )
     for slug in (PRIMARY, BACKUP):

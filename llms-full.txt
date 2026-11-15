@@ -3500,7 +3500,7 @@ credential written with `auth` reads back exactly as it was stored.
 
 `has_credentials_for_slug` and `mergecraft provider status` delegate to a
 single probe — `credential_status_for_slug` in
-`mergecraft.utils.agent_resolve`. It returns:
+`mergecraft.agents.resolution.credentials`. It returns:
 
 | Field | Meaning |
 |-------|---------|

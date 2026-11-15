@@ -14,8 +14,10 @@ import re
 from pathlib import Path
 
 import pytest
+from rich.console import Console
 from typer.testing import CliRunner
 
+from mergecraft.cli import tracing_cmd
 from mergecraft.cli.config_precedence import explain_setting
 from mergecraft.cli.doctor_cmd import _config_probe
 from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
@@ -24,7 +26,7 @@ from mergecraft.config.layered import resolve_config_sources
 
 _RUNNER = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
-_TERM = {"NO_COLOR": "1", "TERM": "dumb", "COLUMNS": "400"}
+_TERM = {"NO_COLOR": "1", "TERM": "dumb"}
 _TRACING_ENV = (
     "MERGECRAFT_CONFIG",
     "GITHUB_ACTIONS",
@@ -44,6 +46,10 @@ _TRACING_ENV = (
 def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in _TRACING_ENV:
         monkeypatch.delenv(key, raising=False)
+    # Keep path assertions independent of the width Rich cached at import.
+    monkeypatch.setattr(
+        tracing_cmd, "console", Console(stderr=True, width=400, force_terminal=False, no_color=True)
+    )
 
 
 def _write_repo(

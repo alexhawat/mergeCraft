@@ -146,7 +146,7 @@ def credential_status_for_slug(
     import importlib
 
     try:
-        lane_b_module = importlib.import_module("mergecraft.utils.agent_resolve")
+        lane_b_module = importlib.import_module("mergecraft.agents.resolution.credentials")
         lane_b_status = getattr(lane_b_module, "credential_status_for_slug", None)
     except ImportError:
         lane_b_status = None
@@ -289,7 +289,7 @@ def _remote_credential_available(
 
 def _reviewer_agent_entries(registry: Any) -> list[tuple[str, Any]]:
     """Return ``(config_key, binding)`` pairs for reviewer agents in dispatch order."""
-    return list(registry._ordered_role_entries(AgentRole.reviewer))
+    return list(registry.ordered_role_entries(AgentRole.reviewer))
 
 
 def _present_github_secret_names(github_block: dict[str, Any] | None) -> set[str] | None:

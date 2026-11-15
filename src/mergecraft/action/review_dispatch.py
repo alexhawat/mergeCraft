@@ -17,6 +17,15 @@ from mergecraft.action.inputs import (
 )
 from mergecraft.action.review_feedback import collect_review_feedback
 from mergecraft.agents.gates import subagent_denied_tool_names
+from mergecraft.agents.resolution.chain import (
+    effective_model_chain,
+    pick_runnable_slug_from_chain,
+    promote_model_evidence,
+)
+from mergecraft.agents.resolution.runtime import (
+    resolve_model,
+    resolve_runtime_agent,
+)
 from mergecraft.agents.shared import Agent, AgentResult, AgentRunContext
 from mergecraft.agents.verifier import verifier_denied_tool_names
 from mergecraft.analyzers.redact import redact_secrets
@@ -42,13 +51,6 @@ from mergecraft.review.roster_execution import (
 from mergecraft.review_policy.ignore_paths import list_pull_request_paths
 from mergecraft.scm.github import (
     github_client_from_scm,
-)
-from mergecraft.utils.agent_resolve import (
-    effective_model_chain,
-    pick_runnable_slug_from_chain,
-    promote_model_evidence,
-    resolve_model,
-    resolve_runtime_agent,
 )
 from mergecraft.utils.git_setup import (
     setup_git,
@@ -229,7 +231,7 @@ async def _assemble_model_chain(ctx: RunContext) -> None:
     ctx.selected_slug = selected_slug
     tool_state.model = resolved_model or payload.get("model")
 
-    from mergecraft.utils.agent_resolve import collect_roster_credential_degradations
+    from mergecraft.agents.resolution.credentials import collect_roster_credential_degradations
 
     degradations = collect_roster_credential_degradations(
         settings=settings,

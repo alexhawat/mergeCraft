@@ -23,6 +23,7 @@ import httpx
 import pytest
 import typer
 from dotenv import dotenv_values
+from rich.console import Console
 from typer.testing import CliRunner
 
 from mergecraft.cli import auth_cmd
@@ -39,7 +40,7 @@ if TYPE_CHECKING:
 
 runner = CliRunner()
 
-_ENV_WIDE = {"COLUMNS": "200", "TERM": "dumb"}
+_ENV_WIDE = {"COLUMNS": "200", "NO_COLOR": "1", "TERM": "xterm"}
 
 
 def _mock_httpx(
@@ -728,6 +729,9 @@ def test_logfire_warns_when_the_tracing_extra_is_missing_but_still_saves(
     _stub_getpass(monkeypatch, "pylf_v1_eu_token")
     _mock_httpx(monkeypatch, _status(200))
     monkeypatch.setattr(auth_cmd, "_logfire_extra_installed", lambda: False)
+    monkeypatch.setattr(
+        auth_cmd, "console", Console(stderr=True, width=200, force_terminal=False, no_color=True)
+    )
     result = runner.invoke(
         app, ["auth", "logfire", "--scope", "local"], input="mergecraft\n", env=_ENV_WIDE
     )
