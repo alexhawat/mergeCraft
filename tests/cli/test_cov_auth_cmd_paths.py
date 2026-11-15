@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 
 runner = CliRunner()
 
-_ENV_WIDE = {"COLUMNS": "200", "TERM": "dumb"}
+_ENV_WIDE = {"COLUMNS": "200", "NO_COLOR": "1", "TERM": "xterm"}
 
 
 def _mock_httpx(

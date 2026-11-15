@@ -24,7 +24,8 @@ from mergecraft.config.layered import resolve_config_sources
 
 _RUNNER = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
-_TERM = {"NO_COLOR": "1", "TERM": "dumb", "COLUMNS": "400"}
+# Rich ignores COLUMNS when a terminal is forced and TERM is dumb.
+_TERM = {"NO_COLOR": "1", "TERM": "xterm", "COLUMNS": "400"}
 _TRACING_ENV = (
     "MERGECRAFT_CONFIG",
     "GITHUB_ACTIONS",
