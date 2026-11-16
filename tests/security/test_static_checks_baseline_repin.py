@@ -89,5 +89,8 @@ async def test_the_re_pin_does_not_absorb_a_change_made_before_it(tmp_path: Path
 
     await _run(ctx)
 
-    with pytest.raises(RuntimeError, match="before run_static_checks"):
+    with pytest.raises(RuntimeError, match="before run_static_checks") as exc:
         ctx.tool_state.review_tree_baseline.verify()
+    text = str(exc.value)
+    assert "dist/planted.whl" in text
+    assert "dist/pkg.whl" not in text

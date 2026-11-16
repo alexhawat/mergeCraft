@@ -208,7 +208,12 @@ def checkout_integrity_failure_message(
         )
     else:
         headline = f"checkout integrity failure: tree changed during read-only review ({resolved})"
-    current = after if after is not None else snapshot_tree(resolved).fingerprints
+    if after is not None:
+        current = after
+    elif boundary is not None and not before:
+        return headline
+    else:
+        current = snapshot_tree(resolved).fingerprints
     detail = format_tree_change_detail(before, current, limit=_INTEGRITY_DIFF_PATH_LIMIT)
     if not detail:
         return headline
@@ -262,6 +267,8 @@ class TreeBaseline:
     fingerprints: dict[str, str] = field(default_factory=dict)
     broken: bool = False
     broken_at: str = "checkout_pr"
+    # Tree at the boundary where a pre-repin change was detected (before checkout/gates).
+    broken_tree: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def capture(cls, root: Path) -> TreeBaseline:
@@ -275,8 +282,10 @@ class TreeBaseline:
 
     def before_boundary(self, boundary: str) -> None:
         if not self.broken and hash_tree(self.root) != self.digest:
+            current = snapshot_tree(self.root)
             self.broken = True
             self.broken_at = boundary
+            self.broken_tree = dict(current.fingerprints)
 
     def after_boundary(self) -> None:
         if not self.broken:
@@ -295,6 +304,7 @@ class TreeBaseline:
             msg = checkout_integrity_failure_message(
                 self.root,
                 self.fingerprints,
+                after=self.broken_tree or None,
                 boundary=f"before {self.broken_at}",
             )
             raise RuntimeError(msg)

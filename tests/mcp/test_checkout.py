@@ -773,5 +773,8 @@ async def test_checkout_pr_does_not_absorb_a_change_made_before_it(tmp_path: Pat
 
     await _checkout(ctx)
 
-    with pytest.raises(RuntimeError, match="before checkout_pr"):
+    with pytest.raises(RuntimeError, match="before checkout_pr") as exc:
         baseline.verify()
+    text = str(exc.value)
+    assert "planted.py" in text
+    assert "new.py" not in text
