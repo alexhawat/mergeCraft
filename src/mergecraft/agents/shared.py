@@ -594,7 +594,14 @@ def apply_integrity_gate(result: AgentResult, baseline: TreeBaseline | None) -> 
     try:
         baseline.verify()
     except RuntimeError as exc:
-        return AgentResult(success=False, error=str(exc), usage=result.usage)
+        metadata = dict(result.metadata)
+        metadata["retryable"] = False
+        return AgentResult(
+            success=False,
+            error=str(exc),
+            usage=result.usage,
+            metadata=metadata,
+        )
     return result
 
 

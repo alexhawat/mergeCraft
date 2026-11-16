@@ -208,12 +208,14 @@ def checkout_integrity_failure_message(
         )
     else:
         headline = f"checkout integrity failure: tree changed during read-only review ({resolved})"
-    if after is not None:
-        current = after
-    elif boundary is not None and not before:
+    if boundary is not None and not before:
         return headline
-    else:
+    if after is None:
+        if boundary is not None:
+            return headline
         current = snapshot_tree(resolved).fingerprints
+    else:
+        current = after
     detail = format_tree_change_detail(before, current, limit=_INTEGRITY_DIFF_PATH_LIMIT)
     if not detail:
         return headline
@@ -304,7 +306,7 @@ class TreeBaseline:
             msg = checkout_integrity_failure_message(
                 self.root,
                 self.fingerprints,
-                after=self.broken_tree or None,
+                after=self.broken_tree,
                 boundary=f"before {self.broken_at}",
             )
             raise RuntimeError(msg)

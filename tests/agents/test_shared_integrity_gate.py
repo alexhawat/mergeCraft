@@ -16,6 +16,7 @@ import pytest
 from mergecraft.agents import claude as claude_module
 from mergecraft.agents import codex as codex_module
 from mergecraft.agents import gemini as gemini_module
+from mergecraft.agents.resolution.chain import is_retryable_failure
 from mergecraft.agents.shared import AgentResult, AgentRunContext, ResolvedInstructions
 from mergecraft.mcp.context import PayloadEvent, ResolvedPayload
 from mergecraft.mcp.tool_state import init_tool_state
@@ -62,6 +63,27 @@ async def test_a_checkout_modified_during_review_fails_closed(name: str, tmp_pat
 
     assert result.success is False
     assert "checkout integrity failure" in (result.error or "")
+    assert result.metadata.get("retryable") is False
+    assert is_retryable_failure(result) is False
+
+
+@pytest.mark.asyncio
+async def test_integrity_failure_listing_billing_path_is_not_retryable(tmp_path: Path) -> None:
+    checkout = tmp_path / "repo"
+    ctx = _ctx(checkout, tmp_path / "run")
+    billing = checkout / "src" / "billing"
+    billing.mkdir(parents=True)
+    (billing / "invoice.py").write_text("print('untouched')\n", encoding="utf-8")
+
+    async def _adds_quota_file(_ctx: AgentRunContext) -> AgentResult:
+        (checkout / "quota.txt").write_text("exceeded\n", encoding="utf-8")
+        return AgentResult(success=True)
+
+    result = await _with_run("codex", _adds_quota_file).run(ctx)
+
+    assert result.success is False
+    assert "quota.txt" in (result.error or "")
+    assert is_retryable_failure(result) is False
 
 
 @pytest.mark.asyncio
