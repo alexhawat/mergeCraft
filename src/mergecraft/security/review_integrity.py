@@ -5,6 +5,7 @@ duplicating checkout/config fingerprint logic.
 
 Exports:
     hash_tree: Fingerprint a checkout tree before agent execution.
+    snapshot_tree: Digest plus per-path fingerprints in one walk.
     verify_tree_unchanged: Fail closed when the tree changed during review.
     TreeBaseline: The run's baseline, re-pinned across ``checkout_pr``.
     assert_checkout_read_boundary: Reject paths outside the checkout read allowlist.
@@ -15,12 +16,14 @@ from __future__ import annotations
 
 import hashlib
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
+
+_INTEGRITY_DIFF_PATH_LIMIT = 20
 
 _SINK_SUFFIXES: frozenset[str] = frozenset({".log", ".txt", ".jsonl", ".ndjson"})
 _SINK_NAMES: frozenset[str] = frozenset({"stdout", "stderr", "output"})
@@ -122,25 +125,125 @@ def _path_digest_payload(path: Path) -> bytes:
     return path.read_bytes()
 
 
-def hash_tree(root: Path) -> str:
-    """Return a stable digest of every file under ``root``."""
+@dataclass(frozen=True)
+class TreeSnapshot:
+    """Checkout tree digest and per-path fingerprints from one walk."""
+
+    digest: str
+    fingerprints: Mapping[str, str]
+
+
+def snapshot_tree(root: Path) -> TreeSnapshot:
+    """Return the tree digest and per-path fingerprints under ``root``."""
     resolved = root.resolve()
+    fingerprints: dict[str, str] = {}
     digest = hashlib.sha256()
     for path in _iter_tree_paths(resolved):
         rel = path.relative_to(resolved).as_posix()
+        payload = _path_digest_payload(path)
+        fingerprints[rel] = hashlib.sha256(payload).hexdigest()
         digest.update(rel.encode())
         digest.update(b"\0")
-        digest.update(_path_digest_payload(path))
+        digest.update(payload)
         digest.update(b"\0")
-    return digest.hexdigest()
+    return TreeSnapshot(digest.hexdigest(), fingerprints)
 
 
-def verify_tree_unchanged(root: Path, before_digest: str) -> None:
+def hash_tree(root: Path) -> str:
+    """Return a stable digest of every file under ``root``."""
+    return snapshot_tree(root).digest
+
+
+def _diff_fingerprints(
+    before: Mapping[str, str],
+    after: Mapping[str, str],
+) -> tuple[list[str], list[str], list[str]]:
+    before_keys = set(before)
+    after_keys = set(after)
+    added = sorted(after_keys - before_keys)
+    removed = sorted(before_keys - after_keys)
+    modified = sorted(key for key in before_keys & after_keys if before[key] != after[key])
+    return added, removed, modified
+
+
+def _format_path_group(label: str, paths: Sequence[str], *, limit: int) -> str:
+    if not paths:
+        return ""
+    if len(paths) <= limit:
+        listing = ", ".join(paths)
+    else:
+        listing = ", ".join(paths[:limit]) + f" (+{len(paths) - limit} more)"
+    return f"{label}: {listing}"
+
+
+def format_tree_change_detail(
+    before: Mapping[str, str],
+    after: Mapping[str, str],
+    *,
+    limit: int = _INTEGRITY_DIFF_PATH_LIMIT,
+) -> str:
+    """Return added/removed/modified path groups; paths only, never file contents."""
+    added, removed, modified = _diff_fingerprints(before, after)
+    parts = [
+        _format_path_group("added", added, limit=limit),
+        _format_path_group("removed", removed, limit=limit),
+        _format_path_group("modified", modified, limit=limit),
+    ]
+    return "\n".join(part for part in parts if part)
+
+
+def checkout_integrity_failure_message(
+    root: Path,
+    before: Mapping[str, str],
+    *,
+    after: Mapping[str, str] | None = None,
+    boundary: str | None = None,
+) -> str:
+    """Build the fail-closed integrity error for logs and ``AgentResult.error``."""
+    resolved = root.resolve()
+    if boundary:
+        headline = (
+            "checkout integrity failure: tree changed during read-only review "
+            f"{boundary} ({resolved})"
+        )
+    else:
+        headline = f"checkout integrity failure: tree changed during read-only review ({resolved})"
+    if boundary is not None and not before:
+        return headline
+    if after is None:
+        if boundary is not None:
+            return headline
+        current = snapshot_tree(resolved).fingerprints
+    else:
+        current = after
+    detail = format_tree_change_detail(before, current, limit=_INTEGRITY_DIFF_PATH_LIMIT)
+    if not detail:
+        return headline
+    return f"{headline}\n{detail}"
+
+
+def verify_tree_unchanged(
+    root: Path,
+    before: TreeSnapshot | str,
+    *,
+    before_fingerprints: Mapping[str, str] | None = None,
+) -> None:
     """Raise ``RuntimeError`` when the checkout changed during a read-only review."""
-    current = hash_tree(root)
-    if current != before_digest:
-        msg = f"checkout integrity failure: tree changed during read-only review ({root})"
+    fingerprints: Mapping[str, str] | None
+    if isinstance(before, TreeSnapshot):
+        before_digest = before.digest
+        fingerprints = before.fingerprints
+    else:
+        before_digest = before
+        fingerprints = before_fingerprints
+    current_snap = snapshot_tree(root)
+    if current_snap.digest == before_digest:
+        return
+    if fingerprints is None:
+        msg = f"checkout integrity failure: tree changed during read-only review ({root.resolve()})"
         raise RuntimeError(msg)
+    msg = checkout_integrity_failure_message(root, fingerprints, after=current_snap.fingerprints)
+    raise RuntimeError(msg)
 
 
 @dataclass
@@ -163,17 +266,34 @@ class TreeBaseline:
 
     root: Path
     digest: str
+    fingerprints: dict[str, str] = field(default_factory=dict)
     broken: bool = False
     broken_at: str = "checkout_pr"
+    # Tree at the boundary where a pre-repin change was detected (before checkout/gates).
+    broken_tree: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def capture(cls, root: Path) -> TreeBaseline:
+        """Snapshot ``root`` for a read-only review integrity baseline."""
+        snap = snapshot_tree(root)
+        return cls(
+            root=root.resolve(),
+            digest=snap.digest,
+            fingerprints=dict(snap.fingerprints),
+        )
 
     def before_boundary(self, boundary: str) -> None:
         if not self.broken and hash_tree(self.root) != self.digest:
+            current = snapshot_tree(self.root)
             self.broken = True
             self.broken_at = boundary
+            self.broken_tree = dict(current.fingerprints)
 
     def after_boundary(self) -> None:
         if not self.broken:
-            self.digest = hash_tree(self.root)
+            snap = snapshot_tree(self.root)
+            self.digest = snap.digest
+            self.fingerprints = dict(snap.fingerprints)
 
     def before_checkout(self) -> None:
         self.before_boundary("checkout_pr")
@@ -183,12 +303,18 @@ class TreeBaseline:
 
     def verify(self) -> None:
         if self.broken:
-            msg = (
-                "checkout integrity failure: tree changed during read-only review "
-                f"before {self.broken_at} ({self.root})"
+            msg = checkout_integrity_failure_message(
+                self.root,
+                self.fingerprints,
+                after=self.broken_tree,
+                boundary=f"before {self.broken_at}",
             )
             raise RuntimeError(msg)
-        verify_tree_unchanged(self.root, self.digest)
+        verify_tree_unchanged(
+            self.root,
+            self.digest,
+            before_fingerprints=self.fingerprints,
+        )
 
 
 def assert_checkout_read_boundary(checkout: Path, paths: Sequence[Path]) -> None:

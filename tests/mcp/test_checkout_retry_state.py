@@ -34,7 +34,7 @@ from mergecraft.mcp.tool_state import (
 )
 from mergecraft.mcp.verdict import ensure_review_scope_for_terminal
 from mergecraft.requirements.ingest import ScopeDeclaration
-from mergecraft.security.review_integrity import TreeBaseline, hash_tree
+from mergecraft.security.review_integrity import TreeBaseline
 from mergecraft.utils.run_bounds import BudgetTracker, resolve_run_bounds
 
 
@@ -95,9 +95,7 @@ async def test_checkout_retry_invalidates_old_scope_and_can_recover(
     )
     ctx.tool_state.scope_declaration = declaration
     ctx.budget_tracker = BudgetTracker(bounds=resolve_run_bounds(), tokens_used=27)
-    ctx.tool_state.review_tree_baseline = TreeBaseline(
-        root=repo, digest=await asyncio.to_thread(hash_tree, repo)
-    )
+    ctx.tool_state.review_tree_baseline = await asyncio.to_thread(TreeBaseline.capture, repo)
     first = await checkout_module.checkout_pr_tool(ctx).execute({"pull_number": 1})
     assert not first.is_error, first.content
     assert ctx.tool_state.scope_declaration is declaration

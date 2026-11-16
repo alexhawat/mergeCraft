@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A read-only review that fails the checkout integrity check now names which
+  repo-relative paths changed (`added` / `removed` / `modified`, capped per group
+  with a `+N more` suffix) in the error and run record, instead of only reporting
+  that the tree changed.
+
 - The full file that `git show <rev>:<path>` saves, and any other oversized `git`
   output, is now readable by an OpenCode reviewer in every run. The files were
   written to the top of the run temp directory, which OpenCode may only read when
