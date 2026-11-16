@@ -410,6 +410,7 @@ class AgentRunContext:
     verifier_denied_tools: Sequence[str] = ()
     # Slice 6 — no-output watchdog interval for this attempt. ``0`` disables it.
     idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S
+    budget_tracker: Any | None = None
 
 
 def mcp_auth_headers(ctx: AgentRunContext) -> dict[str, str]:
