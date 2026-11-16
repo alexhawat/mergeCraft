@@ -252,21 +252,17 @@ def record_agent_usage(
     # ``cache_write_tokens`` are observability fields only — adding them again
     # here double-counts OpenAI-style cached input against the run budget.
     token_total = usage.input_tokens + usage.output_tokens
-    if tracker.stream_tokens_charged > 0 and token_total >= tracker.stream_tokens_charged:
-        token_delta = token_total - tracker.stream_tokens_charged
-        tracker.stream_tokens_charged = token_total
+    if tracker.stream_tokens_charged > 0:
+        token_delta = max(0, token_total - tracker.stream_tokens_charged)
     else:
         token_delta = token_total
-        tracker.stream_tokens_charged = token_total
     if token_delta > 0:
         tracker.record_tokens(token_delta, phase=phase)
     if usage.cost_usd is not None:
-        if tracker.stream_cost_charged > 0 and usage.cost_usd >= tracker.stream_cost_charged:
-            cost_delta = usage.cost_usd - tracker.stream_cost_charged
-            tracker.stream_cost_charged = usage.cost_usd
+        if tracker.stream_cost_charged > 0:
+            cost_delta = max(0, usage.cost_usd - tracker.stream_cost_charged)
         else:
             cost_delta = usage.cost_usd
-            tracker.stream_cost_charged = usage.cost_usd
         if cost_delta > 0:
             tracker.record_cost(cost_delta)
 

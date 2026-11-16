@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mergecraft.utils.run_bounds import (
+    BudgetExhausted,
     BudgetTracker,
     token_total_from_usage_payload,
 )
