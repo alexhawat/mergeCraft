@@ -659,6 +659,67 @@ def test_a_failed_2x_turn_still_reports_the_tokens_it_burned(
     assert result.usage.output_tokens == 12
 
 
+def test_opencode_stream_stops_when_step_exceeds_token_ceiling(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    from dataclasses import replace
+
+    from mergecraft.jev.cost import TokenBudget
+    from mergecraft.utils.run_bounds import BudgetTracker, RunBounds
+
+    bounds = RunBounds(
+        token_budget=100,
+        cost_budget_usd=1.0,
+        tool_call_budget=10,
+        run_timeout_s=60.0,
+        context_retrieval_timeout_s=5.0,
+        max_diff_lines=10_000,
+        external_operation_timeout_s=30.0,
+        token_budget_tolerance=0.0,
+    )
+    tracker = BudgetTracker(bounds)
+    stdout = (
+        json.dumps(
+            {
+                "type": "step_finish",
+                "part": {"tokens": {"input": 60, "output": 5}},
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "type": "step_finish",
+                "part": {"tokens": {"input": 50, "output": 5}},
+            }
+        )
+        + "\n"
+    )
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda cmd, **kwargs: _Proc(stdout, 0))
+    from mergecraft.agents.token_budget import bind_run_budget
+
+    ctx = replace(
+        make_agent_run_context(tmp_path, resolved_model=None),
+        budget_tracker=tracker,
+    )
+    provider = TokenBudget(max_tokens=bounds.token_budget, advisory=False)
+    with bind_run_budget(provider):
+        result = oc._run_opencode_cli_streaming(
+            cmd=["opencode"],
+            ctx=ctx,
+            env={},
+            session={},
+        )
+
+    assert result.success is False
+    assert result.metadata.get("budget_exhausted") is True
+    assert "token budget" in (result.error or "").lower()
+    assert result.usage is not None
+    assert result.usage.input_tokens + result.usage.output_tokens == 65
+    assert "single increment" in (result.error or "").lower() or "token budget" in (
+        result.error or ""
+    ).lower()
+
+
 def test_a_failed_2x_turn_without_stderr_names_the_exit_code(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:

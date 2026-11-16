@@ -5,16 +5,24 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from mergecraft.utils.run_bounds import (
-    BudgetExhausted,
-    BudgetTracker,
-    token_total_from_usage_payload,
-)
+from mergecraft.utils.run_bounds import BudgetExhausted, BudgetTracker
 
 if TYPE_CHECKING:
     from mergecraft.jev.cost import TokenBudget
 
 _PHASE = "reviewer_dispatch"
+
+
+def token_total_from_usage_payload(payload: Mapping[str, Any]) -> int:
+    """Return billed tokens for one usage payload using ``AgentUsage`` rules."""
+    from mergecraft.agents._stream_consumer import StreamSpanAccumulator
+
+    accumulator = StreamSpanAccumulator(agent_name="budget")
+    accumulator.absorb_usage(payload)
+    usage = accumulator.to_usage()
+    if usage is None:
+        return 0
+    return usage.input_tokens + usage.output_tokens
 
 
 def charge_review_stream_step(
@@ -61,4 +69,4 @@ def charge_review_stream_step(
     return None
 
 
-__all__ = ["charge_review_stream_step"]
+__all__ = ["charge_review_stream_step", "token_total_from_usage_payload"]

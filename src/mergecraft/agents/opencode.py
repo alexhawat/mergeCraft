@@ -1809,7 +1809,7 @@ def _absorb_step_usage(
         cost_usd = float(cost)
 
     from mergecraft.agents.token_budget import current_run_budget
-    from mergecraft.utils.stream_budget import charge_review_stream_step
+    from mergecraft.agents.stream_budget import charge_review_stream_step
 
     stop = charge_review_stream_step(
         payload,

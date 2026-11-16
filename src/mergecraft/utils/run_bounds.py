@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 from collections import Counter
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final, Literal
 
@@ -126,6 +125,20 @@ class BudgetTracker:
         tolerance = self.bounds.token_budget_tolerance
 
         if tolerance <= 0.0:
+            remaining = ceiling - self.tokens_used
+            if count > ceiling:
+                msg = (
+                    f"token budget exhausted by single increment ({count} > ceiling {ceiling}; "
+                    f"target {target}, tolerance {tolerance})"
+                )
+                self._raise(BudgetExhausted("token", msg))
+            if count > remaining:
+                msg = (
+                    "token budget exhausted by single increment "
+                    f"({count} > remaining ceiling {remaining}; used {self.tokens_used}, "
+                    f"target {target}, ceiling {ceiling}, tolerance {tolerance})"
+                )
+                self._raise(BudgetExhausted("token", msg))
             self.tokens_used += count
             self.phase_totals[phase_key] += count
             return
@@ -224,18 +237,6 @@ class BudgetTracker:
         """
         self.last_exhausted = exc
         raise exc
-
-
-def token_total_from_usage_payload(payload: Mapping[str, Any]) -> int:
-    """Return billed tokens for one usage payload using ``AgentUsage`` rules."""
-    from mergecraft.agents._stream_consumer import StreamSpanAccumulator
-
-    accumulator = StreamSpanAccumulator(agent_name="budget")
-    accumulator.absorb_usage(payload)
-    usage = accumulator.to_usage()
-    if usage is None:
-        return 0
-    return usage.input_tokens + usage.output_tokens
 
 
 def record_agent_usage(
@@ -555,5 +556,4 @@ __all__ = [
     "round_budget_multiplier",
     "timeout_for_external_operation",
     "token_summary_from_usage",
-    "token_total_from_usage_payload",
 ]
