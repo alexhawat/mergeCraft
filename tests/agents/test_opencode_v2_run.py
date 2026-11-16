@@ -715,9 +715,10 @@ def test_opencode_stream_stops_when_step_exceeds_token_ceiling(
     assert "token budget" in (result.error or "").lower()
     assert result.usage is not None
     assert result.usage.input_tokens + result.usage.output_tokens == 65
-    assert "single increment" in (result.error or "").lower() or "token budget" in (
-        result.error or ""
-    ).lower()
+    assert (
+        "single increment" in (result.error or "").lower()
+        or "token budget" in (result.error or "").lower()
+    )
 
 
 def test_a_failed_2x_turn_without_stderr_names_the_exit_code(

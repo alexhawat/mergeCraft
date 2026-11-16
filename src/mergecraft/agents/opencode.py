@@ -86,6 +86,7 @@ if TYPE_CHECKING:
     from mergecraft.mcp.tool_state import ToolState
     from mergecraft.security.review_integrity import TreeBaseline
     from mergecraft.tracing.content import ContentCapture
+    from mergecraft.utils.run_bounds import BudgetTracker
 
 OPENCODE_AUTH_ENV = "OPENCODE_AUTH_JSON"
 OPENCODE_API_KEY_ENV = "OPENCODE_API_KEY"
@@ -1755,7 +1756,7 @@ def _absorb_step_usage(
     event: dict[str, Any],
     *,
     model: str | None = None,
-    budget_tracker: object | None = None,
+    budget_tracker: BudgetTracker | None = None,
 ) -> None:
     """Fold a 2.x step's reported tokens into the run's usage (#801).
 
@@ -1827,7 +1828,7 @@ def _bash_only_handler(
     tool_state: ToolState | None,
     *,
     model: str | None = None,
-    budget_tracker: object | None = None,
+    budget_tracker: BudgetTracker | None = None,
 ) -> Callable[[StreamSpanAccumulator, dict[str, Any]], None]:
     """Stream handler for a run with no session: record tool calls, touch nothing else."""
 
@@ -1844,7 +1845,7 @@ def _session_event_handler(
     *,
     tool_state: ToolState | None = None,
     model: str | None = None,
-    budget_tracker: object | None = None,
+    budget_tracker: BudgetTracker | None = None,
 ) -> Callable[[StreamSpanAccumulator, dict[str, Any]], None]:
     """Record a 2.x ``run`` stream's session id and answer text.
 

@@ -47,7 +47,9 @@ def test_stream_steps_stop_before_a_lump_finalize_increment() -> None:
     tracker = BudgetTracker(_bounds())
     provider = TokenBudget(max_tokens=tracker.bounds.token_ceiling, advisory=False)
     payload = {"input_tokens": 1_800_000, "output_tokens": 50_000}
-    assert charge_review_stream_step(payload, budget_tracker=tracker, provider_budget=provider) is None
+    assert (
+        charge_review_stream_step(payload, budget_tracker=tracker, provider_budget=provider) is None
+    )
     payload2 = {"input_tokens": 600_000, "output_tokens": 10_000}
     reason = charge_review_stream_step(payload2, budget_tracker=tracker, provider_budget=provider)
     assert reason is not None
