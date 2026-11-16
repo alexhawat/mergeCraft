@@ -1808,8 +1808,8 @@ def _absorb_step_usage(
     elif isinstance(cost, (int, float)) and cost > 0:
         cost_usd = float(cost)
 
-    from mergecraft.agents.token_budget import current_run_budget
     from mergecraft.agents.stream_budget import charge_review_stream_step
+    from mergecraft.agents.token_budget import current_run_budget
 
     stop = charge_review_stream_step(
         payload,

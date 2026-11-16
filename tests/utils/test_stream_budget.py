@@ -5,9 +5,14 @@ from __future__ import annotations
 import pytest
 
 from mergecraft.agents.shared import AgentUsage
-from mergecraft.jev.cost import TokenBudget
-from mergecraft.utils.run_bounds import BudgetExhausted, BudgetTracker, RunBounds, record_agent_usage
 from mergecraft.agents.stream_budget import charge_review_stream_step
+from mergecraft.jev.cost import TokenBudget
+from mergecraft.utils.run_bounds import (
+    BudgetExhausted,
+    BudgetTracker,
+    RunBounds,
+    record_agent_usage,
+)
 
 
 def _bounds(

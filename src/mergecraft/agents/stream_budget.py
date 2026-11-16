@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from mergecraft.utils.run_bounds import BudgetExhausted, BudgetTracker
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from mergecraft.jev.cost import TokenBudget
 
 _PHASE = "reviewer_dispatch"
