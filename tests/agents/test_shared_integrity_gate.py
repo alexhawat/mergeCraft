@@ -105,7 +105,7 @@ async def test_an_unhashable_checkout_fails_the_attempt_closed(
     def _unreadable(_root: Path) -> str:
         raise PermissionError("tree is unreadable")
 
-    monkeypatch.setattr("mergecraft.security.review_integrity.hash_tree", _unreadable)
+    monkeypatch.setattr("mergecraft.security.review_integrity.snapshot_tree", _unreadable)
     ran: list[bool] = []
 
     async def _reads_only(_ctx: AgentRunContext) -> AgentResult:

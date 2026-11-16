@@ -21,7 +21,7 @@ from mergecraft.mcp.static_checks import run_static_checks_tool
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.review_checks import StaticCheckConfig
-from mergecraft.security.review_integrity import TreeBaseline, hash_tree
+from mergecraft.security.review_integrity import TreeBaseline
 from mergecraft.utils.github import GitHubClient
 
 # A gate that builds a wheel into ``dist/`` (gitignored, but still hashed).
@@ -49,7 +49,7 @@ def _ctx(tmp_path: Path) -> tuple[ToolContext, Path]:
         static_checks_enabled=True,
         trust_tier="trusted",
     )
-    ctx.tool_state.review_tree_baseline = TreeBaseline(root=repo, digest=hash_tree(repo))
+    ctx.tool_state.review_tree_baseline = TreeBaseline.capture(repo)
     return ctx, repo
 
 

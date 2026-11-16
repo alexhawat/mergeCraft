@@ -575,11 +575,11 @@ def capture_integrity_baseline(ctx: AgentRunContext) -> TreeBaseline | None:
     An unreadable tree logs an error and returns ``None``.
     """
     from mergecraft.mcp.tool_state import primary_repo_state
-    from mergecraft.security.review_integrity import TreeBaseline, hash_tree
+    from mergecraft.security.review_integrity import TreeBaseline
 
     checkout = Path(primary_repo_state(ctx.tool_state).dir or os.getcwd()).resolve()
     try:
-        baseline = TreeBaseline(root=checkout, digest=hash_tree(checkout))
+        baseline = TreeBaseline.capture(checkout)
     except OSError as exc:
         logger.error("review integrity baseline failed for {}: {}", checkout, exc)
         return None

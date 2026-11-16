@@ -80,18 +80,30 @@ async def test_integrity_hashing_does_not_block_concurrent_rpc(
     )
     entered, finished = threading.Event(), threading.Event()
     original_hash = review_integrity.hash_tree
-    calls = 0
+    original_snapshot = review_integrity.snapshot_tree
+    hash_calls = 0
+    snap_calls = 0
 
     def slow_hash(root: Path) -> str:
-        nonlocal calls
-        calls += 1
-        if calls == hash_index:
+        nonlocal hash_calls
+        hash_calls += 1
+        if hash_index == 1 and hash_calls == 1:
             entered.set()
             time.sleep(0.2)
             finished.set()
         return original_hash(root)
 
+    def slow_snapshot(root: Path) -> review_integrity.TreeSnapshot:
+        nonlocal snap_calls
+        snap_calls += 1
+        if hash_index == 2 and snap_calls == 1:
+            entered.set()
+            time.sleep(0.2)
+            finished.set()
+        return original_snapshot(root)
+
     monkeypatch.setattr(review_integrity, "hash_tree", slow_hash)
+    monkeypatch.setattr(review_integrity, "snapshot_tree", slow_snapshot)
     pending = asyncio.create_task(_call(spec, ctx, arguments))
     try:
         await _list_tools_during_work(entered, finished)
