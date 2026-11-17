@@ -1419,9 +1419,7 @@ def render_deterministic_review_block(
         "### mergeCraft run record",
         "",
     ]
-    risk_line = format_risk_line(getattr(packet, "blast_radius", None))
-    if risk_line is not None:
-        header_lines.append(f"- {risk_line}")
+    # The completed-review recognizer reads the first three rows by position.
     if run_outcome is not None:
         outcome = reconcile_outcome(
             value=run_outcome,
@@ -1438,6 +1436,9 @@ def render_deterministic_review_block(
         header_lines.append(f"- **Verdict diagnostic:** `{diagnostic}`")
     if decision is not None:
         header_lines.append(f"- **Decision:** `{decision.verdict}` — {decision.reason}")
+    risk_line = format_risk_line(getattr(packet, "blast_radius", None))
+    if risk_line is not None:
+        header_lines.append(f"- {risk_line}")
     change_id = str(getattr(packet, "change_id", "") or "").strip()
     if change_id:
         header_lines.append(f"- **Change:** `{change_id}`")

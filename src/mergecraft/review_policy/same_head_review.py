@@ -5,13 +5,12 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from loguru import logger
-
 from mergecraft.action.review_policy import _is_completed_review
-from mergecraft.findings.ledger import DETERMINISTIC_RECORD_MARKER, REVIEW_BODY_MARKER
+from mergecraft.classify.triage import TriageDecision
+from mergecraft.utils.github import _default_server_url
 
 if TYPE_CHECKING:
-    from mergecraft.action.review_state import RunContext
+    from mergecraft.mcp.context import ToolContext
 
 SAME_HEAD_RECOGNIZER = "sameHeadSha"
 _HEAD_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -20,7 +19,7 @@ _HEAD_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 def trusted_completed_review_on_head(
     reviews: list[dict[str, Any]], head_sha: str
 ) -> dict[str, Any] | None:
-    """Newest mergeCraft formal review on ``head_sha`` with a terminal success record."""
+    """Find the newest completed review on ``head_sha`` in authenticated history."""
     if not _HEAD_SHA_RE.fullmatch(head_sha or ""):
         return None
     target = head_sha.casefold()
@@ -34,46 +33,37 @@ def trusted_completed_review_on_head(
     return None
 
 
-def prior_review_pointer(review: dict[str, Any]) -> str:
-    """Human-readable pointer for the run record."""
-    url = str(review.get("html_url") or "").strip()
-    commit = str(review.get("commit_id") or "")[:12]
-    if url:
-        return f"prior review on `{commit}` ({url})"
-    return f"prior review on `{commit}`"
-
-
 async def evaluate_same_head_skip(
-    ctx: RunContext, *, head_sha: str, pull_number: int
-) -> str | None:
-    """Return a skip reason when ``head_sha`` already has a trusted completed review."""
+    ctx: ToolContext, *, head_sha: str, pull_number: int
+) -> TriageDecision | None:
+    """Build a skip decision from one read of the authenticated review history."""
     from mergecraft.mcp.checkout import list_mergecraft_reviews
 
-    assert ctx.tool_context is not None
-    reviews = await list_mergecraft_reviews(ctx.tool_context, pull_number=pull_number)
+    reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
     prior = trusted_completed_review_on_head(reviews, head_sha)
     if prior is None:
         return None
+    review_id = prior.get("id")
+    pointer = f"prior review on `{head_sha[:12]}`"
+    relied_on: tuple[str, ...] = ()
+    if type(review_id) is int and review_id > 0:
+        url = (
+            f"{_default_server_url()}/{ctx.repo.owner}/{ctx.repo.name}"
+            f"/pull/{pull_number}#pullrequestreview-{review_id}"
+        )
+        pointer += f" ({url})"
+        relied_on = (url,)
     reason = (
         "This head SHA already has a trusted mergeCraft review; "
-        f"reusing {prior_review_pointer(prior)} instead of dispatching the agent again."
+        f"reusing {pointer} instead of dispatching the agent again."
     )
-    logger.info("same_head_review: skip — {}", reason)
-    return reason
-
-
-def review_looks_spoofed(review: dict[str, Any]) -> bool:
-    """Reject bodies that mimic our marker without a full deterministic record."""
-    body = str(review.get("body") or "").lstrip()
-    if not body.startswith(DETERMINISTIC_RECORD_MARKER):
-        return True
-    return REVIEW_BODY_MARKER not in body
+    return TriageDecision(
+        tier="skip", recognizer=SAME_HEAD_RECOGNIZER, reason=reason, relied_on_checks=relied_on
+    )
 
 
 __all__ = [
     "SAME_HEAD_RECOGNIZER",
     "evaluate_same_head_skip",
-    "prior_review_pointer",
-    "review_looks_spoofed",
     "trusted_completed_review_on_head",
 ]

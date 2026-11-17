@@ -213,7 +213,6 @@
       "src/mergecraft/evals/benchmark.py:property:reproducibility_digest",
       "src/mergecraft/evals/store.py:property:is_synthetic",
       "src/mergecraft/evidence/diff_coverage.py:property:coverage_percent",
-      "src/mergecraft/jev/questions.py:property:question_names",
       "src/mergecraft/jev/questions.py:property:source_catalog"
     ]
   },

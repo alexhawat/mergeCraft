@@ -39,10 +39,7 @@ on your provider, model, plan and the size of the change.
   ([workflows](workflows.md#ignoring-paths)).
 - **A run cap.** The Action `timeout` input bounds run duration (default 1h)
   ([action reference](action-reference.md)).
-- **Token band.** `runBounds.tokenBudget` (default 2M) is an advisory target;
-  `review.budget.target` (`tokensP50`, `costUsdP50`, `wallSecondsP50`) adds a
-  separate rolling trend warning over the last 20 completed reviews — advisory
-  only, never blocking (#1494).
+- **Token band.** `runBounds.tokenBudget` (default 2M) is an advisory target.
   `tokenBudgetTolerance` (default 10%) defines a hard ceiling for streaming
   reviewers. OpenCode (and other NDJSON stream drivers) charge each provider
   step against that ceiling while the review runs, stop the model before
@@ -54,6 +51,32 @@ on your provider, model, plan and the size of the change.
   toolset, analyzers and a token estimate without any provider call, and
   `mergecraft review --dry-run` prints the review prompt without calling a
   model.
+
+## Review budget trends
+
+Set any of `review.budget.target.tokensP50`, `costUsdP50`, and `wallSecondsP50`
+in the pull request's base-side config to monitor usage across reviews. The
+Action compares each configured target with the corresponding median and shows
+the p50, p90 and number of measurements in the step summary when a target is
+exceeded. `review.budget.windowSize` defaults to 20. Lower it for a window that
+responds faster to changes in spend. The trend warning has no effect on a
+review's verdict or per-run token ceiling.
+
+The window includes the current full review and the newest attributable
+mergeCraft records from GitHub pull request reviews in the same repository.
+Historical records require a reviewer App or PAT with an identifiable author.
+The search inspects at most 50 recently updated pull requests, 100 reviews per
+pull request and publisher, and the 200 newest candidate bodies. The summary
+shows the actual sample count and whether a read limit was reached. When
+history is unavailable the Action can still report the current measurement.
+Missing measurements, including incomplete recorded costs, are omitted from
+that metric's percentiles. Review wall time covers setup and agent execution.
+Historical costs and times use the precision of the published records.
+
+On trusted same-repository runs with an attributable publisher and
+`issues: write`, mergeCraft maintains a tracking issue per metric using
+`mergecraft-budget-trend` labels. It updates the existing issue during a breach
+and closes it when measurements return within target.
 
 ## Provider-specific figures in this repository
 

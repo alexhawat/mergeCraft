@@ -11,6 +11,7 @@ Exports:
     lens_pack: One Choice per catalog lens, read live (plan 21 D9).
     criterion_pack: One noul per behaviour-verification criterion.
     repro_pack: One noul for a reproduce claim.
+    risk_pack: PR diff questions for the raise-only risk overlay.
     get_pack: Lookup by versioned pack id.
     select_lenses: One ``lens/v1`` call per PR.
     select_lenses_or_fallback: ``jev:`` toggle + confidence-floor fallback.
@@ -386,7 +387,7 @@ def get_pack(pack_id: str) -> QuestionPack:
     """Return the versioned pack for ``pack_id``.
 
     Args:
-        pack_id: One of the five registered pack ids.
+        pack_id: A registered pack id.
 
     Returns:
         QuestionPack: The named pack.

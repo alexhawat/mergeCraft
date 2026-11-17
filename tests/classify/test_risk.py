@@ -62,3 +62,8 @@ def test_format_risk_line_omits_baseline_codes() -> None:
 
 def test_format_risk_line_none_when_no_classification() -> None:
     assert format_risk_line(None) is None
+
+
+def test_format_risk_line_baseline_only_displays_the_lane() -> None:
+    det = classify_blast_radius({"changed_paths": ["docs/intro.md"], "diff_stats": {}})
+    assert format_risk_line(det) == "**Risk:** `low`"

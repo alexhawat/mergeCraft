@@ -47,10 +47,10 @@ Every classification carries `reasons`: one row per signal, each with a stable d
 | `diff.destructive_sql` | high | the diff text contains `DROP`, `ALTER` or `CREATE` then `TABLE`, in any case and with any whitespace between |
 | `diff.secret_assignment` | high | the diff text assigns a `password`, `secret_key` or `private_key` (prefixed names such as `db_password =` included, any spacing around `=`) or contains `aws_secret_access_key` |
 | `diff.irreversible_command` | high | the diff text contains `rm` with recursive and force flags in any order or spelling (`-rf`, `-fr`, `-r -f`, `--recursive --force`), or `terraform destroy`, with any whitespace between |
-| `flag.added_off` | low | a feature-flag file matched `flagFileGlobs` and the diff adds a flag defaulting off |
-| `flag.enabled` | high | a feature-flag file matched `flagFileGlobs` and the diff enables a flag or changes rollout/default to on |
-| `diff.authz_outside` | high | the diff changes authorization logic but no path under `auth/`, `security/`, or `permissions/` changed |
-| `diff.data_deletion_outside` | high | the diff deletes or truncates persisted data and no path under `migrations/` changed |
+| `flag.added_off` | low | an added setting in a feature-flag file matched by `flagFileGlobs` defaults a flag to off |
+| `flag.enabled` | high | an added setting in a feature-flag file matched by `flagFileGlobs` enables a flag or sets its rollout to 100% |
+| `diff.authz_outside` | high | changed source lines add, edit or remove authorization logic outside `auth/`, `security/`, and `permissions/` |
+| `diff.data_deletion_outside` | high | added source lines execute a `DELETE FROM` or `TRUNCATE` outside `migrations/` |
 | `paths.public_api` | medium | a package `__init__.py` changed |
 | `deps.changed` | medium | a dependency manifest or lockfile changed: the shared manifest and lockfile names (`pyproject.toml`, `uv.lock`, `package.json`, `go.mod`, `Gemfile`, `composer.json`, `Pipfile`, `Pipfile.lock` and the rest) and every pip requirements or constraints file (`requirements*.txt`, `*-requirements.txt`, `constraints*.txt`, any `.txt` / `.in` under `requirements/`), compared case-insensitively |
 | `tests.missing` | medium | a hand-written source path (see below) changed and no test path changed, whatever generated paths sit beside it; emitted at low, with the carve-out named, when the carve-out applies |
@@ -168,7 +168,9 @@ The approval gate and the risk-band ordering follow the same rule:
 
 Two floors cannot be lowered. `review_config` may be raised but never set below `medium`: a PR that edits the config governing its own review is never `eligible`. `signal.missing.*` has no `RuleSet` key. A `source_without_tests` override also turns off the small-isolated-source carve-out.
 
-The repository-settings field that supplies this value is part of the separate lane-policy wiring wave. The classifier does not read settings itself.
+The GitHub Action reads `blastRadiusOverride` from the PR base. Set `blastRadiusOverride.flagFileGlobs` to use custom feature-flag paths. Omit it to use `**/flags/**`, `**/feature_flags.*`, `**/features.yaml`, and `**/features.yml`.
+
+With `risk.mode: jev`, the Action can raise the deterministic lane using Jev's `risk/v1` pack. The packet keeps the deterministic grade and records an unavailable Jev grade when the overlay cannot return a result. Packets built before agent dispatch is reached also keep the repository's deterministic overrides.
 
 ## Merge Evidence Packet
 

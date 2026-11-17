@@ -35,6 +35,7 @@ from mergecraft.analyzers.dispositions import DispositionCounts
 from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.classify import ChangeSet, classify_blast_radius
 from mergecraft.classify.blast_radius import FixProofStatus, RuleSet
+from mergecraft.classify.risk import jev_skip_reasons
 from mergecraft.evidence.build import build_packet
 from mergecraft.evidence.coverage import coverage_section_for_state
 from mergecraft.evidence.emit import write_packet
@@ -877,15 +878,20 @@ def build_run_packet(
     state = ctx.tool_state
     repo_state = primary_repo_state(state)
     diff_text = _read_diff_text(repo_state)
-    stored = getattr(state, "risk_classification", None)
-    if stored is not None:
-        blast_radius = stored
-    else:
+    blast_radius = state.risk_classification
+    if blast_radius is None:
         blast_radius = classify_run_blast_radius(
             diff_text,
             scope=scope_signal_for_state(state),
             fix_proof=fix_proof_signal_for_context(ctx),
+            rule_set=state.blast_rule_set,
         )
+        if (
+            blast_radius is not None
+            and state.risk_settings is not None
+            and state.risk_settings.mode == "jev"
+        ):
+            blast_radius.reasons.extend(jev_skip_reasons("not_evaluated"))
 
     from mergecraft.evidence.trajectory import build_trajectory_record
     from mergecraft.evidence.trajectory_audit import audit_trajectory

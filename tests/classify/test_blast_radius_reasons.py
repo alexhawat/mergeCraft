@@ -157,7 +157,16 @@ CODE_CASES: list[tuple[str, dict[str, Any], str, str | None]] = [
         "flag.enabled",
         _c(
             ["service/flags/experiment.yaml", "src/pkg/module.py"],
-            {"diff": "+experiment:\n+  default: true\n", "lines_added": 2, "lines_deleted": 0},
+            {
+                "diff": (
+                    "diff --git a/service/flags/experiment.yaml b/service/flags/experiment.yaml\n"
+                    "@@ -0,0 +1,2 @@\n+experiment:\n+  default: true\n"
+                    "diff --git a/src/pkg/module.py b/src/pkg/module.py\n"
+                    "@@ -1 +1 @@\n-return x\n+return y\n"
+                ),
+                "lines_added": 3,
+                "lines_deleted": 1,
+            },
         ),
         "high",
         "tests",
@@ -165,11 +174,11 @@ CODE_CASES: list[tuple[str, dict[str, Any], str, str | None]] = [
     (
         "diff.authz_outside",
         _c(
-            ["docs/runbook.md"],
+            ["src/pkg/views.py"],
             {
-                "diff": "+Access forbidden when token missing\n",
+                "diff": "-if request.user.is_admin:\n+if request.user.is_staff:\n",
                 "lines_added": 1,
-                "lines_deleted": 0,
+                "lines_deleted": 1,
             },
         ),
         "high",
@@ -178,8 +187,12 @@ CODE_CASES: list[tuple[str, dict[str, Any], str, str | None]] = [
     (
         "diff.data_deletion_outside",
         _c(
-            ["src/app/store.py", "tests/test_store.py"],
-            {"diff": "+DELETE FROM sessions;\n", "lines_added": 1, "lines_deleted": 0},
+            ["src/app/store.py"],
+            {
+                "diff": '+conn.execute("DELETE FROM sessions;")\n',
+                "lines_added": 1,
+                "lines_deleted": 0,
+            },
         ),
         "high",
         "migrations",
@@ -771,3 +784,42 @@ def test_the_run_record_line_has_no_suffix_when_every_gate_is_measured() -> None
     assert len(lines) == 1
     assert "high" in lines[0]
     assert "not measured" not in lines[0]
+
+
+@pytest.mark.parametrize(
+    ("path", "hunk"),
+    [
+        ("docs/runbook.md", "-Authentication was required\n+Access forbidden when token missing"),
+        ("src/operations.md", "+Use DELETE FROM only to remove test data."),
+        ("src/views.py", " if user.is_admin:\n-old()\n+new()"),
+        ("src/views.py", "+# Check authentication with authorize(user)"),
+        ("src/views.py", "+return user  # Should we authorize(user)?"),
+        ("src/views.py", '+message = "Access forbidden when token missing."'),
+        ("src/store.py", '-conn.execute("DELETE FROM sessions;")\n+archive_sessions()'),
+        ("src/store.py", '+logger.info("DELETE FROM is forbidden in production")'),
+        ("ops/maintenance.sql", " DELETE FROM sessions;\n+SELECT COUNT(*) FROM sessions;"),
+    ],
+    ids=(
+        "runbook-prose",
+        "source-directory-doc",
+        "unchanged-auth-context",
+        "auth-comment",
+        "inline-auth-comment",
+        "auth-string",
+        "removed-data-operation",
+        "sql-in-log-message",
+        "unchanged-sql-context",
+    ),
+)
+def test_prose_context_and_removed_sql_do_not_escalate(path: str, hunk: str) -> None:
+    """Only an affected authorization check or a new data operation raises risk."""
+    result = classify_blast_radius(
+        {
+            "changed_paths": [path],
+            "diff_stats": {"diff": f"diff --git a/{path} b/{path}\n@@ -1 +1 @@\n{hunk}\n"},
+        }
+    )
+    assert result.lane != "high"
+    assert {"diff.authz_outside", "diff.data_deletion_outside"}.isdisjoint(
+        reason.code for reason in result.reasons
+    )

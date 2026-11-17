@@ -780,6 +780,17 @@ async def main() -> MainResult:
                     )
                 except Exception as error:
                     result = await _action_failure_result(ctx, error)
+                else:
+                    # Budget reporting runs outside the publish deadline (and
+                    # before cleanup closes the SCM connection).
+                    if result.outcome in {
+                        RunOutcome.passed,
+                        RunOutcome.failed,
+                        RunOutcome.inconclusive,
+                    }:
+                        from mergecraft.review.budget_trend import emit_budget_trend_advisory
+
+                        await emit_budget_trend_advisory(ctx)
                 if not result.success:
                     root_span.set_status("error", result.error or "review failed")
                 return result

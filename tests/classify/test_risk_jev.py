@@ -7,19 +7,9 @@ from typing import Any
 
 import pytest
 
-from mergecraft.classify.risk_jev import (
-    evaluate_jev_risk,
-    jev_reasons_from_answers,
-    jev_skip_reasons,
-    risk_pack_questions,
-)
+from mergecraft.classify.risk import jev_skip_reasons
+from mergecraft.classify.risk_jev import evaluate_jev_risk, jev_reasons_from_answers
 from mergecraft.jev.types import JevCallResult, NoulAnswer, SystemOneResponse
-
-
-def test_risk_pack_questions_has_four_noul_items() -> None:
-    questions = risk_pack_questions()
-    assert len(questions) == 4
-    assert all(q["type"] == "noul" for q in questions)
 
 
 def test_jev_reasons_from_answers_respects_floor() -> None:
@@ -28,6 +18,7 @@ def test_jev_reasons_from_answers_respects_floor() -> None:
     assert len(reasons) == 1
     assert reasons[0].code == "jev.authz"
     assert reasons[0].lane == "high"
+    assert jev_reasons_from_answers(answers, floor="high") == []
 
 
 def test_jev_reasons_ignores_low_noul() -> None:
@@ -47,6 +38,7 @@ class _FakeJevClient:
     response: SystemOneResponse | None = None
     skipped_call: bool = False
     call_reason: str | None = None
+    trust_tier: str | None = None
 
     def availability_skip(self, *, pack_id: str | None = None) -> JevCallResult | None:
         del pack_id
@@ -55,7 +47,7 @@ class _FakeJevClient:
         return JevCallResult(skipped=True, available=False, reason=self.skip_reason)
 
     async def call(self, **kwargs: Any) -> JevCallResult:
-        del kwargs
+        self.trust_tier = kwargs["trust_tier"]
         if self.skipped_call:
             return JevCallResult(
                 skipped=True, available=False, reason=self.call_reason or "disabled"
@@ -87,6 +79,7 @@ async def test_evaluate_jev_risk_raises_lane_from_answers() -> None:
     assert record == []
     assert raised
     assert raised[0].code == "jev.flag_enabled"
+    assert client.trust_tier == "untrusted"
 
 
 @pytest.mark.asyncio

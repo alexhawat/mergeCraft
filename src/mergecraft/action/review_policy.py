@@ -373,11 +373,7 @@ async def _same_head_skip_gate(ctx: RunContext) -> SkipAgentReview | None:
     assert ctx.tool_state is not None
     assert ctx.tool_context is not None
     from mergecraft.config.trust_policy import bound_head_sha
-    from mergecraft.review_policy.same_head_review import (
-        SAME_HEAD_RECOGNIZER,
-        evaluate_same_head_skip,
-        trusted_completed_review_on_head,
-    )
+    from mergecraft.review_policy.same_head_review import evaluate_same_head_skip
 
     event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
     pull = event.get("pull_request")
@@ -387,28 +383,17 @@ async def _same_head_skip_gate(ctx: RunContext) -> SkipAgentReview | None:
     head_sha = bound_head_sha(event, event_name=event_name)
     if not head_sha:
         return None
-    reason = await evaluate_same_head_skip(ctx, head_sha=head_sha, pull_number=int(pull["number"]))
-    if reason is None:
-        return None
-    from mergecraft.mcp.checkout import list_mergecraft_reviews
-
-    reviews = await list_mergecraft_reviews(ctx.tool_context, pull_number=int(pull["number"]))
-    prior = trusted_completed_review_on_head(reviews, head_sha)
-    relied: tuple[str, ...] = ()
-    if prior is not None:
-        url = str(prior.get("html_url") or "").strip()
-        if url:
-            relied = (url,)
-    decision = TriageDecision(
-        tier="skip",
-        recognizer=SAME_HEAD_RECOGNIZER,
-        reason=reason,
-        relied_on_checks=relied,
+    decision = await evaluate_same_head_skip(
+        ctx.tool_context, head_sha=head_sha, pull_number=int(pull["number"])
     )
+    if decision is None:
+        return None
     ctx.tool_state.triage = decision
-    logger.warning("» {} — {}", decision.record_line(), decision.reason)
-    gha_log.notice(f"mergeCraft: {reason}")
-    return SkipAgentReview(reason=reason)
+    logger.warning("» {} — trusted review already on this head SHA", decision.record_line())
+    gha_log.notice(
+        "mergeCraft: This head SHA already has a trusted review. Skipping agent dispatch."
+    )
+    return SkipAgentReview(reason=decision.reason)
 
 
 async def _ignore_paths_gate(ctx: RunContext) -> SkipAgentReview | None:

@@ -300,9 +300,6 @@ async def _resolve_run_risk_grade(ctx: RunContext) -> None:
     if ctx.settings is None or ctx.tool_state is None or ctx.tool_context is None:
         return
     from mergecraft.evidence.risk_resolve import resolve_run_risk_classification
-
-    if ctx.tool_context is None:
-        return
     from mergecraft.evidence.run_packet import (
         _read_diff_text,
         fix_proof_signal_for_context,
@@ -311,14 +308,12 @@ async def _resolve_run_risk_grade(ctx: RunContext) -> None:
     from mergecraft.mcp.tool_state import primary_repo_state
 
     state = ctx.tool_state
-    if getattr(state, "risk_classification", None) is not None:
+    if state.risk_classification is not None:
         return
-    risk = getattr(state, "risk_settings", None)
-    rule_set = getattr(state, "blast_rule_set", None)
+    risk = state.risk_settings
     if risk is None:
         await _resolve_run_risk_config(ctx)
-        risk = getattr(state, "risk_settings", None)
-        rule_set = getattr(state, "blast_rule_set", None)
+        risk = state.risk_settings
     if risk is None:
         return
     diff_text = _read_diff_text(primary_repo_state(state))
@@ -330,8 +325,9 @@ async def _resolve_run_risk_grade(ctx: RunContext) -> None:
             scope=scope_signal_for_state(state),
             fix_proof=fix_proof_signal_for_context(ctx.tool_context),
             risk=risk,
-            rule_set=rule_set,
+            rule_set=state.blast_rule_set,
             settings=ctx.settings,
+            trust_tier=ctx.trust_tier,
             tool_state=state,
         )
     except Exception as err:

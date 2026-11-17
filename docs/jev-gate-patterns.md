@@ -58,10 +58,11 @@ the `mergecraft mcp serve` review tool. A dry run makes no Jev call. The four
 local-review packs run after the generative review has finished. `align/v1` is
 registered, but no production path calls it.
 
-The PR review that the GitHub Action runs (`mergecraft gha`) makes no Jev call
-in this release, even when the workflow passes `TYPESAFE_API_KEY`. A workflow
-step calls Jev only when it runs `mergecraft review` or `mergecraft
-verify-behavior` with Jev enabled and the key in its environment.
+The GitHub Action PR review (`mergecraft gha`) can call `risk/v1` before agent
+dispatch. It requires `risk.mode: jev` in the PR base config, Jev and the pack
+enabled, and `TYPESAFE_API_KEY` in the workflow environment. On an untrusted run
+the client fences the diff excerpt as evidence. The pack can raise the
+deterministic lane, and unavailable Jev results leave that lane in effect.
 
 To limit what is sent, turn off single packs with `jev.packs` (for example
 `mergecraft jev set packs.lens/v1 false` keeps the full diff local), lower
