@@ -121,7 +121,8 @@ self-review's session.
 ### Blocking PR scanners and waivers
 
 On a code PR these fail the required checks, not just a side job:
-actionlint and zizmor (`Verify (static + build py3.14)`), npm audit, semgrep
+actionlint and zizmor (`Static checks (py3.14)`, which
+`Verify (static + build py3.14)` requires), npm audit, semgrep
 and trufflehog (`Verify (security audit py3.14)`), and the Trivy image scans
 (`static` needs `image-scan-slim` and `image-scan-analyzers`). Docs-only PRs skip
 the image builds and scans. To accept a semgrep, trufflehog or npm-audit finding,
