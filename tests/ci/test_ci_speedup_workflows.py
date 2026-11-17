@@ -79,7 +79,7 @@ def test_non_pr_coverage_uses_parallel_gate_and_propagates_failure(
 
 
 def test_mypy_cache_cannot_restore_across_incompatible_toolchains() -> None:
-    steps = job(load_workflow("ci.yml"), "static")["steps"]
+    steps = job(load_workflow("ci.yml"), "static-checks")["steps"]
     cache = next(step for step in steps if step.get("with", {}).get("path") == ".mypy_cache")
     options = cache["with"]
     prefix = options["restore-keys"].strip()

@@ -145,13 +145,13 @@ def test_mutation_advisory_is_nightly_only() -> None:
     assert "schedule" in condition
 
 
-def test_static_waits_for_both_image_scans() -> None:
+def test_required_final_gate_waits_for_both_image_scans() -> None:
     needs = as_list(job(load_workflow("ci.yml"), "static")["needs"])
     assert {"image-scan-slim", "image-scan-analyzers"} <= set(needs)
 
 
 def test_required_static_job_blocks_on_workflow_lint() -> None:
-    step = _step("ci.yml", "static", "Workflow lint (actionlint + zizmor, blocking)")
+    step = _step("ci.yml", "static-checks", "Workflow lint (actionlint + zizmor, blocking)")
     assert step["run"] == "make workflow-lint"
     assert not step.get("continue-on-error", False)
 

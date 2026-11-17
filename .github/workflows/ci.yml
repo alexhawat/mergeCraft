@@ -369,11 +369,10 @@ jobs:
     with:
       image: analyzers
 
-  static:
-    name: Verify (static + build py${{ matrix.python }})
-    needs: [changes, toolchain, deployment-candidate, eval-gate, privilege-root, privileged-proofs, deterministic-integration, action-e2e, image-scan-slim, image-scan-analyzers]
-    # Keep the named matrix checks visible to branch protection on every PR.
-    if: always()
+  static-checks:
+    name: Static checks (py${{ matrix.python }})
+    # Static work needs only classification, not images or acceptance tests.
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -381,29 +380,6 @@ jobs:
       matrix:
         python: ["3.11", "3.14"]
     steps:
-      - name: Require successful deterministic prerequisites
-        env:
-          REQUIRED_JOB_RESULTS: ${{ toJSON(needs) }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          python3 - <<'PYCODE'
-          import json, os, sys
-          jobs = json.loads(os.environ["REQUIRED_JOB_RESULTS"])
-          outputs = jobs.get("changes", {}).get("outputs", {})
-          image_only = outputs.get("image_only") == "true"
-          docs_only = os.environ.get("EVENT_NAME") == "pull_request" and outputs.get("code") != "true"
-          image_skipped = {"toolchain", "eval-gate", "privilege-root", "privileged-proofs", "deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers"}
-          docs_skipped = {"eval-gate", "privilege-root", "deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers"}
-          def may_skip(name):
-              return (image_only and name in image_skipped) or (docs_only and name in docs_skipped)
-          failed = {
-              name: job.get("result") for name, job in jobs.items()
-              if job.get("result") != ("skipped" if may_skip(name) else "success")
-          }
-          if not jobs or failed:
-              print(f"Required checks did not succeed: {failed or 'no prerequisite results'}", file=sys.stderr)
-              sys.exit(1)
-          PYCODE
       - name: Docs-only notice
         if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true' && needs.changes.outputs.image_only != 'true'
         run: echo "::notice title=Verify (docs-only)::Running docs-check only — full static/build tier skipped."
@@ -465,7 +441,7 @@ jobs:
           make action-pin-check
       # First-wave CI SARIF for mergeCraft ingest (#464 / D8). Upload even when
       # the static tier failed so the review still sees the tool's findings.
-      # A failed prerequisite skips checkout/bootstrap, so no report tools exist then.
+      # Emit reports only when bootstrap installed the tools successfully.
       - name: Emit ruff and mypy SARIF
         if: always() && steps.bootstrap.outcome == 'success' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         env:
@@ -530,6 +506,43 @@ jobs:
           name: zizmor-sarif
           path: .sarif/zizmor.sarif
           if-no-files-found: warn
+
+  static:
+    name: Verify (static + build py${{ matrix.python }})
+    needs: [changes, static-checks, test, security, coverage-gate, toolchain, deployment-candidate, eval-gate, privilege-root, privileged-proofs, deterministic-integration, action-e2e, image-scan-slim, image-scan-analyzers]
+    # Preserve the required check names as final gates, including after failed
+    # or skipped dependencies. Static work runs in parallel in static-checks.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
+    steps:
+      - name: Require successful deterministic prerequisites
+        env:
+          REQUIRED_JOB_RESULTS: ${{ toJSON(needs) }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os, sys
+          jobs = json.loads(os.environ["REQUIRED_JOB_RESULTS"])
+          outputs = jobs.get("changes", {}).get("outputs", {})
+          image_only = outputs.get("image_only") == "true"
+          docs_only = os.environ.get("EVENT_NAME") == "pull_request" and outputs.get("code") != "true"
+          image_skipped = {"toolchain", "eval-gate", "privilege-root", "privileged-proofs", "deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers"}
+          docs_skipped = {"eval-gate", "privilege-root", "deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers"}
+          def may_skip(name):
+              return (image_only and name in image_skipped) or (docs_only and name in docs_skipped)
+          failed = {
+              name: job.get("result") for name, job in jobs.items()
+              if job.get("result") != ("skipped" if may_skip(name) else "success")
+          }
+          if not jobs or failed:
+              print(f"Required checks did not succeed: {failed or 'no prerequisite results'}", file=sys.stderr)
+              sys.exit(1)
+          PYCODE
 
   security:
     name: Verify (security audit py${{ matrix.python }})

@@ -208,20 +208,25 @@ collection. With the flag set but secrets absent the suite still fails loudly
 
 ## Operator: branch protection
 
-The required `Verify (static + build py3.11)` and `py3.14` contexts also
-check the dependency graph's results explicitly: lock/toolchain, deployment
-candidate verification, structural evaluation, root-container privilege,
-keyless integration on both Python versions, and the reusable Action E2E
-slice must all succeed. Failure, cancellation, or a skipped prerequisite
-makes the required context fail. PR Action E2E is called by CI once; release,
-scheduled and manual invocation remain available. The existing Integration
-workflow still provides its coverage ratchet and diagnostic artifacts.
+The required `Verify (static + build py3.11)` and `py3.14` contexts are
+lightweight final gates. The `Static checks (py3.11)` and `py3.14` jobs run
+lint, typechecking, builds, workflow lint, wheel acceptance, docs checks and
+SARIF publication in parallel with images and acceptance tests, after path
+classification. The final gates retain the existing required names, so branch
+protection and the self-review CI wait need no settings changes.
 
-This graph also runs for documentation-only PRs: they build the Action image
-and run deterministic integration on both Python versions. The integration job
-has a 55-minute timeout, so the full required graph can take substantially longer
-than the docs checks alone. This cost keeps the same required acceptance checks
-on every PR; a path-based skip cannot stand in for a successful prerequisite.
+Both final gates require the complete static matrix, test shards, security
+matrix, coverage gate, lock/toolchain, deployment candidate verification,
+structural evaluation, root-container privilege, privileged proofs, keyless
+integration on both Python versions, Action E2E and both image scans. Failure,
+cancellation, or an unexpected skip fails the gate, even if static checks pass.
+
+The existing skip policy is unchanged: documentation-only PRs run docs checks
+and skip image builds, image scans, structural evaluation, root-container
+privilege, keyless integration and Action E2E. Image-only PRs also skip the
+toolchain and privileged proofs, but still require deployment candidate
+verification. Static, test, security and coverage jobs keep reporting their
+existing path-specific results; the final gates require them to succeed.
 
 Live-provider and mutation advisory jobs remain outside this required graph.
 They provide different evidence and are not a substitute for deterministic
