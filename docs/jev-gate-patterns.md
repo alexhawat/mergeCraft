@@ -49,6 +49,7 @@ is redacted, so a secret in the diff or the page reaches TypeSafe.
 | `evidence/v1` | `claim` (finding message), `section` (the finding's first cited evidence), `path`, `start_line`, `end_line` | local review | once per review and analyzer finding |
 | `claim/v1` | `claim` (one prose claim from the rendered review), `findings_table`, `terminal_verdict` | local review | once per extracted claim |
 | `lens/v1` | `diff` (the whole review diff) | local review | once per review |
+| `risk/v1` | `diff` (excerpt of the PR diff) | PR review when `risk.mode: jev` | once per review before agent dispatch; may only **raise** the deterministic blast-radius lane |
 | `criterion/v1` | `criterion`, `page` (observed page text) | `mergecraft verify-behavior` | once per acceptance criterion |
 | `repro/v1` | `claim` (reproduction claim), `page` | `mergecraft verify-behavior` | once per run with a reproduction claim |
 
