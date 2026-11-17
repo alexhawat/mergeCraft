@@ -136,6 +136,8 @@ def run_cli_attempt(spec: CliHarnessSpec, ctx: AgentRunContext) -> AgentResult:
                 consume_stream(
                     raw_stream=process.stdout, accumulator=accumulator, handler=watched_handler
                 )
+                if accumulator.halt_reason and process.poll() is None:
+                    kill_process_group(process.pid)
                 returncode = wait_or_kill_process_group(process, timeout=timeout)
             except subprocess.TimeoutExpired:
                 return with_prompt(

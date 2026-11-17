@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Streaming OpenCode (and NDJSON CLI) reviews now charge token usage per
+  provider step against the configured ceiling, stop the model before further
+  spend when a step would exceed it, and record only the remaining usage delta
+  at dispatch finalize. This prevents a long single-session review from
+  passing publication and then failing the run with a multi-million-token
+  "single increment" accounting lump, as on downstream installs pinned before
+  0.1.0a6 (#1477 follow-up).
 - A read-only review that fails the checkout integrity check now names which
   repo-relative paths changed (`added` / `removed` / `modified`, capped per group
   with a `+N more` suffix) in the error and run record, instead of only reporting

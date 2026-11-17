@@ -478,7 +478,7 @@ async def _dispatch_offline_agent(
 
     provider_budget = resolve_review_provider_budget(
         model=prepared.resolved_model or PINNED_MODEL,
-        max_tokens=prepared.bounds.token_budget,
+        max_tokens=prepared.bounds.token_ceiling,
     )
     bind_llm_review_timing_tracker()
     with bind_run_budget(provider_budget):

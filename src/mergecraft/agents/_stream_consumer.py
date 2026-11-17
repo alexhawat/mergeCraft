@@ -104,6 +104,8 @@ class StreamSpanAccumulator:
     # Bubblewrap namespace failures on command_execution items (plan 13 W8 / #553).
     user_namespace_failure_reported: bool = False
     run_health_notes: list[str] = field(default_factory=list)
+    # Set by stream budget enforcement to stop the provider before further spend.
+    halt_reason: str | None = None
 
     def set_stream_error(self, message: str | None) -> None:
         """Record the first provider-reported fatal error on this stream."""
@@ -317,8 +319,12 @@ def consume_stream(
             if attach_trace_context is not None:
                 with attach_trace_context(active_span):
                     _safe_invoke_handler(handler, accumulator, event)
+                if accumulator.halt_reason:
+                    break
                 continue
         _safe_invoke_handler(handler, accumulator, event)
+        if accumulator.halt_reason:
+            break
 
 
 __all__ = [
