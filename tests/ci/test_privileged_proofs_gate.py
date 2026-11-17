@@ -126,7 +126,7 @@ def test_integration_workflow_no_longer_carries_a_non_required_copy() -> None:
 
 
 def test_a_skipped_proofs_job_cannot_pass_a_code_pr() -> None:
-    """The guard accepts a skip only for an image-only PR; the job itself never skips otherwise."""
+    """Tier 3 is optional on pull_request; on push a skipped proofs job still blocks static."""
     guard = job(load_workflow("ci.yml"), "static")["steps"][0]["run"]
     needs = as_list(job(load_workflow("ci.yml"), "static")["needs"])
 
@@ -148,4 +148,22 @@ def test_a_skipped_proofs_job_cannot_pass_a_code_pr() -> None:
 
     assert code("success") == 0
     assert code("failure") == 1
-    assert code("skipped") == 1
+    assert code("skipped") == 0
+
+    def push(result: str) -> int:
+        results: dict[str, Any] = {n: {"result": "success"} for n in needs}
+        results["privileged-proofs"] = {"result": result}
+        results["changes"] = {
+            "result": "success",
+            "outputs": {"code": "true", "image_only": "false"},
+        }
+        env = {
+            **os.environ,
+            "REQUIRED_JOB_RESULTS": json.dumps(results),
+            "EVENT_NAME": "push",
+        }
+        return subprocess.run(
+            ["bash", "-ec", guard], env=env, capture_output=True, text=True, check=False
+        ).returncode
+
+    assert push("skipped") == 1

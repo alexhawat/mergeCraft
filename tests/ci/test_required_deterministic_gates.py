@@ -12,6 +12,7 @@ from tests.ci.workflow_support import as_list, job, load_workflow, workflow_on
 
 _PREREQUISITES = {
     "changes",
+    "verify-rules",
     "toolchain",
     "deployment-candidate",
     "eval-gate",
@@ -65,6 +66,7 @@ def test_image_only_required_guard_still_requires_verified_candidate(verifier: s
     guard = job(load_workflow("ci.yml"), "static")["steps"][0]["run"]
     results: dict[str, dict[str, object]] = {name: {"result": "skipped"} for name in _PREREQUISITES}
     results["changes"] = {"result": "success", "outputs": {"image_only": "true"}}
+    results["verify-rules"] = {"result": "success"}
     results["deployment-candidate"] = {"result": verifier}
     run = subprocess.run(
         ["bash", "-ec", guard],
