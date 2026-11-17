@@ -581,7 +581,7 @@ agent.attempt
 - **When does `http.client.request` fire?** Once per outbound `httpx`
   `send()` on a wrapper mergeCraft constructed (no global monkey
   patch). The wrapper installs on the two `httpx.AsyncClient` instances
-  `agents/opencode.py::_prompt_session` and `agents/opencode.py::_run`
+  `agents/opencode_serve.py::prompt_session_http` and `agents/opencode.py::_run`
   use for the custom OpenAI-compatible provider path, the only httpx
   sites in the repo.
 - **`http.url` is always redacted inline** (see the URL redaction

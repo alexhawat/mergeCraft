@@ -61,9 +61,15 @@ def test_dummy_api_key_is_accepted_only_by_test_server(provider_harness) -> None
         timeout=5.0,
     )
     assert response.status_code == 401
-    assert "sk-mergecraft-test" not in (_REPO_ROOT / "src/mergecraft/agents/opencode.py").read_text(
-        encoding="utf-8"
-    )
+    harness_sources = sorted((_REPO_ROOT / "src/mergecraft/agents").glob("opencode*.py"))
+    assert {path.name for path in harness_sources} >= {
+        "opencode.py",
+        "opencode_config.py",
+        "opencode_serve.py",
+        "opencode_tool_parts.py",
+    }
+    for path in harness_sources:
+        assert "sk-mergecraft-test" not in path.read_text(encoding="utf-8"), path.name
 
 
 def test_request_history_is_recorded_redacted_and_bounded(provider_harness) -> None:

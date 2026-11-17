@@ -157,6 +157,6 @@ def test_no_caller_signature_changed() -> None:
         check=True,
     )
     trunk = proc.stdout
-    current = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+    current = (_REPO_ROOT / "src/mergecraft/agents/opencode_config.py").read_text(encoding="utf-8")
     assert _gateway_caller_signatures(current) == _gateway_caller_signatures(trunk)
     assert set(_gateway_caller_signatures(current)) >= _GATEWAY_CALLERS
