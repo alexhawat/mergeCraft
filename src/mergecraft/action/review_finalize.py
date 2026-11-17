@@ -235,6 +235,10 @@ async def _finalize(
 
     _record_final_verdict(tool_state, settings, agent_result, outcome)
 
+    from mergecraft.review.budget_trend import emit_budget_trend_advisory
+
+    await emit_budget_trend_advisory(ctx)
+
     if outcome is not RunOutcome.passed:
         return MainResult(
             success=False,

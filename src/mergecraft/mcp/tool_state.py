@@ -529,6 +529,10 @@ class ToolState:
     # ``main.py``. Despite what the merge-evidence plan assumed, this is *not*
     # a tool-call log — the trajectory record (#43) keeps its own field below.
     usage_entries: list[Any] = field(default_factory=list)
+    # Precomputed blast-radius / risk grade for the evidence packet (#1489).
+    risk_classification: Any | None = None
+    risk_settings: Any | None = None
+    blast_rule_set: Any | None = None
     # Code-measured LLM review generation timing (#983 task 6).
     llm_review_timing: Any | None = None
     # Every MCP tool call this run made, in order (#43, D8). Appended by

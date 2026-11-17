@@ -40,6 +40,9 @@ on your provider, model, plan and the size of the change.
 - **A run cap.** The Action `timeout` input bounds run duration (default 1h)
   ([action reference](action-reference.md)).
 - **Token band.** `runBounds.tokenBudget` (default 2M) is an advisory target;
+  `review.budget.target` (`tokensP50`, `costUsdP50`, `wallSecondsP50`) adds a
+  separate rolling trend warning over the last 20 completed reviews — advisory
+  only, never blocking (#1494).
   `tokenBudgetTolerance` (default 10%) defines a hard ceiling for streaming
   reviewers. OpenCode (and other NDJSON stream drivers) charge each provider
   step against that ceiling while the review runs, stop the model before

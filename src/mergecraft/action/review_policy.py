@@ -368,6 +368,49 @@ async def _run_lite_tier(
     return LiteAgentReview(decision=decision, outcome=outcome)
 
 
+async def _same_head_skip_gate(ctx: RunContext) -> SkipAgentReview | None:
+    """Skip the agent when this exact head SHA already has a trusted completed review (#1490)."""
+    assert ctx.tool_state is not None
+    assert ctx.tool_context is not None
+    from mergecraft.config.trust_policy import bound_head_sha
+    from mergecraft.review_policy.same_head_review import (
+        SAME_HEAD_RECOGNIZER,
+        evaluate_same_head_skip,
+        trusted_completed_review_on_head,
+    )
+
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    pull = event.get("pull_request")
+    if not isinstance(pull, dict) or not isinstance(pull.get("number"), int):
+        return None
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+    head_sha = bound_head_sha(event, event_name=event_name)
+    if not head_sha:
+        return None
+    reason = await evaluate_same_head_skip(ctx, head_sha=head_sha, pull_number=int(pull["number"]))
+    if reason is None:
+        return None
+    from mergecraft.mcp.checkout import list_mergecraft_reviews
+
+    reviews = await list_mergecraft_reviews(ctx.tool_context, pull_number=int(pull["number"]))
+    prior = trusted_completed_review_on_head(reviews, head_sha)
+    relied: tuple[str, ...] = ()
+    if prior is not None:
+        url = str(prior.get("html_url") or "").strip()
+        if url:
+            relied = (url,)
+    decision = TriageDecision(
+        tier="skip",
+        recognizer=SAME_HEAD_RECOGNIZER,
+        reason=reason,
+        relied_on_checks=relied,
+    )
+    ctx.tool_state.triage = decision
+    logger.warning("» {} — {}", decision.record_line(), decision.reason)
+    gha_log.notice(f"mergeCraft: {reason}")
+    return SkipAgentReview(reason=reason)
+
+
 async def _ignore_paths_gate(ctx: RunContext) -> SkipAgentReview | None:
     """Resolve review path ignoring (#1109); skip the agent when every changed file is ignored.
 

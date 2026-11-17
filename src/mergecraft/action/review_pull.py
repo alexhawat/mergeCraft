@@ -11,6 +11,7 @@ from loguru import logger
 from mergecraft.requirements.ingest import ScopeDeclaration, parse_scope_paths
 from mergecraft.review_policy.fix_labels import resolve_fix_labels
 from mergecraft.review_policy.red_green import read_red_green_declaration
+from mergecraft.review_policy.risk_mode import resolve_risk_settings
 
 if TYPE_CHECKING:
     from mergecraft.action.review_state import RunContext
@@ -270,3 +271,68 @@ async def _record_scope_declaration(ctx: RunContext) -> None:
             len(declaration.globs),
             len(declaration.rejected),
         )
+
+
+async def _resolve_run_risk_config(ctx: RunContext) -> None:
+    """Record base-side ``risk`` mode and blast-radius overrides (#1489)."""
+    if ctx.settings is None or ctx.tool_state is None or ctx.tool_context is None:
+        return
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    repo = ctx.tool_context.repo
+    try:
+        risk, rule_set = await resolve_risk_settings(
+            ctx.tool_context.scm,
+            repo.owner,
+            repo.name,
+            event=event,
+            run_start_settings=ctx.settings,
+            operator_owned=ctx.settings_snapshot_operator_owned,
+        )
+    except Exception as err:
+        logger.warning("risk: could not resolve base config ({})", type(err).__name__)
+        return
+    ctx.tool_state.risk_settings = risk
+    ctx.tool_state.blast_rule_set = rule_set
+
+
+async def _resolve_run_risk_grade(ctx: RunContext) -> None:
+    """Classify blast radius / risk before the packet is assembled (#1489)."""
+    if ctx.settings is None or ctx.tool_state is None or ctx.tool_context is None:
+        return
+    from mergecraft.evidence.risk_resolve import resolve_run_risk_classification
+
+    if ctx.tool_context is None:
+        return
+    from mergecraft.evidence.run_packet import (
+        _read_diff_text,
+        fix_proof_signal_for_context,
+        scope_signal_for_state,
+    )
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    state = ctx.tool_state
+    if getattr(state, "risk_classification", None) is not None:
+        return
+    risk = getattr(state, "risk_settings", None)
+    rule_set = getattr(state, "blast_rule_set", None)
+    if risk is None:
+        await _resolve_run_risk_config(ctx)
+        risk = getattr(state, "risk_settings", None)
+        rule_set = getattr(state, "blast_rule_set", None)
+    if risk is None:
+        return
+    diff_text = _read_diff_text(primary_repo_state(state))
+    if not diff_text.strip():
+        return
+    try:
+        await resolve_run_risk_classification(
+            diff_text,
+            scope=scope_signal_for_state(state),
+            fix_proof=fix_proof_signal_for_context(ctx.tool_context),
+            risk=risk,
+            rule_set=rule_set,
+            settings=ctx.settings,
+            tool_state=state,
+        )
+    except Exception as err:
+        logger.warning("risk: classification failed ({})", type(err).__name__)

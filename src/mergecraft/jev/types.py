@@ -104,6 +104,7 @@ ALIGN_PACK_ID: Final[str] = "align/v1"
 LENS_PACK_ID: Final[str] = "lens/v1"
 CRITERION_PACK_ID: Final[str] = "criterion/v1"
 REPRO_PACK_ID: Final[str] = "repro/v1"
+RISK_PACK_ID: Final[str] = "risk/v1"
 CRITERION_ANSWER_NAME: Final[str] = "satisfied"
 REPRO_ANSWER_NAME: Final[str] = "reproduced"
 CERTAIN_CONFIDENCE_FLOOR: Final[float] = 0.9

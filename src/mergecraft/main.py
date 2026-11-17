@@ -130,6 +130,8 @@ from mergecraft.action.review_pull import (
     _record_scope_declaration,
     _resolve_run_fix_labels,
     _resolve_run_red_green_declaration,
+    _resolve_run_risk_config,
+    _resolve_run_risk_grade,
 )
 from mergecraft.action.review_pull import (
     _resolve_run_pull_request_metadata as _resolve_run_pull_request_metadata,
@@ -506,6 +508,7 @@ async def _run_review_after_analyze(
     # Base-side fix labels are recorded before any tier can skip the agent, the
     # setup-script ``inconclusive`` skip included, so the packet never falls back.
     await _resolve_run_fix_labels(ctx)
+    await _resolve_run_risk_config(ctx)
     await _resolve_run_pull_request_metadata(ctx)
     if sc_action == "skip_agent":
         assert isinstance(sc_payload, str)
@@ -523,12 +526,18 @@ async def _run_review_after_analyze(
     triage_out = await _triage_gate(ctx)
     if triage_out is not None:
         return _skip_without_review_diff(ctx, triage_out)
+    from mergecraft.action.review_policy import _same_head_skip_gate
+
+    same_head = await _same_head_skip_gate(ctx)
+    if same_head is not None:
+        return _skip_without_review_diff(ctx, same_head)
     ignore_skip = await _ignore_paths_gate(ctx)
     if ignore_skip is not None:
         return _skip_without_review_diff(ctx, ignore_skip)
 
     with gha_log.group("agent-dispatch"):
         await _prepare_agent_dispatch(ctx)
+        await _resolve_run_risk_grade(ctx)
         dispatch_started = time.perf_counter()
         result = await _dispatch_agent_with_deadline(ctx)
         roster = await _run_server_roster_reviewers_if_needed(ctx)

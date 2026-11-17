@@ -101,6 +101,8 @@ class RuleSet(TypedDict, total=False):
     source_without_tests: RuleOverride
     irreversible_infra: RuleOverride
     review_config: RuleOverride
+    # Glob patterns for feature-flag files (#1489). When omitted, shipped defaults apply.
+    flag_file_globs: list[str]
 
 
 class LaneReason(BaseModel):
@@ -237,6 +239,28 @@ _SECRET_ASSIGNMENT: Final[re.Pattern[str]] = re.compile(
     r"(?:password|secret_key|private_key)\s*=|aws_secret_access_key"
 )
 _DIFF_SIGNAL_KEYS = ("diff", "diff_text", "patch", "text")
+_DEFAULT_FLAG_FILE_GLOBS: Final[tuple[str, ...]] = (
+    "**/flags/**",
+    "**/feature_flags.*",
+    "**/features.yaml",
+    "**/features.yml",
+)
+_FLAG_ENABLE_LINE: Final[re.Pattern[str]] = re.compile(
+    r"^\+.*\b(?:enabled|default|rollout)\s*:\s*(?:true|on|100%)\b",
+    re.MULTILINE | re.IGNORECASE,
+)
+_FLAG_ADD_OFF_LINE: Final[re.Pattern[str]] = re.compile(
+    r"^\+.*\b(?:enabled|default)\s*:\s*(?:false|off|0%?)\b",
+    re.MULTILINE | re.IGNORECASE,
+)
+_AUTH_OUTSIDE_DIFF: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:authorize|authentication|is_admin|permission.?denied|forbidden)\b",
+    re.IGNORECASE,
+)
+_DATA_DELETE_OUTSIDE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:DELETE\s+FROM|TRUNCATE|drop\s+table)\b",
+    re.IGNORECASE,
+)
 
 SIGNAL_MISSING_CATEGORY = "signal_missing"
 """Category recorded when the classifier was not given the inputs it measures.
@@ -365,6 +389,10 @@ LANE_REASON_CATALOGUE: dict[str, Lane] = {
     "fix.no-receipt": "medium",
     "fix.receipt.invalid": "medium",
     "fix.receipt.mismatch": "medium",
+    "flag.added_off": "low",
+    "flag.enabled": "high",
+    "diff.authz_outside": "high",
+    "diff.data_deletion_outside": "high",
 }
 """The closed catalogue of lane-reason codes and their **default** lanes (#1056).
 
@@ -455,6 +483,10 @@ _REASON_SPECS: dict[str, _ReasonSpec] = {
     "fix.no-receipt": _ReasonSpec(None, "fix_proof"),
     "fix.receipt.invalid": _ReasonSpec(None, "fix_proof"),
     "fix.receipt.mismatch": _ReasonSpec(None, "fix_proof"),
+    "flag.added_off": _ReasonSpec(None, None),
+    "flag.enabled": _ReasonSpec(None, None),
+    "diff.authz_outside": _ReasonSpec(None, "auth_security_payment"),
+    "diff.data_deletion_outside": _ReasonSpec(None, "migrations"),
 }
 
 # Floors a repository override may raise but never lower: the review-config
@@ -466,7 +498,22 @@ _SMALL_SOURCE_MAX_LINES = 5
 _SCOPE_DRIFT_MAX_LISTED = 10
 
 
-def _detect(paths: list[str], diff_text: str) -> tuple[list[str], dict[str, str]]:
+def _flag_file_globs(rule_set: RuleSet | None) -> tuple[str, ...]:
+    if rule_set is None:
+        return _DEFAULT_FLAG_FILE_GLOBS
+    raw = rule_set.get("flag_file_globs")
+    if not isinstance(raw, list) or not raw:
+        return _DEFAULT_FLAG_FILE_GLOBS
+    return tuple(str(item) for item in raw if isinstance(item, str) and item.strip())
+
+
+def _path_matches_any_glob(path: str, globs: tuple[str, ...]) -> bool:
+    return any(path_full_matches_glob(glob, path) for glob in globs)
+
+
+def _detect(
+    paths: list[str], diff_text: str, *, rule_set: RuleSet | None = None
+) -> tuple[list[str], dict[str, str]]:
     """Return the legacy category labels and the detected codes with their messages."""
     categories: list[str] = []
     hits: dict[str, str] = {}
@@ -587,6 +634,34 @@ def _detect(paths: list[str], diff_text: str) -> tuple[list[str], dict[str, str]
             "diff.irreversible_command",
             "the diff text contains an irreversible command",
             "irreversible_infra",
+        )
+
+    flag_globs = _flag_file_globs(rule_set)
+    flag_paths = [path for path in paths if _path_matches_any_glob(path, flag_globs)]
+    if flag_paths and _FLAG_ENABLE_LINE.search(diff_text):
+        add(
+            "flag.enabled",
+            "a feature flag default or rollout changed to enabled/on",
+        )
+    elif flag_paths and _FLAG_ADD_OFF_LINE.search(diff_text):
+        add("flag.added_off", "a feature flag was added defaulting off")
+
+    auth_path_hit = any(
+        code in hits for code in ("paths.auth", "paths.security", "paths.permissions")
+    )
+    if not auth_path_hit and _AUTH_OUTSIDE_DIFF.search(diff_text):
+        add(
+            "diff.authz_outside",
+            "the diff changes authorization logic outside auth/security/permissions paths",
+            "auth_security_payment",
+        )
+
+    migration_path = any(_contains_path_part(path, ("migration", "migrations")) for path in lowered)
+    if not migration_path and _DATA_DELETE_OUTSIDE.search(diff_text):
+        add(
+            "diff.data_deletion_outside",
+            "the diff deletes or truncates persisted data outside migrations/",
+            "migrations",
         )
 
     return categories, hits
@@ -971,7 +1046,7 @@ def classify_blast_radius(
     paths = raw_paths if isinstance(raw_paths, list) else []
     raw_stats = change.get("diff_stats")
     diff_stats = raw_stats if isinstance(raw_stats, dict) else {}
-    categories, hits = _detect(paths, _diff_text(diff_stats))
+    categories, hits = _detect(paths, _diff_text(diff_stats), rule_set=rule_set)
     reasons = _lane_reasons(
         missing=missing, hits=hits, paths=paths, diff_stats=diff_stats, rule_set=rule_set
     )

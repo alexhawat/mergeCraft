@@ -18,6 +18,7 @@ from urllib.parse import quote, unquote
 
 from loguru import logger
 
+from mergecraft.classify.risk import format_risk_line
 from mergecraft.findings.lifecycle import LifecycleRecord, LifecycleState, validate_lifecycle_state
 from mergecraft.findings.lifecycle_transitions import (
     assert_lifecycle_transition,
@@ -1418,6 +1419,9 @@ def render_deterministic_review_block(
         "### mergeCraft run record",
         "",
     ]
+    risk_line = format_risk_line(getattr(packet, "blast_radius", None))
+    if risk_line is not None:
+        header_lines.append(f"- {risk_line}")
     if run_outcome is not None:
         outcome = reconcile_outcome(
             value=run_outcome,
