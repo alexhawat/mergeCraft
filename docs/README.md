@@ -29,6 +29,7 @@ Map of consumer and contributor pages tracked in [`docs/manifest.yaml`](manifest
 | [diagrams README](assets/diagrams/README.md) | satellite | Architecture diagram SVG inventory and Terrastruct diagram regeneration commands. |
 | [authentication](authentication.md) | consumer | Provider auth, custom OpenAI-compatible gateways, and model fallback chains. |
 | [blast-radius](blast-radius.md) | contributor | Blast-radius lane semantics in the merge evidence packet. |
+| [ci-tiers](ci-tiers.md) | contributor | CI tier inventory — PR, merge-queue, and release gates for this repository. |
 | [cli-examples](cli-examples.md) | consumer | Runnable mergecraft review CLI example trees under examples/cli/. |
 | [cli](cli.md) | consumer | Full mergecraft CLI command reference derived from the live Typer app. |
 | [compatibility-matrix](compatibility-matrix.md) | contributor | Harness and provider compatibility notes for maintainers. |
