@@ -32,3 +32,23 @@ def test_no_target_means_no_warnings() -> None:
     settings = ReviewBudgetSettings()
     stats = window_stats([RunUsageSample(tokens=999, cost_usd=9.0, wall_seconds=60.0)])
     assert target_warnings(settings, stats, window_n=1) == []
+
+
+def test_samples_from_packets_reads_usage_and_wall_time() -> None:
+    from mergecraft.review.budget_trend import samples_from_packets
+
+    rows = samples_from_packets(
+        [
+            {
+                "run_metrics": {
+                    "phase_elapsed_s": {"review": 10.0, "setup": 2.5},
+                    "recorded_cost_usd": 0.12,
+                },
+                "usage_entries": [{"input_tokens": 100, "output_tokens": 50}],
+            }
+        ]
+    )
+    assert len(rows) == 1
+    assert rows[0].tokens == 150
+    assert rows[0].cost_usd == 0.12
+    assert rows[0].wall_seconds == 12.5
