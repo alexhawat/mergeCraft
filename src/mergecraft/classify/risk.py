@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Final, cast
 
 from mergecraft.classify.blast_radius import (
     _AUTO_MERGE_LANE,
@@ -29,7 +29,9 @@ def combine_risk_lanes(
 ) -> BlastRadiusClassification:
     """Merge Jev overlay onto the deterministic floor; Jev may only raise the lane."""
     reasons = list(deterministic.reasons)
-    det_lane = deterministic.lane
+    det_lane: Lane = cast(  # reason: pydantic exposes Lane as str to pyright
+        "Lane", deterministic.lane
+    )
     if jev_record:
         reasons.extend(jev_record)
     raised: list[LaneReason] = []
@@ -41,7 +43,14 @@ def combine_risk_lanes(
             if _LANE_RANK[reason.lane] > _LANE_RANK[det_lane]:
                 raised.append(reason)
                 reasons.append(reason)
-    lane = lane_max(det_lane, *(r.lane for r in raised)) if raised else det_lane
+    if raised:
+        merged: list[Lane] = [
+            det_lane,
+            *[cast("Lane", r.lane) for r in raised],  # reason: LaneReason.lane is str to pyright
+        ]
+        lane = lane_max(*merged)
+    else:
+        lane = det_lane
     categories = list(
         dict.fromkeys([*deterministic.categories, *(r.code.split(".")[0] for r in raised)])
     )
