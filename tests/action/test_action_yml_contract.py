@@ -59,6 +59,7 @@ class TestDeclaredDefaultsParse:
         [
             ("analyzers", "INPUT_ANALYZERS"),
             ("allow_pr_target_comments", "INPUT_ALLOW_PR_TARGET_COMMENTS"),
+            ("discuss", "INPUT_DISCUSS"),
             ("tracing", "INPUT_TRACING"),
             ("tracing-to", "INPUT_TRACING_TO"),
             ("logfire-token", "INPUT_LOGFIRE_TOKEN"),
@@ -69,6 +70,7 @@ class TestDeclaredDefaultsParse:
         ids=[
             "analyzers",
             "allow_pr_target_comments",
+            "discuss",
             "tracing",
             "tracing-to",
             "logfire-token",
@@ -104,6 +106,10 @@ class TestDeclaredDefaultsParse:
             from mergecraft.utils.payload import _allow_pr_target_comments_optin
 
             assert _allow_pr_target_comments_optin() is False
+        elif input_name == "discuss":
+            from mergecraft.config.env.action_inputs import DiscussActionEnv
+
+            assert DiscussActionEnv().discuss == "disabled"
         else:
             from mergecraft.utils.payload import resolve_non_prompt_inputs
 
