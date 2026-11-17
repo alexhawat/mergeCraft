@@ -20,7 +20,7 @@ from mergecraft.mcp.checkout import (
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import init_tool_state, primary_repo_state
 from mergecraft.modes import compute_modes
-from mergecraft.security.review_integrity import TreeBaseline, hash_tree
+from mergecraft.security.review_integrity import TreeBaseline
 from mergecraft.utils.github import GitHubClient
 
 
@@ -741,7 +741,7 @@ async def test_impact_defaults_do_not_repeat_base_git_probe_on_loop(
 def _baseline_on_base_branch(ctx: ToolContext, repo: Path) -> TreeBaseline:
     """Pin the review baseline on the base branch, as the Action's merge-ref checkout does."""
     _git(repo, "checkout", "-q", "base")
-    baseline = TreeBaseline(root=repo.resolve(), digest=hash_tree(repo))
+    baseline = TreeBaseline.capture(repo.resolve())
     ctx.tool_state.review_tree_baseline = baseline
     return baseline
 
@@ -757,8 +757,9 @@ async def test_checkout_pr_repins_the_review_tree_baseline(tmp_path: Path) -> No
 
     baseline.verify()
     (repo / "new.py").write_text("tampered = 1\n", encoding="utf-8")
-    with pytest.raises(RuntimeError, match="checkout integrity failure"):
+    with pytest.raises(RuntimeError, match="checkout integrity failure") as exc:
         baseline.verify()
+    assert "modified: new.py" in str(exc.value)
 
 
 @pytest.mark.asyncio
@@ -772,5 +773,8 @@ async def test_checkout_pr_does_not_absorb_a_change_made_before_it(tmp_path: Pat
 
     await _checkout(ctx)
 
-    with pytest.raises(RuntimeError, match="before checkout_pr"):
+    with pytest.raises(RuntimeError, match="before checkout_pr") as exc:
         baseline.verify()
+    text = str(exc.value)
+    assert "planted.py" in text
+    assert "new.py" not in text

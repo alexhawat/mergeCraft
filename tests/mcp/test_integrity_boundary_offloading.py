@@ -79,19 +79,19 @@ async def test_integrity_hashing_does_not_block_concurrent_rpc(
         repo, review_integrity.hash_tree(repo)
     )
     entered, finished = threading.Event(), threading.Event()
-    original_hash = review_integrity.hash_tree
-    calls = 0
+    original_snapshot = review_integrity.snapshot_tree
+    snap_calls = 0
 
-    def slow_hash(root: Path) -> str:
-        nonlocal calls
-        calls += 1
-        if calls == hash_index:
+    def slow_snapshot(root: Path) -> review_integrity.TreeSnapshot:
+        nonlocal snap_calls
+        snap_calls += 1
+        if snap_calls == hash_index:
             entered.set()
             time.sleep(0.2)
             finished.set()
-        return original_hash(root)
+        return original_snapshot(root)
 
-    monkeypatch.setattr(review_integrity, "hash_tree", slow_hash)
+    monkeypatch.setattr(review_integrity, "snapshot_tree", slow_snapshot)
     pending = asyncio.create_task(_call(spec, ctx, arguments))
     try:
         await _list_tools_during_work(entered, finished)
@@ -273,14 +273,14 @@ async def test_publication_during_precheckout_hash_must_refuse(
         repo, review_integrity.hash_tree(repo)
     )
     entered, release = threading.Event(), threading.Event()
-    original = review_integrity.hash_tree
+    original_snapshot = review_integrity.snapshot_tree
 
-    def delayed_hash(root: Path) -> str:
+    def delayed_snapshot(root: Path) -> review_integrity.TreeSnapshot:
         entered.set()
         assert release.wait(5)
-        return original(root)
+        return original_snapshot(root)
 
-    monkeypatch.setattr(review_integrity, "hash_tree", delayed_hash)
+    monkeypatch.setattr(review_integrity, "snapshot_tree", delayed_snapshot)
     pending = asyncio.create_task(checkout_pr_tool(ctx).execute({"pull_number": 1}))
     receipt = ReviewRecord(id=1, node_id="R1", reviewed_sha=before.strip(), verdict="approve")
     try:
