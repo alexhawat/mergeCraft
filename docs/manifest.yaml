@@ -361,6 +361,12 @@ pages:
     generator: null
     purpose: What a review spends, which settings change it, and where provider prices are recorded.
 
+  - path: docs/ci-tiers.md
+    audience: contributor
+    template: contributor
+    generator: null
+    purpose: CI tier inventory — PR, merge-queue, and release gates for this repository.
+
   - path: docs/architecture.md
     audience: contributor
     template: contributor
