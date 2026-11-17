@@ -13,8 +13,6 @@ on:
     # Nightly mutation advisory (non-blocking); runs on schedule only.
     - cron: "17 6 * * *"
   workflow_dispatch:
-  merge_group:
-    types: [checks_requested]
 
 permissions:
   contents: read
@@ -35,24 +33,6 @@ jobs:
     uses: ./.github/workflows/classify-pr.yml
     with:
       classify-code: true
-
-  verify-rules:
-    name: Verify (rules py3.14)
-    needs: changes
-    if: needs.changes.outputs.image_only != 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: ./.github/actions/bootstrap
-        with:
-          python-version: "3.14"
-      - name: Tier 1 rules (lint, typecheck, lockfile)
-        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
-        run: make lint && make typecheck && make lockcheck
 
   deployment-candidate:
     name: Verify changed deployment candidates
@@ -83,7 +63,7 @@ jobs:
         run: make action-candidate-check
 
   toolchain:
-    needs: [changes, verify-rules]
+    needs: changes
     if: needs.changes.outputs.image_only != 'true'
     name: Verify (toolchain py${{ matrix.python }})
     runs-on: ubuntu-latest
@@ -108,13 +88,13 @@ jobs:
         run: make lockcheck
 
   test:
-    needs: [changes, verify-rules]
     # py3.14 is measured by `Verify (coverage gate py3.14)`, which runs a
     # superset of this selection (`-m "not integration"` vs this job's
     # `not integration and not coverage`). Running both ran the unit suite twice
     # on 3.14. The two 3.14 shard check names stay so the required contexts keep
     # reporting; those legs do no work and the coverage gate is the proof.
     name: Verify (tests py${{ matrix.python }} ${{ matrix.group }}/2)
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -146,28 +126,12 @@ jobs:
           # Tracing extra only on the test job: exporter unit tests need logfire/otel
           # installed, but static/toolchain jobs must not pay the sync cost (D14 / TH8).
           MERGECRAFT_UV_EXTRAS: tracing
-      - name: Resolve PR test selection
-        if: matrix.python != '3.14' && github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
-        id: pr_tests
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          git fetch --no-tags origin "${BASE_REF:-main}"
-          nodes=$(python3 scripts/ci_select_tests.py --base "${BASE_REF:-main}" || echo tests)
-          echo "nodes=${nodes}" >> "$GITHUB_OUTPUT"
       - name: Unit tests (shard ${{ matrix.group }} of 2)
         if: matrix.python != '3.14' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
         env:
           MERGECRAFT_TEST_SPLITS: "2"
           MERGECRAFT_TEST_GROUP: ${{ matrix.group }}
-          UV_PROJECT_ENVIRONMENT: .venv-dev
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ] && [ -n "${{ steps.pr_tests.outputs.nodes }}" ]; then
-            uv run pytest ${{ steps.pr_tests.outputs.nodes }} -q --tb=short \
-              --splits "${MERGECRAFT_TEST_SPLITS}" --group "${MERGECRAFT_TEST_GROUP}"
-          else
-            make test
-          fi
+        run: make test
 
   coverage-gate:
     name: Verify (coverage gate py3.14)
@@ -260,9 +224,10 @@ jobs:
           python3 scripts/check_coverage_delta.py coverage.json --base "${base}"
 
   deterministic-integration:
-    needs: [changes, verify-rules]
-    # Tier 3: merge queue and main post-push, not ordinary PR pushes (#1493).
-    if: needs.changes.outputs.image_only != 'true' && github.event_name != 'pull_request'
+    needs: changes
+    # The one keyless integration run per PR: integration.yml no longer repeats
+    # `make test-integration`. Docs-only PRs skip it.
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     name: Required integration (py${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 55
@@ -344,8 +309,8 @@ jobs:
   # its own build under its own GHA cache scope. Docs-only PRs build nothing.
   slim-image:
     name: Build slim image (shared)
-    needs: [changes, verify-rules]
-    if: needs.changes.outputs.image_only != 'true' && github.event_name != 'pull_request'
+    needs: changes
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -379,8 +344,8 @@ jobs:
           if-no-files-found: error
 
   action-e2e:
-    needs: [changes, verify-rules, slim-image]
-    if: needs.changes.outputs.image_only != 'true' && github.event_name != 'pull_request'
+    needs: [changes, slim-image]
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     uses: ./.github/workflows/e2e.yml
     with:
       required-security: true
@@ -390,23 +355,23 @@ jobs:
   # CRITICAL finding that has no unexpired `.trivyignore` waiver fails the
   # required Verify (static) check. Same skip rule as the image builds above.
   image-scan-slim:
-    needs: [changes, verify-rules, slim-image]
-    if: needs.changes.outputs.image_only != 'true' && github.event_name != 'pull_request'
+    needs: [changes, slim-image]
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     uses: ./.github/workflows/image-security.yml
     with:
       image: slim
       slim-artifact: mergecraft-slim-image
 
   image-scan-analyzers:
-    needs: [changes, verify-rules]
-    if: needs.changes.outputs.image_only != 'true' && github.event_name != 'pull_request'
+    needs: changes
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     uses: ./.github/workflows/image-security.yml
     with:
       image: analyzers
 
   static:
     name: Verify (static + build py${{ matrix.python }})
-    needs: [changes, verify-rules, toolchain, deployment-candidate, eval-gate, privilege-root, privileged-proofs, deterministic-integration, action-e2e, image-scan-slim, image-scan-analyzers]
+    needs: [changes, toolchain, deployment-candidate, eval-gate, privilege-root, privileged-proofs, deterministic-integration, action-e2e, image-scan-slim, image-scan-analyzers]
     # Keep the named matrix checks visible to branch protection on every PR.
     if: always()
     runs-on: ubuntu-latest
@@ -427,22 +392,9 @@ jobs:
           outputs = jobs.get("changes", {}).get("outputs", {})
           image_only = outputs.get("image_only") == "true"
           docs_only = os.environ.get("EVENT_NAME") == "pull_request" and outputs.get("code") != "true"
-          tier3_skipped = os.environ.get("EVENT_NAME") == "pull_request"
-          tier3_jobs = {
-              "eval-gate",
-              "privilege-root",
-              "privileged-proofs",
-              "deterministic-integration",
-              "action-e2e",
-              "image-scan-slim",
-              "image-scan-analyzers",
-              "slim-image",
-          }
-          image_skipped = {"toolchain", *tier3_jobs}
-          docs_skipped = set(tier3_jobs)
+          image_skipped = {"toolchain", "eval-gate", "privilege-root", "privileged-proofs", "deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers"}
+          docs_skipped = {"eval-gate", "privilege-root", "deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers"}
           def may_skip(name):
-              if tier3_skipped and name in tier3_jobs:
-                  return True
               return (image_only and name in image_skipped) or (docs_only and name in docs_skipped)
           failed = {
               name: job.get("result") for name, job in jobs.items()
