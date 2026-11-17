@@ -46,7 +46,41 @@ on a fork PR is refused rather than downgraded. `checkout_pr` then refuses any P
 number other than the bound one, and refuses a fork head on a run trusted for
 execution or authority.
 
+## Discuss an inline review finding
 
+Copy [the Discuss workflow](../examples/workflows/mergecraft-discuss.yml) to
+`.github/workflows/mergecraft-discuss.yml`. Replace
+`REPLACE_WITH_DISCUSS_CAPABLE_SHA` with a full Action commit SHA whose
+metadata declares `discuss` and whose pinned runtime image supports it.
+The example uses the same reviewer App that posted the
+original finding. A dedicated review account's PAT with pull requests write
+permission also works when that account posted the finding. The shared
+`github-actions[bot]` identity cannot establish who posted a finding.
+
+Set `discuss: enabled` only in the separate workflow triggered by
+`pull_request_review_comment` with `types: [created]`. Keep the review workflow
+on its existing events so discussion runs have their own job name and
+concurrency group. The Discuss job needs neither a checkout nor a review prompt.
+
+GitHub runs this event from the PR's merge ref. Enable the workflow where
+same-repository branch writers are trusted with the workflow's credentials.
+
+On an open, same-repository PR, a human with repository write access and a
+trusted author association can reply to a mergeCraft inline thread with
+`@mergecraft` in the comment. Discuss reads the finding, diff hunk, and a bounded
+portion of the thread up to that comment, then posts one reply in the same
+thread. Reruns recognize an existing reply from the reviewer identity. Discuss
+does not submit reviews, resolve threads, change checks, or update learnings.
+
+The example uses `OPENCODE_GO_API_KEY` and the OpenCode Go subscription
+endpoint. You can instead set an `openai/...` model with `OPENAI_API_KEY`, or
+choose a provider/model and supply both `MERGECRAFT_CUSTOM_PROVIDER_BASE_URL`
+and `MERGECRAFT_CUSTOM_PROVIDER_API_KEY` in the workflow for an HTTPS
+OpenAI-compatible Chat Completions endpoint. The provider receives the fenced
+thread context in one tool-free request. Review CLI subscription bundles and
+provider settings from the PR checkout are unused.
+
+## Other workflow patterns
 
 ### Example 2 — hardened, review as a required check
 

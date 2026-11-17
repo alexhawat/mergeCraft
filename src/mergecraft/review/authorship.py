@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from collections.abc import Coroutine, Mapping
 
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.scm.protocol import ScmProvider
 
 __all__ = [
     "GITHUB_ACTIONS_BOT_LOGIN",
@@ -50,6 +51,7 @@ __all__ = [
     "expected_publisher_logins",
     "has_mergecraft_marker",
     "is_mergecraft_authored",
+    "lookup_publisher_logins",
     "resolve_publisher_logins",
 ]
 
@@ -110,16 +112,20 @@ def expected_publisher_logins(ctx: ToolContext) -> frozenset[str]:
 
 
 async def resolve_publisher_logins(ctx: ToolContext) -> frozenset[str]:
-    """Resolve and cache the expected-publisher set, dropping every failed lookup.
+    """Cache the expected publisher logins on the review tool context."""
+    if ctx.publisher_logins is None:
+        ctx.publisher_logins = await lookup_publisher_logins(ctx.scm, ctx.github_installation_token)
+    return ctx.publisher_logins
 
-    Only an App or PAT publisher proves mergeCraft authorship. The shared
-    Actions job bot is withheld — never added from the declared login or from
-    the publication token — so a run that publishes as it yields an empty set,
-    warned once with the reason (P-8).
+
+async def lookup_publisher_logins(
+    scm: ScmProvider, publication_token: str | None
+) -> frozenset[str]:
+    """Resolve attributable publishers without using a review tool context.
+
+    An App or PAT may prove mergeCraft authorship. The shared Actions job bot
+    is withheld even when the workflow calls it the reviewer.
     """
-    if ctx.publisher_logins is not None:
-        return ctx.publisher_logins
-
     logins: set[str] = set()
     withheld_shared_bot = False
 
@@ -145,7 +151,7 @@ async def resolve_publisher_logins(ctx: ToolContext) -> frozenset[str]:
     app_slug = (
         ""
         if declared and declared.casefold() != GITHUB_ACTIONS_BOT_LOGIN
-        else await _app_bot_slug(ctx)
+        else await _app_bot_slug(scm)
     )
     if app_slug:
         logins.add(f"{app_slug}[bot]")
@@ -159,9 +165,9 @@ async def resolve_publisher_logins(ctx: ToolContext) -> frozenset[str]:
     # while the shared job bot answers ``github-actions[bot]`` — or refuses the
     # endpoint — and proves nothing.
     if not declared and not app_slug and not _app_configured():
-        token = str(ctx.github_installation_token or "").strip()
+        token = str(publication_token or "").strip()
         if token:
-            viewer = await _viewer_login(ctx)
+            viewer = await _viewer_login(scm)
             if viewer and viewer.casefold() != GITHUB_ACTIONS_BOT_LOGIN:
                 logins.add(viewer)
             else:
@@ -197,8 +203,7 @@ async def resolve_publisher_logins(ctx: ToolContext) -> frozenset[str]:
             )
 
     logger.debug("expected mergeCraft publisher logins for this run: {}", sorted(logins))
-    ctx.publisher_logins = frozenset(logins)
-    return ctx.publisher_logins
+    return frozenset(logins)
 
 
 def _app_configured() -> bool:
@@ -209,10 +214,10 @@ def _app_configured() -> bool:
     )
 
 
-async def _app_bot_slug(ctx: ToolContext) -> str:
+async def _app_bot_slug(scm: ScmProvider) -> str:
     """Return the reviewer App's bot slug from ``GET /app``, or ``""``."""
     try:
-        payload = await _scm_get(ctx, "/app")
+        payload = await _scm_get(scm, "/app")
     except Exception as err:  # advisory; a failed lookup must not widen the set
         logger.debug("reviewer App lookup failed; dropping its bot login: {}", err)
         return ""
@@ -223,10 +228,10 @@ async def _app_bot_slug(ctx: ToolContext) -> str:
     return ""
 
 
-async def _viewer_login(ctx: ToolContext) -> str:
+async def _viewer_login(scm: ScmProvider) -> str:
     """Return the login the publication token acts as (``GET /user``), or ``""``."""
     try:
-        payload = await _scm_get(ctx, "/user")
+        payload = await _scm_get(scm, "/user")
     except Exception as err:  # advisory; drop it, never widen
         logger.debug("PAT viewer lookup failed; dropping its login: {}", err)
         return ""
@@ -235,8 +240,8 @@ async def _viewer_login(ctx: ToolContext) -> str:
     return ""
 
 
-async def _scm_get(ctx: ToolContext, path: str) -> Any:
-    result = ctx.scm.get(path)
+async def _scm_get(scm: ScmProvider, path: str) -> Any:
+    result = scm.get(path)
     return await result if inspect.isawaitable(result) else result
 
 

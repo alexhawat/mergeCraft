@@ -131,3 +131,9 @@ class ProviderGatewayEnv(EnvSettings):
     provider_extra_options: _Stripped = Field(
         default=None, validation_alias="MERGECRAFT_PROVIDER_EXTRA_OPTIONS"
     )
+
+    # Workflow-only keys for the tool-free Discuss transport.
+    opencode_go_api_key: SecretStr | None = Field(
+        default=None, validation_alias="OPENCODE_GO_API_KEY"
+    )
+    openai_api_key: SecretStr | None = Field(default=None, validation_alias="OPENAI_API_KEY")

@@ -134,8 +134,9 @@ def _action_input_names() -> tuple[InScope, ...]:
         "INPUT_TRACING_CONTENT",
         "INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT",
     )
-    return tuple(
-        InScope(name, "PS4" if name in tracing else "PS5", "ActionInputEnv") for name in names
+    return (
+        *(InScope(name, "PS4" if name in tracing else "PS5", "ActionInputEnv") for name in names),
+        InScope("INPUT_DISCUSS", "Discuss", "DiscussActionEnv"),
     )
 
 

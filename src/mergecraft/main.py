@@ -18,6 +18,7 @@ from mergecraft.ci.sarif_ingest import (
     ingest_red_green_after_review,
 )
 from mergecraft.config.env import ActionInputEnv
+from mergecraft.config.env.action_inputs import DiscussActionEnv
 from mergecraft.errors import AgentTimeoutError, ConfigurationError, ModelFallbackPolicyError
 from mergecraft.evidence.run_packet import emit_run_packet, resolve_prepared_run_packet
 from mergecraft.findings.fix_brief import fix_brief_path
@@ -689,6 +690,11 @@ async def main() -> MainResult:
     """
     install_loguru_redaction_filter()
     normalize_env()
+    discuss = DiscussActionEnv().discuss
+    if discuss is not None and discuss != "disabled":
+        from mergecraft.action.discuss import run_discuss
+
+        return await run_discuss(discuss)
     if os.environ.get("GITHUB_EVENT_NAME") == "merge_group":
         return await _run_merge_group()
     snapshot: ReviewSnapshot = canonical_review_snapshot(

@@ -110,6 +110,8 @@ _GITHUB = """\
 # fix hand-off workflow; configure it in GitHub, not in this .env file.
 # GITHUB_WORKFLOW_SHA is supplied by GitHub Actions for approval provenance.
 # Do not configure this platform value in a local .env file.
+# INPUT_DISCUSS comes from the optional Discuss workflow Action input.
+# Do not configure this Action input in a local .env file.
 """
 
 

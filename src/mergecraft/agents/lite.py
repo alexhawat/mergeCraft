@@ -2,8 +2,8 @@
 
 The triage ``lite`` tier (``review.fastPath.lite``) covers the two cases a ``skip``
 deliberately leaves out — a recognizer that matched but is not opted in, and a pin bump
-whose verifying checks have not passed from a trusted App. This is the only direct-LLM
-path in mergeCraft: exactly one non-streaming ``POST {url}/chat/completions`` to an
+whose verifying checks have not passed from a trusted App. The driver sends
+exactly one non-streaming ``POST {url}/chat/completions`` to an
 operator-registered OpenAI-compatible provider, with a fixed, versioned system prompt
 and the whole diff in the user message. There is no checkout, no MCP server, no CLI
 harness, no tools, no specialists, no verifier and no learnings write.
@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal, TypedDict
 import httpx
 from loguru import logger
 
+from mergecraft.agents.chat_completion import chat_completion_content, request_chat_completion
 from mergecraft.config.runtime_provider_registry import (
     lookup_registry_entry,
     resolve_registry_gateway_endpoint,
@@ -193,19 +194,6 @@ def lite_model_slug(settings: RepoSettings) -> str | None:
     return f"{label}/{model}" if label and model else None
 
 
-def _message_content(body: Any) -> str | None:
-    if not isinstance(body, dict):
-        return None
-    choices = body.get("choices")
-    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-        return None
-    message = choices[0].get("message")
-    if not isinstance(message, dict):
-        return None
-    content = message.get("content")
-    return content if isinstance(content, str) else None
-
-
 def _reported_usage(body: Any) -> int | None:
     usage = body.get("usage") if isinstance(body, dict) else None
     total = usage.get("total_tokens") if isinstance(usage, dict) else None
@@ -316,12 +304,14 @@ async def run_lite_review(
     }
     slug = f"{label}/{model}"
     factory = http_client_factory or _default_client_factory
-    url = f"{base_url.rstrip('/')}/chat/completions"
     try:
-        async with factory(timeout=_REQUEST_TIMEOUT_S) as client:
-            response = await client.post(
-                url, json=payload, headers={"Authorization": f"Bearer {api_key}"}
-            )
+        response = await request_chat_completion(
+            base_url=base_url,
+            api_key=api_key,
+            payload=payload,
+            http_timeout_s=_REQUEST_TIMEOUT_S,
+            client_factory=factory,
+        )
     except httpx.HTTPError as err:
         return _failed(f"the lite provider request failed ({type(err).__name__})", model_slug=slug)
     if response.status_code >= 400:
@@ -330,7 +320,7 @@ async def run_lite_review(
         body = response.json()
     except ValueError:
         return _failed("the lite provider's response body was not JSON", model_slug=slug)
-    content = _message_content(body)
+    content = chat_completion_content(body)
     reported = _reported_usage(body)
     if reported is not None:
         tokens_used, usage_estimated = reported, False
