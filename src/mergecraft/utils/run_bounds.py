@@ -105,7 +105,76 @@ class BudgetTracker:
     last_exhausted: BudgetExhausted | None = None
     over_target: bool = False
     phase_totals: Counter[str] = field(default_factory=Counter)
+    stream_tokens_charged: int = 0
+    stream_cost_charged: float = 0.0
     _over_target_warned: bool = field(default=False, repr=False)
+
+    def record_tokens_stream_increment(self, count: int, *, phase: str | None = None) -> None:
+        """Enforce the advisory ceiling on one streaming provider increment.
+
+        Streaming reviewers report usage per step. This path fails closed
+        before the increment is accepted when a single step or the remaining
+        ceiling would be exceeded. Final aggregate accounting stays advisory via
+        ``record_tokens``.
+        """
+        if count <= 0:
+            return
+        phase_key = phase or "unattributed"
+        target = self.bounds.token_budget
+        ceiling = self.bounds.token_ceiling
+        tolerance = self.bounds.token_budget_tolerance
+
+        if tolerance <= 0.0:
+            remaining = ceiling - self.tokens_used
+            if count > ceiling:
+                msg = (
+                    f"token budget exhausted by single increment ({count} > ceiling {ceiling}; "
+                    f"target {target}, tolerance {tolerance})"
+                )
+                self._raise(BudgetExhausted("token", msg))
+            if count > remaining:
+                msg = (
+                    "token budget exhausted by single increment "
+                    f"({count} > remaining ceiling {remaining}; used {self.tokens_used}, "
+                    f"target {target}, ceiling {ceiling}, tolerance {tolerance})"
+                )
+                self._raise(BudgetExhausted("token", msg))
+            self.tokens_used += count
+            self.phase_totals[phase_key] += count
+            return
+
+        remaining = ceiling - self.tokens_used
+        if count > ceiling:
+            msg = (
+                f"token budget exhausted by single increment ({count} > ceiling {ceiling}; "
+                f"target {target}, tolerance {tolerance})"
+            )
+            self._raise(BudgetExhausted("token", msg))
+
+        if count > remaining:
+            msg = (
+                "token budget exhausted by single increment "
+                f"({count} > remaining ceiling {remaining}; used {self.tokens_used}, "
+                f"target {target}, ceiling {ceiling}, tolerance {tolerance})"
+            )
+            self._raise(BudgetExhausted("token", msg))
+
+        prior_used = self.tokens_used
+        self.tokens_used += count
+        self.phase_totals[phase_key] += count
+
+        if prior_used <= target < self.tokens_used:
+            self.over_target = True
+            if not self._over_target_warned:
+                self._over_target_warned = True
+                logger.warning(
+                    "token budget over target ({} > target {}); continuing to ceiling {}",
+                    self.tokens_used,
+                    target,
+                    ceiling,
+                )
+        elif self.tokens_used > target:
+            self.over_target = True
 
     def record_tokens(self, count: int, *, phase: str | None = None) -> None:
         """Record all reported tokens and warn once when the target is exceeded.
@@ -184,9 +253,19 @@ def record_agent_usage(
     # ``cache_write_tokens`` are observability fields only — adding them again
     # here double-counts OpenAI-style cached input against the run budget.
     token_total = usage.input_tokens + usage.output_tokens
-    tracker.record_tokens(token_total, phase=phase)
+    if tracker.stream_tokens_charged > 0:
+        token_delta = max(0, token_total - tracker.stream_tokens_charged)
+    else:
+        token_delta = token_total
+    if token_delta > 0:
+        tracker.record_tokens(token_delta, phase=phase)
     if usage.cost_usd is not None:
-        tracker.record_cost(usage.cost_usd)
+        if tracker.stream_cost_charged > 0:
+            cost_delta = max(0, usage.cost_usd - tracker.stream_cost_charged)
+        else:
+            cost_delta = usage.cost_usd
+        if cost_delta > 0:
+            tracker.record_cost(cost_delta)
 
 
 def round_budget_multiplier(

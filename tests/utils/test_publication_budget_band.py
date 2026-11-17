@@ -99,6 +99,20 @@ def test_per_phase_totals_sum_to_tokens_used() -> None:
     assert sum(totals.values()) == tracker.tokens_used == 22
 
 
+def test_single_increment_over_ceiling_has_distinct_message_from_steady_drift() -> None:
+    """A pathological one-shot increment is rejected before it is accepted."""
+    bounds = _base_bounds(token_budget=100, token_budget_tolerance=0.10)
+    tracker = BudgetTracker(bounds)
+    with pytest.raises(BudgetExhausted) as exc_info:
+        tracker.record_tokens_stream_increment(111, phase="reviewer_dispatch")
+    assert "single increment" in str(exc_info.value).lower()
+    tracker = BudgetTracker(bounds)
+    tracker.record_tokens_stream_increment(95, phase="reviewer_dispatch")
+    with pytest.raises(BudgetExhausted):
+        tracker.record_tokens_stream_increment(20, phase="reviewer_dispatch")
+    assert tracker.tokens_used == 95
+
+
 def test_record_cost_path_is_untouched_by_token_band_changes() -> None:
     """D11 — cost accounting must remain independent of the token band."""
     bounds = _base_bounds(cost_budget_usd=0.05)

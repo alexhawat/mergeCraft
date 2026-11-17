@@ -89,4 +89,5 @@ def build_reviewer_context(
         api_token=tool_context.api_token,
         resolved_model=tool_context.resolved_model,
         idle_timeout_s=idle_timeout_s,
+        budget_tracker=tool_context.budget_tracker,
     )
