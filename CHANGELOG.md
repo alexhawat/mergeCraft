@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passing publication and then failing the run with a multi-million-token
   "single increment" accounting lump, as on downstream installs pinned before
   0.1.0a6 (#1477 follow-up).
+- A read-only review that fails the checkout integrity check now names which
+  repo-relative paths changed (`added` / `removed` / `modified`, capped per group
+  with a `+N more` suffix) in the error and run record, instead of only reporting
+  that the tree changed.
 
 - The full file that `git show <rev>:<path>` saves, and any other oversized `git`
   output, is now readable by an OpenCode reviewer in every run. The files were

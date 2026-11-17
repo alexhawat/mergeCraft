@@ -21,6 +21,11 @@ accounting. OpenCode retains its attempt-level integrity checks. The
 builders keep their existing homes and credential refresh rules;
 a resume turn uses the same home and session as its initial turn.
 
+When the checkout integrity gate fails because the tree changed, the error and
+the run's failure record list repo-relative paths grouped as
+`added` / `removed` / `modified` (up to 20 per group, then `+N more`). No file
+contents are logged.
+
 The agent suite exercises every backend's checkout, success/failure/timeout
 usage, deadlines, stderr flooding, process cleanup, and failover classification.
 Run the suite through `make test`.
