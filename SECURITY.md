@@ -49,6 +49,10 @@ tree, apply fixes, commit, push, or open a code-changing pull request.
 Production modes are Review, IncrementalReview, and Plan. `mergecraft
 capabilities` prints this manifest.
 
+The separate opt-in `Discuss` Action handles native review-thread mentions in
+a tool-free model call. Its only write is a reply to the existing, bound inline
+thread. It cannot be selected by a regular review.
+
 ## Security model
 
 mergeCraft is BYOK (bring-your-own-key/subscription): the review talks

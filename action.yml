@@ -76,6 +76,13 @@ inputs:
     description: "Opt-in to comment-driven invocation under `pull_request_target`. Default: false (refused). When set to `true`, comments from authors in {OWNER, MEMBER, COLLABORATOR} dispatch the agent even under `pull_request_target`. Set this only on workflows whose `if:` already gates comment triggers to trusted authors; leave it off everywhere else. See issue #72."
     required: false
     default: "false"
+  discuss:
+    description: >-
+      Enable replies to trusted human mentions in existing inline review threads
+      on native pull_request_review_comment events. Use a separate Discuss workflow
+      and a reviewer App or PAT. Defaults to disabled.
+    required: false
+    default: "disabled"
   codex_sandbox:
     description: >-
       Request Codex platform-sandbox policy for this run. Set to danger-full-access
@@ -276,6 +283,7 @@ runs:
     INPUT_SARIF_UPLOAD: ${{ inputs.sarif_upload }}
     INPUT_OUTPUT_SCHEMA: ${{ inputs.output_schema }}
     INPUT_ALLOW_PR_TARGET_COMMENTS: ${{ inputs.allow_pr_target_comments }}
+    INPUT_DISCUSS: ${{ inputs.discuss }}
     MERGECRAFT_CODEX_SANDBOX: ${{ inputs.codex_sandbox }}
     INPUT_PROVIDER_BASE_URL: ${{ inputs.provider_base_url }}
     INPUT_PROVIDER_API_KEY_ENV: ${{ inputs.provider_api_key_env }}

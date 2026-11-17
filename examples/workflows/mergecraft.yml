@@ -9,10 +9,8 @@ on:
   # that supports merge_group; see docs/workflows.md before enabling a queue.
   merge_group:
     types: [checks_requested]
-  # On-demand runs without a comment trigger. To drive mergeCraft interactively,
-  # use `workflow_dispatch` (below) or trigger a `pull_request` push — comment
-  # triggers are intentionally omitted because any commenter can otherwise steer
-  # the agent (issue #72 / D5). See README for the authorization model.
+  # Use workflow_dispatch for an on-demand review. For the separate optional
+  # Discuss workflow, see https://github.com/alexhawat/mergeCraft/blob/main/docs/workflows.md#discuss-an-inline-review-finding
   workflow_dispatch:
     inputs:
       prompt:
