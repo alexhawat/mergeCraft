@@ -152,6 +152,7 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
+          git fetch --no-tags origin "${BASE_REF:-main}"
           nodes=$(python3 scripts/ci_select_tests.py --base "${BASE_REF:-main}" || echo tests)
           echo "nodes=${nodes}" >> "$GITHUB_OUTPUT"
       - name: Unit tests (shard ${{ matrix.group }} of 2)
@@ -159,6 +160,7 @@ jobs:
         env:
           MERGECRAFT_TEST_SPLITS: "2"
           MERGECRAFT_TEST_GROUP: ${{ matrix.group }}
+          UV_PROJECT_ENVIRONMENT: .venv-dev
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ] && [ -n "${{ steps.pr_tests.outputs.nodes }}" ]; then
             uv run pytest ${{ steps.pr_tests.outputs.nodes }} -q --tb=short \
@@ -426,12 +428,21 @@ jobs:
           image_only = outputs.get("image_only") == "true"
           docs_only = os.environ.get("EVENT_NAME") == "pull_request" and outputs.get("code") != "true"
           tier3_skipped = os.environ.get("EVENT_NAME") == "pull_request"
-          image_skipped = {"toolchain", "eval-gate", "privilege-root", "privileged-proofs", "deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers"}
-          docs_skipped = {"eval-gate", "privilege-root", "deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers"}
-          if tier3_skipped:
-              image_skipped |= {"deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers", "eval-gate", "privilege-root", "privileged-proofs"}
-              docs_skipped |= {"deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers", "eval-gate", "privilege-root", "privileged-proofs"}
+          tier3_jobs = {
+              "eval-gate",
+              "privilege-root",
+              "privileged-proofs",
+              "deterministic-integration",
+              "action-e2e",
+              "image-scan-slim",
+              "image-scan-analyzers",
+              "slim-image",
+          }
+          image_skipped = {"toolchain", *tier3_jobs}
+          docs_skipped = set(tier3_jobs)
           def may_skip(name):
+              if tier3_skipped and name in tier3_jobs:
+                  return True
               return (image_only and name in image_skipped) or (docs_only and name in docs_skipped)
           failed = {
               name: job.get("result") for name, job in jobs.items()
