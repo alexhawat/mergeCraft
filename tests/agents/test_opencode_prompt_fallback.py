@@ -18,6 +18,7 @@ import httpx
 import pytest
 
 import mergecraft.agents.opencode as oc
+import mergecraft.agents.opencode_serve as opencode_serve
 
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
@@ -69,7 +70,7 @@ def _route(monkeypatch: MonkeyPatch, routes: dict[str, _StubResponse]) -> list[s
         return _RecordingClient(routes, calls)
 
     monkeypatch.setattr(httpx, "AsyncClient", _client)
-    monkeypatch.setattr(oc, "instrument_httpx", lambda _client, tracer=None: None)
+    monkeypatch.setattr(opencode_serve, "instrument_httpx", lambda _client, tracer=None: None)
     return calls
 
 

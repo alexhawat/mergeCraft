@@ -1,7 +1,7 @@
 """RED tests for the shared custom-provider resolver (D7 / W3 / W1.4).
 
 The ``mergecraft.agents.openai_compatible_gateways`` module is the single
-shared helper both ``agents/opencode.py`` and ``agents/codex.py`` consume.
+shared helper both ``agents/opencode_config.py`` and ``agents/codex.py`` consume.
 W3 lifts its signature to a multi-provider shape; these tests pin the
 contract W3 must produce.
 
@@ -273,7 +273,7 @@ def _coerce_to_dict(result: object) -> dict[str, object]:
 
 
 def test_both_harnesses_consume_the_shared_helper() -> None:
-    """Both ``opencode.py`` and ``codex.py`` import a function from
+    """Both ``opencode_config.py`` and ``codex.py`` import a function from
     ``openai_compatible_gateways`` — the shared helper backs both harnesses.
 
     The harness modules are wrapped by the ``agent()`` decorator (an
@@ -284,7 +284,7 @@ def test_both_harnesses_consume_the_shared_helper() -> None:
     from pathlib import Path
 
     repo_src = Path(__file__).resolve().parents[2] / "src" / "mergecraft" / "agents"
-    opencode_src = (repo_src / "opencode.py").read_text(encoding="utf-8")
+    opencode_src = (repo_src / "opencode_config.py").read_text(encoding="utf-8")
     codex_src = (repo_src / "codex.py").read_text(encoding="utf-8")
     assert "openai_compatible_gateways" in opencode_src
     assert "openai_compatible_gateways" in codex_src

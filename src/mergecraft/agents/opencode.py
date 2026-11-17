@@ -1,17 +1,29 @@
-"""OpenCode agent harness — invokes `opencode` CLI / serve."""
+"""OpenCode agent harness for the CLI and serve transports.
+
+Module: mergecraft.agents.opencode
+Depends: httpx, loguru, mergecraft.agents.{cli_runner,opencode_config,opencode_serve,shared}
+
+Exports:
+    OPENCODE_API_KEY_ENV — provider API key environment variable.
+    OPENCODE_AUTH_ENV — environment variable containing OpenCode auth JSON.
+    ProviderTimeoutError — controlled failure when the provider times out.
+    build_custom_provider — emit the gateway block for a model.
+    build_custom_providers_for_models — merge gateway blocks for a model roster.
+    build_security_config — render the isolated review configuration.
+    opencode — the registered OpenCode harness.
+    opencode_applied_model_params — resolve effective model parameters for tracing.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import os
 import re
 import shutil
 import subprocess
 import threading
 import time
-from collections import deque
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -19,20 +31,17 @@ from typing import TYPE_CHECKING, Final
 import httpx
 from loguru import logger
 
+import mergecraft.agents.openai_compatible_gateways as openai_compatible_gateways
+import mergecraft.agents.opencode_config as opencode_config
+import mergecraft.agents.opencode_serve as opencode_serve
 from mergecraft.agents.cli_runner import CliHarnessSpec, cli_working_directory, run_cli_attempt
-from mergecraft.agents.gates import GIT_NATIVE_READ_DENY_OPENCODE
-from mergecraft.agents.openai_compatible_gateways import (
-    SINGLETON_PROVIDER_ID,
-    ProviderConfig,
-    _provider_config_for_model,
-    resolve_gateway_endpoints,
-)
 from mergecraft.agents.opencode_otel import apply_otel_plugin, opencode_otel_plugin_wiring
 from mergecraft.agents.opencode_pricing import (
     GO_COST_NOTE,
     GO_ESTIMATED_COST_NOTE,
     estimate_go_step_cost,
 )
+from mergecraft.agents.opencode_tool_parts import record_opencode_part as _record_opencode_part
 from mergecraft.agents.post_run import finalize_agent_result, run_post_run_retry_loop
 from mergecraft.agents.shared import (
     AgentResult,
@@ -41,164 +50,57 @@ from mergecraft.agents.shared import (
     agent,
     apply_integrity_gate,
     capture_integrity_baseline,
-    log_token_table,
-    resolve_cache_read,
     spawn_agent_cli,
     stderr_tail_for_error,
-    with_prompt,
 )
-from mergecraft.config.env import McpEnv
-from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.security.private_files import write_private_file
 from mergecraft.tracing import current_tracer
-from mergecraft.tracing.genai import (
-    ModelParams,
-    input_messages_attrs,
-    model_params_from_mapping,
-    output_messages_attrs,
-    request_attrs,
-    resolve_capture_policy,
-    usage_attrs_from_agent_usage,
-    usage_unavailable_attrs,
-)
+from mergecraft.tracing.genai import resolve_capture_policy
 from mergecraft.tracing.http import instrument_httpx
-from mergecraft.types import MERGECRAFT_MCP_NAME
-from mergecraft.utils.git_setup import (
-    created_temp_directory,
-    is_run_owned_directory,
-    run_export_directory,
-)
-from mergecraft.utils.process_group import (
-    kill_process_group,
-    register_process_group,
-    track_process_group,
-    unregister_process_group,
-    wait_or_kill_process_group,
-)
+from mergecraft.utils.process_group import track_process_group, wait_or_kill_process_group
 from mergecraft.utils.provider_failure import is_retryable_cli_failure
 from mergecraft.utils.secrets import build_agent_env, filter_env
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
-    from typing import IO, Any
+    from typing import Any
 
     from mergecraft.agents._stream_consumer import StreamSpanAccumulator
     from mergecraft.mcp.tool_state import ToolState
     from mergecraft.security.review_integrity import TreeBaseline
-    from mergecraft.tracing.content import ContentCapture
     from mergecraft.utils.run_bounds import BudgetTracker
+
 
 OPENCODE_AUTH_ENV = "OPENCODE_AUTH_JSON"
 OPENCODE_API_KEY_ENV = "OPENCODE_API_KEY"
 
-# OpenCode provider.options accepts transport keys only — generation knobs belong
-# on model entries (``limit`` / ``options``) or the primary ``build`` agent.
-_OPENCODE_PROVIDER_OPTION_KEYS: frozenset[str] = frozenset(
-    {
-        "timeout",
-        "headerTimeout",
-        "chunkTimeout",
-        "setCacheKey",
-        "enterpriseUrl",
-    }
+# Keep the existing harness import surface for callers and tests.
+ProviderTimeoutError = opencode_serve.ProviderTimeoutError
+build_custom_provider = opencode_config.build_custom_provider
+build_custom_providers_for_models = opencode_config.build_custom_providers_for_models
+build_security_config = opencode_config.build_security_config
+opencode_applied_model_params = opencode_config.opencode_applied_model_params
+
+# Compatibility aliases for callers of the former private helpers.
+_SERVER_LOG_TAIL_LINES = opencode_serve.SERVER_LOG_TAIL_LINES
+_ServerHandle = opencode_serve.ServerHandle
+_api_key_from_env = opencode_config.api_key_from_env
+_boot_opencode_server = opencode_serve.boot_opencode_server
+_config_credential_env = opencode_config.config_credential_env
+_evidence_dir = opencode_config.evidence_dir
+_opencode_applied_model_params_from_config = (
+    opencode_config.opencode_applied_model_params_from_config
 )
-_OPENCODE_LIMIT_SOURCE_KEYS: frozenset[str] = frozenset(
-    {"context_limit", "context", "max_tokens", "max_completion_tokens"}
-)
-# OpenCode provider HTTP reads can outlast the generic 600s external-op default
-# (Nous inference hung ~10min in PR #442). Match the workflow action timeout
-# (25m) so httpx does not abort before the Action's own budget.
-_OPENCODE_PROVIDER_HTTP_TIMEOUT_DEFAULT_S: Final[float] = 1500.0
-
-# Ring-buffer depth for `opencode serve` output. Bounded because the buffer is
-# a diagnostic tail, not a log sink: enough to explain a stall, never enough to
-# grow without limit on a long run.
-_SERVER_LOG_TAIL_LINES: Final[int] = 50
-
-# ``opencode serve`` boot budget and wait granularity. Boot waits on the URL
-# event in short slices so a cancel request, an early exit and the deadline are
-# all observed promptly; the wait itself is never a blocking ``readline()``.
-_BOOT_DEADLINE_S: Final[float] = 30.0
-_BOOT_POLL_S: Final[float] = 0.1
-
-# The listening URL the server prints on stdout once it is ready.
-_URL_RE: Final[re.Pattern[str]] = re.compile(r"https?://[^\s]+")
-# The first line of a 2.x ``read`` result that returned text.
-_OPENCODE_READ_HEADER_RE: Final[re.Pattern[str]] = re.compile(
-    r"^Read file .*, lines (?P<start>\d+)-(?P<end>\d+)$", re.MULTILINE
-)
-
-# Credentials never appear in the run config: it names env vars as ``{env:NAME}``,
-# which OpenCode substitutes at load, and the values ride the child env only
-# (the same convention as the Codex driver's ``env_key`` / ``bearer_token_env_var``).
-# The bearer's env var name comes from the model that owns it (``McpEnv``).
-_OPENCODE_MCP_TOKEN_ENV: Final[str] = str(McpEnv.model_fields["mcp_token"].validation_alias)
-_ENV_NAME_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-_ENV_REFERENCE_RE: Final[re.Pattern[str]] = re.compile(r"\{env:([A-Za-z_][A-Za-z0-9_]*)\}")
-
-
-def _opencode_provider_http_timeout_s() -> float:
-    """Return the httpx timeout for OpenCode provider HTTP session calls."""
-    from mergecraft.config.env import RunBoundsEnv
-
-    timeout = RunBoundsEnv().external_operation_timeout_s
-    if timeout is None:
-        return _OPENCODE_PROVIDER_HTTP_TIMEOUT_DEFAULT_S
-    return timeout
-
-
-class ProviderTimeoutError(RuntimeError):
-    """Raised when the opencode provider endpoint times out.
-
-    This is a controlled domain error so callers (``shared.run`` /
-    ``review.offline_agent.run_offline_agent_review``) treat the attempt as a clean failure
-    instead of letting a raw ``httpx.ReadTimeout`` traceback abort the whole
-    review.
-    """
-
-
-def _api_key_from_env(api_key_env: str) -> str:
-    """Read a provider API key from the environment at launch time (HA1 / D16)."""
-    return os.environ.get(api_key_env, "").strip()
-
-
-def _env_reference(env_name: str) -> str:
-    """Return OpenCode's ``{env:NAME}`` reference, or ``""`` for an invalid name."""
-    return f"{{env:{env_name}}}" if _ENV_NAME_RE.fullmatch(env_name) else ""
-
-
-def _config_credential_env(ctx: AgentRunContext, config_json: str) -> dict[str, str]:
-    """Return the credential env vars the run config references by name.
-
-    Each provider ``apiKey`` reference resolves to the parent process's value
-    (what the config used to carry inline); the MCP header reference resolves to
-    the per-run bearer. Unset values are left out, so the reference expands to
-    an empty string exactly as an empty inline key did.
-    """
-    env: dict[str, str] = {}
-    try:
-        config = json.loads(config_json)
-    except json.JSONDecodeError:
-        config = {}
-    providers = config.get("provider") if isinstance(config, dict) else None
-    for block in providers.values() if isinstance(providers, dict) else ():
-        options = block.get("options") if isinstance(block, dict) else None
-        api_key = options.get("apiKey") if isinstance(options, dict) else None
-        match = _ENV_REFERENCE_RE.fullmatch(api_key) if isinstance(api_key, str) else None
-        if match is not None:
-            value = _api_key_from_env(match.group(1))
-            if value:
-                env[match.group(1)] = value
-    if ctx.mcp_auth_token:
-        env[_OPENCODE_MCP_TOKEN_ENV] = ctx.mcp_auth_token
-    return env
-
-
-def _opencode_mcp_headers(ctx: AgentRunContext) -> dict[str, str]:
-    """``Authorization`` header naming the per-run bearer's env var, not its value."""
-    if not ctx.mcp_auth_token:
-        return {}
-    return {"Authorization": f"Bearer {_env_reference(_OPENCODE_MCP_TOKEN_ENV)}"}
+_opencode_build_agent_overrides = opencode_config.opencode_build_agent_overrides
+_opencode_generation_options = opencode_config.opencode_generation_options
+_opencode_model_context_limit = opencode_config.opencode_model_context_limit
+_opencode_model_entry = opencode_config.opencode_model_entry
+_opencode_provider_http_timeout_s = opencode_serve.opencode_provider_http_timeout_s
+_opencode_provider_options = opencode_config.opencode_provider_options
+_positive_int = opencode_config.positive_int
+_prompt_session = opencode_serve.prompt_session
+_prompt_session_http = opencode_serve.prompt_session_http
+_provider_config_for_model = openai_compatible_gateways.provider_config_for_model
 
 
 def _opencode_run_config_dir(ctx: AgentRunContext) -> Path:
@@ -314,518 +216,6 @@ def _resolved_opencode_credentials(ctx: AgentRunContext) -> dict[str, str]:
     )
 
 
-def _positive_int(value: object) -> int | None:
-    """Return a positive integer from a wire value, or ``None`` when absent/invalid."""
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value > 0 else None
-    if isinstance(value, float) and value.is_integer():
-        as_int = int(value)
-        return as_int if as_int > 0 else None
-    return None
-
-
-def _opencode_provider_options(config: ProviderConfig) -> dict[str, object]:
-    """Build OpenCode provider ``options`` (transport only — no generation knobs)."""
-    options: dict[str, object] = {
-        "baseURL": config.base_url,
-        "apiKey": _env_reference(config.api_key_env),
-    }
-    for key in _OPENCODE_PROVIDER_OPTION_KEYS:
-        value = config.extra_options.get(key)
-        if value is not None:
-            options[key] = value
-    return options
-
-
-def _opencode_generation_options(extra_options: dict[str, object]) -> dict[str, object]:
-    """Return gateway generation knobs for OpenCode model/agent config."""
-    reserved = _OPENCODE_PROVIDER_OPTION_KEYS | _OPENCODE_LIMIT_SOURCE_KEYS
-    return {
-        key: value
-        for key, value in extra_options.items()
-        if key not in reserved and value is not None
-    }
-
-
-def _resolve_opencode_output_cap(
-    config: ProviderConfig,
-    *,
-    model_slug: str | None,
-) -> int | None:
-    max_tokens = _positive_int(config.extra_options.get("max_tokens"))
-    if max_tokens is None:
-        max_tokens = _positive_int(config.extra_options.get("max_completion_tokens"))
-    if max_tokens is None and model_slug:
-        from mergecraft.agents.curated_model_catalog import effective_max_output_tokens
-
-        max_tokens = effective_max_output_tokens(model_slug, config.extra_options)
-    return max_tokens
-
-
-def _opencode_applied_model_params_from_config(
-    config: ProviderConfig | None,
-    *,
-    model_slug: str | None = None,
-) -> ModelParams | None:
-    """Resolve ModelParams that the OpenCode config path actually applies (O4)."""
-    if config is None or not config.extra_options:
-        return None
-    applied_raw: dict[str, object] = dict(_opencode_generation_options(config.extra_options))
-    max_tokens = _resolve_opencode_output_cap(config, model_slug=model_slug)
-    context = _opencode_model_context_limit(config)
-    if max_tokens is not None and context is not None:
-        applied_raw["max_tokens"] = max_tokens
-    elif max_tokens is not None and model_slug:
-        from mergecraft.agents.curated_model_catalog import curated_model_entry
-
-        entry = curated_model_entry(model_slug)
-        if entry is not None and entry.requires_output_cap:
-            applied_raw["max_completion_tokens"] = max_tokens
-    params = model_params_from_mapping(applied_raw)
-    return None if params == ModelParams() else params
-
-
-def opencode_applied_model_params(model: str | None) -> ModelParams | None:
-    """Resolve applied ModelParams for a model slug."""
-    config = _provider_config_for_model(model) if model else None
-    return _opencode_applied_model_params_from_config(config, model_slug=model)
-
-
-def _opencode_build_agent_overrides(config: ProviderConfig | None) -> dict[str, object]:
-    """Primary-agent overrides OpenCode reads for temperature/top_p on serve runs."""
-    params = _opencode_applied_model_params_from_config(config)
-    if params is None:
-        return {}
-    overrides: dict[str, object] = {}
-    if params.temperature is not None:
-        overrides["temperature"] = params.temperature
-    if params.top_p is not None:
-        overrides["top_p"] = params.top_p
-    return overrides
-
-
-def _opencode_model_context_limit(config: ProviderConfig) -> int | None:
-    """Resolve an authoritative context window for OpenCode ``limit.context``."""
-    if config.context_limit is not None and config.context_limit > 0:
-        return config.context_limit
-    for key in ("context_limit", "context"):
-        resolved = _positive_int(config.extra_options.get(key))
-        if resolved is not None:
-            return resolved
-    return None
-
-
-def _opencode_model_entry(
-    model_id: str,
-    config: ProviderConfig,
-    *,
-    model_slug: str | None = None,
-) -> dict[str, object]:
-    """Build one OpenCode model table entry.
-
-    OpenCode 1.18.x requires both ``limit.context`` and ``limit.output`` when a
-    ``limit`` object is present; emit it only when both values are known.
-    Curated models that require a prepay output cap still receive
-    ``max_completion_tokens`` in ``options`` when context is unknown.
-    """
-    entry: dict[str, object] = {"name": model_id}
-    slug = model_slug
-    if slug is None and config.provider_id:
-        slug = f"{config.provider_id}/{model_id}"
-    max_tokens = _resolve_opencode_output_cap(config, model_slug=slug)
-    context = _opencode_model_context_limit(config)
-    generation_options = _opencode_generation_options(config.extra_options)
-    if max_tokens is not None and context is not None:
-        entry["limit"] = {"context": context, "output": max_tokens}
-    elif max_tokens is not None and slug:
-        from mergecraft.agents.curated_model_catalog import curated_model_entry
-
-        catalog = curated_model_entry(slug)
-        if catalog is not None and catalog.requires_output_cap:
-            generation_options = {
-                **generation_options,
-                "max_completion_tokens": max_tokens,
-            }
-    if generation_options:
-        entry["options"] = generation_options
-    return entry
-
-
-def _opencode_provider_block(
-    config: ProviderConfig,
-    *,
-    model_id: str | None = None,
-    provider_name: str | None = None,
-    model_slug: str | None = None,
-) -> dict[str, object]:
-    models: dict[str, object] = {}
-    if model_id:
-        slug = model_slug
-        if slug is None:
-            prefix = provider_name or config.provider_id
-            slug = f"{prefix}/{model_id}" if prefix else None
-        models[model_id] = _opencode_model_entry(model_id, config, model_slug=slug)
-    return {
-        "npm": "@ai-sdk/openai-compatible",
-        "name": provider_name or config.provider_id,
-        "options": _opencode_provider_options(config),
-        "models": models,
-    }
-
-
-def _collect_opencode_model_slugs(
-    primary: str | None,
-    agent_block: object,
-) -> tuple[str, ...]:
-    """Return every model slug the OpenCode config references (orchestrator + subagents)."""
-    ordered: list[str] = []
-    seen: set[str] = set()
-
-    def _add(raw: str | None) -> None:
-        if not raw:
-            return
-        slug = raw.strip()
-        if not slug or slug in seen or "/" not in slug:
-            return
-        seen.add(slug)
-        ordered.append(slug)
-
-    _add(primary)
-    if isinstance(agent_block, dict):
-        for entry in agent_block.values():
-            if isinstance(entry, dict):
-                model_value = entry.get("model")
-                if isinstance(model_value, str):
-                    _add(model_value)
-    return tuple(ordered)
-
-
-def _merge_custom_provider_blocks(
-    *blocks: dict[str, object] | None,
-) -> dict[str, object] | None:
-    """Merge provider tables from several :func:`build_custom_provider` calls."""
-    merged: dict[str, object] = {}
-    for block in blocks:
-        if not block:
-            continue
-        for provider_id, payload in block.items():
-            if provider_id not in merged:
-                merged[provider_id] = payload
-                continue
-            existing = merged[provider_id]
-            if not isinstance(existing, dict) or not isinstance(payload, dict):
-                merged[provider_id] = payload
-                continue
-            combined = dict(existing)
-            ex_models = existing.get("models")
-            new_models = payload.get("models")
-            if isinstance(ex_models, dict) and isinstance(new_models, dict):
-                combined["models"] = {**ex_models, **new_models}
-            merged[provider_id] = combined
-    return merged or None
-
-
-def _provider_block_model_slugs(
-    primary: str | None,
-    roster_models: tuple[str, ...],
-) -> tuple[str, ...]:
-    """Return slugs that need custom OpenCode provider blocks.
-
-    Indexed multi-provider deployments (issue #71) emit a block per configured
-    provider, so every roster slug is considered. Singleton back-compat env
-    (PR #79) applies only to the active orchestrator model — verifier subagents
-    such as ``auto/efficient`` must not inherit the same gateway credentials.
-    """
-    from mergecraft.agents.openai_compatible_gateways import SINGLETON_PROVIDER_ID
-
-    indexed = resolve_gateway_endpoints()
-    if not indexed:
-        return tuple(slug for slug in roster_models if slug and "/" in slug)
-    if len(indexed) == 1 and SINGLETON_PROVIDER_ID in indexed:
-        if primary and "/" in primary:
-            return (primary,)
-        return tuple(slug for slug in roster_models if slug and "/" in slug)
-    return roster_models
-
-
-def build_custom_providers_for_models(
-    models: tuple[str, ...] | list[str],
-) -> dict[str, object] | None:
-    """Emit OpenCode provider blocks for every slug in *models* (multi-reviewer)."""
-    blocks: list[dict[str, object] | None] = [
-        build_custom_provider(slug) for slug in models if slug
-    ]
-    return _merge_custom_provider_blocks(*blocks)
-
-
-def build_custom_provider(model: str | None) -> dict[str, object] | None:
-    """Describe an OpenAI-compatible provider (or several) for opencode.
-
-    Resolution order (W3 / #71):
-
-    1. **Multi-provider first**: ``MERGECRAFT_CUSTOM_PROVIDER_{API_KEY,BASE_URL}_<N>``
-       env-var pairs (operator-locked) emit one provider block per index
-       under ``provider_<N>``. Gaps are preserved, partial pairs dropped,
-       singleton ignored when any indexed pair is set. The active model's
-       provider gets the model-id mapping; the rest are emitted with an
-       empty ``models`` table so the harness can still resolve fallbacks at
-       runtime.
-    2. **Singleton back-compat alias**: ``MERGECRAFT_CUSTOM_PROVIDER_BASE_URL``
-       + ``MERGECRAFT_CUSTOM_PROVIDER_API_KEY`` (PR #79 / D7) emit a single
-       provider block keyed by the model's prefix (``default`` for the
-       canonical ``default/...`` model, ``minimax`` for ``minimax/...``, etc.).
-       This preserves the W1.1 single-provider regression pin's emitted
-       shape: a singleton + ``minimax/...`` model still produces a
-       ``provider.minimax`` block, not a ``provider.default`` one.
-    3. **Registry rows**: indexed ``LLM_PROVIDER_<N>_*`` credentials plus optional
-       ``MERGECRAFT_CUSTOM_PROVIDER_*`` workflow env (GHA injects secrets there).
-    """
-    providers = resolve_gateway_endpoints()
-    slash = model.find("/") if model else -1
-    active_provider_id = model[:slash].lower() if (model and slash > 0) else None
-    active_model_id = model[slash + 1 :] if (model and slash > 0) else None
-
-    if providers:
-        # Multi-provider path (W3). If the active model's provider id is in
-        # the resolver dict, use that record; otherwise fall through to the
-        # singleton/preset fallback so a model whose prefix is not registered
-        # still surfaces a useful block (PR #79 compatibility).
-        if active_provider_id is not None and active_provider_id in providers:
-            active_record = providers[active_provider_id]
-            out: dict[str, object] = {}
-            for record in providers.values():
-                model_id = active_model_id if record is active_record else None
-                out[record.provider_id] = _opencode_provider_block(
-                    record,
-                    model_id=model_id,
-                    model_slug=model if record is active_record else None,
-                )
-            return out
-        # Fall through to legacy preset path — the active model is not in
-        # the resolver dict, so use the singleton (or preset) record keyed
-        # by the model's prefix.
-    config = _provider_config_for_model(model) if model else None
-    if config is None or not model:
-        return None
-    model_id = model[model.find("/") + 1 :]
-    provider_key = config.provider_id
-    if provider_key == SINGLETON_PROVIDER_ID and active_provider_id:
-        provider_key = active_provider_id
-    return {
-        provider_key: _opencode_provider_block(
-            config,
-            model_id=model_id,
-            provider_name=provider_key,
-            model_slug=model,
-        )
-    }
-
-
-def _checkout_root(ctx: AgentRunContext) -> Path:
-    return Path(primary_repo_state(ctx.tool_state).dir or os.getcwd()).resolve()
-
-
-def _evidence_dir(ctx: AgentRunContext) -> Path:
-    from mergecraft.evidence.run_packet import resolve_packet_path
-
-    repo = primary_repo_state(ctx.tool_state)
-    slug = f"{repo.owner}-{repo.name}"
-    return resolve_packet_path(tmpdir=ctx.tmpdir, change_slug=slug).parent
-
-
-def _build_review_mode_external_directory_allowlist(
-    checkout: Path, evidence: Path
-) -> dict[str, str]:
-    """Allow only the checkout and evidence scratch roots (MCB-06 / D4)."""
-    perms: dict[str, str] = {"*": "deny"}
-    for root in (checkout.resolve(), evidence.resolve()):
-        root_posix = root.as_posix()
-        perms[root_posix] = "allow"
-        perms[f"{root_posix}/*"] = "allow"
-        perms[f"{root_posix}/**"] = "allow"
-    return perms
-
-
-def _build_review_mode_read_allowlist(
-    checkout: Path, evidence: Path, exports: tuple[Path, ...] = ()
-) -> dict[str, str]:
-    """Read paths allowlisted to the checkout, evidence scratch and tool exports (MCB-06 / D4)."""
-    roots = (checkout.resolve(), evidence.resolve())
-    read: dict[str, str] = {}
-    for root_posix in (*(root.as_posix() for root in roots), *_path_forms(exports)):
-        read[root_posix] = "allow"
-        read[f"{root_posix}/*"] = "allow"
-        read[f"{root_posix}/**"] = "allow"
-    # Deny rules after broad allow patterns — matches gates.py spread order.
-    read.update(GIT_NATIVE_READ_DENY_OPENCODE)
-    for root in roots:
-        root_posix = root.as_posix()
-        read[f"{root_posix}/.git/config"] = "deny"
-        read[f"{root_posix}/.git/**"] = "deny"
-    return read
-
-
-def _path_forms(paths: tuple[Path, ...]) -> list[str]:
-    """Literal and resolved spellings (``/var`` vs ``/private/var`` on macOS)."""
-    return sorted({form.as_posix() for path in paths for form in (path, path.resolve())})
-
-
-def _tool_export_dirs(ctx: AgentRunContext) -> tuple[Path, ...]:
-    """The private directory the MCP tools save oversized output into (#1474).
-
-    ``git show <rev>:<path>`` and oversized git output answer with a preview and
-    the path of the full body. That path must be readable even when the temp dir
-    is operator-chosen or shared and so not granted as a whole — otherwise the
-    agent holds a path it cannot open and re-queries git in small pieces. The
-    directory is a fresh ``mkdtemp`` this run owns, resolved from the same temp
-    root the tools use.
-    """
-    try:
-        return (run_export_directory(ctx.tmpdir),)
-    except OSError as err:
-        logger.warning("» could not prepare the tool export directory: {}", err)
-        return ()
-
-
-def _tool_export_external_directory(exports: tuple[Path, ...]) -> dict[str, str]:
-    rules: dict[str, str] = {}
-    for root in _path_forms(exports):
-        rules[root] = "allow"
-        rules[f"{root}/*"] = "allow"
-        rules[f"{root}/**"] = "allow"
-    return rules
-
-
-# Run temp-dir children the agent must never read: the isolated auth store, the
-# empty per-run config dir, the generated run config, the scratch HOME, and the
-# other harnesses' run homes (a mixed-harness chain shares the temp dir).
-_TEMP_DIR_PRIVATE_CHILDREN: Final[tuple[str, ...]] = (
-    "opencode-xdg-data",
-    "opencode-xdg-config",
-    "opencode-run-config",
-    "home",
-    ".codex",
-    ".claude",
-)
-
-# Where OpenCode spills a tool result too large to return inline; the truncated
-# result tells the model to read the full text from there. It holds the agent's
-# own tool output, so it is re-allowed after the ``opencode-xdg-data`` deny — the
-# auth store beside it stays denied.
-_TEMP_DIR_TOOL_OUTPUT: Final[str] = "opencode-xdg-data/opencode/tool-output"
-
-
-def _review_diff_external_directory(ctx: AgentRunContext) -> dict[str, str]:
-    """``external_directory`` rules that let the agent read the review's diff files.
-
-    Every diff mergeCraft materialises is a top-level ``*.diff`` in the run's temp
-    dir (``review.diff`` offline; ``pr-<n>.diff``, ``pr-<n>-incremental.diff`` and
-    ``commit-<sha>.diff`` from the MCP tools), outside the checkout. OpenCode asks
-    for ``<file's directory>/**``, so the grant is the temp dir's ``/**``; the deny
-    rules after it (last match wins) keep the private children out of reach, except
-    OpenCode's spilled tool output, re-allowed last so truncated results stay
-    readable. Both
-    the literal and the resolved path are listed, because the agent may use either
-    (``/var`` and ``/private/var`` on macOS).
-    """
-    # Only directories this run created: an operator-set ``MERGECRAFT_TEMP_DIR`` can
-    # be a shared root, and a registered diff path's parent is agent-chosen
-    # (``establish_review_scope``), so neither is granted on its own say-so. Nor is
-    # ``ctx.tmpdir`` unless it is a registered ``mkdtemp``: a caller could hand in
-    # an operator-chosen or shared directory, and the whole tree would be readable.
-    dirs = {Path(d) for d in (ctx.tmpdir, created_temp_directory()) if d}
-    dirs = {d for d in dirs if is_run_owned_directory(str(d))}
-    forms = sorted({form.as_posix() for d in dirs for form in (d, d.resolve())})
-    rules = {f"{root}/**": "allow" for root in forms}
-    for root in forms:
-        for child in _TEMP_DIR_PRIVATE_CHILDREN:
-            rules[f"{root}/{child}"] = "deny"
-            rules[f"{root}/{child}/**"] = "deny"
-        rules[f"{root}/{_TEMP_DIR_TOOL_OUTPUT}"] = "allow"
-        rules[f"{root}/{_TEMP_DIR_TOOL_OUTPUT}/**"] = "allow"
-    return rules
-
-
-def _build_review_mode_permissions(ctx: AgentRunContext) -> dict[str, object]:
-    checkout = _checkout_root(ctx)
-    evidence = _evidence_dir(ctx)
-    exports = _tool_export_dirs(ctx)
-    read = _build_review_mode_read_allowlist(checkout, evidence, exports)
-    external_directory = _build_review_mode_external_directory_allowlist(checkout, evidence)
-    external_directory.update(_review_diff_external_directory(ctx))
-    # After the temp-dir rules (last match wins): the export directory is a child
-    # of the temp dir and must stay readable whether or not its parent is granted.
-    external_directory.update(_tool_export_external_directory(exports))
-    return {
-        "bash": "deny",
-        "edit": "deny",
-        "read": read,
-        "webfetch": "deny",
-        "external_directory": external_directory,
-        "skill": "allow",
-    }
-
-
-def build_security_config(ctx: AgentRunContext, model: str | None) -> str:
-    from mergecraft.agents.harness_render import render_for_run
-
-    render_result = render_for_run(ctx, "opencode")
-    agent_block = render_result.payload["agent"] if isinstance(render_result.payload, dict) else {}
-    config: dict[str, object] = {
-        "permission": _build_review_mode_permissions(ctx),
-        "mcp": {
-            MERGECRAFT_MCP_NAME: {
-                "type": "remote",
-                "url": ctx.mcp_server_url,
-                "timeout": 300_000,
-                **({"headers": _opencode_mcp_headers(ctx)} if ctx.mcp_auth_token else {}),
-            }
-        },
-        "agent": agent_block,
-    }
-    agent_models_source = agent_block if (model and "/" in model) else {}
-    roster_models = _collect_opencode_model_slugs(model, agent_models_source)
-    provider_slugs = _provider_block_model_slugs(model, roster_models)
-    provider = build_custom_providers_for_models(provider_slugs)
-    if model:
-        config["model"] = model
-        enabled_ids: set[str] = set(provider.keys()) if isinstance(provider, dict) else set()
-        slash = model.find("/")
-        if slash > 0:
-            enabled_ids.add(model[:slash].lower())
-        if enabled_ids:
-            config["enabled_providers"] = sorted(enabled_ids)
-        provider_config = _provider_config_for_model(model)
-        if provider_config is not None:
-            from mergecraft.agents.openai_generation_params import (
-                validate_generation_params_for_model,
-            )
-
-            validate_generation_params_for_model(model, dict(provider_config.extra_options))
-        build_overrides = _opencode_build_agent_overrides(provider_config)
-        if build_overrides and isinstance(agent_block, dict):
-            agents = dict(agent_block)
-            existing_build = agents.get("build")
-            if isinstance(existing_build, dict):
-                agents["build"] = {**existing_build, **build_overrides}
-            else:
-                agents["build"] = build_overrides
-            config["agent"] = agents
-    for roster_slug in provider_slugs:
-        roster_config = _provider_config_for_model(roster_slug)
-        if roster_config is not None:
-            from mergecraft.agents.openai_generation_params import (
-                validate_generation_params_for_model,
-            )
-
-            validate_generation_params_for_model(roster_slug, dict(roster_config.extra_options))
-    if provider is not None:
-        config["provider"] = provider
-    return json.dumps(config)
-
-
 async def _install(_token: str | None = None) -> str:
     path = shutil.which("opencode")
     if path:
@@ -866,165 +256,6 @@ def _opencode_major_version(cli: str) -> int | None:
     return major
 
 
-class _ServerHandle:
-    def __init__(
-        self,
-        proc: subprocess.Popen[str] | subprocess.Popen[bytes],
-        *,
-        base_url: str = "",
-        url_event: threading.Event | None = None,
-    ) -> None:
-        self.proc = proc
-        self.base_url = base_url
-        self._closed = False
-        self._recent: deque[str] = deque(maxlen=_SERVER_LOG_TAIL_LINES)
-        self._recent_lock = threading.Lock()
-        self._drains: list[threading.Thread] = []
-        # Set by the stdout drain when the server prints its listening URL.
-        self._url_event = url_event
-
-    def start_draining(self) -> None:
-        """Consume the child's pipes from spawn for the rest of its life (#449).
-
-        Boot waits for the listening URL on an event this stdout drain sets, so
-        both pipes are read from the moment the child exists — not only after
-        the URL appears. Without a reader the child blocks in ``write()`` as
-        soon as it fills the platform pipe buffer and stops answering HTTP — a
-        hang with no output, which is exactly what an unexplained provider
-        timeout looks like.
-        """
-        for stream, label in ((self.proc.stdout, "out"), (self.proc.stderr, "err")):
-            if stream is None:
-                continue
-            thread = threading.Thread(
-                target=self._drain,
-                args=(stream, label),
-                name=f"opencode-serve-{label}",
-                daemon=True,
-            )
-            thread.start()
-            self._drains.append(thread)
-
-    def _drain(self, stream: IO[str] | IO[bytes], label: str) -> None:
-        try:
-            while raw := stream.readline():
-                text = (
-                    raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
-                ).rstrip()
-                if not text:
-                    continue
-                # ``deque.append`` is itself atomic, but that says nothing
-                # about *iteration*: joining the deque while a drain thread
-                # appends raises ``RuntimeError: deque mutated during
-                # iteration`` until the buffer reaches ``maxlen``. Since
-                # recent_output() is called from inside the timeout handler,
-                # that would replace the clean failed AgentResult with an
-                # exception — so both sides take this lock.
-                with self._recent_lock:
-                    self._recent.append(text)
-                if label == "out" and self._url_event is not None and not self.base_url:
-                    match = _URL_RE.search(text)
-                    if match:
-                        self.base_url = match.group(0).rstrip("/")
-                        self._url_event.set()
-                logger.debug("[opencode serve/{}] {}", label, text)
-        except (OSError, ValueError):
-            # Pipe closed under us during teardown — expected, not an error.
-            return
-
-    def recent_output(self) -> str:
-        """Return the buffered tail of server output, newest last."""
-        with self._recent_lock:
-            lines = list(self._recent)
-        return "\n".join(lines)
-
-    def close(self, *, already_exited: bool = False) -> None:
-        """Kill (unless the child already exited), reap and unregister the group.
-
-        Every boot failure path funnels here so a failed boot never leaves its
-        process group registered or its child unreaped (P5, N9). Callers that
-        have already observed the child exit pass ``already_exited=True`` so no
-        signal is sent to a dead (and possibly recycled) process group.
-        """
-        if self._closed:
-            return
-        self._closed = True
-        pid = self.proc.pid
-        if already_exited:
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                self.proc.wait(timeout=5)
-        elif self.proc.poll() is None:
-            kill_process_group(pid)
-            try:
-                self.proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                with contextlib.suppress(ProcessLookupError, PermissionError):
-                    self.proc.kill()
-        unregister_process_group(pid)
-
-
-def _boot_wait_slice(deadline: float) -> float:
-    """Return the next bounded wait for the boot URL event.
-
-    Never past ``deadline``: a caller's fake clock (or a real one) that has
-    already blown the deadline gets ``0.0`` so the loop re-checks and raises
-    instead of sleeping out the whole budget.
-    """
-    remaining = deadline - time.time()
-    if remaining <= 0:
-        return 0.0
-    return min(_BOOT_POLL_S, remaining)
-
-
-def _boot_opencode_server(
-    *,
-    cli: str,
-    env: dict[str, str],
-    cwd: str,
-    cancel: threading.Event | None = None,
-) -> _ServerHandle:
-    proc = spawn_agent_cli(
-        [cli, "serve", "--port", "0", "--hostname", "127.0.0.1"],
-        env=env,
-        cwd=cwd,
-        errors="replace",
-    )
-    assert proc.stdout is not None
-    # Register at spawn and drain both pipes from spawn: a boot that hangs must
-    # already be visible to run-level cleanup, and an unread stderr would block
-    # the child in ``write()`` before it ever prints its URL (P5, N9).
-    register_process_group(proc.pid)
-    url_event = threading.Event()
-    handle = _ServerHandle(proc=proc, url_event=url_event)
-    handle.start_draining()
-
-    deadline = time.time() + _BOOT_DEADLINE_S
-    exited = False
-    try:
-        while not url_event.wait(timeout=_boot_wait_slice(deadline)):
-            if cancel is not None and cancel.is_set():
-                msg = "opencode serve boot cancelled"
-                raise RuntimeError(msg)
-            if proc.poll() is not None:
-                exited = True
-                err = handle.recent_output()
-                if not err and proc.stderr is not None:
-                    with contextlib.suppress(OSError, ValueError):
-                        raw = proc.stderr.read()
-                        err = (
-                            raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
-                        ).strip()
-                msg = f"opencode serve exited early: {err}"
-                raise RuntimeError(msg)
-            if time.time() >= deadline:
-                msg = "opencode serve did not print a listening URL"
-                raise RuntimeError(msg)
-    except BaseException:
-        handle.close(already_exited=exited)
-        raise
-    return handle
-
-
 def _parse_model(value: str | None) -> dict[str, str] | None:
     if not value:
         return None
@@ -1032,272 +263,6 @@ def _parse_model(value: str | None) -> dict[str, str] | None:
     if slash <= 0:
         return None
     return {"providerID": value[:slash], "modelID": value[slash + 1 :]}
-
-
-def _record_opencode_bash(tool_state: ToolState | None, part: object) -> None:
-    """Record one finished OpenCode ``bash`` tool part on the run's trajectory (#858).
-
-    The part shape is ``{"tool": "bash", "state": {"status", "input": {"command"},
-    "output", "metadata": {"exit"}}}`` — in a ``run --format json`` ``tool_use``
-    event's ``part`` and in an HTTP turn's ``parts``. Anything else is ignored;
-    recording is evidence only and never raises.
-    """
-    if tool_state is None or not isinstance(part, dict) or part.get("tool") != "bash":
-        return
-    state = part.get("state")
-    if not isinstance(state, dict) or state.get("status") not in {"completed", "error"}:
-        return
-    tool_input = state.get("input")
-    command = tool_input.get("command") if isinstance(tool_input, dict) else None
-    metadata = state.get("metadata")
-    raw_exit = metadata.get("exit") if isinstance(metadata, dict) else None
-    from mergecraft.evidence.trajectory import record_driver_exec
-
-    record_driver_exec(
-        tool_state,
-        command=command,
-        exit_code=raw_exit
-        if isinstance(raw_exit, int) and not isinstance(raw_exit, bool)
-        else None,
-        output=str(state.get("output") or ""),
-        failed=state.get("status") == "error",
-    )
-
-
-def _opencode_read_span(state: Mapping[str, object]) -> tuple[int, int] | None:
-    """Return the lines a finished ``read`` part showed: see :func:`_record_opencode_read`."""
-    from mergecraft.evidence.trajectory import UNKNOWN_READ_SPAN
-
-    output = state.get("output")
-    header = _OPENCODE_READ_HEADER_RE.match(output) if isinstance(output, str) else None
-    if header is not None:
-        return int(header.group("start")), int(header.group("end"))
-    metadata = state.get("metadata")
-    # 2.x nests the tool's own metadata one level down.
-    nested = metadata.get("metadata") if isinstance(metadata, dict) else None
-    truncated = any(isinstance(m, dict) and m.get("truncated") for m in (metadata, nested))
-    tool_input = state.get("input")
-    ranged = isinstance(tool_input, dict) and (
-        tool_input.get("offset") is not None or tool_input.get("limit") is not None
-    )
-    return UNKNOWN_READ_SPAN if truncated or ranged else None
-
-
-def _record_opencode_read(tool_state: ToolState | None, part: object) -> None:
-    """Record one finished OpenCode ``read`` tool part on the run's trajectory.
-
-    The part shape is ``{"tool": "read", "state": {"status", "input", "output",
-    "metadata"}}`` — the same two places as ``bash``. ``input`` names the file as
-    ``path`` on 2.x and ``filePath`` on 1.x. A byte cap can cut a read short of the
-    ``limit`` it asked for, so the lines come from what it showed: 2.x opens its
-    output with ``Read file <path>, lines <a>-<b>``. Without that header a read that
-    was ranged or truncated showed lines nobody can name, and any other read showed
-    the whole file. A failed read showed nothing and is not recorded.
-    """
-    if tool_state is None or not isinstance(part, dict) or part.get("tool") != "read":
-        return
-    state = part.get("state")
-    if not isinstance(state, dict) or state.get("status") != "completed":
-        return
-    tool_input = state.get("input")
-    if not isinstance(tool_input, dict):
-        return
-    from mergecraft.evidence.trajectory import record_driver_read
-
-    record_driver_read(
-        tool_state,
-        path=tool_input.get("path") or tool_input.get("filePath"),
-        span=_opencode_read_span(state),
-    )
-
-
-def _record_opencode_part(tool_state: ToolState | None, part: object) -> None:
-    """Record one OpenCode tool part the trajectory has a door for."""
-    _record_opencode_bash(tool_state, part)
-    _record_opencode_read(tool_state, part)
-
-
-async def _prompt_session(
-    *,
-    base_url: str,
-    session_id: str,
-    text: str,
-    model: dict[str, str] | None,
-    resolved_model: str | None = None,
-    capture_policy: ContentCapture | None = None,
-    tool_state: ToolState | None = None,
-) -> AgentResult:
-    """Prompt the opencode session — the one harness path with full payload visibility.
-
-    OB3: unlike the CLI harnesses (whose NDJSON streams surface only
-    agent-level text), this HTTP path sees the actual prompt sent and the
-    completion returned, so it wraps the exchange in an ``llm.call`` span
-    carrying the request model, the policy-gated input/output messages
-    (O5), and the token usage. The executed model is NOT stamped: the
-    opencode session response does not reliably report it, and a guessed
-    value would fake the D11 fallback signal (coverage recorded in
-    ``agents/_stream_consumer.py``). Tracing never fails the run
-    (convention 3) — every capture step degrades to missing attrs.
-    """
-    tracer = current_tracer()
-    if tracer is None:
-        return await _prompt_session_http(
-            base_url=base_url,
-            session_id=session_id,
-            text=text,
-            model=model,
-            tool_state=tool_state,
-        )
-    model_slug = f"{model['providerID']}/{model['modelID']}" if model else None
-    gen_ai_system = model.get("providerID") if model else None
-    with tracer.start_span("llm.call") as span:
-        try:
-            span.set_attribute("gen_ai.operation.name", "chat")
-            if gen_ai_system:
-                span.set_attribute("gen_ai.system", gen_ai_system)
-            model_params = opencode_applied_model_params(resolved_model or model_slug)
-            for key, value in request_attrs(model=model_slug, params=model_params).items():
-                span.set_attribute(key, value)
-            if capture_policy is not None:
-                for key, value in input_messages_attrs(
-                    [{"role": "user", "content": text}], policy=capture_policy
-                ).items():
-                    span.set_attribute(key, value)
-        except Exception as exc:
-            logger.debug("opencode llm.call request attrs failed: {}", exc)
-        result = await _prompt_session_http(
-            base_url=base_url,
-            session_id=session_id,
-            text=text,
-            model=model,
-            tool_state=tool_state,
-        )
-        from mergecraft.agents.curated_model_catalog import apply_catalog_cost_to_usage
-
-        priced_usage = apply_catalog_cost_to_usage(
-            result.usage,
-            model=resolved_model or model_slug,
-        )
-        if priced_usage is not result.usage:
-            result = replace(result, usage=priced_usage)
-        try:
-            if result.usage is not None:
-                for key, value in usage_attrs_from_agent_usage(
-                    input_tokens=result.usage.input_tokens,
-                    output_tokens=result.usage.output_tokens,
-                    cache_read_tokens=result.usage.cache_read_tokens,
-                    cache_write_tokens=result.usage.cache_write_tokens,
-                    cost_usd=result.usage.cost_usd,
-                ).items():
-                    span.set_attribute(key, value)
-            else:
-                for key, value in usage_unavailable_attrs().items():
-                    span.set_attribute(key, value)
-            if capture_policy is not None and result.output:
-                for key, value in output_messages_attrs(
-                    [{"role": "assistant", "content": result.output}],
-                    policy=capture_policy,
-                ).items():
-                    span.set_attribute(key, value)
-            if not result.success and result.error:
-                span.set_status("error", result.error[:200])
-        except Exception as exc:
-            logger.debug("opencode llm.call response attrs failed: {}", exc)
-        return result
-
-
-async def _prompt_session_http(
-    *,
-    base_url: str,
-    session_id: str,
-    text: str,
-    model: dict[str, str] | None,
-    tool_state: ToolState | None = None,
-) -> AgentResult:
-    payload: dict[str, object] = {
-        "parts": [{"type": "text", "text": text}],
-    }
-    if model:
-        payload["model"] = model
-    async with httpx.AsyncClient(timeout=_opencode_provider_http_timeout_s()) as client:
-        # T2 / D8 — narrow instrumentation: wrap clients mergeCraft builds
-        # (the custom OpenAI-compatible provider path) so every outbound
-        # ``send`` emits an ``http.client.request`` span. ``current_tracer``
-        # resolves to the active mergeCraft span's tracer or ``None`` when
-        # tracing is disabled — ``instrument_httpx`` no-ops in that case
-        # without setting the idempotency sentinel so a later activation
-        # is possible.
-        instrument_httpx(client, tracer=current_tracer())
-        try:
-            resp = await client.post(
-                f"{base_url}/session/{session_id}/message",
-                json=payload,
-            )
-            if resp.status_code in (404, 405):
-                # Fallback path for older/newer API shapes: only "no such
-                # endpoint / method" means the alternate endpoint exists. Every
-                # other >=400 — 429, 5xx — may mean the prompt was accepted and
-                # is still executing, so reposting would start a second agent
-                # turn on the same session and report the wrong status (#444).
-                resp = await client.post(
-                    f"{base_url}/session/{session_id}/prompt",
-                    json=payload,
-                )
-        except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.TimeoutException) as exc:
-            logger.warning("opencode provider request timed out: {}", exc)
-            raise ProviderTimeoutError(f"opencode provider request timed out: {exc}") from exc
-        if resp.status_code >= 400:
-            # 429 and 5xx are the gateway saying "not now", not "never" — mark
-            # them retryable so the chain moves to the next entry (#444). Other
-            # 4xx are request-shaped faults that the next model would repeat.
-            retryable = resp.status_code == 429 or resp.status_code >= 500
-            return with_prompt(
-                AgentResult(
-                    success=False,
-                    error=f"opencode prompt failed ({resp.status_code}): {resp.text[:500]}",
-                    metadata={"retryable": True} if retryable else {},
-                ),
-                text,
-            )
-        data = resp.json() if resp.content else {}
-
-    usage: AgentUsage | None = None
-    output = ""
-    if isinstance(data, dict):
-        for part in data.get("parts") or []:
-            _record_opencode_part(tool_state, part)
-        output = str(
-            data.get("result") or data.get("text") or data.get("output") or json.dumps(data)[:2000]
-        )
-        # Best-effort usage extraction
-        info = data.get("info") or data.get("usage") or {}
-        if isinstance(info, dict):
-            inp = int(info.get("input_tokens") or info.get("input") or 0)
-            out = int(info.get("output_tokens") or info.get("output") or 0)
-            cache_read = resolve_cache_read(info)
-            cost = info.get("cost") or info.get("costUsd")
-            total_tokens = inp + out + cache_read.additive
-            if total_tokens > 0:
-                cost_usd = float(cost) if cost is not None else None
-                usage = AgentUsage(
-                    agent="opencode",
-                    input_tokens=inp + cache_read.additive,
-                    output_tokens=out,
-                    cache_read_tokens=cache_read.reported or None,
-                    cost_usd=cost_usd,
-                )
-                model_slug = f"{model['providerID']}/{model['modelID']}" if model else None
-                from mergecraft.agents.curated_model_catalog import apply_catalog_cost_to_usage
-
-                usage = apply_catalog_cost_to_usage(usage, model=model_slug)
-                log_token_table(
-                    input_tokens=inp,
-                    cache_read=0,
-                    cache_write=0,
-                    output=out,
-                    cost_usd=usage.cost_usd if usage else None,
-                )
-    return with_prompt(AgentResult(success=True, output=output or None, usage=usage), text)
 
 
 def _capture_integrity_baseline(ctx: AgentRunContext) -> TreeBaseline | None:

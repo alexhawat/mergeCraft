@@ -481,6 +481,98 @@ def test_wipe_swallows_resolve_oserror_on_preserve_env(
     git_setup_mod._created_paths.clear()
 
 
+def test_wipe_removes_a_registered_directory(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """A registered directory outside the active temp dir is removed whole."""
+    owned_dir = tmp_path / "owned-dir"
+    owned_dir.mkdir()
+    (owned_dir / "inner.sh").write_text("x\n", encoding="utf-8")
+    monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
+    monkeypatch.setattr(git_setup_mod, "_temp_dir", None)
+    git_setup_mod._created_paths.clear()
+    register_created_path(str(owned_dir))
+
+    wipe_runner_leak_surface()
+
+    assert not owned_dir.exists()
+    assert git_setup_mod._created_paths == set()
+
+
+def test_wipe_forgets_a_registered_path_that_is_already_gone(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A registered path removed by someone else is dropped without a warning."""
+    owned = tmp_path / "already-gone.sh"
+    owned.write_text("x\n", encoding="utf-8")
+    monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
+    monkeypatch.setattr(git_setup_mod, "_temp_dir", None)
+    git_setup_mod._created_paths.clear()
+    register_created_path(str(owned))
+    owned.unlink()
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        git_setup_mod.logger, "warning", lambda *args, **_kw: warnings.append(args[0])
+    )
+
+    wipe_runner_leak_surface()
+
+    assert git_setup_mod._created_paths == set()
+    assert warnings == []
+
+
+def test_wipe_removes_a_registered_path_that_cannot_be_resolved(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A registered path is still wiped by its raw name when resolve fails."""
+    owned = tmp_path / "unresolvable-owned.sh"
+    owned.write_text("x\n", encoding="utf-8")
+    monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
+    monkeypatch.setattr(git_setup_mod, "_temp_dir", None)
+    git_setup_mod._created_paths.clear()
+
+    real_resolve = Path.resolve
+
+    def flaky_resolve(self: Path, strict: bool = False) -> Path:
+        if "unresolvable-owned" in str(self):
+            raise OSError("gone")
+        return real_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", flaky_resolve)
+    register_created_path(str(owned))
+    wipe_runner_leak_surface()
+
+    assert not owned.exists()
+    assert git_setup_mod._created_paths == set()
+
+
+def test_wipe_preserves_an_active_temp_dir_that_cannot_be_resolved(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """The active temp dir is preserved by its raw name when resolve fails."""
+    active = tmp_path / "unresolvable-active"
+    active.mkdir()
+    owned = tmp_path / "owned.sh"
+    owned.write_text("x\n", encoding="utf-8")
+    monkeypatch.setenv("MERGECRAFT_TEMP_DIR", str(active))
+    monkeypatch.setattr(git_setup_mod, "_temp_dir", None)
+    git_setup_mod._created_paths.clear()
+    register_created_path(str(owned))
+    git_setup_mod._created_paths.add(str(active))
+
+    real_resolve = Path.resolve
+
+    def flaky_resolve(self: Path, strict: bool = False) -> Path:
+        if "unresolvable-active" in str(self):
+            raise OSError("gone")
+        return real_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", flaky_resolve)
+    wipe_runner_leak_surface()
+
+    assert active.exists(), "the active temp dir must survive the wipe"
+    assert not owned.exists()
+    git_setup_mod._created_paths.clear()
+
+
 def test_prepare_temp_dir_for_agent_noop_when_not_root(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:

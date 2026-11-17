@@ -72,7 +72,7 @@ class _StubClient:
 @pytest.fixture(autouse=True)
 def _no_http_instrumentation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "mergecraft.agents.opencode.instrument_httpx",
+        "mergecraft.agents.opencode_serve.instrument_httpx",
         lambda client, tracer=None: None,
     )
 
@@ -92,7 +92,7 @@ def opencode_tracer(monkeypatch: pytest.MonkeyPatch) -> Any:
 
     sink = MemorySink()
     tracer = Tracer(sink=sink, session_id="oc-trace", run_id="oc-run")
-    monkeypatch.setattr("mergecraft.agents.opencode.current_tracer", lambda: tracer)
+    monkeypatch.setattr("mergecraft.agents.opencode_serve.current_tracer", lambda: tracer)
     return {"sink": sink, "tracer": tracer}
 
 
