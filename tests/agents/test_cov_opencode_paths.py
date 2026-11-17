@@ -18,6 +18,8 @@ import httpx
 import pytest
 from tests.agents.conftest import make_agent_run_context
 
+import mergecraft.agents.opencode_config as opencode_config
+import mergecraft.agents.opencode_serve as opencode_serve
 from mergecraft.agents import cli_runner
 from mergecraft.agents import opencode as oc
 from mergecraft.agents.openai_compatible_gateways import (
@@ -357,8 +359,8 @@ def test_build_agent_overrides_merge_into_an_existing_build_agent(
         ),
     )
     monkeypatch.setattr(
-        oc,
-        "_provider_config_for_model",
+        opencode_config,
+        "provider_config_for_model",
         lambda _model: _config(extra_options={"temperature": 0.25, "top_p": 0.8}),
     )
     ctx = make_agent_run_context(tmp_path, resolved_model="gw/model-a")
@@ -382,8 +384,8 @@ def test_build_agent_overrides_create_the_build_agent_when_absent(
         lambda ctx, harness, **kwargs: _render_result({}),
     )
     monkeypatch.setattr(
-        oc,
-        "_provider_config_for_model",
+        opencode_config,
+        "provider_config_for_model",
         lambda _model: _config(extra_options={"temperature": 0.25}),
     )
     ctx = make_agent_run_context(tmp_path, resolved_model="gw/model-a")
@@ -510,9 +512,9 @@ class _FakeClock:
 def killed_pids(monkeypatch: MonkeyPatch) -> list[int]:
     """Capture ``kill_process_group`` targets instead of signalling real pids."""
     killed: list[int] = []
-    monkeypatch.setattr(oc, "kill_process_group", lambda pid: killed.append(pid))
-    monkeypatch.setattr(oc, "register_process_group", lambda _pid: None)
-    monkeypatch.setattr(oc, "unregister_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "kill_process_group", lambda pid: killed.append(pid))
+    monkeypatch.setattr(opencode_serve, "register_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "unregister_process_group", lambda _pid: None)
     return killed
 
 
@@ -579,7 +581,7 @@ def test_boot_reports_the_child_stderr_when_serve_exits_early(
         stderr=b"EACCES: permission denied, mkdir '/github/home/.local'",
     )
     _patch_popen(monkeypatch, proc)
-    monkeypatch.setattr(oc, "time", _FakeClock())
+    monkeypatch.setattr(opencode_serve, "time", _FakeClock())
 
     with pytest.raises(RuntimeError) as excinfo:
         oc._boot_opencode_server(cli="opencode", env={}, cwd=".")
@@ -596,7 +598,7 @@ def test_boot_kills_the_group_when_no_listening_url_is_printed(
     """A serve process that never announces a URL is torn down, not leaked."""
     proc = _FakeServeProc(stdout_lines=[b"starting up\n", b"still starting\n"])
     _patch_popen(monkeypatch, proc)
-    monkeypatch.setattr(oc, "time", _FakeClock())
+    monkeypatch.setattr(opencode_serve, "time", _FakeClock())
 
     with pytest.raises(RuntimeError) as excinfo:
         oc._boot_opencode_server(cli="opencode", env={}, cwd=".")
@@ -613,7 +615,7 @@ def test_boot_returns_a_handle_on_the_announced_url_without_a_trailing_slash(
         stdout_lines=[b"boot\n", b"opencode server listening on http://127.0.0.1:41235/\n"]
     )
     captured = _patch_popen(monkeypatch, proc)
-    monkeypatch.setattr(oc, "time", _FakeClock())
+    monkeypatch.setattr(opencode_serve, "time", _FakeClock())
 
     handle = oc._boot_opencode_server(cli="/usr/bin/opencode", env={}, cwd=".")
 
@@ -667,6 +669,7 @@ def _route(monkeypatch: MonkeyPatch, routes: dict[str, _StubResponse]) -> type[_
     client = type("_Client", (_RoutedClient,), {"routes": routes, "calls": []})
     monkeypatch.setattr(httpx, "AsyncClient", client)
     monkeypatch.setattr(oc, "instrument_httpx", lambda _client, tracer=None: None)
+    monkeypatch.setattr(opencode_serve, "instrument_httpx", lambda _client, tracer=None: None)
     return client
 
 
@@ -776,7 +779,7 @@ async def test_model_is_forwarded_in_the_prompt_payload(monkeypatch: MonkeyPatch
             return await super().post(url, **kwargs)
 
     monkeypatch.setattr(httpx, "AsyncClient", _Recorder)
-    monkeypatch.setattr(oc, "instrument_httpx", lambda _client, tracer=None: None)
+    monkeypatch.setattr(opencode_serve, "instrument_httpx", lambda _client, tracer=None: None)
 
     await oc._prompt_session_http(
         base_url="http://127.0.0.1:1",
@@ -1047,8 +1050,8 @@ async def test_run_reports_a_session_creation_failure(
     proc = _FakeServeProc()
     handle = oc._ServerHandle(base_url="http://127.0.0.1:5", proc=proc)  # type: ignore[arg-type]
     monkeypatch.setattr(oc, "_boot_opencode_server", lambda **kwargs: handle)
-    monkeypatch.setattr(oc, "kill_process_group", lambda _pid: None)
-    monkeypatch.setattr(oc, "unregister_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "kill_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "unregister_process_group", lambda _pid: None)
     _route(monkeypatch, {"/session": _StubResponse(status_code=503, text="server busy")})
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
 
@@ -1066,8 +1069,8 @@ async def test_run_rejects_a_session_response_without_an_id(
     proc = _FakeServeProc()
     handle = oc._ServerHandle(base_url="http://127.0.0.1:5", proc=proc)  # type: ignore[arg-type]
     monkeypatch.setattr(oc, "_boot_opencode_server", lambda **kwargs: handle)
-    monkeypatch.setattr(oc, "kill_process_group", lambda _pid: None)
-    monkeypatch.setattr(oc, "unregister_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "kill_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "unregister_process_group", lambda _pid: None)
     _route(monkeypatch, {"/session": _StubResponse(status_code=200, body={"title": "mergecraft"})})
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
 
@@ -1085,8 +1088,8 @@ async def test_run_converts_a_provider_timeout_into_a_clean_failed_attempt(
     proc = _FakeServeProc()
     handle = oc._ServerHandle(base_url="http://127.0.0.1:5", proc=proc)  # type: ignore[arg-type]
     monkeypatch.setattr(oc, "_boot_opencode_server", lambda **kwargs: handle)
-    monkeypatch.setattr(oc, "kill_process_group", lambda _pid: None)
-    monkeypatch.setattr(oc, "unregister_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "kill_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "unregister_process_group", lambda _pid: None)
     _route(
         monkeypatch,
         {
@@ -1129,8 +1132,8 @@ async def test_run_converts_an_initial_prompt_timeout_into_a_failed_attempt(
     handle = oc._ServerHandle(base_url="http://127.0.0.1:5", proc=proc)  # type: ignore[arg-type]
     handle._recent.append("serve: upstream stalled")
     monkeypatch.setattr(oc, "_boot_opencode_server", lambda **kwargs: handle)
-    monkeypatch.setattr(oc, "kill_process_group", lambda _pid: None)
-    monkeypatch.setattr(oc, "unregister_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "kill_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "unregister_process_group", lambda _pid: None)
     _route(monkeypatch, {"/session": _StubResponse(status_code=200, body={"id": "sess-1"})})
 
     calls: list[str] = []

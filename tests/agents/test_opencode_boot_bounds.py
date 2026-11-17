@@ -30,6 +30,7 @@ import pytest
 from tests.agents.conftest import make_agent_run_context
 
 import mergecraft.agents.opencode as oc
+import mergecraft.agents.opencode_serve as opencode_serve
 from mergecraft.agents import shared
 
 if TYPE_CHECKING:
@@ -224,9 +225,11 @@ def test_boot_registers_the_group_before_the_first_stdout_read(
         registered.append(pid)
         order.append("register")
 
-    monkeypatch.setattr(oc, "register_process_group", _register)
-    monkeypatch.setattr(oc, "unregister_process_group", lambda _pid: order.append("unregister"))
-    monkeypatch.setattr(oc, "kill_process_group", lambda _pid: order.append("kill"))
+    monkeypatch.setattr(opencode_serve, "register_process_group", _register)
+    monkeypatch.setattr(
+        opencode_serve, "unregister_process_group", lambda _pid: order.append("unregister")
+    )
+    monkeypatch.setattr(opencode_serve, "kill_process_group", lambda _pid: order.append("kill"))
 
     handle = oc._boot_opencode_server(cli="/usr/bin/opencode", env={}, cwd=str(tmp_path))
 
@@ -245,10 +248,14 @@ def test_boot_failure_path_unregisters_and_reaps(tmp_path: Path, monkeypatch: Mo
     order: list[str] = []
     proc = _FakeServeProc(order, url=None)
     _shim_popen(monkeypatch, lambda *_a, **_k: proc)
-    monkeypatch.setattr(oc, "register_process_group", lambda _pid: order.append("register"))
-    monkeypatch.setattr(oc, "unregister_process_group", lambda _pid: order.append("unregister"))
-    monkeypatch.setattr(oc, "kill_process_group", lambda _pid: order.append("kill"))
-    monkeypatch.setattr(oc, "time", _FakeClock())
+    monkeypatch.setattr(
+        opencode_serve, "register_process_group", lambda _pid: order.append("register")
+    )
+    monkeypatch.setattr(
+        opencode_serve, "unregister_process_group", lambda _pid: order.append("unregister")
+    )
+    monkeypatch.setattr(opencode_serve, "kill_process_group", lambda _pid: order.append("kill"))
+    monkeypatch.setattr(opencode_serve, "time", _FakeClock())
 
     with pytest.raises(RuntimeError):
         oc._boot_opencode_server(cli="/usr/bin/opencode", env={}, cwd=str(tmp_path))
@@ -263,9 +270,9 @@ def test_boot_keeps_its_synchronous_signature(tmp_path: Path, monkeypatch: Monke
     order: list[str] = []
     proc = _FakeServeProc(order)
     _shim_popen(monkeypatch, lambda *_a, **_k: proc)
-    monkeypatch.setattr(oc, "register_process_group", lambda _pid: None)
-    monkeypatch.setattr(oc, "unregister_process_group", lambda _pid: None)
-    monkeypatch.setattr(oc, "kill_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "register_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "unregister_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "kill_process_group", lambda _pid: None)
 
     result = oc._boot_opencode_server(cli="/usr/bin/opencode", env={}, cwd=str(tmp_path))
 
@@ -286,8 +293,8 @@ def test_boot_succeeds_when_stderr_fills_the_pipe_before_the_url(
 ) -> None:
     """Distinct from the event-loop hang: stderr must be read from spawn."""
     child = _spawn_real_child(monkeypatch, children, _N9_CHILD)
-    monkeypatch.setattr(oc, "register_process_group", lambda _pid: None)
-    monkeypatch.setattr(oc, "unregister_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "register_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "unregister_process_group", lambda _pid: None)
 
     outcome: dict[str, Any] = {}
 
@@ -352,8 +359,8 @@ def _wire_run(
         return AgentResult(success=True, output="cli fallback")
 
     monkeypatch.setattr(oc, "_run_cli_fallback", _fallback)
-    monkeypatch.setattr(oc, "register_process_group", lambda _pid: None)
-    monkeypatch.setattr(oc, "unregister_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "register_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "unregister_process_group", lambda _pid: None)
     return ctx, child
 
 
