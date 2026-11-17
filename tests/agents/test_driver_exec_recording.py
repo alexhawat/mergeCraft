@@ -658,6 +658,7 @@ async def test_opencode_http_turn_records_the_bash_parts_of_the_response(
 ) -> None:
     import httpx
 
+    import mergecraft.agents.opencode_serve as opencode_serve
     from mergecraft.agents import opencode as oc
 
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
@@ -701,7 +702,7 @@ async def test_opencode_http_turn_records_the_bash_parts_of_the_response(
             return _Resp()
 
     monkeypatch.setattr(httpx, "AsyncClient", _Client)
-    monkeypatch.setattr(oc, "instrument_httpx", lambda _client, tracer=None: None)
+    monkeypatch.setattr(opencode_serve, "instrument_httpx", lambda _client, tracer=None: None)
 
     result = await oc._prompt_session_http(
         base_url="http://127.0.0.1:1",

@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
+import mergecraft.agents.opencode_serve as opencode_serve
 from mergecraft.agents import opencode as oc
 from mergecraft.agents.shared import AgentResult, AgentRunContext
 from mergecraft.mcp.tool_state import init_tool_state
@@ -148,8 +149,8 @@ def _stub_install(monkeypatch: MonkeyPatch) -> None:
         return "/usr/bin/opencode-stub"
 
     monkeypatch.setattr(oc, "_install", _install)
-    monkeypatch.setattr(oc, "unregister_process_group", lambda _pid: None)
-    monkeypatch.setattr(oc, "kill_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "unregister_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "kill_process_group", lambda _pid: None)
     monkeypatch.setattr(oc, "instrument_httpx", lambda _client, tracer=None: None)
 
 
