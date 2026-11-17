@@ -1,24 +1,12 @@
-"""Repository memory validation and dismissal-signal eligibility.
+"""Dismissal-signal eligibility for repository memory.
 
 Durable negative-memory storage and filtering live in mergecraft.utils.memory.
 """
 
 from __future__ import annotations
 
-from mergecraft.memory.store import (
-    MIN_HISTORICAL_EVIDENCE,
-    IngestResult,
-    MemoryStoreError,
-    MemoryValidationReport,
-    ingest_dismissal_signal,
-    validate_memory_store,
-)
+from mergecraft.memory.store import ingest_dismissal_signal
 
 __all__ = [
-    "MIN_HISTORICAL_EVIDENCE",
-    "IngestResult",
-    "MemoryStoreError",
-    "MemoryValidationReport",
     "ingest_dismissal_signal",
-    "validate_memory_store",
 ]
