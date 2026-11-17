@@ -497,6 +497,28 @@ def test_wipe_removes_a_registered_directory(tmp_path: Path, monkeypatch: Monkey
     assert git_setup_mod._created_paths == set()
 
 
+def test_wipe_forgets_a_registered_path_that_is_already_gone(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    """A registered path removed by someone else is dropped without a warning."""
+    owned = tmp_path / "already-gone.sh"
+    owned.write_text("x\n", encoding="utf-8")
+    monkeypatch.delenv("MERGECRAFT_TEMP_DIR", raising=False)
+    monkeypatch.setattr(git_setup_mod, "_temp_dir", None)
+    git_setup_mod._created_paths.clear()
+    register_created_path(str(owned))
+    owned.unlink()
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        git_setup_mod.logger, "warning", lambda *args, **_kw: warnings.append(args[0])
+    )
+
+    wipe_runner_leak_surface()
+
+    assert git_setup_mod._created_paths == set()
+    assert warnings == []
+
+
 def test_wipe_removes_a_registered_path_that_cannot_be_resolved(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
