@@ -1,11 +1,8 @@
 """Typed environment model for the Action ``INPUT_*`` settings.
 
-Every input ``action.yml`` maps into the container environment except the GitHub
-token is a field here: the tracing family (``INPUT_TRACING*``) plus the prompt,
-setup, permission and provider inputs. ``INPUT_TOKEN`` is deliberately **not** a
-field — it belongs to the ordered credential chain in
-:mod:`mergecraft.utils.token` (PS-D12), and a second holder of the token buys no
-validation.
+This module holds tracing, prompt, setup, permission and provider inputs,
+plus the separate Discuss opt-in. The ordered credential chain in
+:mod:`mergecraft.utils.token` (PS-D12) reads ``INPUT_TOKEN``.
 
 The GitHub Actions runtime injects an **empty string** for an unset input, so
 ``env_ignore_empty`` is ``True`` here and every field is ``str | None`` (the two
@@ -36,7 +33,7 @@ from pydantic_settings import SettingsConfigDict
 
 from mergecraft.config.env._base import EnvSettings, fail_closed_env_bool
 
-__all__ = ["ActionInputEnv"]
+__all__ = ["ActionInputEnv", "DiscussActionEnv"]
 
 
 def _strip_or_none(value: Any) -> Any:
@@ -122,3 +119,9 @@ class ActionInputEnv(EnvSettings):
     export_untrusted_content: Annotated[
         bool | None, BeforeValidator(_validate_input_export_untrusted_content)
     ] = Field(default=None, validation_alias="INPUT_TRACING_EXPORT_UNTRUSTED_CONTENT")
+
+
+class DiscussActionEnv(EnvSettings):
+    """Read the Discuss opt-in independently of review-only Action inputs."""
+
+    discuss: _StripOrNone = Field(default=None, validation_alias="INPUT_DISCUSS")
