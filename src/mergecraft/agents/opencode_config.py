@@ -37,9 +37,7 @@ from mergecraft.agents.openai_compatible_gateways import (
     provider_config_for_model,
     resolve_gateway_endpoints,
 )
-
-# Preserve runtime introspection of the existing build_security_config signature.
-from mergecraft.agents.shared import AgentRunContext  # noqa: TC001
+from mergecraft.agents.shared import AgentRunContext  # noqa: TC001 — runtime get_type_hints
 from mergecraft.config.env import McpEnv
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.tracing.genai import ModelParams, model_params_from_mapping
