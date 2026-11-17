@@ -16,14 +16,19 @@ if TYPE_CHECKING:
     from mergecraft.mcp.tool_state import ToolState
 
 
-def resolve_review_provider_budget(*, model: str, max_tokens: int) -> TokenBudget:
-    """Use the current review budget or start an advisory provider budget."""
+def resolve_review_provider_budget(
+    *,
+    model: str,
+    max_tokens: int,
+    enforce_ceiling: bool = False,
+) -> TokenBudget:
+    """Use the current review budget or start a provider budget for this dispatch."""
     from mergecraft.agents.token_budget import current_run_budget, token_budget_for
 
     return current_run_budget() or token_budget_for(
         model=model,
         max_tokens=max_tokens,
-        advisory=True,
+        advisory=not enforce_ceiling,
     )
 
 

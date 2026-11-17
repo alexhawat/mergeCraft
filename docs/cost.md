@@ -39,6 +39,14 @@ on your provider, model, plan and the size of the change.
   ([workflows](workflows.md#ignoring-paths)).
 - **A run cap.** The Action `timeout` input bounds run duration (default 1h)
   ([action reference](action-reference.md)).
+- **Token band.** `runBounds.tokenBudget` (default 2M) is an advisory target;
+  `tokenBudgetTolerance` (default 10%) defines a hard ceiling for streaming
+  reviewers. OpenCode (and other NDJSON stream drivers) charge each provider
+  step against that ceiling while the review runs, stop the model before
+  further spend when a step would exceed it, and fold only any remaining usage
+  delta at dispatch finalize. Crossing the target alone does not invalidate a
+  completed review (#1477); crossing the ceiling during dispatch ends the
+  attempt with `inconclusive` and names the budget in the run output.
 - **Preview before spending.** `mergecraft plan` prints the model chain,
   toolset, analyzers and a token estimate without any provider call, and
   `mergecraft review --dry-run` prints the review prompt without calling a

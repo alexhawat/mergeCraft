@@ -364,7 +364,6 @@
       "src/mergecraft/findings/outcomes.py:variable:incomplete_pulls",
       "src/mergecraft/jev/client.py:attribute:last_model",
       "src/mergecraft/jev/client.py:variable:last_model",
-      "src/mergecraft/jev/cost.py:attribute:stop_reason",
       "src/mergecraft/jev/pack_registry.py:variable:corpus_ids",
       "src/mergecraft/jev/pack_registry.py:variable:threshold_keys",
       "src/mergecraft/jev/questions.py:variable:reads_live_catalog",

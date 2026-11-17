@@ -875,6 +875,9 @@ async def _run_agent_task_with_deadline(
     bind_llm_review_timing_tracker()
 
     async def _run_agent_once(slug: str) -> AgentResult:
+        if ctx.budget_tracker is not None:
+            ctx.budget_tracker.stream_tokens_charged = 0
+            ctx.budget_tracker.stream_cost_charged = 0.0
         attempt_model = resolve_model(slug=slug, respect_env_override=False)
         attempt_agent = resolve_runtime_agent(model=attempt_model, settings=settings)
         attempt_agent_id = attempt_agent.name
@@ -944,9 +947,10 @@ async def _run_agent_task_with_deadline(
     from mergecraft.agents.token_budget import bind_run_budget
     from mergecraft.jev.types import PINNED_MODEL
 
+    _bounds = ctx.run_bounds
     provider_budget = resolve_review_provider_budget(
         model=ctx.resolved_model or PINNED_MODEL,
-        max_tokens=ctx.run_bounds.token_budget if ctx.run_bounds is not None else 250_000,
+        max_tokens=_bounds.token_ceiling if _bounds is not None else 250_000,
     )
     with bind_run_budget(provider_budget):
         agent_task = asyncio.create_task(_dispatch_selected_agent())
