@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from mergecraft.classify.blast_radius import RuleSet  # noqa: TC001
 from mergecraft.classify.risk import combine_risk_lanes
 from mergecraft.classify.risk_jev import evaluate_jev_risk, risk_jev_client
 from mergecraft.evidence.run_packet import classify_run_blast_radius
 
 if TYPE_CHECKING:
     from mergecraft.classify import BlastRadiusClassification
-    from mergecraft.classify.blast_radius import FixProofSignal, ScopeSignal
+    from mergecraft.classify.blast_radius import FixProofSignal, RuleSet, ScopeSignal
     from mergecraft.config.settings import RepoSettings, RiskSettings
     from mergecraft.mcp.tool_state import ToolState
 

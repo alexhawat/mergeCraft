@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
-from mergecraft.classify.blast_radius import RuleSet  # noqa: TC001
 from mergecraft.review_policy.ignore_paths import _base_repo_settings, _event_base_sha
 
 if TYPE_CHECKING:
+    from mergecraft.classify.blast_radius import RuleSet
     from mergecraft.config.settings import RepoSettings, RiskSettings
     from mergecraft.scm.protocol import ScmProvider
 
@@ -30,7 +30,7 @@ async def resolve_risk_settings(
     if operator_owned or not isinstance(pull, dict):
         risk = run_start_settings.risk
         raw_rules = run_start_settings.blast_radius_override or {}
-        rule_set: RuleSet = cast(RuleSet, dict(raw_rules))
+        rule_set: RuleSet = cast("RuleSet", dict(raw_rules))  # reason: RuleSet is a TypedDict
         return risk, rule_set
     base_sha = _event_base_sha(event)
     if not base_sha:
@@ -44,7 +44,9 @@ async def resolve_risk_settings(
     if settings is None:
         logger.warning("risk: base config dropped — {}", detail)
         return RiskSettings(), {}
-    return settings.risk, cast(RuleSet, dict(settings.blast_radius_override or {}))
+    return settings.risk, cast(  # reason: RuleSet is a TypedDict
+        "RuleSet", dict(settings.blast_radius_override or {})
+    )
 
 
 __all__ = ["resolve_risk_settings"]
