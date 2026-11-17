@@ -40,6 +40,7 @@ from unittest.mock import MagicMock
 
 from tests.agents.conftest import make_agent_run_context
 
+import mergecraft.agents.opencode_serve as opencode_serve
 from mergecraft.agents import cli_runner, shared
 from mergecraft.agents.shared import spawn_agent_cli
 from mergecraft.utils import privilege as privilege_module
@@ -186,7 +187,7 @@ def test_boot_opencode_server_redirects_home_under_privilege_drop(
         return _FakeProc()
 
     monkeypatch.setattr(opencode_module.subprocess, "Popen", _fake_popen)
-    monkeypatch.setattr(opencode_module, "register_process_group", lambda _pid: None)
+    monkeypatch.setattr(opencode_serve, "register_process_group", lambda _pid: None)
 
     env = {"HOME": "/github/home", "PATH": "/usr/bin"}
     handle = opencode_module._boot_opencode_server(

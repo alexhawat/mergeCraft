@@ -16,7 +16,7 @@ operator-facing lines through ``stream_render`` (plan 13 W7), and surface a
 classifier callback for driver-specific span emission.
 
 Per-harness payload coverage (OB3 — recorded, not faked; plan §OB3.1 note):
-    - **OpenCode HTTP path** (``opencode.py::_prompt_session``): full
+    - **OpenCode HTTP path** (``opencode_serve.py::prompt_session``): full
       visibility — mergeCraft sends the prompt and reads the completion over
       HTTP, so ``gen_ai.input.messages`` / ``gen_ai.output.messages`` /
       ``gen_ai.usage.*`` are all populated. The executed model is NOT

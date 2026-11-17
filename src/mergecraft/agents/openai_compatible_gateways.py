@@ -466,7 +466,7 @@ def resolve_gateway_endpoints() -> dict[str, ProviderConfig]:
     return {singleton.provider_id: singleton}
 
 
-def _provider_config_for_model(model: str) -> ProviderConfig | None:
+def provider_config_for_model(model: str) -> ProviderConfig | None:
     """Return the configured ``ProviderConfig`` for ``provider/model``, if any."""
     slash = model.find("/")
     if slash <= 0:
@@ -509,6 +509,10 @@ def _provider_config_for_model(model: str) -> ProviderConfig | None:
     )
 
 
+# Preserve the former import path for the model gateway lookup.
+_provider_config_for_model = provider_config_for_model
+
+
 def _extra_options_for_registry_provider(provider_id: str) -> dict[str, Any]:
     """Resolve ``extra_options`` including indexed ``…EXTRA_OPTIONS_<N>`` env."""
     env_index = _registry_env_index_for_provider(provider_id)
@@ -543,6 +547,7 @@ __all__ = [
     "has_gateway_env",
     "has_legacy_gateway_preset_credentials",
     "legacy_gateway_preset_provider_labels",
+    "provider_config_for_model",
     "require_capabilities",
     "resolve_gateway_endpoint",
     "resolve_gateway_endpoints",
