@@ -22,6 +22,7 @@ from mergecraft.jev.types import (
     LIKELY_CONFIDENCE_FLOOR,
     NOUL_ACT_FLOOR,
     REPRO_PACK_ID,
+    RISK_PACK_ID,
     UNIT_PACK_ID,
     UNIT_THRESHOLD_CORPUS_IDS,
 )
@@ -91,6 +92,12 @@ PACK_REGISTRY: Final[dict[str, PackRegistryEntry]] = {
     REPRO_PACK_ID: PackRegistryEntry(
         pack_id=REPRO_PACK_ID,
         state_fields=frozenset({"claim", "page"}),
+        threshold_keys=frozenset(),
+        corpus_ids=(),
+    ),
+    RISK_PACK_ID: PackRegistryEntry(
+        pack_id=RISK_PACK_ID,
+        state_fields=frozenset({"diff"}),
         threshold_keys=frozenset(),
         corpus_ids=(),
     ),

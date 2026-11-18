@@ -11,6 +11,7 @@ Exports:
     lens_pack: One Choice per catalog lens, read live (plan 21 D9).
     criterion_pack: One noul per behaviour-verification criterion.
     repro_pack: One noul for a reproduce claim.
+    risk_pack: PR diff questions for the raise-only risk overlay.
     get_pack: Lookup by versioned pack id.
     select_lenses: One ``lens/v1`` call per PR.
     select_lenses_or_fallback: ``jev:`` toggle + confidence-floor fallback.
@@ -34,6 +35,7 @@ from mergecraft.jev.types import (
     LIKELY_CONFIDENCE_FLOOR,
     REPRO_ANSWER_NAME,
     REPRO_PACK_ID,
+    RISK_PACK_ID,
     UNIT_PACK_ID,
     ChoiceAnswer,
     JevError,
@@ -327,6 +329,34 @@ def criterion_pack() -> QuestionPack:
     )
 
 
+def risk_pack() -> QuestionPack:
+    """Pack ``risk/v1`` — yes/no risk questions over the PR diff (#1489)."""
+    return QuestionPack(
+        pack_id=RISK_PACK_ID,
+        questions=tuple(
+            QuestionSpec(name=name, kind="noul", instructions=text)
+            for name, text in (
+                (
+                    "data_loss",
+                    "Does this diff delete or rewrite persisted data outside a migrations/ path?",
+                ),
+                (
+                    "authz",
+                    "Does this diff change an authentication or authorization decision?",
+                ),
+                (
+                    "secrets",
+                    "Does this diff handle, log, or transmit secrets or credentials?",
+                ),
+                (
+                    "flag_enabled",
+                    "Does this diff enable a feature flag or change a flag default to on?",
+                ),
+            )
+        ),
+    )
+
+
 def repro_pack() -> QuestionPack:
     """Pack ``repro/v1`` — one noul for a reproduce claim (behaviour verify)."""
     return QuestionPack(
@@ -349,6 +379,7 @@ _PACK_FACTORIES = {
     LENS_PACK_ID: lens_pack,
     CRITERION_PACK_ID: criterion_pack,
     REPRO_PACK_ID: repro_pack,
+    RISK_PACK_ID: risk_pack,
 }
 
 
@@ -356,7 +387,7 @@ def get_pack(pack_id: str) -> QuestionPack:
     """Return the versioned pack for ``pack_id``.
 
     Args:
-        pack_id: One of the five registered pack ids.
+        pack_id: A registered pack id.
 
     Returns:
         QuestionPack: The named pack.

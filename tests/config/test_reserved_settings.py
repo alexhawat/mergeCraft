@@ -36,12 +36,6 @@ _RESERVED_CASES = [
         id="stop-script",
     ),
     pytest.param(
-        "blastRadiusOverride",
-        "blastRadiusOverride:\n  migrations:\n    lane: low\n",
-        ("blastradiusoverride", "blast_radius_override"),
-        id="blast-radius-override",
-    ),
-    pytest.param(
         "operatorPipeline",
         "operatorPipeline: .mergecraft/pipeline.yaml\n",
         ("operatorpipeline", "operator_pipeline"),

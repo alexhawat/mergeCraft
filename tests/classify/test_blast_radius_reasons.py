@@ -144,6 +144,59 @@ CODE_CASES: list[tuple[str, dict[str, Any], str, str | None]] = [
         "high",
         "irreversible_infra",
     ),
+    (
+        "flag.added_off",
+        _c(
+            ["service/flags/new_experiment.yaml"],
+            {"diff": "+new_feature:\n+  default: false\n", "lines_added": 2, "lines_deleted": 0},
+        ),
+        "low",
+        None,
+    ),
+    (
+        "flag.enabled",
+        _c(
+            ["service/flags/experiment.yaml", "src/pkg/module.py"],
+            {
+                "diff": (
+                    "diff --git a/service/flags/experiment.yaml b/service/flags/experiment.yaml\n"
+                    "@@ -0,0 +1,2 @@\n+experiment:\n+  default: true\n"
+                    "diff --git a/src/pkg/module.py b/src/pkg/module.py\n"
+                    "@@ -1 +1 @@\n-return x\n+return y\n"
+                ),
+                "lines_added": 3,
+                "lines_deleted": 1,
+            },
+        ),
+        "high",
+        "tests",
+    ),
+    (
+        "diff.authz_outside",
+        _c(
+            ["src/pkg/views.py"],
+            {
+                "diff": "-if request.user.is_admin:\n+if request.user.is_staff:\n",
+                "lines_added": 1,
+                "lines_deleted": 1,
+            },
+        ),
+        "high",
+        "auth_security_payment",
+    ),
+    (
+        "diff.data_deletion_outside",
+        _c(
+            ["src/app/store.py"],
+            {
+                "diff": '+conn.execute("DELETE FROM sessions;")\n',
+                "lines_added": 1,
+                "lines_deleted": 0,
+            },
+        ),
+        "high",
+        "migrations",
+    ),
     ("paths.public_api", _c(["src/pkg/__init__.py", "tests/test_pkg.py"]), "medium", "public_api"),
     ("deps.changed", _c(["uv.lock"]), "medium", "dependencies"),
     ("tests.missing", _c(["src/pkg/module.py"]), "medium", "tests"),
@@ -579,9 +632,13 @@ def _record_for(paths: list[str]) -> str:
     return render_deterministic_review_block(packet=packet, trust_tier="trusted")
 
 
+def _blast_radius_lines(block: str, *, needle: str) -> list[str]:
+    return [line for line in block.splitlines() if needle in line and "**Blast radius:**" in line]
+
+
 def test_the_run_record_prints_the_lane_and_its_codes_on_one_line() -> None:
     block = _record_for(["migrations/0001_init.sql", "src/auth/session.py"])
-    lines = [line for line in block.splitlines() if "paths.migrations" in line]
+    lines = _blast_radius_lines(block, needle="paths.migrations")
 
     assert len(lines) == 1
     assert "paths.auth" in lines[0]
@@ -590,7 +647,7 @@ def test_the_run_record_prints_the_lane_and_its_codes_on_one_line() -> None:
 
 def test_the_run_record_line_follows_the_classification() -> None:
     block = _record_for(["ruff.toml"])
-    lines = [line for line in block.splitlines() if "paths.review_config" in line]
+    lines = _blast_radius_lines(block, needle="paths.review_config")
 
     assert len(lines) == 1
     assert "medium" in lines[0]
@@ -708,7 +765,7 @@ def _record_for_change(change: dict[str, Any]) -> tuple[str, Any]:
 
 def test_the_run_record_line_lists_the_unmeasured_gates() -> None:
     block, classification = _record_for_change({"changed_paths": ["docs/guide.md"]})
-    lines = [line for line in block.splitlines() if "signal.missing.diff" in line]
+    lines = _blast_radius_lines(block, needle="signal.missing.diff")
     unmeasured = [gate.gate for gate in classification.checklist if gate.passed is None]
 
     assert len(lines) == 1
@@ -721,9 +778,48 @@ def test_the_run_record_line_lists_the_unmeasured_gates() -> None:
 
 def test_the_run_record_line_has_no_suffix_when_every_gate_is_measured() -> None:
     block, classification = _record_for_change(_c(["migrations/0001_init.sql"]))
-    lines = [line for line in block.splitlines() if "paths.migrations" in line]
+    lines = _blast_radius_lines(block, needle="paths.migrations")
 
     assert all(gate.passed is not None for gate in classification.checklist)
     assert len(lines) == 1
     assert "high" in lines[0]
     assert "not measured" not in lines[0]
+
+
+@pytest.mark.parametrize(
+    ("path", "hunk"),
+    [
+        ("docs/runbook.md", "-Authentication was required\n+Access forbidden when token missing"),
+        ("src/operations.md", "+Use DELETE FROM only to remove test data."),
+        ("src/views.py", " if user.is_admin:\n-old()\n+new()"),
+        ("src/views.py", "+# Check authentication with authorize(user)"),
+        ("src/views.py", "+return user  # Should we authorize(user)?"),
+        ("src/views.py", '+message = "Access forbidden when token missing."'),
+        ("src/store.py", '-conn.execute("DELETE FROM sessions;")\n+archive_sessions()'),
+        ("src/store.py", '+logger.info("DELETE FROM is forbidden in production")'),
+        ("ops/maintenance.sql", " DELETE FROM sessions;\n+SELECT COUNT(*) FROM sessions;"),
+    ],
+    ids=(
+        "runbook-prose",
+        "source-directory-doc",
+        "unchanged-auth-context",
+        "auth-comment",
+        "inline-auth-comment",
+        "auth-string",
+        "removed-data-operation",
+        "sql-in-log-message",
+        "unchanged-sql-context",
+    ),
+)
+def test_prose_context_and_removed_sql_do_not_escalate(path: str, hunk: str) -> None:
+    """Only an affected authorization check or a new data operation raises risk."""
+    result = classify_blast_radius(
+        {
+            "changed_paths": [path],
+            "diff_stats": {"diff": f"diff --git a/{path} b/{path}\n@@ -1 +1 @@\n{hunk}\n"},
+        }
+    )
+    assert result.lane != "high"
+    assert {"diff.authz_outside", "diff.data_deletion_outside"}.isdisjoint(
+        reason.code for reason in result.reasons
+    )
