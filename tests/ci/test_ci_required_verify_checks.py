@@ -15,6 +15,7 @@ from tests.ci.workflow_support import REPO_ROOT, read_text
 # protection changes — optional live check below catches drift when ``gh`` works.
 _EXPECTED = frozenset(
     {
+        "Verify (rules py3.14)",
         "Verify (static + build py3.11)",
         "Verify (static + build py3.14)",
         "Verify (tests py3.11 1/2)",
