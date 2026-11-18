@@ -78,7 +78,7 @@ def test_committed_config_lists_trufflehog_sarif_artifact() -> None:
 @pytest.mark.parametrize(
     ("job", "names"),
     [
-        ("static", {"ruff-sarif", "mypy-sarif", "actionlint-sarif", "zizmor-sarif"}),
+        ("static-checks", {"ruff-sarif", "mypy-sarif", "actionlint-sarif", "zizmor-sarif"}),
         ("security", {"bandit-sarif", "semgrep-sarif", "trufflehog-sarif"}),
     ],
 )
@@ -108,7 +108,7 @@ def test_sarif_uploads_continue_on_github_artifact_errors(job: str, names: set[s
 
 def test_static_workflow_sarif_emit_continues_on_github_release_errors() -> None:
     """A GitHub-releases 504 must not fail Verify after ``make ci-static`` passed."""
-    static = load_workflow("ci.yml")["jobs"]["static"]
+    static = load_workflow("ci.yml")["jobs"]["static-checks"]
     assert isinstance(static, dict)
     for step in as_list(static.get("steps")):
         if not isinstance(step, dict):

@@ -12,6 +12,10 @@ from tests.ci.workflow_support import as_list, job, load_workflow, workflow_on
 
 _PREREQUISITES = {
     "changes",
+    "static-checks",
+    "test",
+    "security",
+    "coverage-gate",
     "toolchain",
     "deployment-candidate",
     "eval-gate",
@@ -22,6 +26,24 @@ _PREREQUISITES = {
     "image-scan-slim",
     "image-scan-analyzers",
 }
+
+
+def test_static_work_starts_without_waiting_for_the_final_gate() -> None:
+    ci = load_workflow("ci.yml")
+    checks = job(ci, "static-checks")
+    gate = job(ci, "static")
+    assert as_list(checks["needs"]) == ["changes"]
+    assert checks["strategy"]["matrix"]["python"] == ["3.11", "3.14"]
+    assert checks["strategy"]["fail-fast"] is False
+    assert not checks.get("continue-on-error", False)
+    assert checks["runs-on"] == gate["runs-on"] == "ubuntu-latest"
+    assert checks["name"] != gate["name"]
+    assert any(step.get("run") == "make ci-static" for step in checks["steps"])
+    assert len(gate["steps"]) == 1, "the final gate must not repeat the static work"
+    assert gate["strategy"]["matrix"]["python"] == ["3.11", "3.14"]
+    assert gate["strategy"]["fail-fast"] is False
+    assert not gate.get("continue-on-error", False)
+    assert not gate["steps"][0].get("continue-on-error", False)
 
 
 @pytest.mark.parametrize("failed_job", sorted(_PREREQUISITES))
@@ -65,6 +87,8 @@ def test_image_only_required_guard_still_requires_verified_candidate(verifier: s
     guard = job(load_workflow("ci.yml"), "static")["steps"][0]["run"]
     results: dict[str, dict[str, object]] = {name: {"result": "skipped"} for name in _PREREQUISITES}
     results["changes"] = {"result": "success", "outputs": {"image_only": "true"}}
+    for name in ("static-checks", "test", "security", "coverage-gate"):
+        results[name] = {"result": "success"}
     results["deployment-candidate"] = {"result": verifier}
     run = subprocess.run(
         ["bash", "-ec", guard],
@@ -74,3 +98,48 @@ def test_image_only_required_guard_still_requires_verified_candidate(verifier: s
         check=False,
     )
     assert (run.returncode == 0) == (verifier == "success")
+
+
+@pytest.mark.parametrize("scope", ["code", "docs", "image"])
+@pytest.mark.parametrize("failed_job", sorted(_PREREQUISITES))
+@pytest.mark.parametrize("status", ["failure", "cancelled", "skipped"])
+def test_final_gate_enforces_prerequisites_for_each_pr_scope(
+    scope: str, failed_job: str, status: str
+) -> None:
+    """Allowed path skips cannot hide failures or skips of the parallel checks."""
+    skipped = {
+        "eval-gate",
+        "privilege-root",
+        "deterministic-integration",
+        "action-e2e",
+        "image-scan-slim",
+        "image-scan-analyzers",
+    }
+    if scope == "image":
+        skipped |= {"toolchain", "privileged-proofs"}
+    elif scope == "code":
+        skipped = set()
+    results: dict[str, dict[str, object]] = {
+        name: {"result": "skipped" if name in skipped else "success"} for name in _PREREQUISITES
+    }
+    results["changes"]["outputs"] = {
+        "code": "true" if scope == "code" else "false",
+        "image_only": "true" if scope == "image" else "false",
+    }
+    results[failed_job]["result"] = status
+    guard = job(load_workflow("ci.yml"), "static")["steps"][0]["run"]
+    run = subprocess.run(
+        ["bash", "-ec", guard],
+        env={
+            **os.environ,
+            "REQUIRED_JOB_RESULTS": json.dumps(results),
+            "EVENT_NAME": "pull_request",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert (run.returncode == 0) == (failed_job in skipped and status == "skipped"), (
+        run.stdout + run.stderr
+    )
