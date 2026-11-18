@@ -198,6 +198,7 @@ async def test_native_review_reads_policy_at_base_sha(
     ("frequency", "action", "prior_review", "runs_agent"),
     [
         pytest.param("everyPush", "synchronize", "approved", True, id="every-push"),
+        pytest.param("everyPush", "synchronize", "same-head", False, id="same-head-comment"),
         pytest.param("oncePerPr", "synchronize", "approved", False, id="once-already-reviewed"),
         pytest.param("oncePerPr", "synchronize", "none", True, id="once-no-reviewed-history"),
         pytest.param(
@@ -221,14 +222,21 @@ async def test_native_review_reads_policy_at_base_sha(
 async def test_frequency_uses_verified_formal_review_history(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     frequency: str,
     action: str,
     prior_review: str,
     runs_agent: bool,
 ) -> None:
-    from types import SimpleNamespace
-
+    from mergecraft.evidence.packet import (
+        PACKET_SCHEMA_VERSION,
+        AgentMetadata,
+        Decision,
+        MergeEvidencePacket,
+    )
+    from mergecraft.evidence.run_packet import classify_run_blast_radius
     from mergecraft.findings.ledger import REVIEW_BODY_MARKER, render_deterministic_review_block
+    from tests.support.publication import APP_DIFF
 
     request = prior_review in {"request-changes", "formal-changes"}
     outcome = (
@@ -236,9 +244,22 @@ async def test_frequency_uses_verified_formal_review_history(
         if request
         else ("inconclusive" if prior_review in {"inconclusive", "injected-finding"} else "passed")
     )
-    packet = SimpleNamespace(
-        decision=SimpleNamespace(verdict="failure" if request else "success", reason="test review"),
+    packet = MergeEvidencePacket(
+        schema_version=PACKET_SCHEMA_VERSION,
+        change_id="acme/demo#7",
+        agent=AgentMetadata(id="reviewer", version="test", model="test"),
+        files_changed=["src/app.py"],
+        findings=[],
+        deterministic_checks=[],
+        decision=Decision(
+            verdict="failure" if request else "success", reason="test review", decided_by="test"
+        ),
         agent_terminal_verdict="request_changes" if request else "approve",
+        blast_radius=classify_run_blast_radius(
+            APP_DIFF,
+            scope={"declared": False, "invalid": False, "globs": []},
+            fix_proof={"required": False, "status": "not-required"},
+        ),
     )
     if prior_review == "injected-finding":
         from mergecraft.analyzers.finding import make_finding
@@ -263,18 +284,24 @@ async def test_frequency_uses_verified_formal_review_history(
         verdict_diagnostic="agent_approved_but_blocked" if request else "approved",
         publication_entrypoint="publish_pull_request_review",
     )
+    assert "- **Risk:**" in body
+
+    history_reads: list[int] = []
 
     async def list_reviews(
-        _self: FakeGitHubClient, *_args: Any, **_kwargs: Any
+        _self: FakeGitHubClient, _owner: str, _repo: str, pull_number: int, **_kwargs: Any
     ) -> list[dict[str, Any]]:
+        history_reads.append(pull_number)
         if prior_review == "none":
             return []
         formal_states = {"approved": "APPROVED", "formal-changes": "CHANGES_REQUESTED"}
         return [
             {
                 "state": formal_states.get(prior_review, "COMMENTED"),
-                "commit_id": "3" * 40,
+                "commit_id": ("1" if prior_review == "same-head" else "3") * 40,
                 "body": f"{body}\n{REVIEW_BODY_MARKER}\n*via mergecraft*",
+                "id": 567,
+                "html_url": "https://example.com/?token=review-url-canary",
                 "user": {
                     "login": "contributor" if prior_review == "spoofed" else "mergecraft[bot]",
                     "type": "Bot",
@@ -295,8 +322,34 @@ async def test_frequency_uses_verified_formal_review_history(
         settings=RepoSettings.model_validate({"review": {"triggers": {"frequency": frequency}}}),
         event_name="pull_request_target",
         event_payload=_event(action=action, draft=False),
+        env={"GITHUB_ACTIONS": "true", "GITHUB_SERVER_URL": "https://github.example.com"},
+        capture_status_checks=prior_review == "same-head",
     )
     assert bool(record.agent_runs) is runs_agent
+    if prior_review == "same-head":
+        assert history_reads == [7]
+        assert record.result is not None
+        assert record.result.evidence_packet_path is not None
+        packet_path = Path(record.result.evidence_packet_path)
+        packet_text = await asyncio.to_thread(packet_path.read_text, encoding="utf-8")
+        triage = json.loads(packet_text)["triage"]
+        assert triage["recognizer"] == "sameHeadSha"
+        assert triage["relied_on_checks"] == [
+            "https://github.example.com/acme/demo/pull/7#pullrequestreview-567"
+        ]
+        assert "review-url-canary" not in packet_text
+        assert (
+            next(
+                check["conclusion"]
+                for check in record.status_check_runs
+                if check["name"] == "mergecraft-approval"
+            )
+            == "neutral"
+        )
+        captured = capsys.readouterr()
+        assert "This head SHA already has a trusted review" in captured.out
+        assert "review-url-canary" not in captured.out
+        assert "review-url-canary" not in captured.err
 
 
 @pytest.mark.parametrize(

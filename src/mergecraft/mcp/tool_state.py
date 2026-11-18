@@ -16,7 +16,8 @@ if TYPE_CHECKING:
 
     from mergecraft.analyzers.dispositions import DispositionLedger
     from mergecraft.ci.red_green import RedGreenEvidence
-    from mergecraft.config.settings import RedGreenReceiptSettings
+    from mergecraft.classify.blast_radius import BlastRadiusClassification, RuleSet
+    from mergecraft.config.settings import RedGreenReceiptSettings, RiskSettings
     from mergecraft.config.trust_policy import AgentSandboxDecision
     from mergecraft.findings.ledger import FindingLedger
     from mergecraft.modes import Mode
@@ -529,6 +530,10 @@ class ToolState:
     # ``main.py``. Despite what the merge-evidence plan assumed, this is *not*
     # a tool-call log — the trajectory record (#43) keeps its own field below.
     usage_entries: list[Any] = field(default_factory=list)
+    # Precomputed blast-radius / risk grade for the evidence packet (#1489).
+    risk_classification: BlastRadiusClassification | None = None
+    risk_settings: RiskSettings | None = None
+    blast_rule_set: RuleSet | None = None
     # Code-measured LLM review generation timing (#983 task 6).
     llm_review_timing: Any | None = None
     # Every MCP tool call this run made, in order (#43, D8). Appended by

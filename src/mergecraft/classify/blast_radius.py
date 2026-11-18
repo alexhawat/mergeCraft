@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import re
-from typing import Final, Literal, NamedTuple, NotRequired, cast
+from typing import TYPE_CHECKING, Annotated, Final, Literal, NamedTuple, NotRequired, cast
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from typing_extensions import TypedDict
 
 from mergecraft.classify.path_globs import path_full_matches_glob
 from mergecraft.classify.review_config import is_review_config_path
+from mergecraft.diff import diff_lines, parse_diff
 from mergecraft.review_policy.manifest_names import (
     BUILD_MANIFEST_NAMES,
     is_dependency_manifest_path,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 Lane = Literal["low", "medium", "high"]
 AutoMergeLane = Literal["eligible", "assisted", "human_review", "forbidden"]
@@ -101,6 +105,14 @@ class RuleSet(TypedDict, total=False):
     source_without_tests: RuleOverride
     irreversible_infra: RuleOverride
     review_config: RuleOverride
+    # Glob patterns for feature-flag files (#1489). When omitted, shipped defaults apply.
+    flag_file_globs: Annotated[
+        list[str],
+        Field(
+            validation_alias=AliasChoices("flagFileGlobs", "flag_file_globs"),
+            serialization_alias="flagFileGlobs",
+        ),
+    ]
 
 
 class LaneReason(BaseModel):
@@ -161,6 +173,13 @@ DEFAULT_RULE_SET: dict[Category, RuleOverride] = {
 }
 
 _LANE_RANK: dict[Lane, int] = {"low": 0, "medium": 1, "high": 2}
+
+
+def lane_rank(lane: Lane) -> int:
+    """Return the shared ordering for deterministic and Jev risk lanes."""
+    return _LANE_RANK[lane]
+
+
 _AUTO_MERGE_LANE: dict[Lane, AutoMergeLane] = {
     "low": "eligible",
     "medium": "assisted",
@@ -237,6 +256,34 @@ _SECRET_ASSIGNMENT: Final[re.Pattern[str]] = re.compile(
     r"(?:password|secret_key|private_key)\s*=|aws_secret_access_key"
 )
 _DIFF_SIGNAL_KEYS = ("diff", "diff_text", "patch", "text")
+_DEFAULT_FLAG_FILE_GLOBS: Final[tuple[str, ...]] = (
+    "**/flags/**",
+    "**/feature_flags.*",
+    "**/features.yaml",
+    "**/features.yml",
+)
+_FLAG_SETTING: Final[re.Pattern[str]] = re.compile(
+    r"""(?:^|[,{])[ \t]*["']?(enabled|default|rollout)["']?[ \t]*:[ \t]*"""
+    r"(true|on|100%|false|off|0%?)(?=[ \t,}\]\r#]|$)",
+    re.IGNORECASE,
+)
+_COMMENT_LINE = ("#", "//", "/*", "*", "--", "<!--", ";")
+_INLINE_COMMENT = re.compile(r"[ \t](?:#|//|--)[ \t]")
+_AUTH_OUTSIDE_DIFF: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:authorize|authenticate|authentication|is_admin|permission_?denied|forbidden)"
+    r"[ \t]*(?=\(|\.[a-z_]|=)"
+    r"|^(?:if|elif|unless|return|raise|throw)[ \t]+(?:not[ \t]+)?(?:[a-z_]\w*\.)*"
+    r"(?:is_admin|permission_?denied|forbidden)\b",
+    re.IGNORECASE,
+)
+_DATA_DELETE_OUTSIDE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:delete[ \t]+from|truncate)[ \t]+\S",
+    re.IGNORECASE,
+)
+_SQL_CODE_CONTEXT = re.compile(
+    r"""\b(?:exec(?:ute(?:many)?)?|query|raw|prepare|sql)[ \t]*(?:\(|=)[ \t]*[fru]*["'`]+[ \t]*$""",
+    re.IGNORECASE,
+)
 
 SIGNAL_MISSING_CATEGORY = "signal_missing"
 """Category recorded when the classifier was not given the inputs it measures.
@@ -329,7 +376,7 @@ def _is_deployment_path(path: str) -> bool:
 def _diff_text(diff_stats: dict[str, object]) -> str:
     return "\n".join(
         value for key in _DIFF_SIGNAL_KEYS if isinstance((value := diff_stats.get(key)), str)
-    ).lower()
+    )
 
 
 LANE_REASON_CATALOGUE: dict[str, Lane] = {
@@ -365,6 +412,10 @@ LANE_REASON_CATALOGUE: dict[str, Lane] = {
     "fix.no-receipt": "medium",
     "fix.receipt.invalid": "medium",
     "fix.receipt.mismatch": "medium",
+    "flag.added_off": "low",
+    "flag.enabled": "high",
+    "diff.authz_outside": "high",
+    "diff.data_deletion_outside": "high",
 }
 """The closed catalogue of lane-reason codes and their **default** lanes (#1056).
 
@@ -455,6 +506,10 @@ _REASON_SPECS: dict[str, _ReasonSpec] = {
     "fix.no-receipt": _ReasonSpec(None, "fix_proof"),
     "fix.receipt.invalid": _ReasonSpec(None, "fix_proof"),
     "fix.receipt.mismatch": _ReasonSpec(None, "fix_proof"),
+    "flag.added_off": _ReasonSpec(None, None),
+    "flag.enabled": _ReasonSpec(None, None),
+    "diff.authz_outside": _ReasonSpec(None, "auth_security_payment"),
+    "diff.data_deletion_outside": _ReasonSpec(None, "migrations"),
 }
 
 # Floors a repository override may raise but never lower: the review-config
@@ -466,7 +521,81 @@ _SMALL_SOURCE_MAX_LINES = 5
 _SCOPE_DRIFT_MAX_LISTED = 10
 
 
-def _detect(paths: list[str], diff_text: str) -> tuple[list[str], dict[str, str]]:
+def _flag_file_globs(rule_set: RuleSet | None) -> tuple[str, ...]:
+    if rule_set is None:
+        return _DEFAULT_FLAG_FILE_GLOBS
+    raw = rule_set.get("flag_file_globs")
+    if not isinstance(raw, list) or not raw:
+        return _DEFAULT_FLAG_FILE_GLOBS
+    return tuple(item for item in raw if isinstance(item, str) and item.strip())
+
+
+def _changed_diff_lines(diff_text: str, paths: list[str]) -> Iterator[tuple[str, bool, str]]:
+    """Yield a changed line's path, whether it was added, and its stripped text.
+
+    Git sections bind each hunk to its file. A caller may also supply one
+    headerless excerpt when its sole changed path identifies the file.
+    """
+    parsed = parse_diff(diff_text)
+    files = [
+        (section.new_path, section.old_path, section.text)
+        for section in parsed.files
+        if not section.binary
+    ]
+    if not parsed.files and len(paths) == 1:
+        files = [(paths[0], paths[0], parsed.preamble)]
+    for new_path, old_path, patch in files:
+        in_hunk = not parsed.files
+        for line in diff_lines(patch):
+            if line.startswith("@@ "):
+                in_hunk = True
+            if not in_hunk:
+                continue
+            if new_path and line.startswith("+"):
+                yield new_path, True, line[1:].lstrip()
+            elif old_path and line.startswith("-"):
+                yield old_path, False, line[1:].lstrip()
+
+
+def _diff_risk_codes(paths: list[str], diff_text: str, rule_set: RuleSet | None) -> set[str]:
+    """Collect risk reasons from changed lines within their own files."""
+    if not diff_text:
+        return set()
+    flag_globs = _flag_file_globs(rule_set)
+    flag_paths = {
+        path for path in paths if any(path_full_matches_glob(glob, path) for glob in flag_globs)
+    }
+    code_paths = {
+        path for path in paths if _is_hand_written_source(path) and not _is_doc_path(path)
+    }
+    codes: set[str] = set()
+    for path, added, line in _changed_diff_lines(diff_text, paths):
+        if not line or line.startswith(_COMMENT_LINE):
+            continue
+        code = _INLINE_COMMENT.split(line, maxsplit=1)[0]
+        if added and path in flag_paths:
+            for setting in _FLAG_SETTING.finditer(code):
+                key, value = setting.group(1).lower(), setting.group(2).lower()
+                if value in {"true", "on", "100%"}:
+                    codes.add("flag.enabled")
+                elif key != "rollout":
+                    codes.add("flag.added_off")
+        if path not in code_paths:
+            continue
+        if _AUTH_OUTSIDE_DIFF.search(code):
+            codes.add("diff.authz_outside")
+        if (
+            added
+            and (match := _DATA_DELETE_OUTSIDE.search(code))
+            and (path.lower().endswith(".sql") or _SQL_CODE_CONTEXT.search(code[: match.start()]))
+        ):
+            codes.add("diff.data_deletion_outside")
+    return codes
+
+
+def _detect(
+    paths: list[str], diff_text: str, *, rule_set: RuleSet | None = None
+) -> tuple[list[str], dict[str, str]]:
     """Return the legacy category labels and the detected codes with their messages."""
     categories: list[str] = []
     hits: dict[str, str] = {}
@@ -478,9 +607,10 @@ def _detect(paths: list[str], diff_text: str) -> tuple[list[str], dict[str, str]
                 categories.append(label)
 
     lowered = [path.lower().strip("/") for path in paths]
+    lowered_diff = diff_text.lower()
     if any(_contains_path_part(path, ("migration", "migrations")) for path in lowered):
         add("paths.migrations", "a changed path is under a migrations directory", "migrations")
-    if _DESTRUCTIVE_SQL.search(diff_text):
+    if _DESTRUCTIVE_SQL.search(lowered_diff):
         add(
             "diff.destructive_sql",
             "the diff text contains a schema-changing SQL statement",
@@ -517,7 +647,7 @@ def _detect(paths: list[str], diff_text: str) -> tuple[list[str], dict[str, str]
                 "permissions",
             )
 
-    secret_diff = _SECRET_ASSIGNMENT.search(diff_text) is not None
+    secret_diff = _SECRET_ASSIGNMENT.search(lowered_diff) is not None
     workflow_path = any(path.startswith(".github/workflows/") for path in lowered)
     deployment_path = any(_is_deployment_path(path) for path in lowered)
     secrets_config_path = any(
@@ -582,11 +712,38 @@ def _detect(paths: list[str], diff_text: str) -> tuple[list[str], dict[str, str]
             "a path under infra/terraform/ changed",
             "irreversible_infra",
         )
-    if _IRREVERSIBLE_COMMAND.search(diff_text):
+    if _IRREVERSIBLE_COMMAND.search(lowered_diff):
         add(
             "diff.irreversible_command",
             "the diff text contains an irreversible command",
             "irreversible_infra",
+        )
+
+    diff_risk_codes = _diff_risk_codes(paths, diff_text, rule_set)
+    if "flag.enabled" in diff_risk_codes:
+        add(
+            "flag.enabled",
+            "a feature flag default or rollout changed to enabled/on",
+        )
+    elif "flag.added_off" in diff_risk_codes:
+        add("flag.added_off", "a feature flag was added defaulting off")
+
+    auth_path_hit = any(
+        code in hits for code in ("paths.auth", "paths.security", "paths.permissions")
+    )
+    if not auth_path_hit and "diff.authz_outside" in diff_risk_codes:
+        add(
+            "diff.authz_outside",
+            "the diff changes authorization logic outside auth/security/permissions paths",
+            "auth_security_payment",
+        )
+
+    migration_path = any(_contains_path_part(path, ("migration", "migrations")) for path in lowered)
+    if not migration_path and "diff.data_deletion_outside" in diff_risk_codes:
+        add(
+            "diff.data_deletion_outside",
+            "the diff deletes or truncates persisted data outside migrations/",
+            "migrations",
         )
 
     return categories, hits
@@ -971,7 +1128,7 @@ def classify_blast_radius(
     paths = raw_paths if isinstance(raw_paths, list) else []
     raw_stats = change.get("diff_stats")
     diff_stats = raw_stats if isinstance(raw_stats, dict) else {}
-    categories, hits = _detect(paths, _diff_text(diff_stats))
+    categories, hits = _detect(paths, _diff_text(diff_stats), rule_set=rule_set)
     reasons = _lane_reasons(
         missing=missing, hits=hits, paths=paths, diff_stats=diff_stats, rule_set=rule_set
     )

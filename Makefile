@@ -167,8 +167,10 @@ agents-check: ## Agent registry model/prompt/tool validation gate (AP1)
 	$(UV) run python -m mergecraft.agents.catalog_docs
 
 PYTEST_SPLIT := $(if $(MERGECRAFT_TEST_SPLITS),--splits $(MERGECRAFT_TEST_SPLITS) --group $(MERGECRAFT_TEST_GROUP) --splitting-algorithm least_duration,)
+# MERGECRAFT_TEST_NODES narrows the run to space-separated pytest nodes (PR test
+# selection, #1493). The shell expands it, so its contents are never parsed as code.
 test: ## Unit tests
-	$(PYTEST) tests -v --tb=short --strict-markers -m "not integration and not coverage" $(PYTEST_XDIST) $(PYTEST_SPLIT) \
+	$(PYTEST) $${MERGECRAFT_TEST_NODES:-tests} -v --tb=short --strict-markers -m "not integration and not coverage" $(PYTEST_XDIST) $(PYTEST_SPLIT) \
 		--randomly-seed=$${MERGECRAFT_PYTEST_RANDOM_SEED:-424242}
 
 # Least-duration sharding is only honest when the timings exist. This refreshes

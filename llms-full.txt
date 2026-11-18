@@ -424,6 +424,8 @@ Do not set these in CI or production workflows.
 
 ## Rules for agents
 
+- Before every push to this repository, run `make lint`, `make typecheck`, and
+  `uv run pre-commit run --all-files` (tier 1 — see [`docs/ci-tiers.md`](docs/ci-tiers.md)).
 - Do not weaken trust-tier or fail-closed security behaviour
   ([`docs/workflows.md`](docs/workflows.md), [`SECURITY.md`](SECURITY.md)).
 - Conventional Commits; subject ≤ 72 characters; no `--no-verify` unless the operator allows it.

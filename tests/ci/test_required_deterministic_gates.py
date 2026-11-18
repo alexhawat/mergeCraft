@@ -12,6 +12,7 @@ from tests.ci.workflow_support import as_list, job, load_workflow, workflow_on
 
 _PREREQUISITES = {
     "changes",
+    "verify-rules",
     "static-checks",
     "test",
     "security",
@@ -44,6 +45,54 @@ def test_static_work_starts_without_waiting_for_the_final_gate() -> None:
     assert gate["strategy"]["fail-fast"] is False
     assert not gate.get("continue-on-error", False)
     assert not gate["steps"][0].get("continue-on-error", False)
+
+
+_GATED_ON_RULES = (
+    "toolchain",
+    "test",
+    "deterministic-integration",
+    "slim-image",
+    "action-e2e",
+    "image-scan-slim",
+    "image-scan-analyzers",
+)
+_TIER_THREE_ON_PRS = (
+    "deterministic-integration",
+    "slim-image",
+    "action-e2e",
+    "image-scan-slim",
+    "image-scan-analyzers",
+    "privilege-root",
+)
+
+
+def test_rules_job_always_reports_and_gates_the_expensive_jobs() -> None:
+    """Tier 1 (#1493): a rule violation stops the expensive jobs from starting.
+
+    The rules job has no job-level ``if``: a skipped job skips every job that
+    needs it, which would fail the required gate on docs-only and image-only PRs.
+    """
+    ci = load_workflow("ci.yml")
+    rules = job(ci, "verify-rules")
+    assert "if" not in rules
+    assert as_list(rules["needs"]) == ["changes"]
+    assert any(
+        step.get("run") == "make lint && make typecheck && make lockcheck"
+        for step in rules["steps"]
+    )
+    for name in _GATED_ON_RULES:
+        assert "verify-rules" in as_list(job(ci, name)["needs"]), name
+
+
+def test_tier_three_jobs_still_run_on_code_prs() -> None:
+    """No merge queue requires tier 3 yet, so it must keep gating PRs (#1493)."""
+    ci = load_workflow("ci.yml")
+    assert "merge_group" in workflow_on(ci)
+    for name in _TIER_THREE_ON_PRS:
+        condition = job(ci, name)["if"]
+        assert "needs.changes.outputs.code == 'true'" in condition, name
+    for name in set(_TIER_THREE_ON_PRS) - {"slim-image"}:
+        assert name in _PREREQUISITES, name
 
 
 @pytest.mark.parametrize("failed_job", sorted(_PREREQUISITES))
@@ -87,6 +136,7 @@ def test_image_only_required_guard_still_requires_verified_candidate(verifier: s
     guard = job(load_workflow("ci.yml"), "static")["steps"][0]["run"]
     results: dict[str, dict[str, object]] = {name: {"result": "skipped"} for name in _PREREQUISITES}
     results["changes"] = {"result": "success", "outputs": {"image_only": "true"}}
+    results["verify-rules"] = {"result": "success"}
     for name in ("static-checks", "test", "security", "coverage-gate"):
         results[name] = {"result": "success"}
     results["deployment-candidate"] = {"result": verifier}
