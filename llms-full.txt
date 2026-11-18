@@ -1127,7 +1127,8 @@ failed mid-run. Re-runs edit the same comment in place via the existing
 sticky marker — they do not append a second one.
 
 The comment and the published review body both render from
-`render_deterministic_review_block()` in `findings/ledger.py`, so the two
+`render_deterministic_review_block()` in
+[`findings/record_render.py`](../src/mergecraft/findings/record_render.py), so the two
 surfaces cannot drift. The agent cannot suppress the block by supplying its own
 copy of the markers — dedupe keeps the server's version.
 

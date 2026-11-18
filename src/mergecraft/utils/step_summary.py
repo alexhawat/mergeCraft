@@ -39,9 +39,9 @@ def render_step_summary(
     approval-shaped positive cells become ``inconclusive`` and the record names
     that no credentialed reviewer ran.
     """
-    from mergecraft.findings.ledger import (
-        _APPROVAL_SHAPED_DIAGNOSTIC,
-        _APPROVAL_SHAPED_OUTCOME_LABELS,
+    from mergecraft.findings.record_render import (
+        APPROVAL_SHAPED_DIAGNOSTIC,
+        APPROVAL_SHAPED_OUTCOME_LABELS,
         reconcile_outcome,
         record_is_not_an_approval,
         render_deterministic_review_block,
@@ -69,13 +69,13 @@ def render_step_summary(
     outcome_label = reconcile_outcome(
         value=outcome_label,
         not_an_approval=not_an_approval,
-        positive=_APPROVAL_SHAPED_OUTCOME_LABELS,
+        positive=APPROVAL_SHAPED_OUTCOME_LABELS,
     )
     if diagnostic:
         diagnostic = reconcile_outcome(
             value=diagnostic,
             not_an_approval=not_an_approval,
-            positive=_APPROVAL_SHAPED_DIAGNOSTIC,
+            positive=APPROVAL_SHAPED_DIAGNOSTIC,
         )
 
     header_lines = [

@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.findings.ledger import (
-    _run_sticky_scope,
     fetch_sticky_progress_comment,
     hydrate_finding_ledger_from_progress_comment,
     merge_ledger_into_comment,
 )
+from mergecraft.findings.ledger_io import run_sticky_scope
 from mergecraft.mcp.shared import ToolClass, execute, tool
 from mergecraft.mcp.tool_state import ProgressComment, ReviewReplyRecord, primary_repo_state
 from mergecraft.types import INCREMENTAL_REVIEW_MODE
@@ -246,7 +246,7 @@ def report_progress_tool(ctx: ToolContext) -> ToolSpec:
             existing_sticky: dict[str, Any] | None = None
             if not target_plan:
                 try:
-                    with _run_sticky_scope(ctx):
+                    with run_sticky_scope(ctx):
                         existing_sticky = await fetch_sticky_progress_comment(
                             ctx.scm,
                             ctx.repo.owner,

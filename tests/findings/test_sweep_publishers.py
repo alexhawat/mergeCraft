@@ -42,7 +42,7 @@ class ChecksGitHub(FakeGitHub):
 def _no_ambient_publisher(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MERGECRAFT_REVIEWER_BOT_LOGIN", raising=False)
     monkeypatch.setattr(
-        "mergecraft.findings.ledger._publisher_login_from_repo_config", lambda: "", raising=True
+        "mergecraft.findings.ledger_io._publisher_login_from_repo_config", lambda: "", raising=True
     )
 
 

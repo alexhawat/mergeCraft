@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from mergecraft.findings import ledger
+from mergecraft.findings import ledger, ledger_io
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
@@ -128,7 +128,7 @@ async def test_blank_body_selected_sticky_is_updated_not_duplicated(
             "user": {"login": "github-actions[bot]", "type": "Bot"},
         }
 
-    monkeypatch.setattr(ledger, "fetch_sticky_progress_comment", _select_blank)
+    monkeypatch.setattr(ledger_io, "fetch_sticky_progress_comment", _select_blank)
 
     await ledger.upsert_sticky_progress_comment(ctx, "### mergeCraft run record")
 

@@ -12,7 +12,7 @@ import pytest
 from mergecraft.agents.gates import TRUSTED_PACKET_DECIDED_BY
 from mergecraft.evidence.build import build_packet
 from mergecraft.evidence.packet import Decision
-from mergecraft.findings import ledger
+from mergecraft.findings import ledger, ledger_io
 from mergecraft.mcp import review as review_mod
 from mergecraft.mcp.tool_state import ReviewRecord
 from tests.review_record.conftest import make_scoped_finding, require_symbol
@@ -509,7 +509,7 @@ async def test_bot_only_legacy_record_is_not_adopted_without_a_run_publisher(
     monkeypatch.delenv("MERGECRAFT_REVIEWER_BOT_LOGIN", raising=False)
     # The read-side legacy trust is the configured bot, never the shared job bot;
     # the run-bound selector still resolves no publisher identity and fails closed.
-    monkeypatch.setattr(ledger, "_publisher_login_from_config", _RUN_BOT_LOGIN)
+    monkeypatch.setattr(ledger_io, "_publisher_login_from_config", _RUN_BOT_LOGIN)
     scm = _Scm()
     ctx = _context(tmp_path, scm)
     book = ledger.FindingLedger()

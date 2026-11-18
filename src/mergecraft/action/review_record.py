@@ -380,11 +380,8 @@ async def _recover_attempt_record(
 async def _read_legacy_progress(
     resolved_ctx: ToolContext, pull_number: int, block: str
 ) -> tuple[str, dict[str, Any] | None]:
-    from mergecraft.findings.ledger import (
-        _run_bound_sticky_id,
-        _run_sticky_scope,
-        fetch_sticky_progress_comment,
-    )
+    from mergecraft.findings.ledger import fetch_sticky_progress_comment
+    from mergecraft.findings.ledger_io import run_bound_sticky_id, run_sticky_scope
     from mergecraft.review.authorship import expected_publisher_logins
 
     owner, repo = resolved_ctx.repo.owner, resolved_ctx.repo.name
@@ -393,7 +390,7 @@ async def _read_legacy_progress(
     # expected-publisher set, never a bare bot-type match. With neither, the read is
     # skipped and the record says so.
     legacy: dict[str, Any] | None = None
-    if not expected_publisher_logins(resolved_ctx) and _run_bound_sticky_id(resolved_ctx) is None:
+    if not expected_publisher_logins(resolved_ctx) and run_bound_sticky_id(resolved_ctx) is None:
         logger.info(
             "learnings migration: earlier progress comment read skipped for PR #{} — no "
             "publisher identity and no run-bound comment id prove who wrote it",
@@ -405,7 +402,7 @@ async def _read_legacy_progress(
             "carried into this record.\n"
         )
     else:
-        with _run_sticky_scope(resolved_ctx):
+        with run_sticky_scope(resolved_ctx):
             legacy = await fetch_sticky_progress_comment(resolved_ctx.scm, owner, repo, pull_number)
     return block, legacy
 
