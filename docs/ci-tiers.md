@@ -17,10 +17,12 @@ column says where it runs today.
   `make typecheck` and `make lockcheck`. The expensive jobs `needs:` it, so a
   lint error stops integration, the image build, the scans and the E2E from
   starting.
-- **Tier 2 shards are change-scoped on PRs.** `scripts/ci_select_tests.py` maps
-  the changed paths to test nodes and `make test` runs only those, with the
-  unit lane's markers, xdist and pinned seed. A change it cannot narrow runs
-  the whole tree. The coverage gate still runs the full unit suite on every PR.
+- **Tier 2 keeps the full unit lane on PRs.** Both py3.11 shards and the py3.14
+  coverage gate run the whole unit suite on every code PR. `Changed tests
+  (py3.11, fast feedback)` additionally runs just the tests that
+  `scripts/ci_select_tests.py` maps from the changed paths, as an early signal.
+  It is not a required check, and it does no work when the change cannot be
+  narrowed (a dependency change, or nothing that maps to an existing test).
 - **Tier 3 still runs on every code PR.** `ci.yml` listens for `merge_group`,
   but the repository has no merge queue yet, so nothing would run or require
   these jobs there. They stay on PRs, and stay required through
@@ -35,7 +37,8 @@ column says where it runs today.
 |-----|------|---------|--------|
 | `Verify (rules py3.14)` | 1 | PR, merge group, push | Cheapest signal; gates the expensive jobs |
 | `Verify (toolchain py*)` | 2 | PR, merge group, push | Lockfile and toolchain match on both Pythons |
-| `Verify (tests …)` | 2 | PR (change-scoped), merge group and push (full) | Unit tests for the change |
+| `Verify (tests …)` | 2 | PR, merge group, push | Full unit lane on py3.11 |
+| `Changed tests (py3.11, fast feedback)` | 2 | PR | Early signal from the tests mapped to the changed paths; not required |
 | `Verify (coverage gate py3.14)` | 2 | PR, merge group, push | Full unit suite plus coverage floors and patch coverage |
 | `Verify (security audit …)` | 2 | PR, merge group, push | Secret and dependency scans |
 | `Static checks (py*)` | 2 | PR, merge group, push | Build, docs and workflow lint |

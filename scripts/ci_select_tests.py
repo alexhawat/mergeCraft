@@ -16,6 +16,13 @@ def _changed_files(base_ref: str) -> list[str]:
     return [line.strip() for line in out.splitlines() if line.strip()]
 
 
+# A change to these can affect any test, so it is never narrowed.
+_FULL_TREE_PATHS = frozenset({"pyproject.toml", "uv.lock"})
+# Always run beside a narrowed selection, so the run is never empty when every
+# selected test is deselected by the unit lane's markers.
+_ANCHOR = "tests/ci/test_ci_select_tests.py"
+
+
 def _tests_for_path(path: str) -> set[str]:
     p = PurePosixPath(path)
     if p.parts and p.parts[0] == "tests":
@@ -24,7 +31,7 @@ def _tests_for_path(path: str) -> set[str]:
         rel = PurePosixPath(*p.parts[2:])
         test_file = PurePosixPath("tests") / rel.parent / f"test_{rel.stem}.py"
         return {test_file.as_posix()}
-    if path.startswith(".github/workflows/") or path in {"Makefile", "pyproject.toml", "uv.lock"}:
+    if path.startswith(".github/workflows/") or path == "Makefile":
         return {"tests/ci"}
     return set()
 
@@ -35,7 +42,7 @@ def main() -> int:
     parser.add_argument(
         "--fallback",
         default="tests",
-        help="Node or directory when selection is empty",
+        help="Node or directory when the change cannot be narrowed",
     )
     args = parser.parse_args()
     try:
@@ -43,12 +50,15 @@ def main() -> int:
     except subprocess.CalledProcessError:
         print(args.fallback)
         return 0
-    selected: set[str] = {"tests/conftest.py", "tests/ci"}
+    if _FULL_TREE_PATHS.intersection(files):
+        print(args.fallback)
+        return 0
+    selected: set[str] = set()
     for path in files:
         selected |= _tests_for_path(path)
     existing = {node for node in selected if Path(node).is_file() or Path(node).is_dir()}
-    # Nothing beyond the always-on seeds: the change cannot be narrowed.
-    if len(existing) <= 2 and files:
+    # No changed path maps to a test that exists: the change cannot be narrowed.
+    if not existing:
         print(args.fallback)
         return 0
     # The result is a space-separated list, so a path with whitespace cannot be
@@ -56,6 +66,8 @@ def main() -> int:
     if any(any(char.isspace() for char in node) for node in existing):
         print(args.fallback)
         return 0
+    if Path(_ANCHOR).is_file():
+        existing.add(_ANCHOR)
     print(" ".join(sorted(existing)))
     return 0
 

@@ -150,23 +150,48 @@ jobs:
           # Tracing extra only on the test job: exporter unit tests need logfire/otel
           # installed, but static/toolchain jobs must not pay the sync cost (D14 / TH8).
           MERGECRAFT_UV_EXTRAS: tracing
-      - name: Resolve PR test selection
-        if: matrix.python != '3.14' && github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
-        id: pr_tests
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          git fetch --no-tags origin "${BASE_REF:-main}"
-          # Change-scoped selection (#1493); the full tree when it cannot be narrowed.
-          nodes=$(python3 scripts/ci_select_tests.py --base "${BASE_REF:-main}" || echo tests)
-          echo "nodes=${nodes}" >> "$GITHUB_OUTPUT"
       - name: Unit tests (shard ${{ matrix.group }} of 2)
         if: matrix.python != '3.14' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
         env:
           MERGECRAFT_TEST_SPLITS: "2"
           MERGECRAFT_TEST_GROUP: ${{ matrix.group }}
-          # Empty off PRs, where `make test` then runs the whole tree. Passed as
-          # data: the value is derived from changed file names.
+        run: make test
+
+  changed-tests:
+    name: Changed tests (py3.11, fast feedback)
+    # Tier 2 (#1493): the tests mapped from the changed paths, as an early
+    # signal. It is not a required check and replaces nothing: the py3.11 shards
+    # above still run the whole unit lane on every code PR. When the selection
+    # cannot be narrowed it does no work, because the shards already cover it.
+    needs: [changes, verify-rules]
+    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/bootstrap
+        with:
+          python-version: "3.11"
+        env:
+          MERGECRAFT_UV_EXTRAS: tracing
+      - name: Resolve PR test selection
+        id: pr_tests
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "${BASE_REF:-main}"
+          nodes=$(python3 scripts/ci_select_tests.py --base "${BASE_REF:-main}" || echo tests)
+          echo "nodes=${nodes}" >> "$GITHUB_OUTPUT"
+      - name: Selection not narrowed
+        if: steps.pr_tests.outputs.nodes == 'tests'
+        run: echo "::notice title=Changed tests::No narrower selection for this change; the unit shards run the whole lane."
+      - name: Changed tests
+        if: steps.pr_tests.outputs.nodes != 'tests'
+        env:
+          # Passed as data: the value is derived from changed file names.
           MERGECRAFT_TEST_NODES: ${{ steps.pr_tests.outputs.nodes }}
         run: make test
 
