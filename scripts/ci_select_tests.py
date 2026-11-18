@@ -47,7 +47,13 @@ def main() -> int:
     for path in files:
         selected |= _tests_for_path(path)
     existing = {node for node in selected if Path(node).is_file() or Path(node).is_dir()}
+    # Nothing beyond the always-on seeds: the change cannot be narrowed.
     if len(existing) <= 2 and files:
+        print(args.fallback)
+        return 0
+    # The result is a space-separated list, so a path with whitespace cannot be
+    # carried in it; run everything rather than hand pytest half a path.
+    if any(any(char.isspace() for char in node) for node in existing):
         print(args.fallback)
         return 0
     print(" ".join(sorted(existing)))

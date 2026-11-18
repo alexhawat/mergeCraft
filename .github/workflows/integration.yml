@@ -172,9 +172,10 @@ jobs:
           MERGECRAFT_HEAD_COVERAGE_PATH: ${{ runner.temp }}/coverage-head.json
         run: bash scripts/ci_coverage_delta_gate.sh
 
-  # npm audit and actionlint/zizmor are blocking steps of ci.yml's required
-  # jobs now (`Verify (security audit py3.14)` and `Verify (static + build
-  # py3.14)`); this job keeps only the advisory ruff families.
+  # npm audit and actionlint/zizmor are blocking steps in ci.yml now: npm audit
+  # in `Verify (security audit py3.14)`, actionlint/zizmor in `Static checks
+  # (py3.14)`. The required `Verify (static + build py3.14)` gate fails when
+  # either does. This job keeps only the advisory ruff families.
   security-scope:
     needs: changes
     name: Ruff advisory families (non-blocking)

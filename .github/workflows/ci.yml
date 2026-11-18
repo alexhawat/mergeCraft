@@ -38,16 +38,20 @@ jobs:
 
   verify-rules:
     name: Verify (rules py3.14)
+    # Tier 1 (#1493): fail fast on rule violations before the expensive jobs
+    # start. No job-level `if`: a skipped job would skip everything that needs
+    # it, so docs-only and image-only PRs report success without doing the work.
     needs: changes
-    if: needs.changes.outputs.image_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/bootstrap
+        if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         with:
           python-version: "3.14"
       - name: Tier 1 rules (lint, typecheck, lockfile)
@@ -153,6 +157,7 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: |
           git fetch --no-tags origin "${BASE_REF:-main}"
+          # Change-scoped selection (#1493); the full tree when it cannot be narrowed.
           nodes=$(python3 scripts/ci_select_tests.py --base "${BASE_REF:-main}" || echo tests)
           echo "nodes=${nodes}" >> "$GITHUB_OUTPUT"
       - name: Unit tests (shard ${{ matrix.group }} of 2)
@@ -160,14 +165,10 @@ jobs:
         env:
           MERGECRAFT_TEST_SPLITS: "2"
           MERGECRAFT_TEST_GROUP: ${{ matrix.group }}
-          UV_PROJECT_ENVIRONMENT: .venv-dev
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ] && [ -n "${{ steps.pr_tests.outputs.nodes }}" ]; then
-            uv run pytest ${{ steps.pr_tests.outputs.nodes }} -q --tb=short \
-              --splits "${MERGECRAFT_TEST_SPLITS}" --group "${MERGECRAFT_TEST_GROUP}"
-          else
-            make test
-          fi
+          # Empty off PRs, where `make test` then runs the whole tree. Passed as
+          # data: the value is derived from changed file names.
+          MERGECRAFT_TEST_NODES: ${{ steps.pr_tests.outputs.nodes }}
+        run: make test
 
   coverage-gate:
     name: Verify (coverage gate py3.14)
@@ -261,8 +262,10 @@ jobs:
 
   deterministic-integration:
     needs: [changes, verify-rules]
-    # Tier 3: merge queue and main post-push, not ordinary PR pushes (#1493).
-    if: needs.changes.outputs.image_only != 'true' && github.event_name != 'pull_request'
+    # The one keyless integration run per PR: integration.yml no longer repeats
+    # `make test-integration`. Docs-only PRs skip it. Tier 3 (#1493): it also
+    # runs on `merge_group`, and stays on PRs until a merge queue requires it.
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     name: Required integration (py${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 55
@@ -345,7 +348,7 @@ jobs:
   slim-image:
     name: Build slim image (shared)
     needs: [changes, verify-rules]
-    if: needs.changes.outputs.image_only != 'true' && github.event_name != 'pull_request'
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -380,7 +383,7 @@ jobs:
 
   action-e2e:
     needs: [changes, verify-rules, slim-image]
-    if: needs.changes.outputs.image_only != 'true' && github.event_name != 'pull_request'
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     uses: ./.github/workflows/e2e.yml
     with:
       required-security: true
@@ -391,7 +394,7 @@ jobs:
   # required Verify (static) check. Same skip rule as the image builds above.
   image-scan-slim:
     needs: [changes, verify-rules, slim-image]
-    if: needs.changes.outputs.image_only != 'true' && github.event_name != 'pull_request'
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     uses: ./.github/workflows/image-security.yml
     with:
       image: slim
@@ -399,16 +402,15 @@ jobs:
 
   image-scan-analyzers:
     needs: [changes, verify-rules]
-    if: needs.changes.outputs.image_only != 'true' && github.event_name != 'pull_request'
+    if: needs.changes.outputs.image_only != 'true' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
     uses: ./.github/workflows/image-security.yml
     with:
       image: analyzers
 
-  static:
-    name: Verify (static + build py${{ matrix.python }})
-    needs: [changes, verify-rules, toolchain, deployment-candidate, eval-gate, privilege-root, privileged-proofs, deterministic-integration, action-e2e, image-scan-slim, image-scan-analyzers]
-    # Keep the named matrix checks visible to branch protection on every PR.
-    if: always()
+  static-checks:
+    name: Static checks (py${{ matrix.python }})
+    # Static work needs only classification, not images or acceptance tests.
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -416,51 +418,6 @@ jobs:
       matrix:
         python: ["3.11", "3.14"]
     steps:
-      - name: Require successful deterministic prerequisites
-        env:
-          REQUIRED_JOB_RESULTS: ${{ toJSON(needs) }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          python3 - <<'PYCODE'
-          import json, os, sys
-          jobs = json.loads(os.environ["REQUIRED_JOB_RESULTS"])
-          outputs = jobs.get("changes", {}).get("outputs", {})
-          image_only = outputs.get("image_only") == "true"
-          docs_only = os.environ.get("EVENT_NAME") == "pull_request" and outputs.get("code") != "true"
-          tier3_skipped = os.environ.get("EVENT_NAME") == "pull_request"
-          tier3_jobs = {
-              "eval-gate",
-              "privilege-root",
-              "privileged-proofs",
-              "deterministic-integration",
-              "action-e2e",
-              "image-scan-slim",
-              "image-scan-analyzers",
-              "slim-image",
-          }
-          image_skipped = {"toolchain", *tier3_jobs}
-          docs_skipped = set(tier3_jobs)
-          def may_skip(name):
-              if tier3_skipped and name in tier3_jobs:
-                  return True
-              return (image_only and name in image_skipped) or (docs_only and name in docs_skipped)
-
-          def check_ok(name, result):
-              if result == "success":
-                  return True
-              if result == "skipped" and may_skip(name):
-                  return True
-              return False
-
-          failed = {
-              name: job.get("result")
-              for name, job in jobs.items()
-              if not check_ok(name, job.get("result"))
-          }
-          if not jobs or failed:
-              print(f"Required checks did not succeed: {failed or 'no prerequisite results'}", file=sys.stderr)
-              sys.exit(1)
-          PYCODE
       - name: Docs-only notice
         if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'true' && needs.changes.outputs.image_only != 'true'
         run: echo "::notice title=Verify (docs-only)::Running docs-check only — full static/build tier skipped."
@@ -522,7 +479,7 @@ jobs:
           make action-pin-check
       # First-wave CI SARIF for mergeCraft ingest (#464 / D8). Upload even when
       # the static tier failed so the review still sees the tool's findings.
-      # A failed prerequisite skips checkout/bootstrap, so no report tools exist then.
+      # Emit reports only when bootstrap installed the tools successfully.
       - name: Emit ruff and mypy SARIF
         if: always() && steps.bootstrap.outcome == 'success' && (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
         env:
@@ -587,6 +544,43 @@ jobs:
           name: zizmor-sarif
           path: .sarif/zizmor.sarif
           if-no-files-found: warn
+
+  static:
+    name: Verify (static + build py${{ matrix.python }})
+    needs: [changes, verify-rules, static-checks, test, security, coverage-gate, toolchain, deployment-candidate, eval-gate, privilege-root, privileged-proofs, deterministic-integration, action-e2e, image-scan-slim, image-scan-analyzers]
+    # Preserve the required check names as final gates, including after failed
+    # or skipped dependencies. Static work runs in parallel in static-checks.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14"]
+    steps:
+      - name: Require successful deterministic prerequisites
+        env:
+          REQUIRED_JOB_RESULTS: ${{ toJSON(needs) }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os, sys
+          jobs = json.loads(os.environ["REQUIRED_JOB_RESULTS"])
+          outputs = jobs.get("changes", {}).get("outputs", {})
+          image_only = outputs.get("image_only") == "true"
+          docs_only = os.environ.get("EVENT_NAME") == "pull_request" and outputs.get("code") != "true"
+          image_skipped = {"toolchain", "eval-gate", "privilege-root", "privileged-proofs", "deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers"}
+          docs_skipped = {"eval-gate", "privilege-root", "deterministic-integration", "action-e2e", "image-scan-slim", "image-scan-analyzers"}
+          def may_skip(name):
+              return (image_only and name in image_skipped) or (docs_only and name in docs_skipped)
+          failed = {
+              name: job.get("result") for name, job in jobs.items()
+              if job.get("result") != ("skipped" if may_skip(name) else "success")
+          }
+          if not jobs or failed:
+              print(f"Required checks did not succeed: {failed or 'no prerequisite results'}", file=sys.stderr)
+              sys.exit(1)
+          PYCODE
 
   security:
     name: Verify (security audit py${{ matrix.python }})

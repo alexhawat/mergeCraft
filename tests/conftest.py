@@ -59,6 +59,41 @@ def _reset_run_scope_settings_snapshot() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_git_setup_run_state() -> Iterator[None]:
+    """Restore ``git_setup``'s per-run module state so tests do not leak it.
+
+    ``create_temp_directory`` and the ``register_*`` helpers record the active
+    temp dir and owned paths in module globals and write ``MERGECRAFT_TEMP_DIR``
+    straight into ``os.environ``. A test that left those behind changed which
+    branches the next test in the same worker took, so the module's measured
+    coverage depended on shard membership. The two ``atexit`` flags are left
+    alone: the handlers they record really do stay registered for the process.
+    """
+    from mergecraft.utils import git_setup
+
+    temp_dir = git_setup._temp_dir
+    env_temp_dir = os.environ.get("MERGECRAFT_TEMP_DIR")
+    created_paths = set(git_setup._created_paths)
+    run_owned_dirs = set(git_setup._run_owned_dirs)
+    cleanup_at_exit = dict(git_setup._cleanup_at_exit)
+    agent_export_dirs = dict(git_setup._agent_export_dirs)
+    yield
+    git_setup._temp_dir = temp_dir
+    if env_temp_dir is None:
+        os.environ.pop("MERGECRAFT_TEMP_DIR", None)
+    else:
+        os.environ["MERGECRAFT_TEMP_DIR"] = env_temp_dir
+    git_setup._created_paths.clear()
+    git_setup._created_paths.update(created_paths)
+    git_setup._run_owned_dirs.clear()
+    git_setup._run_owned_dirs.update(run_owned_dirs)
+    git_setup._cleanup_at_exit.clear()
+    git_setup._cleanup_at_exit.update(cleanup_at_exit)
+    git_setup._agent_export_dirs.clear()
+    git_setup._agent_export_dirs.update(agent_export_dirs)
+
+
+@pytest.fixture(autouse=True)
 def _clear_ambient_github_event(monkeypatch: pytest.MonkeyPatch) -> None:
     """Clear the runner's ``GITHUB_EVENT_*`` so no test inherits it (#760, F3).
 

@@ -58,15 +58,9 @@ def test_required_check_names_are_still_produced_by_ci() -> None:
 
 def test_py314_shards_do_not_repeat_the_suite_the_coverage_gate_runs() -> None:
     steps = _steps("ci.yml", "test")
-    assert any(
-        step.get("name") == "Covered by the coverage gate (py3.14)"
-        and step["if"] == "matrix.python == '3.14'"
-        for step in steps
-    )
-    unit_steps = [s for s in steps if str(s.get("name", "")).startswith("Unit tests")]
-    assert len(unit_steps) == 1
-    assert "matrix.python != '3.14'" in unit_steps[0]["if"]
-    assert "make test" in unit_steps[0]["run"]
+    run_steps = [s for s in steps if s.get("run") == "make test"]
+    assert len(run_steps) == 1
+    assert "matrix.python != '3.14'" in run_steps[0]["if"]
     for step in steps:
         if "uses" in step:
             assert "matrix.python != '3.14'" in step["if"], step.get("name")
@@ -132,6 +126,7 @@ def test_docs_only_prs_skip_image_builds_and_scans() -> None:
         "eval-gate",
     ):
         condition = doc["jobs"][name]["if"]
+        assert "needs.changes.outputs.code == 'true'" in condition, name
         assert "github.event_name != 'pull_request'" in condition, name
 
 
@@ -150,13 +145,13 @@ def test_mutation_advisory_is_nightly_only() -> None:
     assert "schedule" in condition
 
 
-def test_static_waits_for_both_image_scans() -> None:
+def test_required_final_gate_waits_for_both_image_scans() -> None:
     needs = as_list(job(load_workflow("ci.yml"), "static")["needs"])
     assert {"image-scan-slim", "image-scan-analyzers"} <= set(needs)
 
 
 def test_required_static_job_blocks_on_workflow_lint() -> None:
-    step = _step("ci.yml", "static", "Workflow lint (actionlint + zizmor, blocking)")
+    step = _step("ci.yml", "static-checks", "Workflow lint (actionlint + zizmor, blocking)")
     assert step["run"] == "make workflow-lint"
     assert not step.get("continue-on-error", False)
 
@@ -194,7 +189,7 @@ def test_image_scan_fails_on_unwaived_findings_and_checks_waiver_expiry() -> Non
 
 
 def test_docs_only_guard_requires_skips_only_for_docs_only_prs() -> None:
-    """The static guard: docs-only PRs may skip tier-3 jobs; toolchain must still succeed."""
+    """The static guard: a docs-only PR may skip the image jobs, a code PR may not."""
     import json
     import subprocess
 
@@ -217,15 +212,13 @@ def test_docs_only_guard_requires_skips_only_for_docs_only_prs() -> None:
     docs_skips = {
         "eval-gate",
         "privilege-root",
-        "privileged-proofs",
         "deterministic-integration",
         "action-e2e",
         "image-scan-slim",
         "image-scan-analyzers",
     }
     assert run("pull_request", "false", docs_skips) == 0
-    # Tier-3 jobs are intentionally skipped on pull_request events (#1493).
-    assert run("pull_request", "true", docs_skips) == 0
+    assert run("pull_request", "true", docs_skips) == 1
     assert run("push", "false", docs_skips) == 1
     assert run("pull_request", "false", docs_skips | {"toolchain"}) == 1
     assert run("pull_request", "true", set()) == 0

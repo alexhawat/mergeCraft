@@ -223,11 +223,12 @@ def test_the_pin_check_ci_step_does_not_shallow_fetch_the_default_branch() -> No
     origin/main:<path>``; without the ref it prints a skip notice and returns
     clean, so the rung-bump guard silently stops guarding. Staleness moved to
     ``action-pin-staleness.yml`` (#669), which is where a shallow fetch would
-    now under-report the lag — asserted separately over there. The ``static``
-    job checks out ``fetch-depth: 0``, so a full fetch costs nothing here.
+    now under-report the lag — asserted separately over there. The
+    ``static-checks`` job checks out ``fetch-depth: 0``, so a full fetch costs
+    nothing here.
     """
-    static = job(load_workflow("ci.yml"), "static")
-    steps = [s for s in static["steps"] if "pin freshness" in str(s.get("name", "")).lower()]
+    static_checks = job(load_workflow("ci.yml"), "static-checks")
+    steps = [s for s in static_checks["steps"] if "pin freshness" in str(s.get("name", "")).lower()]
     assert len(steps) == 1, f"expected one pin-freshness step, got {len(steps)}"
     run = steps[0]["run"]
 

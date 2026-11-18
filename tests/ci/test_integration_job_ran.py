@@ -43,8 +43,8 @@ def test_integration_job_runs_supported_python_matrix() -> None:
     assert bootstrap["with"]["python-version"] == "${{ matrix.python }}"
     execution = next(step for step in steps if step.get("run") == "make test-integration")
     assert not execution.get("if"), "the integration suite step itself never skips"
-    assert "github.event_name != 'pull_request'" in integration["if"], (
-        "tier-3 integration runs on merge queue and main, not ordinary PR pushes (#1493)"
+    assert "needs.changes.outputs.code == 'true'" in integration["if"], (
+        "the job may skip only for docs-only PRs via the path classifier"
     )
     assert not execution.get("continue-on-error"), "integration failures must block CI"
     assert not integration.get("continue-on-error")

@@ -1,31 +1,64 @@
 # CI tiers
 
-mergeCraft splits CI into four tiers (#1493). Each job belongs to exactly one tier.
+mergeCraft sorts its CI jobs into four tiers (#1493). Each job below belongs to
+exactly one tier. The tier says which question a job answers; the "Runs on"
+column says where it runs today.
 
-| Tier | Question | Representative jobs |
-|------|----------|---------------------|
-| 1 — Rules | Do edits follow repo rules? | `Verify (rules py3.14)` — `make lint`, `make typecheck`, `make lockcheck`; pre-commit hooks locally |
-| 2 — This change | Does this PR work? | `Verify (tests …)`, `Verify (security audit …)`, `Verify (coverage gate py3.14)` on PRs; `mergecraft review` |
-| 3 — Main works | Did the full suite pass before merge? | `Required integration`, `Build slim image`, `Action-image E2E`, image scans, `Eval gate`, boundary proofs — `merge_group` and non-PR `CI` runs |
-| 4 — Release | Is this SHA releasable? | `release.yml` publish gate (requires tier 3 green on the SHA) |
+| Tier | Question | Where it runs |
+|------|----------|---------------|
+| 1 — Rules | Do the edits follow the repo's rules? | pre-commit locally, then the first PR job |
+| 2 — This change | Does this change work? | every PR push |
+| 3 — Main works | Is the whole product healthy with this change in? | every PR push, `merge_group`, and pushes to `main` |
+| 4 — Release | Is this SHA releasable? | `release.yml` |
 
-## Job inventory (this repository)
+## Current state
 
-| Job | Workflow | Tier | Notes |
-|-----|----------|------|-------|
-| `Verify (rules py3.14)` | `ci.yml` | 1 | Fail-fast; gates later jobs via `needs:` |
-| `Verify (toolchain py*)` | `ci.yml` | 1–2 | Lockfile on PRs |
-| `Verify (tests …)` | `ci.yml` | 2 | Change-scoped selection on PRs (`scripts/ci_select_tests.py`) |
-| `Verify (coverage gate py3.14)` | `ci.yml` | 2 on PR / 3 on main | Publishes coverage artifact |
-| `Verify (security audit …)` | `ci.yml` | 2 | gitleaks / trufflehog slice |
-| `Verify (static + build …)` | `ci.yml` | 2 | Build + workflow lint after rules |
-| `mergecraft review` | `mergecraft.yml` | 2 | Required on PRs |
-| `Required integration` | `ci.yml` | 3 | Not on ordinary PR pushes |
-| `Privileged boundary proofs` | `ci.yml` | 3 | Required when security surface changes on PR |
-| `Build slim image` / E2E / scans | `ci.yml`, `e2e.yml` | 3 | Merge queue / main |
-| `Eval gate` | `ci.yml` | 3 | Full replay |
-| `Full verify` | `ci-cd.yml` | 3 | Main delivery |
-| `Publish release` | `release.yml` | 4 | Tier 3 prerequisite |
+- **Tier 1 is fail-fast.** `Verify (rules py3.14)` runs `make lint`,
+  `make typecheck` and `make lockcheck`. The expensive jobs `needs:` it, so a
+  lint error stops integration, the image build, the scans and the E2E from
+  starting.
+- **Tier 2 shards are change-scoped on PRs.** `scripts/ci_select_tests.py` maps
+  the changed paths to test nodes and `make test` runs only those, with the
+  unit lane's markers, xdist and pinned seed. A change it cannot narrow runs
+  the whole tree. The coverage gate still runs the full unit suite on every PR.
+- **Tier 3 still runs on every code PR.** `ci.yml` listens for `merge_group`,
+  but the repository has no merge queue yet, so nothing would run or require
+  these jobs there. They stay on PRs, and stay required through
+  `Verify (static + build …)`, until a merge queue requires them. Moving them
+  off PRs is a follow-up that has to land together with the ruleset change.
+- **Tier 4 is planned.** `release.yml` does not yet check that a SHA passed
+  tier 3 before publishing.
+
+## Job inventory: `ci.yml`
+
+| Job | Tier | Runs on | Reason |
+|-----|------|---------|--------|
+| `Verify (rules py3.14)` | 1 | PR, merge group, push | Cheapest signal; gates the expensive jobs |
+| `Verify (toolchain py*)` | 2 | PR, merge group, push | Lockfile and toolchain match on both Pythons |
+| `Verify (tests …)` | 2 | PR (change-scoped), merge group and push (full) | Unit tests for the change |
+| `Verify (coverage gate py3.14)` | 2 | PR, merge group, push | Full unit suite plus coverage floors and patch coverage |
+| `Verify (security audit …)` | 2 | PR, merge group, push | Secret and dependency scans |
+| `Static checks (py*)` | 2 | PR, merge group, push | Build, docs and workflow lint |
+| `Verify changed deployment candidates` | 2 | PR, merge group, push | Checks an `action.yml` image pin when one changes |
+| `Privileged boundary proofs` | 2 | PR, merge group, push | Security-sensitive; must stay required on PRs |
+| `Eval gate` | 2 | PR, merge group, push | Structural replay of the review evals for the change |
+| `Eval rescore delta` | 2 | PR | Advisory; reviewer-surface comparison |
+| `Shadow fixture replay` | 2 | PR, merge group, push | Advisory |
+| `Verify (static + build …)` | 2 | PR, merge group, push | Final gate: fails unless every required job above and below succeeded |
+| `Required integration (py*)` | 3 | PR, merge group, push | Keyless integration suite |
+| `Build slim image (shared)` | 3 | PR, merge group, push | Image the scans and E2E consume |
+| `Action-image E2E` | 3 | PR, merge group, push | End-to-end run of the built action image |
+| `Image scan (slim)` / `Image scan (analyzers)` | 3 | PR, merge group, push | Blocking Trivy scans |
+| `Verify (root container privilege py3.14)` | 3 | PR, merge group, push | Root-container proof against the built image |
+| `Verify (mutation advisory py3.14)` | 3 | schedule | Nightly, non-blocking |
+
+Docs-only PRs skip the work in the code-only jobs, and image-only PRs (a sole
+`action.yml` image pin) skip everything but the deployment-candidate check; the
+final gate knows which skips each of those allows.
+
+The other workflows (`integration.yml`, `ci-matrix.yml`, `e2e.yml`,
+`docker.yml`, `image-security.yml`, `codeql.yml`, `mergecraft.yml`,
+`ci-cd.yml`, `release.yml`) are not inventoried here yet.
 
 ## Agents and contributors
 
@@ -36,4 +69,4 @@ make lint && make typecheck
 uv run pre-commit run --all-files
 ```
 
-On PRs, CI tier 1 (`Verify (rules py3.14)`) must pass before tier 2 jobs start.
+On PRs, tier 1 (`Verify (rules py3.14)`) must pass before the expensive jobs start.

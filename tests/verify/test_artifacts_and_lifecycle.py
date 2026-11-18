@@ -178,17 +178,27 @@ def _alive(pid: int) -> bool:
 @pytest.mark.parametrize("outcome", ["success", "failure", "blocked"])
 async def test_app_process_is_terminated_on_every_path(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     outcome: str,
 ) -> None:
-    """Success, failure, and blocked all reap the started app — no orphan."""
-    pid_file = tmp_path / "app.pid"
+    """Success, failure, and blocked all reap the started app — no orphan.
+
+    The pid comes from the runner's own spawn, not from a file the child writes:
+    the runner reaps as soon as the fake driver returns, which can be before a
+    freshly started interpreter has run a single line.
+    """
+    runner = import_verify("runner")
+    start_app = require_symbol(runner, "_start_app")
+    started: list[int] = []
+
+    async def recording_start_app(command: str, *, cwd: Path) -> Any:
+        proc = await start_app(command, cwd=cwd)
+        started.append(proc.pid)
+        return proc
+
+    monkeypatch.setattr(runner, "_start_app", recording_start_app)
     script = tmp_path / "hold.py"
-    script.write_text(
-        "import os, pathlib, time, sys\n"
-        f"pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid()), encoding='utf-8')\n"
-        "time.sleep(45)\n",
-        encoding="utf-8",
-    )
+    script.write_text("import time\ntime.sleep(45)\n", encoding="utf-8")
     command = f"{sys.executable} {script}"
     url = "http://127.0.0.1:1/blocked" if outcome == "blocked" else "http://127.0.0.1:8765/"
     fake = FakeBrowserDriver(
@@ -206,11 +216,6 @@ async def test_app_process_is_terminated_on_every_path(
         driver=fake,
         offline=True,
     )
-    if not pid_file.exists():
-        # Runner must still have started then reaped; missing pid is only ok
-        # when blocked before start. Unreachable URL still starts the command.
-        if outcome != "blocked":
-            pytest.fail("startup command did not write a pid file")
-        return
-    pid = int(pid_file.read_text(encoding="utf-8"))
-    assert not _alive(pid)
+    # An unreachable URL is only discovered after the command has started.
+    assert len(started) == 1, "the runner must start the app exactly once"
+    assert not _alive(started[0])
