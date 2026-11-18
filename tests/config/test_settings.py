@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
+from mergecraft.classify import classify_blast_radius
 from mergecraft.config import (
     ModeDefinition,
+    RepoSettings,
     default_settings,
     load_repo_settings,
     parse_learnings_headings,
@@ -13,8 +17,6 @@ from mergecraft.config import (
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 def test_default_settings_match_upstream() -> None:
@@ -158,6 +160,34 @@ def test_blast_radius_override_parses_per_category(tmp_path: Path) -> None:
     settings = load_repo_settings(cfg, root=tmp_path, load_learnings_files=False)
     assert settings.blast_radius_override == {"source_without_tests": {"lane": "high"}}
     assert not hasattr(settings, "auto_merge_enabled")
+
+
+@pytest.mark.parametrize(
+    "key", ["flagFileGlobs", "flag_file_globs"], ids=("camel-case", "snake-case")
+)
+def test_flag_file_globs_load_from_yaml_and_change_risk(tmp_path: Path, key: str) -> None:
+    """Both config spellings load, and serialized config keeps the documented key."""
+    config = tmp_path / ".mergecraft" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text(f'blastRadiusOverride:\n  {key}: ["**/toggles/**"]\n', encoding="utf-8")
+    settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
+    wire = settings.model_dump(by_alias=True)
+    assert wire["blastRadiusOverride"] == {"flagFileGlobs": ["**/toggles/**"]}
+    restored = RepoSettings.model_validate(wire)
+    assert restored.blast_radius_override == {"flag_file_globs": ["**/toggles/**"]}
+    change = {
+        "changed_paths": ["service/toggles/example.yaml"],
+        "diff_stats": {
+            "diff_text": (
+                "diff --git a/service/toggles/example.yaml b/service/toggles/example.yaml\n"
+                "@@ -1 +1 @@\n-default: false\n+default: true\n"
+            ),
+        },
+    }
+    assert classify_blast_radius(change).lane == "low"
+    configured = classify_blast_radius(change, rule_set=restored.blast_radius_override)
+    assert configured.lane == "high"
+    assert "flag.enabled" in [reason.code for reason in configured.reasons]
 
 
 def test_analyzers_block_parses_and_merges(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

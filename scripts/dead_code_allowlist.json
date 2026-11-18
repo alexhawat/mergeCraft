@@ -213,7 +213,6 @@
       "src/mergecraft/evals/benchmark.py:property:reproducibility_digest",
       "src/mergecraft/evals/store.py:property:is_synthetic",
       "src/mergecraft/evidence/diff_coverage.py:property:coverage_percent",
-      "src/mergecraft/jev/questions.py:property:question_names",
       "src/mergecraft/jev/questions.py:property:source_catalog"
     ]
   },
@@ -285,6 +284,7 @@
       "src/mergecraft/classify/blast_radius.py:variable:review_config",
       "src/mergecraft/classify/blast_radius.py:variable:secrets_config_deployment",
       "src/mergecraft/classify/blast_radius.py:variable:source_without_tests",
+      "src/mergecraft/classify/blast_radius.py:variable:flag_file_globs",
       "src/mergecraft/cli/profiles.py:variable:latency_budget_ms",
       "src/mergecraft/cli/verify_behavior_cmd.py:attribute:current_url",
       "src/mergecraft/cli/verify_behavior_cmd.py:attribute:last_screenshot",
@@ -292,7 +292,6 @@
       "src/mergecraft/config/compat.py:variable:min_schema_version",
       "src/mergecraft/config/compat.py:variable:protocol_version",
       "src/mergecraft/config/env/runtime.py:variable:permanent_current_decision",
-      "src/mergecraft/config/settings.py:variable:blast_radius_override",
       "src/mergecraft/config/settings.py:variable:providers_seeded",
       "src/mergecraft/config/settings.py:variable:redaction",
       "src/mergecraft/config/settings.py:variable:stop_script",

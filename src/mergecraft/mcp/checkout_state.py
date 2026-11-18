@@ -66,6 +66,9 @@ RESET_TOOL_FIELDS = (
     "review_round_cap_announced",
     "last_terminal_rejection",
     "lite_review",
+    "risk_classification",
+    "risk_settings",
+    "blast_rule_set",
 )
 
 

@@ -19,6 +19,7 @@ import pytest
 from loguru import logger
 
 from mergecraft.analyzers.finding import make_finding
+from mergecraft.config.settings import RiskSettings
 from mergecraft.evidence.packet import PACKET_SCHEMA_VERSION
 from mergecraft.evidence.run_packet import (
     build_run_packet,
@@ -201,6 +202,23 @@ def test_emit_writes_a_packet_with_populated_blast_radius(tmp_path: Path) -> Non
     assert packet["findings"], "analyzer findings did not reach the packet"
     assert packet["decision"] is not None
     assert packet["self_assessment"] == {"approved": True, "sha": "deadbeef"}
+
+
+def test_packet_without_precomputed_grade_uses_risk_config(tmp_path: Path) -> None:
+    """A skipped review still records base-side overrides and Jev's absence."""
+    ctx = _make_ctx(tmp_path, diff_text=_TRIVIAL_DIFF.replace("README.md", "pyproject.toml"))
+    ctx.tool_state.blast_rule_set = {"dependency_changes": {"lane": "high"}}
+    ctx.tool_state.risk_settings = RiskSettings(mode="jev")
+
+    written = _emit(ctx, run_succeeded=False)
+
+    assert written is not None
+    grade = json.loads(written.read_text(encoding="utf-8"))["blast_radius"]
+    assert grade["lane"] == "high"
+    assert grade["auto_merge_lane"] == "forbidden"
+    by_code = {item["code"]: item for item in grade["reasons"]}
+    assert by_code["deps.changed"]["lane"] == "high"
+    assert by_code["jev.not.evaluated"]["lane"] == "low"
 
 
 def test_packet_records_the_orchestrator_reviewed_head_sha(tmp_path: Path) -> None:

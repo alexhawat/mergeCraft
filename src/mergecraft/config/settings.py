@@ -559,6 +559,33 @@ class MergeQueueSettings(BaseModel):
     trusted_check_apps: list[str] = Field(default_factory=list, alias="trustedCheckApps")
 
 
+class RiskSettings(BaseModel):
+    """PR risk grade mode (#1489). Resolved from the PR base, not the head."""
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    mode: Literal["deterministic", "jev"] = "deterministic"
+
+
+class ReviewBudgetTargetSettings(BaseModel):
+    """Advisory review cost targets (#1494). All fields optional."""
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    tokens_p50: int | None = Field(default=None, alias="tokensP50", gt=0)
+    cost_usd_p50: float | None = Field(default=None, alias="costUsdP50", gt=0)
+    wall_seconds_p50: float | None = Field(default=None, alias="wallSecondsP50", gt=0)
+
+
+class ReviewBudgetSettings(BaseModel):
+    """Rolling trend checks against review spend (#1494)."""
+
+    model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
+
+    target: ReviewBudgetTargetSettings = Field(default_factory=ReviewBudgetTargetSettings)
+    window_size: int = Field(default=20, alias="windowSize", ge=1)
+
+
 class ReviewSettings(BaseModel):
     """Review-depth knobs that are separate from analyzer placement (RC3, D2)."""
 
@@ -669,6 +696,7 @@ class ReviewSettings(BaseModel):
             "sources during review-context rendering (for example TEAM.md)."
         ),
     )
+    budget: ReviewBudgetSettings = Field(default_factory=ReviewBudgetSettings)
 
 
 # Evidence keys a repository may declare a proof for under ``policy.evidence``.
@@ -1030,6 +1058,7 @@ _JEV_PACK_IDS: Final[tuple[str, ...]] = (
     # Behaviour verification (``verify-behavior``) criterion / repro judges.
     "criterion/v1",
     "repro/v1",
+    "risk/v1",
 )
 _JEV_DEFAULT_BUDGET_TOKENS: Final[int] = 250_000
 
@@ -1280,10 +1309,11 @@ class RepoSettings(BaseModel):
         default_factory=RuleSet,
         alias="blastRadiusOverride",
         description=(
-            "Reserved — no effect. Blast-radius routing is not consumed by the "
-            "standalone runtime; setting it only logs a warning."
+            "Per-category blast-radius lane overrides and optional ``flagFileGlobs`` "
+            "for feature-flag detection (#1489). Honoured from the PR base only."
         ),
     )
+    risk: RiskSettings = Field(default_factory=RiskSettings)
     mode_instructions: dict[str, str] = Field(default_factory=dict, alias="modeInstructions")
     static_checks: list[StaticCheckDefinition] = Field(default_factory=list, alias="staticChecks")
     # #36 / D10 — declared-only reuse of the repo's finished CI. Default empty:
@@ -1632,8 +1662,6 @@ def _warn_reserved_settings(raw: dict[str, Any]) -> None:
         reserved.append("tracing.redaction")
     if _value_differs_from_default(raw, "stopScript", None):
         reserved.append("stopScript")
-    if _value_differs_from_default(raw, "blastRadiusOverride", {}):
-        reserved.append("blastRadiusOverride")
     for key in reserved:
         logger.warning(
             "reserved config key {!r} has no effect — it is accepted for "

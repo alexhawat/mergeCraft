@@ -368,6 +368,34 @@ async def _run_lite_tier(
     return LiteAgentReview(decision=decision, outcome=outcome)
 
 
+async def _same_head_skip_gate(ctx: RunContext) -> SkipAgentReview | None:
+    """Skip the agent when this exact head SHA already has a trusted completed review (#1490)."""
+    assert ctx.tool_state is not None
+    assert ctx.tool_context is not None
+    from mergecraft.config.trust_policy import bound_head_sha
+    from mergecraft.review_policy.same_head_review import evaluate_same_head_skip
+
+    event = ctx.gh_event if isinstance(ctx.gh_event, dict) else {}
+    pull = event.get("pull_request")
+    if not isinstance(pull, dict) or not isinstance(pull.get("number"), int):
+        return None
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+    head_sha = bound_head_sha(event, event_name=event_name)
+    if not head_sha:
+        return None
+    decision = await evaluate_same_head_skip(
+        ctx.tool_context, head_sha=head_sha, pull_number=int(pull["number"])
+    )
+    if decision is None:
+        return None
+    ctx.tool_state.triage = decision
+    logger.warning("» {} — trusted review already on this head SHA", decision.record_line())
+    gha_log.notice(
+        "mergeCraft: This head SHA already has a trusted review. Skipping agent dispatch."
+    )
+    return SkipAgentReview(reason=decision.reason)
+
+
 async def _ignore_paths_gate(ctx: RunContext) -> SkipAgentReview | None:
     """Resolve review path ignoring (#1109); skip the agent when every changed file is ignored.
 

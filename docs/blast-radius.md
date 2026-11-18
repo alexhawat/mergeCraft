@@ -47,6 +47,10 @@ Every classification carries `reasons`: one row per signal, each with a stable d
 | `diff.destructive_sql` | high | the diff text contains `DROP`, `ALTER` or `CREATE` then `TABLE`, in any case and with any whitespace between |
 | `diff.secret_assignment` | high | the diff text assigns a `password`, `secret_key` or `private_key` (prefixed names such as `db_password =` included, any spacing around `=`) or contains `aws_secret_access_key` |
 | `diff.irreversible_command` | high | the diff text contains `rm` with recursive and force flags in any order or spelling (`-rf`, `-fr`, `-r -f`, `--recursive --force`), or `terraform destroy`, with any whitespace between |
+| `flag.added_off` | low | an added setting in a feature-flag file matched by `flagFileGlobs` defaults a flag to off |
+| `flag.enabled` | high | an added setting in a feature-flag file matched by `flagFileGlobs` enables a flag or sets its rollout to 100% |
+| `diff.authz_outside` | high | changed source lines add, edit or remove authorization logic outside `auth/`, `security/`, and `permissions/` |
+| `diff.data_deletion_outside` | high | added source lines execute a `DELETE FROM` or `TRUNCATE` outside `migrations/` |
 | `paths.public_api` | medium | a package `__init__.py` changed |
 | `deps.changed` | medium | a dependency manifest or lockfile changed: the shared manifest and lockfile names (`pyproject.toml`, `uv.lock`, `package.json`, `go.mod`, `Gemfile`, `composer.json`, `Pipfile`, `Pipfile.lock` and the rest) and every pip requirements or constraints file (`requirements*.txt`, `*-requirements.txt`, `constraints*.txt`, any `.txt` / `.in` under `requirements/`), compared case-insensitively |
 | `tests.missing` | medium | a hand-written source path (see below) changed and no test path changed, whatever generated paths sit beside it; emitted at low, with the carve-out named, when the carve-out applies |
@@ -69,7 +73,7 @@ Every classification carries `reasons`: one row per signal, each with a stable d
 
 **Hand-written source** is every changed path under `src/` that is not generated output, whatever its suffix (packaged config and data such as policy packs or `application.yml` there is behaviour). Elsewhere (`app/`, `lib/`, `cmd/`, `scripts/`, the root) it is any changed path that is not one of these: documentation (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`, `.txt`, anything under `docs/` or `doc/`, and `LICENSE`, `NOTICE`, `AUTHORS`, `CONTRIBUTORS`, `COPYING`, `CODEOWNERS`); a test (a path under `tests/`, `test/`, `__tests__/`, `spec/` or `specs/`, or a file named `test_*`, `*_test.*`, `*.test.*`, `*.spec.*` or `*_spec.*`); generated output (a path under a `generated/` directory); an image or PDF; declarative config or data (`.toml`, `.yaml`, `.yml`, `.json`, `.ini`, `.cfg`, `.conf`, `.lock`, `.jsonl`, `.csv`, `.tsv`, `.xml`, and dotfiles); or a dependency manifest. The config and data exemption applies only outside the package roots `src/`, `lib/`, `app/`, `pkg/` and `packages/`; under them such a file is source. Root-level and other config is judged by `paths.deployment`, `paths.secrets_config` or `paths.review_config` when one applies.
 
-The rendered `reason` string starts with the codes (`Lane reasons: deps.changed, source.changed.`) and keeps the category sentence, so existing readers keep working. The run record prints the lane and the codes on one line.
+The rendered `reason` string starts with the codes (`Lane reasons: deps.changed, source.changed.`) and keeps the category sentence, so existing readers keep working. The run record prints a **Risk:** summary (when blast radius is present) and a **Blast radius:** line with the lane and its codes.
 
 The small-isolated-source carve-out lowers only `tests.missing` and replaces `source.changed` with `source.small_isolated`. Any other reason keeps its lane, so a tiny edit to a package `__init__.py` stays `medium`.
 
@@ -164,7 +168,9 @@ The approval gate and the risk-band ordering follow the same rule:
 
 Two floors cannot be lowered. `review_config` may be raised but never set below `medium`: a PR that edits the config governing its own review is never `eligible`. `signal.missing.*` has no `RuleSet` key. A `source_without_tests` override also turns off the small-isolated-source carve-out.
 
-The repository-settings field that supplies this value is part of the separate lane-policy wiring wave. The classifier does not read settings itself.
+The GitHub Action reads `blastRadiusOverride` from the PR base. Set `blastRadiusOverride.flagFileGlobs` to use custom feature-flag paths. Omit it to use `**/flags/**`, `**/feature_flags.*`, `**/features.yaml`, and `**/features.yml`.
+
+With `risk.mode: jev`, the Action can raise the deterministic lane using Jev's `risk/v1` pack. The packet keeps the deterministic grade and records an unavailable Jev grade when the overlay cannot return a result. Packets built before agent dispatch is reached also keep the repository's deterministic overrides.
 
 ## Merge Evidence Packet
 
