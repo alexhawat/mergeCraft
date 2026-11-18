@@ -491,7 +491,7 @@
       "src/mergecraft/agents_sdk/types.py:method:severity_values",
       "src/mergecraft/analyzers/trust_posture.py:method:may_run_full_analyzers",
       "src/mergecraft/evidence/packet.py:method:is_required",
-      "src/mergecraft/findings/ledger.py:method:render_ledger_block",
+      "src/mergecraft/findings/ledger_model.py:method:render_ledger_block",
       "src/mergecraft/jev/questions.py:method:question_type",
       "src/mergecraft/utils/memory.py:method:add_rule",
       "src/mergecraft/yes/__init__.py:method:has",

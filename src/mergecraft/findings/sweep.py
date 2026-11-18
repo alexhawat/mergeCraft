@@ -167,9 +167,9 @@ async def carryover_publishers(
     login is never a publisher. With none, the set is empty, nothing is swept, and one
     warning says why.
     """
-    from mergecraft.findings.ledger import (
-        _publisher_logins_from_approval_checks,
+    from mergecraft.findings.ledger_io import (
         configured_publisher_login,
+        publisher_logins_from_approval_checks,
     )
     from mergecraft.review_resolution import effective_publishers
     from mergecraft.scm.github import GitHubScmAdapter
@@ -179,7 +179,7 @@ async def carryover_publishers(
     if configured:
         logins.add(configured)
     logins |= set(
-        await _publisher_logins_from_approval_checks(
+        await publisher_logins_from_approval_checks(
             GitHubScmAdapter(github), owner, repo, pull_number
         )
     )

@@ -14,6 +14,7 @@ import pytest
 if TYPE_CHECKING:
     from _pytest.monkeypatch import MonkeyPatch
 
+from mergecraft.findings import ledger_io
 from mergecraft.review_taxonomy import finding_fingerprint
 
 _PATH = "src/app.py"
@@ -619,8 +620,8 @@ async def test_review_ledger_reads_app_reviews_from_repo_config(
     """CLI and carryover have no Action env; repo config names the publisher."""
     monkeypatch.delenv("MERGECRAFT_REVIEWER_BOT_LOGIN", raising=False)
     ledger = _ledger_mod()
-    monkeypatch.setattr(ledger, "_publisher_login_from_config", None)
-    monkeypatch.setattr(ledger, "_publisher_login_from_repo_config", lambda: "mergecraft[bot]")
+    monkeypatch.setattr(ledger_io, "_publisher_login_from_config", None)
+    monkeypatch.setattr(ledger_io, "_publisher_login_from_repo_config", lambda: "mergecraft[bot]")
     other = ledger.FindingLedger()
     other.record(_DEFERRED_FP, "open", source="inline", round_index=1)
     ours = ledger.FindingLedger()
@@ -669,7 +670,7 @@ async def test_review_ledger_derives_app_login_from_approval_check(
     """Read-side ledger uses the mergecraft-approval check's app slug."""
     monkeypatch.delenv("MERGECRAFT_REVIEWER_BOT_LOGIN", raising=False)
     ledger = _ledger_mod()
-    monkeypatch.setattr(ledger, "_publisher_login_from_config", "")
+    monkeypatch.setattr(ledger_io, "_publisher_login_from_config", "")
     other = ledger.FindingLedger()
     other.record(_DEFERRED_FP, "open", source="inline", round_index=1)
     ours = ledger.FindingLedger()
@@ -734,7 +735,7 @@ async def test_publisher_derivation_uses_the_real_check_run_client(
 
     monkeypatch.delenv("MERGECRAFT_REVIEWER_BOT_LOGIN", raising=False)
     ledger = _ledger_mod()
-    monkeypatch.setattr(ledger, "_publisher_login_from_config", "")
+    monkeypatch.setattr(ledger_io, "_publisher_login_from_config", "")
     ours = ledger.FindingLedger()
     ours.record(_DROPPED_FP, "deferred", source="overflow", round_index=1)
     body = ledger.merge_ledger_into_comment(

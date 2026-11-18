@@ -110,4 +110,3 @@ These are residual backlog, not newly discovered bugs. Current source and, where
 Excluded the current pin issue#1169, OS advisory/security sweep#1162, unknown lane/scope and fail-then-pass work#1056, declared-scope PR1160, and all other open work recorded in the snapshot. New fanout is owned by the main audit. No new security issue should be inferred from these exclusions.
 
 No full container/action launch, provider calls, real token permissions, live artifact download, subscription credential attack, or real GHES instance was exercised. Main uses the existing local interpreter rather than a freshly installed exact lockfile environment. Only statements supported by current code or the described probes are treated as findings.
-

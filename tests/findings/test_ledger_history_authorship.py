@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from mergecraft.findings import ledger
+from mergecraft.findings import ledger, ledger_io
 from mergecraft.review_taxonomy import finding_fingerprint
 
 if TYPE_CHECKING:
@@ -82,7 +82,7 @@ def _no_app(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MERGECRAFT_REVIEWER_BOT_LOGIN", raising=False)
     monkeypatch.delenv("GITHUB_APP_ID", raising=False)
     monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
-    monkeypatch.setattr(ledger, "_publisher_login_from_config", "")
+    monkeypatch.setattr(ledger_io, "_publisher_login_from_config", "")
 
 
 @pytest.mark.usefixtures("_no_app")
