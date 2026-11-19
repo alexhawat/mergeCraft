@@ -1,1 +1,1 @@
-"""Workflow manifest parsing shared by CLI and runtime review paths."""
+"""Workflow manifest parsing and comment-preserving YAML authoring helpers."""

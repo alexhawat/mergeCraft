@@ -1,37 +1,50 @@
 """Surgical YAML mutator for ``mergecraft workflow`` provider/model authoring (#484).
 
 Extends the line-based mutation strategy from
-:mod:`mergecraft.cli.tracing_logfire_wf_yaml` — PyYAML parses for assertions only;
+:mod:`mergecraft.workflow.yaml_edit` — PyYAML parses for assertions only;
 owned ``with:`` / ``env:`` keys are edited in-place so comments and unrelated
 YAML stay byte-stable.
 """
 
 from __future__ import annotations
 
-import difflib
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
 
-from mergecraft.cli.tracing_logfire_wf_yaml import (
+from mergecraft.workflow.yaml_edit import (
     DEFAULT_WORKFLOW_RELATIVE_PATH,
     LogfireWorkflowError,
     WiringChange,
-    _create_env_block,
-    _create_with_block,
-    _derive_child_indent,
-    _find_mapping_block,
-    _insert_owned_keys_into_block,
-    _is_action_uses,
-    _line_indent_len,
-    _mutate_steps,
-    _splice_secret,
+    create_env_block,
+    create_with_block,
+    derive_child_indent,
+    find_mapping_block,
+    insert_owned_keys_into_block,
+    is_action_uses,
+    line_indent_len,
+    mutate_steps,
+    splice_secret,
+)
+from mergecraft.workflow.yaml_edit import (
+    render_workflow_diff as render_workflow_diff,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+# Compatibility for existing imports of the shared helper names.
+_create_env_block = create_env_block
+_create_with_block = create_with_block
+_derive_child_indent = derive_child_indent
+_find_mapping_block = find_mapping_block
+_insert_owned_keys_into_block = insert_owned_keys_into_block
+_is_action_uses = is_action_uses
+_line_indent_len = line_indent_len
+_mutate_steps = mutate_steps
+_splice_secret = splice_secret
 
 WORKFLOW_OWNED_WITH_KEYS: tuple[str, ...] = ("model",)
 
@@ -84,7 +97,7 @@ def _assert_model_wired(text: str, *, step_identifiers: list[str], model_slug: s
             if not isinstance(step, dict):
                 continue
             uses = step.get("uses")
-            if not isinstance(uses, str) or not _is_action_uses(uses):
+            if not isinstance(uses, str) or not is_action_uses(uses):
                 continue
             step_id = step.get("id") or step.get("name") or f"step[{i}]"
             if step_id not in targets:
@@ -132,7 +145,7 @@ def _assert_provider_env_wired(
             if not isinstance(step, dict):
                 continue
             uses = step.get("uses")
-            if not isinstance(uses, str) or not _is_action_uses(uses):
+            if not isinstance(uses, str) or not is_action_uses(uses):
                 continue
             step_id = step.get("id") or step.get("name") or f"step[{i}]"
             if step_id not in targets:
@@ -183,7 +196,7 @@ def _assert_harness_provider_env_wired(
             if not isinstance(step, dict):
                 continue
             uses = step.get("uses")
-            if not isinstance(uses, str) or not _is_action_uses(uses):
+            if not isinstance(uses, str) or not is_action_uses(uses):
                 continue
             step_id = step.get("id") or step.get("name") or f"step[{i}]"
             if step_id not in targets:
@@ -208,10 +221,10 @@ def _strip_env_keys_from_block(
     if not keys:
         return block, False
     key_re = re.compile(r"^[ \t]*(?P<k>[A-Za-z0-9_-]+|MERGECRAFT_[A-Z_]+):.*\n")
-    env_block = _find_mapping_block(block, "env", at_indent=at_indent)
+    env_block = find_mapping_block(block, "env", at_indent=at_indent)
     if env_block is None:
         return block, False
-    child_indent_ws = _derive_child_indent(block, env_block[0], env_block[1], env_block[2])
+    child_indent_ws = derive_child_indent(block, env_block[0], env_block[1], env_block[2])
     if child_indent_ws is None:
         return block, False
     child_indent = len(child_indent_ws)
@@ -225,7 +238,7 @@ def _strip_env_keys_from_block(
         if not stripped:
             new_lines.append(ln)
             continue
-        if _line_indent_len(ln) != child_indent:
+        if line_indent_len(ln) != child_indent:
             new_lines.append(ln)
             continue
         match = key_re.match(ln)
@@ -255,7 +268,7 @@ def apply_harness_provider_env_wiring(
 
     def _do(block: str, step_indent: int) -> tuple[str, bool]:
         block0, stripped = _strip_env_keys_from_block(block, keys_to_strip, at_indent=step_indent)
-        block2, mod_env = _insert_owned_keys_into_block(
+        block2, mod_env = insert_owned_keys_into_block(
             block0,
             key="env",
             canonical=env_canonical,
@@ -263,10 +276,10 @@ def apply_harness_provider_env_wiring(
             force=force,
             at_indent=step_indent,
         )
-        if not mod_env and _find_mapping_block(block2, "env", at_indent=step_indent) is None:
-            block2 = _create_env_block(block2, env_canonical, at_indent=step_indent)
+        if not mod_env and find_mapping_block(block2, "env", at_indent=step_indent) is None:
+            block2 = create_env_block(block2, env_canonical, at_indent=step_indent)
             mod_env = True
-        block3, mod_env2 = _insert_owned_keys_into_block(
+        block3, mod_env2 = insert_owned_keys_into_block(
             block2,
             key="env",
             canonical=env_canonical,
@@ -283,7 +296,7 @@ def apply_harness_provider_env_wiring(
             env_canonical=env_canonical,
         )
 
-    return _mutate_steps(
+    return mutate_steps(
         text,
         step_selector=step_selector,
         mutate_one=_do,
@@ -304,7 +317,7 @@ def apply_provider_env_wiring(
     """Insert indexed custom-provider ``env:`` keys into a mergeCraft step."""
     _ = label  # operator context only; workflow keys are index-based
     text = _read_workflow_text(workflow_path)
-    validated_secret = _splice_secret(secret_name)
+    validated_secret = splice_secret(secret_name)
     base_key = _indexed_base_url_key(env_index)
     api_key = _indexed_api_key_key(env_index)
     label_key = f"LLM_PROVIDER_{env_index}"
@@ -315,7 +328,7 @@ def apply_provider_env_wiring(
     ]
 
     def _do(block: str, step_indent: int) -> tuple[str, bool]:
-        block2, mod_env = _insert_owned_keys_into_block(
+        block2, mod_env = insert_owned_keys_into_block(
             block,
             key="env",
             canonical=env_canonical,
@@ -323,10 +336,10 @@ def apply_provider_env_wiring(
             force=force,
             at_indent=step_indent,
         )
-        if not mod_env and _find_mapping_block(block2, "env", at_indent=step_indent) is None:
-            block2 = _create_env_block(block2, env_canonical, at_indent=step_indent)
+        if not mod_env and find_mapping_block(block2, "env", at_indent=step_indent) is None:
+            block2 = create_env_block(block2, env_canonical, at_indent=step_indent)
             mod_env = True
-        block3, mod_env2 = _insert_owned_keys_into_block(
+        block3, mod_env2 = insert_owned_keys_into_block(
             block2,
             key="env",
             canonical=env_canonical,
@@ -346,7 +359,7 @@ def apply_provider_env_wiring(
             secret_name=validated_secret,
         )
 
-    return _mutate_steps(
+    return mutate_steps(
         text,
         step_selector=step_selector,
         mutate_one=_do,
@@ -367,7 +380,7 @@ def apply_model_wiring(
     with_canonical: list[tuple[str, str]] = [("model", model_slug)]
 
     def _do(block: str, step_indent: int) -> tuple[str, bool]:
-        block2, mod_with = _insert_owned_keys_into_block(
+        block2, mod_with = insert_owned_keys_into_block(
             block,
             key="with",
             canonical=with_canonical,
@@ -375,15 +388,15 @@ def apply_model_wiring(
             force=True,
             at_indent=step_indent,
         )
-        if not mod_with and _find_mapping_block(block2, "with", at_indent=step_indent) is None:
-            block2 = _create_with_block(block2, with_canonical, at_indent=step_indent)
+        if not mod_with and find_mapping_block(block2, "with", at_indent=step_indent) is None:
+            block2 = create_with_block(block2, with_canonical, at_indent=step_indent)
             mod_with = True
         return block2, mod_with
 
     def _post_check(cur_text: str, *, step_identifiers: list[str]) -> None:
         _assert_model_wired(cur_text, step_identifiers=step_identifiers, model_slug=model_slug)
 
-    return _mutate_steps(
+    return mutate_steps(
         text,
         step_selector=step_selector,
         mutate_one=_do,
@@ -414,7 +427,7 @@ def _find_prioritize_step_ids(text: str, model_slug: str, before_slug: str) -> t
             if not isinstance(step, dict):
                 continue
             uses = step.get("uses")
-            if not isinstance(uses, str) or not _is_action_uses(uses):
+            if not isinstance(uses, str) or not is_action_uses(uses):
                 continue
             step_id = str(step.get("id") or step.get("name") or f"job:{job_name}/step:{i}")
             with_map = step.get("with")
@@ -452,7 +465,7 @@ def apply_model_prioritize(
     original = _read_workflow_text(workflow_path)
     anchor_id, swap_id = _find_prioritize_step_ids(original, model_slug, before_slug)
 
-    intermediate = _mutate_steps(
+    intermediate = mutate_steps(
         original,
         step_selector=anchor_id,
         mutate_one=_model_mutator(model_slug, force),
@@ -461,7 +474,7 @@ def apply_model_prioritize(
         ),
     )
 
-    final = _mutate_steps(
+    final = mutate_steps(
         intermediate.new_text,
         step_selector=swap_id,
         mutate_one=_model_mutator(before_slug, force),
@@ -481,7 +494,7 @@ def _model_mutator(model_slug: str, force: bool) -> Callable[[str, int], tuple[s
     _ = force  # model is workflow-owned; always overwrite differing values
 
     def _do(block: str, step_indent: int) -> tuple[str, bool]:
-        block2, mod_with = _insert_owned_keys_into_block(
+        block2, mod_with = insert_owned_keys_into_block(
             block,
             key="with",
             canonical=with_canonical,
@@ -489,31 +502,12 @@ def _model_mutator(model_slug: str, force: bool) -> Callable[[str, int], tuple[s
             force=True,
             at_indent=step_indent,
         )
-        if not mod_with and _find_mapping_block(block2, "with", at_indent=step_indent) is None:
-            block2 = _create_with_block(block2, with_canonical, at_indent=step_indent)
+        if not mod_with and find_mapping_block(block2, "with", at_indent=step_indent) is None:
+            block2 = create_with_block(block2, with_canonical, at_indent=step_indent)
             mod_with = True
         return block2, mod_with
 
     return _do
-
-
-def render_workflow_diff(
-    workflow_path: Path, change: WorkflowChange, *, max_lines: int = 200
-) -> str:
-    """Return a unified-diff text between ``change.old_text`` and ``change.new_text``."""
-    rel = str(workflow_path)
-    diff = difflib.unified_diff(
-        change.old_text.splitlines(keepends=True),
-        change.new_text.splitlines(keepends=True),
-        fromfile=f"{rel} (current)",
-        tofile=f"{rel} (proposed)",
-        lineterm="",
-    )
-    lines = list(diff)
-    if len(lines) > max_lines:
-        truncation = f"... ({len(lines) - max_lines} more lines truncated)\n"
-        lines = [*lines[:max_lines], truncation]
-    return "".join(line if line.endswith("\n") else f"{line}\n" for line in lines)
 
 
 __all__ = [
