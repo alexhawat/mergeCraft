@@ -137,7 +137,11 @@ from mergecraft.evidence.trajectory import TrajectoryRecord  # noqa: TC001 — P
 #   paths, and the work that was skipped. Additive; ``None`` everywhere else.
 # - 1.21.0 — #1381 adds optional run identity and recorded reviewer cost
 #   with coverage and qualifiers. These measurements do not feed the gate.
-PACKET_SCHEMA_VERSION = "1.21.0"
+# - 1.22.0 — #1517 adds ``coverage.added_lines_total`` and
+#   ``coverage.added_lines_read``: the added lines an observed read covered, beside
+#   the delivery counts, so "complete" cannot be mistaken for "every line was read".
+#   Additive; both default to ``None``.
+PACKET_SCHEMA_VERSION = "1.22.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
@@ -342,6 +346,12 @@ class CoverageSection(BaseModel):
     ``complete`` ignores ``excluded_generated`` rows (policy exclusions are listed but
     do not count against completeness). ``hunks_total`` counts each unknown-range row as
     one unreviewed hunk. Delivery is what is proven, not comprehension.
+
+    ``added_lines_total`` and ``added_lines_read`` are the other measure: how many
+    added lines an observed read actually covered. ``complete`` can be true while
+    they differ, because a hunk inside the delivered diff counts as covered once any
+    read was observed. They are ``None`` when no read was observed, where the count
+    is unknown rather than zero.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -352,6 +362,8 @@ class CoverageSection(BaseModel):
     lines_covered: int
     uncovered: list[UncoveredRange]
     complete: bool
+    added_lines_total: int | None = None
+    added_lines_read: int | None = None
 
 
 class ReapprovalSection(BaseModel):

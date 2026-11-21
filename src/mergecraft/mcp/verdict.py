@@ -232,18 +232,27 @@ def _scope_refusal_detail(tool_state: ToolState) -> str:
 
 
 def diff_coverage_nudge_for_state(tool_state: ToolState) -> str | None:
-    """Return the one-time unread-range nudge for this run, or ``None``.
+    """Return the unread-range nudge for this run, or ``None``.
 
     Scope is the incremental diff when a re-review materialised one, otherwise
     the full PR diff — the same text the reviewer was instructed to read. The
-    nudge fires at most once per run: after it is returned, the flag is set so
-    a second submission is accepted even if the agent chose not to read every
-    range. It is guidance, never a gate: nothing here changes findings,
+    nudge normally fires once: after it is returned, the flag is set so a second
+    submission is accepted even if the agent chose not to read every range. It
+    fires again, up to ``DIFF_COVERAGE_NUDGE_CAP`` times in all, only while a
+    large share of the change is still unread (#1516): a verdict submitted with
+    most of a large diff unread got one nudge, paged through the rest and
+    resubmitted with nothing new. It stays guidance, never a gate: once the cap
+    is reached the submission is accepted, and nothing here changes findings,
     verdicts, or approval.
     """
     from pathlib import Path
 
-    from mergecraft.evidence.diff_coverage import compute_diff_coverage, coverage_nudge
+    from mergecraft.evidence.diff_coverage import (
+        DIFF_COVERAGE_NUDGE_CAP,
+        compute_diff_coverage,
+        coverage_nudge,
+        largely_unread,
+    )
     from mergecraft.evidence.trajectory import ToolCallRecord
 
     if tool_state.diff_coverage_nudge_sent:
@@ -268,14 +277,26 @@ def diff_coverage_nudge_for_state(tool_state: ToolState) -> str | None:
             except Exception:  # a malformed audit row must not block a verdict
                 continue
         breakdown = compute_diff_coverage(diff_text, calls, diff_path=str(path))
+        # The pre-flight repeats only while a large share of the change is unread and
+        # the cap is not reached; the refusal that will not repeat says so.
+        final = (
+            tool_state.diff_coverage_nudge_count + 1 >= DIFF_COVERAGE_NUDGE_CAP
+            or not largely_unread(breakdown)
+        )
         nudge = coverage_nudge(
-            breakdown, diff_path=str(path), driver_reports_reads=tool_state.driver_reports_reads
+            breakdown,
+            diff_path=str(path),
+            driver_reports_reads=tool_state.driver_reports_reads,
+            final=final,
         )
         if nudge is None:
             return None
-        tool_state.diff_coverage_nudge_sent = True
+        tool_state.diff_coverage_nudge_count += 1
+        tool_state.diff_coverage_nudge_sent = final
         logger.info(
-            "diff coverage nudge: {} unread added line(s) across {} file(s)",
+            "diff coverage nudge {}/{}: {} unread added line(s) across {} file(s)",
+            tool_state.diff_coverage_nudge_count,
+            DIFF_COVERAGE_NUDGE_CAP,
             breakdown.unread_lines,
             len(breakdown.unread_files()),
         )

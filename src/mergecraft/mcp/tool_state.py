@@ -550,6 +550,9 @@ class ToolState:
     # time ``submit_review_verdict`` refuses with unread ranges so the second
     # submission is accepted regardless; the nudge is guidance, never a gate.
     diff_coverage_nudge_sent: bool = False
+    # How many times the pre-flight has refused so far. It repeats, up to a cap,
+    # while a large share of the change is still unread (#1516).
+    diff_coverage_nudge_count: int = 0
     # True while the running driver reports its native reads on ``tool_calls``, so
     # a reviewer told to read the diff can clear an unobserved run by doing it. Set
     # by the driver, cleared before each chain attempt.

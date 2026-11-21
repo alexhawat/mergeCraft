@@ -152,3 +152,51 @@ def test_nudge_accepts_already_built_tool_call_rows(tmp_path: Path) -> None:
 
 def test_unread_range_type_is_public() -> None:
     assert LineRange(3, 4).line_count == 2
+
+
+def _large_diff(lines: int) -> str:
+    added = "".join(f"+line {index}\n" for index in range(lines))
+    return (
+        "diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n"
+        "@@ -1,2 +1,3 @@\n one\n+added\n two\n"
+        "diff --git a/src/big.py b/src/big.py\n--- /dev/null\n+++ b/src/big.py\n"
+        f"@@ -0,0 +1,{lines} @@\n{added}"
+    )
+
+
+def test_pre_submit_nudge_repeats_while_most_of_a_large_change_is_unread(tmp_path: Path) -> None:
+    # #1516: one nudge, a quick page through the rest and a second submission was
+    # all a verdict with most of a large diff unread had to survive.
+    state, diff_path = _state_with_diff(tmp_path, _large_diff(400))
+    _read(state, f"sed -n '1,7p' {diff_path}")
+
+    first = diff_coverage_nudge_for_state(state)
+    second = diff_coverage_nudge_for_state(state)
+    third = diff_coverage_nudge_for_state(state)
+
+    assert first is not None
+    assert "400 of 401 added lines unread" in first
+    assert "one-time nudge" not in first
+    assert second is not None
+    assert "fires again" in second
+    assert third is not None
+    assert "will not fire again" in third
+    assert diff_coverage_nudge_for_state(state) is None
+
+
+def test_pre_submit_nudge_stops_repeating_once_the_change_was_read(tmp_path: Path) -> None:
+    state, diff_path = _state_with_diff(tmp_path, _large_diff(400))
+    _read(state, f"sed -n '1,7p' {diff_path}")
+    assert diff_coverage_nudge_for_state(state) is not None
+
+    _read(state, f"cat {diff_path}")
+
+    assert diff_coverage_nudge_for_state(state) is None
+
+
+def test_a_small_unread_remainder_still_gets_exactly_one_nudge(tmp_path: Path) -> None:
+    state, diff_path = _state_with_diff(tmp_path, _large_diff(150))
+    _read(state, f"sed -n '1,7p' {diff_path}")
+
+    assert "one-time nudge" in (diff_coverage_nudge_for_state(state) or "")
+    assert diff_coverage_nudge_for_state(state) is None

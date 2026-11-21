@@ -62,6 +62,7 @@ RESET_TOOL_FIELDS = (
     "coverage",
     "ignored_review_paths",
     "diff_coverage_nudge_sent",
+    "diff_coverage_nudge_count",
     "review_round_index",
     "review_round_cap_announced",
     "last_terminal_rejection",

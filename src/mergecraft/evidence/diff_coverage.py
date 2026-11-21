@@ -627,10 +627,39 @@ def _is_generated(path: str) -> bool:
     return any(marker in lowered for marker in _GENERATED_DIRS)
 
 
+# The pre-flight refuses at most this many submissions in one review session.
+DIFF_COVERAGE_NUDGE_CAP: Final[int] = 3
+# "Largely unread": more than this share of the added lines, and at least this many.
+_LARGELY_UNREAD_SHARE: Final[float] = 0.10
+_LARGELY_UNREAD_MIN_LINES: Final[int] = 200
+
+
+def largely_unread(breakdown: DiffCoverageBreakdown) -> bool:
+    """True when a large share of the non-generated added lines is still unread.
+
+    This decides whether the pre-flight may refuse a second time. Generated
+    artifacts never count: the reviewer is told it may skip them.
+    """
+    unread = sum(
+        file.unread_count for file in breakdown.unread_files() if not _is_generated(file.path)
+    )
+    return (
+        unread >= _LARGELY_UNREAD_MIN_LINES
+        and unread > breakdown.total_lines * _LARGELY_UNREAD_SHARE
+    )
+
+
 def coverage_nudge(
-    breakdown: DiffCoverageBreakdown, *, diff_path: str, driver_reports_reads: bool = False
+    breakdown: DiffCoverageBreakdown,
+    *,
+    diff_path: str,
+    driver_reports_reads: bool = False,
+    final: bool = True,
 ) -> str | None:
-    """Return a one-time nudge naming every unread range, or ``None``.
+    """Return a nudge naming every unread range, or ``None``.
+
+    ``final`` says whether this is the last refusal of the session. A refusal that
+    may repeat says how much is unread and that reading, not paging, clears it.
 
     A run with nothing unread gets ``None``. Unread ranges in generated
     artifacts are named but marked skippable, so the agent can choose to skip
@@ -660,6 +689,17 @@ def coverage_nudge(
     if generated_only:
         return None
     body = "\n".join(rows)
+    if not final:
+        return (
+            "diff coverage pre-flight: most of this change was not read before the verdict "
+            f"({breakdown.unread_lines} of {breakdown.total_lines} added lines unread). "
+            f"Read the ranges below from `{diff_path}` (or the source files), follow the "
+            "changed functions into the code they call, and report what you find before "
+            "submitting again. You are not obligated to read generated artifacts (lockfiles, "
+            "codegen output, snapshots, migration metadata). This pre-flight fires again "
+            "while a large share of the change is unread.\n\n"
+            f"unread ranges:\n{body}"
+        )
     return (
         "diff coverage pre-flight: some changed lines were not read before the verdict. "
         "This is a one-time nudge — read the ranges below from "
@@ -672,6 +712,7 @@ def coverage_nudge(
 
 
 __all__ = [
+    "DIFF_COVERAGE_NUDGE_CAP",
     "DiffCoverageBreakdown",
     "DiffTocEntry",
     "FileDiffCoverage",
@@ -679,5 +720,6 @@ __all__ = [
     "command_line_span",
     "compute_diff_coverage",
     "coverage_nudge",
+    "largely_unread",
     "parse_diff_toc",
 ]

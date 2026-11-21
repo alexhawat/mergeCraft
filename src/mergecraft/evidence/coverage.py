@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Mapping, Sequence
 
     from mergecraft.config.settings import RepoSettings
+    from mergecraft.evidence.diff_coverage import DiffCoverageBreakdown
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.tool_state import ToolState
 
@@ -131,6 +132,7 @@ def account_coverage(
     diff_truncated: bool = False,
     reads_observed: bool = True,
     covered_lines: Mapping[str, Sequence[tuple[int, int]]] | None = None,
+    added_lines: tuple[int, int] | None = None,
 ) -> CoverageSection:
     """Account for which changed hunks reached the reviewer.
 
@@ -144,6 +146,8 @@ def account_coverage(
             means nothing shows the reviewer opened the delivered diff, so its
             hunks are ``not_observed``; absence of evidence is uncovered, not
             unknown, because this check gates the verdict.
+        added_lines: ``(read, total)`` added lines from the read-tracking layer,
+            recorded beside the delivery counts. Ignored when no read was observed.
     """
     universe = coverage_universe(authoritative_diff)
     delivered = set(universe if delivered_diff is None else coverage_universe(delivered_diff))
@@ -201,6 +205,8 @@ def account_coverage(
         lines_covered=lines_covered,
         uncovered=rows,
         complete=all(row.cause == "excluded_generated" for row in rows),
+        added_lines_read=added_lines[0] if added_lines and reads_observed else None,
+        added_lines_total=added_lines[1] if added_lines and reads_observed else None,
     )
 
 
@@ -223,10 +229,8 @@ def _delivered_diff(state: ToolState) -> str:
         return ""
 
 
-def _read_evidence(
-    state: ToolState, authoritative: str
-) -> tuple[bool, dict[str, list[tuple[int, int]]]]:
-    """Return whether any read was observed, and the lines each read covered.
+def _read_breakdown(state: ToolState, authoritative: str) -> DiffCoverageBreakdown | None:
+    """Return the run's line-range read coverage over ``authoritative``, if there is a diff.
 
     The evidence comes from :mod:`mergecraft.evidence.diff_coverage`, the same
     line-range layer the auditor and the pre-submit nudge use — one read-tracking
@@ -236,11 +240,25 @@ def _read_evidence(
     from mergecraft.evidence.diff_coverage import compute_diff_coverage
 
     if not authoritative:
-        return False, {}
+        return None
     reads = (getattr(state, "tool_calls", None) or [])[
         getattr(state, "review_scope_tool_call_start", 0) :
     ]
-    breakdown = compute_diff_coverage(authoritative, reads, diff_path=None)
+    return compute_diff_coverage(authoritative, reads, diff_path=None)
+
+
+def _read_evidence(
+    state: ToolState, authoritative: str, breakdown: DiffCoverageBreakdown | None = None
+) -> tuple[bool, dict[str, list[tuple[int, int]]]]:
+    """Return whether any read was observed, and the lines each read covered.
+
+    ``breakdown`` is the caller's own :func:`_read_breakdown` result, passed to
+    avoid computing it twice.
+    """
+    if breakdown is None:
+        breakdown = _read_breakdown(state, authoritative)
+    if breakdown is None:
+        return False, {}
     covered = {
         file.path: [(item.start, item.end) for item in file.covered]
         for file in breakdown.files
@@ -285,8 +303,10 @@ def coverage_section_for_state(state: ToolState) -> CoverageSection | None:
             unreviewable = filtered_unreviewable
     if not authoritative and not unreviewable and not record.diff_truncated:
         return None
-    observed, covered = _read_evidence(state, authoritative)
+    breakdown = _read_breakdown(state, authoritative)
+    observed, covered = _read_evidence(state, authoritative, breakdown)
     return account_coverage(
+        added_lines=(breakdown.covered_lines, breakdown.total_lines) if breakdown else None,
         authoritative_diff=authoritative,
         delivered_diff=delivered,
         unreviewable_paths=unreviewable,
@@ -316,7 +336,19 @@ def coverage_summary_line(section: CoverageSection, *, on_incomplete: OnIncomple
     excluded = len(section.uncovered) - len(counted)
     head = f"Coverage: {section.hunks_covered}/{section.hunks_total} hunks"
     if not counted:
-        return f"{head}, {excluded} excluded generated" if excluded else head
+        line = f"{head}, {excluded} excluded generated" if excluded else head
+        if (
+            section.added_lines_total is not None
+            and section.added_lines_read is not None
+            and section.added_lines_read < section.added_lines_total
+        ):
+            # Every hunk was delivered, which is all "complete" claims: say how
+            # much of it an observed read covered, so the line is not read as more.
+            line += (
+                f" delivered; {section.added_lines_read}/{section.added_lines_total}"
+                " added lines read"
+            )
+        return line
     line = f"{head}, {len(counted)} uncovered"
     if on_incomplete is not None:
         line += f" → {on_incomplete}"
