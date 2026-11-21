@@ -12,6 +12,9 @@
 # this file entirely when set.
 
 alexhawat@gmail.com
+# Alex's GitHub noreply address. GitHub email privacy rejects pushes authored
+# as the address above, and web-UI merges on main already use this one.
+1254687+alexhawat@users.noreply.github.com
 noreply@github.com
 cursoragent@cursor.com
 49699333+dependabot[bot]@users.noreply.github.com
