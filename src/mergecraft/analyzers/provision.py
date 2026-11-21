@@ -39,6 +39,13 @@ class ProvisionError(RuntimeError):
     """Raised when a managed binary cannot be provisioned safely."""
 
 
+class MissingProvenanceError(ProvisionError):
+    """The catalog pins no build of the analyzer for this platform.
+
+    Unlike a download or a checksum failure, trying again cannot change the answer.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class ProvisionResult:
     resolved_path: Path
@@ -362,7 +369,7 @@ def provision_managed_binary(
     entry = manifest.provenance.get(platform)
     if entry is None:
         msg = f"no provenance for platform {platform!r} on {manifest.id}"
-        raise ProvisionError(msg)
+        raise MissingProvenanceError(msg)
 
     artifact_pin = (expected_sha256 or entry.sha256).strip()
     if not artifact_pin:
@@ -506,6 +513,7 @@ def platform_key() -> str:
 __all__ = [
     "BAKED_ANALYZER_ROOT",
     "RECEIPT_NAME",
+    "MissingProvenanceError",
     "ProvisionError",
     "ProvisionResult",
     "fetch_unpinned",

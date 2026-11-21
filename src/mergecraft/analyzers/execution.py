@@ -14,7 +14,12 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
-from mergecraft.analyzers.provision import ProvisionError, resolve_baked_binary, resolve_with_lock
+from mergecraft.analyzers.provision import (
+    MissingProvenanceError,
+    ProvisionError,
+    resolve_baked_binary,
+    resolve_with_lock,
+)
 from mergecraft.analyzers.redact import redact_secrets
 from mergecraft.analyzers.registry import filter_lint_targets_for_manifest
 from mergecraft.analyzers.resolve import (
@@ -459,6 +464,10 @@ def provision_managed_argv(
                 platform=platform_key,
             )
             break
+        except MissingProvenanceError as exc:
+            # No pinned build exists for this platform; a retry cannot find one.
+            logger.info("{}: not provisioned — {}", manifest.id, _provisioning_error_detail(exc))
+            raise
         except ProvisionError as exc:
             detail = _provisioning_error_detail(exc)
             logger.warning(

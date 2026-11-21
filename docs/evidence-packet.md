@@ -94,7 +94,7 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.21.0`.
+The current version is `1.22.0`.
 
 Wiring a consumer is **not** a shape change: #96 gave these models their first
 runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
@@ -174,6 +174,12 @@ not move.
 
 - `1.21.0` — adds optional run identity and recorded reviewer model cost
   (#1381), with cost coverage and billing qualifiers.
+- `1.22.0` — the `coverage` section gains `added_lines_total` and
+  `added_lines_read` (#1517): the added lines an observed read covered, beside
+  the delivery counts. Additive; both default to `null`. `run_metrics` gains
+  `coverage_preflight_refusals`, `unread_added_lines_at_first_verdict` and
+  `depth_preflight_refused` (#1516), which record what the verdict pre-flights
+  did. Additive; measurement only.
 
 ## Top-level fields
 
@@ -253,8 +259,9 @@ state — never by an agent. `null` when the run had no diff to account for. A
 hunk is covered only through mediated evidence: it was in the delivered diff, or
 an observed read covered part of it. Absence of read evidence is uncovered, not
 unknown — a run whose reads were never observed cannot claim completeness. The
-pre-submit nudge in `submit_review_verdict` hands every unread range back once,
-before the verdict is accepted; there is no separate follow-up turn. The section
+pre-submit nudge in `submit_review_verdict` hands every unread range back
+before the verdict is accepted, once, or up to three times while a large share
+of the added lines is still unread; there is no separate follow-up turn. The section
 proves delivery and observation, not comprehension.
 
 | Field | Type | Notes |
@@ -264,7 +271,9 @@ proves delivery and observation, not comprehension.
 | `lines_total` | `int` | New-side lines across the known hunks. |
 | `lines_covered` | `int` | New-side lines of the covered hunks. |
 | `uncovered` | `list[{path, start_line, end_line, cause}]` | Every range that did not reach the reviewer. `start_line` and `end_line` are `0` when the range is unknown. |
-| `complete` | `bool` | `true` when nothing is uncovered apart from `excluded_generated` rows. |
+| `complete` | `bool` | `true` when nothing is uncovered apart from `excluded_generated` rows. This is delivery: it can be `true` while `added_lines_read` is below `added_lines_total`. |
+| `added_lines_total` | `int \| null` | Added lines in scope, from the read-tracking layer. `null` when no read was observed. (Added in 1.22.0.) |
+| `added_lines_read` | `int \| null` | Added lines an observed read covered. `null` when no read was observed. (Added in 1.22.0.) |
 
 `cause` is one of `diff_truncated` (the files listing hit its page cap, so
 later files were never seen), `no_inline_patch` (GitHub sent line counts but no
@@ -330,6 +339,9 @@ verdict.**
 | `recorded_cost_usd` | `float \| null` | Recorded reviewer model cost, when available. |
 | `cost_availability` | `str \| null` | `available`, `partial`, or `unavailable`. Older packets omit it. |
 | `cost_notes` | `list[str]` | Qualifiers such as pricing estimates or subscription terms. |
+| `coverage_preflight_refusals` | `int` | Submissions the diff coverage pre-flight refused (at most three). (Added in 1.22.0.) |
+| `unread_added_lines_at_first_verdict` | `int \| null` | Unread added lines at the first refused submission; `null` when none was refused. (Added in 1.22.0.) |
+| `depth_preflight_refused` | `bool` | Whether the one-time review depth pre-flight refused a submission. (Added in 1.22.0.) |
 | `tool_calls` | `int` | Mediated MCP tool calls recorded in the trajectory. |
 | `read_tool_calls` | `int` | Calls the trajectory classified as `read`. |
 | `read_tool_turns` | `int` | Runs of consecutive read-intent calls — the cheap batching signal. |
