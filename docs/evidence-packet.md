@@ -176,7 +176,10 @@ not move.
   (#1381), with cost coverage and billing qualifiers.
 - `1.22.0` — the `coverage` section gains `added_lines_total` and
   `added_lines_read` (#1517): the added lines an observed read covered, beside
-  the delivery counts. Additive; both default to `null`.
+  the delivery counts. Additive; both default to `null`. `run_metrics` gains
+  `coverage_preflight_refusals`, `unread_added_lines_at_first_verdict` and
+  `depth_preflight_refused` (#1516), which record what the verdict pre-flights
+  did. Additive; measurement only.
 
 ## Top-level fields
 
@@ -336,6 +339,9 @@ verdict.**
 | `recorded_cost_usd` | `float \| null` | Recorded reviewer model cost, when available. |
 | `cost_availability` | `str \| null` | `available`, `partial`, or `unavailable`. Older packets omit it. |
 | `cost_notes` | `list[str]` | Qualifiers such as pricing estimates or subscription terms. |
+| `coverage_preflight_refusals` | `int` | Submissions the diff coverage pre-flight refused (at most three). (Added in 1.22.0.) |
+| `unread_added_lines_at_first_verdict` | `int \| null` | Unread added lines at the first refused submission; `null` when none was refused. (Added in 1.22.0.) |
+| `depth_preflight_refused` | `bool` | Whether the one-time review depth pre-flight refused a submission. (Added in 1.22.0.) |
 | `tool_calls` | `int` | Mediated MCP tool calls recorded in the trajectory. |
 | `read_tool_calls` | `int` | Calls the trajectory classified as `read`. |
 | `read_tool_turns` | `int` | Runs of consecutive read-intent calls — the cheap batching signal. |

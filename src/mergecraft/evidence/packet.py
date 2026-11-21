@@ -140,7 +140,9 @@ from mergecraft.evidence.trajectory import TrajectoryRecord  # noqa: TC001 — P
 # - 1.22.0 — #1517 adds ``coverage.added_lines_total`` and
 #   ``coverage.added_lines_read``: the added lines an observed read covered, beside
 #   the delivery counts, so "complete" cannot be mistaken for "every line was read".
-#   Additive; both default to ``None``.
+#   Additive; both default to ``None``. ``run_metrics`` also records what the
+#   verdict pre-flights did (#1516): ``coverage_preflight_refusals``,
+#   ``unread_added_lines_at_first_verdict`` and ``depth_preflight_refused``.
 PACKET_SCHEMA_VERSION = "1.22.0"
 
 
@@ -297,6 +299,12 @@ class RunMetrics(BaseModel):
     recorded_cost_usd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     cost_availability: Literal["available", "partial", "unavailable"] | None = None
     cost_notes: list[str] = Field(default_factory=list)
+    coverage_preflight_refusals: int = Field(default=0, ge=0)
+    """How many submissions the diff coverage pre-flight refused."""
+    unread_added_lines_at_first_verdict: int | None = Field(default=None, ge=0)
+    """Unread added lines at the first refused submission; ``None`` if none was refused."""
+    depth_preflight_refused: bool = False
+    """Whether the one-time review depth pre-flight refused a submission."""
 
 
 class ModePromptVersion(BaseModel):

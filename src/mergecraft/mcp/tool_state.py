@@ -553,6 +553,11 @@ class ToolState:
     # How many times the pre-flight has refused so far. It repeats, up to a cap,
     # while a large share of the change is still unread (#1516).
     diff_coverage_nudge_count: int = 0
+    # Unread added lines when the pre-flight first refused; ``None`` if it never did.
+    diff_coverage_unread_at_first_refusal: int | None = None
+    # One-time depth pre-flight: a high-lane or large change reviewed from the
+    # diff alone is sent back to read the code the change depends on (#1516).
+    review_depth_nudge_sent: bool = False
     # True while the running driver reports its native reads on ``tool_calls``, so
     # a reviewer told to read the diff can clear an unobserved run by doing it. Set
     # by the driver, cleared before each chain attempt.

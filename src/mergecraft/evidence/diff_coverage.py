@@ -649,6 +649,51 @@ def largely_unread(breakdown: DiffCoverageBreakdown) -> bool:
     )
 
 
+# The depth pre-flight: a change this large, or in the high lane, needs more than
+# its own diff. "Enough" is this many source files opened beyond the diff, or
+# every changed file when the change touches fewer.
+_DEEP_REVIEW_MIN_ADDED_LINES: Final[int] = 1000
+_DEEP_REVIEW_SOURCE_READS: Final[int] = 5
+
+
+def depth_nudge(
+    breakdown: DiffCoverageBreakdown,
+    *,
+    source_files_read: int,
+    high_lane: bool,
+) -> str | None:
+    """Return a one-time nudge to read past the diff, or ``None``.
+
+    A diff shows what changed, not what the changed code calls. A review of a
+    high-lane or large change that opened almost nothing beyond the diff cannot
+    have checked the change against the code it depends on (#1516). An
+    unobserved run gets ``None``: nothing shows what it read, so nothing shows
+    what it skipped.
+    """
+    if not breakdown.observed:
+        return None
+    changed = [file for file in breakdown.files if not _is_generated(file.path)]
+    added = sum(file.line_count for file in changed)
+    large = added >= _DEEP_REVIEW_MIN_ADDED_LINES
+    if not (high_lane or large) or not changed:
+        return None
+    wanted = min(_DEEP_REVIEW_SOURCE_READS, len(changed))
+    if source_files_read >= wanted:
+        return None
+    why = "a high-risk change" if high_lane else "a large change"
+    return (
+        f"review depth pre-flight: this is {why} ({added} added lines across "
+        f"{len(changed)} files) and this run opened {source_files_read} source file(s) "
+        "beyond the diff. A diff shows what changed, not what the changed code calls. "
+        "Before the verdict, open the code the changed functions depend on across module "
+        "boundaries (the stores, validators, identity and permission checks they call, and "
+        "the callers of any changed signature), check each claim the change makes in its "
+        "documentation against that code, and record what you find. This is a one-time "
+        "nudge: submit again when you have done that. It will not fire again in this "
+        "review session."
+    )
+
+
 def coverage_nudge(
     breakdown: DiffCoverageBreakdown,
     *,
@@ -720,6 +765,7 @@ __all__ = [
     "command_line_span",
     "compute_diff_coverage",
     "coverage_nudge",
+    "depth_nudge",
     "largely_unread",
     "parse_diff_toc",
 ]

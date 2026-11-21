@@ -192,3 +192,55 @@ def test_record_renders_sub_second_phases_honestly() -> None:
 
     assert "setup 0s, analyzers 0.1s, agent 416s, judge <0.1s" in text
     assert "publish" not in text
+
+
+def _record_with(metrics: object) -> str:
+    from types import SimpleNamespace
+
+    from mergecraft.findings.ledger import render_deterministic_review_block
+
+    packet = SimpleNamespace(
+        files_changed=[],
+        findings=[],
+        run_health=None,
+        deterministic_checks=[],
+        decision=None,
+        self_assessment=None,
+        agent=None,
+        run_metrics=metrics,
+        change_id="acme/demo#7",
+    )
+    return render_deterministic_review_block(packet=packet)
+
+
+def _metrics(**update: object):
+    from mergecraft.evidence.packet import RunMetrics
+
+    return RunMetrics(
+        tool_calls=9,
+        read_tool_calls=4,
+        read_tool_turns=2,
+        distinct_files_read=3,
+        diff_lines=120,
+        diff_added_lines=20,
+        diff_deleted_lines=3,
+    ).model_copy(update=update)
+
+
+def test_record_states_what_the_verdict_pre_flights_refused() -> None:
+    text = _record_with(
+        _metrics(
+            coverage_preflight_refusals=2,
+            unread_added_lines_at_first_verdict=6878,
+            depth_preflight_refused=True,
+        )
+    )
+
+    assert (
+        "- **Verdict pre-flights:** coverage refused 2 submission(s), 6878 added lines "
+        "unread at the first; depth refused one submission"
+    ) in text
+
+
+def test_record_omits_the_pre_flight_row_when_nothing_was_refused() -> None:
+    assert "Verdict pre-flights" not in _record_with(_metrics())

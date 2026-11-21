@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   times instead of once, while at least 200 added lines and more than a tenth of
   the change remain unread. The repeated refusal says how much is unread. It is
   still guidance: after the third the submission is accepted (#1516).
+- A review of a high-risk change, or one with 1,000 or more added lines, that
+  opened fewer than five source files beyond the diff is sent back once to read
+  the code the change depends on. The packet's `run_metrics` records how many
+  submissions the pre-flights refused and how much was unread at the first one
+  (#1516).
 - The evidence packet's `coverage` section now carries `added_lines_total` and
   `added_lines_read` beside the delivery counts (packet schema `1.22.0`), and the
   coverage line of a fully delivered change says how many added lines were read,

@@ -36,6 +36,8 @@ if TYPE_CHECKING:
 
     from mergecraft.agents.shared import AgentRunContext
     from mergecraft.analyzers.finding import Finding
+    from mergecraft.evidence.diff_coverage import DiffCoverageBreakdown
+    from mergecraft.evidence.trajectory import ToolCallRecord
     from mergecraft.mcp.context import ToolContext
     from mergecraft.mcp.shared import ToolSpec
 
@@ -231,32 +233,19 @@ def _scope_refusal_detail(tool_state: ToolState) -> str:
     return "no materialized diff has been recorded yet (review_phase is INIT)"
 
 
-def diff_coverage_nudge_for_state(tool_state: ToolState) -> str | None:
-    """Return the unread-range nudge for this run, or ``None``.
+def _scope_read_breakdown(
+    tool_state: ToolState,
+) -> tuple[DiffCoverageBreakdown, list[ToolCallRecord], str] | None:
+    """Return the review scope's read coverage, its calls and the diff path.
 
     Scope is the incremental diff when a re-review materialised one, otherwise
-    the full PR diff — the same text the reviewer was instructed to read. The
-    nudge normally fires once: after it is returned, the flag is set so a second
-    submission is accepted even if the agent chose not to read every range. It
-    fires again, up to ``DIFF_COVERAGE_NUDGE_CAP`` times in all, only while a
-    large share of the change is still unread (#1516): a verdict submitted with
-    most of a large diff unread got one nudge, paged through the rest and
-    resubmitted with nothing new. It stays guidance, never a gate: once the cap
-    is reached the submission is accepted, and nothing here changes findings,
-    verdicts, or approval.
+    the full PR diff — the same text the reviewer was instructed to read.
     """
     from pathlib import Path
 
-    from mergecraft.evidence.diff_coverage import (
-        DIFF_COVERAGE_NUDGE_CAP,
-        compute_diff_coverage,
-        coverage_nudge,
-        largely_unread,
-    )
+    from mergecraft.evidence.diff_coverage import compute_diff_coverage
     from mergecraft.evidence.trajectory import ToolCallRecord
 
-    if tool_state.diff_coverage_nudge_sent:
-        return None
     repo = primary_repo_state(tool_state)
     for raw in (repo.incremental_diff_path, repo.diff_path):
         if not raw:
@@ -276,32 +265,98 @@ def diff_coverage_nudge_for_state(tool_state: ToolState) -> str | None:
                 )
             except Exception:  # a malformed audit row must not block a verdict
                 continue
-        breakdown = compute_diff_coverage(diff_text, calls, diff_path=str(path))
-        # The pre-flight repeats only while a large share of the change is unread and
-        # the cap is not reached; the refusal that will not repeat says so.
-        final = (
-            tool_state.diff_coverage_nudge_count + 1 >= DIFF_COVERAGE_NUDGE_CAP
-            or not largely_unread(breakdown)
-        )
-        nudge = coverage_nudge(
-            breakdown,
-            diff_path=str(path),
-            driver_reports_reads=tool_state.driver_reports_reads,
-            final=final,
-        )
-        if nudge is None:
-            return None
-        tool_state.diff_coverage_nudge_count += 1
-        tool_state.diff_coverage_nudge_sent = final
-        logger.info(
-            "diff coverage nudge {}/{}: {} unread added line(s) across {} file(s)",
-            tool_state.diff_coverage_nudge_count,
-            DIFF_COVERAGE_NUDGE_CAP,
-            breakdown.unread_lines,
-            len(breakdown.unread_files()),
-        )
-        return nudge
+        return compute_diff_coverage(diff_text, calls, diff_path=str(path)), calls, str(path)
     return None
+
+
+def diff_coverage_nudge_for_state(tool_state: ToolState) -> str | None:
+    """Return the unread-range nudge for this run, or ``None``.
+
+    The nudge normally fires once: after it is returned, the flag is set so a
+    second submission is accepted even if the agent chose not to read every
+    range. It fires again, up to ``DIFF_COVERAGE_NUDGE_CAP`` times in all, only
+    while a large share of the change is still unread (#1516): a verdict
+    submitted with most of a large diff unread got one nudge, paged through the
+    rest and resubmitted with nothing new. It stays guidance, never a gate: once
+    the cap is reached the submission is accepted, and nothing here changes
+    findings, verdicts, or approval.
+    """
+    from mergecraft.evidence.diff_coverage import (
+        DIFF_COVERAGE_NUDGE_CAP,
+        coverage_nudge,
+        largely_unread,
+    )
+
+    if tool_state.diff_coverage_nudge_sent:
+        return None
+    scope = _scope_read_breakdown(tool_state)
+    if scope is None:
+        return None
+    breakdown, _calls, path = scope
+    # The pre-flight repeats only while a large share of the change is unread and
+    # the cap is not reached; the refusal that will not repeat says so.
+    final = (
+        tool_state.diff_coverage_nudge_count + 1 >= DIFF_COVERAGE_NUDGE_CAP
+        or not largely_unread(breakdown)
+    )
+    nudge = coverage_nudge(
+        breakdown,
+        diff_path=path,
+        driver_reports_reads=tool_state.driver_reports_reads,
+        final=final,
+    )
+    if nudge is None:
+        return None
+    if tool_state.diff_coverage_nudge_count == 0:
+        tool_state.diff_coverage_unread_at_first_refusal = breakdown.unread_lines
+    tool_state.diff_coverage_nudge_count += 1
+    tool_state.diff_coverage_nudge_sent = final
+    logger.info(
+        "diff coverage nudge {}/{}: {} unread added line(s) across {} file(s)",
+        tool_state.diff_coverage_nudge_count,
+        DIFF_COVERAGE_NUDGE_CAP,
+        breakdown.unread_lines,
+        len(breakdown.unread_files()),
+    )
+    return nudge
+
+
+def review_depth_nudge_for_state(tool_state: ToolState) -> str | None:
+    """Return the one-time read-past-the-diff nudge for this run, or ``None``.
+
+    It applies to a change in the high blast-radius lane, or a large one, whose
+    review opened almost no source beyond the diff. The lane is read from the
+    run's risk classification when one was resolved before the verdict; a run
+    without one (an offline review) is judged on size alone. Like the coverage
+    pre-flight it is guidance, never a gate: it fires once and the next
+    submission is accepted whatever the reviewer did with it.
+    """
+    from mergecraft.evidence.diff_coverage import depth_nudge
+
+    if tool_state.review_depth_nudge_sent:
+        return None
+    scope = _scope_read_breakdown(tool_state)
+    if scope is None:
+        return None
+    breakdown, calls, path = scope
+    source_files = {
+        name
+        for call in calls
+        if call.intent == "read" and call.ok
+        for name in call.paths
+        if name != path
+    }
+    classification = tool_state.risk_classification
+    nudge = depth_nudge(
+        breakdown,
+        source_files_read=len(source_files),
+        high_lane=classification is not None and classification.lane == "high",
+    )
+    if nudge is None:
+        return None
+    tool_state.review_depth_nudge_sent = True
+    logger.info("review depth nudge: {} source file(s) opened beyond the diff", len(source_files))
+    return nudge
 
 
 def register_review_scope(
@@ -1392,9 +1447,13 @@ def submit_review_verdict_tool(ctx: ToolContext) -> ToolSpec:
         ensure_review_scope_for_terminal(ctx.tool_state, "submit_review_verdict")
         coverage_nudge = diff_coverage_nudge_for_state(ctx.tool_state)
         if coverage_nudge is not None:
-            # One-time, advisory, and not a gate: the next submission proceeds
-            # whether or not the agent read the named ranges.
+            # Advisory and bounded, not a gate: once the cap is reached the next
+            # submission proceeds whether or not the agent read the named ranges.
             raise ValueError(coverage_nudge)
+        depth = review_depth_nudge_for_state(ctx.tool_state)
+        if depth is not None:
+            # One-time and advisory, after the diff itself has been read.
+            raise ValueError(depth)
         dropped = purge_malformed_agent_findings(ctx.tool_state)
         if dropped:
             logger.warning(
@@ -1658,6 +1717,7 @@ __all__ = [
     "recorded_submission_payload",
     "register_review_scope",
     "revalidate_recorded_submission",
+    "review_depth_nudge_for_state",
     "scope_blocks_terminal",
     "span_attrs_for_verdict_diagnostic",
     "stamp_review_phase_on_active_span",
