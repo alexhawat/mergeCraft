@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
 import re
+import subprocess
 import zipfile
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -263,19 +265,66 @@ def last_reviewed_sha(
     return None
 
 
+def _author_patch_identity(head: str, *, cwd: str, base_sha: str) -> str:
+    """Ignore line offsets and blob ids that change after unrelated base edits."""
+    try:
+        patch = _run_git(
+            [
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--binary",
+                "--no-color",
+                "--no-renames",
+                "--unified=3",
+                f"{base_sha}...{head}",
+                "--",
+            ],
+            cwd=cwd,
+        )
+    except (OSError, RuntimeError, subprocess.TimeoutExpired):
+        return head  # Shallow histories and oversized patches can be unavailable.
+    if "\ufffd" in patch or "GIT binary patch" in patch:
+        return head
+    content = (line for line in patch.split("\n") if not line.startswith("index "))
+    normalized = "\n".join("@@" if line.startswith("@@ ") else line for line in content)
+    return hashlib.sha256(normalized.encode()).hexdigest()
+
+
+def _rounds_for_heads(heads: list[str], *, cwd: str | None, base_sha: str) -> int:
+    """Count consecutive changes, falling back to commit ids for older history."""
+    identities: dict[str, str] = {}
+    if cwd and _SHA_RE.fullmatch(base_sha):
+        # A long-lived PR must not require an unbounded number of Git comparisons.
+        recent = dict.fromkeys(head for head in heads[-100:] if _SHA_RE.fullmatch(head))
+        identities = {
+            head: _author_patch_identity(head, cwd=cwd, base_sha=base_sha) for head in recent
+        }
+    previous = None
+    rounds = 0
+    for head in heads:
+        identity = identities.get(head, head) if _SHA_RE.fullmatch(head) else None
+        if identity is None or identity != previous:
+            rounds += 1
+        previous = identity
+    return rounds
+
+
 def review_round_index(
     reviews: list[dict[str, Any]],
     *,
     publishers: frozenset[str] | None = None,
+    head_sha: str = "",
+    base_sha: str = "",
+    cwd: str | None = None,
 ) -> int:
-    """Return the 1-based review round from prior mergeCraft-authored PR reviews (RC12).
-
-    Counts prior reviews that pass the same authorship rule ``last_reviewed_sha``
-    uses, and adds one for the run about to start. This is the single source of
-    truth for round-aware budgets (W9.2c).
-    """
-    prior_rounds = sum(1 for review in reviews or [] if _is_authored_review(review, publishers))
-    return prior_rounds + 1
+    """Count the current round and preceding changes to the authored patch."""
+    heads = [
+        str(review.get("commit_id") or "").lower()
+        for review in reviews or []
+        if _is_authored_review(review, publishers)
+    ]
+    return _rounds_for_heads([*heads, head_sha], cwd=cwd, base_sha=base_sha)
 
 
 # ``pulls/{n}/reviews`` is paginated at 100 per page; a PR with a longer review
@@ -375,6 +424,7 @@ class RunBoundReviewState:
     reviewed_head_sha: str = ""
     round_index: int = 0
     progress_comment_id: int | None = None
+    prior_heads: tuple[str, ...] = ()
 
 
 _UNAVAILABLE_RUN_BOUND_STATE = RunBoundReviewState()
@@ -653,10 +703,15 @@ async def recover_run_bound_review_state(
                     run_id,
                 )
             continue
+        prior_heads: list[str] = []
+        for prior in reversed(trusted[index + 1 :]):
+            entries = (_as_mapping(item) for item in prior.get("pull_requests") or [])
+            entry = next((item for item in entries if item.get("number") == pull_number), {})
+            prior_heads.append(str(_as_mapping(entry.get("head")).get("sha") or ""))
         return RunBoundReviewState(
             reviewed_head_sha=reviewed_head_sha,
-            # Runs skipped above carried no review; this one and every older one count.
             round_index=len(trusted) - index,
+            prior_heads=(*prior_heads, reviewed_head_sha),
             progress_comment_id=_coerce_int(packet.get("progress_comment_id")) if packet else None,
         )
     detail = f"; last error: {last_probe_error}" if last_probe_error else ""
@@ -709,16 +764,19 @@ def _round_index(
     prior_reviews: list[dict[str, Any]],
     *,
     publishers: frozenset[str],
+    head_sha: str = "",
+    cwd: str | None = None,
+    base_sha: str = "",
 ) -> int:
-    """Return the 1-based review round, preferring the run-bound count (HS8).
-
-    The run-bound ``round_index`` counts prior trusted runs, so this run's own
-    round is that plus one. With no trusted checkpoint it falls back to the
-    publisher-set count (``review_round_index``).
-    """
+    """Prefer trusted workflow run history; fall back to authored reviews."""
     if run_bound.round_index > 0:
-        return run_bound.round_index + 1
-    return review_round_index(prior_reviews, publishers=publishers)
+        heads = run_bound.prior_heads or ("",) * (run_bound.round_index - 1) + (
+            run_bound.reviewed_head_sha,
+        )
+        return _rounds_for_heads([*heads, head_sha], cwd=cwd, base_sha=base_sha)
+    return review_round_index(
+        prior_reviews, publishers=publishers, head_sha=head_sha, cwd=cwd, base_sha=base_sha
+    )
 
 
 def _remote_url_for_cwd(cwd: str) -> str:
@@ -1331,7 +1389,9 @@ def checkout_pr_tool(ctx: ToolContext) -> ToolSpec:
             await run_blocking_cleanup(_rebaseline_config_after_checkout, ctx)
             prior_reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
             publishers = expected_publisher_logins(ctx) if prior_reviews else frozenset()
-            round_index = _round_index(run_bound, prior_reviews, publishers=publishers)
+            round_index = _round_index(
+                run_bound, prior_reviews, publishers=publishers, head_sha=head_sha
+            )
             ctx.tool_state.review_round_index = round_index
             result: dict[str, Any] = {
                 "pullNumber": pull_number,
@@ -1541,7 +1601,15 @@ def checkout_pr_tool(ctx: ToolContext) -> ToolSpec:
 
         prior_reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
         publishers = expected_publisher_logins(ctx) if prior_reviews else frozenset()
-        round_index = _round_index(run_bound, prior_reviews, publishers=publishers)
+        round_index = await run_blocking(
+            _round_index,
+            run_bound,
+            prior_reviews,
+            publishers=publishers,
+            head_sha=state.checkout_sha or "",
+            base_sha=str(base.get("sha") or ""),
+            cwd=cwd,
+        )
         ctx.tool_state.review_round_index = round_index
 
         # A re-review should pay for the new commits, not the whole PR. Compute
