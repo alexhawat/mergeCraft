@@ -25,7 +25,7 @@ from mergecraft.config.settings import (
 from mergecraft.main import RunContext, _run_setup_script_phase
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.utils.instructions import resolve_instructions
-from tests.analyzers.support import SAME_REPO_PULL_REQUEST_EVENT, import_module
+from tests.analyzers.support import SAME_REPO_PULL_REQUEST_EVENT
 from tests.security.test_trust_ordering_attacks import (
     FORK_PR_PAYLOAD,
 )
@@ -33,7 +33,9 @@ from tests.support.run_main_harness import run_main_for_test
 
 
 def _settings_mod() -> Any:
-    return import_module("mergecraft.config.settings")
+    from mergecraft.config import settings
+
+    return settings
 
 
 def _apply_trust_tier_to_repo_settings() -> Any:

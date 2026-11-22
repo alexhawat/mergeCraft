@@ -23,7 +23,6 @@ The suite is written before the wiring exists, so it is red until it lands.
 
 from __future__ import annotations
 
-import importlib
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -69,7 +68,9 @@ _ROLLBACK_REASON = (
 
 
 def _producers() -> Any:
-    return importlib.import_module("mergecraft.policy.evidence_producers")
+    from mergecraft.policy import evidence_producers
+
+    return evidence_producers
 
 
 def _record(key: str, *, source: str = "declared-check-run", detail: str = _HEALTH_DETAIL) -> Any:

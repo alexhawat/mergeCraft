@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests.ci.support import CANARY_SECRET, import_module, load_fixture
+from tests.ci.support import CANARY_SECRET, load_fixture
 
 
 def _paths_from_normalized(normalized: dict[str, object], redact: object) -> list[str]:
@@ -14,8 +14,8 @@ def _paths_from_normalized(normalized: dict[str, object], redact: object) -> lis
 
 
 def test_canary_never_in_normalized_excerpt_or_fingerprint_input() -> None:
-    normalize = import_module("mergecraft.ci.normalize")
     import mergecraft.analyzers.redact as redact
+    import mergecraft.ci.normalize as normalize
 
     fixture = load_fixture("canary_in_ci_log.json")
     normalized = normalize.normalize_failure(fixture)
@@ -24,7 +24,8 @@ def test_canary_never_in_normalized_excerpt_or_fingerprint_input() -> None:
 
 
 def test_canary_never_in_artifact_paths() -> None:
-    normalize = import_module("mergecraft.ci.normalize")
+    import mergecraft.ci.normalize as normalize
+
     fixture = load_fixture("canary_in_ci_log.json")
     fixture = dict(fixture)
     fixture["artifacts"] = [f"/tmp/run/logs/{CANARY_SECRET}.txt"]
@@ -34,8 +35,9 @@ def test_canary_never_in_artifact_paths() -> None:
 
 
 def test_canary_never_in_review_comment_body() -> None:
-    review_ci = import_module("mergecraft.ci.review")
-    normalize = import_module("mergecraft.ci.normalize")
+    import mergecraft.ci.normalize as normalize
+    import mergecraft.ci.review as review_ci
+
     fixture = load_fixture("canary_in_ci_log.json")
     normalized = normalize.normalize_failure(fixture)
     body = review_ci.render_ci_failure_comment([normalized])
@@ -43,9 +45,10 @@ def test_canary_never_in_review_comment_body() -> None:
 
 
 def test_canary_never_in_normalized_command_or_cluster_message() -> None:
-    cluster = import_module("mergecraft.ci.cluster")
-    normalize = import_module("mergecraft.ci.normalize")
-    review_ci = import_module("mergecraft.ci.review")
+    import mergecraft.ci.cluster as cluster
+    import mergecraft.ci.normalize as normalize
+    import mergecraft.ci.review as review_ci
+
     fixture = load_fixture("canary_in_ci_log.json")
     fixture = dict(fixture)
     fixture["command"] = f"pytest tests/foo --token={CANARY_SECRET}"

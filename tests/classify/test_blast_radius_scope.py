@@ -26,7 +26,6 @@ suite collects before they exist and each test fails on its own.
 from __future__ import annotations
 
 import typing
-from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -62,13 +61,17 @@ rename to docs/new.md
 @pytest.fixture
 def api() -> Any:
     """Load the classifier module lazily so new names fail per test, not at collection."""
-    return import_module("mergecraft.classify.blast_radius")
+    from mergecraft.classify import blast_radius
+
+    return blast_radius
 
 
 @pytest.fixture
 def run_api() -> Any:
     """Load the run-packet module lazily (``build_run_packet`` reads the declaration)."""
-    return import_module("mergecraft.evidence.run_packet")
+    from mergecraft.evidence import run_packet
+
+    return run_packet
 
 
 def _scope(globs: list[str], *, declared: bool = True, invalid: bool = False) -> dict[str, Any]:

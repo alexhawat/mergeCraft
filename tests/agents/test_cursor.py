@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -16,7 +15,9 @@ if TYPE_CHECKING:
 
 def _load_cursor_module():
     try:
-        return importlib.import_module("mergecraft.agents.cursor")
+        from mergecraft.agents import cursor
+
+        return cursor
     except ImportError as exc:
         pytest.fail(f"mergecraft.agents.cursor not implemented: {exc}")
 

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from tests.analyzers.support import import_module
 from tests.ci.workflow_support import REPO_ROOT
 
 from mergecraft.agents.gates import subagent_denied_tool_names
@@ -50,7 +49,9 @@ _MUTATION_TOOLS = frozenset(
 
 
 def _recall_mod() -> Any:
-    return import_module("mergecraft.agents.recall")
+    from mergecraft.agents import recall
+
+    return recall
 
 
 def _write_config(tmp_path: Path, body: str) -> None:

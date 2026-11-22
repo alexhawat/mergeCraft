@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET, enabled_analyzer_ids, import_module
+from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET, enabled_analyzer_ids
 
 FOUR_CHEAP_FLIPS: tuple[str, ...] = ("golangci-lint", "clippy", "rubocop", "phpstan")
 BATCH_W_FIXTURES = FIXTURES_DIR / "batch-w"
@@ -41,7 +41,9 @@ _AUTO_DETECT_CASES: tuple[tuple[str, Path, list[str]], ...] = (
 
 
 def _registry():
-    return import_module("mergecraft.analyzers.registry")
+    from mergecraft.analyzers import registry
+
+    return registry
 
 
 def _argv_has_level_zero(argv: tuple[str, ...]) -> bool:

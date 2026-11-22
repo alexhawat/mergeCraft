@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.analyzers.support import import_module
-
 _CASES: tuple[tuple[str, str, str], ...] = (
     ("phpstan", "composer.json", "hello.php"),
     ("golangci-lint", "go.mod", "hello.go"),
@@ -15,7 +13,9 @@ _CASES: tuple[tuple[str, str, str], ...] = (
 
 
 def _registry():
-    return import_module("mergecraft.analyzers.registry")
+    from mergecraft.analyzers import registry
+
+    return registry
 
 
 def test_detect_still_matches_enable_markers() -> None:

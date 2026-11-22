@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET, import_module
+from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET
 
 BATCH_X_FIXTURES = FIXTURES_DIR / "batch-x"
 _CATALOG_DIR = Path(__file__).resolve().parents[2] / "src" / "mergecraft" / "analyzers" / "catalog"
@@ -90,7 +90,9 @@ _BANDIT_PIN_RE = re.compile(r"bandit\[toml\]==([0-9][0-9.]*)")
 
 
 def _registry():
-    return import_module("mergecraft.analyzers.registry")
+    from mergecraft.analyzers import registry
+
+    return registry
 
 
 def _detect_params() -> list[pytest.ParameterSet]:

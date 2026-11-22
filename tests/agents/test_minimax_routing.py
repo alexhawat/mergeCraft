@@ -33,7 +33,6 @@ This file pins the contract for:
 
 from __future__ import annotations
 
-import importlib
 import json
 import re
 import tomllib
@@ -105,20 +104,26 @@ def _clear_provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _load_codex_module():
     try:
-        return importlib.import_module("mergecraft.agents.codex")
+        from mergecraft.agents import codex
+
+        return codex
     except ImportError as exc:
         pytest.fail(f"mergecraft.agents.codex not implemented: {exc}")
 
 
 def _load_opencode_module():
     try:
-        return importlib.import_module("mergecraft.agents.opencode")
+        from mergecraft.agents import opencode
+
+        return opencode
     except ImportError as exc:
         pytest.fail(f"mergecraft.agents.opencode not implemented: {exc}")
 
 
 def _load_agent_resolve_module():
-    return importlib.import_module("mergecraft.utils.agent_resolve")
+    from mergecraft.utils import agent_resolve
+
+    return agent_resolve
 
 
 def _write_codex_config(tmp_path: Path, *, model: str | None) -> Path:

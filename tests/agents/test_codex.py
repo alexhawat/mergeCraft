@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -18,7 +17,9 @@ if TYPE_CHECKING:
 
 def _load_codex_module():
     try:
-        return importlib.import_module("mergecraft.agents.codex")
+        from mergecraft.agents import codex
+
+        return codex
     except ImportError as exc:
         pytest.fail(f"mergecraft.agents.codex not implemented: {exc}")
 

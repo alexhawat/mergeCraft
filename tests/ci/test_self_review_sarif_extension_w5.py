@@ -7,7 +7,6 @@ Trufflehog catalog output is JSONL; CI converts it to SARIF and uploads
 
 from __future__ import annotations
 
-import importlib
 import json
 import subprocess
 import sys
@@ -149,14 +148,16 @@ def test_ci_yml_security_job_invokes_trufflehog_sarif() -> None:
 
 def test_ci_extended_sarif_exports_emit_semgrep_sarif() -> None:
     """W5 deliverable — ``emit_semgrep_sarif`` is importable from the CI helper script."""
-    module = importlib.import_module("scripts.ci_extended_sarif")
+    import scripts.ci_extended_sarif as module
+
     emit = getattr(module, "emit_semgrep_sarif", None)
     assert callable(emit)
 
 
 def test_ci_extended_sarif_exports_emit_trufflehog_sarif() -> None:
     """CI evidence — ``emit_trufflehog_sarif`` is importable from the CI helper script."""
-    module = importlib.import_module("scripts.ci_extended_sarif")
+    import scripts.ci_extended_sarif as module
+
     emit = getattr(module, "emit_trufflehog_sarif", None)
     assert callable(emit)
 
@@ -185,7 +186,7 @@ def test_emit_trufflehog_empty_scan_writes_empty_results_sarif(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     """A clean scan must still write a valid SARIF document, never a 0-byte file."""
-    module = importlib.import_module("scripts.ci_extended_sarif")
+    import scripts.ci_extended_sarif as module
 
     def _dummy_argv(**_kwargs: object) -> list[str]:
         return ["trufflehog"]
@@ -221,7 +222,8 @@ def test_emit_trufflehog_does_not_copy_raw_secret(tmp_path: Path, monkeypatch: M
             "RawV2": planted,
         }
     )
-    module = importlib.import_module("scripts.ci_extended_sarif")
+    import scripts.ci_extended_sarif as module
+
     monkeypatch.setattr(module, "_trufflehog_scan_argv", lambda **_kwargs: ["trufflehog"])
     monkeypatch.setattr(
         module.subprocess,
@@ -241,7 +243,8 @@ def test_emit_trufflehog_does_not_copy_raw_secret(tmp_path: Path, monkeypatch: M
 def test_emit_trufflehog_truncated_jsonl_does_not_write_sarif(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
-    module = importlib.import_module("scripts.ci_extended_sarif")
+    import scripts.ci_extended_sarif as module
+
     monkeypatch.setattr(module, "_trufflehog_scan_argv", lambda **_kwargs: ["trufflehog"])
     monkeypatch.setattr(
         module.subprocess,
@@ -261,7 +264,8 @@ def test_emit_trufflehog_truncated_jsonl_does_not_write_sarif(
 
 def test_write_trufflehog_exclude_paths_is_regex_file(tmp_path: Path) -> None:
     """3.96.0 ``filesystem`` takes regexes via ``--exclude-paths``, not globs."""
-    module = importlib.import_module("scripts.ci_extended_sarif")
+    import scripts.ci_extended_sarif as module
+
     path = module.write_trufflehog_exclude_paths(tmp_path)
     text = path.read_text(encoding="utf-8")
     assert "--exclude-globs" not in text
@@ -273,10 +277,10 @@ def test_trufflehog_scan_argv_uses_exclude_paths_not_exclude_globs(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     """Pinned 3.96.0 rejects ``--exclude-globs`` on ``filesystem``."""
+    import scripts.ci_extended_sarif as module
+
     from mergecraft.analyzers.registry import get_manifest
     from mergecraft.analyzers.resolve import AnalyzerPlan
-
-    module = importlib.import_module("scripts.ci_extended_sarif")
 
     def _fake_provision(plan: object, **_kwargs: object) -> AnalyzerPlan:
         _ = plan

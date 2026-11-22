@@ -22,7 +22,6 @@ These tests cover the four failure modes and the two happy paths:
 from __future__ import annotations
 
 import getpass
-import importlib
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -46,7 +45,9 @@ LOGFIRE_PROBE_HOST = "api.pydantic.dev"
 
 def _load_logfire_cmd() -> object:
     try:
-        return importlib.import_module("mergecraft.cli.tracing_logfire_cmd")
+        from mergecraft.cli import tracing_logfire_cmd
+
+        return tracing_logfire_cmd
     except ImportError as exc:
         pytest.fail(f"mergecraft.cli.tracing_logfire_cmd not importable: {exc}")
 

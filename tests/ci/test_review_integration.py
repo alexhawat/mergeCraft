@@ -7,7 +7,6 @@ from tests.ci.support import (
     CI_SECTION_HEADING,
     DEFAULT_TRUNCATION_CAP,
     INLINE_BUDGET,
-    import_module,
     load_fixture,
 )
 
@@ -30,7 +29,8 @@ def _ci_finding(path: str, line: int, message: str) -> object:
 
 
 def test_ci_failures_section_lists_clustered_root_causes() -> None:
-    intelligence = import_module("mergecraft.ci.intelligence")
+    import mergecraft.ci.intelligence as intelligence
+
     fixture = load_fixture("multi_job_single_root_cause.json")
     payload = intelligence.intelligence_from_failures(
         fixture["jobs"],
@@ -46,7 +46,8 @@ def test_ci_failures_section_lists_clustered_root_causes() -> None:
 
 
 def test_analyze_ci_failures_orchestrator_path_renders_verdict_lines() -> None:
-    intelligence = import_module("mergecraft.ci.intelligence")
+    import mergecraft.ci.intelligence as intelligence
+
     unrelated = load_fixture("pre_existing_unrelated_failure.json")
     payload = intelligence.intelligence_from_failures(
         unrelated["jobs"],
@@ -66,7 +67,8 @@ def test_analyze_ci_failures_orchestrator_path_renders_verdict_lines() -> None:
 
 def test_unattributed_cluster_is_counted_and_gets_no_inline_comment() -> None:
     """An ``unknown`` cluster stays unattributed, at the blocking severity."""
-    review_ci = import_module("mergecraft.ci.review")
+    import mergecraft.ci.review as review_ci
+
     fixture = load_fixture("blame_maps_to_diff_hunk.json")
     reports, stats, overflow = review_ci.analyze_ci_failures(
         [fixture["job"]],
@@ -83,8 +85,9 @@ def test_unattributed_cluster_is_counted_and_gets_no_inline_comment() -> None:
 
 
 def test_analyze_ci_failures_end_to_end_from_raw_jobs() -> None:
-    review_ci = import_module("mergecraft.ci.review")
-    intelligence = import_module("mergecraft.ci.intelligence")
+    import mergecraft.ci.intelligence as intelligence
+    import mergecraft.ci.review as review_ci
+
     fixture = load_fixture("blame_maps_to_diff_hunk.json")
     reports, stats, overflow = review_ci.analyze_ci_failures(
         [fixture["job"]],
@@ -131,7 +134,8 @@ def test_ci_finding_clusters_with_analyzer_on_same_line() -> None:
 
 
 def test_truncation_statement_when_failures_exceed_cap() -> None:
-    review_ci = import_module("mergecraft.ci.review")
+    import mergecraft.ci.review as review_ci
+
     fixture = load_fixture("truncation_overflow.json")
     overflow = len(fixture["failed_runs"]) - DEFAULT_TRUNCATION_CAP
     section = review_ci.render_ci_failures_section(
@@ -143,11 +147,11 @@ def test_truncation_statement_when_failures_exceed_cap() -> None:
 
 
 def test_ci_section_respects_inline_budget() -> None:
-    review_ci = import_module("mergecraft.ci.review")
     import mergecraft.analyzers.budget as budget
+    import mergecraft.ci.cluster as cluster
+    import mergecraft.ci.normalize as normalize
+    import mergecraft.ci.review as review_ci
 
-    cluster = import_module("mergecraft.ci.cluster")
-    normalize = import_module("mergecraft.ci.normalize")
     fixture = load_fixture("truncation_overflow.json")
     normalized = [normalize.normalize_failure(run) for run in fixture["failed_runs"]]
     clustered = cluster.cluster_failures(normalized)

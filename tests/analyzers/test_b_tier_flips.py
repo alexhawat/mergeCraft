@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET, enabled_analyzer_ids, import_module
+from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET, enabled_analyzer_ids
 
 B_TIER_IDS: tuple[str, ...] = (
     "luacheck",
@@ -107,7 +107,9 @@ _F_TIER_IDS: tuple[str, ...] = (
 
 
 def _registry():
-    return import_module("mergecraft.analyzers.registry")
+    from mergecraft.analyzers import registry
+
+    return registry
 
 
 def _analyzers_doc_row(tool_id: str) -> str:

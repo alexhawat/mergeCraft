@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tests.evidence.support import import_module, sample_finding_dict
+from tests.evidence.support import sample_finding_dict
 
 
 def test_self_assessment_is_recorded_separately_from_evidence() -> None:
@@ -13,7 +13,8 @@ def test_self_assessment_is_recorded_separately_from_evidence() -> None:
     Neither field is derived from the other — both are present on the same
     packet, with independent types and values.
     """
-    packet_mod = import_module("mergecraft.evidence.packet")
+    import mergecraft.evidence.packet as packet_mod
+
     fields = packet_mod.MergeEvidencePacket.model_fields
     assert "self_assessment" in fields, "packet must carry an explicit self_assessment field"
     assert "decision" in fields, "packet must carry a distinct evidence decision field"
@@ -29,7 +30,8 @@ def test_self_assessment_is_recorded_separately_from_evidence() -> None:
 
 def test_self_assessment_field_carries_approved_and_sha() -> None:
     """The self-assessment field records the agent's boolean plus the commit it approved."""
-    packet_mod = import_module("mergecraft.evidence.packet")
+    import mergecraft.evidence.packet as packet_mod
+
     fields = packet_mod.MergeEvidencePacket.model_fields
     self_assessment_field = fields["self_assessment"]
     annotation = getattr(self_assessment_field, "annotation", None)
@@ -86,9 +88,9 @@ def test_self_assessment_alone_blocks_auto_merge() -> None:
     CI check runs passing), the decision function must return ``verdict == neutral``
     and the gate action must not be ``auto_merge`` (D3 — never ``verdict != auto_merge``).
     """
-    packet_mod = import_module("mergecraft.evidence.packet")
-    gates_mod = import_module("mergecraft.agents.gates")
-    gate_policy_mod = import_module("mergecraft.evidence.gate_policy")
+    import mergecraft.agents.gates as gates_mod
+    import mergecraft.evidence.gate_policy as gate_policy_mod
+    import mergecraft.evidence.packet as packet_mod
 
     payload = _packet_with_self_assessment(approved=True, no_findings=True)
     payload.pop("decision", None)
@@ -111,8 +113,8 @@ def test_decide_approval_does_not_treat_self_assessment_as_evidence() -> None:
     carries a preset ``decision`` row, the gate recomputes the verdict from the
     typed findings: with none, a self-assessment alone never reaches success.
     """
-    packet_mod = import_module("mergecraft.evidence.packet")
-    gates_mod = import_module("mergecraft.agents.gates")
+    import mergecraft.agents.gates as gates_mod
+    import mergecraft.evidence.packet as packet_mod
 
     payload = _packet_with_self_assessment(approved=True, no_findings=True)
     payload["decision"] = {  # type: ignore[index]

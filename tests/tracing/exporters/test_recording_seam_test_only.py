@@ -51,7 +51,9 @@ class _FakeSpan:
 
 
 def _exporters() -> Any:
-    return importlib.import_module("mergecraft.tracing.exporters")
+    from mergecraft.tracing import exporters
+
+    return exporters
 
 
 def _proxy_sentinel() -> Any:

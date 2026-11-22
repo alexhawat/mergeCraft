@@ -20,7 +20,6 @@ test does not depend on which one the seam reads.
 from __future__ import annotations
 
 import inspect
-from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -43,7 +42,9 @@ _NO_SCOPE = "A description with no declared scope.\n- a list item\n"
 
 @pytest.fixture
 def main_mod() -> Any:
-    return import_module("mergecraft.main")
+    from mergecraft import main
+
+    return main
 
 
 def _linked_issues(bodies: tuple[str, ...] | None) -> tuple[LinkedIssue, ...] | None:

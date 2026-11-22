@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tests.analyzers.support import import_module
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -31,7 +30,9 @@ def _plain(text: str) -> str:
 
 
 def _resolver_mod() -> Any:
-    return import_module("mergecraft.utils.source_resolve")
+    from mergecraft.utils import source_resolve
+
+    return source_resolve
 
 
 def _spec_cls() -> Any:

@@ -24,7 +24,6 @@ gates", so another lane may append its own gate beside this one.
 from __future__ import annotations
 
 import re
-from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -77,11 +76,15 @@ ALL_STATUSES = (
 
 
 def _api() -> Any:
-    return import_module("mergecraft.classify.blast_radius")
+    from mergecraft.classify import blast_radius
+
+    return blast_radius
 
 
 def _rg() -> Any:
-    return import_module("mergecraft.ci.red_green")
+    from mergecraft.ci import red_green
+
+    return red_green
 
 
 def _change(

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -79,7 +78,9 @@ def review_context_module() -> Any:
     collection clean — zero collection errors — while every dependent test
     still fails RED at runtime under its non-strict ``xfail`` marker.
     """
-    return importlib.import_module("mergecraft.tracing.review_context")
+    from mergecraft.tracing import review_context
+
+    return review_context
 
 
 @pytest.fixture
@@ -123,7 +124,9 @@ def genai_module() -> Any:
     collection clean — zero collection errors — while every dependent test
     still fails RED at runtime under its non-strict ``xfail`` marker.
     """
-    return importlib.import_module("mergecraft.tracing.genai")
+    from mergecraft.tracing import genai
+
+    return genai
 
 
 @pytest.fixture
@@ -135,4 +138,6 @@ def signals_module() -> Any:
     collection clean — zero collection errors — while every dependent test
     still fails RED at runtime under its non-strict ``xfail`` marker.
     """
-    return importlib.import_module("mergecraft.tracing.signals")
+    from mergecraft.tracing import signals
+
+    return signals

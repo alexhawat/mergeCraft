@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 import re
 from pathlib import Path
@@ -34,11 +33,15 @@ _LEDGER_MARKER_RE = re.compile(
 
 
 def _ledger_mod() -> Any:
-    return importlib.import_module("mergecraft.findings.ledger")
+    from mergecraft.findings import ledger
+
+    return ledger
 
 
 def _lifecycle_mod() -> Any:
-    return importlib.import_module("mergecraft.findings.lifecycle")
+    from mergecraft.findings import lifecycle
+
+    return lifecycle
 
 
 def _progress_comment_with_ledger(*, ledger_block: str) -> str:

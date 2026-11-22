@@ -10,7 +10,7 @@
 !scripts/hatch_build.py
 !src/**
 !evals/corpora/recall_pass_corpus.json
-!evals/cases/adversarial/*.json
+!evals/cases/adversarial/**
 !integrations/opencode/**
 !docker/**
 # Local installs under allowed trees.

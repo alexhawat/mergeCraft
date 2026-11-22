@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET, import_module
+from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET
 
 BATCH_Y_FIXTURES = FIXTURES_DIR / "batch-y"
 _CATALOG_DIR = Path(__file__).resolve().parents[2] / "src" / "mergecraft" / "analyzers" / "catalog"
@@ -42,7 +42,9 @@ _DEFERRED_SECOND_TIER: tuple[str, ...] = ("shfmt", "dockle", "lychee", "flawfind
 
 
 def _registry():
-    return import_module("mergecraft.analyzers.registry")
+    from mergecraft.analyzers import registry
+
+    return registry
 
 
 def _enabled_ids(repo_root: Path, changed_files: list[str]) -> set[str]:
