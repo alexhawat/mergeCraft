@@ -415,6 +415,8 @@ async def _dispatch_reviewer(
         ):
             return await attempt_agent.run(run_ctx)
 
+    token = tool_context.reviewer_sessions.issue() if base_ctx.mcp_auth_token else ""
+    run_ctx.mcp_auth_token = token
     try:
         if timeout_s is not None and timeout_s > 0:
             result = await asyncio.wait_for(_invoke(), timeout=timeout_s)
@@ -422,12 +424,16 @@ async def _dispatch_reviewer(
             result = await _invoke()
     except TimeoutError:
         reason = f"{label} {record_as!r} timed out after {timeout_s:.1f}s"
+        tool_state.agent_diagnostic = {"diagnostic": reason, "wall_clock_timeout": True}
         record_reviewer_dispatch_error(tool_state, agent_id=record_as, reason=reason)
         return _SecondaryOutcome(reason)
     except Exception as exc:  # any runtime failure is this reviewer's outcome, not the run's
         reason = f"{label} {record_as!r} failed: {type(exc).__name__}: {exc}"
         record_reviewer_dispatch_error(tool_state, agent_id=record_as, reason=reason)
         return _SecondaryOutcome(reason)
+    finally:
+        if token:
+            tool_context.reviewer_sessions.revoke(token)
 
     if not result.success:
         from mergecraft.agents.shared import INFRA_REASON_KEY

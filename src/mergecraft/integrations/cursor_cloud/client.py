@@ -158,6 +158,11 @@ class CursorCloudClient:
         path = f"/v1/agents/{agent_id}/runs/{run_id}"
         return await self._request(method="GET", path=path)
 
+    async def cancel_run(self, run_id: str) -> None:
+        """Stop the remote turn after the local review stops waiting."""
+        agent_id = self._agent_id or run_id
+        await self._request(method="POST", path=f"/v1/agents/{agent_id}/runs/{run_id}/cancel")
+
     async def list_artifacts(self, run_id: str) -> list[dict[str, str]]:
         """List artifacts for the agent created by ``create_cloud_agent``."""
         agent_id = self._agent_id or run_id
