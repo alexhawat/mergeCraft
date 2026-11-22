@@ -60,7 +60,8 @@
 # - ANTHROPIC_OPUS_API_KEY — Anthropic API key for the advisory Claude Opus 5.5
 #   reviewer (`review-opus` job). It reviews every same-repo PR in addition to the
 #   cascade, publishes with the job token (not the reviewer App), posts no
-#   check-runs, and never feeds the approval gate.
+#   check-runs, asks for COMMENT-only reviews (`review_event: comment`, live once
+#   the action pin includes it), and never feeds the approval gate.
 # The job skips gracefully when none are set (e.g. fork PRs). Without
 # OPENCODE_GO_API_KEY the primary is inert and Codex is the only reviewer; without
 # CODEX_AUTH_JSON / OPENAI_API_KEY, OpenCode Go is the only reviewer.
@@ -1625,10 +1626,15 @@ jobs:
   # job, so an Opus outage or slow review never blocks a merge.
   # `tests/ci/test_review_opus_advisory.py` pins these properties.
   #
-  # The review event is not forced to COMMENT: the action has no input for it.
-  # `prApproveEnabled: false` in `.mergecraft/config.yaml` rules out APPROVE,
-  # but a request_changes verdict still posts a REQUEST_CHANGES review, which a
-  # maintainer can dismiss.
+  # `review_event: comment` makes the action publish every verdict as a COMMENT
+  # review and skip resolving review threads, so Opus can neither block nor
+  # unblock a merge. The input is new in this repo's action.yml; the pinned
+  # action below (`26b6b5c6`) predates it and ignores it with an "Unexpected
+  # input" warning. Until MERGECRAFT_ACTION_SHA is bumped to a commit (and
+  # image) that has it, a request_changes verdict still posts a REQUEST_CHANGES
+  # review that blocks the merge; a maintainer dismisses the ones they
+  # disagree with. `prApproveEnabled: false` in `.mergecraft/config.yaml`
+  # already rules out APPROVE.
   #
   # Publishes with the JOB token, never the reviewer App. The App identity is
   # what mergeCraft treats as "its own" reviews, so sharing it with the cascade
@@ -1730,6 +1736,9 @@ jobs:
           shell: disabled
           # Advisory reviewer: no mergecraft / mergecraft-approval check-runs.
           status_checks: disabled
+          # Advisory reviewer: COMMENT reviews only, no thread resolution. Takes
+          # effect once the pin above includes the input (see the job comment).
+          review_event: comment
           # Job token on purpose — see the identity note above the job.
           token: ${{ github.token }}
           tracing: "true"

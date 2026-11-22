@@ -9,6 +9,8 @@ state, and each is one copy-paste away from regressing:
 - it publishes with the job token and declares no reviewer bot login, so the
   same-head skip (#1490), thread retirement and the sticky progress comment
   never treat the cascade's App-authored reviews as its own;
+- it asks for COMMENT-only reviews (``review_event: comment``), so a
+  request_changes verdict cannot block a merge once the pin includes it;
 - it does not start in a cancelled run or without the review job's prompt.
 """
 
@@ -43,6 +45,14 @@ def test_opus_posts_no_status_checks() -> None:
         assert permissions.get(scope) in (None, "none", "read"), (
             f"review-opus must not hold {scope}: write; got {permissions!r}"
         )
+
+
+def test_opus_asks_for_comment_only_reviews() -> None:
+    inputs = _review_step().get("with") or {}
+    assert inputs.get("review_event") == "comment", (
+        "review-opus must publish COMMENT reviews only: a REQUEST_CHANGES review "
+        "from it blocks the merge independently of the approval gate"
+    )
 
 
 def test_approval_gate_does_not_wait_for_opus() -> None:
