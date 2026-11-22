@@ -211,7 +211,9 @@ def test_cli_diff_review_json_validates_findings(
             assert item["short_id"].startswith("MC-")
     else:
         assert result.exit_code != 0, combined
-        assert not json_out.exists(), combined
+        report = json.loads(json_out.read_text())
+        assert report["completion_status"] == "incomplete"
+        assert report["outcome"] == "inconclusive"
         assert any(
             token in combined.lower() for token in ("valid", "finding", "validation", "conform")
         ), combined
