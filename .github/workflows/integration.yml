@@ -160,7 +160,7 @@ jobs:
             echo "Head coverage artifact not ready for ${head_sha} (attempt ${attempt}/300); sleeping 5s…" >&2
             sleep 5
           done
-          echo "Head coverage artifact never appeared — coverage ratchet will fall back to make coverage-gate" >&2
+          echo "Head coverage artifact never appeared — the delta gate requires this artifact" >&2
           exit 1
       - name: Coverage ratchet
         if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
