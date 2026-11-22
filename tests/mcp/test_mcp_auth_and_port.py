@@ -344,3 +344,31 @@ def test_orchestrator_and_role_routes_use_distinct_bearer_tokens(tmp_path: Path)
         assert _is_tools_list_ok(status, body)
     finally:
         stop()
+
+
+@pytest.mark.asyncio
+async def test_reviewer_session_expires_independently_of_other_reviewers(tmp_path: Path) -> None:
+    import httpx
+
+    from mergecraft.mcp.server import build_reviewer_tools, create_mcp_app
+
+    ctx = _tool_ctx(tmp_path)
+    tools = build_reviewer_tools(ctx)
+    app = create_mcp_app(tools, ctx, role_tools={"reviewer": tools}, auth_token="primary")
+    first = ctx.reviewer_sessions.issue()
+    second = ctx.reviewer_sessions.issue()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+
+        async def probe(token: str, path: str = MCP_REVIEWER_ENDPOINT) -> int:
+            return (
+                await client.get(path, headers={"Authorization": f"Bearer {token}"})
+            ).status_code
+
+        assert await probe(first) == 200
+        assert await probe(first, MCP_ENDPOINT) == 401
+        ctx.reviewer_sessions.revoke(first)
+        assert await probe(first) == 401
+        assert await probe(second) == 200
+        assert await probe("primary") == 200

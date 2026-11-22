@@ -54,6 +54,23 @@ def test_a_second_attempt_keeps_the_refreshed_login(tmp_path: Path) -> None:
     assert export.read_text(encoding="utf-8") == _REFRESHED
 
 
+def test_contexts_isolate_config_and_forward_the_same_runs_refreshed_login(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    first = make_agent_run_context(tmp_path, resolved_model="openai/gpt-codex")
+    second = replace(first)
+    independent = make_agent_run_context(tmp_path, resolved_model="openai/gpt-codex")
+    homes = [codex_module._codex_home(ctx) for ctx in (first, second, independent)]
+    assert len(set(homes)) == 3
+    credentials = {codex_module.CODEX_AUTH_ENV: _ORIGINAL}
+    codex_module._setup_codex_auth(first, codex_home=homes[0], credential_env=credentials)
+    (homes[0] / "auth.json").write_text(_REFRESHED)
+    codex_module._setup_codex_auth(second, codex_home=homes[1], credential_env=credentials)
+    codex_module._setup_codex_auth(independent, codex_home=homes[2], credential_env=credentials)
+    assert (homes[1] / "auth.json").read_text() == _REFRESHED
+    assert (homes[2] / "auth.json").read_text() == _ORIGINAL
+
+
 def test_a_different_secret_still_replaces_the_file(tmp_path: Path) -> None:
     ctx = make_agent_run_context(tmp_path, resolved_model="openai/gpt-codex")
     home = tmp_path / "home2" / ".codex"
