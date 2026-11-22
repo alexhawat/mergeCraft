@@ -129,7 +129,7 @@ def materialize_branch_diff(*, cwd: Path, out_dir: Path, base: str | None) -> Di
     try:
         resolved = base if base is not None else target_base(cwd)
         return materialize_diff(cwd=cwd, out_dir=out_dir, base=resolved)
-    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         if base is None:
             raise
         detail = " ".join(str(exc).split())
