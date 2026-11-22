@@ -48,6 +48,8 @@ def test_tests_for_path_maps_src_tests_and_ci_touchpoints() -> None:
     assert module._tests_for_path("tests/review/test_budget_trend.py") == {
         "tests/review/test_budget_trend.py"
     }
+    assert module._tests_for_path("tests/analyzers/fixtures/native/biome-minimal.json") == set()
+    assert module._tests_for_path("tests/analyzers/support.py") == set()
     for touchpoint in (".github/workflows/ci.yml", "Makefile"):
         assert module._tests_for_path(touchpoint) == {"tests/ci"}
     assert module._tests_for_path("README.md") == set()
