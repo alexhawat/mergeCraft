@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET, import_module
+from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET, enabled_analyzer_ids, import_module
 
 FOUR_CHEAP_FLIPS: tuple[str, ...] = ("golangci-lint", "clippy", "rubocop", "phpstan")
 BATCH_W_FIXTURES = FIXTURES_DIR / "batch-w"
@@ -42,17 +42,6 @@ _AUTO_DETECT_CASES: tuple[tuple[str, Path, list[str]], ...] = (
 
 def _registry():
     return import_module("mergecraft.analyzers.registry")
-
-
-def _enabled_ids(repo_root: Path, changed_files: list[str]) -> set[str]:
-    return {
-        manifest.id
-        for manifest in _registry().detect_enabled(
-            repo_root=repo_root,
-            changed_files=changed_files,
-            settings_overrides={},
-        )
-    }
 
 
 def _argv_has_level_zero(argv: tuple[str, ...]) -> bool:
@@ -119,11 +108,11 @@ def test_four_cheap_flips_auto_enables_on_language_markers(
     tool_id: str, repo: Path, changed: list[str]
 ) -> None:
     assert repo.is_dir(), f"missing Batch W fixture repo: {repo}"
-    assert tool_id in _enabled_ids(repo, changed)
+    assert tool_id in enabled_analyzer_ids(repo, changed)
 
 
 def test_empty_changed_files_do_not_enable_four_cheap_flips() -> None:
-    ids = _enabled_ids(BATCH_W_FIXTURES / "go", [])
+    ids = enabled_analyzer_ids(BATCH_W_FIXTURES / "go", [])
     assert ids.isdisjoint(FOUR_CHEAP_FLIPS)
 
 
@@ -131,7 +120,7 @@ def test_empty_changed_files_do_not_enable_four_cheap_flips() -> None:
 def test_rubocop_auto_fires_when_config_is_present(tmp_path: Path, config_name: str) -> None:
     (tmp_path / config_name).write_text("AllCops:\n  NewCops: enable\n", encoding="utf-8")
     (tmp_path / "hello.rb").write_text("puts 1\n", encoding="utf-8")
-    assert "rubocop" in _enabled_ids(tmp_path, ["hello.rb"])
+    assert "rubocop" in enabled_analyzer_ids(tmp_path, ["hello.rb"])
 
 
 def test_rubocop_auto_fires_when_gemfile_declares_rubocop(tmp_path: Path) -> None:
@@ -140,7 +129,7 @@ def test_rubocop_auto_fires_when_gemfile_declares_rubocop(tmp_path: Path) -> Non
         encoding="utf-8",
     )
     (tmp_path / "hello.rb").write_text("puts 1\n", encoding="utf-8")
-    assert "rubocop" in _enabled_ids(tmp_path, ["hello.rb"])
+    assert "rubocop" in enabled_analyzer_ids(tmp_path, ["hello.rb"])
 
 
 def test_rubocop_without_config_is_not_enabled(tmp_path: Path) -> None:
@@ -149,7 +138,7 @@ def test_rubocop_without_config_is_not_enabled(tmp_path: Path) -> None:
         'source "https://rubygems.org"\n',
         encoding="utf-8",
     )
-    assert "rubocop" not in _enabled_ids(tmp_path, ["hello.rb", "Gemfile"])
+    assert "rubocop" not in enabled_analyzer_ids(tmp_path, ["hello.rb", "Gemfile"])
 
 
 def test_rubocop_without_config_skips_unavailable_not_a_cop_dump(tmp_path: Path) -> None:

@@ -428,16 +428,29 @@ back as empty lists. The approval gate requires the `inputs` gate to be `true`
 when a checklist is present, and falls back to the category check when it is
 not.
 
-### `trajectory` — `dict[str, Any] | None` (nullable until Batch C)
+### `mode_prompt_versions` — `list[ModePromptVersion] | None`
 
-Placeholder; populated by Batch C's `TrajectoryRecord` and the
-trajectory auditor. Built from the MCP tool-call layer — no
-external trace dependency.
+Each entry identifies a mode by `mode_name` and the prompt body used for that run by `prompt_version`.
 
-### `evals` — `dict[str, Any] | None` (nullable until Batch E)
+### `agent_terminal_verdict` — `approve | request_changes | null`
 
-Placeholder; populated by Batch E's eval bank. The case store lives
-under the existing `evals/` tree.
+Records the agent's accepted terminal submission. The structural approval gate also considers analyzer evidence, trust and completion.
+
+### `reviewed_head_sha` — `str | None`
+
+The PR head checked out by the orchestrator. Trusted workflow runs use it as a checkpoint for incremental review.
+
+### `progress_comment_id` — `int | None`
+
+The GitHub comment ID owned by this run. A subsequent trusted run can update the same progress comment.
+
+### `trajectory` — `TrajectoryRecord | None`
+
+The trajectory records tool calls and file reads observed during the review.
+
+### `evals` — `list[EvalMetadata] | None`
+
+Each row summarizes an attached replay. The corresponding case lives under `evals/cases/`.
 
 ## Worked example
 

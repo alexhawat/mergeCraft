@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET, import_module
+from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET, enabled_analyzer_ids, import_module
 
 B_TIER_IDS: tuple[str, ...] = (
     "luacheck",
@@ -110,17 +110,6 @@ def _registry():
     return import_module("mergecraft.analyzers.registry")
 
 
-def _enabled_ids(repo_root: Path, changed_files: list[str]) -> set[str]:
-    return {
-        manifest.id
-        for manifest in _registry().detect_enabled(
-            repo_root=repo_root,
-            changed_files=changed_files,
-            settings_overrides={},
-        )
-    }
-
-
 def _analyzers_doc_row(tool_id: str) -> str:
     import mergecraft.analyzers.catalog_docs as docs
 
@@ -171,7 +160,7 @@ def test_b_tier_markers_do_not_match_unrelated_paths(tool_id: str) -> None:
 
 
 def test_empty_changed_files_do_not_enable_b_tier() -> None:
-    ids = _enabled_ids(BATCH_Z_FIXTURES / "lua", [])
+    ids = enabled_analyzer_ids(BATCH_Z_FIXTURES / "lua", [])
     assert ids.isdisjoint(B_TIER_IDS)
 
 
@@ -264,12 +253,12 @@ def test_batch_z_detect_fixture_trees_exist() -> None:
 
 def test_shopify_theme_check_does_not_auto_enable_on_bare_liquid() -> None:
     repo = BATCH_Z_FIXTURES / "liquid-bare"
-    assert "shopify-theme-check" not in _enabled_ids(repo, ["hello.liquid"])
+    assert "shopify-theme-check" not in enabled_analyzer_ids(repo, ["hello.liquid"])
 
 
 def test_ember_template_lint_does_not_auto_enable_on_bare_hbs() -> None:
     repo = BATCH_Z_FIXTURES / "hbs-bare"
-    assert "ember-template-lint" not in _enabled_ids(repo, ["hello.hbs"])
+    assert "ember-template-lint" not in enabled_analyzer_ids(repo, ["hello.hbs"])
 
 
 # --- W19 greened: auto flip + extras from the issue table ---
@@ -286,7 +275,7 @@ def test_b_tier_auto_enables_on_detect_markers(
     tool_id: str, repo: Path, changed: list[str]
 ) -> None:
     assert repo.is_dir(), f"missing Batch Z fixture repo: {repo}"
-    assert tool_id in _enabled_ids(repo, changed)
+    assert tool_id in enabled_analyzer_ids(repo, changed)
 
 
 @pytest.mark.parametrize(("tool_id", "changed"), _W19_EXTRA_DETECT_PATHS)
@@ -312,12 +301,12 @@ def test_ember_template_lint_declares_supports_fix() -> None:
 
 def test_shopify_theme_check_auto_enables_on_theme_layout_without_yml() -> None:
     repo = BATCH_Z_FIXTURES / "liquid-theme-layout"
-    assert "shopify-theme-check" in _enabled_ids(repo, ["templates/index.liquid"])
+    assert "shopify-theme-check" in enabled_analyzer_ids(repo, ["templates/index.liquid"])
 
 
 def test_ember_template_lint_auto_enables_on_ember_source_package_json() -> None:
     repo = BATCH_Z_FIXTURES / "ember-source"
-    assert "ember-template-lint" in _enabled_ids(
+    assert "ember-template-lint" in enabled_analyzer_ids(
         repo, ["app/templates/application.hbs", "package.json"]
     )
 
