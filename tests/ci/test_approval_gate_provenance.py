@@ -439,14 +439,16 @@ def test_routing_prefers_the_packet_verdict_over_a_foreign_check(
     )
 
 
-def test_routing_skips_codex_on_an_untrusted_tier_neutral(tmp_path: Path) -> None:
+@pytest.mark.parametrize("provider", ["codex", "claude"])
+def test_routing_skips_fallback_on_an_untrusted_tier_neutral(tmp_path: Path, provider: str) -> None:
     """#1078 — D14 inertness: a fallback rung cannot make an untrusted run green."""
     root = stage_trusted_copy(tmp_path)
     outputs, completed = run_decide_script(
         tmp_path,
-        root / "scripts/decide_codex_fallback.sh",
+        root / f"scripts/decide_{provider}_fallback.sh",
         env={
-            "OPENCODE_GO_OUTCOME": "success",
+            "OPENCODE_GO_OUTCOME": "failure",
+            "OPENCODE_GO_FAILOVER_ELIGIBLE": "true",
             "OPENCODE_GO_PACKET": evidence_packet(
                 verdict="neutral",
                 reason=(
@@ -459,7 +461,7 @@ def test_routing_skips_codex_on_an_untrusted_tier_neutral(tmp_path: Path) -> Non
     )
     assert completed.returncode == 0
     assert outputs.get("need") == "false", (
-        "an untrusted-tier neutral is structurally inert; do not spend Codex on it"
+        "an untrusted-tier neutral is structurally inert; do not spend another provider on it"
     )
     assert "untrusted" in completed.stdout
 
