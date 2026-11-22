@@ -1,0 +1,6 @@
+# actionlint 1.7.12 predates GitHub's concurrency.queue property.
+# The promotion contract tests assert its value and concurrency group.
+paths:
+  ".github/workflows/ci-cd.yml":
+    ignore:
+      - '^unexpected key "queue" for "concurrency" section\.'
