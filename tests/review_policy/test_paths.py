@@ -21,16 +21,16 @@ _CASES: list[tuple[str, str]] = [
     ("src/app.py", "src/app.py"),
     # Leading ``./``.
     ("./src/app.py", "src/app.py"),
-    # Diff ``a/`` and ``b/`` prefixes.
-    ("a/src/app.py", "src/app.py"),
-    ("b/src/app.py", "src/app.py"),
-    # The prefixes chain across the loop: ``./`` then ``a/`` / ``b/``.
-    ("./a/src/app.py", "src/app.py"),
-    ("./b/src/app.py", "src/app.py"),
+    # Real top-level a/ and b/ directories.
+    ("a/src/app.py", "a/src/app.py"),
+    ("b/src/app.py", "b/src/app.py"),
+    # Remove only the leading ./ before a real directory.
+    ("./a/src/app.py", "a/src/app.py"),
+    ("./b/src/app.py", "b/src/app.py"),
     # Windows separators become forward slashes, before the prefix strip.
     ("src\\main\\app.py", "src/main/app.py"),
     (".\\src\\app.py", "src/app.py"),
-    ("a\\src\\app.py", "src/app.py"),
+    ("a\\src\\app.py", "a/src/app.py"),
     ("C:\\src\\app.py", "C:/src/app.py"),
     # Surrounding whitespace is stripped; internal whitespace is not a case here.
     ("  ./src/app.py  ", "src/app.py"),
@@ -50,15 +50,15 @@ _CASES: list[tuple[str, str]] = [
     # Degenerate inputs.
     ("", ""),
     ("a", "a"),
-    ("a/", ""),
+    ("a/", "a/"),
     ("./", ""),
-    ("b/", ""),
+    ("b/", "b/"),
     # ``ab/`` is not the ``a/`` prefix.
     ("ab/foo", "ab/foo"),
     # Only one ``./`` is stripped: the loop does not revisit ``./``.
     ("././src", "./src"),
-    ("a/./src", "./src"),
-    ("b/../x", "../x"),
+    ("a/./src", "a/./src"),
+    ("b/../x", "b/../x"),
 ]
 
 

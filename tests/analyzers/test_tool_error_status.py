@@ -78,11 +78,23 @@ def _plan(tool_id: str, tmp_path: Path) -> AnalyzerPlan:
     ("tool_id", "returncode", "stdout", "stderr"),
     [
         ("mypy", 2, "", _MYPY_CRASH),
+        (
+            "mypy",
+            2,
+            '{"file":"app.py","line":1,"message":"bad type","code":"assignment"}',
+            _MYPY_CRASH,
+        ),
         ("mypy", 2, _MYPY_UNREADABLE, ""),
         ("vulture", 1, "", _VULTURE_CRASH),
         ("mypy", 2, "", ""),
     ],
-    ids=["mypy-traceback", "mypy-unreadable-file", "vulture-traceback", "mypy-silent-exit-2"],
+    ids=[
+        "mypy-traceback",
+        "mypy-diagnostic-before-crash",
+        "mypy-unreadable-file",
+        "vulture-traceback",
+        "mypy-silent-exit-2",
+    ],
 )
 def test_crash_output_is_a_tool_error_not_a_pass(
     tmp_path: Path,
