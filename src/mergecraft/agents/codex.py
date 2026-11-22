@@ -201,7 +201,7 @@ def _codex_home(ctx: AgentRunContext) -> Path:
     ``/tmp`` (world-writable temp). Prefer the run tmpdir when it is safe;
     otherwise relocate under ``RUNNER_TEMP`` / workspace / cache.
     """
-    return _safe_codex_home_parent(ctx) / ".codex"
+    return _safe_codex_home_parent(ctx) / ".codex" / ctx.codex_home_id
 
 
 def _toml_string(value: str) -> str:
@@ -267,26 +267,24 @@ _SEEDED_CODEX_AUTH: dict[str, str] = {}
 _SEEDED_CODEX_AUTH_LOCK = threading.Lock()
 
 
-def _keep_seeded_codex_auth(auth_path: Path, raw: str) -> bool:
-    """Return whether ``auth_path`` holds this process's login for ``raw``, possibly refreshed.
-
-    True only when this process seeded the file from the same secret, the file
-    still parses as a usable subscription login, and it names the same account.
-    """
+def _read_seeded_codex_auth(auth_path: Path, raw: str) -> str | None:
+    """Return a usable login only if its seed and account match this attempt."""
     with _SEEDED_CODEX_AUTH_LOCK:
         seeded = _SEEDED_CODEX_AUTH.get(str(auth_path))
     if seeded != raw:
-        return False
+        return None
     try:
         current = auth_path.read_text(encoding="utf-8")
     except OSError:
-        return False
+        return None
     if not subscription_auth_usable(current):
-        return False
+        return None
     # Both bodies must name the account, as the export path requires: the file
     # is read after the reviewer processed content the pull request controls.
     seeded_account = _subscription_account_id(raw)
-    return seeded_account is not None and _subscription_account_id(current) == seeded_account
+    if seeded_account is not None and _subscription_account_id(current) == seeded_account:
+        return current
+    return None
 
 
 def _setup_codex_auth(
@@ -305,13 +303,13 @@ def _setup_codex_auth(
     source: Mapping[str, str] = credential_env if credential_env is not None else os.environ
     raw = source.get(CODEX_AUTH_ENV, "").strip()
     if raw and subscription_auth_usable(raw):
-        codex_home.mkdir(parents=True, exist_ok=True)
+        codex_home.mkdir(mode=0o700, parents=True, exist_ok=True)
         auth_path = codex_home / "auth.json"
         # #1327 — Codex rotates the refresh token and rewrites auth.json. A
         # second attempt in this process (a post-run resume, or a same-harness
         # chain rung) must not put the spent original back over the refreshed
         # login, or the next refresh fails and the write-back exports nothing.
-        if _keep_seeded_codex_auth(auth_path, raw):
+        if _read_seeded_codex_auth(auth_path, raw) is not None:
             logger.debug("keeping the Codex login already in {} (it may be refreshed)", auth_path)
             return
         # HS4 — the subscription credential must not be group/world-readable,
@@ -319,9 +317,12 @@ def _setup_codex_auth(
         # agent user after this write so the Codex CLI (dropped via setpriv) can
         # still read its own ``auth.json``; the mode, not the owner, is what keeps
         # other processes and the agent's ``Read`` tool out of it.
-        write_private_file(auth_path, raw)
+        previous = ctx.tool_state.codex_login_source
+        refreshed = _read_seeded_codex_auth(Path(previous), raw) if previous else None
+        write_private_file(auth_path, refreshed or raw)
         with _SEEDED_CODEX_AUTH_LOCK:
             _SEEDED_CODEX_AUTH[str(auth_path)] = raw
+        ctx.tool_state.codex_login_source = str(auth_path)
         return
     if raw:
         logger.warning(
@@ -836,7 +837,7 @@ def write_mcp_config(
 ) -> str:
     """Write Codex ``config.toml`` under ``$CODEX_HOME`` and return its path."""
     codex_home = _codex_home(ctx)
-    codex_home.mkdir(parents=True, exist_ok=True)
+    codex_home.mkdir(mode=0o700, parents=True, exist_ok=True)
     instructions_parts: list[str] = []
     if ctx.mcp_server_url:
         instructions_parts.append(_codex_mcp_tool_preamble())

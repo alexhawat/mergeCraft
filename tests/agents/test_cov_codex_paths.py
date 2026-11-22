@@ -113,7 +113,7 @@ def test_codex_home_keeps_run_tmpdir_when_it_is_not_world_writable(
     monkeypatch.setattr(codex_module, "_FORBIDDEN_TEMP_ROOTS", ())
     ctx = make_agent_run_context(tmp_path, resolved_model=None)
 
-    assert codex_module._codex_home(ctx) == tmp_path / ".codex"
+    assert codex_module._codex_home(ctx).parent == tmp_path / ".codex"
 
 
 def test_codex_home_parent_skips_env_candidate_that_is_also_world_writable(
