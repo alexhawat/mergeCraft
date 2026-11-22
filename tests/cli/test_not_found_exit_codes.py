@@ -35,3 +35,27 @@ def test_unknown_id_exits_with_the_usage_code(
     result = CliRunner().invoke(app, list(argv), env=_ENV)
 
     assert result.exit_code == CLI_USAGE_EXIT_CODE, result.output
+
+
+@pytest.mark.parametrize(
+    ("args", "diagnostic"),
+    [
+        (["trust", "set-self-review", "bogus"], "invalid level"),
+        (["trust", "set-agent-sandbox", "bogus"], "invalid tier"),
+        (["agents", "show", "bogus"], "unknown role"),
+        (
+            ["eval", "adjudicate", "sample.json", "--id", "issue", "--by", "bogus"],
+            "unknown adjudicator",
+        ),
+        (["tracing", "logfire", "wire-workflow", "--region", "bogus"], "--region must be one of"),
+        (["provider", "auth", "--api-key-stdin"], "requires a label"),
+        (["provider", "auth", "sample", "--api-key-stdin"], "standard input contained no API key"),
+    ],
+)
+def test_invalid_options_report_the_reason_and_usage_code(
+    args: list[str], diagnostic: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, args, input="\n", env=_ENV)
+    assert result.exit_code == CLI_USAGE_EXIT_CODE, result.output
+    assert diagnostic in result.output
