@@ -6,6 +6,7 @@ import getpass
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import warnings
 from collections.abc import Callable, Mapping, Sequence
@@ -281,10 +282,10 @@ def list_cmd(
     config_path = _config_path(cwd.resolve())
     registry = load_provider_registry(config_path)
     if not registry.labels():
-        console.print("no providers registered")
+        typer.echo("no providers registered")
         return
     for label in registry.labels():
-        console.print(label)
+        typer.echo(label)
 
 
 @app.command("add")
@@ -1259,9 +1260,20 @@ def provider_auth_cmd(
         "--api-key",
         help="API key for api_key providers (non-interactive; skips the prompt).",
     ),
+    api_key_stdin: bool = typer.Option(
+        False, "--api-key-stdin", help="Read a local provider API key from standard input."
+    ),
     cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
 ) -> None:
     """Authenticate one registered provider into indexed ``LLM_PROVIDER_*`` secrets."""
+    if api_key_stdin:
+        if api_key is not None or label is None:
+            cli_bail(
+                "--api-key-stdin requires a label and excludes --api-key", code=CLI_USAGE_EXIT_CODE
+            )
+        api_key = sys.stdin.readline().rstrip("\r\n")
+        if not api_key.strip():
+            cli_bail("standard input contained no API key", code=CLI_USAGE_EXIT_CODE)
     repo_root = cwd.resolve()
     config_path = _config_path(repo_root)
     registry = load_provider_registry(config_path)
