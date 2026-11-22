@@ -48,6 +48,14 @@ inputs:
   status_checks:
     description: "Post mergecraft and mergecraft-approval commit-status checks: disabled (default) or enabled."
     required: false
+  review_event:
+    description: >-
+      Which GitHub review event mergeCraft publishes. `verdict` (default): the
+      recorded verdict decides (APPROVE when approval is enabled, REQUEST_CHANGES,
+      or COMMENT). `comment`: always a COMMENT review, and the run never resolves
+      review threads — for an advisory reviewer that must not block or unblock a
+      merge. Any other value fails the run as a configuration error.
+    required: false
   analyzers:
     description: >-
       Analyzer execution tier: off (disabled), auto (detect + provision), full (baked image tools),
@@ -279,6 +287,7 @@ runs:
     INPUT_PUSH: ${{ inputs.push }}
     INPUT_SHELL: ${{ inputs.shell }}
     INPUT_STATUS_CHECKS: ${{ inputs.status_checks }}
+    INPUT_REVIEW_EVENT: ${{ inputs.review_event }}
     INPUT_ANALYZERS: ${{ inputs.analyzers }}
     INPUT_SARIF_UPLOAD: ${{ inputs.sarif_upload }}
     INPUT_OUTPUT_SCHEMA: ${{ inputs.output_schema }}

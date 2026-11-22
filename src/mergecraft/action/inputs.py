@@ -57,6 +57,17 @@ consumes the whole run budget.
 
 _SETUP_FAILURE_POLICY_VALUES: frozenset[str] = frozenset({"inconclusive", "fail", "warn"})
 
+ReviewEventMode = Literal["verdict", "comment"]
+"""Closed vocabulary for the ``review_event`` Action input.
+
+| value                 | effect                                                      |
+|-----------------------|-------------------------------------------------------------|
+| ``verdict`` (default) | the recorded verdict picks APPROVE / REQUEST_CHANGES / COMMENT |
+| ``comment``           | always COMMENT, and the run resolves no review threads      |
+"""
+
+_REVIEW_EVENT_VALUES: frozenset[str] = frozenset({"verdict", "comment"})
+
 
 def _read_logfire_region() -> Literal["us", "eu"] | None:
     """Return a valid Logfire region from ``MERGECRAFT_TRACING_REGION``.
@@ -301,6 +312,25 @@ def resolve_setup_failure_policy() -> SetupFailurePolicy | None:
         f"unknown setup_failure_policy: {raw!r} "
         f"(expected one of {sorted(_SETUP_FAILURE_POLICY_VALUES)})"
     )
+    raise ValueError(msg)
+
+
+def resolve_review_event() -> ReviewEventMode:
+    """Resolve ``INPUT_REVIEW_EVENT`` to a closed vocabulary value.
+
+    Unset or empty means ``verdict``. Any other value raises ``ValueError`` so
+    the run fails closed as ``RunOutcome.configuration_error`` before the agent
+    starts: a misspelt ``comment`` must not quietly publish a blocking review.
+    """
+    raw = ActionInputEnv().review_event
+    if raw is None:
+        return "verdict"
+    candidate = raw.strip().lower()
+    if not candidate:
+        return "verdict"
+    if candidate in _REVIEW_EVENT_VALUES:
+        return candidate  # type: ignore[return-value]  # — candidate verified against _REVIEW_EVENT_VALUES above
+    msg = f"unknown review_event: {raw!r} (expected one of {sorted(_REVIEW_EVENT_VALUES)})"
     raise ValueError(msg)
 
 
