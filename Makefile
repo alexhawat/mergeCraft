@@ -286,7 +286,7 @@ examples: ## Render example workflow YAML from templates
 example-workflows-check: ## Fail when committed example workflows drift from templates
 	$(UV) run python scripts/render_example_workflows.py --check
 
-pins-check: ## Fail when the defaults.yaml copies drift or the pinned SHA disagrees with its tag (#402, #414)
+pins-check: example-workflows-check ## Fail when the defaults.yaml copies drift or the pinned SHA disagrees with its tag (#402, #414)
 	$(UV) run python scripts/check_example_defaults_sync.py
 
 agent-packages: ## Regenerate per-harness Agent Skills packages

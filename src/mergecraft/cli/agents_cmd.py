@@ -16,6 +16,7 @@ from mergecraft.agents.registry import (
 )
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.model_cmd import (
     _find_provider_index,
     _model_id_from_row,
@@ -94,7 +95,10 @@ def _validate_role_key(role: str) -> str:
     try:
         AgentRole(role_key)
     except ValueError:
-        cli_bail(f"unknown role: {role!r} (expected one of: {_known_roles_message()})")
+        cli_bail(
+            f"unknown role: {role!r} (expected one of: {_known_roles_message()})",
+            code=CLI_USAGE_EXIT_CODE,
+        )
     return role_key
 
 
@@ -131,7 +135,7 @@ def validate_registered_model_slug(
     provider_label = provider_label.strip()
     provider_idx = _find_provider_index(entries, provider_label)
     if provider_idx is None:
-        cli_bail(_unknown_provider_message(provider_label, labels))
+        cli_bail(_unknown_provider_message(provider_label, labels), code=CLI_USAGE_EXIT_CODE)
 
     entry = entries[provider_idx]
     provider_name = str(entry.get("label", provider_label))
@@ -162,7 +166,7 @@ def ensure_registered_model_slug(
     provider_label = provider_label.strip()
     provider_idx = _find_provider_index(entries, provider_label)
     if provider_idx is None:
-        cli_bail(_unknown_provider_message(provider_label, labels))
+        cli_bail(_unknown_provider_message(provider_label, labels), code=CLI_USAGE_EXIT_CODE)
 
     entry = dict(entries[provider_idx])
     provider_name = str(entry.get("label", provider_label))
@@ -301,7 +305,7 @@ def show_cmd(
     try:
         AgentRole(role)
     except ValueError:
-        cli_bail(f"unknown role: {role!r}")
+        cli_bail(f"unknown role: {role!r}", code=CLI_USAGE_EXIT_CODE)
 
     settings = load_repo_settings(root=target_dir)
     try:
@@ -310,7 +314,7 @@ def show_cmd(
     except RegistryValidationError as exc:
         cli_bail(str(exc))
     except KeyError:
-        cli_bail(f"unknown role: {role!r}")
+        cli_bail(f"unknown role: {role!r}", code=CLI_USAGE_EXIT_CODE)
 
     prompt = resolve_prompt_text(binding.prompt_id, version=binding.prompt_version)
     tools = registry.resolve_tool_names(binding, _tool_ctx(target_dir))

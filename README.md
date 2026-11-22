@@ -84,6 +84,8 @@ Docs on `main` may describe unreleased behavior; the
 this install. Offline first: `mergecraft review --dry-run` prints the review prompt
 with no credential. Something wrong? [`docs/troubleshooting.md`](docs/troubleshooting.md).
 
+The [harness](docs/glossary.md#harness) runs the provider selected in your configuration.
+
 ### Example 1 — auto-review every PR
 
 The [complete workflow](examples/workflows/mergecraft.yml) runs the pinned Action on each PR. The scaffold configures permissions, provider credentials, and the review prompt.
@@ -106,7 +108,7 @@ For ignore paths, comment triggers and hardened workflows, see the [workflow gui
 | What teams need | How mergeCraft handles it |
 |---|---|
 | Control over credentials and cost | Run in GitHub Actions with your own subscription or API key. [Cost guide](docs/cost.md) |
-| Reviewable evidence | Analyzers check the diff and a verifier re-reads Critical and Major findings. |
+| Reviewable evidence | Each [analyzer](docs/glossary.md#analyzer) checks the diff and a [verifier](docs/glossary.md#verifier) re-reads Critical and Major findings. |
 | A portable reviewer | Run the MIT-licensed Action or review a local diff with the CLI. |
 
 <span id="how-it-works"></span>

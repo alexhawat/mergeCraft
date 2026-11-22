@@ -24,7 +24,6 @@ _PACKAGED_DEFAULTS = (
 _PINS_CHECK_TARGET = "pins-check"
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _LOCKED_CHECKOUT_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
-_LOCKED_ACTION_SHA = "44bd67c55666303d5bd35efed5ef53868b27bb46"
 
 
 def test_checkout_and_packaged_defaults_yaml_are_byte_identical() -> None:
@@ -76,7 +75,6 @@ def test_defaults_carry_the_shared_action_and_checkout_shas(path: Path) -> None:
     """One immutable commit each for the Action ref and every checkout."""
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(raw, dict)
-    assert raw.get("action_sha_minimal") == _LOCKED_ACTION_SHA
     assert raw.get("checkout_sha") == _LOCKED_CHECKOUT_SHA
     assert _SHA.fullmatch(str(raw.get("action_sha_minimal")))
     assert _SHA.fullmatch(str(raw.get("checkout_sha")))

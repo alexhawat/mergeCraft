@@ -361,7 +361,7 @@ def edit_cmd(
             match_index = idx
             break
     if match_index is None:
-        cli_bail(f"unknown provider label {label!r}")
+        cli_bail(f"unknown provider label {label!r}", code=CLI_USAGE_EXIT_CODE)
 
     updated = dict(entries[match_index])
     if url is not None:
@@ -404,7 +404,7 @@ def delete_cmd(
         remaining.append(entry)
 
     if not removed:
-        cli_bail(f"unknown provider label {label!r}")
+        cli_bail(f"unknown provider label {label!r}", code=CLI_USAGE_EXIT_CODE)
 
     data["providers"] = remaining
     _write_config_dict(config_path, data)
@@ -1272,7 +1272,7 @@ def provider_auth_cmd(
                 "--api-key-stdin requires a label and excludes --api-key", code=CLI_USAGE_EXIT_CODE
             )
         api_key = sys.stdin.readline().rstrip("\r\n")
-        if not api_key.strip():
+        if not api_key or not api_key.strip():
             cli_bail("standard input contained no API key", code=CLI_USAGE_EXIT_CODE)
     repo_root = cwd.resolve()
     config_path = _config_path(repo_root)
@@ -1289,7 +1289,7 @@ def provider_auth_cmd(
             )
         entry = registry.lookup(normalised)
         if entry is None:
-            cli_bail(f"unknown provider label {normalised!r}")
+            cli_bail(f"unknown provider label {normalised!r}", code=CLI_USAGE_EXIT_CODE)
         console.print(f"authenticating provider [cyan]{entry.get('label', normalised)}[/cyan]")
         resolved_scope = (scope or "github").strip().lower()
         if api_key is not None and scope is not None and resolved_scope == "github":
