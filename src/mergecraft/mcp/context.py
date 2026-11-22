@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from mergecraft.mcp.reviewer_sessions import ReviewerSessions
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
@@ -72,6 +74,7 @@ class ToolContext:
     api_token: str
     modes: list[Mode]
     tool_state: ToolState
+    reviewer_sessions: ReviewerSessions
     mcp_server_url: str
     mcp_auth_token: str
     mcp_orchestrator_auth_token: str
@@ -181,6 +184,7 @@ class ToolContext:
             raise ValueError(msg)
         self.tool_state = tool_state
         self.mcp_server_url = mcp_server_url
+        self.reviewer_sessions = ReviewerSessions()
         self.mcp_auth_token = mcp_auth_token
         self.mcp_orchestrator_auth_token = mcp_orchestrator_auth_token
         self.tmpdir = tmpdir

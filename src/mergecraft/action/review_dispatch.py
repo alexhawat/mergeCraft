@@ -782,7 +782,7 @@ def _promote_and_finalize_agent_result(
     output_schema = ctx.output_schema
     # Slice 6 — keep the watchdog diagnostic so the packet and the check
     # summary can name *what* stalled, not only that the clock expired.
-    if (result.metadata or {}).get("idle_timeout"):
+    if result.metadata.get("idle_timeout") or result.metadata.get("wall_clock_timeout"):
         tool_state.agent_diagnostic = dict(result.metadata)
 
     if winning_slug:
