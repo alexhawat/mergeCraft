@@ -299,6 +299,7 @@ jobs:
             git checkout --detach "$tag"
           else
             git push origin "HEAD:refs/tags/$tag"
+            git fetch origin "refs/tags/$tag:refs/tags/$tag"
           fi
 
       - name: Retag the signed images
@@ -321,6 +322,8 @@ jobs:
               exit 1
             fi
           done
+
+          uv run python scripts/bump_action_pin.py verify-release-tag --version "$RELEASE_VERSION"
 
       - name: Create the GitHub release
         env:

@@ -21,7 +21,9 @@ from check_action_image_digest import (
     SLIM_IMAGE,
     TagLookupStatus,
     VerificationError,
+    _action_at,
     _commit,
+    _digest_from_action,
     _ghcr_digest_for_tag,
     _ghcr_digest_for_tag_once,
     _git,
@@ -198,19 +200,42 @@ def publish_canonical(repo: Path, source: str, digests: dict[str, str]) -> dict[
     return {"state": "canonical-images-published", "source_revision": source, **digests}
 
 
+def verify_release_tag(repo: Path, version: str) -> dict[str, str]:
+    """Read the published Git and registry version tags and compare their immutable images."""
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:(?:a|b|rc)[0-9]+)?", version):
+        raise VerificationError("expected a release version")
+    commit = _git(repo, "rev-parse", f"refs/tags/v{version}^{{commit}}").strip()
+    digest = _digest_from_action(_action_at(repo, commit))
+    published = _ghcr_digest_for_tag(version)
+    if published.status is not TagLookupStatus.FOUND or published.digest != digest:
+        raise VerificationError("published version digest differs from tagged action.yml")
+    return {"manifest_commit": commit, "image_digest": digest}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "phase", choices=("manifest", "pin", "resolve-images", "verify-images", "publish-canonical")
+        "phase",
+        choices=(
+            "manifest",
+            "pin",
+            "resolve-images",
+            "verify-images",
+            "publish-canonical",
+            "verify-release-tag",
+        ),
     )
     parser.add_argument("--source", default=os.environ.get("SOURCE_REVISION"))
     parser.add_argument("--digest", default=os.environ.get("IMAGE_DIGEST"))
     parser.add_argument("--manifest", default=os.environ.get("MANIFEST_COMMIT"))
     parser.add_argument("--base-branch", default=os.environ.get("RELEASE_BASE_BRANCH", "pre-0.0.1"))
+    parser.add_argument("--version")
     args = parser.parse_args(argv)
     try:
         if args.phase == "manifest":
             result = prepare_manifest(REPO, args.source or "", args.digest or "")
+        elif args.phase == "verify-release-tag":
+            result = verify_release_tag(REPO, args.version or "")
         elif args.phase == "pin":
             result = prepare_pin(REPO, args.manifest or "", args.base_branch)
         elif args.phase == "resolve-images":
