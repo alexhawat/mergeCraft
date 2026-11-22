@@ -59,7 +59,8 @@
 # - ANTHROPIC_API_KEY — Anthropic API key (same claude harness as CLAUDE_CODE_OAUTH_TOKEN)
 # - ANTHROPIC_OPUS_API_KEY — Anthropic API key for the advisory Claude Opus 5.5
 #   reviewer (`review-opus` job). It reviews every same-repo PR in addition to the
-#   cascade, posts COMMENT reviews only, and never feeds the approval gate.
+#   cascade, publishes with the job token (not the reviewer App), posts no
+#   check-runs, and never feeds the approval gate.
 # The job skips gracefully when none are set (e.g. fork PRs). Without
 # OPENCODE_GO_API_KEY the primary is inert and Codex is the only reviewer; without
 # CODEX_AUTH_JSON / OPENAI_API_KEY, OpenCode Go is the only reviewer.
@@ -1614,7 +1615,7 @@ jobs:
   # A second, independent reviewer: Claude Opus 5.5 on the Anthropic API. It is
   # NOT a rung of the cascade above and does not replace DeepSeek — it reviews
   # every PR in addition to whichever rung recorded the verdict, and posts its
-  # inline comments and summary as a COMMENT review.
+  # own inline comments and summary review.
   #
   # Advisory only. `status_checks: disabled` keeps it from posting a
   # `mergecraft` / `mergecraft-approval` check-run: the approval gate takes the
@@ -1622,15 +1623,33 @@ jobs:
   # second check from this job could disagree with the recorded verdict and fail
   # the gate (or, worse, be the one it compares). The gate does not `needs:` this
   # job, so an Opus outage or slow review never blocks a merge.
+  # `tests/ci/test_review_opus_advisory.py` pins these properties.
   #
-  # It runs after `review-backstop` rather than alongside the cascade so the two
-  # reviews do not write the PR's sticky progress comment / findings ledger at
-  # the same time.
+  # The review event is not forced to COMMENT: the action has no input for it.
+  # `prApproveEnabled: false` in `.mergecraft/config.yaml` rules out APPROVE,
+  # but a request_changes verdict still posts a REQUEST_CHANGES review, which a
+  # maintainer can dismiss.
+  #
+  # Publishes with the JOB token, never the reviewer App. The App identity is
+  # what mergeCraft treats as "its own" reviews, so sharing it with the cascade
+  # would (a) trip the same-head skip (#1490: the cascade's review already
+  # sits on this head SHA, so the agent would never run), (b) let each reviewer
+  # auto-resolve the other's threads whenever it did not re-raise a finding,
+  # and (c) overwrite the cascade's sticky progress comment. The shared
+  # `github-actions[bot]` login is never an expected publisher
+  # (review/authorship.py), so this run sees none of the cascade's state and
+  # keeps its own progress comment. MERGECRAFT_REVIEWER_BOT_LOGIN is therefore
+  # left unset on this step.
+  #
+  # It runs after `review-backstop` rather than alongside the cascade, so the
+  # model spend is only incurred once the recorded verdict exists.
   #
   # Its credential is a dedicated secret, ANTHROPIC_OPUS_API_KEY, passed to the
   # action as ANTHROPIC_API_KEY on this step only. Reusing ANTHROPIC_API_KEY
   # would also change which credential the Claude backstop authenticates with
-  # and widen every HAS_AUTH predicate. Without the secret this job is skipped.
+  # and widen every HAS_AUTH predicate. Without the secret (or on a fork PR) the
+  # job still starts, but every step except a notice is skipped: a job-level
+  # `if:` cannot read `secrets`.
   review-opus:
     name: mergecraft review (Claude Opus 5.5, advisory)
     needs: [changes, wait-for-ci, review, review-backstop]
@@ -1643,11 +1662,15 @@ jobs:
       issues: write
       # mergeCraft can mint short-lived tokens via OIDC when configured.
       id-token: write
-    # Same draft/dispatch/dependabot/image-only guard as the review job, plus the
-    # credential and same-repo guard (fork PRs never receive the secret).
+    # Same draft/dispatch/dependabot/image-only guard as the review job. Unlike
+    # the cascade jobs this one uses `!cancelled()`, not `always()`: a run that
+    # a newer push cancelled (`cancel-in-progress`) must not start a paid Opus
+    # review of the superseded head. It also needs the review job to have
+    # succeeded, because that job composes the prompt passed below; a failed
+    # prep step would otherwise hand the action an empty prompt.
     if: >-
-      always() &&
-      needs.review.result != 'skipped' &&
+      !cancelled() &&
+      needs.review.result == 'success' &&
       needs.changes.outputs.image_only != 'true' &&
       (github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false) &&
       github.event.pull_request.user.login != 'dependabot[bot]'
@@ -1655,7 +1678,6 @@ jobs:
     # > 1× MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES + checkout/setup slack (D8).
     timeout-minutes: 40
     env:
-      HAS_APP: ${{ secrets.MERGECRAFT_APP_ID != '' && secrets.MERGECRAFT_APP_PRIVATE_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
       HAS_OPUS: ${{ secrets.ANTHROPIC_OPUS_API_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
       MERGECRAFT_CI_WAIT_STATE: ${{ needs.wait-for-ci.outputs.state }}
       MERGECRAFT_CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
@@ -1686,21 +1708,6 @@ jobs:
             git branch -f "${base}" "origin/${base}"
           fi
 
-      - name: Mint App token for Claude Opus
-        if: env.HAS_APP == 'true' && env.HAS_OPUS == 'true'
-        id: app_token_opus
-        continue-on-error: true
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          app-id: ${{ secrets.MERGECRAFT_APP_ID }}
-          private-key: ${{ secrets.MERGECRAFT_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-contents: read
-          permission-actions: read
-          permission-pull-requests: write
-          permission-issues: write
-
       - name: mergeCraft PR review (Claude Opus 5.5)
         if: env.HAS_OPUS == 'true'
         id: mergecraft_opus
@@ -1723,19 +1730,19 @@ jobs:
           shell: disabled
           # Advisory reviewer: no mergecraft / mergecraft-approval check-runs.
           status_checks: disabled
-          token: ${{ steps.app_token_opus.outputs.token || github.token }}
+          # Job token on purpose — see the identity note above the job.
+          token: ${{ github.token }}
           tracing: "true"
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
-          MERGECRAFT_REVIEWER_BOT_LOGIN: ${{ steps.app_token_opus.outputs.app-slug && format('{0}[bot]', steps.app_token_opus.outputs.app-slug) || '' }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_OPUS_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: mergecraft-dev
           MERGECRAFT_TRACING_REGION: eu
 
       - name: Report advisory Opus review outcome
-        if: always() && env.HAS_OPUS == 'true'
+        if: ${{ !cancelled() && env.HAS_OPUS == 'true' }}
         env:
           OPUS_OUTCOME: ${{ steps.mergecraft_opus.outcome }}
         run: |
