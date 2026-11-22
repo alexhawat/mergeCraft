@@ -780,7 +780,7 @@ async def test_checkout_pr_does_not_absorb_a_change_made_before_it(tmp_path: Pat
     assert "new.py" not in text
 
 
-@pytest.mark.parametrize("update", ["merge", "rebase"])
+@pytest.mark.parametrize("update", ["merge", "rebase", "conflict"])
 def test_round_tracks_author_patch_across_base_updates(tmp_path: Path, update: str) -> None:
     def git(*args: str) -> str:
         return subprocess.check_output(["git", *args], cwd=tmp_path, text=True).strip()
@@ -788,19 +788,29 @@ def test_round_tracks_author_patch_across_base_updates(tmp_path: Path, update: s
     git("init", "-q", "-b", "main")
     git("config", "user.name", "Test")
     git("config", "user.email", "test@example.invalid")
-    git("commit", "--allow-empty", "-qm", "base")
+    shared = tmp_path / "author.txt"
+    shared.write_text("base\nnearby\nend\n")
+    git("add", "author.txt")
+    git("commit", "-qm", "base")
     git("checkout", "-qb", "feature")
-    (tmp_path / "author.txt").write_text("one\n")
+    shared.write_text("one\nnearby\nend\n")
     git("add", "author.txt")
     git("commit", "-qm", "author patch")
     first = git("rev-parse", "HEAD")
     git("checkout", "-q", "main")
-    (tmp_path / "upstream").write_text("base change")
-    git("add", "upstream")
+    shared.write_text("other\nnearby\nend\n" if update == "conflict" else "base\nnearby\nnew end\n")
+    git("add", "author.txt")
     git("commit", "-qm", "upstream")
     base = git("rev-parse", "HEAD")
     git("checkout", "-q", "feature")
-    git(update, "main")
+    if update == "conflict":
+        with pytest.raises(subprocess.CalledProcessError):
+            git("merge", "main")
+        shared.write_text("resolved\nnearby\nend\n")
+        git("add", "author.txt")
+        git("commit", "-qm", "resolve competing edits")
+    else:
+        git(update, "main")
     updated = git("rev-parse", "HEAD")
     history = [
         {"commit_id": sha, "body": _MERGECRAFT_BODY, "user": _BOT_USER}
@@ -816,7 +826,8 @@ def test_round_tracks_author_patch_across_base_updates(tmp_path: Path, update: s
             cwd=str(tmp_path),
         )
 
-    assert round_for(updated) == 1
+    expected = 2 if update == "conflict" else 1
+    assert round_for(updated) == expected
     (tmp_path / "author.txt").write_text("two\n")
     git("commit", "-qam", "second author patch")
-    assert round_for(git("rev-parse", "HEAD")) == 2
+    assert round_for(git("rev-parse", "HEAD")) == expected + 1

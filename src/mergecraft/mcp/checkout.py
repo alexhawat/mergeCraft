@@ -265,9 +265,20 @@ def last_reviewed_sha(
     return None
 
 
-def _author_patch_identity(head: str, *, cwd: str, base_sha: str) -> str:
+@dataclass(frozen=True, slots=True)
+class _AuthorPatch:
+    base: str
+    exact: str
+    edits: str
+
+    def matches(self, other: _AuthorPatch) -> bool:
+        return self.exact == other.exact if self.base == other.base else self.edits == other.edits
+
+
+def _author_patch_identity(head: str, *, cwd: str, base_sha: str) -> _AuthorPatch:
     """Ignore line offsets and blob ids that change after unrelated base edits."""
     try:
+        ancestor = _run_git(["merge-base", base_sha, head], cwd=cwd).strip()
         patch = _run_git(
             [
                 "diff",
@@ -276,24 +287,29 @@ def _author_patch_identity(head: str, *, cwd: str, base_sha: str) -> str:
                 "--binary",
                 "--no-color",
                 "--no-renames",
-                "--unified=3",
-                f"{base_sha}...{head}",
+                "--unified=0",
+                ancestor,
+                head,
                 "--",
             ],
             cwd=cwd,
         )
     except (OSError, RuntimeError, subprocess.TimeoutExpired):
-        return head  # Shallow histories and oversized patches can be unavailable.
+        return _AuthorPatch("", head, head)  # Missing history or oversized patch.
     if "\ufffd" in patch or "GIT binary patch" in patch:
-        return head
+        return _AuthorPatch("", head, head)
     content = (line for line in patch.split("\n") if not line.startswith("index "))
     normalized = "\n".join("@@" if line.startswith("@@ ") else line for line in content)
-    return hashlib.sha256(normalized.encode()).hexdigest()
+    return _AuthorPatch(
+        ancestor,
+        hashlib.sha256(patch.encode()).hexdigest(),
+        hashlib.sha256(normalized.encode()).hexdigest(),
+    )
 
 
 def _rounds_for_heads(heads: list[str], *, cwd: str | None, base_sha: str) -> int:
     """Count consecutive changes, falling back to commit ids for older history."""
-    identities: dict[str, str] = {}
+    identities: dict[str, _AuthorPatch] = {}
     if cwd and _SHA_RE.fullmatch(base_sha):
         # A long-lived PR must not require an unbounded number of Git comparisons.
         recent = dict.fromkeys(head for head in heads[-100:] if _SHA_RE.fullmatch(head))
@@ -303,8 +319,10 @@ def _rounds_for_heads(heads: list[str], *, cwd: str | None, base_sha: str) -> in
     previous = None
     rounds = 0
     for head in heads:
-        identity = identities.get(head, head) if _SHA_RE.fullmatch(head) else None
-        if identity is None or identity != previous:
+        identity = (
+            identities.get(head, _AuthorPatch("", head, head)) if _SHA_RE.fullmatch(head) else None
+        )
+        if identity is None or previous is None or not identity.matches(previous):
             rounds += 1
         previous = identity
     return rounds
