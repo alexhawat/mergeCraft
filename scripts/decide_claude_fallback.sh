@@ -43,6 +43,9 @@ else
     if packet_is_all_ignored "${packet}"; then
       need="false"
       echo "packet decision.verdict=${verdict} (triage skip: ignorePaths) — every changed file is ignored, so no rung has anything to review; not spending the Claude backstop."
+    elif neutral_is_untrusted_tier "${verdict}" "$(verdict_reason_from_packet "${packet}")"; then
+      need="false"
+      echo "An untrusted tier neutral cannot change on the Claude backstop."
     elif blocks_backstop "${verdict}"; then
       need="false"
       echo "packet decision.verdict=${verdict} — a rung posted a verdict despite failing later; not spending the Claude backstop."

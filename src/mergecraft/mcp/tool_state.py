@@ -375,6 +375,7 @@ class ToolState:
     repos: dict[str, RepoToolState]
     primary_repo_key: str
     evidence_run_id: str = field(default_factory=lambda: uuid4().hex, init=False)
+    codex_login_source: str | None = field(default=None, repr=False, compare=False)
     prepush_failure_count: int = 0
     # Offloaded checkout/analysis operations must not race on this run's tree or state.
     checkout_operation_lock: asyncio.Lock = field(

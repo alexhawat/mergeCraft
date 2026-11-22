@@ -12,6 +12,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NamedTuple, Protocol
+from uuid import uuid4
 
 from loguru import logger
 
@@ -398,6 +399,7 @@ class ResolvedInstructions:
 
 @dataclass(slots=True)
 class AgentRunContext:
+    codex_home_id: str = field(default_factory=lambda: uuid4().hex, init=False)
     payload: Any
     mcp_server_url: str
     tmpdir: str

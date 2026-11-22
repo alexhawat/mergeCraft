@@ -230,7 +230,15 @@ async def _run_cursor_once(
 
     try:
         run = await _poll_run_to_terminal(client, run_id=run_id)
-    except TimeoutError as exc:
+    except (TimeoutError, asyncio.CancelledError) as exc:
+        try:
+            await asyncio.wait_for(client.cancel_run(run_id), timeout=5.0)
+        except (RuntimeError, TimeoutError) as cancel_error:
+            logger.warning(
+                "could not confirm Cursor run cancellation: {}", type(cancel_error).__name__
+            )
+        if isinstance(exc, asyncio.CancelledError):
+            raise
         return AgentResult(
             success=False,
             error=str(exc),
