@@ -372,3 +372,24 @@ async def test_reviewer_session_expires_independently_of_other_reviewers(tmp_pat
         assert await probe(first) == 401
         assert await probe(second) == 200
         assert await probe("primary") == 200
+
+
+@pytest.mark.asyncio
+async def test_revoking_reviewer_cancels_its_pending_request(tmp_path: Path) -> None:
+    import asyncio
+
+    sessions = _tool_ctx(tmp_path).reviewer_sessions
+    token = sessions.issue()
+    entered = asyncio.Event()
+
+    async def request() -> None:
+        with sessions.authorize(token) as authorized:
+            assert authorized
+            entered.set()
+            await asyncio.Future()
+
+    task = asyncio.create_task(request())
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    await asyncio.to_thread(sessions.revoke, token)
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=2)
