@@ -99,9 +99,9 @@ def _assert_usage_unavailable_marker(attrs: dict[str, Any]) -> None:
 
 @pytest.fixture(autouse=True)
 def _no_opencode_http_instrumentation(monkeypatch: pytest.MonkeyPatch) -> None:
-    import importlib
 
-    opencode_mod = importlib.import_module("mergecraft.agents.opencode_serve")
+    import mergecraft.agents.opencode_serve as opencode_mod
+
     monkeypatch.setattr(
         opencode_mod,
         "instrument_httpx",

@@ -65,7 +65,8 @@ def _js_lint_ids(ids: set[str]) -> set[str]:
 
 
 def _finding(*, tool: str, path: str, line: int):
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     return finding_mod.make_finding(
         tool=tool,
         rule_id="rule",
@@ -276,7 +277,8 @@ def test_bundler_audit_auto_enables_on_lockfile() -> None:
 
 
 def test_bundler_audit_has_catalog_check_parser_fixture() -> None:
-    docs = import_module("mergecraft.analyzers.catalog_docs")
+    import mergecraft.analyzers.catalog_docs as docs
+
     manifest = _registry().get_manifest("bundler-audit")
     assert docs.manifest_has_fixture(manifest, fixture_root=FIXTURES_DIR)
 
@@ -284,8 +286,9 @@ def test_bundler_audit_has_catalog_check_parser_fixture() -> None:
 def test_bundler_audit_command_is_gem_cli_not_bundle_audit(tmp_path: Path) -> None:
     """bundler-audit 0.9.2 ships ``bundler-audit check --format json``, not ``bundle audit``."""
     registry = _registry()
-    resolve = import_module("mergecraft.analyzers.resolve")
-    execution = import_module("mergecraft.analyzers.execution")
+    import mergecraft.analyzers.execution as execution
+    import mergecraft.analyzers.resolve as resolve
+
     manifest = registry.get_manifest("bundler-audit")
     assert manifest.command[0] == "bundler-audit"
     assert manifest.command == ["bundler-audit", "check", "--format", "json"]
@@ -460,7 +463,8 @@ def test_sqlfluff_auto_enables_on_sql_fixture() -> None:
 
 def test_sqlfluff_skips_when_no_dialect_declared(tmp_path: Path) -> None:
     """Finding 4: resolve_analyzer must skip sqlfluff when no dialect is declared."""
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.resolve as resolve
+
     (tmp_path / "hello.sql").write_text("SELECT 1;\n", encoding="utf-8")
     manifest = _registry().get_manifest("sqlfluff")
     plan_no_dialect = resolve.resolve_analyzer(
@@ -478,7 +482,8 @@ def test_sqlfluff_skips_when_no_dialect_declared(tmp_path: Path) -> None:
 
 def test_sqlfluff_runs_when_dialect_declared(tmp_path: Path) -> None:
     """sqlfluff must NOT skip when .sqlfluff declares a dialect."""
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.resolve as resolve
+
     (tmp_path / "hello.sql").write_text("SELECT 1;\n", encoding="utf-8")
     (tmp_path / ".sqlfluff").write_text("[sqlfluff]\ndialect = ansi\n", encoding="utf-8")
     manifest = _registry().get_manifest("sqlfluff")
@@ -601,8 +606,9 @@ def test_tflint_auto_enables_on_terraform_fixture() -> None:
 def test_tflint_command_is_workspace_not_file_list(tmp_path: Path) -> None:
     """TFLint 0.54 rejects positional files; pipeline ``scope: diff`` still filters findings."""
     registry = _registry()
-    resolve = import_module("mergecraft.analyzers.resolve")
-    execution = import_module("mergecraft.analyzers.execution")
+    import mergecraft.analyzers.execution as execution
+    import mergecraft.analyzers.resolve as resolve
+
     manifest = registry.get_manifest("tflint")
     assert "{files}" not in manifest.command
     assert manifest.detect.lint_files is None
@@ -642,7 +648,8 @@ def test_languagetool_stays_opt_in() -> None:
 
 
 def test_batch_y_findings_honor_inline_budget() -> None:
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     tools = ("cppcheck", "detekt", "swiftlint", "pmd", "sqlfluff", "yamllint")
     findings = [
         _finding(tool=tool_id, path=f"src/{tool_id}-{index}.ext", line=index)

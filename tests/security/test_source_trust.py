@@ -177,7 +177,8 @@ def test_tier_reaches_decide_approval(tmp_path: Path) -> None:
 
 def test_tier_reaches_analyzer_trust_gate(tmp_path: Path) -> None:
     """Untrusted tier withholds trusted-only analyzer manifests."""
-    manifest_mod = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest_mod
+
     raw = Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml").read_text(
         encoding="utf-8"
     )

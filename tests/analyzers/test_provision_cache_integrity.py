@@ -17,8 +17,6 @@ from typing import Any
 
 import pytest
 
-from tests.analyzers.support import import_module
-
 _PAYLOAD = b"#!/bin/sh\necho pinned-tool 1.0.0\n"
 _PAYLOAD_SHA = hashlib.sha256(_PAYLOAD).hexdigest()
 _PLATFORM = "linux-amd64"
@@ -26,7 +24,8 @@ _PLATFORM = "linux-amd64"
 
 def _manifest(sha256: str = _PAYLOAD_SHA) -> Any:
     """Build a managed manifest whose pinned artifact is the raw fake binary."""
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+
     return manifest.AnalyzerManifest.model_validate(
         {
             "id": "faketool",
@@ -54,7 +53,8 @@ def _manifest(sha256: str = _PAYLOAD_SHA) -> Any:
 @pytest.fixture
 def fake_download(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Replace the pinned download with a local write; return the call log."""
-    provision = import_module("mergecraft.analyzers.provision")
+    import mergecraft.analyzers.provision as provision
+
     calls: list[str] = []
 
     def _fake(url: str, dest: Path) -> None:
@@ -66,7 +66,8 @@ def fake_download(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 
 def _provision(cache_dir: Path) -> Any:
-    provision = import_module("mergecraft.analyzers.provision")
+    import mergecraft.analyzers.provision as provision
+
     return provision.provision_managed_binary(
         manifest=_manifest(), platform=_PLATFORM, cache_dir=cache_dir
     )
@@ -89,7 +90,8 @@ def test_unmodified_cached_binary_is_reused_without_redownloading(
 def test_receipt_records_the_installed_binary_digest(
     tmp_path: Path, fake_download: list[str]
 ) -> None:
-    provision = import_module("mergecraft.analyzers.provision")
+    import mergecraft.analyzers.provision as provision
+
     result = _provision(tmp_path / "cache")
     recorded = provision.read_provision_receipt(result.resolved_path.parent)
 
@@ -118,7 +120,8 @@ def test_binary_mutated_after_provisioning_is_never_executed(
 def test_mutated_binary_is_refused_when_repinning_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_download: list[str]
 ) -> None:
-    provision = import_module("mergecraft.analyzers.provision")
+    import mergecraft.analyzers.provision as provision
+
     cache_dir = tmp_path / "cache"
     first = _provision(cache_dir)
     first.resolved_path.write_bytes(b"#!/bin/sh\necho attacker 9.9.9\n")
@@ -136,7 +139,8 @@ def test_mutated_binary_is_refused_when_repinning_fails(
 
 
 def test_cache_without_a_receipt_is_reprovisioned(tmp_path: Path, fake_download: list[str]) -> None:
-    provision = import_module("mergecraft.analyzers.provision")
+    import mergecraft.analyzers.provision as provision
+
     cache_dir = tmp_path / "cache"
     first = _provision(cache_dir)
     # A cache directory written by a mergeCraft that predates receipts.
@@ -158,7 +162,8 @@ def test_committed_receipt_without_the_pin_binding_is_not_a_cache_hit(
     extracted-binary digest together, so a legacy single-digest sidecar is a
     miss and the entry is re-provisioned from the pin.
     """
-    provision = import_module("mergecraft.analyzers.provision")
+    import mergecraft.analyzers.provision as provision
+
     cache_root = provision._cache_path(tmp_path / "cache", "faketool", _PLATFORM, _PAYLOAD_SHA)
     cache_root.mkdir(parents=True)
     (cache_root / "faketool").write_bytes(_PAYLOAD)
@@ -179,8 +184,9 @@ def test_lock_row_does_not_authenticate_a_checkout_placed_binary(
     commit a binary and the lock row that blessed it. Resolution must go back
     to the pin instead of executing the committed file.
     """
-    provision = import_module("mergecraft.analyzers.provision")
-    lockfile = import_module("mergecraft.analyzers.lockfile")
+    import mergecraft.analyzers.lockfile as lockfile
+    import mergecraft.analyzers.provision as provision
+
     manifest = _manifest()
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -230,9 +236,10 @@ def test_managed_cache_directory_is_outside_the_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The managed binary cache must not live in the tree under review."""
-    execution = import_module("mergecraft.analyzers.execution")
-    provision = import_module("mergecraft.analyzers.provision")
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.execution as execution
+    import mergecraft.analyzers.provision as provision
+    import mergecraft.analyzers.resolve as resolve
+
     monkeypatch.delenv("MERGECRAFT_ANALYZERS", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -274,10 +281,11 @@ def test_semgrep_pip_cache_directory_is_outside_the_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Semgrep's pip install has no digest check, so its root must leave the checkout."""
-    execution = import_module("mergecraft.analyzers.execution")
-    pattern = import_module("mergecraft.analyzers.pattern")
-    registry = import_module("mergecraft.analyzers.registry")
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.execution as execution
+    import mergecraft.analyzers.pattern as pattern
+    import mergecraft.analyzers.registry as registry
+    import mergecraft.analyzers.resolve as resolve
+
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     cache_home = tmp_path / "xdg-cache"
@@ -311,9 +319,10 @@ def test_cache_root_inside_the_checkout_is_refused_with_a_named_reason(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A trusted root that resolves inside the checkout is not trusted at all."""
-    execution = import_module("mergecraft.analyzers.execution")
-    provision = import_module("mergecraft.analyzers.provision")
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.execution as execution
+    import mergecraft.analyzers.provision as provision
+    import mergecraft.analyzers.resolve as resolve
+
     monkeypatch.delenv("MERGECRAFT_ANALYZERS", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -343,9 +352,10 @@ def test_refused_cache_root_surfaces_as_a_named_skip_reason(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The refusal reaches the run as a skip reason naming the tool and the cache."""
-    execution = import_module("mergecraft.analyzers.execution")
-    provision = import_module("mergecraft.analyzers.provision")
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.execution as execution
+    import mergecraft.analyzers.provision as provision
+    import mergecraft.analyzers.resolve as resolve
+
     monkeypatch.delenv("MERGECRAFT_ANALYZERS", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -382,7 +392,8 @@ def test_refused_cache_root_surfaces_as_a_named_skip_reason(
 def test_lock_resolution_reprovisions_a_mutated_cache(
     tmp_path: Path, fake_download: list[str]
 ) -> None:
-    provision = import_module("mergecraft.analyzers.provision")
+    import mergecraft.analyzers.provision as provision
+
     cache_dir = tmp_path / "cache"
     lock_path = tmp_path / ".mergecraft" / "analyzers.lock"
     manifest = _manifest()
@@ -401,9 +412,10 @@ def test_lock_resolution_reprovisions_a_mutated_cache(
 
 
 def _finalized_trufflehog_argv(repo_root: Path, argv: tuple[str, ...]) -> tuple[str, ...]:
-    execution = import_module("mergecraft.analyzers.execution")
-    registry = import_module("mergecraft.analyzers.registry")
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.execution as execution
+    import mergecraft.analyzers.registry as registry
+    import mergecraft.analyzers.resolve as resolve
+
     manifest = registry.get_manifest("trufflehog")
     plan = resolve.AnalyzerPlan(manifest_id="trufflehog", mode="managed", argv=argv)
     finalized = execution.finalize_plan(
@@ -417,14 +429,16 @@ def _finalized_trufflehog_argv(repo_root: Path, argv: tuple[str, ...]) -> tuple[
 
 
 def test_trufflehog_manifest_command_disables_the_self_updater() -> None:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     command = registry.get_manifest("trufflehog").command
 
     assert "--no-update" in command
 
 
 def test_trufflehog_argv_carries_no_update_exactly_once(tmp_path: Path) -> None:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     argv = _finalized_trufflehog_argv(tmp_path, tuple(registry.get_manifest("trufflehog").command))
 
     assert argv.count("--no-update") == 1

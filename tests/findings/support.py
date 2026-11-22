@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from tests.analyzers.support import import_module
-
 
 def make_finding(
     *,
@@ -24,7 +22,8 @@ def make_finding(
     **extra: Any,
 ) -> Any:
     """Build a taxonomy-valid ``Finding`` for DG1 contract tests."""
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     body: dict[str, Any] = {
         "tool": tool,
         "rule_id": rule_id,

@@ -122,7 +122,8 @@ def _enabled_ids(repo_root: Path, changed_files: list[str]) -> set[str]:
 
 
 def _analyzers_doc_row(tool_id: str) -> str:
-    docs = import_module("mergecraft.analyzers.catalog_docs")
+    import mergecraft.analyzers.catalog_docs as docs
+
     needle = f"| `{tool_id}` |"
     for line in docs.generate_analyzers_doc().splitlines():
         if line.startswith(needle):
@@ -131,7 +132,8 @@ def _analyzers_doc_row(tool_id: str) -> str:
 
 
 def _finding(*, tool: str, path: str, line: int):
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     return finding_mod.make_finding(
         tool=tool,
         rule_id="rule",
@@ -175,7 +177,8 @@ def test_empty_changed_files_do_not_enable_b_tier() -> None:
 
 @pytest.mark.parametrize("tool_id", B_TIER_IDS)
 def test_b_tier_has_catalog_check_parser_fixture(tool_id: str) -> None:
-    docs = import_module("mergecraft.analyzers.catalog_docs")
+    import mergecraft.analyzers.catalog_docs as docs
+
     manifest = _registry().get_manifest(tool_id)
     assert docs.manifest_has_fixture(manifest, fixture_root=FIXTURES_DIR), (
         f"{tool_id} must keep a catalog-check-shaped parser fixture (D15)"
@@ -190,8 +193,9 @@ def test_b_tier_declares_timeout(tool_id: str) -> None:
 
 @pytest.mark.parametrize("tool_id", list(B_TIER_IDS))
 def test_b_tier_reports_unavailable_when_toolchain_absent(tool_id: str, tmp_path: Path) -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
-    run = import_module("mergecraft.analyzers.run")
+    import mergecraft.analyzers.resolve as resolve
+    import mergecraft.analyzers.run as run
+
     manifest = _registry().get_manifest(tool_id)
     plan = resolve.resolve_analyzer(
         manifest=manifest,
@@ -209,7 +213,8 @@ def test_b_tier_reports_unavailable_when_toolchain_absent(tool_id: str, tmp_path
 
 
 def test_b_tier_findings_honor_inline_budget() -> None:
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     findings = [
         _finding(tool=tool_id, path=f"src/{tool_id}-{index}.ext", line=index)
         for tool_id in B_TIER_IDS
@@ -339,7 +344,8 @@ def test_prisma_lint_ships_conservative_fallback_ruleset() -> None:
 
 
 def test_prisma_lint_without_rules_uses_conservative_fallback(tmp_path: Path) -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.resolve as resolve
+
     (tmp_path / "schema.prisma").write_text("model User { id Int }\n", encoding="utf-8")
     manifest = _registry().get_manifest("prisma-lint")
     plan = resolve.resolve_analyzer(
@@ -363,7 +369,8 @@ def test_prisma_lint_without_rules_uses_conservative_fallback(tmp_path: Path) ->
 
 
 def test_prisma_lint_without_rules_managed_plan_uses_conservative_fallback(tmp_path: Path) -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.resolve as resolve
+
     (tmp_path / "schema.prisma").write_text("model User { id Int }\n", encoding="utf-8")
     manifest = _registry().get_manifest("prisma-lint")
     plan = resolve.resolve_analyzer(

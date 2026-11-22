@@ -469,6 +469,7 @@ async def _dispatch_offline_agent(
             executed_model=attempt_model,
         ):
             result = await attempt_agent.run(attempt_ctx)
+        tool_context.tool_state.usage_entries.append(result.usage)
         record_agent_usage(budget_tracker, result.usage, phase="reviewer_dispatch")
         return result
 
@@ -613,6 +614,10 @@ async def _publish_offline_agent(
         structured_output=finalized.structured_output,
         output_path=evidence_packet_path,
     )
+    from mergecraft.utils.review_cost import recorded_run_cost
+
+    entries = tool_context.tool_state.usage_entries
+    cost = recorded_run_cost(entries, budget_tracker=tool_context.budget_tracker)
     success = outcome == RunOutcome.passed
     error = None
     if not success:
@@ -626,6 +631,12 @@ async def _publish_offline_agent(
         evidence_packet_path=packet_path,
         outcome=outcome,
         llm_review_timing=finalized.timing_payload,
+        cost_usd=cost.amount_usd if cost.availability == "available" else None,
+        total_tokens=(
+            sum(row.input_tokens + row.output_tokens for row in entries)
+            if entries and all(row is not None for row in entries)
+            else None
+        ),
     )
 
 

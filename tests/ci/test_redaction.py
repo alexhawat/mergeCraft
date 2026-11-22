@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.analyzers.support import import_module as import_analyzer_module
 from tests.ci.support import CANARY_SECRET, import_module, load_fixture
 
 
@@ -16,7 +15,8 @@ def _paths_from_normalized(normalized: dict[str, object], redact: object) -> lis
 
 def test_canary_never_in_normalized_excerpt_or_fingerprint_input() -> None:
     normalize = import_module("mergecraft.ci.normalize")
-    redact = import_analyzer_module("mergecraft.analyzers.redact")
+    import mergecraft.analyzers.redact as redact
+
     fixture = load_fixture("canary_in_ci_log.json")
     normalized = normalize.normalize_failure(fixture)
     for material in _paths_from_normalized(normalized, redact):

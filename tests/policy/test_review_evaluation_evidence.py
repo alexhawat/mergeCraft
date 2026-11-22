@@ -146,7 +146,8 @@ def _required_rule(
 def _spy_collect(monkeypatch: pytest.MonkeyPatch) -> list[frozenset[str]]:
     """Count producer runs through ``collect_policy_evidence``, keeping the real one."""
     producers = _producers()
-    review = importlib.import_module("mergecraft.policy.review")
+    import mergecraft.policy.review as review
+
     real = producers.collect_policy_evidence
     calls: list[frozenset[str]] = []
 

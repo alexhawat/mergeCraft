@@ -23,7 +23,6 @@ The suite is written before the provenance checks exist, so it is red until they
 from __future__ import annotations
 
 import asyncio
-import importlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -63,7 +62,8 @@ _FORK = "attacker/demo"
 
 
 async def _collect(ctx: ToolContext, keys: list[str]) -> Any:
-    producers = importlib.import_module("mergecraft.policy.evidence_producers")
+    import mergecraft.policy.evidence_producers as producers
+
     return await producers.collect_policy_evidence(ctx, required_keys=keys)
 
 

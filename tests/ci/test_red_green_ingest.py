@@ -96,7 +96,8 @@ def _rg() -> Any:
 
 
 def _declaration(*, artifact: str = ARTIFACT, workflow: str = WORKFLOW) -> Any:
-    settings = import_module("mergecraft.config.settings")
+    import mergecraft.config.settings as settings
+
     return settings.RedGreenReceiptSettings(artifact=artifact, workflow=workflow)
 
 

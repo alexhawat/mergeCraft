@@ -481,7 +481,8 @@ def test_existing_curated_slug_resolution_is_unchanged(slug: str) -> None:
     value. The frozen values are the current ``alias.resolve`` for each
     curated alias — if W6 mutates one, this test surfaces the diff.
     """
-    models = importlib.import_module("mergecraft.models")
+    import mergecraft.models as models
+
     expected = models.resolve_cli_model(slug)
     assert expected is not None, (
         f"resolve_cli_model({slug!r}) must return a non-None resolution today"

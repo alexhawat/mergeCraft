@@ -47,7 +47,6 @@ from mergecraft.mcp.server import build_common_tools
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
-from tests.analyzers.support import import_module
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import AnalyzerManifest
@@ -55,12 +54,14 @@ if TYPE_CHECKING:
 
 def _evaluate_manifest_for_shell(*, manifest: AnalyzerManifest, shell: str) -> Any:
     """Lazy so the module still collects before W2 adds the predicate (W1.8)."""
-    trust = import_module("mergecraft.analyzers.trust")
+    import mergecraft.analyzers.trust as trust
+
     return trust.evaluate_manifest_for_shell(manifest=manifest, shell=shell)
 
 
 def _allow_repo_provided_binaries(*, shell: str, tier: str = "trusted") -> Any:
-    trust = import_module("mergecraft.analyzers.trust")
+    import mergecraft.analyzers.trust as trust
+
     return trust.allow_repo_provided_binaries(shell=shell, tier=tier)
 
 

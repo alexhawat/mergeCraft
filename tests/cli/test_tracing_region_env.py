@@ -52,7 +52,7 @@ def _patch_httpx_with(monkeypatch: MonkeyPatch, handler) -> None:
 
 
 def _stub_repo_slug(monkeypatch: MonkeyPatch, slug: str = "acme/widgets") -> None:
-    consumer_module = importlib.import_module("mergecraft.cli.tracing_logfire_cmd")
+    import mergecraft.cli.tracing_logfire_cmd as consumer_module
 
     def _factory() -> str:
         return slug

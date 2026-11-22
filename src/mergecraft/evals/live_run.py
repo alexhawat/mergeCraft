@@ -559,7 +559,7 @@ def _default_review_fn(model: str, budget: ReviewBudget | None = None) -> Review
     """
     from mergecraft.offline_review import run_offline_diff_review
 
-    def _fn(case: DetectionCase) -> list[dict[str, Any]]:
+    def _fn(case: DetectionCase) -> ReviewOutcome:
         with tempfile.TemporaryDirectory(prefix="mergecraft-detect-") as tmp:
             scratch = materialize_case_repo(case, Path(tmp))
             json_path = scratch / "findings.json"
@@ -582,10 +582,12 @@ def _default_review_fn(model: str, budget: ReviewBudget | None = None) -> Review
                 msg = f"{case.case_id}: diff-review succeeded but wrote no findings JSON"
                 raise ReviewRunFailed(msg)
             payload = json.loads(json_path.read_text(encoding="utf-8"))
-            if isinstance(payload, dict):
-                rows = payload.get("findings", [])
-                return [row for row in rows if isinstance(row, dict)]
-            return []
+            rows = payload.get("findings", []) if isinstance(payload, dict) else []
+            return ReviewOutcome(
+                findings=[row for row in rows if isinstance(row, dict)],
+                cost_usd=result.cost_usd,
+                total_tokens=result.total_tokens,
+            )
 
     return _fn
 

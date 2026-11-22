@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from mergecraft.review_taxonomy import finding_fingerprint
-from tests.analyzers.support import import_module as import_analyzer_module
 from tests.ci.support import (
     CI_SECTION_HEADING,
     DEFAULT_TRUNCATION_CAP,
@@ -14,7 +13,8 @@ from tests.ci.support import (
 
 
 def _ci_finding(path: str, line: int, message: str) -> object:
-    finding_mod = import_analyzer_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     return finding_mod.make_finding(
         tool="ci",
         rule_id="pytest-failure",
@@ -104,12 +104,14 @@ def test_analyze_ci_failures_end_to_end_from_raw_jobs() -> None:
 
 
 def test_ci_finding_clusters_with_analyzer_on_same_line() -> None:
-    cluster = import_analyzer_module("mergecraft.analyzers.cluster")
+    import mergecraft.analyzers.cluster as cluster
+
     message = "import error in adapter module"
     path = "tests/analyzers/test_adapters_supply_chain.py"
     line = 10
     ci = _ci_finding(path, line, message)
-    finding_mod = import_analyzer_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     ruff = finding_mod.make_finding(
         tool="ruff",
         rule_id="F401",
@@ -142,7 +144,8 @@ def test_truncation_statement_when_failures_exceed_cap() -> None:
 
 def test_ci_section_respects_inline_budget() -> None:
     review_ci = import_module("mergecraft.ci.review")
-    budget = import_analyzer_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     cluster = import_module("mergecraft.ci.cluster")
     normalize = import_module("mergecraft.ci.normalize")
     fixture = load_fixture("truncation_overflow.json")

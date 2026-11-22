@@ -105,7 +105,8 @@ def _agent_finding(
     body: str,
     severity: str = "Major",
 ) -> object:
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     return finding_mod.make_finding(
         tool="mergecraft-agent",
         rule_id="agent:recall-fixture",
@@ -165,7 +166,7 @@ def test_recall_pass_output_excludes_findings_already_drafted() -> None:
 
 def test_recall_findings_land_in_the_deferred_lane_regardless_of_claimed_severity() -> None:
     """D1 — recall output is always non-blocking deferred placement."""
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
 
     critical = _agent_finding(body="Unbounded retry can wedge the queue.", severity="Critical")
     placement = budget.place_findings([critical], inline_budget=0)

@@ -65,7 +65,7 @@ def _patch_httpx_with(monkeypatch: MonkeyPatch, handler) -> None:
 
 def _stub_repo_slug(monkeypatch: MonkeyPatch, slug: str = "acme/widgets") -> None:
     """Stub ``_parse_repo_slug`` in the consumer module so the gh helpers never shell out."""
-    consumer_module = importlib.import_module("mergecraft.cli.tracing_logfire_cmd")
+    import mergecraft.cli.tracing_logfire_cmd as consumer_module
 
     def _factory() -> str:
         return slug
@@ -83,7 +83,8 @@ def _capture_secret_set(monkeypatch: MonkeyPatch) -> list[dict[str, Any]]:
     # The consumer module imports by name, so the monkeypatch must land on the
     # *consumer* module — auth_cmd._set_gh_secret and consumer._set_gh_secret
     # are two distinct references that resolve to the same callable.
-    consumer_module = importlib.import_module("mergecraft.cli.tracing_logfire_cmd")
+    import mergecraft.cli.tracing_logfire_cmd as consumer_module
+
     monkeypatch.setattr(consumer_module, "_set_gh_secret", _recorder)
     return captured
 
@@ -95,7 +96,8 @@ def _capture_secret_delete(monkeypatch: MonkeyPatch) -> list[dict[str, Any]]:
         captured.append({"name": name, "repo_slug": repo_slug})
         return True
 
-    consumer_module = importlib.import_module("mergecraft.cli.tracing_logfire_cmd")
+    import mergecraft.cli.tracing_logfire_cmd as consumer_module
+
     monkeypatch.setattr(consumer_module, "_delete_gh_secret", _recorder)
     return captured
 
@@ -306,7 +308,8 @@ def test_tracing_logfire_enable_scope_local_only_writes_env(
     def _gh_fail(*_a, **_kw):  # type: ignore[no-untyped-def]
         pytest.fail("gh helpers must not be invoked under --scope local")
 
-    module = importlib.import_module("mergecraft.cli.auth_cmd")
+    import mergecraft.cli.auth_cmd as module
+
     monkeypatch.setattr(module, "_get_gh_token", _gh_fail)
     monkeypatch.setattr(module, "_parse_git_remote", _gh_fail)
     captured = _capture_secret_set(monkeypatch)

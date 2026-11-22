@@ -611,7 +611,8 @@ def _packet_ctx(
     if hasattr(tool_state, "scope_declaration"):
         # Once declared scope lands (#1056 part 3) a run without one is ``scope.unknown``
         # at ``medium``; declare the diff's one path so only the fix proof moves the lane.
-        ingest = import_module("mergecraft.requirements.ingest")
+        import mergecraft.requirements.ingest as ingest
+
         tool_state.scope_declaration = ingest.ScopeDeclaration(
             declared=True, globs=("docs/guide.md",), source_ref="pr_description", rejected=()
         )

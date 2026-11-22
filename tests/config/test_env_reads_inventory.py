@@ -1039,7 +1039,8 @@ def _module(file: str) -> Any:
 
 def _env_modules() -> list[Any]:
     """Every module in the leaf package, including submodules it does not export."""
-    package = importlib.import_module("mergecraft.config.env")
+    import mergecraft.config.env as package
+
     modules = [package]
     for path in sorted(Path(package.__file__).parent.glob("*.py")):
         if path.stem.startswith("_"):

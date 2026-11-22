@@ -37,8 +37,9 @@ def test_lint_targets_exclude_enable_markers() -> None:
 
 def test_finalize_plan_does_not_pass_markers_as_files(tmp_path: Path) -> None:
     registry = _registry()
-    execution = import_module("mergecraft.analyzers.execution")
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.execution as execution
+    import mergecraft.analyzers.resolve as resolve
+
     for tool_id, marker, source in _CASES:
         (tmp_path / source).write_text("x\n", encoding="utf-8")
         (tmp_path / Path(marker).name).write_text("{}\n", encoding="utf-8")
@@ -68,8 +69,9 @@ def test_finalize_plan_does_not_pass_markers_as_files(tmp_path: Path) -> None:
 
 def test_marker_only_changed_files_skip_instead_of_empty_or_unscoped_run(tmp_path: Path) -> None:
     registry = _registry()
-    execution = import_module("mergecraft.analyzers.execution")
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.execution as execution
+    import mergecraft.analyzers.resolve as resolve
+
     (tmp_path / ".sqlfluff").write_text("[sqlfluff]\ndialect = postgres\n", encoding="utf-8")
     (tmp_path / "pyproject.toml").write_text(
         "[tool.sqlfluff]\ndialect = postgres\n", encoding="utf-8"

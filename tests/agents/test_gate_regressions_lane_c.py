@@ -24,7 +24,6 @@ blockers, which is the condition that was meant.
 from __future__ import annotations
 
 import typing
-from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -115,7 +114,8 @@ def _declare_scope(ctx: Any, globs: tuple[str, ...]) -> None:
     """
     if not hasattr(ctx.tool_state, "scope_declaration"):
         return
-    ingest = import_module("mergecraft.requirements.ingest")
+    import mergecraft.requirements.ingest as ingest
+
     ctx.tool_state.scope_declaration = ingest.ScopeDeclaration(
         declared=True, globs=globs, source_ref="pr_description", rejected=()
     )

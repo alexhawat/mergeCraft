@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from mergecraft.analyzers.review_gate import filter_for_review
-from tests.analyzers.support import import_module
 
 
 def _critical_finding() -> object:
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     return finding_mod.make_finding(
         tool="semgrep",
         rule_id="taint-flow",

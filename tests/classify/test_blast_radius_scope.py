@@ -328,7 +328,8 @@ def test_an_invalid_flag_wins_over_globs_that_would_match() -> None:
 @pytest.mark.parametrize("wildcard", ["*", "**", "**/*", "**/*.*"])
 def test_a_declared_match_everything_glob_never_passes_the_gate(wildcard: str, api: Any) -> None:
     """End to end from untrusted text: ``Scope paths: **`` declares nothing."""
-    ingest = import_module("mergecraft.requirements.ingest")
+    import mergecraft.requirements.ingest as ingest
+
     declaration = ingest.parse_scope_paths(f"Scope paths:\n- {wildcard}\n")
     signal = {
         "declared": declaration.declared,
@@ -393,7 +394,8 @@ def test_a_scope_without_changed_paths_is_not_measured() -> None:
 
 def test_the_verification_tool_lane_reads_the_recorded_declaration(tmp_path: Path) -> None:
     """``mcp/verification.py`` builds the same scope signal as the packet."""
-    verification = import_module("mergecraft.mcp.verification")
+    import mergecraft.mcp.verification as verification
+
     ctx = _run_ctx(tmp_path)
 
     ctx.tool_state.scope_declaration = _declaration(("README.md",))
@@ -571,7 +573,8 @@ def _run_ctx(tmp_path: Path, *, diff_text: str = _TRIVIAL_DIFF) -> Any:
 
 
 def _declaration(globs: tuple[str, ...], *, rejected: tuple[str, ...] = ()) -> Any:
-    ingest = import_module("mergecraft.requirements.ingest")
+    import mergecraft.requirements.ingest as ingest
+
     return ingest.ScopeDeclaration(
         declared=True, globs=globs, source_ref="pr_description", rejected=rejected
     )
@@ -637,7 +640,8 @@ def test_the_run_packet_without_a_declaration_leaves_the_scope_gate_unknown(
 def test_the_run_packet_with_an_unparsed_body_leaves_the_scope_gate_unknown(
     tmp_path: Path, run_api: Any
 ) -> None:
-    ingest = import_module("mergecraft.requirements.ingest")
+    import mergecraft.requirements.ingest as ingest
+
     ctx = _run_ctx(tmp_path)
     ctx.tool_state.scope_declaration = ingest.ScopeDeclaration(
         declared=False, globs=(), source_ref="", rejected=()

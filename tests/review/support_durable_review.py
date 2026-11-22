@@ -55,7 +55,8 @@ def sample_short_finding_id() -> str:
 
 def sample_finding_dict() -> dict[str, Any]:
     """One structured finding dict for durable-review fixtures."""
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     finding = finding_mod.make_finding(
         tool="ruff",
         rule_id="F401",
@@ -75,13 +76,15 @@ def sample_finding_dict() -> dict[str, Any]:
 
 def sample_snapshot() -> Any:
     """Canonical CLI ``ReviewSnapshot`` for persistence tests."""
-    snapshot_mod = import_module("mergecraft.review.snapshot")
+    import mergecraft.review.snapshot as snapshot_mod
+
     return snapshot_mod.canonical_review_snapshot(entry="cli", source="tests")
 
 
 def sample_manifest() -> dict[str, Any]:
     """Minimal run manifest payload composed into a completed review (D4)."""
-    manifest_mod = import_module("mergecraft.evidence.run_manifest")
+    import mergecraft.evidence.run_manifest as manifest_mod
+
     return manifest_mod.build_run_manifest(
         cwd=Path("."),
         model="claude-opus",

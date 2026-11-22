@@ -201,7 +201,7 @@ async def test_a_run_without_tool_state_is_left_alone(main_mod: Any) -> None:
 async def test_a_failing_read_leaves_the_scope_unknown_and_never_raises(
     main_mod: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ingest = import_module("mergecraft.requirements.ingest")
+    import mergecraft.requirements.ingest as ingest
 
     def _boom(body: str) -> Any:
         msg = "parser exploded"

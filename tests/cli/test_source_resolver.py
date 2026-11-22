@@ -567,7 +567,8 @@ def test_cloned_source_reviews_at_untrusted_tier(
     spec = spec_cls(repo=file_url, invocation_root=tmp_path)
 
     tier_holder: dict[str, str] = {}
-    offline_mod = import_module("mergecraft.offline_review")
+    import mergecraft.offline_review as offline_mod
+
     original_apply = offline_mod.apply_cli_trust_tier_env
 
     def _capture_tier(tier: str) -> dict[str, str | None]:
