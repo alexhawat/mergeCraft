@@ -27,6 +27,7 @@ from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import (
     CLI_SUCCESS_EXIT_CODE,
+    CLI_USAGE_EXIT_CODE,
 )
 from mergecraft.cli.local_env import local_env_path_for_process_cwd
 from mergecraft.cli.tracing_logfire_wf_yaml import (
@@ -187,7 +188,10 @@ def logfire_enable(
     if region is not None:
         region = region.strip().lower()
         if region not in _VALID_REGIONS:
-            cli_bail(f"--region must be one of: {', '.join(_VALID_REGIONS)} (got {region!r}).")
+            cli_bail(
+                f"--region must be one of: {', '.join(_VALID_REGIONS)} (got {region!r}).",
+                code=CLI_USAGE_EXIT_CODE,
+            )
 
     # Resolve per-key precedence: flag > env (.env, loaded by main()) > prompt.
     # Each key is independent so a partial `.env` (token present, project
@@ -470,7 +474,10 @@ def logfire_wire_workflow(
     if region is not None:
         region = region.strip().lower()
         if region not in _VALID_REGIONS:
-            cli_bail(f"--region must be one of: {', '.join(_VALID_REGIONS)} (got {region!r}).")
+            cli_bail(
+                f"--region must be one of: {', '.join(_VALID_REGIONS)} (got {region!r}).",
+                code=CLI_USAGE_EXIT_CODE,
+            )
     try:
         proposed = apply_logfire_wiring(
             workflow_path=workflow,

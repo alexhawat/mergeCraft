@@ -576,12 +576,22 @@ def record_validated_terminal_submission(
             if not validation.accepted:
                 _raise_terminal_rejection(ctx.tool_state, validation.rejection_reason)
             return existing
-        ctx.tool_state.terminal_submission_conflict = True
-        msg = (
-            "terminal submission conflict: a different verdict payload was already "
-            "recorded for this run"
+        # Draft backfill can uncover a blocker after an approval was banked.
+        # Validate the correction below before replacing the original record.
+        correcting_blocked_approval = (
+            existing.attempt_id == ctx.tool_state.attempt_id
+            and existing.verdict == "approve"
+            and submission.get("verdict") == "request_changes"
+            and not ctx.tool_state.terminal_submission_conflict
+            and _blocks_approve(validation_state_from_tool_context(ctx))
         )
-        raise ValueError(msg)
+        if not correcting_blocked_approval:
+            ctx.tool_state.terminal_submission_conflict = True
+            msg = (
+                "terminal submission conflict: a different verdict payload was already "
+                "recorded for this run"
+            )
+            raise ValueError(msg)
 
     validation = validate_submission(
         submission,

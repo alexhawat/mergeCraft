@@ -168,7 +168,9 @@ withdrawn-memory skip, and a dispatch cap.
 **Review round cap (`review.maxReviewRounds`, default 3).** After this many mergeCraft-authored
 review rounds on one PR, the run injects one Major finding asking the author to reconsider the
 approach, then continues on the incremental diff only. The cap never auto-approves; it is not
-a substitute for human judgment.
+a substitute for human judgment. Repeated reviews of the same head and base-only updates
+with an unchanged author patch use the same round. An unavailable historical patch is counted
+conservatively by commit.
 
 **The cap is `review.verificationBudget`, not the inline budget.** Verification protects what
 gets published, so it is its own control, **independent of inline placement**: the

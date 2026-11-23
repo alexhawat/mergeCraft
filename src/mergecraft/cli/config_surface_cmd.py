@@ -13,6 +13,7 @@ from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import (
     CLI_SUCCESS_EXIT_CODE,
+    CLI_USAGE_EXIT_CODE,
 )
 from mergecraft.config.io import (
     config_path_for_root,
@@ -107,7 +108,7 @@ def _parse_bool_value(value: str) -> bool:
         return True
     if lowered in _FALSE_VALUES:
         return False
-    cli_bail(f"invalid boolean {value!r} — use true or false")
+    cli_bail(f"invalid boolean {value!r} — use true or false", code=CLI_USAGE_EXIT_CODE)
     raise AssertionError("unreachable")
 
 

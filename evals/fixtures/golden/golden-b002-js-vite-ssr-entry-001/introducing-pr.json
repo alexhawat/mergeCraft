@@ -1,0 +1,11 @@
+{
+  "number": 9146,
+  "title": "fix: ssr.external/noExternal should apply to packageName",
+  "html_url": "https://github.com/vitejs/vite/pull/9146",
+  "body": "### Description\r\n\r\nFixes\r\n- https://github.com/sveltejs/kit/issues/5549\r\n\r\nAlso fixes https://github.com/Cluster2a/chartjsError, where we need now to add because of deps being external by default:\r\n```js \r\n  ssr: {\r\n    noExternal: ['chart.js']\r\n  }\r\n```\r\n\r\n---\r\n\r\n### What is the purpose of this pull request? <!-- (put an \"X\" next to an item) -->\r\n\r\n- [x] Bug fix\r\n- [ ] New Feature\r\n- [ ] Documentation update\r\n- [ ] Other",
+  "merged": true,
+  "merged_at": "2022-07-15T21:40:24Z",
+  "merge_commit_sha": "5844d8e3480e7713acfa7655666bf0076dcb8879",
+  "base_sha": "5ea70b3c3cd5f208471338c5832a3eba1aafb01d",
+  "head_sha": "259f91f3b6914f53d958e16db7dd63332fc67084"
+}

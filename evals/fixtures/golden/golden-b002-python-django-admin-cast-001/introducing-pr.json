@@ -1,0 +1,18 @@
+{
+  "base": {
+    "ref": "main",
+    "sha": "03c0a3de722c4a7de9f3edfeb26417ebc8b90fe9"
+  },
+  "body": "ticket : https://code.djangoproject.com/ticket/26001\r\n\r\n [reference](https://code.djangoproject.com/ticket/26001#comment:5)",
+  "head": {
+    "ref": "26001",
+    "sha": "7d8962297c54ebbb8bb4eab7ca26ac42f41720be"
+  },
+  "html_url": "https://github.com/django/django/pull/17885",
+  "merge_commit_sha": "f223729f8f8380901473b244c0fc7c7dc397e3f1",
+  "merged": true,
+  "merged_at": "2024-11-04T08:39:47Z",
+  "number": 17885,
+  "state": "closed",
+  "title": "Fixed #26001 -- Fixed non-string field exact lookups in ModelAdmin.search_fields."
+}

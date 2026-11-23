@@ -125,6 +125,12 @@ def finalize_plan(
     event: dict[str, object] | None = None,
 ) -> AnalyzerPlan:
     scoped_files = filter_lint_targets_for_manifest(manifest, changed_files)
+    # A command such as ruff with an empty file list scans its working directory.
+    # Resolve the targets before deciding whether the plan can run.
+    if FILES_TOKEN in plan.argv and not expand_analyzer_argv(
+        (FILES_TOKEN,), repo_root=repo_root, changed_files=scoped_files
+    ):
+        return replace(plan, mode="skip", argv=(), reason=marker_only_lint_skip_reason(manifest))
     if manifest.detect.lint_files and _uses_files_token(plan, manifest) and not scoped_files:
         reason = marker_only_lint_skip_reason(manifest)
         logger.info("{}", reason)

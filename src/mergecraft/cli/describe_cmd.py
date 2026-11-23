@@ -66,7 +66,7 @@ def _read_diff(repo_root: Path, base: str | None = None) -> str:
         except typer.Exit:
             # ``typer.Exit`` subclasses ``RuntimeError``: a bad ``--base`` must still exit 30.
             raise
-        except (OSError, RuntimeError, subprocess.SubprocessError):
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
             return ""
         return materialization.path.read_text(encoding="utf-8")
 

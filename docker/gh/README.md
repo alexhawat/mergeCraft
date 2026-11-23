@@ -1,18 +1,10 @@
-# Patched GitHub CLI runtime
+# GitHub CLI runtime
 
-Both Action images build gh 2.100.0 from upstream commit
-`45437bc7eeeb3359bbfddd1742f79de7652fd3e2` using the digest-pinned Go 1.26.8
-builder. The upstream source archive is SHA256-checked before extraction.
-`dependencies.patch` changes only `golang.org/x/mod` from 0.39.0 to 0.40.0 and
-adds its Go checksum-database-verified module checksums. The build uses
-`-mod=readonly` and `GOTOOLCHAIN=local`, so it cannot silently change the
-module lock or fetch a different compiler. The installed version is
-`2.100.0-mergecraft.1`; its upstream license is retained.
-
-The official 2.100.0 binaries still embed x/mod 0.39.0, affected by
-CVE-2026-56864/CVE-2026-56865. A release-version bump alone does not fix those
-findings. Retire this patch when a verified upstream binary includes the fixed
-module and passes the same image scan and attestation-command checks.
+Both Action images build GitHub CLI v2.105.0 from upstream commit
+`e1219499a578b69e3437adaa31cd60614e23c802`. Its module lock includes
+`golang.org/x/net v0.62.0` and `golang.org/x/mod v0.42.0`. Both builds
+verify the source archive checksum and use the digest-pinned Go builder
+with `-mod=readonly` and `GOTOOLCHAIN=local`.
 
 The runtime also pins npm 11.19.1's tarball independently of Node 22. Node's
 bundled npm 10 and even npm 10.9.9 retain other vulnerable bundled libraries.

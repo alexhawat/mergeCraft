@@ -34,6 +34,7 @@ RETAINED_TOOL_FIELDS = {
     "browser_daemon",
     "capture_verdicts",
     "checkout_operation_lock",
+    "codex_login_source",
     "credential_degradations",
     "dependency_installation",
     "diff_budget_reason",

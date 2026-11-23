@@ -1,0 +1,111 @@
+[
+  {
+    "role": "base",
+    "path": "django/core/mail/message.py",
+    "commit_sha": "63349394170347241c48a445c843ff2be53e3a8a",
+    "url": "https://github.com/django/django/blob/63349394170347241c48a445c843ff2be53e3a8a/django/core/mail/message.py",
+    "full_source_sha256": "bf211eda8dd80b4aef69b7b73d78780c75ed9e347496b438c927605ec7d1732f",
+    "excerpt_path": "base-source.txt",
+    "excerpt_sha256": "3eec0c4d9535c0decd925e227ba7f59098e3531ea3f10fd104d54137859db7d8",
+    "excerpt_line_ranges": [
+      [
+        251,
+        281
+      ]
+    ],
+    "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+  },
+  {
+    "role": "introduced",
+    "path": "django/core/mail/message.py",
+    "commit_sha": "da82939e5a31dea21a4f4d5085dfcd449fcbed3a",
+    "url": "https://github.com/django/django/blob/da82939e5a31dea21a4f4d5085dfcd449fcbed3a/django/core/mail/message.py",
+    "full_source_sha256": "fd0da66e8d00139285d2923cd604817efa2ac2107bd0758fd9baf41ae790752e",
+    "excerpt_path": "introduced-source.txt",
+    "excerpt_sha256": "2f76d4cf3e41ffd85f3ba12d60022da6c61fc9062f1ca2cceea2da58ae97e6a9",
+    "excerpt_line_ranges": [
+      [
+        251,
+        277
+      ],
+      [
+        409,
+        419
+      ]
+    ],
+    "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+  },
+  {
+    "role": "before-fix",
+    "path": "django/core/mail/message.py",
+    "commit_sha": "d12184fedcd586e2c399ea40abe4bf865ebc87a6",
+    "url": "https://github.com/django/django/blob/d12184fedcd586e2c399ea40abe4bf865ebc87a6/django/core/mail/message.py",
+    "full_source_sha256": "7f3f5b5d632c60dd8d0f81a43169dadd63b0c3af60c20b5cdbe23aa41867da61",
+    "excerpt_path": "before-fix-source.txt",
+    "excerpt_sha256": "bda43208d99a38cba5e009bdfbb5af3bb12f1a1c6bf06b8976f6f51e71fe50be",
+    "excerpt_line_ranges": [
+      [
+        266,
+        292
+      ],
+      [
+        427,
+        440
+      ]
+    ],
+    "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+  },
+  {
+    "role": "fixed",
+    "path": "django/core/mail/message.py",
+    "commit_sha": "b9098538a966fdc1f2b5ee51c094ca3de4db6344",
+    "url": "https://github.com/django/django/blob/b9098538a966fdc1f2b5ee51c094ca3de4db6344/django/core/mail/message.py",
+    "full_source_sha256": "7aea8c0e44b252fe0a9bde621fa32c257deb8a510f68d32bf73f1cb9f553c79a",
+    "excerpt_path": "fixed-source.txt",
+    "excerpt_sha256": "b07bd0218f9f199db7c1e36d93bc2fd33fbf0b35b8121075440896fc76989700",
+    "excerpt_line_ranges": [
+      [
+        266,
+        292
+      ],
+      [
+        428,
+        437
+      ]
+    ],
+    "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+  },
+  {
+    "role": "upstream-regression-tests",
+    "path": "tests/mail/tests.py",
+    "commit_sha": "b9098538a966fdc1f2b5ee51c094ca3de4db6344",
+    "url": "https://github.com/django/django/blob/b9098538a966fdc1f2b5ee51c094ca3de4db6344/tests/mail/tests.py",
+    "full_source_sha256": "8a875e6f176377c553caec5cf428ce6a605a851190203c8a76caf8994aae2916",
+    "excerpt_path": "regression-tests.txt",
+    "excerpt_sha256": "0fb3ceba51656fb91e4acecb6252286bc8850a35c36dcaab4f8376c73ffdc8d4",
+    "excerpt_line_ranges": [
+      [
+        217,
+        226
+      ],
+      [
+        384,
+        416
+      ],
+      [
+        427,
+        440
+      ]
+    ],
+    "format": "Verbatim source lines prefixed with original one-based line numbers; separated test functions are concatenated."
+  },
+  {
+    "role": "license",
+    "path": "LICENSE",
+    "commit_sha": "da82939e5a31dea21a4f4d5085dfcd449fcbed3a",
+    "url": "https://github.com/django/django/blob/da82939e5a31dea21a4f4d5085dfcd449fcbed3a/LICENSE",
+    "full_source_sha256": "b846415d1b514e9c1dff14a22deb906d794bc546ca6129f950a18cd091e2a669",
+    "excerpt_path": "LICENSE",
+    "excerpt_sha256": "b846415d1b514e9c1dff14a22deb906d794bc546ca6129f950a18cd091e2a669"
+  }
+]

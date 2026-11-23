@@ -1,0 +1,12 @@
+  89   await page.goto(url)
+  90   expect(await page.textContent('.optimized-cjs-with-nested-external')).toMatch(
+  91     'Hello World!'
+  92   )
+  93 })
+  94 
+  95 test('msg from external using external entry', async () => {
+  96   await page.goto(url)
+  97   expect(await page.textContent('.external-using-external-entry')).toMatch(
+  98     'Hello World!'
+  99   )
+ 100 })

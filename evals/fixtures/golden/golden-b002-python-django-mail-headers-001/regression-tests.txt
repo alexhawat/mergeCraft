@@ -1,0 +1,57 @@
+217:     def test_cc_headers(self):
+218:         message = EmailMessage(
+219:             "Subject",
+220:             "Content",
+221:             "bounce@example.com",
+222:             ["to@example.com"],
+223:             cc=["foo@example.com"],
+224:             headers={"Cc": "override@example.com"},
+225:         ).message()
+226:         self.assertEqual(message.get_all("Cc"), ["override@example.com"])
+384:     def test_to_header(self):
+385:         """
+386:         Make sure we can manually set the To header (#17444)
+387:         """
+388:         email = EmailMessage(
+389:             "Subject",
+390:             "Content",
+391:             "bounce@example.com",
+392:             ["list-subscriber@example.com", "list-subscriber2@example.com"],
+393:             headers={"To": "mailing-list@example.com"},
+394:         )
+395:         message = email.message()
+396:         self.assertEqual(message.get_all("To"), ["mailing-list@example.com"])
+397:         self.assertEqual(
+398:             email.to, ["list-subscriber@example.com", "list-subscriber2@example.com"]
+399:         )
+400: 
+401:         # If we don't set the To header manually, it should default to the `to`
+402:         # argument to the constructor.
+403:         email = EmailMessage(
+404:             "Subject",
+405:             "Content",
+406:             "bounce@example.com",
+407:             ["list-subscriber@example.com", "list-subscriber2@example.com"],
+408:         )
+409:         message = email.message()
+410:         self.assertEqual(
+411:             message.get_all("To"),
+412:             ["list-subscriber@example.com, list-subscriber2@example.com"],
+413:         )
+414:         self.assertEqual(
+415:             email.to, ["list-subscriber@example.com", "list-subscriber2@example.com"]
+416:         )
+427:     def test_reply_to_header(self):
+428:         """
+429:         Specifying 'Reply-To' in headers should override reply_to.
+430:         """
+431:         email = EmailMessage(
+432:             "Subject",
+433:             "Content",
+434:             "bounce@example.com",
+435:             ["to@example.com"],
+436:             reply_to=["foo@example.com"],
+437:             headers={"Reply-To": "override@example.com"},
+438:         )
+439:         message = email.message()
+440:         self.assertEqual(message.get_all("Reply-To"), ["override@example.com"])

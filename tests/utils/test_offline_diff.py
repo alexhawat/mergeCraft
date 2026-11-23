@@ -109,3 +109,17 @@ def test_untracked_non_utf8_does_not_crash_or_emit_a_lossy_patch(git_repo: Path)
     (git_repo / "legacy.txt").write_bytes(b"caf\xe9\n")
     text = git_unstaged_diff(cwd=git_repo)
     assert "legacy.txt" not in text
+
+
+def test_review_cli_reports_missing_base_as_configuration_error(
+    git_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typer.testing import CliRunner
+
+    from mergecraft.cli.app import app
+    from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE
+
+    monkeypatch.chdir(git_repo)
+    result = CliRunner().invoke(app, ["review", "--base", "absent-review-base", "--dry-run"])
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE, result.output
+    assert "absent-review-base" in result.output

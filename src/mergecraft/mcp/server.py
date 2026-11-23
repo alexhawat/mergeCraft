@@ -278,10 +278,21 @@ def _register_mcp_route(
             raw_auth = request.headers.get("Authorization") or ""
             # Use compare_digest to prevent timing-based token oracle attacks.
             if not secrets.compare_digest(raw_auth.encode(), f"Bearer {auth_token}".encode()):
+                if (
+                    tool_ctx is not None
+                    and path in {MCP_REVIEWER_ENDPOINT, MCP_VERIFIER_ENDPOINT}
+                    and raw_auth.startswith("Bearer ")
+                ):
+                    with tool_ctx.reviewer_sessions.authorize(raw_auth[7:]) as accepted:
+                        if accepted:
+                            return await serve_request(request)
                 return JSONResponse(
                     {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Unauthorized"}},
                     status_code=401,
                 )
+        return await serve_request(request)
+
+    async def serve_request(request: Request) -> Response:
         if request.method == "GET":
             # Streamable HTTP / SSE clients may probe with GET — reply with tool list.
             return JSONResponse(
