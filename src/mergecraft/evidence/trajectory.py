@@ -938,10 +938,8 @@ def _git_paths(
         paths.extend(_resolve_repo_operands(root, cwd, after_separator))
     elif subcommand == "blame" and positional:
         paths.extend(_resolve_repo_operands(root, cwd, [positional[-1]]))
-    elif subcommand == "ls-files" and "--" not in args:
-        paths.extend(_resolve_repo_operands(root, cwd, positional))
-    elif subcommand == "ls-files":
-        paths.extend(_resolve_repo_operands(root, cwd, after_separator))
+    # ``ls-files`` prints names, never contents: its operands are not files the run
+    # read. Recording them put directories, and whole argument strings, in ``files_read``.
     return _dedupe(paths)[:_MAX_PATHS_PER_CALL]
 
 

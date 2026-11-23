@@ -117,6 +117,76 @@ def test_the_run_packet_records_a_complete_coverage_for_a_fully_delivered_diff(
     assert packet.coverage.hunks_total == packet.coverage.hunks_covered == 2
 
 
+@pytest.mark.parametrize(
+    ("delivered", "read"), [(_AUTHORITATIVE, 5), (_DELIVERED_A_ONLY, 1)], ids=["full", "subset"]
+)
+def test_reading_the_delivered_file_credits_only_its_added_lines(
+    tmp_path: Path, delivered: str, read: int
+) -> None:
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    ctx = _make_ctx(tmp_path, diff_text=delivered)
+    ctx.tool_state.coverage.authoritative_diff = _AUTHORITATIVE
+    path = primary_repo_state(ctx.tool_state).diff_path
+    assert path is not None
+    _mark_read(ctx, path)
+
+    section = build_run_packet(ctx, run_succeeded=True).coverage
+    assert section is not None
+    assert (section.added_lines_read, section.added_lines_total) == (read, 5)
+
+
+def test_incremental_reads_use_their_own_offsets_and_combine_with_source_reads(
+    tmp_path: Path,
+) -> None:
+    from mergecraft.evidence.trajectory import record_driver_read
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    ctx = _make_ctx(tmp_path, diff_text=_AUTHORITATIVE)
+    incremental = tmp_path / "incremental.diff"
+    incremental.write_text(_AUTHORITATIVE.removeprefix(_DELIVERED_A_ONLY), encoding="utf-8")
+    primary_repo_state(ctx.tool_state).incremental_diff_path = str(incremental)
+    record_driver_read(ctx.tool_state, path=str(incremental), span=(5, 6))
+    _mark_read(ctx, "src/a.py")
+
+    section = build_run_packet(ctx, run_succeeded=True).coverage
+    assert section is not None
+    assert (section.added_lines_read, section.added_lines_total) == (3, 5)
+
+
+def test_a_failed_diff_read_cannot_vouch_for_delivery(tmp_path: Path) -> None:
+    from mergecraft.evidence.trajectory import record_tool_call
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    ctx = _make_ctx(tmp_path, diff_text=_AUTHORITATIVE)
+    path = primary_repo_state(ctx.tool_state).diff_path
+    record_tool_call(
+        ctx.tool_state,
+        tool="shell",
+        arguments={"command": f"cat {path}"},
+        ok=True,
+        outcome_ok=False,
+    )
+    section = build_run_packet(ctx, run_succeeded=True).coverage
+    assert section is not None
+    assert not section.complete
+    assert section.added_lines_read is None
+
+
+def test_reading_one_physical_diff_line_credits_one_added_line(tmp_path: Path) -> None:
+    from mergecraft.evidence.trajectory import record_tool_call
+    from mergecraft.mcp.tool_state import primary_repo_state
+
+    ctx = _make_ctx(tmp_path, diff_text=_AUTHORITATIVE)
+    path = primary_repo_state(ctx.tool_state).diff_path
+    record_tool_call(
+        ctx.tool_state, tool="shell", arguments={"command": f"sed -n '6p' {path}"}, ok=True
+    )
+    section = build_run_packet(ctx, run_succeeded=True).coverage
+    assert section is not None
+    assert (section.added_lines_read, section.added_lines_total) == (1, 5)
+
+
 def test_the_run_packet_lists_a_hunk_the_reviewer_never_received(tmp_path: Path) -> None:
     ctx = _make_ctx(tmp_path, diff_text=_DELIVERED_A_ONLY)
     ctx.tool_state.coverage.authoritative_diff = _AUTHORITATIVE
