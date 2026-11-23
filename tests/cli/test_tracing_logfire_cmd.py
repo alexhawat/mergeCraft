@@ -634,10 +634,6 @@ def test_logfire_enable_sets_master_switch(tmp_path: Path, monkeypatch: MonkeyPa
 def test_logfire_disable_clears_master_switch(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """``disable --scope local`` clears ``MERGECRAFT_TRACING``."""
 
-    def _handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=[])
-
-    monkeypatch.setattr("mergecraft.cli.auth_cmd._validate_logfire_token", lambda _token: True)
     monkeypatch.setenv("MERGECRAFT_ENV", str(tmp_path / ".env"))
     env_path = tmp_path / ".env"
     env_path.write_text(
