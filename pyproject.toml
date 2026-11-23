@@ -32,8 +32,7 @@ dependencies = [
     "httpcore==1.0.9",
     "rich==15.0.0",
     "typer==0.29.2",
-    # cli/interactive.py and cli/typer_group.py import click directly; typer only
-    # brings it transitively, so pin it explicitly at the locked resolution.
+    # Uvicorn uses standalone Click. Typer has its own command parser.
     "click==8.5.1",
     "pyyaml==6.0.3",
     "pydantic==2.14.4",

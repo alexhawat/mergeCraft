@@ -135,17 +135,18 @@ def _walk_typer_commands(
     app: typer.Typer, prefix: CommandPath = ()
 ) -> list[tuple[CommandPath, Any]]:
     """Collect leaf callbacks through Click's lazy-command resolution API."""
-    import click
+    from typer import _click
+    from typer.core import TyperGroup
     from typer.main import get_group
 
-    def walk(group: click.Group, path: CommandPath) -> list[tuple[CommandPath, Any]]:
+    def walk(group: TyperGroup, path: CommandPath) -> list[tuple[CommandPath, Any]]:
         commands: list[tuple[CommandPath, Any]] = []
-        context = click.Context(group)
+        context = _click.Context(group)
         for name in group.list_commands(context):
             command = group.get_command(context, name)
             if command is None or command.hidden:
                 continue
-            if isinstance(command, click.Group):
+            if isinstance(command, TyperGroup):
                 commands.extend(walk(command, (*path, name)))
             else:
                 commands.append(((*path, name), inspect.unwrap(command.callback)))
