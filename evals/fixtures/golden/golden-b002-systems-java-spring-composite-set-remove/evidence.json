@@ -69,7 +69,7 @@
     "LICENSE.upstream": "56dfc19e0dc836e30177332f73e8e6fbc297941acf3d906eec6eaaa46c2c452a",
     "buggy-set.txt": "4728ca79cc94756648152433c9996a1e5eb03ada6c20ae81c4af6ed9c4f823bc",
     "buggy-map-constructor.txt": "90adaa7306f21cf82d3f6db8c4e77e1b713ef6d9b2d08d412e247489dcb49cca",
-    "buggy-map-keyset.txt": "8328fb03b99ccdb237684e303e1a79ad313f87bf99cd6275045dc468043d1225",
+    "buggy-map-view.txt": "8328fb03b99ccdb237684e303e1a79ad313f87bf99cd6275045dc468043d1225",
     "NOTICE.upstream": "0f17d09aab1077cfc66b00f71a41437a12719640be308a301edd68804e1f524a",
     "ATTRIBUTION.md": "a4cbf4a0446a43c2587a8f21e6a5fe900e16a5caca9984af72d496a658b8123d"
   },
@@ -127,7 +127,7 @@
       "end_line": 65,
       "url": "https://github.com/spring-projects/spring-framework/blob/f5a71230440381427d7d652e94a44a8658357025/spring-core/src/main/java/org/springframework/util/CompositeMap.java#L44-L65"
     },
-    "buggy-map-keyset.txt": {
+    "buggy-map-view.txt": {
       "kind": "verbatim bounded source excerpt",
       "path": "spring-core/src/main/java/org/springframework/util/CompositeMap.java",
       "start_line": 141,
