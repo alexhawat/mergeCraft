@@ -32,8 +32,6 @@ dependencies = [
     "httpcore==1.0.9",
     "rich==15.0.0",
     "typer==0.29.2",
-    # Uvicorn uses standalone Click. Typer has its own command parser.
-    "click==8.5.1",
     "pyyaml==6.0.3",
     "pydantic==2.14.4",
     # Imported by src/mergecraft/config/env/ (the typed settings layer).

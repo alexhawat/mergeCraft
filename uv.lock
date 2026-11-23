@@ -1885,7 +1885,6 @@ version = "0.1.0a7.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
-    { name = "click" },
     { name = "defusedxml" },
     { name = "fastapi" },
     { name = "httpcore" },
@@ -1953,7 +1952,6 @@ requires-dist = [
     { name = "ast-grep-cli", marker = "extra == 'dev'", specifier = "==0.51.3" },
     { name = "bandit", extras = ["toml"], marker = "extra == 'dev'", specifier = "==1.9.4" },
     { name = "basedpyright", marker = "extra == 'dev'", specifier = "==1.40.2" },
-    { name = "click", specifier = "==8.5.1" },
     { name = "defusedxml", specifier = "==0.7.1" },
     { name = "fastapi", specifier = "==0.165.0" },
     { name = "harbor", marker = "python_full_version >= '3.12' and extra == 'harbor'", specifier = "==0.20.0" },
