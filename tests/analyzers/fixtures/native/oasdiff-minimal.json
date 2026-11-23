@@ -1,13 +1,15 @@
 [
   {
-    "id": "response-property-removed",
-    "text": "removed the required property 'email' from the response with the '200' status",
+    "id": "api-path-removed-without-deprecation",
+    "text": "api path removed without deprecation",
     "level": 3,
     "operation": "GET",
-    "operationId": "getUser",
-    "path": "/users/{id}",
-    "source": "openapi/v1.yaml",
+    "operationId": "getUsers",
+    "path": "/users",
     "section": "paths",
-    "baseSource": {"file": "openapi/v1.yaml", "line": 24, "column": 13}
+    "baseSource": {
+      "file": "base/openapi.json"
+    },
+    "fingerprint": "00bb05c98939"
   }
 ]

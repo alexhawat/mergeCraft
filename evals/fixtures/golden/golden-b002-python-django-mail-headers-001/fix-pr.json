@@ -1,0 +1,18 @@
+{
+  "base": {
+    "ref": "main",
+    "sha": "d12184fedcd586e2c399ea40abe4bf865ebc87a6"
+  },
+  "body": "# Trac ticket number\r\n<!-- Replace XXXXX with the corresponding Trac ticket number, or delete the line and write \"N/A\" if this is a trivial PR. -->\r\n\r\nticket-35033\r\n\r\n# Branch description\r\n\r\nticket-35033 as originally reported was caused by a regression introduced in ticket-28912 (PR #9454).\r\n\r\nThis PR fixes that specific regression, and updates the tests to avoid it in the future.\r\n\r\n# Checklist\r\n- [x] This PR targets the `main` branch. <!-- Backports will be evaluated and done by mergers, when necessary. -->\r\n- [x] The commit message is written in past tense, mentions the ticket number, and ends with a period.\r\n- [x] I have checked the \"Has patch\" ticket flag in the Trac system.\r\n- [x] I have added or updated relevant tests.\r\n- [n/a] I have added or updated relevant docs, including release notes if applicable.\r\n- [n/a] I have attached screenshots in both light and dark modes for any UI changes.\r\n",
+  "head": {
+    "ref": "ticket_35033",
+    "sha": "a5511235e5bcfd52d986f3099632f67e32b2a4fe"
+  },
+  "html_url": "https://github.com/django/django/pull/18325",
+  "merge_commit_sha": "b9098538a966fdc1f2b5ee51c094ca3de4db6344",
+  "merged": true,
+  "merged_at": "2024-07-11T06:00:47Z",
+  "number": 18325,
+  "state": "closed",
+  "title": "Fixed #35033 -- Fixed repeated headers in EmailMessage."
+}

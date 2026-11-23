@@ -66,7 +66,10 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /.github/actions/bootstrap
+      - /get-installation-token
     target-branch: main
     schedule:
       interval: weekly

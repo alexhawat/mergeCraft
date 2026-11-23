@@ -405,6 +405,8 @@ def _finalized_trufflehog_argv(repo_root: Path, argv: tuple[str, ...]) -> tuple[
     registry = import_module("mergecraft.analyzers.registry")
     resolve = import_module("mergecraft.analyzers.resolve")
     manifest = registry.get_manifest("trufflehog")
+    (repo_root / "config").mkdir()
+    (repo_root / "config/planted-secret.env").touch()
     plan = resolve.AnalyzerPlan(manifest_id="trufflehog", mode="managed", argv=argv)
     finalized = execution.finalize_plan(
         plan,

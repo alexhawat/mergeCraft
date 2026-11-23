@@ -39,7 +39,8 @@ unset MERGECRAFT_PAYLOAD_ENV_FD
 while IFS= read -r -d '' _MERGECRAFT_BOOTSTRAP_ENTRY; do
     export "$_MERGECRAFT_BOOTSTRAP_ENTRY"
 done <&"$_MERGECRAFT_BOOTSTRAP_FD"
-exec {_MERGECRAFT_BOOTSTRAP_FD}<&-
+case "$_MERGECRAFT_BOOTSTRAP_FD" in ''|*[!0-9]*) exit 2 ;; esac
+eval "exec ${_MERGECRAFT_BOOTSTRAP_FD}<&-"
 exec "$@"
 """
 

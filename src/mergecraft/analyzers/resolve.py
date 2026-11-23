@@ -453,9 +453,10 @@ def expand_analyzer_argv(
                 candidate = path if path.is_absolute() else repo_root / rel
                 try:
                     candidate.resolve().relative_to(repo_root)
-                except ValueError:
+                except (OSError, RuntimeError, ValueError):
                     continue
-                expanded.append(str(candidate))
+                if candidate.is_file():
+                    expanded.append(str(candidate))
             continue
         if arg == TRUFFLEHOG_CONFIG_TOKEN:
             expanded.append(str(_CATALOG_DIR / "trufflehog-detectors.txt"))

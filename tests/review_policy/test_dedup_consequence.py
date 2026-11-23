@@ -22,15 +22,15 @@ _MESSAGE = "Missing timeout on the retry loop"
 #: Path pairs that ``normalize_repo_path`` collapses to one key.
 _SAME_KEY_PAIRS: list[tuple[str, str]] = [
     ("./src/app.py", "src/app.py"),
-    ("a/src/app.py", "src/app.py"),
-    ("b/src/app.py", "src/app.py"),
-    ("./a/src/app.py", "src/app.py"),
     ("src\\app.py", "src/app.py"),
     ("  src/app.py  ", "src/app.py"),
 ]
 
 #: Path pairs every distinction in the normalizer keeps apart.
 _DIFFERENT_KEY_PAIRS: list[tuple[str, str]] = [
+    ("a/src/app.py", "src/app.py"),
+    ("b/src/app.py", "src/app.py"),
+    ("./a/src/app.py", "src/app.py"),
     ("src/app.py", "src/other.py"),
     ("src/app.py", "src/App.py"),
     ("src/app.py", "src//app.py"),

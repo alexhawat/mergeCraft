@@ -15,7 +15,7 @@ from tests.analyzers.support import FIXTURES_DIR
 from mergecraft.analyzers.parsers import get_parser
 from mergecraft.analyzers.registry import get_manifest
 
-_SOURCE = "const answer = 42;\n\n\ndebugger;\n"
+_SOURCE = "export const answer = 42;\n\n\ndebugger;\n"
 
 
 def _fixture(name: str) -> str:
@@ -58,6 +58,8 @@ def test_biome_clean_run_is_empty_and_eslint_shape_is_rejected(tmp_path: Path) -
 
 
 def test_oxlint_array_report_maps_code_severity_and_line(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/index.js").write_text(_SOURCE)
     findings = _parse("oxlint", _fixture("oxlint-minimal.json"), tmp_path)
 
     assert [(f.rule_id, f.severity, f.path, f.start_line) for f in findings] == [
@@ -69,7 +71,7 @@ def test_oxlint_wrapped_report_with_offset_only_spans(tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "index.js").write_text(_SOURCE, encoding="utf-8")
     diagnostics = json.loads(_fixture("oxlint-minimal.json"))
-    diagnostics[0]["labels"][0]["span"] = {"offset": 21, "length": 9}
+    diagnostics[0]["labels"][0]["span"] = {"offset": _SOURCE.index("debugger"), "length": 9}
     wrapped = {"diagnostics": diagnostics, "number_of_files": 1, "number_of_rules": 100}
 
     findings = _parse("oxlint", json.dumps(wrapped), tmp_path)
@@ -80,4 +82,4 @@ def test_oxlint_wrapped_report_with_offset_only_spans(tmp_path: Path) -> None:
 def test_oxlint_rejects_eslint_shaped_output(tmp_path: Path) -> None:
     """An ESLint-style array has no oxlint fields; it must not read as findings or clean."""
     with pytest.raises(ValueError, match="oxlint"):
-        _parse("oxlint", '{"results": []}', tmp_path)
+        _parse("oxlint", _fixture("eslint-minimal.json"), tmp_path)

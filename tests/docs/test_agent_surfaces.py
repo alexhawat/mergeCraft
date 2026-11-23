@@ -19,7 +19,6 @@ from tests.ci.workflow_support import REPO_ROOT, read_text
 from tests.docs.support import (
     AGENT_SECTION_MARKER_RE,
     action_uses_pattern,
-    agent_section_precedes_body,
     git_ref_exists,
     readme_agent_section_region,
 )
@@ -178,19 +177,10 @@ def test_readme_has_agent_section() -> None:
     )
 
 
-def test_agent_section_is_first_section() -> None:
-    """The agent section opens before any prose section (D2).
-
-    Checked by document offset, not by heading text: the section may be
-    collapsed into a ``<details>`` block, which emits a ``<summary>`` rather
-    than an H2 while keeping the same content and the same ``#for-agents``
-    anchor.
-    """
+def test_quickstart_opens_before_agent_reference() -> None:
     text = read_text("README.md")
-    assert AGENT_SECTION_MARKER_RE.search(text), "README must ship a For LLM / Agents section (D2)"
-    assert agent_section_precedes_body(text), (
-        "the For LLM / Agents section must come before the first prose H2 (D2)"
-    )
+    assert text.index("## Quickstart") < text.index("## For LLM / Agents")
+    assert "(docs/agents.md)" in text
 
 
 def test_agent_section_anchor_survives() -> None:
@@ -205,11 +195,9 @@ def test_agent_section_anchor_survives() -> None:
 
 
 def test_agent_prompts_are_fenced_not_quoted() -> None:
-    text = read_text("README.md")
-    region = _readme_agent_section_region(text)
-    assert region is not None, "README agent section missing"
+    region = read_text("docs/agents.md")
     prompts_region_match = re.search(
-        r"###\s+One-line setup prompts[^\n]*\n(.*?)(?=\n### |\n## |\Z)",
+        r"##\s+One-line setup prompts[^\n]*\n(.*?)(?=\n### |\n## |\Z)",
         region,
         re.DOTALL,
     )

@@ -1,0 +1,11 @@
+{
+  "number": 12903,
+  "title": "fix: yarn pnp considerBuiltins",
+  "html_url": "https://github.com/vitejs/vite/pull/12903",
+  "body": "Fixes #12888\r\n\r\n### Description\r\n\r\nRegression introduced by https://github.com/vitejs/vite/pull/12441\r\n\r\nSee [`pnp.resolveToUnqualified` docs](https://yarnpkg.com/advanced/pnpapi#resolveunqualified). By default `considerBuiltins` is `true` and this call then fails to resolve `buffer` and `string_decoder` which are packages in the project.\r\n\r\n---\r\n\r\n### What is the purpose of this pull request? <!-- (put an \"X\" next to an item) -->\r\n\r\n- [x] Bug fix\r\n- [ ] New Feature\r\n- [ ] Documentation update\r\n- [ ] Other",
+  "merged": true,
+  "merged_at": "2023-04-19T06:00:09Z",
+  "merge_commit_sha": "a0e10d5bc8b7ac6f27bd006a5cb65a56538fcede",
+  "base_sha": "62ebe28d4023c1f67578b1977edd3371f44f475a",
+  "head_sha": "31d20aba7890cd6e5c48acb59cf47a2d90e2d7da"
+}

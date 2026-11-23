@@ -14,6 +14,7 @@ import typer
 from mergecraft.agents.codex import CODEX_SANDBOX_ENV, CODEX_SANDBOX_UNSANDBOXED
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.provider_cmd import _config_path, _load_config_dict
 from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.config.io import config_has_yaml_comments, write_config_dict
@@ -348,7 +349,9 @@ def set_self_review_cmd(
     """Write ``trust.selfReview`` to the committed config at ``--cwd``."""
     normalized = level.strip().lower()
     if normalized not in _SELF_REVIEW_LEVELS:
-        cli_bail(f"invalid level {level!r} — expected off, analyzers, or full")
+        cli_bail(
+            f"invalid level {level!r} — expected off, analyzers, or full", code=CLI_USAGE_EXIT_CODE
+        )
 
     target = cwd.resolve()
     config_path = _config_path(target)
@@ -388,7 +391,10 @@ def set_agent_sandbox_cmd(
     """Write ``trust.agentSandbox`` to the committed config at ``--cwd``."""
     normalized = tier.strip().lower()
     if normalized not in AGENT_SANDBOX_LEVELS:
-        cli_bail(f"invalid tier {tier!r} — expected never, merged-only, dispatch, or same-repo")
+        cli_bail(
+            f"invalid tier {tier!r} — expected never, merged-only, dispatch, or same-repo",
+            code=CLI_USAGE_EXIT_CODE,
+        )
 
     target = cwd.resolve()
     config_path = _config_path(target)

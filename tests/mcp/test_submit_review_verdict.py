@@ -808,3 +808,29 @@ def test_backfill_normalizes_a_slug_fingerprint() -> None:
     assert state.agent_findings[0]["fingerprint"] == fingerprint
     assert again == []
     assert resolve_finding_short_ids([fingerprint])[fingerprint].startswith("MC-")
+
+
+@pytest.mark.asyncio
+async def test_late_blocker_allows_corrected_verdict_with_draft_backfill(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    first = await _submit(ctx, _valid_payload())
+    assert not first.is_error
+    _seed_analyzer_run(ctx, [_analyzer_blocker("Major")], verified=set())
+    replay = await _submit(ctx, _valid_payload())
+    assert _REASON_APPROVE_CONFIRMED_BLOCKER in _error_text(replay)
+    finding = AgentFinding(
+        path="src/a.py", line=2, body="Request validation fails.", severity="Major"
+    )
+    corrected = await _submit(
+        ctx,
+        {
+            "verdict": "request_changes",
+            "summary": "Resolve the validation failure.",
+            "findings": [finding.model_dump()],
+        },
+    )
+    assert not corrected.is_error
+    assert ctx.tool_state.terminal_submission is not None
+    assert ctx.tool_state.terminal_submission.verdict == "request_changes"
+    assert not ctx.tool_state.terminal_submission_conflict
+    assert ctx.tool_state.agent_findings
