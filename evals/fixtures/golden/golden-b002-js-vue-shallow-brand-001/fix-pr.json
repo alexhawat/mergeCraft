@@ -1,0 +1,11 @@
+{
+  "number": 14641,
+  "title": "fix(types): use private branding for shallowReactive",
+  "html_url": "https://github.com/vuejs/core/pull/14641",
+  "body": "fix #14638\r\nfix shallowReactive type regressions introduced by #14493\r\n\r\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\n## Summary by CodeRabbit\n\n* **Refactor**\n  * Improved internal TypeScript branding for shallow reactive values to make type behavior more consistent.\n\n* **Tests**\n  * Added compile-time type assertions covering shallow reactive value compatibility.\n  * Added type-level tests for proxyRefs with shallow reactive inputs and for shallow-reactive collections used with toRef, ensuring correct inferred ref types.\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+  "merged": true,
+  "merged_at": "2026-04-03T02:31:00Z",
+  "merge_commit_sha": "302c47a4994bc8b47b8a2af6693d8cb6bbd4b06b",
+  "base_sha": "81615d398a89beeccfe56a4a96fd2fba0c6fb37b",
+  "head_sha": "7d2de78f277cd664fc67b8e01b2b39f33a55ff28"
+}

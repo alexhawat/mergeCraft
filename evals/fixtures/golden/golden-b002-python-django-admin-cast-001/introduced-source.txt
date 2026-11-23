@@ -1,0 +1,45 @@
+1208:         may_have_duplicates = False
+1209:         search_fields = self.get_search_fields(request)
+1210:         if search_fields and search_term:
+1211:             str_annotations = {}
+1212:             orm_lookups = []
+1213:             for field in search_fields:
+1214:                 if field.endswith("__exact"):
+1215:                     field_name = field.rsplit("__exact", 1)[0]
+1216:                     try:
+1217:                         field_obj = queryset.model._meta.get_field(field_name)
+1218:                     except FieldDoesNotExist:
+1219:                         lookup = construct_search(field)
+1220:                         orm_lookups.append(lookup)
+1221:                         continue
+1222:                     # Add string cast annotations for non-string exact lookups.
+1223:                     if not isinstance(field_obj, (models.CharField, models.TextField)):
+1224:                         str_annotations[f"{field_name}_str"] = Cast(
+1225:                             field_name, output_field=models.CharField()
+1226:                         )
+1227:                         orm_lookups.append(f"{field_name}_str__exact")
+1228:                     else:
+1229:                         lookup = construct_search(field)
+1230:                         orm_lookups.append(lookup)
+1231:                 else:
+1232:                     lookup = construct_search(str(field))
+1233:                     orm_lookups.append(lookup)
+1234: 
+1235:             if str_annotations:
+1236:                 queryset = queryset.annotate(**str_annotations)
+1237: 
+1238:             term_queries = []
+1239:             for bit in smart_split(search_term):
+1240:                 if bit.startswith(('"', "'")) and bit[0] == bit[-1]:
+1241:                     bit = unescape_string_literal(bit)
+1242:                 or_queries = models.Q.create(
+1243:                     [(orm_lookup, bit) for orm_lookup in orm_lookups],
+1244:                     connector=models.Q.OR,
+1245:                 )
+1246:                 term_queries.append(or_queries)
+1247:             queryset = queryset.filter(models.Q.create(term_queries))
+1248:             may_have_duplicates |= any(
+1249:                 lookup_spawns_duplicates(self.opts, search_spec)
+1250:                 for search_spec in orm_lookups
+1251:             )
+1252:         return queryset, may_have_duplicates

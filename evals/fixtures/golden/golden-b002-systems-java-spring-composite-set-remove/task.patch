@@ -1,0 +1,46 @@
+diff --git a/spring-core/src/main/java/org/springframework/util/CompositeCollection.java b/spring-core/src/main/java/org/springframework/util/CompositeCollection.java
+index 42d3bcf86550..4e7d441c38a8 100644
+--- a/spring-core/src/main/java/org/springframework/util/CompositeCollection.java
++++ b/spring-core/src/main/java/org/springframework/util/CompositeCollection.java
+@@ -114,9 +114,7 @@ public boolean add(E e) {
+ 
+ 	@Override
+ 	public boolean remove(Object o) {
+-		boolean firstResult = this.first.remove(o);
+-		boolean secondResult = this.second.remove(o);
+-		return firstResult || secondResult;
++		return (this.first.remove(o) || this.second.remove(o));
+ 	}
+ 
+ 	@Override
+diff --git a/spring-core/src/test/java/org/springframework/util/CompositeCollectionTests.java b/spring-core/src/test/java/org/springframework/util/CompositeCollectionTests.java
+index cd158eaeab9c..512534696988 100644
+--- a/spring-core/src/test/java/org/springframework/util/CompositeCollectionTests.java
++++ b/spring-core/src/test/java/org/springframework/util/CompositeCollectionTests.java
+@@ -124,8 +124,19 @@ void remove() {
+ 		assertThat(composite.remove("foo")).isTrue();
+ 		assertThat(composite.contains("foo")).isFalse();
+ 		assertThat(first).containsExactly("bar");
+-
+ 		assertThat(composite.remove("quux")).isFalse();
++
++		// test remove element existing in both first and second
++		first = new ArrayList<>(List.of("foo", "bar"));
++		second = new ArrayList<>(List.of("foo", "qux"));
++		composite = new CompositeCollection<>(first, second);
++
++		assertThat(composite.remove("foo")).isTrue();
++		assertThat(first).containsExactly("bar");
++		assertThat(composite.contains("foo")).isTrue();
++		assertThat(composite.remove("foo")).isTrue();
++		assertThat(second).containsExactly("qux");
++		assertThat(composite.contains("foo")).isFalse();
+ 	}
+ 
+ 	@Test
+@@ -207,4 +218,5 @@ void nullable() {
+ 
+ 		assertThat(composite).containsExactly("foo", null, "bar", null);
+ 	}
++
+ }

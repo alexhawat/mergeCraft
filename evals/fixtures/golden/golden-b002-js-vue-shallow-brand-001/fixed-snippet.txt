@@ -1,0 +1,20 @@
+ 102     mutableCollectionHandlers,
+ 103     reactiveMap,
+ 104   )
+ 105 }
+ 106 
+ 107 // Use a private class brand instead of a marker property so shallow-reactive
+ 108 // types remain distinguishable in `UnwrapRef` without leaking the brand into
+ 109 // `keyof`/indexed access types or requiring the property for plain assignment.
+ 110 declare class ShallowReactiveBrandClass {
+ 111   private __shallowReactiveBrand?: never
+ 112 }
+ 113 
+ 114 export type ShallowReactiveBrand = ShallowReactiveBrandClass
+ 115 
+ 116 export type ShallowReactive<T> = T & ShallowReactiveBrand
+ 117 
+ 118 /**
+ 119  * Shallow version of {@link reactive}.
+ 120  *
+ 121  * Unlike {@link reactive}, there is no deep conversion: only root-level

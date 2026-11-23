@@ -1,0 +1,210 @@
+{
+  "case_id": "golden-b002-python-django-mail-headers-001",
+  "title": "EmailMessage writes a caller-supplied To header twice",
+  "framework": "Django",
+  "category": "correctness",
+  "repo": "django/django",
+  "language": "python",
+  "introducing_pr": {
+    "base": {
+      "ref": "master",
+      "sha": "63349394170347241c48a445c843ff2be53e3a8a"
+    },
+    "body": "https://code.djangoproject.com/ticket/28912",
+    "head": {
+      "ref": "empty-to-header",
+      "sha": "da82939e5a31dea21a4f4d5085dfcd449fcbed3a"
+    },
+    "html_url": "https://github.com/django/django/pull/9454",
+    "merge_commit_sha": "da82939e5a31dea21a4f4d5085dfcd449fcbed3a",
+    "merged": true,
+    "merged_at": "2017-12-30T14:55:42Z",
+    "number": 9454,
+    "state": "closed",
+    "title": "Fixed #28912 -- Fixed EmailMessage.message() to exclude an empty To field."
+  },
+  "fix_pr": {
+    "base": {
+      "ref": "main",
+      "sha": "d12184fedcd586e2c399ea40abe4bf865ebc87a6"
+    },
+    "body": "# Trac ticket number\r\n<!-- Replace XXXXX with the corresponding Trac ticket number, or delete the line and write \"N/A\" if this is a trivial PR. -->\r\n\r\nticket-35033\r\n\r\n# Branch description\r\n\r\nticket-35033 as originally reported was caused by a regression introduced in ticket-28912 (PR #9454).\r\n\r\nThis PR fixes that specific regression, and updates the tests to avoid it in the future.\r\n\r\n# Checklist\r\n- [x] This PR targets the `main` branch. <!-- Backports will be evaluated and done by mergers, when necessary. -->\r\n- [x] The commit message is written in past tense, mentions the ticket number, and ends with a period.\r\n- [x] I have checked the \"Has patch\" ticket flag in the Trac system.\r\n- [x] I have added or updated relevant tests.\r\n- [n/a] I have added or updated relevant docs, including release notes if applicable.\r\n- [n/a] I have attached screenshots in both light and dark modes for any UI changes.\r\n",
+    "head": {
+      "ref": "ticket_35033",
+      "sha": "a5511235e5bcfd52d986f3099632f67e32b2a4fe"
+    },
+    "html_url": "https://github.com/django/django/pull/18325",
+    "merge_commit_sha": "b9098538a966fdc1f2b5ee51c094ca3de4db6344",
+    "merged": true,
+    "merged_at": "2024-07-11T06:00:47Z",
+    "number": 18325,
+    "state": "closed",
+    "title": "Fixed #35033 -- Fixed repeated headers in EmailMessage."
+  },
+  "causal_evidence": {
+    "url": "https://github.com/django/django/pull/18325",
+    "shortquote": "ticket-35033 as originally reported was caused by a regression introduced in ticket-28912 (PR #9454).",
+    "snapshot_path": "evals/fixtures/golden/golden-b002-python-django-mail-headers-001/fix-pr.json",
+    "snapshot_sha256": "03856f9f1f0d280945e95e8bcfbc9efcf51509a82ae70bb8ffaf17a046920a62"
+  },
+  "buggy_file": "django/core/mail/message.py",
+  "start_line": 273,
+  "end_line": 276,
+  "buggy_commit_sha": "da82939e5a31dea21a4f4d5085dfcd449fcbed3a",
+  "buggy_source_url": "https://github.com/django/django/blob/da82939e5a31dea21a4f4d5085dfcd449fcbed3a/django/core/mail/message.py#L273-L276",
+  "proposed_label": {
+    "category": "correctness",
+    "status": "agent_proposal_only",
+    "rationale": "With non-empty to recipients and headers={\"To\": \"mailing-list@example.com\"}, the new list-header helper writes To from extra_headers, then the final extra_headers loop writes it again because the introducing change stops skipping To. Python email.Message assignment appends headers. The fix skips already-handled list headers and changes tests to get_all() so duplicates become visible."
+  },
+  "rationale": "With non-empty to recipients and headers={\"To\": \"mailing-list@example.com\"}, the new list-header helper writes To from extra_headers, then the final extra_headers loop writes it again because the introducing change stops skipping To. Python email.Message assignment appends headers. The fix skips already-handled list headers and changes tests to get_all() so duplicates become visible.",
+  "fix_test": {
+    "path": "tests/mail/tests.py",
+    "names": [
+      "test_to_header",
+      "test_cc_headers",
+      "test_reply_to_header"
+    ],
+    "description": "The fix replaces single-header comparisons with message.get_all(\"To\"), get_all(\"Cc\"), and get_all(\"Reply-To\") equality against one-element lists. test_to_header covers the To duplication newly introduced by #9454.",
+    "execution": "Upstream regression tests included, not run here."
+  },
+  "caveats": [
+    "Upstream regression tests included, not run here.",
+    "The pre-introducing version already had some duplicate-header behavior for Cc/Reply-To. The proposed defect is specifically the newly introduced To duplication, not a claim that all repeated-header variants originate in #9454."
+  ],
+  "license": {
+    "name": "BSD-3-Clause",
+    "url": "https://github.com/django/django/blob/da82939e5a31dea21a4f4d5085dfcd449fcbed3a/LICENSE",
+    "sha256": "b846415d1b514e9c1dff14a22deb906d794bc546ca6129f950a18cd091e2a669",
+    "fixture_path": "LICENSE"
+  },
+  "source_snapshots": [
+    {
+      "role": "base",
+      "path": "django/core/mail/message.py",
+      "commit_sha": "63349394170347241c48a445c843ff2be53e3a8a",
+      "url": "https://github.com/django/django/blob/63349394170347241c48a445c843ff2be53e3a8a/django/core/mail/message.py",
+      "full_source_sha256": "bf211eda8dd80b4aef69b7b73d78780c75ed9e347496b438c927605ec7d1732f",
+      "excerpt_path": "base-source.txt",
+      "excerpt_sha256": "3eec0c4d9535c0decd925e227ba7f59098e3531ea3f10fd104d54137859db7d8",
+      "excerpt_line_ranges": [
+        [
+          251,
+          281
+        ]
+      ],
+      "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+    },
+    {
+      "role": "introduced",
+      "path": "django/core/mail/message.py",
+      "commit_sha": "da82939e5a31dea21a4f4d5085dfcd449fcbed3a",
+      "url": "https://github.com/django/django/blob/da82939e5a31dea21a4f4d5085dfcd449fcbed3a/django/core/mail/message.py",
+      "full_source_sha256": "fd0da66e8d00139285d2923cd604817efa2ac2107bd0758fd9baf41ae790752e",
+      "excerpt_path": "introduced-source.txt",
+      "excerpt_sha256": "2f76d4cf3e41ffd85f3ba12d60022da6c61fc9062f1ca2cceea2da58ae97e6a9",
+      "excerpt_line_ranges": [
+        [
+          251,
+          277
+        ],
+        [
+          409,
+          419
+        ]
+      ],
+      "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+    },
+    {
+      "role": "before-fix",
+      "path": "django/core/mail/message.py",
+      "commit_sha": "d12184fedcd586e2c399ea40abe4bf865ebc87a6",
+      "url": "https://github.com/django/django/blob/d12184fedcd586e2c399ea40abe4bf865ebc87a6/django/core/mail/message.py",
+      "full_source_sha256": "7f3f5b5d632c60dd8d0f81a43169dadd63b0c3af60c20b5cdbe23aa41867da61",
+      "excerpt_path": "before-fix-source.txt",
+      "excerpt_sha256": "bda43208d99a38cba5e009bdfbb5af3bb12f1a1c6bf06b8976f6f51e71fe50be",
+      "excerpt_line_ranges": [
+        [
+          266,
+          292
+        ],
+        [
+          427,
+          440
+        ]
+      ],
+      "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+    },
+    {
+      "role": "fixed",
+      "path": "django/core/mail/message.py",
+      "commit_sha": "b9098538a966fdc1f2b5ee51c094ca3de4db6344",
+      "url": "https://github.com/django/django/blob/b9098538a966fdc1f2b5ee51c094ca3de4db6344/django/core/mail/message.py",
+      "full_source_sha256": "7aea8c0e44b252fe0a9bde621fa32c257deb8a510f68d32bf73f1cb9f553c79a",
+      "excerpt_path": "fixed-source.txt",
+      "excerpt_sha256": "b07bd0218f9f199db7c1e36d93bc2fd33fbf0b35b8121075440896fc76989700",
+      "excerpt_line_ranges": [
+        [
+          266,
+          292
+        ],
+        [
+          428,
+          437
+        ]
+      ],
+      "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+    },
+    {
+      "role": "upstream-regression-tests",
+      "path": "tests/mail/tests.py",
+      "commit_sha": "b9098538a966fdc1f2b5ee51c094ca3de4db6344",
+      "url": "https://github.com/django/django/blob/b9098538a966fdc1f2b5ee51c094ca3de4db6344/tests/mail/tests.py",
+      "full_source_sha256": "8a875e6f176377c553caec5cf428ce6a605a851190203c8a76caf8994aae2916",
+      "excerpt_path": "regression-tests.txt",
+      "excerpt_sha256": "0fb3ceba51656fb91e4acecb6252286bc8850a35c36dcaab4f8376c73ffdc8d4",
+      "excerpt_line_ranges": [
+        [
+          217,
+          226
+        ],
+        [
+          384,
+          416
+        ],
+        [
+          427,
+          440
+        ]
+      ],
+      "format": "Verbatim source lines prefixed with original one-based line numbers; separated test functions are concatenated."
+    },
+    {
+      "role": "license",
+      "path": "LICENSE",
+      "commit_sha": "da82939e5a31dea21a4f4d5085dfcd449fcbed3a",
+      "url": "https://github.com/django/django/blob/da82939e5a31dea21a4f4d5085dfcd449fcbed3a/LICENSE",
+      "full_source_sha256": "b846415d1b514e9c1dff14a22deb906d794bc546ca6129f950a18cd091e2a669",
+      "excerpt_path": "LICENSE",
+      "excerpt_sha256": "b846415d1b514e9c1dff14a22deb906d794bc546ca6129f950a18cd091e2a669"
+    }
+  ],
+  "fixture_dir": "evals/fixtures/golden/golden-b002-python-django-mail-headers-001",
+  "decision": "pending",
+  "decided_at": null,
+  "decided_by": null,
+  "artifact_hashes": {
+    "evals/fixtures/golden/golden-b002-python-django-mail-headers-001/ATTRIBUTION.md": "2e167efd2f7551e74cae1e186a04cc8056257292b5f9f76ad0cc3f5cba7be6c4",
+    "evals/fixtures/golden/golden-b002-python-django-mail-headers-001/LICENSE": "b846415d1b514e9c1dff14a22deb906d794bc546ca6129f950a18cd091e2a669",
+    "evals/fixtures/golden/golden-b002-python-django-mail-headers-001/base-source.txt": "3eec0c4d9535c0decd925e227ba7f59098e3531ea3f10fd104d54137859db7d8",
+    "evals/fixtures/golden/golden-b002-python-django-mail-headers-001/before-fix-source.txt": "bda43208d99a38cba5e009bdfbb5af3bb12f1a1c6bf06b8976f6f51e71fe50be",
+    "evals/fixtures/golden/golden-b002-python-django-mail-headers-001/fix-pr.json": "03856f9f1f0d280945e95e8bcfbc9efcf51509a82ae70bb8ffaf17a046920a62",
+    "evals/fixtures/golden/golden-b002-python-django-mail-headers-001/fix.patch": "b2f7f687d031f8cb0f10a3724938c7ae2cefa30036441e64d13d8e8e4be230f1",
+    "evals/fixtures/golden/golden-b002-python-django-mail-headers-001/fixed-source.txt": "b07bd0218f9f199db7c1e36d93bc2fd33fbf0b35b8121075440896fc76989700",
+    "evals/fixtures/golden/golden-b002-python-django-mail-headers-001/introduced-source.txt": "2f76d4cf3e41ffd85f3ba12d60022da6c61fc9062f1ca2cceea2da58ae97e6a9",
+    "evals/fixtures/golden/golden-b002-python-django-mail-headers-001/introducing-pr.json": "6f51ed3d9e27f57049cb83ba7e81a574c4edf13a1e3a7b95453782cf544b9313",
+    "evals/fixtures/golden/golden-b002-python-django-mail-headers-001/introducing.patch": "31cc712c800e2ccad8c8ce1bcbd92f326d3f665ab082bb422dd21c89747532b1",
+    "evals/fixtures/golden/golden-b002-python-django-mail-headers-001/regression-tests.txt": "0fb3ceba51656fb91e4acecb6252286bc8850a35c36dcaab4f8376c73ffdc8d4",
+    "evals/fixtures/golden/golden-b002-python-django-mail-headers-001/source-snapshots.json": "84a63768346d1d6bc8be561be1afcdfdca915e6164409004ad9e996f42deee1d"
+  }
+}

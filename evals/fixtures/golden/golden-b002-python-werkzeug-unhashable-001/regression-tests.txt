@@ -1,0 +1,9 @@
+376: def test_non_hashable_exception():
+377:     class MutableException(ValueError):
+378:         __hash__ = None
+379: 
+380:     try:
+381:         raise MutableException()
+382:     except MutableException:
+383:         # previously crashed: `TypeError: unhashable type 'MutableException'`
+384:         Traceback(*sys.exc_info())
