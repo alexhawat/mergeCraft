@@ -69,6 +69,7 @@ from mergecraft.analyzers.scope import changed_paths_from_scope, parse_diff_scop
 from mergecraft.classify.change_classifier import _HIGH_STAKES_PATH_PARTS
 from mergecraft.classify.generated_files import FileKind, classify_path, has_generated_marker
 from mergecraft.context.instruction_discovery import is_instruction_path
+from mergecraft.diff import parse_diff
 from mergecraft.review_policy.manifest_names import (
     DEPENDENCY_MANIFEST_NAMES,
     GENERATOR_CONFIG_NAMES,
@@ -184,41 +185,27 @@ class _File:
 
 
 def _parse(diff_text: str, *, newline_only: bool = False) -> list[_File]:
-    """Parse a unified diff; ``newline_only`` splits on ``\n`` alone, never ``splitlines``."""
+    """Use Git section paths for triage and retain hunk bodies for recognizers."""
     files: list[_File] = []
-    current: _File | None = None
-    hunk: _Hunk | None = None
-    raws = diff_text.split("\n") if newline_only else diff_text.splitlines()
-    for raw in raws:
-        if raw.startswith("diff --git "):
-            previous, _, path = raw.removeprefix("diff --git a/").rpartition(" b/")
-            current = _File(path=path.strip(), previous_path=previous.strip())
-            files.append(current)
-            hunk = None
-            continue
-        if current is None:
-            continue
-        if raw.startswith(
-            ("old mode ", "new mode ", "new file mode ", "deleted file mode ", "\\ No newline")
-        ):
-            current.metadata_changed = True
+    for section in parse_diff(diff_text).files:
+        current = _File(
+            path=section.path or "",
+            previous_path=section.old_path or section.path or "",
+            binary=section.binary,
+        )
+        files.append(current)
+        hunk: _Hunk | None = None
+        lines = section.text.split("\n") if newline_only else section.text.splitlines()
+        for raw in lines:
             if raw.startswith(("old mode ", "new mode ")):
                 current.mode_changed = True
-            continue
-        if hunk is None:
-            if raw.startswith("+++ b/"):
-                current.path = raw[6:].strip()
-            elif raw.startswith(("rename from ", "copy from ")):
-                current.previous_path = raw.split(" from ", 1)[1].strip()
-            elif raw.startswith(("Binary files ", "GIT binary patch")):
-                current.binary = True
+                current.metadata_changed = True
+            elif raw.startswith(("new file mode ", "deleted file mode ", "\\ No newline")):
+                current.metadata_changed = True
             elif raw.startswith("@@"):
                 hunk = _new_hunk(raw, current)
-            continue
-        if raw.startswith("@@"):
-            hunk = _new_hunk(raw, current)
-        elif raw[:1] in {" ", "+", "-"}:
-            hunk.lines.append(raw)
+            elif hunk is not None and raw[:1] in {" ", "+", "-"}:
+                hunk.lines.append(raw)
     return files
 
 

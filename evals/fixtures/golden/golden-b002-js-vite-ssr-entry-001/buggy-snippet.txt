@@ -1,0 +1,21 @@
+ 118   // Returns true if it is configured as external, false if it is filtered
+ 119   // by noExternal and undefined if it isn't affected by the explicit config
+ 120   return (id: string) => {
+ 121     const { ssr } = config
+ 122     if (ssr) {
+ 123       const pkgName = getNpmPackageName(id)
+ 124       if (!pkgName) {
+ 125         return undefined
+ 126       }
+ 127       if (ssr.external?.includes(pkgName)) {
+ 128         return true
+ 129       }
+ 130       if (typeof noExternal === 'boolean') {
+ 131         return !noExternal
+ 132       }
+ 133       if (noExternalFilter && !noExternalFilter(pkgName)) {
+ 134         return false
+ 135       }
+ 136     }
+ 137     return undefined
+ 138   }

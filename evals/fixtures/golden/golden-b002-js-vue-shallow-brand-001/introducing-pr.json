@@ -1,0 +1,11 @@
+{
+  "number": 14493,
+  "title": "fix(types): prevent shallowReactive marker from leaking into value unions",
+  "html_url": "https://github.com/vuejs/core/pull/14493",
+  "body": "close #14490\n\n<!-- This is an auto-generated comment: release notes by coderabbit.ai -->\n## Summary by CodeRabbit\n\n* **Bug Fixes**\n  * Fixed shallow-reactive type behavior to prevent marker propagation into union types, improving type compatibility for shallow reactive values.\n* **Tests**\n  * Added a test that verifies the shallow-reactive marker does not leak into union-typed values.\n<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+  "merged": true,
+  "merged_at": "2026-03-25T09:06:27Z",
+  "merge_commit_sha": "3b561db4ab42d06166b002f13c0e97cb2bd4a061",
+  "base_sha": "b147482311762888df6e4681a2c7526bff943fdf",
+  "head_sha": "1f7669281ebc1fb69dfddf14aa197f49ab0135b4"
+}

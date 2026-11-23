@@ -1,0 +1,18 @@
+{
+  "base": {
+    "ref": "0.15.x",
+    "sha": "bdc17e4cd10bbb17449006cef385ec953a11fc36"
+  },
+  "body": "fix minor regression introduced in #1540",
+  "head": {
+    "ref": "exceptions_arent_always_hashable",
+    "sha": "0e669f6be532801267d35de23c5f5237b8406d8a"
+  },
+  "html_url": "https://github.com/pallets/werkzeug/pull/1542",
+  "merge_commit_sha": "2cbdf2b02273daccf85845b1e1569096e65ffe58",
+  "merged": true,
+  "merged_at": "2019-05-12T23:38:51Z",
+  "number": 1542,
+  "state": "closed",
+  "title": "Fix unhashable exception types"
+}

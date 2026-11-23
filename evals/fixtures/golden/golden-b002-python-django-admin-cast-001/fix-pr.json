@@ -1,0 +1,18 @@
+{
+  "base": {
+    "ref": "main",
+    "sha": "f87c2055b45356378a7c2a020eb872352d20f85e"
+  },
+  "body": "Fixes https://code.djangoproject.com/ticket/36865\r\n\r\n## Description\r\n\r\nThis PR fixes a performance regression introduced in PR #17885.\r\n\r\nThe `Cast` to `CharField` for non-string field exact lookups prevents database index usage on primary key fields, generating SQL like:\r\n\r\n```sql\r\nWHERE (\"table\".\"id\")::varchar = '123'\r\n```\r\n\r\nThis cannot use the primary key index and causes full table scans, resulting in timeouts on large tables (reported in [ticket #26001 comment 24](https://code.djangoproject.com/ticket/26001#comment:24)), and discovered in a project I work on at https://github.com/freelawproject/courtlistener/issues/6790.\r\n\r\n## Solution\r\n\r\nDrop the casting approach introduced in #17885, and replace it with field validation that uses `to_python` on the results of `smart_split` to ensure that we only apply field-term pairs that make sense. For example: \r\n\r\n - searching a PrimaryKey field for \"foo\" --> Nope!\r\n - searching a TextField for \"foo\" --> Yes!\r\n - searching a TextField for \"123\" --> Close enough. Yes!\r\n\r\nAnd so forth. \r\n\r\nThis should ensure DB indexes are used and that we don't send nonsensical queries in the first place. \r\n\r\n## Trac tickets\r\n\r\nIntroducing issue: https://code.djangoproject.com/ticket/26001\r\nSolving it: https://code.djangoproject.com/ticket/36865",
+  "head": {
+    "ref": "fix-admin-search-cast-performance",
+    "sha": "12157a328fdb9801fbc99ff549630040baf2d089"
+  },
+  "html_url": "https://github.com/django/django/pull/20538",
+  "merge_commit_sha": "4cecf3039586ea738afafb9a28c946bff42c37c1",
+  "merged": true,
+  "merged_at": "2026-01-30T16:45:39Z",
+  "number": 20538,
+  "state": "closed",
+  "title": "Fixed #36865 -- Removed casting from exact lookups in admin searches."
+}
