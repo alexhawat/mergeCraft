@@ -95,3 +95,22 @@ def test_mypy_cache_cannot_restore_across_incompatible_toolchains() -> None:
     static = next(step for step in steps if step.get("run") == "make ci-static")
     assert steps.index(cache) < steps.index(static)
     assert cache["if"] == static["if"]
+
+
+def test_missing_required_head_artifact_fails_without_running_coverage(tmp_path: Path) -> None:
+    result = subprocess.run(
+        ["bash", str(REPO_ROOT / "scripts/ci_coverage_delta_gate.sh")],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_BASE_REF": "main",
+            "GITHUB_WORKSPACE": str(tmp_path),
+            "MERGECRAFT_HEAD_COVERAGE_PATH": str(tmp_path / "missing.json"),
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "required head coverage artifact is unavailable" in result.stderr

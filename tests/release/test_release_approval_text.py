@@ -160,7 +160,12 @@ def test_the_publish_job_bumps_the_next_development_version_first() -> None:
 
 def test_the_github_release_targets_the_release_sha() -> None:
     scripts = _publish_scripts()
-    assert 'gh release create "v$RELEASE_VERSION" --target "$RELEASE_SHA"' in scripts
+    assert 'manifest --source "$RELEASE_SHA" --digest "$digest"' in scripts
+    assert 'git push origin "HEAD:refs/tags/$tag"' in scripts
+    assert 'gh release create "v$RELEASE_VERSION" --verify-tag' in scripts
+    names = [step.get("name") for step in _publish_steps()]
+    assert names.index("Prepare the release Action tag") < names.index("Retag the signed images")
+    assert names.index("Retag the signed images") < names.index("Publish to PyPI")
     assert 'gh release create "v$RELEASE_VERSION" "$RELEASE_SHA"' not in scripts
 
 
