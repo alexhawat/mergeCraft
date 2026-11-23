@@ -162,7 +162,7 @@ permissions:
 jobs:
   review:
     steps:
-      - uses: alexhawat/mergeCraft@v0.1.0a1
+      - uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
         with:
           sarif_upload: enabled
 ```
@@ -180,7 +180,7 @@ Every run can emit a per-request span tree — to local JSONL, to
 default:
 
 ```yaml
-- uses: alexhawat/mergeCraft@v0.1.0a1
+- uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
   with:
     tracing: enabled
     tracing-to: logfire
@@ -381,7 +381,7 @@ on:
       - "host/evals/**/*.jsonl"
       - "CHANGELOG.md"
 # ...
-      - uses: alexhawat/mergeCraft@7080e962c2259757a34b9f745602f093e4ee3378 # v0.1.0a4
+      - uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
         with:
           # Leave these out of the diff the reviewer sees on a mixed PR.
           # Newline- or comma-separated globs; `**` crosses directories.

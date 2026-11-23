@@ -110,6 +110,11 @@ def git_merge_base_diff(
 
     result = _run_git(["diff", "--merge-base", base], cwd=cwd)
     if result.returncode != 0:
+        probe = _run_git(
+            ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{base}^{{commit}}"], cwd=cwd
+        )
+        if probe.returncode == 1:
+            raise ValueError(f"unknown base revision {base!r}")
         msg = f"failed to compute diff against {base!r}: {result.stderr.strip()}"
         raise RuntimeError(msg)
     return result.stdout

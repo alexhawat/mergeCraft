@@ -8,9 +8,9 @@ import typer
 
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_AUDIT_VERIFY_FAILED_EXIT_CODE, CLI_USAGE_EXIT_CODE
+from mergecraft.cli.global_surface import cli_json_dumps
 from mergecraft.cli.typer_group import mergecraft_typer
 from mergecraft.enterprise.audit import (
-    export_audit_log,
     load_audit_events,
     resolve_audit_log_path,
     verify_audit_chain,
@@ -38,13 +38,13 @@ def export(
         help="Output format (only 'json' is supported).",
     ),
 ) -> None:
-    """Export the audit log as a JSON array."""
+    """Export the audit log as a versioned JSON object with an events array."""
     if format.strip().casefold() != "json":
         cli_bail(
             f"unsupported audit export format {format!r}; only 'json' is supported",
             code=CLI_USAGE_EXIT_CODE,
         )
-    typer.echo(export_audit_log(load_audit_events()))
+    typer.echo(cli_json_dumps({"events": load_audit_events()}))
 
 
 @app.command("verify")

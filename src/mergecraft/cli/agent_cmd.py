@@ -26,7 +26,7 @@ from mergecraft.cli.agents_cmd import (
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
-from mergecraft.cli.init_cmd import _ensure_gitignore_line
+from mergecraft.cli.init_cmd import ensure_gitignore_lines
 from mergecraft.cli.provider_cmd import load_provider_registry
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
 from mergecraft.cli.typer_group import mergecraft_typer
@@ -118,7 +118,7 @@ def _ensure_committed_config(target_dir: Path) -> Path:
 
 
 def _ensure_local_gitignore(target_dir: Path) -> None:
-    _ensure_gitignore_line(target_dir, _LOCAL_CONFIG_GITIGNORE_LINE)
+    ensure_gitignore_lines(target_dir, _LOCAL_CONFIG_GITIGNORE_LINE)
 
 
 def _load_scope_raw(target_dir: Path, target: AgentRosterTarget) -> tuple[Path, dict[str, Any]]:
