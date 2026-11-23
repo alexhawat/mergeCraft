@@ -118,6 +118,7 @@ def _action_input_names() -> tuple[InScope, ...]:
         "INPUT_PUSH",
         "INPUT_SHELL",
         "INPUT_STATUS_CHECKS",
+        "INPUT_REVIEW_EVENT",
         "INPUT_ANALYZERS",
         "INPUT_SARIF_UPLOAD",
         "INPUT_OUTPUT_SCHEMA",

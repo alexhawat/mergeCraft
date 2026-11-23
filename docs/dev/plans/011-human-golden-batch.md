@@ -1,6 +1,6 @@
 # Plan 011: Prepare and complete the first human adjudication batch
 
-- Status: DECIDED — ALL NINE ABSTAINED: no row has immutable code evidence; Alex recorded `abstain` for all nine on 2026-09-24 ([decision](https://github.com/alexhawat/mergeCraft/issues/780#issuecomment-5811216475)). #780 stays open; independent golden labels need a replacement batch
+- Status: REOPENED — on 2026-11-19 the operator stated they had not adjudicated batch 001. The previous attribution of nine abstentions is withdrawn; historical git records and the [earlier issue comment](https://github.com/alexhawat/mergeCraft/issues/780#issuecomment-5811216475) are preserved. Batch 001 has 9 pending decisions and missing code evidence. Batch 002 prepares nine replacement candidates, all pending. #780 remains incomplete.
 - Issue: [#780](https://github.com/alexhawat/mergeCraft/issues/780)
 - Priority: P2; effort: M plus human review; change risk: MED.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
@@ -8,7 +8,7 @@
 
 ## Intent and verified current state
 
-Nine golden cases say `source="human"` but lack recorded adjudication. Their files are descriptive metadata, not code evidence: none contains a patch, source snapshot, origin repository, commit, or PR. Alex Hawat (`alexhawat`) is the sole human adjudicator named by #780; this plan prepares reviewable material and records only decisions he actually makes.
+Nine golden cases say `source="human"` but have no accepted human adjudication. Their reopened manifest has null decision identities and timestamps. Their files are descriptive metadata, not code evidence: none contains a patch, source snapshot, origin repository, commit, or PR. Alex Hawat (`alexhawat`) is the sole human adjudicator named by #780; this plan prepares reviewable material and records only decisions he actually makes.
 
 `evals/cases/golden/golden-python-django-migration-001.json` names a destructive migration at `app/migrations/0042_drop_legacy_slug.py:1–24` but contains no patch or source snapshot. `CorpusCase` currently has title/path/lines/source. There are nine cases, eight categories (`correctness` appears twice) and eight languages. `calibration_status` verifies provenance eligibility only; it does not verify a label, create a held-out split, measure agreement, or calibrate a judge.
 
@@ -16,6 +16,14 @@ Nine golden cases say `source="human"` but lack recorded adjudication. Their fil
 {"id":"golden-python-django-migration-001","source":"human",
  "path":"app/migrations/0042_drop_legacy_slug.py","start_line":1,"end_line":24}
 ```
+
+The [batch 001 review sheet](../../../evals/adjudication/golden-batch-001-review.md)
+preserves the original claims and their missing-evidence status. The
+[batch 002 review packet](../../../evals/adjudication/golden-batch-002-review.md)
+contains nine new agent-proposed findings backed by merged upstream PRs,
+commit-pinned code, causal statements, and licensed, hashed fixtures. Both
+packets await human decisions; evidence preparation does not create human
+provenance, establish calibration, or close #780.
 
 ## Scope and execution context
 

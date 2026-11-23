@@ -1,0 +1,118 @@
+{
+  "case_id": "golden-b002-js-vite-pnp-builtins-001",
+  "title": "Yarn PnP package lookup treats browser polyfills as builtins",
+  "language": "typescript",
+  "framework": "Vite",
+  "category": "correctness",
+  "repo": "vitejs/vite",
+  "introducing_pr": {
+    "number": 12441,
+    "url": "https://github.com/vitejs/vite/pull/12441",
+    "merged": true,
+    "merged_at": "2023-03-21T06:42:23Z",
+    "base_sha": "8d2931ba6d32fab6ca2831e2b293469236b67503",
+    "head_sha": "ff02c9ace060ae9c9c654bc0ae1262597bb5c721",
+    "merge_sha": "1fc8c652c46a27f6229c9125e3b0d1662d2a0e67"
+  },
+  "fix_pr": {
+    "number": 12903,
+    "url": "https://github.com/vitejs/vite/pull/12903",
+    "merged": true,
+    "merged_at": "2023-04-19T06:00:09Z",
+    "base_sha": "62ebe28d4023c1f67578b1977edd3371f44f475a",
+    "head_sha": "31d20aba7890cd6e5c48acb59cf47a2d90e2d7da",
+    "merge_sha": "a0e10d5bc8b7ac6f27bd006a5cb65a56538fcede"
+  },
+  "causal_evidence": {
+    "url": "https://github.com/vitejs/vite/pull/12903",
+    "quote": "Regression introduced by https://github.com/vitejs/vite/pull/12441",
+    "snapshot_path": "evals/fixtures/golden/golden-b002-js-vite-pnp-builtins-001/fix-pr.json"
+  },
+  "buggy_file": "packages/vite/src/node/packages.ts",
+  "start_line": 193,
+  "end_line": 194,
+  "buggy_commit_sha": "1fc8c652c46a27f6229c9125e3b0d1662d2a0e67",
+  "buggy_source_url": "https://github.com/vitejs/vite/blob/1fc8c652c46a27f6229c9125e3b0d1662d2a0e67/packages/vite/src/node/packages.ts#L193-L194",
+  "proposed_label": {
+    "kind": "bug",
+    "status": "agent-proposed; pending human adjudication",
+    "rationale": "The new PnP resolution path calls resolveToUnqualified without considerBuiltins:false. The default treats names shared with Node builtins as builtin modules and returns no package location instead of resolving the installed browser-polyfill package; Vite then reports missing package metadata. The upstream fix explicitly disables builtin treatment in this package-only lookup."
+  },
+  "trigger": "In a Yarn Plug\u2019n\u2019Play project, resolve installed browser packages named buffer or string_decoder through Vite package metadata lookup.",
+  "fix_explanation": "Pass { considerBuiltins: false } to pnp.resolveToUnqualified so installed packages sharing Node builtin names resolve as packages.",
+  "fix_test": {
+    "description": "No regression test was added in fix PR #12903; upstream fix body identifies installed buffer and string_decoder as failing inputs and links issue #12888.",
+    "included": false,
+    "locally_run": false
+  },
+  "caveats": [
+    "No new upstream regression test in the fix PR; evidence consists of the explicit upstream causal statement, introducing call, and targeted option fix.",
+    "The introducing helper resolvePkgJsonPath was later folded into resolvePackageData, so source line numbers differ at the fix commit.",
+    "Requires Yarn PnP and an installed package sharing a Node builtin name; ordinary node_modules resolution uses a different path.",
+    "Selected-path patch excerpts are copied from the GitHub PR-files API and are not a full PR checkout.",
+    "No human decision or adjudicator attribution has been supplied for this candidate."
+  ],
+  "license": {
+    "name": "MIT License",
+    "spdx_id": "MIT",
+    "pinned_url": "https://github.com/vitejs/vite/blob/1fc8c652c46a27f6229c9125e3b0d1662d2a0e67/LICENSE",
+    "path": "evals/fixtures/golden/golden-b002-js-vite-pnp-builtins-001/LICENSE",
+    "sha256": "29b68325fe026047d13e187b44c33b2acacf7dc647dec4583702e59f235e13b5"
+  },
+  "source_snapshots": [
+    {
+      "role": "introduced",
+      "source_url": "https://github.com/vitejs/vite/blob/1fc8c652c46a27f6229c9125e3b0d1662d2a0e67/packages/vite/src/node/packages.ts",
+      "commit_sha": "1fc8c652c46a27f6229c9125e3b0d1662d2a0e67",
+      "path": "packages/vite/src/node/packages.ts",
+      "full_file_sha256": "6f7938683f70b3336a0c1a279d69c571cb0d44f8a7acccaa03fbac77d657bc25",
+      "excerpt_path": "evals/fixtures/golden/golden-b002-js-vite-pnp-builtins-001/buggy-snippet.txt",
+      "start_line": 187,
+      "end_line": 198,
+      "excerpt_sha256": "b125b86211b09822aa66a5cfac7f887bf02d9bc277f3f4a2fc87797b49c214c3"
+    },
+    {
+      "role": "fixed",
+      "source_url": "https://github.com/vitejs/vite/blob/a0e10d5bc8b7ac6f27bd006a5cb65a56538fcede/packages/vite/src/node/packages.ts",
+      "commit_sha": "a0e10d5bc8b7ac6f27bd006a5cb65a56538fcede",
+      "path": "packages/vite/src/node/packages.ts",
+      "full_file_sha256": "a41b53dbe9efffbbd9c851774afd8a1c275079c83374ceb4f6fcc9a9c0e6fff7",
+      "excerpt_path": "evals/fixtures/golden/golden-b002-js-vite-pnp-builtins-001/fixed-snippet.txt",
+      "start_line": 54,
+      "end_line": 77,
+      "excerpt_sha256": "45321c3fc35c51ff60516aac37abb9c480c03e3477a81485e48cba4274cff471"
+    }
+  ],
+  "decision": "pending",
+  "decided_by": null,
+  "decided_at": null,
+  "fixture_path": "evals/fixtures/golden/golden-b002-js-vite-pnp-builtins-001/evidence.json",
+  "artifact_origins": {
+    "introducing.patch": {
+      "kind": "selected-path PR-files API patch hunks",
+      "api_url": "https://api.github.com/repos/vitejs/vite/pulls/12441/files",
+      "compare_url": "https://github.com/vitejs/vite/compare/8d2931ba6d32fab6ca2831e2b293469236b67503...ff02c9ace060ae9c9c654bc0ae1262597bb5c721",
+      "paths": [
+        "packages/vite/src/node/packages.ts"
+      ]
+    },
+    "fix.patch": {
+      "kind": "selected-path PR-files API patch hunks",
+      "api_url": "https://api.github.com/repos/vitejs/vite/pulls/12903/files",
+      "compare_url": "https://github.com/vitejs/vite/compare/62ebe28d4023c1f67578b1977edd3371f44f475a...31d20aba7890cd6e5c48acb59cf47a2d90e2d7da",
+      "paths": [
+        "packages/vite/src/node/packages.ts"
+      ]
+    }
+  },
+  "fixture_files_sha256": {
+    "evals/fixtures/golden/golden-b002-js-vite-pnp-builtins-001/ATTRIBUTION.md": "24b8b8c2dd2931e1b5604a69fefe0d1a57c3b59ec17abd8bec525d1447d5b257",
+    "evals/fixtures/golden/golden-b002-js-vite-pnp-builtins-001/LICENSE": "29b68325fe026047d13e187b44c33b2acacf7dc647dec4583702e59f235e13b5",
+    "evals/fixtures/golden/golden-b002-js-vite-pnp-builtins-001/buggy-snippet.txt": "b125b86211b09822aa66a5cfac7f887bf02d9bc277f3f4a2fc87797b49c214c3",
+    "evals/fixtures/golden/golden-b002-js-vite-pnp-builtins-001/fix-pr.json": "3ad4e91039c9d6dbc5b5c0e69a34bd4443d537e47b7c499c11e51a6536f5ab09",
+    "evals/fixtures/golden/golden-b002-js-vite-pnp-builtins-001/fix.patch": "b7df49190cdc9c61fb0e81876a850a4a0927126d7c3523e86efd1ad2b10cabb2",
+    "evals/fixtures/golden/golden-b002-js-vite-pnp-builtins-001/fixed-snippet.txt": "45321c3fc35c51ff60516aac37abb9c480c03e3477a81485e48cba4274cff471",
+    "evals/fixtures/golden/golden-b002-js-vite-pnp-builtins-001/introducing-pr.json": "bc6740cb52669a37651c09a489734c0b4733e5fb493bc781521f9e45b26fa76d",
+    "evals/fixtures/golden/golden-b002-js-vite-pnp-builtins-001/introducing.patch": "8a43f9a3241971dce7b102fd0507a507f3c68d7fd5c5da1ea0cb3aeeb3ad5aac"
+  }
+}

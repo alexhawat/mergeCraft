@@ -1,0 +1,11 @@
+ 102     mutableCollectionHandlers,
+ 103     reactiveMap,
+ 104   )
+ 105 }
+ 106 
+ 107 export declare const ShallowReactiveMarker: unique symbol
+ 108 
+ 109 export type ShallowReactive<T> = T & { [ShallowReactiveMarker]: never }
+ 110 
+ 111 /**
+ 112  * Shallow version of {@link reactive}.

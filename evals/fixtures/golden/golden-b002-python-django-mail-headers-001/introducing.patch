@@ -1,0 +1,76 @@
+diff --git a/django/core/mail/message.py b/django/core/mail/message.py
+index 9c68b8be6d3b..e34d1cb2a98f 100644
+--- a/django/core/mail/message.py
++++ b/django/core/mail/message.py
+@@ -254,11 +254,9 @@ def message(self):
+         msg = self._create_message(msg)
+         msg['Subject'] = self.subject
+         msg['From'] = self.extra_headers.get('From', self.from_email)
+-        msg['To'] = self.extra_headers.get('To', ', '.join(map(str, self.to)))
+-        if self.cc:
+-            msg['Cc'] = ', '.join(str(cc) for cc in self.cc)
+-        if self.reply_to:
+-            msg['Reply-To'] = self.extra_headers.get('Reply-To', ', '.join(str(r) for r in self.reply_to))
++        self._set_list_header_if_not_empty(msg, 'To', self.to)
++        self._set_list_header_if_not_empty(msg, 'Cc', self.cc)
++        self._set_list_header_if_not_empty(msg, 'Reply-To', self.reply_to)
+ 
+         # Email header names are case-insensitive (RFC 2045), so we have to
+         # accommodate that when doing comparisons.
+@@ -273,7 +271,7 @@ def message(self):
+             # Use cached DNS_NAME for performance
+             msg['Message-ID'] = make_msgid(domain=DNS_NAME)
+         for name, value in self.extra_headers.items():
+-            if name.lower() in ('from', 'to'):  # From and To are already handled
++            if name.lower() == 'from':  # From is already handled
+                 continue
+             msg[name] = value
+         return msg
+@@ -408,6 +406,18 @@ def _create_attachment(self, filename, content, mimetype=None):
+                                   filename=filename)
+         return attachment
+ 
++    def _set_list_header_if_not_empty(self, msg, header, values):
++        """
++        Set msg's header, either from self.extra_headers, if present, or from
++        the values argument.
++        """
++        if values:
++            try:
++                value = self.extra_headers[header]
++            except KeyError:
++                value = ', '.join(str(v) for v in values)
++            msg[header] = value
++
+ 
+ class EmailMultiAlternatives(EmailMessage):
+     """
+diff --git a/tests/mail/tests.py b/tests/mail/tests.py
+index 869cd764bfdb..68a15311dc25 100644
+--- a/tests/mail/tests.py
++++ b/tests/mail/tests.py
+@@ -85,6 +85,10 @@ def test_multiple_recipients(self):
+         self.assertEqual(message['From'], 'from@example.com')
+         self.assertEqual(message['To'], 'to@example.com, other@example.com')
+ 
++    def test_header_omitted_for_no_to_recipients(self):
++        message = EmailMessage('Subject', 'Content', 'from@example.com', cc=['cc@example.com']).message()
++        self.assertNotIn('To', message)
++
+     def test_recipients_with_empty_strings(self):
+         """
+         Empty strings in various recipient arguments are always stripped
+@@ -132,6 +136,13 @@ def test_cc(self):
+             ['to@example.com', 'other@example.com', 'cc@example.com', 'cc.other@example.com', 'bcc@example.com']
+         )
+ 
++    def test_cc_headers(self):
++        message = EmailMessage(
++            'Subject', 'Content', 'bounce@example.com', ['to@example.com'],
++            cc=['foo@example.com'], headers={'Cc': 'override@example.com'},
++        ).message()
++        self.assertEqual(message['Cc'], 'override@example.com')
++
+     def test_cc_in_headers_only(self):
+         message = EmailMessage(
+             'Subject', 'Content', 'bounce@example.com', ['to@example.com'],

@@ -109,3 +109,17 @@ def test_marker_only_changed_files_skip_instead_of_empty_or_unscoped_run(tmp_pat
             assert "run" not in argv
             assert "--out-format" not in argv
             assert joined != "golangci-lint run --out-format sarif"
+
+
+def test_deleted_only_file_list_never_launches_an_unscoped_scan(tmp_path: Path) -> None:
+    from mergecraft.analyzers.execution import finalize_plan
+    from mergecraft.analyzers.registry import get_manifest
+    from mergecraft.analyzers.resolve import AnalyzerPlan
+
+    manifest = get_manifest("ruff")
+    plan = AnalyzerPlan(manifest_id="ruff", mode="repo-native", argv=tuple(manifest.command))
+    final = finalize_plan(
+        plan, manifest=manifest, repo_root=tmp_path, changed_files=["removed.py"], tier="trusted"
+    )
+    assert final.mode == "skip"
+    assert final.argv == ()

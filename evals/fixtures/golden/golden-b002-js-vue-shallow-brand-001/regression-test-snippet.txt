@@ -1,0 +1,9 @@
+ 140   const value = {} as (typeof state)[keyof typeof state]
+ 141   expectType<string>(value.title)
+ 142 })
+ 143 
+ 144 describe('shallowReactive type should accept plain object assignment', () => {
+ 145   const shallow = shallowReactive({ a: 1, b: 2 })
+ 146   let values: typeof shallow
+ 147   values = { a: 1, b: 2 }
+ 148 })

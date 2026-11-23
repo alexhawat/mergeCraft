@@ -14,6 +14,7 @@ from loguru import logger
 
 from mergecraft.action.inputs import (
     apply_setup_overrides,
+    resolve_review_event,
 )
 from mergecraft.action.review_feedback import collect_review_feedback
 from mergecraft.agents.gates import subagent_denied_tool_names
@@ -331,6 +332,7 @@ async def _build_run_tool_context(ctx: RunContext) -> None:
         xrepo=payload.get("xrepo"),
         prepush_script=settings.prepush_script,
         pr_approve_enabled=settings.pr_approve_enabled,
+        comment_only_review=resolve_review_event() == "comment",
         mode_instructions=settings.mode_instructions,
         static_checks=configured_static_checks(settings),
         static_checks_enabled=(

@@ -1,0 +1,118 @@
+{
+  "case_id": "golden-b002-systems-rust-tokio-timer-runtime",
+  "title": "Alternative timer reset registers with a different runtime",
+  "language": "rust",
+  "framework": "Tokio",
+  "category": "correctness",
+  "repo": "tokio-rs/tokio",
+  "introducing_pr": {
+    "number": 8132,
+    "url": "https://github.com/tokio-rs/tokio/pull/8132",
+    "title": "time: move lazy-registration state into Sleep",
+    "merged_at": "2026-05-25T00:11:09Z",
+    "base_sha": "82fe082ef14c2e2b2c1c29ed9873c2ca6e6109ee",
+    "head_sha": "7e1265c0da7b8ad60ba175530de03b0effed2177",
+    "merge_sha": "923e72345c77aef4d11875d874ba67421b0412d3"
+  },
+  "fix_pr": {
+    "number": 8169,
+    "url": "https://github.com/tokio-rs/tokio/pull/8169",
+    "title": "time: ensure timers stay in the same runtime after `.reset()`",
+    "merged_at": "2026-05-26T02:29:50Z",
+    "base_sha": "923e72345c77aef4d11875d874ba67421b0412d3",
+    "head_sha": "9a3508a66373a7a5eab6111ebc434e8713d70cbb",
+    "merge_sha": "37ced33efddccc6721588af6fbe095d34fa17d7d"
+  },
+  "causal_evidence": {
+    "url": "https://github.com/tokio-rs/tokio/pull/8169",
+    "kind": "fix PR body",
+    "quote": "Fix the regression introduced by <https://github.com/tokio-rs/tokio/pull/8132>."
+  },
+  "buggy_file": "tokio/src/runtime/time_alt/timer.rs",
+  "buggy_line_range": {
+    "start": 30,
+    "end": 35
+  },
+  "source_url": "https://github.com/tokio-rs/tokio/blob/923e72345c77aef4d11875d874ba67421b0412d3/tokio/src/runtime/time_alt/timer.rs#L30-L35",
+  "proposed_label": "bug",
+  "proposed_category": "correctness",
+  "rationale": "Timer::new computes its deadline using the original runtime handle, then unconditionally pushes the entry onto the current worker runtime registration queue. Resetting a sleep from another runtime can migrate its timer or panic in a current-thread runtime. The introducing patch removed the runtime identity guard; the fix restores the guard and falls back to registration through the original runtime handle.",
+  "fix_test": {
+    "names": [
+      "reset_should_stay_on_same_runtime",
+      "reset_should_stay_on_same_runtime2"
+    ],
+    "path": "tokio/tests/time_alt.rs",
+    "inspection": "Regression test additions and corresponding production fix inspected in merged upstream PR.",
+    "local_execution": "not run"
+  },
+  "caveats": [
+    "Applies to the alternative timer enabled through the unstable enable_alt_timer API; do not generalize to the default timer.",
+    "Both upstream regression tests are present in the merged fix; they were inspected but not executed locally."
+  ],
+  "license": {
+    "name": "MIT License",
+    "spdx_id": "MIT",
+    "pinned_url": "https://github.com/tokio-rs/tokio/blob/923e72345c77aef4d11875d874ba67421b0412d3/LICENSE"
+  },
+  "decision": "pending",
+  "evidence_status": "recovered",
+  "fixture_dir": "evals/fixtures/golden/golden-b002-systems-rust-tokio-timer-runtime",
+  "fixture_path": "evals/fixtures/golden/golden-b002-systems-rust-tokio-timer-runtime/task.patch",
+  "fixture_sha256": "87aba03e10185c44284e7f310fa062b01777a3c45d229c30a54ac851e8cc9591",
+  "artifactsha256": {
+    "task.patch": "87aba03e10185c44284e7f310fa062b01777a3c45d229c30a54ac851e8cc9591",
+    "fix.patch": "200ca351e81341054adfa24c88ab9d14f9077cd273cc7a5764232d751d18e503",
+    "buggy-source.txt": "02d2a7b7c2b9dec156f58e232504a92dc51c78317b7b69bf268a6f574cea2791",
+    "fixed-source.txt": "dad94ea78f468c1bdc9a0183bbd8dca348fc1a20cc3489d2e1e899212675a102",
+    "fix-test.txt": "89b01592baaff781cae998c60454c50bf37d92154850283b58d922c48ed34dd2",
+    "LICENSE.upstream": "253cd04c6714889df2d32f3f64d669179a1c95c76ac43c40882c52eb06bc3552",
+    "ATTRIBUTION.md": "3a81b65690313c6a83aa1d88b7972a8323ea451ff06b7e19e425179560e5f27d"
+  },
+  "artifact_origins": {
+    "task.patch": {
+      "kind": "file-filtered PR diff",
+      "files": [
+        "tokio/src/runtime/time_alt/timer.rs"
+      ],
+      "url": "https://github.com/tokio-rs/tokio/compare/82fe082ef14c2e2b2c1c29ed9873c2ca6e6109ee...7e1265c0da7b8ad60ba175530de03b0effed2177",
+      "base_sha": "82fe082ef14c2e2b2c1c29ed9873c2ca6e6109ee",
+      "head_sha": "7e1265c0da7b8ad60ba175530de03b0effed2177"
+    },
+    "fix.patch": {
+      "kind": "complete PR diff",
+      "files": null,
+      "url": "https://github.com/tokio-rs/tokio/compare/923e72345c77aef4d11875d874ba67421b0412d3...9a3508a66373a7a5eab6111ebc434e8713d70cbb",
+      "base_sha": "923e72345c77aef4d11875d874ba67421b0412d3",
+      "head_sha": "9a3508a66373a7a5eab6111ebc434e8713d70cbb"
+    },
+    "buggy-source.txt": {
+      "kind": "verbatim bounded source excerpt",
+      "path": "tokio/src/runtime/time_alt/timer.rs",
+      "start_line": 28,
+      "end_line": 79,
+      "url": "https://github.com/tokio-rs/tokio/blob/923e72345c77aef4d11875d874ba67421b0412d3/tokio/src/runtime/time_alt/timer.rs#L28-L79"
+    },
+    "fixed-source.txt": {
+      "kind": "verbatim bounded source excerpt",
+      "path": "tokio/src/runtime/time_alt/timer.rs",
+      "start_line": 28,
+      "end_line": 111,
+      "url": "https://github.com/tokio-rs/tokio/blob/37ced33efddccc6721588af6fbe095d34fa17d7d/tokio/src/runtime/time_alt/timer.rs#L28-L111"
+    },
+    "fix-test.txt": {
+      "kind": "verbatim bounded source excerpt",
+      "path": "tokio/tests/time_alt.rs",
+      "start_line": 114,
+      "end_line": 228,
+      "url": "https://github.com/tokio-rs/tokio/blob/37ced33efddccc6721588af6fbe095d34fa17d7d/tokio/tests/time_alt.rs#L114-L228"
+    },
+    "LICENSE.upstream": {
+      "kind": "unmodified complete upstream license",
+      "url": "https://github.com/tokio-rs/tokio/blob/923e72345c77aef4d11875d874ba67421b0412d3/LICENSE"
+    },
+    "ATTRIBUTION.md": {
+      "kind": "agent-authored attribution and artifact scope"
+    }
+  }
+}

@@ -194,6 +194,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A `review_event` Action input. `verdict` (the default) keeps today's
+  behaviour. `comment` publishes every review as a COMMENT, whatever the
+  verdict, and the run skips the automatic resolution of fixed-finding review
+  threads, so an advisory reviewer can neither block nor unblock a merge. The verdict is
+  still recorded and reported. An unknown value fails the run as a
+  `configuration_error` before the agent starts.
+
 - Re-approve a passed PR whose only new edit is changelog prose by @sevn-one and @claude in [#1285](https://github.com/alexhawat/mergeCraft/pull/1285)
 
 - `mergecraft findings outcomes` aggregates several pull requests (repeat `--pr`)

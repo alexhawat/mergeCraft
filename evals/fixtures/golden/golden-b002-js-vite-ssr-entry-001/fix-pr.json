@@ -1,0 +1,11 @@
+{
+  "number": 9286,
+  "title": "fix: entries in ssr.external",
+  "html_url": "https://github.com/vitejs/vite/pull/9286",
+  "body": "Fixes #9275\r\n\r\n### Description\r\n\r\nFixes a regression introduced by:\r\n- https://github.com/vitejs/vite/pull/9146\r\n\r\nOnly package names are valid in `ssr.noExternal`, as #9146 corrected, but `ssr.external` allows defining package names and also individual entries.\r\n\r\n---\r\n\r\n### What is the purpose of this pull request? <!-- (put an \"X\" next to an item) -->\r\n\r\n- [x] Bug fix\r\n- [ ] New Feature\r\n- [ ] Documentation update\r\n- [ ] Other\r\n\r\n### Before submitting the PR, please make sure you do the following\r\n\r\n- [ ] Read the [Contributing Guidelines](https://github.com/vitejs/vite/blob/main/CONTRIBUTING.md).\r\n- [ ] Read the [Pull Request Guidelines](https://github.com/vitejs/vite/blob/main/CONTRIBUTING.md#pull-request-guidelines) and follow the [Commit Convention](https://github.com/vitejs/vite/blob/main/.github/commit-convention.md).\r\n- [ ] Check that there isn't already a PR that solves the problem the same way to avoid creating a duplicate.\r\n- [ ] Provide a description in this PR that addresses **what** the PR is solving, or reference the issue that it solves (e.g. `fixes #123`).\r\n- [ ] Ideally, include relevant tests that fail without this PR but pass with it.\r\n",
+  "merged": true,
+  "merged_at": "2022-07-22T07:47:32Z",
+  "merge_commit_sha": "d420f01d48c2291e82410b4649f274f8d1493a27",
+  "base_sha": "0b083ca84a1b32f9f2c4d73444d30e0c80abe3b1",
+  "head_sha": "f318d9534dfdb3132af03a2ae3a9f985479a2483"
+}

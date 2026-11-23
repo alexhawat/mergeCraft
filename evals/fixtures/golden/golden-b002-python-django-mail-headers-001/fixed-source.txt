@@ -1,0 +1,37 @@
+266:     def message(self):
+267:         encoding = self.encoding or settings.DEFAULT_CHARSET
+268:         msg = SafeMIMEText(self.body, self.content_subtype, encoding)
+269:         msg = self._create_message(msg)
+270:         msg["Subject"] = self.subject
+271:         msg["From"] = self.extra_headers.get("From", self.from_email)
+272:         self._set_list_header_if_not_empty(msg, "To", self.to)
+273:         self._set_list_header_if_not_empty(msg, "Cc", self.cc)
+274:         self._set_list_header_if_not_empty(msg, "Reply-To", self.reply_to)
+275: 
+276:         # Email header names are case-insensitive (RFC 2045), so we have to
+277:         # accommodate that when doing comparisons.
+278:         header_names = [key.lower() for key in self.extra_headers]
+279:         if "date" not in header_names:
+280:             # formatdate() uses stdlib methods to format the date, which use
+281:             # the stdlib/OS concept of a timezone, however, Django sets the
+282:             # TZ environment variable based on the TIME_ZONE setting which
+283:             # will get picked up by formatdate().
+284:             msg["Date"] = formatdate(localtime=settings.EMAIL_USE_LOCALTIME)
+285:         if "message-id" not in header_names:
+286:             # Use cached DNS_NAME for performance
+287:             msg["Message-ID"] = make_msgid(domain=DNS_NAME)
+288:         for name, value in self.extra_headers.items():
+289:             # Avoid headers handled above.
+290:             if name.lower() not in {"from", "to", "cc", "reply-to"}:
+291:                 msg[name] = value
+292:         return msg
+428:     def _set_list_header_if_not_empty(self, msg, header, values):
+429:         """
+430:         Set msg's header, either from self.extra_headers, if present, or from
+431:         the values argument if not empty.
+432:         """
+433:         try:
+434:             msg[header] = self.extra_headers[header]
+435:         except KeyError:
+436:             if values:
+437:                 msg[header] = ", ".join(str(v) for v in values)

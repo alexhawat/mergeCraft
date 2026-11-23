@@ -437,8 +437,8 @@ async def prompt_session_http(
 
                 usage = apply_catalog_cost_to_usage(usage, model=model_slug)
                 log_token_table(
-                    input_tokens=inp,
-                    cache_read=0,
+                    input_tokens=inp + cache_read.additive - cache_read.reported,
+                    cache_read=cache_read.reported,
                     cache_write=0,
                     output=out,
                     cost_usd=usage.cost_usd if usage else None,
