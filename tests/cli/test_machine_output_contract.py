@@ -10,9 +10,10 @@ import inspect
 import json
 from pathlib import Path
 
-import click
 import pytest
 import typer
+from typer import _click
+from typer.core import TyperGroup
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -22,14 +23,14 @@ from mergecraft.cli.machine_output import ROOT_FORMAT_COMMANDS, json_capability
 _ENV = {"NO_COLOR": "1", "TERM": "dumb"}
 
 
-def _leaves() -> list[tuple[tuple[str, ...], click.Command]]:
+def _leaves() -> list[tuple[tuple[str, ...], _click.Command]]:
     def walk(
-        command: click.Command, path: tuple[str, ...]
-    ) -> list[tuple[tuple[str, ...], click.Command]]:
-        if isinstance(command, click.Group):
-            found: list[tuple[tuple[str, ...], click.Command]] = []
-            for name in command.list_commands(click.Context(command)):
-                sub = command.get_command(click.Context(command), name)
+        command: _click.Command, path: tuple[str, ...]
+    ) -> list[tuple[tuple[str, ...], _click.Command]]:
+        if isinstance(command, TyperGroup):
+            found: list[tuple[tuple[str, ...], _click.Command]] = []
+            for name in command.list_commands(_click.Context(command)):
+                sub = command.get_command(_click.Context(command), name)
                 assert sub is not None
                 found.extend(walk(sub, (*path, name)))
             return found

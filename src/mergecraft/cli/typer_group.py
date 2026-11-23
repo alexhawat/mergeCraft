@@ -12,7 +12,7 @@ from mergecraft.cli.global_surface import bootstrap_cli_surface_from_argv
 from mergecraft.config.yaml_unique import ConfigParseError
 
 if TYPE_CHECKING:
-    import click
+    from typer import _click
 
 
 class MergecraftTyperGroup(TyperGroup):
@@ -30,16 +30,16 @@ class MergecraftTyperGroup(TyperGroup):
         self,
         info_name: str | None,
         args: list[str],
-        parent: click.Context | None = None,
+        parent: _click.Context | None = None,
         **extra: Any,
-    ) -> click.Context:
+    ) -> _click.Context:
         bootstrap_cli_surface_from_argv(args, env=os.environ)
         from mergecraft.cli.help_text import install_terminal_help
 
         install_terminal_help(self)
         return super().make_context(info_name, args, parent=parent, **extra)
 
-    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+    def get_command(self, ctx: _click.Context, cmd_name: str) -> _click.Command | None:
         command = super().get_command(ctx, cmd_name)
         if command is None:
             return None
@@ -52,14 +52,7 @@ class MergecraftTyperGroup(TyperGroup):
         install_root_format_guard(command)
         return command
 
-    def resolve_command(
-        self, ctx: click.Context, args: list[str]
-    ) -> tuple[str | None, click.Command | None, list[str]]:
-        # Click 8.4's NoSuchCommand already suggests close matches; Typer's
-        # override appends the same "Did you mean ...?" again, so skip it.
-        return super(TyperGroup, self).resolve_command(ctx, args)
-
-    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+    def parse_args(self, ctx: _click.Context, args: list[str]) -> list[str]:
         # Click 8.4 raises NoArgsIsHelpError in parse_args before invoke.
         # Clear the flag so empty TTY invocations can open a session.
         saved = self.no_args_is_help
@@ -71,7 +64,7 @@ class MergecraftTyperGroup(TyperGroup):
                 self.no_args_is_help = saved
         return super().parse_args(ctx, args)
 
-    def invoke(self, ctx: click.Context) -> Any:
+    def invoke(self, ctx: _click.Context) -> Any:
         if _is_empty_group_invocation(self, ctx):
             from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
             from mergecraft.cli.interactive import (
@@ -99,7 +92,7 @@ class MergecraftTyperGroup(TyperGroup):
             raise typer.Exit(CLI_CONFIGURATION_EXIT_CODE) from exc
 
 
-def _is_empty_group_invocation(group: TyperGroup, ctx: click.Context) -> bool:
+def _is_empty_group_invocation(group: TyperGroup, ctx: _click.Context) -> bool:
     """True when a group was invoked with no subcommand and no leftover args."""
     if group.invoke_without_command:
         return False
