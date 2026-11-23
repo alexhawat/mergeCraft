@@ -112,7 +112,10 @@ def test_finish_does_not_store_when_structured_output_missing(
     assert finished.outcome is RunOutcome.inconclusive
     assert STRUCTURED_OUTPUT_REQUIRED_MSG in (finished.error or "")
     assert stores == []
-    assert not json_path.exists()
+    report = json.loads(json_path.read_text())
+    assert report["completion_status"] == "incomplete"
+    assert report["outcome"] == "inconclusive"
+    assert report["error"] == finished.error
 
 
 def test_finish_does_not_store_when_structured_output_is_invalid(
