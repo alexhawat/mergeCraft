@@ -57,7 +57,7 @@
 # - OPENAI_API_KEY — OpenAI API key (same Codex harness as CODEX_AUTH_JSON)
 # - CLAUDE_CODE_OAUTH_TOKEN — Claude Pro/Max subscription (`mergecraft auth claude`) — backstop
 # - ANTHROPIC_API_KEY — Anthropic API key (same claude harness as CLAUDE_CODE_OAUTH_TOKEN)
-# - ANTHROPIC_SONNET_API_KEY — Anthropic API key for the advisory Claude Sonnet 5.5
+# - ANTHROPIC_OPUS_API_KEY — Anthropic API key (name kept from the Opus era) for the advisory Claude Sonnet 5.5
 #   reviewer (`review-sonnet` job). It reviews every same-repo PR in addition to the
 #   cascade, publishes with the job token (not the reviewer App), posts no
 #   check-runs, asks for COMMENT-only reviews (`review_event: comment`, live once
@@ -1505,8 +1505,10 @@ jobs:
   # It runs after `review-backstop` rather than alongside the cascade, so the
   # model spend is only incurred once the recorded verdict exists.
   #
-  # Its credential is a dedicated secret, ANTHROPIC_SONNET_API_KEY, passed to the
-  # action as ANTHROPIC_API_KEY on this step only. Reusing ANTHROPIC_API_KEY
+  # Its credential is a dedicated secret, ANTHROPIC_OPUS_API_KEY, passed to the
+  # action as ANTHROPIC_API_KEY on this step only. The name is historical: this
+  # job ran Claude Opus 5.5 first, and the same Anthropic key serves Sonnet 5.5,
+  # so the existing secret was kept rather than re-added. Reusing ANTHROPIC_API_KEY
   # would also change which credential the Claude backstop authenticates with
   # and widen every HAS_AUTH predicate. Without the secret (or on a fork PR) the
   # job still starts, but every step except a notice is skipped: a job-level
@@ -1539,7 +1541,7 @@ jobs:
     # > 1× MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES + checkout/setup slack (D8).
     timeout-minutes: 40
     env:
-      HAS_SONNET: ${{ secrets.ANTHROPIC_SONNET_API_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      HAS_SONNET: ${{ secrets.ANTHROPIC_OPUS_API_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
       MERGECRAFT_CI_WAIT_STATE: ${{ needs.wait-for-ci.outputs.state }}
       MERGECRAFT_CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
       CI_STATE: ${{ needs.wait-for-ci.outputs.state }}
@@ -1548,7 +1550,7 @@ jobs:
       - name: Skip when the Sonnet credential is not configured
         if: env.HAS_SONNET != 'true'
         run: |
-          echo "::notice title=mergecraft Sonnet review skipped::Set the ANTHROPIC_SONNET_API_KEY Actions secret to add the Claude Sonnet 5.5 reviewer (fork PRs are always skipped)."
+          echo "::notice title=mergecraft Sonnet review skipped::Set the ANTHROPIC_OPUS_API_KEY Actions secret to add the Claude Sonnet 5.5 reviewer (fork PRs are always skipped)."
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.HAS_SONNET == 'true'
@@ -1601,7 +1603,7 @@ jobs:
           tracing-to: logfire
           logfire-token: ${{ secrets.LOGFIRE_TOKEN }}
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_SONNET_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_OPUS_API_KEY }}
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           MERGECRAFT_TRACING_PROJECT: mergecraft-dev
           MERGECRAFT_TRACING_REGION: eu
