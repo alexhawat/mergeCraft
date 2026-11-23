@@ -1,0 +1,14 @@
+# Frozen upstream bytes are checked by the batch evidence inventories.
+# Unified-diff context and numbered source blank lines can end with spaces.
+golden-b002-js-*/*.patch whitespace=-blank-at-eol
+golden-b002-js-*/*-snippet.txt whitespace=-blank-at-eol
+golden-b002-python-*/*.patch whitespace=-blank-at-eol
+golden-b002-python-*/*-source.txt whitespace=-blank-at-eol
+golden-b002-python-*/regression-tests.txt whitespace=-blank-at-eol
+golden-b002-systems-*/*.patch whitespace=-blank-at-eol
+# A unified-diff context prefix precedes upstream tab-indented Go/Java lines.
+golden-b002-systems-go-gorm-caller-depth/*.patch whitespace=-blank-at-eol,-space-before-tab
+golden-b002-systems-java-spring-composite-set-remove/*.patch whitespace=-blank-at-eol,-space-before-tab
+# The Go diff ends with a blank context line; the Rust excerpt with a blank line.
+golden-b002-systems-go-gorm-caller-depth/task.patch whitespace=-blank-at-eol,-space-before-tab,-blank-at-eof
+golden-b002-systems-rust-tokio-timer-runtime/fixed-source.txt whitespace=-blank-at-eof

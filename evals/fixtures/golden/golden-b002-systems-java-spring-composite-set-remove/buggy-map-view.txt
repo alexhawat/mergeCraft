@@ -1,0 +1,25 @@
+		}
+	}
+
+	@Override
+	public void clear() {
+		this.first.clear();
+		this.second.clear();
+	}
+
+	@Override
+	public Set<K> keySet() {
+		return new CompositeSet<>(this.first.keySet(), this.second.keySet());
+	}
+
+	@Override
+	public Collection<V> values() {
+		return new CompositeCollection<>(this.first.values(), this.second.values());
+	}
+
+	@Override
+	public Set<Entry<K, V>> entrySet() {
+		return new CompositeSet<>(this.first.entrySet(), this.second.entrySet());
+	}
+
+	@Override

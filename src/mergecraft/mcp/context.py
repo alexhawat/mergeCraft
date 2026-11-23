@@ -84,6 +84,9 @@ class ToolContext:
     xrepo: XrepoConfig | None = None
     prepush_script: str | None = None
     pr_approve_enabled: bool = False
+    # ``review_event: comment`` — publish every review as COMMENT and resolve no
+    # review threads, so an advisory reviewer can neither block nor unblock.
+    comment_only_review: bool = False
     mode_instructions: dict[str, str] = field(default_factory=dict)
     static_checks: list[StaticCheckConfig] = field(default_factory=list)
     static_checks_enabled: bool = False
@@ -139,6 +142,7 @@ class ToolContext:
         xrepo: XrepoConfig | None = None,
         prepush_script: str | None = None,
         pr_approve_enabled: bool = False,
+        comment_only_review: bool = False,
         mode_instructions: dict[str, str] | None = None,
         static_checks: list[StaticCheckConfig] | None = None,
         static_checks_enabled: bool = False,
@@ -193,6 +197,7 @@ class ToolContext:
         self.xrepo = xrepo
         self.prepush_script = prepush_script
         self.pr_approve_enabled = pr_approve_enabled
+        self.comment_only_review = comment_only_review
         self.mode_instructions = dict(mode_instructions or {})
         self.static_checks = list(static_checks or [])
         self.static_checks_enabled = static_checks_enabled

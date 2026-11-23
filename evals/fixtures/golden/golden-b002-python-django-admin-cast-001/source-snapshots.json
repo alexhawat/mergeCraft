@@ -1,0 +1,95 @@
+[
+  {
+    "role": "base",
+    "path": "django/contrib/admin/options.py",
+    "commit_sha": "03c0a3de722c4a7de9f3edfeb26417ebc8b90fe9",
+    "url": "https://github.com/django/django/blob/03c0a3de722c4a7de9f3edfeb26417ebc8b90fe9/django/contrib/admin/options.py",
+    "full_source_sha256": "48146960e7e88e8408cf2ee0bea051f5ebfd9637a948ca294175396b2d160c9e",
+    "excerpt_path": "base-source.txt",
+    "excerpt_sha256": "db8e73ad323424e7bec83d0d9412b72e2b576a91041e35a88bebc485e1864f85",
+    "excerpt_line_ranges": [
+      [
+        1200,
+        1226
+      ]
+    ],
+    "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+  },
+  {
+    "role": "introduced",
+    "path": "django/contrib/admin/options.py",
+    "commit_sha": "f223729f8f8380901473b244c0fc7c7dc397e3f1",
+    "url": "https://github.com/django/django/blob/f223729f8f8380901473b244c0fc7c7dc397e3f1/django/contrib/admin/options.py",
+    "full_source_sha256": "338bcf31eee03927420ab42a9d8562109c9d84511c1dc5f200f3652388894cdf",
+    "excerpt_path": "introduced-source.txt",
+    "excerpt_sha256": "da1245e0ffc9462f6ca3bbe64ed46f7f29f696f431c1b7856c37e64d1e1b7eec",
+    "excerpt_line_ranges": [
+      [
+        1208,
+        1252
+      ]
+    ],
+    "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+  },
+  {
+    "role": "before-fix",
+    "path": "django/contrib/admin/options.py",
+    "commit_sha": "f87c2055b45356378a7c2a020eb872352d20f85e",
+    "url": "https://github.com/django/django/blob/f87c2055b45356378a7c2a020eb872352d20f85e/django/contrib/admin/options.py",
+    "full_source_sha256": "63868378c1775338716679c21a1a04ef27827df1920288cd3bb72d1213f1f573",
+    "excerpt_path": "before-fix-source.txt",
+    "excerpt_sha256": "94a2660519af7e971e4a04cf2de4994c430d676a01a8208426a2a95cba532a4b",
+    "excerpt_line_ranges": [
+      [
+        1137,
+        1218
+      ]
+    ],
+    "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+  },
+  {
+    "role": "fixed",
+    "path": "django/contrib/admin/options.py",
+    "commit_sha": "4cecf3039586ea738afafb9a28c946bff42c37c1",
+    "url": "https://github.com/django/django/blob/4cecf3039586ea738afafb9a28c946bff42c37c1/django/contrib/admin/options.py",
+    "full_source_sha256": "f972bb0e6eb720231a0cc044b7383b1fba868c0c462fa357392c626684220784",
+    "excerpt_path": "fixed-source.txt",
+    "excerpt_sha256": "54181b186831375924ffc5f86978eecb408b9ca01c29ef77fdd73f4e0854cf62",
+    "excerpt_line_ranges": [
+      [
+        1136,
+        1218
+      ]
+    ],
+    "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+  },
+  {
+    "role": "upstream-regression-tests",
+    "path": "tests/admin_changelist/tests.py",
+    "commit_sha": "4cecf3039586ea738afafb9a28c946bff42c37c1",
+    "url": "https://github.com/django/django/blob/4cecf3039586ea738afafb9a28c946bff42c37c1/tests/admin_changelist/tests.py",
+    "full_source_sha256": "6a1aaf22423ff64962e6e8984dd8b2d3f2bc36248a5397ae0930a5ddd0dbd03c",
+    "excerpt_path": "regression-tests.txt",
+    "excerpt_sha256": "655eb6890e65e457773fe021125112dbe13b9d7dc8cb56474c5ab885334be379",
+    "excerpt_line_ranges": [
+      [
+        860,
+        870
+      ],
+      [
+        872,
+        897
+      ]
+    ],
+    "format": "Verbatim source lines prefixed with original one-based line numbers; separated test functions are concatenated."
+  },
+  {
+    "role": "license",
+    "path": "LICENSE",
+    "commit_sha": "f223729f8f8380901473b244c0fc7c7dc397e3f1",
+    "url": "https://github.com/django/django/blob/f223729f8f8380901473b244c0fc7c7dc397e3f1/LICENSE",
+    "full_source_sha256": "b846415d1b514e9c1dff14a22deb906d794bc546ca6129f950a18cd091e2a669",
+    "excerpt_path": "LICENSE",
+    "excerpt_sha256": "b846415d1b514e9c1dff14a22deb906d794bc546ca6129f950a18cd091e2a669"
+  }
+]

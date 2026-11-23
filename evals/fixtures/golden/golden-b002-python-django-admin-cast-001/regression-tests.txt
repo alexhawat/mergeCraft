@@ -1,0 +1,37 @@
+860:     def test_exact_lookup_with_invalid_value(self):
+861:         Child.objects.create(name="Test", age=10)
+862:         m = admin.ModelAdmin(Child, custom_site)
+863:         m.search_fields = ["pk__exact"]
+864: 
+865:         request = self.factory.get("/", data={SEARCH_VAR: "foo"})
+866:         request.user = self.superuser
+867: 
+868:         # Invalid values are gracefully ignored.
+869:         cl = m.get_changelist_instance(request)
+870:         self.assertCountEqual(cl.queryset, [])
+872:     def test_exact_lookup_mixed_terms(self):
+873:         """
+874:         Multi-term search validates each term independently.
+875: 
+876:         For 'foo 123' with search_fields=['name__icontains', 'age__exact']:
+877:         - 'foo': age lookup skipped (invalid), name lookup used
+878:         - '123': both lookups used (valid for age)
+879:         No Cast should be used; invalid lookups are simply skipped.
+880:         """
+881:         child = Child.objects.create(name="foo123", age=123)
+882:         Child.objects.create(name="other", age=456)
+883:         m = admin.ModelAdmin(Child, custom_site)
+884:         m.search_fields = ["name__icontains", "age__exact"]
+885: 
+886:         request = self.factory.get("/", data={SEARCH_VAR: "foo 123"})
+887:         request.user = self.superuser
+888: 
+889:         # One result matching on foo and 123.
+890:         cl = m.get_changelist_instance(request)
+891:         self.assertCountEqual(cl.queryset, [child])
+892: 
+893:         # "xyz" - invalid for age (skipped), no match for name either.
+894:         request = self.factory.get("/", data={SEARCH_VAR: "xyz"})
+895:         request.user = self.superuser
+896:         cl = m.get_changelist_instance(request)
+897:         self.assertCountEqual(cl.queryset, [])

@@ -90,6 +90,7 @@ class ActionInputEnv(EnvSettings):
     push: _StripOrNone = Field(default=None, validation_alias="INPUT_PUSH")
     shell: _StripOrNone = Field(default=None, validation_alias="INPUT_SHELL")
     status_checks: _StripOrNone = Field(default=None, validation_alias="INPUT_STATUS_CHECKS")
+    review_event: _StripOrNone = Field(default=None, validation_alias="INPUT_REVIEW_EVENT")
     suggest_eval_add: _StripOrNone = Field(default=None, validation_alias="INPUT_SUGGEST_EVAL_ADD")
 
     # ── analyzers and setup ─────────────────────────────────────────────────

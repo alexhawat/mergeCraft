@@ -1,0 +1,91 @@
+[
+  {
+    "role": "base",
+    "path": "src/werkzeug/debug/tbtools.py",
+    "commit_sha": "777500b64647ea47b21e52e5e113ba1d86014c05",
+    "url": "https://github.com/pallets/werkzeug/blob/777500b64647ea47b21e52e5e113ba1d86014c05/src/werkzeug/debug/tbtools.py",
+    "full_source_sha256": "1ecb68a0ab016366b78b2e9bce9954ebc2709981e99fe89b96705ccb9a38bc0d",
+    "excerpt_path": "base-source.txt",
+    "excerpt_sha256": "2fa8edb569231655bc8a6d3cd9a855e9e47a8d3732af9063411082eb36e34a0f",
+    "excerpt_line_ranges": [
+      [
+        234,
+        258
+      ]
+    ],
+    "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+  },
+  {
+    "role": "introduced",
+    "path": "src/werkzeug/debug/tbtools.py",
+    "commit_sha": "bdc17e4cd10bbb17449006cef385ec953a11fc36",
+    "url": "https://github.com/pallets/werkzeug/blob/bdc17e4cd10bbb17449006cef385ec953a11fc36/src/werkzeug/debug/tbtools.py",
+    "full_source_sha256": "798054dc379f63335ad6645a15d7c12914c6e12c0af04d0c8e9a84c9ebae23ee",
+    "excerpt_path": "introduced-source.txt",
+    "excerpt_sha256": "65f0e20c7de0dacabcf3a9087df8b94839c1b38a99d516a20c273d546a1ecc0a",
+    "excerpt_line_ranges": [
+      [
+        234,
+        260
+      ]
+    ],
+    "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+  },
+  {
+    "role": "before-fix",
+    "path": "src/werkzeug/debug/tbtools.py",
+    "commit_sha": "bdc17e4cd10bbb17449006cef385ec953a11fc36",
+    "url": "https://github.com/pallets/werkzeug/blob/bdc17e4cd10bbb17449006cef385ec953a11fc36/src/werkzeug/debug/tbtools.py",
+    "full_source_sha256": "798054dc379f63335ad6645a15d7c12914c6e12c0af04d0c8e9a84c9ebae23ee",
+    "excerpt_path": "before-fix-source.txt",
+    "excerpt_sha256": "65f0e20c7de0dacabcf3a9087df8b94839c1b38a99d516a20c273d546a1ecc0a",
+    "excerpt_line_ranges": [
+      [
+        234,
+        260
+      ]
+    ],
+    "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+  },
+  {
+    "role": "fixed",
+    "path": "src/werkzeug/debug/tbtools.py",
+    "commit_sha": "2cbdf2b02273daccf85845b1e1569096e65ffe58",
+    "url": "https://github.com/pallets/werkzeug/blob/2cbdf2b02273daccf85845b1e1569096e65ffe58/src/werkzeug/debug/tbtools.py",
+    "full_source_sha256": "4a400003828a7f0b172629d46dff8010fe06a8e353b11e2e53b58f525a177121",
+    "excerpt_path": "fixed-source.txt",
+    "excerpt_sha256": "f83cadff93623bc4073b7b3add72b7c67ee5c4cf446050a3b40146135c0cddbc",
+    "excerpt_line_ranges": [
+      [
+        234,
+        260
+      ]
+    ],
+    "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+  },
+  {
+    "role": "upstream-regression-tests",
+    "path": "tests/test_debug.py",
+    "commit_sha": "2cbdf2b02273daccf85845b1e1569096e65ffe58",
+    "url": "https://github.com/pallets/werkzeug/blob/2cbdf2b02273daccf85845b1e1569096e65ffe58/tests/test_debug.py",
+    "full_source_sha256": "807df92abb593768c32c864e9e23ce0ddc654d611c4cb4d79ca56f0d8535df42",
+    "excerpt_path": "regression-tests.txt",
+    "excerpt_sha256": "67dc8db648261b4582889175950d119bc158f994ffd477211d683cb6f4287b37",
+    "excerpt_line_ranges": [
+      [
+        376,
+        384
+      ]
+    ],
+    "format": "Verbatim source lines prefixed with original one-based line numbers; separated test functions are concatenated."
+  },
+  {
+    "role": "license",
+    "path": "LICENSE.rst",
+    "commit_sha": "bdc17e4cd10bbb17449006cef385ec953a11fc36",
+    "url": "https://github.com/pallets/werkzeug/blob/bdc17e4cd10bbb17449006cef385ec953a11fc36/LICENSE.rst",
+    "full_source_sha256": "3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b",
+    "excerpt_path": "LICENSE",
+    "excerpt_sha256": "3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b"
+  }
+]
