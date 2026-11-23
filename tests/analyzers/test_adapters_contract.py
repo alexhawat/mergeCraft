@@ -6,11 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import C4_CONTRACT_TOOLS, import_module
+from tests.analyzers.support import C4_CONTRACT_TOOLS
 
 
 def _catalog_ids() -> set[str]:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     return {manifest.id for manifest in registry.load_catalog()}
 
 
@@ -22,7 +23,8 @@ def _run(
     tier: str = "trusted",
     base_ref: str | None = "fixture-base",
 ):
-    adapters = import_module("mergecraft.analyzers.adapters")
+    import mergecraft.analyzers.adapters as adapters
+
     return adapters.run_adapter(
         tool_id=tool_id,
         repo_root=repo_root,
@@ -68,7 +70,8 @@ def test_skips_with_reason_when_base_ref_missing(tool_id: str, adapter_fixture_r
     if tool_id not in _catalog_ids():
         pytest.fail(f"{tool_id} manifest missing from catalog")
 
-    contracts = import_module("mergecraft.analyzers.contracts")
+    import mergecraft.analyzers.contracts as contracts
+
     result = contracts.run_differential_adapter(
         tool_id=tool_id,
         repo_root=adapter_fixture_repo,
@@ -88,10 +91,11 @@ def test_skips_with_reason_when_base_ref_missing(tool_id: str, adapter_fixture_r
 def test_contract_provisioning_failure_stays_a_visible_skip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    contracts = import_module("mergecraft.analyzers.contracts")
-    provision = import_module("mergecraft.analyzers.provision")
-    registry = import_module("mergecraft.analyzers.registry")
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.contracts as contracts
+    import mergecraft.analyzers.provision as provision
+    import mergecraft.analyzers.registry as registry
+    import mergecraft.analyzers.resolve as resolve
+
     manifest = registry.get_manifest("oasdiff")
     plan = resolve.AnalyzerPlan(manifest_id=manifest.id, mode="managed", argv=("oasdiff",))
 

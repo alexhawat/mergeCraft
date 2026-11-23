@@ -7,7 +7,6 @@ matching via ``evals.scoring``'s ±3-line overlap rule. Implementation lands in 
 
 from __future__ import annotations
 
-import importlib
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -45,7 +44,9 @@ index 2222222..3333333 100644
 
 
 def _convergence_mod() -> Any:
-    return importlib.import_module("mergecraft.evals.convergence")
+    from mergecraft.evals import convergence
+
+    return convergence
 
 
 def _body(label: str) -> str:

@@ -471,6 +471,15 @@ jobs:
       - name: Static, typecheck, build tier
         if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
         run: make ci-static
+      - name: Type-check test code (advisory)
+        if: (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true') && matrix.python == '3.14'
+        continue-on-error: true
+        run: make pyright-tests
+      - name: Require clean types in new test modules
+        if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true' && matrix.python == '3.14'
+        env:
+          MERGECRAFT_TEST_TYPE_BASE: ${{ github.event.pull_request.base.sha }}
+        run: make pyright-new-tests
       # Blocking: actionlint (any finding) and zizmor (high severity, per
       # .github/zizmor.yml). The SARIF step further down is evidence only. This
       # used to run solely in integration.yml's unrequired security-scope job.

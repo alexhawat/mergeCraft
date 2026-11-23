@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -24,7 +23,9 @@ _STEP_SUMMARY_CAP = 1_048_576
 
 
 def _step_summary_module() -> Any:
-    return importlib.import_module("mergecraft.utils.step_summary")
+    from mergecraft.utils import step_summary
+
+    return step_summary
 
 
 def test_packet_run_health_round_trips_and_schema_version_bumps() -> None:

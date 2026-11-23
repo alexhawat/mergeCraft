@@ -56,6 +56,8 @@ class OfflineReviewResult:
     # Source and durable-storage roots differ for a temporary remote clone.
     source_root: Path | None = None
     persistence_root: Path | None = None
+    cost_usd: float | None = None
+    total_tokens: int | None = None
 
 
 def _offline_failure(

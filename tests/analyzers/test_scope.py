@@ -8,11 +8,10 @@ from typing import Any
 
 import pytest
 
-from tests.analyzers.support import import_module
-
 
 def _sample_finding(path: str, line: int) -> object:
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     return finding_mod.make_finding(
         tool="actionlint",
         rule_id="syntax-check",
@@ -29,7 +28,8 @@ def _sample_finding(path: str, line: int) -> object:
 
 
 def test_finding_outside_diff_hunks_is_dropped() -> None:
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
+
     diff = """diff --git a/README.md b/README.md
 @@ -1,3 +1,4 @@
  # Title
@@ -42,7 +42,8 @@ def test_finding_outside_diff_hunks_is_dropped() -> None:
 
 
 def test_finding_on_changed_line_survives() -> None:
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
+
     diff = """diff --git a/scripts/deploy.sh b/scripts/deploy.sh
 @@ -1,5 +1,5 @@
  #!/usr/bin/env bash
@@ -57,7 +58,8 @@ def test_finding_on_changed_line_survives() -> None:
 
 
 def test_new_dependency_survives_without_line_intersection(fixture_repo: Path) -> None:
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
+
     diff = """diff --git a/requirements.txt b/requirements.txt
 @@ -1 +1,2 @@
  requests==2.25.0
@@ -69,14 +71,16 @@ def test_new_dependency_survives_without_line_intersection(fixture_repo: Path) -
 
 
 def test_introduced_by_pr_unknown_when_no_base_run() -> None:
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
+
     finding = _sample_finding(".github/workflows/broken.yml", 2)
     scoped = scope.annotate_introduced_by_pr([finding], base_run_performed=False)
     assert scoped[0].introduced_by_pr == "unknown"
 
 
 def test_introduced_by_pr_true_only_with_base_confirmation() -> None:
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
+
     finding = _sample_finding(".github/workflows/broken.yml", 2)
     scoped = scope.annotate_introduced_by_pr(
         [finding], base_run_performed=True, is_new_in_base=True
@@ -86,8 +90,9 @@ def test_introduced_by_pr_true_only_with_base_confirmation() -> None:
 
 def test_introduced_by_base_diff_uses_line_and_rule_not_message() -> None:
     """Same message on a new line must not inherit base ``introduced_by_pr=false``."""
-    scope = import_module("mergecraft.analyzers.scope")
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+    import mergecraft.analyzers.scope as scope
+
     shared = {
         "tool": "ruff",
         "rule_id": "F401",
@@ -110,7 +115,8 @@ def test_introduced_by_base_diff_uses_line_and_rule_not_message() -> None:
 
 def test_filter_generated_scope_drops_generated_findings_without_config_change() -> None:
     """Generated findings on touched paths drop unless generator config changed."""
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
+
     finding = _sample_finding("src/generated/schema.py", 1)
     diff = """diff --git a/src/generated/schema.py b/src/generated/schema.py
 @@ -1 +1,2 @@
@@ -122,7 +128,8 @@ def test_filter_generated_scope_drops_generated_findings_without_config_change()
 
 
 def test_filter_generated_scope_keeps_generated_findings_when_config_changed() -> None:
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
+
     finding = _sample_finding("src/generated/schema.py", 1)
     diff = """diff --git a/Makefile b/Makefile
 @@ -1 +1,2 @@
@@ -138,7 +145,8 @@ diff --git a/src/generated/schema.py b/src/generated/schema.py
 
 
 def test_iter_added_diff_lines_yields_path_line_and_content() -> None:
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
+
     diff = """diff --git a/README.md b/README.md
 index 1111111..2222222 100644
 --- a/README.md
@@ -177,12 +185,14 @@ index 3333333..4444444 100644
 
 
 def test_base_comparison_available_is_true_when_online_and_full() -> None:
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
+
     assert scope.base_comparison_available(base_comparison="full", offline=False) is True
 
 
 def test_base_comparison_available_is_false_when_offline_and_full() -> None:
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
+
     assert scope.base_comparison_available(base_comparison="full", offline=True) is False
 
 
@@ -192,7 +202,8 @@ def test_base_comparison_available_is_false_unless_comparison_is_full(
     base_comparison: str, offline: bool
 ) -> None:
     """The ``!= "full"`` short-circuit is independent of ``offline`` — guard it."""
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
+
     assert (
         scope.base_comparison_available(base_comparison=base_comparison, offline=offline) is False
     )
@@ -220,10 +231,10 @@ def _record_base_run_performed(monkeypatch: pytest.MonkeyPatch, pipeline: Any) -
 def _run_full_comparison_pipeline(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, offline: bool
 ) -> list[bool]:
+    import mergecraft.config.settings as settings_mod
     from mergecraft.analyzers import adapters, pipeline
     from mergecraft.analyzers.registry import get_manifest
 
-    settings_mod = import_module("mergecraft.config.settings")
     pinned = settings_mod.AnalyzersSettings(baseComparison="full")
     monkeypatch.setattr(pipeline, "detect_enabled", lambda **_: [get_manifest("ruff")])
 
@@ -317,7 +328,7 @@ index abc1234..def5678 100644
 
 def test_quoted_unicode_header_gets_its_own_hunks_and_added_lines() -> None:
     """A Git C-quoted header must decode, not collapse onto the previous file."""
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
 
     parsed = scope.parse_diff_scope(_UNICODE_HEADER_DIFF)
     added = list(scope.iter_added_diff_lines(_UNICODE_HEADER_DIFF))
@@ -329,7 +340,7 @@ def test_quoted_unicode_header_gets_its_own_hunks_and_added_lines() -> None:
 
 def test_rename_to_resolves_a_path_containing_a_space_b_prefix() -> None:
     """``rename to`` is authoritative when the header cannot be split unambiguously."""
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
 
     parsed = scope.parse_diff_scope(_RENAME_WITH_SPACE_DIFF)
 
@@ -341,7 +352,7 @@ def test_rename_to_resolves_a_path_containing_a_space_b_prefix() -> None:
 
 def test_quoted_post_image_path_decodes_when_the_header_is_plain() -> None:
     """``+++ b/…`` is a path source, decoded with the same C-style unquoting."""
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
 
     parsed = scope.parse_diff_scope(_QUOTED_PREIMAGE_DIFF)
 
@@ -350,7 +361,7 @@ def test_quoted_post_image_path_decodes_when_the_header_is_plain() -> None:
 
 def test_unparseable_header_clears_the_current_file() -> None:
     """Dropping a hunk loses a scope hint; misattributing one invents a finding."""
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
 
     parsed = scope.parse_diff_scope(_UNPARSEABLE_HEADER_DIFF)
     added = list(scope.iter_added_diff_lines(_UNPARSEABLE_HEADER_DIFF))
@@ -415,11 +426,11 @@ def test_out_of_root_sarif_label_survives_to_the_published_finding(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, uri: str
 ) -> None:
     """AN-D8: the published finding keeps the verbatim URI *and* the label."""
+    import mergecraft.config.settings as settings_mod
     from mergecraft.analyzers import adapters, pipeline
     from mergecraft.analyzers.parse import parse_output_file
     from mergecraft.analyzers.registry import get_manifest
 
-    settings_mod = import_module("mergecraft.config.settings")
     pinned = settings_mod.AnalyzersSettings()
 
     manifest = get_manifest("actionlint")

@@ -25,7 +25,6 @@ Wave plan: ``.ignorelocal/waves/issues-provider-routing-wave-plan.md``
 
 from __future__ import annotations
 
-import importlib
 import re
 from pathlib import Path
 
@@ -42,7 +41,9 @@ DEFAULT_PROVIDER_ID = "default"
 
 def _load_gateways_module() -> object:
     try:
-        return importlib.import_module("mergecraft.agents.openai_compatible_gateways")
+        from mergecraft.agents import openai_compatible_gateways
+
+        return openai_compatible_gateways
     except ImportError as exc:
         pytest.fail(f"mergecraft.agents.openai_compatible_gateways not importable: {exc}")
 

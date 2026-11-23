@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from tests.ci.support import import_module, load_fixture
+from tests.ci.support import load_fixture
 
 
 def test_twelve_jobs_one_broken_import_produce_one_finding() -> None:
-    cluster = import_module("mergecraft.ci.cluster")
-    normalize = import_module("mergecraft.ci.normalize")
+    import mergecraft.ci.cluster as cluster
+    import mergecraft.ci.normalize as normalize
+
     fixture = load_fixture("multi_job_single_root_cause.json")
     normalized = [normalize.normalize_failure(job) for job in fixture["jobs"]]
     findings = cluster.cluster_failures(normalized)
@@ -20,8 +21,9 @@ def test_twelve_jobs_one_broken_import_produce_one_finding() -> None:
 
 
 def test_distinct_signatures_remain_separate_findings() -> None:
-    cluster = import_module("mergecraft.ci.cluster")
-    normalize = import_module("mergecraft.ci.normalize")
+    import mergecraft.ci.cluster as cluster
+    import mergecraft.ci.normalize as normalize
+
     multi = load_fixture("multi_job_single_root_cause.json")
     unrelated = load_fixture("pre_existing_unrelated_failure.json")
     normalized = [
@@ -33,8 +35,9 @@ def test_distinct_signatures_remain_separate_findings() -> None:
 
 
 def test_cluster_groups_by_fingerprint_before_command() -> None:
-    cluster = import_module("mergecraft.ci.cluster")
-    normalize = import_module("mergecraft.ci.normalize")
+    import mergecraft.ci.cluster as cluster
+    import mergecraft.ci.normalize as normalize
+
     fixture = load_fixture("multi_job_single_root_cause.json")
     jobs = fixture["jobs"]
     varied_command = dict(jobs[0])

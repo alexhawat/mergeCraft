@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
@@ -52,7 +51,8 @@ def _merge_preamble() -> Any:
 
 
 def _publish_deterministic_record() -> Any:
-    main = importlib.import_module("mergecraft.main")
+    import mergecraft.main as main
+
     return require_symbol(main, "publish_deterministic_record")
 
 

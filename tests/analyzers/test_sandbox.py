@@ -18,7 +18,6 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import import_module
 from tests.analyzers.support_sandbox_limits import (
     MAX_PROBE_CANDIDATES,
     PROBE_TIMEOUT_MAX_S,
@@ -40,7 +39,8 @@ class _FakePwEntry:
 
 
 def _full_caps_with_user_namespace() -> object:
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     return sandbox.SandboxCapabilities(
         pid_namespace=True,
         network_namespace=True,
@@ -95,8 +95,9 @@ def _fake_sudo_elevation(
 
 
 def _analyzer_argv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    sandbox = import_module("mergecraft.analyzers.sandbox")
-    shell_mod = import_module("mergecraft.mcp.shell")
+    import mergecraft.analyzers.sandbox as sandbox
+    import mergecraft.mcp.shell as shell_mod
+
     monkeypatch.setattr(sandbox, "probe_capabilities", _full_caps_with_user_namespace)
     monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "unshare")
     context = sandbox.build_sandbox_context(
@@ -131,9 +132,10 @@ def test_root_orchestrator_refuses_the_userspace_egress_bridge(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The bridge maps root to root, so the identity drop cannot land: refuse it."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
-    egress = import_module("mergecraft.analyzers.egress")
-    shell_mod = import_module("mergecraft.mcp.shell")
+    import mergecraft.analyzers.egress as egress
+    import mergecraft.analyzers.sandbox as sandbox
+    import mergecraft.mcp.shell as shell_mod
+
     _fake_drop_tools(monkeypatch, uid=0)
     monkeypatch.setattr(sandbox, "probe_capabilities", _full_caps_with_user_namespace)
     # Pin the host probe: direct unshare, so the sudo-path refusal cannot fire first.
@@ -165,9 +167,10 @@ def test_untrusted_analyzer_refuses_the_sudo_unshare_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """When only sudo-unshare is available, untrusted runs fail before any bridge check."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
-    egress = import_module("mergecraft.analyzers.egress")
-    shell_mod = import_module("mergecraft.mcp.shell")
+    import mergecraft.analyzers.egress as egress
+    import mergecraft.analyzers.sandbox as sandbox
+    import mergecraft.mcp.shell as shell_mod
+
     _fake_drop_tools(monkeypatch, uid=0)
     monkeypatch.setattr(sandbox, "probe_capabilities", _full_caps_with_user_namespace)
     monkeypatch.setattr(shell_mod, "detect_sandbox_method", lambda: "sudo-unshare")
@@ -206,7 +209,8 @@ def test_sudo_elevated_root_drop_is_numeric_off_the_action_image(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Root via sudo drops to the invoking numeric identity, no agent user needed."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     _fake_sudo_elevation(monkeypatch, uid=1000, gid=1000)
 
     drop = sandbox.build_privilege_drop_argv()
@@ -230,7 +234,8 @@ def test_sudo_elevated_drop_does_not_route_through_wrap_agent_command(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The agent-image root policy must not fire on the sudo-elevated path."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     _fake_sudo_elevation(monkeypatch)
     from mergecraft.utils import privilege
 
@@ -254,9 +259,9 @@ def test_sudo_elevated_drop_refuses_a_zero_sudo_identity(
     monkeypatch: pytest.MonkeyPatch, sudo_uid: str, sudo_gid: str
 ) -> None:
     """A zero SUDO_UID/GID is never a drop; the configuration error stands."""
+    import mergecraft.analyzers.sandbox as sandbox
     from mergecraft.main import _ConfigurationError
 
-    sandbox = import_module("mergecraft.analyzers.sandbox")
     _fake_sudo_elevation(monkeypatch)
     monkeypatch.setenv("SUDO_UID", sudo_uid)
     monkeypatch.setenv("SUDO_GID", sudo_gid)
@@ -269,10 +274,10 @@ def test_root_drop_refuses_an_unresolvable_agent_user(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """With no sudo identity the agent-user drop stays fail-closed."""
+    import mergecraft.analyzers.sandbox as sandbox
     from mergecraft.main import _ConfigurationError
     from mergecraft.utils import privilege
 
-    sandbox = import_module("mergecraft.analyzers.sandbox")
     monkeypatch.setattr(os, "getuid", lambda: 0)
     monkeypatch.setattr(os, "geteuid", lambda: 0)
     monkeypatch.delenv("SUDO_UID", raising=False)
@@ -290,7 +295,8 @@ def test_root_drop_uses_the_agent_user_inside_the_action_image(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """With no sudo identity the action image keeps today's agent-user drop."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     _fake_drop_tools(monkeypatch, uid=0)
 
     drop = sandbox.build_privilege_drop_argv()
@@ -314,7 +320,8 @@ def test_root_drop_uses_the_agent_user_inside_the_action_image(
 )
 def test_non_root_drop_is_empty(monkeypatch: pytest.MonkeyPatch, sudo_env: bool) -> None:
     """Off the root backend no drop applies, sudo envelope or not."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     _fake_drop_tools(monkeypatch, uid=4242)
     if sudo_env:
         monkeypatch.setenv("SUDO_UID", "1000")
@@ -343,7 +350,8 @@ def test_sudo_elevated_analyzer_argv_carries_the_numeric_drop(
 
 
 def test_capability_probe_records_unavailable_primitives_by_name() -> None:
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     caps = sandbox.probe_capabilities()
     assert hasattr(caps, "network_namespace")
     assert hasattr(caps, "pid_namespace")
@@ -354,8 +362,9 @@ def test_capability_probe_records_unavailable_primitives_by_name() -> None:
 
 
 def test_untrusted_analyzer_skipped_when_required_capability_missing(tmp_path: Path) -> None:
-    sandbox = import_module("mergecraft.analyzers.sandbox")
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+    import mergecraft.analyzers.sandbox as sandbox
+
     m = manifest.load_manifest_file(
         Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml")
     )
@@ -373,7 +382,8 @@ def test_untrusted_analyzer_skipped_when_required_capability_missing(tmp_path: P
 
 
 def test_sandbox_applies_time_memory_and_process_caps(tmp_path: Path) -> None:
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     limits = sandbox.SandboxLimits(timeout_s=30, memory_mb=512, max_processes=16)
     ctx = sandbox.build_sandbox_context(
         repo_root=tmp_path,
@@ -389,7 +399,8 @@ def test_sandbox_applies_time_memory_and_process_caps(tmp_path: Path) -> None:
 
 
 def test_tmpfs_scratch_and_read_only_source_paths(tmp_path: Path) -> None:
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     scratch = tmp_path / "scratch"
     ctx = sandbox.build_sandbox_context(
         repo_root=tmp_path,
@@ -403,7 +414,8 @@ def test_tmpfs_scratch_and_read_only_source_paths(tmp_path: Path) -> None:
 
 
 def test_network_denied_except_manifest_allowlist(tmp_path: Path) -> None:
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     allowlist = ["https://github.com"]
     ctx = sandbox.build_sandbox_context(
         repo_root=tmp_path,
@@ -438,13 +450,15 @@ def test_process_count_for_uid_counts_our_own_process() -> None:
     """Our own test process's real uid is counted from ``/proc/*/status``."""
     if sys.platform != "linux":
         pytest.skip("/proc/*/status only exists on Linux")
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     assert sandbox.process_count_for_uid(os.getuid()) >= 1
 
 
 def test_process_count_for_uid_is_zero_for_a_uid_with_no_processes() -> None:
     """An unused uid is never counted, on any platform, and never raises."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     count = sandbox.process_count_for_uid(_UNUSED_UID)
     assert isinstance(count, int)
     assert count == 0
@@ -453,7 +467,8 @@ def test_process_count_for_uid_is_zero_for_a_uid_with_no_processes() -> None:
 @pytest.mark.parametrize("uid", [-1, _UNUSED_UID - 1])
 def test_process_count_for_uid_tolerates_a_uid_with_no_matches(uid: int) -> None:
     """A uid no process runs as yields zero rather than an exception."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     assert sandbox.process_count_for_uid(uid) == 0
 
 
@@ -461,7 +476,7 @@ def test_process_count_for_uid_returns_zero_when_proc_is_unreadable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A ``/proc`` that cannot be scanned is a best-effort zero, never a raise."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
 
     def _denied(*_args: object, **_kwargs: object) -> object:
         raise PermissionError(13, "Permission denied")
@@ -486,7 +501,8 @@ def test_process_limit_for_drop_keeps_the_flat_cap_without_a_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """With no drop the historical ``(max, max)`` cap is unchanged and nothing is probed."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     refuse_probe(monkeypatch, sandbox)
 
     def _unreachable(*_args: object, **_kwargs: object) -> int:
@@ -506,7 +522,8 @@ def test_process_limit_for_drop_keeps_count_plus_headroom_when_the_count_is_visi
     ``max_processes`` above it so its own ``fork`` still lands after the
     credential-changing exec.
     """
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     monkeypatch.setattr(sandbox, "process_count_for_uid", _visible_count(40), raising=False)
     attempt = ProbeAttempt(succeed_at=56)
     install_probe(monkeypatch, sandbox, attempt)
@@ -523,7 +540,8 @@ def test_process_limit_for_drop_steps_up_until_the_probe_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The probe is refused at each candidate until the kernel accepts it."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     monkeypatch.setattr(sandbox, "process_count_for_uid", _visible_count(0), raising=False)
     attempt = ProbeAttempt(succeed_at=50)
     install_probe(monkeypatch, sandbox, attempt)
@@ -545,7 +563,8 @@ def test_process_limit_for_drop_bounds_the_payload_allowance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The cap is finite, clears the hint, and keeps at least ``max_processes`` for the payload."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     hint = 7
     monkeypatch.setattr(sandbox, "process_count_for_uid", _visible_count(hint), raising=False)
     attempt = ProbeAttempt(succeed_at=hint + 2 * 16)
@@ -570,7 +589,8 @@ def test_process_limit_for_drop_keeps_fork_headroom_when_the_probe_cannot_run(
     leaves headroom 0 on a stale hint - the silent-hang shape. The fallback must
     add the same extra allowance the accepted path does.
     """
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     monkeypatch.setattr(sandbox, "process_count_for_uid", _visible_count(40), raising=False)
     monkeypatch.setattr(sandbox, "_drop_exec_succeeds_at_limit", lambda *_a, **_k: None)
 
@@ -582,7 +602,8 @@ def test_process_limit_for_drop_keeps_fork_headroom_when_the_probe_cannot_run(
 def test_process_limit_for_drop_without_a_gid_keeps_fork_headroom(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     monkeypatch.setattr(sandbox, "process_count_for_uid", _visible_count(40), raising=False)
     refuse_probe(monkeypatch, sandbox)
 
@@ -602,7 +623,8 @@ def test_process_limit_for_drop_keeps_headroom_when_the_hint_under_reports(
     returned pair must therefore add the allowance again, ``(32, 32)``, so the
     dropped payload can still spawn its own children.
     """
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     stale_hint = 16
     true_count = 24
     max_processes = 8
@@ -621,9 +643,9 @@ def test_process_limit_for_drop_fails_closed_when_the_probe_never_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A probe that cannot land within its bound is a configuration error, not a loop."""
+    import mergecraft.analyzers.sandbox as sandbox
     from mergecraft.main import _ConfigurationError
 
-    sandbox = import_module("mergecraft.analyzers.sandbox")
     monkeypatch.setattr(sandbox, "process_count_for_uid", _visible_count(0), raising=False)
     attempt = ProbeAttempt(succeed_at=None)
     install_probe(monkeypatch, sandbox, attempt)
@@ -643,7 +665,8 @@ def test_process_limit_for_drop_accommodates_a_resolved_sudo_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The sudo target's resolved uid and gid drive the probed pair end to end."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     _fake_sudo_elevation(monkeypatch, uid=1001, gid=2002)
     monkeypatch.setattr(sandbox, "process_count_for_uid", _visible_count(0), raising=False)
     attempt = ProbeAttempt(succeed_at=32)
@@ -660,7 +683,8 @@ def test_drop_probe_bounds_each_subprocess_with_a_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A wedged credential-changing exec must not hang the caller: every probe carries a timeout."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     _fake_drop_tools(monkeypatch, uid=0)
     monkeypatch.setattr(sandbox, "process_count_for_uid", _visible_count(0), raising=False)
     runs: list[dict[str, object]] = []
@@ -687,7 +711,8 @@ def test_drop_probe_treats_a_timed_out_exec_as_no_answer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A probe that outlives its timeout resolves to no answer; the caller still returns a pair."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     _fake_drop_tools(monkeypatch, uid=0)
     monkeypatch.setattr(sandbox, "process_count_for_uid", _visible_count(0), raising=False)
 
@@ -707,7 +732,8 @@ def test_resolve_drop_target_uid_returns_the_sudo_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Root via sudo drops to the invoking numeric uid."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     _fake_sudo_elevation(monkeypatch, uid=1000, gid=1000)
     assert sandbox.resolve_drop_target_uid() == 1000
 
@@ -716,7 +742,8 @@ def test_resolve_drop_target_uid_returns_the_agent_user_uid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """In the action image the drop lands on the agent user's uid."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     _fake_drop_tools(monkeypatch, uid=0)
     assert sandbox.resolve_drop_target_uid() == 10001
 
@@ -725,7 +752,8 @@ def test_resolve_drop_target_uid_is_none_without_a_drop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A non-root orchestrator builds no analyzer drop prefix, so no target resolves."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     monkeypatch.delenv("SUDO_UID", raising=False)
     monkeypatch.delenv("SUDO_GID", raising=False)
     monkeypatch.setattr(os, "geteuid", lambda: 4242)
@@ -738,7 +766,8 @@ def test_resolve_drop_target_gid_returns_the_sudo_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Root via sudo drops to the invoking numeric gid, paired with the uid."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     _fake_sudo_elevation(monkeypatch, uid=1000, gid=2000)
     assert resolve_gid(sandbox) == 2000
 
@@ -747,7 +776,8 @@ def test_resolve_drop_target_gid_returns_the_agent_user_gid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """In the action image the drop lands on the agent user's gid."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     _fake_drop_tools(monkeypatch, uid=0)
     assert resolve_gid(sandbox) == 10001
 
@@ -756,7 +786,8 @@ def test_resolve_drop_target_gid_is_none_without_a_drop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A non-root orchestrator resolves no gid either."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     monkeypatch.delenv("SUDO_UID", raising=False)
     monkeypatch.delenv("SUDO_GID", raising=False)
     monkeypatch.setattr(os, "geteuid", lambda: 4242)
@@ -773,7 +804,8 @@ def test_resolve_drop_target_uid_never_raises_on_a_malformed_sudo_envelope(
     monkeypatch: pytest.MonkeyPatch, sudo_uid: str, sudo_gid: str
 ) -> None:
     """A bad sudo envelope must not raise; an unresolvable drop is not returned."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     _fake_sudo_elevation(monkeypatch)
     monkeypatch.setenv("SUDO_UID", sudo_uid)
     monkeypatch.setenv("SUDO_GID", sudo_gid)
@@ -791,7 +823,8 @@ def test_resolve_drop_target_gid_never_raises_on_a_malformed_sudo_envelope(
     monkeypatch: pytest.MonkeyPatch, sudo_uid: str, sudo_gid: str
 ) -> None:
     """A bad sudo envelope must not raise for the gid sibling either."""
-    sandbox = import_module("mergecraft.analyzers.sandbox")
+    import mergecraft.analyzers.sandbox as sandbox
+
     _fake_sudo_elevation(monkeypatch)
     monkeypatch.setenv("SUDO_UID", sudo_uid)
     monkeypatch.setenv("SUDO_GID", sudo_gid)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import time
 from typing import TYPE_CHECKING, Any
@@ -20,7 +19,9 @@ if TYPE_CHECKING:
 
 def _load_gemini_module():
     try:
-        return importlib.import_module("mergecraft.agents.gemini")
+        from mergecraft.agents import gemini
+
+        return gemini
     except ImportError as exc:
         pytest.fail(f"mergecraft.agents.gemini not implemented: {exc}")
 

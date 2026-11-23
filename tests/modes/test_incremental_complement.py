@@ -7,7 +7,6 @@ dispatched-lens metadata from ``modes/_pr_summary_format.py``.
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -102,13 +101,17 @@ def _change(*paths: str, **signals: object) -> dict[str, object]:
 
 def _routing_mod() -> Any:
     try:
-        return importlib.import_module("mergecraft.review.lens_routing")
+        from mergecraft.review import lens_routing
+
+        return lens_routing
     except ImportError as err:
         pytest.fail(f"lens routing import failed: {err}")
 
 
 def _pr_summary_mod() -> Any:
-    return importlib.import_module("mergecraft.modes._pr_summary_format")
+    from mergecraft.modes import _pr_summary_format
+
+    return _pr_summary_format
 
 
 def _classify_change(change: dict[str, object]) -> Any:

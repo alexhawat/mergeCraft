@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from tests.analyzers.support import import_module
-
 from mergecraft.mcp.review import format_analyzer_inline_body
 
 
 def test_format_analyzer_inline_body_includes_short_id() -> None:
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     finding = finding_mod.make_finding(
         tool="ruff",
         rule_id="F401",

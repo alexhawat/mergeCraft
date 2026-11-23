@@ -18,7 +18,8 @@ def _manifest():
 
 
 def _parse(raw: str) -> list[Finding]:
-    parsers = import_module("mergecraft.analyzers.parsers")
+    import mergecraft.analyzers.parsers as parsers
+
     return parsers.get_parser(_manifest().parser)(raw, manifest=_manifest(), repo_root=Path("."))
 
 
@@ -71,7 +72,7 @@ def test_garbage_output_raises_rather_than_reading_as_clean(raw: str) -> None:
 
 
 def test_skips_with_a_named_reason_when_no_feature_file_changed() -> None:
-    adapters = import_module("mergecraft.analyzers.adapters")
+    import mergecraft.analyzers.adapters as adapters
 
     result = adapters.run_adapter(
         tool_id="gherkin-lint",
@@ -86,7 +87,7 @@ def test_skips_with_a_named_reason_when_no_feature_file_changed() -> None:
 
 
 def test_never_selected_when_no_feature_file_changed(tmp_path: Path) -> None:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
 
     selected = registry.detect_enabled(
         repo_root=tmp_path,
@@ -98,7 +99,7 @@ def test_never_selected_when_no_feature_file_changed(tmp_path: Path) -> None:
 
 
 def test_selected_only_when_the_repo_opts_in(tmp_path: Path) -> None:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
 
     off = registry.detect_enabled(
         repo_root=tmp_path, changed_files=["features/a.feature"], settings_overrides={}
@@ -114,8 +115,9 @@ def test_selected_only_when_the_repo_opts_in(tmp_path: Path) -> None:
 
 
 def test_untrusted_and_shell_disabled_behaviour_matches_markdownlint() -> None:
-    trust = import_module("mergecraft.analyzers.trust")
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+    import mergecraft.analyzers.trust as trust
+
     gherkin = registry.get_manifest("gherkin-lint")
     peer = registry.get_manifest("markdownlint")
 
@@ -134,7 +136,8 @@ def test_untrusted_and_shell_disabled_behaviour_matches_markdownlint() -> None:
 
 
 def test_conservative_default_config_attaches_only_when_the_repo_has_none(tmp_path: Path) -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.resolve as resolve
+
     argv = ("gherkin-lint", "-f", "json", resolve.FILES_TOKEN)
 
     patched, note = resolve._apply_config_absent_patches("gherkin-lint", tmp_path, argv)

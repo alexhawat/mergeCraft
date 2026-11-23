@@ -6,18 +6,20 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import C3_PATTERN_TOOLS, import_module
+from tests.analyzers.support import C3_PATTERN_TOOLS
 
 PATTERN_EXCLUSIVE_GROUP = "pattern-scanner"
 
 
 def _catalog_ids() -> set[str]:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     return {manifest.id for manifest in registry.load_catalog()}
 
 
 def _run(tool_id: str, repo_root: Path, changed_files: list[str]):
-    adapters = import_module("mergecraft.analyzers.adapters")
+    import mergecraft.analyzers.adapters as adapters
+
     return adapters.run_adapter(
         tool_id=tool_id,
         repo_root=repo_root,
@@ -27,7 +29,8 @@ def _run(tool_id: str, repo_root: Path, changed_files: list[str]):
 
 
 def test_repo_rules_preferred_and_named(adapter_fixture_repo: Path) -> None:
-    pattern = import_module("mergecraft.analyzers.pattern")
+    import mergecraft.analyzers.pattern as pattern
+
     if "semgrep" not in _catalog_ids():
         pytest.fail("semgrep manifest missing from catalog")
 
@@ -37,7 +40,8 @@ def test_repo_rules_preferred_and_named(adapter_fixture_repo: Path) -> None:
 
 
 def test_exactly_one_pattern_backend_runs(adapter_fixture_repo: Path) -> None:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     enabled = registry.select_enabled_analyzers(
         repo_root=adapter_fixture_repo,
         changed_files=["src/fixture_app/eval_sink.py"],
@@ -98,8 +102,8 @@ def test_semgrep_default_ruleset_catches_action_yml_expression_footgun(
 @pytest.mark.integration
 @pytest.mark.network
 def test_taint_finding_requires_verification_before_review(adapter_fixture_repo: Path) -> None:
-    pipeline = import_module("mergecraft.analyzers.pipeline")
-    verifier = import_module("mergecraft.agents.verifier")
+    import mergecraft.agents.verifier as verifier
+    import mergecraft.analyzers.pipeline as pipeline
 
     if "semgrep" not in _catalog_ids():
         pytest.fail("semgrep manifest missing from catalog")
