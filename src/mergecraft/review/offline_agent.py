@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from loguru import logger
 
 from mergecraft.agents import resolve_agent
+from mergecraft.agents.curated_model_catalog import apply_catalog_cost_to_usage
 from mergecraft.agents.gates import subagent_denied_tool_names
 from mergecraft.agents.resolution.chain import (
     effective_model_chain,
@@ -469,9 +470,10 @@ async def _dispatch_offline_agent(
             executed_model=attempt_model,
         ):
             result = await attempt_agent.run(attempt_ctx)
-        tool_context.tool_state.usage_entries.append(result.usage)
-        record_agent_usage(budget_tracker, result.usage, phase="reviewer_dispatch")
-        return result
+        usage = apply_catalog_cost_to_usage(result.usage, model=attempt_model)
+        tool_state.usage_entries.append(usage)
+        record_agent_usage(budget_tracker, usage, phase="reviewer_dispatch")
+        return replace(result, usage=usage)
 
     from mergecraft.agents.token_budget import bind_run_budget
     from mergecraft.jev.types import PINNED_MODEL

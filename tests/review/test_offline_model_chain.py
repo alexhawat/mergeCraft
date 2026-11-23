@@ -7,8 +7,9 @@ from typing import Any
 
 import pytest
 
-from mergecraft.agents.shared import AgentImpl, AgentResult
-from mergecraft.config.settings import RepoSettings, ReviewSettings
+from mergecraft.agents.curated_model_catalog import ULTRAMARINE_1_FLASH_SLUG
+from mergecraft.agents.shared import AgentImpl, AgentResult, AgentUsage
+from mergecraft.config.settings import ProviderRegistryEntry, RepoSettings, ReviewSettings
 from mergecraft.review import offline_agent
 from mergecraft.run_outcome import RunOutcome
 from mergecraft.utils.agent_resolve import CredentialStatus
@@ -115,6 +116,76 @@ async def test_offline_model_fallback_policy(
         assert len(dispatch["models"]) == 2
     else:
         assert set(dispatch["models"]) == {primary}
+
+
+@pytest.fixture
+def priced_provider() -> ProviderRegistryEntry:
+    return ProviderRegistryEntry(label="paperinstruments", harness="opencode", envIndex=1)
+
+
+async def test_offline_prices_fallback_usage_for_live_review_budgets(
+    dispatch: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    priced_provider: ProviderRegistryEntry,
+) -> None:
+    dispatch["settings"] = RepoSettings(
+        models=[PRIMARY, ULTRAMARINE_1_FLASH_SLUG], providers=[priced_provider]
+    )
+    primary = offline_agent.resolve_model(slug=PRIMARY, respect_env_override=False)
+    dispatch["results"][primary] = AgentResult(
+        success=False,
+        error="temporary provider failure",
+        metadata={"retryable": True},
+        usage=AgentUsage(agent="claude", input_tokens=100, output_tokens=0, cost_usd=0.01),
+    )
+    dispatch["results"][ULTRAMARINE_1_FLASH_SLUG] = AgentResult(
+        success=True,
+        terminal_submission_received=True,
+        usage=AgentUsage(agent="claude", input_tokens=10_000, output_tokens=1000),
+    )
+
+    result = await run(dispatch, tmp_path)
+    assert result.success, result.error
+    assert result.total_tokens == 11_100
+    # Primary reported $0.01. The fallback's input and output cost $0.0015 and $0.0005.
+    assert result.cost_usd == pytest.approx(0.012)
+
+    # Live eval passes its per-review cost limit into offline dispatch via this variable.
+    monkeypatch.setenv("MERGECRAFT_COST_BUDGET_USD", "0.011")
+    limited = await run(dispatch, tmp_path)
+    assert limited.outcome == RunOutcome.inconclusive
+    assert "cost budget exhausted" in limited.error
+
+
+@pytest.mark.parametrize(
+    ("model", "usage", "expected_cost"),
+    [
+        (PRIMARY, AgentUsage(agent="claude", input_tokens=100, output_tokens=10), None),
+        (ULTRAMARINE_1_FLASH_SLUG, None, None),
+        (
+            ULTRAMARINE_1_FLASH_SLUG,
+            AgentUsage(agent="claude", input_tokens=100, output_tokens=10, cost_usd=0.03),
+            0.03,
+        ),
+    ],
+)
+async def test_offline_preserves_unknown_and_reported_costs(
+    dispatch: dict[str, Any],
+    tmp_path: Path,
+    model: str,
+    usage: AgentUsage | None,
+    expected_cost: float | None,
+    priced_provider: ProviderRegistryEntry,
+) -> None:
+    dispatch["settings"] = RepoSettings(models=[model], providers=[priced_provider])
+    resolved = offline_agent.resolve_model(slug=model, respect_env_override=False)
+    dispatch["results"][resolved] = AgentResult(
+        success=True, terminal_submission_received=True, usage=usage
+    )
+    result = await run(dispatch, tmp_path, model)
+    assert result.success, result.error
+    assert result.cost_usd == expected_cost
 
 
 async def test_offline_no_credentials_never_dispatches(
