@@ -2,7 +2,7 @@
 
 - Status: Batch 001 is not planned. The maintainer closed #780 as not planned on 2026-11-23; batch 001's nine rows have no source evidence and will not be adjudicated. On 2026-11-19 the operator had stated they had not adjudicated batch 001, and the previous attribution of nine abstentions is withdrawn; historical git records and the [earlier issue comment](https://github.com/alexhawat/mergeCraft/issues/780#issuecomment-5811216475) are preserved. No batch 001 decision is recorded: its manifest rows keep `decision: pending` and null identities. Batch 002 prepares nine replacement candidates, all pending the maintainer's answers.
 - Issue: [#780](https://github.com/alexhawat/mergeCraft/issues/780) (batch 001; closed as not planned on 2026-11-23)
-- Open question for the maintainer: which issue tracks batch 002. #853, which generalised the batch model, is closed, and no other tracker has been named.
+- Batch 002 is tracked in [#1551](https://github.com/alexhawat/mergeCraft/issues/1551).
 - Priority: P2; effort: M plus human review; change risk: MED.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
 - Dependencies: 007. This batch alone does not complete 012, 013 or 014.

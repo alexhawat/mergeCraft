@@ -42,7 +42,7 @@ Run commands from the numbered plan rather than inventing one-off project workfl
 
 | Plan / issue | Missing input or event | Deliverable possible before it |
 |---|---|---|
-| 011 / batch 002 (no named issue; #780 closed as not planned on 2026-11-23) | Alex's actual adjudication of the nine batch 002 candidates, and a decision on which issue tracks them; batch 001 will not be adjudicated | Evidence inventory and review packet, with missing evidence marked and no invented provenance |
+| 011 / #1551 (batch 002; #780 closed as not planned on 2026-11-23) | Alex's actual adjudication of the nine batch 002 candidates; batch 001 will not be adjudicated | Evidence inventory and review packet, with missing evidence marked and no invented provenance |
 | 012 / #735 | Independently labelled real trajectories covering the eight checks; approved baseline/tolerance | Deterministic scorer, strict corpus/report schema, agent-seeded development fixtures |
 | 013 / #736 | Frozen human reference decisions, disjoint held-out sample and predeclared acceptance contract | Eligibility wording correction, saved-decision scoring, split/pin validation, provisional report |
 | 014 / #140 | Separately adjudicated patch-bearing detection labels, the 013 receipt, two selected provider/model identities, approved budget/limits, credentials and actual results | Concrete campaign manifest and report template; no scores or README quality claims |

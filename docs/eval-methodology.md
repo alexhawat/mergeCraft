@@ -85,8 +85,8 @@ and fixing PR, full commit pins, an explicit upstream causal statement, and
 bounded code evidence. The [fixtures](../evals/fixtures/golden/) retain source
 excerpts, actual upstream patches, licenses, attribution, and artifact hashes.
 All nine decisions remain pending; the packet records which upstream tests
-were inspected and whether they were run locally. No open issue has been named
-to track batch 002.
+were inspected and whether they were run locally. Batch 002 is tracked
+in [#1551](https://github.com/alexhawat/mergeCraft/issues/1551).
 
 Neither packet supplies accepted independent human labels, judge calibration,
 or human-human agreement. Preparing or publishing evidence does not create
