@@ -85,7 +85,7 @@
       "evidence_status": "recovered",
       "source_url": "https://github.com/spring-projects/spring-framework/blob/f5a71230440381427d7d652e94a44a8658357025/spring-core/src/main/java/org/springframework/util/CompositeCollection.java#L115-L118",
       "fixture_path": "evals/fixtures/golden/golden-b002-systems-java-spring-composite-set-remove/evidence.json",
-      "fixture_sha256": "1d8969c1aaddca29e219e1da674b2e2a1cb6cda86f9f8a653d883338cfb8a82b",
+      "fixture_sha256": "f23accfa1ee7da6dabe4042fa22561de79a00d383c97424153a9e09ee5878d14",
       "decision": "pending",
       "decided_at": null,
       "decided_by": null,
