@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from mergecraft.mcp.reviewer_sessions import ReviewerSessions
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
@@ -72,6 +74,7 @@ class ToolContext:
     api_token: str
     modes: list[Mode]
     tool_state: ToolState
+    reviewer_sessions: ReviewerSessions
     mcp_server_url: str
     mcp_auth_token: str
     mcp_orchestrator_auth_token: str
@@ -81,6 +84,9 @@ class ToolContext:
     xrepo: XrepoConfig | None = None
     prepush_script: str | None = None
     pr_approve_enabled: bool = False
+    # ``review_event: comment`` — publish every review as COMMENT and resolve no
+    # review threads, so an advisory reviewer can neither block nor unblock.
+    comment_only_review: bool = False
     mode_instructions: dict[str, str] = field(default_factory=dict)
     static_checks: list[StaticCheckConfig] = field(default_factory=list)
     static_checks_enabled: bool = False
@@ -136,6 +142,7 @@ class ToolContext:
         xrepo: XrepoConfig | None = None,
         prepush_script: str | None = None,
         pr_approve_enabled: bool = False,
+        comment_only_review: bool = False,
         mode_instructions: dict[str, str] | None = None,
         static_checks: list[StaticCheckConfig] | None = None,
         static_checks_enabled: bool = False,
@@ -181,6 +188,7 @@ class ToolContext:
             raise ValueError(msg)
         self.tool_state = tool_state
         self.mcp_server_url = mcp_server_url
+        self.reviewer_sessions = ReviewerSessions()
         self.mcp_auth_token = mcp_auth_token
         self.mcp_orchestrator_auth_token = mcp_orchestrator_auth_token
         self.tmpdir = tmpdir
@@ -189,6 +197,7 @@ class ToolContext:
         self.xrepo = xrepo
         self.prepush_script = prepush_script
         self.pr_approve_enabled = pr_approve_enabled
+        self.comment_only_review = comment_only_review
         self.mode_instructions = dict(mode_instructions or {})
         self.static_checks = list(static_checks or [])
         self.static_checks_enabled = static_checks_enabled

@@ -43,6 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   traceback, so the Quickstart failed at its model step. Only the keys a command
   changes are rewritten; comments elsewhere in the file are kept (#1336, #1455).
 
+### Security
+
+- The `gh` binary in both images, and `actionlint` in the analyzers image, are
+  now built with Go 1.27.4, which fixes CVE-2026-97054 in the Go standard
+  library: an HTTP/1 server could crash on a header race when a request body
+  hit its `MaxBytesReader` limit. Neither binary runs an HTTP server inside the
+  Action. The fix clears the HIGH finding that was failing the image scan.
 
 ## 0.1.0a6
 ### Breaking — action required
@@ -186,6 +193,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commit emails and does not authenticate the author (#1310, #1434).
 
 ### Added
+
+- A `review_event` Action input. `verdict` (the default) keeps today's
+  behaviour. `comment` publishes every review as a COMMENT, whatever the
+  verdict, and the run skips the automatic resolution of fixed-finding review
+  threads, so an advisory reviewer can neither block nor unblock a merge. The verdict is
+  still recorded and reported. An unknown value fails the run as a
+  `configuration_error` before the agent starts.
 
 - Re-approve a passed PR whose only new edit is changelog prose by @sevn-one and @claude in [#1285](https://github.com/alexhawat/mergeCraft/pull/1285)
 
