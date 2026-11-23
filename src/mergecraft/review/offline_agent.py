@@ -616,10 +616,6 @@ async def _publish_offline_agent(
         structured_output=finalized.structured_output,
         output_path=evidence_packet_path,
     )
-    from mergecraft.utils.review_cost import recorded_run_cost
-
-    entries = tool_context.tool_state.usage_entries
-    cost = recorded_run_cost(entries, budget_tracker=tool_context.budget_tracker)
     success = outcome == RunOutcome.passed
     error = None
     if not success:
@@ -633,12 +629,6 @@ async def _publish_offline_agent(
         evidence_packet_path=packet_path,
         outcome=outcome,
         llm_review_timing=finalized.timing_payload,
-        cost_usd=cost.amount_usd if cost.availability == "available" else None,
-        total_tokens=(
-            sum(row.input_tokens + row.output_tokens for row in entries)
-            if entries and all(row is not None for row in entries)
-            else None
-        ),
     )
 
 
@@ -669,6 +659,7 @@ async def run_offline_agent_review(
     )
     stop_mcp = None
     github: GitHubClient | None = None
+    tool_context: ToolContext | None = None
     try:
         github = GitHubClient(token="")
         prepared = _prepare_offline_agent(
@@ -711,7 +702,7 @@ async def run_offline_agent_review(
             output_schema=output_schema,
         )
         finalized = _finalize_offline_agent(prepared, dispatched, output_schema=output_schema)
-        return await _publish_offline_agent(
+        result = await _publish_offline_agent(
             finalized,
             tool_context,
             cwd=cwd,
@@ -719,20 +710,20 @@ async def run_offline_agent_review(
             evidence_packet_path=evidence_packet_path,
         )
     except ModelFallbackPolicyError as exc:
-        return _offline_failure(
+        result = _offline_failure(
             error=str(exc),
             outcome=RunOutcome.configuration_error,
             diff_path=str(materialization.path),
         )
     except BudgetExhausted as exc:
-        return _offline_failure(
+        result = _offline_failure(
             error=str(exc),
             outcome=budget_exhaustion_outcome(exc),
             diff_path=str(materialization.path),
         )
     except Exception as exc:
         logger.exception("offline diff-review failed")
-        return _offline_failure(
+        result = _offline_failure(
             error=str(exc),
             outcome=_offline_error_outcome(exc),
             diff_path=str(materialization.path),
@@ -744,3 +735,13 @@ async def run_offline_agent_review(
             await github.aclose()
         # ``tmpdir`` belongs to the caller, which schedules its removal
         # (``utils.git_setup.schedule_directory_cleanup``, ``MERGECRAFT_KEEP_TMP``).
+
+    if tool_context is not None:
+        from mergecraft.utils.review_cost import recorded_run_cost
+
+        entries = tool_context.tool_state.usage_entries
+        cost = recorded_run_cost(entries, budget_tracker=tool_context.budget_tracker)
+        result.cost_usd = cost.amount_usd if cost.availability == "available" else None
+        if entries and all(row is not None for row in entries):
+            result.total_tokens = sum(row.input_tokens + row.output_tokens for row in entries)
+    return result

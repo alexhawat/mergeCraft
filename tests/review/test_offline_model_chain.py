@@ -156,6 +156,8 @@ async def test_offline_prices_fallback_usage_for_live_review_budgets(
     limited = await run(dispatch, tmp_path)
     assert limited.outcome == RunOutcome.inconclusive
     assert "cost budget exhausted" in limited.error
+    assert limited.cost_usd == pytest.approx(0.012)
+    assert limited.total_tokens == 11_100
 
 
 @pytest.mark.parametrize(

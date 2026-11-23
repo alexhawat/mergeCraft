@@ -548,10 +548,12 @@ def test_review_run_failed_excludes_case_from_scoring_not_a_zero_finding_pass(
     _write_detection_case(corpus, "bench-detect-fails-001", closed_world=False, issues=[])
     cases = discover_detection_cases(corpus)
 
-    def review_fn(case: DetectionCase) -> list[dict[str, Any]]:
+    from mergecraft.evals.live_run import ReviewOutcome
+
+    def review_fn(case: DetectionCase) -> ReviewOutcome:
         if case.case_id == "bench-detect-fails-001":
             raise ReviewRunFailed("simulated provider rate-limit error")
-        return []
+        return ReviewOutcome(findings=[], cost_usd=0.01)
 
     metrics = run_live_detection(
         cases,
@@ -564,6 +566,7 @@ def test_review_run_failed_excludes_case_from_scoring_not_a_zero_finding_pass(
     assert metrics.cases_run == 1
     assert metrics.cases_failed == 1
     assert metrics.failed_case_ids == ["bench-detect-fails-001"]
+    assert metrics.total_cost_usd is None
     assert {r.case_id for r in metrics.case_results} == {"bench-detect-ok-001"}
     # The failed case's aggregate isn't polluted with a fabricated zero-finding pass.
     assert metrics.aggregate.total_cases == 1
@@ -876,6 +879,39 @@ def test_a_review_over_its_wall_clock_bound_is_recorded_as_a_timeout(tmp_path: P
     assert metrics.failed_case_errors["bench-a-001"].startswith("TimeoutError")
 
 
+def test_exhausted_review_charges_campaign_before_the_next_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mergecraft.evals.live_run import ReviewBudget, _default_review_fn
+    from mergecraft.review.offline_result import OfflineReviewResult
+
+    attempts: list[Path] = []
+
+    async def exhausted_review(*, diff_file: Path, **_kwargs: Any) -> OfflineReviewResult:
+        attempts.append(diff_file)
+        return OfflineReviewResult(success=False, error="cost budget exhausted", cost_usd=0.012)
+
+    monkeypatch.setattr("mergecraft.offline_review.run_offline_diff_review", exhausted_review)
+    cases = _three_cases(tmp_path)[:2]
+    budget = ReviewBudget(per_review_cost_budget_usd=0.011, campaign_cost_ceiling_usd=0.012)
+    model = "paperinstruments/ultramarine-1-flash"
+    metrics = run_live_detection(
+        cases,
+        provider="paperinstruments",
+        model=model,
+        review_fn=_default_review_fn(model, budget),
+        results_dir=tmp_path / "results",
+        budget=budget,
+    )
+
+    assert attempts == [cases[0].patch_path]
+    assert metrics.cases_run == 0
+    assert metrics.cases_failed == 2
+    assert "cost budget exhausted" in metrics.failed_case_errors[cases[0].case_id]
+    assert "campaign cost ceiling reached" in metrics.failed_case_errors[cases[1].case_id]
+    assert metrics.total_cost_usd == pytest.approx(0.012)
+
+
 def test_default_review_enforces_the_timeout_and_scopes_the_bounds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -972,7 +1008,8 @@ def test_bench_command_exposes_failures_latency_cost_and_budget_flags(
     assert result.exit_code == 0, result.output
     assert "failed cases    : 1" in result.output
     assert "bench-b-002: TimeoutError: hung" in result.output
-    assert "cost            : $0.5000" in result.output
+    # The timed-out attempt reported no cost, so the campaign total is unknown.
+    assert "cost            : unknown" in result.output
     assert "latency" in result.output
 
 
