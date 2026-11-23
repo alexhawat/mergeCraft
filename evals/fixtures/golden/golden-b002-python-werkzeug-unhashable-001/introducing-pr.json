@@ -1,0 +1,18 @@
+{
+  "base": {
+    "ref": "0.15.x",
+    "sha": "777500b64647ea47b21e52e5e113ba1d86014c05"
+  },
+  "body": "closes #1536 \r\n\r\nThe traceback formatter followed `exc_value.__context__` infinitely, even if there was a cycle. Add a memo set to track what's been seen already and break when it detects a cycle. ",
+  "head": {
+    "ref": "break-tb-cycle",
+    "sha": "44e38c2985bcd3a7c17467bead901b8f36528f5f"
+  },
+  "html_url": "https://github.com/pallets/werkzeug/pull/1540",
+  "merge_commit_sha": "bdc17e4cd10bbb17449006cef385ec953a11fc36",
+  "merged": true,
+  "merged_at": "2019-05-12T14:55:29Z",
+  "number": 1540,
+  "state": "closed",
+  "title": "break cycle in chained exceptions"
+}

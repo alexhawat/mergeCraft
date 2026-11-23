@@ -357,6 +357,27 @@ def _usage_token_totals(usage_entries: list[Any]) -> tuple[int, int]:
     return input_total, output_total
 
 
+def _input_label(input_total: int, usage_entries: list[Any]) -> str:
+    label = f"{input_total:,} input"
+    cached = written = 0
+    for row in usage_entries:
+        read = getattr(row, "cache_read_tokens", None) or 0
+        write = getattr(row, "cache_write_tokens", None) or 0
+        if min(read, write) < 0 or read + write > (getattr(row, "input_tokens", 0) or 0):
+            logger.warning("inconsistent input cache counters; displaying total input")
+            return label
+        cached += read
+        written += write
+    if not (cached or written):
+        return label
+    parts = [f"{input_total - cached - written:,} fresh"]
+    if cached:
+        parts.append(f"{cached:,} cached")
+    if written:
+        parts.append(f"{written:,} cache write")
+    return f"{label} ({' + '.join(parts)})"
+
+
 def format_token_budget_summary(
     tracker: BudgetTracker,
     *,
@@ -380,14 +401,12 @@ def format_token_budget_summary(
         used = f"{tracker.tokens_used:,} used"
     else:
         input_total, output_total = _usage_token_totals(usage_entries)
+        label = _input_label(input_total, usage_entries)
         context_extra = tracker.tokens_used - (input_total + output_total)
         if context_extra > 0:
-            used = (
-                f"{input_total:,} input / {output_total:,} output / "
-                f"{context_extra:,} context expansion used"
-            )
+            used = f"{label} / {output_total:,} output / {context_extra:,} context expansion used"
         else:
-            used = f"{input_total:,} input / {output_total:,} output used"
+            used = f"{label} / {output_total:,} output used"
     parts = [
         f"{used} (target {bounds.token_budget:,}, ceiling {bounds.token_ceiling:,})",
     ]
@@ -420,7 +439,7 @@ def token_summary_from_usage(
     if not usage_entries:
         return None
     input_total, output_total = _usage_token_totals(usage_entries)
-    return f"{input_total:,} input / {output_total:,} output"
+    return f"{_input_label(input_total, usage_entries)} / {output_total:,} output"
 
 
 def enumerate_unbounded_external_operations() -> list[str]:

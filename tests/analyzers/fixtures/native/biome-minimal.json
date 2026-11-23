@@ -2,6 +2,11 @@
   "summary": {
     "changed": 0,
     "unchanged": 1,
+    "matches": 0,
+    "duration": {
+      "secs": 0,
+      "nanos": 28704916
+    },
     "errors": 1,
     "warnings": 0,
     "skipped": 0,
@@ -14,18 +19,89 @@
       "severity": "error",
       "description": "This is an unexpected use of the debugger statement.",
       "message": [
-        {"elements": [], "content": "This is an unexpected use of the "},
-        {"elements": ["Emphasis"], "content": "debugger"},
-        {"elements": [], "content": " statement."}
+        {
+          "elements": [],
+          "content": "This is an unexpected use of the "
+        },
+        {
+          "elements": [
+            "Emphasis"
+          ],
+          "content": "debugger"
+        },
+        {
+          "elements": [],
+          "content": " statement."
+        }
       ],
-      "advices": {"advices": []},
-      "verboseAdvices": {"advices": []},
-      "location": {
-        "path": {"file": "src/index.js"},
-        "span": [21, 30],
-        "sourceCode": "const answer = 42;\n\n\ndebugger;\n"
+      "advices": {
+        "advices": [
+          {
+            "log": [
+              "info",
+              [
+                {
+                  "elements": [],
+                  "content": "Unsafe fix: Remove debugger statement"
+                }
+              ]
+            ]
+          },
+          {
+            "diff": {
+              "dictionary": "export const answer = 42;\n\n\ndebugger;",
+              "ops": [
+                {
+                  "diffOp": {
+                    "equal": {
+                      "range": [
+                        0,
+                        25
+                      ]
+                    }
+                  }
+                },
+                {
+                  "diffOp": {
+                    "delete": {
+                      "range": [
+                        25,
+                        37
+                      ]
+                    }
+                  }
+                },
+                {
+                  "diffOp": {
+                    "equal": {
+                      "range": [
+                        25,
+                        26
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
       },
-      "tags": ["fixable"],
+      "verboseAdvices": {
+        "advices": []
+      },
+      "location": {
+        "path": {
+          "file": "src/index.js"
+        },
+        "span": [
+          28,
+          37
+        ],
+        "sourceCode": "export const answer = 42;\n\n\ndebugger;\n"
+      },
+      "tags": [
+        "fixable"
+      ],
       "source": null
     }
   ],

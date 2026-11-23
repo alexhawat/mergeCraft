@@ -1,0 +1,709 @@
+{
+  "schema_version": "1",
+  "source_id": "golden-batch-002",
+  "title": "mergeCraft golden batch 002 (pending human review)",
+  "workflow": {
+    "schema_version": "1",
+    "id": "mergecraft-golden-b002",
+    "version": 1,
+    "title": "mergeCraft golden batch 002 adjudication",
+    "description": "A human confirms, corrects, or abstains on each agent-proposed regression finding, judged against the pinned upstream code and PR diffs.",
+    "item": {
+      "id_field": "case_id",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case_id",
+          "review_id",
+          "title",
+          "category",
+          "path",
+          "start_line",
+          "end_line",
+          "finding",
+          "excerpt",
+          "evidence_status"
+        ],
+        "properties": {
+          "case_id": {
+            "type": "string"
+          },
+          "review_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "framework": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "license": {
+            "type": "string"
+          },
+          "license_url": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "introducing_pr_url": {
+            "type": "string"
+          },
+          "fix_pr_url": {
+            "type": "string"
+          },
+          "trigger": {
+            "type": "string"
+          },
+          "finding": {
+            "type": "string"
+          },
+          "history_md": {
+            "type": "string"
+          },
+          "correction": {
+            "type": "string"
+          },
+          "tests": {
+            "type": "string"
+          },
+          "limits": {
+            "type": "string"
+          },
+          "excerpt": {
+            "type": "string"
+          },
+          "verification": {
+            "type": "string"
+          },
+          "fix_test_files": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "introducing_patch": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fix_patch": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "evidence_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "packet_fixture_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "start_line": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "end_line": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "excerpt_start": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "evidence_status": {
+            "enum": [
+              "recovered",
+              "missing"
+            ]
+          },
+          "verified": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "display": {
+      "eyebrow": "{review_id} · {case_id}",
+      "blocks": [
+        {
+          "type": "heading",
+          "field": "title"
+        },
+        {
+          "type": "callout",
+          "tone": "neutral",
+          "text": "Agent-proposed finding, pending your adjudication. Judge it against the pinned upstream code and diffs below, not the agent's wording."
+        },
+        {
+          "type": "callout",
+          "tone": "warning",
+          "show_if": {
+            "field": "verified",
+            "equals": false
+          },
+          "field": "verification"
+        },
+        {
+          "type": "facts",
+          "items": [
+            {
+              "label": "Claimed location",
+              "template": "{path}:{start_line}-{end_line}",
+              "style": "mono"
+            },
+            {
+              "label": "Proposed category",
+              "field": "category",
+              "style": "badge"
+            },
+            {
+              "label": "Language / framework",
+              "template": "{language} / {framework}"
+            },
+            {
+              "label": "Upstream",
+              "template": "{repo} ({license})"
+            },
+            {
+              "label": "Evidence",
+              "field": "evidence_status",
+              "style": "badge",
+              "tones": {
+                "recovered": "ok",
+                "missing": "warning"
+              }
+            },
+            {
+              "label": "Checked against GitHub",
+              "field": "verification"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "label": "Trigger",
+          "field": "trigger"
+        },
+        {
+          "type": "text",
+          "label": "Proposed finding",
+          "field": "finding"
+        },
+        {
+          "type": "markdown",
+          "label": "Upstream history",
+          "field": "history_md"
+        },
+        {
+          "type": "link",
+          "label": "Pinned source at the introducing merge",
+          "field": "source_url"
+        },
+        {
+          "type": "code",
+          "label": "Code at the claimed location (introducing merge)",
+          "field": "excerpt",
+          "language": "{language}",
+          "start_line_field": "excerpt_start"
+        },
+        {
+          "type": "diff",
+          "label": "Introducing PR diff for this file",
+          "field": "introducing_patch",
+          "highlight": {
+            "path_field": "path",
+            "start_field": "start_line",
+            "end_field": "end_line"
+          },
+          "show_if": {
+            "field": "introducing_patch",
+            "present": true
+          }
+        },
+        {
+          "type": "diff",
+          "label": "Fix PR diff",
+          "field": "fix_patch",
+          "show_if": {
+            "field": "fix_patch",
+            "present": true
+          }
+        },
+        {
+          "type": "text",
+          "label": "Correction in the merged fix",
+          "field": "correction"
+        },
+        {
+          "type": "text",
+          "label": "Test evidence",
+          "field": "tests"
+        },
+        {
+          "type": "text",
+          "label": "Test files in the fix PR",
+          "field": "fix_test_files",
+          "show_if": {
+            "field": "fix_test_files",
+            "present": true
+          }
+        },
+        {
+          "type": "text",
+          "label": "Limits",
+          "field": "limits"
+        },
+        {
+          "type": "link",
+          "label": "License",
+          "field": "license_url"
+        }
+      ]
+    },
+    "question": {
+      "text": "Does the proposed finding hold at the claimed location, within its stated scope?",
+      "help": "Confirm accepts the finding and its scope. Correct if it is real but the claim, location or category is wrong. Abstain if the evidence does not let you decide."
+    },
+    "form": {
+      "fields": [
+        {
+          "name": "decision",
+          "label": "Decision",
+          "type": "choice",
+          "required": true,
+          "options": [
+            {
+              "value": "confirm",
+              "label": "Confirm",
+              "help": "The finding holds at the claimed location, within its stated scope."
+            },
+            {
+              "value": "correct",
+              "label": "Correct",
+              "help": "The finding is real but the claim, location or category is wrong."
+            },
+            {
+              "value": "abstain",
+              "label": "Abstain",
+              "help": "The evidence does not let you decide."
+            }
+          ]
+        },
+        {
+          "name": "corrected_fields",
+          "label": "Corrected fields",
+          "type": "group",
+          "show_if": {
+            "answer": "decision",
+            "equals": "correct"
+          },
+          "required": "at_least_one",
+          "fields": [
+            {
+              "name": "finding",
+              "label": "Corrected claim",
+              "type": "textarea"
+            },
+            {
+              "name": "category",
+              "label": "Category",
+              "type": "text",
+              "placeholder_field": "category"
+            },
+            {
+              "name": "path",
+              "label": "Path",
+              "type": "text",
+              "placeholder_field": "path"
+            },
+            {
+              "name": "start_line",
+              "label": "Start line",
+              "type": "integer",
+              "min": 1,
+              "placeholder_field": "start_line"
+            },
+            {
+              "name": "end_line",
+              "label": "End line",
+              "type": "integer",
+              "min": 1,
+              "placeholder_field": "end_line"
+            }
+          ]
+        },
+        {
+          "name": "notes",
+          "label": "Notes",
+          "type": "textarea",
+          "help": "Optional. For Abstain, what evidence is missing or what is uncertain."
+        }
+      ]
+    },
+    "output": {
+      "format": "json",
+      "include": "answered",
+      "envelope": {
+        "batch_id": {
+          "source_meta": "batch_id"
+        },
+        "adjudicator_login": {
+          "source_meta": "adjudicator_login"
+        }
+      },
+      "records_key": "cases",
+      "record": {
+        "review_id": {
+          "item": "review_id"
+        },
+        "case_id": {
+          "item": "case_id"
+        },
+        "evidence_sha256": {
+          "item": "evidence_sha256"
+        },
+        "decision": {
+          "answer": "decision"
+        },
+        "decided_at": {
+          "response": "submitted_at"
+        },
+        "decided_by": {
+          "response": "user"
+        },
+        "corrected_fields": {
+          "answer": "corrected_fields",
+          "empty_as": null
+        },
+        "notes": {
+          "answer": "notes",
+          "empty_as": null
+        }
+      }
+    }
+  },
+  "meta": {
+    "batch_id": "golden-batch-002",
+    "adjudicator_login": "alexhawat",
+    "prepared": "2026-11-19",
+    "tracking_issue": "https://github.com/alexhawat/mergeCraft/issues/780",
+    "note": "Agent-proposed candidates staged for review; not published golden corpus rows."
+  },
+  "items": [
+    {
+      "case_id": "golden-b002-js-vite-pnp-builtins-001",
+      "review_id": "B2-01",
+      "title": "Yarn PnP package lookup treats browser polyfills as builtins",
+      "language": "typescript",
+      "framework": "Vite",
+      "category": "correctness",
+      "repo": "vitejs/vite",
+      "license": "MIT",
+      "license_url": "https://github.com/vitejs/vite/blob/1fc8c652c46a27f6229c9125e3b0d1662d2a0e67/LICENSE",
+      "path": "packages/vite/src/node/packages.ts",
+      "start_line": 193,
+      "end_line": 194,
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/vitejs/vite/blob/1fc8c652c46a27f6229c9125e3b0d1662d2a0e67/packages/vite/src/node/packages.ts#L193-L194",
+      "introducing_pr_url": "https://github.com/vitejs/vite/pull/12441",
+      "fix_pr_url": "https://github.com/vitejs/vite/pull/12903",
+      "trigger": "In a Yarn Plug'n'Play project, resolve installed browser packages named buffer or string_decoder through Vite package metadata lookup.",
+      "finding": "The new PnP resolution path calls resolveToUnqualified without considerBuiltins:false. The default treats names shared with Node builtins as builtin modules and returns no package location instead of resolving the installed browser-polyfill package; Vite then reports missing package metadata. The upstream fix explicitly disables builtin treatment in this package-only lookup.",
+      "history_md": "[Introducing PR #12441](https://github.com/vitejs/vite/pull/12441) merged 2023-03-21T06:42:23Z · [fix PR #12903](https://github.com/vitejs/vite/pull/12903) merged 2023-04-19T06:00:09Z\n\n| Pin | Introducing PR | Fix PR |\n|---|---|---|\n| Base | `8d2931ba6d32fab6ca2831e2b293469236b67503` | `62ebe28d4023c1f67578b1977edd3371f44f475a` |\n| Head | `ff02c9ace060ae9c9c654bc0ae1262597bb5c721` | `31d20aba7890cd6e5c48acb59cf47a2d90e2d7da` |\n| Merge | `1fc8c652c46a27f6229c9125e3b0d1662d2a0e67` | `a0e10d5bc8b7ac6f27bd006a5cb65a56538fcede` |\n\nFix PR states: “Regression introduced by https://github.com/vitejs/vite/pull/12441”",
+      "correction": "Pass { considerBuiltins: false } to pnp.resolveToUnqualified so installed packages sharing Node builtin names resolve as packages.",
+      "tests": "No regression test was added in fix PR #12903; upstream fix body identifies installed buffer and string_decoder as failing inputs and links issue #12888. No local test was run.",
+      "fix_test_files": null,
+      "limits": "No new upstream regression test in the fix PR; evidence consists of the explicit upstream causal statement, introducing call, and targeted option fix. The introducing helper resolvePkgJsonPath was later folded into resolvePackageData, so source line numbers differ at the fix commit. Requires Yarn PnP and an installed package sharing a Node builtin name; ordinary node_modules resolution uses a different path. Selected-path patch excerpts are copied from the GitHub PR-files API and are not a full PR checkout.",
+      "excerpt": "  basedir: string,\n  preserveSymlinks = false,\n): string | undefined {\n  if (pnp) {\n    const pkg = pnp.resolveToUnqualified(pkgName, basedir)\n    if (!pkg) return undefined\n    return path.join(pkg, 'package.json')\n  }\n\n  let root = basedir",
+      "excerpt_start": 189,
+      "introducing_patch": "--- a/packages/vite/src/node/packages.ts\n+++ b/packages/vite/src/node/packages.ts\n@@ -1,9 +1,18 @@\n import fs from 'node:fs'\n import path from 'node:path'\n-import { createDebugger, createFilter, resolveFrom } from './utils'\n+import { createRequire } from 'node:module'\n+import { createDebugger, createFilter, safeRealpathSync } from './utils'\n import type { ResolvedConfig } from './config'\n import type { Plugin } from './plugin'\n \n+// eslint-disable-next-line @typescript-eslint/consistent-type-imports\n+let pnp: typeof import('pnpapi') | undefined\n+if (process.versions.pnp) {\n+  try {\n+    pnp = createRequire(import.meta.url)('pnpapi')\n+  } catch {}\n+}\n+\n const isDebug = process.env.DEBUG\n const debug = createDebugger('vite:resolve-details', {\n   onlyWhenFocused: true,\n@@ -60,9 +69,9 @@ export function resolvePackageData(\n       return pkg\n     }\n   }\n-  let pkgPath: string | undefined\n+  const pkgPath = resolvePkgJsonPath(id, basedir, preserveSymlinks)\n+  if (!pkgPath) return null\n   try {\n-    pkgPath = resolveFrom(`${id}/package.json`, basedir, preserveSymlinks)\n     pkg = loadPackageData(pkgPath, true, packageCache)\n     if (packageCache) {\n       packageCache.set(cacheKey!, pkg)\n@@ -72,12 +81,8 @@ export function resolvePackageData(\n     if (e instanceof SyntaxError) {\n       isDebug && debug(`Parsing failed: ${pkgPath}`)\n     }\n-    // Ignore error for missing package.json\n-    else if (e.code !== 'MODULE_NOT_FOUND') {\n-      throw e\n-    }\n+    throw e\n   }\n-  return null\n }\n \n export function loadPackageData(\n@@ -86,7 +91,7 @@ export function loadPackageData(\n   packageCache?: PackageCache,\n ): PackageData {\n   if (!preserveSymlinks) {\n-    pkgPath = fs.realpathSync.native(pkgPath)\n+    pkgPath = safeRealpathSync(pkgPath)\n   }\n \n   let cached: PackageData | undefined\n@@ -178,3 +183,30 @@ export function watchPackageDataPlugin(config: ResolvedConfig): Plugin {\n     },\n   }\n }\n+\n+export function resolvePkgJsonPath(\n+  pkgName: string,\n+  basedir: string,\n+  preserveSymlinks = false,\n+): string | undefined {\n+  if (pnp) {\n+    const pkg = pnp.resolveToUnqualified(pkgName, basedir)\n+    if (!pkg) return undefined\n+    return path.join(pkg, 'package.json')\n+  }\n+\n+  let root = basedir\n+  while (root) {\n+    const pkg = path.join(root, 'node_modules', pkgName, 'package.json')\n+    try {\n+      if (fs.existsSync(pkg)) {\n+        return preserveSymlinks ? pkg : safeRealpathSync(pkg)\n+      }\n+    } catch {}\n+    const nextRoot = path.dirname(root)\n+    if (nextRoot === root) break\n+    root = nextRoot\n+  }\n+\n+  return undefined\n+}\n",
+      "fix_patch": "--- a/packages/vite/src/node/packages.ts\n+++ b/packages/vite/src/node/packages.ts\n@@ -60,7 +60,9 @@ export function resolvePackageData(\n \n     let pkg: string | null\n     try {\n-      pkg = pnp.resolveToUnqualified(pkgName, basedir)\n+      pkg = pnp.resolveToUnqualified(pkgName, basedir, {\n+        considerBuiltins: false,\n+      })\n     } catch {\n       return null\n     }\n",
+      "evidence_sha256": "312438090ed292f9df87cc7f385cfe8f82b475849a68be5799675d380855e681",
+      "packet_fixture_sha256": "fbceb2fbfeac6aa3a1810e6166fd58995748d8f13add62f854cb6dc91e84146f",
+      "verification": "pins and causal quote match GitHub",
+      "verified": true
+    },
+    {
+      "case_id": "golden-b002-js-vite-ssr-entry-001",
+      "review_id": "B2-02",
+      "title": "Package-name matching ignores explicit SSR external entry",
+      "language": "typescript",
+      "framework": "Vite",
+      "category": "correctness",
+      "repo": "vitejs/vite",
+      "license": "MIT",
+      "license_url": "https://github.com/vitejs/vite/blob/5844d8e3480e7713acfa7655666bf0076dcb8879/LICENSE",
+      "path": "packages/vite/src/node/ssr/ssrExternal.ts",
+      "start_line": 127,
+      "end_line": 128,
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/vitejs/vite/blob/5844d8e3480e7713acfa7655666bf0076dcb8879/packages/vite/src/node/ssr/ssrExternal.ts#L127-L128",
+      "introducing_pr_url": "https://github.com/vitejs/vite/pull/9146",
+      "fix_pr_url": "https://github.com/vitejs/vite/pull/9286",
+      "trigger": "Set ssr.external to ['external-entry/entry'] and ssr.noExternal to ['external-entry']; import the same stateful entry both directly and from another external package.",
+      "finding": "Replacing includes(id) with includes(pkgName) prevents an explicit package subpath from matching ssr.external. The package-level noExternal filter can then bundle that entry despite its explicit external declaration, splitting its module state from the Node-loaded copy. The fix prioritizes an exact id match and adds a state-sharing regression fixture.",
+      "history_md": "[Introducing PR #9146](https://github.com/vitejs/vite/pull/9146) merged 2022-07-15T21:40:24Z · [fix PR #9286](https://github.com/vitejs/vite/pull/9286) merged 2022-07-22T07:47:32Z\n\n| Pin | Introducing PR | Fix PR |\n|---|---|---|\n| Base | `5ea70b3c3cd5f208471338c5832a3eba1aafb01d` | `0b083ca84a1b32f9f2c4d73444d30e0c80abe3b1` |\n| Head | `259f91f3b6914f53d958e16db7dd63332fc67084` | `f318d9534dfdb3132af03a2ae3a9f985479a2483` |\n| Merge | `5844d8e3480e7713acfa7655666bf0076dcb8879` | `d420f01d48c2291e82410b4649f274f8d1493a27` |\n\nFix PR states: “Fixes a regression introduced by: - https://github.com/vitejs/vite/pull/9146”",
+      "correction": "Check ssr.external.includes(id) first so a specific entry is forced external; handle package-wide declarations separately and retain the externalizability check.",
+      "tests": "playground/ssr-deps/__tests__/ssr-deps.spec.ts: msg from external using external entry. Upstream regression coverage was inspected; it was not run locally.",
+      "fix_test_files": "playground/ssr-deps/__tests__/ssr-deps.spec.ts, playground/ssr-deps/external-entry/entry.js, playground/ssr-deps/external-entry/index.js, playground/ssr-deps/external-entry/package.json, playground/ssr-deps/external-using-external-entry/index.js, playground/ssr-deps/external-using-external-entry/package.json, playground/ssr-deps/package.json, playground/ssr-deps/server.js, playground/ssr-deps/src/app.js",
+      "limits": "The proposed finding is the loss of exact subpath matching. The same fix also adjusts package-wide externalization so non-externalizable assets still pass through checks. Upstream integration coverage needs Vite SSR playground dependencies and a browser. Selected-path patch excerpts are copied from the GitHub PR-files API and are not a full PR checkout.",
+      "excerpt": "      const pkgName = getNpmPackageName(id)\n      if (!pkgName) {\n        return undefined\n      }\n      if (ssr.external?.includes(pkgName)) {\n        return true\n      }\n      if (typeof noExternal === 'boolean') {\n        return !noExternal\n      }",
+      "excerpt_start": 123,
+      "introducing_patch": "--- a/packages/vite/src/node/ssr/ssrExternal.ts\n+++ b/packages/vite/src/node/ssr/ssrExternal.ts\n@@ -120,13 +120,17 @@ export function createIsConfiguredAsSsrExternal(\n   return (id: string) => {\n     const { ssr } = config\n     if (ssr) {\n-      if (ssr.external?.includes(id)) {\n+      const pkgName = getNpmPackageName(id)\n+      if (!pkgName) {\n+        return undefined\n+      }\n+      if (ssr.external?.includes(pkgName)) {\n         return true\n       }\n       if (typeof noExternal === 'boolean') {\n         return !noExternal\n       }\n-      if (noExternalFilter && !noExternalFilter(id)) {\n+      if (noExternalFilter && !noExternalFilter(pkgName)) {\n         return false\n       }\n     }\n",
+      "fix_patch": "--- a/packages/vite/src/node/ssr/ssrExternal.ts\n+++ b/packages/vite/src/node/ssr/ssrExternal.ts\n@@ -124,9 +124,22 @@ export function createIsConfiguredAsSsrExternal(\n       if (!pkgName) {\n         return undefined\n       }\n-      if (ssr.external?.includes(pkgName)) {\n+      if (\n+        // If this id is defined as external, force it as external\n+        // Note that individual package entries are allowed in ssr.external\n+        ssr.external?.includes(id)\n+      ) {\n         return true\n       }\n+      if (\n+        // A package name in ssr.external externalizes every entry\n+        ssr.external?.includes(pkgName)\n+      ) {\n+        // Return undefined here to avoid short-circuiting the isExternalizable check,\n+        // that will filter this id out if it is not externalizable (e.g. a CSS file)\n+        // We return here to make ssr.external take precedence over noExternal\n+        return undefined\n+      }\n       if (typeof noExternal === 'boolean') {\n         return !noExternal\n       }\n@@ -154,7 +167,7 @@ function createIsSsrExternal(\n     isBuild: true\n   }\n \n-  const isValidPackageEntry = (id: string) => {\n+  const isExternalizable = (id: string) => {\n     if (!bareImportRE.test(id) || id.includes('\\0')) {\n       return false\n     }\n@@ -176,7 +189,7 @@ function createIsSsrExternal(\n     let external = false\n     if (!id.startsWith('.') && !path.isAbsolute(id)) {\n       external =\n-        isBuiltin(id) || (isConfiguredAsExternal(id) ?? isValidPackageEntry(id))\n+        isBuiltin(id) || (isConfiguredAsExternal(id) ?? isExternalizable(id))\n     }\n     processedIds.set(id, external)\n     return external\n",
+      "evidence_sha256": "f335cdae0fb831998e9b675db3d5a7bed7e0140379cdace69162a9532720d819",
+      "packet_fixture_sha256": "b382f0cb83dfb90aa58e27b8248edc6ec420ca48e756cc2cbc947c5101febc7c",
+      "verification": "pins and causal quote match GitHub",
+      "verified": true
+    },
+    {
+      "case_id": "golden-b002-js-vue-shallow-brand-001",
+      "review_id": "B2-03",
+      "title": "Required shallowReactive brand rejects plain object assignment",
+      "language": "typescript",
+      "framework": "Vue",
+      "category": "correctness",
+      "repo": "vuejs/core",
+      "license": "MIT",
+      "license_url": "https://github.com/vuejs/core/blob/3b561db4ab42d06166b002f13c0e97cb2bd4a061/LICENSE",
+      "path": "packages/reactivity/src/reactive.ts",
+      "start_line": 109,
+      "end_line": 109,
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/vuejs/core/blob/3b561db4ab42d06166b002f13c0e97cb2bd4a061/packages/reactivity/src/reactive.ts#L109-L109",
+      "introducing_pr_url": "https://github.com/vuejs/core/pull/14493",
+      "fix_pr_url": "https://github.com/vuejs/core/pull/14641",
+      "trigger": "Create const shallow = shallowReactive({ a: 1, b: 2 }); declare let values: typeof shallow; then assign values = { a: 1, b: 2 }.",
+      "finding": "Changing the optional unique-symbol marker into a required property of type never makes a structurally equivalent plain object unassignable. No public caller can provide the uninhabitable required brand. The fix replaces it with an optional private-class brand; the added assignment test exercises this exact source compatibility regression.",
+      "history_md": "[Introducing PR #14493](https://github.com/vuejs/core/pull/14493) merged 2026-03-25T09:06:27Z · [fix PR #14641](https://github.com/vuejs/core/pull/14641) merged 2026-04-03T02:31:00Z\n\n| Pin | Introducing PR | Fix PR |\n|---|---|---|\n| Base | `b147482311762888df6e4681a2c7526bff943fdf` | `81615d398a89beeccfe56a4a96fd2fba0c6fb37b` |\n| Head | `1f7669281ebc1fb69dfddf14aa197f49ab0135b4` | `7d2de78f277cd664fc67b8e01b2b39f33a55ff28` |\n| Merge | `3b561db4ab42d06166b002f13c0e97cb2bd4a061` | `302c47a4994bc8b47b8a2af6693d8cb6bbd4b06b` |\n\nFix PR states: “fix shallowReactive type regressions introduced by #14493”",
+      "correction": "Use a private class with an optional private property as the brand, preserving distinction for unwrap types without requiring a symbol property for plain assignment.",
+      "tests": "packages-private/dts-test/reactivity.test-d.ts: shallowReactive type should accept plain object assignment. Upstream regression coverage was inspected; it was not run locally.",
+      "fix_test_files": "packages-private/dts-test/reactivity.test-d.ts, packages-private/dts-test/ref.test-d.ts",
+      "limits": "This case targets plain-object assignability only; the fix PR also changes proxyRefs and collection unwrapping, which are outside the proposed finding. Type-level source compatibility defect, not a runtime reactivity failure. Selected-path patch excerpts are copied from the GitHub PR-files API and are not a full PR checkout.",
+      "excerpt": "}\n\nexport declare const ShallowReactiveMarker: unique symbol\n\nexport type ShallowReactive<T> = T & { [ShallowReactiveMarker]: never }\n\n/**\n * Shallow version of {@link reactive}.\n *",
+      "excerpt_start": 105,
+      "introducing_patch": "--- a/packages/reactivity/src/reactive.ts\n+++ b/packages/reactivity/src/reactive.ts\n@@ -106,7 +106,7 @@ export function reactive(target: object) {\n \n export declare const ShallowReactiveMarker: unique symbol\n \n-export type ShallowReactive<T> = T & { [ShallowReactiveMarker]?: true }\n+export type ShallowReactive<T> = T & { [ShallowReactiveMarker]: never }\n \n /**\n  * Shallow version of {@link reactive}.\n",
+      "fix_patch": "--- a/packages/reactivity/src/reactive.ts\n+++ b/packages/reactivity/src/reactive.ts\n@@ -104,9 +104,16 @@ export function reactive(target: object) {\n   )\n }\n \n-export declare const ShallowReactiveMarker: unique symbol\n+// Use a private class brand instead of a marker property so shallow-reactive\n+// types remain distinguishable in `UnwrapRef` without leaking the brand into\n+// `keyof`/indexed access types or requiring the property for plain assignment.\n+declare class ShallowReactiveBrandClass {\n+  private __shallowReactiveBrand?: never\n+}\n+\n+export type ShallowReactiveBrand = ShallowReactiveBrandClass\n \n-export type ShallowReactive<T> = T & { [ShallowReactiveMarker]: never }\n+export type ShallowReactive<T> = T & ShallowReactiveBrand\n \n /**\n  * Shallow version of {@link reactive}.\n",
+      "evidence_sha256": "a5324dcb1f5b661003f65fef35df1b2dab6ad241cd3699632611b56f5bb5138f",
+      "packet_fixture_sha256": "1d80cf02cc57a7cfe6b65bba5a8a4cf975fdb7baece44aecb7429d7c782a690a",
+      "verification": "pins and causal quote match GitHub",
+      "verified": true
+    },
+    {
+      "case_id": "golden-b002-python-django-admin-cast-001",
+      "review_id": "B2-04",
+      "title": "Casting exact admin search fields prevents use of ordinary database indexes",
+      "language": "python",
+      "framework": "Django",
+      "category": "performance",
+      "repo": "django/django",
+      "license": "BSD-3-Clause",
+      "license_url": "https://github.com/django/django/blob/f223729f8f8380901473b244c0fc7c7dc397e3f1/LICENSE",
+      "path": "django/contrib/admin/options.py",
+      "start_line": 1222,
+      "end_line": 1227,
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/django/django/blob/f223729f8f8380901473b244c0fc7c7dc397e3f1/django/contrib/admin/options.py#L1222-L1227",
+      "introducing_pr_url": "https://github.com/django/django/pull/17885",
+      "fix_pr_url": "https://github.com/django/django/pull/20538",
+      "trigger": "Configure a Django admin exact search on an indexed non-text field, such as search_fields = [\"id__exact\"], and search a large PostgreSQL table.",
+      "finding": "For a non-text field such as an indexed integer id searched via id__exact, the introducing change annotates Cast(field_name, CharField()) and filters the cast alias. On PostgreSQL an ordinary integer/primary-key index cannot serve that cast expression, causing full scans on large tables. The fix removes Cast and validates each search term against its target field before building direct lookups.",
+      "history_md": "[Introducing PR #17885](https://github.com/django/django/pull/17885) merged 2024-11-04T08:39:47Z · [fix PR #20538](https://github.com/django/django/pull/20538) merged 2026-01-30T16:45:39Z\n\n| Pin | Introducing PR | Fix PR |\n|---|---|---|\n| Base | `03c0a3de722c4a7de9f3edfeb26417ebc8b90fe9` | `f87c2055b45356378a7c2a020eb872352d20f85e` |\n| Head | `7d8962297c54ebbb8bb4eab7ca26ac42f41720be` | `12157a328fdb9801fbc99ff549630040baf2d089` |\n| Merge | `f223729f8f8380901473b244c0fc7c7dc397e3f1` | `4cecf3039586ea738afafb9a28c946bff42c37c1` |\n\nFix PR states: “This PR fixes a performance regression introduced in PR #17885.”",
+      "correction": "Remove string casts and validate each term against its target field before generating direct lookups. The ordinary indexed column can then remain in the search predicate.",
+      "tests": "The fix adds invalid-value and mixed-term search regressions, ensuring invalid non-text lookups are skipped while valid direct lookups continue to work. These are behavioral regressions, not a query-plan/performance assertion. Upstream regression tests included, not run here.",
+      "fix_test_files": "tests/admin_changelist/models.py, tests/admin_changelist/tests.py",
+      "limits": "No PostgreSQL query-plan reproduction or benchmark was run; index impact is explicit in the fix PR body and matches the removed Cast expression. The implementation was refactored between introducing and fixing PRs. The introducing version handles direct concrete field names (for example id__exact); do not use pk__exact to demonstrate this particular introducing hunk.",
+      "excerpt": "                    except FieldDoesNotExist:\n                        lookup = construct_search(field)\n                        orm_lookups.append(lookup)\n                        continue\n                    # Add string cast annotations for non-string exact lookups.\n                    if not isinstance(field_obj, (models.CharField, models.TextField)):\n                        str_annotations[f\"{field_name}_str\"] = Cast(\n                            field_name, output_field=models.CharField()\n                        )\n                        orm_lookups.append(f\"{field_name}_str__exact\")\n                    else:\n                        lookup = construct_search(field)\n                        orm_lookups.append(lookup)\n                else:",
+      "excerpt_start": 1218,
+      "introducing_patch": "--- a/django/contrib/admin/options.py\n+++ b/django/contrib/admin/options.py\n@@ -41,6 +41,7 @@\n from django.core.paginator import Paginator\n from django.db import models, router, transaction\n from django.db.models.constants import LOOKUP_SEP\n+from django.db.models.functions import Cast\n from django.forms.formsets import DELETION_FIELD_NAME, all_valid\n from django.forms.models import (\n     BaseInlineFormSet,\n@@ -1207,9 +1208,33 @@ def construct_search(field_name):\n         may_have_duplicates = False\n         search_fields = self.get_search_fields(request)\n         if search_fields and search_term:\n-            orm_lookups = [\n-                construct_search(str(search_field)) for search_field in search_fields\n-            ]\n+            str_annotations = {}\n+            orm_lookups = []\n+            for field in search_fields:\n+                if field.endswith(\"__exact\"):\n+                    field_name = field.rsplit(\"__exact\", 1)[0]\n+                    try:\n+                        field_obj = queryset.model._meta.get_field(field_name)\n+                    except FieldDoesNotExist:\n+                        lookup = construct_search(field)\n+                        orm_lookups.append(lookup)\n+                        continue\n+                    # Add string cast annotations for non-string exact lookups.\n+                    if not isinstance(field_obj, (models.CharField, models.TextField)):\n+                        str_annotations[f\"{field_name}_str\"] = Cast(\n+                            field_name, output_field=models.CharField()\n+                        )\n+                        orm_lookups.append(f\"{field_name}_str__exact\")\n+                    else:\n+                        lookup = construct_search(field)\n+                        orm_lookups.append(lookup)\n+                else:\n+                    lookup = construct_search(str(field))\n+                    orm_lookups.append(lookup)\n+\n+            if str_annotations:\n+                queryset = queryset.annotate(**str_annotations)\n+\n             term_queries = []\n             for bit in smart_split(search_term):\n                 if bit.startswith(('\"', \"'\")) and bit[0] == bit[-1]:\n",
+      "fix_patch": "--- a/django/contrib/admin/options.py\n+++ b/django/contrib/admin/options.py\n@@ -41,7 +41,6 @@\n from django.core.paginator import Paginator\n from django.db import models, router, transaction\n from django.db.models.constants import LOOKUP_SEP\n-from django.db.models.functions import Cast\n from django.forms.formsets import DELETION_FIELD_NAME, all_valid\n from django.forms.models import (\n     BaseInlineFormSet,\n@@ -1137,6 +1136,12 @@ def get_search_results(self, request, queryset, search_term):\n \n         # Apply keyword searches.\n         def construct_search(field_name):\n+            \"\"\"\n+            Return a tuple of (lookup, field_to_validate).\n+\n+            field_to_validate is set for non-text exact lookups so that\n+            invalid search terms can be skipped (preserving index usage).\n+            \"\"\"\n             if field_name.startswith(\"^\"):\n                 return \"%s__istartswith\" % field_name.removeprefix(\"^\"), None\n             elif field_name.startswith(\"=\"):\n@@ -1148,7 +1153,7 @@ def construct_search(field_name):\n             lookup_fields = field_name.split(LOOKUP_SEP)\n             # Go through the fields, following all relations.\n             prev_field = None\n-            for i, path_part in enumerate(lookup_fields):\n+            for path_part in lookup_fields:\n                 if path_part == \"pk\":\n                     path_part = opts.pk.name\n                 try:\n@@ -1159,15 +1164,9 @@ def construct_search(field_name):\n                         if path_part == \"exact\" and not isinstance(\n                             prev_field, (models.CharField, models.TextField)\n                         ):\n-                            field_name_without_exact = \"__\".join(lookup_fields[:i])\n-                            alias = Cast(\n-                                field_name_without_exact,\n-                                output_field=models.CharField(),\n-                            )\n-                            alias_name = \"_\".join(lookup_fields[:i])\n-                            return f\"{alias_name}_str\", alias\n-                        else:\n-                            return field_name, None\n+                            # Use prev_field to validate the search term.\n+                            return field_name, prev_field\n+                        return field_name, None\n                 else:\n                     prev_field = field\n                     if hasattr(field, \"path_infos\"):\n@@ -1179,30 +1178,42 @@ def construct_search(field_name):\n         may_have_duplicates = False\n         search_fields = self.get_search_fields(request)\n         if search_fields and search_term:\n-            str_aliases = {}\n             orm_lookups = []\n             for field in search_fields:\n-                lookup, str_alias = construct_search(str(field))\n-                orm_lookups.append(lookup)\n-                if str_alias:\n-                    str_aliases[lookup] = str_alias\n-\n-            if str_aliases:\n-                queryset = queryset.alias(**str_aliases)\n+                orm_lookups.append(construct_search(str(field)))\n \n             term_queries = []\n             for bit in smart_split(search_term):\n                 if bit.startswith(('\"', \"'\")) and bit[0] == bit[-1]:\n                     bit = unescape_string_literal(bit)\n-                or_queries = models.Q.create(\n-                    [(orm_lookup, bit) for orm_lookup in orm_lookups],\n-                    connector=models.Q.OR,\n-                )\n-                term_queries.append(or_queries)\n-            queryset = queryset.filter(models.Q.create(term_queries))\n+                # Build term lookups, skipping values invalid for their field.\n+                bit_lookups = []\n+                for orm_lookup, validate_field in orm_lookups:\n+                    if validate_field is not None:\n+                        formfield = validate_field.formfield()\n+                        try:\n+                            if formfield is not None:\n+                                value = formfield.to_python(bit)\n+                            else:\n+                                # Fields like AutoField lack a form field.\n+                                value = validate_field.to_python(bit)\n+                        except ValidationError:\n+                            # Skip this lookup for invalid values.\n+                            continue\n+                    else:\n+                        value = bit\n+                    bit_lookups.append((orm_lookup, value))\n+                if bit_lookups:\n+                    or_queries = models.Q.create(bit_lookups, connector=models.Q.OR)\n+                    term_queries.append(or_queries)\n+                else:\n+                    # No valid lookups: add a filter that returns nothing.\n+                    term_queries.append(models.Q(pk__in=[]))\n+            if term_queries:\n+                queryset = queryset.filter(models.Q.create(term_queries))\n             may_have_duplicates |= any(\n                 lookup_spawns_duplicates(self.opts, search_spec)\n-                for search_spec in orm_lookups\n+                for search_spec, _ in orm_lookups\n             )\n         return queryset, may_have_duplicates\n \n",
+      "evidence_sha256": "13c8713253e790756ee769f585e3d4a1608ad0d5f4bc97cbbbc2b17f1df24d77",
+      "packet_fixture_sha256": "e2ff41811c4b18e9180729e84c8e91161dfdeda71b449bb5e5a178ef89952419",
+      "verification": "pins and causal quote match GitHub",
+      "verified": true
+    },
+    {
+      "case_id": "golden-b002-python-django-mail-headers-001",
+      "review_id": "B2-05",
+      "title": "EmailMessage writes a caller-supplied To header twice",
+      "language": "python",
+      "framework": "Django",
+      "category": "correctness",
+      "repo": "django/django",
+      "license": "BSD-3-Clause",
+      "license_url": "https://github.com/django/django/blob/da82939e5a31dea21a4f4d5085dfcd449fcbed3a/LICENSE",
+      "path": "django/core/mail/message.py",
+      "start_line": 273,
+      "end_line": 276,
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/django/django/blob/da82939e5a31dea21a4f4d5085dfcd449fcbed3a/django/core/mail/message.py#L273-L276",
+      "introducing_pr_url": "https://github.com/django/django/pull/9454",
+      "fix_pr_url": "https://github.com/django/django/pull/18325",
+      "trigger": "Construct EmailMessage with a non-empty to list and headers={\"To\": \"mailing-list@example.com\"}, then inspect message().get_all(\"To\").",
+      "finding": "With non-empty to recipients and headers={\"To\": \"mailing-list@example.com\"}, the new list-header helper writes To from extra_headers, then the final extra_headers loop writes it again because the introducing change stops skipping To. Python email.Message assignment appends headers. The fix skips already-handled list headers and changes tests to get_all() so duplicates become visible.",
+      "history_md": "[Introducing PR #9454](https://github.com/django/django/pull/9454) merged 2017-12-30T14:55:42Z · [fix PR #18325](https://github.com/django/django/pull/18325) merged 2024-07-11T06:00:47Z\n\n| Pin | Introducing PR | Fix PR |\n|---|---|---|\n| Base | `63349394170347241c48a445c843ff2be53e3a8a` | `d12184fedcd586e2c399ea40abe4bf865ebc87a6` |\n| Head | `da82939e5a31dea21a4f4d5085dfcd449fcbed3a` | `a5511235e5bcfd52d986f3099632f67e32b2a4fe` |\n| Merge | `da82939e5a31dea21a4f4d5085dfcd449fcbed3a` | `b9098538a966fdc1f2b5ee51c094ca3de4db6344` |\n\nFix PR states: “ticket-35033 as originally reported was caused by a regression introduced in ticket-28912 (PR #9454).”",
+      "correction": "Skip To, Cc, and Reply-To in the final extra_headers loop because the list-header helper already handled them. Use get_all() in assertions to expose duplicate header values.",
+      "tests": "The fix replaces single-header comparisons with message.get_all(\"To\"), get_all(\"Cc\"), and get_all(\"Reply-To\") equality against one-element lists. test_to_header covers the To duplication newly introduced by #9454. Upstream regression tests included, not run here.",
+      "fix_test_files": "tests/mail/tests.py",
+      "limits": "The pre-introducing version already had some duplicate-header behavior for Cc/Reply-To. The proposed defect is specifically the newly introduced To duplication, not a claim that all repeated-header variants originate in #9454.",
+      "excerpt": "            msg['Date'] = formatdate(localtime=settings.EMAIL_USE_LOCALTIME)\n        if 'message-id' not in header_names:\n            # Use cached DNS_NAME for performance\n            msg['Message-ID'] = make_msgid(domain=DNS_NAME)\n        for name, value in self.extra_headers.items():\n            if name.lower() == 'from':  # From is already handled\n                continue\n            msg[name] = value\n        return msg\n\n    def recipients(self):\n        \"\"\"",
+      "excerpt_start": 269,
+      "introducing_patch": "--- a/django/core/mail/message.py\n+++ b/django/core/mail/message.py\n@@ -254,11 +254,9 @@ def message(self):\n         msg = self._create_message(msg)\n         msg['Subject'] = self.subject\n         msg['From'] = self.extra_headers.get('From', self.from_email)\n-        msg['To'] = self.extra_headers.get('To', ', '.join(map(str, self.to)))\n-        if self.cc:\n-            msg['Cc'] = ', '.join(str(cc) for cc in self.cc)\n-        if self.reply_to:\n-            msg['Reply-To'] = self.extra_headers.get('Reply-To', ', '.join(str(r) for r in self.reply_to))\n+        self._set_list_header_if_not_empty(msg, 'To', self.to)\n+        self._set_list_header_if_not_empty(msg, 'Cc', self.cc)\n+        self._set_list_header_if_not_empty(msg, 'Reply-To', self.reply_to)\n \n         # Email header names are case-insensitive (RFC 2045), so we have to\n         # accommodate that when doing comparisons.\n@@ -273,7 +271,7 @@ def message(self):\n             # Use cached DNS_NAME for performance\n             msg['Message-ID'] = make_msgid(domain=DNS_NAME)\n         for name, value in self.extra_headers.items():\n-            if name.lower() in ('from', 'to'):  # From and To are already handled\n+            if name.lower() == 'from':  # From is already handled\n                 continue\n             msg[name] = value\n         return msg\n@@ -408,6 +406,18 @@ def _create_attachment(self, filename, content, mimetype=None):\n                                   filename=filename)\n         return attachment\n \n+    def _set_list_header_if_not_empty(self, msg, header, values):\n+        \"\"\"\n+        Set msg's header, either from self.extra_headers, if present, or from\n+        the values argument.\n+        \"\"\"\n+        if values:\n+            try:\n+                value = self.extra_headers[header]\n+            except KeyError:\n+                value = ', '.join(str(v) for v in values)\n+            msg[header] = value\n+\n \n class EmailMultiAlternatives(EmailMessage):\n     \"\"\"\n",
+      "fix_patch": "--- a/django/core/mail/message.py\n+++ b/django/core/mail/message.py\n@@ -286,7 +286,8 @@ def message(self):\n             # Use cached DNS_NAME for performance\n             msg[\"Message-ID\"] = make_msgid(domain=DNS_NAME)\n         for name, value in self.extra_headers.items():\n-            if name.lower() != \"from\":  # From is already handled\n+            # Avoid headers handled above.\n+            if name.lower() not in {\"from\", \"to\", \"cc\", \"reply-to\"}:\n                 msg[name] = value\n         return msg\n \n@@ -427,14 +428,13 @@ def _create_attachment(self, filename, content, mimetype=None):\n     def _set_list_header_if_not_empty(self, msg, header, values):\n         \"\"\"\n         Set msg's header, either from self.extra_headers, if present, or from\n-        the values argument.\n+        the values argument if not empty.\n         \"\"\"\n-        if values:\n-            try:\n-                value = self.extra_headers[header]\n-            except KeyError:\n-                value = \", \".join(str(v) for v in values)\n-            msg[header] = value\n+        try:\n+            msg[header] = self.extra_headers[header]\n+        except KeyError:\n+            if values:\n+                msg[header] = \", \".join(str(v) for v in values)\n \n \n class EmailMultiAlternatives(EmailMessage):\n",
+      "evidence_sha256": "d47e1446aa6a7b51554b54ffd303c8f4ce42da840b285ed5ac29aed2758439fb",
+      "packet_fixture_sha256": "fe6d1fb31057ea132e309e956098a1e944ff4caa59bdc7285c40b6cb28591995",
+      "verification": "pins and causal quote match GitHub",
+      "verified": true
+    },
+    {
+      "case_id": "golden-b002-python-werkzeug-unhashable-001",
+      "review_id": "B2-06",
+      "title": "Cycle tracking crashes the debugger on unhashable exception instances",
+      "language": "python",
+      "framework": "Werkzeug",
+      "category": "correctness",
+      "repo": "pallets/werkzeug",
+      "license": "BSD-3-Clause",
+      "license_url": "https://github.com/pallets/werkzeug/blob/bdc17e4cd10bbb17449006cef385ec953a11fc36/LICENSE.rst",
+      "path": "src/werkzeug/debug/tbtools.py",
+      "start_line": 251,
+      "end_line": 255,
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/pallets/werkzeug/blob/bdc17e4cd10bbb17449006cef385ec953a11fc36/src/werkzeug/debug/tbtools.py#L251-L255",
+      "introducing_pr_url": "https://github.com/pallets/werkzeug/pull/1540",
+      "fix_pr_url": "https://github.com/pallets/werkzeug/pull/1542",
+      "trigger": "Format a traceback whose exception class defines __hash__ = None (for example, a mutable custom exception).",
+      "finding": "The newly added memo.add(exc_value) hashes the exception instance. A legitimate exception class with __hash__ = None raises TypeError while the debugger is formatting the original exception. The fix tracks id(exc_value), preserving cycle detection without requiring hashable exceptions.",
+      "history_md": "[Introducing PR #1540](https://github.com/pallets/werkzeug/pull/1540) merged 2019-05-12T14:55:29Z · [fix PR #1542](https://github.com/pallets/werkzeug/pull/1542) merged 2019-05-12T23:38:51Z\n\n| Pin | Introducing PR | Fix PR |\n|---|---|---|\n| Base | `777500b64647ea47b21e52e5e113ba1d86014c05` | `bdc17e4cd10bbb17449006cef385ec953a11fc36` |\n| Head | `44e38c2985bcd3a7c17467bead901b8f36528f5f` | `0e669f6be532801267d35de23c5f5237b8406d8a` |\n| Merge | `bdc17e4cd10bbb17449006cef385ec953a11fc36` | `2cbdf2b02273daccf85845b1e1569096e65ffe58` |\n\nFix PR states: “fix minor regression introduced in #1540”",
+      "correction": "Track id(exc_value) in the cycle-detection set, rather than hashing exception instances.",
+      "tests": "Upstream test_non_hashable_exception defines MutableException(ValueError) with __hash__ = None and calls Traceback(*sys.exc_info()); the pre-fix code throws TypeError. Upstream regression tests included, not run here.",
+      "fix_test_files": "tests/test_debug.py",
+      "limits": "Upstream regression test included, not run here. The case targets debugger availability/correctness and makes no security claim.",
+      "excerpt": "        self.groups = []\n        memo = set()\n        while True:\n            self.groups.append(Group(exc_type, exc_value, tb))\n            memo.add(exc_value)\n            if PY2:\n                break\n            exc_value = exc_value.__cause__ or exc_value.__context__\n            if exc_value is None or exc_value in memo:\n                break\n            exc_type = type(exc_value)\n            tb = exc_value.__traceback__\n        self.groups.reverse()",
+      "excerpt_start": 247,
+      "introducing_patch": "--- a/src/werkzeug/debug/tbtools.py\n+++ b/src/werkzeug/debug/tbtools.py\n@@ -245,12 +245,14 @@ def __init__(self, exc_type, exc_value, tb):\n         self.exception_type = exception_type\n \n         self.groups = []\n+        memo = set()\n         while True:\n             self.groups.append(Group(exc_type, exc_value, tb))\n+            memo.add(exc_value)\n             if PY2:\n                 break\n             exc_value = exc_value.__cause__ or exc_value.__context__\n-            if exc_value is None:\n+            if exc_value is None or exc_value in memo:\n                 break\n             exc_type = type(exc_value)\n             tb = exc_value.__traceback__\n",
+      "fix_patch": "--- a/src/werkzeug/debug/tbtools.py\n+++ b/src/werkzeug/debug/tbtools.py\n@@ -248,11 +248,11 @@ def __init__(self, exc_type, exc_value, tb):\n         memo = set()\n         while True:\n             self.groups.append(Group(exc_type, exc_value, tb))\n-            memo.add(exc_value)\n+            memo.add(id(exc_value))\n             if PY2:\n                 break\n             exc_value = exc_value.__cause__ or exc_value.__context__\n-            if exc_value is None or exc_value in memo:\n+            if exc_value is None or id(exc_value) in memo:\n                 break\n             exc_type = type(exc_value)\n             tb = exc_value.__traceback__\n",
+      "evidence_sha256": "edc7f4b33b7a03aa73bb629d6caf88857c887b6e83bd003f4373f10a1da7f82d",
+      "packet_fixture_sha256": "e5efd9693673c7b27b71dead43e8f7c8355501b148415bb93bf7fd93e41bc87e",
+      "verification": "pins and causal quote match GitHub",
+      "verified": true
+    },
+    {
+      "case_id": "golden-b002-systems-go-gorm-caller-depth",
+      "review_id": "B2-07",
+      "title": "FileWithLineNum reports an inner wrapper after caller extraction",
+      "language": "go",
+      "framework": "GORM",
+      "category": "correctness",
+      "repo": "go-gorm/gorm",
+      "license": "MIT",
+      "license_url": "https://github.com/go-gorm/gorm/blob/2c3d109af3057f0d0ee64104011f12ac7bdab9bc/LICENSE",
+      "path": "utils/utils.go",
+      "start_line": 55,
+      "end_line": 59,
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/go-gorm/gorm/blob/2c3d109af3057f0d0ee64104011f12ac7bdab9bc/utils/utils.go#L55-L59",
+      "introducing_pr_url": "https://github.com/go-gorm/gorm/pull/7610",
+      "fix_pr_url": "https://github.com/go-gorm/gorm/pull/7717",
+      "trigger": "Call FileWithLineNum through an external wrapper chain and compare the reported file:line with the established outer caller location.",
+      "finding": "The introduction routes FileWithLineNum through an additional CallerFrame wrapper while retaining runtime.Callers(3). An external wrapper chain is therefore resolved one frame too early, changing the file:line returned by the established helper. The fix chooses explicit stack skips separately for CallerFrame and FileWithLineNum, and tests the wrapped call chain.",
+      "history_md": "[Introducing PR #7610](https://github.com/go-gorm/gorm/pull/7610) merged 2025-10-30T10:56:26Z · [fix PR #7717](https://github.com/go-gorm/gorm/pull/7717) merged 2026-03-21T11:31:31Z\n\n| Pin | Introducing PR | Fix PR |\n|---|---|---|\n| Base | `b88148363a954f69fa680b152dfd96a94ffea1e1` | `4380dd6dd1a56b7438cec1f4c5a786d006a2c29e` |\n| Head | `0f6d61a85d68e0a3ce35cf57117fbca290f11ac9` | `a52dbae3c58bac0d111b9b338ae81f72e46ad6d7` |\n| Merge | `2c3d109af3057f0d0ee64104011f12ac7bdab9bc` | `61520d7476a5b08cf09439da7bb2628f86d2cd25` |\n\nFix PR states: “After #7610, stack scanning was extracted into CallerFrame().”",
+      "correction": "Use separate explicit stack-skip counts for CallerFrame and FileWithLineNum and exercise the wrapped call chain in the regression test.",
+      "tests": "utils/utils_test.go: TestFileWithLineNumWrappedCallRegression. Upstream regression coverage was inspected; it was not run locally.",
+      "fix_test_files": "utils/utils_test.go",
+      "limits": "This affects caller source diagnostics, rather than database query results. The regression test and stack-depth changes were inspected at the merged fix; no Go tests were executed locally.",
+      "excerpt": "\n\treturn runtime.Frame{}\n}\n\n// FileWithLineNum return the file name and line number of the current file\nfunc FileWithLineNum() string {\n\tframe := CallerFrame()\n\tif frame.PC != 0 {\n\t\treturn string(strconv.AppendInt(append([]byte(frame.File), ':'), int64(frame.Line), 10))\n\t}\n\n\treturn \"\"\n}",
+      "excerpt_start": 51,
+      "introducing_patch": "--- a/utils/utils.go\n+++ b/utils/utils.go\n@@ -30,8 +30,12 @@ func sourceDir(file string) string {\n \treturn filepath.ToSlash(s) + \"/\"\n }\n \n-// FileWithLineNum return the file name and line number of the current file\n-func FileWithLineNum() string {\n+// CallerFrame retrieves the first relevant stack frame outside of GORM's internal implementation files.\n+// It skips:\n+//   - GORM's core source files (identified by gormSourceDir prefix)\n+//   - Exclude test files (*_test.go)\n+//   - go-gorm/gen's Generated files (*.gen.go)\n+func CallerFrame() runtime.Frame {\n \tpcs := [13]uintptr{}\n \t// the third caller usually from gorm internal\n \tlen := runtime.Callers(3, pcs[:])\n@@ -41,10 +45,20 @@ func FileWithLineNum() string {\n \t\tframe, _ := frames.Next()\n \t\tif (!strings.HasPrefix(frame.File, gormSourceDir) ||\n \t\t\tstrings.HasSuffix(frame.File, \"_test.go\")) && !strings.HasSuffix(frame.File, \".gen.go\") {\n-\t\t\treturn string(strconv.AppendInt(append([]byte(frame.File), ':'), int64(frame.Line), 10))\n+\t\t\treturn frame\n \t\t}\n \t}\n \n+\treturn runtime.Frame{}\n+}\n+\n+// FileWithLineNum return the file name and line number of the current file\n+func FileWithLineNum() string {\n+\tframe := CallerFrame()\n+\tif frame.PC != 0 {\n+\t\treturn string(strconv.AppendInt(append([]byte(frame.File), ':'), int64(frame.Line), 10))\n+\t}\n+\n \treturn \"\"\n }\n \n",
+      "fix_patch": "--- a/utils/utils.go\n+++ b/utils/utils.go\n@@ -36,9 +36,14 @@ func sourceDir(file string) string {\n //   - Exclude test files (*_test.go)\n //   - go-gorm/gen's Generated files (*.gen.go)\n func CallerFrame() runtime.Frame {\n+\t// Preserve the original CallerFrame stack depth after introducing callerFrame().\n+\treturn callerFrame(4)\n+}\n+\n+func callerFrame(skip int) runtime.Frame {\n \tpcs := [13]uintptr{}\n-\t// the third caller usually from gorm internal\n-\tlen := runtime.Callers(3, pcs[:])\n+\t// skip is caller-path sensitive and should be selected by each public helper.\n+\tlen := runtime.Callers(skip, pcs[:])\n \tframes := runtime.CallersFrames(pcs[:len])\n \tfor i := 0; i < len; i++ {\n \t\t// second return value is \"more\", not \"ok\"\n@@ -54,7 +59,8 @@ func CallerFrame() runtime.Frame {\n \n // FileWithLineNum return the file name and line number of the current file\n func FileWithLineNum() string {\n-\tframe := CallerFrame()\n+\t// Keep FileWithLineNum one frame outer than CallerFrame to preserve pre-v1.31.1 semantics.\n+\tframe := callerFrame(4)\n \tif frame.PC != 0 {\n \t\treturn string(strconv.AppendInt(append([]byte(frame.File), ':'), int64(frame.Line), 10))\n \t}\n",
+      "evidence_sha256": "701152b662478cc7d90fa0ace3eaef4c84f04dd93707250574fd8c57d8044a92",
+      "packet_fixture_sha256": "d1397cb2a1f31a7eceab7fa58a147e2f068f61598b50ea813e2b5232ac35dd83",
+      "verification": "pins and causal quote match GitHub",
+      "verified": true
+    },
+    {
+      "case_id": "golden-b002-systems-java-spring-composite-set-remove",
+      "review_id": "B2-08",
+      "title": "Composite map key-set removal exposes a hidden duplicate key",
+      "language": "java",
+      "framework": "Spring Framework",
+      "category": "correctness",
+      "repo": "spring-projects/spring-framework",
+      "license": "Apache-2.0",
+      "license_url": "https://github.com/spring-projects/spring-framework/blob/f5a71230440381427d7d652e94a44a8658357025/LICENSE.txt",
+      "path": "spring-core/src/main/java/org/springframework/util/CompositeCollection.java",
+      "start_line": 115,
+      "end_line": 118,
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/spring-projects/spring-framework/blob/f5a71230440381427d7d652e94a44a8658357025/spring-core/src/main/java/org/springframework/util/CompositeCollection.java#L115-L118",
+      "introducing_pr_url": "https://github.com/spring-projects/spring-framework/pull/37332",
+      "fix_pr_url": "https://github.com/spring-projects/spring-framework/pull/37394",
+      "trigger": "Construct a CompositeMap with a key present in both backing maps and call compositeMap.keySet().remove(key).",
+      "finding": "The introduced short-circuit OR skips removing the element from the second collection after the first removal succeeds. CompositeSet inherits this behavior and backs CompositeMap.keySet(); deleting an overlapping key therefore reveals the previously hidden second-map entry instead of removing the mapping. The fix overrides set removal to evaluate removals against both sets.",
+      "history_md": "[Introducing PR #37332](https://github.com/spring-projects/spring-framework/pull/37332) merged 2026-10-02T14:26:54Z · [fix PR #37394](https://github.com/spring-projects/spring-framework/pull/37394) merged 2026-10-05T09:34:42Z\n\n| Pin | Introducing PR | Fix PR |\n|---|---|---|\n| Base | `bc45a6a511bf739efa6e30cef7942c879df160fe` | `9b93e5f635dd6576cf049f8e1f8f623968c88047` |\n| Head | `eab3c7bc0e4869fe005a34186cce4c5da3b5a203` | `751251815cc70f8ff34a55283ffaeb5fc4552a82` |\n| Merge | `f5a71230440381427d7d652e94a44a8658357025` | `891f9f94dbd6dd4edcc8c6a86fd5907f0262b206` |\n\nFix PR states: “Since #37332, `CompositeCollection.remove(Object)` stops after removing the element from the first collection.”",
+      "correction": "Override CompositeSet.remove so both backing sets are evaluated instead of short-circuiting after the first successful removal.",
+      "tests": "spring-core/src/test/java/org/springframework/util/CompositeMapTests.java: CompositeMapTests.CollisionTests.keySetRemove. Upstream regression coverage was inspected; it was not run locally.",
+      "fix_test_files": "spring-core/src/test/java/org/springframework/util/CompositeMapTests.java",
+      "limits": "The Collection.remove single-instance behavior is intentional; the defect concerns inherited Set/Map view behavior. Upstream fix body reports the new regression test fails without the change. This task inspected that test and fix, but did not run Gradle.",
+      "excerpt": "\tpublic boolean add(E e) {\n\t\tthrow new UnsupportedOperationException();\n\t}\n\n\t@Override\n\tpublic boolean remove(Object o) {\n\t\treturn (this.first.remove(o) || this.second.remove(o));\n\t}\n\n\t@Override\n\tpublic boolean containsAll(Collection<?> c) {\n\t\tfor (Object o : c) {",
+      "excerpt_start": 111,
+      "introducing_patch": "--- a/spring-core/src/main/java/org/springframework/util/CompositeCollection.java\n+++ b/spring-core/src/main/java/org/springframework/util/CompositeCollection.java\n@@ -114,9 +114,7 @@ public boolean add(E e) {\n \n \t@Override\n \tpublic boolean remove(Object o) {\n-\t\tboolean firstResult = this.first.remove(o);\n-\t\tboolean secondResult = this.second.remove(o);\n-\t\treturn firstResult || secondResult;\n+\t\treturn (this.first.remove(o) || this.second.remove(o));\n \t}\n \n \t@Override\n",
+      "fix_patch": "--- a/spring-core/src/main/java/org/springframework/util/CompositeSet.java\n+++ b/spring-core/src/main/java/org/springframework/util/CompositeSet.java\n@@ -31,8 +31,25 @@\n  */\n final class CompositeSet<E extends @Nullable Object> extends CompositeCollection<E> implements Set<E> {\n \n+\tprivate final Set<E> first;\n+\n+\tprivate final Set<E> second;\n+\n+\n \tCompositeSet(Set<E> first, Set<E> second) {\n \t\tsuper(first, second);\n+\t\tthis.first = first;\n+\t\tthis.second = second;\n+\t}\n+\n+\n+\t@Override\n+\tpublic boolean remove(Object o) {\n+\t\t// A set contains a given element at most once: remove it from both sets\n+\t\t// so that an element hidden in the second set does not become visible.\n+\t\tboolean firstResult = this.first.remove(o);\n+\t\tboolean secondResult = this.second.remove(o);\n+\t\treturn (firstResult || secondResult);\n \t}\n \n \n",
+      "evidence_sha256": "8f5737cf1c8e63080b5a40a1921f817aa251658711680099458c1afe0457eecb",
+      "packet_fixture_sha256": "1d8969c1aaddca29e219e1da674b2e2a1cb6cda86f9f8a653d883338cfb8a82b",
+      "verification": "pins and causal quote match GitHub",
+      "verified": true
+    },
+    {
+      "case_id": "golden-b002-systems-rust-tokio-timer-runtime",
+      "review_id": "B2-09",
+      "title": "Alternative timer reset registers with a different runtime",
+      "language": "rust",
+      "framework": "Tokio",
+      "category": "correctness",
+      "repo": "tokio-rs/tokio",
+      "license": "MIT",
+      "license_url": "https://github.com/tokio-rs/tokio/blob/923e72345c77aef4d11875d874ba67421b0412d3/LICENSE",
+      "path": "tokio/src/runtime/time_alt/timer.rs",
+      "start_line": 30,
+      "end_line": 35,
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/tokio-rs/tokio/blob/923e72345c77aef4d11875d874ba67421b0412d3/tokio/src/runtime/time_alt/timer.rs#L30-L35",
+      "introducing_pr_url": "https://github.com/tokio-rs/tokio/pull/8132",
+      "fix_pr_url": "https://github.com/tokio-rs/tokio/pull/8169",
+      "trigger": "Enable the unstable alternative timer; create a Sleep under runtime A and reset it while running under runtime B.",
+      "finding": "Timer::new computes its deadline using the original runtime handle, then unconditionally pushes the entry onto the current worker runtime registration queue. Resetting a sleep from another runtime can migrate its timer or panic in a current-thread runtime. The introducing patch removed the runtime identity guard; the fix restores the guard and falls back to registration through the original runtime handle.",
+      "history_md": "[Introducing PR #8132](https://github.com/tokio-rs/tokio/pull/8132) merged 2026-05-25T00:11:09Z · [fix PR #8169](https://github.com/tokio-rs/tokio/pull/8169) merged 2026-05-26T02:29:50Z\n\n| Pin | Introducing PR | Fix PR |\n|---|---|---|\n| Base | `82fe082ef14c2e2b2c1c29ed9873c2ca6e6109ee` | `923e72345c77aef4d11875d874ba67421b0412d3` |\n| Head | `7e1265c0da7b8ad60ba175530de03b0effed2177` | `9a3508a66373a7a5eab6111ebc434e8713d70cbb` |\n| Merge | `923e72345c77aef4d11875d874ba67421b0412d3` | `37ced33efddccc6721588af6fbe095d34fa17d7d` |\n\nFix PR states: “Fix the regression introduced by <https://github.com/tokio-rs/tokio/pull/8132>.”",
+      "correction": "Check that the current runtime is the original timer runtime before enqueueing locally; otherwise register through the original runtime handle.",
+      "tests": "tokio/tests/time_alt.rs: reset_should_stay_on_same_runtime, reset_should_stay_on_same_runtime2. Upstream regression coverage was inspected; it was not run locally.",
+      "fix_test_files": "tokio/tests/time_alt.rs",
+      "limits": "Applies to the alternative timer enabled through the unstable enable_alt_timer API; do not generalize to the default timer. Both upstream regression tests are present in the merged fix; they were inspected but not executed locally.",
+      "excerpt": "}\n\nimpl Timer {\n    #[track_caller]\n    pub(crate) fn new(handle: scheduler::Handle, deadline: Instant) -> Self {\n        let tick = deadline_to_tick(&handle, deadline);\n        let entry = with_current_temp_local_context(|ctx| match ctx {\n            Some(TempLocalContext::Running { registration_queue }) => {\n                let entry = EntryHandle::new(tick);\n                unsafe { registration_queue.push_front(entry.clone()) }\n                entry\n            }\n            #[cfg(feature = \"rt-multi-thread\")]\n            Some(TempLocalContext::Shutdown) => panic!(\"{RUNTIME_SHUTTING_DOWN_ERROR}\"),",
+      "excerpt_start": 26,
+      "introducing_patch": "--- a/tokio/src/runtime/time_alt/timer.rs\n+++ b/tokio/src/runtime/time_alt/timer.rs\n@@ -1,5 +1,5 @@\n use super::{EntryHandle, TempLocalContext};\n-use crate::runtime::scheduler::Handle as SchedulerHandle;\n+use crate::runtime::scheduler;\n use crate::time::Instant;\n \n use std::pin::Pin;\n@@ -9,143 +9,76 @@ use std::task::{Context, Poll};\n use crate::util::error::RUNTIME_SHUTTING_DOWN_ERROR;\n \n pub(crate) struct Timer {\n-    sched_handle: SchedulerHandle,\n-\n     /// The entry in the timing wheel.\n-    ///\n-    /// - `Some` if the timer is registered / pending / woken up / cancelling.\n-    /// - `None` if the timer is unregistered.\n-    entry: Option<EntryHandle>,\n-\n-    /// The deadline for the timer.\n-    deadline: Instant,\n+    entry: EntryHandle,\n }\n \n impl std::fmt::Debug for Timer {\n     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n-        f.debug_struct(\"Timer\")\n-            .field(\"deadline\", &self.deadline)\n-            .finish()\n+        f.debug_struct(\"Timer\").finish()\n     }\n }\n \n impl Drop for Timer {\n     fn drop(&mut self) {\n-        if let Some(entry) = self.entry.take() {\n-            entry.cancel();\n-        }\n+        self.entry.cancel();\n     }\n }\n \n impl Timer {\n     #[track_caller]\n-    pub(crate) fn new(sched_hdl: SchedulerHandle, deadline: Instant) -> Self {\n-        // Panic if the time driver is not enabled\n-        let _ = sched_hdl.driver().time();\n-        Timer {\n-            sched_handle: sched_hdl,\n-            entry: None,\n-            deadline,\n-        }\n-    }\n-\n-    pub(crate) fn deadline(&self) -> Instant {\n-        self.deadline\n-    }\n-\n-    pub(crate) fn is_elapsed(&self) -> bool {\n-        self.entry.as_ref().is_some_and(|entry| entry.is_woken_up())\n-    }\n-\n-    fn register(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {\n-        let this = self.get_mut();\n-\n-        with_current_temp_local_context(&this.sched_handle, |maybe_time_cx| {\n-            let deadline = deadline_to_tick(&this.sched_handle, this.deadline);\n-\n-            match maybe_time_cx {\n-                Some(TempLocalContext::Running {\n-                    registration_queue: _,\n-                    elapsed,\n-                }) if deadline <= elapsed => Poll::Ready(()),\n-\n-                Some(TempLocalContext::Running {\n-                    registration_queue,\n-                    elapsed: _,\n-                }) => {\n-                    let hdl = EntryHandle::new(deadline, cx.waker().clone());\n-                    this.entry = Some(hdl.clone());\n-                    unsafe {\n-                        registration_queue.push_front(hdl);\n-                    }\n-                    Poll::Pending\n-                }\n-                #[cfg(feature = \"rt-multi-thread\")]\n-                Some(TempLocalContext::Shutdown) => panic!(\"{RUNTIME_SHUTTING_DOWN_ERROR}\"),\n-\n-                _ => {\n-                    let hdl = EntryHandle::new(deadline, cx.waker().clone());\n-                    this.entry = Some(hdl.clone());\n-                    push_from_remote(&this.sched_handle, hdl);\n-                    Poll::Pending\n-                }\n+    pub(crate) fn new(handle: scheduler::Handle, deadline: Instant) -> Self {\n+        let tick = deadline_to_tick(&handle, deadline);\n+        let entry = with_current_temp_local_context(|ctx| match ctx {\n+            Some(TempLocalContext::Running { registration_queue }) => {\n+                let entry = EntryHandle::new(tick);\n+                unsafe { registration_queue.push_front(entry.clone()) }\n+                entry\n             }\n-        })\n-    }\n+            #[cfg(feature = \"rt-multi-thread\")]\n+            Some(TempLocalContext::Shutdown) => panic!(\"{RUNTIME_SHUTTING_DOWN_ERROR}\"),\n \n-    pub(crate) fn poll_elapsed(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {\n-        match self.entry.as_ref() {\n-            Some(entry) => entry.poll(cx),\n-            None => self.register(cx),\n-        }\n-    }\n+            _ => {\n+                let entry = EntryHandle::new(tick);\n+                push_from_remote(&handle, entry.clone());\n+                entry\n+            }\n+        });\n \n-    pub(crate) fn scheduler_handle(&self) -> &SchedulerHandle {\n-        &self.sched_handle\n+        Timer { entry }\n     }\n \n-    #[cfg(all(tokio_unstable, feature = \"tracing\"))]\n-    pub(crate) fn driver(&self) -> &crate::runtime::time::Handle {\n-        self.sched_handle.driver().time()\n+    pub(crate) fn is_elapsed(&self) -> bool {\n+        self.entry.is_woken_up()\n     }\n \n-    #[cfg(all(tokio_unstable, feature = \"tracing\"))]\n-    pub(crate) fn clock(&self) -> &crate::time::Clock {\n-        self.sched_handle.driver().clock()\n+    pub(crate) fn poll_elapsed(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {\n+        self.entry.poll(cx)\n     }\n }\n \n-fn with_current_temp_local_context<F, R>(hdl: &SchedulerHandle, f: F) -> R\n+fn with_current_temp_local_context<F, R>(f: F) -> R\n where\n     F: FnOnce(Option<TempLocalContext<'_>>) -> R,\n {\n     #[cfg(not(feature = \"rt\"))]\n     {\n-        let (_, _) = (hdl, f);\n+        let _ = f;\n         panic!(\"Tokio runtime is not enabled, cannot access the current wheel\");\n     }\n \n     #[cfg(feature = \"rt\")]\n     {\n         use crate::runtime::context;\n \n-        let is_same_rt =\n-            context::with_current(|cur_hdl| cur_hdl.is_same_runtime(hdl)).unwrap_or_default();\n-\n-        if !is_same_rt {\n-            // We don't want to create the timer in one runtime,\n-            // but register it in a different runtime's timer wheel.\n-            f(None)\n-        } else {\n-            context::with_scheduler(|maybe_cx| match maybe_cx {\n-                Some(cx) => cx.with_time_temp_local_context(f),\n-                None => f(None),\n-            })\n-        }\n+        context::with_scheduler(|maybe_cx| match maybe_cx {\n+            Some(cx) => cx.expect_multi_thread().with_time_temp_local_context(f),\n+            None => f(None),\n+        })\n     }\n }\n \n-fn push_from_remote(sched_hdl: &SchedulerHandle, entry_hdl: EntryHandle) {\n+fn push_from_remote(sched_hdl: &scheduler::Handle, entry_hdl: EntryHandle) {\n     #[cfg(not(feature = \"rt\"))]\n     {\n         let (_, _) = (sched_hdl, entry_hdl);\n@@ -159,7 +92,7 @@ fn push_from_remote(sched_hdl: &SchedulerHandle, entry_hdl: EntryHandle) {\n     }\n }\n \n-fn deadline_to_tick(sched_hdl: &SchedulerHandle, deadline: Instant) -> u64 {\n+fn deadline_to_tick(sched_hdl: &scheduler::Handle, deadline: Instant) -> u64 {\n     let time_hdl = sched_hdl.driver().time();\n     time_hdl.time_source().deadline_to_tick(deadline)\n }\n",
+      "fix_patch": "--- a/tokio/src/runtime/time_alt/timer.rs\n+++ b/tokio/src/runtime/time_alt/timer.rs\n@@ -29,7 +29,7 @@ impl Timer {\n     #[track_caller]\n     pub(crate) fn new(handle: scheduler::Handle, deadline: Instant) -> Self {\n         let tick = deadline_to_tick(&handle, deadline);\n-        let entry = with_current_temp_local_context(|ctx| match ctx {\n+        let entry = with_current_temp_local_context(&handle, |ctx| match ctx {\n             Some(TempLocalContext::Running { registration_queue }) => {\n                 let entry = EntryHandle::new(tick);\n                 unsafe { registration_queue.push_front(entry.clone()) }\n@@ -57,7 +57,7 @@ impl Timer {\n     }\n }\n \n-fn with_current_temp_local_context<F, R>(f: F) -> R\n+fn with_current_temp_local_context<F, R>(sched_hdl: &scheduler::Handle, f: F) -> R\n where\n     F: FnOnce(Option<TempLocalContext<'_>>) -> R,\n {\n@@ -69,8 +69,39 @@ where\n \n     #[cfg(feature = \"rt\")]\n     {\n+        use crate::loom::sync::Arc;\n         use crate::runtime::context;\n \n+        // There is no compile-time guarantee that the timer is\n+        // always registered in the same runtime as it was created in,\n+        // so we need to check it at runtime.\n+        let is_same_rt = context::with_current(|cur_sched_hdl| {\n+            use crate::runtime::scheduler::Handle;\n+\n+            match (sched_hdl, cur_sched_hdl) {\n+                (Handle::CurrentThread(_), _) => {\n+                    // this case is impossible as `tokio::runtime::Builder::enable_alt_timer`\n+                    // is not supported in the current-thread runtime, but we'd better handle it\n+                    // in case the API is misused in the future.\n+                    unreachable!(\"alternative timer is not supported in the current-thread runtime\")\n+                }\n+                (_, Handle::CurrentThread(_)) => false,\n+                (Handle::MultiThread(sched_hdl), Handle::MultiThread(cur_sched_hdl)) => {\n+                    Arc::as_ptr(sched_hdl) == Arc::as_ptr(cur_sched_hdl)\n+                }\n+            }\n+        })\n+        .unwrap_or_default();\n+\n+        if !is_same_rt {\n+            // The timer is being registered from a runtime\n+            // that is different from the runtime that the timer is created in,\n+            // so we cannot access `TempLocalContext` of the original runtime.\n+            return f(None);\n+        }\n+\n+        // The timer is being registered from the same runtime that the timer is created in,\n+        // so we can access `TempLocalContext`.\n         context::with_scheduler(|maybe_cx| match maybe_cx {\n             Some(cx) => cx.expect_multi_thread().with_time_temp_local_context(f),\n             None => f(None),\n",
+      "evidence_sha256": "fdaca50303cf4418bb733361dea4796d7f912b72444a3894b2b3b04effc8bc0b",
+      "packet_fixture_sha256": "230f5e6b948371353493cae37ae383d1d7cb7e04726e2fa557775b5db554d5fe",
+      "verification": "pins and causal quote match GitHub",
+      "verified": true
+    }
+  ]
+}

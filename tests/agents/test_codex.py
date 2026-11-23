@@ -273,7 +273,8 @@ def test_codex_home_relocates_off_tmp(
     ctx = make_agent_run_context(forbidden, resolved_model="openai/gpt-5.3-codex")
     home = codex_module._codex_home(ctx)
     assert str(home).startswith(str(safe))
-    assert home.name == ".codex"
+    assert home.parent.name == ".codex"
+    assert home.name == ctx.codex_home_id
 
 
 # ── nested-sandbox failure and the operator opt-in (#70) ────────────────

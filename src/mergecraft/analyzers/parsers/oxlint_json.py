@@ -62,8 +62,12 @@ def parse_oxlint_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) 
     category = taxonomy_category(manifest)
     findings: list[Finding] = []
     for diagnostic in _diagnostics(raw):
-        if not isinstance(diagnostic, dict):
-            continue
+        if (
+            not isinstance(diagnostic, dict)
+            or not diagnostic.get("filename")
+            or not diagnostic.get("message")
+        ):
+            raise ValueError("oxlint diagnostic requires filename and message")
         path = resolve_repo_relative_path(
             str(diagnostic.get("filename") or ""), repo_root=repo_root
         )

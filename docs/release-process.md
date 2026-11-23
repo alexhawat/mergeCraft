@@ -83,18 +83,13 @@ then approve its `pypi` deployment. The workflow is the only publisher.
 The `publish` job runs in the `pypi` environment, whose required reviewers are the
 approval. After approval it:
 
-1. waits for the CI/CD run on the release SHA, downloads the dist it built, and
-   verifies it is exactly the wheel and sdist for the version;
-2. publishes to PyPI with **Trusted Publishing** (OIDC) — there is no PyPI token;
-3. creates the GitHub release at the release SHA with the CHANGELOG section as notes;
-4. retags the signed GHCR digests to `:<version>` and `:analyzers-<version>`, and
-   fails if the digest changes;
-5. opens the merge-back PR with the App token. Merge it with a merge commit.
+1. Downloads the wheel and sdist from the successful CI/CD run on the release SHA and verifies their version.
+2. Verifies the signed slim image for that SHA, records its digest in `action.yml` and tags the manifest commit.
+3. Retags the slim and analyzer images. Registry readback must match the source digests, and the published slim digest must match `action.yml` at the Git version tag.
+4. Creates the GitHub release with the changelog notes and publishes the distributions to PyPI using Trusted Publishing (OIDC).
+5. Opens the merge-back PR with the App token. Merge it with a merge commit.
 
-A later step can fail after PyPI accepted the files (for example a transient
-registry issue). Re-run the job and approve the deployment again: the upload has
-`skip-existing`, so it passes and the remaining steps finish. Do not delete a tag,
-re-cut the branch, or bump the version to recover.
+A rerun verifies the existing tag and image digests before continuing. PyPI skips distributions already uploaded for the release.
 
 **One-time setup:** the PyPI project has a Trusted Publisher for
 `alexhawat/mergeCraft`, workflow `release.yml`, environment `pypi`; the repository

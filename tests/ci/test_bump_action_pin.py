@@ -398,3 +398,22 @@ def test_the_pin_cycle_never_merges_or_bypasses_review() -> None:
     assert "--auto" not in scripts
     assert "--admin" not in scripts
     assert "Merge with a **merge commit**, not a squash." in scripts
+
+
+def test_dry_release_tag_resolves_to_published_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _module(monkeypatch)
+    repo, source, manifest = _history(tmp_path)
+    version = "0.1.0a7"
+    digest = "sha256:" + "b" * 64
+    from check_action_image_digest import TagLookupResult, TagLookupStatus
+
+    monkeypatch.setattr(
+        module, "_ghcr_digest_for_tag", lambda tag: TagLookupResult(TagLookupStatus.FOUND, digest)
+    )
+    _git(repo, "tag", f"v{version}", manifest)
+    assert module.verify_release_tag(repo, version)["image_digest"] == digest
+    _git(repo, "tag", "-f", f"v{version}", source)
+    with pytest.raises(module.VerificationError, match="differs"):
+        module.verify_release_tag(repo, version)

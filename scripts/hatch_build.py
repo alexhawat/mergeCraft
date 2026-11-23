@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -30,8 +31,8 @@ class BuildCommitHook(BuildHookInterface):
         if commit is None:
             return
 
-        out_dir = Path(self.directory) / "stamped_build_metadata"
-        out_dir.mkdir(parents=True, exist_ok=True)
+        self._stamp_dir = tempfile.TemporaryDirectory(prefix="mergecraft-build-")
+        out_dir = Path(self._stamp_dir.name)
         out_path = out_dir / "_build_metadata.py"
         out_path.write_text(_METADATA_TEMPLATE.format(commit=commit), encoding="utf-8")
 
@@ -41,6 +42,10 @@ class BuildCommitHook(BuildHookInterface):
         else:
             dest = "mergecraft/_build_metadata.py"
         force_include[str(out_path)] = dest
+
+    def finalize(self, version: str, build_data: dict[str, Any], artifact_path: str) -> None:
+        if hasattr(self, "_stamp_dir"):
+            self._stamp_dir.cleanup()
 
     def _git_head_commit(self) -> str | None:
         try:

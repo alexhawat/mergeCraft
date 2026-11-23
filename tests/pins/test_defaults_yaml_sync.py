@@ -24,7 +24,6 @@ _PACKAGED_DEFAULTS = (
 _PINS_CHECK_TARGET = "pins-check"
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _LOCKED_CHECKOUT_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
-_LOCKED_ACTION_SHA = "7080e962c2259757a34b9f745602f093e4ee3378"
 
 
 def test_checkout_and_packaged_defaults_yaml_are_byte_identical() -> None:
@@ -76,7 +75,61 @@ def test_defaults_carry_the_shared_action_and_checkout_shas(path: Path) -> None:
     """One immutable commit each for the Action ref and every checkout."""
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(raw, dict)
-    assert raw.get("action_sha_minimal") == _LOCKED_ACTION_SHA
     assert raw.get("checkout_sha") == _LOCKED_CHECKOUT_SHA
     assert _SHA.fullmatch(str(raw.get("action_sha_minimal")))
     assert _SHA.fullmatch(str(raw.get("checkout_sha")))
+
+
+def test_release_refresh_uses_published_tag_and_detects_doc_or_workflow_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    from scripts import check_example_defaults_sync as pins
+
+    git = ["git", "-C", str(tmp_path)]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run(
+        [
+            *git,
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "release",
+        ],
+        check=True,
+    )
+    tag = "v9.9.9"
+    subprocess.run([*git, "tag", tag], check=True)
+    sha = subprocess.check_output([*git, "rev-parse", "HEAD"], text=True).strip()
+
+    monkeypatch.setattr(pins, "REPO", tmp_path)
+    source, packaged = tmp_path / "defaults.yaml", tmp_path / "packaged.yaml"
+    monkeypatch.setattr(pins, "CHECKOUT_DEFAULTS", source)
+    monkeypatch.setattr(pins, "PACKAGED_DEFAULTS", packaged)
+    source.write_bytes(_CHECKOUT_DEFAULTS.read_bytes())
+    workflow = "examples/workflows/mergecraft.yml"
+    extra = "docs/another-guide.md"
+    for name in (*pins._PIN_DOCS, extra, workflow):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("- uses: alexhawat/mergeCraft@main # outdated\n")
+    (tmp_path / "tests/pins/fixtures").mkdir(parents=True)
+
+    pins._refresh_release(tag, str(tmp_path), pins._load(source))
+    assert pins._load(source)["action_sha_minimal"] == sha
+    assert source.read_bytes() == packaged.read_bytes()
+    assert sha in (tmp_path / extra).read_text()
+    assert pins._document_pins(tag, sha, refresh=False) == [f"{workflow} must use {sha} # {tag}"]
+    (tmp_path / workflow).write_text(
+        f"- uses: alexhawat/mergeCraft@{sha} # {tag}\n  MERGECRAFT_ACTION_SHA: {'a' * 40}\n"
+    )
+    assert pins._document_pins(tag, sha, refresh=False)
+    (tmp_path / workflow).write_text(
+        f"- uses: alexhawat/mergeCraft@{sha} # {tag}\n  MERGECRAFT_ACTION_SHA: {sha}\n"
+    )
+    assert pins._document_pins(tag, sha, refresh=False) == []
