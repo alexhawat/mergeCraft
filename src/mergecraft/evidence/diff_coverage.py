@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import re
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final
 
 from mergecraft.analyzers.scope import (
@@ -54,7 +54,7 @@ from mergecraft.analyzers.scope import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from mergecraft.evidence.trajectory import ToolCallRecord
 
@@ -62,7 +62,7 @@ _HUNK_RE: Final[re.Pattern[str]] = re.compile(
     r"^@@ -\d+(?:,\d+)? \+(?P<start>\d+)(?:,(?P<count>\d+))? @@"
 )
 _SED_RANGE_RE: Final[re.Pattern[str]] = re.compile(r"^(?P<start>\d+),(?P<end>\d+)p$")
-_SED_SINGLE_RE: Final[re.Pattern[str]] = re.compile(r"^(?P<line>\d+)p$")
+_SED_SINGLE_RE: Final[re.Pattern[str]] = re.compile(r"^(?P<start>\d+)p$")
 _HEAD_N_RE: Final[re.Pattern[str]] = re.compile(r"^(?P<count>\d+)$")
 # Generated artifacts are in the diff but not worth a human read. The nudge
 # names them, as pullfrog does, so the agent can decide to skip deliberately
@@ -550,11 +550,23 @@ def _mentions_diff(command: str | None, diff_path: str | None) -> bool:
     return _normalize_path(diff_path) in _normalize_path(command)
 
 
+def _delivered_entries(text: str, scope: Sequence[DiffTocEntry]) -> tuple[DiffTocEntry, ...]:
+    """Keep physical diff offsets but credit only added post-image lines in scope."""
+    in_scope = {entry.path: {line for _, line in entry.line_map} for entry in scope}
+    delivered = []
+    for entry in parse_diff_toc(text):
+        if entry.path in in_scope:
+            line_map = tuple(pair for pair in entry.line_map if pair[1] in in_scope[entry.path])
+            delivered.append(replace(entry, line_map=line_map))
+    return tuple(delivered)
+
+
 def compute_diff_coverage(
     diff_text: str,
     calls: Sequence[ToolCallRecord],
     *,
     diff_path: str | None = None,
+    delivered_diffs: Mapping[str, str] | None = None,
 ) -> DiffCoverageBreakdown:
     """Compute added-line coverage for ``diff_text`` from observed reads.
 
@@ -563,7 +575,9 @@ def compute_diff_coverage(
         calls: Mediated and external tool-call rows, in sequence order.
         diff_path: Absolute path of ``diff_text`` on disk, when a caller knows
             it. Reads of that path are mapped onto the added lines the read
-            span showed; without it only source-file reads count.
+            span showed.
+        delivered_diffs: Other materialized diffs at the same head, keyed by their
+            physical paths. Each read uses offsets from the file actually opened.
 
     Returns:
         A :class:`DiffCoverageBreakdown`. ``observed`` is ``False`` when no
@@ -573,19 +587,32 @@ def compute_diff_coverage(
     entries = parse_diff_toc(diff_text)
     if not entries:
         return DiffCoverageBreakdown(files=(), observed=False)
-    total_diff_lines = max(len(diff_text.splitlines()), 1)
+    physical_diffs = dict(delivered_diffs or {})
+    if diff_path:
+        physical_diffs[diff_path] = diff_text
+    tables = {
+        path: (
+            entries if text == diff_text else _delivered_entries(text, entries),
+            len(text.splitlines()),
+        )
+        for path, text in physical_diffs.items()
+    }
     covered_by_file: dict[str, list[LineRange]] = {entry.path: [] for entry in entries}
     read_files: set[str] = set()
     observed = False
     entry_by_path = {entry.path: entry for entry in entries}
     for call in calls:
-        if not call.ok or call.intent != "read":
+        if not call.ok or call.outcome_ok is False or call.intent != "read":
             continue
-        if call.diff_read_path is not None or call.paths or _mentions_diff(call.command, diff_path):
+        if call.diff_read_path is not None or call.paths:
             observed = True
-        diff_range = _diff_read_range(call, diff_path=diff_path, total_diff_lines=total_diff_lines)
-        if diff_range is not None:
-            for entry in entries:
+        for path, (delivered_entries, line_count) in tables.items():
+            if _mentions_diff(call.command, path):
+                observed = True
+            diff_range = _diff_read_range(call, diff_path=path, total_diff_lines=line_count)
+            if diff_range is None:
+                continue
+            for entry in delivered_entries:
                 section = LineRange(entry.diff_start, entry.diff_end)
                 if diff_range.intersect(section) is not None:
                     read_files.add(entry.path)
@@ -627,10 +654,84 @@ def _is_generated(path: str) -> bool:
     return any(marker in lowered for marker in _GENERATED_DIRS)
 
 
-def coverage_nudge(
-    breakdown: DiffCoverageBreakdown, *, diff_path: str, driver_reports_reads: bool = False
+# The pre-flight refuses at most this many submissions in one review session.
+DIFF_COVERAGE_NUDGE_CAP: Final[int] = 3
+# "Largely unread": more than this share of the added lines, and at least this many.
+_LARGELY_UNREAD_SHARE: Final[float] = 0.10
+_LARGELY_UNREAD_MIN_LINES: Final[int] = 200
+
+
+def largely_unread(breakdown: DiffCoverageBreakdown) -> bool:
+    """True when a large share of the non-generated added lines is still unread.
+
+    This decides whether the pre-flight may refuse a second time. Generated
+    artifacts never count: the reviewer is told it may skip them.
+    """
+    unread = sum(
+        file.unread_count for file in breakdown.unread_files() if not _is_generated(file.path)
+    )
+    return (
+        unread >= _LARGELY_UNREAD_MIN_LINES
+        and unread > breakdown.total_lines * _LARGELY_UNREAD_SHARE
+    )
+
+
+# The depth pre-flight: a change this large, or in the high lane, needs more than
+# its own diff. "Enough" is this many source files opened beyond the diff, or
+# every changed file when the change touches fewer.
+_DEEP_REVIEW_MIN_ADDED_LINES: Final[int] = 1000
+_DEEP_REVIEW_SOURCE_READS: Final[int] = 5
+
+
+def depth_nudge(
+    breakdown: DiffCoverageBreakdown,
+    *,
+    source_files_read: int,
+    high_lane: bool,
 ) -> str | None:
-    """Return a one-time nudge naming every unread range, or ``None``.
+    """Return a one-time nudge to read past the diff, or ``None``.
+
+    A diff shows what changed, not what the changed code calls. A review of a
+    high-lane or large change that opened almost nothing beyond the diff cannot
+    have checked the change against the code it depends on (#1516). An
+    unobserved run gets ``None``: nothing shows what it read, so nothing shows
+    what it skipped.
+    """
+    if not breakdown.observed:
+        return None
+    changed = [file for file in breakdown.files if not _is_generated(file.path)]
+    added = sum(file.line_count for file in changed)
+    large = added >= _DEEP_REVIEW_MIN_ADDED_LINES
+    if not (high_lane or large) or not changed:
+        return None
+    wanted = min(_DEEP_REVIEW_SOURCE_READS, len(changed))
+    if source_files_read >= wanted:
+        return None
+    why = "a high-risk change" if high_lane else "a large change"
+    return (
+        f"review depth pre-flight: this is {why} ({added} added lines across "
+        f"{len(changed)} files) and this run opened {source_files_read} source file(s) "
+        "beyond the diff. A diff shows what changed, not what the changed code calls. "
+        "Before the verdict, open the code the changed functions depend on across module "
+        "boundaries (the stores, validators, identity and permission checks they call, and "
+        "the callers of any changed signature), check each claim the change makes in its "
+        "documentation against that code, and record what you find. This is a one-time "
+        "nudge: submit again when you have done that. It will not fire again in this "
+        "review session."
+    )
+
+
+def coverage_nudge(
+    breakdown: DiffCoverageBreakdown,
+    *,
+    diff_path: str,
+    driver_reports_reads: bool = False,
+    final: bool = True,
+) -> str | None:
+    """Return a nudge naming every unread range, or ``None``.
+
+    ``final`` says whether this is the last refusal of the session. A refusal that
+    may repeat says how much is unread and that reading, not paging, clears it.
 
     A run with nothing unread gets ``None``. Unread ranges in generated
     artifacts are named but marked skippable, so the agent can choose to skip
@@ -660,6 +761,17 @@ def coverage_nudge(
     if generated_only:
         return None
     body = "\n".join(rows)
+    if not final:
+        return (
+            "diff coverage pre-flight: most of this change was not read before the verdict "
+            f"({breakdown.unread_lines} of {breakdown.total_lines} added lines unread). "
+            f"Read the ranges below from `{diff_path}` (or the source files), follow the "
+            "changed functions into the code they call, and report what you find before "
+            "submitting again. You are not obligated to read generated artifacts (lockfiles, "
+            "codegen output, snapshots, migration metadata). This pre-flight fires again "
+            "while a large share of the change is unread.\n\n"
+            f"unread ranges:\n{body}"
+        )
     return (
         "diff coverage pre-flight: some changed lines were not read before the verdict. "
         "This is a one-time nudge — read the ranges below from "
@@ -672,6 +784,7 @@ def coverage_nudge(
 
 
 __all__ = [
+    "DIFF_COVERAGE_NUDGE_CAP",
     "DiffCoverageBreakdown",
     "DiffTocEntry",
     "FileDiffCoverage",
@@ -679,5 +792,7 @@ __all__ = [
     "command_line_span",
     "compute_diff_coverage",
     "coverage_nudge",
+    "depth_nudge",
+    "largely_unread",
     "parse_diff_toc",
 ]
