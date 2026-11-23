@@ -1078,7 +1078,15 @@ async def publish_github_review(
 
     event = "COMMENT"
     triage_skipped = getattr(ctx.tool_state.triage, "tier", None) == "skip"
-    if (
+    if ctx.comment_only_review:
+        # ``review_event: comment`` — an advisory reviewer. The verdict is still
+        # recorded (and bound to the receipt below); only the GitHub event, the
+        # part that can block or unblock a merge, stays COMMENT.
+        logger.info(
+            "review_event is comment: publishing the {} verdict as a COMMENT review",
+            "approve" if approved else "request_changes" if request_changes else "comment",
+        )
+    elif (
         approved
         and ctx.pr_approve_enabled
         and run_not_passing_reason is None
@@ -1388,7 +1396,15 @@ async def publish_github_review(
         response["bodyTruncated"] = True
     if publication_gap:
         response["publicationIncomplete"] = publication_gap
-    if run_not_passing_reason is not None:
+    if ctx.comment_only_review:
+        # An advisory reviewer must not close threads: they may belong to the
+        # reviewer whose verdict gates the merge.
+        logger.info(
+            "finding resolution: skipped on PR #{} because review_event is comment",
+            pull_number,
+        )
+        resolved = 0
+    elif run_not_passing_reason is not None:
         # The run will not pass (its approval, if any, was withheld): what this
         # review left out is no proof the earlier findings are fixed.
         logger.info(
