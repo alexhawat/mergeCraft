@@ -236,7 +236,8 @@ def _event(base_sha: str = BASE_SHA) -> dict[str, object]:
 async def _resolve(
     scm: _ContentsScm, *, operator_owned: bool, head: list[str], event: object
 ) -> list[str]:
-    module = import_module("mergecraft.review_policy.fix_labels")
+    import mergecraft.review_policy.fix_labels as module
+
     review = ReviewSettings.model_validate({"fixLabels": head})
     resolved = await module.resolve_fix_labels(
         scm, "acme", "demo", event=event, run_start_review=review, operator_owned=operator_owned

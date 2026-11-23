@@ -10,8 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import import_module
-
 _CATALOG_DIR = Path(__file__).resolve().parents[2] / "src" / "mergecraft" / "analyzers" / "catalog"
 _FALLBACK_NAME = "markdownlint-default-config.json"
 
@@ -33,15 +31,21 @@ _MARKDOWNLINT_CLI2_ONLY_NAMES: tuple[str, ...] = (
 
 
 def _detect() -> object:
-    return import_module("mergecraft.analyzers.detect")
+    from mergecraft.analyzers import detect
+
+    return detect
 
 
 def _resolve() -> object:
-    return import_module("mergecraft.analyzers.resolve")
+    from mergecraft.analyzers import resolve
+
+    return resolve
 
 
 def _registry() -> object:
-    return import_module("mergecraft.analyzers.registry")
+    from mergecraft.analyzers import registry
+
+    return registry
 
 
 def test_has_markdownlint_config_is_false_when_absent(tmp_path: Path) -> None:

@@ -15,7 +15,7 @@ _CANARY_SECRET = "sk-canary-w0-8-do-not-leak-7f3a9b2c1d4e5f6a"
 
 def test_evidence_packet_round_trips_through_json() -> None:
     """A fully populated packet serializes to JSON and re-validates with zero errors."""
-    packet_mod = import_module("mergecraft.evidence.packet")
+    import mergecraft.evidence.packet as packet_mod
 
     payload = sample_minimal_packet_dict()
     packet = packet_mod.MergeEvidencePacket(**payload)
@@ -29,7 +29,7 @@ def test_evidence_packet_round_trips_through_json() -> None:
 
 def test_evidence_packet_round_trips_through_dict() -> None:
     """A packet serializes to a dict and re-validates from the dict (no info loss)."""
-    packet_mod = import_module("mergecraft.evidence.packet")
+    import mergecraft.evidence.packet as packet_mod
 
     payload = sample_minimal_packet_dict()
     packet = packet_mod.MergeEvidencePacket(**payload)
@@ -40,7 +40,7 @@ def test_evidence_packet_round_trips_through_dict() -> None:
 
 def test_run_bound_review_fields_round_trip_through_json() -> None:
     """The orchestrator-written fields survive serialization like every other field."""
-    packet_mod = import_module("mergecraft.evidence.packet")
+    import mergecraft.evidence.packet as packet_mod
 
     payload = sample_minimal_packet_dict()
     payload["reviewed_head_sha"] = "a" * 40
@@ -56,7 +56,7 @@ def test_run_bound_review_fields_round_trip_through_json() -> None:
 
 def test_evidence_packet_rejects_unknown_fields() -> None:
     """``extra=\"forbid\"`` rejects unknown fields (D3 — packet composes Finding strictly)."""
-    packet_mod = import_module("mergecraft.evidence.packet")
+    import mergecraft.evidence.packet as packet_mod
 
     payload = sample_minimal_packet_dict()
     payload_with_extra: dict[str, Any] = {**payload, "rogue_field": "should be rejected"}
@@ -66,7 +66,7 @@ def test_evidence_packet_rejects_unknown_fields() -> None:
 
 def test_evidence_packet_rejects_nested_unknown_fields() -> None:
     """``extra=\"forbid\"`` also applies to nested models (e.g. ``agent``)."""
-    packet_mod = import_module("mergecraft.evidence.packet")
+    import mergecraft.evidence.packet as packet_mod
 
     payload = sample_minimal_packet_dict()
     nested = dict(payload["agent"])  # type: ignore[arg-type]

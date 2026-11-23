@@ -91,6 +91,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # Keep the Action images on the supported Python line while 3.15 is skipped.
+      - dependency-name: python
+        versions: ["~> 3.15.0"]
     groups:
       docker-patch-minor:
         applies-to: version-updates

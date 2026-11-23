@@ -31,7 +31,6 @@ the checkout-workspace chown that already existed for W3.4.
 
 from __future__ import annotations
 
-import importlib
 import os
 import stat
 import sys
@@ -56,10 +55,10 @@ if TYPE_CHECKING:
 # resolution. Go through ``sys.modules`` via ``importlib`` to get the actual
 # submodules, matching how ``tests/agents/test_codex.py`` resolves
 # ``mergecraft.agents.codex``.
-claude_module = importlib.import_module("mergecraft.agents.claude")
-opencode_module = importlib.import_module("mergecraft.agents.opencode")
-codex_module = importlib.import_module("mergecraft.agents.codex")
-gemini_module = importlib.import_module("mergecraft.agents.gemini")
+import mergecraft.agents.claude as claude_module
+import mergecraft.agents.codex as codex_module
+import mergecraft.agents.gemini as gemini_module
+import mergecraft.agents.opencode as opencode_module
 
 
 class _FakePw:

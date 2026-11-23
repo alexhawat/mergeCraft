@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import inspect
 import re
-from importlib import import_module
 from typing import Any
 
 import pytest
@@ -48,7 +47,9 @@ _LOCKED_GATE_ORDER: tuple[str, ...] = (
 @pytest.fixture
 def api() -> Any:
     """Load the classifier module lazily so new names fail per test, not at collection."""
-    return import_module("mergecraft.classify.blast_radius")
+    from mergecraft.classify import blast_radius
+
+    return blast_radius
 
 
 def _c(paths: list[str], stats: dict[str, object] | None = None) -> dict[str, Any]:

@@ -140,6 +140,7 @@ WORKDIR /opt/mergecraft
 COPY pyproject.toml uv.lock README.md ./
 COPY scripts/hatch_build.py ./scripts/hatch_build.py
 COPY src/mergecraft ./src/mergecraft
+COPY evals/cases/adversarial/ ./evals/cases/adversarial/
 COPY evals/corpora/recall_pass_corpus.json ./evals/corpora/recall_pass_corpus.json
 # The wheel force-includes integrations/opencode as mergecraft/data/opencode, so
 # the build context must carry it or `uv sync` cannot resolve the Hatch path.

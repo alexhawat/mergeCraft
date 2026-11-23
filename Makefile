@@ -160,6 +160,13 @@ typecheck: ## mypy strict
 pyright: ## Supplemental Pyright pass
 	$(UV) run pyright src/mergecraft
 
+.PHONY: pyright-tests pyright-new-tests
+pyright-tests: ## Report Pyright diagnostics across the complete test tree
+	$(UV) run pyright tests
+
+pyright-new-tests: ## Gate Python test modules added since MERGECRAFT_TEST_TYPE_BASE
+	$(UV) run python scripts/check_new_test_types.py
+
 catalog-check: ## Manifest fixture/doc/severity gate (C5/C6)
 	$(UV) run python -m mergecraft.analyzers.catalog_docs
 

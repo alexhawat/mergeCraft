@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import secrets
 import string
@@ -104,7 +103,8 @@ def test_entropy_sweep_harness_records_redacted_tokens_with_context(tmp_path: Pa
 
 def test_entropy_sweep_classifies_benign_candidates_for_operator_review() -> None:
     """D13/D14 — W6 publishes benign-vs-secret classification from sweep evidence."""
-    module = importlib.import_module("mergecraft.analyzers.redact")
+    import mergecraft.analyzers.redact as module
+
     classify = getattr(module, "classify_entropy_redaction_hits", None)
     if classify is None:
         pytest.fail("classify_entropy_redaction_hits not implemented")

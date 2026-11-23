@@ -20,7 +20,6 @@ from typing import Any
 import pytest
 
 from mergecraft.analyzers.redact import redact_analyzer_output
-from tests.analyzers.support import import_module
 
 NETWORK_REASON = "sandboxed: network is disabled"
 WRITE_REASON = "sandboxed: path not writable"
@@ -109,7 +108,8 @@ WRITE_POSITIVE_SAMPLES: tuple[str, ...] = (
 
 
 def _classifier() -> Callable[[str], str | None]:
-    module = import_module("mergecraft.analyzers.sandbox_failures")
+    import mergecraft.analyzers.sandbox_failures as module
+
     for name in ("classify_sandbox_failure", "sandbox_failure_reason", "classify_stderr"):
         candidate: Any = getattr(module, name, None)
         if callable(candidate):
@@ -121,7 +121,8 @@ def _classifier() -> Callable[[str], str | None]:
 
 
 def _detail_classifier() -> Callable[[str], Any]:
-    module = import_module("mergecraft.analyzers.sandbox_failures")
+    import mergecraft.analyzers.sandbox_failures as module
+
     candidate: Any = getattr(module, "classify_sandbox_failure_detail", None)
     if callable(candidate):
         return candidate
@@ -131,7 +132,8 @@ def _detail_classifier() -> Callable[[str], Any]:
 
 
 def _unambiguous_classifier() -> Callable[[str], Any]:
-    module = import_module("mergecraft.analyzers.sandbox_failures")
+    import mergecraft.analyzers.sandbox_failures as module
+
     candidate: Any = getattr(module, "classify_unambiguous_sandbox_failure_detail", None)
     if callable(candidate):
         return candidate

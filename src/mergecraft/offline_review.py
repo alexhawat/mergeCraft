@@ -7,7 +7,7 @@ import os
 import subprocess
 import tempfile
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -260,11 +260,13 @@ def _structured_output_failure(result: OfflineReviewResult, reason: str) -> Offl
     outcome, resolved_reason = resolve_run_outcome(
         OutcomeInputs(result=AgentResult(success=True), structured_output_error=reason)
     )
-    return _offline_failure(
+    return replace(
+        result,
+        success=False,
         error=resolved_reason or reason,
         outcome=outcome,
-        diff_path=result.diff_path,
-        evidence_packet_path=result.evidence_packet_path,
+        structured_output=None,
+        output=None,
     )
 
 

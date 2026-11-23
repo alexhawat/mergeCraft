@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, cast
 
@@ -34,7 +33,8 @@ def _clear_provider_env(monkeypatch: MonkeyPatch) -> None:
 
 
 def _import_chain_symbol(name: str) -> object:
-    module = importlib.import_module("mergecraft.utils.agent_resolve")
+    import mergecraft.utils.agent_resolve as module
+
     try:
         return getattr(module, name)
     except AttributeError as exc:

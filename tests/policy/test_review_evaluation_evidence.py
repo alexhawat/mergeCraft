@@ -23,7 +23,6 @@ The suite is written before the wiring exists, so it is red until it lands.
 
 from __future__ import annotations
 
-import importlib
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -69,7 +68,9 @@ _ROLLBACK_REASON = (
 
 
 def _producers() -> Any:
-    return importlib.import_module("mergecraft.policy.evidence_producers")
+    from mergecraft.policy import evidence_producers
+
+    return evidence_producers
 
 
 def _record(key: str, *, source: str = "declared-check-run", detail: str = _HEALTH_DETAIL) -> Any:
@@ -146,7 +147,8 @@ def _required_rule(
 def _spy_collect(monkeypatch: pytest.MonkeyPatch) -> list[frozenset[str]]:
     """Count producer runs through ``collect_policy_evidence``, keeping the real one."""
     producers = _producers()
-    review = importlib.import_module("mergecraft.policy.review")
+    import mergecraft.policy.review as review
+
     real = producers.collect_policy_evidence
     calls: list[frozenset[str]] = []
 
