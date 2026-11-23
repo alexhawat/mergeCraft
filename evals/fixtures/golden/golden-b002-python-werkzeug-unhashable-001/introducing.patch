@@ -1,0 +1,70 @@
+diff --git a/CHANGES.rst b/CHANGES.rst
+index 0df304c55..87033da6a 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -18,6 +18,8 @@ Unreleased
+     float values. (:issue:`1511`)
+ -   Update :class:`~middleware.lint.LintMiddleware` to work on Python 3.
+     (:issue:`1510`)
++-   The debugger detects cycles in chained exceptions and does not time
++    out in that case. (:issue:`1536`)
+ 
+ 
+ Version 0.15.2
+diff --git a/src/werkzeug/debug/tbtools.py b/src/werkzeug/debug/tbtools.py
+index f6af4e307..2eadb9e39 100644
+--- a/src/werkzeug/debug/tbtools.py
++++ b/src/werkzeug/debug/tbtools.py
+@@ -245,12 +245,14 @@ def __init__(self, exc_type, exc_value, tb):
+         self.exception_type = exception_type
+ 
+         self.groups = []
++        memo = set()
+         while True:
+             self.groups.append(Group(exc_type, exc_value, tb))
++            memo.add(exc_value)
+             if PY2:
+                 break
+             exc_value = exc_value.__cause__ or exc_value.__context__
+-            if exc_value is None:
++            if exc_value is None or exc_value in memo:
+                 break
+             exc_type = type(exc_value)
+             tb = exc_value.__traceback__
+diff --git a/tests/test_debug.py b/tests/test_debug.py
+index fa94b653d..4c4b9746a 100644
+--- a/tests/test_debug.py
++++ b/tests/test_debug.py
+@@ -354,3 +354,20 @@ def app(environ, start_response):
+         assert "The debugger caught an exception in your WSGI application" in r.text
+     else:
+         assert r.text == "hello"
++
++
++@pytest.mark.skipif(PY2, reason="Python 2 doesn't have chained exceptions.")
++@pytest.mark.timeout(2)
++def test_chained_exception_cycle():
++    try:
++        try:
++            raise ValueError()
++        except ValueError:
++            raise TypeError()
++    except TypeError as e:
++        # create a cycle and make it available outside the except block
++        e.__context__.__context__ = error = e
++
++    # if cycles aren't broken, this will time out
++    tb = Traceback(TypeError, error, error.__traceback__)
++    assert len(tb.groups) == 2
+diff --git a/tox.ini b/tox.ini
+index 64a6ec57d..6b67a49b0 100644
+--- a/tox.ini
++++ b/tox.ini
+@@ -10,6 +10,7 @@ skip_missing_interpreters = true
+ deps =
+     coverage
+     pytest
++    pytest-timeout
+     pytest-xprocess
+     requests
+     requests_unixsocket

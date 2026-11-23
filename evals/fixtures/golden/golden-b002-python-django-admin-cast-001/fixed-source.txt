@@ -1,0 +1,83 @@
+1136: 
+1137:         # Apply keyword searches.
+1138:         def construct_search(field_name):
+1139:             """
+1140:             Return a tuple of (lookup, field_to_validate).
+1141: 
+1142:             field_to_validate is set for non-text exact lookups so that
+1143:             invalid search terms can be skipped (preserving index usage).
+1144:             """
+1145:             if field_name.startswith("^"):
+1146:                 return "%s__istartswith" % field_name.removeprefix("^"), None
+1147:             elif field_name.startswith("="):
+1148:                 return "%s__iexact" % field_name.removeprefix("="), None
+1149:             elif field_name.startswith("@"):
+1150:                 return "%s__search" % field_name.removeprefix("@"), None
+1151:             # Use field_name if it includes a lookup.
+1152:             opts = queryset.model._meta
+1153:             lookup_fields = field_name.split(LOOKUP_SEP)
+1154:             # Go through the fields, following all relations.
+1155:             prev_field = None
+1156:             for path_part in lookup_fields:
+1157:                 if path_part == "pk":
+1158:                     path_part = opts.pk.name
+1159:                 try:
+1160:                     field = opts.get_field(path_part)
+1161:                 except FieldDoesNotExist:
+1162:                     # Use valid query lookups.
+1163:                     if prev_field and prev_field.get_lookup(path_part):
+1164:                         if path_part == "exact" and not isinstance(
+1165:                             prev_field, (models.CharField, models.TextField)
+1166:                         ):
+1167:                             # Use prev_field to validate the search term.
+1168:                             return field_name, prev_field
+1169:                         return field_name, None
+1170:                 else:
+1171:                     prev_field = field
+1172:                     if hasattr(field, "path_infos"):
+1173:                         # Update opts to follow the relation.
+1174:                         opts = field.path_infos[-1].to_opts
+1175:             # Otherwise, use the field with icontains.
+1176:             return "%s__icontains" % field_name, None
+1177: 
+1178:         may_have_duplicates = False
+1179:         search_fields = self.get_search_fields(request)
+1180:         if search_fields and search_term:
+1181:             orm_lookups = []
+1182:             for field in search_fields:
+1183:                 orm_lookups.append(construct_search(str(field)))
+1184: 
+1185:             term_queries = []
+1186:             for bit in smart_split(search_term):
+1187:                 if bit.startswith(('"', "'")) and bit[0] == bit[-1]:
+1188:                     bit = unescape_string_literal(bit)
+1189:                 # Build term lookups, skipping values invalid for their field.
+1190:                 bit_lookups = []
+1191:                 for orm_lookup, validate_field in orm_lookups:
+1192:                     if validate_field is not None:
+1193:                         formfield = validate_field.formfield()
+1194:                         try:
+1195:                             if formfield is not None:
+1196:                                 value = formfield.to_python(bit)
+1197:                             else:
+1198:                                 # Fields like AutoField lack a form field.
+1199:                                 value = validate_field.to_python(bit)
+1200:                         except ValidationError:
+1201:                             # Skip this lookup for invalid values.
+1202:                             continue
+1203:                     else:
+1204:                         value = bit
+1205:                     bit_lookups.append((orm_lookup, value))
+1206:                 if bit_lookups:
+1207:                     or_queries = models.Q.create(bit_lookups, connector=models.Q.OR)
+1208:                     term_queries.append(or_queries)
+1209:                 else:
+1210:                     # No valid lookups: add a filter that returns nothing.
+1211:                     term_queries.append(models.Q(pk__in=[]))
+1212:             if term_queries:
+1213:                 queryset = queryset.filter(models.Q.create(term_queries))
+1214:             may_have_duplicates |= any(
+1215:                 lookup_spawns_duplicates(self.opts, search_spec)
+1216:                 for search_spec, _ in orm_lookups
+1217:             )
+1218:         return queryset, may_have_duplicates

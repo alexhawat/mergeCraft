@@ -1,0 +1,12 @@
+ 187 export function resolvePkgJsonPath(
+ 188   pkgName: string,
+ 189   basedir: string,
+ 190   preserveSymlinks = false,
+ 191 ): string | undefined {
+ 192   if (pnp) {
+ 193     const pkg = pnp.resolveToUnqualified(pkgName, basedir)
+ 194     if (!pkg) return undefined
+ 195     return path.join(pkg, 'package.json')
+ 196   }
+ 197 
+ 198   let root = basedir

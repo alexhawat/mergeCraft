@@ -1,0 +1,117 @@
+{
+  "case_id": "golden-b002-systems-go-gorm-caller-depth",
+  "title": "FileWithLineNum reports an inner wrapper after caller extraction",
+  "language": "go",
+  "framework": "GORM",
+  "category": "correctness",
+  "repo": "go-gorm/gorm",
+  "introducing_pr": {
+    "number": 7610,
+    "url": "https://github.com/go-gorm/gorm/pull/7610",
+    "title": "Fix slog logger caller frame detection to output correct source file",
+    "merged_at": "2025-10-30T10:56:26Z",
+    "base_sha": "b88148363a954f69fa680b152dfd96a94ffea1e1",
+    "head_sha": "0f6d61a85d68e0a3ce35cf57117fbca290f11ac9",
+    "merge_sha": "2c3d109af3057f0d0ee64104011f12ac7bdab9bc"
+  },
+  "fix_pr": {
+    "number": 7717,
+    "url": "https://github.com/go-gorm/gorm/pull/7717",
+    "title": "fix(utils): restore FileWithLineNum caller depth and add regression test",
+    "merged_at": "2026-03-21T11:31:31Z",
+    "base_sha": "4380dd6dd1a56b7438cec1f4c5a786d006a2c29e",
+    "head_sha": "a52dbae3c58bac0d111b9b338ae81f72e46ad6d7",
+    "merge_sha": "61520d7476a5b08cf09439da7bb2628f86d2cd25"
+  },
+  "causal_evidence": {
+    "url": "https://github.com/go-gorm/gorm/pull/7717",
+    "kind": "fix PR body",
+    "quote": "After #7610, stack scanning was extracted into CallerFrame()."
+  },
+  "buggy_file": "utils/utils.go",
+  "buggy_line_range": {
+    "start": 55,
+    "end": 59
+  },
+  "source_url": "https://github.com/go-gorm/gorm/blob/2c3d109af3057f0d0ee64104011f12ac7bdab9bc/utils/utils.go#L55-L59",
+  "proposed_label": "bug",
+  "proposed_category": "correctness",
+  "rationale": "The introduction routes FileWithLineNum through an additional CallerFrame wrapper while retaining runtime.Callers(3). An external wrapper chain is therefore resolved one frame too early, changing the file:line returned by the established helper. The fix chooses explicit stack skips separately for CallerFrame and FileWithLineNum, and tests the wrapped call chain.",
+  "fix_test": {
+    "names": [
+      "TestFileWithLineNumWrappedCallRegression"
+    ],
+    "path": "utils/utils_test.go",
+    "inspection": "Regression test additions and corresponding production fix inspected in merged upstream PR.",
+    "local_execution": "not run"
+  },
+  "caveats": [
+    "This affects caller source diagnostics, rather than database query results.",
+    "The regression test and stack-depth changes were inspected at the merged fix; no Go tests were executed locally."
+  ],
+  "license": {
+    "name": "MIT License",
+    "spdx_id": "MIT",
+    "pinned_url": "https://github.com/go-gorm/gorm/blob/2c3d109af3057f0d0ee64104011f12ac7bdab9bc/LICENSE"
+  },
+  "decision": "pending",
+  "evidence_status": "recovered",
+  "fixture_dir": "evals/fixtures/golden/golden-b002-systems-go-gorm-caller-depth",
+  "fixture_path": "evals/fixtures/golden/golden-b002-systems-go-gorm-caller-depth/task.patch",
+  "fixture_sha256": "056156b6d682914c8408fc2a90414133372d2b8bb9b887b8e588e585bbe48716",
+  "artifactsha256": {
+    "task.patch": "056156b6d682914c8408fc2a90414133372d2b8bb9b887b8e588e585bbe48716",
+    "fix.patch": "b85592a03d44efee34168de626f04f6f0870657e32560508ce4e4f95c242d7ce",
+    "buggy-source.txt": "7200117f62e40b58a47cba86ee5ae765d275fd9da3210beef78b430451390689",
+    "fixed-source.txt": "5c23493728614e30d952caec2e0840434018ec6aae70c4369f4ff28f46cc36b0",
+    "fix-test.txt": "5a5fd6eeb702e82ecfaf05c1c39f7a97692a3fc597d651b7f7bc857dc8c04e95",
+    "LICENSE.upstream": "a7535fe9fee1f534b47846eee31be7492c73fb766e6f4fe9433a427e16e147c3",
+    "ATTRIBUTION.md": "912d322af066606406dad69efa4c6f37ce98dfdbd54404f72b3cf1a08e1d0a55"
+  },
+  "artifact_origins": {
+    "task.patch": {
+      "kind": "file-filtered PR diff",
+      "files": [
+        "utils/utils.go"
+      ],
+      "url": "https://github.com/go-gorm/gorm/compare/b88148363a954f69fa680b152dfd96a94ffea1e1...0f6d61a85d68e0a3ce35cf57117fbca290f11ac9",
+      "base_sha": "b88148363a954f69fa680b152dfd96a94ffea1e1",
+      "head_sha": "0f6d61a85d68e0a3ce35cf57117fbca290f11ac9"
+    },
+    "fix.patch": {
+      "kind": "complete PR diff",
+      "files": null,
+      "url": "https://github.com/go-gorm/gorm/compare/4380dd6dd1a56b7438cec1f4c5a786d006a2c29e...a52dbae3c58bac0d111b9b338ae81f72e46ad6d7",
+      "base_sha": "4380dd6dd1a56b7438cec1f4c5a786d006a2c29e",
+      "head_sha": "a52dbae3c58bac0d111b9b338ae81f72e46ad6d7"
+    },
+    "buggy-source.txt": {
+      "kind": "verbatim bounded source excerpt",
+      "path": "utils/utils.go",
+      "start_line": 33,
+      "end_line": 63,
+      "url": "https://github.com/go-gorm/gorm/blob/2c3d109af3057f0d0ee64104011f12ac7bdab9bc/utils/utils.go#L33-L63"
+    },
+    "fixed-source.txt": {
+      "kind": "verbatim bounded source excerpt",
+      "path": "utils/utils.go",
+      "start_line": 33,
+      "end_line": 69,
+      "url": "https://github.com/go-gorm/gorm/blob/61520d7476a5b08cf09439da7bb2628f86d2cd25/utils/utils.go#L33-L69"
+    },
+    "fix-test.txt": {
+      "kind": "verbatim bounded source excerpt",
+      "path": "utils/utils_test.go",
+      "start_line": 203,
+      "end_line": 224,
+      "url": "https://github.com/go-gorm/gorm/blob/61520d7476a5b08cf09439da7bb2628f86d2cd25/utils/utils_test.go#L203-L224"
+    },
+    "LICENSE.upstream": {
+      "kind": "unmodified complete upstream license",
+      "url": "https://github.com/go-gorm/gorm/blob/2c3d109af3057f0d0ee64104011f12ac7bdab9bc/LICENSE"
+    },
+    "ATTRIBUTION.md": {
+      "kind": "agent-authored attribution and artifact scope"
+    }
+  }
+}

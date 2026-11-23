@@ -57,32 +57,37 @@ checkout-relative authoring tree last. `mergecraft eval adjudicate` changes
 only the path passed by the operator. It does not infer or update another copy,
 an installed wheel, or an unrelated custom corpus.
 
-### First human adjudication batch
+### Human adjudication review packets
 
-`evals/adjudication/golden-batch-001.json` is the strict preparation manifest
-for the nine golden rows tracked by #780. Render its review sheet with:
+The [batch 001 review sheet](../evals/adjudication/golden-batch-001-review.md)
+lists the nine original claims tracked by #780. Its
+[manifest](../evals/adjudication/golden-batch-001.json) names `alexhawat` as
+the intended adjudicator. On 2026-11-19 the operator stated that they had not
+adjudicated the batch. The previous attribution of nine abstentions is
+withdrawn; historical git records and the
+[earlier issue comment](https://github.com/alexhawat/mergeCraft/issues/780#issuecomment-5811216475)
+remain preserved. Current decisions are 9 pending, 0 confirm, 0 correct,
+0 abstain, with null decision identities and timestamps.
 
-```bash
-make eval-human-batch
-```
+All nine original rows still have `evidence_status: missing`. Commit
+`3ff1bb39d6a5c2035c19c793131c493b591cf98d` introduced their descriptive
+metadata without a source patch, originating repository, PR, or immutable
+code snapshot. That history does not establish the claimed defects. Render
+the manifest with `make eval-human-batch`.
 
-The committed manifest names `alexhawat` as the adjudicator. All nine rows
-are `evidence_status: missing`, and on 2026-09-24 the adjudicator recorded
-`abstain` for every one of them
-([decision](https://github.com/alexhawat/mergeCraft/issues/780#issuecomment-5811216475)):
-0 confirm, 0 correct, 9 abstain, 0 pending. Repository history shows that commit
-`3ff1bb39d6a5c2035c19c793131c493b591cf98d` introduced the metadata files; it
-contains no source patch, originating repository, PR, or immutable code
-snapshot and is therefore history, not substantive evidence for the claims.
-Abstained rows stay in the corpus without human provenance, so the golden
-subset still has no `independent`-tier labels. Independent golden labels need
-replacement cases that point at real, commit-pinned changes, recorded in a
-later batch.
+The [batch 002 review packet](../evals/adjudication/golden-batch-002-review.md)
+and [manifest](../evals/adjudication/golden-batch-002.json) prepare nine new,
+agent-proposed findings for human review. Each links a merged introducing PR
+and fixing PR, full commit pins, an explicit upstream causal statement, and
+bounded code evidence. The [fixtures](../evals/fixtures/golden/) retain source
+excerpts, actual upstream patches, licenses, attribution, and artifact hashes.
+All nine decisions remain pending; the packet records which upstream tests
+were inspected and whether they were run locally.
 
-The manifest validates source URLs as commit-pinned, confines any local
-fixture to `evals/fixtures/golden/<case-id>/`, and verifies its SHA-256 before
-rendering. This batch establishes neither judge calibration nor human-human
-agreement, even after its provenance requirements are eventually satisfied.
+Neither packet supplies accepted independent human labels, judge calibration,
+or human-human agreement. Preparing or publishing evidence does not create
+human provenance or complete #780. Confirmations and corrections require the
+intended adjudicator's actual response and inspectable evidence.
 
 ### Judge calibration
 

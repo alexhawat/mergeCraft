@@ -1,0 +1,18 @@
+{
+  "base": {
+    "ref": "master",
+    "sha": "63349394170347241c48a445c843ff2be53e3a8a"
+  },
+  "body": "https://code.djangoproject.com/ticket/28912",
+  "head": {
+    "ref": "empty-to-header",
+    "sha": "da82939e5a31dea21a4f4d5085dfcd449fcbed3a"
+  },
+  "html_url": "https://github.com/django/django/pull/9454",
+  "merge_commit_sha": "da82939e5a31dea21a4f4d5085dfcd449fcbed3a",
+  "merged": true,
+  "merged_at": "2017-12-30T14:55:42Z",
+  "number": 9454,
+  "state": "closed",
+  "title": "Fixed #28912 -- Fixed EmailMessage.message() to exclude an empty To field."
+}

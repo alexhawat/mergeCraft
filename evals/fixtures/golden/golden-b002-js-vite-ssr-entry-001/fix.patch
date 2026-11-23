@@ -1,0 +1,139 @@
+diff --git a/packages/vite/src/node/ssr/ssrExternal.ts b/packages/vite/src/node/ssr/ssrExternal.ts
+--- a/packages/vite/src/node/ssr/ssrExternal.ts
++++ b/packages/vite/src/node/ssr/ssrExternal.ts
+@@ -124,9 +124,22 @@ export function createIsConfiguredAsSsrExternal(
+       if (!pkgName) {
+         return undefined
+       }
+-      if (ssr.external?.includes(pkgName)) {
++      if (
++        // If this id is defined as external, force it as external
++        // Note that individual package entries are allowed in ssr.external
++        ssr.external?.includes(id)
++      ) {
+         return true
+       }
++      if (
++        // A package name in ssr.external externalizes every entry
++        ssr.external?.includes(pkgName)
++      ) {
++        // Return undefined here to avoid short-circuiting the isExternalizable check,
++        // that will filter this id out if it is not externalizable (e.g. a CSS file)
++        // We return here to make ssr.external take precedence over noExternal
++        return undefined
++      }
+       if (typeof noExternal === 'boolean') {
+         return !noExternal
+       }
+@@ -154,7 +167,7 @@ function createIsSsrExternal(
+     isBuild: true
+   }
+ 
+-  const isValidPackageEntry = (id: string) => {
++  const isExternalizable = (id: string) => {
+     if (!bareImportRE.test(id) || id.includes('\0')) {
+       return false
+     }
+@@ -176,7 +189,7 @@ function createIsSsrExternal(
+     let external = false
+     if (!id.startsWith('.') && !path.isAbsolute(id)) {
+       external =
+-        isBuiltin(id) || (isConfiguredAsExternal(id) ?? isValidPackageEntry(id))
++        isBuiltin(id) || (isConfiguredAsExternal(id) ?? isExternalizable(id))
+     }
+     processedIds.set(id, external)
+     return external
+diff --git a/playground/ssr-deps/__tests__/ssr-deps.spec.ts b/playground/ssr-deps/__tests__/ssr-deps.spec.ts
+--- a/playground/ssr-deps/__tests__/ssr-deps.spec.ts
++++ b/playground/ssr-deps/__tests__/ssr-deps.spec.ts
+@@ -91,3 +91,10 @@ test('msg from optimized cjs with nested external', async () => {
+     'Hello World!'
+   )
+ })
++
++test('msg from external using external entry', async () => {
++  await page.goto(url)
++  expect(await page.textContent('.external-using-external-entry')).toMatch(
++    'Hello World!'
++  )
++})
+diff --git a/playground/ssr-deps/external-entry/entry.js b/playground/ssr-deps/external-entry/entry.js
+--- /dev/null
++++ b/playground/ssr-deps/external-entry/entry.js
+@@ -0,0 +1,9 @@
++// Module with state, to check that it is properly externalized and
++// not bundled in the optimized deps
++let msg
++export function setMessage(externalMsg) {
++  msg = externalMsg
++}
++export default function getMessage() {
++  return msg
++}
+diff --git a/playground/ssr-deps/external-entry/package.json b/playground/ssr-deps/external-entry/package.json
+--- /dev/null
++++ b/playground/ssr-deps/external-entry/package.json
+@@ -0,0 +1,10 @@
++{
++  "name": "external-entry",
++  "private": true,
++  "version": "0.0.0",
++  "exports": {
++    ".": "./index.js",
++    "./entry": "./entry.js"
++  },
++  "type": "module"
++}
+diff --git a/playground/ssr-deps/external-using-external-entry/index.js b/playground/ssr-deps/external-using-external-entry/index.js
+--- /dev/null
++++ b/playground/ssr-deps/external-using-external-entry/index.js
+@@ -0,0 +1,7 @@
++import getMessage from 'external-entry/entry'
++
++export default {
++  hello() {
++    return getMessage()
++  }
++}
+diff --git a/playground/ssr-deps/server.js b/playground/ssr-deps/server.js
+--- a/playground/ssr-deps/server.js
++++ b/playground/ssr-deps/server.js
+@@ -35,8 +35,13 @@ export async function createServer(root = process.cwd(), hmrPort) {
+     },
+     appType: 'custom',
+     ssr: {
+-      noExternal: ['no-external-cjs', 'import-builtin-cjs', 'no-external-css'],
+-      external: ['nested-external'],
++      noExternal: [
++        'no-external-cjs',
++        'import-builtin-cjs',
++        'no-external-css',
++        'external-entry'
++      ],
++      external: ['nested-external', 'external-entry/entry'],
+       optimizeDeps: {
+         disabled: 'build'
+       }
+diff --git a/playground/ssr-deps/src/app.js b/playground/ssr-deps/src/app.js
+--- a/playground/ssr-deps/src/app.js
++++ b/playground/ssr-deps/src/app.js
+@@ -20,6 +20,10 @@ import 'non-optimized-with-nested-external'
+ import optimizedWithNestedExternal from 'optimized-with-nested-external'
+ import optimizedCjsWithNestedExternal from 'optimized-cjs-with-nested-external'
+ 
++import { setMessage } from 'external-entry/entry'
++setMessage('Hello World!')
++import externalUsingExternalEntry from 'external-using-external-entry'
++
+ export async function render(url, rootDir) {
+   let html = ''
+ 
+@@ -68,5 +72,8 @@ export async function render(url, rootDir) {
+     optimizedCjsWithNestedExternal.hello()
+   html += `\n<p class="optimized-cjs-with-nested-external">message from optimized-cjs-with-nested-external: ${optimizedCjsWithNestedExternalMessage}</p>`
+ 
++  const externalUsingExternalEntryMessage = externalUsingExternalEntry.hello()
++  html += `\n<p class="external-using-external-entry">message from external-using-external-entry: ${externalUsingExternalEntryMessage}</p>`
++
+   return html + '\n'
+ }
