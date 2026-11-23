@@ -219,6 +219,10 @@ def test_a_large_change_reviewed_from_the_diff_alone_is_sent_back_once(tmp_path:
     _read(state, f"cat {diff_path}")
     _read_source(state, "src/big.py")
 
+    record_tool_call(
+        state, tool="shell", arguments={"command": "cat src/missing.py"}, ok=True, outcome_ok=False
+    )
+
     assert diff_coverage_nudge_for_state(state) is None
     nudge = review_depth_nudge_for_state(state)
 

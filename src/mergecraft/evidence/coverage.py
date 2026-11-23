@@ -213,12 +213,7 @@ def account_coverage(
 # ── run state ────────────────────────────────────────────────────────────────
 
 
-def _delivered_diff(state: ToolState) -> str:
-    from mergecraft.mcp.tool_state import primary_repo_state
-
-    raw = primary_repo_state(state).diff_path
-    if not raw:
-        return ""
+def _delivered_diff(raw: str) -> str:
     path = Path(raw)
     if not path.is_file():
         return ""
@@ -229,7 +224,9 @@ def _delivered_diff(state: ToolState) -> str:
         return ""
 
 
-def _read_breakdown(state: ToolState, authoritative: str) -> DiffCoverageBreakdown | None:
+def _read_breakdown(
+    state: ToolState, authoritative: str, delivered_diffs: Mapping[str, str] | None = None
+) -> DiffCoverageBreakdown | None:
     """Return the run's line-range read coverage over ``authoritative``, if there is a diff.
 
     The evidence comes from :mod:`mergecraft.evidence.diff_coverage`, the same
@@ -244,7 +241,7 @@ def _read_breakdown(state: ToolState, authoritative: str) -> DiffCoverageBreakdo
     reads = (getattr(state, "tool_calls", None) or [])[
         getattr(state, "review_scope_tool_call_start", 0) :
     ]
-    return compute_diff_coverage(authoritative, reads, diff_path=None)
+    return compute_diff_coverage(authoritative, reads, delivered_diffs=delivered_diffs)
 
 
 def _read_evidence(
@@ -269,8 +266,14 @@ def _read_evidence(
 
 def coverage_section_for_state(state: ToolState) -> CoverageSection | None:
     """Return the run's coverage section, or ``None`` when there is nothing to account for."""
+    from mergecraft.mcp.tool_state import primary_repo_state
+
     record = state.coverage
-    delivered = _delivered_diff(state)
+    repo = primary_repo_state(state)
+    delivered_diffs = {
+        path: _delivered_diff(path) for path in (repo.diff_path, repo.incremental_diff_path) if path
+    }
+    delivered = delivered_diffs.get(repo.diff_path or "", "")
     authoritative = (
         record.authoritative_diff if record.authoritative_diff is not None else delivered
     )
@@ -303,7 +306,7 @@ def coverage_section_for_state(state: ToolState) -> CoverageSection | None:
             unreviewable = filtered_unreviewable
     if not authoritative and not unreviewable and not record.diff_truncated:
         return None
-    breakdown = _read_breakdown(state, authoritative)
+    breakdown = _read_breakdown(state, authoritative, delivered_diffs)
     observed, covered = _read_evidence(state, authoritative, breakdown)
     return account_coverage(
         added_lines=(breakdown.covered_lines, breakdown.total_lines) if breakdown else None,

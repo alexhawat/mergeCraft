@@ -342,7 +342,7 @@ def review_depth_nudge_for_state(tool_state: ToolState) -> str | None:
     source_files = {
         name
         for call in calls
-        if call.intent == "read" and call.ok
+        if call.intent == "read" and call.ok and call.outcome_ok is not False
         for name in call.paths
         if name != path
     }

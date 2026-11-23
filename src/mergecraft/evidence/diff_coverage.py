@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import re
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final
 
 from mergecraft.analyzers.scope import (
@@ -54,7 +54,7 @@ from mergecraft.analyzers.scope import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from mergecraft.evidence.trajectory import ToolCallRecord
 
@@ -62,7 +62,7 @@ _HUNK_RE: Final[re.Pattern[str]] = re.compile(
     r"^@@ -\d+(?:,\d+)? \+(?P<start>\d+)(?:,(?P<count>\d+))? @@"
 )
 _SED_RANGE_RE: Final[re.Pattern[str]] = re.compile(r"^(?P<start>\d+),(?P<end>\d+)p$")
-_SED_SINGLE_RE: Final[re.Pattern[str]] = re.compile(r"^(?P<line>\d+)p$")
+_SED_SINGLE_RE: Final[re.Pattern[str]] = re.compile(r"^(?P<start>\d+)p$")
 _HEAD_N_RE: Final[re.Pattern[str]] = re.compile(r"^(?P<count>\d+)$")
 # Generated artifacts are in the diff but not worth a human read. The nudge
 # names them, as pullfrog does, so the agent can decide to skip deliberately
@@ -550,11 +550,23 @@ def _mentions_diff(command: str | None, diff_path: str | None) -> bool:
     return _normalize_path(diff_path) in _normalize_path(command)
 
 
+def _delivered_entries(text: str, scope: Sequence[DiffTocEntry]) -> tuple[DiffTocEntry, ...]:
+    """Keep physical diff offsets but credit only added post-image lines in scope."""
+    in_scope = {entry.path: {line for _, line in entry.line_map} for entry in scope}
+    delivered = []
+    for entry in parse_diff_toc(text):
+        if entry.path in in_scope:
+            line_map = tuple(pair for pair in entry.line_map if pair[1] in in_scope[entry.path])
+            delivered.append(replace(entry, line_map=line_map))
+    return tuple(delivered)
+
+
 def compute_diff_coverage(
     diff_text: str,
     calls: Sequence[ToolCallRecord],
     *,
     diff_path: str | None = None,
+    delivered_diffs: Mapping[str, str] | None = None,
 ) -> DiffCoverageBreakdown:
     """Compute added-line coverage for ``diff_text`` from observed reads.
 
@@ -563,7 +575,9 @@ def compute_diff_coverage(
         calls: Mediated and external tool-call rows, in sequence order.
         diff_path: Absolute path of ``diff_text`` on disk, when a caller knows
             it. Reads of that path are mapped onto the added lines the read
-            span showed; without it only source-file reads count.
+            span showed.
+        delivered_diffs: Other materialized diffs at the same head, keyed by their
+            physical paths. Each read uses offsets from the file actually opened.
 
     Returns:
         A :class:`DiffCoverageBreakdown`. ``observed`` is ``False`` when no
@@ -573,19 +587,32 @@ def compute_diff_coverage(
     entries = parse_diff_toc(diff_text)
     if not entries:
         return DiffCoverageBreakdown(files=(), observed=False)
-    total_diff_lines = max(len(diff_text.splitlines()), 1)
+    physical_diffs = dict(delivered_diffs or {})
+    if diff_path:
+        physical_diffs[diff_path] = diff_text
+    tables = {
+        path: (
+            entries if text == diff_text else _delivered_entries(text, entries),
+            len(text.splitlines()),
+        )
+        for path, text in physical_diffs.items()
+    }
     covered_by_file: dict[str, list[LineRange]] = {entry.path: [] for entry in entries}
     read_files: set[str] = set()
     observed = False
     entry_by_path = {entry.path: entry for entry in entries}
     for call in calls:
-        if not call.ok or call.intent != "read":
+        if not call.ok or call.outcome_ok is False or call.intent != "read":
             continue
-        if call.diff_read_path is not None or call.paths or _mentions_diff(call.command, diff_path):
+        if call.diff_read_path is not None or call.paths:
             observed = True
-        diff_range = _diff_read_range(call, diff_path=diff_path, total_diff_lines=total_diff_lines)
-        if diff_range is not None:
-            for entry in entries:
+        for path, (delivered_entries, line_count) in tables.items():
+            if _mentions_diff(call.command, path):
+                observed = True
+            diff_range = _diff_read_range(call, diff_path=path, total_diff_lines=line_count)
+            if diff_range is None:
+                continue
+            for entry in delivered_entries:
                 section = LineRange(entry.diff_start, entry.diff_end)
                 if diff_range.intersect(section) is not None:
                     read_files.add(entry.path)
