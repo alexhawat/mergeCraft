@@ -1,0 +1,228 @@
+diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py
+index 69b7031e8260..9c787d232912 100644
+--- a/django/contrib/admin/options.py
++++ b/django/contrib/admin/options.py
+@@ -41,7 +41,6 @@
+ from django.core.paginator import Paginator
+ from django.db import models, router, transaction
+ from django.db.models.constants import LOOKUP_SEP
+-from django.db.models.functions import Cast
+ from django.forms.formsets import DELETION_FIELD_NAME, all_valid
+ from django.forms.models import (
+     BaseInlineFormSet,
+@@ -1137,6 +1136,12 @@ def get_search_results(self, request, queryset, search_term):
+ 
+         # Apply keyword searches.
+         def construct_search(field_name):
++            """
++            Return a tuple of (lookup, field_to_validate).
++
++            field_to_validate is set for non-text exact lookups so that
++            invalid search terms can be skipped (preserving index usage).
++            """
+             if field_name.startswith("^"):
+                 return "%s__istartswith" % field_name.removeprefix("^"), None
+             elif field_name.startswith("="):
+@@ -1148,7 +1153,7 @@ def construct_search(field_name):
+             lookup_fields = field_name.split(LOOKUP_SEP)
+             # Go through the fields, following all relations.
+             prev_field = None
+-            for i, path_part in enumerate(lookup_fields):
++            for path_part in lookup_fields:
+                 if path_part == "pk":
+                     path_part = opts.pk.name
+                 try:
+@@ -1159,15 +1164,9 @@ def construct_search(field_name):
+                         if path_part == "exact" and not isinstance(
+                             prev_field, (models.CharField, models.TextField)
+                         ):
+-                            field_name_without_exact = "__".join(lookup_fields[:i])
+-                            alias = Cast(
+-                                field_name_without_exact,
+-                                output_field=models.CharField(),
+-                            )
+-                            alias_name = "_".join(lookup_fields[:i])
+-                            return f"{alias_name}_str", alias
+-                        else:
+-                            return field_name, None
++                            # Use prev_field to validate the search term.
++                            return field_name, prev_field
++                        return field_name, None
+                 else:
+                     prev_field = field
+                     if hasattr(field, "path_infos"):
+@@ -1179,30 +1178,42 @@ def construct_search(field_name):
+         may_have_duplicates = False
+         search_fields = self.get_search_fields(request)
+         if search_fields and search_term:
+-            str_aliases = {}
+             orm_lookups = []
+             for field in search_fields:
+-                lookup, str_alias = construct_search(str(field))
+-                orm_lookups.append(lookup)
+-                if str_alias:
+-                    str_aliases[lookup] = str_alias
+-
+-            if str_aliases:
+-                queryset = queryset.alias(**str_aliases)
++                orm_lookups.append(construct_search(str(field)))
+ 
+             term_queries = []
+             for bit in smart_split(search_term):
+                 if bit.startswith(('"', "'")) and bit[0] == bit[-1]:
+                     bit = unescape_string_literal(bit)
+-                or_queries = models.Q.create(
+-                    [(orm_lookup, bit) for orm_lookup in orm_lookups],
+-                    connector=models.Q.OR,
+-                )
+-                term_queries.append(or_queries)
+-            queryset = queryset.filter(models.Q.create(term_queries))
++                # Build term lookups, skipping values invalid for their field.
++                bit_lookups = []
++                for orm_lookup, validate_field in orm_lookups:
++                    if validate_field is not None:
++                        formfield = validate_field.formfield()
++                        try:
++                            if formfield is not None:
++                                value = formfield.to_python(bit)
++                            else:
++                                # Fields like AutoField lack a form field.
++                                value = validate_field.to_python(bit)
++                        except ValidationError:
++                            # Skip this lookup for invalid values.
++                            continue
++                    else:
++                        value = bit
++                    bit_lookups.append((orm_lookup, value))
++                if bit_lookups:
++                    or_queries = models.Q.create(bit_lookups, connector=models.Q.OR)
++                    term_queries.append(or_queries)
++                else:
++                    # No valid lookups: add a filter that returns nothing.
++                    term_queries.append(models.Q(pk__in=[]))
++            if term_queries:
++                queryset = queryset.filter(models.Q.create(term_queries))
+             may_have_duplicates |= any(
+                 lookup_spawns_duplicates(self.opts, search_spec)
+-                for search_spec in orm_lookups
++                for search_spec, _ in orm_lookups
+             )
+         return queryset, may_have_duplicates
+ 
+diff --git a/tests/admin_changelist/models.py b/tests/admin_changelist/models.py
+index a84c27a06662..0b594300d2a3 100644
+--- a/tests/admin_changelist/models.py
++++ b/tests/admin_changelist/models.py
+@@ -140,3 +140,10 @@ class CharPK(models.Model):
+ class ProxyUser(User):
+     class Meta:
+         proxy = True
++
++
++class MixedFieldsModel(models.Model):
++    """Model with multiple field types for testing search validation."""
++
++    int_field = models.IntegerField(null=True, blank=True)
++    json_field = models.JSONField(null=True, blank=True)
+diff --git a/tests/admin_changelist/tests.py b/tests/admin_changelist/tests.py
+index 319d6259f6a9..e0772a3e6d4a 100644
+--- a/tests/admin_changelist/tests.py
++++ b/tests/admin_changelist/tests.py
+@@ -66,6 +66,7 @@
+     Group,
+     Invitation,
+     Membership,
++    MixedFieldsModel,
+     Musician,
+     OrderedObject,
+     Parent,
+@@ -856,6 +857,89 @@ def test_custom_lookup_with_pk_shortcut(self):
+         cl = m.get_changelist_instance(request)
+         self.assertCountEqual(cl.queryset, [abcd])
+ 
++    def test_exact_lookup_with_invalid_value(self):
++        Child.objects.create(name="Test", age=10)
++        m = admin.ModelAdmin(Child, custom_site)
++        m.search_fields = ["pk__exact"]
++
++        request = self.factory.get("/", data={SEARCH_VAR: "foo"})
++        request.user = self.superuser
++
++        # Invalid values are gracefully ignored.
++        cl = m.get_changelist_instance(request)
++        self.assertCountEqual(cl.queryset, [])
++
++    def test_exact_lookup_mixed_terms(self):
++        """
++        Multi-term search validates each term independently.
++
++        For 'foo 123' with search_fields=['name__icontains', 'age__exact']:
++        - 'foo': age lookup skipped (invalid), name lookup used
++        - '123': both lookups used (valid for age)
++        No Cast should be used; invalid lookups are simply skipped.
++        """
++        child = Child.objects.create(name="foo123", age=123)
++        Child.objects.create(name="other", age=456)
++        m = admin.ModelAdmin(Child, custom_site)
++        m.search_fields = ["name__icontains", "age__exact"]
++
++        request = self.factory.get("/", data={SEARCH_VAR: "foo 123"})
++        request.user = self.superuser
++
++        # One result matching on foo and 123.
++        cl = m.get_changelist_instance(request)
++        self.assertCountEqual(cl.queryset, [child])
++
++        # "xyz" - invalid for age (skipped), no match for name either.
++        request = self.factory.get("/", data={SEARCH_VAR: "xyz"})
++        request.user = self.superuser
++        cl = m.get_changelist_instance(request)
++        self.assertCountEqual(cl.queryset, [])
++
++    def test_exact_lookup_with_more_lenient_formfield(self):
++        """
++        Exact lookups on BooleanField use formfield().to_python() for lenient
++        parsing. Using model field's to_python() would reject 'false' whereas
++        the form field accepts it.
++        """
++        obj = UnorderedObject.objects.create(bool=False)
++        UnorderedObject.objects.create(bool=True)
++        m = admin.ModelAdmin(UnorderedObject, custom_site)
++        m.search_fields = ["bool__exact"]
++
++        # 'false' is accepted by form field but rejected by model field.
++        request = self.factory.get("/", data={SEARCH_VAR: "false"})
++        request.user = self.superuser
++
++        cl = m.get_changelist_instance(request)
++        self.assertCountEqual(cl.queryset, [obj])
++
++    def test_exact_lookup_validates_each_field_independently(self):
++        """
++        Each field validates the search term independently without leaking
++        converted values between fields.
++
++        "3." is valid for IntegerField (converts to 3) but invalid for
++        JSONField. The converted value must not leak to the JSONField check.
++        """
++        # obj_int has int_field=3, should match "3." via IntegerField.
++        obj_int = MixedFieldsModel.objects.create(
++            int_field=3, json_field={"key": "value"}
++        )
++        # obj_json has json_field=3, should NOT match "3." because "3." is
++        # invalid JSON.
++        MixedFieldsModel.objects.create(int_field=99, json_field=3)
++        m = admin.ModelAdmin(MixedFieldsModel, custom_site)
++        m.search_fields = ["int_field__exact", "json_field__exact"]
++
++        # "3." is valid for int (becomes 3) but invalid JSON.
++        # Only obj_int should match via int_field.
++        request = self.factory.get("/", data={SEARCH_VAR: "3."})
++        request.user = self.superuser
++
++        cl = m.get_changelist_instance(request)
++        self.assertCountEqual(cl.queryset, [obj_int])
++
+     def test_search_with_exact_lookup_for_non_string_field(self):
+         child = Child.objects.create(name="Asher", age=11)
+         model_admin = ChildAdmin(Child, custom_site)

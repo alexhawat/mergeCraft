@@ -1,0 +1,14 @@
+diff --git a/packages/vite/src/node/packages.ts b/packages/vite/src/node/packages.ts
+--- a/packages/vite/src/node/packages.ts
++++ b/packages/vite/src/node/packages.ts
+@@ -60,7 +60,9 @@ export function resolvePackageData(
+ 
+     let pkg: string | null
+     try {
+-      pkg = pnp.resolveToUnqualified(pkgName, basedir)
++      pkg = pnp.resolveToUnqualified(pkgName, basedir, {
++        considerBuiltins: false,
++      })
+     } catch {
+       return null
+     }

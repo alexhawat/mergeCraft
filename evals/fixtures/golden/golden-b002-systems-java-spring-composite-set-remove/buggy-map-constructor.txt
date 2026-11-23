@@ -1,0 +1,22 @@
+	private final Map<K, V> second;
+
+	private final @Nullable BiFunction<K, V, V> putFunction;
+
+	private final @Nullable Consumer<Map<K, V>> putAllFunction;
+
+
+	CompositeMap(Map<K, V> first, Map<K, V> second) {
+		this(first, second, null, null);
+	}
+
+	CompositeMap(Map<K, V> first, Map<K, V> second,
+			@Nullable BiFunction<K, V, V> putFunction,
+			@Nullable Consumer<Map<K, V>> putAllFunction) {
+
+		Assert.notNull(first, "First must not be null");
+		Assert.notNull(second, "Second must not be null");
+		this.first = first;
+		this.second = new FilteredMap<>(second, key -> !this.first.containsKey(key));
+		this.putFunction = putFunction;
+		this.putAllFunction = putAllFunction;
+	}

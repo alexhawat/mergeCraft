@@ -1,0 +1,195 @@
+{
+  "case_id": "golden-b002-python-django-admin-cast-001",
+  "title": "Casting exact admin search fields prevents use of ordinary database indexes",
+  "framework": "Django",
+  "category": "performance",
+  "repo": "django/django",
+  "language": "python",
+  "introducing_pr": {
+    "base": {
+      "ref": "main",
+      "sha": "03c0a3de722c4a7de9f3edfeb26417ebc8b90fe9"
+    },
+    "body": "ticket : https://code.djangoproject.com/ticket/26001\r\n\r\n [reference](https://code.djangoproject.com/ticket/26001#comment:5)",
+    "head": {
+      "ref": "26001",
+      "sha": "7d8962297c54ebbb8bb4eab7ca26ac42f41720be"
+    },
+    "html_url": "https://github.com/django/django/pull/17885",
+    "merge_commit_sha": "f223729f8f8380901473b244c0fc7c7dc397e3f1",
+    "merged": true,
+    "merged_at": "2024-11-04T08:39:47Z",
+    "number": 17885,
+    "state": "closed",
+    "title": "Fixed #26001 -- Fixed non-string field exact lookups in ModelAdmin.search_fields."
+  },
+  "fix_pr": {
+    "base": {
+      "ref": "main",
+      "sha": "f87c2055b45356378a7c2a020eb872352d20f85e"
+    },
+    "body": "Fixes https://code.djangoproject.com/ticket/36865\r\n\r\n## Description\r\n\r\nThis PR fixes a performance regression introduced in PR #17885.\r\n\r\nThe `Cast` to `CharField` for non-string field exact lookups prevents database index usage on primary key fields, generating SQL like:\r\n\r\n```sql\r\nWHERE (\"table\".\"id\")::varchar = '123'\r\n```\r\n\r\nThis cannot use the primary key index and causes full table scans, resulting in timeouts on large tables (reported in [ticket #26001 comment 24](https://code.djangoproject.com/ticket/26001#comment:24)), and discovered in a project I work on at https://github.com/freelawproject/courtlistener/issues/6790.\r\n\r\n## Solution\r\n\r\nDrop the casting approach introduced in #17885, and replace it with field validation that uses `to_python` on the results of `smart_split` to ensure that we only apply field-term pairs that make sense. For example: \r\n\r\n - searching a PrimaryKey field for \"foo\" --> Nope!\r\n - searching a TextField for \"foo\" --> Yes!\r\n - searching a TextField for \"123\" --> Close enough. Yes!\r\n\r\nAnd so forth. \r\n\r\nThis should ensure DB indexes are used and that we don't send nonsensical queries in the first place. \r\n\r\n## Trac tickets\r\n\r\nIntroducing issue: https://code.djangoproject.com/ticket/26001\r\nSolving it: https://code.djangoproject.com/ticket/36865",
+    "head": {
+      "ref": "fix-admin-search-cast-performance",
+      "sha": "12157a328fdb9801fbc99ff549630040baf2d089"
+    },
+    "html_url": "https://github.com/django/django/pull/20538",
+    "merge_commit_sha": "4cecf3039586ea738afafb9a28c946bff42c37c1",
+    "merged": true,
+    "merged_at": "2026-01-30T16:45:39Z",
+    "number": 20538,
+    "state": "closed",
+    "title": "Fixed #36865 -- Removed casting from exact lookups in admin searches."
+  },
+  "causal_evidence": {
+    "url": "https://github.com/django/django/pull/20538",
+    "shortquote": "This PR fixes a performance regression introduced in PR #17885.",
+    "snapshot_path": "evals/fixtures/golden/golden-b002-python-django-admin-cast-001/fix-pr.json",
+    "snapshot_sha256": "89b45013c0dfd88c25f2b22566f38864b2f57cdbc0c1f8d642f4029a9eba5bc2"
+  },
+  "buggy_file": "django/contrib/admin/options.py",
+  "start_line": 1222,
+  "end_line": 1227,
+  "buggy_commit_sha": "f223729f8f8380901473b244c0fc7c7dc397e3f1",
+  "buggy_source_url": "https://github.com/django/django/blob/f223729f8f8380901473b244c0fc7c7dc397e3f1/django/contrib/admin/options.py#L1222-L1227",
+  "proposed_label": {
+    "category": "performance",
+    "status": "agent_proposal_only",
+    "rationale": "For a non-text field such as an indexed integer id searched via id__exact, the introducing change annotates Cast(field_name, CharField()) and filters the cast alias. On PostgreSQL an ordinary integer/primary-key index cannot serve that cast expression, causing full scans on large tables. The fix removes Cast and validates each search term against its target field before building direct lookups."
+  },
+  "rationale": "For a non-text field such as an indexed integer id searched via id__exact, the introducing change annotates Cast(field_name, CharField()) and filters the cast alias. On PostgreSQL an ordinary integer/primary-key index cannot serve that cast expression, causing full scans on large tables. The fix removes Cast and validates each search term against its target field before building direct lookups.",
+  "fix_test": {
+    "path": "tests/admin_changelist/tests.py",
+    "names": [
+      "test_exact_lookup_with_invalid_value",
+      "test_exact_lookup_mixed_terms"
+    ],
+    "description": "The fix adds invalid-value and mixed-term search regressions, ensuring invalid non-text lookups are skipped while valid direct lookups continue to work. These are behavioral regressions, not a query-plan/performance assertion.",
+    "execution": "Upstream regression tests included, not run here."
+  },
+  "caveats": [
+    "Upstream regression tests included, not run here.",
+    "No PostgreSQL query-plan reproduction or benchmark was run; index impact is explicit in the fix PR body and matches the removed Cast expression.",
+    "The implementation was refactored between introducing and fixing PRs; both immutable source snapshots are included.",
+    "The introducing version handles direct concrete field names (for example id__exact); do not use pk__exact to demonstrate this particular introducing hunk."
+  ],
+  "license": {
+    "name": "BSD-3-Clause",
+    "url": "https://github.com/django/django/blob/f223729f8f8380901473b244c0fc7c7dc397e3f1/LICENSE",
+    "sha256": "b846415d1b514e9c1dff14a22deb906d794bc546ca6129f950a18cd091e2a669",
+    "fixture_path": "LICENSE"
+  },
+  "source_snapshots": [
+    {
+      "role": "base",
+      "path": "django/contrib/admin/options.py",
+      "commit_sha": "03c0a3de722c4a7de9f3edfeb26417ebc8b90fe9",
+      "url": "https://github.com/django/django/blob/03c0a3de722c4a7de9f3edfeb26417ebc8b90fe9/django/contrib/admin/options.py",
+      "full_source_sha256": "48146960e7e88e8408cf2ee0bea051f5ebfd9637a948ca294175396b2d160c9e",
+      "excerpt_path": "base-source.txt",
+      "excerpt_sha256": "db8e73ad323424e7bec83d0d9412b72e2b576a91041e35a88bebc485e1864f85",
+      "excerpt_line_ranges": [
+        [
+          1200,
+          1226
+        ]
+      ],
+      "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+    },
+    {
+      "role": "introduced",
+      "path": "django/contrib/admin/options.py",
+      "commit_sha": "f223729f8f8380901473b244c0fc7c7dc397e3f1",
+      "url": "https://github.com/django/django/blob/f223729f8f8380901473b244c0fc7c7dc397e3f1/django/contrib/admin/options.py",
+      "full_source_sha256": "338bcf31eee03927420ab42a9d8562109c9d84511c1dc5f200f3652388894cdf",
+      "excerpt_path": "introduced-source.txt",
+      "excerpt_sha256": "da1245e0ffc9462f6ca3bbe64ed46f7f29f696f431c1b7856c37e64d1e1b7eec",
+      "excerpt_line_ranges": [
+        [
+          1208,
+          1252
+        ]
+      ],
+      "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+    },
+    {
+      "role": "before-fix",
+      "path": "django/contrib/admin/options.py",
+      "commit_sha": "f87c2055b45356378a7c2a020eb872352d20f85e",
+      "url": "https://github.com/django/django/blob/f87c2055b45356378a7c2a020eb872352d20f85e/django/contrib/admin/options.py",
+      "full_source_sha256": "63868378c1775338716679c21a1a04ef27827df1920288cd3bb72d1213f1f573",
+      "excerpt_path": "before-fix-source.txt",
+      "excerpt_sha256": "94a2660519af7e971e4a04cf2de4994c430d676a01a8208426a2a95cba532a4b",
+      "excerpt_line_ranges": [
+        [
+          1137,
+          1218
+        ]
+      ],
+      "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+    },
+    {
+      "role": "fixed",
+      "path": "django/contrib/admin/options.py",
+      "commit_sha": "4cecf3039586ea738afafb9a28c946bff42c37c1",
+      "url": "https://github.com/django/django/blob/4cecf3039586ea738afafb9a28c946bff42c37c1/django/contrib/admin/options.py",
+      "full_source_sha256": "f972bb0e6eb720231a0cc044b7383b1fba868c0c462fa357392c626684220784",
+      "excerpt_path": "fixed-source.txt",
+      "excerpt_sha256": "54181b186831375924ffc5f86978eecb408b9ca01c29ef77fdd73f4e0854cf62",
+      "excerpt_line_ranges": [
+        [
+          1136,
+          1218
+        ]
+      ],
+      "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+    },
+    {
+      "role": "upstream-regression-tests",
+      "path": "tests/admin_changelist/tests.py",
+      "commit_sha": "4cecf3039586ea738afafb9a28c946bff42c37c1",
+      "url": "https://github.com/django/django/blob/4cecf3039586ea738afafb9a28c946bff42c37c1/tests/admin_changelist/tests.py",
+      "full_source_sha256": "6a1aaf22423ff64962e6e8984dd8b2d3f2bc36248a5397ae0930a5ddd0dbd03c",
+      "excerpt_path": "regression-tests.txt",
+      "excerpt_sha256": "655eb6890e65e457773fe021125112dbe13b9d7dc8cb56474c5ab885334be379",
+      "excerpt_line_ranges": [
+        [
+          860,
+          870
+        ],
+        [
+          872,
+          897
+        ]
+      ],
+      "format": "Verbatim source lines prefixed with original one-based line numbers; separated test functions are concatenated."
+    },
+    {
+      "role": "license",
+      "path": "LICENSE",
+      "commit_sha": "f223729f8f8380901473b244c0fc7c7dc397e3f1",
+      "url": "https://github.com/django/django/blob/f223729f8f8380901473b244c0fc7c7dc397e3f1/LICENSE",
+      "full_source_sha256": "b846415d1b514e9c1dff14a22deb906d794bc546ca6129f950a18cd091e2a669",
+      "excerpt_path": "LICENSE",
+      "excerpt_sha256": "b846415d1b514e9c1dff14a22deb906d794bc546ca6129f950a18cd091e2a669"
+    }
+  ],
+  "fixture_dir": "evals/fixtures/golden/golden-b002-python-django-admin-cast-001",
+  "decision": "pending",
+  "decided_at": null,
+  "decided_by": null,
+  "artifact_hashes": {
+    "evals/fixtures/golden/golden-b002-python-django-admin-cast-001/ATTRIBUTION.md": "3beb57a23ce6d276261ece0d6976ed0db2ccaf869cc3e5450715364c42552f1e",
+    "evals/fixtures/golden/golden-b002-python-django-admin-cast-001/LICENSE": "b846415d1b514e9c1dff14a22deb906d794bc546ca6129f950a18cd091e2a669",
+    "evals/fixtures/golden/golden-b002-python-django-admin-cast-001/base-source.txt": "db8e73ad323424e7bec83d0d9412b72e2b576a91041e35a88bebc485e1864f85",
+    "evals/fixtures/golden/golden-b002-python-django-admin-cast-001/before-fix-source.txt": "94a2660519af7e971e4a04cf2de4994c430d676a01a8208426a2a95cba532a4b",
+    "evals/fixtures/golden/golden-b002-python-django-admin-cast-001/fix-pr.json": "89b45013c0dfd88c25f2b22566f38864b2f57cdbc0c1f8d642f4029a9eba5bc2",
+    "evals/fixtures/golden/golden-b002-python-django-admin-cast-001/fix.patch": "e211397316d08fe156a41009b848ae2ac5528cf5b972af017b0e02ac97672002",
+    "evals/fixtures/golden/golden-b002-python-django-admin-cast-001/fixed-source.txt": "54181b186831375924ffc5f86978eecb408b9ca01c29ef77fdd73f4e0854cf62",
+    "evals/fixtures/golden/golden-b002-python-django-admin-cast-001/introduced-source.txt": "da1245e0ffc9462f6ca3bbe64ed46f7f29f696f431c1b7856c37e64d1e1b7eec",
+    "evals/fixtures/golden/golden-b002-python-django-admin-cast-001/introducing-pr.json": "294344c3f534aad4b8c86928ed7b5bbd8a50003fc49c64aa4bea17cce30523f7",
+    "evals/fixtures/golden/golden-b002-python-django-admin-cast-001/introducing.patch": "6477f0e6eb395a4240dcd5991c5749c4db2397200a49d3577952ff71d3917f7e",
+    "evals/fixtures/golden/golden-b002-python-django-admin-cast-001/regression-tests.txt": "655eb6890e65e457773fe021125112dbe13b9d7dc8cb56474c5ab885334be379",
+    "evals/fixtures/golden/golden-b002-python-django-admin-cast-001/source-snapshots.json": "8536e59ba7e2ee61a3cabc576e57fde41dc6640ac20316f5ad3512ade378034b"
+  }
+}

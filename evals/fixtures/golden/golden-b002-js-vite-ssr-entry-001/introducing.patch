@@ -1,0 +1,23 @@
+diff --git a/packages/vite/src/node/ssr/ssrExternal.ts b/packages/vite/src/node/ssr/ssrExternal.ts
+--- a/packages/vite/src/node/ssr/ssrExternal.ts
++++ b/packages/vite/src/node/ssr/ssrExternal.ts
+@@ -120,13 +120,17 @@ export function createIsConfiguredAsSsrExternal(
+   return (id: string) => {
+     const { ssr } = config
+     if (ssr) {
+-      if (ssr.external?.includes(id)) {
++      const pkgName = getNpmPackageName(id)
++      if (!pkgName) {
++        return undefined
++      }
++      if (ssr.external?.includes(pkgName)) {
+         return true
+       }
+       if (typeof noExternal === 'boolean') {
+         return !noExternal
+       }
+-      if (noExternalFilter && !noExternalFilter(id)) {
++      if (noExternalFilter && !noExternalFilter(pkgName)) {
+         return false
+       }
+     }

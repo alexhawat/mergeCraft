@@ -1,0 +1,124 @@
+diff --git a/django/core/mail/message.py b/django/core/mail/message.py
+index 2eb8aa354bae..eb467de42951 100644
+--- a/django/core/mail/message.py
++++ b/django/core/mail/message.py
+@@ -286,7 +286,8 @@ def message(self):
+             # Use cached DNS_NAME for performance
+             msg["Message-ID"] = make_msgid(domain=DNS_NAME)
+         for name, value in self.extra_headers.items():
+-            if name.lower() != "from":  # From is already handled
++            # Avoid headers handled above.
++            if name.lower() not in {"from", "to", "cc", "reply-to"}:
+                 msg[name] = value
+         return msg
+ 
+@@ -427,14 +428,13 @@ def _create_attachment(self, filename, content, mimetype=None):
+     def _set_list_header_if_not_empty(self, msg, header, values):
+         """
+         Set msg's header, either from self.extra_headers, if present, or from
+-        the values argument.
++        the values argument if not empty.
+         """
+-        if values:
+-            try:
+-                value = self.extra_headers[header]
+-            except KeyError:
+-                value = ", ".join(str(v) for v in values)
+-            msg[header] = value
++        try:
++            msg[header] = self.extra_headers[header]
++        except KeyError:
++            if values:
++                msg[header] = ", ".join(str(v) for v in values)
+ 
+ 
+ class EmailMultiAlternatives(EmailMessage):
+diff --git a/tests/mail/tests.py b/tests/mail/tests.py
+index 1f7cbbadcaf7..a0d28eb0cee1 100644
+--- a/tests/mail/tests.py
++++ b/tests/mail/tests.py
+@@ -223,7 +223,7 @@ def test_cc_headers(self):
+             cc=["foo@example.com"],
+             headers={"Cc": "override@example.com"},
+         ).message()
+-        self.assertEqual(message["Cc"], "override@example.com")
++        self.assertEqual(message.get_all("Cc"), ["override@example.com"])
+ 
+     def test_cc_in_headers_only(self):
+         message = EmailMessage(
+@@ -233,7 +233,7 @@ def test_cc_in_headers_only(self):
+             ["to@example.com"],
+             headers={"Cc": "foo@example.com"},
+         ).message()
+-        self.assertEqual(message["Cc"], "foo@example.com")
++        self.assertEqual(message.get_all("Cc"), ["foo@example.com"])
+ 
+     def test_reply_to(self):
+         email = EmailMessage(
+@@ -379,7 +379,7 @@ def test_from_header(self):
+             headers={"From": "from@example.com"},
+         )
+         message = email.message()
+-        self.assertEqual(message["From"], "from@example.com")
++        self.assertEqual(message.get_all("From"), ["from@example.com"])
+ 
+     def test_to_header(self):
+         """
+@@ -393,7 +393,7 @@ def test_to_header(self):
+             headers={"To": "mailing-list@example.com"},
+         )
+         message = email.message()
+-        self.assertEqual(message["To"], "mailing-list@example.com")
++        self.assertEqual(message.get_all("To"), ["mailing-list@example.com"])
+         self.assertEqual(
+             email.to, ["list-subscriber@example.com", "list-subscriber2@example.com"]
+         )
+@@ -408,7 +408,8 @@ def test_to_header(self):
+         )
+         message = email.message()
+         self.assertEqual(
+-            message["To"], "list-subscriber@example.com, list-subscriber2@example.com"
++            message.get_all("To"),
++            ["list-subscriber@example.com, list-subscriber2@example.com"],
+         )
+         self.assertEqual(
+             email.to, ["list-subscriber@example.com", "list-subscriber2@example.com"]
+@@ -421,7 +422,7 @@ def test_to_in_headers_only(self):
+             "bounce@example.com",
+             headers={"To": "to@example.com"},
+         ).message()
+-        self.assertEqual(message["To"], "to@example.com")
++        self.assertEqual(message.get_all("To"), ["to@example.com"])
+ 
+     def test_reply_to_header(self):
+         """
+@@ -436,7 +437,7 @@ def test_reply_to_header(self):
+             headers={"Reply-To": "override@example.com"},
+         )
+         message = email.message()
+-        self.assertEqual(message["Reply-To"], "override@example.com")
++        self.assertEqual(message.get_all("Reply-To"), ["override@example.com"])
+ 
+     def test_reply_to_in_headers_only(self):
+         message = EmailMessage(
+@@ -446,7 +447,7 @@ def test_reply_to_in_headers_only(self):
+             ["to@example.com"],
+             headers={"Reply-To": "reply_to@example.com"},
+         ).message()
+-        self.assertEqual(message["Reply-To"], "reply_to@example.com")
++        self.assertEqual(message.get_all("Reply-To"), ["reply_to@example.com"])
+ 
+     def test_multiple_message_call(self):
+         """
+@@ -461,9 +462,9 @@ def test_multiple_message_call(self):
+             headers={"From": "from@example.com"},
+         )
+         message = email.message()
+-        self.assertEqual(message["From"], "from@example.com")
++        self.assertEqual(message.get_all("From"), ["from@example.com"])
+         message = email.message()
+-        self.assertEqual(message["From"], "from@example.com")
++        self.assertEqual(message.get_all("From"), ["from@example.com"])
+ 
+     def test_unicode_address_header(self):
+         """

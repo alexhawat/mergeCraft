@@ -1,0 +1,188 @@
+{
+  "case_id": "golden-b002-python-werkzeug-unhashable-001",
+  "title": "Cycle tracking crashes the debugger on unhashable exception instances",
+  "framework": "Werkzeug",
+  "category": "correctness",
+  "repo": "pallets/werkzeug",
+  "language": "python",
+  "introducing_pr": {
+    "base": {
+      "ref": "0.15.x",
+      "sha": "777500b64647ea47b21e52e5e113ba1d86014c05"
+    },
+    "body": "closes #1536 \r\n\r\nThe traceback formatter followed `exc_value.__context__` infinitely, even if there was a cycle. Add a memo set to track what's been seen already and break when it detects a cycle. ",
+    "head": {
+      "ref": "break-tb-cycle",
+      "sha": "44e38c2985bcd3a7c17467bead901b8f36528f5f"
+    },
+    "html_url": "https://github.com/pallets/werkzeug/pull/1540",
+    "merge_commit_sha": "bdc17e4cd10bbb17449006cef385ec953a11fc36",
+    "merged": true,
+    "merged_at": "2019-05-12T14:55:29Z",
+    "number": 1540,
+    "state": "closed",
+    "title": "break cycle in chained exceptions"
+  },
+  "fix_pr": {
+    "base": {
+      "ref": "0.15.x",
+      "sha": "bdc17e4cd10bbb17449006cef385ec953a11fc36"
+    },
+    "body": "fix minor regression introduced in #1540",
+    "head": {
+      "ref": "exceptions_arent_always_hashable",
+      "sha": "0e669f6be532801267d35de23c5f5237b8406d8a"
+    },
+    "html_url": "https://github.com/pallets/werkzeug/pull/1542",
+    "merge_commit_sha": "2cbdf2b02273daccf85845b1e1569096e65ffe58",
+    "merged": true,
+    "merged_at": "2019-05-12T23:38:51Z",
+    "number": 1542,
+    "state": "closed",
+    "title": "Fix unhashable exception types"
+  },
+  "causal_evidence": {
+    "url": "https://github.com/pallets/werkzeug/pull/1542",
+    "shortquote": "fix minor regression introduced in #1540",
+    "snapshot_path": "evals/fixtures/golden/golden-b002-python-werkzeug-unhashable-001/fix-pr.json",
+    "snapshot_sha256": "1961b42543ade6cbf9fef30bff8ae193ca39b4b817d8f2308417cc252e6fa69b"
+  },
+  "buggy_file": "src/werkzeug/debug/tbtools.py",
+  "start_line": 251,
+  "end_line": 255,
+  "buggy_commit_sha": "bdc17e4cd10bbb17449006cef385ec953a11fc36",
+  "buggy_source_url": "https://github.com/pallets/werkzeug/blob/bdc17e4cd10bbb17449006cef385ec953a11fc36/src/werkzeug/debug/tbtools.py#L251-L255",
+  "proposed_label": {
+    "category": "correctness",
+    "status": "agent_proposal_only",
+    "rationale": "The newly added memo.add(exc_value) hashes the exception instance. A legitimate exception class with __hash__ = None raises TypeError while the debugger is formatting the original exception. The fix tracks id(exc_value), preserving cycle detection without requiring hashable exceptions."
+  },
+  "rationale": "The newly added memo.add(exc_value) hashes the exception instance. A legitimate exception class with __hash__ = None raises TypeError while the debugger is formatting the original exception. The fix tracks id(exc_value), preserving cycle detection without requiring hashable exceptions.",
+  "fix_test": {
+    "path": "tests/test_debug.py",
+    "names": [
+      "test_non_hashable_exception"
+    ],
+    "description": "Upstream test_non_hashable_exception defines MutableException(ValueError) with __hash__ = None and calls Traceback(*sys.exc_info()); the pre-fix code throws TypeError.",
+    "execution": "Upstream regression tests included, not run here."
+  },
+  "caveats": [
+    "Upstream regression test included, not run here.",
+    "The case targets debugger availability/correctness and makes no security claim."
+  ],
+  "license": {
+    "name": "BSD-3-Clause",
+    "url": "https://github.com/pallets/werkzeug/blob/bdc17e4cd10bbb17449006cef385ec953a11fc36/LICENSE.rst",
+    "sha256": "3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b",
+    "fixture_path": "LICENSE"
+  },
+  "source_snapshots": [
+    {
+      "role": "base",
+      "path": "src/werkzeug/debug/tbtools.py",
+      "commit_sha": "777500b64647ea47b21e52e5e113ba1d86014c05",
+      "url": "https://github.com/pallets/werkzeug/blob/777500b64647ea47b21e52e5e113ba1d86014c05/src/werkzeug/debug/tbtools.py",
+      "full_source_sha256": "1ecb68a0ab016366b78b2e9bce9954ebc2709981e99fe89b96705ccb9a38bc0d",
+      "excerpt_path": "base-source.txt",
+      "excerpt_sha256": "2fa8edb569231655bc8a6d3cd9a855e9e47a8d3732af9063411082eb36e34a0f",
+      "excerpt_line_ranges": [
+        [
+          234,
+          258
+        ]
+      ],
+      "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+    },
+    {
+      "role": "introduced",
+      "path": "src/werkzeug/debug/tbtools.py",
+      "commit_sha": "bdc17e4cd10bbb17449006cef385ec953a11fc36",
+      "url": "https://github.com/pallets/werkzeug/blob/bdc17e4cd10bbb17449006cef385ec953a11fc36/src/werkzeug/debug/tbtools.py",
+      "full_source_sha256": "798054dc379f63335ad6645a15d7c12914c6e12c0af04d0c8e9a84c9ebae23ee",
+      "excerpt_path": "introduced-source.txt",
+      "excerpt_sha256": "65f0e20c7de0dacabcf3a9087df8b94839c1b38a99d516a20c273d546a1ecc0a",
+      "excerpt_line_ranges": [
+        [
+          234,
+          260
+        ]
+      ],
+      "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+    },
+    {
+      "role": "before-fix",
+      "path": "src/werkzeug/debug/tbtools.py",
+      "commit_sha": "bdc17e4cd10bbb17449006cef385ec953a11fc36",
+      "url": "https://github.com/pallets/werkzeug/blob/bdc17e4cd10bbb17449006cef385ec953a11fc36/src/werkzeug/debug/tbtools.py",
+      "full_source_sha256": "798054dc379f63335ad6645a15d7c12914c6e12c0af04d0c8e9a84c9ebae23ee",
+      "excerpt_path": "before-fix-source.txt",
+      "excerpt_sha256": "65f0e20c7de0dacabcf3a9087df8b94839c1b38a99d516a20c273d546a1ecc0a",
+      "excerpt_line_ranges": [
+        [
+          234,
+          260
+        ]
+      ],
+      "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+    },
+    {
+      "role": "fixed",
+      "path": "src/werkzeug/debug/tbtools.py",
+      "commit_sha": "2cbdf2b02273daccf85845b1e1569096e65ffe58",
+      "url": "https://github.com/pallets/werkzeug/blob/2cbdf2b02273daccf85845b1e1569096e65ffe58/src/werkzeug/debug/tbtools.py",
+      "full_source_sha256": "4a400003828a7f0b172629d46dff8010fe06a8e353b11e2e53b58f525a177121",
+      "excerpt_path": "fixed-source.txt",
+      "excerpt_sha256": "f83cadff93623bc4073b7b3add72b7c67ee5c4cf446050a3b40146135c0cddbc",
+      "excerpt_line_ranges": [
+        [
+          234,
+          260
+        ]
+      ],
+      "format": "Verbatim source lines prefixed with original one-based line numbers; separated ranges are concatenated."
+    },
+    {
+      "role": "upstream-regression-tests",
+      "path": "tests/test_debug.py",
+      "commit_sha": "2cbdf2b02273daccf85845b1e1569096e65ffe58",
+      "url": "https://github.com/pallets/werkzeug/blob/2cbdf2b02273daccf85845b1e1569096e65ffe58/tests/test_debug.py",
+      "full_source_sha256": "807df92abb593768c32c864e9e23ce0ddc654d611c4cb4d79ca56f0d8535df42",
+      "excerpt_path": "regression-tests.txt",
+      "excerpt_sha256": "67dc8db648261b4582889175950d119bc158f994ffd477211d683cb6f4287b37",
+      "excerpt_line_ranges": [
+        [
+          376,
+          384
+        ]
+      ],
+      "format": "Verbatim source lines prefixed with original one-based line numbers; separated test functions are concatenated."
+    },
+    {
+      "role": "license",
+      "path": "LICENSE.rst",
+      "commit_sha": "bdc17e4cd10bbb17449006cef385ec953a11fc36",
+      "url": "https://github.com/pallets/werkzeug/blob/bdc17e4cd10bbb17449006cef385ec953a11fc36/LICENSE.rst",
+      "full_source_sha256": "3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b",
+      "excerpt_path": "LICENSE",
+      "excerpt_sha256": "3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b"
+    }
+  ],
+  "fixture_dir": "evals/fixtures/golden/golden-b002-python-werkzeug-unhashable-001",
+  "decision": "pending",
+  "decided_at": null,
+  "decided_by": null,
+  "artifact_hashes": {
+    "evals/fixtures/golden/golden-b002-python-werkzeug-unhashable-001/ATTRIBUTION.md": "53ed5d415a16aa0cbc2278110f2d929a40b58e715b4cfcb42aa49bafefa80158",
+    "evals/fixtures/golden/golden-b002-python-werkzeug-unhashable-001/LICENSE": "3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b",
+    "evals/fixtures/golden/golden-b002-python-werkzeug-unhashable-001/base-source.txt": "2fa8edb569231655bc8a6d3cd9a855e9e47a8d3732af9063411082eb36e34a0f",
+    "evals/fixtures/golden/golden-b002-python-werkzeug-unhashable-001/before-fix-source.txt": "65f0e20c7de0dacabcf3a9087df8b94839c1b38a99d516a20c273d546a1ecc0a",
+    "evals/fixtures/golden/golden-b002-python-werkzeug-unhashable-001/fix-pr.json": "1961b42543ade6cbf9fef30bff8ae193ca39b4b817d8f2308417cc252e6fa69b",
+    "evals/fixtures/golden/golden-b002-python-werkzeug-unhashable-001/fix.patch": "52703129accf1e180a2ead821f55d63cf204ae343ce34006d3b343df3eb32a79",
+    "evals/fixtures/golden/golden-b002-python-werkzeug-unhashable-001/fixed-source.txt": "f83cadff93623bc4073b7b3add72b7c67ee5c4cf446050a3b40146135c0cddbc",
+    "evals/fixtures/golden/golden-b002-python-werkzeug-unhashable-001/introduced-source.txt": "65f0e20c7de0dacabcf3a9087df8b94839c1b38a99d516a20c273d546a1ecc0a",
+    "evals/fixtures/golden/golden-b002-python-werkzeug-unhashable-001/introducing-pr.json": "fd42538d9ece36639929e8e39ecfe3bf0727bd1f247fa798f69954d38db979c7",
+    "evals/fixtures/golden/golden-b002-python-werkzeug-unhashable-001/introducing.patch": "5d8e915a607d47f3d85edefd621006dbbd73dc97e6a704a67e9f7a625061e4b4",
+    "evals/fixtures/golden/golden-b002-python-werkzeug-unhashable-001/regression-tests.txt": "67dc8db648261b4582889175950d119bc158f994ffd477211d683cb6f4287b37",
+    "evals/fixtures/golden/golden-b002-python-werkzeug-unhashable-001/source-snapshots.json": "945563c6fb86c874114f8441f7cddf047180c6efdc0251799d24eacd55c9c53a"
+  }
+}

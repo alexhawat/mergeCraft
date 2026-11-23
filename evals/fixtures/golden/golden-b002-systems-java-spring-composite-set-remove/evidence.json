@@ -1,0 +1,145 @@
+{
+  "case_id": "golden-b002-systems-java-spring-composite-set-remove",
+  "title": "Composite map key-set removal exposes a hidden duplicate key",
+  "language": "java",
+  "framework": "Spring Framework",
+  "category": "correctness",
+  "repo": "spring-projects/spring-framework",
+  "introducing_pr": {
+    "number": 37332,
+    "url": "https://github.com/spring-projects/spring-framework/pull/37332",
+    "title": "Honor `Collection.remove()` contract in `CompositeCollection`",
+    "merged_at": "2026-10-02T14:26:54Z",
+    "base_sha": "bc45a6a511bf739efa6e30cef7942c879df160fe",
+    "head_sha": "eab3c7bc0e4869fe005a34186cce4c5da3b5a203",
+    "merge_sha": "f5a71230440381427d7d652e94a44a8658357025"
+  },
+  "fix_pr": {
+    "number": 37394,
+    "url": "https://github.com/spring-projects/spring-framework/pull/37394",
+    "title": "Remove element from both sets in `CompositeSet.remove()`",
+    "merged_at": "2026-10-05T09:34:42Z",
+    "base_sha": "9b93e5f635dd6576cf049f8e1f8f623968c88047",
+    "head_sha": "751251815cc70f8ff34a55283ffaeb5fc4552a82",
+    "merge_sha": "891f9f94dbd6dd4edcc8c6a86fd5907f0262b206"
+  },
+  "causal_evidence": {
+    "url": "https://github.com/spring-projects/spring-framework/pull/37394",
+    "kind": "fix PR body",
+    "quote": "Since #37332, `CompositeCollection.remove(Object)` stops after removing the element from the first collection."
+  },
+  "buggy_file": "spring-core/src/main/java/org/springframework/util/CompositeCollection.java",
+  "buggy_line_range": {
+    "start": 115,
+    "end": 118
+  },
+  "source_url": "https://github.com/spring-projects/spring-framework/blob/f5a71230440381427d7d652e94a44a8658357025/spring-core/src/main/java/org/springframework/util/CompositeCollection.java#L115-L118",
+  "proposed_label": "bug",
+  "proposed_category": "correctness",
+  "rationale": "The introduced short-circuit OR skips removing the element from the second collection after the first removal succeeds. CompositeSet inherits this behavior and backs CompositeMap.keySet(); deleting an overlapping key therefore reveals the previously hidden second-map entry instead of removing the mapping. The fix overrides set removal to evaluate removals against both sets.",
+  "fix_test": {
+    "names": [
+      "CompositeMapTests.CollisionTests.keySetRemove"
+    ],
+    "path": "spring-core/src/test/java/org/springframework/util/CompositeMapTests.java",
+    "inspection": "Regression test additions and corresponding production fix inspected in merged upstream PR.",
+    "local_execution": "not run"
+  },
+  "caveats": [
+    "The Collection.remove single-instance behavior is intentional; the defect concerns inherited Set/Map view behavior.",
+    "Upstream fix body reports the new regression test fails without the change. This task inspected that test and fix, but did not run Gradle.",
+    "The upstream Apache NOTICE is a distribution template containing literal version/copyright placeholders; it is preserved without substitution."
+  ],
+  "license": {
+    "name": "Apache License 2.0",
+    "spdx_id": "Apache-2.0",
+    "pinned_url": "https://github.com/spring-projects/spring-framework/blob/f5a71230440381427d7d652e94a44a8658357025/LICENSE.txt"
+  },
+  "decision": "pending",
+  "evidence_status": "recovered",
+  "fixture_dir": "evals/fixtures/golden/golden-b002-systems-java-spring-composite-set-remove",
+  "fixture_path": "evals/fixtures/golden/golden-b002-systems-java-spring-composite-set-remove/task.patch",
+  "fixture_sha256": "300ec120244449dc43d7e5a633bd716e5d8eee2cc077effa570070285571bf10",
+  "artifactsha256": {
+    "task.patch": "300ec120244449dc43d7e5a633bd716e5d8eee2cc077effa570070285571bf10",
+    "fix.patch": "1bcee47eec4849e40b17d7e98e852a94e5dfa0cb9c21f7ddedbfea39683bbf17",
+    "buggy-source.txt": "d03183263e4246a27c9347928bc4597dfb0ad65a1f056d4401deaea2bd089af8",
+    "fixed-source.txt": "65c1df37a1b7083900921b1cc6e3a0cc490386e3b56f10aacec49296980b96c5",
+    "fix-test.txt": "017072fe981ec948089ccb972e0a5f3438448f2f298912d91d2e8a0b54d2badb",
+    "LICENSE.upstream": "56dfc19e0dc836e30177332f73e8e6fbc297941acf3d906eec6eaaa46c2c452a",
+    "buggy-set.txt": "4728ca79cc94756648152433c9996a1e5eb03ada6c20ae81c4af6ed9c4f823bc",
+    "buggy-map-constructor.txt": "90adaa7306f21cf82d3f6db8c4e77e1b713ef6d9b2d08d412e247489dcb49cca",
+    "buggy-map-keyset.txt": "8328fb03b99ccdb237684e303e1a79ad313f87bf99cd6275045dc468043d1225",
+    "NOTICE.upstream": "0f17d09aab1077cfc66b00f71a41437a12719640be308a301edd68804e1f524a",
+    "ATTRIBUTION.md": "a4cbf4a0446a43c2587a8f21e6a5fe900e16a5caca9984af72d496a658b8123d"
+  },
+  "artifact_origins": {
+    "task.patch": {
+      "kind": "complete PR diff",
+      "files": null,
+      "url": "https://github.com/spring-projects/spring-framework/compare/bc45a6a511bf739efa6e30cef7942c879df160fe...eab3c7bc0e4869fe005a34186cce4c5da3b5a203",
+      "base_sha": "bc45a6a511bf739efa6e30cef7942c879df160fe",
+      "head_sha": "eab3c7bc0e4869fe005a34186cce4c5da3b5a203"
+    },
+    "fix.patch": {
+      "kind": "complete PR diff",
+      "files": null,
+      "url": "https://github.com/spring-projects/spring-framework/compare/9b93e5f635dd6576cf049f8e1f8f623968c88047...751251815cc70f8ff34a55283ffaeb5fc4552a82",
+      "base_sha": "9b93e5f635dd6576cf049f8e1f8f623968c88047",
+      "head_sha": "751251815cc70f8ff34a55283ffaeb5fc4552a82"
+    },
+    "buggy-source.txt": {
+      "kind": "verbatim bounded source excerpt",
+      "path": "spring-core/src/main/java/org/springframework/util/CompositeCollection.java",
+      "start_line": 110,
+      "end_line": 128,
+      "url": "https://github.com/spring-projects/spring-framework/blob/f5a71230440381427d7d652e94a44a8658357025/spring-core/src/main/java/org/springframework/util/CompositeCollection.java#L110-L128"
+    },
+    "fixed-source.txt": {
+      "kind": "verbatim bounded source excerpt",
+      "path": "spring-core/src/main/java/org/springframework/util/CompositeSet.java",
+      "start_line": 16,
+      "end_line": 70,
+      "url": "https://github.com/spring-projects/spring-framework/blob/891f9f94dbd6dd4edcc8c6a86fd5907f0262b206/spring-core/src/main/java/org/springframework/util/CompositeSet.java#L16-L70"
+    },
+    "fix-test.txt": {
+      "kind": "verbatim bounded source excerpt",
+      "path": "spring-core/src/test/java/org/springframework/util/CompositeMapTests.java",
+      "start_line": 285,
+      "end_line": 314,
+      "url": "https://github.com/spring-projects/spring-framework/blob/891f9f94dbd6dd4edcc8c6a86fd5907f0262b206/spring-core/src/test/java/org/springframework/util/CompositeMapTests.java#L285-L314"
+    },
+    "LICENSE.upstream": {
+      "kind": "unmodified complete upstream license",
+      "url": "https://github.com/spring-projects/spring-framework/blob/f5a71230440381427d7d652e94a44a8658357025/LICENSE.txt"
+    },
+    "buggy-set.txt": {
+      "kind": "verbatim bounded source excerpt",
+      "path": "spring-core/src/main/java/org/springframework/util/CompositeSet.java",
+      "start_line": 16,
+      "end_line": 60,
+      "url": "https://github.com/spring-projects/spring-framework/blob/f5a71230440381427d7d652e94a44a8658357025/spring-core/src/main/java/org/springframework/util/CompositeSet.java#L16-L60"
+    },
+    "buggy-map-constructor.txt": {
+      "kind": "verbatim bounded source excerpt",
+      "path": "spring-core/src/main/java/org/springframework/util/CompositeMap.java",
+      "start_line": 44,
+      "end_line": 65,
+      "url": "https://github.com/spring-projects/spring-framework/blob/f5a71230440381427d7d652e94a44a8658357025/spring-core/src/main/java/org/springframework/util/CompositeMap.java#L44-L65"
+    },
+    "buggy-map-keyset.txt": {
+      "kind": "verbatim bounded source excerpt",
+      "path": "spring-core/src/main/java/org/springframework/util/CompositeMap.java",
+      "start_line": 141,
+      "end_line": 165,
+      "url": "https://github.com/spring-projects/spring-framework/blob/f5a71230440381427d7d652e94a44a8658357025/spring-core/src/main/java/org/springframework/util/CompositeMap.java#L141-L165"
+    },
+    "NOTICE.upstream": {
+      "kind": "unmodified complete upstream notice template",
+      "url": "https://github.com/spring-projects/spring-framework/blob/f5a71230440381427d7d652e94a44a8658357025/framework-docs/src/docs/dist/notice.txt"
+    },
+    "ATTRIBUTION.md": {
+      "kind": "agent-authored attribution and artifact scope"
+    }
+  }
+}

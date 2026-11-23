@@ -1,0 +1,106 @@
+{
+  "schema_version": "1.0.0",
+  "batch_id": "golden-batch-002",
+  "adjudicator_login": "alexhawat",
+  "cases": [
+    {
+      "case_id": "golden-b002-js-vite-pnp-builtins-001",
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/vitejs/vite/blob/1fc8c652c46a27f6229c9125e3b0d1662d2a0e67/packages/vite/src/node/packages.ts#L193-L194",
+      "fixture_path": "evals/fixtures/golden/golden-b002-js-vite-pnp-builtins-001/evidence.json",
+      "fixture_sha256": "fbceb2fbfeac6aa3a1810e6166fd58995748d8f13add62f854cb6dc91e84146f",
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    },
+    {
+      "case_id": "golden-b002-js-vite-ssr-entry-001",
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/vitejs/vite/blob/5844d8e3480e7713acfa7655666bf0076dcb8879/packages/vite/src/node/ssr/ssrExternal.ts#L127-L128",
+      "fixture_path": "evals/fixtures/golden/golden-b002-js-vite-ssr-entry-001/evidence.json",
+      "fixture_sha256": "b382f0cb83dfb90aa58e27b8248edc6ec420ca48e756cc2cbc947c5101febc7c",
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    },
+    {
+      "case_id": "golden-b002-js-vue-shallow-brand-001",
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/vuejs/core/blob/3b561db4ab42d06166b002f13c0e97cb2bd4a061/packages/reactivity/src/reactive.ts#L109-L109",
+      "fixture_path": "evals/fixtures/golden/golden-b002-js-vue-shallow-brand-001/evidence.json",
+      "fixture_sha256": "1d80cf02cc57a7cfe6b65bba5a8a4cf975fdb7baece44aecb7429d7c782a690a",
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    },
+    {
+      "case_id": "golden-b002-python-django-admin-cast-001",
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/django/django/blob/f223729f8f8380901473b244c0fc7c7dc397e3f1/django/contrib/admin/options.py#L1222-L1227",
+      "fixture_path": "evals/fixtures/golden/golden-b002-python-django-admin-cast-001/evidence.json",
+      "fixture_sha256": "e2ff41811c4b18e9180729e84c8e91161dfdeda71b449bb5e5a178ef89952419",
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    },
+    {
+      "case_id": "golden-b002-python-django-mail-headers-001",
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/django/django/blob/da82939e5a31dea21a4f4d5085dfcd449fcbed3a/django/core/mail/message.py#L273-L276",
+      "fixture_path": "evals/fixtures/golden/golden-b002-python-django-mail-headers-001/evidence.json",
+      "fixture_sha256": "fe6d1fb31057ea132e309e956098a1e944ff4caa59bdc7285c40b6cb28591995",
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    },
+    {
+      "case_id": "golden-b002-python-werkzeug-unhashable-001",
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/pallets/werkzeug/blob/bdc17e4cd10bbb17449006cef385ec953a11fc36/src/werkzeug/debug/tbtools.py#L251-L255",
+      "fixture_path": "evals/fixtures/golden/golden-b002-python-werkzeug-unhashable-001/evidence.json",
+      "fixture_sha256": "e5efd9693673c7b27b71dead43e8f7c8355501b148415bb93bf7fd93e41bc87e",
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    },
+    {
+      "case_id": "golden-b002-systems-go-gorm-caller-depth",
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/go-gorm/gorm/blob/2c3d109af3057f0d0ee64104011f12ac7bdab9bc/utils/utils.go#L55-L59",
+      "fixture_path": "evals/fixtures/golden/golden-b002-systems-go-gorm-caller-depth/evidence.json",
+      "fixture_sha256": "d1397cb2a1f31a7eceab7fa58a147e2f068f61598b50ea813e2b5232ac35dd83",
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    },
+    {
+      "case_id": "golden-b002-systems-java-spring-composite-set-remove",
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/spring-projects/spring-framework/blob/f5a71230440381427d7d652e94a44a8658357025/spring-core/src/main/java/org/springframework/util/CompositeCollection.java#L115-L118",
+      "fixture_path": "evals/fixtures/golden/golden-b002-systems-java-spring-composite-set-remove/evidence.json",
+      "fixture_sha256": "1d8969c1aaddca29e219e1da674b2e2a1cb6cda86f9f8a653d883338cfb8a82b",
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    },
+    {
+      "case_id": "golden-b002-systems-rust-tokio-timer-runtime",
+      "evidence_status": "recovered",
+      "source_url": "https://github.com/tokio-rs/tokio/blob/923e72345c77aef4d11875d874ba67421b0412d3/tokio/src/runtime/time_alt/timer.rs#L30-L35",
+      "fixture_path": "evals/fixtures/golden/golden-b002-systems-rust-tokio-timer-runtime/evidence.json",
+      "fixture_sha256": "230f5e6b948371353493cae37ae383d1d7cb7e04726e2fa557775b5db554d5fe",
+      "decision": "pending",
+      "decided_at": null,
+      "decided_by": null,
+      "corrected_fields": null
+    }
+  ]
+}
