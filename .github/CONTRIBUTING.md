@@ -27,6 +27,10 @@ make test
 make ci
 ```
 
+`make lint` includes **test honesty** checks (`make lint-test-honesty`) that block
+fixed sleeps, flake masking, conditional-only assertions, and related patterns in
+`tests/`. See [`docs/dev/test-honesty.md`](../docs/dev/test-honesty.md).
+
 `make test` runs the unit and mocked-integration suite — **no API keys or secrets required**.
 Live-provider tests are excluded by default (`-m "not integration"`).
 

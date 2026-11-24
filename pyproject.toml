@@ -188,6 +188,11 @@ ignore = [
     "B008",
 ]
 
+# Test-honesty: S110 (try-except-pass) and SIM105 (contextlib.suppress) run on
+# ``tests/`` via ``scripts/lint_test_honesty.py`` / ``make lint-test-honesty``.
+# AST-based gaps (fixed sleeps, flake markers, conditional asserts, self-mock)
+# use the same entry point with ``scripts/test_honesty_baseline.json``.
+
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20", "RUF001", "TC001", "TC003"]
 "scripts/**" = ["T20"]
