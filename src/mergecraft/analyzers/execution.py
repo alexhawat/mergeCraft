@@ -14,7 +14,12 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
-from mergecraft.analyzers.provision import ProvisionError, resolve_baked_binary, resolve_with_lock
+from mergecraft.analyzers.provision import (
+    MissingProvenanceError,
+    ProvisionError,
+    resolve_baked_binary,
+    resolve_with_lock,
+)
 from mergecraft.analyzers.redact import redact_secrets
 from mergecraft.analyzers.registry import filter_lint_targets_for_manifest
 from mergecraft.analyzers.resolve import (
@@ -120,6 +125,12 @@ def finalize_plan(
     event: dict[str, object] | None = None,
 ) -> AnalyzerPlan:
     scoped_files = filter_lint_targets_for_manifest(manifest, changed_files)
+    # A command such as ruff with an empty file list scans its working directory.
+    # Resolve the targets before deciding whether the plan can run.
+    if FILES_TOKEN in plan.argv and not expand_analyzer_argv(
+        (FILES_TOKEN,), repo_root=repo_root, changed_files=scoped_files
+    ):
+        return replace(plan, mode="skip", argv=(), reason=marker_only_lint_skip_reason(manifest))
     if manifest.detect.lint_files and _uses_files_token(plan, manifest) and not scoped_files:
         reason = marker_only_lint_skip_reason(manifest)
         logger.info("{}", reason)
@@ -459,6 +470,10 @@ def provision_managed_argv(
                 platform=platform_key,
             )
             break
+        except MissingProvenanceError as exc:
+            # No pinned build exists for this platform; a retry cannot find one.
+            logger.info("{}: not provisioned — {}", manifest.id, _provisioning_error_detail(exc))
+            raise
         except ProvisionError as exc:
             detail = _provisioning_error_detail(exc)
             logger.warning(

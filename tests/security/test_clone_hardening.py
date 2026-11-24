@@ -15,13 +15,13 @@ from typing import Any
 
 import pytest
 
-from tests.analyzers.support import import_module
-
 pytestmark = pytest.mark.usefixtures("offline_upstream_resolution")
 
 
 def _source_resolve_mod() -> Any:
-    return import_module("mergecraft.utils.source_resolve")
+    from mergecraft.utils import source_resolve
+
+    return source_resolve
 
 
 def _review_source(*, url: str, ref: str = "main", token: str | None = None) -> Any:

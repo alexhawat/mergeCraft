@@ -29,7 +29,6 @@ xfail / 0 xpass. J6 plan checkboxes stay ☐.
 | **J1.1** credential-absent skip (G1–G3) | J2 | `…::test_enabled_without_credential_is_recorded_skip_not_silent_pass` |
 | **J1.1** kill-switch stop (D10) | J2 | `…::test_kill_switch_stops_dispatch_and_records_the_stop` |
 | **J1.1** concurrent same API key | J2 | `…::test_concurrent_same_api_key_shares_one_budget` |
-| **J1.1** package exports | J2 | `…::test_package_exports_client_and_result_types` |
 | **J1.1** price table / known cost | J2 | `test_cost.py::test_compute_cost_uses_price_table_when_tokens_known` |
 | **J1.1** `input_tokens is None` (D10) | J2 | `test_cost.py::test_unreported_tokens_set_cost_known_false_not_zero` |
 | **J1.1** client survives `Usage` None | J2 | `test_cost.py::test_client_survives_usage_input_tokens_none` |
@@ -80,7 +79,7 @@ xfail / 0 xpass. J6 plan checkboxes stay ☐.
 
 | Symbol | Module (planned) | Test anchor |
 | --- | --- | --- |
-| `PINNED_MODEL` | `jev/__init__.py`, `jev/client.py` | `test_client.py` |
+| `PINNED_MODEL` | `jev/client.py` | `test_client.py` |
 | `AsyncJevClient` | `jev/client.py` | `test_client.py`, `test_cost.py`, `test_tracing.py` |
 | `RecordedTransport` / `FlakyRecordedTransport` | `jev/client.py` | `test_client.py` |
 | `TypeSafeAPIError` / `map_typesafe_error` / `_adapt_sdk_error` | `jev/client.py` | `test_client.py` |

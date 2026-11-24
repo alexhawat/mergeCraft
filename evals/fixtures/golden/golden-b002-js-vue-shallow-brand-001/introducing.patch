@@ -1,0 +1,55 @@
+diff --git a/packages-private/dts-test/reactivity.test-d.ts b/packages-private/dts-test/reactivity.test-d.ts
+--- a/packages-private/dts-test/reactivity.test-d.ts
++++ b/packages-private/dts-test/reactivity.test-d.ts
+@@ -4,6 +4,7 @@ import {
+   reactive,
+   readonly,
+   ref,
++  shallowReactive,
+   shallowReadonly,
+ } from 'vue'
+ import { describe, expectType } from './utils'
+@@ -130,3 +131,12 @@ describe('should not error when assignment', () => {
+   record2 = arr
+   expectType<string>(record2[0])
+ })
++
++describe('shallowReactive marker should not leak into value unions', () => {
++  const state = shallowReactive({
++    a: { title: 'A' },
++    b: { title: 'B' },
++  })
++  const value = {} as (typeof state)[keyof typeof state]
++  expectType<string>(value.title)
++})
+diff --git a/packages/reactivity/src/reactive.ts b/packages/reactivity/src/reactive.ts
+--- a/packages/reactivity/src/reactive.ts
++++ b/packages/reactivity/src/reactive.ts
+@@ -106,7 +106,7 @@ export function reactive(target: object) {
+ 
+ export declare const ShallowReactiveMarker: unique symbol
+ 
+-export type ShallowReactive<T> = T & { [ShallowReactiveMarker]?: true }
++export type ShallowReactive<T> = T & { [ShallowReactiveMarker]: never }
+ 
+ /**
+  * Shallow version of {@link reactive}.
+diff --git a/packages/reactivity/src/ref.ts b/packages/reactivity/src/ref.ts
+--- a/packages/reactivity/src/ref.ts
++++ b/packages/reactivity/src/ref.ts
+@@ -567,8 +567,10 @@ export type UnwrapRefSimple<T> = T extends
+           ? WeakSet<UnwrapRefSimple<V>> & UnwrapRef<Omit<T, keyof WeakSet<any>>>
+           : T extends ReadonlyArray<any>
+             ? { [K in keyof T]: UnwrapRefSimple<T[K]> }
+-            : T extends object & { [ShallowReactiveMarker]?: never }
+-              ? {
+-                  [P in keyof T]: P extends symbol ? T[P] : UnwrapRef<T[P]>
+-                }
+-              : T
++            : T extends object & { [ShallowReactiveMarker]: never }
++              ? T
++              : T extends object
++                ? {
++                    [P in keyof T]: P extends symbol ? T[P] : UnwrapRef<T[P]>
++                  }
++                : T

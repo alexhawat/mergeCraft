@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.ci.support import import_module, load_fixture
+from tests.ci.support import load_fixture
 
 _FAILED_TEST_PATH = "tests/analyzers/test_adapters_supply_chain.py"
 
@@ -32,12 +32,14 @@ _FAILED_TEST_PATH = "tests/analyzers/test_adapters_supply_chain.py"
 def test_failure_context_forms_are_extracted_and_normalised(
     log_excerpt: str, expected_path: str
 ) -> None:
-    paths = import_module("mergecraft.ci.paths")
+    import mergecraft.ci.paths as paths
+
     assert paths.extract_failure_paths(log_excerpt) == [expected_path]
 
 
 def test_normalize_repo_path_strips_dot_slash_and_collapses_slashes() -> None:
-    paths = import_module("mergecraft.ci.paths")
+    import mergecraft.ci.paths as paths
+
     normalize = paths.normalize_repo_path
     assert normalize("./src/a.py") == "src/a.py"
     assert normalize("src//a.py") == "src/a.py"
@@ -45,7 +47,8 @@ def test_normalize_repo_path_strips_dot_slash_and_collapses_slashes() -> None:
 
 
 def test_failure_line_accepts_dot_slash_and_line_col_forms() -> None:
-    paths = import_module("mergecraft.ci.paths")
+    import mergecraft.ci.paths as paths
+
     assert paths.failure_line("./src/a.py:3: error\n", path="src/a.py") == 3
     assert paths.failure_line("src/a.ts(3,5): error TS2322\n", path="src/a.ts") == 3
 
@@ -53,7 +56,8 @@ def test_failure_line_accepts_dot_slash_and_line_col_forms() -> None:
 def test_flaky_retry_failure_attempt_yields_only_the_failed_path() -> None:
     """The captured retry log has one FAILED node; its PASSED lines are not failures."""
     fixture = load_fixture("flaky_retry_pass.json")
-    paths = import_module("mergecraft.ci.paths")
+    import mergecraft.ci.paths as paths
+
     extracted = paths.extract_failure_paths(fixture["attempts"][0]["log_excerpt"])
     assert extracted == [_FAILED_TEST_PATH]
 
@@ -76,11 +80,13 @@ def test_flaky_retry_failure_attempt_yields_only_the_failed_path() -> None:
     ],
 )
 def test_non_failure_lines_yield_no_failure_path(log_excerpt: str) -> None:
-    paths = import_module("mergecraft.ci.paths")
+    import mergecraft.ci.paths as paths
+
     assert paths.extract_failure_paths(log_excerpt) == []
 
 
 def test_absolute_path_in_a_traceback_citation_stays_dropped() -> None:
     """An absolute path is never a repo-relative failure location."""
-    paths = import_module("mergecraft.ci.paths")
+    import mergecraft.ci.paths as paths
+
     assert paths.extract_failure_paths("/home/runner/work/x/y/src/a.py:3: boom\n") == []

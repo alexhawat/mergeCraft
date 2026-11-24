@@ -78,7 +78,8 @@ is only for anchoring.
 
 **Coverage is line-range, not file-level.** `changed-unread-file` now reports the
 unread added-line ranges (`path:start-end`) rather than "this file was never
-read", and the pre-submit check nudges **once** with exactly those ranges. The
+read", and the pre-submit check nudges **once** with exactly those ranges (up to
+three times while a large share of the added lines is still unread). The
 rule id, severity, and `scope="run"` (advisory, never a gate) are unchanged; what
 changed is what counts as read. Reads of the diff file itself count, via the
 `diff_read_path` / `diff_read` marker recorded from the raw command before the
@@ -167,7 +168,9 @@ withdrawn-memory skip, and a dispatch cap.
 **Review round cap (`review.maxReviewRounds`, default 3).** After this many mergeCraft-authored
 review rounds on one PR, the run injects one Major finding asking the author to reconsider the
 approach, then continues on the incremental diff only. The cap never auto-approves; it is not
-a substitute for human judgment.
+a substitute for human judgment. Repeated reviews of the same head and base-only updates
+with an unchanged author patch use the same round. An unavailable historical patch is counted
+conservatively by commit.
 
 **The cap is `review.verificationBudget`, not the inline budget.** Verification protects what
 gets published, so it is its own control, **independent of inline placement**: the
@@ -349,7 +352,8 @@ rule is what keeps it off green: a run-health row is enough to attest a run. Rea
 are observed through MCP, a driver's recorded shell commands, and OpenCode's `read`
 tool. Claude's, Gemini's and Cursor's native reads are not, so a reviewer that reads
 only that way ends `not_observed`, a false negative the gate accepts. The pre-submit
-nudge hands every unread range back once, before the verdict is accepted, including
+nudge hands every unread range back before the verdict is accepted (once, or up to
+three times while a large share of the added lines is still unread), including
 every range of an unobserved run when the driver reports its reads (OpenCode's and
 Codex's CLI streams), where a read now would be seen; there is no second turn.
 

@@ -934,7 +934,9 @@ def adjudicate_cmd(
     kinds: dict[str, AdjudicatorKind] = {"human": "human", "jev": "jev", "llm": "llm"}
     kind = kinds.get(by)
     if kind is None:
-        cli_bail(f"unknown adjudicator {by!r} — expected human, jev, or llm")
+        cli_bail(
+            f"unknown adjudicator {by!r} — expected human, jev, or llm", code=CLI_USAGE_EXIT_CODE
+        )
     if not baseline.is_file():
         cli_bail(f"{baseline} is not a file")
     try:

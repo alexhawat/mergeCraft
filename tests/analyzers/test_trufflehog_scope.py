@@ -13,8 +13,6 @@ from typing import Any
 
 import pytest
 
-from tests.analyzers.support import import_module
-
 # Path-level exemptions name a reason; the URI canary uses a finding-level pair.
 _NAMED_FIXTURES: tuple[tuple[str, str], ...] = (
     (
@@ -34,11 +32,15 @@ _UNNAMED_TEST_SECRET = "tests/new_committed_secret.env"
 
 
 def _config() -> object:
-    return import_module("mergecraft.analyzers.config")
+    from mergecraft.analyzers import config
+
+    return config
 
 
 def _ci_sarif() -> object:
-    return import_module("scripts.ci_extended_sarif")
+    from scripts import ci_extended_sarif
+
+    return ci_extended_sarif
 
 
 def test_trufflehog_exclude_paths_cover_venv_dev_and_virtualenv_trees(

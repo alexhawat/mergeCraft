@@ -214,9 +214,9 @@ async def test_auth_class_fetch_does_not_retry(
 
 
 def _establish_review_scope_tool(ctx: ToolContext):
-    import importlib
 
-    mod = importlib.import_module("mergecraft.mcp.verdict")
+    import mergecraft.mcp.verdict as mod
+
     factory = getattr(mod, "establish_review_scope_tool", None)
     assert factory is not None, "establish_review_scope_tool is not implemented yet"
     return factory(ctx)

@@ -277,9 +277,9 @@ async def test_github_tool_endpoint_behaviour_is_unchanged(
 def test_no_github_specific_type_leaks_into_core() -> None:
     """Core runtime surfaces depend on ``ScmProvider``, not ``GitHubClient``."""
     require_scm()
+    import mergecraft.mcp.context as context_mod
     from mergecraft.scm.protocol import ScmProvider
 
-    context_mod = importlib.import_module("mergecraft.mcp.context")
     tool_context = context_mod.ToolContext
     field_names = {field.name for field in dataclasses.fields(tool_context)}
     assert "scm" in field_names, "ToolContext must expose scm: ScmProvider"

@@ -135,6 +135,10 @@ class ReviewRunFailed(RuntimeError):
     depress recall/F1 for the wrong reason (mergeCraft self-review, PR #216).
     """
 
+    def __init__(self, message: str, *, cost_usd: float | None = None) -> None:
+        super().__init__(message)
+        self.cost_usd = cost_usd
+
 
 def discover_detection_cases(
     corpus_dir: Path = DEFAULT_DETECTION_CORPUS_DIR,
@@ -332,9 +336,13 @@ def run_live_detection(
             continue
 
         started_at = time.monotonic()
+        case_cost_usd = None
         try:
             outcome = review_fn(case)
+            if isinstance(outcome, ReviewOutcome):
+                case_cost_usd = outcome.cost_usd
         except ReviewRunFailed as exc:
+            case_cost_usd = exc.cost_usd
             logger.warning("detection case {} review failed: {}", case.case_id, exc)
             _record_failure(
                 case.case_id,
@@ -357,19 +365,18 @@ def run_live_detection(
                 journal_path,
             )
             continue
+        finally:
+            # Each attempted review contributes spend even when it returns no findings.
+            case_costs.append(case_cost_usd)
+            if case_cost_usd is not None:
+                campaign_cost_usd += case_cost_usd
         elapsed_seconds = time.monotonic() - started_at
         if isinstance(outcome, ReviewOutcome):
             raw_rows = outcome.findings
-            case_cost_usd = outcome.cost_usd
             case_tokens = outcome.total_tokens
         else:
             raw_rows = outcome
-            case_cost_usd = None
             case_tokens = None
-        # Every review that ran counts toward spend, scored or not.
-        case_costs.append(case_cost_usd)
-        if case_cost_usd is not None:
-            campaign_cost_usd += case_cost_usd
         overrun = _budget_overrun(
             budget, elapsed_seconds=elapsed_seconds, cost_usd=case_cost_usd, tokens=case_tokens
         )
@@ -559,7 +566,7 @@ def _default_review_fn(model: str, budget: ReviewBudget | None = None) -> Review
     """
     from mergecraft.offline_review import run_offline_diff_review
 
-    def _fn(case: DetectionCase) -> list[dict[str, Any]]:
+    def _fn(case: DetectionCase) -> ReviewOutcome:
         with tempfile.TemporaryDirectory(prefix="mergecraft-detect-") as tmp:
             scratch = materialize_case_repo(case, Path(tmp))
             json_path = scratch / "findings.json"
@@ -577,15 +584,20 @@ def _default_review_fn(model: str, budget: ReviewBudget | None = None) -> Review
                 )
             if not result.success:
                 msg = f"{case.case_id}: {result.error or 'diff-review did not succeed'}"
-                raise ReviewRunFailed(msg)
+                raise ReviewRunFailed(msg, cost_usd=result.cost_usd)
             if not json_path.is_file():
                 msg = f"{case.case_id}: diff-review succeeded but wrote no findings JSON"
-                raise ReviewRunFailed(msg)
-            payload = json.loads(json_path.read_text(encoding="utf-8"))
-            if isinstance(payload, dict):
-                rows = payload.get("findings", [])
-                return [row for row in rows if isinstance(row, dict)]
-            return []
+                raise ReviewRunFailed(msg, cost_usd=result.cost_usd)
+            try:
+                payload = json.loads(json_path.read_text(encoding="utf-8"))
+            except (ValueError, OSError) as exc:
+                raise ReviewRunFailed(str(exc), cost_usd=result.cost_usd) from exc
+            rows = payload.get("findings", []) if isinstance(payload, dict) else []
+            return ReviewOutcome(
+                findings=[row for row in rows if isinstance(row, dict)],
+                cost_usd=result.cost_usd,
+                total_tokens=result.total_tokens,
+            )
 
     return _fn
 

@@ -28,36 +28,6 @@ No SaaS account. No dashboard. Your repo, your keys, your reviewers.
 
 ---
 
-<span id="for-agents"></span>
-
-<details>
-<summary><b>For LLM / Agents</b></summary>
-
-### One-line setup prompts
-
-Open your coding agent (its [harness](docs/glossary.md#harness)) in the repo you want reviewed and paste this. It installs
-the CLI, runs `mergecraft init`, and stops at the credential step for you.
-
-```text
-Set up mergeCraft (BYOK AI PR review) in this repository.
-Reference: https://github.com/alexhawat/mergeCraft/blob/main/AGENTS-mergecraft.md
-Install uv if missing, then `uv tool install mergecraft-action==0.1.0a6`, run
-`mergecraft init`, and print the `mergecraft provider auth <label> --scope github`
-command for me to run. Never read, echo or commit a credential. After I confirm,
-run `mergecraft doctor` (its `workflow auth` row must be ok; if not, `mergecraft
-workflow sync --apply`), commit only the files `init` created, and open a PR.
-```
-
-The full prompts (install, teach your agent the mergeCraft skill, per-agent
-one-liners) are in [`docs/agents.md`](docs/agents.md). Machine-readable entry points:
-[`AGENTS-mergecraft.md`](AGENTS-mergecraft.md), [`llms.txt`](llms.txt),
-[`skills/mergecraft/SKILL.md`](skills/mergecraft/SKILL.md), and the public MCP server
-([`docs/mcp.md`](docs/mcp.md)).
-
-MCP Registry ownership: `mcp-name: io.github.alexhawat/mergecraft`
-
-</details>
-
 ## Quickstart
 
 Five minutes, one repository, one provider credential.
@@ -114,80 +84,36 @@ mergecraft doctor   # git, providers, analyzers, auth, config, workflow auth, MC
    `@mergecraft review` comments.
 
 Docs on `main` may describe unreleased behavior; the
-[v0.1.0a5 docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a6/docs) match
+[Release documentation](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a6/docs) match
 this install. Offline first: `mergecraft review --dry-run` prints the review prompt
 with no credential. Something wrong? [`docs/troubleshooting.md`](docs/troubleshooting.md).
 
+The [harness](docs/glossary.md#harness) runs the provider selected in your configuration.
+
 ### Example 1 — auto-review every PR
 
+The [complete workflow](examples/workflows/mergecraft.yml) runs the pinned Action on each PR. The scaffold configures permissions, provider credentials, and the review prompt.
+
 ```yaml
-# .github/workflows/mergecraft.yml  — matches `mergecraft init` / examples/workflows/
-name: mergeCraft
-on:
-  pull_request:
-    types: [opened, ready_for_review, synchronize]
-  workflow_dispatch:
-    inputs:
-      prompt:
-        description: Prompt for the agent
-        required: true
-        type: string
-
-permissions:
-  contents: read   # a review needs only read access
-  pull-requests: write
-  issues: write
-  checks: write
-  actions: read
-
-concurrency:
-  group: mergecraft-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  mergecraft:
+  review:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: alexhawat/mergeCraft@7080e962c2259757a34b9f745602f093e4ee3378 # v0.1.0a4
-        with:
-          prompt: >
-            ${{ github.event_name == 'pull_request'
-                && 'Review this pull request.'
-                || github.event.inputs.prompt }}
-          model: anthropic/claude-sonnet
-          status_checks: enabled
-        env:
-          # Keep equal to the `uses:` commit above.
-          MERGECRAFT_ACTION_SHA: 7080e962c2259757a34b9f745602f093e4ee3378
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      - uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
 ```
 
-More patterns — [ignore paths](docs/workflows.md#ignoring-paths), hardened `pull_request_target`, comment triggers, [SARIF](docs/glossary.md#sarif):
-[`docs/workflows.md`](docs/workflows.md). Other install paths (Docker-only, no local
-install): [`docs/install.md`](docs/install.md).
+For ignore paths, comment triggers and hardened workflows, see the [workflow guide](docs/workflows.md).
 
 ## Problem
 
-Three reasons teams pick mergeCraft over hosted reviewers:
-
-### Hosted SaaS → [BYOK](docs/glossary.md#byok)
-
-Bring your own Claude Pro/Max or ChatGPT subscription, an API key, or any
-OpenAI-compatible endpoint. Credentials and code stay inside GitHub Actions and
-this repo's code — no proprietary backend. What it costs: [`docs/cost.md`](docs/cost.md).
-
-### Vibes → evidence + [verifier](docs/glossary.md#verifier)
-
-Deterministic [analyzers](docs/glossary.md#analyzer) settle mechanically checkable facts; the LLM only judges
-what is left, and a second read-only verifier re-reads every Critical/Major
-finding before it is published.
-
-### Lock-in → MIT Action
-
-One Docker action, one YAML workflow, MIT-licensed Python you can read end to end.
+| What teams need | How mergeCraft handles it |
+|---|---|
+| Control over credentials and cost | Run in GitHub Actions with your own subscription or API key. [Cost guide](docs/cost.md) |
+| Reviewable evidence | Each [analyzer](docs/glossary.md#analyzer) checks the diff and a [verifier](docs/glossary.md#verifier) re-reads Critical and Major findings. |
+| A portable reviewer | Run the MIT-licensed Action or review a local diff with the CLI. |
 
 <span id="how-it-works"></span>
 
@@ -282,6 +208,14 @@ Not in the provider catalog:
 | [`docs/REVIEW-CHECKS.md`](docs/REVIEW-CHECKS.md) · [`docs/ANALYZERS.md`](docs/ANALYZERS.md) · [`docs/trust-policy.md`](docs/trust-policy.md) | What a review checks, analyzers, operator trust knobs |
 | [`SECURITY.md`](SECURITY.md) | Threat model, trust tiers, reporting |
 | [`docs/`](docs/) | Full generated index |
+
+<span id="for-agents"></span>
+
+## For LLM / Agents
+
+For an agent-assisted `mergecraft init`, use the [setup prompts](docs/agents.md), [agent instructions](AGENTS-mergecraft.md), [skill](skills/mergecraft/SKILL.md), or [MCP reference](docs/mcp.md). Machine-readable overview: [llms.txt](llms.txt).
+
+MCP Registry ownership: `mcp-name: io.github.alexhawat/mergecraft`
 
 ## License
 
@@ -607,7 +541,9 @@ never be cleared, because there are no lines to hand back; generated, minified
 and vendored hunks removed by policy are listed as `excluded_generated` and do
 not count against completeness. Before the verdict is accepted, one nudge names
 exactly the unread ranges so the reviewer can read them and submit again; that
-nudge fires once per session. If anything is still uncovered, the run is
+nudge fires once per session, or up to three times while at least 200 added
+lines and more than a tenth of the change are still unread. If anything is still
+uncovered, the run is
 `inconclusive` (a `neutral` check)
 even though a verdict was submitted; a Critical or Major finding still makes
 `mergecraft-approval` conclude `failure`. The checks and the run record state
@@ -923,7 +859,8 @@ Checks on the review process itself, so a review can't quietly skip half the PR:
 
 - The complete raw diff is read end-to-end, using the diff's table of contents as a coverage checklist.
 - On a re-review, an incremental patch covering only the commits since mergeCraft's last review scopes what is new — the full diff still establishes coverage.
-- A first submission that missed regions gets a one-time nudge listing the unread ranges.
+- A first submission that missed regions gets a nudge listing the unread ranges: once, or up to three times while most of a large change is still unread.
+- A high-risk change, or one with 1,000 or more added lines, whose review opened fewer than five source files beyond the diff gets a one-time nudge to read the code the change depends on before the verdict is accepted. An offline review has no risk lane at that point and is judged on size alone.
 - Understanding is never delegated: subagents supply lens investigations, but the primary reviewer synthesizes and re-verifies every finding.
 - **Trivially skippable** — a single-word doc typo, whitespace-only changes, comment-only changes, lockfile or generated-code regeneration, a mechanical rename, a low-risk dependency patch bump.
 - **Looks trivial but is not** (small diff, big blast radius — never skipped):
@@ -1693,7 +1630,8 @@ is only for anchoring.
 
 **Coverage is line-range, not file-level.** `changed-unread-file` now reports the
 unread added-line ranges (`path:start-end`) rather than "this file was never
-read", and the pre-submit check nudges **once** with exactly those ranges. The
+read", and the pre-submit check nudges **once** with exactly those ranges (up to
+three times while a large share of the added lines is still unread). The
 rule id, severity, and `scope="run"` (advisory, never a gate) are unchanged; what
 changed is what counts as read. Reads of the diff file itself count, via the
 `diff_read_path` / `diff_read` marker recorded from the raw command before the
@@ -1782,7 +1720,9 @@ withdrawn-memory skip, and a dispatch cap.
 **Review round cap (`review.maxReviewRounds`, default 3).** After this many mergeCraft-authored
 review rounds on one PR, the run injects one Major finding asking the author to reconsider the
 approach, then continues on the incremental diff only. The cap never auto-approves; it is not
-a substitute for human judgment.
+a substitute for human judgment. Repeated reviews of the same head and base-only updates
+with an unchanged author patch use the same round. An unavailable historical patch is counted
+conservatively by commit.
 
 **The cap is `review.verificationBudget`, not the inline budget.** Verification protects what
 gets published, so it is its own control, **independent of inline placement**: the
@@ -1964,7 +1904,8 @@ rule is what keeps it off green: a run-health row is enough to attest a run. Rea
 are observed through MCP, a driver's recorded shell commands, and OpenCode's `read`
 tool. Claude's, Gemini's and Cursor's native reads are not, so a reviewer that reads
 only that way ends `not_observed`, a false negative the gate accepts. The pre-submit
-nudge hands every unread range back once, before the verdict is accepted, including
+nudge hands every unread range back before the verdict is accepted (once, or up to
+three times while a large share of the added lines is still unread), including
 every range of an unobserved run when the driver reports its reads (OpenCode's and
 Codex's CLI streams), where a read now would be seen; there is no second turn.
 
@@ -3452,7 +3393,8 @@ still names the `.env` explicitly.
 
 Disable clears **credentials**, not registration: the `providers:` row and its
 `LLM_PROVIDER_<N>` label survive, so `provider enable` re-authenticates the same
-env index. Use `mergecraft provider delete` to drop the registration itself.
+env index. Use `mergecraft provider delete` to drop the registration itself; the
+deleted provider's env index is never handed to a later `provider add`.
 Workflow YAML is never rewritten — the shipped cascade already skips a provider
 whose secret is missing.
 
@@ -3555,7 +3497,7 @@ For the common single-provider case, two top-level `with:` inputs map
 onto the singleton env vars — no need to name them in `env:`:
 
 ```yaml
-- uses: alexhawat/mergeCraft@v0.1.0a1
+- uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
   with:
     model: default/your-model-id
     provider_base_url: https://api.example.com/v1
@@ -3622,7 +3564,7 @@ Two distinct OpenAI-compatible providers in one workflow (e.g. MiniMax
 and Nous alongside OpenAI):
 
 ```yaml
-- uses: alexhawat/mergeCraft@v0.1.0a1
+- uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
   with:
     model: provider_1/deepseek-v4-flash           # active provider_1
   env:
@@ -3702,7 +3644,7 @@ modelFallbacks:
 ```yaml
 # .github/workflows/mergecraft.yml — a single ``uses:`` step walks the
 # chain. ``model:`` is the head; the configured tail follows.
-- uses: alexhawat/mergeCraft@v0.1.0a1
+- uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
   with:
     model: anthropic/claude-sonnet        # ← chain head (your pick)
     # model_pin: enabled                 # ← uncomment to collapse to one model
@@ -3733,7 +3675,7 @@ semantics, set `model_pin: enabled` on the `with:` block, or
 `modelPin: true` in `.mergecraft/config.yaml` (the action input wins):
 
 ```yaml
-- uses: alexhawat/mergeCraft@v0.1.0a1
+- uses: alexhawat/mergeCraft@44bd67c55666303d5bd35efed5ef53868b27bb46 # v0.1.0a6
   with:
     model: anthropic/claude-sonnet
     model_pin: enabled                 # ← chain collapses to [claude-sonnet]

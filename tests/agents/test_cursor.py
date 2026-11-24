@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -16,7 +15,9 @@ if TYPE_CHECKING:
 
 def _load_cursor_module():
     try:
-        return importlib.import_module("mergecraft.agents.cursor")
+        from mergecraft.agents import cursor
+
+        return cursor
     except ImportError as exc:
         pytest.fail(f"mergecraft.agents.cursor not implemented: {exc}")
 
@@ -68,3 +69,21 @@ async def test_cursor_harness_launches_cloud_agent_and_parses_agent_result(
     dashboard = result.metadata.get("dashboard_url") or result.metadata.get("dashboardUrl")
     assert dashboard is not None
     assert "run-123" in str(dashboard)
+
+
+@pytest.mark.asyncio
+async def test_cursor_timeout_cancels_created_run(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    from unittest.mock import AsyncMock
+
+    cursor = _load_cursor_module()
+    monkeypatch.setenv("CURSOR_API_KEY", "cursor-test-key")
+    client = AsyncMock()
+    client.create_cloud_agent.return_value = {"id": "run-123"}
+    monkeypatch.setattr(cursor, "CursorCloudClient", lambda **_kwargs: client)
+    monkeypatch.setattr(
+        cursor, "_poll_run_to_terminal", AsyncMock(side_effect=TimeoutError("expired"))
+    )
+    ctx = make_agent_run_context(tmp_path, resolved_model="cursor/cloud-agent")
+    result = await cursor._run_cursor_once(ctx=ctx)
+    assert not result.success
+    client.cancel_run.assert_awaited_once_with("run-123")

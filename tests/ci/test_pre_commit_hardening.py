@@ -25,8 +25,8 @@ _LOCAL_REPO: Final = "local"
 # dev-tool pin (the pydantic-free copy of the rule).
 _FROZEN_REVS: Final[dict[str, tuple[str, str]]] = {
     "https://github.com/astral-sh/ruff-pre-commit": (
-        "c0f278f1254ccc8fb09676bcdb8d847e7db493e5",
-        "v0.17.4",
+        "9026c9127e153371d7a78dfcb0c45ae2046a3d10",
+        "v0.17.6",
     ),
     _HOOKS_REPO: ("cef0300fd0fc4d2a87a85fa2093c6b283ea36f4b", "v5.0.0"),
 }

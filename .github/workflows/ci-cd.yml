@@ -16,7 +16,7 @@ permissions: {}
 concurrency:
   # One group per commit: a shared group let a newer push cancel the *pending*
   # run of an older merge, so its verify and coverage artifact never completed.
-  # Image publication is serialised per ref at job level (build-images).
+  # build-images stages each commit independently. Only promote serialises per ref.
   group: ci-cd-${{ github.workflow }}-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: false
 
@@ -494,12 +494,12 @@ jobs:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/pre-0.0.1' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # The only job that writes a mutable tag. Its own group (build-images has a
-    # different one) so a queued promote is only ever replaced by a newer
-    # promote, never by another job; the tip check below makes that safe.
+    # Queue pending promotions in arrival order. A slower, older build can
+    # arrive after the tip; the branch-tip guard skips it when its turn comes.
     concurrency:
       group: ci-cd-promote-${{ github.ref }}
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       packages: write

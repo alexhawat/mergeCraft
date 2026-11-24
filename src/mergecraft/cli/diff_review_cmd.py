@@ -17,7 +17,7 @@ from loguru import logger
 from mergecraft.analyzers.finding import Finding, finding_short_id
 from mergecraft.cli.agent_protocol import AgentProtocolStream, notify_findings
 from mergecraft.cli.consoles import err_console as console
-from mergecraft.cli.exits import RunOutcome, cli_exit_code_for_review
+from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE, RunOutcome, cli_exit_code_for_review
 from mergecraft.cli.global_surface import get_cli_globals
 from mergecraft.cli.review_output import (
     HunkFileFindings,
@@ -630,7 +630,7 @@ def run(
     try:
         trust_override = parse_cli_trust_override(trust)
     except ValueError as exc:
-        _exit_with_message(str(exc), cli_exit_code_for_review(RunOutcome.configuration_error))
+        _exit_with_message(str(exc), CLI_USAGE_EXIT_CODE)
 
     if with_coverage or with_mutation:
         if shell != "enabled":

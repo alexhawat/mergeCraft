@@ -1,0 +1,123 @@
+{
+  "case_id": "golden-b002-js-vue-shallow-brand-001",
+  "title": "Required shallowReactive brand rejects plain object assignment",
+  "language": "typescript",
+  "framework": "Vue",
+  "category": "correctness",
+  "repo": "vuejs/core",
+  "introducing_pr": {
+    "number": 14493,
+    "url": "https://github.com/vuejs/core/pull/14493",
+    "merged": true,
+    "merged_at": "2026-03-25T09:06:27Z",
+    "base_sha": "b147482311762888df6e4681a2c7526bff943fdf",
+    "head_sha": "1f7669281ebc1fb69dfddf14aa197f49ab0135b4",
+    "merge_sha": "3b561db4ab42d06166b002f13c0e97cb2bd4a061"
+  },
+  "fix_pr": {
+    "number": 14641,
+    "url": "https://github.com/vuejs/core/pull/14641",
+    "merged": true,
+    "merged_at": "2026-04-03T02:31:00Z",
+    "base_sha": "81615d398a89beeccfe56a4a96fd2fba0c6fb37b",
+    "head_sha": "7d2de78f277cd664fc67b8e01b2b39f33a55ff28",
+    "merge_sha": "302c47a4994bc8b47b8a2af6693d8cb6bbd4b06b"
+  },
+  "causal_evidence": {
+    "url": "https://github.com/vuejs/core/pull/14641",
+    "quote": "fix shallowReactive type regressions introduced by #14493",
+    "snapshot_path": "evals/fixtures/golden/golden-b002-js-vue-shallow-brand-001/fix-pr.json"
+  },
+  "buggy_file": "packages/reactivity/src/reactive.ts",
+  "start_line": 109,
+  "end_line": 109,
+  "buggy_commit_sha": "3b561db4ab42d06166b002f13c0e97cb2bd4a061",
+  "buggy_source_url": "https://github.com/vuejs/core/blob/3b561db4ab42d06166b002f13c0e97cb2bd4a061/packages/reactivity/src/reactive.ts#L109-L109",
+  "proposed_label": {
+    "kind": "bug",
+    "status": "agent-proposed; pending human adjudication",
+    "rationale": "Changing the optional unique-symbol marker into a required property of type never makes a structurally equivalent plain object unassignable. No public caller can provide the uninhabitable required brand. The fix replaces it with an optional private-class brand; the added assignment test exercises this exact source compatibility regression."
+  },
+  "trigger": "Create const shallow = shallowReactive({ a: 1, b: 2 }); declare let values: typeof shallow; then assign values = { a: 1, b: 2 }.",
+  "fix_explanation": "Use a private class with an optional private property as the brand, preserving distinction for unwrap types without requiring a symbol property for plain assignment.",
+  "fix_test": {
+    "description": "packages-private/dts-test/reactivity.test-d.ts: shallowReactive type should accept plain object assignment",
+    "included": true,
+    "locally_run": false,
+    "source_url": "https://github.com/vuejs/core/blob/302c47a4994bc8b47b8a2af6693d8cb6bbd4b06b/packages-private/dts-test/reactivity.test-d.ts"
+  },
+  "caveats": [
+    "This case targets plain-object assignability only; the fix PR also changes proxyRefs and collection unwrapping, which are outside the proposed finding.",
+    "Type-level source compatibility defect, not a runtime reactivity failure.",
+    "Selected-path patch excerpts are copied from the GitHub PR-files API and are not a full PR checkout.",
+    "No human decision or adjudicator attribution has been supplied for this candidate."
+  ],
+  "license": {
+    "name": "MIT License",
+    "spdx_id": "MIT",
+    "pinned_url": "https://github.com/vuejs/core/blob/3b561db4ab42d06166b002f13c0e97cb2bd4a061/LICENSE",
+    "path": "evals/fixtures/golden/golden-b002-js-vue-shallow-brand-001/LICENSE",
+    "sha256": "49190d1f742dd61e47fe816df4963e5186a2a62100d9122f9883a60ea32973ac"
+  },
+  "source_snapshots": [
+    {
+      "role": "introduced",
+      "source_url": "https://github.com/vuejs/core/blob/3b561db4ab42d06166b002f13c0e97cb2bd4a061/packages/reactivity/src/reactive.ts",
+      "commit_sha": "3b561db4ab42d06166b002f13c0e97cb2bd4a061",
+      "path": "packages/reactivity/src/reactive.ts",
+      "full_file_sha256": "e3023f7121b8106852c8539e983b391b5b8638cfc39309d7d2e0e3cf3ab8dab6",
+      "excerpt_path": "evals/fixtures/golden/golden-b002-js-vue-shallow-brand-001/buggy-snippet.txt",
+      "start_line": 102,
+      "end_line": 112,
+      "excerpt_sha256": "95b87c483c9b20015f96913edc6b038f62e363a83631d54bba146d062d447ea8"
+    },
+    {
+      "role": "fixed",
+      "source_url": "https://github.com/vuejs/core/blob/302c47a4994bc8b47b8a2af6693d8cb6bbd4b06b/packages/reactivity/src/reactive.ts",
+      "commit_sha": "302c47a4994bc8b47b8a2af6693d8cb6bbd4b06b",
+      "path": "packages/reactivity/src/reactive.ts",
+      "full_file_sha256": "37440858ed8f63432215539c718efed6fb736ed59269d17a4aa56f1b65fe5471",
+      "excerpt_path": "evals/fixtures/golden/golden-b002-js-vue-shallow-brand-001/fixed-snippet.txt",
+      "start_line": 102,
+      "end_line": 121,
+      "excerpt_sha256": "a047b57a1605ddf9b35ae13171ae7abe4685d3eadfd32e972b0b4488556ea15f"
+    }
+  ],
+  "decision": "pending",
+  "decided_by": null,
+  "decided_at": null,
+  "fixture_path": "evals/fixtures/golden/golden-b002-js-vue-shallow-brand-001/evidence.json",
+  "artifact_origins": {
+    "introducing.patch": {
+      "kind": "selected-path PR-files API patch hunks",
+      "api_url": "https://api.github.com/repos/vuejs/core/pulls/14493/files",
+      "compare_url": "https://github.com/vuejs/core/compare/b147482311762888df6e4681a2c7526bff943fdf...1f7669281ebc1fb69dfddf14aa197f49ab0135b4",
+      "paths": [
+        "packages/reactivity/src/reactive.ts",
+        "packages/reactivity/src/ref.ts",
+        "packages-private/dts-test/reactivity.test-d.ts"
+      ]
+    },
+    "fix.patch": {
+      "kind": "selected-path PR-files API patch hunks",
+      "api_url": "https://api.github.com/repos/vuejs/core/pulls/14641/files",
+      "compare_url": "https://github.com/vuejs/core/compare/81615d398a89beeccfe56a4a96fd2fba0c6fb37b...7d2de78f277cd664fc67b8e01b2b39f33a55ff28",
+      "paths": [
+        "packages/reactivity/src/reactive.ts",
+        "packages/reactivity/src/ref.ts",
+        "packages-private/dts-test/reactivity.test-d.ts"
+      ]
+    }
+  },
+  "fixture_files_sha256": {
+    "evals/fixtures/golden/golden-b002-js-vue-shallow-brand-001/ATTRIBUTION.md": "34033e177cae5019ef81da562204d527442af19ec82da820c2aab5629ec2766b",
+    "evals/fixtures/golden/golden-b002-js-vue-shallow-brand-001/LICENSE": "49190d1f742dd61e47fe816df4963e5186a2a62100d9122f9883a60ea32973ac",
+    "evals/fixtures/golden/golden-b002-js-vue-shallow-brand-001/buggy-snippet.txt": "95b87c483c9b20015f96913edc6b038f62e363a83631d54bba146d062d447ea8",
+    "evals/fixtures/golden/golden-b002-js-vue-shallow-brand-001/fix-pr.json": "b4007e3f15e816f63b2d2624afd8e16e71ad31bda04891326422c20951498802",
+    "evals/fixtures/golden/golden-b002-js-vue-shallow-brand-001/fix.patch": "8270997fcdad50241d41eda4bfcdc578e739404b339e1a3c3feb49dd035279fa",
+    "evals/fixtures/golden/golden-b002-js-vue-shallow-brand-001/fixed-snippet.txt": "a047b57a1605ddf9b35ae13171ae7abe4685d3eadfd32e972b0b4488556ea15f",
+    "evals/fixtures/golden/golden-b002-js-vue-shallow-brand-001/introducing-pr.json": "305ef8e95b3023a8dedaf66c88dda15b89bac0758fb459d2d75b904d942cd463",
+    "evals/fixtures/golden/golden-b002-js-vue-shallow-brand-001/introducing.patch": "0c5bd526d82e2287767c09342a42bde0ef84fcfbd7a48dbc694ab10e358c1c61",
+    "evals/fixtures/golden/golden-b002-js-vue-shallow-brand-001/regression-test-snippet.txt": "e7ae23ed9852484e95c7e26c787fa984e39ad45f1229916011c5db9dfb43d147"
+  }
+}

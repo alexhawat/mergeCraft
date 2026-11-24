@@ -78,17 +78,18 @@ def _action_reference_input_table() -> dict[str, str]:
 
 def _walk_typer_commands(app: typer.Typer, prefix: tuple[str, ...] = ()) -> set[tuple[str, ...]]:
     """Collect every leaf command through Click's lazy resolution API."""
-    import click
+    from typer import _click
+    from typer.core import TyperGroup
     from typer.main import get_group
 
-    def walk(group: click.Group, path: tuple[str, ...]) -> set[tuple[str, ...]]:
+    def walk(group: TyperGroup, path: tuple[str, ...]) -> set[tuple[str, ...]]:
         paths: set[tuple[str, ...]] = set()
-        context = click.Context(group)
+        context = _click.Context(group)
         for name in group.list_commands(context):
             command = group.get_command(context, name)
             if command is None or command.hidden:
                 continue
-            if isinstance(command, click.Group):
+            if isinstance(command, TyperGroup):
                 paths |= walk(command, (*path, name))
             else:
                 paths.add((*path, name))

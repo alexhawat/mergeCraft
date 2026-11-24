@@ -1,7 +1,7 @@
 # Sync hook revisions with dev tooling (see pyproject.toml optional dev deps).
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: c0f278f1254ccc8fb09676bcdb8d847e7db493e5  # v0.17.4
+    rev: 9026c9127e153371d7a78dfcb0c45ae2046a3d10  # v0.17.6
     hooks:
       - id: ruff
         args: [--fix]
@@ -17,7 +17,16 @@ repos:
       - id: check-yaml
       - id: check-toml
       - id: end-of-file-fixer
+        # Frozen upstream excerpt: the final blank line is part of its hash.
+        exclude: ^evals/fixtures/golden/golden-b002-systems-rust-tokio-timer-runtime/fixed-source\.txt$
       - id: trailing-whitespace
+        # Preserve hashed upstream diff context and numbered blank source lines.
+        # Attribution, JSON, licenses and all other hooks still run normally.
+        exclude: >-
+          (?x)^evals/fixtures/golden/golden-b002-
+          (?:(?:js|python|systems)-[^/]+/[^/]+\.patch|
+          js-[^/]+/(?:buggy|fixed|regression-test)-snippet\.txt|
+          python-[^/]+/(?:(?:base|before-fix|fixed|introduced)-source|regression-tests)\.txt)$
       - id: check-added-large-files
         args: [--maxkb=1024]
         # Machine-generated pytest-split timing metadata, regenerated in full by

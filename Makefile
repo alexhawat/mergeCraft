@@ -160,6 +160,13 @@ typecheck: ## mypy strict
 pyright: ## Supplemental Pyright pass
 	$(UV) run pyright src/mergecraft
 
+.PHONY: pyright-tests pyright-new-tests
+pyright-tests: ## Report Pyright diagnostics across the complete test tree
+	$(UV) run pyright tests
+
+pyright-new-tests: ## Gate Python test modules added since MERGECRAFT_TEST_TYPE_BASE
+	$(UV) run python scripts/check_new_test_types.py
+
 catalog-check: ## Manifest fixture/doc/severity gate (C5/C6)
 	$(UV) run python -m mergecraft.analyzers.catalog_docs
 
@@ -286,7 +293,7 @@ examples: ## Render example workflow YAML from templates
 example-workflows-check: ## Fail when committed example workflows drift from templates
 	$(UV) run python scripts/render_example_workflows.py --check
 
-pins-check: ## Fail when the defaults.yaml copies drift or the pinned SHA disagrees with its tag (#402, #414)
+pins-check: example-workflows-check ## Fail when the defaults.yaml copies drift or the pinned SHA disagrees with its tag (#402, #414)
 	$(UV) run python scripts/check_example_defaults_sync.py
 
 agent-packages: ## Regenerate per-harness Agent Skills packages

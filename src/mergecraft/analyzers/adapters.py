@@ -723,7 +723,8 @@ def run_adapter(
         logger.info("{}: {}", reason, exc)
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
-    if not findings and outcome.exit_code:
+    # Mypy reserves exit 2 for tool failure, even after emitting diagnostics.
+    if outcome.exit_code and (not findings or (tool_id == "mypy" and outcome.exit_code == 2)):
         # The exit code is only trusted as "findings present" when there are
         # findings: lenient parsers read crash text on stderr as "no rows".
         return nonzero_exit_result(

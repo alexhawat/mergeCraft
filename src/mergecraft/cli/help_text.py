@@ -17,10 +17,14 @@ Exports:
 from __future__ import annotations
 
 import weakref
+from typing import TYPE_CHECKING
 
-import click
+from typer.core import TyperGroup, TyperOption
 
-_INSTALLED: weakref.WeakSet[click.Command] = weakref.WeakSet()
+if TYPE_CHECKING:
+    from typer import _click
+
+_INSTALLED: weakref.WeakSet[_click.Command] = weakref.WeakSet()
 
 
 def terminal_help(text: str | None) -> str | None:
@@ -41,11 +45,11 @@ def terminal_help(text: str | None) -> str | None:
     return text.replace("``", "`")
 
 
-def install_terminal_help(command: click.Command) -> None:
+def install_terminal_help(command: _click.Command) -> None:
     """Rewrite the help of *command*, its options and its subcommands once.
 
     Args:
-        command (click.Command): A command or group about to be shown or run.
+        command (_click.Command): A command or group about to be shown or run.
     """
     if command in _INSTALLED:
         return
@@ -54,9 +58,9 @@ def install_terminal_help(command: click.Command) -> None:
     command.short_help = terminal_help(command.short_help)
     command.epilog = terminal_help(command.epilog)
     for param in command.params:
-        if isinstance(param, click.Option):
+        if isinstance(param, TyperOption):
             param.help = terminal_help(param.help)
-    if isinstance(command, click.Group):
+    if isinstance(command, TyperGroup):
         for sub in command.commands.values():
             install_terminal_help(sub)
 

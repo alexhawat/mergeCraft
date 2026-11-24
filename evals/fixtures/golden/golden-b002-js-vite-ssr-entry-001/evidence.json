@@ -1,0 +1,131 @@
+{
+  "case_id": "golden-b002-js-vite-ssr-entry-001",
+  "title": "Package-name matching ignores explicit SSR external entry",
+  "language": "typescript",
+  "framework": "Vite",
+  "category": "correctness",
+  "repo": "vitejs/vite",
+  "introducing_pr": {
+    "number": 9146,
+    "url": "https://github.com/vitejs/vite/pull/9146",
+    "merged": true,
+    "merged_at": "2022-07-15T21:40:24Z",
+    "base_sha": "5ea70b3c3cd5f208471338c5832a3eba1aafb01d",
+    "head_sha": "259f91f3b6914f53d958e16db7dd63332fc67084",
+    "merge_sha": "5844d8e3480e7713acfa7655666bf0076dcb8879"
+  },
+  "fix_pr": {
+    "number": 9286,
+    "url": "https://github.com/vitejs/vite/pull/9286",
+    "merged": true,
+    "merged_at": "2022-07-22T07:47:32Z",
+    "base_sha": "0b083ca84a1b32f9f2c4d73444d30e0c80abe3b1",
+    "head_sha": "f318d9534dfdb3132af03a2ae3a9f985479a2483",
+    "merge_sha": "d420f01d48c2291e82410b4649f274f8d1493a27"
+  },
+  "causal_evidence": {
+    "url": "https://github.com/vitejs/vite/pull/9286",
+    "quote": "Fixes a regression introduced by:\r\n- https://github.com/vitejs/vite/pull/9146",
+    "snapshot_path": "evals/fixtures/golden/golden-b002-js-vite-ssr-entry-001/fix-pr.json"
+  },
+  "buggy_file": "packages/vite/src/node/ssr/ssrExternal.ts",
+  "start_line": 127,
+  "end_line": 128,
+  "buggy_commit_sha": "5844d8e3480e7713acfa7655666bf0076dcb8879",
+  "buggy_source_url": "https://github.com/vitejs/vite/blob/5844d8e3480e7713acfa7655666bf0076dcb8879/packages/vite/src/node/ssr/ssrExternal.ts#L127-L128",
+  "proposed_label": {
+    "kind": "bug",
+    "status": "agent-proposed; pending human adjudication",
+    "rationale": "Replacing includes(id) with includes(pkgName) prevents an explicit package subpath from matching ssr.external. The package-level noExternal filter can then bundle that entry despite its explicit external declaration, splitting its module state from the Node-loaded copy. The fix prioritizes an exact id match and adds a state-sharing regression fixture."
+  },
+  "trigger": "Set ssr.external to ['external-entry/entry'] and ssr.noExternal to ['external-entry']; import the same stateful entry both directly and from another external package.",
+  "fix_explanation": "Check ssr.external.includes(id) first so a specific entry is forced external; handle package-wide declarations separately and retain the externalizability check.",
+  "fix_test": {
+    "description": "playground/ssr-deps/__tests__/ssr-deps.spec.ts: msg from external using external entry",
+    "included": true,
+    "locally_run": false,
+    "source_url": "https://github.com/vitejs/vite/blob/d420f01d48c2291e82410b4649f274f8d1493a27/playground/ssr-deps/__tests__/ssr-deps.spec.ts"
+  },
+  "caveats": [
+    "The proposed finding is the loss of exact subpath matching. The same fix also adjusts package-wide externalization so non-externalizable assets still pass through checks.",
+    "Upstream integration coverage needs Vite SSR playground dependencies and a browser.",
+    "Selected-path patch excerpts are copied from the GitHub PR-files API and are not a full PR checkout.",
+    "No human decision or adjudicator attribution has been supplied for this candidate."
+  ],
+  "license": {
+    "name": "MIT License",
+    "spdx_id": "MIT",
+    "pinned_url": "https://github.com/vitejs/vite/blob/5844d8e3480e7713acfa7655666bf0076dcb8879/LICENSE",
+    "path": "evals/fixtures/golden/golden-b002-js-vite-ssr-entry-001/LICENSE",
+    "sha256": "29b68325fe026047d13e187b44c33b2acacf7dc647dec4583702e59f235e13b5"
+  },
+  "source_snapshots": [
+    {
+      "role": "introduced",
+      "source_url": "https://github.com/vitejs/vite/blob/5844d8e3480e7713acfa7655666bf0076dcb8879/packages/vite/src/node/ssr/ssrExternal.ts",
+      "commit_sha": "5844d8e3480e7713acfa7655666bf0076dcb8879",
+      "path": "packages/vite/src/node/ssr/ssrExternal.ts",
+      "full_file_sha256": "23b5c2163734d8ed3e4ef121524f33fde8533a58d78b69c5b39ea373875e8806",
+      "excerpt_path": "evals/fixtures/golden/golden-b002-js-vite-ssr-entry-001/buggy-snippet.txt",
+      "start_line": 118,
+      "end_line": 138,
+      "excerpt_sha256": "ec004e534d2b0ada1b1cdec027fd88b7dbf9cd812cb056f9b15ebdabac23c54e"
+    },
+    {
+      "role": "fixed",
+      "source_url": "https://github.com/vitejs/vite/blob/d420f01d48c2291e82410b4649f274f8d1493a27/packages/vite/src/node/ssr/ssrExternal.ts",
+      "commit_sha": "d420f01d48c2291e82410b4649f274f8d1493a27",
+      "path": "packages/vite/src/node/ssr/ssrExternal.ts",
+      "full_file_sha256": "2b4a9a7d0bc8290a95d388d5cf33b447f3aa9c0c528d68abf2070c239d759456",
+      "excerpt_path": "evals/fixtures/golden/golden-b002-js-vite-ssr-entry-001/fixed-snippet.txt",
+      "start_line": 118,
+      "end_line": 155,
+      "excerpt_sha256": "bd9277cafe8414e466bf66d90cbfcdb092c95827b57d2ac5d813b63155963d1f"
+    }
+  ],
+  "decision": "pending",
+  "decided_by": null,
+  "decided_at": null,
+  "fixture_path": "evals/fixtures/golden/golden-b002-js-vite-ssr-entry-001/evidence.json",
+  "artifact_origins": {
+    "introducing.patch": {
+      "kind": "selected-path PR-files API patch hunks",
+      "api_url": "https://api.github.com/repos/vitejs/vite/pulls/9146/files",
+      "compare_url": "https://github.com/vitejs/vite/compare/5ea70b3c3cd5f208471338c5832a3eba1aafb01d...259f91f3b6914f53d958e16db7dd63332fc67084",
+      "paths": [
+        "packages/vite/src/node/ssr/ssrExternal.ts",
+        "playground/ssr-deps/__tests__/ssr-deps.spec.ts",
+        "playground/ssr-deps/server.js",
+        "playground/ssr-deps/src/app.js",
+        "playground/ssr-deps/external-entry/entry.js",
+        "playground/ssr-deps/external-entry/package.json",
+        "playground/ssr-deps/external-using-external-entry/index.js"
+      ]
+    },
+    "fix.patch": {
+      "kind": "selected-path PR-files API patch hunks",
+      "api_url": "https://api.github.com/repos/vitejs/vite/pulls/9286/files",
+      "compare_url": "https://github.com/vitejs/vite/compare/0b083ca84a1b32f9f2c4d73444d30e0c80abe3b1...f318d9534dfdb3132af03a2ae3a9f985479a2483",
+      "paths": [
+        "packages/vite/src/node/ssr/ssrExternal.ts",
+        "playground/ssr-deps/__tests__/ssr-deps.spec.ts",
+        "playground/ssr-deps/server.js",
+        "playground/ssr-deps/src/app.js",
+        "playground/ssr-deps/external-entry/entry.js",
+        "playground/ssr-deps/external-entry/package.json",
+        "playground/ssr-deps/external-using-external-entry/index.js"
+      ]
+    }
+  },
+  "fixture_files_sha256": {
+    "evals/fixtures/golden/golden-b002-js-vite-ssr-entry-001/ATTRIBUTION.md": "2606c5a793fd3599f9fe25f803d90e32a2aa1e3644247ad22f237bb09ae85dca",
+    "evals/fixtures/golden/golden-b002-js-vite-ssr-entry-001/LICENSE": "29b68325fe026047d13e187b44c33b2acacf7dc647dec4583702e59f235e13b5",
+    "evals/fixtures/golden/golden-b002-js-vite-ssr-entry-001/buggy-snippet.txt": "ec004e534d2b0ada1b1cdec027fd88b7dbf9cd812cb056f9b15ebdabac23c54e",
+    "evals/fixtures/golden/golden-b002-js-vite-ssr-entry-001/fix-pr.json": "5a3dd0f9c519329ec451503d21a549a6602ae0238c21b7f4952d127cd4b2647f",
+    "evals/fixtures/golden/golden-b002-js-vite-ssr-entry-001/fix.patch": "dd1d341414fd380efdcd760f01ddcc1640a4ecc5362a02cce2999ca52d122541",
+    "evals/fixtures/golden/golden-b002-js-vite-ssr-entry-001/fixed-snippet.txt": "bd9277cafe8414e466bf66d90cbfcdb092c95827b57d2ac5d813b63155963d1f",
+    "evals/fixtures/golden/golden-b002-js-vite-ssr-entry-001/introducing-pr.json": "4eb198dac06c724934cc943c0d3cfbcc57977f4863844a192cb40f2f4d2e5e70",
+    "evals/fixtures/golden/golden-b002-js-vite-ssr-entry-001/introducing.patch": "28f861046b93fda1ebe8de97270c179487e49ece8cd9eca878da2e12bc55a41f",
+    "evals/fixtures/golden/golden-b002-js-vite-ssr-entry-001/regression-test-snippet.txt": "59b425f2048e41773fcf71ab3c81dd3aaf65c17feca24bc09a878e96f0953221"
+  }
+}

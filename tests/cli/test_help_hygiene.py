@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import re
 
-import click
 import typer
+from typer import _click
+from typer.core import TyperGroup
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -24,11 +25,11 @@ _PLANNING_ID = re.compile(
 
 
 def _paths() -> list[tuple[str, ...]]:
-    def walk(command: click.Command, path: tuple[str, ...]) -> list[tuple[str, ...]]:
+    def walk(command: _click.Command, path: tuple[str, ...]) -> list[tuple[str, ...]]:
         found = [path]
-        if isinstance(command, click.Group):
-            for name in command.list_commands(click.Context(command)):
-                sub = command.get_command(click.Context(command), name)
+        if isinstance(command, TyperGroup):
+            for name in command.list_commands(_click.Context(command)):
+                sub = command.get_command(_click.Context(command), name)
                 assert sub is not None
                 found.extend(walk(sub, (*path, name)))
         return found

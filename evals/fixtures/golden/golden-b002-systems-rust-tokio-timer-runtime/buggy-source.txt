@@ -1,0 +1,52 @@
+impl Timer {
+    #[track_caller]
+    pub(crate) fn new(handle: scheduler::Handle, deadline: Instant) -> Self {
+        let tick = deadline_to_tick(&handle, deadline);
+        let entry = with_current_temp_local_context(|ctx| match ctx {
+            Some(TempLocalContext::Running { registration_queue }) => {
+                let entry = EntryHandle::new(tick);
+                unsafe { registration_queue.push_front(entry.clone()) }
+                entry
+            }
+            #[cfg(feature = "rt-multi-thread")]
+            Some(TempLocalContext::Shutdown) => panic!("{RUNTIME_SHUTTING_DOWN_ERROR}"),
+
+            _ => {
+                let entry = EntryHandle::new(tick);
+                push_from_remote(&handle, entry.clone());
+                entry
+            }
+        });
+
+        Timer { entry }
+    }
+
+    pub(crate) fn is_elapsed(&self) -> bool {
+        self.entry.is_woken_up()
+    }
+
+    pub(crate) fn poll_elapsed(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        self.entry.poll(cx)
+    }
+}
+
+fn with_current_temp_local_context<F, R>(f: F) -> R
+where
+    F: FnOnce(Option<TempLocalContext<'_>>) -> R,
+{
+    #[cfg(not(feature = "rt"))]
+    {
+        let _ = f;
+        panic!("Tokio runtime is not enabled, cannot access the current wheel");
+    }
+
+    #[cfg(feature = "rt")]
+    {
+        use crate::runtime::context;
+
+        context::with_scheduler(|maybe_cx| match maybe_cx {
+            Some(cx) => cx.expect_multi_thread().with_time_temp_local_context(f),
+            None => f(None),
+        })
+    }
+}

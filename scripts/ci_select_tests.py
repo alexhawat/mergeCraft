@@ -26,7 +26,9 @@ _ANCHOR = "tests/ci/test_ci_select_tests.py"
 def _tests_for_path(path: str) -> set[str]:
     p = PurePosixPath(path)
     if p.parts and p.parts[0] == "tests":
-        return {path.replace("\\", "/")}
+        # Pytest accepts collected modules here. Fixture reports and support files
+        # are inputs, so passing them as explicit nodes aborts collection.
+        return {p.as_posix()} if p.match("test_*.py") or p.match("*_test.py") else set()
     if len(p.parts) >= 3 and p.parts[:2] == ("src", "mergecraft") and p.suffix == ".py":
         rel = PurePosixPath(*p.parts[2:])
         test_file = PurePosixPath("tests") / rel.parent / f"test_{rel.stem}.py"

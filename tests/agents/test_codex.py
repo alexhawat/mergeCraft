@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -18,7 +17,9 @@ if TYPE_CHECKING:
 
 def _load_codex_module():
     try:
-        return importlib.import_module("mergecraft.agents.codex")
+        from mergecraft.agents import codex
+
+        return codex
     except ImportError as exc:
         pytest.fail(f"mergecraft.agents.codex not implemented: {exc}")
 
@@ -272,7 +273,8 @@ def test_codex_home_relocates_off_tmp(
     ctx = make_agent_run_context(forbidden, resolved_model="openai/gpt-5.3-codex")
     home = codex_module._codex_home(ctx)
     assert str(home).startswith(str(safe))
-    assert home.name == ".codex"
+    assert home.parent.name == ".codex"
+    assert home.name == ctx.codex_home_id
 
 
 # ── nested-sandbox failure and the operator opt-in (#70) ────────────────

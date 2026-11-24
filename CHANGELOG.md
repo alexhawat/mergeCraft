@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Every diff walker now splits diff text on `\n` only, as Git and `parse_diff`
+  do: analyzer scoping, added-line and hunk iteration, the diff TOC, JEV hunk
+  segmentation, diff-size budgets, diff summaries, triage, `lens`, and the
+  added and deleted line counts of `describe`, the run record and baseline
+  suppression. A carriage return, form feed or Unicode line separator inside a
+  changed line no longer reads as a line break, and analyzer scoping reads
+  file-header lines only before a file's first hunk.
+- `provider delete` now records the highest freed env index as
+  `providersEnvIndexHighWater` in `config.yaml`, so `provider add`,
+  `workflow provider add`, `provider migrate` and `init` seeding never hand
+  that index out again. Allocation also skips any index that still has
+  `LLM_PROVIDER_<N>` or `MERGECRAFT_CUSTOM_PROVIDER_*_<N>` keys in the local
+  `.env` or the environment, which covers registries written before the mark
+  existed.
+- Analyzer output longer than the per-stream cap is cut on a line boundary (a
+  token boundary for one long line) before redaction and capped again after it,
+  so redaction always sees whole values while its work stays bounded by the cap.
+  A quoted value the cut would leave open is dropped whole.
+- A dependency advisory already present on the base branch is no longer reported
+  as introduced by the pull request. The base copy of a lock file is scanned from
+  a scratch path, so its advisories never matched their head twins and every one
+  read as new. When the base side cannot be scanned, novelty is now `unknown`
+  rather than `true`, and an advisory with no fixed version is no longer told to
+  "upgrade to a patched version" (#1518).
+- A verdict submitted with most of a large diff unread is refused up to three
+  times instead of once, while at least 200 added lines and more than a tenth of
+  the change remain unread. The repeated refusal says how much is unread. It is
+  still guidance: after the third the submission is accepted (#1516).
+- A review of a high-risk change, or one with 1,000 or more added lines, that
+  opened fewer than five source files beyond the diff is sent back once to read
+  the code the change depends on. The packet's `run_metrics` records how many
+  submissions the pre-flights refused and how much was unread at the first one
+  (#1516).
+- The evidence packet's `coverage` section now carries `added_lines_total` and
+  `added_lines_read` beside the delivery counts (packet schema `1.22.0`), and the
+  coverage line of a fully delivered change says how many added lines were read,
+  so "complete" is not taken to mean every line was read (#1517).
+- An analyzer with no pinned build for the platform fails once instead of being
+  retried three times with a delay (#1519).
+- `git ls-files` operands are no longer recorded as files the review read (#1520).
+
 - Streaming OpenCode (and NDJSON CLI) reviews now charge token usage per
   provider step against the configured ceiling, stop the model before further
   spend when a step would exceed it, and record only the remaining usage delta
@@ -43,6 +84,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   traceback, so the Quickstart failed at its model step. Only the keys a command
   changes are rewritten; comments elsewhere in the file are kept (#1336, #1455).
 
+### Security
+
+- The `gh` binary in both images, and `actionlint` in the analyzers image, are
+  now built with Go 1.27.4, which fixes CVE-2026-97054 in the Go standard
+  library: an HTTP/1 server could crash on a header race when a request body
+  hit its `MaxBytesReader` limit. Neither binary runs an HTTP server inside the
+  Action. The fix clears the HIGH finding that was failing the image scan.
 
 ## 0.1.0a6
 ### Breaking — action required
@@ -186,6 +234,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commit emails and does not authenticate the author (#1310, #1434).
 
 ### Added
+
+- A `review_event` Action input. `verdict` (the default) keeps today's
+  behaviour. `comment` publishes every review as a COMMENT, whatever the
+  verdict, and the run skips the automatic resolution of fixed-finding review
+  threads, so an advisory reviewer can neither block nor unblock a merge. The verdict is
+  still recorded and reported. An unknown value fails the run as a
+  `configuration_error` before the agent starts.
 
 - Re-approve a passed PR whose only new edit is changelog prose by @sevn-one and @claude in [#1285](https://github.com/alexhawat/mergeCraft/pull/1285)
 

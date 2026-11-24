@@ -1,0 +1,54 @@
+diff --git a/spring-core/src/main/java/org/springframework/util/CompositeSet.java b/spring-core/src/main/java/org/springframework/util/CompositeSet.java
+index 1d30371cd865..caad2f4cfcf7 100644
+--- a/spring-core/src/main/java/org/springframework/util/CompositeSet.java
++++ b/spring-core/src/main/java/org/springframework/util/CompositeSet.java
+@@ -31,8 +31,25 @@
+  */
+ final class CompositeSet<E extends @Nullable Object> extends CompositeCollection<E> implements Set<E> {
+ 
++	private final Set<E> first;
++
++	private final Set<E> second;
++
++
+ 	CompositeSet(Set<E> first, Set<E> second) {
+ 		super(first, second);
++		this.first = first;
++		this.second = second;
++	}
++
++
++	@Override
++	public boolean remove(Object o) {
++		// A set contains a given element at most once: remove it from both sets
++		// so that an element hidden in the second set does not become visible.
++		boolean firstResult = this.first.remove(o);
++		boolean secondResult = this.second.remove(o);
++		return (firstResult || secondResult);
+ 	}
+ 
+ 
+diff --git a/spring-core/src/test/java/org/springframework/util/CompositeMapTests.java b/spring-core/src/test/java/org/springframework/util/CompositeMapTests.java
+index aa998eebf5a8..a60d562ef359 100644
+--- a/spring-core/src/test/java/org/springframework/util/CompositeMapTests.java
++++ b/spring-core/src/test/java/org/springframework/util/CompositeMapTests.java
+@@ -290,6 +290,19 @@ void keySet() {
+ 			assertThat(keySet).containsExactlyInAnyOrder("foo", "baz", "corge");
+ 		}
+ 
++		@Test
++		void keySetRemove() {
++			Map<String, String> first = new HashMap<>(Map.of("foo", "bar", "baz", "qux"));
++			Map<String, String> second = new HashMap<>(Map.of("baz", "quux", "corge", "grault"));
++			CompositeMap<String, String> composite = new CompositeMap<>(first, second);
++
++			assertThat(composite.keySet().remove("baz")).isTrue();
++			assertThat(composite.containsKey("baz")).isFalse();
++			assertThat(composite.keySet()).containsExactlyInAnyOrder("foo", "corge");
++			assertThat(first).containsExactly(entry("foo", "bar"));
++			assertThat(second).containsExactly(entry("corge", "grault"));
++		}
++
+ 
+ 		@Test
+ 		void values() {

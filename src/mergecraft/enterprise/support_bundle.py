@@ -9,6 +9,7 @@ Exports:
 from __future__ import annotations
 
 import io
+import json
 import sys
 import tarfile
 from pathlib import Path
@@ -61,7 +62,9 @@ def write_support_bundle(
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     python_info = f"python: {sys.version}\nplatform: {sys.platform}\n"
-    payload = python_info
+    from mergecraft.enterprise.health import health_payload
+
+    payload = python_info + "health: " + json.dumps(health_payload(), sort_keys=True) + "\n"
     audit_path = resolve_audit_log_path(root=root)
     if audit_path.is_file():
         breaks = verify_audit_chain(audit_path)

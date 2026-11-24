@@ -37,7 +37,9 @@ def health_payload() -> dict[str, Any]:
         is_telemetry_export_enabled,
         resolve_telemetry_mode,
     )
+    from mergecraft.tracing.resolve import resolve_active_tracing
 
+    tracing = resolve_active_tracing()
     diag = operational_diagnostics()
     mode = resolve_telemetry_mode(explicit=current_enterprise_settings().telemetry)
     checks: dict[str, Any] = {
@@ -48,7 +50,9 @@ def health_payload() -> dict[str, Any]:
         "telemetry": {
             "status": "ok",
             "mode": mode.value,
-            "remote_export": is_telemetry_export_enabled(mode),
+            "remote_export": bool(tracing.enabled)
+            and is_telemetry_export_enabled(mode)
+            and any(sink.type in {"logfire", "otel"} for sink in tracing.sinks),
         },
     }
     return {"status": "ok", "checks": checks}

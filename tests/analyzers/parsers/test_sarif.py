@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
-from tests.analyzers.support import FIXTURES_DIR, import_module
+from tests.analyzers.support import FIXTURES_DIR
 
 
 @pytest.mark.parametrize(
@@ -18,8 +18,9 @@ from tests.analyzers.support import FIXTURES_DIR, import_module
     ],
 )
 def test_ingest_recorded_sarif_fixtures(fixture_name: str) -> None:
-    sarif = import_module("mergecraft.analyzers.parsers.sarif")
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+    import mergecraft.analyzers.parsers.sarif as sarif
+
     raw = (FIXTURES_DIR / fixture_name).read_text(encoding="utf-8")
     tool = fixture_name.split("/")[1].split("-")[0]
     m = manifest.load_manifest_file(Path(f"src/mergecraft/analyzers/catalog/{tool}.yaml"))
@@ -29,8 +30,9 @@ def test_ingest_recorded_sarif_fixtures(fixture_name: str) -> None:
 
 
 def test_sarif_level_maps_to_taxonomy_severity() -> None:
-    sarif = import_module("mergecraft.analyzers.parsers.sarif")
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+    import mergecraft.analyzers.parsers.sarif as sarif
+
     raw = (FIXTURES_DIR / "sarif/actionlint-minimal.sarif.json").read_text(encoding="utf-8")
     m = manifest.load_manifest_file(
         Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml")
@@ -40,8 +42,9 @@ def test_sarif_level_maps_to_taxonomy_severity() -> None:
 
 
 def test_artifact_location_resolves_to_repo_relative_path() -> None:
-    sarif = import_module("mergecraft.analyzers.parsers.sarif")
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+    import mergecraft.analyzers.parsers.sarif as sarif
+
     raw = (FIXTURES_DIR / "sarif/hadolint-minimal.sarif.json").read_text(encoding="utf-8")
     m = manifest.load_manifest_file(
         Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml")
@@ -51,8 +54,9 @@ def test_artifact_location_resolves_to_repo_relative_path() -> None:
 
 
 def test_export_round_trips_to_valid_sarif() -> None:
-    sarif_mod = import_module("mergecraft.analyzers.sarif")
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+    import mergecraft.analyzers.sarif as sarif_mod
+
     sample = finding_mod.make_finding(
         tool="actionlint",
         rule_id="syntax-check",
@@ -110,13 +114,15 @@ def _sarif_document(uri: str, *, uri_base_id: str | None = None) -> str:
 
 
 def _actionlint_manifest() -> object:
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+
     return manifest.load_manifest_file(_ACTIONLINT_MANIFEST)
 
 
 def test_file_uri_outside_the_root_is_not_shortened_to_a_basename(tmp_path: Path) -> None:
     """The basename of an out-of-root ``file://`` can be a real, unrelated file."""
-    sarif = import_module("mergecraft.analyzers.parsers.sarif")
+    import mergecraft.analyzers.parsers.sarif as sarif
+
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     (repo_root / "README").write_text("a real file at the repo root\n", encoding="utf-8")
@@ -135,7 +141,8 @@ def test_bare_absolute_path_outside_the_root_keeps_its_path_and_is_labelled(
     tmp_path: Path,
 ) -> None:
     """A runner path is kept verbatim and labelled, never stripped of its prefix."""
-    sarif = import_module("mergecraft.analyzers.parsers.sarif")
+    import mergecraft.analyzers.parsers.sarif as sarif
+
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     uri = "/home/runner/work/mergeCraft/mergeCraft/README"
@@ -150,7 +157,8 @@ def test_bare_absolute_path_outside_the_root_keeps_its_path_and_is_labelled(
 
 def test_srcroot_escape_error_names_the_uri(tmp_path: Path) -> None:
     """The rejection is correct; the message must say which URI caused it."""
-    sarif = import_module("mergecraft.analyzers.parsers.sarif")
+    import mergecraft.analyzers.parsers.sarif as sarif
+
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
@@ -166,7 +174,8 @@ def test_srcroot_escape_error_names_the_uri(tmp_path: Path) -> None:
 
 def test_file_uri_inside_the_root_still_resolves_repo_relative(tmp_path: Path) -> None:
     """A path that does map into the repo keeps resolving to its relative form."""
-    sarif = import_module("mergecraft.analyzers.parsers.sarif")
+    import mergecraft.analyzers.parsers.sarif as sarif
+
     repo_root = tmp_path / "repo"
     target = repo_root / "src" / "app.py"
     target.parent.mkdir(parents=True)
@@ -182,8 +191,9 @@ def test_file_uri_inside_the_root_still_resolves_repo_relative(tmp_path: Path) -
 
 
 def _edge_case_findings() -> dict[str, object]:
-    sarif = import_module("mergecraft.analyzers.parsers.sarif")
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.parsers.sarif as sarif
+    import mergecraft.analyzers.registry as registry
+
     raw = (FIXTURES_DIR / "sarif/parser-edge-cases.sarif.json").read_text(encoding="utf-8")
     findings = sarif.parse_sarif(
         raw, manifest=registry.get_manifest("semgrep"), repo_root=Path(".")

@@ -7,10 +7,11 @@ import runpy
 import sys
 from typing import TYPE_CHECKING
 
-import click
 import pytest
-from click.testing import CliRunner
+from typer import _click
+from typer.core import TyperGroup
 from typer.main import get_command
+from typer.testing import CliRunner
 
 from mergecraft.cli.command_catalog import COMMANDS
 from mergecraft.cli.help_text import terminal_help
@@ -97,18 +98,19 @@ def test_module_entrypoint_keeps_real_parser_behavior(
     assert expected in captured.out + captured.err
 
 
-def test_completion_leaves_selected_command_ready_for_execution() -> None:
+def test_completion_leaves_selected_command_ready_for_execution(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     from mergecraft.cli.app import app
 
     root = get_command(app)
-    assert isinstance(root, click.Group)
-    with click.Context(root) as ctx:
+    assert isinstance(root, TyperGroup)
+    with _click.Context(root) as ctx:
         names = {item.value for item in root.shell_complete(ctx, "rev")}
     assert "review" in names
     assert "diff-review" not in names
-    result = CliRunner().invoke(root, ["review", "--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
-    assert result.exit_code == 0, result.output
-    assert "--diff" in result.output
+    root.main(args=["review", "--help"], standalone_mode=False)
+    assert "--diff" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("command_name", sorted(COMMANDS), ids=sorted(COMMANDS))
@@ -117,8 +119,8 @@ def test_catalog_summary_matches_resolved_command_help(command_name: str) -> Non
     from mergecraft.cli.app import app
 
     root = get_command(app)
-    assert isinstance(root, click.Group)
-    with click.Context(root) as ctx:
+    assert isinstance(root, TyperGroup)
+    with _click.Context(root) as ctx:
         command = root.get_command(ctx, command_name)
     assert command is not None
     assert command.help
@@ -130,10 +132,9 @@ def test_catalog_summary_matches_resolved_command_help(command_name: str) -> Non
 def test_maintainer_commands_hidden_and_removed_pipeline_unavailable() -> None:
     from mergecraft.cli.app import app
 
-    root = get_command(app)
     runner = CliRunner()
-    root_help = runner.invoke(root, ["--help"])
-    analyzers_help = runner.invoke(root, ["analyzers", "--help"])
+    root_help = runner.invoke(app, ["--help"])
+    analyzers_help = runner.invoke(app, ["analyzers", "--help"])
     assert root_help.exit_code == analyzers_help.exit_code == 0
     root_commands = {
         line.lstrip(" │").split()[0]
@@ -147,6 +148,6 @@ def test_maintainer_commands_hidden_and_removed_pipeline_unavailable() -> None:
     }
     assert {"pipeline", "eval"}.isdisjoint(root_commands)
     assert "docs" not in analyzer_commands
-    assert runner.invoke(root, ["pipeline", "--help"]).exit_code == 2
-    assert runner.invoke(root, ["eval", "--help"]).exit_code == 0
-    assert runner.invoke(root, ["analyzers", "docs", "--help"]).exit_code == 0
+    assert runner.invoke(app, ["pipeline", "--help"]).exit_code == 2
+    assert runner.invoke(app, ["eval", "--help"]).exit_code == 0
+    assert runner.invoke(app, ["analyzers", "docs", "--help"]).exit_code == 0

@@ -111,7 +111,7 @@ def test_case_repo_is_materialized_before_review(tmp_path: Path, monkeypatch: Mo
 
     async def _fake_review(**kwargs: Any) -> SimpleNamespace:
         _snapshot_cwd(Path(kwargs["cwd"]), Path(kwargs["json_path"]))
-        return SimpleNamespace(success=True, error=None)
+        return SimpleNamespace(success=True, error=None, cost_usd=0.125, total_tokens=75)
 
     monkeypatch.setattr(offline_mod, "run_offline_diff_review", _fake_review)
     monkeypatch.setattr(
@@ -128,6 +128,7 @@ def test_case_repo_is_materialized_before_review(tmp_path: Path, monkeypatch: Mo
     )
 
     assert metrics is not None
+    assert metrics.total_cost_usd == 0.125
     assert skipped_reason is None
     assert observed["repo_file_at_review_time"] is True
     assert observed["repo_content_at_review_time"] == _REPO_A_PY

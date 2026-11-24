@@ -10,15 +10,16 @@ from importlib import import_module
 from importlib.util import find_spec
 from typing import TYPE_CHECKING, Any
 
-import click
 import typer
+from typer import _click
+from typer.core import TyperCommand, TyperGroup
 from typer.main import get_command, get_group
 
 from mergecraft.cli.command_catalog import COMMANDS
 from mergecraft.cli.typer_group import MergecraftTyperGroup
 
 if TYPE_CHECKING:
-    from click.shell_completion import CompletionItem
+    from typer._click.shell_completion import CompletionItem
 
 
 class LazyRootGroup(MergecraftTyperGroup):
@@ -31,10 +32,10 @@ class LazyRootGroup(MergecraftTyperGroup):
         for name, entry in COMMANDS.items():
             if name == "eval" and find_spec("mergecraft.cli.eval_cmd") is None:
                 continue
-            command_type = click.Group if entry.group else click.Command
-            self.commands[name] = command_type(name, help=entry.help, hidden=entry.hidden)
+            command_type = TyperGroup if entry.group else TyperCommand
+            self.commands[name] = command_type(name=name, help=entry.help, hidden=entry.hidden)
 
-    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+    def get_command(self, ctx: _click.Context, cmd_name: str) -> _click.Command | None:
         if self._discovery:
             return self.commands.get(cmd_name)
         if cmd_name in self.commands and cmd_name in COMMANDS and cmd_name not in self._loaded:
@@ -49,14 +50,14 @@ class LazyRootGroup(MergecraftTyperGroup):
                 wrapper = typer.Typer()
                 wrapper.add_typer(target, name="config")
                 command = get_command(wrapper)
-                assert isinstance(command, click.Group)
+                assert isinstance(command, TyperGroup)
                 group = command.commands["config"]
-                assert isinstance(group, click.Group)
+                assert isinstance(group, TyperGroup)
                 additions = typer.Typer()
                 for verb in ("show", "explain", "set", "validate"):
                     additions.command(verb)(getattr(config_surface_cmd, f"config_{verb}"))
                 extra = get_command(additions)
-                assert isinstance(extra, click.Group)
+                assert isinstance(extra, TyperGroup)
                 group.commands.update(extra.commands)
                 command = group
             elif entry.group:
@@ -74,14 +75,14 @@ class LazyRootGroup(MergecraftTyperGroup):
             install_terminal_help(command)
         return super().get_command(ctx, cmd_name)
 
-    def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+    def format_help(self, ctx: _click.Context, formatter: _click.HelpFormatter) -> None:
         self._discovery = True
         try:
             super().format_help(ctx, formatter)
         finally:
             self._discovery = False
 
-    def shell_complete(self, ctx: click.Context, incomplete: str) -> list[CompletionItem]:
+    def shell_complete(self, ctx: _click.Context, incomplete: str) -> list[CompletionItem]:
         self._discovery = True
         try:
             return super().shell_complete(ctx, incomplete)

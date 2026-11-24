@@ -1,18 +1,15 @@
 # Human adjudication review sheet: golden-batch-001
 
-Adjudicator: `alexhawat`
+Batch 001 will not be adjudicated: the maintainer closed
+[#780](https://github.com/alexhawat/mergeCraft/issues/780) as not planned on
+2026-11-23.
 
-This sheet records no severity because `CorpusCase` has no severity field.
-Every UNANSWERED row requires an explicit `confirm`, `correct`, or `abstain` response.
+The rendered sheet that was here recorded nine abstentions. The operator stated
+on 2026-11-19 that they had not adjudicated the batch, so that attribution is
+withdrawn and no decision is recorded. The earlier sheet remains in git history.
 
-| Case ID | Claimed title | Claimed path/range | Category | Evidence | Decision |
-|---|---|---|---|---|---|
-| golden-go-chi-api-breakage-001 | Exported handler signature drop breaks downstream clients | pkg/api/handlers.go:90-110 | api_breakage | missing | abstain by alexhawat |
-| golden-java-spring-performance-001 | N+1 repository call inside a request mapping | src/main/java/com/example/OrderService.java:120-160 | performance | missing | abstain by alexhawat |
-| golden-javascript-npm-dependency-001 | Direct dependency pin removed while lockfile still resolves it | package.json:12-40 | dependency | missing | abstain by alexhawat |
-| golden-python-django-migration-001 | Destructive column drop without a expand/contract step | app/migrations/0042_drop_legacy_slug.py:1-24 | migration | missing | abstain by alexhawat |
-| golden-python-fastapi-correctness-001 | Optional nested config dereference without a null guard | app/settings.py:44-48 | correctness | missing | abstain by alexhawat |
-| golden-python-requirements-001 | Ticket requires authz check that the diff never adds | docs/tickets/AUTHZ-19.md:1-30 | correctness | missing | abstain by alexhawat |
-| golden-ruby-rails-clean-001 | Docs-only README wording with no behavioural diff | README.md:1-12 | clean | missing | abstain by alexhawat |
-| golden-rust-tokio-concurrency-001 | Shared HashMap mutated across tasks without a lock | src/cache.rs:55-80 | concurrency | missing | abstain by alexhawat |
-| golden-typescript-express-security-001 | Unparameterized SQL concatenated from a request query | src/routes/search.ts:18-26 | security | missing | abstain by alexhawat |
+Use the [batch 001 review sheet](../../../evals/adjudication/golden-batch-001-review.md)
+for the original claims. `make eval-human-batch` still renders its manifest and
+marks every row UNANSWERED; those rows no longer need a response. The
+[batch 002 review packet](../../../evals/adjudication/golden-batch-002-review.md)
+is the one awaiting human decisions.

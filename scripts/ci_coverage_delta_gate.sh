@@ -34,6 +34,9 @@ reuse_base=false
 if [[ -n "${MERGECRAFT_HEAD_COVERAGE_PATH:-}" && -f "${MERGECRAFT_HEAD_COVERAGE_PATH}" ]]; then
   cp "${MERGECRAFT_HEAD_COVERAGE_PATH}" "${GITHUB_WORKSPACE}/coverage.json"
   reuse_head=true
+elif [[ -n "${MERGECRAFT_HEAD_COVERAGE_PATH:-}" ]]; then
+  echo "The required head coverage artifact is unavailable; check the CI coverage gate." >&2
+  exit 1
 fi
 
 if [[ -n "${MERGECRAFT_BASE_COVERAGE_PATH:-}" && -f "${MERGECRAFT_BASE_COVERAGE_PATH}" ]]; then

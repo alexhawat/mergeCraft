@@ -141,7 +141,8 @@ def scenario_event_and_name(
 
 
 def import_trust_policy_symbol(name: str) -> Any:
-    module = importlib.import_module("mergecraft.config.trust_policy")
+    import mergecraft.config.trust_policy as module
+
     try:
         return getattr(module, name)
     except AttributeError as exc:
@@ -149,7 +150,8 @@ def import_trust_policy_symbol(name: str) -> Any:
 
 
 def import_agent_resolve_symbol(name: str) -> Any:
-    module = importlib.import_module("mergecraft.utils.agent_resolve")
+    import mergecraft.utils.agent_resolve as module
+
     try:
         return getattr(module, name)
     except AttributeError as exc:
@@ -157,7 +159,8 @@ def import_agent_resolve_symbol(name: str) -> Any:
 
 
 def import_action_symbol(name: str) -> Any:
-    module = importlib.import_module("mergecraft.action.inputs")
+    import mergecraft.action.inputs as module
+
     try:
         return getattr(module, name)
     except AttributeError as exc:

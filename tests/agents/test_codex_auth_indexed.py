@@ -30,9 +30,10 @@ _FLAT_AUTH = json.dumps(
 
 
 def _codex() -> Any:
-    import importlib
 
-    return importlib.import_module("mergecraft.agents.codex")
+    from mergecraft.agents import codex
+
+    return codex
 
 
 def _ctx(tmp_path: Any) -> Any:

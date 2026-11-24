@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # SPDX-License-Identifier: MIT
 # Production Action image for mergeCraft (standalone BYOK runtime).
-# Pins (W7 / D7): base + uv + node by digest; gh source + dependency patch by checksum;
+# Pins (W7 / D7): base + uv + node by digest; gh source by checksum;
 # agent CLIs via docker/agent-clis lockfile (npm ci).
 #
 # Timestamp-normalised rebuilds (not bit-for-bit reproducible: apt packages outside
@@ -10,19 +10,17 @@
 #     --output type=docker,dest=out.tar,rewrite-timestamp=true ...
 ARG SOURCE_DATE_EPOCH=1700000000
 
-# Build the upstream gh release with its remaining vulnerable Go module patched.
+# Build the upstream gh release from its locked source.
 # The archive, Go toolchain and dependency checksums are immutable inputs.
-FROM --platform=$BUILDPLATFORM golang:1.27.3-bookworm@sha256:dc0963f32053e4bc451d24d87e3892d42d01021b61f093e98eb95c0352bb84b0 AS gh-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea AS gh-builder
 ARG TARGETARCH
 ENV GOTOOLCHAIN=local CGO_ENABLED=0
-ADD --checksum=sha256:e16749bc0d99dc0633a3d5ebadf48ffff1c24beb1ce83e8f6a71bb64ce477e9a \
-    https://codeload.github.com/cli/cli/tar.gz/45437bc7eeeb3359bbfddd1742f79de7652fd3e2 /tmp/gh-source.tar.gz
+ADD --checksum=sha256:09bc3a29ab105e5cd36589550550ab6246711002b8f53a7237ce316e3482315c \
+    https://codeload.github.com/cli/cli/tar.gz/e1219499a578b69e3437adaa31cd60614e23c802 /tmp/gh-source.tar.gz
 WORKDIR /src/gh
-COPY docker/gh/dependencies.patch /tmp/dependencies.patch
 RUN tar -xzf /tmp/gh-source.tar.gz --strip-components=1 -C /src/gh \
-    && git apply --no-index /tmp/dependencies.patch \
     && GOOS=linux GOARCH=${TARGETARCH} go build -mod=readonly -trimpath -buildvcs=false \
-        -ldflags="-s -w -X github.com/cli/cli/v2/internal/build.Version=2.100.0-mergecraft.1" \
+        -ldflags="-s -w -X github.com/cli/cli/v2/internal/build.Version=2.105.0" \
         -o /out/gh ./cmd/gh
 
 FROM python:3.14-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f
@@ -142,6 +140,7 @@ WORKDIR /opt/mergecraft
 COPY pyproject.toml uv.lock README.md ./
 COPY scripts/hatch_build.py ./scripts/hatch_build.py
 COPY src/mergecraft ./src/mergecraft
+COPY evals/cases/adversarial/ ./evals/cases/adversarial/
 COPY evals/corpora/recall_pass_corpus.json ./evals/corpora/recall_pass_corpus.json
 # The wheel force-includes integrations/opencode as mergecraft/data/opencode, so
 # the build context must carry it or `uv sync` cannot resolve the Hatch path.

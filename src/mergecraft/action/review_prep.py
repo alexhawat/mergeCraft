@@ -314,6 +314,7 @@ async def _bind_action_trust(ctx: RunContext) -> RepoSettings:
 
     from mergecraft.action.inputs import (
         ForkCredentialInvariantError,
+        resolve_review_event,
         validate_fork_credential_invariant,
     )
     from mergecraft.agents.codex import CODEX_SANDBOX_UNSANDBOXED
@@ -335,6 +336,11 @@ async def _bind_action_trust(ctx: RunContext) -> RepoSettings:
     try:
         validate_fork_credential_invariant(event=gh_event, env=os.environ, settings=ctx.settings)
     except ForkCredentialInvariantError as exc:
+        raise _ConfigurationError(str(exc)) from exc
+    # Fail closed on a misspelt ``review_event`` before any review is published.
+    try:
+        resolve_review_event()
+    except ValueError as exc:
         raise _ConfigurationError(str(exc)) from exc
 
     # D7 — the same ``event_name`` read above for ``resolve_trust_policy``

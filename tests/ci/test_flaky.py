@@ -8,11 +8,12 @@ the ref and what it concluded — never the false headline "already fails".
 
 from __future__ import annotations
 
-from tests.ci.support import import_module, load_fixture
+from tests.ci.support import load_fixture
 
 
 def test_same_fingerprint_different_retry_outcomes_is_flaky() -> None:
-    flaky_mod = import_module("mergecraft.ci.flaky")
+    import mergecraft.ci.flaky as flaky_mod
+
     fixture = load_fixture("flaky_retry_pass.json")
     verdict = flaky_mod.classify_failure(
         fingerprint=fixture["fingerprint"],
@@ -25,7 +26,8 @@ def test_same_fingerprint_different_retry_outcomes_is_flaky() -> None:
 
 
 def test_base_branch_same_fingerprint_is_pre_existing() -> None:
-    flaky_mod = import_module("mergecraft.ci.flaky")
+    import mergecraft.ci.flaky as flaky_mod
+
     pre_existing = load_fixture("pre_existing_unrelated_failure.json")
     job = pre_existing["jobs"][0]
     verdict = flaky_mod.classify_failure(
@@ -47,7 +49,8 @@ def test_base_branch_same_fingerprint_is_pre_existing() -> None:
 
 
 def test_flaky_verdict_names_base_branch_not_author() -> None:
-    flaky_mod = import_module("mergecraft.ci.flaky")
+    import mergecraft.ci.flaky as flaky_mod
+
     fixture = load_fixture("flaky_retry_pass.json")
     verdict = flaky_mod.classify_failure(
         fingerprint=fixture["fingerprint"],
@@ -65,7 +68,8 @@ def test_flaky_verdict_names_base_branch_not_author() -> None:
 
 
 def test_base_success_with_failing_attempts_is_stable_and_blames_the_author() -> None:
-    flaky_mod = import_module("mergecraft.ci.flaky")
+    import mergecraft.ci.flaky as flaky_mod
+
     fingerprint = "1b24d1aea23d6a54"
     verdict = flaky_mod.classify_failure(
         fingerprint=fingerprint,
@@ -80,7 +84,8 @@ def test_base_success_with_failing_attempts_is_stable_and_blames_the_author() ->
 
 
 def test_matching_base_failure_conclusion_casing_is_honoured() -> None:
-    flaky_mod = import_module("mergecraft.ci.flaky")
+    import mergecraft.ci.flaky as flaky_mod
+
     fingerprint = "1b24d1aea23d6a54"
     verdict = flaky_mod.classify_failure(
         fingerprint=fingerprint,
@@ -95,7 +100,8 @@ def test_matching_base_failure_conclusion_casing_is_honoured() -> None:
 
 
 def test_mixed_base_outcomes_exonerate_only_on_the_failing_ref() -> None:
-    flaky_mod = import_module("mergecraft.ci.flaky")
+    import mergecraft.ci.flaky as flaky_mod
+
     fingerprint = "1b24d1aea23d6a54"
     verdict = flaky_mod.classify_failure(
         fingerprint=fingerprint,
