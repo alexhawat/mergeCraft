@@ -20,7 +20,6 @@ import pytest
 
 from tests.analyzers.support import (
     finding_path_matches,
-    import_module,
     skip_if_github_release_outage,
 )
 
@@ -59,7 +58,8 @@ def _fail_if_skipped(result: AdapterRunResult, tool_id: str) -> None:
 @pytest.mark.network
 @pytest.mark.parametrize("tool_id", list(PLANTED))
 def test_adapter_catches_planted_finding(tool_id: str, adapter_fixture_repo: Path) -> None:
-    adapters = import_module("mergecraft.analyzers.adapters")
+    import mergecraft.analyzers.adapters as adapters
+
     path, line = PLANTED[tool_id]
     result = adapters.run_adapter(
         tool_id=tool_id,
@@ -80,7 +80,8 @@ def test_adapter_catches_planted_finding(tool_id: str, adapter_fixture_repo: Pat
 def test_adapter_invents_no_unplanted_findings_on_untouched_files(
     tool_id: str, adapter_fixture_repo: Path
 ) -> None:
-    adapters = import_module("mergecraft.analyzers.adapters")
+    import mergecraft.analyzers.adapters as adapters
+
     result = adapters.run_adapter(
         tool_id=tool_id,
         repo_root=adapter_fixture_repo,
@@ -107,7 +108,8 @@ def test_actionlint_ignores_composite_action_but_catches_invalid_workflow(
     workflow. The workflow defect must still be caught; the composite must not
     be linted against the workflow schema at all.
     """
-    adapters = import_module("mergecraft.analyzers.adapters")
+    import mergecraft.analyzers.adapters as adapters
+
     composite = ".github/actions/bootstrap/action.yml"
     workflow, line = PLANTED["actionlint"]
     result = adapters.run_adapter(

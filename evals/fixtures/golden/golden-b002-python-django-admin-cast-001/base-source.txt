@@ -1,0 +1,27 @@
+1200:                     prev_field = field
+1201:                     if hasattr(field, "path_infos"):
+1202:                         # Update opts to follow the relation.
+1203:                         opts = field.path_infos[-1].to_opts
+1204:             # Otherwise, use the field with icontains.
+1205:             return "%s__icontains" % field_name
+1206: 
+1207:         may_have_duplicates = False
+1208:         search_fields = self.get_search_fields(request)
+1209:         if search_fields and search_term:
+1210:             orm_lookups = [
+1211:                 construct_search(str(search_field)) for search_field in search_fields
+1212:             ]
+1213:             term_queries = []
+1214:             for bit in smart_split(search_term):
+1215:                 if bit.startswith(('"', "'")) and bit[0] == bit[-1]:
+1216:                     bit = unescape_string_literal(bit)
+1217:                 or_queries = models.Q.create(
+1218:                     [(orm_lookup, bit) for orm_lookup in orm_lookups],
+1219:                     connector=models.Q.OR,
+1220:                 )
+1221:                 term_queries.append(or_queries)
+1222:             queryset = queryset.filter(models.Q.create(term_queries))
+1223:             may_have_duplicates |= any(
+1224:                 lookup_spawns_duplicates(self.opts, search_spec)
+1225:                 for search_spec in orm_lookups
+1226:             )

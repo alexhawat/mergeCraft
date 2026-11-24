@@ -154,6 +154,8 @@ jobs:
   # (mergecraft.evals.gate.DEFAULT_GATE_TOLERANCE). Blocking: a metric that
   # regresses beyond the band fails the release before publish.
   eval-gate:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.sha != '' }}
     name: Eval regression gate
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -162,6 +164,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
       - uses: ./.github/actions/bootstrap
       - name: Replay eval bank (candidate)
@@ -200,6 +203,7 @@ jobs:
     timeout-minutes: 60
     environment: pypi
     permissions:
+      attestations: read
       contents: read
       packages: write
       id-token: write
@@ -225,7 +229,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          ref: ${{ needs.prepare.outputs.branch }}
+          ref: ${{ needs.prepare.outputs.sha }}
           token: ${{ steps.app-token.outputs.token }}
           # The post-release bump is committed and pushed on the merge-back branch.
           persist-credentials: true
@@ -273,14 +277,53 @@ jobs:
           find dist -mindepth 1 -maxdepth 1 ! -name '*.whl' ! -name '*.tar.gz' -exec rm -rf {} +
           uv run python scripts/release_publish.py verify-dist --dist dist --version "$RELEASE_VERSION"
 
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
-        with:
-          packages-dir: dist/
-          # A later step can fail after PyPI accepted the files (for example a
-          # transient registry issue). The re-run must finish the release, not
-          # die on an existing version.
-          skip-existing: true
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - name: Prepare the release Action tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          digest=$(docker buildx imagetools inspect "$repo:$RELEASE_SHA" --format '{{.Manifest.Digest}}')
+          uv run python scripts/bump_action_pin.py manifest --source "$RELEASE_SHA" --digest "$digest"
+          git add action.yml
+          if ! git diff --cached --quiet; then
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "chore(action): pin release $RELEASE_VERSION to its signed image"
+          fi
+          tag="v$RELEASE_VERSION"
+          if git rev-parse --verify --quiet "refs/tags/$tag"; then
+            git diff --exit-code HEAD "$tag" --
+            git merge-base --is-ancestor "$RELEASE_SHA" "$tag"
+            git checkout --detach "$tag"
+          else
+            git push origin "HEAD:refs/tags/$tag"
+            git fetch origin "refs/tags/$tag:refs/tags/$tag"
+          fi
+
+      - name: Retag the signed images
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker buildx imagetools create --prefer-index=false -t "$repo:$RELEASE_VERSION" "$repo:$RELEASE_SHA"
+          docker buildx imagetools create --prefer-index=false -t "$repo:analyzers-$RELEASE_VERSION" "$repo:analyzers-$RELEASE_SHA"
+          for pair in "$RELEASE_VERSION:$RELEASE_SHA" "analyzers-$RELEASE_VERSION:analyzers-$RELEASE_SHA"; do
+            target="${pair%%:*}"
+            source="${pair##*:}"
+            src_digest="$(docker buildx imagetools inspect "$repo:$source" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+            dst_digest="$(docker buildx imagetools inspect "$repo:$target" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+            if [ "$src_digest" != "$dst_digest" ]; then
+              echo "::error::retagging $source changed the digest ($src_digest -> $dst_digest)"
+              exit 1
+            fi
+          done
+
+          uv run python scripts/bump_action_pin.py verify-release-tag --version "$RELEASE_VERSION"
 
       - name: Create the GitHub release
         env:
@@ -297,29 +340,17 @@ jobs:
           if gh release view "v$RELEASE_VERSION" >/dev/null 2>&1; then
             echo "release v$RELEASE_VERSION already exists; leaving it in place"
           else
-            gh release create "v$RELEASE_VERSION" --target "$RELEASE_SHA" "${args[@]}"
+            gh release create "v$RELEASE_VERSION" --verify-tag "${args[@]}"
           fi
 
-      - name: Retag the signed images
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ACTOR: ${{ github.actor }}
-        run: |
-          set -euo pipefail
-          echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
-          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
-          docker buildx imagetools create -t "$repo:$RELEASE_VERSION" "$repo:$RELEASE_SHA"
-          docker buildx imagetools create -t "$repo:analyzers-$RELEASE_VERSION" "$repo:analyzers-$RELEASE_SHA"
-          for pair in "$RELEASE_VERSION:$RELEASE_SHA" "analyzers-$RELEASE_VERSION:analyzers-$RELEASE_SHA"; do
-            target="${pair%%:*}"
-            source="${pair##*:}"
-            src_digest="$(docker buildx imagetools inspect "$repo:$source" --format '{{json .Manifest.Digest}}' | tr -d '"')"
-            dst_digest="$(docker buildx imagetools inspect "$repo:$target" --format '{{json .Manifest.Digest}}' | tr -d '"')"
-            if [ "$src_digest" != "$dst_digest" ]; then
-              echo "::error::retagging $source changed the digest ($src_digest -> $dst_digest)"
-              exit 1
-            fi
-          done
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist/
+          # A later step can fail after PyPI accepted the files (for example a
+          # transient registry issue). The re-run must finish the release, not
+          # die on an existing version.
+          skip-existing: true
 
       - name: Bump to the next development version
         id: post
@@ -332,7 +363,9 @@ jobs:
           bash scripts/post-release.sh "" "$RELEASE_VERSION"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml server.json uv.lock
+          uv run python scripts/check_example_defaults_sync.py --refresh-release
+          make examples docs pins-check
+          git add pyproject.toml server.json uv.lock README.md docs/ llms-full.txt scripts/example_workflows/defaults.yaml src/mergecraft/data/example_workflows/defaults.yaml examples/workflows/mergecraft.yml tests/pins/fixtures/git_ls_remote_tags.txt
           if git diff --cached --quiet; then
             echo "branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
             exit 0

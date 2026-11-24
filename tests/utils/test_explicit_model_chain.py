@@ -34,7 +34,6 @@ These tests pin that contract from three angles:
 
 from __future__ import annotations
 
-import importlib
 from typing import cast
 
 import pytest
@@ -62,7 +61,8 @@ def _clear_provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _import_chain_symbol(name: str) -> object:
     """Pull a symbol off the agent_resolve module, xfailing clearly if absent."""
-    module = importlib.import_module("mergecraft.utils.agent_resolve")
+    import mergecraft.utils.agent_resolve as module
+
     try:
         return getattr(module, name)
     except AttributeError as exc:

@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tests.analyzers.support import import_module
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -31,7 +30,9 @@ def _plain(text: str) -> str:
 
 
 def _resolver_mod() -> Any:
-    return import_module("mergecraft.utils.source_resolve")
+    from mergecraft.utils import source_resolve
+
+    return source_resolve
 
 
 def _spec_cls() -> Any:
@@ -567,7 +568,8 @@ def test_cloned_source_reviews_at_untrusted_tier(
     spec = spec_cls(repo=file_url, invocation_root=tmp_path)
 
     tier_holder: dict[str, str] = {}
-    offline_mod = import_module("mergecraft.offline_review")
+    import mergecraft.offline_review as offline_mod
+
     original_apply = offline_mod.apply_cli_trust_tier_env
 
     def _capture_tier(tier: str) -> dict[str, str | None]:

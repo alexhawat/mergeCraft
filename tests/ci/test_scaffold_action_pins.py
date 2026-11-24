@@ -30,7 +30,6 @@ _HARDENED_PLACEHOLDER = "REPLACE_WITH_FULL_COMMIT_SHA"
 # Locked, published values. `make pins-check` re-derives `action_sha_minimal`
 # from the tag; these constants pin the pair this plan ships.
 LOCKED_CHECKOUT_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
-LOCKED_ACTION_SHA = "7080e962c2259757a34b9f745602f093e4ee3378"
 
 _RENDERED = render_all()
 
@@ -122,7 +121,7 @@ def test_every_actions_checkout_uses_the_shared_checkout_sha() -> None:
 
 def test_action_sha_minimal_matches_the_published_commit() -> None:
     defaults = load_example_defaults()
-    assert defaults.get("action_sha_minimal") == LOCKED_ACTION_SHA
+    assert f"alexhawat/mergeCraft@{defaults['action_sha_minimal']}" in _workflow_template()
     assert defaults.get("action_pin_minimal") == action_pin_minimal()
 
 

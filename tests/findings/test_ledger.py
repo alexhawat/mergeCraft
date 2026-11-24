@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 import re
 from pathlib import Path
@@ -34,11 +33,15 @@ _LEDGER_MARKER_RE = re.compile(
 
 
 def _ledger_mod() -> Any:
-    return importlib.import_module("mergecraft.findings.ledger")
+    from mergecraft.findings import ledger
+
+    return ledger
 
 
 def _lifecycle_mod() -> Any:
-    return importlib.import_module("mergecraft.findings.lifecycle")
+    from mergecraft.findings import lifecycle
+
+    return lifecycle
 
 
 def _progress_comment_with_ledger(*, ledger_block: str) -> str:
@@ -153,9 +156,9 @@ def test_ledger_survives_a_second_action_run_with_no_local_state() -> None:
 
 
 def test_ledger_records_over_budget_verifications_from_w2(tmp_path: Path) -> None:
+    import mergecraft.agents.verifier as verifier
     from mergecraft.config.settings import load_repo_settings
 
-    verifier = importlib.import_module("mergecraft.agents.verifier")
     ledger = _ledger_mod()
 
     settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
@@ -868,8 +871,9 @@ def test_out_of_root_sarif_row_keys_the_ledger_stably(
     the ledger key — is deterministic. A basename-collapse would instead key
     the real, unrelated ``README`` at the repo root.
     """
-    sarif = importlib.import_module("mergecraft.analyzers.parsers.sarif")
-    manifest = importlib.import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+    import mergecraft.analyzers.parsers.sarif as sarif
+
     m = manifest.load_manifest_file(_ACTIONLINT_MANIFEST)
 
     repo_root = tmp_path / "repo"

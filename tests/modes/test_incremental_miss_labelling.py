@@ -6,7 +6,6 @@ Pins ``mergecraft.modes._incremental_miss`` helpers and the exact D10 label stri
 
 from __future__ import annotations
 
-import importlib
 from typing import Any
 
 import pytest
@@ -39,7 +38,9 @@ index 1111111..2222222 100644
 
 def _miss_mod() -> Any:
     try:
-        return importlib.import_module("mergecraft.modes._incremental_miss")
+        from mergecraft.modes import _incremental_miss
+
+        return _incremental_miss
     except ImportError as err:
         pytest.fail(f"W6.2 module missing: {err}")
 

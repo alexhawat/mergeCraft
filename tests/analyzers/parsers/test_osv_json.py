@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tests.analyzers.support import import_module
 
 # Real ``N.N.N`` versions — accepted today and after W11.
 VALID_FIXED_VERSIONS: tuple[str, ...] = ("1.2.3", "0.0.1", "10.20.30", "2024.1.0")
@@ -62,7 +61,8 @@ ALREADY_REJECTED: tuple[str, ...] = (
 
 
 def _osv_manifest() -> Any:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     return registry.get_manifest("osv-scanner")
 
 
@@ -103,13 +103,15 @@ def _osv_payload(fixed: str) -> str:
 
 
 def _fixed_version(fixed: str) -> str | None:
-    osv_json = import_module("mergecraft.analyzers.parsers.osv_json")
+    import mergecraft.analyzers.parsers.osv_json as osv_json
+
     result: str | None = osv_json._fixed_version(_vulnerability(fixed))
     return result
 
 
 def _remediation(fixed: str) -> str | None:
-    osv_json = import_module("mergecraft.analyzers.parsers.osv_json")
+    import mergecraft.analyzers.parsers.osv_json as osv_json
+
     findings = osv_json.parse_osv_json(
         _osv_payload(fixed),
         manifest=_osv_manifest(),
@@ -144,7 +146,8 @@ def test_malformed_version_stays_rejected(fixed: str) -> None:
 
 
 def test_missing_fixed_event_yields_no_version() -> None:
-    osv_json = import_module("mergecraft.analyzers.parsers.osv_json")
+    import mergecraft.analyzers.parsers.osv_json as osv_json
+
     vulnerability = {
         "affected": [{"ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"}]}]}]
     }
@@ -152,7 +155,8 @@ def test_missing_fixed_event_yields_no_version() -> None:
 
 
 def test_non_ecosystem_range_is_ignored() -> None:
-    osv_json = import_module("mergecraft.analyzers.parsers.osv_json")
+    import mergecraft.analyzers.parsers.osv_json as osv_json
+
     vulnerability = {
         "affected": [
             {"ranges": [{"type": "SEMVER", "events": [{"introduced": "0", "fixed": "1.2.3"}]}]}

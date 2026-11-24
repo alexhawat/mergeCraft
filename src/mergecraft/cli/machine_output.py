@@ -31,7 +31,8 @@ from __future__ import annotations
 import weakref
 from typing import TYPE_CHECKING, Literal
 
-import click
+from typer import Exit, _click
+from typer.core import TyperGroup, TyperOption
 
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.global_surface import CliGlobals
@@ -69,33 +70,33 @@ ROOT_FORMAT_COMMANDS: frozenset[tuple[str, ...]] = frozenset(
 
 Capability = Literal["root", "json-flag", "format-choice", "none"]
 
-_INSTALLED: weakref.WeakSet[click.Command] = weakref.WeakSet()
+_INSTALLED: weakref.WeakSet[_click.Command] = weakref.WeakSet()
 
 
-def _json_flag(command: click.Command) -> click.Option | None:
+def _json_flag(command: _click.Command) -> TyperOption | None:
     for param in command.params:
-        if isinstance(param, click.Option) and param.is_flag and "--json" in param.opts:
+        if isinstance(param, TyperOption) and param.is_flag and "--json" in param.opts:
             return param
     return None
 
 
-def _format_choice(command: click.Command) -> click.Option | None:
+def _format_choice(command: _click.Command) -> TyperOption | None:
     for param in command.params:
-        if not isinstance(param, click.Option):
+        if not isinstance(param, TyperOption):
             continue
         if not {"--format", "--output-format"} & set(param.opts):
             continue
-        choices = getattr(param.type, "choices", None)
+        choices = param.type_descriptor.choices
         if (choices is not None and "json" in choices) or param.default == "json":
             return param
     return None
 
 
-def json_capability(command: click.Command, path: tuple[str, ...]) -> Capability:
+def json_capability(command: _click.Command, path: tuple[str, ...]) -> Capability:
     """Return how *command* satisfies the root ``--format json``.
 
     Args:
-        command (click.Command): A leaf command.
+        command (_click.Command): A leaf command.
         path (tuple[str, ...]): Its subcommand path below ``mergecraft``.
 
     Returns:
@@ -110,9 +111,9 @@ def json_capability(command: click.Command, path: tuple[str, ...]) -> Capability
     return "none"
 
 
-def _command_path(ctx: click.Context) -> tuple[str, ...]:
+def _command_path(ctx: _click.Context) -> tuple[str, ...]:
     names: list[str] = []
-    node: click.Context | None = ctx
+    node: _click.Context | None = ctx
     while node is not None and node.parent is not None:
         names.append(node.info_name or "")
         node = node.parent
@@ -123,19 +124,19 @@ def _mentions(args: list[str], opts: list[str]) -> bool:
     return any(arg in opts or any(arg.startswith(f"{opt}=") for opt in opts) for arg in args)
 
 
-def _root_wants_json(ctx: click.Context) -> bool:
+def _root_wants_json(ctx: _click.Context) -> bool:
     globals_ = ctx.find_root().obj
     return isinstance(globals_, CliGlobals) and globals_.format == "json"
 
 
-def _wants_help(ctx: click.Context, args: list[str]) -> bool:
+def _wants_help(ctx: _click.Context, args: list[str]) -> bool:
     return any(arg in ctx.help_option_names for arg in args)
 
 
 def _guarded_parse_args(
-    command: click.Command, original: Callable[[click.Context, list[str]], list[str]]
-) -> Callable[[click.Context, list[str]], list[str]]:
-    def parse_args(ctx: click.Context, args: list[str]) -> list[str]:
+    command: _click.Command, original: Callable[[_click.Context, list[str]], list[str]]
+) -> Callable[[_click.Context, list[str]], list[str]]:
+    def parse_args(ctx: _click.Context, args: list[str]) -> list[str]:
         if ctx.resilient_parsing or _wants_help(ctx, args) or not _root_wants_json(ctx):
             return original(ctx, args)
         path = _command_path(ctx)
@@ -150,7 +151,7 @@ def _guarded_parse_args(
                 args = [option.opts[0], "json", *args]
         elif capability == "none":
             name = " ".join(("mergecraft", *path))
-            raise click.exceptions.Exit(_reject(name))
+            raise Exit(_reject(name))
         return original(ctx, args)
 
     return parse_args
@@ -169,18 +170,18 @@ def _reject(name: str) -> int:
     return CLI_USAGE_EXIT_CODE
 
 
-def install_root_format_guard(command: click.Command) -> None:
+def install_root_format_guard(command: _click.Command) -> None:
     """Apply the root ``--format json`` rule to *command* and its subcommands.
 
     Installed once per command by the CLI group, like the repo-root resolver.
 
     Args:
-        command (click.Command): A command or group about to be invoked.
+        command (_click.Command): A command or group about to be invoked.
     """
     if command in _INSTALLED:
         return
     _INSTALLED.add(command)
-    if isinstance(command, click.Group):
+    if isinstance(command, TyperGroup):
         for sub in command.commands.values():
             install_root_format_guard(sub)
         return

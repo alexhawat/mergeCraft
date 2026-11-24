@@ -1,0 +1,38 @@
+251:     def message(self):
+252:         encoding = self.encoding or settings.DEFAULT_CHARSET
+253:         msg = SafeMIMEText(self.body, self.content_subtype, encoding)
+254:         msg = self._create_message(msg)
+255:         msg['Subject'] = self.subject
+256:         msg['From'] = self.extra_headers.get('From', self.from_email)
+257:         self._set_list_header_if_not_empty(msg, 'To', self.to)
+258:         self._set_list_header_if_not_empty(msg, 'Cc', self.cc)
+259:         self._set_list_header_if_not_empty(msg, 'Reply-To', self.reply_to)
+260: 
+261:         # Email header names are case-insensitive (RFC 2045), so we have to
+262:         # accommodate that when doing comparisons.
+263:         header_names = [key.lower() for key in self.extra_headers]
+264:         if 'date' not in header_names:
+265:             # formatdate() uses stdlib methods to format the date, which use
+266:             # the stdlib/OS concept of a timezone, however, Django sets the
+267:             # TZ environment variable based on the TIME_ZONE setting which
+268:             # will get picked up by formatdate().
+269:             msg['Date'] = formatdate(localtime=settings.EMAIL_USE_LOCALTIME)
+270:         if 'message-id' not in header_names:
+271:             # Use cached DNS_NAME for performance
+272:             msg['Message-ID'] = make_msgid(domain=DNS_NAME)
+273:         for name, value in self.extra_headers.items():
+274:             if name.lower() == 'from':  # From is already handled
+275:                 continue
+276:             msg[name] = value
+277:         return msg
+409:     def _set_list_header_if_not_empty(self, msg, header, values):
+410:         """
+411:         Set msg's header, either from self.extra_headers, if present, or from
+412:         the values argument.
+413:         """
+414:         if values:
+415:             try:
+416:                 value = self.extra_headers[header]
+417:             except KeyError:
+418:                 value = ', '.join(str(v) for v in values)
+419:             msg[header] = value

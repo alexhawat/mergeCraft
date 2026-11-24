@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tempfile
-from dataclasses import dataclass, field
+from contextlib import suppress
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -258,12 +260,48 @@ def _structured_output_failure(result: OfflineReviewResult, reason: str) -> Offl
     outcome, resolved_reason = resolve_run_outcome(
         OutcomeInputs(result=AgentResult(success=True), structured_output_error=reason)
     )
-    return _offline_failure(
+    return replace(
+        result,
+        success=False,
         error=resolved_reason or reason,
         outcome=outcome,
-        diff_path=result.diff_path,
-        evidence_packet_path=result.evidence_packet_path,
+        structured_output=None,
+        output=None,
     )
+
+
+def _write_incomplete_report(result: OfflineReviewResult, json_path: Path) -> OfflineReviewResult:
+    from mergecraft.analyzers.redact import redact_secrets
+    from mergecraft.evidence.packet import MergeEvidencePacket
+    from mergecraft.utils.atomic_write import write_text_atomically
+
+    findings = []
+    if result.evidence_packet_path:
+        try:
+            packet = MergeEvidencePacket.model_validate_json(
+                Path(result.evidence_packet_path).read_bytes()
+            )
+            findings = [item.model_dump(mode="json") for item in packet.findings]
+        except (ValueError, OSError) as exc:
+            logger.warning(
+                "Incomplete report could not load the evidence packet: {}", type(exc).__name__
+            )
+    if not findings and result.structured_output:
+        with suppress(ValueError):
+            findings = parse_findings_payload(result.structured_output)
+    report = {
+        "completion_status": "incomplete",
+        "outcome": result.outcome or RunOutcome.inconclusive,
+        "error": redact_secrets(result.error or "review did not complete"),
+        "evidence_packet_path": result.evidence_packet_path,
+        "findings": findings,
+    }
+    try:
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        write_text_atomically(json_path, json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        logger.warning("Could not write the incomplete review report: {}", exc)
+    return result
 
 
 def _finalize_structured_findings(
@@ -272,14 +310,17 @@ def _finalize_structured_findings(
 ) -> OfflineReviewResult:
     """Validate agent structured output and write findings JSON."""
     if not result.success:
-        return result
+        return _write_incomplete_report(result, json_path)
 
     from mergecraft.review.outcome_resolution import structured_output_error
 
     structured_raw = result.structured_output
     unusable = structured_output_error(structured_raw, findings=True)
     if unusable is not None or not structured_raw:
-        return _structured_output_failure(result, unusable or STRUCTURED_OUTPUT_REQUIRED_MSG)
+        return _write_incomplete_report(
+            _structured_output_failure(result, unusable or STRUCTURED_OUTPUT_REQUIRED_MSG),
+            json_path,
+        )
     findings = parse_findings_payload(structured_raw)
 
     try:

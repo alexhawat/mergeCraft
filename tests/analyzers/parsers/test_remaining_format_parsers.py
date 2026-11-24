@@ -58,7 +58,8 @@ def _manifest(tool_id: str):
 
 
 def _parse(parser_id: str, raw: str, *, tool_id: str):
-    parsers = import_module("mergecraft.analyzers.parsers")
+    import mergecraft.analyzers.parsers as parsers
+
     return parsers.get_parser(parser_id)(raw, manifest=_manifest(tool_id), repo_root=Path("."))
 
 
@@ -185,7 +186,8 @@ def test_ember_template_lint_uses_json_formatter() -> None:
 
 
 def test_sarif_parser_extracts_json_from_console_prefix() -> None:
-    sarif = import_module("mergecraft.analyzers.parsers.sarif")
+    import mergecraft.analyzers.parsers.sarif as sarif
+
     manifest = _manifest("detekt")
     body = (FIXTURES_DIR / "sarif/detekt-minimal.sarif.json").read_text(encoding="utf-8")
     raw = "detekt 1.23.7\n" + body

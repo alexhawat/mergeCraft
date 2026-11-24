@@ -82,3 +82,29 @@ def test_review_record_renders_split_token_line() -> None:
     block = render_deterministic_review_block(packet=packet, token_summary=summary)
     assert "- **Tokens:** 12,345 input / 2,100 output used" in block
     assert "14,445 used (" not in block
+
+
+def test_cache_counts_agree_in_budget_and_fallback_summaries() -> None:
+    usage = [
+        AgentUsage(
+            agent="claude",
+            input_tokens=90,
+            output_tokens=4,
+            cache_read_tokens=45,
+            cache_write_tokens=10,
+        ),
+        AgentUsage(agent="codex", input_tokens=60, output_tokens=2, cache_read_tokens=40),
+        AgentUsage(agent="other", input_tokens=10, output_tokens=1),
+    ]
+    expected = "160 input (65 fresh + 85 cached + 10 cache write) / 7 output"
+    assert token_summary_from_usage(usage) == expected
+    tracker = BudgetTracker(_bounds())
+    for row in usage:
+        record_agent_usage(tracker, row, phase="reviewer_dispatch")
+    assert tracker.tokens_used == 167
+    assert format_token_budget_summary(tracker, usage_entries=usage).startswith(expected)
+
+
+def test_inconsistent_cache_counters_keep_combined_input() -> None:
+    usage = AgentUsage(agent="other", input_tokens=10, output_tokens=3, cache_read_tokens=11)
+    assert token_summary_from_usage([usage]) == "10 input / 3 output"

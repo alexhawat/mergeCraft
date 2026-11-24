@@ -73,7 +73,7 @@ def test_audit_cmd_export_empty_json_array(tmp_path: Path, monkeypatch: pytest.M
     result = runner.invoke(module.app, ["export"], env=_DUMB_ENV)
     assert result.exit_code == 0, result.stdout + result.stderr
     payload = json.loads(result.stdout)
-    assert payload == []
+    assert payload == {"schema_version": "1.0.0", "events": []}
 
 
 def test_support_bundle_cmd_writes_archive(tmp_path: Path) -> None:

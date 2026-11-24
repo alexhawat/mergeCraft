@@ -1,0 +1,197 @@
+diff --git a/tokio/src/runtime/time_alt/timer.rs b/tokio/src/runtime/time_alt/timer.rs
+index bd87d05b62b..1798deeb73a 100644
+--- a/tokio/src/runtime/time_alt/timer.rs
++++ b/tokio/src/runtime/time_alt/timer.rs
+@@ -29,7 +29,7 @@ impl Timer {
+     #[track_caller]
+     pub(crate) fn new(handle: scheduler::Handle, deadline: Instant) -> Self {
+         let tick = deadline_to_tick(&handle, deadline);
+-        let entry = with_current_temp_local_context(|ctx| match ctx {
++        let entry = with_current_temp_local_context(&handle, |ctx| match ctx {
+             Some(TempLocalContext::Running { registration_queue }) => {
+                 let entry = EntryHandle::new(tick);
+                 unsafe { registration_queue.push_front(entry.clone()) }
+@@ -57,7 +57,7 @@ impl Timer {
+     }
+ }
+ 
+-fn with_current_temp_local_context<F, R>(f: F) -> R
++fn with_current_temp_local_context<F, R>(sched_hdl: &scheduler::Handle, f: F) -> R
+ where
+     F: FnOnce(Option<TempLocalContext<'_>>) -> R,
+ {
+@@ -69,8 +69,39 @@ where
+ 
+     #[cfg(feature = "rt")]
+     {
++        use crate::loom::sync::Arc;
+         use crate::runtime::context;
+ 
++        // There is no compile-time guarantee that the timer is
++        // always registered in the same runtime as it was created in,
++        // so we need to check it at runtime.
++        let is_same_rt = context::with_current(|cur_sched_hdl| {
++            use crate::runtime::scheduler::Handle;
++
++            match (sched_hdl, cur_sched_hdl) {
++                (Handle::CurrentThread(_), _) => {
++                    // this case is impossible as `tokio::runtime::Builder::enable_alt_timer`
++                    // is not supported in the current-thread runtime, but we'd better handle it
++                    // in case the API is misused in the future.
++                    unreachable!("alternative timer is not supported in the current-thread runtime")
++                }
++                (_, Handle::CurrentThread(_)) => false,
++                (Handle::MultiThread(sched_hdl), Handle::MultiThread(cur_sched_hdl)) => {
++                    Arc::as_ptr(sched_hdl) == Arc::as_ptr(cur_sched_hdl)
++                }
++            }
++        })
++        .unwrap_or_default();
++
++        if !is_same_rt {
++            // The timer is being registered from a runtime
++            // that is different from the runtime that the timer is created in,
++            // so we cannot access `TempLocalContext` of the original runtime.
++            return f(None);
++        }
++
++        // The timer is being registered from the same runtime that the timer is created in,
++        // so we can access `TempLocalContext`.
+         context::with_scheduler(|maybe_cx| match maybe_cx {
+             Some(cx) => cx.expect_multi_thread().with_time_temp_local_context(f),
+             None => f(None),
+diff --git a/tokio/tests/time_alt.rs b/tokio/tests/time_alt.rs
+index 360aac3c802..fd8d1dd688d 100644
+--- a/tokio/tests/time_alt.rs
++++ b/tokio/tests/time_alt.rs
+@@ -4,6 +4,12 @@
+ use tokio::runtime::Runtime;
+ use tokio::time::*;
+ 
++use std::future::Future;
++
++use futures::FutureExt;
++use futures_test::task::noop_context;
++use tokio_test::assert_pending;
++
+ fn rt_combinations() -> Vec<Runtime> {
+     let mut rts = vec![];
+ 
+@@ -106,3 +112,117 @@ fn timeout() {
+         });
+     }
+ }
++
++#[test]
++/// It is possible that a timer is created in one runtime,
++/// but `.reset()` is called in a different runtime.
++/// In this case, the timer should be registered in the original runtime.
++fn reset_should_stay_on_same_runtime() {
++    let rt1 = tokio::runtime::Builder::new_multi_thread()
++        .worker_threads(1)
++        .enable_alt_timer()
++        .build()
++        .unwrap();
++
++    let rt2 = tokio::runtime::Builder::new_multi_thread()
++        .worker_threads(1)
++        .enable_alt_timer()
++        .build()
++        .unwrap();
++
++    // Register the timer into the local timer wheel of `rt1`.
++    //
++    // We cannot use bare `rt1.block_on` as the local timer wheel of `rt1`
++    // is only accessible from the worker threads of `rt1`,
++    // but `rt1.block_on` runs the future on the current thread.
++    // So we need to use `rt1.spawn` to run the future on the worker thread.
++    let sleep = rt1
++        .block_on(
++            #[allow(clippy::async_yields_async)]
++            rt1.spawn(async {
++                // 1 hour is long enough to make sure the timer is not fired before we call `reset()`.
++                tokio::time::sleep(Duration::from_secs(3600))
++            }),
++        )
++        .unwrap();
++    let mut sleep = Box::pin(sleep);
++    assert_pending!(sleep.as_mut().poll(&mut noop_context()));
++
++    // reset the timer created from `rt1` in `rt2`,
++    // which should register the timer into the local timer wheel of `rt1`.
++    let sleep = rt2
++        .block_on({
++            #[allow(clippy::async_yields_async)]
++            rt2.spawn(async move {
++                sleep
++                    .as_mut()
++                    .reset(Instant::now() + Duration::from_secs(3600));
++                sleep
++            })
++        })
++        .unwrap();
++
++    // drop `rt1` to fire all timers registered in `rt1`,
++    // including the timer we just reset.
++    drop(rt1);
++
++    // If this assertion fails, it means the timer is not registered in `rt1`.
++    // This can happen if the timer is registered in `rt2` instead of `rt1`,
++    assert!(sleep.now_or_never().is_some());
++}
++
++#[test]
++/// It is possible that a timer is created in one runtime,
++/// but `.reset()` is called in a different runtime.
++/// In this case, the timer should be registered in the original runtime.
++fn reset_should_stay_on_same_runtime2() {
++    let rt1 = tokio::runtime::Builder::new_multi_thread()
++        .worker_threads(1)
++        .enable_alt_timer()
++        .build()
++        .unwrap();
++
++    let rt2 = tokio::runtime::Builder::new_current_thread()
++        .build()
++        .unwrap();
++
++    // Register the timer into the local timer wheel of `rt1`.
++    //
++    // We cannot use bare `rt1.block_on` as the local timer wheel of `rt1`
++    // is only accessible from the worker threads of `rt1`,
++    // but `rt1.block_on` runs the future on the current thread.
++    // So we need to use `rt1.spawn` to run the future on the worker thread.
++    let sleep = rt1
++        .block_on(
++            #[allow(clippy::async_yields_async)]
++            rt1.spawn(async {
++                // 1 hour is long enough to make sure the timer is not fired before we call `reset()`.
++                tokio::time::sleep(Duration::from_secs(3600))
++            }),
++        )
++        .unwrap();
++    let mut sleep = Box::pin(sleep);
++    assert_pending!(sleep.as_mut().poll(&mut noop_context()));
++
++    // reset the timer created from `rt1` in `rt2`,
++    // which should register the timer into the local timer wheel of `rt1`.
++    let sleep = rt2
++        .block_on({
++            #[allow(clippy::async_yields_async)]
++            rt2.spawn(async move {
++                sleep
++                    .as_mut()
++                    .reset(Instant::now() + Duration::from_secs(3600));
++                sleep
++            })
++        })
++        .unwrap();
++
++    // drop `rt1` to fire all timers registered in `rt1`,
++    // including the timer we just reset.
++    drop(rt1);
++
++    // If this assertion fails, it means the timer is not registered in `rt1`.
++    // This can happen if the timer is registered in `rt2` instead of `rt1`,
++    assert!(sleep.now_or_never().is_some());
++}

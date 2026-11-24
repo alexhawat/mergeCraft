@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 from typing import TYPE_CHECKING, Any
 
@@ -112,7 +111,8 @@ def _ctx(tmp_path: Path, *, github: GitHubClient | None = None) -> ToolContext:
 @pytest.mark.asyncio
 async def test_list_check_runs_tool_is_registered_under_its_own_name(tmp_path: Path) -> None:
     """The tool name is part of the agent contract — #266 renames the payload, not the tool."""
-    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+    import mergecraft.mcp.check_runs as check_runs
+
     ctx = _ctx(tmp_path, github=_RecordingGitHub())
 
     tool = check_runs.list_check_runs_tool(ctx)
@@ -128,7 +128,8 @@ async def test_list_check_runs_calls_the_check_runs_endpoint(tmp_path: Path) -> 
 
     Inverted from the pre-#266 assertion that pinned ``list_check_suites_for_ref``.
     """
-    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+    import mergecraft.mcp.check_runs as check_runs
+
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path, github=github)
 
@@ -141,7 +142,8 @@ async def test_list_check_runs_calls_the_check_runs_endpoint(tmp_path: Path) -> 
 @pytest.mark.asyncio
 async def test_list_check_runs_returns_check_run_data_for_ref(tmp_path: Path) -> None:
     """#266 — the payload key is ``check_runs`` and carries the runs the endpoint returned."""
-    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+    import mergecraft.mcp.check_runs as check_runs
+
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path, github=github)
 
@@ -165,7 +167,8 @@ async def test_list_check_runs_preserves_the_run_shape_agents_navigate_by(
     which takes a *suite* id. On a check run that id lives at ``check_suite.id``, so the
     nesting must survive the swap or the documented follow-up call breaks.
     """
-    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+    import mergecraft.mcp.check_runs as check_runs
+
     ctx = _ctx(tmp_path, github=_RecordingGitHub())
 
     tool = check_runs.list_check_runs_tool(ctx)
@@ -184,7 +187,8 @@ async def test_each_run_carries_the_suite_id_at_the_top_level(tmp_path: Path) ->
     run id, because ``id`` sits at the top level and the id the next tool wants
     was buried at ``check_suite.id``. Lifting it makes the shape carry the rule.
     """
-    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+    import mergecraft.mcp.check_runs as check_runs
+
     ctx = _ctx(tmp_path, github=_RecordingGitHub())
 
     tool = check_runs.list_check_runs_tool(ctx)
@@ -256,7 +260,8 @@ async def test_list_check_runs_returns_only_the_fields_agents_navigate_by(
     One unprojected listing on a ~35-check PR returned 184 KB to the reviewer and
     pushed every later turn to 90-120 s until the self-review timed out.
     """
-    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+    import mergecraft.mcp.check_runs as check_runs
+
     ctx = _ctx(tmp_path, github=_RawRunGitHub(_raw_run()))
 
     tool = check_runs.list_check_runs_tool(ctx)
@@ -280,7 +285,8 @@ async def test_list_check_runs_returns_only_the_fields_agents_navigate_by(
 
 @pytest.mark.asyncio
 async def test_list_check_runs_title_is_none_when_output_is_missing(tmp_path: Path) -> None:
-    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+    import mergecraft.mcp.check_runs as check_runs
+
     raw = _raw_run()
     del raw["output"]
     ctx = _ctx(tmp_path, github=_RawRunGitHub(raw))
@@ -297,7 +303,7 @@ async def test_list_check_runs_title_is_none_when_output_is_missing(tmp_path: Pa
 @pytest.mark.asyncio
 async def test_list_check_runs_incomplete_omits_partial_catalog(tmp_path: Path) -> None:
     """A truncated check-run walk must not look like a complete catalog."""
-    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+    import mergecraft.mcp.check_runs as check_runs
 
     class _IncompleteGitHub(_RecordingGitHub):
         async def list_check_runs_for_ref(
@@ -328,7 +334,8 @@ async def test_list_check_runs_incomplete_omits_partial_catalog(tmp_path: Path) 
 @pytest.mark.asyncio
 async def test_get_check_suite_tool_returns_suite_detail(tmp_path: Path) -> None:
     """Companion tool must fetch one suite by id (GitHubClient.get_check_suite)."""
-    check_runs = importlib.import_module("mergecraft.mcp.check_runs")
+    import mergecraft.mcp.check_runs as check_runs
+
     github = _RecordingGitHub()
     ctx = _ctx(tmp_path, github=github)
 

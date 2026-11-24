@@ -239,7 +239,7 @@ def test_audit_export_cli_returns_producer_events(
 
     result = runner.invoke(audit_cmd.app, ["export"], env=_DUMB_ENV)
     assert result.exit_code == 0, result.stdout + result.stderr
-    payload = json.loads(result.stdout)
+    payload = json.loads(result.stdout)["events"]
     assert isinstance(payload, list)
     assert len(payload) == 1
     assert payload[0]["artifact_id"] == "artifact-cli"

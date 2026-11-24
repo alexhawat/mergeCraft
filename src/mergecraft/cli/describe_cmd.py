@@ -18,6 +18,7 @@ from mergecraft.cli.diff_base import materialize_branch_diff
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.global_surface import emit_cli_json, wants_json_output
 from mergecraft.config.settings import load_repo_settings
+from mergecraft.diff import diff_lines
 from mergecraft.pr import (
     DescribeOutput,
     TodoFinding,
@@ -66,7 +67,7 @@ def _read_diff(repo_root: Path, base: str | None = None) -> str:
         except typer.Exit:
             # ``typer.Exit`` subclasses ``RuntimeError``: a bad ``--base`` must still exit 30.
             raise
-        except (OSError, RuntimeError, subprocess.SubprocessError):
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
             return ""
         return materialization.path.read_text(encoding="utf-8")
 
@@ -74,7 +75,7 @@ def _read_diff(repo_root: Path, base: str | None = None) -> str:
 def _line_counts(diff: str) -> tuple[int, int]:
     added = 0
     deleted = 0
-    for line in diff.splitlines():
+    for line in diff_lines(diff):
         if line.startswith("+") and not line.startswith("+++"):
             added += 1
         elif line.startswith("-") and not line.startswith("---"):

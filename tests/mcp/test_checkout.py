@@ -778,3 +778,56 @@ async def test_checkout_pr_does_not_absorb_a_change_made_before_it(tmp_path: Pat
     text = str(exc.value)
     assert "planted.py" in text
     assert "new.py" not in text
+
+
+@pytest.mark.parametrize("update", ["merge", "rebase", "conflict"])
+def test_round_tracks_author_patch_across_base_updates(tmp_path: Path, update: str) -> None:
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], cwd=tmp_path, text=True).strip()
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.name", "Test")
+    git("config", "user.email", "test@example.invalid")
+    shared = tmp_path / "author.txt"
+    shared.write_text("base\nnearby\nend\n")
+    git("add", "author.txt")
+    git("commit", "-qm", "base")
+    git("checkout", "-qb", "feature")
+    shared.write_text("one\nnearby\nend\n")
+    git("add", "author.txt")
+    git("commit", "-qm", "author patch")
+    first = git("rev-parse", "HEAD")
+    git("checkout", "-q", "main")
+    shared.write_text("other\nnearby\nend\n" if update == "conflict" else "base\nnearby\nnew end\n")
+    git("add", "author.txt")
+    git("commit", "-qm", "upstream")
+    base = git("rev-parse", "HEAD")
+    git("checkout", "-q", "feature")
+    if update == "conflict":
+        with pytest.raises(subprocess.CalledProcessError):
+            git("merge", "main")
+        shared.write_text("resolved\nnearby\nend\n")
+        git("add", "author.txt")
+        git("commit", "-qm", "resolve competing edits")
+    else:
+        git(update, "main")
+    updated = git("rev-parse", "HEAD")
+    history = [
+        {"commit_id": sha, "body": _MERGECRAFT_BODY, "user": _BOT_USER}
+        for sha in (first, updated, updated)
+    ]
+
+    def round_for(head: str) -> int:
+        return review_round_index(
+            history,
+            head_sha=head,
+            publishers=frozenset({_PUBLISHER_LOGIN}),
+            base_sha=base,
+            cwd=str(tmp_path),
+        )
+
+    expected = 2 if update == "conflict" else 1
+    assert round_for(updated) == expected
+    (tmp_path / "author.txt").write_text("two\n")
+    git("commit", "-qam", "second author patch")
+    assert round_for(git("rev-parse", "HEAD")) == expected + 1

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET, import_module
+from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET, enabled_analyzer_ids
 
 FOUR_CHEAP_FLIPS: tuple[str, ...] = ("golangci-lint", "clippy", "rubocop", "phpstan")
 BATCH_W_FIXTURES = FIXTURES_DIR / "batch-w"
@@ -41,18 +41,9 @@ _AUTO_DETECT_CASES: tuple[tuple[str, Path, list[str]], ...] = (
 
 
 def _registry():
-    return import_module("mergecraft.analyzers.registry")
+    from mergecraft.analyzers import registry
 
-
-def _enabled_ids(repo_root: Path, changed_files: list[str]) -> set[str]:
-    return {
-        manifest.id
-        for manifest in _registry().detect_enabled(
-            repo_root=repo_root,
-            changed_files=changed_files,
-            settings_overrides={},
-        )
-    }
+    return registry
 
 
 def _argv_has_level_zero(argv: tuple[str, ...]) -> bool:
@@ -94,7 +85,8 @@ def test_rubocop_detect_matches_shipped_config_glob() -> None:
 
 @pytest.mark.parametrize("tool_id", FOUR_CHEAP_FLIPS)
 def test_four_cheap_flips_have_catalog_check_sarif_fixture(tool_id: str) -> None:
-    docs = import_module("mergecraft.analyzers.catalog_docs")
+    import mergecraft.analyzers.catalog_docs as docs
+
     manifest = _registry().get_manifest(tool_id)
     assert docs.manifest_has_fixture(manifest, fixture_root=FIXTURES_DIR), (
         f"{tool_id} must keep a catalog-check-shaped parser fixture (D15)"
@@ -118,11 +110,11 @@ def test_four_cheap_flips_auto_enables_on_language_markers(
     tool_id: str, repo: Path, changed: list[str]
 ) -> None:
     assert repo.is_dir(), f"missing Batch W fixture repo: {repo}"
-    assert tool_id in _enabled_ids(repo, changed)
+    assert tool_id in enabled_analyzer_ids(repo, changed)
 
 
 def test_empty_changed_files_do_not_enable_four_cheap_flips() -> None:
-    ids = _enabled_ids(BATCH_W_FIXTURES / "go", [])
+    ids = enabled_analyzer_ids(BATCH_W_FIXTURES / "go", [])
     assert ids.isdisjoint(FOUR_CHEAP_FLIPS)
 
 
@@ -130,7 +122,7 @@ def test_empty_changed_files_do_not_enable_four_cheap_flips() -> None:
 def test_rubocop_auto_fires_when_config_is_present(tmp_path: Path, config_name: str) -> None:
     (tmp_path / config_name).write_text("AllCops:\n  NewCops: enable\n", encoding="utf-8")
     (tmp_path / "hello.rb").write_text("puts 1\n", encoding="utf-8")
-    assert "rubocop" in _enabled_ids(tmp_path, ["hello.rb"])
+    assert "rubocop" in enabled_analyzer_ids(tmp_path, ["hello.rb"])
 
 
 def test_rubocop_auto_fires_when_gemfile_declares_rubocop(tmp_path: Path) -> None:
@@ -139,7 +131,7 @@ def test_rubocop_auto_fires_when_gemfile_declares_rubocop(tmp_path: Path) -> Non
         encoding="utf-8",
     )
     (tmp_path / "hello.rb").write_text("puts 1\n", encoding="utf-8")
-    assert "rubocop" in _enabled_ids(tmp_path, ["hello.rb"])
+    assert "rubocop" in enabled_analyzer_ids(tmp_path, ["hello.rb"])
 
 
 def test_rubocop_without_config_is_not_enabled(tmp_path: Path) -> None:
@@ -148,11 +140,12 @@ def test_rubocop_without_config_is_not_enabled(tmp_path: Path) -> None:
         'source "https://rubygems.org"\n',
         encoding="utf-8",
     )
-    assert "rubocop" not in _enabled_ids(tmp_path, ["hello.rb", "Gemfile"])
+    assert "rubocop" not in enabled_analyzer_ids(tmp_path, ["hello.rb", "Gemfile"])
 
 
 def test_rubocop_without_config_skips_unavailable_not_a_cop_dump(tmp_path: Path) -> None:
-    adapters = import_module("mergecraft.analyzers.adapters")
+    import mergecraft.analyzers.adapters as adapters
+
     (tmp_path / "hello.rb").write_text("puts 1\n", encoding="utf-8")
     result = adapters.run_adapter(
         tool_id="rubocop",
@@ -175,7 +168,8 @@ def test_phpstan_neon_globs_match_before_flip() -> None:
 
 
 def test_phpstan_without_neon_runs_at_level_zero(tmp_path: Path) -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.resolve as resolve
+
     (tmp_path / "composer.json").write_text("{}\n", encoding="utf-8")
     (tmp_path / "hello.php").write_text("<?php\n", encoding="utf-8")
     manifest = _registry().get_manifest("phpstan")
@@ -193,7 +187,8 @@ def test_phpstan_without_neon_runs_at_level_zero(tmp_path: Path) -> None:
 
 
 def test_phpstan_without_neon_managed_plan_runs_at_level_zero(tmp_path: Path) -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.resolve as resolve
+
     (tmp_path / "composer.json").write_text("{}\n", encoding="utf-8")
     (tmp_path / "hello.php").write_text("<?php\n", encoding="utf-8")
     manifest = _registry().get_manifest("phpstan")
@@ -210,7 +205,8 @@ def test_phpstan_without_neon_managed_plan_runs_at_level_zero(tmp_path: Path) ->
 
 
 def test_phpstan_with_neon_does_not_force_level_zero() -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.resolve as resolve
+
     repo = BATCH_W_FIXTURES / "php"
     manifest = _registry().get_manifest("phpstan")
     plan = resolve.resolve_analyzer(
@@ -233,8 +229,9 @@ def test_phpstan_with_neon_does_not_force_level_zero() -> None:
 def test_flipped_tool_reports_unavailable_when_toolchain_absent(
     tool_id: str, tmp_path: Path
 ) -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
-    run = import_module("mergecraft.analyzers.run")
+    import mergecraft.analyzers.resolve as resolve
+    import mergecraft.analyzers.run as run
+
     manifest = _registry().get_manifest(tool_id)
     plan = resolve.resolve_analyzer(
         manifest=manifest,
@@ -253,7 +250,8 @@ def test_flipped_tool_reports_unavailable_when_toolchain_absent(
 
 @pytest.mark.parametrize("tool_id", FOUR_CHEAP_FLIPS)
 def test_flipped_tool_plan_carries_manifest_timeout(tool_id: str, tmp_path: Path) -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.resolve as resolve
+
     manifest = _registry().get_manifest(tool_id)
     plan = resolve.resolve_analyzer(
         manifest=manifest,
@@ -270,8 +268,9 @@ def test_flipped_tool_plan_carries_manifest_timeout(tool_id: str, tmp_path: Path
 
 def test_clippy_command_is_workspace_cargo_not_file_list(tmp_path: Path) -> None:
     registry = _registry()
-    resolve = import_module("mergecraft.analyzers.resolve")
-    execution = import_module("mergecraft.analyzers.execution")
+    import mergecraft.analyzers.execution as execution
+    import mergecraft.analyzers.resolve as resolve
+
     manifest = registry.get_manifest("clippy")
     assert "{files}" not in manifest.command
     assert manifest.command == ["cargo", "clippy", "--message-format=json"]
@@ -300,8 +299,9 @@ def test_clippy_command_is_workspace_cargo_not_file_list(tmp_path: Path) -> None
 
 
 def test_four_cheap_flips_findings_honor_inline_budget() -> None:
-    budget = import_module("mergecraft.analyzers.budget")
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.budget as budget
+    import mergecraft.analyzers.finding as finding_mod
+
     findings = [
         finding_mod.make_finding(
             tool=tool_id,

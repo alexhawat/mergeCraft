@@ -8,7 +8,6 @@ also touch. Implementation lands in W8.2.
 from __future__ import annotations
 
 from mergecraft.review_taxonomy import FINDING_CATEGORIES
-from tests.analyzers.support import import_module
 
 
 def _base_kwargs() -> dict[str, object]:
@@ -34,7 +33,8 @@ _COLLATERAL_PATHS: tuple[str, ...] = (
 
 def test_finding_carries_optional_collateral_list() -> None:
     """RC11 — findings may list collateral paths the fix must also touch."""
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     finding = finding_mod.make_finding(**_base_kwargs(), collateral=list(_COLLATERAL_PATHS))
 
     assert finding.collateral == list(_COLLATERAL_PATHS)
@@ -42,7 +42,8 @@ def test_finding_carries_optional_collateral_list() -> None:
 
 def test_existing_construction_sites_still_work_without_collateral() -> None:
     """RC11 compatibility — ``make_finding`` and ``Finding()`` work without collateral."""
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     kwargs = _base_kwargs()
 
     via_helper = finding_mod.make_finding(**kwargs)

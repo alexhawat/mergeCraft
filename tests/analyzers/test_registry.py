@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.analyzers.support import import_module
-
 
 def test_detect_files_globs_enable_analyzer(fixture_repo: Path) -> None:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     changed = [".github/workflows/broken.yml"]
     enabled = registry.detect_enabled(
         repo_root=fixture_repo,
@@ -20,7 +19,8 @@ def test_detect_files_globs_enable_analyzer(fixture_repo: Path) -> None:
 
 
 def test_detect_respects_default_disabled_when_no_matching_files(fixture_repo: Path) -> None:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     enabled = registry.detect_enabled(
         repo_root=fixture_repo,
         changed_files=["README.md"],
@@ -30,7 +30,8 @@ def test_detect_respects_default_disabled_when_no_matching_files(fixture_repo: P
 
 
 def test_default_enabled_auto_respects_repo_config_override(fixture_repo: Path) -> None:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     enabled = registry.detect_enabled(
         repo_root=fixture_repo,
         changed_files=["Dockerfile"],
@@ -43,7 +44,8 @@ def test_default_enabled_auto_respects_repo_config_override(fixture_repo: Path) 
 
 
 def test_exclusive_group_never_both_enable_by_default(fixture_repo: Path) -> None:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     changed = ["src/example.py", "src/other.py"]
     enabled = registry.detect_enabled(
         repo_root=fixture_repo,
@@ -60,7 +62,8 @@ def test_exclusive_group_never_both_enable_by_default(fixture_repo: Path) -> Non
 
 
 def test_explicit_override_wins_over_exclusive_group(fixture_repo: Path) -> None:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     overrides = {
         "analyzers": {
             "overrides": {

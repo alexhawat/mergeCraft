@@ -6,18 +6,20 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import CATALOG_ANALYZER_IDS, import_module
+from tests.analyzers.support import CATALOG_ANALYZER_IDS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _catalog_manifests():
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     return registry.load_catalog()
 
 
 def test_every_manifest_has_analyzers_doc_row() -> None:
-    docs = import_module("mergecraft.analyzers.catalog_docs")
+    import mergecraft.analyzers.catalog_docs as docs
+
     analyzers_md = REPO_ROOT / "docs" / "ANALYZERS.md"
     assert analyzers_md.is_file(), "docs/ANALYZERS.md must exist (C6.6)"
 
@@ -28,7 +30,8 @@ def test_every_manifest_has_analyzers_doc_row() -> None:
 
 
 def test_every_manifest_has_fixture() -> None:
-    docs = import_module("mergecraft.analyzers.catalog_docs")
+    import mergecraft.analyzers.catalog_docs as docs
+
     fixture_root = REPO_ROOT / "tests" / "analyzers" / "fixtures"
 
     for manifest in _catalog_manifests():
@@ -38,7 +41,7 @@ def test_every_manifest_has_fixture() -> None:
 
 
 def test_every_manifest_has_complete_severity_map() -> None:
-    docs = import_module("mergecraft.analyzers.catalog_docs")
+    import mergecraft.analyzers.catalog_docs as docs
 
     for manifest in _catalog_manifests():
         assert docs.severity_map_complete(manifest), (
@@ -53,7 +56,8 @@ def test_catalog_analyzers_include_planned_expansion_ids() -> None:
 
 
 def test_manifest_missing_fixture_fails_ci_gate(tmp_path: Path) -> None:
-    docs = import_module("mergecraft.analyzers.catalog_docs")
+    import mergecraft.analyzers.catalog_docs as docs
+
     bad_manifest = tmp_path / "orphan.yaml"
     bad_manifest.write_text(
         "id: orphan-tool\ncategory: lint\nlanguages: [python]\n"
@@ -69,7 +73,8 @@ def test_manifest_missing_fixture_fails_ci_gate(tmp_path: Path) -> None:
 
 
 def test_every_manifest_fixture_parses_through_its_wired_parser() -> None:
-    docs = import_module("mergecraft.analyzers.catalog_docs")
+    import mergecraft.analyzers.catalog_docs as docs
+
     fixture_root = REPO_ROOT / "tests" / "analyzers" / "fixtures"
 
     failures = [
@@ -100,7 +105,8 @@ def test_catalog_check_fails_when_the_wired_parser_cannot_read_the_fixture(
     tmp_path: Path,
 ) -> None:
     """A Biome-format fixture under a manifest wired to ``eslint_json`` must fail the gate."""
-    docs = import_module("mergecraft.analyzers.catalog_docs")
+    import mergecraft.analyzers.catalog_docs as docs
+
     native = tmp_path / "native"
     native.mkdir()
     biome_report = (REPO_ROOT / "tests/analyzers/fixtures/native/biome-minimal.json").read_text(
@@ -121,7 +127,8 @@ def test_catalog_check_fails_when_the_wired_parser_cannot_read_the_fixture(
 
 
 def test_catalog_check_fails_when_the_fixture_parses_to_nothing(tmp_path: Path) -> None:
-    docs = import_module("mergecraft.analyzers.catalog_docs")
+    import mergecraft.analyzers.catalog_docs as docs
+
     native = tmp_path / "native"
     native.mkdir()
     (native / "jslint-minimal.json").write_text("[]", encoding="utf-8")
@@ -135,7 +142,8 @@ def test_catalog_check_fails_when_the_fixture_parses_to_nothing(tmp_path: Path) 
 
 def test_catalog_check_ignores_a_fixture_of_the_wrong_kind(tmp_path: Path) -> None:
     """A native parser is never satisfied by a SARIF fixture (and vice versa)."""
-    docs = import_module("mergecraft.analyzers.catalog_docs")
+    import mergecraft.analyzers.catalog_docs as docs
+
     sarif_dir = tmp_path / "sarif"
     sarif_dir.mkdir()
     sarif_fixture = REPO_ROOT / "tests/analyzers/fixtures/sarif/actionlint-minimal.sarif.json"

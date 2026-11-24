@@ -53,7 +53,8 @@ def test_driver_runs_in_review_checkout(
 def test_opencode_version_probe_uses_filtered_spawn(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    module = importlib.import_module("mergecraft.agents.opencode")
+    import mergecraft.agents.opencode as module
+
     monkeypatch.setattr(module, "_OPENCODE_MAJOR_CACHE", {})
     monkeypatch.setenv("GITHUB_TOKEN", "test-only-parent-token")
     monkeypatch.chdir(tmp_path)
@@ -190,7 +191,8 @@ def test_driver_reaps_child_when_supervision_raises(
 def test_opencode_serve_preserves_identity_and_replaces_invalid_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    module = importlib.import_module("mergecraft.agents.opencode")
+    import mergecraft.agents.opencode as module
+
     monkeypatch.setattr(
         "mergecraft.tracing.review_context.review_env_for_subprocess",
         lambda: {"MERGECRAFT_REVIEW_ID": "test-review-identity"},
@@ -225,7 +227,8 @@ def test_driver_validates_timeout_before_spawning(
 ) -> None:
     from pydantic import ValidationError
 
-    module = importlib.import_module("mergecraft.agents.gemini")
+    import mergecraft.agents.gemini as module
+
     monkeypatch.setattr(module, "_build_env", lambda _ctx: {})
     monkeypatch.setenv("MERGECRAFT_AGENT_TIMEOUT", "not-a-number")
     original_popen = subprocess.Popen

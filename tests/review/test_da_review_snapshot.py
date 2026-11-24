@@ -13,8 +13,9 @@ import inspect
 import re
 from pathlib import Path
 
-import click
 import pytest
+from typer import _click
+from typer.core import TyperGroup
 from typer.main import get_command
 from typer.testing import CliRunner
 
@@ -47,8 +48,8 @@ def test_hidden_diff_review_alias_remains_invocable() -> None:
     combined = _plain(result.stdout + result.stderr)
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, combined
     root = get_command(app)
-    assert isinstance(root, click.Group)
-    with click.Context(root) as ctx:
+    assert isinstance(root, TyperGroup)
+    with _click.Context(root) as ctx:
         name, command, _ = root.resolve_command(ctx, ["diff-review"])
     assert name == "diff-review"
     assert command is not None

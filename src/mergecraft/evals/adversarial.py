@@ -48,7 +48,12 @@ if TYPE_CHECKING:
 #: Default on-disk location of the adversarial corpus — one JSON case per
 #: hostile shape. Deliberately a *subdirectory* of the eval bank so the
 #: bank's top-level ``*.md`` scan never picks these up.
-DEFAULT_ADVERSARIAL_CORPUS_DIR: Final[Path] = Path("evals/cases/adversarial")
+_PACKAGED_CORPUS = Path(__file__).parent / "cases" / "adversarial"
+DEFAULT_ADVERSARIAL_CORPUS_DIR: Final[Path] = (
+    _PACKAGED_CORPUS
+    if _PACKAGED_CORPUS.is_dir()
+    else Path(__file__).resolve().parents[3] / "evals" / "cases" / "adversarial"
+)
 
 #: The attack-vector vocabulary. Every vector must carry at least one corpus
 #: case; discovery fails loudly otherwise (an empty corpus is a failure,

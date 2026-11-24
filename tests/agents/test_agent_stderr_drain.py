@@ -285,7 +285,9 @@ def test_driver_timeout_path_still_returns_when_stderr_is_filled(
 
 
 def _shared_module() -> Any:
-    return importlib.import_module("mergecraft.agents.shared")
+    from mergecraft.agents import shared
+
+    return shared
 
 
 def _drain_helper() -> Any:
