@@ -126,6 +126,76 @@ async def test_invalid_subcommand_after_normalization_rejected(
     assert recorder.calls == []
 
 
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("log --oneline -6", ["log", "--oneline", "-6"]),
+        ("ls-files docs", ["ls-files", "docs"]),
+        ("log --author='A B' -3", ["log", "--author=A B", "-3"]),
+    ],
+)
+async def test_command_line_without_git_prefix_is_split_into_args(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str, expected: list[str]
+) -> None:
+    """A known verb followed by its options in ``command`` runs; it is not refused."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": command})
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert recorder.calls == [expected]
+
+
+async def test_grep_command_line_keeps_a_quoted_pattern_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[list[str]] = []
+
+    def _grep(argv: list[str], *, cwd: str) -> tuple[str, bool]:
+        calls.append(list(argv))
+        return "src/a.py:1:def a", True
+
+    monkeypatch.setattr("mergecraft.mcp.git._run_grep", _grep)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "grep -n 'def a|def b' src/a.py"})
+
+    assert result.is_error is False, result.content[0]["text"]
+    assert len(calls) == 1
+    assert calls[0][0] == "grep"
+    assert "def a|def b" in calls[0]
+
+
+async def test_command_line_options_still_reach_the_guards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Splitting ``command`` must not let a refused option past the guards."""
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    tool = git_tool(_ctx(tmp_path))
+    as_args = await tool.execute({"command": "diff", "args": ["--output=leak.txt", "HEAD"]})
+    as_line = await tool.execute({"command": "diff --output=leak.txt HEAD"})
+
+    assert as_args.is_error is True
+    assert as_line.is_error is True
+    assert as_line.content[0]["text"] == as_args.content[0]["text"]
+    assert recorder.calls == []
+
+
+async def test_unknown_multi_token_command_names_the_args_parameter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = _RunGitRecorder()
+    monkeypatch.setattr("mergecraft.mcp.git._run_git", recorder)
+
+    result = await git_tool(_ctx(tmp_path)).execute({"command": "rm -rf"})
+
+    assert result.is_error is True
+    assert "each option in `args`" in result.content[0]["text"]
+    assert recorder.calls == []
+
+
 async def test_global_c_option_inside_repo_root_is_forwarded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

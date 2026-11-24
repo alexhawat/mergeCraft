@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The reviewer's read-only `git` tool now runs a whole command line passed in
+  `command` (`log --oneline -6`, `grep -n 'a|b' src/x.py`) when it opens with a
+  verb the tool knows, with quoted arguments kept whole. It used to refuse these
+  as an invalid subcommand unless they carried a `git ` prefix, so an agent that
+  wrote them that way lost a turn on every call. Every guard still sees the
+  split options, and a refused multi-word command now says to put options in
+  `args`.
 - A dependency advisory already present on the base branch is no longer reported
   as introduced by the pull request. The base copy of a lock file is scanned from
   a scratch path, so its advisories never matched their head twins and every one

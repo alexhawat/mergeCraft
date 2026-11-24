@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -836,6 +837,8 @@ def _validate_git_invocation(
         )
         if command in _FILE_READER_VERBS:
             msg = f"{msg}. {_file_reader_hint(command, args)}"
+        elif len(command.split()) > 1:
+            msg = f"{msg}. Pass the subcommand alone in `command` and each option in `args`."
         raise ToolRefusedError(msg)
     if command == "branch":
         _reject_branch_writes(args)
@@ -859,6 +862,35 @@ def _validate_git_invocation(
     # Bind -C / --git-dir / --work-tree to a registered checkout, with relative
     # values resolved against the cwd git will run in (#257 / D7).
     _validate_path_confinement(global_opts, cwd, checkout_roots=checkout_roots)
+
+
+def _split_command_line(command: str) -> list[str]:
+    """Split a whole git command line the reviewing agent put in ``command``.
+
+    Quoted arguments are honoured the way a shell reads them, so a pattern such
+    as ``'def a|def b'`` stays one token. A line without quotes, or one whose
+    quotes do not balance, is split on whitespace as it always was.
+    """
+    if "'" in command or '"' in command:
+        try:
+            return shlex.split(command)
+        except ValueError:
+            pass
+    return command.split()
+
+
+def _is_command_line(command: str) -> bool:
+    """Report whether ``command`` is a known git verb followed by its arguments.
+
+    The agent often sends ``log --oneline -6`` in ``command`` with no ``git``
+    prefix. Only a line that opens with a verb this tool knows is split; any
+    other multi-token command (``rm -rf``) stays whole and is refused as one
+    invalid subcommand.
+    """
+    tokens = command.split(None, 1)
+    if len(tokens) < 2:
+        return False
+    return tokens[0] in _READONLY_SUBCOMMANDS or tokens[0] in _REDIRECT_TO_TOOL
 
 
 def _repo_dir_for(ctx: ToolContext, repo: object) -> str:
@@ -896,11 +928,15 @@ def git_tool(ctx: ToolContext) -> ToolSpec:
             command = ""
         elif command.lower().startswith("git "):
             command = command[len("git ") :].strip()
-        # Only a command that arrived with a `git ` prefix (a full git
-        # invocation string, e.g. `git -C /abs status`) is tokenized for
-        # global-option extraction. A bare non-prefix multi-token command like
-        # `rm -rf` must still be rejected as an invalid subcommand.
-        cmd_tokens = command.split() if had_git_prefix and command else [command] if command else []
+        # A command that arrived with a `git ` prefix (a full git invocation
+        # string, e.g. `git -C /abs status`) or that opens with a verb this tool
+        # knows (`log --oneline -6`) is tokenized, so its options reach the
+        # guards as args. Any other multi-token command like `rm -rf` must still
+        # be rejected as an invalid subcommand.
+        if command and (had_git_prefix or _is_command_line(command)):
+            cmd_tokens = _split_command_line(command)
+        else:
+            cmd_tokens = [command] if command else []
         # Pull any global git options (e.g. `-C <dir>`, `-c key=val`) out of
         # command/args and forward them before the subcommand, rather than
         # treating them as the subcommand or rejecting them as an
@@ -1006,7 +1042,9 @@ def git_tool(ctx: ToolContext) -> ToolSpec:
         name="git",
         tool_class=ToolClass.REPOSITORY_READ,
         description=(
-            "Run a git subcommand. `command` is the subcommand ONLY. "
+            "Run a git subcommand. `command` is the subcommand ONLY "
+            "(e.g. `log`); every option and operand goes in `args` "
+            '(e.g. `["--oneline", "-6"]`). '
             "Use git_fetch to read remote refs; repository writes are not available."
         ),
         input_schema={
