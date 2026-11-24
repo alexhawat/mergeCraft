@@ -160,7 +160,6 @@ def _clean_authorship_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.timeout(20)
-@pytest.mark.xfail(reason="green after W4", strict=True)
 async def test_list_reviews_lets_the_loop_run_during_the_login_lookup(tmp_path: Path) -> None:
     """#1568 — listing prior reviews no longer stalls every other MCP request."""
     heartbeat = _Heartbeat()
@@ -181,7 +180,6 @@ async def test_list_reviews_lets_the_loop_run_during_the_login_lookup(tmp_path: 
 
 
 @pytest.mark.timeout(20)
-@pytest.mark.xfail(reason="green after W4", strict=True)
 async def test_resolve_fixed_threads_lets_the_loop_run_during_the_login_lookup(
     tmp_path: Path,
 ) -> None:
@@ -213,7 +211,6 @@ async def test_resolve_fixed_threads_lets_the_loop_run_during_the_login_lookup(
 
 
 @pytest.mark.timeout(20)
-@pytest.mark.xfail(reason="green after W4", strict=True)
 async def test_checkout_lets_the_loop_run_during_the_login_lookup(tmp_path: Path) -> None:
     """#1568 — the checkout path that reads prior reviews keeps the loop free."""
     repo, _first, head = await asyncio.to_thread(_pr_repo_with_two_commits, tmp_path)
