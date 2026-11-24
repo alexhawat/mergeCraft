@@ -73,6 +73,10 @@ def parse_oxlint_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) 
         )
         line = _line(diagnostic, repo_root=repo_root, path=path)
         rule_id = str(diagnostic.get("code") or "oxlint")
+        message = str(diagnostic.get("message") or rule_id)
+        help_text = diagnostic.get("help")
+        if rule_id.startswith("landmines/") and isinstance(help_text, str) and help_text.strip():
+            message = f"{message} {help_text.strip()}"
         findings.append(
             make_finding(
                 tool=manifest.id,
@@ -82,7 +86,7 @@ def parse_oxlint_json(raw: str, *, manifest: AnalyzerManifest, repo_root: Path) 
                     manifest, str(diagnostic.get("severity") or "warning")
                 ),
                 confidence=map_confidence(None),
-                message=str(diagnostic.get("message") or rule_id),
+                message=message,
                 path=path,
                 start_line=line,
                 end_line=line,

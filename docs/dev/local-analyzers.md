@@ -14,6 +14,8 @@ can run them offline.
 | `markdownlint-cli` | `0.50.0` (npm) | `scripts/package.json` → `scripts/node_modules/.bin` |
 | `markdownlint` (engine) | `0.42.1` | resolved via `scripts/package-lock.json` (catalog `version:`) |
 | `jscpd` | `4.1.0` | same npm tooling package |
+| `oxlint` | `1.81.0` | same npm tooling package (landmines opt-in only) |
+| `@interfere/landmines` | `0.3.1` | same npm tooling package (landmines opt-in only) |
 
 Pins match the `version:` fields in `src/mergecraft/analyzers/catalog/*.yaml` and
 are locked via `uv.lock` (Python) and `scripts/package-lock.json` (npm). `make setup`
@@ -51,6 +53,33 @@ these tools locally; mergeCraft still skips them with the standard
 
 Do **not** flip these manifests to `runtime: managed` or add darwin provenance —
 they stay `runtime: repo-native` per catalog policy.
+
+## Oxlint landmines (opt-in)
+
+[`@interfere/landmines`](https://github.com/interfere-inc/landmines) is an MIT-licensed
+Oxlint plugin that flags tests where agents fake a pass (fixed sleeps, retries, module
+mocks, and related patterns). mergeCraft does **not** enable it by default.
+
+Requirements when opted in:
+
+- Oxlint **1.81+** and Node **22.18+** (the plugin uses Oxlint `jsPlugins`).
+- Pinned `oxlint` and `@interfere/landmines` in `scripts/package.json` (installed by
+  `make setup-local-analyzers` and baked into mergeCraft Docker images).
+
+Enable on the **base** `.mergecraft/config.yaml` (not the PR head — see
+[REVIEW-CHECKS.md](../REVIEW-CHECKS.md)):
+
+```yaml
+analyzers:
+  overrides:
+    oxlint:
+      landmines: true
+```
+
+When `landmines: true` and oxlint is the selected JS/TS linter, mergeCraft injects the
+plugin's `recommended` config (correctness + suspicious) unless the repo's
+`.oxlintrc.json` / `oxlint.json` already extends or registers landmines — in that case
+the repo config alone is used so rules are not doubled.
 
 ## Analyzer latency and managed caches
 

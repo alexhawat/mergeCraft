@@ -174,12 +174,14 @@ class AnalyzerOverride(_OptionalFeatureModel):
     """Per-analyzer config override.
 
     ``rules`` and ``ignore`` are consumed only by the ``antislop`` in-process
-    analyzer; other analyzers ignore those fields.
+    analyzer; other analyzers ignore those fields. ``landmines`` is consumed only
+    by the ``oxlint`` analyzer when mergeCraft injects ``@interfere/landmines``.
     """
 
     enabled: bool | None = None
     rules: dict[str, str] | None = None
     ignore: list[str] | None = None
+    landmines: bool | None = None
 
     @model_validator(mode="before")
     @classmethod
