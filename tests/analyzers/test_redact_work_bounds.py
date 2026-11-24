@@ -169,3 +169,43 @@ def test_captured_output_is_capped_before_redaction(
     assert outcome.output_path is not None
     assert len(Path(outcome.output_path).read_text(encoding="utf-8")) <= 1_000
     assert "exceeded 1000 chars" in outcome.output
+
+
+_CAP = 1_000
+_TOKEN = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+
+
+def _line_oriented_stream() -> str:
+    # The token starts 12 characters before the cap, so a plain cut keeps "ghp_A1b2C3d4".
+    head = "x" * 9 + "\n" + "lint: ok\n" * 108
+    return head + f"found {_TOKEN} in src/a.py\n" + "lint: ok\n" * 50
+
+
+def _single_line_stream() -> str:
+    # One line longer than the cap: the cut has to fall back to a token boundary.
+    return "word " * 198 + _TOKEN + " word" * 50
+
+
+@pytest.mark.parametrize(
+    "stream", [_line_oriented_stream(), _single_line_stream()], ids=["lines", "one-line"]
+)
+def test_a_credential_cut_by_the_cap_is_not_left_behind_as_a_prefix(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stream: str
+) -> None:
+    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_CHARS", _CAP)
+    seen = _spy_redaction(monkeypatch)
+    start = stream.index(_TOKEN)
+    assert start < _CAP < start + len(_TOKEN)
+    completed = subprocess.CompletedProcess(args=["ruff"], returncode=1, stdout=stream, stderr="")
+
+    outcome = run_mod._outcome_from_completed(
+        completed, plan=_plan(tmp_path), command="ruff check", output_dir=tmp_path
+    )
+
+    assert outcome.output_path is not None
+    persisted = Path(outcome.output_path).read_text(encoding="utf-8")
+    for text in (persisted, outcome.output):
+        assert _TOKEN[:8] not in text
+    assert [len(raw) <= _CAP for raw in seen] == [True]
+    assert len(persisted) > _CAP // 2
+    assert f"exceeded {_CAP} chars" in outcome.output

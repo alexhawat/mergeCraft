@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that index out again. Allocation also skips any index that still has
   `LLM_PROVIDER_<N>` keys in the local `.env`, which covers registries written
   before the mark existed.
+- Analyzer output longer than the per-stream cap is cut on a line boundary (a
+  token boundary for one long line) before redaction and capped again after it,
+  so redaction always sees whole values while its work stays bounded by the cap.
 - A dependency advisory already present on the base branch is no longer reported
   as introduced by the pull request. The base copy of a lock file is scanned from
   a scratch path, so its advisories never matched their head twins and every one

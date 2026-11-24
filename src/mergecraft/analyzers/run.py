@@ -150,8 +150,47 @@ def _cap_captured(text: str) -> tuple[str, bool]:
     return text[:MAX_CAPTURED_OUTPUT_CHARS], True
 
 
+# Characters a credential-shaped token (or URL userinfo) is made of. A cut at any
+# other character cannot split one, so nothing redaction would catch whole is
+# left behind as a prefix.
+_TOKEN_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-+/=.~:@%")
+_TOKEN_BOUNDARY_SCAN_CHARS = 4096
+
+
+def _redaction_safe_head(text: str) -> str:
+    """Return the head of an over-cap stream, cut where no token straddles the cut.
+
+    The cut lands after the last complete line inside the cap. When the head is
+    one long line (minified JSON), it lands just before the last character that
+    cannot belong to a token instead. Either way the kept text stays within the cap.
+    """
+    limit = MAX_CAPTURED_OUTPUT_CHARS
+    newline = text.rfind("\n", 0, limit)
+    if newline >= limit // 2:
+        return text[:newline]
+    for index in range(limit - 1, max(limit - _TOKEN_BOUNDARY_SCAN_CHARS, 0) - 1, -1):
+        if text[index] not in _TOKEN_CHARS:
+            return text[:index]
+    return text[:limit]
+
+
 def _redact_stream(text: str, *, plan: AnalyzerPlan) -> str:
     return redact_analyzer_output(text, tool_id=plan.manifest_id) if text else text
+
+
+def _redact_captured(text: str, *, plan: AnalyzerPlan) -> tuple[str, bool]:
+    """Redact one captured stream, keeping at most the cap; flag a cut.
+
+    Redaction has to see whole credentials: a cut at an arbitrary offset can
+    leave a token's prefix below every rule's minimum length, and that prefix
+    survives redaction. An over-cap stream is cut on a safe boundary first, so the
+    redactor's work stays bounded by the cap. The result is capped again only
+    after redaction, where a cut can no longer expose anything.
+    """
+    cut = len(text) > MAX_CAPTURED_OUTPUT_CHARS
+    head = _redaction_safe_head(text) if cut else text
+    redacted, recut = _cap_captured(_redact_stream(head.strip(), plan=plan))
+    return redacted, cut or recut
 
 
 @dataclass(frozen=True, slots=True)
@@ -486,13 +525,12 @@ def _outcome_from_completed(
 ) -> AnalyzerOutcome:
     """Combine stdout/stderr, redact, persist to disk, and build the final outcome.
 
-    Each stream is capped, then redacted exactly once; the persisted parser input
-    and the display string are both built from those redacted streams.
+    Each stream is redacted exactly once, on input bounded by the cap, and capped
+    after redaction (:func:`_redact_captured`); the persisted parser input and the
+    display string are both built from those redacted streams.
     """
-    capped_stdout, stdout_cut = _cap_captured(completed.stdout or "")
-    capped_stderr, stderr_cut = _cap_captured(completed.stderr or "")
-    stdout = _redact_stream(capped_stdout.strip(), plan=plan)
-    stderr = _redact_stream(capped_stderr.strip(), plan=plan)
+    stdout, stdout_cut = _redact_captured(completed.stdout or "", plan=plan)
+    stderr, stderr_cut = _redact_captured(completed.stderr or "", plan=plan)
     for_parser = stdout or stderr
     combined = for_parser
     if stderr and stdout:
