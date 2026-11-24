@@ -319,6 +319,11 @@ async def _dispatch_reviewer(
 
     Returns:
         The dispatch's hard error and infrastructure reason, both ``None`` on success.
+
+    Raises:
+        BudgetExhausted: The dispatch's usage crossed the run's budget ceiling. A
+            dispatch error naming the budget is recorded first, so the reviewer is
+            never silently reported as merely failed.
     """
     from mergecraft.agents.registry import resolve_agent_model as _resolve
     from mergecraft.modes import compute_modes
@@ -949,7 +954,9 @@ async def run_file_group_reviewers(
                 )
         except BudgetExhausted:
             # The run's overrun, already recorded by the dispatch; never a group
-            # failure.
+            # failure. ``dispatch_file_groups`` collects it as a failure row, and
+            # the tracker's ``last_exhausted`` still maps the run to the budget
+            # outcome, so the ceiling is never silently crossed.
             raise
         except Exception as exc:
             reason = str(exc) or exc.__class__.__name__

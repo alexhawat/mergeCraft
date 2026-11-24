@@ -60,6 +60,11 @@ def charge_reviewer_usage(
     Returns:
         The priced usage that was appended, or ``None`` for a ``None`` input.
 
+    Raises:
+        BudgetExhausted: Charging the usage crossed the run's budget ceiling. The
+            caller decides what that means for the run; this helper never
+            swallows it.
+
     Examples:
         >>> from mergecraft.agents.shared import AgentUsage
         >>> from mergecraft.mcp.tool_state import init_tool_state
