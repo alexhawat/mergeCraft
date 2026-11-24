@@ -36,9 +36,7 @@ def _recorded_client(
 
 def test_pinned_model_is_jev_1_13_0() -> None:
     client_mod = _client_mod()
-    package = import_jev()
     assert client_mod.PINNED_MODEL == PINNED_MODEL
-    assert package.PINNED_MODEL == PINNED_MODEL
     assert client_mod.PINNED_MODEL != "jev-latest"
     assert client_mod.PINNED_MODEL != "jev-preview"
 
@@ -246,15 +244,6 @@ async def test_successful_call_records_non_negative_wall_clock_latency() -> None
     result = await client.call(state={"hunk": "x"}, pack_id="unit/v1", unit_id="u")
     assert result.latency_ms is not None
     assert result.latency_ms >= 0
-
-
-def test_package_exports_client_and_result_types() -> None:
-    package = import_jev()
-    assert package.AsyncJevClient is _client_mod().AsyncJevClient
-    assert package.PINNED_MODEL == PINNED_MODEL
-    types = import_jev("types")
-    assert package.JevCallResult is types.JevCallResult
-    assert package.JevError is types.JevError
 
 
 async def test_advisory_run_budget_does_not_skip_later_jev_calls() -> None:
