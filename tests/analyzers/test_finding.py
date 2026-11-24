@@ -9,11 +9,11 @@ from mergecraft.review_taxonomy import (
     FINDING_EFFORTS,
     finding_fingerprint,
 )
-from tests.analyzers.support import import_module
 
 
 def test_finding_requires_taxonomy_category_and_severity() -> None:
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     with pytest.raises(finding_mod.FindingValidationError, match=r"category|severity"):
         finding_mod.Finding(
             tool="actionlint",
@@ -37,7 +37,8 @@ def test_finding_requires_taxonomy_category_and_severity() -> None:
 
 @pytest.mark.parametrize("confidence", ["certain", "likely", "possible"])
 def test_confidence_axis_values(confidence: str) -> None:
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     finding = finding_mod.Finding(
         tool="actionlint",
         rule_id="syntax-check",
@@ -61,7 +62,8 @@ def test_confidence_axis_values(confidence: str) -> None:
 
 @pytest.mark.parametrize("source", ["analyzer", "agent", "ci"])
 def test_source_literal_values(source: str) -> None:
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     finding = finding_mod.make_finding(
         tool="zizmor",
         rule_id="unpinned-uses-ref",
@@ -78,7 +80,8 @@ def test_source_literal_values(source: str) -> None:
 
 
 def test_fingerprint_delegates_to_review_taxonomy_helper() -> None:
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     body = "Using latest is prone to errors."
     expected = finding_fingerprint(path="Dockerfile", body=body)
     finding = finding_mod.make_finding(
@@ -97,7 +100,8 @@ def test_fingerprint_delegates_to_review_taxonomy_helper() -> None:
 
 
 def test_invalid_effort_not_on_finding_model() -> None:
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     fields = set(finding_mod.Finding.model_fields)
     assert "effort" not in fields
     assert FINDING_EFFORTS  # taxonomy still owns effort for agent findings

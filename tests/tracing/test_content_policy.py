@@ -43,7 +43,6 @@ Acceptance (plan §OB2.1, post-reconciliation): 13 collected; 13 passed;
 from __future__ import annotations
 
 import hashlib
-import importlib
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -68,7 +67,9 @@ def content_module() -> Any:
     collection clean — zero collection errors — while every dependent test
     still fails RED at runtime under its non-strict ``xfail`` marker.
     """
-    return importlib.import_module("mergecraft.tracing.content")
+    from mergecraft.tracing import content
+
+    return content
 
 
 def _sha256(text: str) -> str:

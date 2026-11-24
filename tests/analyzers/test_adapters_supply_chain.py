@@ -12,17 +12,18 @@ from tests.analyzers.support import (
     C2_SUPPLY_CHAIN_TOOLS,
     FORK_PULL_REQUEST_EVENT,
     PLANTED_AWS_SECRET,
-    import_module,
 )
 
 
 def _catalog_ids() -> set[str]:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     return {manifest.id for manifest in registry.load_catalog()}
 
 
 def _run(tool_id: str, repo_root: Path, changed_files: list[str], *, tier: str = "trusted"):
-    adapters = import_module("mergecraft.analyzers.adapters")
+    import mergecraft.analyzers.adapters as adapters
+
     return adapters.run_adapter(
         tool_id=tool_id,
         repo_root=repo_root,
@@ -62,7 +63,8 @@ def _run_expecting_cve(
     attempt/delay shape trivy's parse retry uses, and a persistent skip is
     returned to the caller's ``assert not result.skipped``.
     """
-    supply_chain = import_module("mergecraft.analyzers.supply_chain")
+    import mergecraft.analyzers.supply_chain as supply_chain
+
     result = _run(tool_id, repo_root, changed_files, tier=tier)
     for _ in range(1, supply_chain._TRIVY_MAX_ATTEMPTS):
         if not _cve_run_is_transient(tool_id, result):
@@ -151,7 +153,8 @@ def test_pre_existing_cve_stays_silent(tool_id: str, adapter_fixture_repo: Path)
 
 def _skipped_egress_result(tool_id: str) -> Any:
     """The self-skip ``probe_userspace_egress`` produces on a transient failure."""
-    adapters = import_module("mergecraft.analyzers.adapters")
+    import mergecraft.analyzers.adapters as adapters
+
     return adapters.AdapterRunResult(
         findings=[],
         skipped=True,
@@ -165,8 +168,9 @@ def _skipped_egress_result(tool_id: str) -> Any:
 
 def _cve_result(tool_id: str) -> Any:
     """A successful run carrying one analyzer finding."""
-    adapters = import_module("mergecraft.analyzers.adapters")
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.adapters as adapters
+    import mergecraft.analyzers.finding as finding_mod
+
     return adapters.AdapterRunResult(
         findings=[
             finding_mod.Finding(
@@ -196,8 +200,9 @@ def test_run_expecting_cve_retries_a_transient_egress_skip(
     tool_id: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A first-attempt skip must be retried, for osv-scanner as well as trivy."""
-    adapters = import_module("mergecraft.analyzers.adapters")
-    supply_chain = import_module("mergecraft.analyzers.supply_chain")
+    import mergecraft.analyzers.adapters as adapters
+    import mergecraft.analyzers.supply_chain as supply_chain
+
     monkeypatch.setattr(supply_chain, "_TRIVY_RETRY_DELAY_S", 0.0)
 
     calls: list[int] = []
@@ -221,8 +226,9 @@ def test_run_expecting_cve_persistent_skip_still_fails_the_assertion(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Retries must not paper over a genuine skip: it survives to the assertion."""
-    adapters = import_module("mergecraft.analyzers.adapters")
-    supply_chain = import_module("mergecraft.analyzers.supply_chain")
+    import mergecraft.analyzers.adapters as adapters
+    import mergecraft.analyzers.supply_chain as supply_chain
+
     monkeypatch.setattr(supply_chain, "_TRIVY_RETRY_DELAY_S", 0.0)
 
     calls: list[int] = []
@@ -267,7 +273,8 @@ def test_userspace_egress_skip_is_named_by_tool_and_probed_namespace(tool_id: st
 )
 def test_other_skips_are_not_excused_by_the_userspace_egress_gate(reason: str) -> None:
     """A skip that is not the named userspace egress failure still fails the test."""
-    adapters = import_module("mergecraft.analyzers.adapters")
+    import mergecraft.analyzers.adapters as adapters
+
     result = adapters.AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
     assert _userspace_egress_skip_reason(result) is None
@@ -323,7 +330,7 @@ def test_trufflehog_never_emits_secret_value(adapter_fixture_repo: Path) -> None
 
     path = C2_SUPPLY_CHAIN_TOOLS[tool_id]
     result = _run(tool_id, adapter_fixture_repo, [path])
-    redact = import_module("mergecraft.analyzers.redact")
+    import mergecraft.analyzers.redact as redact
 
     for finding in result.findings:
         for field in (finding.message, finding.remediation or "", *finding.evidence):
@@ -335,10 +342,11 @@ def test_trufflehog_never_emits_secret_value(adapter_fixture_repo: Path) -> None
 def test_supply_chain_provisioning_failure_stays_a_visible_skip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    provision = import_module("mergecraft.analyzers.provision")
-    registry = import_module("mergecraft.analyzers.registry")
-    resolve = import_module("mergecraft.analyzers.resolve")
-    supply_chain = import_module("mergecraft.analyzers.supply_chain")
+    import mergecraft.analyzers.provision as provision
+    import mergecraft.analyzers.registry as registry
+    import mergecraft.analyzers.resolve as resolve
+    import mergecraft.analyzers.supply_chain as supply_chain
+
     manifest = registry.get_manifest("osv-scanner")
     plan = resolve.AnalyzerPlan(
         manifest_id=manifest.id,
@@ -365,12 +373,14 @@ def test_trufflehog_verification_off_on_fork(
     if tool_id not in _catalog_ids():
         pytest.fail(f"{tool_id} manifest missing from catalog")
 
-    trust = import_module("mergecraft.analyzers.trust")
+    import mergecraft.analyzers.trust as trust
+
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
     tier = trust.derive_trust_tier(FORK_PULL_REQUEST_EVENT)
     assert tier == "untrusted"
 
-    config = import_module("mergecraft.analyzers.config")
+    import mergecraft.analyzers.config as config
+
     verify_enabled = config.trufflehog_verify_enabled(
         repo_root=adapter_fixture_repo,
         tier=tier,

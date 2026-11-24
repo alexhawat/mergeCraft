@@ -9,7 +9,6 @@ authenticate without inventing unverified config keys.
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 
 import pytest
@@ -18,7 +17,9 @@ from tests.agents.conftest import make_agent_run_context
 
 def _load_codex_module():
     try:
-        return importlib.import_module("mergecraft.agents.codex")
+        from mergecraft.agents import codex
+
+        return codex
     except ImportError as exc:
         pytest.fail(f"mergecraft.agents.codex not implemented: {exc}")
 

@@ -24,7 +24,6 @@ gates", so another lane may append its own gate beside this one.
 from __future__ import annotations
 
 import re
-from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -77,11 +76,15 @@ ALL_STATUSES = (
 
 
 def _api() -> Any:
-    return import_module("mergecraft.classify.blast_radius")
+    from mergecraft.classify import blast_radius
+
+    return blast_radius
 
 
 def _rg() -> Any:
-    return import_module("mergecraft.ci.red_green")
+    from mergecraft.ci import red_green
+
+    return red_green
 
 
 def _change(
@@ -611,7 +614,8 @@ def _packet_ctx(
     if hasattr(tool_state, "scope_declaration"):
         # Once declared scope lands (#1056 part 3) a run without one is ``scope.unknown``
         # at ``medium``; declare the diff's one path so only the fix proof moves the lane.
-        ingest = import_module("mergecraft.requirements.ingest")
+        import mergecraft.requirements.ingest as ingest
+
         tool_state.scope_declaration = ingest.ScopeDeclaration(
             declared=True, globs=("docs/guide.md",), source_ref="pr_description", rejected=()
         )

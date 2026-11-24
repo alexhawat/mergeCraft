@@ -104,11 +104,12 @@ def test_warm_version_startup_cpu_budget(tmp_path: Path) -> None:
 
 def test_root_completion_discovers_commands_without_importing_them(tmp_path: Path) -> None:
     script = """
-import click, json, sys
+import json, sys
+from typer import Context
 from typer.main import get_command
 from mergecraft.cli.app import app
 command = get_command(app)
-items = command.shell_complete(click.Context(command), "rev")
+items = command.shell_complete(Context(command), "rev")
 print(json.dumps({"items": [item.value for item in items], "modules": list(sys.modules)}))
 """
     result = subprocess.run(

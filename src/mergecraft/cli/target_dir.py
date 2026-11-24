@@ -26,19 +26,21 @@ import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import click
-from click.core import ParameterSource
+from typer._click.core import ParameterSource
+from typer.core import TyperOption
 
 from mergecraft.utils.workspace import git_repo_root
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from typer import _click
+
 #: Directory options that name the repository a command acts on.
 _REPO_DIR_PARAM_NAMES = frozenset({"cwd", "repo_root", "repo"})
 _IMPLICIT_SOURCES = frozenset({ParameterSource.DEFAULT, ParameterSource.DEFAULT_MAP})
 #: Commands whose directory options already carry the resolver (install once).
-_INSTALLED: weakref.WeakSet[click.Command] = weakref.WeakSet()
+_INSTALLED: weakref.WeakSet[_click.Command] = weakref.WeakSet()
 
 
 def target_dir(cwd: Path) -> Path:
@@ -72,24 +74,24 @@ def implicit_repo_root() -> Path:
     return git_repo_root(str(start)) or start
 
 
-def _is_repo_dir_option(param: click.Parameter) -> bool:
+def _is_repo_dir_option(param: _click.Parameter) -> bool:
     """True for a ``--cwd``-style option whose default is the current directory.
 
     Args:
-        param (click.Parameter): A command parameter.
+        param (_click.Parameter): A command parameter.
 
     Returns:
         bool: Whether an omitted value should resolve to the repository root.
     """
-    if not isinstance(param, click.Option) or param.name not in _REPO_DIR_PARAM_NAMES:
+    if not isinstance(param, TyperOption) or param.name not in _REPO_DIR_PARAM_NAMES:
         return False
     default = param.default
     return default == "." or (isinstance(default, Path) and default == Path())
 
 
 def _root_resolving_callback(
-    original: Callable[[click.Context, click.Parameter, Any], Any] | None,
-) -> Callable[[click.Context, click.Parameter, Any], Any]:
+    original: Callable[[_click.Context, _click.Parameter, Any], Any] | None,
+) -> Callable[[_click.Context, _click.Parameter, Any], Any]:
     """Wrap *original* so an omitted value becomes :func:`implicit_repo_root`.
 
     Args:
@@ -99,7 +101,7 @@ def _root_resolving_callback(
         Callable: A Click option callback.
     """
 
-    def callback(ctx: click.Context, param: click.Parameter, value: Any) -> Any:
+    def callback(ctx: _click.Context, param: _click.Parameter, value: Any) -> Any:
         if (
             param.name is not None
             and not ctx.resilient_parsing
@@ -111,14 +113,14 @@ def _root_resolving_callback(
     return callback
 
 
-def install_implicit_repo_root(command: click.Command) -> None:
+def install_implicit_repo_root(command: _click.Command) -> None:
     """Make *command*'s omitted ``--cwd``-style options resolve to the repository root.
 
     Installed once per command by the CLI group, so every command — and any
     added later — follows the same rule without its own resolver.
 
     Args:
-        command (click.Command): The command about to be invoked.
+        command (_click.Command): The command about to be invoked.
     """
     if command in _INSTALLED:
         return

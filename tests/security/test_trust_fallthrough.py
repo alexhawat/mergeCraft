@@ -35,7 +35,6 @@ from mergecraft.analyzers.trust import (
 from tests.analyzers.support import (
     FORK_PULL_REQUEST_EVENT,
     SAME_REPO_PULL_REQUEST_EVENT,
-    import_module,
 )
 
 
@@ -225,7 +224,8 @@ def test_every_caller_tolerates_untrusted_default(
     with the untrusted result, and asserts both the tier returned by
     ``derive_trust_tier`` and that every helper handles it cleanly.
     """
-    manifest_mod = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest_mod
+
     raw = Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml").read_text(
         encoding="utf-8"
     )

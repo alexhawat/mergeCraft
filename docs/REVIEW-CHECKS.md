@@ -173,7 +173,9 @@ never be cleared, because there are no lines to hand back; generated, minified
 and vendored hunks removed by policy are listed as `excluded_generated` and do
 not count against completeness. Before the verdict is accepted, one nudge names
 exactly the unread ranges so the reviewer can read them and submit again; that
-nudge fires once per session. If anything is still uncovered, the run is
+nudge fires once per session, or up to three times while at least 200 added
+lines and more than a tenth of the change are still unread. If anything is still
+uncovered, the run is
 `inconclusive` (a `neutral` check)
 even though a verdict was submitted; a Critical or Major finding still makes
 `mergecraft-approval` conclude `failure`. The checks and the run record state
@@ -489,7 +491,8 @@ Checks on the review process itself, so a review can't quietly skip half the PR:
 
 - The complete raw diff is read end-to-end, using the diff's table of contents as a coverage checklist.
 - On a re-review, an incremental patch covering only the commits since mergeCraft's last review scopes what is new — the full diff still establishes coverage.
-- A first submission that missed regions gets a one-time nudge listing the unread ranges.
+- A first submission that missed regions gets a nudge listing the unread ranges: once, or up to three times while most of a large change is still unread.
+- A high-risk change, or one with 1,000 or more added lines, whose review opened fewer than five source files beyond the diff gets a one-time nudge to read the code the change depends on before the verdict is accepted. An offline review has no risk lane at that point and is judged on size alone.
 - Understanding is never delegated: subagents supply lens investigations, but the primary reviewer synthesizes and re-verifies every finding.
 - **Trivially skippable** — a single-word doc typo, whitespace-only changes, comment-only changes, lockfile or generated-code regeneration, a mechanical rename, a low-risk dependency patch bump.
 - **Looks trivial but is not** (small diff, big blast radius — never skipped):

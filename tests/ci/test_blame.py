@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import pytest
 
-from tests.ci.support import import_module, load_fixture
+from tests.ci.support import load_fixture
 
 _FAILING_LOG = "FAILED src/app.py::test_thing\n"
 
 
 def test_failure_touching_diff_maps_to_introducing_hunk() -> None:
-    blame = import_module("mergecraft.ci.blame")
+    import mergecraft.ci.blame as blame
+
     fixture = load_fixture("blame_maps_to_diff_hunk.json")
     verdict = blame.blame_failure(
         failure=fixture["job"],
@@ -38,7 +39,8 @@ def test_failure_outside_diff_reports_probably_not_this_pr() -> None:
     exoneration must not hinge on a fabricated location; and a decided verdict
     names what the base concluded instead of hedging with "probably".
     """
-    blame = import_module("mergecraft.ci.blame")
+    import mergecraft.ci.blame as blame
+
     fixture = load_fixture("blame_unrelated_to_pr.json")
     verdict = blame.blame_failure(
         failure=fixture["job"],
@@ -54,7 +56,8 @@ def test_failure_outside_diff_reports_probably_not_this_pr() -> None:
 
 
 def test_blame_unknown_when_paths_do_not_overlap_and_base_unknown() -> None:
-    blame = import_module("mergecraft.ci.blame")
+    import mergecraft.ci.blame as blame
+
     fixture = load_fixture("blame_unrelated_to_pr.json")
     verdict = blame.blame_failure(
         failure=fixture["job"],
@@ -67,7 +70,8 @@ def test_blame_unknown_when_paths_do_not_overlap_and_base_unknown() -> None:
 
 def test_no_path_and_no_base_evidence_is_unknown_without_a_sentinel() -> None:
     """A pathless log is unattributed, not attributed to ``ci/pipeline``."""
-    blame = import_module("mergecraft.ci.blame")
+    import mergecraft.ci.blame as blame
+
     verdict = blame.blame_failure(
         failure={
             "log_excerpt": (
@@ -96,7 +100,8 @@ def test_no_path_and_no_base_evidence_is_unknown_without_a_sentinel() -> None:
     ],
 )
 def test_only_a_base_failure_exonerates(base_branch_status: str | None, expected: str) -> None:
-    blame = import_module("mergecraft.ci.blame")
+    import mergecraft.ci.blame as blame
+
     verdict = blame.blame_failure(
         failure={"log_excerpt": _FAILING_LOG},
         pr_diff_paths=["README.md"],
@@ -106,7 +111,8 @@ def test_only_a_base_failure_exonerates(base_branch_status: str | None, expected
 
 
 def test_a_passing_base_branch_does_not_exonerate() -> None:
-    blame = import_module("mergecraft.ci.blame")
+    import mergecraft.ci.blame as blame
+
     verdict = blame.blame_failure(
         failure={"log_excerpt": _FAILING_LOG},
         pr_diff_paths=["README.md"],
@@ -118,7 +124,8 @@ def test_a_passing_base_branch_does_not_exonerate() -> None:
 
 
 def test_an_unrecognised_base_status_does_not_exonerate() -> None:
-    blame = import_module("mergecraft.ci.blame")
+    import mergecraft.ci.blame as blame
+
     verdict = blame.blame_failure(
         failure={"log_excerpt": _FAILING_LOG},
         pr_diff_paths=["README.md"],
@@ -130,7 +137,8 @@ def test_an_unrecognised_base_status_does_not_exonerate() -> None:
 
 def test_blame_normalises_dot_slash_on_both_sides() -> None:
     """The diff's ``./src/a.py`` and the log's ``src/a.py`` are the same path."""
-    blame = import_module("mergecraft.ci.blame")
+    import mergecraft.ci.blame as blame
+
     verdict = blame.blame_failure(
         failure={"log_excerpt": "src/a.py:3: error\n"},
         pr_diff_paths=["./src/a.py"],
@@ -141,7 +149,8 @@ def test_blame_normalises_dot_slash_on_both_sides() -> None:
 
 def test_flaky_retry_log_does_not_blame_a_path_that_passed() -> None:
     """A ``PASSED`` line is not a failure location, so an unrelated diff is safe."""
-    blame = import_module("mergecraft.ci.blame")
+    import mergecraft.ci.blame as blame
+
     fixture = load_fixture("flaky_retry_pass.json")
     verdict = blame.blame_failure(
         failure={"log_excerpt": fixture["attempts"][0]["log_excerpt"]},

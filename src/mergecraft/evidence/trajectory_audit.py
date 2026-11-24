@@ -73,7 +73,10 @@ _CATEGORY = "Maintainability & Code Quality"
 # failures. The diff-coverage nudge is raised once by ``submit_review_verdict``
 # and the agent is expected to resubmit with different arguments, so keying
 # ``ignored-tool-error`` on the changed signature would manufacture a finding.
-_GUIDANCE_ERROR_MARKERS: Final[tuple[str, ...]] = ("diff coverage pre-flight",)
+_GUIDANCE_ERROR_MARKERS: Final[tuple[str, ...]] = (
+    "diff coverage pre-flight",
+    "review depth pre-flight",
+)
 
 
 class TrajectoryCheck(BaseModel):

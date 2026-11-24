@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from mergecraft.review_taxonomy import finding_fingerprint
-from tests.analyzers.support import import_module
 
 
 def _finding(tool: str, path: str, line: int, message: str) -> object:
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     return finding_mod.make_finding(
         tool=tool,
         rule_id=f"{tool}-rule",
@@ -23,7 +23,8 @@ def _finding(tool: str, path: str, line: int, message: str) -> object:
 
 
 def test_three_tools_one_defect_publish_one_finding_with_evidence() -> None:
-    cluster = import_module("mergecraft.analyzers.cluster")
+    import mergecraft.analyzers.cluster as cluster
+
     message = "unpinned third-party action"
     findings = [
         _finding("zizmor", ".github/workflows/unpinned-action.yml", 11, message),
@@ -38,7 +39,8 @@ def test_three_tools_one_defect_publish_one_finding_with_evidence() -> None:
 
 
 def test_distinct_defects_on_same_line_stay_distinct() -> None:
-    cluster = import_module("mergecraft.analyzers.cluster")
+    import mergecraft.analyzers.cluster as cluster
+
     findings = [
         _finding("zizmor", "Dockerfile", 2, "Using latest tag"),
         _finding("hadolint", "Dockerfile", 2, "Missing HEALTHCHECK"),
@@ -48,7 +50,8 @@ def test_distinct_defects_on_same_line_stay_distinct() -> None:
 
 
 def test_cluster_key_derives_from_finding_fingerprint() -> None:
-    cluster = import_module("mergecraft.analyzers.cluster")
+    import mergecraft.analyzers.cluster as cluster
+
     message = "Double quote to prevent globbing."
     path = "scripts/deploy.sh"
     f1 = _finding("shellcheck", path, 5, message)

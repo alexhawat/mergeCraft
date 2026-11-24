@@ -38,17 +38,6 @@ _INPUT = 100
 _OUTPUT = 7
 
 
-class _StubResponse:
-    def __init__(self, body: dict[str, Any]) -> None:
-        self._body = body
-        self.status_code = 200
-        self.content = b"{}"
-        self.text = "{}"
-
-    def json(self) -> dict[str, Any]:
-        return self._body
-
-
 class _StubClient:
     body: ClassVar[dict[str, Any]] = {}
     last_payload: ClassVar[dict[str, Any] | None] = None
@@ -62,11 +51,11 @@ class _StubClient:
     async def __aexit__(self, *exc: object) -> None:
         return None
 
-    async def post(self, *args: object, **kwargs: object) -> _StubResponse:
+    async def post(self, *args: object, **kwargs: object) -> httpx.Response:
         payload = kwargs.get("json")
         if isinstance(payload, dict):
             type(self).last_payload = payload
-        return _StubResponse(type(self).body)
+        return httpx.Response(200, json=type(self).body)
 
 
 @pytest.fixture(autouse=True)

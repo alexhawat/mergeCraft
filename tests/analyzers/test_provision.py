@@ -7,14 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import import_module, skip_if_github_release_outage
+from tests.analyzers.support import skip_if_github_release_outage
 
 
 def test_checksum_mismatch_fails_before_execute(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    provision = import_module("mergecraft.analyzers.provision")
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+    import mergecraft.analyzers.provision as provision
+
     m = manifest.load_manifest_file(
         Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml")
     )
@@ -33,13 +34,15 @@ def test_checksum_mismatch_fails_before_execute(
 
 
 def test_unpinned_download_path_does_not_exist(tmp_path: Path) -> None:
-    provision = import_module("mergecraft.analyzers.provision")
+    import mergecraft.analyzers.provision as provision
+
     with pytest.raises((provision.ProvisionError, AttributeError), match=r"pin|sha256|provenance"):
         provision.fetch_unpinned(url="https://example.com/tool", cache_dir=tmp_path)
 
 
 def test_lockfile_records_resolved_tool_and_checksum(tmp_path: Path) -> None:
-    lockfile = import_module("mergecraft.analyzers.lockfile")
+    import mergecraft.analyzers.lockfile as lockfile
+
     entry = lockfile.LockEntry(
         tool_id="actionlint",
         version="1.7.12",
@@ -57,8 +60,9 @@ def test_lockfile_records_resolved_tool_and_checksum(tmp_path: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.network
 def test_two_runs_at_same_lock_resolve_identically(tmp_path: Path) -> None:
-    provision = import_module("mergecraft.analyzers.provision")
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+    import mergecraft.analyzers.provision as provision
+
     m = manifest.load_manifest_file(
         Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml")
     )
@@ -84,9 +88,10 @@ def test_checkout_lock_is_recorded_but_never_authenticates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The lock row is a record — it never vouches for a binary committed in the tree."""
-    provision = import_module("mergecraft.analyzers.provision")
-    lockfile = import_module("mergecraft.analyzers.lockfile")
-    manifest_mod = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.lockfile as lockfile
+    import mergecraft.analyzers.manifest as manifest_mod
+    import mergecraft.analyzers.provision as provision
+
     m = manifest_mod.load_manifest_file(
         Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml")
     )

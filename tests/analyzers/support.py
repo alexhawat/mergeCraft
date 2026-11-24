@@ -271,3 +271,14 @@ def patch_analyzer_spawn(monkeypatch: Any, run_like: Any) -> None:
             return self._completed.stdout, self._completed.stderr
 
     monkeypatch.setattr(subprocess, "Popen", _FakePopen)
+
+
+def enabled_analyzer_ids(repo_root: Path, changed_files: list[str]) -> set[str]:
+    from mergecraft.analyzers.registry import detect_enabled
+
+    return {
+        manifest.id
+        for manifest in detect_enabled(
+            repo_root=repo_root, changed_files=changed_files, settings_overrides={}
+        )
+    }

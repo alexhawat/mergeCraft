@@ -7,8 +7,8 @@ from copy import copy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import click
-from click.core import ParameterSource
+from typer._click.core import ParameterSource
+from typer.core import TyperCommand, TyperGroup, TyperOption
 from typer.main import get_command
 
 from mergecraft.utils.git_hardening import git_argv
@@ -16,6 +16,7 @@ from mergecraft.utils.workspace import git_repo_root
 
 if TYPE_CHECKING:
     import typer
+    from typer import _click
 
 
 def implicit_env_is_tracked(path: Path) -> bool:
@@ -77,17 +78,17 @@ def startup_local_target(app: typer.Typer, args: list[str]) -> Path | None:
         return None
     from mergecraft.utils.source_resolve import _is_remote_source
 
-    command: click.Command | None = get_command(app)
+    command: _click.Command | None = get_command(app)
     remaining = list(args)
     target: Path | None = None
     while command is not None:
         params = [copy(param) for param in command.params]
         for param in params:
             param.callback = None
-            if isinstance(param, click.Option):
+            if isinstance(param, TyperOption):
                 param.prompt = None
-        group = isinstance(command, click.Group)
-        parser = click.Command(
+        group = isinstance(command, TyperGroup)
+        parser = TyperCommand(
             name=command.name,
             params=params,
             context_settings={"allow_interspersed_args": not group, "allow_extra_args": True},
@@ -102,7 +103,7 @@ def startup_local_target(app: typer.Typer, args: list[str]) -> Path | None:
                 if isinstance(repo, str) and not _is_remote_source(repo):
                     target = Path(repo.strip()).expanduser().resolve()
             remaining = context.args
-        if not isinstance(command, click.Group) or not remaining:
+        if not isinstance(command, TyperGroup) or not remaining:
             break
         command = command.get_command(context, remaining[0])
         remaining = remaining[1:]

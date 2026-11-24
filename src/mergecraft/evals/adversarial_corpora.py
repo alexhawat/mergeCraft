@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from mergecraft.evals.adversarial import AdversarialCase, check_fence
+from mergecraft.evals.adversarial import AdversarialCase, check_fence, discover_adversarial_cases
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -293,6 +293,16 @@ def eval_adversarial_gate(
     corpora = discover_adversarial_corpora(bank=bank)
     failed: list[str] = [item for item in candidate_failures if item]
     failed.extend(_corpus_regressions(corpora))
+    for case in discover_adversarial_cases():
+        result = check_fence(case)
+        expected_route = "classified" if case.vector == "generated_code" else "reviewed"
+        if not (
+            result.fenced
+            and result.forged_delimiters_neutralized
+            and result.legit_content_preserved
+            and result.handled_as == expected_route
+        ):
+            failed.append(case.case_id)
     unique = tuple(dict.fromkeys(failed))
     return AdversarialGateReport(passed=not unique, failed_cases=unique)
 
