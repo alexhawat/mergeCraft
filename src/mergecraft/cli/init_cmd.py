@@ -10,6 +10,7 @@ from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.local_env import local_env_path_for_cwd
 from mergecraft.cli.provider_cmd import seed_builtin_providers
 from mergecraft.cli.startup_env import implicit_env_is_tracked
 from mergecraft.cli.target_dir import implicit_repo_root
@@ -194,7 +195,7 @@ def run(
     _ensure_gitignore(root)
 
     if config_path.is_file():
-        seed_builtin_providers(config_path)
+        seed_builtin_providers(config_path, env_path=local_env_path_for_cwd(root))
 
     console.print("\n[bold]next steps[/bold]")
     console.print(
