@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -48,6 +49,18 @@ _RULE_MESSAGES: dict[str, str] = {
 }
 
 
+def _ast_anchor(node: ast.AST) -> str:
+    """Position-independent digest of an AST subtree."""
+    payload = ast.dump(node, annotate_fields=False)
+    return hashlib.sha256(payload.encode()).hexdigest()[:12]
+
+
+def _except_handler_anchor(handler: ast.ExceptHandler) -> str:
+    if handler.type is None:
+        return "bare-except"
+    return ast.unparse(handler.type) if hasattr(ast, "unparse") else _ast_anchor(handler.type)
+
+
 @dataclass(frozen=True)
 class HonestyFinding:
     """One honesty violation."""
@@ -56,6 +69,7 @@ class HonestyFinding:
     line_no: int
     rule: str
     detail: str
+    anchor: str
     level: FindingLevel = "error"
 
     @property
@@ -66,8 +80,8 @@ class HonestyFinding:
 
     @property
     def fingerprint(self) -> str:
-        """Stable key for baseline entries."""
-        return f"{self.path}:{self.line_no}:{self.rule}"
+        """Stable key for baseline entries (path + rule + logical anchor, no line number)."""
+        return f"{self.path}:{self.rule}:{self.anchor}"
 
 
 @dataclass
@@ -148,6 +162,7 @@ class _HonestyVisitor(ast.NodeVisitor):
         self.lines = lines
         self.findings: list[HonestyFinding] = []
         self._under_test = _module_under_test(rel_path)
+        self._current_func = "<module>"
 
     def _maybe_add(self, finding: HonestyFinding) -> None:
         if _line_has_allow(self.lines, finding.line_no):
@@ -157,18 +172,40 @@ class _HonestyVisitor(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:
         sleep_name = _sleep_callee(node)
         if sleep_name and node.args and _is_const_number(node.args[0]):
-            value = node.args[0].value  # type: ignore[union-attr]
+            arg0 = node.args[0]
+            assert isinstance(arg0, ast.Constant)
+            value = arg0.value
+            if isinstance(value, (int, float)) and value == 0:
+                pass
+            else:
+                anchor = f"{sleep_name}({value!r})"
+                self._maybe_add(
+                    HonestyFinding(
+                        path=self.rel_path,
+                        line_no=node.lineno,
+                        rule=RULE_SLEEP_CONSTANT,
+                        detail=anchor,
+                        anchor=anchor,
+                    )
+                )
+
+        suppress_name = _dotted_name(node.func)
+        if suppress_name in {"contextlib.suppress", "suppress"}:
             self._maybe_add(
                 HonestyFinding(
                     path=self.rel_path,
                     line_no=node.lineno,
-                    rule=RULE_SLEEP_CONSTANT,
-                    detail=f"{sleep_name}({value!r})",
+                    rule=RULE_EXCEPT_SWALLOW,
+                    detail="contextlib.suppress swallows exceptions",
+                    anchor=f"suppress:{_ast_anchor(node)}",
                 )
             )
 
         func = _dotted_name(node.func)
-        if func in {"unittest.mock.patch", "mock.patch"} and node.args:
+        is_patch = func in {"unittest.mock.patch", "mock.patch"} or (
+            isinstance(node.func, ast.Name) and node.func.id == "patch"
+        )
+        if is_patch and node.args:
             target = node.args[0]
             if isinstance(target, ast.Constant) and isinstance(target.value, str):
                 self._check_patch_target(target.value, node.lineno)
@@ -203,6 +240,7 @@ class _HonestyVisitor(ast.NodeVisitor):
                             line_no=node.lineno,
                             rule=RULE_RERUN_CONFIG,
                             detail="pytest_plugins lists pytest_rerunfailures",
+                            anchor="pytest_plugins:pytest_rerunfailures",
                         )
                     )
         self.generic_visit(node)
@@ -215,22 +253,29 @@ class _HonestyVisitor(ast.NodeVisitor):
                     line_no=node.lineno,
                     rule=RULE_RERUN_CONFIG,
                     detail="imports pytest_rerunfailures",
+                    anchor="import:pytest_rerunfailures",
                 )
             )
         self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        prev = self._current_func
+        self._current_func = node.name
         for dec in node.decorator_list:
             self._visit_decorator(dec, context=node.name)
             self._visit_patch_decorator(dec)
         self._visit_assertions_in_body(node.body)
+        self._current_func = prev
         self.generic_visit(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        prev = self._current_func
+        self._current_func = node.name
         for dec in node.decorator_list:
             self._visit_decorator(dec, context=node.name)
             self._visit_patch_decorator(dec)
         self._visit_assertions_in_body(node.body)
+        self._current_func = prev
         self.generic_visit(node)
 
     def _visit_patch_decorator(self, dec: ast.expr) -> None:
@@ -238,9 +283,14 @@ class _HonestyVisitor(ast.NodeVisitor):
             return
         name = _dotted_name(dec.func)
         if (
-            name in {None, "patch", "mock.patch", "unittest.mock.patch"}
-            or (isinstance(dec.func, ast.Name) and dec.func.id == "patch")
-        ) and dec.args and isinstance(dec.args[0], ast.Constant) and isinstance(dec.args[0].value, str):
+            (
+                name in {None, "patch", "mock.patch", "unittest.mock.patch"}
+                or (isinstance(dec.func, ast.Name) and dec.func.id == "patch")
+            )
+            and dec.args
+            and isinstance(dec.args[0], ast.Constant)
+            and isinstance(dec.args[0].value, str)
+        ):
             self._check_patch_target(dec.args[0].value, dec.lineno)
 
     def _visit_decorator(self, dec: ast.expr, *, context: str) -> None:
@@ -252,6 +302,7 @@ class _HonestyVisitor(ast.NodeVisitor):
                         line_no=dec.lineno,
                         rule=RULE_FLAKE_MARKER,
                         detail=f"@pytest.mark.flaky on {context}",
+                        anchor=f"flaky:{context}",
                     )
                 )
             return
@@ -265,6 +316,7 @@ class _HonestyVisitor(ast.NodeVisitor):
                     line_no=dec.lineno,
                     rule=RULE_FLAKE_MARKER,
                     detail=f"flaky marker on {context}",
+                    anchor=f"flaky:{context}",
                 )
             )
         if name == "pytest.mark.timeout" or (
@@ -272,22 +324,31 @@ class _HonestyVisitor(ast.NodeVisitor):
         ):
             seconds = _timeout_marker_seconds(dec)
             if seconds is not None and seconds > _TIMEOUT_INFLATION_THRESHOLD:
+                anchor = f"timeout:{context}@{seconds}"
                 self._maybe_add(
                     HonestyFinding(
                         path=self.rel_path,
                         line_no=dec.lineno,
                         rule=RULE_TIMEOUT_INFLATED,
-                        detail=f"@pytest.mark.timeout({seconds}) on {context} (default {_DEFAULT_TIMEOUT_SECONDS}s)",
+                        detail=(
+                            f"@pytest.mark.timeout({seconds}) on {context} "
+                            f"(default {_DEFAULT_TIMEOUT_SECONDS}s)"
+                        ),
+                        anchor=anchor,
                     )
                 )
         for kw in dec.keywords:
             if kw.arg == "reruns" and _is_const_number(kw.value):
+                reruns_node = kw.value
+                assert isinstance(reruns_node, ast.Constant)
+                reruns = reruns_node.value
                 self._maybe_add(
                     HonestyFinding(
                         path=self.rel_path,
                         line_no=dec.lineno,
                         rule=RULE_RERUN_CONFIG,
-                        detail=f"reruns={kw.value.value} on {context}",  # type: ignore[union-attr]
+                        detail=f"reruns={reruns} on {context}",
+                        anchor=f"reruns:{context}@{reruns}",
                     )
                 )
 
@@ -301,6 +362,7 @@ class _HonestyVisitor(ast.NodeVisitor):
                     line_no=line_no,
                     rule=RULE_SELF_MOCK,
                     detail=f"patch({target!r}) targets module under test {self._under_test}",
+                    anchor=f"patch:{target}",
                     level="warning",
                 )
             )
@@ -308,12 +370,14 @@ class _HonestyVisitor(ast.NodeVisitor):
     def visit_Try(self, node: ast.Try) -> None:
         for handler in node.handlers:
             if _handler_swallows(handler):
+                anchor = f"except-pass:{self._current_func}:{_except_handler_anchor(handler)}"
                 self._maybe_add(
                     HonestyFinding(
                         path=self.rel_path,
                         line_no=handler.lineno,
                         rule=RULE_EXCEPT_SWALLOW,
                         detail="except block with only pass",
+                        anchor=anchor,
                     )
                 )
         self.generic_visit(node)
@@ -325,12 +389,14 @@ class _HonestyVisitor(ast.NodeVisitor):
     def _walk_conditional_asserts(self, node: ast.stmt, *, conditional: bool) -> None:
         if isinstance(node, ast.Assert):
             if conditional:
+                anchor = f"assert:{self._current_func}:{_ast_anchor(node)}"
                 self._maybe_add(
                     HonestyFinding(
                         path=self.rel_path,
                         line_no=node.lineno,
                         rule=RULE_CONDITIONAL_ASSERT,
                         detail="assert only runs on a conditional branch",
+                        anchor=anchor,
                     )
                 )
             return
@@ -357,9 +423,9 @@ class _HonestyVisitor(ast.NodeVisitor):
             for child in node.orelse:
                 self._walk_conditional_asserts(child, conditional=conditional)
             return
-        if isinstance(node, ast.With):
+        if isinstance(node, (ast.With, ast.AsyncWith)):
             for child in node.body:
-                self._walk_conditional_asserts(child, conditional=True)
+                self._walk_conditional_asserts(child, conditional=False)
             return
 
 
@@ -371,11 +437,16 @@ def _handler_swallows(handler: ast.ExceptHandler) -> bool:
 
 def _timeout_marker_seconds(dec: ast.Call) -> int | float | None:
     if dec.args and _is_const_number(dec.args[0]):
-        return dec.args[0].value  # type: ignore[union-attr]
+        val = dec.args[0].value
+        return val if isinstance(val, (int, float)) else None
     for kw in dec.keywords:
         if kw.arg in {"timeout", "seconds", None} and _is_const_number(kw.value):
-            return kw.value.value  # type: ignore[union-attr]
+            val = kw.value.value
+            return val if isinstance(val, (int, float)) else None
     return None
+
+
+HONESTY_RUFF_EXCLUDE = "tests/scripts/fixtures/test_honesty"
 
 
 def scan_file(path: Path, *, repo: Path) -> HonestyScanResult:

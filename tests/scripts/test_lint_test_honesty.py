@@ -42,32 +42,32 @@ def fixture_visitors():
 
 def test_scan_flags_constant_sleep(visitors) -> None:
     target = _FIXTURES / "violation_sleep.py"
-    result = visitors.scan_file(target, repo=_FIXTURES.parents[2])
+    result = visitors.scan_file(target, repo=_ROOT)
     rules = {item.rule for item in result.findings}
     assert visitors.RULE_SLEEP_CONSTANT in rules
 
 
 def test_scan_flags_conditional_assert(visitors) -> None:
     target = _FIXTURES / "violation_conditional_assert.py"
-    result = visitors.scan_file(target, repo=_FIXTURES.parents[2])
+    result = visitors.scan_file(target, repo=_ROOT)
     assert any(item.rule == visitors.RULE_CONDITIONAL_ASSERT for item in result.findings)
 
 
 def test_scan_flags_swallowed_exception(visitors) -> None:
     target = _FIXTURES / "violation_swallow.py"
-    result = visitors.scan_file(target, repo=_FIXTURES.parents[2])
+    result = visitors.scan_file(target, repo=_ROOT)
     assert any(item.rule == visitors.RULE_EXCEPT_SWALLOW for item in result.findings)
 
 
 def test_suppression_comment_skips_sleep(visitors) -> None:
     target = _FIXTURES / "allowed_with_suppression.py"
-    result = visitors.scan_file(target, repo=_FIXTURES.parents[2])
+    result = visitors.scan_file(target, repo=_ROOT)
     assert not result.findings
 
 
 def test_baseline_filters_grandfathered_findings(checker, visitors, tmp_path: Path) -> None:
     target = _FIXTURES / "violation_sleep.py"
-    result = visitors.scan_file(target, repo=_FIXTURES.parents[2])
+    result = visitors.scan_file(target, repo=_ROOT)
     assert result.findings
     baseline_path = tmp_path / "baseline.json"
     baseline_path.write_text(
@@ -88,7 +88,7 @@ def test_check_fixture_files_fail_without_baseline(checker) -> None:
     ]
     code, result, new, _grandfathered = checker.check_test_honesty(
         targets,
-        repo=_FIXTURES.parents[2],
+        repo=_ROOT,
         baseline=checker.BaselineFile(fingerprints=frozenset(), documented_count=0),
         skip_ruff=True,
     )
@@ -102,3 +102,59 @@ def test_honesty_allow_regex_requires_reason(visitors) -> None:
     assert not visitors._line_has_allow(lines, 1)
     lines = ["time.sleep(1)  # honesty: allow polling window"]
     assert visitors._line_has_allow(lines, 1)
+
+
+def test_scan_flags_flake_and_rerun(visitors) -> None:
+    target = _FIXTURES / "violation_flake.py"
+    result = visitors.scan_file(target, repo=_ROOT)
+    rules = {item.rule for item in result.findings}
+    assert visitors.RULE_FLAKE_MARKER in rules
+    assert visitors.RULE_RERUN_CONFIG in rules
+
+
+def test_scan_flags_inflated_timeout(visitors) -> None:
+    target = _FIXTURES / "violation_timeout.py"
+    result = visitors.scan_file(target, repo=_ROOT)
+    assert any(item.rule == visitors.RULE_TIMEOUT_INFLATED for item in result.findings)
+
+
+def test_scan_flags_self_mock_warning(visitors) -> None:
+    target = _FIXTURES / "test_self_mock.py"
+    result = visitors.scan_file(target, repo=_ROOT)
+    hits = [f for f in result.findings if f.rule == visitors.RULE_SELF_MOCK]
+    assert hits
+    assert hits[0].level == "warning"
+
+
+def test_scan_flags_contextlib_suppress(visitors) -> None:
+    target = _FIXTURES / "violation_suppress.py"
+    result = visitors.scan_file(target, repo=_ROOT)
+    assert any(item.rule == visitors.RULE_EXCEPT_SWALLOW for item in result.findings)
+
+
+def test_sleep_zero_not_flagged(visitors, tmp_path: Path) -> None:
+    path = tmp_path / "test_yield.py"
+    path.write_text(
+        "import asyncio\n\nasync def test_yield():\n    await asyncio.sleep(0)\n",
+        encoding="utf-8",
+    )
+    result = visitors.scan_file(path, repo=tmp_path)
+    assert not result.findings
+
+
+def test_fingerprint_stable_when_lines_shift(visitors, tmp_path: Path) -> None:
+    body = "def test_branch():\n    flag = True\n    if flag:\n        assert flag\n"
+    path = tmp_path / "tests" / "test_shift.py"
+    path.parent.mkdir(parents=True)
+    path.write_text(body, encoding="utf-8")
+    first = visitors.scan_file(path, repo=tmp_path).findings
+    path.write_text("# header comment\n" + body, encoding="utf-8")
+    second = visitors.scan_file(path, repo=tmp_path).findings
+    assert len(first) == 1
+    assert len(second) == 1
+    assert first[0].fingerprint == second[0].fingerprint
+
+
+def test_ruff_pass_excludes_honesty_fixtures(checker) -> None:
+    code = checker.run_ruff_test_honesty(repo=_ROOT)
+    assert code == 0
