@@ -23,9 +23,9 @@ on your provider, model, plan and the size of the change.
 | Jev screening (opt-in) | Calls a hosted service rather than your model provider; see [Jev gate patterns](jev-gate-patterns.md#data-sent-to-typesafe). |
 
 The cost and tokens mergeCraft reports for a run, and the run budget it charges
-(`runBounds.tokenBudget`, `runBounds.costBudgetUsd`), include every dispatch —
-the primary reviewer, the verifier, each extra roster reviewer and each
-file-group reviewer — not only the primary reviewer.
+(`runBounds.tokenBudget`, `runBounds.costBudgetUsd`), include every reviewer
+dispatch — the primary reviewer, each extra roster reviewer and each file-group
+reviewer — not only the primary reviewer.
 
 ## Levers you control
 
