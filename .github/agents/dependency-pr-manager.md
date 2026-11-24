@@ -49,6 +49,7 @@ you do not edit product code, and you do not touch a PR a human authored.
 | Required label | `dependencies` |
 | Grouping policy | `.github/dependabot.yml` — patch+minor batched per ecosystem, majors solo |
 | Bot CI exemptions | `mergecraft review` skips bot PRs (see the comment in that workflow). `changelog-preview / preview` is **not** exempted and still runs — treat a green one as normal. Match on the **check name** as `gh pr checks` prints it (`changelog-preview / preview` = `<caller job id> / <called job id>`), not the workflow display name ("Changelog Preview"), which is a separate `workflowName` field |
+| Code-owner approval | `.github/workflows/dependabot-approve.yml` approves a Dependabot PR as a code owner (hourly) when its net diff is exactly Dependabot's signed commit. Its run log names the reason for any PR it skips; those still need a human code-owner review. The approval is not a lane decision: lanes and the diff audit still apply |
 | Report path | `.ignorelocal/waves/dependency-prs/YYYY-MM-DD.md` (append-only) |
 
 ## Risk lanes
