@@ -79,7 +79,7 @@ xfail / 0 xpass. J6 plan checkboxes stay ☐.
 
 | Symbol | Module (planned) | Test anchor |
 | --- | --- | --- |
-| `PINNED_MODEL` | `jev/__init__.py`, `jev/client.py` | `test_client.py` |
+| `PINNED_MODEL` | `jev/client.py` | `test_client.py` |
 | `AsyncJevClient` | `jev/client.py` | `test_client.py`, `test_cost.py`, `test_tracing.py` |
 | `RecordedTransport` / `FlakyRecordedTransport` | `jev/client.py` | `test_client.py` |
 | `TypeSafeAPIError` / `map_typesafe_error` / `_adapt_sdk_error` | `jev/client.py` | `test_client.py` |

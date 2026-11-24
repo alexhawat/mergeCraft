@@ -11875,7 +11875,6 @@
     "tests/jev/test_client.py::test_explicit_budget_wins_over_bound_run_budget": 0.006302249035798013,
     "tests/jev/test_client.py::test_kill_switch_stops_dispatch_and_records_the_stop": 0.006765373924281448,
     "tests/jev/test_client.py::test_none_state_raises_structured_jev_error": 0.004602124041412026,
-    "tests/jev/test_client.py::test_package_exports_client_and_result_types": 0.001001416938379407,
     "tests/jev/test_client.py::test_permanent_typesafe_error_does_not_retry": 0.008777207985986024,
     "tests/jev/test_client.py::test_pinned_model_is_jev_1_13_0": 0.004933458985760808,
     "tests/jev/test_client.py::test_rate_limit_maps_to_retryable_provider_failure": 2.4693601249018684,
