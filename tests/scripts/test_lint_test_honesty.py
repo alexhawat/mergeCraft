@@ -119,7 +119,7 @@ def test_scan_flags_inflated_timeout(visitors) -> None:
 
 
 def test_scan_flags_self_mock_warning(visitors) -> None:
-    target = _FIXTURES / "test_self_mock.py"
+    target = _FIXTURES / "violation_self_mock.py"
     result = visitors.scan_file(target, repo=_ROOT)
     hits = [f for f in result.findings if f.rule == visitors.RULE_SELF_MOCK]
     assert hits
@@ -140,6 +140,29 @@ def test_sleep_zero_not_flagged(visitors, tmp_path: Path) -> None:
     )
     result = visitors.scan_file(path, repo=tmp_path)
     assert not result.findings
+
+
+def test_duplicate_sleep_gets_distinct_anchors(visitors, tmp_path: Path) -> None:
+    text = (
+        "import time\n\n"
+        "def test_one():\n"
+        "    time.sleep(0.5)\n"
+        "def test_two():\n"
+        "    time.sleep(0.5)\n"
+    )
+    path = tmp_path / "tests" / "test_dup.py"
+    path.parent.mkdir(parents=True)
+    path.write_text(text, encoding="utf-8")
+    result = visitors.scan_file(path, repo=tmp_path)
+    sleep_hits = [f for f in result.findings if f.rule == visitors.RULE_SLEEP_CONSTANT]
+    assert len(sleep_hits) == 2
+    assert sleep_hits[0].anchor != sleep_hits[1].anchor
+
+
+def test_conditional_assert_inside_with_under_if(visitors) -> None:
+    target = _FIXTURES / "violation_conditional_with.py"
+    result = visitors.scan_file(target, repo=_ROOT)
+    assert any(item.rule == visitors.RULE_CONDITIONAL_ASSERT for item in result.findings)
 
 
 def test_fingerprint_stable_when_lines_shift(visitors, tmp_path: Path) -> None:

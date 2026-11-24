@@ -157,6 +157,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    if (args.write_baseline or args.prune_baseline) and args.paths:
+        print(
+            "test-honesty: --write-baseline/--prune-baseline require a full tests/ scan",
+            file=sys.stderr,
+        )
+        return 2
+
     scan_targets = [Path(p) for p in args.paths] if args.paths else [TESTS]
     if not scan_targets and not TESTS.is_dir():
         print(f"missing tests tree: {TESTS}", file=sys.stderr)

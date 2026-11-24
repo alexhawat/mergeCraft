@@ -32,9 +32,10 @@ explicitly to unit tests.
 `sleep_constant` ignores `sleep(0)` / `sleep(0.0)` (common `asyncio` yield).
 
 Grandfathered hits live in `scripts/test_honesty_baseline.json`. Each entry is
-`path:rule:anchor` where **anchor** is derived from the offending construct
-(function name, sleep literal, patch target, assert digest, etc.) — not the line
-number — so harmless line edits do not reopen baselined debt.
+`path:rule:anchor` where **anchor** is `function:construct#occurrence` (for example
+`test_poll:time.sleep(0.5)#1`) — stable across line edits but distinct per test
+function and per duplicate construct in the same function. Checker fixtures live
+under `tests/scripts/fixtures/` and are excluded from pytest collection.
 
 **New** violations fail `make lint` and pre-commit.
 

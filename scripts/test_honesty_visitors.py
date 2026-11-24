@@ -143,14 +143,19 @@ def _module_under_test(rel_path: str) -> str | None:
         if not tail:
             return "mergecraft"
         return "mergecraft." + ".".join(tail)
-    if not path.name.startswith("test_") or path.suffix != ".py":
+    if path.suffix != ".py":
+        return None
+    if path.name.startswith("test_"):
+        stem = path.stem.removeprefix("test_")
+    elif path.name.startswith("violation_"):
+        stem = path.stem.removeprefix("violation_")
+    else:
         return None
     parts = path.parts
     if "tests" not in parts:
         return None
     idx = parts.index("tests")
     pkg_parts = list(parts[idx + 1 : -1])
-    stem = path.stem.removeprefix("test_")
     if pkg_parts:
         return "mergecraft." + ".".join([*pkg_parts, stem])
     return f"mergecraft.{stem}"
@@ -163,6 +168,14 @@ class _HonestyVisitor(ast.NodeVisitor):
         self.findings: list[HonestyFinding] = []
         self._under_test = _module_under_test(rel_path)
         self._current_func = "<module>"
+        self._anchor_seq: dict[tuple[str, str, str], int] = {}
+
+    def _scoped_anchor(self, rule: str, base: str) -> str:
+        """Return ``func:base#n`` with a per-function occurrence index."""
+        key = (rule, self._current_func, base)
+        seq = self._anchor_seq.get(key, 0) + 1
+        self._anchor_seq[key] = seq
+        return f"{self._current_func}:{base}#{seq}"
 
     def _maybe_add(self, finding: HonestyFinding) -> None:
         if _line_has_allow(self.lines, finding.line_no):
@@ -178,26 +191,27 @@ class _HonestyVisitor(ast.NodeVisitor):
             if isinstance(value, (int, float)) and value == 0:
                 pass
             else:
-                anchor = f"{sleep_name}({value!r})"
+                base = f"{sleep_name}({value!r})"
                 self._maybe_add(
                     HonestyFinding(
                         path=self.rel_path,
                         line_no=node.lineno,
                         rule=RULE_SLEEP_CONSTANT,
-                        detail=anchor,
-                        anchor=anchor,
+                        detail=base,
+                        anchor=self._scoped_anchor(RULE_SLEEP_CONSTANT, base),
                     )
                 )
 
         suppress_name = _dotted_name(node.func)
         if suppress_name in {"contextlib.suppress", "suppress"}:
+            base = f"suppress:{_ast_anchor(node)}"
             self._maybe_add(
                 HonestyFinding(
                     path=self.rel_path,
                     line_no=node.lineno,
                     rule=RULE_EXCEPT_SWALLOW,
                     detail="contextlib.suppress swallows exceptions",
-                    anchor=f"suppress:{_ast_anchor(node)}",
+                    anchor=self._scoped_anchor(RULE_EXCEPT_SWALLOW, base),
                 )
             )
 
@@ -265,8 +279,8 @@ class _HonestyVisitor(ast.NodeVisitor):
             self._visit_decorator(dec, context=node.name)
             self._visit_patch_decorator(dec)
         self._visit_assertions_in_body(node.body)
-        self._current_func = prev
         self.generic_visit(node)
+        self._current_func = prev
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         prev = self._current_func
@@ -275,8 +289,8 @@ class _HonestyVisitor(ast.NodeVisitor):
             self._visit_decorator(dec, context=node.name)
             self._visit_patch_decorator(dec)
         self._visit_assertions_in_body(node.body)
-        self._current_func = prev
         self.generic_visit(node)
+        self._current_func = prev
 
     def _visit_patch_decorator(self, dec: ast.expr) -> None:
         if not isinstance(dec, ast.Call):
@@ -362,7 +376,7 @@ class _HonestyVisitor(ast.NodeVisitor):
                     line_no=line_no,
                     rule=RULE_SELF_MOCK,
                     detail=f"patch({target!r}) targets module under test {self._under_test}",
-                    anchor=f"patch:{target}",
+                    anchor=self._scoped_anchor(RULE_SELF_MOCK, f"patch:{target}"),
                     level="warning",
                 )
             )
@@ -370,14 +384,14 @@ class _HonestyVisitor(ast.NodeVisitor):
     def visit_Try(self, node: ast.Try) -> None:
         for handler in node.handlers:
             if _handler_swallows(handler):
-                anchor = f"except-pass:{self._current_func}:{_except_handler_anchor(handler)}"
+                base = f"except-pass:{_except_handler_anchor(handler)}"
                 self._maybe_add(
                     HonestyFinding(
                         path=self.rel_path,
                         line_no=handler.lineno,
                         rule=RULE_EXCEPT_SWALLOW,
                         detail="except block with only pass",
-                        anchor=anchor,
+                        anchor=self._scoped_anchor(RULE_EXCEPT_SWALLOW, base),
                     )
                 )
         self.generic_visit(node)
@@ -389,14 +403,14 @@ class _HonestyVisitor(ast.NodeVisitor):
     def _walk_conditional_asserts(self, node: ast.stmt, *, conditional: bool) -> None:
         if isinstance(node, ast.Assert):
             if conditional:
-                anchor = f"assert:{self._current_func}:{_ast_anchor(node)}"
+                base = f"assert:{_ast_anchor(node)}"
                 self._maybe_add(
                     HonestyFinding(
                         path=self.rel_path,
                         line_no=node.lineno,
                         rule=RULE_CONDITIONAL_ASSERT,
                         detail="assert only runs on a conditional branch",
-                        anchor=anchor,
+                        anchor=self._scoped_anchor(RULE_CONDITIONAL_ASSERT, base),
                     )
                 )
             return
@@ -425,7 +439,7 @@ class _HonestyVisitor(ast.NodeVisitor):
             return
         if isinstance(node, (ast.With, ast.AsyncWith)):
             for child in node.body:
-                self._walk_conditional_asserts(child, conditional=False)
+                self._walk_conditional_asserts(child, conditional=conditional)
             return
 
 
