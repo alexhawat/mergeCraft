@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Every diff walker now splits diff text on `\n` only, as Git and `parse_diff`
+  do: analyzer scoping, added-line and hunk iteration, the diff TOC, JEV hunk
+  segmentation, diff-size budgets, diff summaries, triage and `lens`. A carriage
+  return, form feed or Unicode line separator inside a changed line no longer
+  reads as a line break, and analyzer scoping reads file-header lines only
+  before a file's first hunk.
 - A dependency advisory already present on the base branch is no longer reported
   as introduced by the pull request. The base copy of a lock file is scanned from
   a scratch path, so its advisories never matched their head twins and every one
