@@ -385,6 +385,30 @@ async def test_secondary_reviewer_overrun_raises_budget_exhausted(
     assert tracker.last_exhausted is not None
 
 
+# --------------------------------------------------------------------------- stream residue
+
+
+async def test_secondary_charge_is_not_reduced_by_the_primary_streamed_residue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1559 — a previous dispatch's incremental charges must not shrink this one.
+
+    A streaming primary leaves its per-step totals on the shared tracker. The
+    secondary's aggregate charge must still add the secondary's whole usage, or
+    the budget under-counts it again.
+    """
+    agent = _UsageAgent(AgentResult(success=True, output="ok", usage=_PRICED_USAGE))
+    env = _build_env(tmp_path, monkeypatch, agent=agent)
+    # What the primary's stream guard charged incrementally before finalizing.
+    env.tracker.stream_tokens_charged = 120_000
+    env.tracker.stream_cost_charged = 0.50
+
+    await _run_roster(env)
+
+    assert env.tracker.tokens_used == (_PRICED_USAGE.input_tokens + _PRICED_USAGE.output_tokens)
+    assert env.tracker.cost_used == pytest.approx(_PRICED_USAGE.cost_usd)
+
+
 # --------------------------------------------------------------------------- guards
 
 
