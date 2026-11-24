@@ -78,8 +78,10 @@ analyzers:
 
 When `landmines: true` and oxlint is the selected JS/TS linter, mergeCraft injects the
 plugin's `recommended` config (correctness + suspicious) unless the repo's
-`.oxlintrc.json` / `oxlint.json` already extends or registers landmines — in that case
-the repo config alone is used so rules are not doubled.
+`.oxlintrc.json` / `oxlint.json` already **registers** the plugin — an `extends` entry
+that resolves to `@interfere/landmines`, or `jsPlugins` naming
+`@interfere/landmines`. Bare `landmines/*` rule keys or unrelated `extends` paths do
+not count; injection still runs so the opt-in cannot be disabled from the PR head alone.
 
 ## Analyzer latency and managed caches
 

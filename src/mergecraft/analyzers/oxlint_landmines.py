@@ -67,6 +67,21 @@ def mergecraft_tooling_root() -> Path:
     return here.parents[3]
 
 
+def _extends_registers_landmines(entry: object) -> bool:
+    """Return True when an ``extends`` entry loads the ``@interfere/landmines`` package."""
+    text = str(entry).casefold()
+    return "@interfere/landmines" in text
+
+
+def _js_plugin_registers_landmines(plugin: dict[str, object]) -> bool:
+    """Return True when a ``jsPlugins`` entry registers ``@interfere/landmines``."""
+    name = str(plugin.get("name", "")).casefold()
+    specifier = str(plugin.get("specifier", "")).casefold()
+    return specifier == "@interfere/landmines" or (
+        name == "landmines" and specifier == "@interfere/landmines"
+    )
+
+
 def landmines_toolchain() -> tuple[Path, Path] | None:
     """Return ``(oxlint_binary, recommended_config)`` when the pinned toolchain is present."""
     node_modules = mergecraft_tooling_root() / "scripts" / "node_modules"
@@ -93,20 +108,13 @@ def oxlint_config_uses_landmines(repo_root: Path) -> bool:
         extends = payload.get("extends")
         if isinstance(extends, list):
             for entry in extends:
-                text = str(entry).casefold()
-                if "landmines" in text or "@interfere/landmines" in text:
+                if _extends_registers_landmines(entry):
                     return True
         plugins = payload.get("jsPlugins")
         if isinstance(plugins, list):
             for plugin in plugins:
-                if not isinstance(plugin, dict):
-                    continue
-                blob = f"{plugin.get('name', '')} {plugin.get('specifier', '')}".casefold()
-                if "landmines" in blob or "@interfere/landmines" in blob:
+                if isinstance(plugin, dict) and _js_plugin_registers_landmines(plugin):
                     return True
-        rules = payload.get("rules")
-        if isinstance(rules, dict) and any(str(key).startswith("landmines/") for key in rules):
-            return True
     return False
 
 

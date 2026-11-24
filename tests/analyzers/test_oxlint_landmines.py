@@ -18,6 +18,10 @@ _LANDMINES_JSON = _FIXTURES / "native" / "oxlint-landmines-sample.json"
 _BATCH_Y = _FIXTURES / "batch-y"
 
 
+def _landmines_toolchain_installed() -> bool:
+    return oxlint_landmines.landmines_toolchain() is not None
+
+
 def _settings(*, landmines: bool | None) -> AnalyzersSettings:
     return AnalyzersSettings(
         overrides={"oxlint": AnalyzerOverride(landmines=landmines)},
@@ -54,6 +58,48 @@ def test_oxlint_config_uses_landmines_detects_js_plugins(tmp_path: Path) -> None
     assert oxlint_landmines.oxlint_config_uses_landmines(tmp_path) is True
 
 
+def test_oxlint_config_rules_only_does_not_count_as_configured(tmp_path: Path) -> None:
+    (tmp_path / ".oxlintrc.json").write_text(
+        json.dumps({"rules": {"landmines/no-fixed-sleep": "off"}}),
+        encoding="utf-8",
+    )
+    assert oxlint_landmines.oxlint_config_uses_landmines(tmp_path) is False
+
+
+def test_oxlint_config_lookalike_extends_does_not_count_as_configured(tmp_path: Path) -> None:
+    (tmp_path / "landmines-compat.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / ".oxlintrc.json").write_text(
+        json.dumps({"extends": ["./landmines-compat.json"]}),
+        encoding="utf-8",
+    )
+    assert oxlint_landmines.oxlint_config_uses_landmines(tmp_path) is False
+
+
+@pytest.mark.skipif(
+    not _landmines_toolchain_installed(),
+    reason="scripts/node_modules oxlint + landmines not installed",
+)
+def test_apply_oxlint_landmines_injects_when_rules_only_config(tmp_path: Path) -> None:
+    (tmp_path / ".oxlintrc.json").write_text(
+        json.dumps({"rules": {"landmines/no-fixed-sleep": "off"}}),
+        encoding="utf-8",
+    )
+    manifest = get_manifest("oxlint")
+    plan = AnalyzerPlan(
+        manifest_id="oxlint",
+        mode="repo-native",
+        argv=tuple(manifest.command),
+    )
+    scratch = tmp_path / "scratch"
+    patched = oxlint_landmines.apply_oxlint_landmines(
+        plan,
+        repo_root=tmp_path,
+        scratch_dir=scratch,
+        analyzers_settings=_settings(landmines=True),
+    )
+    assert "-c" in patched.argv
+
+
 def test_apply_oxlint_landmines_noop_when_repo_already_configured(tmp_path: Path) -> None:
     (tmp_path / ".oxlintrc.json").write_text(
         '{"extends":["./node_modules/@interfere/landmines/configs/recommended.json"]}\n',
@@ -74,10 +120,6 @@ def test_apply_oxlint_landmines_noop_when_repo_already_configured(tmp_path: Path
     )
     assert patched.argv == plan.argv
     assert "-c" not in patched.argv
-
-
-def _landmines_toolchain_installed() -> bool:
-    return oxlint_landmines.landmines_toolchain() is not None
 
 
 @pytest.mark.skipif(
