@@ -66,13 +66,39 @@ def test_oxlint_config_rules_only_does_not_count_as_configured(tmp_path: Path) -
     assert oxlint_landmines.oxlint_config_uses_landmines(tmp_path) is False
 
 
-def test_oxlint_config_lookalike_extends_does_not_count_as_configured(tmp_path: Path) -> None:
-    (tmp_path / "landmines-compat.json").write_text("{}\n", encoding="utf-8")
-    (tmp_path / ".oxlintrc.json").write_text(
-        json.dumps({"extends": ["./landmines-compat.json"]}),
-        encoding="utf-8",
-    )
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "./landmines-compat.json",
+        "./@interfere/landmines-empty.json",
+        "./@interfere/landmines/configs/recommended.json",
+        "./vendor/node_modules/@interfere/landmines/configs/recommended.json",
+        "./node_modules/@interfere/landmines-fork/configs/recommended.json",
+        "./node_modules/@interfere/landmines/configs/../../../../empty.json",
+        "@interfere/landmines",
+        "@interfere/landmines/configs/recommended.json",
+        {"path": "./node_modules/@interfere/landmines/configs/recommended.json"},
+    ],
+)
+def test_oxlint_config_lookalike_extends_does_not_count_as_configured(
+    tmp_path: Path, entry: object
+) -> None:
+    (tmp_path / ".oxlintrc.json").write_text(json.dumps({"extends": [entry]}), encoding="utf-8")
     assert oxlint_landmines.oxlint_config_uses_landmines(tmp_path) is False
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "node_modules/@interfere/landmines/configs/recommended.json",
+        "./src/../node_modules/@interfere/landmines/configs/all.json",
+    ],
+)
+def test_oxlint_config_package_extends_spellings_count_as_configured(
+    tmp_path: Path, entry: str
+) -> None:
+    (tmp_path / ".oxlintrc.json").write_text(json.dumps({"extends": [entry]}), encoding="utf-8")
+    assert oxlint_landmines.oxlint_config_uses_landmines(tmp_path) is True
 
 
 @pytest.mark.skipif(

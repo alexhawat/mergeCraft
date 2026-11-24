@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mergecraft.analyzers.detect import _OXLINT_CONFIG_NAMES
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from mergecraft.analyzers.resolve import AnalyzerPlan
     from mergecraft.config.settings import AnalyzersSettings
 
@@ -21,6 +21,7 @@ _MIN_NODE_VERSION = (22, 18, 0)
 _LANDMINES_INJECT_CONFIG_NOTE = (
     "@interfere/landmines configs/recommended — mergeCraft-injected oxlint config"
 )
+_LANDMINES_CONFIG_DIR = Path("node_modules", "@interfere", "landmines", "configs")
 _VERSION_COMPONENT_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 
@@ -58,8 +59,6 @@ def node_meets_landmines_requirement() -> bool:
 
 def mergecraft_tooling_root() -> Path:
     """Repository root that carries ``scripts/package.json`` (source checkout or image)."""
-    from pathlib import Path
-
     here = Path(__file__).resolve()
     for candidate in (here, *here.parents):
         if (candidate / "scripts" / "package.json").is_file():
@@ -67,10 +66,17 @@ def mergecraft_tooling_root() -> Path:
     return here.parents[3]
 
 
-def _extends_registers_landmines(entry: object) -> bool:
-    """Return True when an ``extends`` entry loads the ``@interfere/landmines`` package."""
-    text = str(entry).casefold()
-    return "@interfere/landmines" in text
+def _extends_registers_landmines(entry: object, *, repo_root: Path) -> bool:
+    """Return True when an ``extends`` entry is a config shipped by ``@interfere/landmines``.
+
+    Oxlint resolves ``extends`` as file paths against the config's directory and rejects
+    package specifiers, so only a path to the installed package's ``configs/`` counts. The
+    match is lexical: the PR head may not have installed packages, and pnpm symlinks them.
+    """
+    if not isinstance(entry, str):
+        return False
+    path = Path(os.path.normpath(repo_root / entry))
+    return path.suffix == ".json" and path.parent == repo_root / _LANDMINES_CONFIG_DIR
 
 
 def _js_plugin_registers_landmines(plugin: dict[str, object]) -> bool:
@@ -108,7 +114,7 @@ def oxlint_config_uses_landmines(repo_root: Path) -> bool:
         extends = payload.get("extends")
         if isinstance(extends, list):
             for entry in extends:
-                if _extends_registers_landmines(entry):
+                if _extends_registers_landmines(entry, repo_root=repo_root):
                     return True
         plugins = payload.get("jsPlugins")
         if isinstance(plugins, list):
