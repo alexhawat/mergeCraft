@@ -519,10 +519,7 @@ def _resolve_targets(targets: list[Path], *, repo: Path) -> list[Path]:
     resolved: list[Path] = []
     for target in targets:
         path = Path(target)
-        if not path.is_absolute():
-            path = (repo / path).resolve()
-        else:
-            path = path.resolve()
+        path = (repo / path).resolve() if not path.is_absolute() else path.resolve()
         resolved.append(path)
     return resolved
 
