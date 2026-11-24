@@ -158,20 +158,56 @@ _TOKEN_BOUNDARY_SCAN_CHARS = 4096
 
 
 def _redaction_safe_head(text: str) -> str:
-    """Return the head of an over-cap stream, cut where no token straddles the cut.
+    """Return the head of an over-cap stream, cut where no value straddles the cut.
 
     The cut lands after the last complete line inside the cap. When the head is
     one long line (minified JSON), it lands just before the last character that
-    cannot belong to a token instead. Either way the kept text stays within the cap.
+    cannot belong to a token instead. Either way the kept text stays within the cap,
+    and a quoted value the head opens but does not close is dropped as well.
     """
     limit = MAX_CAPTURED_OUTPUT_CHARS
     newline = text.rfind("\n", 0, limit)
     if newline >= limit // 2:
-        return text[:newline]
+        return _drop_open_quoted_value(text[:newline])
     for index in range(limit - 1, max(limit - _TOKEN_BOUNDARY_SCAN_CHARS, 0) - 1, -1):
         if text[index] not in _TOKEN_CHARS:
-            return text[:index]
-    return text[:limit]
+            return _drop_open_quoted_value(text[:index])
+    return _drop_open_quoted_value(text[:limit])
+
+
+def _last_unescaped(text: str, quote: str) -> int:
+    index = text.rfind(quote)
+    while index > 0 and text[index - 1] == "\\":
+        index = text.rfind(quote, 0, index)
+    return index
+
+
+def _opens_value(text: str, quote_index: int) -> bool:
+    """Whether the quote at *quote_index* directly follows ``:`` or ``=`` (spaces allowed)."""
+    before = quote_index - 1
+    while before >= 0 and text[before].isspace():
+        before -= 1
+    return before >= 0 and text[before] in ":="
+
+
+def _drop_open_quoted_value(head: str) -> str:
+    """Cut *head* before a quoted value it opens (``key: "`` / ``key='``) but never closes.
+
+    The redactor's assignment rules match a quoted value only up to its closing
+    quote, so a value the cut left open would otherwise be kept as written. A
+    quote is taken as opening a value when it is the last unescaped quote of its
+    kind and directly follows ``:`` or ``=``.
+    """
+    for _ in range(4):
+        cut = len(head)
+        for quote in ('"', "'"):
+            index = _last_unescaped(head, quote)
+            if index >= 0 and _opens_value(head, index):
+                cut = min(cut, index)
+        if cut == len(head):
+            break
+        head = head[:cut]
+    return head
 
 
 def _redact_stream(text: str, *, plan: AnalyzerPlan) -> str:

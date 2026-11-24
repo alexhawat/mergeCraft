@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 import typer
 import yaml
+from pydantic import NonNegativeInt, TypeAdapter, ValidationError
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
@@ -94,7 +95,13 @@ ENV_STRUCTURE_KEYS_TO_REMOVE_ON_APPLY: frozenset[str] = frozenset()
 
 # Highest env index ``provider delete`` has freed; see ``allocate_env_index`` (D3).
 ENV_INDEX_HIGH_WATER_KEY = "providersEnvIndexHighWater"
-_INDEXED_ENV_KEY_RE = re.compile(r"^LLM_PROVIDER_(\d+)(?:_|$)")
+# A ``.env`` or process-env key that belongs to env index ``N``: the indexed
+# ``LLM_PROVIDER_<N>*`` keys and the workflow's ``MERGECRAFT_CUSTOM_PROVIDER_*_<N>``.
+_INDEXED_ENV_KEY_RE = re.compile(
+    r"^(?:LLM_PROVIDER_(\d+)(?:_.*)?|MERGECRAFT_CUSTOM_PROVIDER_(?:API_KEY|BASE_URL)_(\d+))$"
+)
+# Reads an env index exactly as ``RepoSettings`` validates one.
+_ENV_INDEX: TypeAdapter[int] = TypeAdapter(NonNegativeInt)
 
 CREDENTIAL_SUBSTRINGS_IN_CONFIG: tuple[str, ...] = (
     "api_key",
@@ -188,20 +195,35 @@ def _provider_entries(data: dict[str, Any]) -> list[dict[str, Any]]:
     return [entry for entry in raw if isinstance(entry, dict)]
 
 
+def _parse_env_index(raw: object) -> int | None:
+    """Return *raw* as an env index, parsed as ``RepoSettings`` parses one, or ``None``."""
+    try:
+        return _ENV_INDEX.validate_python(raw)
+    except ValidationError:
+        return None
+
+
 def _env_index_high_water(data: Mapping[str, Any]) -> int:
     raw = data.get(ENV_INDEX_HIGH_WATER_KEY)
-    return raw if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0 else 0
+    if raw is None:
+        return 0
+    parsed = _parse_env_index(raw)
+    if parsed is None:
+        cli_bail(f"{ENV_INDEX_HIGH_WATER_KEY} must be a non-negative integer, got {raw!r}")
+    return parsed
 
 
 def _occupied_env_indices(env_path: Path | None) -> set[int]:
-    """Return every ``N`` that still has an ``LLM_PROVIDER_<N>`` key in *env_path*."""
-    if env_path is None:
-        return set()
-    return {
-        int(match.group(1))
-        for key in _read_env_map(env_path)
-        if (match := _INDEXED_ENV_KEY_RE.match(key)) is not None
-    }
+    """Return every ``N`` that still has a key in *env_path* or the process environment."""
+    keys = set(os.environ)
+    if env_path is not None:
+        keys.update(_read_env_map(env_path))
+    occupied: set[int] = set()
+    for key in keys:
+        match = _INDEXED_ENV_KEY_RE.match(key)
+        if match is not None:
+            occupied.add(int(match.group(1) or match.group(2)))
+    return occupied
 
 
 def allocate_registry_env_index(
@@ -440,8 +462,9 @@ def delete_cmd(
     for entry in entries:
         if str(entry.get("label", "")).lower() == label.strip().lower():
             removed = True
-            if entry.get("envIndex") is not None:
-                freed.append(int(entry["envIndex"]))
+            freed_index = _parse_env_index(entry.get("envIndex"))
+            if freed_index is not None:
+                freed.append(freed_index)
             continue
         remaining.append(entry)
 

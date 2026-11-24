@@ -594,7 +594,7 @@ def compute_diff_coverage(
     tables = {
         path: (
             entries if text == diff_text else _delivered_entries(text, entries),
-            len(text.splitlines()),
+            len(diff_lines(text)),
         )
         for path, text in physical_diffs.items()
     }

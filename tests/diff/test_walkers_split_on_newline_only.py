@@ -53,3 +53,24 @@ def test_every_walker_sees_the_files_parse_diff_sees(separator: str) -> None:
     (parsed,) = _parse(diff)
     assert parsed.path == "x.py"
     assert [len(hunk.lines) for hunk in parsed.hunks] == [2]
+
+
+@pytest.mark.parametrize("separator", _SEPARATORS, ids=lambda c: f"U+{ord(c):04X}")
+def test_diff_line_counters_count_lines_git_wrote(separator: str) -> None:
+    from mergecraft.analyzers.baseline_suppression import _changed_line_count
+    from mergecraft.cli.describe_cmd import _line_counts
+    from mergecraft.evidence.run_packet import _diff_stats
+
+    diff = (
+        "diff --git a/x.py b/x.py\n"
+        "--- a/x.py\n"
+        "+++ b/x.py\n"
+        "@@ -1,1 +1,1 @@\n"
+        "-old\n"
+        f"+a{separator}-b{separator}+c\n"
+    )
+
+    assert _changed_line_count(diff) == 2
+    assert _line_counts(diff) == (1, 1)
+    stats = _diff_stats(diff)
+    assert (stats["lines_added"], stats["lines_deleted"]) == (1, 1)

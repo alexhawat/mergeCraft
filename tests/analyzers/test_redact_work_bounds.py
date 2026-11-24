@@ -209,3 +209,32 @@ def test_a_credential_cut_by_the_cap_is_not_left_behind_as_a_prefix(
     assert [len(raw) <= _CAP for raw in seen] == [True]
     assert len(persisted) > _CAP // 2
     assert f"exceeded {_CAP} chars" in outcome.output
+
+
+_PHRASE = "correct horse battery staple"
+
+
+@pytest.mark.parametrize(
+    ("opening", "closing"),
+    [('token="', '"'), ("token='", "'"), ('{"token": "', '"}'), ('token="q\\"', '"')],
+    ids=["double", "single", "json", "escaped-quote"],
+)
+def test_a_quoted_value_cut_by_the_cap_is_dropped_whole(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, opening: str, closing: str
+) -> None:
+    """The assignment rules need the closing quote, so an open quoted value must not survive."""
+    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_CHARS", _CAP)
+    stream = "word " * 196 + opening + _PHRASE + closing + " word" * 50
+    start = stream.index(_PHRASE)
+    assert start < _CAP < start + len(_PHRASE)
+    completed = subprocess.CompletedProcess(args=["ruff"], returncode=1, stdout=stream, stderr="")
+
+    outcome = run_mod._outcome_from_completed(
+        completed, plan=_plan(tmp_path), command="ruff check", output_dir=tmp_path
+    )
+
+    assert outcome.output_path is not None
+    persisted = Path(outcome.output_path).read_text(encoding="utf-8")
+    for text in (persisted, outcome.output):
+        assert "correct" not in text
+    assert len(persisted) > _CAP // 2

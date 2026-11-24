@@ -11,19 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Every diff walker now splits diff text on `\n` only, as Git and `parse_diff`
   do: analyzer scoping, added-line and hunk iteration, the diff TOC, JEV hunk
-  segmentation, diff-size budgets, diff summaries, triage and `lens`. A carriage
-  return, form feed or Unicode line separator inside a changed line no longer
-  reads as a line break, and analyzer scoping reads file-header lines only
-  before a file's first hunk.
+  segmentation, diff-size budgets, diff summaries, triage, `lens`, and the
+  added and deleted line counts of `describe`, the run record and baseline
+  suppression. A carriage return, form feed or Unicode line separator inside a
+  changed line no longer reads as a line break, and analyzer scoping reads
+  file-header lines only before a file's first hunk.
 - `provider delete` now records the highest freed env index as
   `providersEnvIndexHighWater` in `config.yaml`, so `provider add`,
   `workflow provider add`, `provider migrate` and `init` seeding never hand
   that index out again. Allocation also skips any index that still has
-  `LLM_PROVIDER_<N>` keys in the local `.env`, which covers registries written
-  before the mark existed.
+  `LLM_PROVIDER_<N>` or `MERGECRAFT_CUSTOM_PROVIDER_*_<N>` keys in the local
+  `.env` or the environment, which covers registries written before the mark
+  existed.
 - Analyzer output longer than the per-stream cap is cut on a line boundary (a
   token boundary for one long line) before redaction and capped again after it,
   so redaction always sees whole values while its work stays bounded by the cap.
+  A quoted value the cut would leave open is dropped whole.
 - A dependency advisory already present on the base branch is no longer reported
   as introduced by the pull request. The base copy of a lock file is scanned from
   a scratch path, so its advisories never matched their head twins and every one
