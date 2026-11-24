@@ -45,6 +45,8 @@ from mergecraft.review.file_group_fanout import (
     plan_file_groups,
 )
 from mergecraft.review.roster_dispatch import reviewer_dispatch_batches
+from mergecraft.review.usage_charging import charge_reviewer_usage
+from mergecraft.utils.run_bounds import BudgetExhausted
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -435,6 +437,25 @@ async def _dispatch_reviewer(
         if token:
             tool_context.reviewer_sessions.revoke(token)
 
+    # Every dispatched reviewer's usage is priced, listed and charged before its
+    # result is judged, so a reviewer that failed after spending is still
+    # accounted for (D1/D3). An overrun is not this reviewer's failure: record the
+    # reason naming the budget, then let ``BudgetExhausted`` reach the run.
+    try:
+        charge_reviewer_usage(
+            tool_state=tool_state,
+            budget_tracker=tool_context.budget_tracker,
+            usage=result.usage,
+            model=attempt_model,
+        )
+    except BudgetExhausted as exc:
+        record_reviewer_dispatch_error(
+            tool_state,
+            agent_id=record_as,
+            reason=f"{label} {record_as!r} exceeded the run budget: {exc}",
+        )
+        raise
+
     if not result.success:
         from mergecraft.agents.shared import INFRA_REASON_KEY
 
@@ -621,6 +642,10 @@ async def run_pending_roster_reviewers(
             return_exceptions=True,
         )
         for binding, outcome in zip(pending, outcomes, strict=True):
+            if isinstance(outcome, BudgetExhausted):
+                # An overrun is the run's, never a degraded reviewer; the dispatch
+                # already recorded why. Re-raise it past this gather (D4).
+                raise outcome
             if isinstance(outcome, BaseException):
                 reason = (
                     f"secondary reviewer {binding.agent_id!r} failed: "
@@ -913,6 +938,10 @@ async def run_file_group_reviewers(
                     stamp_reviewer_evidence=True,
                     instructions_for=instructions_for,
                 )
+        except BudgetExhausted:
+            # The run's overrun, already recorded by the dispatch; never a group
+            # failure (D4).
+            raise
         except Exception as exc:
             reason = str(exc) or exc.__class__.__name__
             record_reviewer_dispatch_error(tool_state, agent_id=agent_id, reason=reason)
