@@ -152,7 +152,7 @@ def _build_section(lines: list[str]) -> DiffFile:
     )
 
 
-def diff_lines(diff_text: str, *, keepends: bool = False) -> list[str]:
+def diff_lines(diff_text: str, *, keepends: bool = False, strip_cr: bool = False) -> list[str]:
     """Split ``diff_text`` into lines the way Git writes them: on ``\\n`` only.
 
     ``str.splitlines`` also breaks on ``\\r``, form feeds and Unicode separators
@@ -163,6 +163,9 @@ def diff_lines(diff_text: str, *, keepends: bool = False) -> list[str]:
     Args:
         diff_text (str): A unified diff as ``git diff`` renders it.
         keepends (bool): Keep the trailing ``\\n`` on each line.
+        strip_cr (bool): Drop one trailing ``\\r`` from each line, so a CRLF
+            file's content reads as it did through ``str.splitlines``. Ignored
+            when ``keepends`` is set, which must reproduce the text exactly.
 
     Returns:
         list[str]: The lines; no empty trailing element for a final newline.
@@ -170,13 +173,21 @@ def diff_lines(diff_text: str, *, keepends: bool = False) -> list[str]:
     Examples:
         >>> diff_lines("+a\\u2028b\\n+c\\n")
         ['+a\\u2028b', '+c']
+        >>> diff_lines("+a\\r\\n+b\\rc\\n", strip_cr=True)
+        ['+a', '+b\\rc']
     """
     lines = str(diff_text).split("\n")
     tail = lines.pop()  # "" when the text ends with a newline
-    out = [line + "\n" for line in lines] if keepends else lines
     if tail:
-        out.append(tail)
-    return out
+        lines.append(tail)
+    if keepends:
+        out = [line + "\n" for line in lines]
+        if tail:
+            out[-1] = tail
+        return out
+    if strip_cr:
+        return [line.removesuffix("\r") for line in lines]
+    return lines
 
 
 def parse_diff(diff_text: str) -> ParsedDiff:

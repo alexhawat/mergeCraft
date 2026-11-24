@@ -10,7 +10,7 @@
 
 The eight checks already run; the missing work is measurement against independently labelled process defects. Coding the scorer can proceed while the human dataset is prepared. A labelled trajectory CI regression gate must not make run-health findings block reviewed PRs.
 
-`evidence/trajectory_audit.py:492` exposes `audit_trajectory`; `TRAJECTORY_CHECKS` defines eight checks. `_changed_unread_file:167–181` is one producer. `TrajectoryRecord` and `ToolCallRecord` are strict models in `evidence/trajectory.py`; predictions are ordinary `Finding` objects with `rule_id`, `path`, `source="trajectory"`, and `scope="run"`. `tracing/signals.py::emit_eval_score` already emits numeric eval fields. No labelled-trajectory scorer exists. #780's golden finding metadata cannot supply tool-call trajectories; #735's dependency text claiming otherwise is stale and must be corrected.
+`evidence/trajectory_audit.py:492` exposes `audit_trajectory`; `TRAJECTORY_CHECKS` defines eight checks. `_changed_unread_file:167–181` is one producer. `TrajectoryRecord` and `ToolCallRecord` are strict models in `evidence/trajectory.py`; predictions are ordinary `Finding` objects with `rule_id`, `path`, `source="trajectory"`, and `scope="run"`. `tracing/signals.py::emit_eval_score` already emits numeric eval fields. No labelled-trajectory scorer exists. #780's golden finding metadata cannot supply tool-call trajectories; #735's dependency text claiming otherwise is stale and must be corrected; #780 was also closed as not planned on 2026-11-23, so it supplies no labels.
 
 ```
 def audit_trajectory(record: TrajectoryRecord) -> list[Finding]:
@@ -67,7 +67,7 @@ Verification: Known confusion-matrix fixtures give exact expected counts; empty/
 
 ### 3. Obtain separate human trajectory labels
 
-Prepare real sanitized traces representing all eight checks, including ordinary-read and redaction boundaries. Freeze a manifest before scoring with case IDs/hashes, source commits, disjoint `calibration`/`held_out` membership, minimum independently labelled examples per check, and regression tolerances. These numeric minimums and tolerances require maintainer approval; the schema must require explicit values and provide no permissive defaults. Have a named independent human annotate with the written protocol. Keep development fixtures and #780 rows out of ground truth. Update #735 to remove #780 as its label dependency.
+Prepare real sanitized traces representing all eight checks, including ordinary-read and redaction boundaries. Freeze a manifest before scoring with case IDs/hashes, source commits, disjoint `calibration`/`held_out` membership, minimum independently labelled examples per check, and regression tolerances. These numeric minimums and tolerances require maintainer approval; the schema must require explicit values and provide no permissive defaults. Have a named independent human annotate with the written protocol. Keep development fixtures and #780 rows out of ground truth. Update #735 to remove #780, now closed as not planned, as its label dependency.
 
 Verification: The command reports independent eligibility and sample counts per check; unlabelled/agent-seeded collections remain advisory.
 
