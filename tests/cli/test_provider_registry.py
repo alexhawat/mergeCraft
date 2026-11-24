@@ -52,6 +52,15 @@ def test_allocate_env_index_never_reuses_gaps() -> None:
     assert allocate([{"envIndex": 1}, {"envIndex": 5}]) == 6
 
 
+def test_allocate_env_index_stays_above_freed_and_occupied_indices() -> None:
+    registry = import_provider_registry()
+
+    assert registry.allocate_env_index([], high_water=3) == 4
+    assert registry.allocate_env_index([{"envIndex": 1}], high_water=2) == 3
+    assert registry.allocate_env_index([{"envIndex": 5}], high_water=2) == 6
+    assert registry.allocate_env_index([{"envIndex": 1}], occupied={1, 4}) == 5
+
+
 def test_harness_support_predicate_agrees_with_agent_resolve() -> None:
     registry = import_provider_registry()
     supports = getattr(registry, "harness_supports_provider", None)
