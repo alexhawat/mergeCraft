@@ -50,9 +50,16 @@ _RULE_MESSAGES: dict[str, str] = {
 
 
 def _ast_anchor(node: ast.AST) -> str:
-    """Position-independent digest of an AST subtree."""
+    """Position-independent digest of an AST subtree (fallback only)."""
     payload = ast.dump(node, annotate_fields=False)
     return hashlib.sha256(payload.encode()).hexdigest()[:12]
+
+
+def _source_line_anchor(lines: list[str], line_no: int, *, prefix: str = "") -> str:
+    """Anchor from the physical source line (stable across Python versions)."""
+    if 0 < line_no <= len(lines):
+        return f"{prefix}{lines[line_no - 1].strip()}"
+    return f"{prefix}@{line_no}"
 
 
 def _except_handler_anchor(handler: ast.ExceptHandler) -> str:
@@ -204,7 +211,7 @@ class _HonestyVisitor(ast.NodeVisitor):
 
         suppress_name = _dotted_name(node.func)
         if suppress_name in {"contextlib.suppress", "suppress"}:
-            base = f"suppress:{_ast_anchor(node)}"
+            base = _source_line_anchor(self.lines, node.lineno, prefix="suppress:")
             self._maybe_add(
                 HonestyFinding(
                     path=self.rel_path,
@@ -403,7 +410,7 @@ class _HonestyVisitor(ast.NodeVisitor):
     def _walk_conditional_asserts(self, node: ast.stmt, *, conditional: bool) -> None:
         if isinstance(node, ast.Assert):
             if conditional:
-                base = f"assert:{_ast_anchor(node)}"
+                base = _source_line_anchor(self.lines, node.lineno, prefix="assert:")
                 self._maybe_add(
                     HonestyFinding(
                         path=self.rel_path,

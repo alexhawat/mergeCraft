@@ -33,8 +33,10 @@ explicitly to unit tests.
 
 Grandfathered hits live in `scripts/test_honesty_baseline.json`. Each entry is
 `path:rule:anchor` where **anchor** is `function:construct#occurrence` (for example
-`test_poll:time.sleep(0.5)#1`) — stable across line edits but distinct per test
-function and per duplicate construct in the same function. Checker fixtures live
+`test_poll:time.sleep(0.5)#1` or `test_foo:assert:assert x > 0#1`). Assert and
+suppress keys use the **source text** of the line so anchors match across Python
+3.11 / 3.14; they still shift if the assertion text changes. Duplicate constructs
+in one function get `#2`, `#3`, … Checker fixtures live
 under `tests/scripts/fixtures/` and are excluded from pytest collection.
 
 **New** violations fail `make lint` and pre-commit.
