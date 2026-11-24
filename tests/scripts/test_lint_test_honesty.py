@@ -199,3 +199,86 @@ def test_relative_path_arguments_resolve_against_repo(checker, visitors) -> None
     assert result.findings
     assert new
     assert code == 1
+
+
+def _conditional_hits(visitors, tmp_path: Path, body: str) -> list[int]:
+    path = tmp_path / "tests" / "test_loop.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("def test_loop(items, flag):\n" + body, encoding="utf-8")
+    result = visitors.scan_file(path, repo=tmp_path)
+    return [f.line_no for f in result.findings if f.rule == visitors.RULE_CONDITIONAL_ASSERT]
+
+
+@pytest.mark.parametrize("literal", ["(1, 2)", "[1]", "{1, 2}", "(1, *items)"])
+def test_assert_in_for_over_non_empty_literal_is_unconditional(
+    visitors, tmp_path: Path, literal: str
+) -> None:
+    body = f"    for value in {literal}:\n        assert value\n"
+    assert _conditional_hits(visitors, tmp_path, body) == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "    for value in items:\n        assert value\n",
+        "    for value in ():\n        assert value\n",
+        "    for value in (*items,):\n        assert value\n",
+        "    for value in (1, 2):\n        if flag:\n            assert value\n",
+        "    for value in (1, 2):\n        if flag:\n            continue\n        assert value\n",
+        "    for value in (1, 2):\n        if flag:\n            break\n        assert value\n",
+        "    if flag:\n        for value in (1, 2):\n            assert value\n",
+        "    for item in items:\n        for value in (1, 2):\n            assert value\n",
+        "    while flag:\n        assert flag\n",
+    ],
+)
+def test_assert_in_loop_that_may_not_run_stays_conditional(
+    visitors, tmp_path: Path, body: str
+) -> None:
+    assert len(_conditional_hits(visitors, tmp_path, body)) == 1
+
+
+@pytest.fixture(name="baseline_repo")
+def fixture_baseline_repo(checker, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the checker at a throwaway repo with one grandfathered sleep."""
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_old.py").write_text(
+        "import time\n\ndef test_old():\n    time.sleep(0.5)\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(checker, "REPO", tmp_path)
+    monkeypatch.setattr(checker, "TESTS", tests)
+    monkeypatch.setattr(checker, "BASELINE_PATH", tmp_path / "baseline.json")
+    load = checker.load_baseline
+    monkeypatch.setattr(checker, "load_baseline", lambda: load(tmp_path / "baseline.json"))
+    return tmp_path
+
+
+def test_write_baseline_records_the_tree_and_makes_it_pass(checker, baseline_repo: Path) -> None:
+    assert checker.main(["--skip-ruff"]) == 1
+    assert checker.main(["--write-baseline", "--skip-ruff"]) == 0
+    payload = json.loads((baseline_repo / "baseline.json").read_text(encoding="utf-8"))
+    assert payload == {
+        "violation_count": 1,
+        "fingerprints": ["tests/test_old.py:sleep_constant:test_old:time.sleep(0.5)#1"],
+    }
+    assert checker.main(["--skip-ruff"]) == 0
+
+
+def test_prune_baseline_drops_fixed_entries_without_adding_new_ones(
+    checker, baseline_repo: Path
+) -> None:
+    assert checker.main(["--write-baseline", "--skip-ruff"]) == 0
+    (baseline_repo / "tests" / "test_old.py").write_text(
+        "import asyncio\n\nasync def test_new():\n    await asyncio.sleep(0.7)\n",
+        encoding="utf-8",
+    )
+    assert checker.main(["--prune-baseline", "--skip-ruff"]) == 0
+    payload = json.loads((baseline_repo / "baseline.json").read_text(encoding="utf-8"))
+    assert payload == {"violation_count": 0, "fingerprints": []}
+    assert checker.main(["--skip-ruff"]) == 1
+
+
+def test_baseline_rewrite_refuses_partial_scan(checker, baseline_repo: Path) -> None:
+    target = str(baseline_repo / "tests" / "test_old.py")
+    assert checker.main(["--write-baseline", target]) == 2
+    assert not (baseline_repo / "baseline.json").exists()

@@ -26,10 +26,13 @@ explicitly to unit tests.
 | `rerun_config` | `reruns=`, `pytest_rerunfailures` | Same as flaky markers |
 | `timeout_inflated` | `@pytest.mark.timeout(N)` with `N > 180` or `N == 0` (disables budget) | Keep the default 180s budget or speed up the test |
 | `except_swallow` | `except ...: pass` or `contextlib.suppress` in tests | Assert expected failures or re-raise |
-| `conditional_assert` | `assert` only under `if` / loops / `try` (not `with`) | Assert unconditionally or use `pytest.raises` |
+| `conditional_assert` | `assert` only under `if` / loops / `try` (not `with`, and not `for` over a non-empty literal) | Assert unconditionally or use `pytest.raises` |
 | `self_mock` (warning) | `patch("mergecraft.<module-under-test>...")` from matching `test_<mod>.py` | Patch collaborators, not the unit under test |
 
 `sleep_constant` ignores `sleep(0)` / `sleep(0.0)` (common `asyncio` yield).
+
+`conditional_assert` ignores `for` over a non-empty tuple, list or set literal, because the
+body always runs. A `break` or `continue` anywhere in that body makes it conditional again.
 
 Grandfathered hits live in `scripts/test_honesty_baseline.json`. Each entry is
 `path:rule:anchor` where **anchor** is `function:construct#occurrence` (for example

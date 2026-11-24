@@ -441,8 +441,9 @@ class _HonestyVisitor(ast.NodeVisitor):
                 self._walk_conditional_asserts(child, conditional=conditional)
             return
         if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+            body_conditional = conditional or not _loop_body_always_runs(node)
             for child in node.body:
-                self._walk_conditional_asserts(child, conditional=True)
+                self._walk_conditional_asserts(child, conditional=body_conditional)
             for child in node.orelse:
                 self._walk_conditional_asserts(child, conditional=conditional)
             return
@@ -450,6 +451,23 @@ class _HonestyVisitor(ast.NodeVisitor):
             for child in node.body:
                 self._walk_conditional_asserts(child, conditional=conditional)
             return
+
+
+def _loop_body_always_runs(node: ast.For | ast.AsyncFor | ast.While) -> bool:
+    """Return whether every statement in the loop body is reached at least once.
+
+    True only for ``for`` over a non-empty tuple/list/set literal without ``break`` or
+    ``continue``: its asserts run exactly as if they were written out one by one.
+    """
+    if not isinstance(node, ast.For) or not isinstance(node.iter, (ast.Tuple, ast.List, ast.Set)):
+        return False
+    if all(isinstance(element, ast.Starred) for element in node.iter.elts):
+        return False
+    return not any(
+        isinstance(child, (ast.Break, ast.Continue))
+        for stmt in node.body
+        for child in ast.walk(stmt)
+    )
 
 
 def _handler_swallows(handler: ast.ExceptHandler) -> bool:
