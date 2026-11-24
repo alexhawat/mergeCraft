@@ -14,7 +14,6 @@ env-writer helper at a temp file. Tokens are fake (``pylf_test_xxx``).
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -34,7 +33,9 @@ _REGION_ENV = "MERGECRAFT_TRACING_REGION"
 
 def _load_logfire_cmd() -> object:
     try:
-        return importlib.import_module("mergecraft.cli.tracing_logfire_cmd")
+        from mergecraft.cli import tracing_logfire_cmd
+
+        return tracing_logfire_cmd
     except ImportError as exc:  # pragma: no cover
         pytest.fail(f"mergecraft.cli.tracing_logfire_cmd not importable: {exc}")
 
@@ -52,7 +53,7 @@ def _patch_httpx_with(monkeypatch: MonkeyPatch, handler) -> None:
 
 
 def _stub_repo_slug(monkeypatch: MonkeyPatch, slug: str = "acme/widgets") -> None:
-    consumer_module = importlib.import_module("mergecraft.cli.tracing_logfire_cmd")
+    import mergecraft.cli.tracing_logfire_cmd as consumer_module
 
     def _factory() -> str:
         return slug

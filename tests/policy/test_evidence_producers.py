@@ -37,7 +37,6 @@ Pinned shapes (the implementation target):
 from __future__ import annotations
 
 import asyncio
-import importlib
 import os
 import subprocess
 import zipfile
@@ -100,7 +99,9 @@ _NO_BASE_LINKS = "no linked repositories are declared on the base"
 
 
 def _producers() -> Any:
-    return importlib.import_module("mergecraft.policy.evidence_producers")
+    from mergecraft.policy import evidence_producers
+
+    return evidence_producers
 
 
 async def _collect(ctx: ToolContext, keys: tuple[str, ...] | list[str] | set[str]) -> Any:

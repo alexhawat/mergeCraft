@@ -39,6 +39,17 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _restore_loguru_stderr() -> Iterator[None]:
+    """Detach any stderr sink a test configured on a temporary capture stream."""
+    from mergecraft.utils import log
+
+    handler_id = log._STDERR_HANDLER_ID
+    yield
+    if handler_id != log._STDERR_HANDLER_ID:
+        log.configure_logging(force=True)
+
+
+@pytest.fixture(autouse=True)
 def _reset_process_tracer_cache() -> Iterator[None]:
     """Reset the process-wide Tracer cache (#292) so tests do not leak tracers."""
     from mergecraft.tracing.tracer import reset_process_tracer_cache

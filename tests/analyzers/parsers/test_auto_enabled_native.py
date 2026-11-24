@@ -51,7 +51,8 @@ def _manifest(tool_id: str):
 
 
 def _parse(parser_id: str, raw: str, *, tool_id: str):
-    parsers = import_module("mergecraft.analyzers.parsers")
+    import mergecraft.analyzers.parsers as parsers
+
     return parsers.get_parser(parser_id)(raw, manifest=_manifest(tool_id), repo_root=Path("."))
 
 
@@ -210,7 +211,8 @@ def test_tsc_project_diagnostic_without_location_is_body_only() -> None:
 def test_tsc_project_diagnostic_survives_ts_only_diff_scope() -> None:
     raw = "error TS18003: No inputs were found in config file 'tsconfig.json'."
     findings = _parse("tsc_pretty", raw, tool_id="tsc")
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
+
     diff = """diff --git a/src/index.ts b/src/index.ts
 @@ -1,3 +1,4 @@
  export const x = 1

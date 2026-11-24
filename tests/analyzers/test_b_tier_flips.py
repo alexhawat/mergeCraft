@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET, import_module
+from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET, enabled_analyzer_ids
 
 B_TIER_IDS: tuple[str, ...] = (
     "luacheck",
@@ -107,22 +107,14 @@ _F_TIER_IDS: tuple[str, ...] = (
 
 
 def _registry():
-    return import_module("mergecraft.analyzers.registry")
+    from mergecraft.analyzers import registry
 
-
-def _enabled_ids(repo_root: Path, changed_files: list[str]) -> set[str]:
-    return {
-        manifest.id
-        for manifest in _registry().detect_enabled(
-            repo_root=repo_root,
-            changed_files=changed_files,
-            settings_overrides={},
-        )
-    }
+    return registry
 
 
 def _analyzers_doc_row(tool_id: str) -> str:
-    docs = import_module("mergecraft.analyzers.catalog_docs")
+    import mergecraft.analyzers.catalog_docs as docs
+
     needle = f"| `{tool_id}` |"
     for line in docs.generate_analyzers_doc().splitlines():
         if line.startswith(needle):
@@ -131,7 +123,8 @@ def _analyzers_doc_row(tool_id: str) -> str:
 
 
 def _finding(*, tool: str, path: str, line: int):
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     return finding_mod.make_finding(
         tool=tool,
         rule_id="rule",
@@ -169,13 +162,14 @@ def test_b_tier_markers_do_not_match_unrelated_paths(tool_id: str) -> None:
 
 
 def test_empty_changed_files_do_not_enable_b_tier() -> None:
-    ids = _enabled_ids(BATCH_Z_FIXTURES / "lua", [])
+    ids = enabled_analyzer_ids(BATCH_Z_FIXTURES / "lua", [])
     assert ids.isdisjoint(B_TIER_IDS)
 
 
 @pytest.mark.parametrize("tool_id", B_TIER_IDS)
 def test_b_tier_has_catalog_check_parser_fixture(tool_id: str) -> None:
-    docs = import_module("mergecraft.analyzers.catalog_docs")
+    import mergecraft.analyzers.catalog_docs as docs
+
     manifest = _registry().get_manifest(tool_id)
     assert docs.manifest_has_fixture(manifest, fixture_root=FIXTURES_DIR), (
         f"{tool_id} must keep a catalog-check-shaped parser fixture (D15)"
@@ -190,8 +184,9 @@ def test_b_tier_declares_timeout(tool_id: str) -> None:
 
 @pytest.mark.parametrize("tool_id", list(B_TIER_IDS))
 def test_b_tier_reports_unavailable_when_toolchain_absent(tool_id: str, tmp_path: Path) -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
-    run = import_module("mergecraft.analyzers.run")
+    import mergecraft.analyzers.resolve as resolve
+    import mergecraft.analyzers.run as run
+
     manifest = _registry().get_manifest(tool_id)
     plan = resolve.resolve_analyzer(
         manifest=manifest,
@@ -209,7 +204,8 @@ def test_b_tier_reports_unavailable_when_toolchain_absent(tool_id: str, tmp_path
 
 
 def test_b_tier_findings_honor_inline_budget() -> None:
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     findings = [
         _finding(tool=tool_id, path=f"src/{tool_id}-{index}.ext", line=index)
         for tool_id in B_TIER_IDS
@@ -259,12 +255,12 @@ def test_batch_z_detect_fixture_trees_exist() -> None:
 
 def test_shopify_theme_check_does_not_auto_enable_on_bare_liquid() -> None:
     repo = BATCH_Z_FIXTURES / "liquid-bare"
-    assert "shopify-theme-check" not in _enabled_ids(repo, ["hello.liquid"])
+    assert "shopify-theme-check" not in enabled_analyzer_ids(repo, ["hello.liquid"])
 
 
 def test_ember_template_lint_does_not_auto_enable_on_bare_hbs() -> None:
     repo = BATCH_Z_FIXTURES / "hbs-bare"
-    assert "ember-template-lint" not in _enabled_ids(repo, ["hello.hbs"])
+    assert "ember-template-lint" not in enabled_analyzer_ids(repo, ["hello.hbs"])
 
 
 # --- W19 greened: auto flip + extras from the issue table ---
@@ -281,7 +277,7 @@ def test_b_tier_auto_enables_on_detect_markers(
     tool_id: str, repo: Path, changed: list[str]
 ) -> None:
     assert repo.is_dir(), f"missing Batch Z fixture repo: {repo}"
-    assert tool_id in _enabled_ids(repo, changed)
+    assert tool_id in enabled_analyzer_ids(repo, changed)
 
 
 @pytest.mark.parametrize(("tool_id", "changed"), _W19_EXTRA_DETECT_PATHS)
@@ -307,12 +303,12 @@ def test_ember_template_lint_declares_supports_fix() -> None:
 
 def test_shopify_theme_check_auto_enables_on_theme_layout_without_yml() -> None:
     repo = BATCH_Z_FIXTURES / "liquid-theme-layout"
-    assert "shopify-theme-check" in _enabled_ids(repo, ["templates/index.liquid"])
+    assert "shopify-theme-check" in enabled_analyzer_ids(repo, ["templates/index.liquid"])
 
 
 def test_ember_template_lint_auto_enables_on_ember_source_package_json() -> None:
     repo = BATCH_Z_FIXTURES / "ember-source"
-    assert "ember-template-lint" in _enabled_ids(
+    assert "ember-template-lint" in enabled_analyzer_ids(
         repo, ["app/templates/application.hbs", "package.json"]
     )
 
@@ -339,7 +335,8 @@ def test_prisma_lint_ships_conservative_fallback_ruleset() -> None:
 
 
 def test_prisma_lint_without_rules_uses_conservative_fallback(tmp_path: Path) -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.resolve as resolve
+
     (tmp_path / "schema.prisma").write_text("model User { id Int }\n", encoding="utf-8")
     manifest = _registry().get_manifest("prisma-lint")
     plan = resolve.resolve_analyzer(
@@ -363,7 +360,8 @@ def test_prisma_lint_without_rules_uses_conservative_fallback(tmp_path: Path) ->
 
 
 def test_prisma_lint_without_rules_managed_plan_uses_conservative_fallback(tmp_path: Path) -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.resolve as resolve
+
     (tmp_path / "schema.prisma").write_text("model User { id Int }\n", encoding="utf-8")
     manifest = _registry().get_manifest("prisma-lint")
     plan = resolve.resolve_analyzer(

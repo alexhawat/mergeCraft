@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET, import_module
+from tests.analyzers.support import FIXTURES_DIR, INLINE_BUDGET
 
 BATCH_X_FIXTURES = FIXTURES_DIR / "batch-x"
 _CATALOG_DIR = Path(__file__).resolve().parents[2] / "src" / "mergecraft" / "analyzers" / "catalog"
@@ -90,7 +90,9 @@ _BANDIT_PIN_RE = re.compile(r"bandit\[toml\]==([0-9][0-9.]*)")
 
 
 def _registry():
-    return import_module("mergecraft.analyzers.registry")
+    from mergecraft.analyzers import registry
+
+    return registry
 
 
 def _detect_params() -> list[pytest.ParameterSet]:
@@ -125,7 +127,8 @@ def _make_security_bandit_pin() -> str:
 
 
 def _finding(*, tool: str, path: str, line: int):
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     return finding_mod.make_finding(
         tool=tool,
         rule_id="clone",
@@ -222,7 +225,8 @@ def test_new_manifest_declares_timeout(tool_id: str) -> None:
 
 @pytest.mark.parametrize("tool_id", NEW_MANIFEST_IDS)
 def test_new_manifest_has_catalog_check_parser_fixture(tool_id: str) -> None:
-    docs = import_module("mergecraft.analyzers.catalog_docs")
+    import mergecraft.analyzers.catalog_docs as docs
+
     manifest = _registry().get_manifest(tool_id)
     assert docs.manifest_has_fixture(manifest, fixture_root=FIXTURES_DIR), (
         f"{tool_id} must keep a catalog-check-shaped parser fixture (D15)"
@@ -269,8 +273,9 @@ def test_bandit_version_reuses_make_security_pin() -> None:
 def test_bandit_command_is_json_not_sarif(tmp_path: Path) -> None:
     """Bandit 1.9.4 ships JSON built-in; SARIF needs the optional ``sarif`` extra."""
     registry = _registry()
-    resolve = import_module("mergecraft.analyzers.resolve")
-    execution = import_module("mergecraft.analyzers.execution")
+    import mergecraft.analyzers.execution as execution
+    import mergecraft.analyzers.resolve as resolve
+
     manifest = registry.get_manifest("bandit")
     assert manifest.command == ["bandit", "-r", "--format", "json", "{files}"]
     (tmp_path / "hello.py").write_text("print('ok')\n", encoding="utf-8")
@@ -302,7 +307,8 @@ def test_jscpd_scope_is_repo() -> None:
 
 def test_jscpd_drops_preexisting_clones_off_the_diff() -> None:
     """D14: duplication is repo-wide, but findings must sit on diff lines only."""
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
+
     manifest = _registry().get_manifest("jscpd")
     assert manifest.scope == "repo"
     diff = """diff --git a/src/clone-a.js b/src/clone-a.js
@@ -319,7 +325,8 @@ def test_jscpd_drops_preexisting_clones_off_the_diff() -> None:
 
 
 def test_tsc_diff_filter_keeps_only_changed_lines() -> None:
-    scope = import_module("mergecraft.analyzers.scope")
+    import mergecraft.analyzers.scope as scope
+
     manifest = _registry().get_manifest("tsc")
     assert manifest.scope == "repo"
     diff = """diff --git a/src/index.ts b/src/index.ts
@@ -348,8 +355,9 @@ def test_cargo_audit_and_deny_are_distinct_catalog_ids() -> None:
 def test_new_manifest_reports_unavailable_when_toolchain_absent(
     tool_id: str, tmp_path: Path
 ) -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
-    run = import_module("mergecraft.analyzers.run")
+    import mergecraft.analyzers.resolve as resolve
+    import mergecraft.analyzers.run as run
+
     manifest = _registry().get_manifest(tool_id)
     plan = resolve.resolve_analyzer(
         manifest=manifest,
@@ -367,7 +375,8 @@ def test_new_manifest_reports_unavailable_when_toolchain_absent(
 
 
 def test_new_manifest_findings_honor_inline_budget() -> None:
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     findings = [
         _finding(tool=tool_id, path=f"src/{tool_id}-{index}.ext", line=index)
         for tool_id in NEW_MANIFEST_IDS

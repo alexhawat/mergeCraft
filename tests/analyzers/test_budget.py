@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from mergecraft.config.settings import AnalyzersSettings
 from mergecraft.review_taxonomy import BODY_ONLY_EFFORT, BODY_ONLY_SEVERITY
-from tests.analyzers.support import INLINE_BUDGET, import_module
+from tests.analyzers.support import INLINE_BUDGET
 
 
 def _finding(
     severity: str, source: str = "analyzer", path: str = "src/a.py", line: int = 1
 ) -> object:
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     return finding_mod.make_finding(
         tool="actionlint",
         rule_id="rule",
@@ -26,7 +27,8 @@ def _finding(
 
 
 def test_inline_budget_matches_w0_measurement() -> None:
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     assert budget.default_inline_budget() == INLINE_BUDGET
 
 
@@ -37,7 +39,7 @@ def test_resolve_inline_budget_honours_an_explicit_zero() -> None:
     pre-pass key and the tool request describe different placement contracts.
     The resolver is ``None``-aware: only a genuinely unset budget falls back.
     """
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
 
     assert budget.resolve_inline_budget(AnalyzersSettings(inlineBudget=0)) == 0
     assert budget.resolve_inline_budget(AnalyzersSettings()) == budget.default_inline_budget()
@@ -62,7 +64,8 @@ def test_zero_budget_places_every_finding_in_overflow() -> None:
     covers only the overflow rows. (``test_mechanical_section_includes_short_ids``
     pins the overflow short id; this pins the zero-slot placement itself.)
     """
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     analyzer_findings = [_finding("Major", path=f"src/a{i}.py", line=i) for i in range(1, 4)]
     agent_findings = [
         {"severity": "Major", "path": f"src/g{i}.py", "line": i, "body": f"agent {i}"}
@@ -81,7 +84,8 @@ def test_zero_budget_places_every_finding_in_overflow() -> None:
 
 
 def test_overflow_lands_in_mechanical_section() -> None:
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     findings = [_finding("Major", path=f"src/f{i}.py", line=i) for i in range(1, INLINE_BUDGET + 4)]
     placement = budget.place_findings(findings, inline_budget=INLINE_BUDGET)
     assert len(placement.inline) <= INLINE_BUDGET
@@ -91,8 +95,9 @@ def test_overflow_lands_in_mechanical_section() -> None:
 
 def test_mechanical_section_includes_short_ids() -> None:
     """Production markdown surfaces batch-resolved short ids for overflow findings."""
-    finding_mod = import_module("mergecraft.analyzers.finding")
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+    import mergecraft.analyzers.finding as finding_mod
+
     findings = [_finding("Major", path=f"src/f{i}.py", line=i) for i in range(1, INLINE_BUDGET + 2)]
     placement = budget.place_findings(findings, inline_budget=0)
     assert placement.mechanical_section is not None
@@ -103,10 +108,10 @@ def test_mechanical_section_includes_short_ids() -> None:
 
 def test_sync_deferred_section_includes_short_ids() -> None:
     """Live markdown regen keeps batch-resolved short ids on deferred overflow rows."""
+    import mergecraft.analyzers.budget as budget
+    import mergecraft.analyzers.finding as finding_mod
     from mergecraft.mcp.tool_state import AnalyzerRunState
 
-    finding_mod = import_module("mergecraft.analyzers.finding")
-    budget = import_module("mergecraft.analyzers.budget")
     finding = _finding("Major", path="src/deferred.py", line=9)
     run_state = AnalyzerRunState(
         ran=True,
@@ -121,10 +126,9 @@ def test_sync_deferred_section_includes_short_ids() -> None:
 
 def test_cross_lane_short_ids_disambiguate_collisions() -> None:
     """Inline and mechanical lanes share one batch-resolved ``MC-…`` mapping."""
+    import mergecraft.analyzers.budget as budget
+    import mergecraft.analyzers.finding as finding_mod
     from mergecraft.review.finding_lookup import fingerprint_for_short_id
-
-    finding_mod = import_module("mergecraft.analyzers.finding")
-    budget = import_module("mergecraft.analyzers.budget")
     from tests.analyzers.support_short_id import collision_fingerprints
 
     fp1, fp2 = collision_fingerprints()
@@ -168,7 +172,8 @@ def test_cross_lane_short_ids_disambiguate_collisions() -> None:
 
 
 def test_trivial_severity_never_inline() -> None:
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     trivial = _finding(BODY_ONLY_SEVERITY)
     placement = budget.place_findings([trivial], inline_budget=INLINE_BUDGET)
     assert trivial not in placement.inline
@@ -176,7 +181,8 @@ def test_trivial_severity_never_inline() -> None:
 
 
 def test_low_value_effort_never_inline() -> None:
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     placement = budget.place_findings(
         [],
         inline_budget=INLINE_BUDGET,
@@ -187,8 +193,9 @@ def test_low_value_effort_never_inline() -> None:
 
 def test_overflow_agent_findings_get_distinct_fingerprints() -> None:
     """Overflowed agent findings must stay individually identifiable (C5)."""
-    budget = import_module("mergecraft.analyzers.budget")
-    taxonomy = import_module("mergecraft.review_taxonomy")
+    import mergecraft.analyzers.budget as budget
+    import mergecraft.review_taxonomy as taxonomy
+
     agent_findings = [
         {
             "severity": "Major",
@@ -214,7 +221,8 @@ def test_overflow_agent_findings_get_distinct_fingerprints() -> None:
 
 
 def test_overflow_agent_finding_keeps_supplied_fingerprint() -> None:
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     agent_findings: list[dict[str, object]] = [
         {"severity": "Major", "path": f"src/a{i:02d}.py", "line": i, "body": f"filler {i}"}
         for i in range(1, INLINE_BUDGET + 1)
@@ -236,7 +244,8 @@ def test_overflow_agent_finding_keeps_supplied_fingerprint() -> None:
 
 
 def test_agent_findings_win_ties_over_analyzer() -> None:
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     agent = _finding("Major", source="agent", path="src/tie.py", line=10)
     analyzer = _finding("Major", source="analyzer", path="src/tie.py", line=10)
     at_cap = [_finding("Major", path=f"src/other{i}.py", line=i) for i in range(1, INLINE_BUDGET)]

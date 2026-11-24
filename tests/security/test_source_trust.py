@@ -20,15 +20,19 @@ from mergecraft.agents.gates import decide_approval
 from mergecraft.analyzers.finding import Finding
 from mergecraft.analyzers.trust import derive_trust_tier, evaluate_manifest_for_tier
 from mergecraft.config.settings import load_repo_settings
-from tests.analyzers.support import SAME_REPO_PULL_REQUEST_EVENT, import_module
+from tests.analyzers.support import SAME_REPO_PULL_REQUEST_EVENT
 
 
 def _trust_mod() -> Any:
-    return import_module("mergecraft.analyzers.trust")
+    from mergecraft.analyzers import trust
+
+    return trust
 
 
 def _offline_mod() -> Any:
-    return import_module("mergecraft.offline_review")
+    from mergecraft import offline_review
+
+    return offline_review
 
 
 def _derive_source_trust_tier() -> Any:
@@ -177,7 +181,8 @@ def test_tier_reaches_decide_approval(tmp_path: Path) -> None:
 
 def test_tier_reaches_analyzer_trust_gate(tmp_path: Path) -> None:
     """Untrusted tier withholds trusted-only analyzer manifests."""
-    manifest_mod = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest_mod
+
     raw = Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml").read_text(
         encoding="utf-8"
     )

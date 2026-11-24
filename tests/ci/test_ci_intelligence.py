@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from mergecraft.ci.intelligence import intelligence_from_failures
-from tests.ci.support import CI_SECTION_HEADING, import_module, load_fixture
+from tests.ci.support import CI_SECTION_HEADING, load_fixture
 
 
 def _two_cluster_fixtures() -> tuple[list[dict[str, object]], list[str], str]:
     multi = load_fixture("multi_job_single_root_cause.json")
     unrelated = load_fixture("pre_existing_unrelated_failure.json")
     failures = [multi["jobs"][0], *unrelated["jobs"]]
-    normalize = import_module("mergecraft.ci.normalize")
+    import mergecraft.ci.normalize as normalize
+
     unrelated_fingerprint = str(
         normalize.normalize_failure(unrelated["jobs"][0])["failure_fingerprint"]
     )
@@ -22,7 +23,8 @@ def test_mixed_failures_cluster_and_attribute_correctly() -> None:
     multi = load_fixture("multi_job_single_root_cause.json")
     unrelated = load_fixture("pre_existing_unrelated_failure.json")
     failures = [multi["jobs"][0], *unrelated["jobs"]]
-    normalize = import_module("mergecraft.ci.normalize")
+    import mergecraft.ci.normalize as normalize
+
     unrelated_fingerprint = str(
         normalize.normalize_failure(unrelated["jobs"][0])["failure_fingerprint"]
     )
@@ -92,7 +94,8 @@ def test_base_success_and_non_overlap_render_one_unattributed_conclusion() -> No
     exactly one: unattributed, with neither summary claiming authorship.
     """
     fixture = load_fixture("blame_unrelated_to_pr.json")
-    normalize = import_module("mergecraft.ci.normalize")
+    import mergecraft.ci.normalize as normalize
+
     fingerprint = str(normalize.normalize_failure(fixture["job"])["failure_fingerprint"])
 
     payload = intelligence_from_failures(
@@ -130,7 +133,8 @@ def test_base_success_and_non_overlap_render_one_unattributed_conclusion() -> No
 def test_flaky_retry_surfaces_in_section_and_pre_merge_row() -> None:
     flaky = load_fixture("flaky_retry_pass.json")
     multi = load_fixture("multi_job_single_root_cause.json")
-    normalize = import_module("mergecraft.ci.normalize")
+    import mergecraft.ci.normalize as normalize
+
     fingerprint = normalize.normalize_failure(multi["jobs"][0])["failure_fingerprint"]
     retry_attempts = {fingerprint: flaky["attempts"]}
 

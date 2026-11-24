@@ -20,7 +20,8 @@ def sample_finding_dict() -> dict[str, Any]:
     Mirrors the shape used by the analyzer test suite, so the packet test
     fixtures stay decoupled from the eventual emission pipeline.
     """
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     finding = finding_mod.make_finding(
         tool="ruff",
         rule_id="F401",

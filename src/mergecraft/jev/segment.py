@@ -17,6 +17,7 @@ import hashlib
 import re
 from typing import Any
 
+from mergecraft.diff import diff_lines
 from mergecraft.jev.types import HunkUnit, JevError
 
 _DIFF_GIT_RE = re.compile(r"^diff --git a/(.*) b/(.*)$")
@@ -78,7 +79,7 @@ def segment_hunks(
         hunk_header = None
         hunk_body = []
 
-    for raw_line in diff_text.splitlines():
+    for raw_line in diff_lines(diff_text, strip_cr=True):
         git_match = _DIFF_GIT_RE.match(raw_line)
         if git_match:
             flush()

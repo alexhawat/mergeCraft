@@ -21,6 +21,8 @@ from tests.cli.support_provider_registry import (
     read_config,
     read_env_file,
     scaffold_mergecraft_home,
+    stub_mergecraft_env,
+    write_env_pairs,
 )
 from typer.testing import CliRunner
 
@@ -227,6 +229,144 @@ def test_provider_edit_unknown_label_exits_nonzero(
     output = _plain(result.stdout + result.stderr)
     assert result.exit_code != CLI_SUCCESS_EXIT_CODE, output
     assert "missing" in output.lower() or "unknown" in output.lower()
+
+
+def _add_custom(label: str) -> None:
+    result = _invoke(
+        "provider",
+        "add",
+        "--label",
+        label,
+        "--url",
+        f"https://{label}.example/v1",
+        "--harness",
+        "opencode",
+    )
+    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, result.stdout + result.stderr
+
+
+def _env_indices(tmp_path: Path) -> dict[str, int]:
+    return {
+        str(entry["label"]): int(entry["envIndex"])
+        for entry in provider_entries(read_config(tmp_path))
+    }
+
+
+def test_provider_delete_never_frees_its_env_index_for_reuse(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """D3: deleting the highest (or last) entry must not recycle its index."""
+    scaffold_mergecraft_home(tmp_path)
+    stub_mergecraft_env(monkeypatch, tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _require_provider_command()
+
+    _add_custom("alpha")
+    _add_custom("beta")
+    delete = _invoke("provider", "delete", "beta")
+    assert delete.exit_code == CLI_SUCCESS_EXIT_CODE, delete.stdout + delete.stderr
+    assert read_config(tmp_path)["providersEnvIndexHighWater"] == 2
+
+    _add_custom("gamma")
+    assert _env_indices(tmp_path) == {"alpha": 1, "gamma": 3}
+
+    for label in ("alpha", "gamma"):
+        assert _invoke("provider", "delete", label).exit_code == CLI_SUCCESS_EXIT_CODE
+    _add_custom("delta")
+    assert _env_indices(tmp_path) == {"delta": 4}
+    assert read_env_file(tmp_path)["LLM_PROVIDER_4"] == "delta"
+
+
+def test_provider_add_skips_env_index_still_present_in_dotenv(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A registry written before the high-water mark still skips occupied ``.env`` slots."""
+    scaffold_mergecraft_home(
+        tmp_path,
+        config_body="providers:\n  - label: alpha\n    harness: opencode\n    envIndex: 1\n"
+        "    url: https://alpha.example/v1\n",
+    )
+    stub_mergecraft_env(monkeypatch, tmp_path)
+    write_env_pairs(tmp_path, {"LLM_PROVIDER_1": "alpha", "LLM_PROVIDER_2_API_KEY": "kept"})
+    monkeypatch.chdir(tmp_path)
+    _require_provider_command()
+
+    _add_custom("beta")
+
+    assert _env_indices(tmp_path) == {"alpha": 1, "beta": 3}
+
+
+def test_provider_add_skips_env_index_still_exported_in_the_environment(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    scaffold_mergecraft_home(tmp_path)
+    stub_mergecraft_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("LLM_PROVIDER_1_API_KEY", "kept")
+    monkeypatch.setenv("MERGECRAFT_CUSTOM_PROVIDER_BASE_URL_2", "https://kept.example/v1")
+    monkeypatch.chdir(tmp_path)
+    _require_provider_command()
+
+    _add_custom("alpha")
+
+    assert _env_indices(tmp_path) == {"alpha": 3}
+
+
+def test_provider_delete_tolerates_a_malformed_env_index(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    scaffold_mergecraft_home(
+        tmp_path,
+        config_body="providers:\n  - label: broken\n    harness: opencode\n    envIndex: abc\n"
+        "    url: https://broken.example/v1\n",
+    )
+    stub_mergecraft_env(monkeypatch, tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _require_provider_command()
+
+    result = _invoke("provider", "delete", "broken")
+
+    assert result.exit_code == CLI_SUCCESS_EXIT_CODE, result.stdout + result.stderr
+    config = read_config(tmp_path)
+    assert provider_entries(config) == []
+    assert "providersEnvIndexHighWater" not in config
+
+
+def test_provider_add_reads_the_high_water_mark_as_settings_do(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A quoted mark is coerced exactly as ``RepoSettings`` coerces it."""
+    scaffold_mergecraft_home(tmp_path, config_body='providersEnvIndexHighWater: "3"\n')
+    stub_mergecraft_env(monkeypatch, tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _require_provider_command()
+
+    _add_custom("alpha")
+
+    assert _env_indices(tmp_path) == {"alpha": 4}
+
+
+def test_provider_add_rejects_an_invalid_high_water_mark(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    scaffold_mergecraft_home(tmp_path, config_body="providersEnvIndexHighWater: -1\n")
+    stub_mergecraft_env(monkeypatch, tmp_path)
+    monkeypatch.chdir(tmp_path)
+    _require_provider_command()
+
+    result = _invoke(
+        "provider", "add", "--label", "alpha", "--url", CUSTOM_BASE_URL, "--harness", "opencode"
+    )
+
+    output = _plain(result.stdout + result.stderr)
+    assert result.exit_code != CLI_SUCCESS_EXIT_CODE, output
+    assert "providersEnvIndexHighWater" in output
+    assert provider_entries(read_config(tmp_path)) == []
 
 
 def test_provider_delete_unknown_label_exits_nonzero(

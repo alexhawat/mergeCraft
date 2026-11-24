@@ -52,7 +52,9 @@ LOGFIRE_US_WRITE_PROBE = "https://logfire-us.pydantic.dev/v1/info"
 def _load_auth_cmd() -> object:
     """Lazy import so missing symbols fail with a clear message, not at collection time."""
     try:
-        return importlib.import_module("mergecraft.cli.auth_cmd")
+        from mergecraft.cli import auth_cmd
+
+        return auth_cmd
     except ImportError as exc:
         pytest.fail(f"mergecraft.cli.auth_cmd not importable: {exc}")
 
@@ -738,7 +740,6 @@ def test_auth_logfire_subcommand_emits_no_syntax_warning(tmp_path: Path) -> None
     this test guards against a regression to a plain triple-quoted docstring
     that would re-introduce the warning.
     """
-    import importlib
     import sys
     import warnings
 

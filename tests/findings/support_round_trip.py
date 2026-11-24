@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from tests.analyzers.support import import_module
 from tests.analyzers.support_short_id import require_callable as require_finding_callable
 
 FindingFormat = Literal["json", "agent_jsonl", "markdown", "pr_comment", "hunk", "sarif"]
@@ -70,7 +69,9 @@ NAMED_FORMAT_HACKS: tuple[NamedFormatHack, ...] = (
 
 def finding_module() -> Any:
     """Return ``mergecraft.analyzers.finding``."""
-    return import_module("mergecraft.analyzers.finding")
+    from mergecraft.analyzers import finding
+
+    return finding
 
 
 def short_id_for(finding: Any) -> str:

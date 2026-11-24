@@ -13,7 +13,6 @@ the production names exist.
 from __future__ import annotations
 
 import re
-from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -54,7 +53,9 @@ EXPECTED_CODES: dict[str, str] = {
 @pytest.fixture
 def api() -> Any:
     """Load the classifier module lazily so new names fail per test, not at collection."""
-    return import_module("mergecraft.classify.blast_radius")
+    from mergecraft.classify import blast_radius
+
+    return blast_radius
 
 
 def _section(text: str, title: str) -> list[str]:

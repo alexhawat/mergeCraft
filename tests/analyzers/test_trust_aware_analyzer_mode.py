@@ -55,7 +55,6 @@ from mergecraft.mcp.context import (
 from mergecraft.mcp.tool_state import init_tool_state
 from mergecraft.modes import compute_modes
 from mergecraft.utils.github import GitHubClient
-from tests.analyzers.support import import_module
 
 if TYPE_CHECKING:
     from mergecraft.analyzers.manifest import AnalyzerManifest
@@ -94,7 +93,9 @@ IN_PROCESS_IDS: frozenset[str] = frozenset({"agentsec", "antislop", "self-silenc
 
 
 def _trust() -> Any:
-    return import_module("mergecraft.analyzers.trust")
+    from mergecraft.analyzers import trust
+
+    return trust
 
 
 def _resolve_analyzers_mode(raw: str | None) -> Any:

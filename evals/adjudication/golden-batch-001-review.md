@@ -1,6 +1,8 @@
 # Batch 001 review sheet
 
-All nine original claims are pending. The earlier attribution was withdrawn at the intended reviewer’s request. To confirm or correct a claim, supply its original PR, commit-pinned file, or archived patch.
+Batch 001 will not be adjudicated. The maintainer closed [#780](https://github.com/alexhawat/mergeCraft/issues/780) as not planned on 2026-11-23, and none of the nine claims has source evidence. The earlier attribution was withdrawn at the intended reviewer’s request on 2026-11-19, and no decision is recorded. This sheet is kept as a record of the original claims; the Decision column mirrors the manifest and no row is awaiting an answer.
+
+The candidates awaiting decisions are in the [batch 002 review packet](golden-batch-002-review.md).
 
 | Case | Proposed finding | Claimed location | Evidence | Decision |
 | --- | --- | --- | --- | --- |

@@ -9,12 +9,12 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from tests.analyzers.support import import_module
 from tests.findings.support import make_finding
 
 
 def _head_and_base_hit(*, path: str, line: int, message: str) -> tuple[object, object]:
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     shared = {
         "tool": "ruff",
         "rule_id": "F401",
@@ -88,7 +88,8 @@ def test_suppression_is_skipped_when_it_cannot_pay_for_itself() -> None:
     from mergecraft.analyzers.baseline_suppression import should_run_baseline_suppression
 
     tiny_diff = "diff --git a/src/a.py b/src/a.py\n@@ -1 +1 @@\n-old\n+new\n"
-    settings_mod = import_module("mergecraft.config.settings")
+    import mergecraft.config.settings as settings_mod
+
     settings = settings_mod.AnalyzersSettings()
 
     assert settings.base_comparison == "diff"

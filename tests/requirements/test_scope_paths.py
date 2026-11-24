@@ -18,7 +18,6 @@ import builtins
 import dataclasses
 import glob as glob_module
 import pathlib
-from importlib import import_module
 from typing import Any
 
 import pytest
@@ -30,7 +29,9 @@ _FENCE_CLOSE = "<<<END-UNTRUSTED-MERGECRAFT-CONTENT nonce="
 @pytest.fixture
 def ingest() -> Any:
     """Load the ingest module lazily so new names fail per test, not at collection."""
-    return import_module("mergecraft.requirements.ingest")
+    from mergecraft.requirements import ingest
+
+    return ingest
 
 
 def _parse(ingest: Any, body: str) -> Any:
