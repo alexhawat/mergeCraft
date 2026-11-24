@@ -439,8 +439,8 @@ async def _dispatch_reviewer(
 
     # Every dispatched reviewer's usage is priced, listed and charged before its
     # result is judged, so a reviewer that failed after spending is still
-    # accounted for (D1/D3). An overrun is not this reviewer's failure: record the
-    # reason naming the budget, then let ``BudgetExhausted`` reach the run.
+    # accounted for. An overrun is not this reviewer's failure: record the reason
+    # naming the budget, then let ``BudgetExhausted`` reach the run.
     try:
         charge_reviewer_usage(
             tool_state=tool_state,
@@ -644,7 +644,8 @@ async def run_pending_roster_reviewers(
         for binding, outcome in zip(pending, outcomes, strict=True):
             if isinstance(outcome, BudgetExhausted):
                 # An overrun is the run's, never a degraded reviewer; the dispatch
-                # already recorded why. Re-raise it past this gather (D4).
+                # already recorded why. Re-raise it past this gather so it reaches
+                # the run instead of being recorded as this reviewer's failure.
                 raise outcome
             if isinstance(outcome, BaseException):
                 reason = (
@@ -940,7 +941,7 @@ async def run_file_group_reviewers(
                 )
         except BudgetExhausted:
             # The run's overrun, already recorded by the dispatch; never a group
-            # failure (D4).
+            # failure.
             raise
         except Exception as exc:
             reason = str(exc) or exc.__class__.__name__
