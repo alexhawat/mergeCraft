@@ -1,10 +1,12 @@
-"""Re-approval (#1284): a trusted pass carries over when only changelog prose moved.
+"""Re-approval (#1284): a trusted pass carries over when the reviewed change is intact.
 
 Each scenario is a real history: a base, a reviewed head ``P`` the trusted reviewer App
-passed, and a new head ``H``. A one-line changelog edit and a base merge whose only
-resolution is the changelog both take the deterministic path. A source edit hidden in
-the merge resolution, an upstream edit overlapping a reviewed file, a changed review
-policy, and missing or ambiguous evidence all get the normal review.
+passed, and a new head ``H``. A one-line changelog edit, a base merge whose only
+resolution is the changelog, and a base merge the pull request adds nothing to all take
+the deterministic path. A source edit hidden in the merge resolution, an upstream edit
+overlapping a reviewed file, and missing or ambiguous evidence all get the normal
+review. A changed review policy is the normal review under ``onPolicyChange: review``
+and a carry-over that owes the deterministic checks under ``recheck``.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ if TYPE_CHECKING:
     from mergecraft.scm.protocol import ScmProvider
 
 VERSION = "0.1.0a5"
+PIN = "9" * 40
 WORKFLOW = ".github/workflows/mergecraft.yml"
 
 CHANGELOG = """# Changelog
@@ -97,7 +100,9 @@ class Scenario:
         self.repo.base_sha = self.b0
         self.reviews = [review(self.p)]
 
-    async def stamp_prior(self, *, digest: str | None = None, **check: Any) -> None:
+    async def stamp_prior(
+        self, *, digest: str | None = None, action_pin: str | None = None, **check: Any
+    ) -> None:
         """Publish the trusted pass on ``P`` with the stamp of the policy at ``B0``."""
         digest = digest or await review_policy_digest(
             cast("ScmProvider", self.repo),
@@ -106,6 +111,7 @@ class Scenario:
             self.b0,
             workflow_path=WORKFLOW,
             version=VERSION,
+            action_pin=action_pin,
         )
         stamp = ReviewStamp(pull_number=PULL, base_ref="main", policy_digest=digest)
         summary = "\n".join(["mergeCraft approved this PR.", *stamp.lines()])
@@ -157,8 +163,25 @@ class Scenario:
         self.repo.head_sha = head
         return head
 
+    def pure_base_merge(self, *, upstream: dict[str, tuple[str, str]] | None = None) -> str:
+        """A PR that never touched the changelog, merged with a moved base and nothing else."""
+        self.pr_files = dict(self.pr_files)
+        self.pr_files["CHANGELOG.md"] = self.base_files["CHANGELOG.md"]
+        self.p = self.repo.commit("reviewed-head-no-changelog", self.pr_files)
+        self.repo.merge_bases[(self.b0, self.p)] = self.b0
+        self.reviews = [review(self.p)]
+        b1_changelog = _with_line(CHANGELOG, "### Added", "\n- An upstream entry from main.")
+        return self.base_merge(
+            upstream=upstream, resolution={"CHANGELOG.md": (b1_changelog, "100644")}
+        )
+
     async def evaluate(
-        self, *, head: str | None = None, workflow_path: str | None = WORKFLOW, **config: Any
+        self,
+        *,
+        head: str | None = None,
+        workflow_path: str | None = WORKFLOW,
+        action_pin: str | None = None,
+        **config: Any,
     ) -> Any:
         settings = FastPathReapprovalSettings.model_validate(
             {"enabled": True, "trustedCheckApps": [REVIEWER_APP], **config}
@@ -178,6 +201,7 @@ class Scenario:
             list_reviews=_reviews,
             workflow_path=workflow_path,
             version=VERSION,
+            action_pin=action_pin,
         )
 
 
@@ -236,6 +260,264 @@ async def test_the_record_states_what_was_reused_compared_run_and_skipped() -> N
     assert "must pass on this head" in text
 
 
+# ── a merge of the base branch alone ──────────────────────────────────────────
+
+
+async def test_a_base_merge_the_pull_request_adds_nothing_to_carries_the_pass_over() -> None:
+    """The case behind PR 1549: main moved, the branch merged it, nothing else changed."""
+    scenario = Scenario()
+    reviewed_before = scenario.p
+    scenario.pure_base_merge()
+    assert scenario.p != reviewed_before
+    await scenario.stamp_prior()
+    head = scenario.repo.head_sha
+
+    outcome = await scenario.evaluate()
+
+    assert outcome.verdict.eligible, outcome.verdict.reason
+    record = outcome.verdict.record
+    assert record.prior_head_sha == scenario.p
+    assert record.head_sha == head
+    assert record.qualifying_paths == ()
+    assert record.preserved_paths == ("src/app.py", "src/new_module.py")
+    assert record.inherited_paths == ("CHANGELOG.md", "docs/guide.md", "src/other.py")
+    assert record.policy_changed is False
+    assert "analyzers" in record.skipped
+    assert "authored no change" in record.reason()
+    assert not any("/contents/" in path for path in scenario.repo.requests), (
+        "with no qualifying change there is no prose to read"
+    )
+
+
+async def test_a_base_only_merge_states_that_no_path_qualified() -> None:
+    scenario = Scenario()
+    scenario.pure_base_merge()
+    await scenario.stamp_prior()
+
+    text = "\n".join((await scenario.evaluate()).verdict.record.summary_lines())
+
+    assert "Qualifying path: none (no PR-authored change since the prior review)" in text
+    assert "Accounted for: 0 qualifying, 2 reviewed and unchanged, 3 inherited" in text
+    assert "prose proof" not in text
+    assert "Skipped: LLM review, specialist and verifier agents, analyzers" in text
+
+
+async def test_no_qualifying_path_configured_still_carries_a_base_only_merge() -> None:
+    scenario = Scenario()
+    scenario.pure_base_merge()
+    await scenario.stamp_prior()
+
+    outcome = await scenario.evaluate(paths=[])
+
+    assert outcome.verdict.eligible, outcome.verdict.reason
+    assert outcome.verdict.record.qualifying_paths == ()
+
+
+async def test_a_base_only_merge_overlapping_a_reviewed_file_is_reviewed() -> None:
+    scenario = Scenario()
+    upstream_app = APP + "\n\ndef added_upstream():\n    return 0\n"
+    merged_app = APP.replace("x + 1", "x + 2") + "\n\ndef added_upstream():\n    return 0\n"
+    scenario.pr_files = dict(scenario.pr_files)
+    scenario.pr_files["CHANGELOG.md"] = scenario.base_files["CHANGELOG.md"]
+    scenario.p = scenario.repo.commit("reviewed-head-no-changelog", scenario.pr_files)
+    scenario.repo.merge_bases[(scenario.b0, scenario.p)] = scenario.b0
+    scenario.reviews = [review(scenario.p)]
+    await scenario.stamp_prior()
+    b1_changelog = _with_line(CHANGELOG, "### Added", "\n- An upstream entry from main.")
+    scenario.base_merge(
+        upstream={"src/app.py": (upstream_app, "100644")},
+        resolution={
+            "src/app.py": (merged_app, "100644"),
+            "CHANGELOG.md": (b1_changelog, "100644"),
+        },
+    )
+
+    outcome = await scenario.evaluate()
+
+    assert not outcome.verdict.eligible
+    assert "src/app.py" in outcome.verdict.reason
+
+
+async def test_a_merge_that_drops_the_prs_own_changelog_entry_carries_over() -> None:
+    """The changelog at the new head is the base's; every other change is the reviewed one."""
+    scenario = Scenario()
+    await scenario.stamp_prior()
+    b1_changelog = _with_line(CHANGELOG, "### Added", "\n- An upstream entry from main.")
+    scenario.base_merge(resolution={"CHANGELOG.md": (b1_changelog, "100644")})
+
+    outcome = await scenario.evaluate()
+
+    assert outcome.verdict.eligible, outcome.verdict.reason
+    record = outcome.verdict.record
+    assert record.qualifying_paths == ()
+    assert "CHANGELOG.md" in record.inherited_paths
+    assert record.preserved_paths == ("src/app.py", "src/new_module.py")
+
+
+# ── a changed review policy ───────────────────────────────────────────────────
+
+
+def _config_edit() -> dict[str, tuple[str, str]]:
+    return {".mergecraft/config.yaml": (CONFIG + "  extra: true\n", "100644")}
+
+
+async def test_a_changed_review_policy_is_reviewed_when_configured_to() -> None:
+    scenario = Scenario()
+    await scenario.stamp_prior()
+    scenario.base_merge(upstream=_config_edit())
+
+    outcome = await scenario.evaluate(onPolicyChange="review")
+
+    assert not outcome.verdict.eligible
+    assert outcome.verdict.reason == "the review policy changed since the prior pass"
+
+
+async def test_a_changed_review_policy_owes_the_deterministic_checks_by_default() -> None:
+    scenario = Scenario()
+    await scenario.stamp_prior()
+    scenario.base_merge(upstream=_config_edit())
+
+    outcome = await scenario.evaluate()
+
+    assert outcome.verdict.eligible, outcome.verdict.reason
+    record = outcome.verdict.record
+    assert record.policy_changed is True
+    assert record.rechecked == (), "the decision runs nothing; the caller owes the checks"
+    assert record.skipped == (
+        "LLM review",
+        "specialist and verifier agents",
+        "full-diff reads",
+    )
+    assert "the review policy changed" in record.reason()
+
+
+async def test_a_recheck_record_states_what_ran_again() -> None:
+    from dataclasses import replace
+
+    scenario = Scenario()
+    scenario.pure_base_merge(upstream=_config_edit())
+    await scenario.stamp_prior()
+    # The stamp above was taken at ``B0``; the merged base carries the edited config.
+    record = (await scenario.evaluate()).verdict.record
+    assert record.policy_changed is True
+
+    text = "\n".join(
+        replace(record, rechecked=("analyzers: 2 ran, 0 unavailable, 0 findings",)).summary_lines()
+    )
+
+    assert "Review policy: changed since the prior review" in text
+    assert "Re-ran: analyzers: 2 ran, 0 unavailable, 0 findings" in text
+    assert "Skipped: LLM review, specialist and verifier agents, full-diff reads" in text
+
+
+async def test_a_changed_policy_never_excuses_a_changed_pull_request() -> None:
+    scenario = Scenario()
+    await scenario.stamp_prior()
+    scenario.base_merge(
+        upstream=_config_edit(),
+        resolution={"src/app.py": (APP.replace("x + 1", "x + 3"), "100644")},
+    )
+
+    outcome = await scenario.evaluate()
+
+    assert not outcome.verdict.eligible
+    assert "src/app.py" in outcome.verdict.reason
+
+
+async def test_a_changed_version_is_a_changed_policy() -> None:
+    scenario = Scenario()
+    await scenario.stamp_prior(
+        digest=await review_policy_digest(
+            cast("ScmProvider", scenario.repo),
+            OWNER,
+            REPO,
+            scenario.b0,
+            workflow_path=WORKFLOW,
+            version="0.0.9",
+        )
+    )
+    scenario.changelog_edit()
+
+    refused = await scenario.evaluate(onPolicyChange="review")
+    rechecked = await scenario.evaluate()
+
+    assert not refused.verdict.eligible
+    assert "review policy" in refused.verdict.reason
+    assert rechecked.verdict.record.policy_changed is True
+
+
+# ── the policy digest and the Action pin ──────────────────────────────────────
+
+
+def _workflow_edit() -> dict[str, tuple[str, str]]:
+    return {WORKFLOW: ("on: pull_request_target\n# an advisory job changed\n", "100644")}
+
+
+async def test_a_workflow_edit_that_keeps_the_action_pin_is_not_a_changed_policy() -> None:
+    """main renamed an advisory job in the workflow; the pin, config and version held."""
+    scenario = Scenario()
+    await scenario.stamp_prior(action_pin=PIN)
+    scenario.base_merge(upstream=_workflow_edit())
+
+    outcome = await scenario.evaluate(action_pin=PIN, onPolicyChange="review")
+
+    assert outcome.verdict.eligible, outcome.verdict.reason
+    assert outcome.verdict.record.policy_changed is False
+
+
+async def test_a_new_action_pin_is_a_changed_policy() -> None:
+    scenario = Scenario()
+    await scenario.stamp_prior(action_pin=PIN)
+    scenario.changelog_edit()
+
+    outcome = await scenario.evaluate(action_pin="8" * 40, onPolicyChange="review")
+
+    assert not outcome.verdict.eligible
+    assert outcome.verdict.reason == "the review policy changed since the prior pass"
+
+
+async def test_a_config_edit_is_a_changed_policy_whatever_the_pin() -> None:
+    scenario = Scenario()
+    await scenario.stamp_prior(action_pin=PIN)
+    scenario.base_merge(upstream=_config_edit())
+
+    outcome = await scenario.evaluate(action_pin=PIN, onPolicyChange="review")
+
+    assert not outcome.verdict.eligible
+    assert outcome.verdict.reason == "the review policy changed since the prior pass"
+
+
+@pytest.mark.parametrize("pin", [None, "", "v1", "9" * 39, "g" * 40])
+async def test_without_a_full_commit_pin_the_workflow_file_is_the_policy(
+    pin: str | None,
+) -> None:
+    scenario = Scenario()
+    await scenario.stamp_prior(action_pin=pin)
+    scenario.base_merge(upstream=_workflow_edit())
+
+    outcome = await scenario.evaluate(action_pin=pin, onPolicyChange="review")
+
+    assert not outcome.verdict.eligible
+    assert outcome.verdict.reason == "the review policy changed since the prior pass"
+
+
+async def test_the_pinned_digest_differs_from_the_unpinned_one_and_by_workflow_path() -> None:
+    scenario = Scenario()
+    repo = cast("ScmProvider", scenario.repo)
+    other = ".github/workflows/other.yml"
+    scenario.base_files[other] = ("on: pull_request_target\n", "100644")
+    base = scenario.repo.commit("base-with-two-workflows", scenario.base_files)
+
+    async def digest(path: str, pin: str | None) -> str:
+        return await review_policy_digest(
+            repo, OWNER, REPO, base, workflow_path=path, version=VERSION, action_pin=pin
+        )
+
+    assert await digest(WORKFLOW, PIN) != await digest(WORKFLOW, None)
+    assert await digest(WORKFLOW, PIN) != await digest(other, PIN)
+    assert await digest(WORKFLOW, PIN) == await digest(WORKFLOW, PIN.upper())
+
+
 # ── the normal review ─────────────────────────────────────────────────────────
 
 
@@ -277,39 +559,6 @@ async def test_a_clean_merge_overlapping_a_reviewed_file_is_reviewed() -> None:
 
     assert not outcome.verdict.eligible
     assert "src/app.py" in outcome.verdict.reason
-
-
-async def test_a_changed_review_policy_is_reviewed() -> None:
-    scenario = Scenario()
-    await scenario.stamp_prior()
-    scenario.base_merge(
-        upstream={".mergecraft/config.yaml": (CONFIG + "  extra: true\n", "100644")},
-    )
-
-    outcome = await scenario.evaluate()
-
-    assert not outcome.verdict.eligible
-    assert outcome.verdict.reason == "the review policy changed since the prior pass"
-
-
-async def test_a_changed_workflow_or_version_is_a_changed_policy() -> None:
-    scenario = Scenario()
-    await scenario.stamp_prior(
-        digest=await review_policy_digest(
-            cast("ScmProvider", scenario.repo),
-            OWNER,
-            REPO,
-            scenario.b0,
-            workflow_path=WORKFLOW,
-            version="0.0.9",
-        )
-    )
-    scenario.changelog_edit()
-
-    outcome = await scenario.evaluate()
-
-    assert not outcome.verdict.eligible
-    assert "review policy" in outcome.verdict.reason
 
 
 async def test_a_code_fence_edit_in_the_changelog_is_reviewed() -> None:
@@ -579,49 +828,7 @@ async def test_a_workflow_missing_at_the_base_never_reapproves_or_stamps() -> No
     assert outcome.stamp is None
 
 
-async def test_a_base_side_workflow_edit_is_a_changed_policy() -> None:
-    scenario = Scenario()
-    await scenario.stamp_prior()
-    scenario.base_merge(upstream={WORKFLOW: ("on: pull_request_target\n# new pin\n", "100644")})
-
-    outcome = await scenario.evaluate()
-
-    assert not outcome.verdict.eligible
-    assert outcome.verdict.reason == "the review policy changed since the prior pass"
-
-
 # ── qualifying vs inherited (MC-dbcf5c) ───────────────────────────────────────
-
-
-async def test_a_base_only_changelog_change_is_inherited_not_reported_as_prose() -> None:
-    """The PR never touches the changelog; only the merged base does."""
-    scenario = Scenario()
-    scenario.pr_files = dict(scenario.pr_files)
-    scenario.pr_files["CHANGELOG.md"] = scenario.base_files["CHANGELOG.md"]
-    scenario.p = scenario.repo.commit("reviewed-head-no-changelog", scenario.pr_files)
-    scenario.repo.merge_bases[(scenario.b0, scenario.p)] = scenario.b0
-    scenario.reviews = [review(scenario.p)]
-    await scenario.stamp_prior()
-    b1_changelog = _with_line(CHANGELOG, "### Added", "\n- An upstream entry from main.")
-    scenario.base_merge(resolution={"CHANGELOG.md": (b1_changelog, "100644")})
-
-    outcome = await scenario.evaluate()
-
-    assert not outcome.verdict.eligible
-    assert "no PR-authored change to a qualifying path" in outcome.verdict.reason
-
-
-async def test_a_merge_that_drops_the_prs_own_changelog_entry_is_reviewed() -> None:
-    """At the new head the changelog is the base's: nothing PR-authored is prose-proven."""
-    scenario = Scenario()
-    await scenario.stamp_prior()
-    b1_changelog = _with_line(CHANGELOG, "### Added", "\n- An upstream entry from main.")
-    scenario.base_merge(resolution={"CHANGELOG.md": (b1_changelog, "100644")})
-
-    outcome = await scenario.evaluate()
-
-    assert not outcome.verdict.eligible
-    assert "no PR-authored change to a qualifying path" in outcome.verdict.reason
 
 
 async def test_every_reported_qualifying_path_was_prose_proven() -> None:

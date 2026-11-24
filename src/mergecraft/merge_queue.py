@@ -291,8 +291,16 @@ async def _queue_policy_digest(
         if entry is None or entry.get("mode") not in ("100644", "100755"):
             raise ReapprovalUnavailableError("The queue config or workflow is not a regular file")
     await _verify_policy_tree(trees, base)
+    from mergecraft.build_metadata import resolve_action_pin_sha
+
     return await review_policy_digest(
-        scm, owner, repo, base, workflow_path=workflow_path, version=__version__
+        scm,
+        owner,
+        repo,
+        base,
+        workflow_path=workflow_path,
+        version=__version__,
+        action_pin=resolve_action_pin_sha(),
     )
 
 

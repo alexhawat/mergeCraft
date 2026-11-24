@@ -426,24 +426,33 @@ def _default_reapproval_paths() -> list[str]:
 
 
 class FastPathReapprovalSettings(BaseModel):
-    """``review.fastPath.reapproval``: carry a trusted pass forward over changelog prose.
+    """``review.fastPath.reapproval``: carry a trusted pass forward to an unchanged change.
 
     Off by default, and only honoured with ``review.fastPath.enabled`` from the
     operator's base-side config. When the newest mergeCraft review of the pull request
-    passed on an earlier head, and every PR-authored change since then is a prose edit
-    to one of ``paths`` (a merge of the base branch included, as long as the base's own
-    changes do not touch a reviewed file), the run issues the prior verdict for the new
-    head with no LLM call. The prior pass only counts as a ``mergecraft-approval`` check
-    run on that head published by a GitHub App named in ``trustedCheckApps``, for the
-    same pull request, target branch and review policy. ``github-actions`` is refused:
-    a ``pull_request`` workflow on the head ref can publish under that name.
+    passed on an earlier head, and the pull request authored nothing since then except
+    a prose edit to one of ``paths`` — a merge of the base branch alone included, as
+    long as the base's own changes do not touch a reviewed file — the run issues the
+    prior verdict for the new head with no LLM call. The prior pass only counts as a
+    ``mergecraft-approval`` check run on that head published by a GitHub App named in
+    ``trustedCheckApps``, for the same pull request and target branch.
+    ``github-actions`` is refused: a ``pull_request`` workflow on the head ref can
+    publish under that name.
 
     Args:
         enabled: Turn re-approval on. Default ``False``.
         paths: Exact repository-relative paths whose prose edit may be carried over.
-            Default ``["CHANGELOG.md"]`` (the root changelog only).
+            Default ``["CHANGELOG.md"]`` (the root changelog only). An empty list
+            carries over only a head whose PR-authored changes are all unchanged.
         trusted_check_apps: GitHub App slugs whose ``mergecraft-approval`` check runs
             are a trusted prior pass. Empty means re-approval never applies.
+        on_policy_change: What an otherwise proven re-approval does when the review
+            policy (the ``.mergecraft`` directory, the Action pin, the mergeCraft
+            version) differs from the one the prior pass was decided under.
+            ``"recheck"`` (default) runs the analyzers and static checks on the new
+            head with no LLM call and carries the verdict over only when they are
+            clean; anything else is the normal review. ``"review"`` always runs the
+            normal review.
     """
 
     model_config = ConfigDict(extra=_SECURITY_RUNTIME_EXTRA, populate_by_name=True)
@@ -451,6 +460,9 @@ class FastPathReapprovalSettings(BaseModel):
     enabled: bool = False
     paths: list[str] = Field(default_factory=_default_reapproval_paths)
     trusted_check_apps: list[str] = Field(default_factory=list, alias="trustedCheckApps")
+    on_policy_change: Literal["review", "recheck"] = Field(
+        default="recheck", alias="onPolicyChange"
+    )
 
 
 class FastPathSettings(BaseModel):

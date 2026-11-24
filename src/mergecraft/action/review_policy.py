@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from mergecraft.action.reapproval_recheck import run_deterministic_recheck
 from mergecraft.action.review_state import LiteAgentReview, SkipAgentReview
 from mergecraft.agents.lite import LiteOutcome, lite_model_slug, run_lite_review
 from mergecraft.ci.sarif_ingest import (
@@ -70,7 +71,7 @@ def _is_completed_review(review: dict[str, Any]) -> bool:
 async def _reapproval_gate(
     ctx: RunContext, pull_number: int, head_sha: str
 ) -> SkipAgentReview | None:
-    """Carry a trusted prior pass over to this head when only changelog prose moved (#1284).
+    """Carry a trusted prior pass over to this head when the reviewed change is intact (#1284).
 
     Returns ``SkipAgentReview`` when :func:`mergecraft.reapproval.evaluate_reapproval`
     proves the prior pass applies, and records the ``skip`` / ``reapproval`` tier and
@@ -78,11 +79,16 @@ async def _reapproval_gate(
     otherwise: the normal triage and review run. Either way the run's review stamp
     (pull request, target branch, review-policy digest) is recorded, so this run's own
     approval check can seed a later re-approval.
+
+    A proof made under a changed review policy (``record.policy_changed``) carries
+    over only after :func:`run_deterministic_recheck` ran the analyzers and static
+    checks clean on this head; otherwise the normal review runs.
     """
     assert ctx.settings is not None
     assert ctx.tool_state is not None
     assert ctx.tool_context is not None
     from mergecraft import __version__
+    from mergecraft.build_metadata import resolve_action_pin_sha
     from mergecraft.classify.reapproval import APPROVAL_CHECK_NAME, REAPPROVAL_RECOGNIZER
     from mergecraft.mcp.checkout import list_mergecraft_reviews
     from mergecraft.reapproval import evaluate_reapproval, workflow_path_from_ref
@@ -103,12 +109,24 @@ async def _reapproval_gate(
         list_reviews=_reviews,
         workflow_path=workflow_path_from_ref(os.environ.get("GITHUB_WORKFLOW_REF")),
         version=__version__,
+        action_pin=resolve_action_pin_sha(),
     )
     ctx.tool_state.review_stamp = outcome.stamp
     record = outcome.verdict.record
     if record is None:
         logger.info("» re-approval: normal review — {}", outcome.verdict.reason)
         return None
+    if record.policy_changed:
+        recheck = await run_deterministic_recheck(
+            tool_context, pull_number=pull_number, head_sha=head_sha
+        )
+        if not recheck.clean:
+            logger.info(
+                "» re-approval: normal review — the review policy changed and {}",
+                recheck.reason,
+            )
+            return None
+        record = replace(record, rechecked=recheck.ran)
     ctx.tool_state.reapproval = record
     decision = TriageDecision(
         tier="skip",

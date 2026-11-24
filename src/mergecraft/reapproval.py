@@ -143,18 +143,26 @@ async def review_policy_digest(
     *,
     workflow_path: str | None,
     version: str,
+    action_pin: str | None = None,
 ) -> str:
     """The digest of the review policy a pull request is reviewed under.
 
     It covers the base side's ``.mergecraft`` directory (config, learnings, rules —
-    its Git tree id changes with any file in it), the workflow file that runs the
-    review (``GITHUB_WORKFLOW_REF``; its Action pin, permissions and inputs) and the
-    mergeCraft version. Any change to them is a changed review policy.
+    its Git tree id changes with any file in it), the mergeCraft version, the path of
+    the workflow that runs the review (``GITHUB_WORKFLOW_REF``) and the Action pin the
+    run executes (``action_pin``, the full commit the consumer workflow pins). Any
+    change to them is a changed review policy.
+
+    The workflow file's content is covered only when no Action pin is known. With a
+    pin, an edit to the workflow that keeps the pin — a comment, an advisory job, a
+    ``with:`` input, a permission — leaves the digest unchanged, so it no longer
+    invalidates every open pull request's pass. Without one (``action_pin`` absent or
+    not a full commit SHA) the workflow blob stands in for it, and any edit to the
+    file is a changed policy.
 
     Raises:
         ReapprovalUnavailableError: The running workflow is unnamed, or it is not a
-            file at the base revision. Without its blob in the digest a base-side
-            edit to the workflow could not invalidate a stamp, so no digest exists.
+            file at the base revision.
     """
     if not workflow_path:
         msg = "the running workflow is unknown (GITHUB_WORKFLOW_REF is missing or malformed)"
@@ -167,11 +175,16 @@ async def review_policy_digest(
     if workflow is None or workflow.get("type") != "blob" or not isinstance(workflow_sha, str):
         msg = f"the running workflow {workflow_path} is not a file at the base revision"
         raise ReapprovalUnavailableError(msg)
+    pin = (action_pin or "").strip().lower()
     payload: dict[str, Any] = {
         "mergecraft": version,
         POLICY_DIRECTORY: policy.get("sha") if policy is not None else None,
-        "workflow": [workflow_path, _sha(workflow_sha, "the workflow blob")],
     }
+    if _SHA.fullmatch(pin):
+        payload["action"] = pin
+        payload["workflow"] = workflow_path
+    else:
+        payload["workflow"] = [workflow_path, _sha(workflow_sha, "the workflow blob")]
     blob = json.dumps(payload, sort_keys=True).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
 
@@ -384,6 +397,7 @@ async def evaluate_reapproval(
     list_reviews: Callable[[], Awaitable[list[dict[str, Any]]]],
     workflow_path: str | None,
     version: str,
+    action_pin: str | None = None,
 ) -> ReapprovalOutcome:
     """Read the evidence for one pull request and decide whether its prior pass carries over.
 
@@ -404,6 +418,7 @@ async def evaluate_reapproval(
             pull["base"]["sha"],
             workflow_path=workflow_path,
             version=version,
+            action_pin=action_pin,
         )
         stamp = ReviewStamp(
             pull_number=pull_number, base_ref=pull["base"]["ref"], policy_digest=digest
@@ -425,7 +440,11 @@ async def evaluate_reapproval(
             policy_digest=digest,
             qualifying=config.paths,
         )
-        verdict = decide_reapproval(evidence, qualifying_paths=config.paths)
+        verdict = decide_reapproval(
+            evidence,
+            qualifying_paths=config.paths,
+            on_policy_change=config.on_policy_change,
+        )
     except Exception as err:  # any read failure is a reason to review, never to carry over
         reason = (
             str(err)

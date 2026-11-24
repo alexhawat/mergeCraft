@@ -1021,6 +1021,8 @@ def _reapproval_section(state: ToolState) -> ReapprovalSection | None:
         preserved_paths=list(record.preserved_paths),
         inherited_paths=list(record.inherited_paths),
         skipped=list(record.skipped),
+        policy_changed=record.policy_changed,
+        rechecked=list(record.rechecked),
     )
 
 

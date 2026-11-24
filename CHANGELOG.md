@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Re-approval (`review.fastPath.reapproval`) now carries a trusted pass over a
+  merge of the base branch alone. A pull request that authored nothing since
+  the reviewed head no longer needs a changelog edit to qualify; every reviewed
+  file must still match the reviewed change exactly.
+- The review-policy digest covers the Action pin the run executes instead of
+  the whole workflow file, so an edit to the workflow that keeps the pin no
+  longer sends every open pull request through a full review. Stamps written
+  before this change do not match the new digest.
+- A re-approval whose review policy changed since the prior pass now re-runs
+  the analyzers and static checks on the new head with no LLM call, and carries
+  the pass over only when they are clean. Set
+  `review.fastPath.reapproval.onPolicyChange: review` to keep a full review on
+  every policy change. The evidence packet schema is `1.23.0`.
+
 ### Fixed
 
 - Every diff walker now splits diff text on `\n` only, as Git and `parse_diff`

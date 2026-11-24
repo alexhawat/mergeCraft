@@ -143,7 +143,12 @@ from mergecraft.evidence.trajectory import TrajectoryRecord  # noqa: TC001 — P
 #   Additive; both default to ``None``. ``run_metrics`` also records what the
 #   verdict pre-flights did (#1516): ``coverage_preflight_refusals``,
 #   ``unread_added_lines_at_first_verdict`` and ``depth_preflight_refused``.
-PACKET_SCHEMA_VERSION = "1.22.0"
+# - 1.23.0 — ``triage.reapproval`` gains ``policy_changed`` and ``rechecked``: a
+#   re-approval made under a changed review policy carries over only after the
+#   analyzers and static checks ran clean on the new head, and the section states
+#   what ran. Additive; ``False`` and an empty list otherwise. ``qualifying_paths``
+#   may now be empty (a merge of the base branch alone).
+PACKET_SCHEMA_VERSION = "1.23.0"
 
 
 class _PinnedRequiredFieldInfo(FieldInfo):  # type: ignore[misc]  # — FieldInfo.__init_subclass__ is not typed in pydantic stubs; subclassing is intentional
@@ -392,6 +397,8 @@ class ReapprovalSection(BaseModel):
     preserved_paths: list[str] = Field(default_factory=list)
     inherited_paths: list[str] = Field(default_factory=list)
     skipped: list[str] = Field(default_factory=list)
+    policy_changed: bool = False
+    rechecked: list[str] = Field(default_factory=list)
 
 
 class TriageSection(BaseModel):

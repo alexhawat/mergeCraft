@@ -94,7 +94,7 @@ to ship a schema change. The rules are:
    a typo) do **not** require a bump. The version is the contract, not
    the prose around it.
 
-The current version is `1.22.0`.
+The current version is `1.23.0`.
 
 Wiring a consumer is **not** a shape change: #96 gave these models their first
 runtime caller without touching a single field, so `PACKET_SCHEMA_VERSION` did
@@ -180,6 +180,11 @@ not move.
   `coverage_preflight_refusals`, `unread_added_lines_at_first_verdict` and
   `depth_preflight_refused` (#1516), which record what the verdict pre-flights
   did. Additive; measurement only.
+- `1.23.0` — `triage.reapproval` gains `policy_changed` and `rechecked`: a
+  re-approval made under a changed review policy carries over only after the
+  analyzers and static checks ran clean on the new head, and the section states
+  what ran. Additive; `false` and an empty list otherwise. `qualifying_paths`
+  may now be empty (a merge of the base branch alone).
 
 ## Top-level fields
 
@@ -312,10 +317,12 @@ off, so a run with no `review.fastPath` config is unchanged.
 | `prior_check_id` | `int` | That check run's id. |
 | `prior_head_sha` / `head_sha` | `str` | The reviewed head and the new head the result is published on. |
 | `prior_merge_base` / `merge_base` | `str` | The merge base of the PR's changes at each head. |
-| `qualifying_paths` | `list[str]` | Paths whose PR-authored change was proven prose (`CHANGELOG.md` by default). |
+| `qualifying_paths` | `list[str]` | Paths whose PR-authored change was proven prose (`CHANGELOG.md` by default). Empty when the pull request authored nothing since the reviewed head (a merge of the base branch alone). |
 | `preserved_paths` | `list[str]` | PR-authored paths identical to the reviewed change (status, blob, patch and mode). |
 | `inherited_paths` | `list[str]` | Paths that changed only because the base branch did. |
-| `skipped` | `list[str]` | Work the run did not repeat (LLM review, agents, analyzers, static checks, full-diff reads). |
+| `skipped` | `list[str]` | Work the run did not repeat (LLM review, agents, analyzers, static checks, full-diff reads). With `policy_changed`, the analyzers and static checks are not in it. |
+| `policy_changed` | `bool` | The review policy differs from the one the prior pass was decided under, so the deterministic checks ran again on this head. (Added in 1.23.0.) |
+| `rechecked` | `list[str]` | One stated line per deterministic check that ran on this head under `policy_changed`; empty otherwise. (Added in 1.23.0.) |
 
 Neither a `skip` nor a `lite` run ever carries a `success` decision of its own:
 approval is left to a human. The one exception is a `skip (reapproval)` run on a

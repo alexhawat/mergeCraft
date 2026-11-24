@@ -176,6 +176,8 @@ def _reapproval_lines(section: Any) -> list[str]:
         preserved_paths=tuple(section.preserved_paths),
         inherited_paths=tuple(section.inherited_paths),
         skipped=tuple(section.skipped),
+        policy_changed=bool(section.policy_changed),
+        rechecked=tuple(section.rechecked),
     )
     return record.summary_lines()
 

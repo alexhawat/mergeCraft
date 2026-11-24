@@ -384,11 +384,18 @@ def render_deterministic_review_block(
         header_lines.append(f"- **Tier:** skip ({triage.recognizer}) — no LLM review ran")
         reapproval = getattr(triage, "reapproval", None)
         if reapproval is not None:
+            qualifying = ", ".join(f"`{path}`" for path in reapproval.qualifying_paths)
             header_lines.append(
                 f"- **Re-approved from:** `{reapproval.prior_head_sha}` "
                 f"({reapproval.prior_url}); qualifying path: "
-                + ", ".join(f"`{path}`" for path in reapproval.qualifying_paths)
+                + (qualifying or "none (no PR-authored change since)")
             )
+            if getattr(reapproval, "policy_changed", False):
+                rechecked = "; ".join(getattr(reapproval, "rechecked", []) or [])
+                header_lines.append(
+                    "- **Review policy changed:** deterministic checks re-ran on this head"
+                    + (f" — {rechecked}" if rechecked else "")
+                )
     elif triage is not None and triage.tier == "lite":
         used = getattr(triage, "tokens_used", None)
         usage = "" if used is None else f"; {used} tokens used"

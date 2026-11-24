@@ -4,7 +4,8 @@
 shape change, so ``PACKET_SCHEMA_VERSION`` took the next minor: ``1.18.0``; the
 lite tier's triage fields then moved it to ``1.19.0``, and ``triage.reapproval``
 (#1284) to ``1.20.0``. Stored review metrics (#1381) move it to ``1.21.0``, and
-the read counts beside the delivery coverage (#1517) to ``1.22.0``.
+the read counts beside the delivery coverage (#1517) to ``1.22.0``. The
+re-approval recheck fields (``policy_changed``, ``rechecked``) move it to ``1.23.0``.
 ``docs/evidence-packet.md`` states the current version, carries a history row
 for it, and documents the real ``blast_radius`` shape.
 """
@@ -59,14 +60,14 @@ def _blast_radius_section() -> str:
     raise AssertionError("docs/evidence-packet.md has no `blast_radius` section")
 
 
-def test_the_packet_schema_version_is_1_22_0() -> None:
-    assert PACKET_SCHEMA_VERSION == "1.22.0"
+def test_the_packet_schema_version_is_1_23_0() -> None:
+    assert PACKET_SCHEMA_VERSION == "1.23.0"
 
 
 def test_a_new_packet_defaults_to_the_current_version() -> None:
     field = MergeEvidencePacket.model_fields["schema_version"]
 
-    assert field.default == "1.22.0"
+    assert field.default == "1.23.0"
 
 
 def test_the_docs_state_the_current_version() -> None:
@@ -74,7 +75,7 @@ def test_the_docs_state_the_current_version() -> None:
 
     assert match is not None
     assert match["version"] == PACKET_SCHEMA_VERSION
-    assert "The current version is `1.22.0`." in _doc()
+    assert "The current version is `1.23.0`." in _doc()
 
 
 def test_the_docs_history_row_names_the_new_blast_radius_fields() -> None:
@@ -102,6 +103,13 @@ def test_the_docs_history_row_names_the_read_counts() -> None:
 
     assert "added_lines_total" in entry
     assert "added_lines_read" in entry
+
+
+def test_the_docs_history_row_names_the_recheck_fields() -> None:
+    entry = _history_entry("1.23.0")
+
+    assert "policy_changed" in entry
+    assert "rechecked" in entry
 
 
 def test_the_docs_blast_radius_section_documents_the_real_shape() -> None:

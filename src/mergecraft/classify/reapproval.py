@@ -1,10 +1,11 @@
-"""Re-approval: carry a trusted mergeCraft pass forward when only changelog prose moved.
+"""Re-approval: carry a trusted mergeCraft pass forward when the reviewed change is intact.
 
 A pull request that mergeCraft already passed often comes back with nothing new to
-review: a merge of the base branch whose only conflict was the changelog, or a one-line
-changelog fix. The full review then re-reads every file to conclude what the previous
-run already concluded. This module decides, from evidence alone and before any agent
-exists, whether the new head is that case.
+review: a merge of the base branch that touches none of the reviewed files, a merge
+whose only conflict was the changelog, or a one-line changelog fix. The full review then
+re-reads every file to conclude what the previous run already concluded. This module
+decides, from evidence alone and before any agent exists, whether the new head is that
+case.
 
 The evidence is three comparisons and the file modes on each side:
 
@@ -21,6 +22,9 @@ Every path in ``interdiff`` is accounted for, or the answer is a full review:
 * a path **inherited from the base**: not part of the pull request at ``P`` or at
   ``H``, so ``H`` holds the base's version of it.
 
+No qualifying path has to change: a merge of the base branch that leaves every
+PR-authored change exactly as reviewed carries over on the inherited paths alone.
+
 A PR-authored path that changed since ``P`` is never accounted for. Every
 non-qualifying entry of ``current`` must equal its ``reviewed`` entry exactly — status,
 rename source, post-image blob and patch. An identical patch applied to an identical
@@ -31,9 +35,12 @@ compare API omits, must match on both sides of both comparisons.
 
 The prior pass is a ``mergecraft-approval`` check run that concluded ``success`` on
 ``P`` from a trusted GitHub App, and it carries a :class:`ReviewStamp` naming the pull
-request, target branch and review-policy digest it was decided under. All three must
-match this run. The I/O shell (:mod:`mergecraft.reapproval`) reads the evidence; this
-module only decides.
+request, target branch and review-policy digest it was decided under. The pull request
+and target branch must match this run. A different review policy is a refusal under
+``on_policy_change="review"``; under ``"recheck"`` the record is marked
+``policy_changed`` and the caller must re-run the deterministic checks (analyzers and
+static checks) on the new head before the verdict carries over. The I/O shell
+(:mod:`mergecraft.reapproval`) reads the evidence; this module only decides.
 
 Exports:
     ReviewStamp: The pull request, target branch and policy a verdict was decided under.
@@ -52,7 +59,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Literal
 
 from mergecraft.classify.triage import recognize_prose_only
 
@@ -70,6 +77,14 @@ SKIPPED_WORK: Final[tuple[str, ...]] = (
     "static checks",
     "full-diff reads",
 )
+# What a re-approval under a changed review policy does not repeat: the analyzers and
+# static checks run again on the new head, so only the LLM work is skipped.
+RECHECK_SKIPPED_WORK: Final[tuple[str, ...]] = (
+    "LLM review",
+    "specialist and verifier agents",
+    "full-diff reads",
+)
+OnPolicyChange = Literal["review", "recheck"]
 REGULAR_FILE_MODES: Final[frozenset[str]] = frozenset({"100644", "100755"})
 
 _SHA: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{40}")
@@ -232,6 +247,10 @@ class ReapprovalRecord:
         preserved_paths: PR-authored paths byte-identical to the reviewed version.
         inherited_paths: Paths that changed only because the base branch did.
         skipped: Work this run did not repeat.
+        policy_changed: The review policy differs from the one the prior pass was
+            decided under. The verdict then carries over only after the deterministic
+            checks ran clean on the new head; ``rechecked`` names what ran.
+        rechecked: The deterministic checks that ran on the new head, as stated lines.
     """
 
     prior_url: str
@@ -244,36 +263,62 @@ class ReapprovalRecord:
     preserved_paths: tuple[str, ...]
     inherited_paths: tuple[str, ...]
     skipped: tuple[str, ...] = SKIPPED_WORK
+    policy_changed: bool = False
+    rechecked: tuple[str, ...] = ()
+
+    def change_summary(self) -> str:
+        """What the pull request authored since the reviewed head, in a few words."""
+        if self.qualifying_paths:
+            return "prose in " + ", ".join(self.qualifying_paths)
+        return "nothing (the base branch moved)"
 
     def reason(self) -> str:
         """One sentence for the run record and the triage reason."""
-        paths = ", ".join(self.qualifying_paths)
-        return (
-            f"re-approved: the mergeCraft pass on {self.prior_head_sha[:12]} carries over; "
-            f"the only PR-authored change since then is prose in {paths}"
-        )
+        lead = f"re-approved: the mergeCraft pass on {self.prior_head_sha[:12]} carries over; "
+        if self.qualifying_paths:
+            change = "the only PR-authored change since then is " + self.change_summary()
+        else:
+            change = "the pull request authored no change since then (the base branch moved)"
+        if self.policy_changed:
+            change += "; the review policy changed, so the deterministic checks ran again"
+        return lead + change
 
     def summary_lines(self) -> list[str]:
         """The lines the ``mergecraft`` and ``mergecraft-approval`` checks state."""
-        return [
+        proof = "prior pass, review stamp, path accounting, file modes"
+        if self.qualifying_paths:
+            proof += ", prose proof"
+        lines = [
             "Tier: skip (reapproval) — no LLM review ran; the prior mergeCraft pass carries over",
             f"Prior review: {self.prior_url} (mergecraft-approval on {self.prior_head_sha})",
             f"Compared: {self.prior_head_sha}..{self.head_sha}",
             f"Merge base: {self.prior_merge_base} -> {self.merge_base}",
-            "Qualifying path: " + ", ".join(self.qualifying_paths) + " (prose only)",
+            (
+                "Qualifying path: " + ", ".join(self.qualifying_paths) + " (prose only)"
+                if self.qualifying_paths
+                else "Qualifying path: none (no PR-authored change since the prior review)"
+            ),
             (
                 f"Accounted for: {len(self.qualifying_paths)} qualifying, "
                 f"{len(self.preserved_paths)} reviewed and unchanged, "
                 f"{len(self.inherited_paths)} inherited from the base branch"
             ),
-            (
-                "Run on this head: re-approval proof (prior pass, review stamp, "
-                "path accounting, file modes, prose proof)"
-            ),
-            "Reused from the prior review: the mergecraft-approval verdict",
-            "Skipped: " + ", ".join(self.skipped),
-            "Other required checks are not reused; they must pass on this head.",
+            f"Run on this head: re-approval proof ({proof})",
         ]
+        if self.policy_changed:
+            lines.append(
+                "Review policy: changed since the prior review; the deterministic checks "
+                "ran again on this head and no LLM review did"
+            )
+            lines.extend(f"Re-ran: {line}" for line in self.rechecked)
+        lines.extend(
+            [
+                "Reused from the prior review: the mergecraft-approval verdict",
+                "Skipped: " + ", ".join(self.skipped),
+                "Other required checks are not reused; they must pass on this head.",
+            ]
+        )
+        return lines
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,7 +366,7 @@ def _section(entry: ChangedFile) -> str:
     return f"diff --git a/{entry.path} b/{entry.path}\n{entry.patch or ''}\n"
 
 
-def _stamp_problem(evidence: ReapprovalEvidence) -> str | None:
+def _stamp_problem(evidence: ReapprovalEvidence, on_policy_change: OnPolicyChange) -> str | None:
     stamp = evidence.prior.stamp
     if stamp is None:
         return "the prior pass carries no review stamp (pull request, target branch, policy)"
@@ -329,12 +374,12 @@ def _stamp_problem(evidence: ReapprovalEvidence) -> str | None:
         return f"the prior pass was for pull request #{stamp.pull_number}"
     if stamp.base_ref != evidence.base_ref:
         return f"the target branch changed from {stamp.base_ref} to {evidence.base_ref}"
-    if stamp.policy_digest != evidence.policy_digest:
+    if stamp.policy_digest != evidence.policy_digest and on_policy_change != "recheck":
         return "the review policy changed since the prior pass"
     return None
 
 
-def _identity_problem(evidence: ReapprovalEvidence) -> str | None:
+def _identity_problem(evidence: ReapprovalEvidence, on_policy_change: OnPolicyChange) -> str | None:
     prior = evidence.prior.head_sha
     shas = (
         prior,
@@ -349,7 +394,7 @@ def _identity_problem(evidence: ReapprovalEvidence) -> str | None:
         return "the head is the reviewed head; there is nothing to carry over"
     if evidence.interdiff.merge_base != prior:
         return f"the new head does not descend from the reviewed head {prior[:12]}"
-    return _stamp_problem(evidence)
+    return _stamp_problem(evidence, on_policy_change)
 
 
 def _mode_problem(
@@ -437,7 +482,8 @@ def _since_review(
     A path is qualifying only when the pull request authors a change to it at the new
     head (``authored``, every one of which is prose-proven). A qualifying-named path
     the PR does not change at the new head holds the base's version there, so it is
-    inherited, never reported as a PR-authored prose edit.
+    inherited, never reported as a PR-authored prose edit. Neither set has to be
+    non-empty: a merge of the base branch alone leaves only inherited paths.
     """
     qualifying: set[str] = set()
     inherited: set[str] = set()
@@ -454,8 +500,6 @@ def _since_review(
             msg = f"the PR-authored path {sorted(touched)[0]} changed since the review"
             raise _RefusedError(msg)
         inherited.update(names)
-    if not qualifying:
-        raise _RefusedError("no PR-authored change to a qualifying path since the review")
     return qualifying, inherited
 
 
@@ -474,12 +518,12 @@ def _check_modes(evidence: ReapprovalEvidence, allowed: set[str]) -> None:
             raise _RefusedError(f"{path} is not a regular non-executable file at the new head")
 
 
-def _decide(evidence: ReapprovalEvidence, allowed: set[str]) -> ReapprovalRecord:
-    problem = _identity_problem(evidence)
+def _decide(
+    evidence: ReapprovalEvidence, allowed: set[str], on_policy_change: OnPolicyChange
+) -> ReapprovalRecord:
+    problem = _identity_problem(evidence, on_policy_change)
     if problem is not None:
         raise _RefusedError(problem)
-    if not allowed:
-        raise _RefusedError("review.fastPath.reapproval.paths names no path")
     reviewed = _index(evidence.reviewed, "reviewed", need_patches=True)
     current = _index(evidence.current, "current", need_patches=True)
     interdiff = _index(evidence.interdiff, "since-review", need_patches=False)
@@ -488,13 +532,19 @@ def _decide(evidence: ReapprovalEvidence, allowed: set[str]) -> ReapprovalRecord
     qualifying, inherited = _since_review(
         interdiff, pr_names, allowed, {entry.path for entry in prose}
     )
-    # Every qualifying path is a PR-authored change at the new head, so ``prose`` is
-    # never empty here and the proof always runs for what the record calls prose.
-    diff_text = "".join(_section(entry) for entry in prose)
-    if not recognize_prose_only(diff_text, head_files=evidence.head_files):
-        changed = ", ".join(entry.path for entry in prose)
-        raise _RefusedError(f"the change to {changed} is not proven prose")
+    # Every qualifying path is a PR-authored change at the new head, so it is in
+    # ``prose`` and the proof runs for everything the record calls prose. A pull
+    # request that authors no qualifying change has nothing to prove here: all of its
+    # changes were matched to the reviewed ones above.
+    if prose:
+        diff_text = "".join(_section(entry) for entry in prose)
+        if not recognize_prose_only(diff_text, head_files=evidence.head_files):
+            changed = ", ".join(entry.path for entry in prose)
+            raise _RefusedError(f"the change to {changed} is not proven prose")
     _check_modes(evidence, allowed)
+    # ``_identity_problem`` already refused a missing stamp.
+    stamp = evidence.prior.stamp
+    policy_changed = stamp is None or stamp.policy_digest != evidence.policy_digest
     return ReapprovalRecord(
         prior_url=evidence.prior.url,
         prior_check_id=evidence.prior.check_id,
@@ -505,11 +555,16 @@ def _decide(evidence: ReapprovalEvidence, allowed: set[str]) -> ReapprovalRecord
         qualifying_paths=tuple(sorted(qualifying)),
         preserved_paths=tuple(preserved),
         inherited_paths=tuple(sorted(inherited)),
+        skipped=RECHECK_SKIPPED_WORK if policy_changed else SKIPPED_WORK,
+        policy_changed=policy_changed,
     )
 
 
 def decide_reapproval(
-    evidence: ReapprovalEvidence, *, qualifying_paths: Collection[str]
+    evidence: ReapprovalEvidence,
+    *,
+    qualifying_paths: Collection[str],
+    on_policy_change: OnPolicyChange = "review",
 ) -> ReapprovalVerdict:
     """Decide whether the prior pass carries over to the new head.
 
@@ -517,17 +572,19 @@ def decide_reapproval(
     refusal means the normal review runs. The steps, each a refusal on failure:
 
     1. identity — full SHAs, a new head that descends from the reviewed one, and a
-       review stamp naming this pull request, target branch and review policy;
+       review stamp naming this pull request and target branch. A stamp naming a
+       different review policy is a refusal under ``on_policy_change="review"``; under
+       ``"recheck"`` the record is marked ``policy_changed`` and the caller owes the
+       deterministic checks on the new head before it publishes the verdict;
     2. the PR's own changes — every non-qualifying change identical to the reviewed
        one, every qualifying change an in-place edit;
     3. accounting — every path changed since the review is qualifying (a change the
-       PR authors at the new head) or inherited from the base, and at least one is
-       qualifying;
-    4. prose — the qualifying change at the new head is proven prose;
+       PR authors at the new head) or inherited from the base;
+    4. prose — every qualifying change at the new head is proven prose;
     5. modes — unchanged on both sides of both comparisons.
     """
     try:
-        record = _decide(evidence, {path for path in qualifying_paths if path})
+        record = _decide(evidence, {path for path in qualifying_paths if path}, on_policy_change)
     except _RefusedError as refusal:
         return _refuse(str(refusal))
     return ReapprovalVerdict(record=record, reason=record.reason())
@@ -536,10 +593,12 @@ def decide_reapproval(
 __all__ = [
     "APPROVAL_CHECK_NAME",
     "REAPPROVAL_RECOGNIZER",
+    "RECHECK_SKIPPED_WORK",
     "REGULAR_FILE_MODES",
     "SKIPPED_WORK",
     "ChangedFile",
     "Comparison",
+    "OnPolicyChange",
     "PriorPass",
     "ReapprovalEvidence",
     "ReapprovalRecord",
