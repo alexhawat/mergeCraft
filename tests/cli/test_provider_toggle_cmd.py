@@ -542,7 +542,8 @@ def test_local_partial_failure_bails(tmp_path: Path, monkeypatch: MonkeyPatch) -
     # by walking package attributes, which is not guaranteed to be the same
     # object ``from mergecraft.cli.auth_cmd import _write_env_value`` reaches
     # through ``sys.modules``. This mirrors tests/cli/test_auth_scope_cmd.py.
-    auth_cmd = importlib.import_module("mergecraft.cli.auth_cmd")
+    import mergecraft.cli.auth_cmd as auth_cmd
+
     real_write = auth_cmd._write_env_value
     calls: list[str] = []
 

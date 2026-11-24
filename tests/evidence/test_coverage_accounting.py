@@ -439,3 +439,35 @@ def test_the_gate_reason_follows_the_pinned_policy() -> None:
     assert coverage_gate_reason(incomplete, on_incomplete="warn") is None
     assert coverage_gate_reason(complete, on_incomplete="inconclusive") is None
     assert coverage_gate_reason(None, on_incomplete="inconclusive") is None
+
+
+def test_read_counts_sit_beside_delivery_and_qualify_a_complete_line() -> None:
+    # #1517: every hunk delivered is "complete", which a reader took for "all read".
+    from mergecraft.evidence.coverage import account_coverage, coverage_summary_line
+
+    section = account_coverage(authoritative_diff=_TWO_FILES, added_lines=(4, 9))
+
+    assert section.complete is True
+    assert (section.added_lines_read, section.added_lines_total) == (4, 9)
+    assert coverage_summary_line(section, on_incomplete=None) == (
+        "Coverage: 3/3 hunks delivered; 4/9 added lines read"
+    )
+
+
+def test_read_counts_are_unknown_when_no_read_was_observed() -> None:
+    from mergecraft.evidence.coverage import account_coverage
+
+    section = account_coverage(
+        authoritative_diff=_TWO_FILES, reads_observed=False, added_lines=(0, 9)
+    )
+
+    assert section.added_lines_read is None
+    assert section.added_lines_total is None
+
+
+def test_a_fully_read_change_keeps_the_plain_summary_line() -> None:
+    from mergecraft.evidence.coverage import account_coverage, coverage_summary_line
+
+    section = account_coverage(authoritative_diff=_TWO_FILES, added_lines=(9, 9))
+
+    assert coverage_summary_line(section, on_incomplete=None) == "Coverage: 3/3 hunks"

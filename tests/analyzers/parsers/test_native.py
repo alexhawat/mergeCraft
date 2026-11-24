@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from tests.analyzers.support import FIXTURES_DIR, import_module
+from tests.analyzers.support import FIXTURES_DIR
 
 
 @pytest.mark.parametrize(
@@ -16,8 +16,9 @@ from tests.analyzers.support import FIXTURES_DIR, import_module
     ],
 )
 def test_native_parser_recorded_fixture(parser_id: str, fixture: str) -> None:
-    parsers = import_module("mergecraft.analyzers.parsers")
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+    import mergecraft.analyzers.parsers as parsers
+
     raw = (FIXTURES_DIR / fixture).read_text(encoding="utf-8")
     m = manifest.load_manifest_yaml(
         f"""
@@ -58,9 +59,11 @@ def test_parsers_never_shell_out(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(subprocess, "run", _boom)
     monkeypatch.setattr(subprocess, "Popen", _boom)
-    parsers = import_module("mergecraft.analyzers.parsers")
+    import mergecraft.analyzers.parsers as parsers
+
     raw = (FIXTURES_DIR / "native/ruff-minimal.json").read_text(encoding="utf-8")
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+
     m = manifest.load_manifest_yaml(
         """
 id: ruff
@@ -91,8 +94,9 @@ exclusive_group: python-lint
 
 def test_trivy_parser_tolerates_leading_log_noise() -> None:
     """Trivy may print a timestamped INFO line before the JSON object."""
-    parsers = import_module("mergecraft.analyzers.parsers")
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+    import mergecraft.analyzers.parsers as parsers
+
     body = (FIXTURES_DIR / "native/trivy-minimal.json").read_text(encoding="utf-8")
     raw = "2026-08-01T08:13:17.574Z\tINFO\tLoaded config\n" + body
     m = manifest.load_manifest_yaml(
@@ -143,8 +147,8 @@ def test_require_json_array_rejects_error_object_then_empty_array() -> None:
 
 def test_trivy_parser_skips_leading_empty_array_before_report() -> None:
     """A banner plus ``[]`` must not hide the later Trivy report object."""
-    parsers = import_module("mergecraft.analyzers.parsers")
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+    import mergecraft.analyzers.parsers as parsers
     from mergecraft.analyzers.parsers._common import require_json_object
     from mergecraft.utils.json_load import try_load_json
 
@@ -191,8 +195,8 @@ exclusive_group: dependency-vuln
 
 def test_trivy_parser_does_not_false_clean_on_progress_object() -> None:
     """Progress tokens inside a skipped array must not latch as a clean Trivy report."""
-    parsers = import_module("mergecraft.analyzers.parsers")
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+    import mergecraft.analyzers.parsers as parsers
     from mergecraft.utils.json_load import try_load_json_object
 
     body = (FIXTURES_DIR / "native/trivy-minimal.json").read_text(encoding="utf-8")

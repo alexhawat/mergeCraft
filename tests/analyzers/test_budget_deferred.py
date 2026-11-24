@@ -6,7 +6,7 @@ from dataclasses import fields
 from typing import Any
 
 from mergecraft.review_taxonomy import BODY_ONLY_EFFORT, BODY_ONLY_SEVERITY
-from tests.analyzers.support import INLINE_BUDGET, import_module
+from tests.analyzers.support import INLINE_BUDGET
 
 DEFERRED_SECTION_HEADING = "### 🗂 Deferred findings"
 
@@ -14,7 +14,8 @@ DEFERRED_SECTION_HEADING = "### 🗂 Deferred findings"
 def _finding(
     severity: str, source: str = "analyzer", path: str = "src/a.py", line: int = 1
 ) -> object:
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     return finding_mod.make_finding(
         tool="actionlint",
         rule_id="rule",
@@ -58,7 +59,8 @@ def _agent_overflow(
 
 def test_overflowed_agent_finding_keeps_its_body() -> None:
     """RC1: agent overflow retains reasoning in the deferred lane, not a bodyless stub."""
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     overflow_body = "Race when two workers claim the same row"
     placement = budget.place_findings(
         [],
@@ -73,7 +75,8 @@ def test_overflowed_agent_finding_keeps_its_body() -> None:
 
 
 def test_deferred_section_renders_severity_path_and_body() -> None:
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     overflow_body = "Missing rollback when the write fails mid-batch"
     overflow_path = "src/zz-batch.py"
     placement = budget.place_findings(
@@ -94,7 +97,8 @@ def test_deferred_section_renders_severity_path_and_body() -> None:
 
 def test_analyzer_overflow_still_renders_as_a_compact_tool_table() -> None:
     """Analyzer overflow stays in the mechanical table; agent overflow must not."""
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     analyzer_findings = [
         _finding("Major", path=f"src/analyzer{i:02d}.py", line=i)
         for i in range(1, INLINE_BUDGET + 3)
@@ -116,14 +120,16 @@ def test_analyzer_overflow_still_renders_as_a_compact_tool_table() -> None:
 
 def test_inline_budget_is_still_eight() -> None:
     """D1 invariant: inline cap stays 8 for this program."""
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     assert budget.default_inline_budget() == 8
     assert INLINE_BUDGET == 8
 
 
 def test_trivial_and_low_value_never_reach_the_deferred_section() -> None:
     """Trivial / Low value belong in Nitpicks, not the deferred lane (REVIEW-CHECKS §5)."""
-    budget = import_module("mergecraft.analyzers.budget")
+    import mergecraft.analyzers.budget as budget
+
     placement = budget.place_findings(
         [],
         inline_budget=INLINE_BUDGET,

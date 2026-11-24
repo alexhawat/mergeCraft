@@ -15,7 +15,6 @@ makes no enterprise call at all.
 
 from __future__ import annotations
 
-import importlib
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -115,7 +114,8 @@ def test_disabled_path_leaves_a_bound_enterprise_block_unchanged(
 def test_disabled_path_makes_no_enterprise_call(monkeypatch: MonkeyPatch) -> None:
     """The disabled path must not call the enterprise binder at all."""
     _disable_tracing(monkeypatch)
-    runtime = importlib.import_module("mergecraft.enterprise.runtime")
+    import mergecraft.enterprise.runtime as runtime
+
     calls: list[Any] = []
 
     def _record(*args: Any, **kwargs: Any) -> None:
@@ -182,8 +182,9 @@ def test_unbound_telemetry_off_builds_no_remote_sink_and_stays_unbound(
     """Settings-scoped telemetry must not leak past sink construction."""
     _ensure_real_tracer_provider()
     _disable_tracing(monkeypatch)
-    runtime = importlib.import_module("mergecraft.enterprise.runtime")
-    exporters = importlib.import_module("mergecraft.tracing.exporters")
+    import mergecraft.enterprise.runtime as runtime
+    import mergecraft.tracing.exporters as exporters
+
     reset_enterprise_runtime()
     assert runtime._BOUND.get() is None
 

@@ -41,7 +41,6 @@ import json
 import os
 import subprocess
 import zipfile
-from importlib import import_module
 from io import BytesIO
 from typing import TYPE_CHECKING, Any
 
@@ -88,15 +87,20 @@ diff --git a/docs/guide.md b/docs/guide.md
 
 
 def _ingest() -> Any:
-    return import_module("mergecraft.ci.sarif_ingest")
+    from mergecraft.ci import sarif_ingest
+
+    return sarif_ingest
 
 
 def _rg() -> Any:
-    return import_module("mergecraft.ci.red_green")
+    from mergecraft.ci import red_green
+
+    return red_green
 
 
 def _declaration(*, artifact: str = ARTIFACT, workflow: str = WORKFLOW) -> Any:
-    settings = import_module("mergecraft.config.settings")
+    import mergecraft.config.settings as settings
+
     return settings.RedGreenReceiptSettings(artifact=artifact, workflow=workflow)
 
 

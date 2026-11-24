@@ -37,8 +37,8 @@ from mergecraft.tracing.redaction import redact_attrs
 from mergecraft.tracing.sinks import read_jsonl_events
 
 if TYPE_CHECKING:
-    import click
     from rich.console import Console
+    from typer import _click
 
     from mergecraft.config.layered import ConfigSources
 
@@ -52,11 +52,11 @@ class _TracesGroup(MergecraftTyperGroup):
     help flag, ``show`` is inserted in front of the arguments.
     """
 
-    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+    def parse_args(self, ctx: _click.Context, args: list[str]) -> list[str]:
         """Insert ``show`` before *args* unless they already name a subcommand.
 
         Args:
-            ctx (click.Context): The group's parse context.
+            ctx (_click.Context): The group's parse context.
             args (list[str]): Raw arguments after ``traces``.
 
         Returns:

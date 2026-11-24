@@ -52,18 +52,18 @@ _CONSTANT_NAMES = [
 @pytest.mark.parametrize("name", _GUARD_NAMES)
 def test_git_guards_exports_guard(name: str) -> None:
     """W9.1b — each guard function is exported from ``mcp.git_guards``."""
-    import importlib
 
-    module = importlib.import_module("mergecraft.mcp.git_guards")
+    import mergecraft.mcp.git_guards as module
+
     assert hasattr(module, name), f"mcp.git_guards is missing {name!r}"
 
 
 @pytest.mark.parametrize("name", _CONSTANT_NAMES)
 def test_git_guards_exports_constant(name: str) -> None:
     """W9.1c — each guard constant is exported from ``mcp.git_guards``."""
-    import importlib
 
-    module = importlib.import_module("mergecraft.mcp.git_guards")
+    import mergecraft.mcp.git_guards as module
+
     assert hasattr(module, name), f"mcp.git_guards is missing constant {name!r}"
 
 

@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.analyzers.support import import_module
 from tests.ci.workflow_support import REPO_ROOT, read_text
 
 if TYPE_CHECKING:
@@ -25,7 +24,9 @@ _CANARY = "tests/tracing/test_redact_url.py"
 
 
 def _module() -> Any:
-    return import_module("scripts.ci_extended_sarif")
+    from scripts import ci_extended_sarif
+
+    return ci_extended_sarif
 
 
 def _finding(path: str, detector: str, line: int = 1) -> str:

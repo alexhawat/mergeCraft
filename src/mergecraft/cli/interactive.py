@@ -28,9 +28,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import click
 import typer
-from click.core import ParameterSource
+from typer import _click
+from typer._click.core import ParameterSource
+from typer._click.exceptions import MissingParameter
+from typer.core import TyperArgument, TyperGroup, TyperOption
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE, CLI_USAGE_EXIT_CODE
@@ -73,7 +75,7 @@ def _env_truthy(value: str | None) -> bool:
 
 
 def command_was_invoked_bare(
-    ctx: click.Context,
+    ctx: _click.Context,
     *,
     ignore: frozenset[str] | None = None,
 ) -> bool:
@@ -84,7 +86,7 @@ def command_was_invoked_bare(
     wizard.
     """
     skipped = ignore or frozenset()
-    current: click.Context | None = ctx
+    current: _click.Context | None = ctx
     while current is not None:
         for param in current.command.params:
             name = param.name
@@ -138,10 +140,10 @@ class GroupMenuItem:
     help: str
 
 
-def visible_group_commands(ctx: click.Context) -> list[GroupMenuItem]:
+def visible_group_commands(ctx: _click.Context) -> list[GroupMenuItem]:
     """Return non-hidden subcommands of the Click group in *ctx*."""
     group = ctx.command
-    if not isinstance(group, click.Group):
+    if not isinstance(group, TyperGroup):
         return []
     items: list[GroupMenuItem] = []
     for name in group.list_commands(ctx):
@@ -152,7 +154,7 @@ def visible_group_commands(ctx: click.Context) -> list[GroupMenuItem]:
     return items
 
 
-def _short_help(command: click.Command) -> str:
+def _short_help(command: _click.Command) -> str:
     text = (command.short_help or command.help or "").strip()
     if not text:
         return ""
@@ -199,7 +201,7 @@ def prompt_choice(
     return selected
 
 
-def run_group_session(ctx: click.Context) -> None:
+def run_group_session(ctx: _click.Context) -> None:
     """Offer the group's subcommands and invoke the one that is chosen."""
     items = visible_group_commands(ctx)
     if not items:
@@ -209,7 +211,7 @@ def run_group_session(ctx: click.Context) -> None:
     options = [(item.name, item.help) for item in items]
     selected = prompt_choice(f"{path} — interactive session", options)
     name = items[selected - 1].name
-    command = ctx.command.get_command(ctx, name) if isinstance(ctx.command, click.Group) else None
+    command = ctx.command.get_command(ctx, name) if isinstance(ctx.command, TyperGroup) else None
     if command is None:
         console.print(f"[red]unknown command {name!r}[/red]")
         raise typer.Exit(CLI_USAGE_EXIT_CODE)
@@ -218,9 +220,9 @@ def run_group_session(ctx: click.Context) -> None:
         command.invoke(sub_ctx)
 
 
-def _command_path(ctx: click.Context) -> str:
+def _command_path(ctx: _click.Context) -> str:
     names: list[str] = []
-    current: click.Context | None = ctx
+    current: _click.Context | None = ctx
     while current is not None:
         if current.info_name:
             names.append(current.info_name)
@@ -229,13 +231,13 @@ def _command_path(ctx: click.Context) -> str:
     return " ".join(names) or "mergecraft"
 
 
-def install_missing_param_prompts(command: click.Command) -> None:
+def install_missing_param_prompts(command: _click.Command) -> None:
     """Wrap *command.parse_args* so a TTY can supply missing required values."""
     if getattr(command, "_mergecraft_missing_param_prompts", False):
         return
     original = command.parse_args
 
-    def parse_args(ctx: click.Context, args: list[str]) -> list[str]:
+    def parse_args(ctx: _click.Context, args: list[str]) -> list[str]:
         return _parse_args_prompting_missing(original, ctx, args)
 
     command.parse_args = parse_args  # type: ignore[method-assign]  # — wrap Click parse_args with TTY missing-arg prompts
@@ -243,27 +245,27 @@ def install_missing_param_prompts(command: click.Command) -> None:
 
 
 def _parse_args_prompting_missing(
-    original: Callable[[click.Context, list[str]], list[str]],
-    ctx: click.Context,
+    original: Callable[[_click.Context, list[str]], list[str]],
+    ctx: _click.Context,
     args: list[str],
 ) -> list[str]:
     current = list(args)
     while True:
         try:
             return original(ctx, current)
-        except click.MissingParameter as exc:
+        except MissingParameter as exc:
             if not is_interactive_session() or exc.param is None or ctx.resilient_parsing:
                 raise
             current = _inject_prompted_param(exc.param, current)
 
 
-def _inject_prompted_param(param: click.Parameter, args: list[str]) -> list[str]:
-    label = param.human_readable_name or param.name or "value"
-    if isinstance(param, click.Argument):
+def _inject_prompted_param(param: _click.Parameter, args: list[str]) -> list[str]:
+    label = param.metavar or param.name or "value"
+    if isinstance(param, TyperArgument):
         value = prompt_text(label)
         return [*args, value]
     flag = param.opts[0] if param.opts else f"--{param.name}"
-    if isinstance(param, click.Option) and param.is_flag:
+    if isinstance(param, TyperOption) and param.is_flag:
         return [flag, *args]
     value = prompt_text(label)
     return [flag, value, *args]

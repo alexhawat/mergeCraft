@@ -7,7 +7,6 @@ Pins ``mergecraft.modes._incremental_promotion`` helpers that promote ledger
 
 from __future__ import annotations
 
-import importlib
 from typing import Any
 
 import pytest
@@ -22,13 +21,17 @@ _DEFERRED_FP = finding_fingerprint(path=_DEFERRED_PATH, body=_DEFERRED_BODY)
 
 def _promotion_mod() -> Any:
     try:
-        return importlib.import_module("mergecraft.modes._incremental_promotion")
+        from mergecraft.modes import _incremental_promotion
+
+        return _incremental_promotion
     except ImportError as err:
         pytest.fail(f"W6.2 module missing: {err}")
 
 
 def _ledger_mod() -> Any:
-    return importlib.import_module("mergecraft.findings.ledger")
+    from mergecraft.findings import ledger
+
+    return ledger
 
 
 def _deferred_row() -> dict[str, object]:

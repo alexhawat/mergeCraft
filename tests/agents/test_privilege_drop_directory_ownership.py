@@ -31,7 +31,6 @@ instead of here.
 
 from __future__ import annotations
 
-import importlib
 import sys
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
@@ -45,9 +44,8 @@ if TYPE_CHECKING:
 
     from _pytest.monkeypatch import MonkeyPatch
 
-claude_module = importlib.import_module("mergecraft.agents.claude")
-gemini_module = importlib.import_module("mergecraft.agents.gemini")
-codex_module = importlib.import_module("mergecraft.agents.codex")
+import mergecraft.agents.claude as claude_module
+import mergecraft.agents.gemini as gemini_module
 
 
 class _FakePw:

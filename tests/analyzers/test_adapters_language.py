@@ -11,17 +11,18 @@ from tests.analyzers.support import (
     C1_LANGUAGE_TOOLS,
     C1_TYPE_CHECKERS,
     finding_path_matches,
-    import_module,
 )
 
 
 def _catalog_ids() -> set[str]:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     return {manifest.id for manifest in registry.load_catalog()}
 
 
 def _run(tool_id: str, repo_root: Path, changed_files: list[str]):
-    adapters = import_module("mergecraft.analyzers.adapters")
+    import mergecraft.analyzers.adapters as adapters
+
     return adapters.run_adapter(
         tool_id=tool_id,
         repo_root=repo_root,
@@ -54,8 +55,9 @@ def test_type_checker_never_uses_managed_substitute(
     if tool_id not in _catalog_ids():
         pytest.fail(f"{tool_id} manifest missing from catalog")
 
-    resolve = import_module("mergecraft.analyzers.resolve")
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+    import mergecraft.analyzers.resolve as resolve
+
     manifest = next(m for m in registry.load_catalog() if m.id == tool_id)
 
     plan = resolve.resolve_analyzer(
@@ -80,7 +82,8 @@ def test_review_names_tool_version(tool_id: str, adapter_fixture_repo: Path) -> 
     if result.skipped:
         pytest.skip(result.skip_reason or "adapter skipped in this environment")
 
-    pipeline = import_module("mergecraft.analyzers.pipeline")
+    import mergecraft.analyzers.pipeline as pipeline
+
     review_meta = pipeline.analyzer_run_metadata(tool_id=tool_id, result=result)
     version_note = review_meta.get("version") or review_meta.get("version_note") or ""
     assert version_note, f"{tool_id} review must name the version that ran (D5/C1.5)"

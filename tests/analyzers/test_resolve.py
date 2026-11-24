@@ -5,15 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tests.analyzers.support import import_module
-
 if TYPE_CHECKING:
     import pytest
 
 
 def test_preference_order_repo_native_before_managed(fixture_repo: Path) -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+    import mergecraft.analyzers.resolve as resolve
+
     raw = (Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml")).read_text(
         encoding="utf-8"
     )
@@ -30,8 +29,9 @@ def test_preference_order_repo_native_before_managed(fixture_repo: Path) -> None
 
 
 def test_ci_result_preferred_over_managed_when_repo_lacks_tool(fixture_repo: Path) -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+    import mergecraft.analyzers.resolve as resolve
+
     m = manifest.load_manifest_file(
         Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml")
     )
@@ -47,8 +47,9 @@ def test_ci_result_preferred_over_managed_when_repo_lacks_tool(fixture_repo: Pat
 
 
 def test_skip_records_human_readable_reason(fixture_repo: Path) -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+    import mergecraft.analyzers.resolve as resolve
+
     m = manifest.load_manifest_file(
         Path("tests/analyzers/fixtures/manifests/valid-actionlint.yaml")
     )
@@ -68,8 +69,9 @@ def test_skip_records_human_readable_reason(fixture_repo: Path) -> None:
 def test_repo_installed_tool_never_substituted(
     fixture_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    resolve = import_module("mergecraft.analyzers.resolve")
-    manifest = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest
+    import mergecraft.analyzers.resolve as resolve
+
     m = manifest.load_manifest_yaml(
         (Path("tests/analyzers/fixtures/manifests/invalid-unmapped-severity.yaml"))
         .read_text(encoding="utf-8")
@@ -96,7 +98,8 @@ def test_static_check_plan_confines_and_neutralises_changed_files(tmp_path: Path
     ``../outside`` is dropped; an option-shaped entry is prefixed with ``./`` so
     every getopt reads it as a path. No ``--`` separator is inserted.
     """
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.resolve as resolve
+
     plan = resolve.static_check_plan(
         name="lint",
         command="gate {files}",
@@ -118,7 +121,8 @@ def test_static_check_plan_confines_and_neutralises_changed_files(tmp_path: Path
 
 def test_static_check_plan_leaves_clean_entries_readable(tmp_path: Path) -> None:
     """A normal repo-relative file survives the confinement step."""
-    resolve = import_module("mergecraft.analyzers.resolve")
+    import mergecraft.analyzers.resolve as resolve
+
     plan = resolve.static_check_plan(
         name="lint",
         command="gate {files}",

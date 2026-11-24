@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.analyzers.support import INLINE_BUDGET, import_module
+from tests.analyzers.support import INLINE_BUDGET
 
 from mergecraft.review_taxonomy import WITHDRAWN_FINDINGS_HEADING
 
@@ -13,7 +13,8 @@ if TYPE_CHECKING:
 
 
 def _critical_findings(count: int, *, prefix: str = "critical issue") -> list[object]:
-    verifier = import_module("mergecraft.agents.verifier")
+    import mergecraft.agents.verifier as verifier
+
     return [
         verifier.AgentFinding(
             path=f"src/f{index:02d}.py",
@@ -60,7 +61,8 @@ def test_verification_budget_zero_means_no_cap(tmp_path: Path) -> None:
     settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
     assert settings.review.verification_budget == 0
 
-    verifier = import_module("mergecraft.agents.verifier")
+    import mergecraft.agents.verifier as verifier
+
     findings = _critical_findings(30)
     plan = verifier.plan_agent_verifications(
         findings,
@@ -75,7 +77,8 @@ def test_ninth_critical_finding_is_still_verified(tmp_path: Path) -> None:
     from mergecraft.config.settings import load_repo_settings
 
     settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
-    verifier = import_module("mergecraft.agents.verifier")
+    import mergecraft.agents.verifier as verifier
+
     findings = _critical_findings(9)
     plan = verifier.plan_agent_verifications(
         findings,
@@ -88,8 +91,8 @@ def test_ninth_critical_finding_is_still_verified(tmp_path: Path) -> None:
 
 def test_publication_still_caps_inline_at_eight() -> None:
     """D1 invariant — decoupling verification must not raise the inline cap."""
-    budget = import_module("mergecraft.analyzers.budget")
-    verifier = import_module("mergecraft.agents.verifier")
+    import mergecraft.agents.verifier as verifier
+    import mergecraft.analyzers.budget as budget
 
     placement = budget.place_findings(
         [],
@@ -114,9 +117,9 @@ def test_withdrawn_and_below_severity_filters_run_before_the_budget(
     tmp_path: Path,
 ) -> None:
     """Preserves verifier.py filter order — pre-budget skips never consume slots."""
+    import mergecraft.agents.verifier as verifier
     from mergecraft.config.settings import load_repo_settings
 
-    verifier = import_module("mergecraft.agents.verifier")
     withdrawn = verifier.AgentFinding(
         path="src/withdrawn.py",
         body="already refuted in learnings",
@@ -160,7 +163,8 @@ def test_over_budget_verifications_are_recorded_not_silently_dropped(
     from mergecraft.config.settings import load_repo_settings
 
     settings = load_repo_settings(root=tmp_path, load_learnings_files=False)
-    verifier = import_module("mergecraft.agents.verifier")
+    import mergecraft.agents.verifier as verifier
+
     findings = _critical_findings(25)
     plan = verifier.plan_agent_verifications(
         findings,

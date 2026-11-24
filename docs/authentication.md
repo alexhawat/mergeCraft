@@ -121,7 +121,8 @@ still names the `.env` explicitly.
 
 Disable clears **credentials**, not registration: the `providers:` row and its
 `LLM_PROVIDER_<N>` label survive, so `provider enable` re-authenticates the same
-env index. Use `mergecraft provider delete` to drop the registration itself.
+env index. Use `mergecraft provider delete` to drop the registration itself; the
+deleted provider's env index is never handed to a later `provider add`.
 Workflow YAML is never rewritten — the shipped cascade already skips a provider
 whose secret is missing.
 
