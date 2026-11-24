@@ -1,14 +1,15 @@
 # Plan 011: Prepare and complete the first human adjudication batch
 
-- Status: REOPENED — on 2026-11-19 the operator stated they had not adjudicated batch 001. The previous attribution of nine abstentions is withdrawn; historical git records and the [earlier issue comment](https://github.com/alexhawat/mergeCraft/issues/780#issuecomment-5811216475) are preserved. Batch 001 has 9 pending decisions and missing code evidence. Batch 002 prepares nine replacement candidates, all pending. #780 remains incomplete.
-- Issue: [#780](https://github.com/alexhawat/mergeCraft/issues/780)
+- Status: Batch 001 is not planned. The maintainer closed #780 as not planned on 2026-11-23; batch 001's nine rows have no source evidence and will not be adjudicated. On 2026-11-19 the operator had stated they had not adjudicated batch 001, and the previous attribution of nine abstentions is withdrawn; historical git records and the [earlier issue comment](https://github.com/alexhawat/mergeCraft/issues/780#issuecomment-5811216475) are preserved. No batch 001 decision is recorded: its manifest rows keep `decision: pending` and null identities. Batch 002 prepares nine replacement candidates, all pending the maintainer's answers.
+- Issue: [#780](https://github.com/alexhawat/mergeCraft/issues/780) (batch 001; closed as not planned on 2026-11-23)
+- Batch 002 is tracked in [#1551](https://github.com/alexhawat/mergeCraft/issues/1551).
 - Priority: P2; effort: M plus human review; change risk: MED.
 - Planned against main `be9993367386b03f982c795ceb1d80e4a0bfcf1d`, 2026-09-22.
 - Dependencies: 007. This batch alone does not complete 012, 013 or 014.
 
 ## Intent and verified current state
 
-Nine golden cases say `source="human"` but have no accepted human adjudication. Their reopened manifest has null decision identities and timestamps. Their files are descriptive metadata, not code evidence: none contains a patch, source snapshot, origin repository, commit, or PR. Alex Hawat (`alexhawat`) is the sole human adjudicator named by #780; this plan prepares reviewable material and records only decisions he actually makes.
+Nine golden cases say `source="human"` but have no accepted human adjudication. Their manifest has null decision identities and timestamps. Their files are descriptive metadata, not code evidence: none contains a patch, source snapshot, origin repository, commit, or PR. Alex Hawat (`alexhawat`) is the sole human adjudicator named by #780; this plan prepares reviewable material and records only decisions he actually makes.
 
 `evals/cases/golden/golden-python-django-migration-001.json` names a destructive migration at `app/migrations/0042_drop_legacy_slug.py:1–24` but contains no patch or source snapshot. `CorpusCase` currently has title/path/lines/source. There are nine cases, eight categories (`correctness` appears twice) and eight languages. `calibration_status` verifies provenance eligibility only; it does not verify a label, create a held-out split, measure agreement, or calibrate a judge.
 
@@ -21,9 +22,9 @@ The [batch 001 review sheet](../../../evals/adjudication/golden-batch-001-review
 preserves the original claims and their missing-evidence status. The
 [batch 002 review packet](../../../evals/adjudication/golden-batch-002-review.md)
 contains nine new agent-proposed findings backed by merged upstream PRs,
-commit-pinned code, causal statements, and licensed, hashed fixtures. Both
-packets await human decisions; evidence preparation does not create human
-provenance, establish calibration, or close #780.
+commit-pinned code, causal statements, and licensed, hashed fixtures. Batch 001
+is kept as a record and awaits nothing; only batch 002 awaits human decisions.
+Evidence preparation does not create human provenance or establish calibration.
 
 ## Scope and execution context
 
@@ -56,6 +57,8 @@ Commands described as new targets are implementation deliverables, not commands 
 
 ## Ordered steps
 
+Steps 1 to 4 were written for batch 001, which is no longer being adjudicated. They are kept as the record of how that batch was prepared. The rules against inventing evidence, decisions or provenance apply to any later batch.
+
 ### 1. Prepare inspectable evidence
 
 For each ID, locate an immutable source URL and, where available, the original repository, base/head commit SHA, and PR. A stable source link may be sufficient for Alex to review; vendoring a bounded `evals/fixtures/golden/<case-id>/task.patch` is optional and, when used, requires a SHA-256 plus appropriate attribution. Never reconstruct a plausible patch from the title. If no immutable evidence establishes the claimed path/range, set `evidence_status="missing"`; that ID is not adjudicable. Any replacement gets a new case ID and its own evidence.
@@ -78,6 +81,8 @@ Verification: Each result remains an object, validates through CorpusCase, has h
 
 ### 4. Close only the actual batch
 
+Since 2026-11-23 this rule no longer governs #780, which the maintainer closed as not planned. That closure is not a completion: it records no decision and creates no human provenance. Whether the all-nine bar below also applies to batch 002 is for the maintainer to say.
+
 Close only if all nine rows are `confirm` or `correct`, all evidence validates, and every corpus object carries a command-produced record. Call `calibration_status([case.provenance for case in golden_cases()], required="independent")`; `eligible is True` means only that every provenance clears the independence bar. If any row is missing/abstained/pending, keep the batch incomplete and report counts. Do not claim a threshold, held-out split, human-human reliability, judge-human agreement, or trajectory quality.
 
 Verification: make eval-gate passes; the batch report contains exactly nine independent records or explicitly remains incomplete.
@@ -85,7 +90,7 @@ Verification: make eval-gate passes; the batch report contains exactly nine inde
 ## Done criteria
 
 - [ ] Every confirmed/corrected label is backed by code evidence and an actual human response.
-- [ ] All nine rows have recovered immutable evidence and actual Alex decisions before closing #780; otherwise the plan remains blocked with exact row statuses.
+- Not applicable since 2026-11-23: "All nine rows have recovered immutable evidence and actual Alex decisions before closing #780." The issue was closed as not planned with 9 pending, 0 confirm, 0 correct and 0 abstain, so this criterion was never met.
 - [x] No judge calibration or trajectory-label completion is inferred from this batch.
 - [ ] Relevant commands pass with actual results/limitations recorded.
 - [ ] `git diff --check` exits0; changed paths stay within scope, plus plan status/changelog.

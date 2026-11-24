@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Literal
 from loguru import logger
 
 from mergecraft.analyzers.scope import DiffScope, changed_paths_from_scope, parse_diff_scope
+from mergecraft.diff import diff_lines
 from mergecraft.errors import ConfigurationError
 from mergecraft.review_policy.paths import normalize_repo_path
 from mergecraft.utils.git_hardening import git_argv
@@ -74,7 +75,7 @@ def _touched_paths(diff_text: str, *, scope: DiffScope | None = None) -> set[str
 def _changed_line_count(diff_text: str) -> int:
     return sum(
         1
-        for line in diff_text.splitlines()
+        for line in diff_lines(diff_text)
         if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
     )
 

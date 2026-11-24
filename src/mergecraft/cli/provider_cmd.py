@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import getpass
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 import typer
 import yaml
+from pydantic import NonNegativeInt, TypeAdapter, ValidationError
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
@@ -90,6 +92,16 @@ VERTEX_LEGACY_CONFIG_KEYS: tuple[str, ...] = ("GOOGLE_CLOUD_PROJECT", "VERTEX_LO
 STRUCTURE_KEYS_IN_ENV: frozenset[str] = frozenset({"harness", "envIndex", "modelChain", "authKind"})
 
 ENV_STRUCTURE_KEYS_TO_REMOVE_ON_APPLY: frozenset[str] = frozenset()
+
+# Highest env index ``provider delete`` has freed; see ``allocate_env_index`` (D3).
+ENV_INDEX_HIGH_WATER_KEY = "providersEnvIndexHighWater"
+# A ``.env`` or process-env key that belongs to env index ``N``: the indexed
+# ``LLM_PROVIDER_<N>*`` keys and the workflow's ``MERGECRAFT_CUSTOM_PROVIDER_*_<N>``.
+_INDEXED_ENV_KEY_RE = re.compile(
+    r"^(?:LLM_PROVIDER_(\d+)(?:_.*)?|MERGECRAFT_CUSTOM_PROVIDER_(?:API_KEY|BASE_URL)_(\d+))$"
+)
+# Reads an env index exactly as ``RepoSettings`` validates one.
+_ENV_INDEX: TypeAdapter[int] = TypeAdapter(NonNegativeInt)
 
 CREDENTIAL_SUBSTRINGS_IN_CONFIG: tuple[str, ...] = (
     "api_key",
@@ -183,6 +195,51 @@ def _provider_entries(data: dict[str, Any]) -> list[dict[str, Any]]:
     return [entry for entry in raw if isinstance(entry, dict)]
 
 
+def _parse_env_index(raw: object) -> int | None:
+    """Return *raw* as an env index, parsed as ``RepoSettings`` parses one, or ``None``."""
+    try:
+        return _ENV_INDEX.validate_python(raw)
+    except ValidationError:
+        return None
+
+
+def _env_index_high_water(data: Mapping[str, Any]) -> int:
+    raw = data.get(ENV_INDEX_HIGH_WATER_KEY)
+    if raw is None:
+        return 0
+    parsed = _parse_env_index(raw)
+    if parsed is None:
+        cli_bail(f"{ENV_INDEX_HIGH_WATER_KEY} must be a non-negative integer, got {raw!r}")
+    return parsed
+
+
+def _occupied_env_indices(env_path: Path | None) -> set[int]:
+    """Return every ``N`` that still has a key in *env_path* or the process environment."""
+    keys = set(os.environ)
+    if env_path is not None:
+        keys.update(_read_env_map(env_path))
+    occupied: set[int] = set()
+    for key in keys:
+        match = _INDEXED_ENV_KEY_RE.match(key)
+        if match is not None:
+            occupied.add(int(match.group(1) or match.group(2)))
+    return occupied
+
+
+def allocate_registry_env_index(
+    data: Mapping[str, Any],
+    entries: Sequence[Mapping[str, Any]],
+    *,
+    env_path: Path | None = None,
+) -> int:
+    """Allocate the next env index for the registry in *data*; never a freed one (D3)."""
+    return allocate_env_index(
+        entries,
+        high_water=_env_index_high_water(data),
+        occupied=_occupied_env_indices(env_path),
+    )
+
+
 def _write_env_label(env_index: int, label: str, cwd: Path | None = None) -> None:
     from mergecraft.cli.auth_cmd import _write_env_value
 
@@ -231,15 +288,19 @@ def _seed_url_for_label(label: str) -> str | None:
     return SEED_PROVIDER_URLS.get(label)
 
 
-def seed_builtin_providers(config_path: Path) -> None:
-    """Import built-in ``PROVIDERS`` catalog rows once (not a reconcile loop)."""
+def seed_builtin_providers(config_path: Path, *, env_path: Path | None = None) -> None:
+    """Import built-in ``PROVIDERS`` catalog rows once (not a reconcile loop).
+
+    *env_path* is the ``.env`` paired with the config; indices it still uses are
+    skipped so a seeded row never takes over an existing ``LLM_PROVIDER_<N>`` slot.
+    """
     data = _load_config_dict(config_path)
     if data.get("providersSeeded"):
         return
 
     entries = _provider_entries(data)
     existing = {str(entry.get("label", "")).lower() for entry in entries}
-    next_index = allocate_env_index(entries)
+    next_index = allocate_registry_env_index(data, entries, env_path=env_path)
 
     for label in sorted(PROVIDERS.keys()):
         if label.lower() in existing:
@@ -323,7 +384,7 @@ def add_cmd(
     elif not is_builtin_default:
         cli_bail(f"provider {normalised_label!r} requires --url (absolute http(s) URL)")
 
-    env_index = allocate_env_index(entries)
+    env_index = allocate_registry_env_index(data, entries, env_path=_env_path(repo_root))
     entry: dict[str, Any] = {
         "label": normalised_label,
         "harness": resolved_harness,
@@ -397,9 +458,13 @@ def delete_cmd(
 
     remaining: list[dict[str, Any]] = []
     removed = False
+    freed: list[int] = []
     for entry in entries:
         if str(entry.get("label", "")).lower() == label.strip().lower():
             removed = True
+            freed_index = _parse_env_index(entry.get("envIndex"))
+            if freed_index is not None:
+                freed.append(freed_index)
             continue
         remaining.append(entry)
 
@@ -407,6 +472,9 @@ def delete_cmd(
         cli_bail(f"unknown provider label {label!r}", code=CLI_USAGE_EXIT_CODE)
 
     data["providers"] = remaining
+    if freed:
+        # The row is gone, so record its index: allocation must never hand it out again.
+        data[ENV_INDEX_HIGH_WATER_KEY] = max(_env_index_high_water(data), *freed)
     _write_config_dict(config_path, data)
     console.print(f"deleted provider [green]{label}[/green]")
 
@@ -996,7 +1064,7 @@ def plan_provider_migration(
             "mergecraft provider add before migrating custom endpoints"
         )
 
-    next_index = allocate_env_index(existing_entries)
+    next_index = allocate_registry_env_index(config_data, existing_entries, env_path=env_path)
     labels_to_add: list[str] = []
 
     for legacy_key, (label, suffix) in LEGACY_API_KEY_MIGRATIONS.items():
@@ -1330,6 +1398,7 @@ __all__ = [
     "AuthStrategy",
     "MigrationPlan",
     "ProviderRegistry",
+    "allocate_registry_env_index",
     "app",
     "apply_provider_migration",
     "indexed_credential_keys",

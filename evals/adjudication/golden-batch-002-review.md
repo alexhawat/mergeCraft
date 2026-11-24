@@ -1,6 +1,6 @@
 # Batch 002 review packet
 
-Nine proposed findings for [#780](https://github.com/alexhawat/mergeCraft/issues/780). For each case, check whether the introducing change caused the described behavior at the cited lines. Reply with the case ID and `confirm`, `correct` with your edit, or `abstain`. You can also leave a case pending.
+Nine proposed findings, prepared as replacements for batch 001 under [#780](https://github.com/alexhawat/mergeCraft/issues/780) (closed as not planned on 2026-11-23). For each case, check whether the introducing change caused the described behavior at the cited lines. Reply with the case ID and `confirm`, `correct` with your edit, or `abstain`. You can also leave a case pending.
 
 | Case | Project | Proposed finding |
 | --- | --- | --- |

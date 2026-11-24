@@ -52,6 +52,7 @@ from mergecraft.analyzers.scope import (
     DIFF_HEADER_RENAME,
     classify_diff_header_line,
 )
+from mergecraft.diff import diff_lines
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -287,7 +288,7 @@ def parse_diff_toc(diff_text: str) -> tuple[DiffTocEntry, ...]:
     A file with no added lines (deletion-only, binary, mode change) is omitted:
     there is nothing on the RIGHT side for a review to account for.
     """
-    lines = diff_text.splitlines()
+    lines = diff_lines(diff_text, strip_cr=True)
     # A ``None`` path is a section whose ``diff --git`` header could not be
     # decoded: it still bounds the previous file's section, but its hunks are
     # dropped rather than attributed to a neighbour.
@@ -593,7 +594,7 @@ def compute_diff_coverage(
     tables = {
         path: (
             entries if text == diff_text else _delivered_entries(text, entries),
-            len(text.splitlines()),
+            len(diff_lines(text)),
         )
         for path, text in physical_diffs.items()
     }
