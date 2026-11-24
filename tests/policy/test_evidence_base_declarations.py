@@ -23,7 +23,6 @@ The suite is written before base-commit resolution exists, so it is red until it
 
 from __future__ import annotations
 
-import importlib
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -64,7 +63,8 @@ _MISSING_BASE_SHA = "0" * 40
 
 
 async def _collect(ctx: ToolContext, keys: list[str]) -> Any:
-    producers = importlib.import_module("mergecraft.policy.evidence_producers")
+    import mergecraft.policy.evidence_producers as producers
+
     return await producers.collect_policy_evidence(ctx, required_keys=keys)
 
 

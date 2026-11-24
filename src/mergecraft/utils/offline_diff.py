@@ -110,6 +110,11 @@ def git_merge_base_diff(
 
     result = _run_git(["diff", "--merge-base", base], cwd=cwd)
     if result.returncode != 0:
+        probe = _run_git(
+            ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{base}^{{commit}}"], cwd=cwd
+        )
+        if probe.returncode == 1:
+            raise ValueError(f"unknown base revision {base!r}")
         msg = f"failed to compute diff against {base!r}: {result.stderr.strip()}"
         raise RuntimeError(msg)
     return result.stdout
@@ -352,10 +357,11 @@ def materialize_diff(
 
 def summarize_diff(text: str) -> str:
     """Return a short TOC-like summary of changed paths in a unified diff."""
+    from mergecraft.diff import diff_lines
     from mergecraft.utils.diff_paths import post_image_path_from_header
 
     paths: list[str] = []
-    for line in text.splitlines():
+    for line in diff_lines(text, strip_cr=True):
         if line.startswith("diff --git "):
             # diff --git a/foo b/foo (paths may contain spaces or be quoted)
             path = post_image_path_from_header(line)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from mergecraft.review_taxonomy import FINDING_CATEGORIES
-from tests.analyzers.support import import_module
 
 
 def _base_kwargs() -> dict[str, object]:
@@ -23,7 +22,8 @@ def _base_kwargs() -> dict[str, object]:
 
 def test_finding_carries_optional_lens_attribution() -> None:
     """D9 — findings may carry the lens id that produced them."""
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     finding = finding_mod.make_finding(**_base_kwargs(), lens="security")
 
     assert finding.lens == "security"
@@ -31,7 +31,8 @@ def test_finding_carries_optional_lens_attribution() -> None:
 
 def test_existing_finding_construction_sites_still_work_without_lens() -> None:
     """D9 compatibility — ``make_finding`` and ``Finding()`` default lens to None."""
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     kwargs = _base_kwargs()
 
     via_helper = finding_mod.make_finding(**kwargs)

@@ -8,7 +8,6 @@ picker, auth-kind strategies, legacy shim (D7), and ``auth logfire`` isolation (
 from __future__ import annotations
 
 import getpass
-import importlib
 import json
 import re
 import subprocess
@@ -55,7 +54,9 @@ def _invoke(*argv: str) -> object:
 
 def _load_auth_cmd() -> Any:
     try:
-        return importlib.import_module("mergecraft.cli.auth_cmd")
+        from mergecraft.cli import auth_cmd
+
+        return auth_cmd
     except ImportError as exc:
         pytest.fail(f"mergecraft.cli.auth_cmd not importable: {exc}")
 
@@ -107,7 +108,9 @@ def test_provider_auth_help_documents_scope_flag() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("from_stdin", [False, True])
 def test_provider_auth_writes_indexed_api_key(
+    from_stdin: bool,
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -125,11 +128,19 @@ def test_provider_auth_writes_indexed_api_key(
     _patch_httpx_noop(monkeypatch)
     monkeypatch.setattr(getpass, "getpass", lambda _prompt: "acme-indexed-key")
 
-    result = _invoke("provider", "auth", "acme", "--scope", "local")
+    args = ["provider", "auth", "acme", "--scope", "local"]
+    if from_stdin:
+        monkeypatch.setattr(getpass, "getpass", lambda *_: pytest.fail("unexpected prompt"))
+        result = runner.invoke(
+            app, [*args, "--api-key-stdin"], input="acme-indexed-key\n", env=_DUMB_ENV
+        )
+    else:
+        result = runner.invoke(app, args, env=_DUMB_ENV)
 
     output = _plain(result.stdout + result.stderr)
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, output
     env = dotenv_values(tmp_path / ".env")
+    assert "acme-indexed-key" not in output
     assert env.get("LLM_PROVIDER_1") == "acme"
     assert env.get(indexed_env_key(1, "API_KEY")) == "acme-indexed-key"
 

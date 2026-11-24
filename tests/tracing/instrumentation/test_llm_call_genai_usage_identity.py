@@ -27,17 +27,6 @@ _INPUT_TOKENS = 100
 _OUTPUT_TOKENS = 7
 
 
-class _StubResponse:
-    def __init__(self, body: dict[str, Any]) -> None:
-        self._body = body
-        self.status_code = 200
-        self.content = b"{}"
-        self.text = "{}"
-
-    def json(self) -> dict[str, Any]:
-        return self._body
-
-
 class _StubClient:
     body: ClassVar[dict[str, Any]] = {}
 
@@ -50,8 +39,8 @@ class _StubClient:
     async def __aexit__(self, *exc: object) -> None:
         return None
 
-    async def post(self, *args: object, **kwargs: object) -> _StubResponse:
-        return _StubResponse(type(self).body)
+    async def post(self, *args: object, **kwargs: object) -> httpx.Response:
+        return httpx.Response(200, json=type(self).body)
 
 
 def _llm_call_events(sink: Any) -> list[Any]:
@@ -99,9 +88,9 @@ def _assert_usage_unavailable_marker(attrs: dict[str, Any]) -> None:
 
 @pytest.fixture(autouse=True)
 def _no_opencode_http_instrumentation(monkeypatch: pytest.MonkeyPatch) -> None:
-    import importlib
 
-    opencode_mod = importlib.import_module("mergecraft.agents.opencode_serve")
+    import mergecraft.agents.opencode_serve as opencode_mod
+
     monkeypatch.setattr(
         opencode_mod,
         "instrument_httpx",

@@ -18,8 +18,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.analyzers.support import import_module
-
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -49,13 +47,15 @@ PR_1209_GITHUB_PATHS = (
 
 
 def _actionlint_scoped(changed: list[str]) -> list[str]:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     manifest = registry.get_manifest("actionlint")
     return registry.filter_changed_files_for_manifest(manifest, changed)
 
 
 def _actionlint_lint_targets(changed: list[str]) -> list[str]:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     manifest = registry.get_manifest("actionlint")
     return registry.filter_lint_targets_for_manifest(manifest, changed)
 
@@ -84,7 +84,8 @@ def test_pr_1209_replay_hands_actionlint_only_the_workflow() -> None:
 
 def test_zizmor_keeps_covering_composite_actions() -> None:
     """Dropping the glob from actionlint must not drop action-manifest coverage."""
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     manifest = registry.get_manifest("zizmor")
     assert registry.filter_changed_files_for_manifest(manifest, [COMPOSITE_ACTION]) == [
         COMPOSITE_ACTION
@@ -92,7 +93,8 @@ def test_zizmor_keeps_covering_composite_actions() -> None:
 
 
 def test_composite_only_diff_does_not_enable_actionlint(fixture_repo: Path) -> None:
-    registry = import_module("mergecraft.analyzers.registry")
+    import mergecraft.analyzers.registry as registry
+
     enabled = registry.detect_enabled(
         repo_root=fixture_repo,
         changed_files=[COMPOSITE_ACTION],
@@ -107,7 +109,8 @@ def test_composite_only_diff_skips_actionlint_before_running_it(
     adapter_fixture_repo: Path,
 ) -> None:
     """No tool invocation can emit workflow-schema findings for the composite."""
-    adapters = import_module("mergecraft.analyzers.adapters")
+    import mergecraft.analyzers.adapters as adapters
+
     assert (adapter_fixture_repo / COMPOSITE_ACTION).is_file()
 
     result = adapters.run_adapter(

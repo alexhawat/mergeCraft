@@ -447,6 +447,19 @@ def render_deterministic_review_block(
             f"{getattr(metrics, 'diff_lines', 0)} diff lines"
             f"{phases_text}"
         )
+        # A packet built before 1.22.0 carries none of the pre-flight fields.
+        if hasattr(metrics, "coverage_preflight_refusals"):
+            preflight_bits: list[str] = []
+            if metrics.coverage_preflight_refusals:
+                unread = metrics.unread_added_lines_at_first_verdict
+                at_first = f", {unread} added lines unread at the first" if unread else ""
+                preflight_bits.append(
+                    f"coverage refused {metrics.coverage_preflight_refusals} submission(s){at_first}"
+                )
+            if metrics.depth_preflight_refused:
+                preflight_bits.append("depth refused one submission")
+            if preflight_bits:
+                header_lines.append(f"- **Verdict pre-flights:** {'; '.join(preflight_bits)}")
         agent_diag = getattr(metrics, "agent_diagnostic", None)
         if isinstance(agent_diag, str) and agent_diag.strip():
             header_lines.append(f"- **Agent stall:** {agent_diag.strip().splitlines()[0]}")

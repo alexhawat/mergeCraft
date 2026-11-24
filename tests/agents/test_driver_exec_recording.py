@@ -12,7 +12,6 @@ as it would have been without a recorder.
 
 from __future__ import annotations
 
-import importlib
 import json
 from typing import TYPE_CHECKING, Any
 
@@ -314,7 +313,8 @@ def test_claude_full_run_wires_the_recorder_into_the_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The seam: ``_run_claude_once`` hands the run's state to its stream handler."""
-    claude_module = importlib.import_module("mergecraft.agents.claude")
+    import mergecraft.agents.claude as claude_module
+
     ctx = make_agent_run_context(tmp_path, resolved_model="anthropic/claude-sonnet-5")
     stream = _lines(
         _claude_bash_use("t1", "pytest -q"),

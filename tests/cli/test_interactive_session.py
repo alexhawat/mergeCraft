@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 import typer
-from click.core import ParameterSource
+from typer._click.core import ParameterSource
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app

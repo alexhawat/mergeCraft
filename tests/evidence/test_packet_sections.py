@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from tests.evidence.support import import_module
-
 _REQUIRED_SECTIONS: tuple[str, ...] = (
     "schema_version",
     "change_id",
@@ -23,7 +21,8 @@ _NULLABLE_UNTIL_LATER: tuple[str, ...] = (
 
 def test_packet_contains_required_sections() -> None:
     """Every required top-level section is present on the packet model."""
-    packet_mod = import_module("mergecraft.evidence.packet")
+    import mergecraft.evidence.packet as packet_mod
+
     fields = packet_mod.MergeEvidencePacket.model_fields
     for name in _REQUIRED_SECTIONS:
         assert name in fields, f"required section {name!r} missing from packet"
@@ -31,7 +30,8 @@ def test_packet_contains_required_sections() -> None:
 
 def test_packet_contains_nullable_until_later_sections() -> None:
     """Nullable-until-later sections are present and typed ``| None`` (not omitted)."""
-    packet_mod = import_module("mergecraft.evidence.packet")
+    import mergecraft.evidence.packet as packet_mod
+
     fields = packet_mod.MergeEvidencePacket.model_fields
     for name in _NULLABLE_UNTIL_LATER:
         assert name in fields, f"nullable-until-later section {name!r} missing from packet"
@@ -48,14 +48,16 @@ def test_packet_contains_nullable_until_later_sections() -> None:
 
 def test_packet_blast_radius_uses_classification_model() -> None:
     """Batch B replaces the untyped placeholder with the classifier result."""
-    packet_mod = import_module("mergecraft.evidence.packet")
+    import mergecraft.evidence.packet as packet_mod
+
     annotation = packet_mod.MergeEvidencePacket.model_fields["blast_radius"].annotation
     assert "BlastRadiusClassification" in str(annotation)
 
 
 def test_packet_agent_section_carries_id_version_and_model() -> None:
     """The ``agent`` section must record id, version, and model."""
-    packet_mod = import_module("mergecraft.evidence.packet")
+    import mergecraft.evidence.packet as packet_mod
+
     agent_cls = packet_mod.AgentMetadata
     fields = agent_cls.model_fields
     for name in ("id", "version", "model"):
@@ -64,6 +66,7 @@ def test_packet_agent_section_carries_id_version_and_model() -> None:
 
 def test_packet_decision_section_exists() -> None:
     """A ``decision`` section is required even when the verdict is to block."""
-    packet_mod = import_module("mergecraft.evidence.packet")
+    import mergecraft.evidence.packet as packet_mod
+
     fields = packet_mod.MergeEvidencePacket.model_fields
     assert "decision" in fields

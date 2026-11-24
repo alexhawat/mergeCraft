@@ -22,7 +22,6 @@ Interpretation pinned for the impl wave (recorded in
 
 from __future__ import annotations
 
-import importlib
 from collections.abc import Iterator
 from typing import Any
 
@@ -50,7 +49,8 @@ EXPECTED_VALUES = {
 @pytest.fixture
 def run_outcome_cls() -> Iterator[Any]:
     """Import the W5 enum lazily so collection succeeds before W5 lands."""
-    module = importlib.import_module("mergecraft.main")
+    import mergecraft.main as module
+
     cls = getattr(module, "RunOutcome", None)
     assert cls is not None, "mergecraft.main.RunOutcome does not exist yet (W5.1)"
     return cls

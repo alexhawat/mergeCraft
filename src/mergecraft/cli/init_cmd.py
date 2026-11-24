@@ -10,6 +10,7 @@ from loguru import logger
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.local_env import local_env_path_for_cwd
 from mergecraft.cli.provider_cmd import seed_builtin_providers
 from mergecraft.cli.startup_env import implicit_env_is_tracked
 from mergecraft.cli.target_dir import implicit_repo_root
@@ -82,50 +83,28 @@ def _local_config_gitignore_line() -> str:
     return ".mergecraft/config.local.yaml"
 
 
-def _ensure_gitignore_line(root: Path, line: str) -> None:
-    """Ensure consumer ``.gitignore`` contains ``line`` once, as a whole line.
-
-    Matched per line, not as a substring: ``.envrc`` or ``!.env.example``
-    contain the text ``.env`` but do not ignore ``.env``.
-    """
-    gitignore_path = root / ".gitignore"
-    if gitignore_path.is_file():
-        text = gitignore_path.read_text(encoding="utf-8")
-        if line in (existing.strip() for existing in text.splitlines()):
-            return
-        suffix = "" if not text or text.endswith("\n") else "\n"
-        gitignore_path.write_text(f"{text}{suffix}{line}\n", encoding="utf-8")
-    else:
-        gitignore_path.write_text(f"{line}\n", encoding="utf-8")
-    console.print(f"wrote [green]{gitignore_path.relative_to(root)}[/green]")
+def ensure_gitignore_lines(root: Path, *required: str) -> None:
+    """Append each missing ignore rule in a single write."""
+    path = root / ".gitignore"
+    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+    entries = {line.strip() for line in existing.splitlines()}
+    missing = [line for line in required if line not in entries]
+    if missing:
+        suffix = "\n" if existing and not existing.endswith("\n") else ""
+        path.write_text(existing + suffix + "\n".join(missing) + "\n", encoding="utf-8")
+        console.print("wrote [green].gitignore[/green]")
 
 
-def _ensure_audit_jsonl_gitignore(root: Path) -> None:
-    """Ensure consumer ``.gitignore`` ignores enterprise audit JSONL (D10 / #487)."""
-    _ensure_gitignore_line(root, _audit_jsonl_gitignore_line())
-
-
-def _ensure_reviews_gitignore(root: Path) -> None:
-    """Ensure consumer ``.gitignore`` ignores durable local review artifacts."""
-    _ensure_gitignore_line(root, _reviews_gitignore_line())
-
-
-def _ensure_analyzer_runtime_gitignore(root: Path) -> None:
-    """Ensure generated managed analyzer state stays out of consumer worktrees."""
-    _ensure_gitignore_line(root, _analyzer_cache_gitignore_line())
-    _ensure_gitignore_line(root, _analyzers_lock_gitignore_line())
-
-
-def _ensure_local_credentials_gitignore(root: Path) -> None:
-    """Keep ``provider auth --scope local`` output and local overrides out of Git.
-
-    The documented flow is ``init`` → ``provider auth`` → commit and push, so
-    the ignore rules must exist before the first ``git add .``. An ignore rule
-    does not untrack a file that is already committed, so a tracked ``.env``
-    gets an explicit warning.
-    """
-    _ensure_gitignore_line(root, _local_env_gitignore_line())
-    _ensure_gitignore_line(root, _local_config_gitignore_line())
+def _ensure_gitignore(root: Path) -> None:
+    ensure_gitignore_lines(
+        root,
+        _audit_jsonl_gitignore_line(),
+        _reviews_gitignore_line(),
+        _analyzer_cache_gitignore_line(),
+        _analyzers_lock_gitignore_line(),
+        _local_env_gitignore_line(),
+        _local_config_gitignore_line(),
+    )
     env_path = root / ".env"
     if implicit_env_is_tracked(env_path):
         console.print(
@@ -213,13 +192,10 @@ def run(
         )
         console.print(f"wrote [green]{learnings.relative_to(root)}[/green]")
 
-    _ensure_audit_jsonl_gitignore(root)
-    _ensure_reviews_gitignore(root)
-    _ensure_analyzer_runtime_gitignore(root)
-    _ensure_local_credentials_gitignore(root)
+    _ensure_gitignore(root)
 
     if config_path.is_file():
-        seed_builtin_providers(config_path)
+        seed_builtin_providers(config_path, env_path=local_env_path_for_cwd(root))
 
     console.print("\n[bold]next steps[/bold]")
     console.print(

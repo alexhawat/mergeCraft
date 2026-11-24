@@ -384,11 +384,13 @@ def test_every_mutable_tag_writer_is_serialised_and_guarded_against_stale_commit
     promote = job(ci_cd, "promote")
     assert promote["concurrency"] == {
         "group": "ci-cd-promote-${{ github.ref }}",
+        "queue": "max",  # A late older build must leave the pending tip in the queue.
         "cancel-in-progress": False,
     }
     steps = [s for s in promote["steps"] if "imagetools create" in str(s.get("run", ""))]
     assert len(steps) == 2, "one step per channel, each retagging both images"
     for step in steps:
+        assert step["env"]["GH_TOKEN"] == "${{ github.token }}"
         run = step["run"]
         assert run.count("imagetools create") == 2, "slim and analyzers move as one step"
         assert "set -euo pipefail" in run

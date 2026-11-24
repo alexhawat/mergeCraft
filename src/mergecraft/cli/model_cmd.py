@@ -9,6 +9,7 @@ import typer
 
 from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
+from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.provider_cmd import (
     _config_path,
     _env_path,
@@ -143,7 +144,7 @@ def add_cmd(
     provider_label = provider_label.strip()
     provider_idx = _find_provider_index(entries, provider_label)
     if provider_idx is None:
-        cli_bail(_unknown_provider_message(provider_label, labels))
+        cli_bail(_unknown_provider_message(provider_label, labels), code=CLI_USAGE_EXIT_CODE)
 
     entry = dict(entries[provider_idx])
     provider_name = str(entry.get("label", provider_label))
@@ -186,7 +187,7 @@ def delete_cmd(
 
     provider_idx = _find_provider_index(entries, provider)
     if provider_idx is None:
-        cli_bail(_unknown_provider_message(provider, labels))
+        cli_bail(_unknown_provider_message(provider, labels), code=CLI_USAGE_EXIT_CODE)
 
     entry = dict(entries[provider_idx])
     provider_name = str(entry.get("label", provider))
@@ -202,7 +203,9 @@ def delete_cmd(
         remaining.append(row)
 
     if not removed:
-        cli_bail(f"unknown model {target_id!r} on provider {provider_name!r}")
+        cli_bail(
+            f"unknown model {target_id!r} on provider {provider_name!r}", code=CLI_USAGE_EXIT_CODE
+        )
 
     entry["models"] = remaining
     entries[provider_idx] = entry

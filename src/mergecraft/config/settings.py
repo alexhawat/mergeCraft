@@ -13,6 +13,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    NonNegativeInt,
     field_validator,
     model_serializer,
     model_validator,
@@ -1366,6 +1367,10 @@ class RepoSettings(BaseModel):
     # #477 / BA — operator provider registry (structure only; secrets in ``.env``).
     providers: list[ProviderRegistryEntry] = Field(default_factory=list)
     providers_seeded: bool = Field(default=False, alias="providersSeeded")
+    # Highest ``envIndex`` freed by ``provider delete``; allocation never reuses it (D3).
+    providers_env_index_high_water: NonNegativeInt = Field(
+        default=0, alias="providersEnvIndexHighWater"
+    )
 
     @field_validator("push", "shell", mode="before")
     @classmethod
