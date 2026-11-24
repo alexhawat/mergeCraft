@@ -326,11 +326,16 @@ def _finalize_structured_findings(
     try:
         write_findings_json(json_path, findings)
     except OSError as exc:
-        return _offline_failure(
+        # The review already ran and spent tokens; a failed write is a runner
+        # fault, so keep the recorded cost and paths and report infrastructure,
+        # the same way ``_structured_output_failure`` keeps them.
+        return replace(
+            result,
+            success=False,
             error=f"failed to write findings JSON: {exc}",
-            outcome=RunOutcome.configuration_error,
-            diff_path=result.diff_path,
-            evidence_packet_path=result.evidence_packet_path,
+            outcome=RunOutcome.infra_error,
+            structured_output=None,
+            output=None,
         )
 
     return result
@@ -937,9 +942,11 @@ class _OfflineDiffReviewRun:
                 try:
                     write_findings_json(self.json_path, [])
                 except OSError as exc:
+                    # No agent ran, so there is no spend to keep; the fault is
+                    # still the runner's, not the operator's.
                     return _offline_failure(
                         error=f"failed to write findings JSON: {exc}",
-                        outcome=RunOutcome.configuration_error,
+                        outcome=RunOutcome.infra_error,
                     )
             return OfflineReviewResult(
                 success=True,
