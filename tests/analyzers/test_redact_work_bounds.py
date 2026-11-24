@@ -238,3 +238,26 @@ def test_a_quoted_value_cut_by_the_cap_is_dropped_whole(
     for text in (persisted, outcome.output):
         assert "correct" not in text
     assert len(persisted) > _CAP // 2
+
+
+def test_a_multiline_quoted_value_cut_at_a_newline_is_dropped_whole(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A quoted value may span lines, so the last newline inside the cap can sit inside it."""
+    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_CHARS", _CAP)
+    head = "lint: ok\n" * 105
+    stream = head + 'token="aaaaaaaa\n' + "b" * 40 + '"\n' + "lint: ok\n" * 50
+    inner_newline = stream.index("aaaaaaaa\n") + len("aaaaaaaa")
+    assert stream.rfind("\n", 0, _CAP) == inner_newline
+    completed = subprocess.CompletedProcess(args=["ruff"], returncode=1, stdout=stream, stderr="")
+
+    outcome = run_mod._outcome_from_completed(
+        completed, plan=_plan(tmp_path), command="ruff check", output_dir=tmp_path
+    )
+
+    assert outcome.output_path is not None
+    persisted = Path(outcome.output_path).read_text(encoding="utf-8")
+    for text in (persisted, outcome.output):
+        assert "aaaaaaaa" not in text
+        assert "bbbb" not in text
+    assert "lint: ok" in persisted
