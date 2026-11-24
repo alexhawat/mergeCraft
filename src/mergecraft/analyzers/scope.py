@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mergecraft.diff.quoting import split_diff_git_paths, unquote_git_path
+from mergecraft.diff.sections import diff_lines
 from mergecraft.review_policy.manifest_names import DEPENDENCY_MANIFEST_NAMES, LOCKFILE_NAMES
 from mergecraft.review_taxonomy import WITHDRAWN_FINDINGS_HEADING, finding_fingerprint
 
@@ -164,7 +165,7 @@ def parse_diff_scope(diff_text: str) -> DiffScope:
     hunk_end = 0
     is_new_file = False
 
-    for raw_line in diff_text.splitlines():
+    for raw_line in diff_lines(diff_text, strip_cr=True):
         if tracker.consume(raw_line):
             if raw_line.startswith(_DIFF_GIT_PREFIX):
                 is_new_file = False
@@ -174,12 +175,14 @@ def parse_diff_scope(diff_text: str) -> DiffScope:
         if current_path is None:
             continue
 
-        if _NEW_FILE_RE.match(raw_line):
+        # File-level header lines exist only before the first hunk; inside a
+        # hunk, a removed ``-- /dev/null`` line renders as ``--- /dev/null``.
+        if not tracker.in_hunk and _NEW_FILE_RE.match(raw_line):
             is_new_file = True
             added_files.add(current_path)
             continue
 
-        if raw_line.startswith("--- ") and _DEV_NULL_RE.match(raw_line):
+        if not tracker.in_hunk and _DEV_NULL_RE.match(raw_line):
             is_new_file = True
             added_files.add(current_path)
             continue
@@ -231,7 +234,7 @@ def iter_added_diff_lines(diff_text: str) -> Iterator[tuple[str, int, str]]:
     tracker = _DiffPathTracker()
     new_line = 0
 
-    for raw_line in diff_text.splitlines():
+    for raw_line in diff_lines(diff_text, strip_cr=True):
         if tracker.consume(raw_line):
             continue
 
@@ -284,7 +287,7 @@ def iter_diff_hunks(diff_text: str) -> Iterator[DiffHunk]:
         path, old_start, old_count, new_start, new_count = header
         return DiffHunk(path, old_start, old_count, new_start, new_count, tuple(body))
 
-    for raw_line in diff_text.splitlines():
+    for raw_line in diff_lines(diff_text, strip_cr=True):
         if tracker.consume(raw_line):
             flushed = _flush()
             if flushed is not None:

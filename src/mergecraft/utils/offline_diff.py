@@ -357,10 +357,11 @@ def materialize_diff(
 
 def summarize_diff(text: str) -> str:
     """Return a short TOC-like summary of changed paths in a unified diff."""
+    from mergecraft.diff import diff_lines
     from mergecraft.utils.diff_paths import post_image_path_from_header
 
     paths: list[str] = []
-    for line in text.splitlines():
+    for line in diff_lines(text, strip_cr=True):
         if line.startswith("diff --git "):
             # diff --git a/foo b/foo (paths may contain spaces or be quoted)
             path = post_image_path_from_header(line)

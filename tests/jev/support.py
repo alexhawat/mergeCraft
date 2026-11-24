@@ -228,8 +228,6 @@ def watch_async_jev_client(monkeypatch: Any) -> list[Any]:
             super().__init__(*args, **kwargs)
 
     monkeypatch.setattr(client_mod, "AsyncJevClient", WatchedAsyncJevClient)
-    package = import_jev()
-    monkeypatch.setattr(package, "AsyncJevClient", WatchedAsyncJevClient)
     import mergecraft.offline_review as offline_mod
 
     if getattr(offline_mod, "AsyncJevClient", None) is not None:
@@ -373,8 +371,6 @@ def inject_recorded_jev_client(monkeypatch: Any, fixture_name: str) -> StateReco
             super().__init__(*args, **kwargs)
 
     monkeypatch.setattr(client_mod, "AsyncJevClient", InjectedAsyncJevClient)
-    package = import_jev()
-    monkeypatch.setattr(package, "AsyncJevClient", InjectedAsyncJevClient)
     import mergecraft.offline_review as offline_mod
 
     monkeypatch.setattr(offline_mod, "AsyncJevClient", InjectedAsyncJevClient)

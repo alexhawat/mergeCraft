@@ -23,7 +23,7 @@ RUN tar -xzf /tmp/gh-source.tar.gz --strip-components=1 -C /src/gh \
         -ldflags="-s -w -X github.com/cli/cli/v2/internal/build.Version=2.105.0" \
         -o /out/gh ./cmd/gh
 
-FROM python:3.14-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f
+FROM python:3.14-slim-bookworm@sha256:3fe1a0b6c2d6b2ebb572906cdabeca75aeb558c0c17db5ffefbcf8094871c32b
 
 ARG SOURCE_DATE_EPOCH
 ARG SOURCE_REVISION=""
