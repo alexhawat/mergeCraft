@@ -519,7 +519,7 @@
     "tests/ci/test_review_gate_all_ignored.py:conditional_assert:test_hardened_policy_skip_requires_current_packet_and_neutral_check:assert:dcdc8224b163#1",
     "tests/ci/test_review_gate_all_ignored.py:conditional_assert:test_self_gate_policy_skip_requires_bound_packet_and_check:assert:01f4510eda66#1",
     "tests/ci/test_review_gate_all_ignored.py:conditional_assert:test_self_gate_policy_skip_requires_bound_packet_and_check:assert:73ce8efb3199#1",
-    "tests/ci/test_review_opus_advisory.py:conditional_assert:test_opus_posts_no_status_checks:assert:29dc8b7afe8e#1",
+    "tests/ci/test_review_sonnet_advisory.py:conditional_assert:test_sonnet_posts_no_status_checks:assert:0205a091aad3#1",
     "tests/ci/test_ruff_advisory_families.py:conditional_assert:test_integration_yml_runs_lint_ruff_advisory_non_blocking:assert:647b9d8545e8#1",
     "tests/ci/test_ruleset_drift.py:conditional_assert:test_volatile_fields_are_ignored:assert:5748232c941d#1",
     "tests/ci/test_scaffold_action_pins.py:conditional_assert:_surfaces:assert:06b2f9661e19#1",
