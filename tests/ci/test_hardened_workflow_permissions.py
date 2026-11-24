@@ -111,7 +111,6 @@ def _permission_keys(doc: dict[str, Any]) -> set[str]:
     return keys
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 @pytest.mark.parametrize("spec", _HARDENED_SURFACES)
 def test_hardened_workflows_do_not_grant_statuses_write(spec: str) -> None:
     """No ``permissions`` mapping in the template or either copy names ``statuses`` (#1567)."""
@@ -148,7 +147,6 @@ def test_hardened_workflows_grant_checks_write(spec: str) -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 @pytest.mark.parametrize("spec", _HARDENED_SURFACES)
 def test_no_permission_was_added(spec: str) -> None:
     """Removing a scope must not add another: every key stays inside the pinned set."""
