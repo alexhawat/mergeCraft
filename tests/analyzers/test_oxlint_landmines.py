@@ -7,30 +7,15 @@ from pathlib import Path
 
 import pytest
 
+from mergecraft.analyzers import oxlint_landmines
+from mergecraft.analyzers.parsers.oxlint_json import parse_oxlint_json
+from mergecraft.analyzers.registry import get_manifest
+from mergecraft.analyzers.resolve import AnalyzerPlan
 from mergecraft.config.settings import AnalyzerOverride, AnalyzersSettings
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 _LANDMINES_JSON = _FIXTURES / "native" / "oxlint-landmines-sample.json"
 _BATCH_Y = _FIXTURES / "batch-y"
-
-
-def _landmines() -> object:
-    from mergecraft.analyzers import oxlint_landmines
-
-    return oxlint_landmines
-
-
-def _resolve() -> object:
-    from mergecraft.analyzers import resolve
-
-    return resolve
-
-
-def _registry() -> object:
-    from mergecraft.analyzers import registry
-
-    return registry
 
 
 def _settings(*, landmines: bool | None) -> AnalyzersSettings:
@@ -40,28 +25,24 @@ def _settings(*, landmines: bool | None) -> AnalyzersSettings:
 
 
 def test_landmines_opt_in_defaults_off() -> None:
-    landmines = _landmines()
-    assert landmines.landmines_opt_in(None) is False
-    assert landmines.landmines_opt_in(AnalyzersSettings()) is False
-    assert landmines.landmines_opt_in(_settings(landmines=False)) is False
+    assert oxlint_landmines.landmines_opt_in(None) is False
+    assert oxlint_landmines.landmines_opt_in(AnalyzersSettings()) is False
+    assert oxlint_landmines.landmines_opt_in(_settings(landmines=False)) is False
 
 
 def test_landmines_opt_in_explicit_true() -> None:
-    landmines = _landmines()
-    assert landmines.landmines_opt_in(_settings(landmines=True)) is True
+    assert oxlint_landmines.landmines_opt_in(_settings(landmines=True)) is True
 
 
 def test_oxlint_config_uses_landmines_detects_extends(tmp_path: Path) -> None:
-    landmines = _landmines()
     (tmp_path / ".oxlintrc.json").write_text(
         json.dumps({"extends": ["./node_modules/@interfere/landmines/configs/recommended.json"]}),
         encoding="utf-8",
     )
-    assert landmines.oxlint_config_uses_landmines(tmp_path) is True
+    assert oxlint_landmines.oxlint_config_uses_landmines(tmp_path) is True
 
 
 def test_oxlint_config_uses_landmines_detects_js_plugins(tmp_path: Path) -> None:
-    landmines = _landmines()
     (tmp_path / "oxlint.json").write_text(
         json.dumps(
             {
@@ -70,24 +51,22 @@ def test_oxlint_config_uses_landmines_detects_js_plugins(tmp_path: Path) -> None
         ),
         encoding="utf-8",
     )
-    assert landmines.oxlint_config_uses_landmines(tmp_path) is True
+    assert oxlint_landmines.oxlint_config_uses_landmines(tmp_path) is True
 
 
 def test_apply_oxlint_landmines_noop_when_repo_already_configured(tmp_path: Path) -> None:
-    landmines = _landmines()
-    resolve = _resolve()
     (tmp_path / ".oxlintrc.json").write_text(
         '{"extends":["./node_modules/@interfere/landmines/configs/recommended.json"]}\n',
         encoding="utf-8",
     )
-    manifest = _registry().get_manifest("oxlint")
-    plan = resolve.AnalyzerPlan(
+    manifest = get_manifest("oxlint")
+    plan = AnalyzerPlan(
         manifest_id="oxlint",
         mode="repo-native",
         argv=tuple(manifest.command),
     )
     scratch = tmp_path / "scratch"
-    patched = landmines.apply_oxlint_landmines(
+    patched = oxlint_landmines.apply_oxlint_landmines(
         plan,
         repo_root=tmp_path,
         scratch_dir=scratch,
@@ -98,7 +77,7 @@ def test_apply_oxlint_landmines_noop_when_repo_already_configured(tmp_path: Path
 
 
 def _landmines_toolchain_installed() -> bool:
-    return _landmines().landmines_toolchain() is not None
+    return oxlint_landmines.landmines_toolchain() is not None
 
 
 @pytest.mark.skipif(
@@ -106,16 +85,14 @@ def _landmines_toolchain_installed() -> bool:
     reason="scripts/node_modules oxlint + landmines not installed",
 )
 def test_apply_oxlint_landmines_injects_config(tmp_path: Path) -> None:
-    landmines = _landmines()
-    resolve = _resolve()
-    manifest = _registry().get_manifest("oxlint")
-    plan = resolve.AnalyzerPlan(
+    manifest = get_manifest("oxlint")
+    plan = AnalyzerPlan(
         manifest_id="oxlint",
         mode="repo-native",
         argv=tuple(manifest.command),
     )
     scratch = tmp_path / "scratch"
-    patched = landmines.apply_oxlint_landmines(
+    patched = oxlint_landmines.apply_oxlint_landmines(
         plan,
         repo_root=tmp_path,
         scratch_dir=scratch,
@@ -132,9 +109,7 @@ def test_apply_oxlint_landmines_injects_config(tmp_path: Path) -> None:
 
 
 def test_oxlint_landmines_parser_maps_rules_and_help(tmp_path: Path) -> None:
-    from mergecraft.analyzers.parsers.oxlint_json import parse_oxlint_json
-
-    manifest = _registry().get_manifest("oxlint")
+    manifest = get_manifest("oxlint")
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "widget.test.ts").write_text("// fixture\n", encoding="utf-8")
     raw = _LANDMINES_JSON.read_text(encoding="utf-8")
