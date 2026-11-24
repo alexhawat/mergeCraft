@@ -27,7 +27,6 @@ Wave plan: ``.ignorelocal/waves/issues-provider-routing-wave-plan.md`` (Batch B
 
 from __future__ import annotations
 
-import importlib
 import json
 import tomllib
 from pathlib import Path
@@ -41,7 +40,9 @@ from tests.agents.conftest import make_agent_run_context
 
 def _load_codex_module():
     try:
-        return importlib.import_module("mergecraft.agents.codex")
+        from mergecraft.agents import codex
+
+        return codex
     except ImportError as exc:
         pytest.fail(f"mergecraft.agents.codex not implemented: {exc}")
 

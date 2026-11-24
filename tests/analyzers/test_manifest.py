@@ -6,11 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.analyzers.support import MANIFEST_FIXTURES, import_module
+from tests.analyzers.support import MANIFEST_FIXTURES
 
 
 def test_valid_manifest_round_trips_yaml() -> None:
-    manifest_mod = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest_mod
+
     raw = (MANIFEST_FIXTURES / "valid-actionlint.yaml").read_text(encoding="utf-8")
     parsed = manifest_mod.load_manifest_yaml(raw)
     assert parsed.id == "actionlint"
@@ -22,7 +23,8 @@ def test_valid_manifest_round_trips_yaml() -> None:
 
 
 def test_unknown_top_level_key_rejected() -> None:
-    manifest_mod = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest_mod
+
     raw = (MANIFEST_FIXTURES / "valid-actionlint.yaml").read_text(encoding="utf-8")
     with pytest.raises(manifest_mod.ManifestValidationError, match="extra"):
         manifest_mod.load_manifest_yaml(raw + "\nunexpectedKey: true\n")
@@ -39,21 +41,24 @@ def test_unknown_top_level_key_rejected() -> None:
 def test_severity_map_values_must_be_taxonomy_members(
     severity_key: str, taxonomy_value: str
 ) -> None:
-    manifest_mod = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest_mod
+
     base = (MANIFEST_FIXTURES / "valid-actionlint.yaml").read_text(encoding="utf-8")
     manifest = manifest_mod.load_manifest_yaml(base)
     assert manifest.severity_map[severity_key] == taxonomy_value
 
 
 def test_unmapped_analyzer_severity_is_validation_error_not_default() -> None:
-    manifest_mod = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest_mod
+
     raw = (MANIFEST_FIXTURES / "invalid-unmapped-severity.yaml").read_text(encoding="utf-8")
     with pytest.raises(manifest_mod.ManifestValidationError, match=r"banana|severity_map"):
         manifest_mod.load_manifest_yaml(raw)
 
 
 def test_provenance_requires_sha256_per_declared_platform() -> None:
-    manifest_mod = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest_mod
+
     raw = (MANIFEST_FIXTURES / "valid-actionlint.yaml").read_text(encoding="utf-8")
     with pytest.raises(manifest_mod.ManifestValidationError, match=r"sha256|provenance"):
         manifest_mod.load_manifest_yaml(
@@ -66,21 +71,24 @@ def test_provenance_requires_sha256_per_declared_platform() -> None:
 
 @pytest.mark.parametrize("trust", ["trusted", "untrusted"])
 def test_trust_must_be_known_tier(trust: str) -> None:
-    manifest_mod = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest_mod
+
     raw = (MANIFEST_FIXTURES / "valid-actionlint.yaml").read_text(encoding="utf-8")
     manifest = manifest_mod.load_manifest_yaml(raw.replace("trust: untrusted", f"trust: {trust}"))
     manifest_mod.validate_manifest(manifest)
 
 
 def test_unknown_trust_tier_rejected() -> None:
-    manifest_mod = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest_mod
+
     raw = (MANIFEST_FIXTURES / "valid-actionlint.yaml").read_text(encoding="utf-8")
     with pytest.raises(manifest_mod.ManifestValidationError, match="trust"):
         manifest_mod.load_manifest_yaml(raw.replace("trust: untrusted", "trust: superuser"))
 
 
 def test_catalog_yaml_files_round_trip_at_runtime() -> None:
-    manifest_mod = import_module("mergecraft.analyzers.manifest")
+    import mergecraft.analyzers.manifest as manifest_mod
+
     catalog_dir = Path("src/mergecraft/analyzers/catalog")
     yaml_files = sorted(catalog_dir.glob("*.yaml"))
     assert yaml_files, "catalog must ship at least one manifest after W2"

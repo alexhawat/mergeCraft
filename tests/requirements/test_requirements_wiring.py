@@ -8,7 +8,6 @@ policy may require evidence without a second ``decide_approval``.
 from __future__ import annotations
 
 import ast
-import importlib
 import inspect
 import re
 from pathlib import Path
@@ -113,7 +112,8 @@ def test_requirement_states_are_the_five_named_outcomes() -> None:
     """#352 — states: satisfied / partially_satisfied / contradicted /
     not_evidenced / out_of_scope.
     """
-    module = importlib.import_module("mergecraft.requirements")
+    import mergecraft.requirements as module
+
     states = getattr(module, "REQUIREMENT_STATES", None)
     if states is None:
         for attr in ("RequirementState", "requirement_states"):
@@ -138,7 +138,8 @@ def test_ingest_accepts_named_requirement_sources(source: str) -> None:
     """#352 — ingest covers PR description, linked issue, and local spec (min)."""
     invoked = production_invoked_names(exclude_package="requirements")
     assert "ingest_requirements" in invoked or "ingest" in invoked
-    module = importlib.import_module("mergecraft.requirements")
+    import mergecraft.requirements as module
+
     ingest = getattr(module, "ingest_requirements", None) or getattr(module, "ingest", None)
     assert callable(ingest)
     names = set(inspect.signature(ingest).parameters)

@@ -48,9 +48,10 @@ _MAX_OUT = 1_000
 
 
 def _lite_api() -> Any:
-    from importlib import import_module
 
-    return import_module("mergecraft.agents.lite")
+    from mergecraft.agents import lite
+
+    return lite
 
 
 def _settings(

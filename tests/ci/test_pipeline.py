@@ -5,7 +5,6 @@ from __future__ import annotations
 from mergecraft.ci.providers.github_actions import GitHubActionsProvider
 from tests.ci.support import (
     NORMALIZED_FIELDS,
-    import_module,
     load_fixture,
 )
 
@@ -17,7 +16,8 @@ def _raw_job(fixture: dict[str, object]) -> dict[str, object]:
 
 
 def test_normalize_emits_full_shape_from_recorded_fixture() -> None:
-    normalize = import_module("mergecraft.ci.normalize")
+    import mergecraft.ci.normalize as normalize
+
     fixture = load_fixture("multi_job_single_root_cause.json")
     raw = _raw_job(fixture)
     normalized = normalize.normalize_failure(raw)
@@ -32,7 +32,8 @@ def test_normalize_emits_full_shape_from_recorded_fixture() -> None:
 
 
 def test_same_failure_signature_yields_identical_fingerprint() -> None:
-    normalize = import_module("mergecraft.ci.normalize")
+    import mergecraft.ci.normalize as normalize
+
     fixture = load_fixture("multi_job_single_root_cause.json")
     jobs = fixture["jobs"]
     fps = [normalize.normalize_failure(job)["failure_fingerprint"] for job in jobs[:3]]
@@ -40,7 +41,8 @@ def test_same_failure_signature_yields_identical_fingerprint() -> None:
 
 
 def test_fingerprint_stable_across_run_ids() -> None:
-    normalize = import_module("mergecraft.ci.normalize")
+    import mergecraft.ci.normalize as normalize
+
     fixture = load_fixture("multi_job_single_root_cause.json")
     job_a = dict(fixture["jobs"][0])
     job_b = dict(fixture["jobs"][1])

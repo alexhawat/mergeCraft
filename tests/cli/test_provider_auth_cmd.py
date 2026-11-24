@@ -8,7 +8,6 @@ picker, auth-kind strategies, legacy shim (D7), and ``auth logfire`` isolation (
 from __future__ import annotations
 
 import getpass
-import importlib
 import json
 import re
 import subprocess
@@ -55,7 +54,9 @@ def _invoke(*argv: str) -> object:
 
 def _load_auth_cmd() -> Any:
     try:
-        return importlib.import_module("mergecraft.cli.auth_cmd")
+        from mergecraft.cli import auth_cmd
+
+        return auth_cmd
     except ImportError as exc:
         pytest.fail(f"mergecraft.cli.auth_cmd not importable: {exc}")
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import importlib
 import json
 import tomllib
 from pathlib import Path
@@ -37,7 +36,9 @@ USABLE_SUBSCRIPTION_AUTH_JSON = json.dumps(
 
 def load_codex_module() -> Any:
     try:
-        return importlib.import_module("mergecraft.agents.codex")
+        from mergecraft.agents import codex
+
+        return codex
     except ImportError as exc:
         pytest.fail(f"mergecraft.agents.codex not implemented: {exc}")
 
