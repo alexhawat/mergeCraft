@@ -118,6 +118,12 @@ def test_scan_flags_inflated_timeout(visitors) -> None:
     assert any(item.rule == visitors.RULE_TIMEOUT_INFLATED for item in result.findings)
 
 
+def test_scan_flags_timeout_disabled(visitors) -> None:
+    target = _FIXTURES / "violation_timeout_disabled.py"
+    result = visitors.scan_file(target, repo=_ROOT)
+    assert any(item.rule == visitors.RULE_TIMEOUT_INFLATED for item in result.findings)
+
+
 def test_scan_flags_self_mock_warning(visitors) -> None:
     target = _FIXTURES / "violation_self_mock.py"
     result = visitors.scan_file(target, repo=_ROOT)
@@ -181,3 +187,15 @@ def test_fingerprint_stable_when_lines_shift(visitors, tmp_path: Path) -> None:
 def test_ruff_pass_excludes_honesty_fixtures(checker) -> None:
     code = checker.run_ruff_test_honesty(repo=_ROOT)
     assert code == 0
+
+
+def test_relative_path_arguments_resolve_against_repo(checker, visitors) -> None:
+    code, result, new, _ = checker.check_test_honesty(
+        [Path("tests/scripts/fixtures/test_honesty/violation_sleep.py")],
+        repo=_ROOT,
+        baseline=checker.BaselineFile(fingerprints=frozenset(), documented_count=0),
+        skip_ruff=True,
+    )
+    assert result.findings
+    assert new
+    assert code == 1

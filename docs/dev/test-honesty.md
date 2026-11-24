@@ -24,7 +24,7 @@ explicitly to unit tests.
 | `sleep_constant` | `time.sleep(<literal>)` / `asyncio.sleep(<literal>)` in tests or fixtures | Await the event or poll the real signal instead of sleeping |
 | `flake_marker` | `@pytest.mark.flaky` | Fix root instability instead of rerunning |
 | `rerun_config` | `reruns=`, `pytest_rerunfailures` | Same as flaky markers |
-| `timeout_inflated` | `@pytest.mark.timeout(N)` with `N > 180` | Speed up the test or split it; do not raise the budget |
+| `timeout_inflated` | `@pytest.mark.timeout(N)` with `N > 180` or `N == 0` (disables budget) | Keep the default 180s budget or speed up the test |
 | `except_swallow` | `except ...: pass` or `contextlib.suppress` in tests | Assert expected failures or re-raise |
 | `conditional_assert` | `assert` only under `if` / loops / `try` (not `with`) | Assert unconditionally or use `pytest.raises` |
 | `self_mock` (warning) | `patch("mergecraft.<module-under-test>...")` from matching `test_<mod>.py` | Patch collaborators, not the unit under test |

@@ -344,17 +344,19 @@ class _HonestyVisitor(ast.NodeVisitor):
             isinstance(dec.func, ast.Attribute) and dec.func.attr == "timeout"
         ):
             seconds = _timeout_marker_seconds(dec)
-            if seconds is not None and seconds > _TIMEOUT_INFLATION_THRESHOLD:
+            if seconds is not None and (seconds > _TIMEOUT_INFLATION_THRESHOLD or seconds <= 0):
+                reason = (
+                    "disables per-test timeout"
+                    if seconds <= 0
+                    else f"exceeds default {_DEFAULT_TIMEOUT_SECONDS}s"
+                )
                 anchor = f"timeout:{context}@{seconds}"
                 self._maybe_add(
                     HonestyFinding(
                         path=self.rel_path,
                         line_no=dec.lineno,
                         rule=RULE_TIMEOUT_INFLATED,
-                        detail=(
-                            f"@pytest.mark.timeout({seconds}) on {context} "
-                            f"(default {_DEFAULT_TIMEOUT_SECONDS}s)"
-                        ),
+                        detail=f"@pytest.mark.timeout({seconds}) on {context} ({reason})",
                         anchor=anchor,
                     )
                 )
@@ -513,9 +515,21 @@ def iter_test_files(targets: list[Path], *, repo: Path) -> list[Path]:
     return files
 
 
+def _resolve_targets(targets: list[Path], *, repo: Path) -> list[Path]:
+    resolved: list[Path] = []
+    for target in targets:
+        path = Path(target)
+        if not path.is_absolute():
+            path = (repo / path).resolve()
+        else:
+            path = path.resolve()
+        resolved.append(path)
+    return resolved
+
+
 def scan_paths(targets: list[Path], *, repo: Path) -> HonestyScanResult:
     """Scan many paths and merge findings."""
     merged: list[HonestyFinding] = []
-    for path in iter_test_files(targets, repo=repo):
+    for path in iter_test_files(_resolve_targets(targets, repo=repo), repo=repo):
         merged.extend(scan_file(path, repo=repo).findings)
     return HonestyScanResult(findings=merged)
