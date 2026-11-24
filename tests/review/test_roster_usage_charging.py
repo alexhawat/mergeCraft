@@ -277,7 +277,6 @@ async def _run_fanout(env: _Env) -> Any:
 # --------------------------------------------------------------------------- happy path
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 async def test_secondary_reviewer_usage_reaches_usage_entries_and_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -300,7 +299,6 @@ async def test_secondary_reviewer_usage_reaches_usage_entries_and_budget(
     )
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 async def test_file_group_reviewer_usage_is_charged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -330,7 +328,6 @@ async def test_file_group_reviewer_usage_is_charged(
     assert env.tracker.cost_used == pytest.approx(_PRICED_USAGE.cost_usd * 2)
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 async def test_failed_reviewer_with_usage_is_still_charged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -349,7 +346,6 @@ async def test_failed_reviewer_with_usage_is_still_charged(
     assert env.tracker.tokens_used == (_PRICED_USAGE.input_tokens + _PRICED_USAGE.output_tokens)
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 async def test_usage_without_cost_is_priced_with_the_attempt_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -371,7 +367,6 @@ async def test_usage_without_cost_is_priced_with_the_attempt_model(
     assert env.tracker.cost_used == pytest.approx(expected)
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 async def test_secondary_reviewer_overrun_raises_budget_exhausted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
