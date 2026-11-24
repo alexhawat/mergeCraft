@@ -13,7 +13,6 @@ and ``--dangerously-skip-permissions`` stays for headless CI.
 
 from __future__ import annotations
 
-import importlib
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -67,7 +66,8 @@ class _EmptyProcess:
 
 
 def _captured_argv(monkeypatch: MonkeyPatch, tmp_path: Path) -> list[str]:
-    module = importlib.import_module("mergecraft.agents.claude")
+    import mergecraft.agents.claude as module
+
     seen: list[list[str]] = []
 
     def _spawn(cmd: list[str], **_kwargs: Any) -> _EmptyProcess:
@@ -133,7 +133,8 @@ def test_execution_tools_stay_denied(ci: bool, tmp_path: Path, monkeypatch: Monk
 
 def test_deny_list_constant_carries_the_review_tools() -> None:
     """The constant the argv is built from must expose the new denies."""
-    module = importlib.import_module("mergecraft.agents.claude")
+    import mergecraft.agents.claude as module
+
     rules = _deny_rules(module.CLAUDE_DISALLOWED_TOOLS)
 
     assert set(_REVIEW_DENIED_TOOLS).issubset(rules)

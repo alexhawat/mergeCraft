@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 import typer
 
 if TYPE_CHECKING:
-    from click import Command, Context
+    from typer._click import Command, Context
 
     from mergecraft.findings.lifecycle import LifecycleRecord
 

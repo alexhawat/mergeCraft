@@ -43,7 +43,6 @@ write to ``tmp_path``; every provider validator is stubbed.
 from __future__ import annotations
 
 import getpass
-import importlib
 import inspect
 import json
 import subprocess
@@ -105,7 +104,9 @@ PRESERVED_VALUE = "keep-me"
 def _load_auth_cmd() -> Any:
     """Lazy import so a missing symbol fails with a clear message, not at collection."""
     try:
-        return importlib.import_module("mergecraft.cli.auth_cmd")
+        from mergecraft.cli import auth_cmd
+
+        return auth_cmd
     except ImportError as exc:
         pytest.fail(f"mergecraft.cli.auth_cmd not importable: {exc}")
 

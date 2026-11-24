@@ -6,7 +6,7 @@ import os
 import stat
 from typing import TYPE_CHECKING
 
-from tests.analyzers.support import C5_AGENTSEC_TARGETS, import_module
+from tests.analyzers.support import C5_AGENTSEC_TARGETS
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -15,7 +15,8 @@ if TYPE_CHECKING:
 
 
 def _run_agentsec(repo_root: Path, changed_files: list[str]):
-    agentsec = import_module("mergecraft.analyzers.agentsec")
+    import mergecraft.analyzers.agentsec as agentsec
+
     return agentsec.scan_manifests(
         repo_root=repo_root,
         changed_files=changed_files,
@@ -23,7 +24,8 @@ def _run_agentsec(repo_root: Path, changed_files: list[str]):
 
 
 def test_rules_load_from_yaml_not_code() -> None:
-    agentsec = import_module("mergecraft.analyzers.agentsec")
+    import mergecraft.analyzers.agentsec as agentsec
+
     rules = agentsec.load_native_rules()
     assert rules, "agent-security rules must load from YAML (C7)"
     for rule in rules:

@@ -16,10 +16,10 @@ import io
 import json
 from typing import Any
 
-import click
 import httpx
 import pytest
 import typer
+from typer.core import TyperCommand
 
 from mergecraft.cli import watch_cmd
 from mergecraft.cli.global_surface import CliGlobals
@@ -129,9 +129,7 @@ def _run_watch_for_two_polls(
     out = io.StringIO()
     monkeypatch.setattr(watch_cmd.sys, "stdout", out)
 
-    ctx = typer.Context(
-        click.Command("watch"), obj=CliGlobals(format="json") if root_json else None
-    )
+    ctx = typer.Context(TyperCommand("watch"), obj=CliGlobals(format="json") if root_json else None)
     with pytest.raises(_Stop):
         watch_cmd.run(ctx, repo="acme/demo", pr=1, since=None, pretty=pretty)
 

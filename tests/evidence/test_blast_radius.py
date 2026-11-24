@@ -24,9 +24,10 @@ import pytest
 @pytest.fixture
 def classifier_api() -> Any:
     """Load the W6 API lazily so the RED suite remains collectable."""
-    from importlib import import_module
 
-    return import_module("mergecraft.classify.blast_radius")
+    from mergecraft.classify import blast_radius
+
+    return blast_radius
 
 
 def _change(*paths: str, **signals: object) -> dict[str, object]:

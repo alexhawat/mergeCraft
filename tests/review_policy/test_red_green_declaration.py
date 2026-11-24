@@ -20,7 +20,6 @@ owner, repo, *, event, run_start_ci_evidence, operator_owned)
 from __future__ import annotations
 
 import base64
-from importlib import import_module
 from typing import Any
 
 import pytest
@@ -74,7 +73,8 @@ async def _resolve(
     head: dict[str, object] | None = None,
     event: object = None,
 ) -> Any:
-    module = import_module("mergecraft.review_policy.red_green")
+    import mergecraft.review_policy.red_green as module
+
     run_start = CiEvidenceSettings.model_validate(HEAD_BLOCK if head is None else head)
     return await module.resolve_red_green_declaration(
         scm,

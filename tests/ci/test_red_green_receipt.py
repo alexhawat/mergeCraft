@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from importlib import import_module
 from typing import Any
 
 import pytest
@@ -33,7 +32,9 @@ DEFAULT_FIX_LABELS = ["bug", "fix"]
 
 def _rg() -> Any:
     """Load ``mergecraft.ci.red_green`` lazily (fails per test until it exists)."""
-    return import_module("mergecraft.ci.red_green")
+    from mergecraft.ci import red_green
+
+    return red_green
 
 
 def _test(

@@ -33,7 +33,8 @@ exclusive_group: python-lint
 
 
 def _parse(code: str, severity: str = "error") -> str:
-    parsers = import_module("mergecraft.analyzers.parsers")
+    import mergecraft.analyzers.parsers as parsers
+
     manifest = import_module("mergecraft.analyzers.manifest").load_manifest_yaml(_MANIFEST)
     raw = json.dumps(
         [

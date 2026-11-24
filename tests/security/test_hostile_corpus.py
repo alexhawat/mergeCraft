@@ -220,7 +220,6 @@ async def test_review_still_produces_a_usable_verdict_on_the_hostile_repo(
     import mergecraft.offline_review as offline_mod
     from mergecraft.config.settings import RepoInfo
     from mergecraft.modes import Mode
-    from tests.analyzers.support import import_module
 
     invocation_root = tmp_path / "operator"
     invocation_root.mkdir()
@@ -230,7 +229,8 @@ async def test_review_still_produces_a_usable_verdict_on_the_hostile_repo(
         invocation_root=invocation_root,
     )
 
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     finding = finding_mod.make_finding(
         tool="hostile-corpus",
         rule_id="TS5-D4",

@@ -32,7 +32,8 @@ def require_callable(name: str) -> Callable[..., Any]:
 
 def sample_line_finding(**overrides: Any) -> Any:
     """Build a line-anchored finding for Hunk export tests."""
-    finding_mod = import_module("mergecraft.analyzers.finding")
+    import mergecraft.analyzers.finding as finding_mod
+
     kwargs: dict[str, Any] = {
         "tool": "ruff",
         "rule_id": "F401",

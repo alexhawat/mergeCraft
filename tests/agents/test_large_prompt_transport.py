@@ -125,7 +125,8 @@ def test_the_opencode_1x_fallback_keeps_the_answer(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
     """AGT-F15 — the ``run`` fallback reads ``text`` events, so the answer survives."""
-    module = importlib.import_module("mergecraft.agents.opencode")
+    import mergecraft.agents.opencode as module
+
     event = '{"type": "text", "sessionID": "ses_1", "part": {"type": "text", "text": "the answer"}}'
     script = f"import sys; sys.stdout.write({event!r} + chr(10))"
     real_spawn = shared.spawn_agent_cli

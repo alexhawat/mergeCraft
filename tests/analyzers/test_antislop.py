@@ -10,7 +10,6 @@ import pytest
 from mergecraft.analyzers.registry import detect_enabled, get_manifest
 from mergecraft.analyzers.trust import IN_PROCESS_ANALYZER_IDS
 from mergecraft.review_taxonomy import FINDING_CATEGORIES
-from tests.analyzers.support import import_module
 
 _FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "antislop"
 _POSITIVE = _FIXTURE_ROOT / "positive"
@@ -65,11 +64,15 @@ def _copy_fixture_repo(tmp_path: Path, relative_paths: list[str]) -> Path:
 
 
 def _adapters():
-    return import_module("mergecraft.analyzers.adapters")
+    from mergecraft.analyzers import adapters
+
+    return adapters
 
 
 def _antislop():
-    return import_module("mergecraft.analyzers.antislop")
+    from mergecraft.analyzers import antislop
+
+    return antislop
 
 
 def test_rules_load_from_yaml_not_code() -> None:

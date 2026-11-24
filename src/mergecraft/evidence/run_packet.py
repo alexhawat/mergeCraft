@@ -746,6 +746,11 @@ def _run_metrics(
             key: round(float(value), 3) for key, value in phases.items() if value is not None
         },
         agent_diagnostic=diagnostic_text,
+        coverage_preflight_refusals=int(getattr(state, "diff_coverage_nudge_count", 0) or 0),
+        unread_added_lines_at_first_verdict=getattr(
+            state, "diff_coverage_unread_at_first_refusal", None
+        ),
+        depth_preflight_refused=bool(getattr(state, "review_depth_nudge_sent", False)),
     )
 
 

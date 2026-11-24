@@ -70,17 +70,6 @@ _OPENAI_SHAPES = (
 _USAGE_KEYS = ("info", "usage")
 
 
-class _StubResponse:
-    def __init__(self, body: dict[str, Any]) -> None:
-        self._body = body
-        self.status_code = 200
-        self.content = b"{}"
-        self.text = "{}"
-
-    def json(self) -> dict[str, Any]:
-        return self._body
-
-
 class _StubClient:
     """Minimal stand-in for ``httpx.AsyncClient`` returning one canned body."""
 
@@ -95,8 +84,8 @@ class _StubClient:
     async def __aexit__(self, *exc: object) -> None:
         return None
 
-    async def post(self, *args: object, **kwargs: object) -> _StubResponse:
-        return _StubResponse(type(self).body)
+    async def post(self, *args: object, **kwargs: object) -> httpx.Response:
+        return httpx.Response(200, json=type(self).body)
 
 
 @pytest.fixture

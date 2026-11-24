@@ -118,15 +118,39 @@ def _enrich_vuln_finding(
     elif finding.remediation:
         remediation = finding.remediation
     else:
-        remediation = "Upgrade to a patched version"
+        # No fixed version is published (an unmaintained or yanked package, or a
+        # vulnerability without a release), so "upgrade" would name nothing.
+        remediation = _NO_FIXED_VERSION_REMEDIATION
     evidence = list(finding.evidence)
     if not any("direct" in item.casefold() or "transitive" in item.casefold() for item in evidence):
         evidence.append(f"dependency: {relationship}")
     return finding.model_copy(update={"remediation": remediation, "evidence": evidence})
 
 
-def _delta_findings(base: list[Finding], head: list[Finding]) -> list[Finding]:
-    base_by_key = {_vuln_key(item): item for item in base}
+_NO_FIXED_VERSION_REMEDIATION: Final[str] = (
+    "No fixed version is published for this advisory; replace or remove the "
+    "dependency, or record why the risk is accepted"
+)
+
+
+def _delta_findings(
+    base: list[Finding],
+    head: list[Finding],
+    *,
+    head_path_of: dict[str, str] | None = None,
+) -> list[Finding]:
+    """Return the head findings the base side does not already carry.
+
+    ``head_path_of`` maps each base file to the head file it is the earlier
+    version of. The base copy of a manifest is scanned from a scratch path, so
+    without the mapping no base advisory ever shares a key with its head twin
+    and every advisory already present at base reads as introduced by the change.
+    """
+    paths = head_path_of or {}
+    base_by_key = {
+        _vuln_key(item.model_copy(update={"path": paths.get(item.path, item.path)})): item
+        for item in base
+    }
     delta: list[Finding] = []
     for item in head:
         key = _vuln_key(item)
@@ -634,9 +658,24 @@ def run_differential_scan(
             skip_reason=base_err,
         )
 
+    if base_err and not base_findings:
+        # The base side could not be scanned, so nothing shows which advisories the
+        # change introduced. Report them without claiming novelty.
+        logger.info("{}: base side not scanned — {}", tool_id, base_err)
+        return AdapterRunResult(
+            findings=[
+                item.model_copy(update={"introduced_by_pr": "unknown"}) for item in head_findings
+            ],
+            pass_reason=head_pass_reason,
+        )
+
     # A head side with nothing to scan keeps its reason on the passed row.
     return AdapterRunResult(
-        findings=_delta_findings(base_findings, head_findings),
+        findings=_delta_findings(
+            base_findings,
+            head_findings,
+            head_path_of=dict(zip(base_files, head_files, strict=False)),
+        ),
         pass_reason=head_pass_reason,
     )
 

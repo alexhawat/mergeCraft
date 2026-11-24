@@ -21,7 +21,6 @@ until they land.
 
 from __future__ import annotations
 
-import importlib
 import json
 import subprocess
 from types import SimpleNamespace
@@ -104,7 +103,8 @@ def _git(cwd: Path, *args: str) -> str:
 
 async def test_run_start_records_each_closing_issue_with_its_author() -> None:
     """Two closing issues become two ``LinkedIssue`` rows, in GitHub's order."""
-    main = importlib.import_module("mergecraft.main")
+    import mergecraft.main as main
+
     client = _GraphQL(
         _page([_node(12, "## Acceptance criteria", "octo-author"), _node(13, None, "second")])
     )
@@ -123,7 +123,8 @@ async def test_run_start_records_each_closing_issue_with_its_author() -> None:
 
 async def test_run_start_records_an_empty_tuple_when_nothing_is_closed() -> None:
     """Closing no issue is a known answer, distinct from not having read."""
-    main = importlib.import_module("mergecraft.main")
+    import mergecraft.main as main
+
     ctx = _run_ctx(_GraphQL(_page([])))
 
     await main._read_linked_issues(ctx)
@@ -143,7 +144,8 @@ async def test_run_start_records_an_empty_tuple_when_nothing_is_closed() -> None
 )
 async def test_run_start_leaves_linked_issues_unread_on_any_doubt(client: _GraphQL) -> None:
     """A failed, partial or malformed read is ``None``, never a shorter list."""
-    main = importlib.import_module("mergecraft.main")
+    import mergecraft.main as main
+
     ctx = _run_ctx(client)
     ctx.tool_state.linked_issues = ()
 
@@ -155,7 +157,8 @@ async def test_run_start_leaves_linked_issues_unread_on_any_doubt(client: _Graph
 
 async def test_run_start_without_a_pull_request_reads_nothing() -> None:
     """No pull request, no closing references: no call, and the field stays unread."""
-    main = importlib.import_module("mergecraft.main")
+    import mergecraft.main as main
+
     client = _GraphQL(_page([_node(12, "body", "octo-author")]))
     ctx = _run_ctx(client, pr=None)
 
@@ -190,6 +193,7 @@ async def test_the_credential_phase_reads_the_closing_issues_once(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """The real run-start phase calls the read, so the field is never dead in production."""
+    import mergecraft.main as main
     from mergecraft.config.settings import RepoSettings
     from mergecraft.main import RunContext
     from mergecraft.scm.github import GitHubScmAdapter
@@ -199,7 +203,6 @@ async def test_the_credential_phase_reads_the_closing_issues_once(
         _run_context_data,
     )
 
-    main = importlib.import_module("mergecraft.main")
     client = _CredentialPhaseGitHub()
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("GITHUB_EVENT_NAME", "issue_comment")
@@ -325,7 +328,8 @@ async def test_checkout_records_the_base_manifest_and_the_linked_repo_review(
     assert [entry.slug for entry in base.manifest.repos] == ["acme/contracts"]
     assert review is not None
     assert [entry.slug for entry in review.manifest.repos] == ["acme/contracts"]
-    producers = importlib.import_module("mergecraft.policy.evidence_producers")
+    import mergecraft.policy.evidence_producers as producers
+
     evidence = await producers.collect_policy_evidence(ctx, required_keys=["xrepo"])
     # No operator grant covers acme/contracts, so the review omitted it: the producer
     # read the recorded review rather than inventing a clean one.

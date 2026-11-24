@@ -12,10 +12,11 @@ from __future__ import annotations
 import re
 import shlex
 
-import click
 import pytest
 import typer.main
 import yaml
+from typer import _click
+from typer.core import TyperGroup
 
 from mergecraft.cli.app import app
 from tests.ci.workflow_support import REPO_ROOT, read_text
@@ -65,13 +66,13 @@ def _resolve(command: str) -> str | None:
         tokens = shlex.split(command)[1:]
     except ValueError:
         return None
-    current: click.Command = typer.main.get_command(app)
+    current: _click.Command = typer.main.get_command(app)
     index = 0
-    while isinstance(current, click.Group) and index < len(tokens):
+    while isinstance(current, TyperGroup) and index < len(tokens):
         token = tokens[index]
         if token.startswith("-"):
             break
-        child = current.get_command(click.Context(current), token)
+        child = current.get_command(_click.Context(current), token)
         if child is None:
             return f"unknown command {token!r} in {command!r}"
         current = child
