@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ import pytest
 from mergecraft.analyzers import oxlint_landmines
 from mergecraft.analyzers.parsers.oxlint_json import parse_oxlint_json
 from mergecraft.analyzers.registry import get_manifest
-from mergecraft.analyzers.resolve import AnalyzerPlan
+from mergecraft.analyzers.resolve import FILES_TOKEN, AnalyzerPlan
 from mergecraft.config.settings import AnalyzerOverride, AnalyzersSettings
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -38,114 +39,83 @@ def test_landmines_opt_in_explicit_true() -> None:
     assert oxlint_landmines.landmines_opt_in(_settings(landmines=True)) is True
 
 
-def test_oxlint_config_uses_landmines_detects_extends(tmp_path: Path) -> None:
-    (tmp_path / ".oxlintrc.json").write_text(
-        json.dumps({"extends": ["./node_modules/@interfere/landmines/configs/recommended.json"]}),
-        encoding="utf-8",
+def test_inject_config_pins_recommended_rules_over_the_repo_config(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".oxlintrc.json").write_text("{}\n", encoding="utf-8")
+    recommended = tmp_path / "recommended.json"
+    recommended.write_text(
+        json.dumps({"rules": {"landmines/no-fixed-sleep": "error"}}), encoding="utf-8"
     )
-    assert oxlint_landmines.oxlint_config_uses_landmines(tmp_path) is True
+    out = oxlint_landmines.write_landmines_inject_config(
+        scratch_dir=tmp_path / "scratch", repo_root=repo, landmines_recommended=recommended
+    )
+    assert json.loads(out.read_text(encoding="utf-8")) == {
+        "extends": [str((repo / ".oxlintrc.json").resolve()), str(recommended.resolve())],
+        "overrides": [{"files": ["**/*"], "rules": {"landmines/no-fixed-sleep": "error"}}],
+    }
 
 
-def test_oxlint_config_uses_landmines_detects_js_plugins(tmp_path: Path) -> None:
-    (tmp_path / "oxlint.json").write_text(
-        json.dumps(
-            {
-                "jsPlugins": [{"name": "landmines", "specifier": "@interfere/landmines"}],
-            }
+def _apply(repo: Path, scratch: Path) -> AnalyzerPlan:
+    return oxlint_landmines.apply_oxlint_landmines(
+        AnalyzerPlan(
+            manifest_id="oxlint",
+            mode="repo-native",
+            argv=tuple(get_manifest("oxlint").command),
         ),
-        encoding="utf-8",
+        repo_root=repo,
+        scratch_dir=scratch,
+        analyzers_settings=_settings(landmines=True),
     )
-    assert oxlint_landmines.oxlint_config_uses_landmines(tmp_path) is True
 
 
-def test_oxlint_config_rules_only_does_not_count_as_configured(tmp_path: Path) -> None:
-    (tmp_path / ".oxlintrc.json").write_text(
-        json.dumps({"rules": {"landmines/no-fixed-sleep": "off"}}),
-        encoding="utf-8",
-    )
-    assert oxlint_landmines.oxlint_config_uses_landmines(tmp_path) is False
-
-
-@pytest.mark.parametrize(
-    "entry",
-    [
-        "./landmines-compat.json",
-        "./@interfere/landmines-empty.json",
-        "./@interfere/landmines/configs/recommended.json",
-        "./vendor/node_modules/@interfere/landmines/configs/recommended.json",
-        "./node_modules/@interfere/landmines-fork/configs/recommended.json",
-        "./node_modules/@interfere/landmines/configs/../../../../empty.json",
-        "@interfere/landmines",
-        "@interfere/landmines/configs/recommended.json",
-        {"path": "./node_modules/@interfere/landmines/configs/recommended.json"},
-    ],
-)
-def test_oxlint_config_lookalike_extends_does_not_count_as_configured(
-    tmp_path: Path, entry: object
-) -> None:
-    (tmp_path / ".oxlintrc.json").write_text(json.dumps({"extends": [entry]}), encoding="utf-8")
-    assert oxlint_landmines.oxlint_config_uses_landmines(tmp_path) is False
-
-
-@pytest.mark.parametrize(
-    "entry",
-    [
-        "node_modules/@interfere/landmines/configs/recommended.json",
-        "./src/../node_modules/@interfere/landmines/configs/all.json",
-    ],
-)
-def test_oxlint_config_package_extends_spellings_count_as_configured(
-    tmp_path: Path, entry: str
-) -> None:
-    (tmp_path / ".oxlintrc.json").write_text(json.dumps({"extends": [entry]}), encoding="utf-8")
-    assert oxlint_landmines.oxlint_config_uses_landmines(tmp_path) is True
+_PLUGIN = [{"name": "landmines", "specifier": "@interfere/landmines"}]
+_OFF = {"landmines/no-fixed-sleep": "off"}
 
 
 @pytest.mark.skipif(
     not _landmines_toolchain_installed(),
     reason="scripts/node_modules oxlint + landmines not installed",
 )
-def test_apply_oxlint_landmines_injects_when_rules_only_config(tmp_path: Path) -> None:
-    (tmp_path / ".oxlintrc.json").write_text(
-        json.dumps({"rules": {"landmines/no-fixed-sleep": "off"}}),
+@pytest.mark.parametrize(
+    "repo_config",
+    [
+        {},
+        {"rules": _OFF},
+        {"jsPlugins": _PLUGIN, "rules": _OFF},
+        {"extends": ["./node_modules/@interfere/landmines/configs/recommended.json"]},
+        {
+            "extends": ["./node_modules/@interfere/landmines/configs/recommended.json"],
+            "rules": _OFF,
+        },
+        {"overrides": [{"files": ["**/*.test.ts"], "rules": _OFF}]},
+        {"overrides": [{"files": ["*"], "jsPlugins": _PLUGIN, "rules": _OFF}]},
+        {"ignorePatterns": ["**/*.test.ts"]},
+    ],
+)
+def test_repo_config_cannot_turn_injected_landmines_off(
+    tmp_path: Path, repo_config: dict[str, object]
+) -> None:
+    toolchain = oxlint_landmines.landmines_toolchain()
+    assert toolchain is not None
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "node_modules").symlink_to(toolchain[1].parents[3], target_is_directory=True)
+    (repo / ".oxlintrc.json").write_text(json.dumps(repo_config), encoding="utf-8")
+    target = repo / "src" / "widget.test.ts"
+    target.write_text(
+        'import { test } from "vitest";\n'
+        'test("x", async () => {\n'
+        "  await new Promise((r) => setTimeout(r, 500));\n"
+        "});\n",
         encoding="utf-8",
     )
-    manifest = get_manifest("oxlint")
-    plan = AnalyzerPlan(
-        manifest_id="oxlint",
-        mode="repo-native",
-        argv=tuple(manifest.command),
-    )
-    scratch = tmp_path / "scratch"
-    patched = oxlint_landmines.apply_oxlint_landmines(
-        plan,
-        repo_root=tmp_path,
-        scratch_dir=scratch,
-        analyzers_settings=_settings(landmines=True),
-    )
-    assert "-c" in patched.argv
-
-
-def test_apply_oxlint_landmines_noop_when_repo_already_configured(tmp_path: Path) -> None:
-    (tmp_path / ".oxlintrc.json").write_text(
-        '{"extends":["./node_modules/@interfere/landmines/configs/recommended.json"]}\n',
-        encoding="utf-8",
-    )
-    manifest = get_manifest("oxlint")
-    plan = AnalyzerPlan(
-        manifest_id="oxlint",
-        mode="repo-native",
-        argv=tuple(manifest.command),
-    )
-    scratch = tmp_path / "scratch"
-    patched = oxlint_landmines.apply_oxlint_landmines(
-        plan,
-        repo_root=tmp_path,
-        scratch_dir=scratch,
-        analyzers_settings=_settings(landmines=True),
-    )
-    assert patched.argv == plan.argv
-    assert "-c" not in patched.argv
+    patched = _apply(repo, tmp_path / "scratch")
+    assert patched.mode == "repo-native", patched.reason
+    argv = [str(target) if arg == FILES_TOKEN else arg for arg in patched.argv]
+    run = subprocess.run(argv, cwd=repo, capture_output=True, text=True, check=False, timeout=60)
+    codes = {item["code"] for item in json.loads(run.stdout)["diagnostics"]}
+    assert "landmines(no-fixed-sleep)" in codes
 
 
 @pytest.mark.skipif(

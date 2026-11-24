@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 from dataclasses import replace
@@ -21,7 +20,6 @@ _MIN_NODE_VERSION = (22, 18, 0)
 _LANDMINES_INJECT_CONFIG_NOTE = (
     "@interfere/landmines configs/recommended — mergeCraft-injected oxlint config"
 )
-_LANDMINES_CONFIG_DIR = Path("node_modules", "@interfere", "landmines", "configs")
 _VERSION_COMPONENT_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 
@@ -66,28 +64,6 @@ def mergecraft_tooling_root() -> Path:
     return here.parents[3]
 
 
-def _extends_registers_landmines(entry: object, *, repo_root: Path) -> bool:
-    """Return True when an ``extends`` entry is a config shipped by ``@interfere/landmines``.
-
-    Oxlint resolves ``extends`` as file paths against the config's directory and rejects
-    package specifiers, so only a path to the installed package's ``configs/`` counts. The
-    match is lexical: the PR head may not have installed packages, and pnpm symlinks them.
-    """
-    if not isinstance(entry, str):
-        return False
-    path = Path(os.path.normpath(repo_root / entry))
-    return path.suffix == ".json" and path.parent == repo_root / _LANDMINES_CONFIG_DIR
-
-
-def _js_plugin_registers_landmines(plugin: dict[str, object]) -> bool:
-    """Return True when a ``jsPlugins`` entry registers ``@interfere/landmines``."""
-    name = str(plugin.get("name", "")).casefold()
-    specifier = str(plugin.get("specifier", "")).casefold()
-    return specifier == "@interfere/landmines" or (
-        name == "landmines" and specifier == "@interfere/landmines"
-    )
-
-
 def landmines_toolchain() -> tuple[Path, Path] | None:
     """Return ``(oxlint_binary, recommended_config)`` when the pinned toolchain is present."""
     node_modules = mergecraft_tooling_root() / "scripts" / "node_modules"
@@ -96,32 +72,6 @@ def landmines_toolchain() -> tuple[Path, Path] | None:
     if oxlint_bin.is_file() and recommended.is_file():
         return oxlint_bin.resolve(), recommended.resolve()
     return None
-
-
-def oxlint_config_uses_landmines(repo_root: Path) -> bool:
-    """Return True when the repo's oxlint config already enables landmines."""
-    repo_root = repo_root.resolve()
-    for name in _OXLINT_CONFIG_NAMES:
-        path = repo_root / name
-        if not path.is_file():
-            continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if not isinstance(payload, dict):
-            continue
-        extends = payload.get("extends")
-        if isinstance(extends, list):
-            for entry in extends:
-                if _extends_registers_landmines(entry, repo_root=repo_root):
-                    return True
-        plugins = payload.get("jsPlugins")
-        if isinstance(plugins, list):
-            for plugin in plugins:
-                if isinstance(plugin, dict) and _js_plugin_registers_landmines(plugin):
-                    return True
-    return False
 
 
 def _repo_oxlint_config_path(repo_root: Path) -> Path | None:
@@ -139,15 +89,22 @@ def write_landmines_inject_config(
     repo_root: Path,
     landmines_recommended: Path,
 ) -> Path:
-    """Write a scratch oxlint config that layers landmines ``recommended`` onto the repo."""
+    """Write a scratch oxlint config that layers landmines ``recommended`` onto the repo.
+
+    The repo's own config comes from the PR head, so its other rules apply but its landmines
+    settings must not win. Later ``extends`` entries beat its top-level ``rules``; only a
+    top-level override beats its ``overrides``, so the recommended rules are repeated there.
+    """
     scratch_dir.mkdir(parents=True, exist_ok=True)
     extends: list[str] = []
     repo_config = _repo_oxlint_config_path(repo_root)
     if repo_config is not None:
         extends.append(str(repo_config))
     extends.append(str(landmines_recommended.resolve()))
+    rules = json.loads(landmines_recommended.read_text(encoding="utf-8"))["rules"]
+    payload = {"extends": extends, "overrides": [{"files": ["**/*"], "rules": rules}]}
     out = scratch_dir / "oxlint-landmines-inject.json"
-    out.write_text(json.dumps({"extends": extends}, indent=2) + "\n", encoding="utf-8")
+    out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return out
 
 
@@ -158,12 +115,10 @@ def apply_oxlint_landmines(
     scratch_dir: Path,
     analyzers_settings: AnalyzersSettings | None,
 ) -> AnalyzerPlan:
-    """Patch an oxlint plan to run landmines when opted in and not already configured."""
+    """Patch an oxlint plan to run landmines whenever the base config opted in."""
     if plan.manifest_id != "oxlint" or plan.mode == "skip" or not plan.argv:
         return plan
     if not landmines_opt_in(analyzers_settings):
-        return plan
-    if oxlint_config_uses_landmines(repo_root):
         return plan
 
     if not node_meets_landmines_requirement():
@@ -238,6 +193,5 @@ __all__ = [
     "landmines_toolchain",
     "mergecraft_tooling_root",
     "node_meets_landmines_requirement",
-    "oxlint_config_uses_landmines",
     "write_landmines_inject_config",
 ]
