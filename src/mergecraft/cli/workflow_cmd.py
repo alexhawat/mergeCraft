@@ -18,9 +18,11 @@ from mergecraft.cli.provider_cmd import (
     AUTH_KIND_API_KEY,
     _config_path,
     _entry_auth_kind,
+    _env_path,
     _load_config_dict,
     _provider_entries,
     _write_env_label,
+    allocate_registry_env_index,
     indexed_credential_keys,
     load_provider_registry,
     resolve_provider_harness,
@@ -39,7 +41,6 @@ from mergecraft.cli.workflow_wf_yaml import (
 from mergecraft.config.agent_roster import load_roster
 from mergecraft.config.io import write_config_dict
 from mergecraft.config.provider_registry import (
-    allocate_env_index,
     list_supported_harnesses,
     validate_http_url,
 )
@@ -351,7 +352,7 @@ def _plan_provider_for_workflow(
     else:
         cli_bail(f"provider {normalised_label!r} requires --url (absolute http(s) URL)")
 
-    env_index = allocate_env_index(entries)
+    env_index = allocate_registry_env_index(data, entries, env_path=_env_path(repo_root))
     entry = {
         "label": normalised_label,
         "harness": resolved_harness,

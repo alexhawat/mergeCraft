@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import getpass
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -90,6 +91,10 @@ VERTEX_LEGACY_CONFIG_KEYS: tuple[str, ...] = ("GOOGLE_CLOUD_PROJECT", "VERTEX_LO
 STRUCTURE_KEYS_IN_ENV: frozenset[str] = frozenset({"harness", "envIndex", "modelChain", "authKind"})
 
 ENV_STRUCTURE_KEYS_TO_REMOVE_ON_APPLY: frozenset[str] = frozenset()
+
+# Highest env index ``provider delete`` has freed; see ``allocate_env_index`` (D3).
+ENV_INDEX_HIGH_WATER_KEY = "providersEnvIndexHighWater"
+_INDEXED_ENV_KEY_RE = re.compile(r"^LLM_PROVIDER_(\d+)(?:_|$)")
 
 CREDENTIAL_SUBSTRINGS_IN_CONFIG: tuple[str, ...] = (
     "api_key",
@@ -183,6 +188,36 @@ def _provider_entries(data: dict[str, Any]) -> list[dict[str, Any]]:
     return [entry for entry in raw if isinstance(entry, dict)]
 
 
+def _env_index_high_water(data: Mapping[str, Any]) -> int:
+    raw = data.get(ENV_INDEX_HIGH_WATER_KEY)
+    return raw if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0 else 0
+
+
+def _occupied_env_indices(env_path: Path | None) -> set[int]:
+    """Return every ``N`` that still has an ``LLM_PROVIDER_<N>`` key in *env_path*."""
+    if env_path is None:
+        return set()
+    return {
+        int(match.group(1))
+        for key in _read_env_map(env_path)
+        if (match := _INDEXED_ENV_KEY_RE.match(key)) is not None
+    }
+
+
+def allocate_registry_env_index(
+    data: Mapping[str, Any],
+    entries: Sequence[Mapping[str, Any]],
+    *,
+    env_path: Path | None = None,
+) -> int:
+    """Allocate the next env index for the registry in *data*; never a freed one (D3)."""
+    return allocate_env_index(
+        entries,
+        high_water=_env_index_high_water(data),
+        occupied=_occupied_env_indices(env_path),
+    )
+
+
 def _write_env_label(env_index: int, label: str, cwd: Path | None = None) -> None:
     from mergecraft.cli.auth_cmd import _write_env_value
 
@@ -231,15 +266,19 @@ def _seed_url_for_label(label: str) -> str | None:
     return SEED_PROVIDER_URLS.get(label)
 
 
-def seed_builtin_providers(config_path: Path) -> None:
-    """Import built-in ``PROVIDERS`` catalog rows once (not a reconcile loop)."""
+def seed_builtin_providers(config_path: Path, *, env_path: Path | None = None) -> None:
+    """Import built-in ``PROVIDERS`` catalog rows once (not a reconcile loop).
+
+    *env_path* is the ``.env`` paired with the config; indices it still uses are
+    skipped so a seeded row never takes over an existing ``LLM_PROVIDER_<N>`` slot.
+    """
     data = _load_config_dict(config_path)
     if data.get("providersSeeded"):
         return
 
     entries = _provider_entries(data)
     existing = {str(entry.get("label", "")).lower() for entry in entries}
-    next_index = allocate_env_index(entries)
+    next_index = allocate_registry_env_index(data, entries, env_path=env_path)
 
     for label in sorted(PROVIDERS.keys()):
         if label.lower() in existing:
@@ -323,7 +362,7 @@ def add_cmd(
     elif not is_builtin_default:
         cli_bail(f"provider {normalised_label!r} requires --url (absolute http(s) URL)")
 
-    env_index = allocate_env_index(entries)
+    env_index = allocate_registry_env_index(data, entries, env_path=_env_path(repo_root))
     entry: dict[str, Any] = {
         "label": normalised_label,
         "harness": resolved_harness,
@@ -397,9 +436,12 @@ def delete_cmd(
 
     remaining: list[dict[str, Any]] = []
     removed = False
+    freed: list[int] = []
     for entry in entries:
         if str(entry.get("label", "")).lower() == label.strip().lower():
             removed = True
+            if entry.get("envIndex") is not None:
+                freed.append(int(entry["envIndex"]))
             continue
         remaining.append(entry)
 
@@ -407,6 +449,9 @@ def delete_cmd(
         cli_bail(f"unknown provider label {label!r}", code=CLI_USAGE_EXIT_CODE)
 
     data["providers"] = remaining
+    if freed:
+        # The row is gone, so record its index: allocation must never hand it out again.
+        data[ENV_INDEX_HIGH_WATER_KEY] = max(_env_index_high_water(data), *freed)
     _write_config_dict(config_path, data)
     console.print(f"deleted provider [green]{label}[/green]")
 
@@ -996,7 +1041,7 @@ def plan_provider_migration(
             "mergecraft provider add before migrating custom endpoints"
         )
 
-    next_index = allocate_env_index(existing_entries)
+    next_index = allocate_registry_env_index(config_data, existing_entries, env_path=env_path)
     labels_to_add: list[str] = []
 
     for legacy_key, (label, suffix) in LEGACY_API_KEY_MIGRATIONS.items():
@@ -1330,6 +1375,7 @@ __all__ = [
     "AuthStrategy",
     "MigrationPlan",
     "ProviderRegistry",
+    "allocate_registry_env_index",
     "app",
     "apply_provider_migration",
     "indexed_credential_keys",

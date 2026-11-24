@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   return, form feed or Unicode line separator inside a changed line no longer
   reads as a line break, and analyzer scoping reads file-header lines only
   before a file's first hunk.
+- `provider delete` now records the highest freed env index as
+  `providersEnvIndexHighWater` in `config.yaml`, so `provider add`,
+  `workflow provider add`, `provider migrate` and `init` seeding never hand
+  that index out again. Allocation also skips any index that still has
+  `LLM_PROVIDER_<N>` keys in the local `.env`, which covers registries written
+  before the mark existed.
 - A dependency advisory already present on the base branch is no longer reported
   as introduced by the pull request. The base copy of a lock file is scanned from
   a scratch path, so its advisories never matched their head twins and every one
