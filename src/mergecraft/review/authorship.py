@@ -251,8 +251,10 @@ def _await_sync(awaitable: Coroutine[Any, Any, frozenset[str]]) -> frozenset[str
         asyncio.get_running_loop()
     except RuntimeError:
         return _run_coroutine(awaitable)
-    # A loop is already running: give the lookup its own loop in a worker so the
-    # sync contract holds without blocking the caller's loop.
+    # A loop is already running: give the lookup its own loop in a worker.
+    # ``.result()`` waits on the caller's thread, so a running loop on that thread
+    # — an MCP tool coroutine — waits for the whole lookup. Async callers await
+    # ``resolve_publisher_logins`` instead of calling this.
     with ThreadPoolExecutor(max_workers=1) as pool:
         return pool.submit(_run_coroutine, awaitable).result()
 

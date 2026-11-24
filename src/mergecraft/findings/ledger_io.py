@@ -627,14 +627,14 @@ async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> Find
             for record in FindingLedger.from_comment_body(legacy).records():
                 ledger.upsert_if_newer(record)
         if issue_number is not None and hasattr(ctx.scm, "list_reviews"):
-            from mergecraft.review.authorship import expected_publisher_logins
+            from mergecraft.review.authorship import resolve_publisher_logins
 
             for body in await fetch_review_record_bodies(
                 ctx.scm,
                 ctx.repo.owner,
                 ctx.repo.name,
                 int(issue_number),
-                publishers=expected_publisher_logins(ctx),
+                publishers=await resolve_publisher_logins(ctx),
             ):
                 for record in FindingLedger.from_comment_body(body).records():
                     ledger.upsert_if_newer(record)
