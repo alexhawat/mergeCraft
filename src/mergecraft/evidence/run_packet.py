@@ -36,6 +36,7 @@ from mergecraft.analyzers.finding import Finding, make_finding
 from mergecraft.classify import ChangeSet, classify_blast_radius
 from mergecraft.classify.blast_radius import FixProofStatus, RuleSet
 from mergecraft.classify.risk import jev_skip_reasons
+from mergecraft.diff import diff_lines
 from mergecraft.evidence.build import build_packet
 from mergecraft.evidence.coverage import coverage_section_for_state
 from mergecraft.evidence.emit import write_packet
@@ -167,7 +168,7 @@ def _diff_stats(diff_text: str) -> dict[str, object]:
     """
     added = 0
     deleted = 0
-    for line in diff_text.splitlines():
+    for line in diff_lines(diff_text):
         if line.startswith("+") and not line.startswith("+++ "):
             added += 1
         elif line.startswith("-") and not line.startswith("--- "):
@@ -725,7 +726,7 @@ def _run_metrics(
     # that call, so an unstamped publish must be omitted rather than rendered
     # as ``0s`` (#1075). A genuinely stamped value still renders.
     added = deleted = 0
-    for line in diff_text.splitlines():
+    for line in diff_lines(diff_text):
         if line.startswith("+") and not line.startswith("+++ "):
             added += 1
         elif line.startswith("-") and not line.startswith("--- "):
@@ -739,7 +740,7 @@ def _run_metrics(
         read_tool_calls=sum(1 for call in calls if getattr(call, "intent", None) == "read"),
         read_tool_turns=_read_tool_turns(calls),
         distinct_files_read=len(set(getattr(trajectory, "files_read", []) or [])),
-        diff_lines=len(diff_text.splitlines()),
+        diff_lines=len(diff_lines(diff_text)),
         diff_added_lines=added,
         diff_deleted_lines=deleted,
         phase_elapsed_s={

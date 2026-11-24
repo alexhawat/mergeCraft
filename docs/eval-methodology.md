@@ -60,14 +60,17 @@ an installed wheel, or an unrelated custom corpus.
 ### Human adjudication review packets
 
 The [batch 001 review sheet](../evals/adjudication/golden-batch-001-review.md)
-lists the nine original claims tracked by #780. Its
+lists the nine original claims tracked by
+[#780](https://github.com/alexhawat/mergeCraft/issues/780), which the maintainer
+closed as not planned on 2026-11-23. Batch 001 will not be adjudicated. Its
 [manifest](../evals/adjudication/golden-batch-001.json) names `alexhawat` as
 the intended adjudicator. On 2026-11-19 the operator stated that they had not
 adjudicated the batch. The previous attribution of nine abstentions is
 withdrawn; historical git records and the
 [earlier issue comment](https://github.com/alexhawat/mergeCraft/issues/780#issuecomment-5811216475)
-remain preserved. Current decisions are 9 pending, 0 confirm, 0 correct,
-0 abstain, with null decision identities and timestamps.
+remain preserved. The manifest still reads 9 pending, 0 confirm, 0 correct,
+0 abstain, with null decision identities and timestamps. Closing the issue
+recorded no decision.
 
 All nine original rows still have `evidence_status: missing`. Commit
 `3ff1bb39d6a5c2035c19c793131c493b591cf98d` introduced their descriptive
@@ -82,11 +85,12 @@ and fixing PR, full commit pins, an explicit upstream causal statement, and
 bounded code evidence. The [fixtures](../evals/fixtures/golden/) retain source
 excerpts, actual upstream patches, licenses, attribution, and artifact hashes.
 All nine decisions remain pending; the packet records which upstream tests
-were inspected and whether they were run locally.
+were inspected and whether they were run locally. Batch 002 is tracked
+in [#1551](https://github.com/alexhawat/mergeCraft/issues/1551).
 
 Neither packet supplies accepted independent human labels, judge calibration,
 or human-human agreement. Preparing or publishing evidence does not create
-human provenance or complete #780. Confirmations and corrections require the
+human provenance. Confirmations and corrections require the
 intended adjudicator's actual response and inspectable evidence.
 
 ### Judge calibration

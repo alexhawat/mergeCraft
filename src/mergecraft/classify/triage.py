@@ -69,7 +69,7 @@ from mergecraft.analyzers.scope import changed_paths_from_scope, parse_diff_scop
 from mergecraft.classify.change_classifier import _HIGH_STAKES_PATH_PARTS
 from mergecraft.classify.generated_files import FileKind, classify_path, has_generated_marker
 from mergecraft.context.instruction_discovery import is_instruction_path
-from mergecraft.diff import parse_diff
+from mergecraft.diff import diff_lines, parse_diff
 from mergecraft.review_policy.manifest_names import (
     DEPENDENCY_MANIFEST_NAMES,
     GENERATOR_CONFIG_NAMES,
@@ -195,7 +195,9 @@ def _parse(diff_text: str, *, newline_only: bool = False) -> list[_File]:
         )
         files.append(current)
         hunk: _Hunk | None = None
-        lines = section.text.split("\n") if newline_only else section.text.splitlines()
+        lines = (
+            section.text.split("\n") if newline_only else diff_lines(section.text, strip_cr=True)
+        )
         for raw in lines:
             if raw.startswith(("old mode ", "new mode ")):
                 current.mode_changed = True
