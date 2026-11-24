@@ -25,8 +25,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 import mergecraft.offline_review as offline_mod
 from mergecraft.review.offline_result import OfflineReviewResult
 from mergecraft.run_outcome import RunOutcome, exit_code_for_outcome
@@ -98,7 +96,6 @@ def _driver(tmp_path: Path, *, json_path: Path) -> offline_mod._OfflineDiffRevie
 # --------------------------------------------------------------------------- findings write
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_write_failure_keeps_cost_and_tokens(tmp_path: Path) -> None:
     """#1561 — the paid run keeps its recorded cost and tokens on a write failure."""
     result = _paid_result(tmp_path)
@@ -112,7 +109,6 @@ def test_write_failure_keeps_cost_and_tokens(tmp_path: Path) -> None:
     assert finished.error.startswith(_ERROR_PREFIX)
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_write_failure_is_infra_error(tmp_path: Path) -> None:
     """#1561 — a write failure is a runner fault (exit 40), not operator config (30)."""
     result = _paid_result(tmp_path)
@@ -123,7 +119,6 @@ def test_write_failure_is_infra_error(tmp_path: Path) -> None:
     assert exit_code_for_outcome(finished.outcome) == 40
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_write_failure_keeps_diff_and_packet_paths(tmp_path: Path) -> None:
     """#1561 — the failure keeps every field of the result it was built from."""
     result = _paid_result(tmp_path)
@@ -139,7 +134,6 @@ def test_write_failure_keeps_diff_and_packet_paths(tmp_path: Path) -> None:
     assert finished.structured_output is None
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 async def test_empty_diff_write_failure_is_infra_error(tmp_path: Path) -> None:
     """#1561 — the empty-diff write path reports infrastructure, not configuration."""
     driver = _driver(tmp_path, json_path=_blocked_findings_path(tmp_path))
