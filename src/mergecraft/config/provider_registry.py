@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -60,19 +60,26 @@ def supported_harness_names() -> frozenset[str]:
     return frozenset(row.name for row in _harness_rows())
 
 
-def allocate_env_index(entries: Sequence[Mapping[str, Any]]) -> int:
-    """Return ``max(existing envIndex) + 1``, or ``1`` when empty (D3).
+def allocate_env_index(
+    entries: Sequence[Mapping[str, Any]],
+    *,
+    high_water: int = 0,
+    occupied: Iterable[int] = (),
+) -> int:
+    """Return one past the highest env index ever used, or ``1`` when none was (D3).
 
-    Gaps are preserved — freed indices are never recycled.
+    Gaps are preserved — freed indices are never recycled. The live entries alone
+    cannot show that: ``provider delete`` removes an entry's row, so the registry
+    also records the highest freed index as ``high_water``. ``occupied`` names
+    indices whose ``LLM_PROVIDER_<N>`` keys are still in the local ``.env``, which
+    covers registries written before that mark existed.
     """
     indices = [
         int(entry["envIndex"])
         for entry in entries
         if isinstance(entry, Mapping) and entry.get("envIndex") is not None
     ]
-    if not indices:
-        return 1
-    return max(indices) + 1
+    return max([0, high_water, *indices, *occupied]) + 1
 
 
 def validate_http_url(url: str) -> str:

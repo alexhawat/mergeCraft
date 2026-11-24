@@ -1,9 +1,15 @@
 # Human adjudication review sheet: golden-batch-001
 
+Batch 001 will not be adjudicated: the maintainer closed
+[#780](https://github.com/alexhawat/mergeCraft/issues/780) as not planned on
+2026-11-23.
+
 The rendered sheet that was here recorded nine abstentions. The operator stated
 on 2026-11-19 that they had not adjudicated the batch, so that attribution is
-withdrawn and all nine decisions are pending. The earlier sheet remains in git
-history.
+withdrawn and no decision is recorded. The earlier sheet remains in git history.
 
 Use the [batch 001 review sheet](../../../evals/adjudication/golden-batch-001-review.md)
-for the current status. Render the manifest with `make eval-human-batch`.
+for the original claims. `make eval-human-batch` still renders its manifest and
+marks every row UNANSWERED; those rows no longer need a response. The
+[batch 002 review packet](../../../evals/adjudication/golden-batch-002-review.md)
+is the one awaiting human decisions.

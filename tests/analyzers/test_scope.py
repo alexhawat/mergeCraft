@@ -170,6 +170,77 @@ index 3333333..4444444 100644
     ]
 
 
+# Characters ``str.splitlines`` breaks on but Git does not (``diff_lines``).
+_NON_NEWLINE_BREAKS = ("\r", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", " ", " ")
+
+
+@pytest.mark.parametrize("separator", _NON_NEWLINE_BREAKS, ids=lambda c: f"U+{ord(c):04X}")
+def test_scope_walkers_split_diff_text_on_newline_only(separator: str) -> None:
+    """Content holding a line separator never starts a ``diff --git`` or hunk line."""
+    import mergecraft.analyzers.scope as scope
+
+    content = f"a{separator}diff --git a/y.py b/y.py{separator}@@ -1,0 +1,9 @@{separator}+b"
+    diff = (
+        "diff --git a/x.py b/x.py\n"
+        "index 1111111..2222222 100644\n"
+        "--- a/x.py\n"
+        "+++ b/x.py\n"
+        "@@ -1,2 +1,3 @@\n"
+        " keep\n"
+        f"+{content}\n"
+        f"-{content}\n"
+        "+tail\n"
+    )
+
+    parsed = scope.parse_diff_scope(diff)
+    assert parsed.hunk_ranges == {"x.py": [(1, 3)]}
+    assert parsed.added_files == frozenset()
+    assert list(scope.iter_added_diff_lines(diff)) == [
+        ("x.py", 2, content),
+        ("x.py", 3, "tail"),
+    ]
+    hunks = list(scope.iter_diff_hunks(diff))
+    assert [(hunk.path, hunk.new_start, len(hunk.lines)) for hunk in hunks] == [("x.py", 1, 4)]
+
+
+def test_scope_walkers_read_crlf_content_without_its_carriage_return() -> None:
+    import mergecraft.analyzers.scope as scope
+
+    diff = (
+        "diff --git a/w.bat b/w.bat\n"
+        "--- a/w.bat\n"
+        "+++ b/w.bat\n"
+        "@@ -1,1 +1,2 @@\n"
+        " @echo off\r\n"
+        "+set X=1\r\n"
+    )
+
+    assert list(scope.iter_added_diff_lines(diff)) == [("w.bat", 2, "set X=1")]
+    (hunk,) = scope.iter_diff_hunks(diff)
+    assert hunk.lines == (" @echo off", "+set X=1")
+
+
+def test_file_header_text_inside_a_hunk_is_content() -> None:
+    """A removed ``-- /dev/null`` line renders as ``--- /dev/null`` but is not a header."""
+    import mergecraft.analyzers.scope as scope
+
+    diff = (
+        "diff --git a/q.sql b/q.sql\n"
+        "index 1111111..2222222 100644\n"
+        "--- a/q.sql\n"
+        "+++ b/q.sql\n"
+        "@@ -1,2 +1,2 @@\n"
+        " select 1;\n"
+        "--- /dev/null\n"
+        "+select 2;\n"
+    )
+
+    parsed = scope.parse_diff_scope(diff)
+    assert parsed.added_files == frozenset()
+    assert parsed.hunk_ranges == {"q.sql": [(1, 2)]}
+    assert list(scope.iter_added_diff_lines(diff)) == [("q.sql", 2, "select 2;")]
+
+
 # --------------------------------------------------------------------------- #
 # #269 — ``base_comparison_available`` must return ``not offline``, never
 # ``offline``.

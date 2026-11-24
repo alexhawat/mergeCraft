@@ -14,6 +14,7 @@ from mergecraft.cli.consoles import err_console as console
 from mergecraft.cli.errors import cli_bail
 from mergecraft.cli.exits import CLI_USAGE_EXIT_CODE
 from mergecraft.cli.typer_group import mergecraft_typer
+from mergecraft.diff import diff_lines
 from mergecraft.review.lens_routing import load_routing_registry, route_lenses
 
 if TYPE_CHECKING:
@@ -75,7 +76,7 @@ def run_lens_test(
     diff_text = diff.read_text(encoding="utf-8")
     changed_paths = [
         line.split(" b/", 1)[1]
-        for line in diff_text.splitlines()
+        for line in diff_lines(diff_text, strip_cr=True)
         if line.startswith("diff --git ") and " b/" in line
     ]
     if not changed_paths:
