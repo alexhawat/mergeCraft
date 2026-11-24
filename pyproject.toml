@@ -25,32 +25,29 @@ classifiers = [
     "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = [
-    "loguru==0.7.3",
+    "loguru==0.8.0",
     "httpx==0.28.1",
     # security/egress.py subclasses the private httpcore._backends.base.NetworkBackend,
     # so httpcore is declared directly rather than left to httpx's transitive tree.
     "httpcore==1.0.9",
     "rich==15.0.0",
-    "typer==0.25.1",
-    # cli/interactive.py and cli/typer_group.py import click directly; typer only
-    # brings it transitively, so pin it explicitly at the locked resolution.
-    "click==8.4.2",
+    "typer==0.29.2",
     "pyyaml==6.0.3",
-    "pydantic==2.14.3",
+    "pydantic==2.14.4",
     # Imported by src/mergecraft/config/env/ (the typed settings layer).
-    "pydantic-settings==2.16.2",
-    "fastapi==0.162.0",
+    "pydantic-settings==2.16.3",
+    "fastapi==0.165.0",
     "uvicorn[standard]==0.54.0",
     "starlette==1.10.0",
     "jsonschema==4.26.0",
-    "semver==3.1.0",
+    "semver==3.1.2",
     "python-dotenv==1.2.4",
     # Transitive runtime requirement of httpx and starlette; the exact pin is policy.
     "anyio==4.16.0",
     "defusedxml==0.7.1",
     "tenacity==9.2.1",
     "pyjwt[crypto]==2.15.1",
-    "tree-sitter==0.26.0",
+    "tree-sitter==0.26.1",
     "tree-sitter-python==0.25.0",
     "typing-extensions==4.16.0",
     "typesafe-sdk==0.7.5",
@@ -74,15 +71,15 @@ harbor = [
 ]
 # Optional in-process OpenAI Agents SDK integration.
 agents = [
-    "openai-agents==0.24.0",
-    "openai==3.46.0",
+    "openai-agents==0.25.0",
+    "openai==3.57.0",
 ]
 # W8 / D6 — `tracing` extra behind which `logfire` and `opentelemetry-*` live.
 # Imports are lazy and guarded inside the sink factory; `make ci-resume` passes
 # with these uninstalled (convention 5). Exact pins + `uv.lock` committed
 # gate via `make lockcheck`.
 tracing = [
-    "logfire==5.6.0",
+    "logfire==6.0.0",
     "opentelemetry-api==1.45.2",
     "opentelemetry-sdk==1.45.2",
     "opentelemetry-exporter-otlp-proto-http==1.45.2",
@@ -90,9 +87,9 @@ tracing = [
 ]
 dev = [
     "pytest==9.2.0",
-    "pytest-asyncio==1.4.1.post1",
+    "pytest-asyncio==1.5.0",
     "pytest-xdist==3.8.0",
-    "ruff==0.17.4",
+    "ruff==0.17.6",
     "mypy==2.4.1",
     "pre-commit==4.7.0",
     "bandit[toml]==1.9.4",
@@ -102,18 +99,18 @@ dev = [
     "pyright==1.1.414",
     "basedpyright==1.40.2",
     "pytest-cov==7.1.0",
-    "pytest-randomly==5.0.0",
+    "pytest-randomly==5.1.0",
     "pytest-split==0.11.0",
     # Pinned to the version in analyzers/catalog/ast-grep.yaml so dev/test
     # runs exercise the same declaration-node kinds as the managed binary
     # impact.py resolves at review time.
-    "ast-grep-cli==0.51.1",
+    "ast-grep-cli==0.51.3",
     # Pinned to analyzers/catalog/vulture.yaml — repo-native dead-code scan (#427).
     "vulture==2.16",
     # Pinned to analyzers/catalog/typos.yaml — repo-native typo checker (#427).
-    "typos==1.52.0",
+    "typos==1.52.2",
     # BR0 / D14b — property-based tests for redaction transforms (BR1 RED suite).
-    "hypothesis==6.170.14",
+    "hypothesis==6.170.17",
 ]
 
 [tool.uv]

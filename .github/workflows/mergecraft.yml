@@ -57,8 +57,8 @@
 # - OPENAI_API_KEY — OpenAI API key (same Codex harness as CODEX_AUTH_JSON)
 # - CLAUDE_CODE_OAUTH_TOKEN — Claude Pro/Max subscription (`mergecraft auth claude`) — backstop
 # - ANTHROPIC_API_KEY — Anthropic API key (same claude harness as CLAUDE_CODE_OAUTH_TOKEN)
-# - ANTHROPIC_OPUS_API_KEY — Anthropic API key for the advisory Claude Opus 5.5
-#   reviewer (`review-opus` job). It reviews every same-repo PR in addition to the
+# - ANTHROPIC_OPUS_API_KEY — Anthropic API key (name kept from the Opus era) for the advisory Claude Sonnet 5.5
+#   reviewer (`review-sonnet` job). It reviews every same-repo PR in addition to the
 #   cascade, publishes with the job token (not the reviewer App), posts no
 #   check-runs, asks for COMMENT-only reviews (`review_event: comment`, live once
 #   the action pin includes it), and never feeds the approval gate.
@@ -1468,7 +1468,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
 
-  # A second, independent reviewer: Claude Opus 5.5 on the Anthropic API. It is
+  # A second, independent reviewer: Claude Sonnet 5.5 on the Anthropic API. It is
   # NOT a rung of the cascade above and does not replace DeepSeek — it reviews
   # every PR in addition to whichever rung recorded the verdict, and posts its
   # own inline comments and summary review.
@@ -1478,11 +1478,11 @@ jobs:
   # newest attributable `mergecraft-approval` with this run's external id, so a
   # second check from this job could disagree with the recorded verdict and fail
   # the gate (or, worse, be the one it compares). The gate does not `needs:` this
-  # job, so an Opus outage or slow review never blocks a merge.
-  # `tests/ci/test_review_opus_advisory.py` pins these properties.
+  # job, so a Sonnet outage or slow review never blocks a merge.
+  # `tests/ci/test_review_sonnet_advisory.py` pins these properties.
   #
   # `review_event: comment` makes the action publish every verdict as a COMMENT
-  # review and skip resolving review threads, so Opus can neither block nor
+  # review and skip resolving review threads, so Sonnet can neither block nor
   # unblock a merge. The input is new in this repo's action.yml; the pinned
   # action below (`26b6b5c6`) predates it and ignores it with an "Unexpected
   # input" warning. Until MERGECRAFT_ACTION_SHA is bumped to a commit (and
@@ -1506,13 +1506,15 @@ jobs:
   # model spend is only incurred once the recorded verdict exists.
   #
   # Its credential is a dedicated secret, ANTHROPIC_OPUS_API_KEY, passed to the
-  # action as ANTHROPIC_API_KEY on this step only. Reusing ANTHROPIC_API_KEY
+  # action as ANTHROPIC_API_KEY on this step only. The name is historical: this
+  # job ran Claude Opus 5.5 first, and the same Anthropic key serves Sonnet 5.5,
+  # so the existing secret was kept rather than re-added. Reusing ANTHROPIC_API_KEY
   # would also change which credential the Claude backstop authenticates with
   # and widen every HAS_AUTH predicate. Without the secret (or on a fork PR) the
   # job still starts, but every step except a notice is skipped: a job-level
   # `if:` cannot read `secrets`.
-  review-opus:
-    name: mergecraft review (Claude Opus 5.5, advisory)
+  review-sonnet:
+    name: mergecraft review (Claude Sonnet 5.5, advisory)
     needs: [changes, wait-for-ci, review, review-backstop]
     permissions:
       contents: read
@@ -1525,7 +1527,7 @@ jobs:
       id-token: write
     # Same draft/dispatch/dependabot/image-only guard as the review job. Unlike
     # the cascade jobs this one uses `!cancelled()`, not `always()`: a run that
-    # a newer push cancelled (`cancel-in-progress`) must not start a paid Opus
+    # a newer push cancelled (`cancel-in-progress`) must not start a paid Sonnet
     # review of the superseded head. It also needs the review job to have
     # succeeded, because that job composes the prompt passed below; a failed
     # prep step would otherwise hand the action an empty prompt.
@@ -1539,26 +1541,26 @@ jobs:
     # > 1× MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES + checkout/setup slack (D8).
     timeout-minutes: 40
     env:
-      HAS_OPUS: ${{ secrets.ANTHROPIC_OPUS_API_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      HAS_SONNET: ${{ secrets.ANTHROPIC_OPUS_API_KEY != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
       MERGECRAFT_CI_WAIT_STATE: ${{ needs.wait-for-ci.outputs.state }}
       MERGECRAFT_CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
       CI_STATE: ${{ needs.wait-for-ci.outputs.state }}
       CI_FAILED_COUNT: ${{ needs.wait-for-ci.outputs.failed_count }}
     steps:
-      - name: Skip when the Opus credential is not configured
-        if: env.HAS_OPUS != 'true'
+      - name: Skip when the Sonnet credential is not configured
+        if: env.HAS_SONNET != 'true'
         run: |
-          echo "::notice title=mergecraft Opus review skipped::Set the ANTHROPIC_OPUS_API_KEY Actions secret to add the Claude Opus 5.5 reviewer (fork PRs are always skipped)."
+          echo "::notice title=mergecraft Sonnet review skipped::Set the ANTHROPIC_OPUS_API_KEY Actions secret to add the Claude Sonnet 5.5 reviewer (fork PRs are always skipped)."
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: env.HAS_OPUS == 'true'
+        if: env.HAS_SONNET == 'true'
         with:
           fetch-depth: 0
           # MUST stay false — same Duplicate-header reason as the review job.
           persist-credentials: false
 
       - name: Ensure PR base ref exists locally
-        if: env.HAS_OPUS == 'true' && github.event_name == 'pull_request_target'
+        if: env.HAS_SONNET == 'true' && github.event_name == 'pull_request_target'
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
@@ -1569,10 +1571,10 @@ jobs:
             git branch -f "${base}" "origin/${base}"
           fi
 
-      - name: mergeCraft PR review (Claude Opus 5.5)
-        if: env.HAS_OPUS == 'true'
-        id: mergecraft_opus
-        # Advisory: a failed Opus review must not fail the workflow run.
+      - name: mergeCraft PR review (Claude Sonnet 5.5)
+        if: env.HAS_SONNET == 'true'
+        id: mergecraft_sonnet
+        # Advisory: a failed Sonnet review must not fail the workflow run.
         continue-on-error: true
         # Same mandatory full-SHA pin as the cascade rungs — keep in lockstep.
         uses: alexhawat/mergeCraft@26b6b5c65f5ebfe38bec93dd48aff0e3f3fbd7ed # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
@@ -1581,10 +1583,11 @@ jobs:
           # outcome) — repo-controlled values only.
           prompt: ${{ needs.review.outputs.prompt }}
           timeout: ${{ env.MERGECRAFT_REVIEW_ATTEMPT_TIMEOUT_MINUTES }}m
-          # Claude Opus 5.5 through the Claude Code harness, billed to the
-          # Anthropic API key below. Not a curated alias, so it is passed through
-          # as a raw `provider/model` specifier.
-          model: anthropic/claude-opus-5-5
+          # Claude Sonnet 5.5 through the Claude Code harness, billed to the
+          # Anthropic API key below. Not a curated alias (the `anthropic/claude-sonnet`
+          # alias resolves to Sonnet 5), so it is passed through as a raw
+          # `provider/model` specifier.
+          model: anthropic/claude-sonnet-5-5
           # Run exactly this model; the step carries only the Anthropic key.
           model_pin: enabled
           push: disabled
@@ -1605,13 +1608,13 @@ jobs:
           MERGECRAFT_TRACING_PROJECT: mergecraft-dev
           MERGECRAFT_TRACING_REGION: eu
 
-      - name: Report advisory Opus review outcome
-        if: ${{ !cancelled() && env.HAS_OPUS == 'true' }}
+      - name: Report advisory Sonnet review outcome
+        if: ${{ !cancelled() && env.HAS_SONNET == 'true' }}
         env:
-          OPUS_OUTCOME: ${{ steps.mergecraft_opus.outcome }}
+          SONNET_OUTCOME: ${{ steps.mergecraft_sonnet.outcome }}
         run: |
-          if [ "${OPUS_OUTCOME}" != "success" ]; then
-            echo "::warning title=mergecraft Opus review::The advisory Claude Opus 5.5 review did not finish (outcome=${OPUS_OUTCOME}); see the step log. The required mergecraft review check is unaffected."
+          if [ "${SONNET_OUTCOME}" != "success" ]; then
+            echo "::warning title=mergecraft Sonnet review::The advisory Claude Sonnet 5.5 review did not finish (outcome=${SONNET_OUTCOME}); see the step log. The required mergecraft review check is unaffected."
           fi
 
 

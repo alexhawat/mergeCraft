@@ -292,6 +292,7 @@
       "src/mergecraft/config/compat.py:variable:min_schema_version",
       "src/mergecraft/config/compat.py:variable:protocol_version",
       "src/mergecraft/config/env/runtime.py:variable:permanent_current_decision",
+      "src/mergecraft/config/settings.py:variable:providers_env_index_high_water",
       "src/mergecraft/config/settings.py:variable:providers_seeded",
       "src/mergecraft/config/settings.py:variable:redaction",
       "src/mergecraft/config/settings.py:variable:stop_script",
