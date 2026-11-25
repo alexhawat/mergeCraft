@@ -37,10 +37,10 @@ class InlineAnchorAdjustment:
 def build_inline_anchor_index(diff_text: str) -> InlineAnchorIndex:
     """Build the valid ``(path, line, side)`` anchor set from a unified diff.
 
-    ``--- `` / ``+++ `` lines are file headers only before a file's first hunk:
-    inside a hunk a removed ``-- comment`` or an added ``++ x`` renders with
-    those prefixes and is content. A hunk closes once its declared old and new
-    counts are consumed, so a header that follows a completed hunk without a
+    ``--- `` / ``+++ `` lines are file headers only while no hunk is open: a
+    removed ``-- comment`` or an added ``++ x`` inside a hunk renders with those
+    prefixes and is content. A hunk closes once its declared old and new counts
+    are consumed, so a header that follows a completed hunk without a
     ``diff --git`` line is still a header.
     """
     anchors: set[tuple[str, int, str]] = set()
