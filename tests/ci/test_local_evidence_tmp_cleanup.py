@@ -36,7 +36,6 @@ def _tmp_trees_under_tmp_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(local_evidence, "checkout_is_fork_pr", lambda _root: False)
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_source_copy_scratch_is_removed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sandbox = importlib.import_module("mergecraft.analyzers.sandbox")
     seen: dict[str, Path] = {}
@@ -74,7 +73,6 @@ def test_source_copy_scratch_is_removed(tmp_path: Path, monkeypatch: pytest.Monk
     assert _local_trees(tmp_path) == []
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_coverage_workdir_is_removed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_run(argv: Sequence[str], **_kwargs: Any) -> Any:
         if "-o" in argv:
@@ -99,7 +97,6 @@ def test_coverage_workdir_is_removed(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert _local_trees(tmp_path) == []
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_mutation_results_dir_is_removed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     mutant_key = "src.mod.x_fn_watch__mutmut_1"
     meta = tmp_path / "mutants" / "src" / "mod.py.meta"
@@ -138,7 +135,6 @@ def test_mutation_results_dir_is_removed(tmp_path: Path, monkeypatch: pytest.Mon
     assert _local_trees(tmp_path) == []
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_scratch_is_removed_when_the_run_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
