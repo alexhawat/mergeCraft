@@ -14,7 +14,6 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.support.cli_text import compact_cli_text
 from typer.testing import CliRunner
 
@@ -67,7 +66,6 @@ def test_config_show_models_with_a_single_slug(
     assert "a/one" in output
 
 
-@pytest.mark.xfail(reason="green after W4", strict=True)
 def test_config_show_models_lists_the_whole_chain(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -82,7 +80,6 @@ def test_config_show_models_lists_the_whole_chain(
     _assert_chain_in_order(output)
 
 
-@pytest.mark.xfail(reason="green after W4", strict=True)
 def test_config_explain_models_lists_the_whole_chain(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

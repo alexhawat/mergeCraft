@@ -32,7 +32,6 @@ _EXPECTED = "unsupported config key for show/explain: 'bogus.key'"
 
 
 @pytest.mark.parametrize("verb", ["show", "explain"])
-@pytest.mark.xfail(reason="green after W4", strict=True)
 def test_unknown_config_key_exits_usage(
     verb: str,
     tmp_path: Path,

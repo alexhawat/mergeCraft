@@ -13,7 +13,6 @@ from __future__ import annotations
 import subprocess
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.support.cli_text import compact_cli_text
 from typer.testing import CliRunner
 
@@ -58,7 +57,6 @@ def _repo_with_a_change(tmp_path: Path, monkeypatch: MonkeyPatch) -> Path:
     return repo
 
 
-@pytest.mark.xfail(reason="green after W4", strict=True)
 def test_missing_model_chain_prints_one_line_without_a_traceback(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

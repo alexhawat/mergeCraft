@@ -13,13 +13,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-
 if TYPE_CHECKING:
     from _pytest.capture import CaptureFixture
 
 
-@pytest.mark.xfail(reason="green after W4", strict=True)
 def test_add_mask_escapes_and_writes_to_stdout(capsys: CaptureFixture[str]) -> None:
     """Happy: ``%`` and a newline are escaped, and stdout gets the whole line."""
     from mergecraft.utils import gha_log
@@ -32,7 +29,6 @@ def test_add_mask_escapes_and_writes_to_stdout(capsys: CaptureFixture[str]) -> N
     assert captured.err == ""
 
 
-@pytest.mark.xfail(reason="green after W4", strict=True)
 def test_add_mask_keeps_brackets_intact(capsys: CaptureFixture[str]) -> None:
     """Edge: ``[...]`` is literal text, never Rich markup."""
     from mergecraft.utils import gha_log

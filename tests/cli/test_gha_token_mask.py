@@ -12,8 +12,6 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-import pytest
-
 from mergecraft.cli.gha_cmd import _set_output
 
 if TYPE_CHECKING:
@@ -25,7 +23,6 @@ if TYPE_CHECKING:
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
-@pytest.mark.xfail(reason="green after W4", strict=True)
 def test_mask_line_is_raw_on_stdout_and_matches_the_output_file(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -44,7 +41,6 @@ def test_mask_line_is_raw_on_stdout_and_matches_the_output_file(
     assert out.read_text(encoding="utf-8") == "token=tok[bold]en\n"
 
 
-@pytest.mark.xfail(reason="green after W4", strict=True)
 def test_mask_line_ignores_terminal_width_and_colour(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
