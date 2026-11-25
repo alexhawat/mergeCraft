@@ -126,6 +126,7 @@ _ACTION_REF = re.compile(
     r"(?m)^([ \t]*(?:-[ \t]+)?uses: alexhawat/mergeCraft@)([\w./-]+)(?:[ \t]+#[^\n]*)?[ \t]*$"
 )
 _ACTION_SHA_ENV = re.compile(r"(?m)^([ \t]*MERGECRAFT_ACTION_SHA: )([0-9a-fA-F]{40})[ \t]*$")
+_EVALS_DEFAULT_REF = re.compile(r"(\(default ref `)v[^`\s]+(`)")
 _PIN_DOCS = {"README.md", "docs/workflows.md", "docs/authentication.md", "docs/evidence-packet.md"}
 
 
@@ -158,8 +159,14 @@ def _refresh_release(tag: str, remote: str, defaults: dict[str, Any]) -> None:
     for key, value in (("action_pin_minimal", tag), ("action_sha_minimal", sha)):
         text = text.replace(f"{key}: {defaults[key]}\n", f"{key}: {value}\n")
     failures = _document_pins(tag, sha, refresh=True)
+    evals_readme = REPO / "evals/README.md"
+    evals_old = evals_readme.read_text(encoding="utf-8")
+    evals_new, count = _EVALS_DEFAULT_REF.subn(lambda m: f"{m[1]}{tag}{m[2]}", evals_old)
+    if count != 1:
+        failures.append(f"evals/README.md must name the default install ref once, found {count}")
     if failures:
         raise SystemExit("\n".join(failures))
+    evals_readme.write_text(evals_new, encoding="utf-8")
     for path in (CHECKOUT_DEFAULTS, PACKAGED_DEFAULTS):
         path.write_text(text, encoding="utf-8")
     capture = REPO / "tests/pins/fixtures/git_ls_remote_tags.txt"

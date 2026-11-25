@@ -365,7 +365,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           uv run python scripts/check_example_defaults_sync.py --refresh-release
           make examples docs pins-check
-          git add pyproject.toml server.json uv.lock README.md docs/ llms-full.txt scripts/example_workflows/defaults.yaml src/mergecraft/data/example_workflows/defaults.yaml examples/workflows/mergecraft.yml tests/pins/fixtures/git_ls_remote_tags.txt
+          git add pyproject.toml server.json uv.lock README.md docs/ evals/README.md llms-full.txt scripts/example_workflows/defaults.yaml src/mergecraft/data/example_workflows/defaults.yaml examples/workflows/mergecraft.yml tests/pins/fixtures/git_ls_remote_tags.txt
           if git diff --cached --quiet; then
             echo "branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
             exit 0

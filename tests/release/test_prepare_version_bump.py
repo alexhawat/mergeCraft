@@ -55,7 +55,7 @@ from typing import Any
 
 import pytest
 import yaml
-from scripts.consumer_install_pins import METADATA, pin_paths
+from scripts.consumer_install_pins import METADATA, SECURITY_DOC, pin_paths
 
 from tests.ci.workflow_support import REPO_ROOT
 from tests.docs.support import load_script_module
@@ -354,6 +354,7 @@ def test_prepare_bump_touches_only_the_versioned_files(tmp_path: Path) -> None:
             _SERVER_JSON,
             _UV_LOCK,
             METADATA,
+            SECURITY_DOC,
             "skills-lock.json",
             *(path.relative_to(root).as_posix() for path in pin_paths(root)),
         ]

@@ -119,11 +119,15 @@ def test_release_refresh_uses_published_tag_and_detects_doc_or_workflow_drift(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("- uses: alexhawat/mergeCraft@main # outdated\n")
     (tmp_path / "tests/pins/fixtures").mkdir(parents=True)
+    evals_readme = tmp_path / "evals/README.md"
+    evals_readme.parent.mkdir()
+    evals_readme.write_bytes((REPO_ROOT / "evals/README.md").read_bytes())
 
     pins._refresh_release(tag, str(tmp_path), pins._load(source))
     assert pins._load(source)["action_sha_minimal"] == sha
     assert source.read_bytes() == packaged.read_bytes()
     assert sha in (tmp_path / extra).read_text()
+    assert f"default ref `{tag}`" in evals_readme.read_text()
     assert pins._document_pins(tag, sha, refresh=False) == [f"{workflow} must use {sha} # {tag}"]
     (tmp_path / workflow).write_text(
         f"- uses: alexhawat/mergeCraft@{sha} # {tag}\n  MERGECRAFT_ACTION_SHA: {'a' * 40}\n"
