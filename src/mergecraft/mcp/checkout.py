@@ -1110,8 +1110,8 @@ def _write_incremental_diff(
             reason=f"no changes since the last reviewed commit {prior_sha[:12]}",
         )
     if ignore is not None and ignore.active:
-        # Judge against the whole PR, not just this range: a generator config reviewed
-        # in an earlier round still keeps its generated output in scope now.
+        # Pass the whole PR's change set for callers that expect it; the name-only
+        # ignore rule does not read it.
         diff = filter_diff(diff, ignore, changed_paths=pr_changed_paths).text
         if not diff.strip():
             return IncrementalDiffResult(

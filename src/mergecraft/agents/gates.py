@@ -280,13 +280,12 @@ def decide_approval(
     - **Merge-evidence packet call sites** (positional ``MergeEvidencePacket``):
       returns a :class:`mergecraft.evidence.packet.Decision` row with
       ``verdict`` / ``reason`` / ``decided_by``. The packet's existing
-      ``self_assessment`` row is **advisory only**; if the packet carries an
-      explicit ``Decision``, that row is honoured only when ``decided_by`` is
-      the trusted decider and the verdict is consistent with typed findings
-      (D9 / LR-1 — forged or permissive rows are refused). Otherwise the same
-      monotone blocker logic runs against attested findings (change-scoped rows
-      from ``packet.findings`` plus run-health rows for attestation only) and
-      the result is wrapped in a :class:`Decision`.
+      ``self_assessment`` row is **advisory only**, and any explicit
+      ``Decision`` row the packet already carries is **ignored**: the verdict
+      is always recomputed by the same monotone blocker logic against attested
+      findings (change-scoped rows from ``packet.findings`` plus run-health rows
+      for attestation only) and the result is wrapped in a :class:`Decision`
+      (D9 / LR-1 — forged or permissive rows are never trusted).
 
     The decision is monotone in blockers:
 

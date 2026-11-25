@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from mergecraft.diff.quoting import split_diff_git_paths, unquote_git_path
 from mergecraft.diff.sections import diff_lines
 from mergecraft.review_policy.manifest_names import DEPENDENCY_MANIFEST_NAMES, LOCKFILE_NAMES
-from mergecraft.review_taxonomy import WITHDRAWN_FINDINGS_HEADING, finding_fingerprint
+from mergecraft.review_taxonomy import WITHDRAWN_FINDINGS_HEADING
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -494,11 +494,14 @@ def suppress_withdrawn_findings(
 
 
 def withdrawn_fingerprints(learnings_text: str) -> frozenset[str]:
-    """Return every finding fingerprint refuted under ``WITHDRAWN_FINDINGS_HEADING``.
+    """Return the fingerprints stamped into withdrawal markers in ``learnings_text``.
 
-    Public because agent-finding verification (C6) skips a finding the author
-    already refuted, and it must read the same section, by the same rules, as
-    analyzer suppression does — a second parser would drift.
+    Only ``<!-- mergecraft-finding:v1:… -->`` markers withdraw a finding. A
+    fingerprint includes the finding's path, so a plain-text line hashed with no
+    path could never equal one; prose in the section informs the verifier brief
+    instead. Public because agent-finding verification (C6) reads the same
+    section, by the same rules, as analyzer suppression does — a second parser
+    would drift.
     """
     if WITHDRAWN_FINDINGS_HEADING not in learnings_text:
         return frozenset()
@@ -506,20 +509,13 @@ def withdrawn_fingerprints(learnings_text: str) -> frozenset[str]:
     next_heading = re.search(r"\n## ", section)
     if next_heading:
         section = section[: next_heading.start()]
-    fingerprints: set[str] = set()
-    for match in re.finditer(
-        r"<!-- mergecraft-finding:v1:([0-9a-f]{24}) -->",
-        section,
-    ):
-        fingerprints.add(match.group(1))
-    for line in section.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        fp = finding_fingerprint(path="", body=stripped)
-        if len(fp) == 24:
-            fingerprints.add(fp)
-    return frozenset(fingerprints)
+    return frozenset(
+        match.group(1)
+        for match in re.finditer(
+            r"<!-- mergecraft-finding:v1:([0-9a-f]{24}) -->",
+            section,
+        )
+    )
 
 
 def changed_paths_from_scope(scope: DiffScope) -> list[str]:

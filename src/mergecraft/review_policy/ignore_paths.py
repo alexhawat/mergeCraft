@@ -242,12 +242,10 @@ def filter_diff(
     so a pull request cannot take a file out of scope by renaming it into an ignored
     name. ``ignored_paths`` and ``kept_paths`` report post-image paths.
 
-    ``changed_paths`` is the whole pull request's change set, used by the generated-file
-    rule (a generated file stays in scope when its generator config changed anywhere in
-    the PR). Pass it whenever ``diff_text`` covers less than the full PR, such as an
-    incremental range; without it the diff's own paths are the change set. A section
-    whose header cannot be parsed is kept: an unreadable header is never a reason to
-    review less.
+    ``changed_paths`` is accepted for callers that pass the pull request's change set;
+    the name-only ignore rule does not read it, and no generated-file rule is
+    implemented today. A section whose header cannot be parsed is kept: an unreadable
+    header is never a reason to review less.
     """
     prefix, sections = _split_sections(str(diff_text))
     posts = list(dict.fromkeys(paths[0] for paths, _ in sections if paths))
