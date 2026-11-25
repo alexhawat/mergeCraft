@@ -250,9 +250,10 @@ def patch_analyzer_spawn(monkeypatch: Any, run_like: Any) -> None:
     """Route the analyzer runner's spawn through a ``subprocess.run``-style fake.
 
     The runner starts analyzers with ``Popen(start_new_session=True)`` so a
-    timeout can kill the whole process group; tests that only care about the
-    argv/env/kwargs of the spawn keep their ``run``-shaped fake and install it
-    here. ``run_like(argv, **kwargs)`` returns a ``CompletedProcess``.
+    timeout can kill the whole process group, then waits on the process while a
+    reader thread drains each pipe; tests that only care about the argv/env/kwargs
+    of the spawn keep their ``run``-shaped fake and install it here.
+    ``run_like(argv, **kwargs)`` returns a ``CompletedProcess``.
     """
     import subprocess
 
@@ -269,6 +270,10 @@ def patch_analyzer_spawn(monkeypatch: Any, run_like: Any) -> None:
         def communicate(self, timeout: float | None = None) -> tuple[Any, Any]:
             _ = timeout
             return self._completed.stdout, self._completed.stderr
+
+        def wait(self, timeout: float | None = None) -> int:
+            _ = timeout
+            return self.returncode
 
     monkeypatch.setattr(subprocess, "Popen", _FakePopen)
 
