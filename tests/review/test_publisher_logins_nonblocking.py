@@ -23,7 +23,9 @@ from typing import Any
 
 import pytest
 
+from mergecraft.findings import ledger_io
 from mergecraft.mcp.checkout import checkout_pr_tool, list_mergecraft_reviews
+from mergecraft.mcp.comment import report_progress_tool
 from mergecraft.mcp.review_threads import resolve_fixed_finding_threads
 from mergecraft.mcp.tool_state import primary_repo_state
 from mergecraft.review.authorship import expected_publisher_logins
@@ -36,6 +38,8 @@ _HEARTBEAT_S = 0.01
 _MIN_TICKS = 5
 _LOGIN = "mergecraft-bot"
 _MERGECRAFT_BODY = "### Review\n\n---\n*via mergecraft*"
+_STICKY_ID = 55
+_STICKY_BODY = "## mergeCraft progress\n\nRound one.\n\n---\n*via mergecraft*"
 _DIFF = (
     "diff --git a/src/app.py b/src/app.py\n"
     "--- a/src/app.py\n"
@@ -143,6 +147,53 @@ class _SlowLoginGitHub(_StubGitHub):
         return [] if path.endswith("/files") else {}
 
 
+class _SlowLoginCommentScm(_SlowLoginScm):
+    """Add the issue-comment calls the sticky progress comment needs."""
+
+    def __init__(self, heartbeat: _Heartbeat) -> None:
+        super().__init__(heartbeat)
+        self.updated_ids: list[int] = []
+        self.creates = 0
+
+    async def list_issue_comments(
+        self,
+        owner: str,
+        repo: str,
+        issue_number: int,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        if int((params or {}).get("page", 1)) != 1:
+            return []
+        return [
+            # A look-alike from the shared job bot: only the resolved login proves
+            # which sticky is this run's.
+            {
+                "id": _STICKY_ID - 1,
+                "body": _STICKY_BODY,
+                "user": {"login": "github-actions[bot]", "type": "Bot"},
+            },
+            {"id": _STICKY_ID, "body": _STICKY_BODY, "user": {"login": _LOGIN, "type": "Bot"}},
+        ]
+
+    async def list_reviews(
+        self, owner: str, repo: str, pull_number: int, **kwargs: Any
+    ) -> list[dict[str, Any]]:
+        return []
+
+    async def update_issue_comment(
+        self, owner: str, repo: str, comment_id: int, body: str
+    ) -> dict[str, Any]:
+        self.updated_ids.append(comment_id)
+        return {"id": comment_id, "body": body}
+
+    async def create_issue_comment(
+        self, owner: str, repo: str, issue_number: int, body: str
+    ) -> dict[str, Any]:
+        self.creates += 1
+        return {"id": 999, "body": body}
+
+
 @pytest.fixture(autouse=True)
 def _clean_authorship_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep every case hermetic: the authorship rule reads the process env."""
@@ -234,7 +285,80 @@ async def test_checkout_lets_the_loop_run_during_the_login_lookup(tmp_path: Path
     assert elapsed >= _MIN_TICKS
 
 
+@pytest.mark.timeout(20)
+@pytest.mark.parametrize("ledger_loaded", [False, True], ids=["hydrates-ledger", "ledger-loaded"])
+async def test_report_progress_lets_the_loop_run_during_the_login_lookup(
+    tmp_path: Path, ledger_loaded: bool
+) -> None:
+    """#1568 — ``report_progress`` as a run's first tool call keeps the loop free.
+
+    With a cold ledger the hydration reaches the lookup first; with a loaded one
+    the tool's own sticky lookup does.
+    """
+    heartbeat = _Heartbeat()
+    scm = _SlowLoginCommentScm(heartbeat)
+    ctx = _tool_ctx(tmp_path, scm)
+    primary_repo_state(ctx.tool_state).issue_number = 7
+    ctx.tool_state.finding_ledger_loaded = ledger_loaded
+
+    heartbeat.start()
+    try:
+        result = await report_progress_tool(ctx).execute({"body": "Round two."})
+    finally:
+        await heartbeat.stop()
+
+    assert not result.is_error, result.content
+    assert scm.lookup_ticks is not None, "the login lookup never ran"
+    assert scm.lookup_ticks >= _MIN_TICKS, "the event loop was blocked during the login lookup"
+    assert scm.login_lookups == 1
+    assert scm.updated_ids == [_STICKY_ID], "the resolved login selects this run's sticky"
+    assert scm.creates == 0
+
+
+@pytest.mark.timeout(20)
+async def test_record_upsert_lets_the_loop_run_during_the_login_lookup(tmp_path: Path) -> None:
+    """#1568 — the run-record writer resolves publishers without blocking the loop."""
+    heartbeat = _Heartbeat()
+    scm = _SlowLoginCommentScm(heartbeat)
+    ctx = _tool_ctx(tmp_path, scm)
+    primary_repo_state(ctx.tool_state).issue_number = 7
+
+    heartbeat.start()
+    try:
+        await ledger_io.upsert_sticky_progress_comment(ctx, "### mergeCraft run record")
+    finally:
+        await heartbeat.stop()
+
+    assert scm.lookup_ticks is not None, "the login lookup never ran"
+    assert scm.lookup_ticks >= _MIN_TICKS, "the event loop was blocked during the login lookup"
+    assert scm.updated_ids == [_STICKY_ID]
+    assert scm.creates == 0
+
+
 # --------------------------------------------------------------------------- guards
+
+
+@pytest.mark.timeout(20)
+async def test_sticky_scope_ends_with_its_block(tmp_path: Path) -> None:
+    """Guard: a failing lookup must not leave later code inside the run's scope."""
+    ctx = _tool_ctx(tmp_path, _SlowLoginCommentScm(_Heartbeat()))
+    ctx.publisher_logins = frozenset({_LOGIN})
+    comments = await ctx.scm.list_issue_comments("acme", "demo", 7)
+
+    scoped: list[Any] = []
+
+    async def _fail_inside_the_scope() -> None:
+        async with ledger_io.run_sticky_scope(ctx):
+            scoped.append(ledger_io.sticky_progress_comment(comments))
+            raise RuntimeError("listing failed")
+
+    with pytest.raises(RuntimeError, match="listing failed"):
+        await _fail_inside_the_scope()
+
+    unscoped = ledger_io.sticky_progress_comment(comments)
+    assert [comment["id"] for comment in scoped] == [_STICKY_ID]
+    assert unscoped is not None
+    assert unscoped["id"] == _STICKY_ID - 1, "outside the scope the legacy rule applies again"
 
 
 @pytest.mark.timeout(20)

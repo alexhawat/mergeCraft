@@ -21,8 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of dropping the spend and reporting an operator configuration error
   (exit `30`). The empty-diff path reports infrastructure too (#1561).
 - The first publisher-login lookup of a run no longer blocks the MCP server's
-  event loop: async callers await the lookup instead of running it on a worker
-  thread and waiting for it, so other tool calls keep making progress (#1568).
+  event loop: async callers, including the progress-comment and run-record
+  lookups, await it instead of running it on a worker thread and waiting for it,
+  so other tool calls keep making progress (#1568).
 - Every diff walker now splits diff text on `\n` only, as Git and `parse_diff`
   do: analyzer scoping, added-line and hunk iteration, the diff TOC, JEV hunk
   segmentation, diff-size budgets, diff summaries, triage, `lens`, and the

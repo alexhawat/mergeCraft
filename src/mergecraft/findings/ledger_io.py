@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import contextvars
 from collections.abc import Mapping
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -45,7 +45,7 @@ from mergecraft.findings.record_render import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import AsyncIterator, Sequence
 
     from mergecraft.mcp.context import ToolContext
     from mergecraft.scm.protocol import ScmProvider
@@ -388,12 +388,16 @@ def run_bound_sticky_id(ctx: ToolContext) -> int | None:
         return None
 
 
-@contextmanager
-def run_sticky_scope(ctx: ToolContext) -> Iterator[None]:
-    """Scope a sticky lookup to the run's publisher set and run-bound id (HS1)."""
-    from mergecraft.review.authorship import expected_publisher_logins
+@asynccontextmanager
+async def run_sticky_scope(ctx: ToolContext) -> AsyncIterator[None]:
+    """Scope a sticky lookup to the run's publisher set and run-bound id (HS1).
 
-    publisher_token = _run_scope_publishers.set(expected_publisher_logins(ctx))
+    Entering it may look the publishers up over the network, so it is awaited
+    rather than run synchronously on the caller's event loop.
+    """
+    from mergecraft.review.authorship import resolve_publisher_logins
+
+    publisher_token = _run_scope_publishers.set(await resolve_publisher_logins(ctx))
     id_token = _run_scope_progress_comment_id.set(run_bound_sticky_id(ctx))
     try:
         yield
@@ -617,7 +621,7 @@ async def hydrate_finding_ledger_from_progress_comment(ctx: ToolContext) -> Find
             # still have written it before its rows are read.
             legacy = str(comment.get("body") or "") if _comment_author_is_bot(comment) else ""
         elif issue_number is not None:
-            with run_sticky_scope(ctx):
+            async with run_sticky_scope(ctx):
                 legacy = await fetch_sticky_progress_comment_body(
                     ctx.scm, ctx.repo.owner, ctx.repo.name, int(issue_number)
                 )
@@ -699,7 +703,7 @@ async def upsert_sticky_progress_comment(ctx: ToolContext, record_block: str) ->
             tool_state.last_progress_body = body_with_ledger
             return
 
-        with run_sticky_scope(ctx):
+        async with run_sticky_scope(ctx):
             sticky = await fetch_sticky_progress_comment(
                 ctx.scm,
                 ctx.repo.owner,

@@ -405,7 +405,7 @@ async def _read_legacy_progress(
             "carried into this record.\n"
         )
     else:
-        with run_sticky_scope(resolved_ctx):
+        async with run_sticky_scope(resolved_ctx):
             legacy = await fetch_sticky_progress_comment(resolved_ctx.scm, owner, repo, pull_number)
     return block, legacy
 
