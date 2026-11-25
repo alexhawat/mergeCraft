@@ -20,7 +20,7 @@ from mergecraft.utils.run_bounds import record_agent_usage
 if TYPE_CHECKING:
     from mergecraft.agents.shared import AgentUsage
     from mergecraft.mcp.tool_state import ToolState
-    from mergecraft.utils.run_bounds import BudgetTracker
+    from mergecraft.utils.run_bounds import BudgetTracker, StreamCharges
 
 __all__ = ["charge_reviewer_usage"]
 
@@ -32,6 +32,7 @@ def charge_reviewer_usage(
     usage: AgentUsage | None,
     model: str | None,
     phase: str = "reviewer_dispatch",
+    streamed: StreamCharges | None = None,
 ) -> AgentUsage | None:
     """Price, list and charge one reviewer dispatch's usage, in that order.
 
@@ -56,6 +57,8 @@ def charge_reviewer_usage(
         usage: The dispatch's reported usage, or ``None`` when it reported none.
         model: The model the dispatch executed, used to price missing cost.
         phase: Usage-breakdown label recorded with the charge.
+        streamed: What this dispatch's stream already charged; the charge adds
+            only the remainder.
 
     Returns:
         The priced usage that was appended, or ``None`` for a ``None`` input.
@@ -82,5 +85,5 @@ def charge_reviewer_usage(
     if priced is None:
         return None
     tool_state.usage_entries.append(priced)
-    record_agent_usage(budget_tracker, priced, phase=phase)
+    record_agent_usage(budget_tracker, priced, phase=phase, streamed=streamed)
     return priced

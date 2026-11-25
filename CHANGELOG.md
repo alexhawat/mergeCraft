@@ -13,7 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run's token and cost budget and toward the cost it reports: each dispatch's
   usage is priced from the catalog, listed with the run's usage, and charged to
   the budget, so crossing the cost ceiling now ends the run instead of passing
-  silently (#1559).
+  silently. Streamed usage is tracked per dispatch, so reviewers running at the
+  same time, and a fallback after a failed attempt, are each charged in full
+  (#1559).
 - A failure to write the findings file after a review keeps the run's recorded
   cost and tokens and is reported as an infrastructure error (exit `40`),
   instead of dropping the spend and reporting an operator configuration error

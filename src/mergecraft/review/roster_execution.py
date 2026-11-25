@@ -46,7 +46,7 @@ from mergecraft.review.file_group_fanout import (
 )
 from mergecraft.review.roster_dispatch import reviewer_dispatch_batches
 from mergecraft.review.usage_charging import charge_reviewer_usage
-from mergecraft.utils.run_bounds import BudgetExhausted
+from mergecraft.utils.run_bounds import BudgetExhausted, StreamCharges
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -402,6 +402,8 @@ async def _dispatch_reviewer(
         instructions=instructions,
         subagent_denied_tools=denied,
         verifier_denied_tools=verifier_denied,
+        # Peers run concurrently on one tracker, so each counts its own stream.
+        stream_charges=StreamCharges(),
     )
     before_findings = _agent_findings_snapshot(tool_state)
     logger.info(
@@ -424,14 +426,6 @@ async def _dispatch_reviewer(
 
     token = tool_context.reviewer_sessions.issue() if base_ctx.mcp_auth_token else ""
     run_ctx.mcp_auth_token = token
-    # Start this dispatch's incremental stream accounting at zero, as the primary
-    # attempt path does: the counters belong to the dispatch that streamed them,
-    # so an earlier dispatch's residue must not reduce this reviewer's aggregate
-    # charge.
-    budget_tracker = tool_context.budget_tracker
-    if budget_tracker is not None:
-        budget_tracker.stream_tokens_charged = 0
-        budget_tracker.stream_cost_charged = 0.0
     try:
         if timeout_s is not None and timeout_s > 0:
             result = await asyncio.wait_for(_invoke(), timeout=timeout_s)
@@ -457,9 +451,10 @@ async def _dispatch_reviewer(
     try:
         charge_reviewer_usage(
             tool_state=tool_state,
-            budget_tracker=budget_tracker,
+            budget_tracker=tool_context.budget_tracker,
             usage=result.usage,
             model=attempt_model,
+            streamed=run_ctx.stream_charges,
         )
     except BudgetExhausted as exc:
         record_reviewer_dispatch_error(

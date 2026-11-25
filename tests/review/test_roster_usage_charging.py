@@ -19,12 +19,16 @@ budget.
 
 from __future__ import annotations
 
+import asyncio
+import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from mergecraft.agents import cli_runner
+from mergecraft.agents import opencode as oc
 from mergecraft.agents.registry import ResolvedAgentModel
 from mergecraft.agents.shared import AgentResult, AgentRunContext, AgentUsage
 from mergecraft.config.settings import load_repo_settings
@@ -41,7 +45,12 @@ from mergecraft.review.roster_execution import (
 )
 from mergecraft.utils.github import GitHubClient
 from mergecraft.utils.instructions import ResolvedInstructions
-from mergecraft.utils.run_bounds import BudgetTracker, resolve_run_bounds
+from mergecraft.utils.run_bounds import (
+    BudgetExhausted,
+    BudgetTracker,
+    StreamCharges,
+    resolve_run_bounds,
+)
 from tests.agents.conftest import make_agent_run_context
 from tests.cli.support_agent_roster import write_config
 
@@ -222,7 +231,7 @@ def _build_env(
         github_installation_token="",
         git_token="",
         api_token="",
-        modes=(),
+        modes=[],
         tool_state=tool_state,
         mcp_server_url="http://127.0.0.1:9/mcp/reviewer",
         tmpdir=str(scratch),
@@ -241,6 +250,7 @@ def _build_env(
         tool_state=tool_state,
         api_token="",
         resolved_model=_PRIMARY_MODEL,
+        budget_tracker=budget,
     )
     _patch_dispatch_seams(monkeypatch, agent)
     return _Env(
@@ -325,7 +335,7 @@ async def test_file_group_reviewer_usage_is_charged(
     )
     tokens = _PRICED_USAGE.input_tokens + _PRICED_USAGE.output_tokens
     assert env.tracker.tokens_used == tokens * 2
-    assert env.tracker.cost_used == pytest.approx(_PRICED_USAGE.cost_usd * 2)
+    assert env.tracker.cost_used == pytest.approx((_PRICED_USAGE.cost_usd or 0.0) * 2)
 
 
 async def test_failed_reviewer_with_usage_is_still_charged(
@@ -371,8 +381,6 @@ async def test_secondary_reviewer_overrun_raises_budget_exhausted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An overrun is not swallowed as "this reviewer failed": it reaches the run."""
-    from mergecraft.utils.run_bounds import BudgetExhausted
-
     agent = _UsageAgent(AgentResult(success=True, output="ok", usage=_PRICED_USAGE))
     tracker = BudgetTracker(bounds=replace(resolve_run_bounds(env={}), cost_budget_usd=0.001))
     env = _build_env(tmp_path, monkeypatch, agent=agent, tracker=tracker)
@@ -393,20 +401,159 @@ async def test_secondary_charge_is_not_reduced_by_the_primary_streamed_residue(
 ) -> None:
     """#1559 — a previous dispatch's incremental charges must not shrink this one.
 
-    A streaming primary leaves its per-step totals on the shared tracker. The
-    secondary's aggregate charge must still add the secondary's whole usage, or
-    the budget under-counts it again.
+    The roster dispatches from the primary's run context, whose stream total is
+    the primary's own. The secondary's aggregate charge must still add the
+    secondary's whole usage, or the budget under-counts it again.
     """
     agent = _UsageAgent(AgentResult(success=True, output="ok", usage=_PRICED_USAGE))
     env = _build_env(tmp_path, monkeypatch, agent=agent)
     # What the primary's stream guard charged incrementally before finalizing.
-    env.tracker.stream_tokens_charged = 120_000
-    env.tracker.stream_cost_charged = 0.50
+    env.base_ctx.stream_charges = StreamCharges(tokens=120_000, cost_usd=0.50)
 
     await _run_roster(env)
 
     assert env.tracker.tokens_used == (_PRICED_USAGE.input_tokens + _PRICED_USAGE.output_tokens)
     assert env.tracker.cost_used == pytest.approx(_PRICED_USAGE.cost_usd)
+
+
+# --------------------------------------------------------------------------- concurrency
+
+_STREAM_MODEL = "acme/streaming"
+_PEER_MODEL = "acme/aggregate"
+_CONCURRENT_CONFIG = f"""
+models:
+  - {_PRIMARY_MODEL}
+  - {_STREAM_MODEL}
+  - {_PEER_MODEL}
+agents:
+  reviewer:
+    modelChain:
+      - {_PRIMARY_MODEL}
+  reviewer2:
+    role: reviewer
+    modelChain:
+      - {_STREAM_MODEL}
+  reviewer3:
+    role: reviewer
+    modelChain:
+      - {_PEER_MODEL}
+"""
+#: What the streaming reviewer's two steps add up to.
+_STREAMED_TOKENS = 120_000
+_STREAMED_COST = 1.0
+#: A peer that spent less than the stream did, reported once when it finished.
+_PEER_USAGE = AgentUsage(agent="claude", input_tokens=90_000, output_tokens=10_000, cost_usd=0.9)
+
+
+class _StreamProc:
+    """An opencode CLI process that has already written two finished steps."""
+
+    pid = 777_124
+    returncode = 0
+
+    def __init__(self) -> None:
+        step = {
+            "type": "step_finish",
+            "sessionID": "s1",
+            "part": {"tokens": {"input": 50_000, "output": 10_000}, "cost": 0.5},
+        }
+        self.stdout = [json.dumps(step) + "\n"] * 2
+        self.stderr: list[str] = []
+
+    def poll(self) -> int:
+        return self.returncode
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.returncode
+
+
+class _ConcurrentReviewers:
+    """One streaming and one aggregate-only reviewer, in a fixed interleaving.
+
+    The streaming one runs opencode's real stream loop against a canned process.
+    ``stream_first`` picks whether it streams before or after its peer's dispatch
+    starts; the peer always finishes after the stream and before the streamer.
+    """
+
+    name = "opencode"
+
+    def __init__(self, *, stream_first: bool) -> None:
+        self._stream_first = stream_first
+        self._peer_started = asyncio.Event()
+        self._streamed = asyncio.Event()
+        self._peer_done = asyncio.Event()
+
+    async def install(self) -> None:
+        return None
+
+    async def run(self, ctx: AgentRunContext) -> AgentResult:
+        if ctx.resolved_model == _STREAM_MODEL:
+            return await self._run_streaming(ctx)
+        self._peer_started.set()
+        await self._streamed.wait()
+        self._record(ctx, "reviewer3")
+        self._peer_done.set()
+        return AgentResult(success=True, output="ok", usage=_PEER_USAGE)
+
+    async def _run_streaming(self, ctx: AgentRunContext) -> AgentResult:
+        if not self._stream_first:
+            await self._peer_started.wait()
+        result = oc._run_opencode_cli_streaming(cmd=["opencode"], ctx=ctx, env={}, session={})
+        self._streamed.set()
+        await self._peer_done.wait()
+        self._record(ctx, "reviewer2")
+        return result
+
+    @staticmethod
+    def _record(ctx: AgentRunContext, agent_id: str) -> None:
+        record_reviewer_dispatch_run(
+            ctx.tool_state, agent_id=agent_id, findings=[], model_slug=ctx.resolved_model
+        )
+
+
+def _concurrent_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    stream_first: bool,
+    cost_budget_usd: float = 10.0,
+) -> _Env:
+    monkeypatch.setattr(cli_runner, "spawn_agent_cli", lambda cmd, **kwargs: _StreamProc())
+    bounds = replace(resolve_run_bounds(env={}), cost_budget_usd=cost_budget_usd)
+    return _build_env(
+        tmp_path,
+        monkeypatch,
+        agent=_ConcurrentReviewers(stream_first=stream_first),
+        config=_CONCURRENT_CONFIG,
+        tracker=BudgetTracker(bounds=bounds),
+    )
+
+
+@pytest.mark.parametrize("stream_first", [True, False])
+async def test_concurrent_reviewers_are_each_charged_their_whole_usage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stream_first: bool
+) -> None:
+    """#1559 — one reviewer's streamed steps never discount or recharge a peer's usage."""
+    env = _concurrent_env(tmp_path, monkeypatch, stream_first=stream_first)
+
+    summary = await _run_roster(env)
+
+    assert summary.hard_error is None
+    assert summary.dispatched_agent_ids == ("reviewer2", "reviewer3")
+    assert env.tracker.tokens_used == _STREAMED_TOKENS + 100_000
+    assert env.tracker.cost_used == pytest.approx(_STREAMED_COST + 0.9)
+
+
+async def test_concurrent_reviewers_cannot_cross_the_cost_ceiling_unnoticed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each reviewer fits the ceiling alone; together they cross it and end the run."""
+    env = _concurrent_env(tmp_path, monkeypatch, stream_first=False, cost_budget_usd=1.5)
+
+    with pytest.raises(BudgetExhausted):
+        await _run_roster(env)
+
+    assert "budget" in env.tool_state.reviewer_dispatch_errors["reviewer3"].lower()
 
 
 # --------------------------------------------------------------------------- guards

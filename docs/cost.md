@@ -25,7 +25,9 @@ on your provider, model, plan and the size of the change.
 The cost and tokens mergeCraft reports for a run, and the run budget it charges
 (`runBounds.tokenBudget`, `runBounds.costBudgetUsd`), include every reviewer
 dispatch — the primary reviewer, each extra roster reviewer and each file-group
-reviewer — not only the primary reviewer.
+reviewer — not only the primary reviewer. Reviewers that run at the same time
+are each charged their whole usage: what one streamed never reduces what another
+is charged.
 
 ## Levers you control
 
