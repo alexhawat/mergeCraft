@@ -14,8 +14,10 @@ every future warning easy to miss.
 
 Both tests spawn ``sys.executable -m ruff`` against the repository root and
 assert on the exit code and the diagnostics, so they see exactly what an
-operator running the issue's commands sees. Nothing is skipped: a missing ruff
-fails the test with the interpreter path in the message.
+operator running the issue's commands sees. The format test names the three
+files the issue lists; ``make lint`` and CI keep their existing narrower scope
+by decision, so a fourth drifting block is not caught here. Nothing is skipped:
+a missing ruff fails the test with the interpreter path in the message.
 """
 
 from __future__ import annotations

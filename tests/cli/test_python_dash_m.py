@@ -16,13 +16,18 @@ this module wrong.
 from __future__ import annotations
 
 import os
+import runpy
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
+
+if TYPE_CHECKING:
+    import pytest
 
 # A child process with a minimal environment: nothing in the parent's
 # ``MERGECRAFT_*`` / provider / proxy variables may change what ``--version``
@@ -43,8 +48,8 @@ def _python_dash_m(argv: list[str], tmp_path: Path) -> subprocess.CompletedProce
     )
 
 
-def _console_script_version() -> str:
-    """Return the line ``mergecraft --version`` prints, through the Typer app."""
+def _app_version_line() -> str:
+    """Return the line the CLI's ``--version`` prints, through the Typer app."""
     result = CliRunner().invoke(app, ["--version"])
     assert result.exit_code == 0, f"`mergecraft --version` failed:\n{result.output}"
     return result.output.strip()
@@ -52,7 +57,7 @@ def _console_script_version() -> str:
 
 def test_python_dash_m_prints_the_version(tmp_path: Path) -> None:
     """``python -m mergecraft --version`` exits 0 and prints the console script's line."""
-    expected = _console_script_version()
+    expected = _app_version_line()
     result = _python_dash_m(["--version"], tmp_path)
     assert result.returncode == 0, (
         f"python -m mergecraft --version exited {result.returncode}; stderr:\n{result.stderr}"
@@ -76,3 +81,18 @@ def test_python_dash_m_help_matches_the_console_script(tmp_path: Path) -> None:
         f"the usage line {usage!r} does not name mergecraft; the module entry point "
         "must run the same CLI as the console script"
     )
+
+
+def test_package_guard_runs_the_cli_in_process(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The package ``__main__`` guard runs the CLI and prints its version line.
+
+    The child-process tests above prove the operator-visible behaviour but run
+    outside coverage's reach; this one drives the same guard in-process so the
+    module's own lines are exercised.
+    """
+    expected = _app_version_line()
+    monkeypatch.setattr(sys, "argv", ["mergecraft", "--version"])
+    runpy.run_module("mergecraft", run_name="__main__")
+    assert capsys.readouterr().out.strip() == expected

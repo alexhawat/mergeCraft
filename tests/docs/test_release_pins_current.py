@@ -18,8 +18,8 @@ import re
 from mergecraft.pins import action_pin_minimal
 from tests.ci.workflow_support import read_text
 
-# ``uv tool install mergecraft-action==0.1.0a6`` -- the distribution name is the
-# stable part; the version after ``==`` is what every document must repeat.
+# ``uv tool install mergecraft-action==<release>`` -- the distribution name is
+# the stable part; the version after ``==`` is what every document must repeat.
 _INSTALL = re.compile(r"uv tool install mergecraft-action==(?P<version>\S+)")
 
 

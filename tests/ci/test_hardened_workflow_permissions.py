@@ -28,6 +28,7 @@ from typing import Any
 import pytest
 import yaml
 from scripts.render_example_workflows import render_all
+from scripts.workflow_yaml import permission_dict
 
 from tests.ci.workflow_support import REPO_ROOT
 
@@ -39,6 +40,9 @@ _HARDENED_SURFACES = (
     "example:examples/workflows/mergecraft-hardened.yml",
     "dogfood:docs/artifacts/dogfood-mergecraft.yml",
 )
+
+# ``scripts.workflow_yaml`` expands the scalar permission forms to sentinels.
+_ALL_WRITE = "__all_write__"
 
 # Every permission key these three files may declare. Pinned so a removal cannot
 # buy its green with an addition elsewhere. ``security-events`` is commented out
@@ -86,20 +90,22 @@ def _load_surface(spec: str) -> dict[str, Any]:
 def _permission_mappings(doc: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     """Return every ``permissions:`` mapping at workflow and job level.
 
-    ``permissions: read-all`` / ``write-all`` are strings, not mappings; they
-    cannot name ``statuses``, so they are skipped. A workflow that declared no
-    permissions block at all yields an empty list and fails the grant guard
-    below with "no permissions mapping", which is the honest failure.
+    Scalars are expanded with the repository's ``permission_dict`` helper:
+    ``write-all`` becomes the ``__all_write__`` sentinel, which grants every
+    scope including ``statuses``, so it is checked rather than skipped. A
+    workflow that declared no permissions block at all yields an empty list and
+    fails the grant guard below with "no permissions mapping", which is the
+    honest failure.
     """
     mappings: list[tuple[str, dict[str, Any]]] = []
-    workflow_level = doc.get("permissions")
-    if isinstance(workflow_level, dict):
+    workflow_level = permission_dict(doc.get("permissions"))
+    if workflow_level:
         mappings.append(("workflow", workflow_level))
     jobs = doc.get("jobs")
     if isinstance(jobs, dict):
         for job_name, job in jobs.items():
-            block = job.get("permissions") if isinstance(job, dict) else None
-            if isinstance(block, dict):
+            block = permission_dict(job.get("permissions")) if isinstance(job, dict) else {}
+            if block:
                 mappings.append((f"job {job_name}", block))
     return mappings
 
@@ -111,6 +117,18 @@ def _permission_keys(doc: dict[str, Any]) -> set[str]:
     return keys
 
 
+def _statuses_grants(doc: dict[str, Any]) -> set[str]:
+    """Return every grant in ``doc`` that lets a step call the commit-status API."""
+    grants: set[str] = set()
+    for scope, block in _permission_mappings(doc):
+        if _ALL_WRITE in block:
+            grants.add(f"{scope}: permissions: write-all")
+        for key, value in block.items():
+            if str(key).strip() == "statuses":
+                grants.add(f"{scope}: statuses: {value}")
+    return grants
+
+
 @pytest.mark.parametrize("spec", _HARDENED_SURFACES)
 def test_hardened_workflows_do_not_grant_statuses_write(spec: str) -> None:
     """No ``permissions`` mapping in the template or either copy names ``statuses`` (#1567)."""
@@ -118,12 +136,7 @@ def test_hardened_workflows_do_not_grant_statuses_write(spec: str) -> None:
     doc = _load_surface(spec)
     mappings = _permission_mappings(doc)
     assert mappings, f"{relative}: no workflow-level or job-level permissions mapping to check"
-    granted = {
-        f"{scope}: {key}={value}"
-        for scope, block in mappings
-        for key, value in block.items()
-        if str(key).strip() == "statuses"
-    }
+    granted = _statuses_grants(doc)
     assert not granted, (
         f"{relative}: the hardened workflow grants an unused statuses scope "
         f"({sorted(granted)}); mergeCraft posts check-runs (checks: write) and never "
@@ -159,3 +172,19 @@ def test_no_permission_was_added(spec: str) -> None:
         f"{relative}: unexpected permission key(s) {sorted(unexpected)}; the hardened "
         f"workflow may declare only {sorted(_ALLOWED_PERMISSION_KEYS)}"
     )
+
+
+def test_statuses_guard_fails_closed_on_a_job_level_write_all() -> None:
+    """A job-level ``permissions: write-all`` grants statuses and must be rejected."""
+    doc = {
+        "permissions": {"contents": "read", "checks": "write"},
+        "jobs": {"review": {"permissions": "write-all"}},
+    }
+    assert _statuses_grants(doc) == {"job review: permissions: write-all"}
+    assert "__all_write__" in _permission_keys(doc)
+
+
+def test_statuses_guard_accepts_an_explicit_least_privilege_mapping() -> None:
+    """The guard reports nothing for the mapping shape the hardened files use."""
+    doc = {"permissions": {"contents": "read", "checks": "write"}, "jobs": {"review": {}}}
+    assert _statuses_grants(doc) == set()
