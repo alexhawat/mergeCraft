@@ -11,6 +11,7 @@ from mergecraft.utils.run_bounds import (
     BudgetExhausted,
     BudgetTracker,
     RunBounds,
+    StreamCharges,
     record_agent_usage,
 )
 
@@ -48,10 +49,15 @@ def test_stream_steps_stop_before_a_lump_finalize_increment() -> None:
     provider = TokenBudget(max_tokens=tracker.bounds.token_ceiling, advisory=False)
     payload = {"input_tokens": 1_800_000, "output_tokens": 50_000}
     assert (
-        charge_review_stream_step(payload, budget_tracker=tracker, provider_budget=provider) is None
+        charge_review_stream_step(
+            payload, budget_tracker=tracker, provider_budget=provider, stream_charges=None
+        )
+        is None
     )
     payload2 = {"input_tokens": 600_000, "output_tokens": 10_000}
-    reason = charge_review_stream_step(payload2, budget_tracker=tracker, provider_budget=provider)
+    reason = charge_review_stream_step(
+        payload2, budget_tracker=tracker, provider_budget=provider, stream_charges=None
+    )
     assert reason is not None
     assert "single increment" in reason or "remaining ceiling" in reason
 
@@ -63,6 +69,7 @@ def test_charge_stops_on_cost_budget() -> None:
         {"input_tokens": 1, "output_tokens": 0},
         budget_tracker=tracker,
         provider_budget=None,
+        stream_charges=None,
         cost_usd=0.02,
     )
     assert reason is not None
@@ -88,12 +95,35 @@ def test_consume_stream_stops_when_handler_sets_halt_reason() -> None:
 
 def test_finalize_records_only_usage_delta_after_stream_steps() -> None:
     tracker = BudgetTracker(_bounds())
-    tracker.stream_tokens_charged = 150
-    tracker.tokens_used = 150
+    charges = StreamCharges()
+    reason = charge_review_stream_step(
+        {"input_tokens": 100, "output_tokens": 20},
+        budget_tracker=tracker,
+        provider_budget=None,
+        stream_charges=charges,
+        cost_usd=0.2,
+    )
+    assert reason is None
+    assert charges == StreamCharges(tokens=120, cost_usd=0.2)
+
     record_agent_usage(
         tracker,
-        AgentUsage(agent="opencode", input_tokens=120, output_tokens=30),
+        AgentUsage(agent="opencode", input_tokens=120, output_tokens=30, cost_usd=0.25),
         phase="reviewer_dispatch",
+        streamed=charges,
+    )
+
+    assert tracker.tokens_used == 150
+    assert tracker.cost_used == pytest.approx(0.25)
+
+
+def test_usage_below_the_streamed_total_charges_nothing_more() -> None:
+    """A halted step is charged before it is absorbed, so usage can be the smaller total."""
+    tracker = BudgetTracker(_bounds(), tokens_used=150, cost_used=0.3)
+    record_agent_usage(
+        tracker,
+        AgentUsage(agent="opencode", input_tokens=100, output_tokens=20, cost_usd=0.2),
+        streamed=StreamCharges(tokens=150, cost_usd=0.3),
     )
     assert tracker.tokens_used == 150
-    assert tracker.stream_tokens_charged == 150
+    assert tracker.cost_used == pytest.approx(0.3)

@@ -9,6 +9,7 @@ import pytest
 
 from mergecraft.agents.curated_model_catalog import ULTRAMARINE_1_FLASH_SLUG
 from mergecraft.agents.shared import AgentImpl, AgentResult, AgentUsage
+from mergecraft.agents.stream_budget import charge_review_stream_step
 from mergecraft.config.settings import ProviderRegistryEntry, RepoSettings, ReviewSettings
 from mergecraft.review import offline_agent
 from mergecraft.run_outcome import RunOutcome
@@ -22,6 +23,7 @@ BACKUP = "openai/gpt-5.3-codex"
 @pytest.fixture
 def dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     seen: dict[str, Any] = {"models": [], "prompts": [], "results": {}, "available": True}
+    seen["streams"] = {}
     monkeypatch.delenv("MERGECRAFT_MODEL", raising=False)
     monkeypatch.setattr(offline_agent, "load_repo_settings", lambda **_: seen["settings"])
     monkeypatch.setattr(
@@ -49,6 +51,14 @@ def dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             assert ctx.tool_state.terminal_submission is None
             assert ctx.tool_state.output is None
             ctx.tool_state.output = "attempt output"
+            tokens, cost = seen["streams"].get(ctx.resolved_model, (0, 0.0))
+            charge_review_stream_step(
+                {"input_tokens": tokens, "output_tokens": 0},
+                budget_tracker=ctx.budget_tracker,
+                provider_budget=None,
+                stream_charges=ctx.stream_charges,
+                cost_usd=cost,
+            )
             return seen["results"].get(
                 ctx.resolved_model, AgentResult(success=True, terminal_submission_received=True)
             )
@@ -361,6 +371,46 @@ async def test_offline_fallback_budget_is_cumulative(
     else:
         assert result.outcome is RunOutcome.passed
         assert tracker.over_target is True
+
+
+async def test_offline_fallback_charge_is_not_reduced_by_the_failed_stream(
+    dispatch: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fallback attempt pays its whole usage; the failed attempt's stream is not its own."""
+    from mergecraft.utils.run_bounds import resolve_run_bounds
+
+    primary, backup = (
+        offline_agent.resolve_model(slug=slug, respect_env_override=False)
+        for slug in (PRIMARY, BACKUP)
+    )
+    dispatch["streams"][primary] = (120_000, 1.0)
+    dispatch["results"][primary] = AgentResult(
+        success=False,
+        error="temporary",
+        metadata={"retryable": True},
+        usage=AgentUsage(agent="claude", input_tokens=120_000, output_tokens=0, cost_usd=1.0),
+    )
+    dispatch["results"][backup] = AgentResult(
+        success=True,
+        terminal_submission_received=True,
+        usage=AgentUsage(agent="claude", input_tokens=100_000, output_tokens=0, cost_usd=0.9),
+    )
+    bounds = resolve_run_bounds(settings=dispatch["settings"])
+    tracker = offline_agent.BudgetTracker(bounds)
+    monkeypatch.setattr(offline_agent, "BudgetTracker", lambda _bounds: tracker)
+
+    await offline_agent.run_offline_agent_review(
+        cwd=tmp_path,
+        materialization=dispatch["materialization"],
+        prompt="review",
+        model=None,
+        tmpdir=tmp_path,
+        run_bounds=bounds,
+    )
+
+    assert dispatch["models"] == [primary, backup]
+    assert tracker.tokens_used == 220_000
+    assert tracker.cost_used == pytest.approx(1.9)
 
 
 async def test_offline_attempts_keep_the_nearest_instructions_under_a_tight_cap(

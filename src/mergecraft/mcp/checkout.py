@@ -388,11 +388,15 @@ async def list_mergecraft_reviews(ctx: ToolContext, *, pull_number: int) -> list
         return []
     # A review without the marker cannot be mergeCraft's, so skip the publisher
     # lookup entirely when there is nothing to attribute.
-    from mergecraft.review.authorship import has_mergecraft_marker, is_mergecraft_authored
+    from mergecraft.review.authorship import (
+        has_mergecraft_marker,
+        is_mergecraft_authored,
+        resolve_publisher_logins,
+    )
 
     if not any(has_mergecraft_marker(review) for review in raw):
         return []
-    publishers = expected_publisher_logins(ctx)
+    publishers = await resolve_publisher_logins(ctx)
     return [review for review in raw if is_mergecraft_authored(review, publishers=publishers)]
 
 
@@ -1406,7 +1410,9 @@ def checkout_pr_tool(ctx: ToolContext) -> ToolSpec:
             )
             await run_blocking_cleanup(_rebaseline_config_after_checkout, ctx)
             prior_reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
-            publishers = expected_publisher_logins(ctx) if prior_reviews else frozenset()
+            from mergecraft.review.authorship import resolve_publisher_logins
+
+            publishers = await resolve_publisher_logins(ctx) if prior_reviews else frozenset()
             round_index = _round_index(
                 run_bound, prior_reviews, publishers=publishers, head_sha=head_sha
             )
@@ -1618,7 +1624,9 @@ def checkout_pr_tool(ctx: ToolContext) -> ToolSpec:
         _annotate_ignored(result, ignored_paths)
 
         prior_reviews = await list_mergecraft_reviews(ctx, pull_number=pull_number)
-        publishers = expected_publisher_logins(ctx) if prior_reviews else frozenset()
+        from mergecraft.review.authorship import resolve_publisher_logins
+
+        publishers = await resolve_publisher_logins(ctx) if prior_reviews else frozenset()
         round_index = await run_blocking(
             _round_index,
             run_bound,

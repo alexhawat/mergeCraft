@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from mergecraft.utils.run_bounds import StreamCharges
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -150,6 +152,8 @@ class RunContext:
     run_ctx: AgentRunContext | None = None
     run_bounds: RunBounds | None = None
     budget_tracker: BudgetTracker | None = None
+    # What the current primary attempt's stream already charged.
+    stream_charges: StreamCharges = field(default_factory=StreamCharges)
     budget_exhaustion: BudgetExhausted | None = None
     # Why a required ``set_output`` payload is missing, if it is (resolver input).
     structured_output_error: str | None = None

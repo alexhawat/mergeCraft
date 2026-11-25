@@ -87,6 +87,24 @@ class BudgetExhausted(RuntimeError):
 
 
 @dataclass(slots=True)
+class StreamCharges:
+    """What one dispatch's stream already charged to the run's :class:`BudgetTracker`.
+
+    A streaming driver charges each step as it arrives and reports its whole
+    usage again when it finishes. The final charge subtracts these totals so the
+    run pays once. They belong to one dispatch: reviewers run concurrently on one
+    tracker, and another reviewer's streamed steps must not reduce this charge.
+
+    Attributes:
+        tokens: Tokens charged step by step.
+        cost_usd: Cost charged step by step, in USD.
+    """
+
+    tokens: int = 0
+    cost_usd: float = 0.0
+
+
+@dataclass(slots=True)
 class BudgetTracker:
     """Mutable per-run budget consumption against resolved :class:`RunBounds`.
 
@@ -105,8 +123,6 @@ class BudgetTracker:
     last_exhausted: BudgetExhausted | None = None
     over_target: bool = False
     phase_totals: Counter[str] = field(default_factory=Counter)
-    stream_tokens_charged: int = 0
-    stream_cost_charged: float = 0.0
     _over_target_warned: bool = field(default=False, repr=False)
 
     def record_tokens_stream_increment(self, count: int, *, phase: str | None = None) -> None:
@@ -244,8 +260,13 @@ def record_agent_usage(
     usage: AgentUsage | None,
     *,
     phase: str | None = None,
+    streamed: StreamCharges | None = None,
 ) -> None:
-    """Charge resolved agent usage against the per-run budget tracker."""
+    """Charge resolved agent usage against the per-run budget tracker.
+
+    ``streamed`` is what this same dispatch already charged step by step; only
+    the remainder is charged here. ``None`` charges the whole usage.
+    """
     if tracker is None or usage is None:
         return
     # ``AgentUsage.input_tokens`` already folds disjoint Anthropic cache reads
@@ -253,17 +274,12 @@ def record_agent_usage(
     # ``cache_write_tokens`` are observability fields only — adding them again
     # here double-counts OpenAI-style cached input against the run budget.
     token_total = usage.input_tokens + usage.output_tokens
-    if tracker.stream_tokens_charged > 0:
-        token_delta = max(0, token_total - tracker.stream_tokens_charged)
-    else:
-        token_delta = token_total
+    charges = streamed or StreamCharges()
+    token_delta = token_total - charges.tokens
     if token_delta > 0:
         tracker.record_tokens(token_delta, phase=phase)
     if usage.cost_usd is not None:
-        if tracker.stream_cost_charged > 0:
-            cost_delta = max(0, usage.cost_usd - tracker.stream_cost_charged)
-        else:
-            cost_delta = usage.cost_usd
+        cost_delta = usage.cost_usd - charges.cost_usd
         if cost_delta > 0:
             tracker.record_cost(cost_delta)
 
@@ -566,6 +582,7 @@ __all__ = [
     "BudgetTracker",
     "RunBounds",
     "ScopeReduction",
+    "StreamCharges",
     "apply_diff_line_budget",
     "budget_exhaustion_outcome",
     "enumerate_unbounded_external_operations",
