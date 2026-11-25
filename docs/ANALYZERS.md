@@ -187,6 +187,17 @@ the repo provides may not stand in for the pinned one, so nothing the PR
 authored is executed. `runtime: repo-native` stays withheld because it exists
 to run the *repo's* tool against the *repo's* config.
 
+### Captured analyzer output
+
+Analyzer stdout and stderr are read through one reader per pipe. Each reader
+keeps at most 32 MiB per stream and discards the rest while it keeps reading to
+end-of-stream, so a chatty analyzer cannot grow the reviewer's memory and never
+blocks on a full pipe. The limit is enforced **while the output is read** and
+counts bytes: a stream of multi-byte text can be cut below 32 Mi characters.
+The retained head is then cut on a redaction-safe boundary, redacted, and capped
+for display; an over-cap stream's outcome carries an "exceeded … per stream"
+notice.
+
 | runtime | trust | `shell: disabled` | `shell: restricted` / `enabled` |
 |---------|-------|-------------------|----------------------------------|
 | `repo-native` (35) | `trusted` | withheld — `runtime` needs repo-provided tooling | runs on trusted events; skipped on untrusted |
