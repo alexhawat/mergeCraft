@@ -11,8 +11,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import pytest
-
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -35,7 +33,6 @@ def _lstrip_dot_slash_calls(root: Path) -> list[str]:
     return hits
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_no_source_or_script_strips_dot_slash_as_a_character_set() -> None:
     """No live ``lstrip("./")`` remains under ``src/`` or ``scripts/``."""
     assert _lstrip_dot_slash_calls(_REPO_ROOT / "src") == []

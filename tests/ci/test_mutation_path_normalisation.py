@@ -11,8 +11,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from mergecraft.ci import mutation
 
 
@@ -45,13 +43,11 @@ def _survivor_paths(reported_path: str) -> list[str]:
     return [finding.path for finding in result.findings]
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_survivor_on_a_dot_prefixed_path_keeps_its_dot() -> None:
     """A survivor in ``.github/scripts/x.py`` is reported at that path."""
     assert _survivor_paths(".github/scripts/x.py") == [".github/scripts/x.py"]
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_backslash_path_keeps_its_leading_dot() -> None:
     """Backslashes become slashes; the leading dot of a real directory survives."""
     assert _survivor_paths(".github\\scripts\\x.py") == [".github/scripts/x.py"]

@@ -27,7 +27,6 @@ def _strip() -> Callable[[str], str]:
     return cast("Callable[[str], str]", helper)
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
