@@ -20,7 +20,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -51,7 +50,6 @@ def _console_script_version() -> str:
     return result.output.strip()
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_python_dash_m_prints_the_version(tmp_path: Path) -> None:
     """``python -m mergecraft --version`` exits 0 and prints the console script's line."""
     expected = _console_script_version()
@@ -65,7 +63,6 @@ def test_python_dash_m_prints_the_version(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_python_dash_m_help_matches_the_console_script(tmp_path: Path) -> None:
     """``python -m mergecraft --help`` exits 0 and its usage line names mergecraft."""
     result = _python_dash_m(["--help"], tmp_path)

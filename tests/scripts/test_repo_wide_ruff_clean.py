@@ -24,7 +24,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 from tests.ci.workflow_support import REPO_ROOT
 
 # The Markdown files the repository-wide format check rejects today. A new one
@@ -53,7 +52,6 @@ def _ruff(args: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_markdown_code_blocks_are_formatted() -> None:
     """``ruff format --check`` accepts every Markdown code block the issue lists."""
     root = Path(REPO_ROOT)
@@ -65,7 +63,6 @@ def test_markdown_code_blocks_are_formatted() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_ruff_check_src_emits_no_warning() -> None:
     """``ruff check src`` exits 0 and prints no invalid-noqa warning."""
     # ``--no-cache``: ruff 0.17.6 caches "already parsed" state and suppresses

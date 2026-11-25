@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 from mergecraft.pins import action_pin_minimal
 from tests.ci.workflow_support import read_text
 
@@ -32,7 +30,6 @@ def _readme_release() -> str:
     return match.group("version").strip()
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_agents_page_installs_the_readme_release() -> None:
     """``docs/agents.md`` installs the release README installs, not an older one."""
     release = _readme_release()
@@ -43,7 +40,6 @@ def test_agents_page_installs_the_readme_release() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_agents_page_links_the_current_docs_tree() -> None:
     """The docs-tree link in ``docs/agents.md`` names the release tag's tree."""
     release = _readme_release()
@@ -55,7 +51,6 @@ def test_agents_page_links_the_current_docs_tree() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_security_doc_names_the_current_pre_release() -> None:
     """``SECURITY.md`` Section Supported Versions names the release README installs."""
     release = _readme_release()
@@ -69,7 +64,6 @@ def test_security_doc_names_the_current_pre_release() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_evals_readme_names_the_action_pin_minimal_value() -> None:
     """``evals/README.md`` quotes the ref the Harbor agent really defaults to."""
     pin = action_pin_minimal()
@@ -84,7 +78,6 @@ def test_evals_readme_names_the_action_pin_minimal_value() -> None:
     )
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_evals_readme_does_not_claim_the_readme_example_pins_the_same_ref() -> None:
     """The default-ref sentence must not restate an undrived same-pin claim."""
     offenders = [
