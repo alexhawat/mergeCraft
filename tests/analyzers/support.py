@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import io
 import re
 from pathlib import Path
 from typing import Any
@@ -262,10 +263,10 @@ def patch_analyzer_spawn(monkeypatch: Any, run_like: Any) -> None:
             self.pid = 0
             self._completed = run_like(argv, **kwargs)
             self.returncode = self._completed.returncode
-
-        stdin = None
-        stdout = None
-        stderr = None
+            # The runner drains ``stdout``/``stderr`` with a reader per pipe.
+            self.stdin = None
+            self.stdout = io.StringIO(self._completed.stdout or "")
+            self.stderr = io.StringIO(self._completed.stderr or "")
 
         def communicate(self, timeout: float | None = None) -> tuple[Any, Any]:
             _ = timeout
