@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import inspect
-import re
 
 from tests.support.cli_text import compact_cli_text
 from typer.testing import CliRunner
@@ -14,12 +13,7 @@ from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 from mergecraft.offline_review import _run_offline_diff_review, run_offline_diff_review
 
 runner = CliRunner()
-_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}
-
-
-def _plain(text: str) -> str:
-    return _ANSI.sub("", text)
 
 
 def test_offline_review_hot_path_does_not_export_resume_review() -> None:

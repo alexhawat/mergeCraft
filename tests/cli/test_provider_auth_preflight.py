@@ -41,9 +41,12 @@ def test_provider_auth_preflight_before_collection(
         return True
 
     monkeypatch.setattr(auth_cmd, "_set_gh_secret", save_secret)
-    monkeypatch.setattr(
-        provider_cmd, "_cancelable_getpass", lambda _: (calls.append("prompt"), "fake-key")[1]
-    )
+
+    def collect(_prompt: str) -> str:
+        calls.append("prompt")
+        return "fake-key"
+
+    monkeypatch.setattr(provider_cmd, "_cancelable_getpass", collect)
     if admin:
         provider_cmd.run_provider_auth(ENTRY, "github", cwd=tmp_path)
         expected_calls = [

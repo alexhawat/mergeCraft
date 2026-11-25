@@ -12,7 +12,6 @@ confirmation names the indexed key it wrote.
 
 from __future__ import annotations
 
-import re
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -29,7 +28,6 @@ if TYPE_CHECKING:
 
 runner = CliRunner()
 _DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}
-_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 _PLACEHOLDER_TOKEN = "sk-ant-oat01-placeholder-token"
 _INDEXED_KEY = "LLM_PROVIDER_1_CLAUDE_CODE_OAUTH_TOKEN"
@@ -181,7 +179,38 @@ def test_confirmation_names_the_key_written(
 
     result = runner.invoke(app, ["auth", "claude", "--scope", "local"], env=_DUMB_ENV)
 
-    output = compact_cli_text(_ANSI.sub("", result.stdout + result.stderr))
+    output = compact_cli_text(result.stdout + result.stderr)
     assert result.exit_code == 0, output
     assert _INDEXED_KEY in output
     assert "LLM_PROVIDER_1, CLAUDE_CODE_OAUTH_TOKEN" not in output
+
+
+def test_pinned_env_file_does_not_disable_the_indexed_path(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Guard: ``MERGECRAFT_ENV`` moves the ``.env`` only, never the registry.
+
+    The override names the credential file; the repository config stays on the
+    checkout root, exactly as it does for ``provider auth --cwd``. Anchoring the
+    registry on the override's directory would read nothing and silently write
+    the flat secret — the failure this module exists to prevent.
+    """
+    root, _sub = _checkout(tmp_path, monkeypatch)
+    pinned = tmp_path / "pinned" / ".env"
+    pinned.parent.mkdir()
+    monkeypatch.setenv("MERGECRAFT_ENV", str(pinned))
+    monkeypatch.chdir(root)
+
+    persisted = persist_legacy_indexed_auth(
+        "claude", "local", {"API_KEY": _PLACEHOLDER_TOKEN}, target=None
+    )
+
+    assert persisted is True
+    written = pinned.read_text(encoding="utf-8")
+    keys = {
+        line.split("=", 1)[0].strip()
+        for line in written.splitlines()
+        if "=" in line and not line.lstrip().startswith("#")
+    }
+    assert keys == {"LLM_PROVIDER_1", _INDEXED_KEY}

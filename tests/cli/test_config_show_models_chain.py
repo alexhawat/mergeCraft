@@ -11,7 +11,6 @@ unchanged.
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 from tests.support.cli_text import compact_cli_text
@@ -26,7 +25,6 @@ if TYPE_CHECKING:
 
 runner = CliRunner()
 _DUMB_ENV = {"TERM": "dumb", "NO_COLOR": "1"}
-_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 _CHAIN = ("a/one", "b/two", "c/three")
 
@@ -40,7 +38,7 @@ def _write_chain(tmp_path: Path) -> None:
 
 def _invoke(argv: list[str]) -> tuple[int, str]:
     result = runner.invoke(app, argv, env=_DUMB_ENV)
-    return result.exit_code, compact_cli_text(_ANSI.sub("", result.stdout + result.stderr))
+    return result.exit_code, compact_cli_text(result.stdout + result.stderr)
 
 
 def _assert_chain_in_order(output: str) -> None:
