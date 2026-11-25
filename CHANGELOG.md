@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `make ci` and `make ci-resume` now run `make pyright-new-tests`, which only CI
+  ran before, so a type error in a new test module fails the local gate too. An
+  unset `MERGECRAFT_TEST_TYPE_BASE` means `origin/main` instead of a `KeyError`,
+  and test modules not committed yet are checked.
+
 ### Fixed
 
 - Secondary roster reviewers and file-group reviewers now count toward the

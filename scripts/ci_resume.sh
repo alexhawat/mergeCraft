@@ -5,7 +5,7 @@
 # one error and continue, without re-running the steps that already passed.
 #
 # When every step passes, the checkpoint is cleared and the run is equivalent to `make ci`
-# (``CI_STEPS`` mirrors ``ci-static`` + ``security`` + ``coverage-gate`` only — advisory
+# (``CI_STEPS`` mirrors ``ci-static`` + ``pyright-new-tests`` + ``security`` + ``coverage-gate`` only — advisory
 # workflow jobs such as ``mutation-advisory`` are not included).
 # Full ``make ci`` remains the authoritative gate; this is the iterative fix loop.
 #
