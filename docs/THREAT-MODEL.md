@@ -32,6 +32,25 @@ product is not a control.
 | Untrusted-tier scanners take configuration only from bundled files or the base revision; a PR that changes a scanner config, ignore or plugin file produces a `scanner-config-changed` finding | `mergecraft.analyzers.execution:scanner_config_change_findings` | `tests/analyzers/test_untrusted_scanner_config.py::test_scanner_config_changes_become_findings` |
 | Secrets are redacted from analyzer output before it becomes a finding | `mergecraft.analyzers.redact:redact_analyzer_output` (called from `analyzers/run.py`) | `tests/analyzers/test_redact_entropy.py` |
 | Findings are redacted again before SARIF upload | `mergecraft.analyzers.sarif_upload:redact_findings_for_upload` | `tests/analyzers/test_sarif_upload.py` |
+| Log lines pass the redactor, and only three positively matched benign shapes survive it | `mergecraft.analyzers.redact:redact_log_message` (installed by `install_loguru_redaction_filter`) | `tests/analyzers/test_redact_directory_paths.py`, `tests/analyzers/test_redact_image_refs_and_versions.py` |
+
+### Log redaction exemptions
+
+`redact_log_message` keeps three shapes verbatim so a CI log stays diagnosable:
+
+- a **path** whose segments are all bounded ordinary words — a directory-only
+  path, an absolute path, or the value side of `name=/path`, with one leading
+  dot per segment allowed and a dotted numeric tail on the final segment;
+- a **container image reference** whose host labels and path segments pass that
+  same per-segment test and whose tag is a version or a short ordinary word;
+  a `sha256:` digest is kept as public content;
+- a **version string** of at most 48 characters whose pre-release and build
+  identifiers are each at most 16 characters.
+
+Each exemption is a positive match on a benign shape, segment by segment.
+Anything that does not satisfy every condition of a shape keeps the entropy
+rule, so a credential pasted into a path segment, an image tag or a version's
+build part is still redacted.
 
 ## Network egress
 
