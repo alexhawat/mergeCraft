@@ -1,0 +1,7 @@
+{
+  "name": "js-oxlint-landmines-fixture",
+  "private": true,
+  "devDependencies": {
+    "oxlint": "1.81.0"
+  }
+}

@@ -571,6 +571,15 @@ def run_adapter(
         return AdapterRunResult(findings=[], skipped=True, skip_reason=reason)
 
     scratch_dir = fresh_analyzer_scratch_dir(tool_id)
+    if tool_id == "oxlint":
+        from mergecraft.analyzers.oxlint_landmines import apply_oxlint_landmines
+
+        plan = apply_oxlint_landmines(
+            plan,
+            repo_root=repo_root,
+            scratch_dir=scratch_dir,
+            analyzers_settings=analyzers_settings,
+        )
     sandbox_decision = plan_sandbox(
         manifest=manifest,
         tier=tier,
