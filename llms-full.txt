@@ -1451,6 +1451,17 @@ under `shell: disabled`, on every event: they run command strings the PR
 author controls. They report `declared-but-cannot-run` rather than vanishing.
 No `analyzers:` value re-enables them.
 
+### Captured analyzer output
+
+Analyzer stdout and stderr are read through one reader per pipe. Each reader
+keeps at most 32 MiB per stream and discards the rest while it keeps reading to
+end-of-stream, so a chatty analyzer cannot grow the reviewer's memory and never
+blocks on a full pipe. The limit is enforced **while the output is read** and
+counts bytes: a stream of multi-byte text can be cut below 32 Mi characters.
+The retained head is then cut on a redaction-safe boundary, redacted, and capped
+for display; an over-cap stream's outcome carries an "exceeded … per stream"
+notice.
+
 ## Overrides
 
 Enable or disable tools in ``.mergecraft/config.yaml``:
@@ -1870,6 +1881,27 @@ The gate-action routing table gained the matching pair of named rules:
 - **`schema_failure` → `block`**, re-scoped: it now fires only when the
   packet's evidence is structurally absent (no decision row, no findings, no
   blast radius, no trajectory) — never on a parsed, validated packet.
+
+#### Overriding a rule (`gates.override`)
+
+`gates.override` in `.mergecraft/config.yaml` maps a **rule id** from the
+routing table to an action, and is layered over the defaults at the gate. The
+valid rule ids are exactly the shipped keys — `schema_failure`,
+`high_risk_migration`, `low_risk_passing`, `has_blockers`,
+`changed-unread-file`, `tool_loop`, `clean_pass`, `needs_human_review` — and the
+valid actions are `auto_merge`, `block`, `request_changes`,
+`require_human_review`, `require_more_tests`, `quarantine`, `escalate`.
+
+An unknown rule id is rejected, not silently ignored: the message names the
+key and lists the valid ids. A value outside the action vocabulary is rejected
+the same way. Both checks run wherever a review reads its policy, and
+`get_policy` returns the message as its `error` payload.
+
+```yaml
+gates:
+  override:
+    low_risk_passing: require_human_review
+```
 
 ### Run outcome taxonomy
 
@@ -3433,7 +3465,10 @@ An explicitly selected `MERGECRAFT_ENV` file remains an operator override and
 can be loaded regardless of its tracking status.
 
 The walk-up is why `mergecraft auth` run from a subdirectory writes the `.env`
-the next invocation actually loads. Outside a git checkout the writers fail
+the next invocation actually loads. The legacy `auth` commands also read the
+provider registry from that same repository root, so `auth claude` takes the
+indexed `LLM_PROVIDER_<N>_…` path from any directory of the checkout rather
+than falling back to the flat secret. Outside a git checkout the writers fail
 with the directory they consulted named in the error; the startup load falls
 back to `./.env` and stays silent when it is missing, so global invocations are
 unaffected. Inside GitHub Actions the startup load reads no `.env` from the

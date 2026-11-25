@@ -24,6 +24,10 @@ def configure(
     if registered:
         write_provider_entry(tmp_path, label=label, env_index=1, auth_kind="api_key")
     monkeypatch.setattr("mergecraft.cli.roster_seed.seed_reviewer_p0_after_auth", lambda **kw: None)
+    # The registry anchor is the checkout root. ``implicit_repo_root`` shells out
+    # to git, and this module fakes ``subprocess.run`` for ``gh``; pin the anchor
+    # to the temporary checkout these tests already describe.
+    monkeypatch.setattr("mergecraft.cli.target_dir.implicit_repo_root", lambda: tmp_path)
 
 
 @pytest.mark.parametrize(

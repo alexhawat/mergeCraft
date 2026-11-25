@@ -240,6 +240,17 @@ under `shell: disabled`, on every event: they run command strings the PR
 author controls. They report `declared-but-cannot-run` rather than vanishing.
 No `analyzers:` value re-enables them.
 
+### Captured analyzer output
+
+Analyzer stdout and stderr are read through one reader per pipe. Each reader
+keeps at most 32 MiB per stream and discards the rest while it keeps reading to
+end-of-stream, so a chatty analyzer cannot grow the reviewer's memory and never
+blocks on a full pipe. The limit is enforced **while the output is read** and
+counts bytes: a stream of multi-byte text can be cut below 32 Mi characters.
+The retained head is then cut on a redaction-safe boundary, redacted, and capped
+for display; an over-cap stream's outcome carries an "exceeded … per stream"
+notice.
+
 ## Overrides
 
 Enable or disable tools in ``.mergecraft/config.yaml``:
