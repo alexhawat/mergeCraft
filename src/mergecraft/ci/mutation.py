@@ -11,7 +11,7 @@ This module must not import ``scripts/mutate_decision_modules.py`` (K6).
 
 Module: mergecraft.ci.mutation
 Depends: mergecraft.analyzers.finding, mergecraft.ci.{archive_bounds,
-    changed_functions,evidence}, loguru
+    changed_functions,evidence}, mergecraft.review_policy.paths, loguru
 
 Exports:
     Classes:
@@ -47,6 +47,7 @@ from mergecraft.ci.changed_functions import (
     unsupported_language_skip,
 )
 from mergecraft.ci.evidence import CI_TOOL, GateSubstitution, artifact_ingest_failures
+from mergecraft.review_policy.paths import strip_dot_slash_prefix
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -96,7 +97,7 @@ class MutationIngestResult:
 
 
 def _norm_path(path: str) -> str:
-    return path.replace("\\", "/").lstrip("./")
+    return strip_dot_slash_prefix(path.replace("\\", "/"))
 
 
 def _status_of(raw: object) -> str:
