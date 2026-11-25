@@ -221,15 +221,18 @@ Inventory command (read-only):
 ```python
 import ast, collections
 from pathlib import Path
+
 stats = collections.defaultdict(lambda: [0, 0, 0])
-for p in Path('tests').rglob('test_*.py'):
+for p in Path("tests").rglob("test_*.py"):
     source = p.read_text()
     tree = ast.parse(source)
-    tests = [n for n in ast.walk(tree)
-             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-             and n.name.startswith('test_')]
-    parts = p.relative_to('tests').parts
-    domain = parts[0] if len(parts) > 1 else '(root)'
+    tests = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test_")
+    ]
+    parts = p.relative_to("tests").parts
+    domain = parts[0] if len(parts) > 1 else "(root)"
     stats[domain][0] += 1
     stats[domain][1] += len(tests)
     stats[domain][2] += len(source.splitlines())
@@ -244,6 +247,7 @@ The [testing probe](https://github.com/alexhawat/mergeCraft/blob/5dbaa2d4f59f321
 from pathlib import Path
 import importlib.util, sys, argparse
 
+
 def module(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     obj = importlib.util.module_from_spec(spec)
@@ -251,34 +255,63 @@ def module(name, path):
     spec.loader.exec_module(obj)
     return obj
 
-m = module('audit_mutation', 'scripts/mutate_decision_modules.py')
+
+m = module("audit_mutation", "scripts/mutate_decision_modules.py")
+
+
 class MemoryPath:
     def read_text(self, **kwargs):
-        return 'def eligible(value):\n    return value == 1\n'
+        return "def eligible(value):\n    return value == 1\n"
+
     def write_text(self, value, **kwargs):
         return len(value)
+
+
 m.resolve_module_path = lambda *args, **kwargs: MemoryPath()
-m._module_test_dirs = lambda: {'fixture.py': ('tests/fixture',)}
+m._module_test_dirs = lambda: {"fixture.py": ("tests/fixture",)}
 for exitcode in (2, 3, 4, 5):
     m._run_pytest = lambda *args, exitcode=exitcode, **kwargs: (
-        exitcode, 'pytest did not complete any tests')
-    result = m._mutate_module('fixture.py', sandbox_root=Path('/unused'),
-                             python=Path('/unused'), max_mutants=1,
-                             seed=1, verbose=0)
+        exitcode,
+        "pytest did not complete any tests",
+    )
+    result = m._mutate_module(
+        "fixture.py",
+        sandbox_root=Path("/unused"),
+        python=Path("/unused"),
+        max_mutants=1,
+        seed=1,
+        verbose=0,
+    )
     print(exitcode, result.killed, result.errors, result.survived)
 # Each output: <exitcode> 1 0 0
 
-e = module('audit_e2e', 'docker/e2e/assert_e2e_outputs.py')
+e = module("audit_e2e", "docker/e2e/assert_e2e_outputs.py")
+
+
 class FakePath:
-    def is_file(self): return True
-args = argparse.Namespace(github_output=FakePath(), check_runs_dir=FakePath(),
-                          expect_outcome='passed', require_check_runs=True)
+    def is_file(self):
+        return True
+
+
+args = argparse.Namespace(
+    github_output=FakePath(),
+    check_runs_dir=FakePath(),
+    expect_outcome="passed",
+    require_check_runs=True,
+)
 e.argparse.ArgumentParser.parse_args = lambda self: args
-e._parse_github_output = lambda path: {'result': 'E2E review complete: no findings.'}
-e._load_check_runs = lambda path: [{'body': {
-    'name': 'mergecraft', 'head_sha': 'WRONG-COMMIT', 'status': 'completed',
-    'conclusion': 'failure', 'output': {'title': 'Failure', 'summary': 'No review accepted'}
-}}]
+e._parse_github_output = lambda path: {"result": "E2E review complete: no findings."}
+e._load_check_runs = lambda path: [
+    {
+        "body": {
+            "name": "mergecraft",
+            "head_sha": "WRONG-COMMIT",
+            "status": "completed",
+            "conclusion": "failure",
+            "output": {"title": "Failure", "summary": "No review accepted"},
+        }
+    }
+]
 print(e.main())  # 0, despite wrong commit and failure conclusion
 ```
 
