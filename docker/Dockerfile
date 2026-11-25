@@ -138,6 +138,10 @@ RUN cd /opt/agent-clis \
 WORKDIR /opt/mergecraft
 
 COPY pyproject.toml uv.lock README.md ./
+COPY scripts/package.json scripts/package-lock.json ./scripts/
+RUN cd scripts \
+    && npm ci --ignore-scripts --no-audit --no-fund \
+    && rm -rf /tmp/npm-cache /root/.npm
 COPY scripts/hatch_build.py ./scripts/hatch_build.py
 COPY src/mergecraft ./src/mergecraft
 COPY evals/cases/adversarial/ ./evals/cases/adversarial/
