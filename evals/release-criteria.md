@@ -37,7 +37,7 @@ independent human adjudication and judge calibration
 ([#736](https://github.com/alexhawat/mergeCraft/issues/736),
 [#735](https://github.com/alexhawat/mergeCraft/issues/735)) and on recorded
 live runs. [#780](https://github.com/alexhawat/mergeCraft/issues/780), the first
-adjudication batch, was closed as not planned on 2026-11-23. Batch 002 is
-pending human decisions, tracked in
-[#1551](https://github.com/alexhawat/mergeCraft/issues/1551). No
-qualifying detection result has been produced.
+adjudication batch, was closed as not planned on 2026-11-23. Batch 002's
+nine candidates were confirmed by one human rater on 2026-11-25
+([#1551](https://github.com/alexhawat/mergeCraft/issues/1551)); they supply no
+judge calibration. No qualifying detection result has been produced.
