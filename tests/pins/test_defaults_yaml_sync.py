@@ -107,10 +107,14 @@ def test_release_refresh_uses_published_tag_and_detects_doc_or_workflow_drift(
     subprocess.run([*git, "tag", tag], check=True)
     sha = subprocess.check_output([*git, "rev-parse", "HEAD"], text=True).strip()
 
+    fallback = tmp_path / "pins.py"
+    fallback.write_bytes(pins.EMBEDDED_FALLBACK.read_bytes())
+    real_fallback = pins.EMBEDDED_FALLBACK.read_bytes()
     monkeypatch.setattr(pins, "REPO", tmp_path)
     source, packaged = tmp_path / "defaults.yaml", tmp_path / "packaged.yaml"
     monkeypatch.setattr(pins, "CHECKOUT_DEFAULTS", source)
     monkeypatch.setattr(pins, "PACKAGED_DEFAULTS", packaged)
+    monkeypatch.setattr(pins, "EMBEDDED_FALLBACK", fallback)
     source.write_bytes(_CHECKOUT_DEFAULTS.read_bytes())
     workflow = "examples/workflows/mergecraft.yml"
     extra = "docs/another-guide.md"
@@ -126,6 +130,9 @@ def test_release_refresh_uses_published_tag_and_detects_doc_or_workflow_drift(
     pins._refresh_release(tag, str(tmp_path), pins._load(source))
     assert pins._load(source)["action_sha_minimal"] == sha
     assert source.read_bytes() == packaged.read_bytes()
+    assert pins._check_embedded_fallback(pins._load(source)) == []
+    assert pins.EMBEDDED_FALLBACK.read_bytes() != real_fallback
+    assert (REPO_ROOT / "src" / "mergecraft" / "pins.py").read_bytes() == real_fallback
     assert sha in (tmp_path / extra).read_text()
     assert f"default ref `{tag}`" in evals_readme.read_text()
     assert pins._document_pins(tag, sha, refresh=False) == [f"{workflow} must use {sha} # {tag}"]

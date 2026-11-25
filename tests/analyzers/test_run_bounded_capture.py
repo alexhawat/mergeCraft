@@ -47,7 +47,7 @@ def _plan(tmp_path: Path, script: str, *, timeout_s: int = 120) -> AnalyzerPlan:
 def test_parent_retains_at_most_the_cap_per_stream(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_CHARS", _CAP_BYTES)
+    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_BYTES", _CAP_BYTES)
     handed: dict[str, int] = {}
     real_outcome = run_mod._outcome_from_completed
 
@@ -69,7 +69,7 @@ def test_parent_retains_at_most_the_cap_per_stream(
 @pytest.mark.timeout(180)
 def test_peak_memory_is_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cap = 1024 * 1024
-    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_CHARS", cap)
+    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_BYTES", cap)
 
     tracemalloc.start()
     try:
@@ -87,7 +87,7 @@ def test_child_is_not_blocked_by_a_full_pipe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A reader that stops draining would block the child; it must keep reading."""
-    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_CHARS", _CAP_BYTES)
+    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_BYTES", _CAP_BYTES)
 
     started = time.monotonic()
     outcome = run_mod.run_plan(_plan(tmp_path, _writer_script(_EIGHT_MIB)))
@@ -101,12 +101,12 @@ def test_child_is_not_blocked_by_a_full_pipe(
 def test_over_cap_stream_reports_the_exceeded_notice(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_CHARS", _CAP_BYTES)
+    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_BYTES", _CAP_BYTES)
 
     outcome = run_mod.run_plan(_plan(tmp_path, _writer_script(_EIGHT_MIB)))
 
     assert "analyzer output exceeded" in outcome.output
-    assert "chars per stream" in outcome.output
+    assert f"capture limit of {_CAP_BYTES} bytes (UTF-8) per stream" in outcome.output
 
 
 @pytest.mark.timeout(60)
@@ -115,7 +115,7 @@ def test_a_cap_that_lands_mid_token_never_publishes_the_prefix(
 ) -> None:
     """A reader cut inside a credential drops that line, never half a token."""
     cap = 4096
-    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_CHARS", cap)
+    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_BYTES", cap)
     token = "ghp_" + ("a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6" + "q7R8")[:36]
     filler = "x" * (cap - 11)
     script = f"import sys; sys.stdout.write({(filler + chr(10) + token)!r})"

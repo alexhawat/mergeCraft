@@ -30,11 +30,14 @@ if TYPE_CHECKING:
     from mergecraft.analyzers.sandbox import SandboxContext
 
 CHECK_TIMEOUT_S = 300
+# Display limit: characters of the combined output shown in an outcome. The full
+# (capture-limited) output is persisted for parsers.
 MAX_OUTPUT_CHARS = 8_000
-# Per-stream ceiling on captured analyzer output that is redacted and parsed.
-# Enforced while the pipe is read (the reader keeps only the head and discards
-# the rest), so a chatty analyzer cannot grow the parent's memory.
-MAX_CAPTURED_OUTPUT_CHARS = 32 * 1024 * 1024
+# Capture limit: per-stream ceiling, in UTF-8 bytes, on analyzer output that is
+# redacted and parsed. Enforced while the pipe is read (the reader keeps only the
+# head and discards the rest), so a chatty analyzer cannot grow the parent's
+# memory; a multi-byte stream therefore keeps fewer characters than this (#1591).
+MAX_CAPTURED_OUTPUT_BYTES = 32 * 1024 * 1024
 # Read size for one pipe chunk, and the bound on joining a reader whose stream
 # never reaches EOF because a process outside the killed group still holds it.
 _CAPTURE_READ_CHARS = 64 * 1024
@@ -151,11 +154,27 @@ def _persist_output(
     return str(path)
 
 
+def _utf8_len(text: str) -> int:
+    """Length of *text* in UTF-8 bytes, counted as the bounded reader counts them."""
+    return len(text.encode("utf-8", "replace"))
+
+
+def _utf8_head(text: str, limit: int) -> str:
+    """The longest prefix of *text* that fits in *limit* UTF-8 bytes.
+
+    The cut never splits a character, so the result is always valid UTF-8.
+    """
+    encoded = text.encode("utf-8", "replace")
+    if len(encoded) <= limit:
+        return text
+    return encoded[:limit].decode("utf-8", "ignore")
+
+
 def _cap_captured(text: str) -> tuple[str, bool]:
     """Keep the head of one captured stream (parsers need its start); flag a cut."""
-    if len(text) <= MAX_CAPTURED_OUTPUT_CHARS:
+    if _utf8_len(text) <= MAX_CAPTURED_OUTPUT_BYTES:
         return text, False
-    return text[:MAX_CAPTURED_OUTPUT_CHARS], True
+    return _utf8_head(text, MAX_CAPTURED_OUTPUT_BYTES), True
 
 
 # Characters a credential-shaped token (or URL userinfo) is made of. A cut at any
@@ -172,9 +191,10 @@ def _redaction_safe_head(text: str) -> str:
     lands after the last complete line inside the limit, or, when the head is one
     long line (minified JSON), just before the last character that cannot belong
     to a token. Either way the kept text stays within the limit, and a quoted
-    value the head opens but does not close is dropped as well.
+    value the head opens but does not close is dropped as well. The limit is
+    the capture limit in UTF-8 bytes, applied as the characters that fit in it.
     """
-    limit = min(MAX_CAPTURED_OUTPUT_CHARS, len(text))
+    limit = len(_utf8_head(text, MAX_CAPTURED_OUTPUT_BYTES))
     newline = text.rfind("\n", 0, limit)
     if newline >= limit // 2:
         return _drop_open_quoted_value(text[:newline])
@@ -233,7 +253,7 @@ def _redact_captured(text: str, *, plan: AnalyzerPlan, truncated: bool = False) 
     straddling value and its work stays bounded by the cap. The result is capped
     again only after redaction, where a cut can no longer expose anything.
     """
-    cut = truncated or len(text) > MAX_CAPTURED_OUTPUT_CHARS
+    cut = truncated or _utf8_len(text) > MAX_CAPTURED_OUTPUT_BYTES
     head = _redaction_safe_head(text) if cut else text
     redacted, recut = _cap_captured(_redact_stream(head.strip(), plan=plan))
     return redacted, cut or recut
@@ -459,7 +479,7 @@ class _StreamReader:
     def _drain(self) -> None:
         if self._stream is not None:
             self.text, self.truncated = _read_bounded_stream(
-                self._stream, MAX_CAPTURED_OUTPUT_CHARS
+                self._stream, MAX_CAPTURED_OUTPUT_BYTES
             )
 
     @property
@@ -542,7 +562,7 @@ def _run_in_own_session(
     privilege drop, and ``killpg`` the group on timeout.
 
     Both pipes are drained by one reader thread each, which keeps at most
-    ``MAX_CAPTURED_OUTPUT_CHARS`` bytes and keeps reading past the cap so the
+    ``MAX_CAPTURED_OUTPUT_BYTES`` bytes and keeps reading past the cap so the
     child never blocks on a full pipe. The run is finished only when the child
     has exited **and** both pipes reached EOF: a grandchild still holding a pipe
     keeps the output incomplete, which is reported as a timeout and takes the
@@ -708,7 +728,7 @@ def _outcome_from_completed(
     Each stream is redacted exactly once, on input already bounded by the capture
     layer (:func:`_read_bounded_stream`). A stream whose reader dropped bytes is
     cut on a redaction-safe boundary and reported with the exceeded notice, even
-    when the retained text is under the character cap.
+    when the retained text is under the capture limit (UTF-8 bytes).
     """
     stdout, stdout_cut = _redact_captured(
         completed.stdout or "", plan=plan, truncated="stdout" in truncated
@@ -731,8 +751,8 @@ def _outcome_from_completed(
     display = _truncate(combined, output_path=output_path)
     if stdout_cut or stderr_cut:
         display = (
-            f"analyzer output exceeded {MAX_CAPTURED_OUTPUT_CHARS} chars per stream; "
-            f"the rest was dropped before parsing\n{display}"
+            f"analyzer output exceeded the capture limit of {MAX_CAPTURED_OUTPUT_BYTES} "
+            f"bytes (UTF-8) per stream; the rest was dropped before parsing\n{display}"
         )
     return AnalyzerOutcome(
         name=plan.manifest_id,

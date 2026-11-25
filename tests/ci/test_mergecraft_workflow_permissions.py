@@ -17,7 +17,10 @@ the existing ``tests.ci.workflow_support`` helpers.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
+from scripts.workflow_yaml import missing_permissions, permission_dict
 
 from tests.ci.workflow_support import job, load_workflow, read_text
 
@@ -154,8 +157,61 @@ class TestReviewJobRunBoundIdentity:
         )
 
 
+# The three self-review attempt jobs that publish check-runs (#1595).
+_ATTEMPT_JOBS = ("review", "review-codex", "review-backstop")
+
+
+def _effective_permissions(doc: dict[str, Any], name: str) -> dict[str, str]:
+    """A job-level ``permissions:`` block replaces the workflow-level one entirely."""
+    block = job(doc, name)
+    raw = block["permissions"] if "permissions" in block else doc.get("permissions")
+    return permission_dict(raw)
+
+
+def _can_write_statuses(permissions: dict[str, str]) -> bool:
+    return not missing_permissions(permissions, {"statuses": "write"})
+
+
+class TestSelfReviewAttemptPermissions:
+    """The attempt jobs publish check-runs and never write commit statuses (#1595)."""
+
+    @pytest.mark.parametrize("name", _ATTEMPT_JOBS)
+    def test_attempt_job_cannot_write_commit_statuses(self, name: str) -> None:
+        effective = _effective_permissions(load_workflow(_WORKFLOW), name)
+        assert effective, f"{name} has no effective permissions to check"
+        assert not _can_write_statuses(effective), (
+            f"{name} grants an unused commit-status write scope ({effective!r}); "
+            "mergeCraft posts check-runs, which need only `checks: write`"
+        )
+
+    @pytest.mark.parametrize("name", _ATTEMPT_JOBS)
+    def test_attempt_job_keeps_checks_write(self, name: str) -> None:
+        effective = _effective_permissions(load_workflow(_WORKFLOW), name)
+        assert effective.get("checks") == "write", (
+            f"{name} must keep `checks: write` to publish the mergecraft / "
+            f"mergecraft-approval check-runs; got {effective!r}"
+        )
+
+    @pytest.mark.parametrize(
+        "permissions",
+        [{"checks": "write", "statuses": "write"}, "write-all"],
+        ids=["explicit", "write-all"],
+    )
+    def test_the_guard_rejects_a_status_write_grant(self, permissions: object) -> None:
+        doc = {
+            "permissions": {"contents": "read"},
+            "jobs": {"review": {"permissions": permissions}},
+        }
+        assert _can_write_statuses(_effective_permissions(doc, "review"))
+
+    def test_the_guard_reads_a_job_without_a_block_from_the_workflow_level(self) -> None:
+        doc = {"permissions": {"statuses": "write"}, "jobs": {"review": {}}}
+        assert _can_write_statuses(_effective_permissions(doc, "review"))
+
+
 __all__ = [
     "TestReviewJobRunBoundIdentity",
+    "TestSelfReviewAttemptPermissions",
     "TestWaitForCiBehaviourAnchors",
     "TestWaitForCiPermissions",
     "TestWorkflowLevelPermissionsUnchanged",
