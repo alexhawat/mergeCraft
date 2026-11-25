@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -465,11 +466,14 @@ class _StreamReader:
     def alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def join(self) -> None:
+    def join(self, deadline: float | None = None) -> None:
         """Wait (bounded) for this reader; a reader that outlives the wait dropped output."""
         if self._thread is None:
             return
-        self._thread.join(timeout=_READER_JOIN_TIMEOUT_S)
+        timeout = (
+            _READER_JOIN_TIMEOUT_S if deadline is None else max(deadline - time.monotonic(), 0.0)
+        )
+        self._thread.join(timeout=timeout)
         if self._thread.is_alive():
             self.truncated = True
 
@@ -568,15 +572,18 @@ def _run_in_own_session(
         _StreamReader("stderr", proc.stderr),
     ]
     with contextlib.ExitStack() as scope:
+        deadline = time.monotonic() + timeout_s
         try:
             scope.enter_context(track_process_group(proc))
             for reader in readers:
                 reader.start()
-            proc.wait(timeout=timeout_s)
-            # EOF, not just the child's exit: a grandchild that inherited a pipe
-            # never finished writing, which is the timeout ``communicate()`` saw.
+            # EOF first: it arrives as soon as every writer closes, with none of
+            # the poll interval ``Popen.wait`` uses, so a killed child is seen at
+            # once. A pipe a grandchild still holds is the timeout
+            # ``communicate()`` reported, and it takes the group down below.
             for reader in readers:
-                reader.join()
+                reader.join(deadline)
+            proc.wait(timeout=max(deadline - time.monotonic(), 0.0))
             if any(reader.alive for reader in readers):
                 raise subprocess.TimeoutExpired(run_argv, timeout_s)
             check_process_cancelled()
