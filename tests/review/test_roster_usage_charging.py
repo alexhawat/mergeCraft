@@ -592,3 +592,316 @@ async def test_primary_usage_entries_are_untouched_by_roster_dispatch(
 
     assert env.tool_state.usage_entries == [primary_usage]
     assert env.tracker.cost_used == 0.0
+
+
+# --------------------------------------------------------------------------- shared budget halts the fan-out (#1583)
+
+#: A group's usage that fits the default ceiling once the run has budget left.
+_SMALL_USAGE = AgentUsage(agent="opencode", input_tokens=1_000, output_tokens=500, cost_usd=0.05)
+
+
+def _fanout_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    agent: Any,
+    concurrency: int = 1,
+    tracker: BudgetTracker | None = None,
+) -> _Env:
+    return _build_env(
+        tmp_path,
+        monkeypatch,
+        agent=agent,
+        config=_config(
+            extra=_fanout_block(enabled=True, maxGroups=3, concurrency=concurrency),
+        ),
+        diff=_LARGE_DIFF,
+        tracker=tracker
+        or BudgetTracker(bounds=replace(resolve_run_bounds(env={}), cost_budget_usd=1.0)),
+    )
+
+
+def _run_health_messages(env: _Env) -> list[str]:
+    return [
+        str(row.get("message"))
+        for row in env.tool_state.agent_findings
+        if isinstance(row, dict) and row.get("scope") == "run"
+    ]
+
+
+def _resolved_outcome(env: _Env) -> Any:
+    from mergecraft.review.outcome_resolution import OutcomeInputs, resolve_run_outcome
+    from mergecraft.review.pipeline.finalize import complete_outcome_inputs
+
+    inputs = complete_outcome_inputs(
+        OutcomeInputs(result=AgentResult(success=True, terminal_submission_received=True)),
+        budget_tracker=env.tracker,
+    )
+    return resolve_run_outcome(inputs)
+
+
+async def test_a_cost_overrun_stops_queued_groups_from_dispatching(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Three groups at concurrency one: the first one's overrun is the last paid call."""
+    from mergecraft.run_outcome import RunOutcome
+
+    assert len(plan_file_groups(_LARGE_DIFF, max_groups=3).groups) == 3
+    agent = _UsageAgent(
+        AgentResult(success=True, output="ok", usage=_PRICED_USAGE), is_file_group=True
+    )
+    env = _fanout_env(tmp_path, monkeypatch, agent=agent)
+
+    with pytest.raises(BudgetExhausted) as exc_info:
+        await _run_fanout(env)
+
+    assert exc_info.value.kind == "cost"
+    assert agent.calls == 1
+    # The spend already observed is kept, listed once and charged once.
+    assert len(env.tool_state.usage_entries) == 1
+    assert env.tracker.cost_used == pytest.approx(_PRICED_USAGE.cost_usd)
+    # No group reads as one that merely "produced no findings".
+    assert _run_health_messages(env) == []
+    errors = env.tool_state.reviewer_dispatch_errors
+    assert "exceeded the run budget" in errors["file-group/group-1"]
+    for skipped in ("file-group/group-2", "file-group/group-3"):
+        assert errors[skipped].startswith("not dispatched: the run budget is exhausted")
+    outcome, reason = _resolved_outcome(env)
+    assert outcome is RunOutcome.inconclusive
+    assert "cost budget exhausted" in (reason or "")
+
+
+class _TwoWorkerAgent:
+    """Two groups in flight: the first exhausts the budget while the second still runs.
+
+    The second group returns only once the first group's usage charge has run,
+    which is the charge that exhausts the budget.
+    """
+
+    name = "opencode"
+
+    def __init__(self, first_charged: asyncio.Event) -> None:
+        self.first_charged = first_charged
+        self.started: list[int] = []
+        self._second_started = asyncio.Event()
+
+    async def install(self) -> None:
+        return None
+
+    async def run(self, ctx: AgentRunContext) -> AgentResult:
+        index = len(self.started)
+        self.started.append(index)
+        if index == 0:
+            await asyncio.wait_for(self._second_started.wait(), timeout=10)
+            return AgentResult(success=True, output="ok", usage=_PRICED_USAGE)
+        self._second_started.set()
+        await asyncio.wait_for(self.first_charged.wait(), timeout=10)
+        return AgentResult(success=True, output="ok", usage=_SMALL_USAGE)
+
+
+async def test_queued_work_never_starts_after_exhaustion_with_two_workers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The in-flight peer finishes and is charged; the queued third group never starts."""
+    from mergecraft.review import roster_execution
+
+    charged = asyncio.Event()
+    real_charge = roster_execution.charge_reviewer_usage
+
+    def _charge(**kwargs: Any) -> Any:
+        try:
+            return real_charge(**kwargs)
+        finally:
+            charged.set()
+
+    monkeypatch.setattr(roster_execution, "charge_reviewer_usage", _charge)
+    tracker = BudgetTracker(bounds=replace(resolve_run_bounds(env={}), cost_budget_usd=1.0))
+    agent = _TwoWorkerAgent(charged)
+    env = _fanout_env(tmp_path, monkeypatch, agent=agent, concurrency=2, tracker=tracker)
+
+    with pytest.raises(BudgetExhausted):
+        await _run_fanout(env)
+
+    assert agent.started == [0, 1]
+    assert len(env.tool_state.usage_entries) == 2
+    assert tracker.cost_used == pytest.approx(
+        (_PRICED_USAGE.cost_usd or 0.0) + (_SMALL_USAGE.cost_usd or 0.0)
+    )
+    assert _run_health_messages(env) == []
+    assert env.tool_state.reviewer_dispatch_errors["file-group/group-3"].startswith(
+        "not dispatched"
+    )
+
+
+async def test_an_exhaustion_recorded_outside_a_group_also_stops_queued_groups(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tool-call overrun the MCP handler caught still halts the fan-out."""
+
+    class _ToolCallAgent(_UsageAgent):
+        async def run(self, ctx: AgentRunContext) -> AgentResult:
+            self.calls += 1
+            assert ctx.budget_tracker is not None
+            with pytest.raises(BudgetExhausted):
+                ctx.budget_tracker.record_tool_call()
+            return AgentResult(success=True, output="ok")
+
+    tracker = BudgetTracker(bounds=replace(resolve_run_bounds(env={}), tool_call_budget=0))
+    agent = _ToolCallAgent(AgentResult(success=True, output="ok"), is_file_group=True)
+    env = _fanout_env(tmp_path, monkeypatch, agent=agent, tracker=tracker)
+
+    with pytest.raises(BudgetExhausted) as exc_info:
+        await _run_fanout(env)
+
+    assert exc_info.value.kind == "tool_call"
+    assert agent.calls == 1
+    assert _run_health_messages(env) == []
+
+
+async def test_an_ordinary_group_failure_still_lets_its_peers_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control: a failing reviewer is isolated to its group; nothing halts."""
+
+    class _FirstFails(_UsageAgent):
+        async def run(self, ctx: AgentRunContext) -> AgentResult:
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("provider unavailable")
+            return AgentResult(success=True, output="ok", usage=_SMALL_USAGE)
+
+    agent = _FirstFails(AgentResult(success=True, output="ok"), is_file_group=True)
+    env = _fanout_env(tmp_path, monkeypatch, agent=agent)
+
+    summary = await _run_fanout(env)
+
+    assert agent.calls == 3
+    assert summary.halted is None
+    assert summary.skipped == ()
+    assert [group_id for group_id, _reason in summary.failures] == ["group-1"]
+    assert len(_run_health_messages(env)) == 1
+    assert env.tracker.last_exhausted is None
+
+
+# --------------------------------------------------------------------------- abnormal termination (#1588)
+
+#: What the reviewer streamed before it timed out or raised.
+_OBSERVED_INPUT = 30_000
+_OBSERVED_OUTPUT = 6_000
+_OBSERVED_COST = 0.25
+
+
+class _AbnormalAgent:
+    """Streams one step (or nothing), then times out or raises before reporting usage."""
+
+    name = "opencode"
+
+    def __init__(self, *, ending: str, streams: bool) -> None:
+        self.ending = ending
+        self.streams = streams
+        self.calls = 0
+
+    async def install(self) -> None:
+        return None
+
+    async def run(self, ctx: AgentRunContext) -> AgentResult:
+        from mergecraft.agents.stream_budget import charge_review_stream_step
+
+        self.calls += 1
+        reason = (
+            charge_review_stream_step(
+                {"input_tokens": _OBSERVED_INPUT, "output_tokens": _OBSERVED_OUTPUT},
+                budget_tracker=ctx.budget_tracker,
+                provider_budget=None,
+                stream_charges=ctx.stream_charges,
+                cost_usd=_OBSERVED_COST,
+            )
+            if self.streams
+            else None
+        )
+        assert reason is None
+        if self.ending == "timeout":
+            # Never set: the dispatch's own deadline is what ends this reviewer.
+            await asyncio.Event().wait()
+        raise RuntimeError("provider connection reset")
+
+
+@pytest.mark.parametrize("ending", ["timeout", "raise"])
+async def test_abnormal_termination_lists_the_observed_partial_usage_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ending: str
+) -> None:
+    from mergecraft.utils.run_bounds import token_summary_from_usage
+
+    agent = _AbnormalAgent(ending=ending, streams=True)
+    env = _build_env(tmp_path, monkeypatch, agent=agent)
+
+    summary = await run_pending_roster_reviewers(
+        tool_context=env.tool_context,
+        base_run_ctx=env.base_ctx,
+        settings=env.settings,
+        payload=_PAYLOAD,
+        repo_root=env.root,
+        per_reviewer_timeout_s=0.05,
+    )
+
+    assert env.tool_state.usage_entries == [
+        AgentUsage(
+            agent=agent.name,
+            input_tokens=_OBSERVED_INPUT,
+            output_tokens=_OBSERVED_OUTPUT,
+            cost_usd=_OBSERVED_COST,
+        )
+    ]
+    assert env.tracker.tokens_used == _OBSERVED_INPUT + _OBSERVED_OUTPUT
+    assert env.tracker.cost_used == pytest.approx(_OBSERVED_COST)
+    rendered = token_summary_from_usage(env.tool_state.usage_entries, budget_tracker=env.tracker)
+    assert rendered is not None
+    assert "context expansion" not in rendered
+    assert f"{_OBSERVED_INPUT:,} input / {_OBSERVED_OUTPUT:,} output used" in rendered
+    # The reviewer's own failure reason survives.
+    expected = "timed out" if ending == "timeout" else "RuntimeError: provider connection reset"
+    assert expected in env.tool_state.reviewer_dispatch_errors["reviewer2"]
+    assert summary.hard_error is not None
+    assert expected in summary.hard_error
+
+
+@pytest.mark.parametrize("ending", ["timeout", "raise"])
+async def test_abnormal_termination_without_usage_fabricates_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ending: str
+) -> None:
+    agent = _AbnormalAgent(ending=ending, streams=False)
+    env = _build_env(tmp_path, monkeypatch, agent=agent)
+
+    await run_pending_roster_reviewers(
+        tool_context=env.tool_context,
+        base_run_ctx=env.base_ctx,
+        settings=env.settings,
+        payload=_PAYLOAD,
+        repo_root=env.root,
+        per_reviewer_timeout_s=0.05,
+    )
+
+    assert env.tool_state.usage_entries == []
+    assert env.tracker.tokens_used == 0
+    assert env.tracker.cost_used == 0.0
+    assert "reviewer2" in env.tool_state.reviewer_dispatch_errors
+
+
+async def test_an_exhausted_run_budget_dispatches_no_secondary_reviewer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1584 — an exhaustion already on the tracker opens no further paid dispatch."""
+    agent = _UsageAgent(AgentResult(success=True, output="ok", usage=_SMALL_USAGE))
+    tracker = BudgetTracker(bounds=replace(resolve_run_bounds(env={}), tool_call_budget=0))
+    with pytest.raises(BudgetExhausted):
+        tracker.record_tool_call()
+    env = _build_env(tmp_path, monkeypatch, agent=agent, tracker=tracker)
+
+    summary = await _run_roster(env)
+
+    assert agent.calls == 0
+    assert env.tool_state.usage_entries == []
+    reason = env.tool_state.reviewer_dispatch_errors["reviewer2"]
+    assert reason.startswith("secondary reviewer 'reviewer2' was not dispatched")
+    assert "tool-call budget exhausted" in reason
+    assert summary.hard_error == reason

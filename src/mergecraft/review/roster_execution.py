@@ -45,7 +45,7 @@ from mergecraft.review.file_group_fanout import (
     plan_file_groups,
 )
 from mergecraft.review.roster_dispatch import reviewer_dispatch_batches
-from mergecraft.review.usage_charging import charge_reviewer_usage
+from mergecraft.review.usage_charging import charge_reviewer_usage, observed_stream_usage
 from mergecraft.utils.run_bounds import BudgetExhausted, StreamCharges
 
 if TYPE_CHECKING:
@@ -267,6 +267,59 @@ def _stamp_reviewer_evidence(
     return stamped
 
 
+def run_budget_exhaustion(tool_context: ToolContext) -> BudgetExhausted | None:
+    """Return the run's recorded budget exhaustion, or ``None`` while budget remains.
+
+    The tracker keeps the exhaustion wherever it was tripped — a streamed step,
+    a final usage charge, or an MCP tool call whose handler already answered
+    the caller — so this is the one check made before opening another paid
+    provider dispatch.
+
+    Args:
+        tool_context: The run's tool context.
+
+    Returns:
+        The exhaustion the run's budget tracker recorded, if any.
+    """
+    tracker = getattr(tool_context, "budget_tracker", None)
+    exhausted = getattr(tracker, "last_exhausted", None)
+    return exhausted if isinstance(exhausted, BudgetExhausted) else None
+
+
+def _charge_observed_partial_usage(
+    *,
+    tool_context: ToolContext,
+    agent_name: str,
+    model: str | None,
+    streamed: StreamCharges,
+) -> BudgetExhausted | None:
+    """List a reviewer's observed spend once when it ended before reporting usage (#1588).
+
+    A timed-out or raising dispatch returns no ``AgentResult.usage``, yet the
+    steps it streamed were already charged. Their observed split is priced,
+    listed and charged like any usage row, net of the stream's own charges, so
+    the run pays for it once and the token summary attributes it. A stream that
+    reported nothing lists nothing.
+
+    Returns:
+        The exhaustion raised by charging the row, if it crossed a ceiling.
+    """
+    partial = observed_stream_usage(streamed, agent=agent_name)
+    if partial is None:
+        return None
+    try:
+        charge_reviewer_usage(
+            tool_state=tool_context.tool_state,
+            budget_tracker=tool_context.budget_tracker,
+            usage=partial,
+            model=model,
+            streamed=streamed,
+        )
+    except BudgetExhausted as exc:
+        return exc
+    return None
+
+
 async def _dispatch_reviewer(
     *,
     binding: AgentBinding,
@@ -323,7 +376,9 @@ async def _dispatch_reviewer(
     Raises:
         BudgetExhausted: The dispatch's usage crossed the run's budget ceiling. A
             dispatch error naming the budget is recorded first, so the reviewer is
-            never silently reported as merely failed.
+            never silently reported as merely failed. A dispatch that timed out
+            or raised keeps its own reason and is charged its observed partial
+            usage; when that charge crosses the ceiling it raises too.
     """
     from mergecraft.agents.registry import resolve_agent_model as _resolve
     from mergecraft.modes import compute_modes
@@ -434,12 +489,24 @@ async def _dispatch_reviewer(
     except TimeoutError:
         reason = f"{label} {record_as!r} timed out after {timeout_s:.1f}s"
         tool_state.agent_diagnostic = {"diagnostic": reason, "wall_clock_timeout": True}
-        record_reviewer_dispatch_error(tool_state, agent_id=record_as, reason=reason)
-        return _SecondaryOutcome(reason)
+        return _abnormal_outcome(
+            tool_context,
+            record_as=record_as,
+            reason=reason,
+            agent_name=attempt_agent.name,
+            model=attempt_model,
+            streamed=run_ctx.stream_charges,
+        )
     except Exception as exc:  # any runtime failure is this reviewer's outcome, not the run's
         reason = f"{label} {record_as!r} failed: {type(exc).__name__}: {exc}"
-        record_reviewer_dispatch_error(tool_state, agent_id=record_as, reason=reason)
-        return _SecondaryOutcome(reason)
+        return _abnormal_outcome(
+            tool_context,
+            record_as=record_as,
+            reason=reason,
+            agent_name=attempt_agent.name,
+            model=attempt_model,
+            streamed=run_ctx.stream_charges,
+        )
     finally:
         if token:
             tool_context.reviewer_sessions.revoke(token)
@@ -498,6 +565,34 @@ async def _dispatch_reviewer(
     return _SecondaryOutcome(None)
 
 
+def _abnormal_outcome(
+    tool_context: ToolContext,
+    *,
+    record_as: str,
+    reason: str,
+    agent_name: str,
+    model: str | None,
+    streamed: StreamCharges | None,
+) -> _SecondaryOutcome:
+    """Record a timed-out or raising dispatch: its observed usage, then its reason.
+
+    The reason is what the reviewer's outcome names even when charging its
+    partial usage crossed the run's budget; that exhaustion is then raised so
+    it reaches the run, as for a dispatch that finished over budget.
+    """
+    exhausted = (
+        _charge_observed_partial_usage(
+            tool_context=tool_context, agent_name=agent_name, model=model, streamed=streamed
+        )
+        if streamed is not None
+        else None
+    )
+    record_reviewer_dispatch_error(tool_context.tool_state, agent_id=record_as, reason=reason)
+    if exhausted is not None:
+        raise exhausted
+    return _SecondaryOutcome(reason)
+
+
 async def _run_one_secondary_reviewer(
     *,
     binding: AgentBinding,
@@ -527,6 +622,33 @@ async def _run_one_secondary_reviewer(
         require_recorded_run=require_recorded_run,
         instructions_for=instructions_for,
     )
+
+
+def _record_budget_skips(
+    tool_context: ToolContext,
+    batch: tuple[str, ...],
+    *,
+    primary_id: str,
+    exhausted: BudgetExhausted,
+    settings: RepoSettings,
+) -> list[str]:
+    """Record every pending reviewer of ``batch`` as not dispatched for want of budget.
+
+    Returns:
+        The reasons of the required reviewers among them.
+    """
+    required: list[str] = []
+    for agent_id in batch:
+        if agent_id == primary_id or _binding_already_recorded(tool_context.tool_state, agent_id):
+            continue
+        reason = (
+            f"secondary reviewer {agent_id!r} was not dispatched: "
+            f"the run budget is exhausted ({exhausted})"
+        )
+        record_reviewer_dispatch_error(tool_context.tool_state, agent_id=agent_id, reason=reason)
+        if reviewer_is_required(settings, agent_id):
+            required.append(reason)
+    return required
 
 
 _SECONDARY_TIMEOUT_CEILING_S = 900.0
@@ -589,6 +711,13 @@ async def run_pending_roster_reviewers(
     ``instructions_for`` maps a harness name to the instructions resolved at run
     start. When it is given, every reviewer uses those instead of rendering new
     ones from ``repo_root``, which may hold the reviewed head by now.
+
+    Once the run's budget is exhausted, no further dispatch level starts:
+    each reviewer left is recorded as not dispatched, naming the budget, and a
+    required one is part of ``hard_error``.
+
+    Raises:
+        BudgetExhausted: A reviewer's own usage exhausted the run's budget.
     """
     from mergecraft.config.settings_snapshot import repo_settings_from_context
 
@@ -610,6 +739,20 @@ async def run_pending_roster_reviewers(
 
     errors: list[str] = []
     for batch in batches:
+        if (exhausted := run_budget_exhaustion(tool_context)) is not None:
+            # The run's budget is spent: no further provider dispatch opens (#1584).
+            # The tracker keeps the exhaustion, so the run still resolves to the
+            # budget outcome; each reviewer left is recorded as never dispatched.
+            errors.extend(
+                _record_budget_skips(
+                    tool_context,
+                    batch,
+                    primary_id=primary_id,
+                    exhausted=exhausted,
+                    settings=effective_settings,
+                )
+            )
+            continue
         pending: list[AgentBinding] = []
         for agent_id in batch:
             if agent_id == primary_id:
@@ -857,6 +1000,12 @@ async def run_file_group_reviewers(
     dispatch error plus one run-scoped ``Minor`` row in ``agent_findings``, and
     is never a hard error.
 
+    The run's budget is shared by every group (#1583). Once it is exhausted —
+    by a group's usage, or anywhere else the tracker records it — no queued
+    group starts; groups already in flight finish and are charged. A group
+    that never started is recorded as not dispatched, with no run-health row,
+    and the exhaustion is raised to the run.
+
     Args:
         tool_context: The run's tool context; ``agent_id`` is restored after.
         base_run_ctx: The primary run context each group dispatch derives from.
@@ -870,6 +1019,10 @@ async def run_file_group_reviewers(
 
     Returns:
         The fan-out summary; ``failures`` rows carry the bare group id.
+
+    Raises:
+        BudgetExhausted: The run's budget was exhausted before or during the
+            fan-out.
     """
     from mergecraft.config.settings_snapshot import repo_settings_from_context
     from mergecraft.mcp.tool_state import primary_repo_state
@@ -949,9 +1102,8 @@ async def run_file_group_reviewers(
                 )
         except BudgetExhausted:
             # The run's overrun, already recorded by the dispatch; never a group
-            # failure. ``dispatch_file_groups`` collects it as a failure row, and
-            # the tracker's ``last_exhausted`` still maps the run to the budget
-            # outcome, so the ceiling is never silently crossed.
+            # failure. ``dispatch_file_groups`` halts on it: no queued group
+            # starts, and the exhaustion is raised to the run below.
             raise
         except Exception as exc:
             reason = str(exc) or exc.__class__.__name__
@@ -967,12 +1119,25 @@ async def run_file_group_reviewers(
             record_reviewer_dispatch_error(tool_state, agent_id=agent_id, reason=reason)
         tool_state.agent_findings.append(_file_group_health_row(agent_id, reason))
 
-    return await dispatch_file_groups(
+    summary = await dispatch_file_groups(
         plan,
         _dispatch,
         on_failure=_record_failure,
         concurrency=fanout.concurrency,
+        halt_on=(BudgetExhausted,),
+        halted=lambda: run_budget_exhaustion(tool_context),
     )
+    if summary.halted is not None:
+        # A group that never started produced nothing and failed nothing: it is
+        # noted as not dispatched, never as a group that "produced no findings".
+        for group_id in summary.skipped:
+            record_reviewer_dispatch_error(
+                tool_state,
+                agent_id=file_group_agent_id(group_id),
+                reason=f"not dispatched: the run budget is exhausted ({summary.halted})",
+            )
+        raise summary.halted
+    return summary
 
 
 def primary_repo_state_dir(tool_state: ToolState) -> str:
@@ -990,6 +1155,7 @@ __all__ = [
     "reviewer_is_required",
     "roster_dispatch_failure_message",
     "roster_dispatch_gaps",
+    "run_budget_exhaustion",
     "run_file_group_reviewers",
     "run_pending_roster_reviewers",
     "secondary_reviewer_agent_ids",

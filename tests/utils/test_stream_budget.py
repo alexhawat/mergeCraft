@@ -104,7 +104,7 @@ def test_finalize_records_only_usage_delta_after_stream_steps() -> None:
         cost_usd=0.2,
     )
     assert reason is None
-    assert charges == StreamCharges(tokens=120, cost_usd=0.2)
+    assert charges == StreamCharges(tokens=120, cost_usd=0.2, input_tokens=100, output_tokens=20)
 
     record_agent_usage(
         tracker,
@@ -127,3 +127,103 @@ def test_usage_below_the_streamed_total_charges_nothing_more() -> None:
     )
     assert tracker.tokens_used == 150
     assert tracker.cost_used == pytest.approx(0.3)
+
+
+# --------------------------------------------------------------------------- crossing step (#1587)
+
+
+def _ceiling_bounds() -> RunBounds:
+    return _bounds(token_budget=100, tolerance=0.0, cost_budget_usd=1.0)
+
+
+@pytest.mark.parametrize(
+    ("steps", "stops_at"),
+    [
+        pytest.param([(65, 0.01), (55, 0.02)], 1, id="second-step-crosses"),
+        pytest.param([(120, 0.03)], 0, id="first-step-crosses"),
+        pytest.param([(65, 0.01), (35, 0.02)], None, id="exactly-the-ceiling"),
+    ],
+)
+def test_a_completed_step_is_charged_even_when_it_crosses_the_ceiling(
+    steps: list[tuple[int, float]], stops_at: int | None
+) -> None:
+    """The step already ran: its tokens and cost count once; only the decision is a stop."""
+    tracker = BudgetTracker(_ceiling_bounds())
+    charges = StreamCharges()
+    reasons = [
+        charge_review_stream_step(
+            {"input_tokens": tokens, "output_tokens": 0},
+            budget_tracker=tracker,
+            provider_budget=None,
+            stream_charges=charges,
+            cost_usd=cost,
+        )
+        for tokens, cost in steps
+    ]
+
+    tokens = sum(step_tokens for step_tokens, _cost in steps)
+    cost = sum(step_cost for _tokens, step_cost in steps)
+    # Only the crossing step returns a stop reason, and it names the token budget.
+    assert [reason is not None for reason in reasons] == [
+        index == stops_at for index in range(len(steps))
+    ]
+    assert all("token budget" in reason for reason in reasons if reason is not None)
+    assert (tracker.last_exhausted is not None) is (stops_at is not None)
+    assert tracker.tokens_used == tokens
+    assert tracker.cost_used == pytest.approx(cost)
+    assert charges == StreamCharges(
+        tokens=tokens, cost_usd=pytest.approx(cost), input_tokens=tokens
+    )
+
+    # Aggregate reconciliation adds nothing the stream already charged.
+    record_agent_usage(
+        tracker,
+        AgentUsage(agent="opencode", input_tokens=tokens, output_tokens=0, cost_usd=cost),
+        streamed=charges,
+    )
+    assert tracker.tokens_used == tokens
+    assert tracker.cost_used == pytest.approx(cost)
+
+
+def test_a_step_that_crosses_the_cost_ceiling_is_charged_once() -> None:
+    """``record_cost`` adds before it raises, so the stream must count that cost as charged."""
+    tracker = BudgetTracker(_bounds(cost_budget_usd=0.01))
+    charges = StreamCharges()
+
+    reason = charge_review_stream_step(
+        {"input_tokens": 10, "output_tokens": 0},
+        budget_tracker=tracker,
+        provider_budget=None,
+        stream_charges=charges,
+        cost_usd=0.02,
+    )
+    assert reason is not None
+    assert "cost budget" in reason
+    assert charges.cost_usd == pytest.approx(0.02)
+
+    with pytest.raises(BudgetExhausted):
+        record_agent_usage(
+            tracker,
+            AgentUsage(agent="opencode", input_tokens=10, output_tokens=0, cost_usd=0.03),
+            streamed=charges,
+        )
+    # Only the 0.01 the stream never saw is added on top of the streamed 0.02.
+    assert tracker.cost_used == pytest.approx(0.03)
+
+
+def test_a_provider_budget_stop_still_charges_the_step_cost() -> None:
+    tracker = BudgetTracker(_bounds())
+    provider = TokenBudget(max_tokens=50, advisory=False)
+    charges = StreamCharges()
+
+    reason = charge_review_stream_step(
+        {"input_tokens": 60, "output_tokens": 0},
+        budget_tracker=tracker,
+        provider_budget=provider,
+        stream_charges=charges,
+        cost_usd=0.4,
+    )
+
+    assert reason == "budget"
+    assert tracker.cost_used == pytest.approx(0.4)
+    assert charges == StreamCharges(tokens=60, cost_usd=0.4, input_tokens=60)

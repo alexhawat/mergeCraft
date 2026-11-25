@@ -95,13 +95,25 @@ class StreamCharges:
     run pays once. They belong to one dispatch: reviewers run concurrently on one
     tracker, and another reviewer's streamed steps must not reduce this charge.
 
+    The input/output split of those same steps is kept beside the totals. A
+    dispatch that times out or raises never reports its final usage, and the
+    split is what lets its observed partial usage still be listed once (#1588).
+
     Attributes:
         tokens: Tokens charged step by step.
         cost_usd: Cost charged step by step, in USD.
+        input_tokens: Input tokens the streamed steps reported.
+        output_tokens: Output tokens the streamed steps reported.
+        cache_read_tokens: Cached input tokens the streamed steps reported.
+        cache_write_tokens: Cache-write input tokens the streamed steps reported.
     """
 
     tokens: int = 0
     cost_usd: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 @dataclass(slots=True)
