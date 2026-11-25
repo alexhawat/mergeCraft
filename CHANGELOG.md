@@ -107,6 +107,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   traceback, so the Quickstart failed at its model step. Only the keys a command
   changes are rewritten; comments elsewhere in the file are kept (#1336, #1455).
 
+- Legacy `mergecraft auth <provider>` now finds the provider registry from any
+  directory of a checkout and writes the indexed `LLM_PROVIDER_<N>_…` key, with
+  its confirmation naming the key it wrote. It used to read the registry from
+  the working directory, so a run from a subdirectory silently wrote the flat
+  legacy secret and skipped the indexed wiring (#1557).
+- `config show` and `config explain` exit `2` with a plain message for an
+  unknown key instead of `30` with the message quoted twice; `config show
+  models` shows the whole configured fallback chain; and a missing model chain
+  prints one actionable line instead of a traceback (#1569).
+- An unknown rule id under `gates.override` is now an error that names the key
+  and lists the valid ids, instead of a silently stored override that is never
+  selected (#1564).
+- `mergecraft gha token` writes its `::add-mask::` command raw and escaped to
+  stdout, like the other workflow commands, so Rich markup, soft-wrapping and
+  colour can no longer change the string the runner masks (#1558).
+- CLI help and error tests no longer depend on terminal width: a phrase that
+  wraps across a Rich panel border is matched through one shared normaliser
+  (#1565).
+
+### Removed
+
+- `validate_config_secret_split` (never called outside tests; its `.env`
+  credential branch could not report anything) (#1564).
+
 ### Security
 
 - The `gh` binary in both images, and `actionlint` in the analyzers image, are
