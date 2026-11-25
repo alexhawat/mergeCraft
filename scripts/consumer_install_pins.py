@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 METADATA = "docs/consumer-release.json"
+SECURITY_DOC = "SECURITY.md"
 PIN_PATHS = (
     "README.md",
     "AGENTS-mergecraft.md",
@@ -27,6 +28,7 @@ PIN_PATHS = (
 RELEASE_VERSION = re.compile(r"\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?")
 INSTALL_PIN = re.compile(r"mergecraft-action==([0-9][A-Za-z0-9.]*)")
 RELEASE_DOCS = re.compile(r"https://github\.com/alexhawat/mergeCraft/tree/v([^/\s)]+)/docs")
+SUPPORTED_RELEASE = re.compile(r"pre-release \(currently `([^`\s]+)`\)")
 
 
 def documented_release(root: Path) -> str:
@@ -62,6 +64,11 @@ def plan_pin_updates(root: Path, new_version: str) -> dict[Path, str]:
         updates[path] = RELEASE_DOCS.sub(
             f"https://github.com/alexhawat/mergeCraft/tree/v{release}/docs", updated
         )
+    security_path = root / SECURITY_DOC
+    security = security_path.read_text(encoding="utf-8")
+    if SUPPORTED_RELEASE.findall(security) != [old_version]:
+        raise ValueError(f"{security_path}: must name {old_version} once as the supported release")
+    updates[security_path] = SUPPORTED_RELEASE.sub(f"pre-release (currently `{release}`)", security)
     lock_path = root / "skills-lock.json"
     lock = json.loads(lock_path.read_text(encoding="utf-8"))
     for path, text in updates.items():

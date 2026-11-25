@@ -270,6 +270,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Traces are separate for each review in one process, Codex tool spans keep their
   arguments and results, and a custom CA reaches the Node agent CLIs
   (#1375, #1466).
+- Preparing a release updates the supported version in `SECURITY.md`, and the
+  merge-back updates the default install ref in `evals/README.md`. Both were left
+  on the previous release, which failed the release branch's own checks.
 - Invalid option values exit `2` and a missing review base exits `30`
   (#1343, #1530).
 - The hardened workflow gate fails when the review step itself failed
