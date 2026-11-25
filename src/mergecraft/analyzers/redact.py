@@ -186,6 +186,34 @@ _CREDENTIAL_KEY_WORD_RE = re.compile(
 # unchanged for every value that is not literally one of these strings.
 _KNOWN_SAFE_LITERALS: frozenset[str] = frozenset({"--remote-debugging-port"})
 
+# Docker/OCI image references (``ghcr.io/owner/app:v1.2.3``, ``repo@sha256:…``).
+# A reference is public build metadata; only the shapes below are exempt, and
+# every host label, path segment and tag must pass the same ordinary-word rules
+# the path exemption uses, so a credential pasted into a reference stays redacted.
+_IMAGE_REF_RE = re.compile(
+    r"^(?P<host>[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+)"
+    r"(?P<path>(?:/[A-Za-z0-9_][A-Za-z0-9._-]*)+)"
+    r"(?::(?P<tag>[A-Za-z0-9][A-Za-z0-9._-]{0,31}))?"
+    r"(?:@(?P<digest>sha256:[a-f0-9]{64}))?$"
+)
+# Version strings (SemVer 2.0 with an optional ``v``/PEP 440 short suffix, and
+# their image-tag variants such as ``3.12-slim``). The release core needs at
+# least two numeric parts, and every dot/hyphen/plus-separated identifier is
+# bounded, so a long build blob never rides in on a version.
+_VERSION_TOKEN_RE = re.compile(
+    r"^v?(?P<release>[0-9]+(?:\.[0-9]+)+)"
+    r"(?P<pep440>[a-z][0-9]*)?"
+    r"(?P<prerelease>-(?:[0-9A-Za-z-]+)(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?P<build>\+(?:[0-9A-Za-z-]+)(?:\.[0-9A-Za-z-]+)*)?$"
+)
+_MAX_VERSION_TOKEN_CHARS = 48
+_MAX_VERSION_IDENTIFIER_CHARS = 16
+_MAX_VERSIONED_STEM_CHARS = 48
+# A path segment with more than this many digit runs is a random-looking run
+# (``e405ee00d36e8e0``), not a name with a version suffix (``x86_64``).
+_MAX_PATH_SEGMENT_DIGIT_RUNS = 2
+
 # GitHub permalinks (#1281). With an embedded 40/64-hex SHA or run id, a link
 # scores ~4.5-4.6 bits/char once the entropy pass sees ``com/<owner>/<repo>/…``
 # as one token, and every one of them rendered as ``<redacted>``. Only these
@@ -391,14 +419,107 @@ def _should_force_redact_dense_token(token: str) -> bool:
 
 
 def _looks_like_repo_path_token(token: str) -> bool:
-    """Repo-relative path prefixes are not secrets — preserve for CI blame paths."""
-    if "/" not in token or _REPO_PATH_TOKEN_RE.match(token) is None:
+    """Repo-relative, absolute and ``name=/path`` paths are not secrets.
+
+    A token is kept when it carries a filename suffix on its last segment, or
+    when **every** segment is a bounded ordinary word (``src/mergecraft/cli``,
+    ``/root/.cache/mergecraft/analyzers``, ``python=/usr/bin/python3.12``). A
+    single dense segment makes the whole token ineligible, so a credential
+    pasted into a path stays redacted.
+    """
+    candidate = token
+    if "=" in token:
+        key, _, value = token.partition("=")
+        if _SIMPLE_METADATA_TOKEN_RE.fullmatch(key) is None:
+            return False
+        if _CREDENTIAL_KEY_WORD_RE.search(key) is not None:
+            return False
+        candidate = value
+    if "/" not in candidate or _REPO_PATH_TOKEN_RE.match(candidate) is None:
         return False
-    segments = [segment for segment in token.split("/") if segment]
+    segments = [segment for segment in candidate.split("/") if segment]
     if not segments or not all(re.search(r"[A-Za-z]", segment) for segment in segments):
         return False
     last = segments[-1]
-    return "." in last or _is_benign_filename(token)
+    if "." in last or _is_benign_filename(candidate):
+        return True
+    return _is_benign_path_prefix(segments)
+
+
+def _is_benign_path_prefix(segments: list[str]) -> bool:
+    """Every segment is an ordinary word; a dotted version may end the path."""
+    for index, segment in enumerate(segments):
+        if _is_ordinary_path_segment(segment):
+            continue
+        if index == len(segments) - 1 and _is_benign_versioned_stem(segment):
+            continue
+        return False
+    return True
+
+
+def _is_ordinary_path_segment(segment: str) -> bool:
+    """A segment that is a bounded ordinary word, not a random-looking run."""
+    candidate = segment.removeprefix(".")
+    if not _is_benign_path_stem_segment(candidate):
+        return False
+    # A random hex/base32 run alternates letters and digits many times, and its
+    # digit runs are long. A name with a version or architecture suffix
+    # (``python3``, ``sha256``, ``x86_64``) has at most two short ones.
+    digit_runs = _DIGIT_RUN_RE.findall(candidate)
+    if len(digit_runs) > _MAX_PATH_SEGMENT_DIGIT_RUNS:
+        return False
+    return len(digit_runs) < 2 or all(len(run) <= 2 for run in digit_runs)
+
+
+def _is_benign_versioned_stem(segment: str) -> bool:
+    """A benign stem plus a dotted numeric/identifier tail (``python3.12``)."""
+    candidate = segment.removeprefix(".")
+    if len(candidate) > _MAX_VERSIONED_STEM_CHARS or "." not in candidate:
+        return False
+    head, *tail = candidate.split(".")
+    if not head or not tail or not _is_benign_path_stem_segment(head):
+        return False
+    return all(part.isdigit() or _is_benign_identifier(part) for part in tail)
+
+
+def _looks_like_version_token(token: str) -> bool:
+    """A bounded version string is public build metadata, not a secret."""
+    if len(token) > _MAX_VERSION_TOKEN_CHARS or _VERSION_TOKEN_RE.match(token) is None:
+        return False
+    identifiers = [part for part in re.split(r"[.+-]", token.removeprefix("v")) if part]
+    return all(len(part) <= _MAX_VERSION_IDENTIFIER_CHARS for part in identifiers)
+
+
+def _looks_like_image_ref_token(token: str) -> bool:
+    """A container image reference is public build metadata, not a secret."""
+    match = _IMAGE_REF_RE.match(token)
+    if match is None:
+        return False
+    host_labels = match.group("host").split(".")
+    segments = [segment for segment in match.group("path").split("/") if segment]
+    tag = match.group("tag")
+    return (
+        all(_is_benign_path_stem_segment(label) for label in host_labels)
+        and bool(segments)
+        and _is_benign_path_prefix(segments)
+        and (tag is None or _is_benign_image_tag(tag))
+    )
+
+
+def _is_benign_image_tag(tag: str) -> bool:
+    """A tag is a version or one bounded ordinary word (``latest``, ``3.12-slim``)."""
+    return _looks_like_version_token(tag) or _is_ordinary_path_segment(tag)
+
+
+def _is_exempt_public_token(token: str) -> bool:
+    """Public build metadata kept verbatim: paths, image references and versions."""
+    if _looks_like_repo_path_token(token):
+        return True
+    # An image reference and a version string both contain a dot, and the
+    # entropy token alphabet has none: only the whole-token check can see them.
+    if "." not in token:
+        return False
+    return _looks_like_image_ref_token(token) or _looks_like_version_token(token)
 
 
 def _is_benign_path_stem_segment(segment: str) -> bool:
@@ -517,9 +638,9 @@ def _entropy_redact(text: str) -> str:
             absolute = token.startswith("/") and token.count("/") >= 2
             if absolute or _PATH_SUFFIX_RE.match(text, match.end()) is not None:
                 segments = token.removeprefix("/").split("/")
-                if all(_is_benign_path_stem_segment(part) for part in segments):
+                if _is_benign_path_prefix(segments):
                     return token
-        if _looks_like_repo_path_token(token):
+        if _is_exempt_public_token(token):
             return token
         if len(token) < _MIN_ENTROPY_LENGTH:
             return token
@@ -586,7 +707,7 @@ def _maybe_redact_entire_string(text: str, redacted: str) -> str:
         return redacted
     if _BENIGN_HEX_40_RE.match(text) or _BENIGN_HEX_64_RE.match(text):
         return redacted
-    if _looks_like_repo_path_token(text):
+    if _is_exempt_public_token(text):
         return redacted
     if _is_benign_identifier(text):
         return redacted

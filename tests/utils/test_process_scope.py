@@ -162,8 +162,14 @@ def test_analyzer_reap_is_bounded(
             pass_fds=(),
             preexec_fn=None,
         )
-    assert child.communicates == ([5] if late_cancel else [2, 5])
-    assert child.waits == [1]
+    # The pipes belong to the reader threads, so the reap itself is a bounded
+    # ``wait``: the analyzer budget, the 5-second drain, then the post-kill reap.
+    # ``UnreapableChild.wait`` asserts that no wait is unbounded.
+    waits = child.waits
+    assert child.communicates == []
+    assert waits[-2:] == [5, 1]
+    assert all(timeout is not None and 0 < timeout <= 5 for timeout in waits)
+    assert all(timeout <= 2 for timeout in waits[:-2])
     assert child.killed
     assert child.pid in signals
     assert child.pid not in process_group.active_process_groups()

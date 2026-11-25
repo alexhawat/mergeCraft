@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import io
 import re
 from pathlib import Path
 from typing import Any
@@ -250,9 +251,10 @@ def patch_analyzer_spawn(monkeypatch: Any, run_like: Any) -> None:
     """Route the analyzer runner's spawn through a ``subprocess.run``-style fake.
 
     The runner starts analyzers with ``Popen(start_new_session=True)`` so a
-    timeout can kill the whole process group; tests that only care about the
-    argv/env/kwargs of the spawn keep their ``run``-shaped fake and install it
-    here. ``run_like(argv, **kwargs)`` returns a ``CompletedProcess``.
+    timeout can kill the whole process group, then waits on the process while a
+    reader thread drains each pipe; tests that only care about the argv/env/kwargs
+    of the spawn keep their ``run``-shaped fake and install it here.
+    ``run_like(argv, **kwargs)`` returns a ``CompletedProcess``.
     """
     import subprocess
 
@@ -261,14 +263,18 @@ def patch_analyzer_spawn(monkeypatch: Any, run_like: Any) -> None:
             self.pid = 0
             self._completed = run_like(argv, **kwargs)
             self.returncode = self._completed.returncode
-
-        stdin = None
-        stdout = None
-        stderr = None
+            # The runner drains ``stdout``/``stderr`` with a reader per pipe.
+            self.stdin = None
+            self.stdout = io.StringIO(self._completed.stdout or "")
+            self.stderr = io.StringIO(self._completed.stderr or "")
 
         def communicate(self, timeout: float | None = None) -> tuple[Any, Any]:
             _ = timeout
             return self._completed.stdout, self._completed.stderr
+
+        def wait(self, timeout: float | None = None) -> int:
+            _ = timeout
+            return self.returncode
 
     monkeypatch.setattr(subprocess, "Popen", _FakePopen)
 
