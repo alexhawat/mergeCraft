@@ -42,27 +42,42 @@ from mergecraft.utils.run_bounds import BudgetExhausted, BudgetTracker, resolve_
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from mergecraft.agents.shared import AgentRunContext
     from mergecraft.mcp.context import ToolContext
+    from mergecraft.types import AgentId
 
 _COST_BUDGET_USD = 1.0
+#: ``reviewer3`` runs at a second dispatch level, after ``reviewer2``.
+_MULTI_LEVEL_CONFIG = _config(
+    extra="""  reviewer3:
+    role: reviewer
+    after: reviewer2
+    modelChain:
+      - openai/gpt-5.3-codex
+"""
+)
 _OVER = AgentUsage(agent="claude", input_tokens=200_000, output_tokens=100_000, cost_usd=1.25)
 _UNDER = AgentUsage(agent="claude", input_tokens=20_000, output_tokens=10_000, cost_usd=0.2)
 
 
 class _Primary:
-    """A primary reviewer that submits its verdict and reports its usage on completion."""
+    """A primary reviewer that submits its verdict and reports its usage on completion.
 
-    name = "claude"
+    It satisfies the ``Agent`` protocol, so it is passed to ``RunContext`` as is.
+    """
+
+    name: AgentId = "claude"
 
     def __init__(self, tool_context: ToolContext, usage: AgentUsage) -> None:
         self.tool_context = tool_context
         self.usage = usage
         self.calls = 0
 
-    async def install(self) -> None:
-        return None
+    async def install(self, token: str | None = None) -> str:
+        del token
+        return "fake"
 
-    async def run(self, ctx: Any) -> AgentResult:
+    async def run(self, ctx: AgentRunContext) -> AgentResult:
         self.calls += 1
         await submit_verdict(self.tool_context, "approve", [])
         result = await finalize_agent_result(
@@ -85,8 +100,9 @@ def _action_run(
     *,
     primary_usage: AgentUsage,
     secondary_result: AgentResult,
+    config: str | None = None,
 ) -> _Run:
-    write_config(tmp_path, _config())
+    write_config(tmp_path, config or _config())
     monkeypatch.chdir(tmp_path)
     tool_context = publication_ctx(tmp_path, github=RecordingReviewGitHub(), trust_tier="trusted")
     tracker = BudgetTracker(
@@ -107,7 +123,7 @@ def _action_run(
         run_ctx=run_ctx,
         tmpdir=tool_context.tmpdir,
         budget_tracker=tracker,
-        agent=primary,  # type: ignore[arg-type]  # — a duck-typed fake driver
+        agent=primary,
         agent_id="claude",
         payload={"event": {"trigger": "pull_request"}},
         run_start_instructions={secondary.name: run_ctx.instructions},
@@ -245,3 +261,57 @@ def test_the_outer_classifier_maps_a_budget_stop_to_inconclusive() -> None:
     assert main_mod._classify_error_outcome(RuntimeError("socket closed")) is (
         RunOutcome.infra_error
     )
+
+
+# --------------------------------------------------------------------------- multi-level roster
+
+
+def _not_dispatched(run: _Run, agent_id: str) -> str:
+    assert run.ctx.tool_state is not None
+    reason = run.ctx.tool_state.reviewer_dispatch_errors[agent_id]
+    assert reason.startswith(f"secondary reviewer {agent_id!r} was not dispatched")
+    return reason
+
+
+async def test_a_primary_overrun_records_every_roster_level_as_not_dispatched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No secondary runs, and each one, at either level, says why it never did."""
+    run = _action_run(
+        tmp_path,
+        monkeypatch,
+        primary_usage=_OVER,
+        secondary_result=AgentResult(success=True, output="ok", usage=_UNDER),
+        config=_MULTI_LEVEL_CONFIG,
+    )
+
+    await main_mod._dispatch_agent_with_deadline(run.ctx)
+    roster = await main_mod._run_server_roster_reviewers_if_needed(run.ctx)
+
+    assert run.secondary.calls == 0
+    assert roster is not None
+    assert roster.dispatched_agent_ids == ()
+    for agent_id in ("reviewer2", "reviewer3"):
+        assert "cost budget exhausted" in _not_dispatched(run, agent_id)
+        assert agent_id in (roster.hard_error or "")
+
+
+async def test_a_level_one_overrun_records_the_later_level_as_not_dispatched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The overrun stops the roster mid-way; the level it never reached is still recorded."""
+    run = _action_run(
+        tmp_path,
+        monkeypatch,
+        primary_usage=_UNDER,
+        secondary_result=AgentResult(success=True, output="ok", usage=_OVER),
+        config=_MULTI_LEVEL_CONFIG,
+    )
+
+    outcome = await _review_and_finalize(run)
+
+    assert run.secondary.calls == 1
+    assert run.ctx.tool_state is not None
+    assert "exceeded the run budget" in run.ctx.tool_state.reviewer_dispatch_errors["reviewer2"]
+    assert "cost budget exhausted" in _not_dispatched(run, "reviewer3")
+    _assert_inconclusive_budget_stop(run, outcome)

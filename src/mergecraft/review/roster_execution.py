@@ -831,6 +831,52 @@ async def run_pending_roster_reviewers(
     )
 
 
+def record_budget_skipped_reviewers(
+    tool_context: ToolContext,
+    *,
+    exhausted: BudgetExhausted,
+    repo_root: Path | None = None,
+) -> RosterExecutionSummary:
+    """Record every secondary reviewer not yet recorded as not dispatched; dispatch nothing.
+
+    The skip-only half of :func:`run_pending_roster_reviewers`, for a caller that
+    already knows the run's budget is spent: every dispatch level is walked and
+    each reviewer without a recorded run or error is marked as never dispatched,
+    naming the budget, the same way the roster marks the levels it skips itself.
+    No reviewer is resolved or invoked, whatever the budget tracker holds.
+
+    Args:
+        tool_context: The run's tool context.
+        exhausted: The exhaustion that stopped dispatch.
+        repo_root: The checkout root; defaults to the primary checkout.
+
+    Returns:
+        A summary whose ``hard_error`` names the required reviewers left
+        undispatched, and that dispatched no one.
+    """
+    from mergecraft.config.settings_snapshot import repo_settings_from_context
+
+    root = repo_root or Path(primary_repo_state_dir(tool_context.tool_state))
+    effective_settings = repo_settings_from_context(tool_context)
+    registry = load_registry(settings=effective_settings, repo_root=root)
+    reviewers = registry.resolve_roles(AgentRole.reviewer)
+    if len(reviewers) <= 1:
+        return RosterExecutionSummary(hard_error=None, dispatched_agent_ids=())
+    primary_id = reviewers[0].agent_id
+    errors: list[str] = []
+    for batch in reviewer_dispatch_batches(registry):
+        errors.extend(
+            _record_budget_skips(
+                tool_context,
+                batch,
+                primary_id=primary_id,
+                exhausted=exhausted,
+                settings=effective_settings,
+            )
+        )
+    return RosterExecutionSummary(hard_error="; ".join(errors) or None, dispatched_agent_ids=())
+
+
 class _FileGroupDispatchError(RuntimeError):
     """A file group produced no findings; its reason is already recorded."""
 
@@ -1152,6 +1198,7 @@ __all__ = [
     "ROSTER_INFRA_REASON_KEY",
     "RosterExecutionSummary",
     "apply_roster_failure",
+    "record_budget_skipped_reviewers",
     "reviewer_is_required",
     "roster_dispatch_failure_message",
     "roster_dispatch_gaps",

@@ -47,6 +47,7 @@ from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.review.roster_execution import (
     RosterExecutionSummary,
     primary_repo_state_dir,
+    record_budget_skipped_reviewers,
     run_budget_exhaustion,
     run_file_group_reviewers,
 )
@@ -1093,7 +1094,9 @@ async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecu
     (#1584). An exhaustion raised by the fan-out or the roster is the run's,
     never an infrastructure fault: it is kept on ``ctx.budget_exhaustion`` so
     finalization publishes the inconclusive budget outcome and its reason
-    (#1585), and no roster summary is returned.
+    (#1585). Either way, every secondary reviewer, at every dispatch level, that
+    never ran is recorded as not dispatched, and the summary returned names the
+    required ones (:func:`record_budget_skipped_reviewers`).
     """
     assert ctx.tool_context is not None
     assert ctx.tool_state is not None
@@ -1102,23 +1105,35 @@ async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecu
     if ctx.tool_state.selected_mode not in {"Review", "IncrementalReview"}:
         return None
     if (exhausted := _recorded_budget_exhaustion(ctx)) is not None:
-        _note_budget_exhaustion(ctx, exhausted)
         logger.warning(
             "» run budget exhausted ({}); no file-group or secondary reviewer is dispatched: {}",
             exhausted.kind,
             exhausted,
         )
-        return None
+        return _skip_secondary_reviewers(ctx, exhausted)
     try:
         return await _dispatch_server_side_reviewers(ctx)
     except BudgetExhausted as exc:
-        _note_budget_exhaustion(ctx, exc)
         logger.warning(
             "» run budget exhausted ({}) during server-side reviewer dispatch: {}",
             exc.kind,
             exc,
         )
-        return None
+        return _skip_secondary_reviewers(ctx, exc)
+
+
+def _skip_secondary_reviewers(
+    ctx: RunContext, exhausted: BudgetExhausted
+) -> RosterExecutionSummary:
+    """Keep the exhaustion for finalization and record every undispatched secondary."""
+    assert ctx.tool_context is not None
+    assert ctx.tool_state is not None
+    _note_budget_exhaustion(ctx, exhausted)
+    return record_budget_skipped_reviewers(
+        ctx.tool_context,
+        exhausted=exhausted,
+        repo_root=Path(primary_repo_state_dir(ctx.tool_state)),
+    )
 
 
 async def _dispatch_server_side_reviewers(ctx: RunContext) -> RosterExecutionSummary | None:

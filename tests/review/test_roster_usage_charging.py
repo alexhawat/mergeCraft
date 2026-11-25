@@ -905,3 +905,36 @@ async def test_an_exhausted_run_budget_dispatches_no_secondary_reviewer(
     assert reason.startswith("secondary reviewer 'reviewer2' was not dispatched")
     assert "tool-call budget exhausted" in reason
     assert summary.hard_error == reason
+
+
+async def test_an_exhaustion_during_one_level_skips_the_next_level(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1584 — a later dispatch level never starts once an earlier one spent the budget."""
+
+    class _ToolCallOverrun(_UsageAgent):
+        async def run(self, ctx: AgentRunContext) -> AgentResult:
+            assert ctx.budget_tracker is not None
+            with pytest.raises(BudgetExhausted):
+                ctx.budget_tracker.record_tool_call()
+            return await super().run(ctx)
+
+    agent = _ToolCallOverrun(AgentResult(success=True, output="ok", usage=_SMALL_USAGE))
+    tracker = BudgetTracker(bounds=replace(resolve_run_bounds(env={}), tool_call_budget=0))
+    config = _config(
+        extra="""  reviewer3:
+    role: reviewer
+    after: reviewer2
+    modelChain:
+      - openai/gpt-5.3-codex
+"""
+    )
+    env = _build_env(tmp_path, monkeypatch, agent=agent, config=config, tracker=tracker)
+
+    summary = await _run_roster(env)
+
+    assert agent.calls == 1
+    assert summary.dispatched_agent_ids == ("reviewer2",)
+    reason = env.tool_state.reviewer_dispatch_errors["reviewer3"]
+    assert reason.startswith("secondary reviewer 'reviewer3' was not dispatched")
+    assert summary.hard_error == reason
