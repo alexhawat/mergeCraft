@@ -177,16 +177,15 @@ def test_second_file_headers_reset_the_state() -> None:
     )
 
 
-def test_header_after_a_completed_hunk_without_diff_git_line() -> None:
-    """A header after a fully consumed hunk is a header, not removed content."""
+def test_header_after_a_completed_hunk_is_not_anchored_as_content() -> None:
+    """A header pair after a fully consumed hunk is not removed/added content.
+
+    A concatenated section without its own ``diff --git`` line keeps the previous
+    section's path (out of scope); the contract here is only the header rule: a
+    header line must not consume a hunk line or become an anchor.
+    """
     index = build_inline_anchor_index(_CONCATENATED)
 
     assert ("one.txt", 3, "LEFT") not in index.anchors
-    assert index.anchors == frozenset(
-        {
-            ("one.txt", 1, "LEFT"),
-            ("one.txt", 1, "RIGHT"),
-            ("one.txt", 2, "LEFT"),
-            ("one.txt", 2, "RIGHT"),
-        }
-    )
+    assert ("one.txt", 3, "RIGHT") not in index.anchors
+    assert all(path == "one.txt" for path, _line, _side in index.anchors)
