@@ -45,7 +45,6 @@ def _plan(tmp_path: Path, script: str, *, timeout_s: int = 120) -> AnalyzerPlan:
     )
 
 
-@pytest.mark.xfail(reason="green after W4", strict=True)
 @pytest.mark.timeout(120)
 def test_parent_retains_at_most_the_cap_per_stream(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -69,7 +68,6 @@ def test_parent_retains_at_most_the_cap_per_stream(
     assert handed["stderr"] <= _CAP_BYTES
 
 
-@pytest.mark.xfail(reason="green after W4", strict=True)
 @pytest.mark.timeout(180)
 def test_peak_memory_is_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cap = 1024 * 1024
