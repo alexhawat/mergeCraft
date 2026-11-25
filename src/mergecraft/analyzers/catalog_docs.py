@@ -646,6 +646,21 @@ def generate_analyzers_doc(manifests: Iterable[AnalyzerManifest] | None = None) 
     lines.extend(
         [
             "",
+            "### Captured analyzer output",
+            "",
+            "Analyzer stdout and stderr are read through one reader per pipe. Each reader",
+            "keeps at most 32 MiB per stream and discards the rest while it keeps reading to",
+            "end-of-stream, so a chatty analyzer cannot grow the reviewer's memory and never",
+            "blocks on a full pipe. The limit is enforced **while the output is read** and",
+            "counts bytes: a stream of multi-byte text can be cut below 32 Mi characters.",
+            "The retained head is then cut on a redaction-safe boundary, redacted, and capped",
+            'for display; an over-cap stream\'s outcome carries an "exceeded … per stream"',
+            "notice.",
+        ]
+    )
+    lines.extend(
+        [
+            "",
             "## Overrides",
             "",
             "Enable or disable tools in ``.mergecraft/config.yaml``:",

@@ -165,14 +165,15 @@ _TOKEN_BOUNDARY_SCAN_CHARS = 4096
 
 
 def _redaction_safe_head(text: str) -> str:
-    """Return the head of an over-cap stream, cut where no value straddles the cut.
+    """Return the head of a cut stream, cut where no value straddles the cut.
 
-    The cut lands after the last complete line inside the cap. When the head is
-    one long line (minified JSON), it lands just before the last character that
-    cannot belong to a token instead. Either way the kept text stays within the cap,
-    and a quoted value the head opens but does not close is dropped as well.
+    Applies to an over-cap stream and to a stream the reader truncated: the cut
+    lands after the last complete line inside the limit, or, when the head is one
+    long line (minified JSON), just before the last character that cannot belong
+    to a token. Either way the kept text stays within the limit, and a quoted
+    value the head opens but does not close is dropped as well.
     """
-    limit = MAX_CAPTURED_OUTPUT_CHARS
+    limit = min(MAX_CAPTURED_OUTPUT_CHARS, len(text))
     newline = text.rfind("\n", 0, limit)
     if newline >= limit // 2:
         return _drop_open_quoted_value(text[:newline])
@@ -221,16 +222,17 @@ def _redact_stream(text: str, *, plan: AnalyzerPlan) -> str:
     return redact_analyzer_output(text, tool_id=plan.manifest_id) if text else text
 
 
-def _redact_captured(text: str, *, plan: AnalyzerPlan) -> tuple[str, bool]:
+def _redact_captured(text: str, *, plan: AnalyzerPlan, truncated: bool = False) -> tuple[str, bool]:
     """Redact one captured stream, keeping at most the cap; flag a cut.
 
     Redaction has to see whole credentials: a cut at an arbitrary offset can
     leave a token's prefix below every rule's minimum length, and that prefix
-    survives redaction. An over-cap stream is cut on a safe boundary first, so the
-    redactor's work stays bounded by the cap. The result is capped again only
-    after redaction, where a cut can no longer expose anything.
+    survives redaction. An over-cap stream -- and a stream the reader truncated
+    at the cap -- is cut on a safe boundary first, so the redactor sees no
+    straddling value and its work stays bounded by the cap. The result is capped
+    again only after redaction, where a cut can no longer expose anything.
     """
-    cut = len(text) > MAX_CAPTURED_OUTPUT_CHARS
+    cut = truncated or len(text) > MAX_CAPTURED_OUTPUT_CHARS
     head = _redaction_safe_head(text) if cut else text
     redacted, recut = _cap_captured(_redact_stream(head.strip(), plan=plan))
     return redacted, cut or recut
@@ -420,7 +422,7 @@ def _requires_wrapping(
 
 
 class _CapturedProcess(subprocess.CompletedProcess[str]):
-    """A completed run that also records whether a reader dropped output bytes."""
+    """A completed run that also records which streams a reader had to cut."""
 
     def __init__(
         self,
@@ -429,10 +431,54 @@ class _CapturedProcess(subprocess.CompletedProcess[str]):
         stdout: str | None,
         stderr: str | None,
         *,
-        truncated: bool,
+        truncated: frozenset[str],
     ) -> None:
         super().__init__(args, returncode, stdout, stderr)
         self.truncated = truncated
+
+
+class _StreamReader:
+    """One pipe's bounded reader: its retained text and whether bytes were dropped."""
+
+    def __init__(self, name: str, stream: IO[str] | None) -> None:
+        self.name = name
+        self.text = ""
+        self.truncated = False
+        self._stream = stream
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._stream is None:
+            return
+        self._thread = threading.Thread(
+            target=self._drain, name=f"analyzer-{self.name}", daemon=True
+        )
+        self._thread.start()
+
+    def _drain(self) -> None:
+        if self._stream is not None:
+            self.text, self.truncated = _read_bounded_stream(
+                self._stream, MAX_CAPTURED_OUTPUT_CHARS
+            )
+
+    @property
+    def alive(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def join(self) -> None:
+        """Wait (bounded) for this reader; a reader that outlives the wait dropped output."""
+        if self._thread is None:
+            return
+        self._thread.join(timeout=_READER_JOIN_TIMEOUT_S)
+        if self._thread.is_alive():
+            self.truncated = True
+
+    def close(self) -> None:
+        """Close the pipe, unless a reader is still blocked on it."""
+        if self.alive or self._stream is None:
+            return
+        with contextlib.suppress(OSError, ValueError):
+            self._stream.close()
 
 
 def _read_bounded_stream(stream: IO[str], cap: int) -> tuple[str, bool]:
@@ -440,7 +486,9 @@ def _read_bounded_stream(stream: IO[str], cap: int) -> tuple[str, bool]:
 
     The cap counts UTF-8 bytes, so a multi-byte stream may retain fewer than
     ``cap`` characters. Reading continues after the cap so the child never blocks
-    on a full pipe. Returns the retained text and whether bytes were dropped.
+    on a full pipe. Returns the retained text and whether bytes were dropped; a
+    read that ends before EOF (the parent closed the pipe after a bounded join)
+    or on undecodable bytes is a dropped tail, not a complete stream.
     """
     kept: list[str] = []
     retained = 0
@@ -461,9 +509,14 @@ def _read_bounded_stream(stream: IO[str], cap: int) -> tuple[str, bool]:
             remaining = cap - retained
             if remaining > 0:
                 kept.append(encoded[:remaining].decode("utf-8", "ignore"))
+    except UnicodeDecodeError:
+        # ``text=True`` decodes strictly: undecodable bytes end this stream, and
+        # the outcome must say output was dropped rather than report a clean pass.
+        return "".join(kept), True
     except (OSError, ValueError):
-        # The parent closes the pipe once the child is gone; keep what was read.
-        return "".join(kept), truncated
+        # The parent closed the pipe after the bounded join, so the tail was
+        # dropped: report a cut, never a complete stream.
+        return "".join(kept), True
     return "".join(kept), truncated
 
 
@@ -486,7 +539,10 @@ def _run_in_own_session(
 
     Both pipes are drained by one reader thread each, which keeps at most
     ``MAX_CAPTURED_OUTPUT_CHARS`` bytes and keeps reading past the cap so the
-    child never blocks on a full pipe.
+    child never blocks on a full pipe. The run is finished only when the child
+    has exited **and** both pipes reached EOF: a grandchild still holding a pipe
+    keeps the output incomplete, which is reported as a timeout and takes the
+    group down, exactly as ``communicate()`` treated it.
     """
     if isinstance(preexec_fn, _SandboxLimits):
         # A Python callback between fork and exec can inherit locked interpreter
@@ -507,17 +563,9 @@ def _run_in_own_session(
         pass_fds=pass_fds,
         start_new_session=True,
     )
-    captured: dict[str, tuple[str, bool]] = {}
-
-    def _drain(name: str, stream: IO[str] | None) -> None:
-        if stream is None:
-            captured[name] = ("", False)
-            return
-        captured[name] = _read_bounded_stream(stream, MAX_CAPTURED_OUTPUT_CHARS)
-
     readers = [
-        threading.Thread(target=_drain, args=("stdout", proc.stdout), daemon=True),
-        threading.Thread(target=_drain, args=("stderr", proc.stderr), daemon=True),
+        _StreamReader("stdout", proc.stdout),
+        _StreamReader("stderr", proc.stderr),
     ]
     with contextlib.ExitStack() as scope:
         try:
@@ -525,6 +573,12 @@ def _run_in_own_session(
             for reader in readers:
                 reader.start()
             proc.wait(timeout=timeout_s)
+            # EOF, not just the child's exit: a grandchild that inherited a pipe
+            # never finished writing, which is the timeout ``communicate()`` saw.
+            for reader in readers:
+                reader.join()
+            if any(reader.alive for reader in readers):
+                raise subprocess.TimeoutExpired(run_argv, timeout_s)
             check_process_cancelled()
         except BaseException:
             # TimeoutExpired, KeyboardInterrupt, ...: take the whole tree down.
@@ -536,26 +590,22 @@ def _run_in_own_session(
                     proc.kill()
                 with contextlib.suppress(subprocess.TimeoutExpired):
                     proc.wait(timeout=1)
+            for reader in readers:
+                reader.join()
             raise
         finally:
+            # Never close a pipe a reader is still blocked on: ``close()`` waits
+            # for that thread's lock, and the writer may never let go. A daemon
+            # reader left blocked here dies with the parent.
             for reader in readers:
-                if reader.is_alive():
-                    reader.join(timeout=_READER_JOIN_TIMEOUT_S)
-            # Closing the pipe releases a reader still blocked on a stream a
-            # process outside the killed group holds open.
-            # Popen.__exit__ can wait indefinitely for an unreapable child.
-            for pipe in (proc.stdin, proc.stdout, proc.stderr):
-                if pipe is not None:
-                    pipe.close()
-        stdout, stdout_truncated = captured.get("stdout", ("", False))
-        stderr, stderr_truncated = captured.get("stderr", ("", False))
-        return _CapturedProcess(
-            run_argv,
-            proc.returncode,
-            stdout,
-            stderr,
-            truncated=stdout_truncated or stderr_truncated,
-        )
+                reader.close()
+    return _CapturedProcess(
+        run_argv,
+        proc.returncode,
+        readers[0].text,
+        readers[1].text,
+        truncated=frozenset(reader.name for reader in readers if reader.truncated),
+    )
 
 
 def _run_subprocess(
@@ -644,17 +694,21 @@ def _outcome_from_completed(
     plan: AnalyzerPlan,
     command: str,
     output_dir: Path | None = None,
-    truncated: bool = False,
+    truncated: frozenset[str] = frozenset(),
 ) -> AnalyzerOutcome:
     """Combine stdout/stderr, redact, persist to disk, and build the final outcome.
 
-    Each stream is redacted exactly once, on input already bounded by the
-    capture layer (:func:`_read_bounded_stream`); a stream whose reader dropped
-    bytes is reported with the same exceeded notice, even when the retained text
-    is under the character cap.
+    Each stream is redacted exactly once, on input already bounded by the capture
+    layer (:func:`_read_bounded_stream`). A stream whose reader dropped bytes is
+    cut on a redaction-safe boundary and reported with the exceeded notice, even
+    when the retained text is under the character cap.
     """
-    stdout, stdout_cut = _redact_captured(completed.stdout or "", plan=plan)
-    stderr, stderr_cut = _redact_captured(completed.stderr or "", plan=plan)
+    stdout, stdout_cut = _redact_captured(
+        completed.stdout or "", plan=plan, truncated="stdout" in truncated
+    )
+    stderr, stderr_cut = _redact_captured(
+        completed.stderr or "", plan=plan, truncated="stderr" in truncated
+    )
     for_parser = stdout or stderr
     combined = for_parser
     if stderr and stdout:
@@ -668,7 +722,7 @@ def _outcome_from_completed(
     # neither stream; persisting that turned a clean run into "failed to parse".
     output_path = _persist_output(for_parser, plan=plan, output_dir=output_dir)
     display = _truncate(combined, output_path=output_path)
-    if stdout_cut or stderr_cut or truncated:
+    if stdout_cut or stderr_cut:
         display = (
             f"analyzer output exceeded {MAX_CAPTURED_OUTPUT_CHARS} chars per stream; "
             f"the rest was dropped before parsing\n{display}"
@@ -797,14 +851,12 @@ def run_plan(
         )
         if isinstance(result, AnalyzerOutcome):
             return result
-        # Only the capture layer drops bytes; any other CompletedProcess reports none.
-        truncated = isinstance(result, _CapturedProcess) and result.truncated
         return _outcome_from_completed(
             result,
             plan=plan,
             command=command,
             output_dir=output_dir,
-            truncated=truncated,
+            truncated=result.truncated,
         )
     except FilteredEgressSetupError as exc:
         return AnalyzerOutcome(

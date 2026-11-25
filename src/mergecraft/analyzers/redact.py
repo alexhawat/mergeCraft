@@ -210,6 +210,9 @@ _VERSION_TOKEN_RE = re.compile(
 _MAX_VERSION_TOKEN_CHARS = 48
 _MAX_VERSION_IDENTIFIER_CHARS = 16
 _MAX_VERSIONED_STEM_CHARS = 48
+# A path segment with more than this many digit runs is a random-looking run
+# (``e405ee00d36e8e0``), not a name with a version suffix (``x86_64``).
+_MAX_PATH_SEGMENT_DIGIT_RUNS = 2
 
 # GitHub permalinks (#1281). With an embedded 40/64-hex SHA or run id, a link
 # scores ~4.5-4.6 bits/char once the entropy pass sees ``com/<owner>/<repo>/…``
@@ -446,12 +449,22 @@ def _looks_like_repo_path_token(token: str) -> bool:
 def _is_benign_path_prefix(segments: list[str]) -> bool:
     """Every segment is an ordinary word; a dotted version may end the path."""
     for index, segment in enumerate(segments):
-        if _is_benign_path_stem_segment(segment.removeprefix(".")):
+        if _is_ordinary_path_segment(segment):
             continue
         if index == len(segments) - 1 and _is_benign_versioned_stem(segment):
             continue
         return False
     return True
+
+
+def _is_ordinary_path_segment(segment: str) -> bool:
+    """A segment that is a bounded ordinary word, not a random-looking run."""
+    candidate = segment.removeprefix(".")
+    if not _is_benign_path_stem_segment(candidate):
+        return False
+    # A random hex/base32 run alternates letters and digits many times; a name
+    # with a version suffix (``python3``, ``x86_64``) does not.
+    return len(_DIGIT_RUN_RE.findall(candidate)) <= _MAX_PATH_SEGMENT_DIGIT_RUNS
 
 
 def _is_benign_versioned_stem(segment: str) -> bool:
@@ -490,19 +503,19 @@ def _looks_like_image_ref_token(token: str) -> bool:
 
 
 def _is_benign_image_tag(tag: str) -> bool:
-    """A tag is a version or a short ordinary word (``latest``, ``3.12-slim``)."""
-    if _looks_like_version_token(tag):
-        return True
-    return not _looks_like_secret_shape(tag)
+    """A tag is a version or one bounded ordinary word (``latest``, ``3.12-slim``)."""
+    return _looks_like_version_token(tag) or _is_ordinary_path_segment(tag)
 
 
 def _is_exempt_public_token(token: str) -> bool:
     """Public build metadata kept verbatim: paths, image references and versions."""
-    return (
-        _looks_like_repo_path_token(token)
-        or _looks_like_image_ref_token(token)
-        or _looks_like_version_token(token)
-    )
+    if _looks_like_repo_path_token(token):
+        return True
+    # An image reference and a version string both contain a dot, and the
+    # entropy token alphabet has none: only the whole-token check can see them.
+    if "." not in token:
+        return False
+    return _looks_like_image_ref_token(token) or _looks_like_version_token(token)
 
 
 def _is_benign_path_stem_segment(segment: str) -> bool:
@@ -621,7 +634,7 @@ def _entropy_redact(text: str) -> str:
             absolute = token.startswith("/") and token.count("/") >= 2
             if absolute or _PATH_SUFFIX_RE.match(text, match.end()) is not None:
                 segments = token.removeprefix("/").split("/")
-                if all(_is_benign_path_stem_segment(part) for part in segments):
+                if _is_benign_path_prefix(segments):
                     return token
         if _is_exempt_public_token(token):
             return token
