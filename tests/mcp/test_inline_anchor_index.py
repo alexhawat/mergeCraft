@@ -102,7 +102,6 @@ def _lines(diff_text: str, side: str) -> list[int]:
     return sorted(line for _path, line, anchor_side in index.anchors if anchor_side == side)
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 def test_added_line_starting_with_two_pluses_is_anchored() -> None:
     """``++ x`` adds ``+++ x`` to the hunk; the last RIGHT anchor is line 4."""
     index = build_inline_anchor_index(_ADDED_PLUS_PLUS)
@@ -111,7 +110,6 @@ def test_added_line_starting_with_two_pluses_is_anchored() -> None:
     assert index.hunk_ranges["m.sql"]["RIGHT"] == [(1, 4)]
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 def test_removed_sql_comment_line_is_anchored() -> None:
     """A removed ``-- old comment`` keeps its LEFT anchor at the true line."""
     index = build_inline_anchor_index(_REMOVED_SQL_COMMENT)
@@ -120,7 +118,6 @@ def test_removed_sql_comment_line_is_anchored() -> None:
     assert index.hunk_ranges["m.sql"]["LEFT"] == [(1, 4)]
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 @pytest.mark.parametrize(
     ("diff_text", "side"),
     [
@@ -142,7 +139,6 @@ def test_comment_on_last_line_of_such_a_hunk_is_kept(diff_text: str, side: str) 
     assert adjusted.comment["line"] == 4
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 def test_lines_after_the_content_line_keep_their_numbers() -> None:
     """Skipping the content line under-counts every later anchor by one."""
     assert _lines(_REMOVED_SQL_COMMENT_MIDDLE, "LEFT") == [1, 2, 3, 4, 5]
