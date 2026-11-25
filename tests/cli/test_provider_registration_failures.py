@@ -180,11 +180,19 @@ def test_repeating_add_after_a_failed_label_write_registers_once(
     assert _labels(tmp_path) == {"LLM_PROVIDER_1": "alpha"}
 
 
-def test_failed_config_write_removes_the_new_label(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "env_before",
+    [None, b"# local settings\nOTHER=1\nQUOTED='a b'\n"],
+    ids=["no-env-file", "existing-env-file"],
+)
+def test_failed_config_write_restores_the_env_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env_before: bytes | None
 ) -> None:
+    """The rollback leaves ``.env`` exactly as it was, including absent (MC-48de7f)."""
     config = _repo(tmp_path, monkeypatch)
-    (tmp_path / ".env").write_text("OTHER=1\n", encoding="utf-8")
+    env_file = tmp_path / ".env"
+    if env_before is not None:
+        env_file.write_bytes(env_before)
     config_before = config.read_bytes()
     with monkeypatch.context() as patch:
         patch.setattr(provider_cmd, "_write_config_dict", _raise(OSError("disk full")))
@@ -195,7 +203,7 @@ def test_failed_config_write_removes_the_new_label(
     assert "disk full" in output
     assert "registered provider" not in output
     assert config.read_bytes() == config_before
-    assert read_env_file(tmp_path) == {"OTHER": "1"}
+    assert (env_file.read_bytes() if env_file.exists() else None) == env_before
 
     retry = _invoke(*_ADD_ALPHA)
 

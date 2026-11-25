@@ -275,20 +275,15 @@ def _write_env_label(env_index: int, label: str, cwd: Path | None = None) -> Non
         raise ProviderLabelWriteError(msg)
 
 
-def _remove_env_label(env_index: int, cwd: Path | None = None) -> None:
-    """Remove the ``LLM_PROVIDER_<N>`` key :func:`_write_env_label` just added."""
-    from dotenv import unset_key
-
-    env_path = _env_path(cwd)
-    if not env_path.is_file():
-        return
+def _restore_env_file(env_path: Path, before: bytes | None) -> None:
+    """Put *env_path* back exactly as it was: *before* bytes, or absent when ``None``."""
     try:
-        unset_key(str(env_path), _indexed_label_key(env_index))
+        if before is None:
+            env_path.unlink(missing_ok=True)
+        else:
+            env_path.write_bytes(before)
     except OSError as exc:
-        console.print(
-            f"[yellow]could not remove {_indexed_label_key(env_index)} from {env_path}: "
-            f"{exc}[/yellow]"
-        )
+        console.print(f"[yellow]could not restore {env_path}: {exc}[/yellow]")
 
 
 def register_provider_entry(
@@ -302,22 +297,24 @@ def register_provider_entry(
 ) -> None:
     """Persist a new registry row and its local ``.env`` label, or neither (#1593).
 
-    The label is written first. :func:`allocate_registry_env_index` never hands
-    out an index that still has an ``LLM_PROVIDER_<N>`` key in the local ``.env``
-    or the environment, so the key is new and removing it restores the file when
-    the config write then fails. A label write that fails leaves both files as
-    they were, so repeating the command allocates the same index; writing the row
-    first would strand it and make the retry fail the duplicate-label check.
+    The label is written first, after snapshotting the ``.env`` it goes into.
+    When the config write then fails, the snapshot is restored byte for byte,
+    and a ``.env`` the label write created is removed again. A label write that
+    fails leaves both files as they were, so repeating the command allocates the
+    same index; writing the row first would strand it and make the retry fail
+    the duplicate-label check.
 
     Raises:
         ProviderLabelWriteError: When the label write failed; nothing was written.
     """
     env_index = int(entry["envIndex"])
-    _write_env_label(env_index, str(entry["label"]), cwd)
+    env_path = _env_path(cwd)
+    env_before = env_path.read_bytes() if env_path.is_file() else None
     try:
+        _write_env_label(env_index, str(entry["label"]), cwd)
         write_config(config_path, {**data, "providers": [*entries, entry]})
     except BaseException:
-        _remove_env_label(env_index, cwd)
+        _restore_env_file(env_path, env_before)
         raise
     entries.append(entry)
     data["providers"] = entries

@@ -251,10 +251,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   traceback and exit `1`. Neither `config.yaml` nor `.env` is changed (#1592).
 - `provider add` and `workflow provider add` now fail when the local
   `LLM_PROVIDER_<N>` label cannot be written, instead of printing success with
-  the label missing. The label is written before the registry row and removed
-  again if the row cannot be written, so a failed attempt leaves neither and
-  repeating the command registers the provider once, at the same index
-  (#1593).
+  the label missing. The label is written before the registry row, and `.env`
+  is restored byte for byte (or removed, if the write created it) when either
+  write fails, so a failed attempt leaves neither and repeating the command
+  registers the provider once, at the same index (#1593).
 - `config show` and `config explain` exit `2` with a plain message for an
   unknown key instead of `30` with the message quoted twice; `config show
   models` shows the whole configured fallback chain; and a missing model chain
