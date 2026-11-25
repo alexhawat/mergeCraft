@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from mergecraft.config.layered import load_layered_config_dict
+from mergecraft.review_policy.paths import strip_dot_slash_prefix
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -83,7 +84,7 @@ def trufflehog_allowed_findings() -> Mapping[tuple[str, str], str]:
 
 
 def _normalize_trufflehog_path(path: str) -> str:
-    return path.replace("\\", "/").lstrip("./")
+    return strip_dot_slash_prefix(path.replace("\\", "/"))
 
 
 def is_trufflehog_path_suppressed(

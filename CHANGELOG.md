@@ -32,6 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/agents.md`, `SECURITY.md` and `evals/README.md` name the current release
   again instead of a previous alpha, and tests keep them in step with
   `README.md` (#1570).
+- Inline review comments on a hunk that contains a changed line starting with
+  `--- ` or `+++ ` (for example a removed SQL `-- comment`) are no longer moved
+  one line up: those prefixes are file headers only while no hunk is open
+  (#1556).
+- Mutation-survivor paths and trufflehog suppression paths keep a leading dot
+  (`.github/…`, `.venv-dev/…`); only one leading `./` is removed, so a dotted
+  path matches its own changed path and a dotted virtualenv still hits its
+  suppression marker (#1563).
+- Corrected five docstrings and comments that described behaviour the code does
+  not have, and removed two unreachable branches they described: the explicit
+  packet `Decision` is always recomputed, the user prompt is passed verbatim,
+  `filter_diff`'s `changed_paths` is not read by the name matcher, and
+  `withdrawn_fingerprints` withdraws only marker fingerprints (#1562).
 - Every diff walker now splits diff text on `\n` only, as Git and `parse_diff`
   do: analyzer scoping, added-line and hunk iteration, the diff TOC, JEV hunk
   segmentation, diff-size budgets, diff summaries, triage, `lens`, and the
