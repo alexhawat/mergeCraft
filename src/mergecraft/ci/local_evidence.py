@@ -31,6 +31,7 @@ Exports:
 
 from __future__ import annotations
 
+import atexit
 import configparser
 import importlib.util
 import json
@@ -41,6 +42,7 @@ import subprocess
 import sys
 import tempfile
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from io import StringIO
 from pathlib import Path
@@ -231,12 +233,51 @@ def _argv_is_wrapped(argv: Sequence[str], method: str) -> bool:
     return False
 
 
+_LOCAL_TREE_SINK: ContextVar[list[Path] | None] = ContextVar(
+    "mergecraft_local_evidence_trees", default=None
+)
+
+
+def _new_local_tree(prefix: str) -> Path:
+    """Create a ``mergecraft-local-*`` tree owned by the enclosing run scope."""
+    path = Path(tempfile.mkdtemp(prefix=prefix))
+    sink = _LOCAL_TREE_SINK.get()
+    if sink is None:
+        # A direct caller outside a run scope still gets cleanup, at process exit.
+        atexit.register(shutil.rmtree, path, True)
+    else:
+        sink.append(path)
+    return path
+
+
+@contextmanager
+def _local_tree_scope() -> Iterator[None]:
+    """Remove every ``mergecraft-local-*`` tree created inside the block.
+
+    The trees outlive the helper that creates them: a sandboxed child mounts its
+    own scratch root, and the coverage and mutation artifacts are read by the
+    caller that owns the run. The run removes them on success and on error.
+    """
+    sink: list[Path] = []
+    token = _LOCAL_TREE_SINK.set(sink)
+    try:
+        yield
+    finally:
+        _LOCAL_TREE_SINK.reset(token)
+        for path in sink:
+            shutil.rmtree(path, ignore_errors=True)
+
+
 def _sandboxed_argv(argv: Sequence[str], *, repo_root: Path) -> list[str]:
     """Wrap *argv* in the real sandbox backend; refuse a no-op wrap.
 
     Uses :func:`mergecraft.analyzers.sandbox.build_analyzer_sandbox_argv`.
     A probe of ``unshare`` that still returns the raw argv is the #593
     fail-open and is refused. The unsandboxed-shell env override is ignored.
+
+    The scratch root is created here and removed by the enclosing
+    :func:`_local_tree_scope`, because the child that mounts it runs after this
+    helper returns.
     """
     from mergecraft.analyzers.sandbox import (
         SandboxLimits,
@@ -251,7 +292,7 @@ def _sandboxed_argv(argv: Sequence[str], *, repo_root: Path) -> list[str]:
             "local coverage/mutation requires a sandbox backend",
             code=SKIP_NO_SANDBOX_BACKEND,
         )
-    scratch = Path(tempfile.mkdtemp(prefix="mergecraft-local-sbx-"))
+    scratch = _new_local_tree("mergecraft-local-sbx-")
     context = build_sandbox_context(
         repo_root=repo_root,
         scratch_dir=scratch,
@@ -331,7 +372,7 @@ def _execute_coverage(repo_root: Path, *, timeout_seconds: int) -> Path | None:
     # interpreter owns pytest and project dependencies, for both run and export.
     executable = shutil.which("coverage")
     coverage_command = [executable] if executable else [sys.executable, "-m", "coverage"]
-    workdir = Path(tempfile.mkdtemp(prefix="mergecraft-local-cov-"))
+    workdir = _new_local_tree("mergecraft-local-cov-")
     data_file = workdir / ".coverage"
     dest = workdir / "coverage.json"
     try:
@@ -627,7 +668,7 @@ def _export_mutmut_json(
             )
     if not rows:
         return None
-    dest = Path(tempfile.mkdtemp(prefix="mergecraft-local-mut-")) / "mutmut-results.json"
+    dest = _new_local_tree("mergecraft-local-mut-") / "mutmut-results.json"
     dest.write_text(
         json.dumps({"schema_version": 1, "mutants": rows}, indent=2),
         encoding="utf-8",
@@ -765,22 +806,26 @@ def run_local_coverage(
         return LocalEvidenceResult(executed=False, skip_reason=SKIP_TOOLCHAIN_ABSENT)
 
     artifact = produced_artifact
-    if artifact is None:
-        if toolchain_available is None and not _coverage_toolchain_available():
-            return LocalEvidenceResult(executed=False, skip_reason=SKIP_TOOLCHAIN_ABSENT)
-        try:
-            artifact = _execute_coverage(repo_root, timeout_seconds=timeout_seconds)
-        except LocalEvidenceRefused as exc:
-            return LocalEvidenceResult(executed=False, skip_reason=exc.code)
+    with _local_tree_scope():
         if artifact is None:
-            return LocalEvidenceResult(executed=False, skip_reason=SKIP_EXECUTION_FAILED)
+            if toolchain_available is None and not _coverage_toolchain_available():
+                return LocalEvidenceResult(executed=False, skip_reason=SKIP_TOOLCHAIN_ABSENT)
+            try:
+                artifact = _execute_coverage(repo_root, timeout_seconds=timeout_seconds)
+            except LocalEvidenceRefused as exc:
+                return LocalEvidenceResult(executed=False, skip_reason=exc.code)
+            if artifact is None:
+                return LocalEvidenceResult(executed=False, skip_reason=SKIP_EXECUTION_FAILED)
 
-    text = _read_artifact(artifact)
+        # Read before the scope removes the run's temporary tree.
+        artifact_name = artifact.name
+        text = _read_artifact(artifact)
+
     if text is None:
         return LocalEvidenceResult(executed=False, skip_reason=SKIP_EXECUTION_FAILED)
 
     tree = dict(source_tree) if source_tree is not None else _load_source_tree(repo_root, diff)
-    parsed = parse_coverage_artifact(text, artifact.name)
+    parsed = parse_coverage_artifact(text, artifact_name)
     ingest = coverage_findings(
         parsed,
         diff=diff,
@@ -845,33 +890,37 @@ def run_local_mutation(
         return LocalEvidenceResult(executed=False, skip_reason=SKIP_TOOLCHAIN_ABSENT)
 
     artifact = produced_artifact
-    if artifact is None:
-        if toolchain_available is None and not _mutation_toolchain_available():
-            return LocalEvidenceResult(executed=False, skip_reason=SKIP_TOOLCHAIN_ABSENT)
-        planned = plan_local_mutation_paths(
-            changed_paths=_changed_paths(diff),
-            repo_paths=_repo_paths(repo_root),
-            path_allowlist=list(path_allowlist or ()),
-        )
-        try:
-            artifact = _execute_mutation(
-                repo_root,
-                timeout_seconds=timeout_seconds,
-                paths=planned,
-                diff=diff,
-                max_mutants=max_mutants,
-            )
-        except LocalEvidenceRefused as exc:
-            return LocalEvidenceResult(executed=False, skip_reason=exc.code)
+    with _local_tree_scope():
         if artifact is None:
-            return LocalEvidenceResult(executed=False, skip_reason=SKIP_EXECUTION_FAILED)
+            if toolchain_available is None and not _mutation_toolchain_available():
+                return LocalEvidenceResult(executed=False, skip_reason=SKIP_TOOLCHAIN_ABSENT)
+            planned = plan_local_mutation_paths(
+                changed_paths=_changed_paths(diff),
+                repo_paths=_repo_paths(repo_root),
+                path_allowlist=list(path_allowlist or ()),
+            )
+            try:
+                artifact = _execute_mutation(
+                    repo_root,
+                    timeout_seconds=timeout_seconds,
+                    paths=planned,
+                    diff=diff,
+                    max_mutants=max_mutants,
+                )
+            except LocalEvidenceRefused as exc:
+                return LocalEvidenceResult(executed=False, skip_reason=exc.code)
+            if artifact is None:
+                return LocalEvidenceResult(executed=False, skip_reason=SKIP_EXECUTION_FAILED)
 
-    text = _read_artifact(artifact)
+        # Read before the scope removes the run's temporary tree.
+        artifact_name = artifact.name
+        text = _read_artifact(artifact)
+
     if text is None:
         return LocalEvidenceResult(executed=False, skip_reason=SKIP_EXECUTION_FAILED)
 
     tree = dict(source_tree) if source_tree is not None else _load_source_tree(repo_root, diff)
-    parsed = parse_mutation_artifact(text, artifact.name)
+    parsed = parse_mutation_artifact(text, artifact_name)
     ingest = mutation_findings(
         parsed,
         source="analyzer",
