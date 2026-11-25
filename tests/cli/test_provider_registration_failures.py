@@ -35,7 +35,7 @@ from mergecraft.cli.exits import CLI_CONFIGURATION_EXIT_CODE, CLI_SUCCESS_EXIT_C
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from click.testing import Result
+    from typer.testing import Result
 
 runner = CliRunner()
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
