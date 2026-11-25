@@ -99,8 +99,9 @@ def _action_run(
     secondary = _UsageAgent(secondary_result)
     _patch_dispatch_seams(monkeypatch, secondary)
     primary = _Primary(tool_context, primary_usage)
+    settings = load_repo_settings(root=tmp_path)
     ctx = main_mod.RunContext(
-        settings=load_repo_settings(root=tmp_path),
+        settings=settings,
         tool_context=tool_context,
         tool_state=tool_context.tool_state,
         run_ctx=run_ctx,
@@ -112,7 +113,7 @@ def _action_run(
         run_start_instructions={secondary.name: run_ctx.instructions},
     )
     ctx.run_context = RunContextData(
-        repo=RepoInfo(owner="acme", name="demo"), repoSettings=ctx.settings
+        repo=RepoInfo(owner="acme", name="demo"), repoSettings=settings
     )
     out = _Run(ctx, primary, secondary)
 

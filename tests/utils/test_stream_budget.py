@@ -171,9 +171,8 @@ def test_a_completed_step_is_charged_even_when_it_crosses_the_ceiling(
     assert (tracker.last_exhausted is not None) is (stops_at is not None)
     assert tracker.tokens_used == tokens
     assert tracker.cost_used == pytest.approx(cost)
-    assert charges == StreamCharges(
-        tokens=tokens, cost_usd=pytest.approx(cost), input_tokens=tokens
-    )
+    assert (charges.tokens, charges.input_tokens, charges.output_tokens) == (tokens, tokens, 0)
+    assert charges.cost_usd == pytest.approx(cost)
 
     # Aggregate reconciliation adds nothing the stream already charged.
     record_agent_usage(

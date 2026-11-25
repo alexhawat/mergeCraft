@@ -463,11 +463,14 @@ async def test_offline_accounts_for_the_scripted_chain_like_the_action(
     from mergecraft.utils.run_bounds import resolve_run_bounds
 
     attempts = CHAIN_SCRIPTS[script]
-    models = tuple(
+    first, second = (
         offline_agent.resolve_model(slug=slug, respect_env_override=False)
         for slug in (PRIMARY, BACKUP)
     )
-    install_chain_rates(monkeypatch, (models[0], models[1]))
+    assert first is not None
+    assert second is not None
+    models = (first, second)
+    install_chain_rates(monkeypatch, models)
     # The fixture streams input tokens only.
     assert all(attempt.output_tokens == 0 for attempt in attempts if attempt.streamed)
     for model, attempt in zip(models, attempts, strict=True):
