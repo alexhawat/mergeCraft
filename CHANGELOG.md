@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The hardened reference workflow no longer grants `statuses: write`: mergeCraft
+  posts check-runs and needs only `checks: write`, so the extra scope is gone from
+  the template, its generated example and the dogfood mirror (#1567).
+- `python -m mergecraft` now runs the CLI, so an interpreter without the console
+  script on `PATH` can invoke it (#1570).
+- `docs/agents.md`, `SECURITY.md` and `evals/README.md` name the current release
+  again instead of a previous alpha, and tests keep them in step with
+  `README.md` (#1570).
 - Every diff walker now splits diff text on `\n` only, as Git and `parse_diff`
   do: analyzer scoping, added-line and hunk iteration, the diff TOC, JEV hunk
   segmentation, diff-size budgets, diff summaries, triage, `lens`, and the
