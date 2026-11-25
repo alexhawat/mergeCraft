@@ -10,8 +10,6 @@ too.
 
 from __future__ import annotations
 
-import pytest
-
 from mergecraft.agents.verifier import _withdrawn_section
 from mergecraft.analyzers.scope import withdrawn_fingerprints
 from mergecraft.review_taxonomy import WITHDRAWN_FINDINGS_HEADING
@@ -30,7 +28,6 @@ def test_marker_lines_yield_their_fingerprints() -> None:
     assert _FINGERPRINT in withdrawn_fingerprints(_learnings(_MARKER))
 
 
-@pytest.mark.xfail(reason="green after W4", strict=True)
 def test_plain_text_lines_yield_no_fingerprints() -> None:
     """Two prose lines and one marker withdraw exactly one finding."""
     body = "Prose withdrawal one.\nAnother prose withdrawal.\n" + _MARKER
