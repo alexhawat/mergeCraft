@@ -258,6 +258,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The golden corpus has its first human-adjudicated cases: the nine batch 002
+  findings, confirmed by the maintainer, each with upstream evidence and an
+  adjudication record. They are one rater's labels and establish no judge
+  calibration, agreement or held-out split; batch 001's nine rows still have no
+  provenance, so the corpus as a whole does not clear the `independent` bar
+  (#1551).
 - A `review_event` Action input. `verdict` (the default) keeps today's
   behaviour. `comment` publishes every review as a COMMENT, whatever the
   verdict, and the run skips the automatic resolution of fixed-finding review

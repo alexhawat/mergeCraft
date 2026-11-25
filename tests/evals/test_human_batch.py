@@ -460,3 +460,76 @@ def test_batch_002_rows_keep_the_agreement_guard() -> None:
 
     with pytest.raises(ValidationError, match="recovered evidence"):
         HumanBatchManifest.model_validate(payload)
+
+
+# --- batch 002: recorded decisions -------------------------------------------
+#
+# The rows, the manifest and the evidence are three files that nothing but these
+# tests compares. Case ids come from the manifest, so a row cannot drop out unseen.
+
+_BATCH_002_PATH = _REPO_ROOT / "evals" / "adjudication" / "golden-batch-002.json"
+
+
+def _load_batch_002() -> HumanBatchManifest:
+    return load_human_batch(_BATCH_002_PATH, repo_root=_REPO_ROOT)
+
+
+def _batch_002_row(case_id: str) -> HumanBatchCase:
+    return next(row for row in _load_batch_002().cases if row.case_id == case_id)
+
+
+_RECORDED_CASE_IDS: tuple[str, ...] = tuple(
+    row["case_id"] for row in json.loads(_BATCH_002_PATH.read_text(encoding="utf-8"))["cases"]
+)
+
+
+def test_batch_002_records_nine_confirmations_by_its_adjudicator() -> None:
+    manifest = _load_batch_002()
+    assert manifest.adjudicator_login == "alexhawat"
+    assert [(row.decision, row.decided_by) for row in manifest.cases] == [
+        ("confirm", "alexhawat")
+    ] * 9
+
+
+@pytest.mark.parametrize("case_id", _RECORDED_CASE_IDS)
+def test_batch_002_row_and_authoring_case_agree_on_human_provenance(case_id: str) -> None:
+    _assert_row_and_corpus_agree(
+        _batch_002_row(case_id), _load_authoring_case(case_id, repo_root=_REPO_ROOT)
+    )
+
+
+@pytest.mark.parametrize("case_id", _RECORDED_CASE_IDS)
+def test_batch_002_authoring_case_matches_its_evidence(case_id: str) -> None:
+    """A confirmed row carries the reviewed claim, not a retyped one."""
+    fixture_path = _batch_002_row(case_id).fixture_path
+    assert fixture_path is not None
+    evidence = json.loads((_REPO_ROOT / fixture_path).read_text(encoding="utf-8"))
+    # The three independently prepared research groups record the range differently.
+    lines = evidence.get("buggy_line_range") or {
+        "start": evidence["start_line"],
+        "end": evidence["end_line"],
+    }
+    case = _load_authoring_case(case_id, repo_root=_REPO_ROOT)
+
+    assert case.model_dump(
+        include={"id", "title", "language", "framework", "category", "path"}
+    ) == {
+        "id": case_id,
+        "title": evidence["title"],
+        "language": evidence["language"],
+        "framework": evidence["framework"].split()[0].casefold(),
+        "category": evidence["category"],
+        "path": evidence["buggy_file"],
+    }
+    assert (case.start_line, case.end_line) == (lines["start"], lines["end"])
+    assert fixture_path in case.notes
+
+
+def test_batch_002_review_sheet_renders_every_recorded_decision() -> None:
+    sheet = render_review_sheet(_load_batch_002(), repo_root=_REPO_ROOT)
+    rows = {
+        line.split("|")[1].strip(): line.split("|")[-2].strip()
+        for line in sheet.splitlines()
+        if line.startswith("| golden-")
+    }
+    assert rows == dict.fromkeys(_RECORDED_CASE_IDS, "confirm by alexhawat")
