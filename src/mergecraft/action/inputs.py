@@ -8,8 +8,9 @@ The contract is that each input maps to a deterministic field on
 GitHub auth input (``INPUT_TOKEN``) is never confused with
 ``INPUT_LOGFIRE_TOKEN``.
 
-``GITHUB_WORKSPACE`` is honoured for the local ``jsonl_file`` sink's path so
-the trace files land under the consumer repo, not the Docker CWD.
+``GITHUB_WORKSPACE`` is not read here: the local ``jsonl_file`` sink's path is
+the literal ``.mergecraft/traces/``, resolved from the process working
+directory by the tracing exporter.
 
 S1 / D10 — ``setup_failure_policy`` and ``setup_timeout`` are also resolved
 here. Both are security/runtime surfaces: invalid values fail closed *before*
@@ -83,14 +84,6 @@ def _read_logfire_region() -> Literal["us", "eu"] | None:
     return None
 
 
-def _resolve_local_path(raw_path: str | None) -> str:
-    """Resolve ``local_files`` ``path`` against ``GITHUB_WORKSPACE``."""
-    workspace = os.environ.get("GITHUB_WORKSPACE")
-    if workspace and raw_path and not raw_path.startswith("/"):
-        return f"{workspace.rstrip('/')}/{raw_path.lstrip('./')}".rstrip("/") + "/"
-    return raw_path or ".mergecraft/traces/"
-
-
 def resolve_tracing_from_action_inputs(*, warn_unknown_sink: bool = False) -> dict[str, Any]:
     """Resolve the tracing action inputs to a tracing settings dict.
 
@@ -146,7 +139,7 @@ def resolve_tracing_from_action_inputs(*, warn_unknown_sink: bool = False) -> di
 
     if enabled and tracing_to:
         if tracing_to == "local_files":
-            sinks.append({"type": "jsonl_file", "path": _resolve_local_path(None)})
+            sinks.append({"type": "jsonl_file", "path": ".mergecraft/traces/"})
         elif tracing_to == "logfire":
             logfire_entry: dict[str, Any] = {"type": "logfire"}
             region = _read_logfire_region()
