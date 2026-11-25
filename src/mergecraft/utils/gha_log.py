@@ -26,8 +26,13 @@ def escape_workflow_command(value: str) -> str:
     return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
-def _write_workflow_command(command: str, message: str) -> None:
-    if not _in_github_actions():
+def _write_workflow_command(command: str, message: str, *, force: bool = False) -> None:
+    """Write one escaped workflow command to stdout.
+
+    ``force`` emits outside GitHub Actions too; the token mask uses it so the
+    command never depends on a Rich console's width or colour (#1558).
+    """
+    if not force and not _in_github_actions():
         return
     sys.stdout.write(f"::{command}::{escape_workflow_command(message)}\n")
     sys.stdout.flush()
@@ -63,16 +68,15 @@ def error(message: str) -> None:
 
 
 def add_mask(value: str) -> None:
-    """Register *value* with the runner's log masker, escaped and raw.
+    """Register *value* with the runner's log masker as one raw stdout line.
 
-    Written straight to stdout through the same escaper as every other workflow
-    command: Rich would interpret ``[...]`` as markup and could wrap or colourise
-    the line, so the runner would mask a different string than the one written to
-    ``$GITHUB_OUTPUT`` (#1558). Always emitted — the caller is the token step,
-    and a mask line is harmless outside Actions.
+    Goes through the same writer and escaper as every other workflow command:
+    Rich would interpret ``[...]`` as markup and could wrap or colourise the
+    line, so the runner would mask a different string than the one written to
+    ``$GITHUB_OUTPUT`` (#1558). The line carries the value by design — that is
+    what the runner masks — so it is emitted outside Actions too.
     """
-    sys.stdout.write(f"::add-mask::{escape_workflow_command(value)}\n")
-    sys.stdout.flush()
+    _write_workflow_command("add-mask", value, force=True)
 
 
 __all__ = [

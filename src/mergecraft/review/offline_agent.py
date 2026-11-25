@@ -731,8 +731,10 @@ async def run_offline_agent_review(
             diff_path=str(materialization.path),
         )
     except Exception as exc:
-        # A configuration error is an operator fix, not a crash: one line, no
-        # stack trace. Everything else keeps the traceback (#1569).
+        # A known configuration error is an operator fix, not a crash: one line,
+        # no stack trace (#1569). Everything else keeps its traceback so a
+        # genuine defect stays diagnosable; both still classify through
+        # ``_offline_error_outcome`` for the exit code.
         if isinstance(exc, ConfigurationError):
             logger.error("offline diff-review failed: {}", exc)
         else:

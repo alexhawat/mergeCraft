@@ -247,10 +247,10 @@ class GatesSettings(BaseModel):
     Enforcement is gated behind an explicit flip.
 
     The override is a rule-key -> action mapping that is layered on top
-    of ``DEFAULT_GATE_POLICIES`` at the gate. The closed action
-    vocabulary is enforced at the gate itself, so a mis-spelled value
-    here is rejected by ``decide_action`` rather than silently widening
-    the gate (W9.2).
+    of ``DEFAULT_GATE_POLICIES`` at the gate. Keys and values are both
+    validated where the policy is resolved: a rule id that is not
+    shipped is rejected, and a mis-spelled value is outside the closed
+    action vocabulary. Neither silently widens the gate (W9.2).
 
     D4/W6.2 — ``extra="forbid"``: unknown keys are configuration errors.
     """

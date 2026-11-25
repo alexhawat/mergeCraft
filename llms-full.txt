@@ -1881,9 +1881,9 @@ valid rule ids are exactly the shipped keys — `schema_failure`,
 valid actions are `auto_merge`, `block`, `request_changes`,
 `require_human_review`, `require_more_tests`, `quarantine`, `escalate`.
 
-An unknown rule id is a configuration error, not a silent no-op: the message
-names the key and lists the valid ids. A value outside the action vocabulary is
-rejected the same way. Both checks run wherever a review reads its policy, and
+An unknown rule id is rejected, not silently ignored: the message names the
+key and lists the valid ids. A value outside the action vocabulary is rejected
+the same way. Both checks run wherever a review reads its policy, and
 `get_policy` returns the message as its `error` payload.
 
 ```yaml

@@ -111,6 +111,10 @@ DEFAULT_GATE_POLICIES: Final[GateActionPolicy] = {
     **{rule_id: action for rule_id, action in NAMED_GATE_POLICY_ROWS},
 }
 
+# The legal ``gates.override`` keys: exactly the shipped rule ids, sorted for a
+# stable error message.
+VALID_RULE_IDS: Final[tuple[str, ...]] = tuple(sorted(DEFAULT_GATE_POLICIES))
+
 
 def resolve_effective_gate_policies(
     overrides: dict[str, str] | None = None,
@@ -126,12 +130,11 @@ def resolve_effective_gate_policies(
     effective: GateActionPolicy = dict(DEFAULT_GATE_POLICIES)
     if not overrides:
         return effective
-    valid_rule_ids = sorted(DEFAULT_GATE_POLICIES)
     for rule_id, action_name in overrides.items():
         if rule_id not in DEFAULT_GATE_POLICIES:
             msg = (
                 f"gate policy override names unknown rule {rule_id!r}; "
-                f"valid rule ids: {valid_rule_ids}"
+                f"valid rule ids: {list(VALID_RULE_IDS)}"
             )
             raise ValueError(msg)
         if action_name not in GATE_ACTIONS:
@@ -148,6 +151,7 @@ __all__ = [
     "DEFAULT_GATE_POLICIES",
     "GATE_ACTIONS",
     "NAMED_GATE_POLICY_ROWS",
+    "VALID_RULE_IDS",
     "GateAction",
     "GateActionPolicy",
     "RuleId",

@@ -24,6 +24,18 @@ from mergecraft.config.layered import load_layered_config_dict, resolve_config_s
 from mergecraft.config.settings import RepoSettings
 
 _SETTABLE_KEYS = frozenset({"model", "models", "tracing.enabled", "tracing"})
+
+
+def _render_config_value(value: object) -> str:
+    """Render one resolved config value for a table row.
+
+    A tuple is an ordered model chain; every other value renders as itself.
+    """
+    if isinstance(value, tuple):
+        return ", ".join(str(item) for item in value)
+    return str(value)
+
+
 _TRUE_VALUES = frozenset({"true", "1", "yes", "on"})
 _FALSE_VALUES = frozenset({"false", "0", "no", "off"})
 
@@ -48,7 +60,7 @@ def config_show(
     table = Table(title=f"mergecraft config show {key}", show_header=True, header_style="bold")
     table.add_column("field", style="cyan")
     table.add_column("value")
-    table.add_row("value", str(value))
+    table.add_row("value", _render_config_value(value))
     table.add_row("source", layer.value)
     console.print(table)
 
@@ -68,8 +80,9 @@ def config_explain(
     table.add_column("layer", style="cyan")
     table.add_column("value")
     for layer_name, layer_value in explained["layers"].items():
-        table.add_row(layer_name, str(layer_value))
-    table.add_row("[bold]winner[/bold]", f"{explained['winner']} → {explained['value']}")
+        table.add_row(layer_name, _render_config_value(layer_value))
+    winner = _render_config_value(explained["value"])
+    table.add_row("[bold]winner[/bold]", f"{explained['winner']} → {winner}")
     console.print(table)
 
 

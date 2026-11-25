@@ -162,6 +162,24 @@ def _env_path(cwd: Path | None = None) -> Path:
     return local_env_path_for_process_cwd()
 
 
+def _auth_repo_root(cwd: Path | None) -> Path:
+    """Return the directory that holds the provider registry for an auth write.
+
+    An explicit ``--cwd`` wins, exactly as it does for every other ``provider``
+    command; an omitted one means the checkout root, which is also where the
+    legacy commands' ``.env`` lands. The registry deliberately does *not* follow
+    ``MERGECRAFT_ENV``: that override names the ``.env`` only (see
+    :mod:`mergecraft.cli.local_env`), while ``--cwd`` owns the repository config
+    — pairing the registry to the override would make a pinned env file silently
+    disable the indexed path (#1557).
+    """
+    if cwd is not None:
+        return cwd
+    from mergecraft.cli.target_dir import implicit_repo_root
+
+    return implicit_repo_root()
+
+
 def _load_config_dict(path: Path) -> dict[str, Any]:
     """Load the repo config mapping for a CLI read or write.
 
@@ -469,6 +487,11 @@ def delete_cmd(
     console.print(f"deleted provider [green]{label}[/green]")
 
 
+def _indexed_key(env_index: int, suffix: str) -> str:
+    """Return one ``LLM_PROVIDER_<N>_<SUFFIX>`` key."""
+    return f"LLM_PROVIDER_{env_index}_{suffix}"
+
+
 def indexed_credential_keys(entry: Mapping[str, Any]) -> Sequence[str]:
     """Return indexed ``LLM_PROVIDER_<N>_<SUFFIX>`` keys for *entry* (#478)."""
     env_index = int(entry["envIndex"])
@@ -489,7 +512,7 @@ def indexed_credential_keys(entry: Mapping[str, Any]) -> Sequence[str]:
         suffix = AUTH_KIND_PRIMARY_SUFFIX.get(auth_kind, "API_KEY")
         suffixes = (suffix,)
 
-    return [f"LLM_PROVIDER_{env_index}_{suffix}" for suffix in suffixes]
+    return [_indexed_key(env_index, suffix) for suffix in suffixes]
 
 
 @dataclass(frozen=True, slots=True)
@@ -544,16 +567,11 @@ def _persist_indexed_credentials(
         _write_env_value,
     )
     from mergecraft.cli.roster_seed import seed_reviewer_p0_after_auth
-    from mergecraft.cli.target_dir import implicit_repo_root
 
     env_index = int(entry["envIndex"])
     label = str(entry["label"])
     target = target or _resolve_auth_target(scope, cwd=cwd)
-    # Legacy ``auth`` has no ``--cwd``; an omitted ``--cwd`` means the checkout
-    # root, the same anchor ``wire_authenticated_provider`` and the ``.env`` use
-    # (#1557). Seeding into the process cwd would leave a nested
-    # ``.mergecraft/config.yaml`` behind a run from a subdirectory.
-    seed_root = cwd or implicit_repo_root()
+    seed_root = _auth_repo_root(cwd)
 
     env_path = target.env_path or _env_path(cwd)
     label_key = _indexed_label_key(env_index)
@@ -562,16 +580,14 @@ def _persist_indexed_credentials(
     if target.local:
         if not _write_env_value(env_path, label_key, label):
             cli_bail(f"could not write {label_key} to {env_path}")
-        credential_keys: list[str] = []
         for suffix, raw_value in credential_map.items():
-            key = f"LLM_PROVIDER_{env_index}_{suffix}"
-            credential_keys.append(key)
+            key = _indexed_key(env_index, suffix)
             value = _single_line_credential(name=key, value=raw_value)
             if not _write_env_value(env_path, key, value):
                 cli_bail(f"could not write {key} to {env_path}")
         # Name the indexed keys actually written, not the bare suffixes: the
         # legacy flat path prints the same suffix names otherwise (#1557).
-        landed = ", ".join([label_key, *credential_keys])
+        landed = ", ".join([label_key, *(_indexed_key(env_index, s) for s in credential_map)])
         console.print(f"[green]wrote {landed}[/green] to {env_path}")
         any_local_written = True
         seed_reviewer_p0_after_auth(cwd=seed_root, provider_label=label)
@@ -579,7 +595,7 @@ def _persist_indexed_credentials(
     if target.github is not None:
         wrote_any_github = False
         for suffix, raw_value in credential_map.items():
-            key = f"LLM_PROVIDER_{env_index}_{suffix}"
+            key = _indexed_key(env_index, suffix)
             value = _single_line_credential(name=key, value=raw_value)
             console.print(f"saving [cyan]{key}[/cyan] via gh secret set...")
             if _set_gh_secret(name=key, value=value, repo_slug=target.github.repo_slug):
@@ -755,9 +771,6 @@ def _run_opencode_zen_strategy(
         "(OpenCode Zen billing — same console for OpenCode Go), then paste it below."
     )
     api_key = _cancelable_getpass("OpenCode Zen API key (Enter to cancel): ")
-    if not api_key.strip():
-        console.print("canceled.")
-        return
     auth_json = build_opencode_zen_auth_json(api_key)
     suffix = AUTH_KIND_PRIMARY_SUFFIX[AUTH_KIND_OPENCODE_ZEN]
     _persist_indexed_credentials(entry, scope, {suffix: auth_json}, cwd=cwd, target=target)
@@ -1247,24 +1260,6 @@ def migrate_cmd(
     _print_migration_plan(plan, env_path)
 
 
-def _legacy_auth_registry_root(target: AuthTarget | None) -> Path:
-    """Return the directory whose provider registry backs a legacy ``auth`` write.
-
-    The legacy commands have no ``--cwd``, so their ``.env`` lands at the git
-    root of the process working directory. Reading the registry from the literal
-    ``Path.cwd()`` instead split that pair: from a subdirectory the lookup found
-    no provider and the flat legacy secret was written with no warning (#1557).
-    A resolved target names the same directory the credential lands in; a
-    target with no ``.env`` (a ``github``-only scope) keeps the implicit
-    checkout root those commands have always used.
-    """
-    if target is not None and target.env_path is not None:
-        return target.env_path.parent
-    from mergecraft.cli.target_dir import implicit_repo_root
-
-    return implicit_repo_root()
-
-
 def persist_legacy_indexed_auth(
     label: str,
     scope: str,
@@ -1273,7 +1268,7 @@ def persist_legacy_indexed_auth(
     target: AuthTarget | None = None,
 ) -> bool:
     """Write *credential_map* via the indexed provider path when *label* is registered."""
-    config_path = _config_path(_legacy_auth_registry_root(target))
+    config_path = _config_path(_auth_repo_root(None))
     registry = load_provider_registry(config_path)
     entry = registry.lookup(label)
     if entry is None:
