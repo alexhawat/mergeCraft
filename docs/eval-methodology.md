@@ -84,14 +84,28 @@ agent-proposed findings for human review. Each links a merged introducing PR
 and fixing PR, full commit pins, an explicit upstream causal statement, and
 bounded code evidence. The [fixtures](../evals/fixtures/golden/) retain source
 excerpts, actual upstream patches, licenses, attribution, and artifact hashes.
-All nine decisions remain pending; the packet records which upstream tests
-were inspected and whether they were run locally. Batch 002 is tracked
+The packet records which upstream tests were inspected and whether they were
+run locally. `alexhawat` confirmed all nine on 2026-11-25, with no corrections
+and no abstentions; the manifest holds the decisions. Each case has a row under
+[`evals/cases/golden/`](../evals/cases/golden/) with human provenance written by
+`mergecraft eval adjudicate`. Batch 002 is tracked
 in [#1551](https://github.com/alexhawat/mergeCraft/issues/1551).
 
-Neither packet supplies accepted independent human labels, judge calibration,
-or human-human agreement. Preparing or publishing evidence does not create
-human provenance. Confirmations and corrections require the
-intended adjudicator's actual response and inspectable evidence.
+The review tool recorded the answers under its own user id, `Alex`, as its
+[export](../evals/adjudication/golden-batch-002-hitl/golden-batch-002.export.json)
+shows. `alexhawat` [stated on #1551](https://github.com/alexhawat/mergeCraft/issues/1551#issuecomment-7163609820)
+that those answers are theirs, and the manifest records them as `alexhawat`. Decision times are the review tool's; the time inside a
+case row is when the command ran.
+
+Batch 002 therefore supplies nine independent labels from one human rater. It
+supplies no judge calibration, no human-human agreement, and no held-out split.
+Batch 001 supplies no labels, and its nine rows remain in the golden corpus
+without provenance, so `calibration_status` over all 18 golden cases reports
+`eligible=False` (9 of 18 below the `independent` bar). The nine batch 002 rows
+alone report `eligible=True`, which says only that their provenance clears the
+bar. Preparing or publishing evidence does not create human provenance.
+Confirmations and corrections require the intended adjudicator's actual
+response and inspectable evidence.
 
 ### Judge calibration
 

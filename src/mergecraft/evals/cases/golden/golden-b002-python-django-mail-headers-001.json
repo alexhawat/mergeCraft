@@ -1,0 +1,21 @@
+{
+  "id": "golden-b002-python-django-mail-headers-001",
+  "title": "EmailMessage writes a caller-supplied To header twice",
+  "language": "python",
+  "framework": "django",
+  "category": "correctness",
+  "kind": "historical_pr",
+  "source": "human",
+  "path": "django/core/mail/message.py",
+  "start_line": 273,
+  "end_line": 276,
+  "notes": "Introduced by https://github.com/django/django/pull/9454 (merge da82939e5a31dea21a4f4d5085dfcd449fcbed3a); fixed by https://github.com/django/django/pull/18325. Evidence: evals/fixtures/golden/golden-b002-python-django-mail-headers-001/evidence.json",
+  "provenance": "human",
+  "adjudication": {
+    "adjudicated_by": "human",
+    "model": "",
+    "produced_by": "",
+    "independence": "independent",
+    "at": "2026-11-25T12:26:54.847998Z"
+  }
+}

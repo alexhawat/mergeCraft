@@ -1,0 +1,21 @@
+{
+  "id": "golden-b002-python-django-admin-cast-001",
+  "title": "Casting exact admin search fields prevents use of ordinary database indexes",
+  "language": "python",
+  "framework": "django",
+  "category": "performance",
+  "kind": "historical_pr",
+  "source": "human",
+  "path": "django/contrib/admin/options.py",
+  "start_line": 1222,
+  "end_line": 1227,
+  "notes": "Introduced by https://github.com/django/django/pull/17885 (merge f223729f8f8380901473b244c0fc7c7dc397e3f1); fixed by https://github.com/django/django/pull/20538. Evidence: evals/fixtures/golden/golden-b002-python-django-admin-cast-001/evidence.json",
+  "provenance": "human",
+  "adjudication": {
+    "adjudicated_by": "human",
+    "model": "",
+    "produced_by": "",
+    "independence": "independent",
+    "at": "2026-11-25T12:26:53.453258Z"
+  }
+}

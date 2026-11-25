@@ -1,0 +1,21 @@
+{
+  "id": "golden-b002-systems-rust-tokio-timer-runtime",
+  "title": "Alternative timer reset registers with a different runtime",
+  "language": "rust",
+  "framework": "tokio",
+  "category": "correctness",
+  "kind": "historical_pr",
+  "source": "human",
+  "path": "tokio/src/runtime/time_alt/timer.rs",
+  "start_line": 30,
+  "end_line": 35,
+  "notes": "Introduced by https://github.com/tokio-rs/tokio/pull/8132 (merge 923e72345c77aef4d11875d874ba67421b0412d3); fixed by https://github.com/tokio-rs/tokio/pull/8169. Evidence: evals/fixtures/golden/golden-b002-systems-rust-tokio-timer-runtime/evidence.json",
+  "provenance": "human",
+  "adjudication": {
+    "adjudicated_by": "human",
+    "model": "",
+    "produced_by": "",
+    "independence": "independent",
+    "at": "2026-11-25T12:27:00.922767Z"
+  }
+}

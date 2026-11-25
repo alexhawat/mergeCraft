@@ -7,6 +7,7 @@ permissive licence and a link, so nothing unlicensed is queued for vendoring.
 
 from __future__ import annotations
 
+import json
 import re
 from collections import Counter
 
@@ -49,8 +50,10 @@ def test_the_matrix_lists_every_catalog_language_with_the_catalog_tool_count() -
 def test_the_golden_column_matches_the_golden_corpus() -> None:
     from tests.ci.workflow_support import REPO_ROOT
 
+    # Read the declared field: a batch-prefixed name (golden-b002-…) carries no language.
     golden = {
-        path.name.split("-")[1] for path in (REPO_ROOT / "evals/cases/golden").glob("golden-*.json")
+        json.loads(path.read_text(encoding="utf-8"))["language"]
+        for path in (REPO_ROOT / "evals/cases/golden").glob("golden-*.json")
     }
     marked = {language for language, cells in _matrix_rows().items() if cells[2] == "yes"}
 
