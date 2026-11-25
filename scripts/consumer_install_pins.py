@@ -18,6 +18,7 @@ METADATA = "docs/consumer-release.json"
 PIN_PATHS = (
     "README.md",
     "AGENTS-mergecraft.md",
+    "docs/agents.md",
     "docs/install.md",
     "docs/mcp.md",
     "docs/opencode.md",
