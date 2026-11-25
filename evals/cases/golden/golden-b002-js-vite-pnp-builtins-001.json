@@ -1,0 +1,21 @@
+{
+  "id": "golden-b002-js-vite-pnp-builtins-001",
+  "title": "Yarn PnP package lookup treats browser polyfills as builtins",
+  "language": "typescript",
+  "framework": "vite",
+  "category": "correctness",
+  "kind": "historical_pr",
+  "source": "human",
+  "path": "packages/vite/src/node/packages.ts",
+  "start_line": 193,
+  "end_line": 194,
+  "notes": "Introduced by https://github.com/vitejs/vite/pull/12441 (merge 1fc8c652c46a27f6229c9125e3b0d1662d2a0e67); fixed by https://github.com/vitejs/vite/pull/12903. Evidence: evals/fixtures/golden/golden-b002-js-vite-pnp-builtins-001/evidence.json",
+  "provenance": "human",
+  "adjudication": {
+    "adjudicated_by": "human",
+    "model": "",
+    "produced_by": "",
+    "independence": "independent",
+    "at": "2026-11-25T12:26:49.230138Z"
+  }
+}

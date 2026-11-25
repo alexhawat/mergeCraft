@@ -1,0 +1,21 @@
+{
+  "id": "golden-b002-js-vue-shallow-brand-001",
+  "title": "Required shallowReactive brand rejects plain object assignment",
+  "language": "typescript",
+  "framework": "vue",
+  "category": "correctness",
+  "kind": "historical_pr",
+  "source": "human",
+  "path": "packages/reactivity/src/reactive.ts",
+  "start_line": 109,
+  "end_line": 109,
+  "notes": "Introduced by https://github.com/vuejs/core/pull/14493 (merge 3b561db4ab42d06166b002f13c0e97cb2bd4a061); fixed by https://github.com/vuejs/core/pull/14641. Evidence: evals/fixtures/golden/golden-b002-js-vue-shallow-brand-001/evidence.json",
+  "provenance": "human",
+  "adjudication": {
+    "adjudicated_by": "human",
+    "model": "",
+    "produced_by": "",
+    "independence": "independent",
+    "at": "2026-11-25T12:26:52.071555Z"
+  }
+}

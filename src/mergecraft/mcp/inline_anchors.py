@@ -35,7 +35,14 @@ class InlineAnchorAdjustment:
 
 
 def build_inline_anchor_index(diff_text: str) -> InlineAnchorIndex:
-    """Build the valid ``(path, line, side)`` anchor set from a unified diff."""
+    """Build the valid ``(path, line, side)`` anchor set from a unified diff.
+
+    ``--- `` / ``+++ `` lines are file headers only while no hunk is open: a
+    removed ``-- comment`` or an added ``++ x`` inside a hunk renders with those
+    prefixes and is content. A hunk closes once its declared old and new counts
+    are consumed, so a header that follows a completed hunk without a
+    ``diff --git`` line is still a header.
+    """
     anchors: set[tuple[str, int, str]] = set()
     hunk_ranges: dict[str, dict[str, list[tuple[int, int]]]] = defaultdict(
         lambda: {"LEFT": [], "RIGHT": []}
@@ -44,14 +51,23 @@ def build_inline_anchor_index(diff_text: str) -> InlineAnchorIndex:
     current_path: str | None = None
     old_line = 0
     new_line = 0
+    old_remaining = 0
+    new_remaining = 0
+    in_hunk = False
 
     sections = iter(parse_diff(diff_text).files)
     for raw_line in diff_lines(diff_text):
         if raw_line.startswith("diff --git "):
             current_path = next(sections).path
+            in_hunk = False
+            old_remaining = 0
+            new_remaining = 0
             continue
 
         if current_path is None:
+            continue
+
+        if not in_hunk and raw_line.startswith(("--- ", "+++ ")):
             continue
 
         hunk_match = _HUNK_RE.match(raw_line)
@@ -62,13 +78,13 @@ def build_inline_anchor_index(diff_text: str) -> InlineAnchorIndex:
             new_count = int(hunk_match.group(4) or "1")
             old_line = old_start
             new_line = new_start
+            old_remaining = old_count
+            new_remaining = new_count
+            in_hunk = True
             hunk_ranges[current_path]["LEFT"].append((old_start, old_start + max(old_count, 1) - 1))
             hunk_ranges[current_path]["RIGHT"].append(
                 (new_start, new_start + max(new_count, 1) - 1)
             )
-            continue
-
-        if raw_line.startswith(("--- ", "+++ ")):
             continue
 
         prefix = raw_line[:1]
@@ -77,12 +93,18 @@ def build_inline_anchor_index(diff_text: str) -> InlineAnchorIndex:
             anchors.add((current_path, new_line, "RIGHT"))
             old_line += 1
             new_line += 1
+            old_remaining -= 1
+            new_remaining -= 1
         elif prefix == "+":
             anchors.add((current_path, new_line, "RIGHT"))
             new_line += 1
+            new_remaining -= 1
         elif prefix == "-":
             anchors.add((current_path, old_line, "LEFT"))
             old_line += 1
+            old_remaining -= 1
+        if in_hunk and old_remaining <= 0 and new_remaining <= 0:
+            in_hunk = False
 
     return InlineAnchorIndex(
         anchors=frozenset(anchors),

@@ -284,8 +284,8 @@ def coverage_section_for_state(state: ToolState) -> CoverageSection | None:
     if isinstance(ignore, ReviewIgnore) and ignore.active:
         # Files ignored by config are out of scope, not unread (#1109): whatever diff
         # established scope, their hunks never enter the universe.
-        # Same change set ``checkout_pr`` judged against: a generated file stays in scope
-        # when its generator config changed too, so the check needs every changed path.
+        # Same change set ``checkout_pr`` judged against; the name-only ignore rule does
+        # not read it, so this only keeps the call shape aligned.
         # The record is not trusted as already filtered, because a caller-supplied scope
         # never went through the checkout.
         changed = [*filter_diff(authoritative, None).changed_paths, *unreviewable]
