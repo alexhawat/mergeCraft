@@ -42,7 +42,9 @@ def config_show(
     try:
         value, layer = resolve_setting(key, cwd=root, cli_model=model)
     except KeyError as exc:
-        cli_bail(str(exc))
+        # An unknown key is a usage error, and ``str(KeyError(...))`` would
+        # wrap the message in a second pair of quotes (#1569).
+        cli_bail(exc.args[0], code=CLI_USAGE_EXIT_CODE)
     table = Table(title=f"mergecraft config show {key}", show_header=True, header_style="bold")
     table.add_column("field", style="cyan")
     table.add_column("value")
@@ -61,7 +63,7 @@ def config_explain(
     try:
         explained = explain_setting(key, cwd=root, cli_model=model)
     except KeyError as exc:
-        cli_bail(str(exc))
+        cli_bail(exc.args[0], code=CLI_USAGE_EXIT_CODE)
     table = Table(title=f"mergecraft config explain {key}", show_header=True, header_style="bold")
     table.add_column("layer", style="cyan")
     table.add_column("value")

@@ -55,7 +55,9 @@ def _resolve_model_layers(*, cwd: Path, cli_model: str | None = None) -> dict[Co
     settings = load_repo_settings(root=cwd, load_learnings_files=False)
     yaml_slugs = configured_model_slugs(settings)
     if yaml_slugs:
-        layers[ConfigLayer.YAML] = yaml_slugs[0]
+        # The configured fallback chain is what an operator opens ``show`` /
+        # ``explain`` to see; the first entry alone hides it (#1569).
+        layers[ConfigLayer.YAML] = ", ".join(yaml_slugs)
     layers[ConfigLayer.DEFAULT] = resolve_effective_model_slug(settings)
     return layers
 

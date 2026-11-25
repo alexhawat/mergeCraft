@@ -60,3 +60,26 @@ def warning(message: str) -> None:
 def error(message: str) -> None:
     """Emit a ``::error::`` workflow annotation."""
     _write_workflow_command("error", message)
+
+
+def add_mask(value: str) -> None:
+    """Register *value* with the runner's log masker, escaped and raw.
+
+    Written straight to stdout through the same escaper as every other workflow
+    command: Rich would interpret ``[...]`` as markup and could wrap or colourise
+    the line, so the runner would mask a different string than the one written to
+    ``$GITHUB_OUTPUT`` (#1558). Always emitted — the caller is the token step,
+    and a mask line is harmless outside Actions.
+    """
+    sys.stdout.write(f"::add-mask::{escape_workflow_command(value)}\n")
+    sys.stdout.flush()
+
+
+__all__ = [
+    "add_mask",
+    "error",
+    "escape_workflow_command",
+    "group",
+    "notice",
+    "warning",
+]

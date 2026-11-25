@@ -17,7 +17,7 @@ verification row below.
 |------|----------|------|
 | `0` | `CLI_SUCCESS_EXIT_CODE` | Command completed successfully (including `--version`, successful auth writes, empty config validation). |
 | `1` | `CLI_AUDIT_VERIFY_FAILED_EXIT_CODE` | A verification found a problem: `audit verify` (broken or unreadable chain), `verify-behavior` (blocked or failed), `opencode doctor --strict` (a failed check). |
-| `2` | `CLI_USAGE_EXIT_CODE` | Invalid CLI flags or arguments (Typer usage errors, unknown `--scope`, bad `--format`, malformed input), an unknown id (`agent show`, `lens show`, `analyzers explain`, `memory show`, `eval replay`, `evidence show`, `requirements explain`, `explain`), and root `--format json` on a command with no JSON output. |
+| `2` | `CLI_USAGE_EXIT_CODE` | Invalid CLI flags or arguments (Typer usage errors, unknown `--scope`, bad `--format`, malformed input), an unknown id (`agent show`, `lens show`, `analyzers explain`, `memory show`, `eval replay`, `evidence show`, `requirements explain`, `explain`, `config show`, `config explain`), and root `--format json` on a command with no JSON output. |
 
 ## Review outcomes (`mergecraft review`)
 
