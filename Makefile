@@ -169,7 +169,7 @@ pyright: ## Supplemental Pyright pass
 pyright-tests: ## Report Pyright diagnostics across the complete test tree
 	$(UV) run pyright tests
 
-pyright-new-tests: ## Gate Python test modules added since MERGECRAFT_TEST_TYPE_BASE
+pyright-new-tests: ## Gate Python test modules added since MERGECRAFT_TEST_TYPE_BASE (default origin/main)
 	$(UV) run python scripts/check_new_test_types.py
 
 catalog-check: ## Manifest fixture/doc/severity gate (C5/C6)
@@ -366,7 +366,7 @@ ci-static: lockcheck lint typecheck pyright evals-check catalog-check agents-che
 	@echo "ci-static OK"
 
 # Ordered expansion of `make ci`, consumed by the resumable runner (scripts/ci_resume.sh).
-CI_STEPS := lockcheck lint typecheck pyright evals-check catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check pins-check action-pin-check test-durations-check security coverage-gate mcp-server-json-check
+CI_STEPS := lockcheck lint typecheck pyright evals-check catalog-check agents-check build example-workflows-check agent-packages-check cli-examples-check docs-check pins-check action-pin-check test-durations-check pyright-new-tests security coverage-gate mcp-server-json-check
 
 ci-steps: ## Print the ordered `make ci` step list (consumed by ci-resume)
 	@echo $(CI_STEPS)
@@ -379,7 +379,7 @@ ci-reset: ## Clear the ci-resume checkpoint (start the gate over)
 	@chmod +x scripts/ci_resume.sh 2>/dev/null || true
 	@./scripts/ci_resume.sh --reset
 
-ci: ci-static security coverage-gate ## Full gate
+ci: ci-static pyright-new-tests security coverage-gate ## Full gate
 	@echo "ci OK"
 
 REVIEWBENCH_DIR ?= evals/reviewbench

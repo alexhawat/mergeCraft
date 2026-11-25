@@ -105,6 +105,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#1473, #1517).
 - The round cap counts author changes: base-only merges, rebases and repeat
   reviews of one head keep the round (#1449, #1529).
+- `make ci` and `make ci-resume` now run `make pyright-new-tests`, which only CI
+  ran before, so a type error in a new test module fails the local gate too. An
+  unset `MERGECRAFT_TEST_TYPE_BASE` means `origin/main` instead of a `KeyError`,
+  and test modules not committed yet are checked (#1581).
 
 ### Fixed
 
