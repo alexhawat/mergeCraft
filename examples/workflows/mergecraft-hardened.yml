@@ -96,7 +96,6 @@ permissions:
   issues: write
   # Post the mergecraft / mergecraft-approval check-runs.
   checks: write
-  statuses: write
   # Uncomment TOGETHER WITH `sarif_upload: enabled` below to publish analyzer
   # findings as code-scanning alerts (#39). Left off here so copying this
   # template changes nothing until you decide to opt in; without the permission

@@ -27,10 +27,10 @@ Do all of this yourself, without asking me, except where step 4 says STOP:
    Do NOT install Python. uv downloads a compatible interpreter on its own.
 
 2. Install the CLI:
-     uv tool install mergecraft-action==0.1.0a5
+     uv tool install mergecraft-action==0.1.0a6
      mergecraft --version
    Main-branch instructions may include unreleased behavior. Match this install
-   to https://github.com/alexhawat/mergeCraft/tree/v0.1.0a5/docs before using newer features.
+   to https://github.com/alexhawat/mergeCraft/tree/v0.1.0a6/docs before using newer features.
 
 3. Scaffold config + workflow (non-interactive, writes no secrets):
      mergecraft init

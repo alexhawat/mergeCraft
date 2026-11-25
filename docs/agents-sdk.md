@@ -27,6 +27,7 @@ from mergecraft.agents_sdk.types import ReviewFindingsReport
 REPO = Path("/path/to/repo")
 ALLOWED = frozenset({"src/app.py"})
 
+
 async def main() -> None:
     agent = review_agent(
         repo_root=REPO,
@@ -45,6 +46,7 @@ async def main() -> None:
         max_rounds=3,
     )
     print(outcome.final_report.model_dump_json(indent=2))
+
 
 asyncio.run(main())
 ```
