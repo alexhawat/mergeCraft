@@ -2,6 +2,8 @@
 
 Nine proposed findings, prepared as replacements for batch 001 under [#780](https://github.com/alexhawat/mergeCraft/issues/780) (closed as not planned on 2026-11-23). For each case, check whether the introducing change caused the described behavior at the cited lines. Reply with the case ID and `confirm`, `correct` with your edit, or `abstain`. You can also leave a case pending.
 
+**Answered on 2026-11-25.** `alexhawat` confirmed all nine cases with no corrections. The decisions are recorded in the [manifest](golden-batch-002.json); the [review tool export](golden-batch-002-hitl/golden-batch-002.export.json) names the answering user id `Alex`, and [the statement on #1551](https://github.com/alexhawat/mergeCraft/issues/1551#issuecomment-7163609820) says those answers are `alexhawat`'s. The rest of this page is the packet as it was reviewed, so its cases still read “pending”.
+
 | Case | Project | Proposed finding |
 | --- | --- | --- |
 | [B2-01](#b2-01) | Vite | Yarn PnP package lookup treats browser polyfills as builtins |

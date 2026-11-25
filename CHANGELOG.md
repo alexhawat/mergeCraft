@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Log lines keep directory paths, container image references and version
+  strings instead of replacing them with `<redacted>`: a path whose segments are
+  all ordinary words (including absolute paths and a `name=/path` value), an
+  image reference whose labels, segments and tag are ordinary, and a bounded
+  version string each survive the redactor. Secret-shaped tokens are redacted as
+  before, in log lines and wherever else `redact_secrets` runs (#1560).
+- Local coverage and mutation evidence runs remove their temporary source copy,
+  coverage work directory and mutation results directory when the run returns or
+  raises, so repeated local runs no longer accumulate `mergecraft-local-*`
+  directories in the system temp directory (#1566).
+- Analyzer output is capped while it is read: one reader per stream keeps at most
+  32 MiB and discards the rest, so a chatty analyzer no longer grows the
+  reviewer's memory (an analyzer streaming for three seconds took the parent from
+  about 150 MB to about 8.8 GB before this change). The cap counts bytes, a
+  truncated stream is cut on a redaction-safe boundary so no credential prefix is
+  published, and an undecodable byte or a child that leaves a grandchild holding
+  the pipe is reported instead of silently passing (#1566).
 - Secondary roster reviewers and file-group reviewers now count toward the
   run's token and cost budget and toward the cost it reports: each dispatch's
   usage is priced from the catalog, listed with the run's usage, and charged to
@@ -32,6 +49,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/agents.md`, `SECURITY.md` and `evals/README.md` name the current release
   again instead of a previous alpha, and tests keep them in step with
   `README.md` (#1570).
+- Inline review comments on a hunk that contains a changed line starting with
+  `--- ` or `+++ ` (for example a removed SQL `-- comment`) are no longer moved
+  one line up: those prefixes are file headers only while no hunk is open
+  (#1556).
+- Mutation-survivor paths and trufflehog suppression paths keep a leading dot
+  (`.github/…`, `.venv-dev/…`); only one leading `./` is removed, so a dotted
+  path matches its own changed path and a dotted virtualenv still hits its
+  suppression marker (#1563).
+- Corrected five docstrings and comments that described behaviour the code does
+  not have, and removed two unreachable branches they described: the explicit
+  packet `Decision` is always recomputed, the user prompt is passed verbatim,
+  `filter_diff`'s `changed_paths` is not read by the name matcher, and
+  `withdrawn_fingerprints` withdraws only marker fingerprints (#1562).
 - Every diff walker now splits diff text on `\n` only, as Git and `parse_diff`
   do: analyzer scoping, added-line and hunk iteration, the diff TOC, JEV hunk
   segmentation, diff-size budgets, diff summaries, triage, `lens`, and the
@@ -106,6 +136,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that `mergecraft init` generates. They used to stop with a "refusing to rewrite"
   traceback, so the Quickstart failed at its model step. Only the keys a command
   changes are rewritten; comments elsewhere in the file are kept (#1336, #1455).
+
+- Legacy `mergecraft auth <provider>` now finds the provider registry from any
+  directory of a checkout and writes the indexed `LLM_PROVIDER_<N>_…` key, with
+  its confirmation naming the key it wrote. It used to read the registry from
+  the working directory, so a run from a subdirectory silently wrote the flat
+  legacy secret and skipped the indexed wiring (#1557).
+- `config show` and `config explain` exit `2` with a plain message for an
+  unknown key instead of `30` with the message quoted twice; `config show
+  models` shows the whole configured fallback chain; and a missing model chain
+  prints one actionable line instead of a traceback (#1569).
+- An unknown rule id under `gates.override` is now an error that names the key
+  and lists the valid ids, instead of a silently stored override that is never
+  selected (#1564).
+- `mergecraft gha token` writes its `::add-mask::` command raw and escaped to
+  stdout, like the other workflow commands, so Rich markup, soft-wrapping and
+  colour can no longer change the string the runner masks (#1558).
+- CLI help and error tests no longer depend on terminal width: a phrase that
+  wraps across a Rich panel border is matched through one shared normaliser
+  (#1565).
+
+### Removed
+
+- `validate_config_secret_split` (never called outside tests; its `.env`
+  credential branch could not report anything) (#1564).
 
 ### Security
 
@@ -258,6 +312,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The golden corpus has its first human-adjudicated cases: the nine batch 002
+  findings, confirmed by the maintainer, each with upstream evidence and an
+  adjudication record. They are one rater's labels and establish no judge
+  calibration, agreement or held-out split; batch 001's nine rows still have no
+  provenance, so the corpus as a whole does not clear the `independent` bar
+  (#1551).
 - A `review_event` Action input. `verdict` (the default) keeps today's
   behaviour. `comment` publishes every review as a COMMENT, whatever the
   verdict, and the run skips the automatic resolution of fixed-finding review

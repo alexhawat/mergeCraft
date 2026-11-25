@@ -1,0 +1,21 @@
+{
+  "id": "golden-b002-systems-go-gorm-caller-depth",
+  "title": "FileWithLineNum reports an inner wrapper after caller extraction",
+  "language": "go",
+  "framework": "gorm",
+  "category": "correctness",
+  "kind": "historical_pr",
+  "source": "human",
+  "path": "utils/utils.go",
+  "start_line": 55,
+  "end_line": 59,
+  "notes": "Introduced by https://github.com/go-gorm/gorm/pull/7610 (merge 2c3d109af3057f0d0ee64104011f12ac7bdab9bc); fixed by https://github.com/go-gorm/gorm/pull/7717. Evidence: evals/fixtures/golden/golden-b002-systems-go-gorm-caller-depth/evidence.json",
+  "provenance": "human",
+  "adjudication": {
+    "adjudicated_by": "human",
+    "model": "",
+    "produced_by": "",
+    "independence": "independent",
+    "at": "2026-11-25T12:26:57.628238Z"
+  }
+}

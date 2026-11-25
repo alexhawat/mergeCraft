@@ -29,7 +29,7 @@ from mergecraft.agents.shared import AgentResult
 from mergecraft.analyzers.trust import allow_repo_command_overrides
 from mergecraft.config import load_repo_settings
 from mergecraft.config.settings import RepoInfo, apply_trust_tier_to_repo_settings
-from mergecraft.errors import ModelFallbackPolicyError
+from mergecraft.errors import ConfigurationError, ModelFallbackPolicyError
 from mergecraft.mcp.context import PayloadEvent, RepoIdentity, ResolvedPayload, ToolContext
 from mergecraft.mcp.endpoints import mcp_role_url
 from mergecraft.mcp.server import start_mcp_http_server
@@ -225,7 +225,9 @@ def _prepare_offline_agent(
         tool_state.setup_script_skip_reason = setup_script_skip_reason
     chain = effective_model_chain(settings, head=model, pin=settings.model_pin)
     if not chain:
-        raise ValueError("no model chain configured — set models: in .mergecraft/config.yaml")
+        raise ConfigurationError(
+            "no model chain configured — set models: in .mergecraft/config.yaml"
+        )
     resolved_model = resolve_model(slug=chain[0] if chain else model, respect_env_override=False)
     # Context construction must not reject an unavailable primary before
     # the shared fallback loop can inspect it. Runtime resolution happens
@@ -729,7 +731,14 @@ async def run_offline_agent_review(
             diff_path=str(materialization.path),
         )
     except Exception as exc:
-        logger.exception("offline diff-review failed")
+        # A known configuration error is an operator fix, not a crash: one line,
+        # no stack trace (#1569). Everything else keeps its traceback so a
+        # genuine defect stays diagnosable; both still classify through
+        # ``_offline_error_outcome`` for the exit code.
+        if isinstance(exc, ConfigurationError):
+            logger.error("offline diff-review failed: {}", exc)
+        else:
+            logger.exception("offline diff-review failed")
         result = _offline_failure(
             error=str(exc),
             outcome=_offline_error_outcome(exc),

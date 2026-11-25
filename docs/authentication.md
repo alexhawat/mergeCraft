@@ -158,7 +158,10 @@ An explicitly selected `MERGECRAFT_ENV` file remains an operator override and
 can be loaded regardless of its tracking status.
 
 The walk-up is why `mergecraft auth` run from a subdirectory writes the `.env`
-the next invocation actually loads. Outside a git checkout the writers fail
+the next invocation actually loads. The legacy `auth` commands also read the
+provider registry from that same repository root, so `auth claude` takes the
+indexed `LLM_PROVIDER_<N>_…` path from any directory of the checkout rather
+than falling back to the flat secret. Outside a git checkout the writers fail
 with the directory they consulted named in the error; the startup load falls
 back to `./.env` and stays silent when it is missing, so global invocations are
 unaffected. Inside GitHub Actions the startup load reads no `.env` from the

@@ -1,0 +1,21 @@
+{
+  "id": "golden-b002-systems-java-spring-composite-set-remove",
+  "title": "Composite map key-set removal exposes a hidden duplicate key",
+  "language": "java",
+  "framework": "spring",
+  "category": "correctness",
+  "kind": "historical_pr",
+  "source": "human",
+  "path": "spring-core/src/main/java/org/springframework/util/CompositeCollection.java",
+  "start_line": 115,
+  "end_line": 118,
+  "notes": "Introduced by https://github.com/spring-projects/spring-framework/pull/37332 (merge f5a71230440381427d7d652e94a44a8658357025); fixed by https://github.com/spring-projects/spring-framework/pull/37394. Evidence: evals/fixtures/golden/golden-b002-systems-java-spring-composite-set-remove/evidence.json",
+  "provenance": "human",
+  "adjudication": {
+    "adjudicated_by": "human",
+    "model": "",
+    "produced_by": "",
+    "independence": "independent",
+    "at": "2026-11-25T12:26:59.553422Z"
+  }
+}

@@ -45,7 +45,9 @@ def _load_yaml_raw(cwd: Path) -> dict[str, Any]:
     return load_layered_config_dict(root=cwd)
 
 
-def _resolve_model_layers(*, cwd: Path, cli_model: str | None = None) -> dict[ConfigLayer, Any]:
+def _resolve_model_layers(
+    *, cwd: Path, cli_model: str | None = None, key: str = "model"
+) -> dict[ConfigLayer, Any]:
     layers: dict[ConfigLayer, Any] = {}
     if cli_model:
         layers[ConfigLayer.CLI] = cli_model
@@ -55,7 +57,10 @@ def _resolve_model_layers(*, cwd: Path, cli_model: str | None = None) -> dict[Co
     settings = load_repo_settings(root=cwd, load_learnings_files=False)
     yaml_slugs = configured_model_slugs(settings)
     if yaml_slugs:
-        layers[ConfigLayer.YAML] = yaml_slugs[0]
+        # ``models`` carries the configured fallback chain — the thing an
+        # operator opens show/explain to see (#1569); ``model`` stays the single
+        # head slug it always was. The renderer joins the tuple.
+        layers[ConfigLayer.YAML] = tuple(yaml_slugs) if key == "models" else yaml_slugs[0]
     layers[ConfigLayer.DEFAULT] = resolve_effective_model_slug(settings)
     return layers
 
@@ -120,7 +125,7 @@ def resolve_setting(
     config_path = resolved_config_path(root)
     normalized = key.strip().lower()
     if normalized in {"model", "models"}:
-        layers = _resolve_model_layers(cwd=root, cli_model=cli_model)
+        layers = _resolve_model_layers(cwd=root, cli_model=cli_model, key=normalized)
         winner = _winning_layer(layers)
         return layers.get(winner, resolve_effective_model_slug(default_settings())), winner
     if normalized in {"tracing.enabled", "tracing"}:
@@ -152,7 +157,7 @@ def explain_setting(
     config_path = resolved_config_path(root)
     normalized = key.strip().lower()
     if normalized in {"model", "models"}:
-        layers = _resolve_model_layers(cwd=root, cli_model=cli_model)
+        layers = _resolve_model_layers(cwd=root, cli_model=cli_model, key=normalized)
     elif normalized in {"tracing.enabled", "tracing"}:
         layers = _resolve_tracing_enabled_layers(
             cwd=root, cli_args=cli_args, config_path=config_path

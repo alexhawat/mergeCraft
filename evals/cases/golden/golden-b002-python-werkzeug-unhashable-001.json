@@ -1,0 +1,21 @@
+{
+  "id": "golden-b002-python-werkzeug-unhashable-001",
+  "title": "Cycle tracking crashes the debugger on unhashable exception instances",
+  "language": "python",
+  "framework": "werkzeug",
+  "category": "correctness",
+  "kind": "historical_pr",
+  "source": "human",
+  "path": "src/werkzeug/debug/tbtools.py",
+  "start_line": 251,
+  "end_line": 255,
+  "notes": "Introduced by https://github.com/pallets/werkzeug/pull/1540 (merge bdc17e4cd10bbb17449006cef385ec953a11fc36); fixed by https://github.com/pallets/werkzeug/pull/1542. Evidence: evals/fixtures/golden/golden-b002-python-werkzeug-unhashable-001/evidence.json",
+  "provenance": "human",
+  "adjudication": {
+    "adjudicated_by": "human",
+    "model": "",
+    "produced_by": "",
+    "independence": "independent",
+    "at": "2026-11-25T12:26:56.249965Z"
+  }
+}

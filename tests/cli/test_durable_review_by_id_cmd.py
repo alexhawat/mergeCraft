@@ -22,6 +22,7 @@ from tests.review.support_durable_review import (
     sample_trace_events,
     seed_completed_review,
 )
+from tests.support.cli_text import compact_cli_text
 from typer.testing import CliRunner
 
 from mergecraft.cli.app import app
@@ -374,7 +375,7 @@ def test_explain_single_arg_hex_review_id_steers_to_two_arg_form(
         ["explain", review_id, "--repo-root", str(tmp_path)],
         env=_DUMB_ENV,
     )
-    combined = _plain(result.stdout + result.stderr)
+    combined = compact_cli_text(result.stdout + result.stderr)
     assert result.exit_code == CLI_USAGE_EXIT_CODE, combined
     assert "stored review id" in combined.casefold()
     assert "explain <review-id> <finding-id>" in combined

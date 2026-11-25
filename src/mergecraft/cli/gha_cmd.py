@@ -80,7 +80,7 @@ def _set_output(name: str, value: str, *, mask: bool = False) -> None:
             else:
                 fh.write(f"{name}={value}\n")
     if mask and "\n" not in value and value:
-        console.print(f"::add-mask::{value}")
+        gha_log.add_mask(value)
 
 
 def _structured_failure_result(outcome: RunOutcome, message: str) -> str:
