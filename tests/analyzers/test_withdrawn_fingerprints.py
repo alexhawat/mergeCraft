@@ -1,4 +1,4 @@
-"""Withdrawn findings: markers withdraw, prose only informs (#1562, D9).
+"""Withdrawn findings: markers withdraw, prose only informs (#1562).
 
 ``withdrawn_fingerprints`` returns the fingerprints stamped into
 ``<!-- mergecraft-finding:v1:… -->`` markers. A plain-text line was hashed with

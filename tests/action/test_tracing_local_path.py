@@ -1,10 +1,9 @@
-"""The ``local_files`` tracing sink path is the literal default (D6, §1562).
+"""The ``local_files`` tracing sink path is the literal default (#1562).
 
 ``_resolve_local_path`` claimed to resolve the sink path against
 ``GITHUB_WORKSPACE``, but its only caller passed ``None`` and the workspace
-branch was unreachable. The sink path is the literal ``.mergecraft/traces/``
-whether or not ``GITHUB_WORKSPACE`` is set; this pins that before the dead
-branch is deleted.
+branch was unreachable; the dead branch is gone. The sink path is the literal
+``.mergecraft/traces/`` whether or not ``GITHUB_WORKSPACE`` is set.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Mutation-survivor paths keep a leading dot (#1563, D5).
+"""Mutation-survivor paths keep a leading dot (#1563).
 
 ``_norm_path`` normalises survivor and symbol paths. ``lstrip("./")`` removed
 every leading dot and slash, so a survivor in ``.github/scripts/x.py`` was

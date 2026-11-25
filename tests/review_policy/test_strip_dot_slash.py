@@ -1,4 +1,4 @@
-"""One shared ``./`` prefix strip, applied once (#1563, D3-D5).
+"""One shared ``./`` prefix strip, applied once (#1563).
 
 ``str.lstrip("./")`` removes every leading ``.`` and ``/`` character, so
 ``.github/x.py`` becomes ``github/x.py`` and ``../traces`` becomes ``traces``.
@@ -9,22 +9,9 @@ untouched.
 
 from __future__ import annotations
 
-import importlib
-from typing import TYPE_CHECKING, cast
-
 import pytest
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-
-def _strip() -> Callable[[str], str]:
-    """Import the helper inside the body so a missing symbol is an assertion."""
-    module = importlib.import_module("mergecraft.review_policy.paths")
-    helper = getattr(module, "strip_dot_slash_prefix", None)
-    assert helper is not None, "mergecraft.review_policy.paths.strip_dot_slash_prefix is missing"
-    assert callable(helper)
-    return cast("Callable[[str], str]", helper)
+from mergecraft.review_policy.paths import strip_dot_slash_prefix
 
 
 @pytest.mark.parametrize(
@@ -43,4 +30,4 @@ def _strip() -> Callable[[str], str]:
 )
 def test_strip_dot_slash_prefix(raw: str, expected: str) -> None:
     """Each row is a path shape the lstrip character set used to corrupt."""
-    assert _strip()(raw) == expected
+    assert strip_dot_slash_prefix(raw) == expected

@@ -1,4 +1,4 @@
-"""Guard: no production call uses ``lstrip("./")`` as a character set (#1563, D7).
+"""Guard: no production call uses ``lstrip("./")`` as a character set (#1563).
 
 ``str.lstrip("./")`` is not a prefix strip. It removes every leading ``.`` and
 ``/`` character, so a real dotted path loses its dot. This test scans ``src/``

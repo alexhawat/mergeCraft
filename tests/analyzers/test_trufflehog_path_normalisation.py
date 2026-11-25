@@ -1,4 +1,4 @@
-"""Trufflehog suppression paths keep a leading dot (#1563, D5, K-SAFE).
+"""Trufflehog suppression paths keep a leading dot (#1563).
 
 ``_normalize_trufflehog_path`` is the suppression lookup key. ``lstrip("./")``
 collapsed a dot-prefixed path onto its undotted form, so
@@ -25,10 +25,10 @@ def test_a_root_level_dotted_venv_path_hits_the_venv_marker() -> None:
 
 
 def test_the_undotted_fixture_path_is_still_suppressed() -> None:
-    """K-SAFE: the intentional credential fixture stays exempt."""
+    """The intentional credential fixture stays exempt."""
     assert is_trufflehog_path_suppressed("tests/security/test_credentials.py") is True
 
 
 def test_an_explicit_dot_slash_fixture_path_is_still_suppressed() -> None:
-    """K-SAFE: one leading ``./`` is removed, so the fixture still matches."""
+    """One leading ``./`` is removed, so the fixture still matches."""
     assert is_trufflehog_path_suppressed("./tests/security/test_credentials.py") is True
