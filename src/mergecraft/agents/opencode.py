@@ -68,7 +68,7 @@ if TYPE_CHECKING:
     from mergecraft.agents._stream_consumer import StreamSpanAccumulator
     from mergecraft.mcp.tool_state import ToolState
     from mergecraft.security.review_integrity import TreeBaseline
-    from mergecraft.utils.run_bounds import BudgetTracker
+    from mergecraft.utils.run_bounds import BudgetTracker, StreamCharges
 
 
 OPENCODE_AUTH_ENV = "OPENCODE_AUTH_JSON"
@@ -641,12 +641,14 @@ def _run_opencode_cli_streaming(
             tool_state=ctx.tool_state,
             model=ctx.resolved_model,
             budget_tracker=ctx.budget_tracker,
+            stream_charges=ctx.stream_charges,
         )
         if session is not None
         else _bash_only_handler(
             ctx.tool_state,
             model=ctx.resolved_model,
             budget_tracker=ctx.budget_tracker,
+            stream_charges=ctx.stream_charges,
         )
     )
 
@@ -722,6 +724,7 @@ def _absorb_step_usage(
     *,
     model: str | None = None,
     budget_tracker: BudgetTracker | None = None,
+    stream_charges: StreamCharges | None = None,
 ) -> None:
     """Fold a 2.x step's reported tokens into the run's usage (#801).
 
@@ -781,6 +784,7 @@ def _absorb_step_usage(
         payload,
         budget_tracker=budget_tracker,
         provider_budget=current_run_budget(),
+        stream_charges=stream_charges,
         cost_usd=cost_usd,
     )
     if stop:
@@ -794,11 +798,18 @@ def _bash_only_handler(
     *,
     model: str | None = None,
     budget_tracker: BudgetTracker | None = None,
+    stream_charges: StreamCharges | None = None,
 ) -> Callable[[StreamSpanAccumulator, dict[str, Any]], None]:
     """Stream handler for a run with no session: record tool calls, touch nothing else."""
 
     def _handle(accumulator: StreamSpanAccumulator, event: dict[str, Any]) -> None:
-        _absorb_step_usage(accumulator, event, model=model, budget_tracker=budget_tracker)
+        _absorb_step_usage(
+            accumulator,
+            event,
+            model=model,
+            budget_tracker=budget_tracker,
+            stream_charges=stream_charges,
+        )
         if event.get("type") == "tool_use":
             _record_opencode_part(tool_state, event.get("part"))
 
@@ -811,6 +822,7 @@ def _session_event_handler(
     tool_state: ToolState | None = None,
     model: str | None = None,
     budget_tracker: BudgetTracker | None = None,
+    stream_charges: StreamCharges | None = None,
 ) -> Callable[[StreamSpanAccumulator, dict[str, Any]], None]:
     """Record a 2.x ``run`` stream's session id and answer text.
 
@@ -832,7 +844,13 @@ def _session_event_handler(
             )
             session["error"] = str(message or event)[:1000]
             accumulator.set_stream_error(session["error"])
-        _absorb_step_usage(accumulator, event, model=model, budget_tracker=budget_tracker)
+        _absorb_step_usage(
+            accumulator,
+            event,
+            model=model,
+            budget_tracker=budget_tracker,
+            stream_charges=stream_charges,
+        )
         part = event.get("part")
         if event.get("type") == "tool_use":
             _record_opencode_part(tool_state, part)

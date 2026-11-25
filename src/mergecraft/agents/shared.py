@@ -19,6 +19,7 @@ from loguru import logger
 from mergecraft.agents.activity_watchdog import DEFAULT_IDLE_TIMEOUT_S
 from mergecraft.errors import ConfigurationError
 from mergecraft.mcp.endpoints import mcp_role_url as _mcp_role_url
+from mergecraft.utils.run_bounds import StreamCharges
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -413,6 +414,9 @@ class AgentRunContext:
     # Slice 6 — no-output watchdog interval for this attempt. ``0`` disables it.
     idle_timeout_s: float = DEFAULT_IDLE_TIMEOUT_S
     budget_tracker: Any | None = None
+    # This dispatch's own streamed total. ``replace`` copies the reference, so
+    # every dispatch must replace it with a fresh one.
+    stream_charges: StreamCharges = field(default_factory=StreamCharges)
 
 
 def mcp_auth_headers(ctx: AgentRunContext) -> dict[str, str]:

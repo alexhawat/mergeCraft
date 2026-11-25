@@ -90,7 +90,6 @@ permissions:
   issues: write
   # Post the mergecraft / mergecraft-approval check-runs.
   checks: write
-  statuses: write
 
 concurrency:
   # pull_request_target resolves github.ref to the default branch, so keying on

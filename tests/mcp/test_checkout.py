@@ -87,13 +87,20 @@ _BOT_USER: dict[str, str] = {"login": _PUBLISHER_LOGIN, "type": "Bot"}
 def _pin_publishers(monkeypatch: pytest.MonkeyPatch, logins: frozenset[str]) -> None:
     """Pin the expected-publisher set for the checkpoint/round tests (TB-D7).
 
-    Direct attribute access on both modules: a missing seam fails loudly here
-    instead of silently leaving the test to exercise the real lookup.
+    Direct attribute access on the modules: a missing seam fails loudly here
+    instead of silently leaving the test to exercise the real lookup. Async
+    callers on the MCP loop await ``resolve_publisher_logins`` (#1568), so that
+    seam is pinned too — the synchronous accessor still serves the pure
+    selectors (``last_reviewed_sha``, ``_round_index``).
     """
     import mergecraft.review.authorship as authorship
     from mergecraft.mcp import checkout as checkout_module
 
+    async def _resolved(_ctx: object) -> frozenset[str]:
+        return logins
+
     monkeypatch.setattr(authorship, "expected_publisher_logins", lambda ctx: logins)
+    monkeypatch.setattr(authorship, "resolve_publisher_logins", _resolved)
     monkeypatch.setattr(checkout_module, "expected_publisher_logins", lambda ctx: logins)
 
 

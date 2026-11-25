@@ -56,6 +56,7 @@ from mergecraft.utils.instructions import resolve_instructions
 from mergecraft.utils.run_bounds import (
     BudgetExhausted,
     BudgetTracker,
+    StreamCharges,
     budget_exhaustion_outcome,
     record_agent_usage,
     resolve_run_bounds,
@@ -452,6 +453,7 @@ async def _dispatch_offline_agent(
             resolved_model=attempt_model,
             instructions=attempt_instructions,
             subagent_denied_tools=subagent_denied_tool_names(tool_context, output_schema),
+            stream_charges=StreamCharges(),
         )
         if budget_tracker.last_exhausted is not None:
             raise budget_tracker.last_exhausted
@@ -472,7 +474,12 @@ async def _dispatch_offline_agent(
             result = await attempt_agent.run(attempt_ctx)
         usage = apply_catalog_cost_to_usage(result.usage, model=attempt_model)
         tool_state.usage_entries.append(usage)
-        record_agent_usage(budget_tracker, usage, phase="reviewer_dispatch")
+        record_agent_usage(
+            budget_tracker,
+            usage,
+            phase="reviewer_dispatch",
+            streamed=attempt_ctx.stream_charges,
+        )
         return replace(result, usage=usage)
 
     from mergecraft.agents.token_budget import bind_run_budget

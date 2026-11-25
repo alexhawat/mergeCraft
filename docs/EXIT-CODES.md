@@ -31,7 +31,7 @@ These codes apply to `mergecraft review` and the hidden `diff-review` alias.
 | `12` | `CLI_FAILED_EXIT_CODE` | `failed` | Review failed without classified findings. |
 | `20` | `CLI_INCONCLUSIVE_EXIT_CODE` | `inconclusive` | Review could not reach a verdict. |
 | `30` | `CLI_CONFIGURATION_EXIT_CODE` | `configuration_error` | Invalid repo config, missing required paths, or other setup errors. |
-| `40` | `CLI_INFRA_EXIT_CODE` | `infra_error` | Provider / credential / runtime infrastructure failure. |
+| `40` | `CLI_INFRA_EXIT_CODE` | `infra_error` | Provider / credential / runtime infrastructure failure, or a failure to write the findings file. |
 | `50` | `CLI_TIMEOUT_EXIT_CODE` | `timed_out` | Run exceeded its budget or wall-clock timeout. |
 
 Findings refine only an outcome the review reached: `10` and `11` apply when the

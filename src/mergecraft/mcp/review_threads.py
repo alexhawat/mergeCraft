@@ -76,9 +76,9 @@ async def resolve_fixed_finding_threads(
     changed_lines = _incremental_changed_lines(primary)
     if changed_lines is None:
         return 0
-    from mergecraft.review.authorship import expected_publisher_logins
+    from mergecraft.review.authorship import resolve_publisher_logins
 
-    publishers = expected_publisher_logins(ctx)
+    publishers = await resolve_publisher_logins(ctx)
     try:
         page = await fetch_review_thread_page(ctx, pull_number) if publishers else None
     except Exception as err:  # advisory cleanup; never fails a posted review

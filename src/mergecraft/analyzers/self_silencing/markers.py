@@ -140,7 +140,7 @@ _GENERIC_RULES: tuple[_Rule, ...] = (
 # Secret scanners honour their own line markers in *any* file: a
 # ``<!-- trufflehog:ignore -->`` in a Markdown example silences a finding exactly
 # as ``# gitleaks:allow`` does in code (#1008). Prose suffixes and unknown
-# extensions get these and nothing else — ``# noqa`` in a document is not a
+# extensions get these and nothing else — a noqa marker in a document is not a
 # suppression.
 _SECRET_SCANNER_RULES: tuple[_Rule, ...] = (
     _Rule("gitleaks:allow", re.compile(r"gitleaks:allow\b"), security=True),

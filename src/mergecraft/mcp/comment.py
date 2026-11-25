@@ -246,7 +246,7 @@ def report_progress_tool(ctx: ToolContext) -> ToolSpec:
             existing_sticky: dict[str, Any] | None = None
             if not target_plan:
                 try:
-                    with run_sticky_scope(ctx):
+                    async with run_sticky_scope(ctx):
                         existing_sticky = await fetch_sticky_progress_comment(
                             ctx.scm,
                             ctx.repo.owner,

@@ -15,6 +15,9 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+# Honesty-checker negative fixtures (tests/scripts/fixtures/test_honesty/) are not pytest modules.
+collect_ignore = ["scripts/fixtures"]
+
 pytest_plugins = [
     "tests.support.hermetic",
     "tests.support.github_fakes",
