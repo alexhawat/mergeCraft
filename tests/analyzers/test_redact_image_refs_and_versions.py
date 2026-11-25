@@ -25,7 +25,6 @@ def _github_token_body() -> str:
     return ("a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6" + "q7R8")[:36]
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 @pytest.mark.parametrize(
     "reference",
     [

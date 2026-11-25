@@ -40,13 +40,11 @@ def _userinfo_password() -> str:
     return ("Ab3xK9qLmZ7pR2tY8wQ1" * 2)[:21]
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 @pytest.mark.parametrize("path", _SURVIVING_PATHS)
 def test_directory_paths_survive_log_redaction(path: str) -> None:
     assert redact_log_message(path) == path
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 def test_directory_path_survives_inside_a_sentence() -> None:
     line = "provisioning semgrep into /root/.cache/mergecraft/analyzers (python3.12)"
     assert redact_log_message(line) == line
