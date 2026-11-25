@@ -5,15 +5,13 @@ from __future__ import annotations
 import sys
 import time
 import tracemalloc
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from mergecraft.analyzers import run as run_mod
 from mergecraft.analyzers.resolve import AnalyzerPlan
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 _CAP_BYTES = 64 * 1024
 _EIGHT_MIB = 8 * 1024 * 1024
@@ -109,6 +107,26 @@ def test_over_cap_stream_reports_the_exceeded_notice(
 
     assert "analyzer output exceeded" in outcome.output
     assert "chars per stream" in outcome.output
+
+
+@pytest.mark.timeout(60)
+def test_a_cap_that_lands_mid_token_never_publishes_the_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reader cut inside a credential drops that line, never half a token."""
+    cap = 4096
+    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_CHARS", cap)
+    token = "ghp_" + ("a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6" + "q7R8")[:36]
+    filler = "x" * (cap - 11)
+    script = f"import sys; sys.stdout.write({(filler + chr(10) + token)!r})"
+
+    outcome = run_mod.run_plan(_plan(tmp_path, script))
+
+    persisted = Path(outcome.output_path).read_text(encoding="utf-8") if outcome.output_path else ""
+    prefix = token[:10]
+    assert prefix not in outcome.output
+    assert prefix not in persisted
+    assert "analyzer output exceeded" in outcome.output
 
 
 @pytest.mark.timeout(60)
