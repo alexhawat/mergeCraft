@@ -1,7 +1,7 @@
 """RED unit tests for ``provider migrate`` planning helpers (#483 / BF).
 
-Pins migration planning, fingerprint redaction, config/secret split validation,
-legacy precedence (D7), and Bedrock/Vertex ``cloud_chain`` suffix mapping (D10).
+Pins migration planning, fingerprint redaction, legacy precedence (D7), and
+Bedrock/Vertex ``cloud_chain`` suffix mapping (D10).
 """
 
 from __future__ import annotations
@@ -81,51 +81,6 @@ def test_migration_secret_fingerprint_redacts_full_value() -> None:
     assert fingerprint != _OPENAI_SECRET
     assert _OPENAI_SECRET not in fingerprint
     assert "9999" in fingerprint or "…" in fingerprint or "*" in fingerprint
-
-
-def test_validate_config_secret_split_flags_credential_in_yaml(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    module = require_provider_migrate_symbols()
-    scaffold_mergecraft_home(
-        tmp_path,
-        config_body=(
-            "providers:\n"
-            "  - label: leaked\n"
-            "    harness: opencode\n"
-            "    envIndex: 1\n"
-            "    apiKey: should-not-live-here\n"
-        ),
-    )
-    monkeypatch.chdir(tmp_path)
-    stub_mergecraft_env(monkeypatch, tmp_path)
-
-    violations = module.validate_config_secret_split(
-        config_path=tmp_path / ".mergecraft" / "config.yaml",
-        env_path=tmp_path / ".env",
-    )
-    assert violations
-    joined = " ".join(violations).lower()
-    assert "apikey" in joined or "credential" in joined or "secret" in joined
-
-
-def test_validate_config_secret_split_flags_structure_in_env(
-    tmp_path: Path,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    module = require_provider_migrate_symbols()
-    scaffold_mergecraft_home(tmp_path)
-    monkeypatch.chdir(tmp_path)
-    stub_mergecraft_env(monkeypatch, tmp_path)
-    (tmp_path / ".env").write_text("harness=opencode\nLLM_PROVIDER_1=nous\n", encoding="utf-8")
-
-    violations = module.validate_config_secret_split(
-        config_path=tmp_path / ".mergecraft" / "config.yaml",
-        env_path=tmp_path / ".env",
-    )
-    assert violations
-    assert any("harness" in item.lower() for item in violations)
 
 
 @pytest.mark.parametrize("legacy_key", sorted(LEGACY_API_KEY_MIGRATIONS))
@@ -233,3 +188,12 @@ def test_apply_provider_migration_is_idempotent(
     assert not second_plan.providers
     module.apply_provider_migration(second_plan, env_path=env_path, config_path=config_path)
     assert env_path.read_text(encoding="utf-8") == after_first
+
+
+@pytest.mark.xfail(reason="green after W2", strict=True)
+def test_secret_split_validator_is_not_exported() -> None:
+    """The dead secret-split validator is gone from the module's public surface."""
+    module = require_provider_migrate_symbols()
+
+    assert "validate_config_secret_split" not in module.__all__
+    assert not hasattr(module, "validate_config_secret_split")

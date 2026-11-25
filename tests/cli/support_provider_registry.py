@@ -492,7 +492,6 @@ def require_provider_migrate_symbols() -> Any:
         "plan_provider_migration",
         "apply_provider_migration",
         "migration_secret_fingerprint",
-        "validate_config_secret_split",
         "resolve_indexed_credential",
     ):
         if not hasattr(module, name):

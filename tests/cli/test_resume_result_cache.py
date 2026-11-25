@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import re
 
+from tests.support.cli_text import compact_cli_text
 from typer.testing import CliRunner
 
 import mergecraft.offline_review as offline_mod
@@ -36,9 +37,9 @@ def test_recovery_module_does_not_export_resume_review() -> None:
 def test_review_help_documents_resume_as_local_result_cache() -> None:
     """Happy: ``review --help`` describes ``--resume`` as the same cache as ``--use-cache``."""
     result = runner.invoke(app, ["review", "--help"], env=_DUMB_ENV)
-    help_text = _plain(result.stdout + result.stderr)
+    help_text = compact_cli_text(result.stdout + result.stderr)
     assert result.exit_code == CLI_SUCCESS_EXIT_CODE, help_text
-    compact = " ".join(help_text.split()).casefold()
+    compact = help_text.casefold()
     assert "--resume" in compact
     assert "--use-cache" in compact
     assert "result cache" in compact
