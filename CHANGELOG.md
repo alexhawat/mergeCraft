@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Log lines keep directory paths, container image references and version
+  strings instead of replacing them with `<redacted>`: a path whose segments are
+  all ordinary words (including absolute paths and a `name=/path` value), an
+  image reference whose labels, segments and tag are ordinary, and a bounded
+  version string each survive the redactor. Secret-shaped tokens are redacted as
+  before, in log lines and wherever else `redact_secrets` runs (#1560).
+- Local coverage and mutation evidence runs remove their temporary source copy,
+  coverage work directory and mutation results directory when the run returns or
+  raises, so repeated local runs no longer accumulate `mergecraft-local-*`
+  directories in the system temp directory (#1566).
+- Analyzer output is capped while it is read: one reader per stream keeps at most
+  32 MiB and discards the rest, so a chatty analyzer no longer grows the
+  reviewer's memory (an analyzer streaming for three seconds took the parent from
+  about 150 MB to about 8.8 GB before this change). The cap counts bytes, a
+  truncated stream is cut on a redaction-safe boundary so no credential prefix is
+  published, and an undecodable byte or a child that leaves a grandchild holding
+  the pipe is reported instead of silently passing (#1566).
 - Secondary roster reviewers and file-group reviewers now count toward the
   run's token and cost budget and toward the cost it reports: each dispatch's
   usage is priced from the catalog, listed with the run's usage, and charged to

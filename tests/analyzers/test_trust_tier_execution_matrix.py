@@ -165,7 +165,7 @@ def spawns(monkeypatch: pytest.MonkeyPatch) -> list[Spawn]:
     ) -> subprocess.CompletedProcess[str]:
         _ = timeout_s, pass_fds
         recorded.append(Spawn(list(run_argv), cwd, dict(env), preexec_fn))
-        return subprocess.CompletedProcess(run_argv, 0, "[]", "")
+        return run_mod._CapturedProcess(run_argv, 0, "[]", "", truncated=frozenset())
 
     monkeypatch.setattr(run_mod, "_run_in_own_session", _record)
     return recorded
