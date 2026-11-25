@@ -468,6 +468,9 @@ def test_batch_002_rows_keep_the_agreement_guard() -> None:
 # tests compares. Case ids come from the manifest, so a row cannot drop out unseen.
 
 _BATCH_002_PATH = _REPO_ROOT / "evals" / "adjudication" / "golden-batch-002.json"
+_BATCH_002_EXPORT_PATH = (
+    _REPO_ROOT / "evals" / "adjudication" / "golden-batch-002-hitl" / "golden-batch-002.export.json"
+)
 
 
 def _load_batch_002() -> HumanBatchManifest:
@@ -533,3 +536,13 @@ def test_batch_002_review_sheet_renders_every_recorded_decision() -> None:
         if line.startswith("| golden-")
     }
     assert rows == dict.fromkeys(_RECORDED_CASE_IDS, "confirm by alexhawat")
+
+
+def test_batch_002_manifest_is_the_review_tool_export_with_only_the_login_mapped() -> None:
+    """The export keeps the id that answered, so the mapping to a login stays auditable."""
+    manifest = json.loads(_BATCH_002_PATH.read_text(encoding="utf-8"))
+    export = json.loads(_BATCH_002_EXPORT_PATH.read_text(encoding="utf-8"))
+
+    assert [row["decided_by"] for row in export["cases"]] == ["Alex"] * 9
+    mapped = [{**row, "decided_by": "alexhawat"} for row in export["cases"]]
+    assert {**export, "cases": mapped} == manifest

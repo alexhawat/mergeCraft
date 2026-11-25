@@ -91,9 +91,10 @@ and no abstentions; the manifest holds the decisions. Each case has a row under
 `mergecraft eval adjudicate`. Batch 002 is tracked
 in [#1551](https://github.com/alexhawat/mergeCraft/issues/1551).
 
-The review tool recorded the answers under its own user id, `Alex`. The
-maintainer confirmed that those answers are theirs, and the manifest records
-them as `alexhawat`. Decision times are the review tool's; the time inside a
+The review tool recorded the answers under its own user id, `Alex`, as its
+[export](../evals/adjudication/golden-batch-002-hitl/golden-batch-002.export.json)
+shows. `alexhawat` [stated on #1551](https://github.com/alexhawat/mergeCraft/issues/1551#issuecomment-7163609820)
+that those answers are theirs, and the manifest records them as `alexhawat`. Decision times are the review tool's; the time inside a
 case row is when the command ran.
 
 Batch 002 therefore supplies nine independent labels from one human rater. It
