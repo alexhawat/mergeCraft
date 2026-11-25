@@ -243,9 +243,10 @@ def filter_diff(
     name. ``ignored_paths`` and ``kept_paths`` report post-image paths.
 
     ``changed_paths`` is accepted for callers that pass the pull request's change set;
-    the name-only ignore rule does not read it, and no generated-file rule is
-    implemented today. A section whose header cannot be parsed is kept: an unreadable
-    header is never a reason to review less.
+    this name-only matcher does not read it. The generated-file rule runs later, after
+    diff scoping, in :func:`mergecraft.analyzers.scope.filter_generated_scope`. A
+    section whose header cannot be parsed is kept: an unreadable header is never a
+    reason to review less.
     """
     prefix, sections = _split_sections(str(diff_text))
     posts = list(dict.fromkeys(paths[0] for paths, _ in sections if paths))

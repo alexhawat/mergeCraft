@@ -496,12 +496,11 @@ def suppress_withdrawn_findings(
 def withdrawn_fingerprints(learnings_text: str) -> frozenset[str]:
     """Return the fingerprints stamped into withdrawal markers in ``learnings_text``.
 
-    Only ``<!-- mergecraft-finding:v1:… -->`` markers withdraw a finding. A
-    fingerprint includes the finding's path, so a plain-text line hashed with no
-    path could never equal one; prose in the section informs the verifier brief
-    instead. Public because agent-finding verification (C6) reads the same
-    section, by the same rules, as analyzer suppression does — a second parser
-    would drift.
+    Only ``<!-- mergecraft-finding:v1:… -->`` markers withdraw a finding. Analyzer
+    and agent findings fingerprint with their path, so a line hashed with no path
+    does not match them; prose in the section informs the verifier brief instead.
+    Public because agent-finding verification (C6) reads the same section, by the
+    same rules, as analyzer suppression does — a second parser would drift.
     """
     if WITHDRAWN_FINDINGS_HEADING not in learnings_text:
         return frozenset()
