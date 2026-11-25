@@ -53,7 +53,6 @@ def test_bad_value_is_still_rejected() -> None:
     assert "closed action vocabulary" in message
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_unknown_rule_id_is_rejected() -> None:
     """Bug: a mistyped rule id is an error that names it and the valid ids."""
     with pytest.raises(ValueError, match="has_blocker") as excinfo:
@@ -64,7 +63,6 @@ def test_unknown_rule_id_is_rejected() -> None:
     assert "has_blockers" in message
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_unknown_key_is_reported_before_a_bad_value() -> None:
     """Bug: the key is checked first, so the error names the typo, not the action."""
     with pytest.raises(ValueError, match="has_blocker") as excinfo:
@@ -75,7 +73,6 @@ def test_unknown_key_is_reported_before_a_bad_value() -> None:
     assert "outside the closed action vocabulary" not in message
 
 
-@pytest.mark.xfail(reason="green after W3", strict=True)
 def test_config_with_a_mistyped_override_key_fails_where_a_bad_value_fails(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
