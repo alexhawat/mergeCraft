@@ -12,7 +12,6 @@ valid rule ids — and it checks the key before the value.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import TYPE_CHECKING
 
@@ -73,7 +72,7 @@ def test_unknown_key_is_reported_before_a_bad_value() -> None:
     assert "outside the closed action vocabulary" not in message
 
 
-def test_config_with_a_mistyped_override_key_fails_where_a_bad_value_fails(
+async def test_config_with_a_mistyped_override_key_fails_where_a_bad_value_fails(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -91,7 +90,8 @@ def test_config_with_a_mistyped_override_key_fails_where_a_bad_value_fails(
     ctx = build_mcp_tool_context(cwd=tmp_path)
     spec = next(tool for tool in public_mod.build_public_tools(ctx) if tool.name == "get_policy")
 
-    payload = json.loads(asyncio.run(spec.execute({})).content[0]["text"])
+    result = await spec.execute({})
+    payload = json.loads(result.content[0]["text"])
 
     error = payload.get("error")
     assert isinstance(error, str), payload
