@@ -462,9 +462,13 @@ def _is_ordinary_path_segment(segment: str) -> bool:
     candidate = segment.removeprefix(".")
     if not _is_benign_path_stem_segment(candidate):
         return False
-    # A random hex/base32 run alternates letters and digits many times; a name
-    # with a version suffix (``python3``, ``x86_64``) does not.
-    return len(_DIGIT_RUN_RE.findall(candidate)) <= _MAX_PATH_SEGMENT_DIGIT_RUNS
+    # A random hex/base32 run alternates letters and digits many times, and its
+    # digit runs are long. A name with a version or architecture suffix
+    # (``python3``, ``sha256``, ``x86_64``) has at most two short ones.
+    digit_runs = _DIGIT_RUN_RE.findall(candidate)
+    if len(digit_runs) > _MAX_PATH_SEGMENT_DIGIT_RUNS:
+        return False
+    return len(digit_runs) < 2 or all(len(run) <= 2 for run in digit_runs)
 
 
 def _is_benign_versioned_stem(segment: str) -> bool:
