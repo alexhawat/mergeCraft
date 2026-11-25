@@ -7,10 +7,11 @@ worked. Any runbook that reaches for ``sys.executable -m mergecraft`` (a
 virtualenv without the script on ``PATH``, a container with a bare
 interpreter) was broken.
 
-Both tests drive the real CLI in a child process, so they observe the exit
-code and the text an operator sees. The expected version line is read from
-``mergecraft --version`` on the same interpreter, so a release bump cannot make
-this module wrong.
+Both ``python -m mergecraft`` behaviours are driven in a child process, so the
+tests observe the exit code and the text an operator sees. The expected version
+line is read from ``mergecraft --version`` on the same interpreter, so a release
+bump cannot make this module wrong. A third test runs the package's ``__main__``
+guard in-process so coverage sees the module's own lines.
 """
 
 from __future__ import annotations
@@ -94,5 +95,11 @@ def test_package_guard_runs_the_cli_in_process(
     """
     expected = _app_version_line()
     monkeypatch.setattr(sys, "argv", ["mergecraft", "--version"])
-    runpy.run_module("mergecraft", run_name="__main__")
+    try:
+        runpy.run_module("mergecraft", run_name="__main__")
+    finally:
+        # Importing the package's ``__main__`` caches the entrypoint module;
+        # runpy warns when another test executes an already-imported module with
+        # ``-m``, and warnings are errors in this suite.
+        sys.modules.pop("mergecraft.cli.entrypoint", None)
     assert capsys.readouterr().out.strip() == expected

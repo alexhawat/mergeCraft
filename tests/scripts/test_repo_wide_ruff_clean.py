@@ -28,8 +28,10 @@ from pathlib import Path
 
 from tests.ci.workflow_support import REPO_ROOT
 
-# The Markdown files the repository-wide format check rejects today. A new one
-# appearing fails the test until it is listed here.
+# The Markdown files the repository-wide format check rejected when the drift
+# was reported. Only these three are checked here: ``make lint`` keeps its
+# narrower scope by decision, so a fourth drifting block is not caught by this
+# test.
 _MARKDOWN_FILES = (
     "docs/agents-sdk.md",
     "docs/dev/plans/audit-2026-11-05-testing.md",

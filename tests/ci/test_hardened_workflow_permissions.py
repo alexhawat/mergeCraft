@@ -28,7 +28,7 @@ from typing import Any
 import pytest
 import yaml
 from scripts.render_example_workflows import render_all
-from scripts.workflow_yaml import permission_dict
+from scripts.workflow_yaml import missing_permissions, permission_dict
 
 from tests.ci.workflow_support import REPO_ROOT
 
@@ -40,9 +40,6 @@ _HARDENED_SURFACES = (
     "example:examples/workflows/mergecraft-hardened.yml",
     "dogfood:docs/artifacts/dogfood-mergecraft.yml",
 )
-
-# ``scripts.workflow_yaml`` expands the scalar permission forms to sentinels.
-_ALL_WRITE = "__all_write__"
 
 # Every permission key these three files may declare. Pinned so a removal cannot
 # buy its green with an addition elsewhere. ``security-events`` is commented out
@@ -121,11 +118,10 @@ def _statuses_grants(doc: dict[str, Any]) -> set[str]:
     """Return every grant in ``doc`` that lets a step call the commit-status API."""
     grants: set[str] = set()
     for scope, block in _permission_mappings(doc):
-        if _ALL_WRITE in block:
-            grants.add(f"{scope}: permissions: write-all")
-        for key, value in block.items():
-            if str(key).strip() == "statuses":
-                grants.add(f"{scope}: statuses: {value}")
+        if "statuses" in block:
+            grants.add(f"{scope}: statuses: {block['statuses']}")
+        elif not missing_permissions(block, {"statuses": "write"}):
+            grants.add(f"{scope}: permissions grant every scope")
     return grants
 
 
@@ -180,8 +176,7 @@ def test_statuses_guard_fails_closed_on_a_job_level_write_all() -> None:
         "permissions": {"contents": "read", "checks": "write"},
         "jobs": {"review": {"permissions": "write-all"}},
     }
-    assert _statuses_grants(doc) == {"job review: permissions: write-all"}
-    assert "__all_write__" in _permission_keys(doc)
+    assert _statuses_grants(doc) == {"job review: permissions grant every scope"}
 
 
 def test_statuses_guard_accepts_an_explicit_least_privilege_mapping() -> None:
