@@ -1871,6 +1871,27 @@ The gate-action routing table gained the matching pair of named rules:
   packet's evidence is structurally absent (no decision row, no findings, no
   blast radius, no trajectory) — never on a parsed, validated packet.
 
+#### Overriding a rule (`gates.override`)
+
+`gates.override` in `.mergecraft/config.yaml` maps a **rule id** from the
+routing table to an action, and is layered over the defaults at the gate. The
+valid rule ids are exactly the shipped keys — `schema_failure`,
+`high_risk_migration`, `low_risk_passing`, `has_blockers`,
+`changed-unread-file`, `tool_loop`, `clean_pass`, `needs_human_review` — and the
+valid actions are `auto_merge`, `block`, `request_changes`,
+`require_human_review`, `require_more_tests`, `quarantine`, `escalate`.
+
+An unknown rule id is a configuration error, not a silent no-op: the message
+names the key and lists the valid ids. A value outside the action vocabulary is
+rejected the same way. Both checks run wherever a review reads its policy, and
+`get_policy` returns the message as its `error` payload.
+
+```yaml
+gates:
+  override:
+    low_risk_passing: require_human_review
+```
+
 ### Run outcome taxonomy
 
 A run ends in exactly one of six named outcomes —
