@@ -182,10 +182,21 @@ def test_header_after_a_completed_hunk_is_not_anchored_as_content() -> None:
 
     A concatenated section without its own ``diff --git`` line keeps the previous
     section's path (out of scope); the contract here is only the header rule: a
-    header line must not consume a hunk line or become an anchor.
+    header line must not consume a hunk line or become an anchor. Both hunks
+    cover lines 1-2 on each side, so exactly those four anchors exist: an empty
+    index fails, and so does a header read as removed/added line 3 (#1596).
     """
     index = build_inline_anchor_index(_CONCATENATED)
 
+    assert index.anchors == frozenset(
+        {
+            ("one.txt", 1, "LEFT"),
+            ("one.txt", 1, "RIGHT"),
+            ("one.txt", 2, "LEFT"),
+            ("one.txt", 2, "RIGHT"),
+        }
+    )
+    assert index.hunk_ranges == {"one.txt": {"LEFT": [(1, 2), (1, 2)], "RIGHT": [(1, 2), (1, 2)]}}
     assert ("one.txt", 3, "LEFT") not in index.anchors
     assert ("one.txt", 3, "RIGHT") not in index.anchors
     assert all(path == "one.txt" for path, _line, _side in index.anchors)
