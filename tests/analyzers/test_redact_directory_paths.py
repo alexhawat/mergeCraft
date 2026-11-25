@@ -22,6 +22,14 @@ def _high_entropy_segment() -> str:
     return "aB3xK9qLmZ7pR2tY8wQ1" + "vN4c"
 
 
+def _low_entropy_random_segment() -> str:
+    """A lowercase hex-like run: random by shape, under a word-based entropy bar."""
+    return "e405" + "ee00" + "d36e" + "8e0"
+
+
+_LOW_ENTROPY_RANDOM_SEGMENT = _low_entropy_random_segment()
+
+
 def _absolute_high_entropy_segment() -> str:
     return "Zx9Kq2Lm8Pw3Rt7Yv1Nc5" + "Bd0"
 
@@ -62,6 +70,18 @@ def test_absolute_path_with_high_entropy_segment_is_still_redacted() -> None:
     out = redact_log_message(f"/home/u/.config/{secret}")
     assert secret not in out
     assert REDACTION_SENTINEL in out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"src/{_LOW_ENTROPY_RANDOM_SEGMENT}",
+        f"/opt/{_LOW_ENTROPY_RANDOM_SEGMENT}",
+        f"python=/usr/bin/{_LOW_ENTROPY_RANDOM_SEGMENT}",
+    ],
+)
+def test_random_looking_low_entropy_segment_is_still_redacted(text: str) -> None:
+    assert _LOW_ENTROPY_RANDOM_SEGMENT not in redact_log_message(text)
 
 
 def test_base64_with_two_slashes_is_still_redacted() -> None:
