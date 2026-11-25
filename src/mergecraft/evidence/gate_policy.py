@@ -15,11 +15,13 @@ automated route asks for a human (#1056: unknown is never green), leaving
 ``schema_failure`` to fire only on structurally absent evidence.
 
 The mapping is **declarative data, not a long if/elif**: a repository
-overrides any individual rule by ``lane`` or ``rule_id`` via
-``RepoSettings.gate_action_override``, and the new value is validated
-against the closed action vocabulary before it takes effect. A typo
-in an override, or any value outside the seven names, is rejected
-by ``decide_action()`` rather than silently widening the gate.
+overrides an individual rule by its rule id via ``RepoSettings.gates.override``,
+and the new value is validated against the closed action vocabulary before it
+takes effect. An override key that is not one of the rule ids below is a
+configuration error that names the key and lists the valid ids, and a value
+outside the seven names is rejected too — by
+``resolve_effective_gate_policies()`` (and ``decide_action()``) rather than
+silently widening the gate.
 
 Exports:
     GateAction: The closed action vocabulary (Pydantic enum / Literal).
@@ -109,15 +111,32 @@ DEFAULT_GATE_POLICIES: Final[GateActionPolicy] = {
     **{rule_id: action for rule_id, action in NAMED_GATE_POLICY_ROWS},
 }
 
+# The legal ``gates.override`` keys: exactly the shipped rule ids, sorted for a
+# stable error message.
+VALID_RULE_IDS: Final[tuple[str, ...]] = tuple(sorted(DEFAULT_GATE_POLICIES))
+
 
 def resolve_effective_gate_policies(
     overrides: dict[str, str] | None = None,
 ) -> GateActionPolicy:
-    """Merge repo ``gates.override`` onto :data:`DEFAULT_GATE_POLICIES`."""
+    """Merge repo ``gates.override`` onto :data:`DEFAULT_GATE_POLICIES`.
+
+    A key is a rule id from :data:`DEFAULT_GATE_POLICIES`; anything else is a
+    configuration error naming the unknown key and listing the valid ids. The
+    key is checked before the action, so a mistyped rule id is reported as a
+    typo even when its value is also outside the vocabulary — an override that
+    can never be selected would otherwise look applied.
+    """
     effective: GateActionPolicy = dict(DEFAULT_GATE_POLICIES)
     if not overrides:
         return effective
     for rule_id, action_name in overrides.items():
+        if rule_id not in DEFAULT_GATE_POLICIES:
+            msg = (
+                f"gate policy override names unknown rule {rule_id!r}; "
+                f"valid rule ids: {list(VALID_RULE_IDS)}"
+            )
+            raise ValueError(msg)
         if action_name not in GATE_ACTIONS:
             msg = (
                 f"gate policy {rule_id!r} maps to {action_name!r}, which is outside the closed "
@@ -132,6 +151,7 @@ __all__ = [
     "DEFAULT_GATE_POLICIES",
     "GATE_ACTIONS",
     "NAMED_GATE_POLICY_ROWS",
+    "VALID_RULE_IDS",
     "GateAction",
     "GateActionPolicy",
     "RuleId",

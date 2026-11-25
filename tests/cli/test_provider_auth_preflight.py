@@ -31,18 +31,38 @@ def test_provider_auth_preflight_before_collection(
         return subprocess.CompletedProcess(argv, 0, value)
 
     monkeypatch.setattr(auth_cmd.subprocess, "run", run)
-    monkeypatch.setattr(provider_cmd, "_cancelable_getpass", lambda _: calls.append("prompt"))
+    # ``_cancelable_getpass`` never returns ``None`` (a cancel raises), so the
+    # stub must hand back a value; ``_set_gh_secret`` is recorded instead of
+    # shelling out so the assertion stays about preflight ordering.
+    writes: list[str] = []
+
+    def save_secret(**kwargs: str) -> bool:
+        writes.append(kwargs["name"])
+        return True
+
+    monkeypatch.setattr(auth_cmd, "_set_gh_secret", save_secret)
+
+    def collect(_prompt: str) -> str:
+        calls.append("prompt")
+        return "fake-key"
+
+    monkeypatch.setattr(provider_cmd, "_cancelable_getpass", collect)
     if admin:
         provider_cmd.run_provider_auth(ENTRY, "github", cwd=tmp_path)
-        assert calls == [
+        expected_calls = [
             "repos/owner/target",
             "repos/owner/target/actions/secrets/public-key",
             "prompt",
         ]
+        expected_writes = ["LLM_PROVIDER_1_API_KEY"]
     else:
         with pytest.raises(typer.Exit):
             provider_cmd.run_provider_auth(ENTRY, "github", cwd=tmp_path)
-        assert calls == ["repos/owner/target"]
+        expected_calls = ["repos/owner/target"]
+        expected_writes = []
+
+    assert calls == expected_calls
+    assert writes == expected_writes
 
 
 def test_provider_auth_preflight_unknown_access_never_prompts(

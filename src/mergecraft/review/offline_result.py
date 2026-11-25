@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from mergecraft.analyzers.finding import Finding, parse_findings_payload
+from mergecraft.errors import ConfigurationError
 from mergecraft.run_outcome import RunOutcome
 
 if TYPE_CHECKING:
@@ -83,7 +84,7 @@ def _offline_failure(
 def _offline_error_outcome(exc: BaseException) -> RunOutcome:
     if isinstance(exc, (TimeoutError, asyncio.TimeoutError, subprocess.TimeoutExpired)):
         return RunOutcome.timed_out
-    if isinstance(exc, ValueError):
+    if isinstance(exc, (ConfigurationError, ValueError)):
         return RunOutcome.configuration_error
     return RunOutcome.infra_error
 

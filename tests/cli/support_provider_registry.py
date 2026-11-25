@@ -454,14 +454,6 @@ VERTEX_LEGACY_CONFIG_KEYS: tuple[str, ...] = (
     "VERTEX_LOCATION",
 )
 
-CREDENTIAL_SUBSTRINGS_IN_CONFIG: tuple[str, ...] = (
-    "api_key",
-    "apiKey",
-    "secret",
-    "password",
-    "token",
-)
-
 
 def write_env_pairs(tmp_path: Path, pairs: Mapping[str, str]) -> None:
     """Append ``KEY=value`` lines to ``tmp_path/.env``."""
@@ -492,7 +484,6 @@ def require_provider_migrate_symbols() -> Any:
         "plan_provider_migration",
         "apply_provider_migration",
         "migration_secret_fingerprint",
-        "validate_config_secret_split",
         "resolve_indexed_credential",
     ):
         if not hasattr(module, name):
