@@ -2,8 +2,4 @@
 
 from __future__ import annotations
 
-from mergecraft.ci.normalize import normalize_failure
-
-__all__ = [
-    "normalize_failure",
-]
+__all__: list[str] = []

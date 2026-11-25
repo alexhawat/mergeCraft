@@ -42,10 +42,11 @@
           "do_not_enforce_on_create": false,
           "required_status_checks": [
             {
-              "context": "Verify (rules py3.14)"
+              "context": "Verify (coverage gate py3.14)"
             },
             {
-              "context": "Verify (coverage gate py3.14)"
+              "context": "Verify (rules py3.14)",
+              "integration_id": 15368
             },
             {
               "context": "Verify (security audit py3.11)"

@@ -32,7 +32,7 @@ dependencies = [
     "httpcore==1.0.9",
     "rich==15.0.0",
     "typer==0.29.2",
-    "pyyaml==6.0.3",
+    "pyyaml==6.0.4",
     "pydantic==2.14.4",
     # Imported by src/mergecraft/config/env/ (the typed settings layer).
     "pydantic-settings==2.16.3",

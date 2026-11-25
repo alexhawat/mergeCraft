@@ -42,7 +42,7 @@ Run commands from the numbered plan rather than inventing one-off project workfl
 
 | Plan / issue | Missing input or event | Deliverable possible before it |
 |---|---|---|
-| 011 / #780 | Inspectable source/patch evidence and Alex's actual adjudication; incomplete historical cases may need explicit replacement decisions | Evidence inventory and review packet, with missing evidence marked and no invented provenance |
+| 011 / #1551 (batch 002; #780 closed as not planned on 2026-11-23) | Alex's actual adjudication of the nine batch 002 candidates; batch 001 will not be adjudicated | Evidence inventory and review packet, with missing evidence marked and no invented provenance |
 | 012 / #735 | Independently labelled real trajectories covering the eight checks; approved baseline/tolerance | Deterministic scorer, strict corpus/report schema, agent-seeded development fixtures |
 | 013 / #736 | Frozen human reference decisions, disjoint held-out sample and predeclared acceptance contract | Eligibility wording correction, saved-decision scoring, split/pin validation, provisional report |
 | 014 / #140 | Separately adjudicated patch-bearing detection labels, the 013 receipt, two selected provider/model identities, approved budget/limits, credentials and actual results | Concrete campaign manifest and report template; no scores or README quality claims |
@@ -53,7 +53,8 @@ Run commands from the numbered plan rather than inventing one-off project workfl
 - #790 and #796 already have implemented fixes and passing targeted regressions on main via #806. They need evidence-based issue housekeeping, not replacement implementations.
 - #771 is the sole automatic closing reference in #817. #797 additionally needs the final numeric contract verified after #817 and plan 006; it has no automatic closing reference in #817.
 - #792 can close after plan 010 and generated-doc checks. Plans 001–009 each name their own regression and completion criteria; link the corresponding implementation PR only when those criteria actually pass.
-- Keep #780, #735, #736, #140 and #783 open if only preparation is complete. Record the completed portion and the precise remaining input rather than overclaiming closure.
+- Keep #735, #736, #140 and #783 open if only preparation is complete. Record the completed portion and the precise remaining input rather than overclaiming closure.
+- The maintainer closed #780 as not planned on 2026-11-23. That closure is not evidence of adjudication: batch 001 has no recorded decision, and batch 002 is still pending.
 - #723 remains a tracker. Refresh its child map and completion evidence after implementation; avoid creating a duplicate umbrella project.
 - This planning PR intentionally has no issue-closing keywords. It changes the handoff, not the product behaviors described in the issues.
 
