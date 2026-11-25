@@ -326,8 +326,8 @@ harbor run -d "<dataset>" --agent mergecraft.harbor.agent:MergecraftReviewAgent
 ```
 
 The agent installs mergecraft with `uv tool install git+https://github.com/alexhawat/mergeCraft@<ref>`
-(default ref `v0.1.0a1`, the same pin as README Example 1; override with
-`MERGECRAFT_INSTALL_REF`) and runs `mergecraft diff-review --json` inside each
+(default ref `v0.1.0a6`, the value `action_pin_minimal()` returns; override
+with `MERGECRAFT_INSTALL_REF`) and runs `mergecraft diff-review --json` inside each
 task environment — that is the hidden deprecated alias of `mergecraft review`
 (one stderr warning per invocation).
 

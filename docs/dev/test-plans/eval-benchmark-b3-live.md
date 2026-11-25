@@ -124,20 +124,22 @@ this PR specifically (unlike B1/B2, where every referenced symbol already existe
 `AttributeError`/`ValidationError` at call time).
 
 ```python
-PATCH_CANDIDATES: Final[tuple[str, ...]]          # see finding 1
+PATCH_CANDIDATES: Final[tuple[str, ...]]  # see finding 1
 BASELINE_FILENAME: Final[str] = "baseline.json"
 DEFAULT_DETECTION_CORPUS_DIR: Final[Path] = Path("evals/bench/mergecraft")
 SKIP_REASON_NO_CREDENTIAL: Final[str] = "no live credential"
 SKIP_REASON_NO_CASES: Final[str] = "no patch-bearing cases"
 
-class DetectionCase(BaseModel):        # extra="forbid"
+
+class DetectionCase(BaseModel):  # extra="forbid"
     case_id: str
     patch_path: Path
     baseline_path: Path
     closed_world: bool = False
 
+
 class DetectionCaseResult(BaseModel):  # extra="forbid" — per-case row, mirrors
-                                        # CaseReplayRow's role in BenchmarkMetrics
+    # CaseReplayRow's role in BenchmarkMetrics
     case_id: str
     closed_world: bool
     total_issues: int
@@ -146,10 +148,11 @@ class DetectionCaseResult(BaseModel):  # extra="forbid" — per-case row, mirror
     recall: float
     corpus_confirmed_precision: float
     f1: float
-    strict_precision: float | None = None   # None on an open-world case (D4:
-                                             # ScoreReport.strict_precision raises there)
+    strict_precision: float | None = None  # None on an open-world case (D4:
+    # ScoreReport.strict_precision raises there)
 
-class DetectionMetrics(BaseModel):     # extra="forbid"
+
+class DetectionMetrics(BaseModel):  # extra="forbid"
     provider: str
     model: str
     cases_run: int
@@ -157,11 +160,14 @@ class DetectionMetrics(BaseModel):     # extra="forbid"
     case_results: list[DetectionCaseResult]
     raw_findings_dir: str
 
+
 ReviewFn = Callable[[DetectionCase], list[dict[str, Any]]]
+
 
 def discover_detection_cases(
     corpus_dir: Path = DEFAULT_DETECTION_CORPUS_DIR,
 ) -> list[DetectionCase]: ...
+
 
 def run_live_detection(
     cases: list[DetectionCase],
@@ -173,6 +179,7 @@ def run_live_detection(
     slack: int = DEFAULT_LINE_SLACK,
 ) -> DetectionMetrics: ...
 
+
 def run_detection(
     *,
     provider: str,
@@ -182,6 +189,7 @@ def run_detection(
     review_fn: ReviewFn | None = None,
 ) -> tuple[DetectionMetrics | None, str | None]:
     """Returns (metrics, None) on a real run, or (None, skip_reason) per findings 2/3."""
+
 
 def run_full_benchmark(
     bank_dir: Path = DEFAULT_BANK_DIR,

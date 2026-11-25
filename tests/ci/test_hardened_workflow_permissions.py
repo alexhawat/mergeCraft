@@ -1,0 +1,185 @@
+"""The hardened workflow grants only the scopes mergeCraft uses (#1567).
+
+The template sold as *hardened* once granted ``statuses: write`` under the
+comment about check-runs. mergeCraft posts its ``mergecraft`` /
+``mergecraft-approval`` results as **check-runs** (``utils/status_checks.py``,
+``POST /repos/{owner}/{repo}/check-runs``), which need ``checks: write`` only;
+the commit-status API is never called in production (the sole
+``.create_status(`` call sits behind the ``scm/github.py`` wrapper with no
+production caller). Commit statuses are what branch protection matches on, so
+an unused write scope in a copy-me template is a real privilege leak.
+
+Three surfaces carry the grant and all three must stay least-privilege:
+
+* ``scripts/example_workflows/hardened.yml.tpl`` — the source template, read
+  through the real renderer so the check sees the YAML a consumer copies;
+* ``examples/workflows/mergecraft-hardened.yml`` — its generated copy;
+* ``docs/artifacts/dogfood-mergecraft.yml`` — the hand-kept mirror.
+
+The two unmarked guards keep the test honest: ``checks: write`` must survive
+(dropping it would break check-run publication), and no *new* permission may
+appear in any of the three files while the scope is removed.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+import yaml
+from scripts.render_example_workflows import render_all
+from scripts.workflow_yaml import missing_permissions, permission_dict
+
+from tests.ci.workflow_support import REPO_ROOT
+
+# The surfaces that carry the hardened grant, keyed by the label the failure
+# message uses. ``template`` is rendered, not read raw, so the placeholders are
+# substituted exactly as ``make examples`` substitutes them.
+_HARDENED_SURFACES = (
+    "template:scripts/example_workflows/hardened.yml.tpl",
+    "example:examples/workflows/mergecraft-hardened.yml",
+    "dogfood:docs/artifacts/dogfood-mergecraft.yml",
+)
+
+# Every permission key these three files may declare. Pinned so a removal cannot
+# buy its green with an addition elsewhere. ``security-events`` is commented out
+# in the template today; it is listed because the template documents it as the
+# opt-in scope and a consumer uncomments it.
+_ALLOWED_PERMISSION_KEYS = frozenset(
+    {
+        "contents",
+        "actions",
+        "pull-requests",
+        "issues",
+        "checks",
+        # statuses — removed by #1567; kept out of the allow-list deliberately.
+        "security-events",
+    }
+)
+
+
+def _render_hardened_template() -> dict[str, Any]:
+    """Render the hardened template through the generator and parse the YAML."""
+    body = render_all()["hardened"]
+    loaded = yaml.safe_load(body)
+    assert isinstance(loaded, dict), "the rendered hardened template did not parse as a mapping"
+    return loaded
+
+
+def _load_surface(spec: str) -> dict[str, Any]:
+    """Return the parsed workflow for one ``label:path`` spec.
+
+    The template is rendered through ``scripts.render_example_workflows.py`` so
+    the assertion runs on the same bytes ``make examples`` writes; the two
+    committed copies are read from disk.
+    """
+    label, _, relative = spec.partition(":")
+    assert relative, f"malformed surface spec {spec!r}"
+    if label == "template":
+        return _render_hardened_template()
+    path = REPO_ROOT / relative
+    assert path.is_file(), f"missing {relative}"
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(loaded, dict), f"{relative} did not parse as a mapping"
+    return loaded
+
+
+def _permission_mappings(doc: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Return every ``permissions:`` mapping at workflow and job level.
+
+    Scalars are expanded with the repository's ``permission_dict`` helper:
+    ``write-all`` becomes the ``__all_write__`` sentinel, which grants every
+    scope including ``statuses``, so it is checked rather than skipped. A
+    workflow that declared no permissions block at all yields an empty list and
+    fails the grant guard below with "no permissions mapping", which is the
+    honest failure.
+    """
+    mappings: list[tuple[str, dict[str, Any]]] = []
+    workflow_level = permission_dict(doc.get("permissions"))
+    if workflow_level:
+        mappings.append(("workflow", workflow_level))
+    jobs = doc.get("jobs")
+    if isinstance(jobs, dict):
+        for job_name, job in jobs.items():
+            block = permission_dict(job.get("permissions")) if isinstance(job, dict) else {}
+            if block:
+                mappings.append((f"job {job_name}", block))
+    return mappings
+
+
+def _permission_keys(doc: dict[str, Any]) -> set[str]:
+    keys: set[str] = set()
+    for _, block in _permission_mappings(doc):
+        keys.update(str(key) for key in block)
+    return keys
+
+
+def _statuses_grants(doc: dict[str, Any]) -> set[str]:
+    """Return every grant in ``doc`` that lets a step call the commit-status API."""
+    grants: set[str] = set()
+    for scope, block in _permission_mappings(doc):
+        if "statuses" in block:
+            grants.add(f"{scope}: statuses: {block['statuses']}")
+        elif not missing_permissions(block, {"statuses": "write"}):
+            grants.add(f"{scope}: permissions grant every scope")
+    return grants
+
+
+@pytest.mark.parametrize("spec", _HARDENED_SURFACES)
+def test_hardened_workflows_do_not_grant_statuses_write(spec: str) -> None:
+    """No ``permissions`` mapping in the template or either copy names ``statuses`` (#1567)."""
+    _, _, relative = spec.partition(":")
+    doc = _load_surface(spec)
+    mappings = _permission_mappings(doc)
+    assert mappings, f"{relative}: no workflow-level or job-level permissions mapping to check"
+    granted = _statuses_grants(doc)
+    assert not granted, (
+        f"{relative}: the hardened workflow grants an unused statuses scope "
+        f"({sorted(granted)}); mergeCraft posts check-runs (checks: write) and never "
+        "calls the commit-status API"
+    )
+
+
+@pytest.mark.parametrize("spec", _HARDENED_SURFACES)
+def test_hardened_workflows_grant_checks_write(spec: str) -> None:
+    """The scope mergeCraft actually uses survives the removal (#1567)."""
+    label, _, relative = spec.partition(":")
+    doc = _load_surface(spec)
+    checks = {
+        str(block.get("checks")).strip().lower()
+        for _, block in _permission_mappings(doc)
+        if "checks" in block
+    }
+    assert "write" in checks, (
+        f"{relative}: {label} must keep `checks: write` — mergeCraft posts the "
+        f"mergecraft / mergecraft-approval results as check-runs; found {sorted(checks)}"
+    )
+
+
+@pytest.mark.parametrize("spec", _HARDENED_SURFACES)
+def test_no_permission_was_added(spec: str) -> None:
+    """Removing a scope must not add another: every key stays inside the pinned set."""
+    _, _, relative = spec.partition(":")
+    doc = _load_surface(spec)
+    keys = _permission_keys(doc)
+    assert keys, f"{relative}: no permission keys found to compare"
+    unexpected = keys - _ALLOWED_PERMISSION_KEYS
+    assert not unexpected, (
+        f"{relative}: unexpected permission key(s) {sorted(unexpected)}; the hardened "
+        f"workflow may declare only {sorted(_ALLOWED_PERMISSION_KEYS)}"
+    )
+
+
+def test_statuses_guard_fails_closed_on_a_job_level_write_all() -> None:
+    """A job-level ``permissions: write-all`` grants statuses and must be rejected."""
+    doc = {
+        "permissions": {"contents": "read", "checks": "write"},
+        "jobs": {"review": {"permissions": "write-all"}},
+    }
+    assert _statuses_grants(doc) == {"job review: permissions grant every scope"}
+
+
+def test_statuses_guard_accepts_an_explicit_least_privilege_mapping() -> None:
+    """The guard reports nothing for the mapping shape the hardened files use."""
+    doc = {"permissions": {"contents": "read", "checks": "write"}, "jobs": {"review": {}}}
+    assert _statuses_grants(doc) == set()
