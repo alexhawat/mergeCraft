@@ -64,7 +64,6 @@ def test_value_is_returned_stripped(monkeypatch: MonkeyPatch) -> None:
     assert _cancelable_getpass("API key (Enter to cancel): ") == "placeholder-key"
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 def test_return_annotation_is_str() -> None:
     """Bug: the declared return type must match the only paths that can return."""
     hints = typing.get_type_hints(_cancelable_getpass)

@@ -16,7 +16,6 @@ import re
 import subprocess
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.support.cli_text import compact_cli_text
 from typer.testing import CliRunner
 
@@ -133,7 +132,6 @@ def test_unregistered_label_falls_back_to_the_flat_secret(
     assert not any(key.startswith("LLM_PROVIDER_") for key in env)
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 def test_indexed_path_is_taken_from_a_subdirectory(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -153,7 +151,6 @@ def test_indexed_path_is_taken_from_a_subdirectory(
     assert _FLAT_KEY not in env
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 def test_legacy_auth_command_from_a_subdirectory_writes_the_indexed_key(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -173,7 +170,6 @@ def test_legacy_auth_command_from_a_subdirectory_writes_the_indexed_key(
     assert _FLAT_KEY not in env
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 def test_confirmation_names_the_key_written(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

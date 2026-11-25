@@ -190,7 +190,6 @@ def test_apply_provider_migration_is_idempotent(
     assert env_path.read_text(encoding="utf-8") == after_first
 
 
-@pytest.mark.xfail(reason="green after W2", strict=True)
 def test_secret_split_validator_is_not_exported() -> None:
     """The dead secret-split validator is gone from the module's public surface."""
     module = require_provider_migrate_symbols()
