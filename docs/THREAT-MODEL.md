@@ -32,7 +32,7 @@ product is not a control.
 | Untrusted-tier scanners take configuration only from bundled files or the base revision; a PR that changes a scanner config, ignore or plugin file produces a `scanner-config-changed` finding | `mergecraft.analyzers.execution:scanner_config_change_findings` | `tests/analyzers/test_untrusted_scanner_config.py::test_scanner_config_changes_become_findings` |
 | Secrets are redacted from analyzer output before it becomes a finding | `mergecraft.analyzers.redact:redact_analyzer_output` (called from `analyzers/run.py`) | `tests/analyzers/test_redact_entropy.py` |
 | Findings are redacted again before SARIF upload | `mergecraft.analyzers.sarif_upload:redact_findings_for_upload` | `tests/analyzers/test_sarif_upload.py` |
-| Log lines pass the redactor, and only three positively matched benign shapes survive it | `mergecraft.analyzers.redact:redact_log_message` (installed by `install_loguru_redaction_filter`) | `tests/analyzers/test_redact_directory_paths.py`, `tests/analyzers/test_redact_image_refs_and_versions.py` |
+| Log lines pass the redactor, and only three positively matched benign shapes survive it | `mergecraft.analyzers.redact:install_loguru_redaction_filter` (installs `redact_log_message`) | `tests/analyzers/test_redact_directory_paths.py`, `tests/analyzers/test_redact_image_refs_and_versions.py` |
 
 ### Log redaction exemptions
 
