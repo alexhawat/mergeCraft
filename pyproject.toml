@@ -32,7 +32,7 @@ dependencies = [
     "httpcore==1.0.9",
     "rich==15.0.0",
     "typer==0.29.2",
-    "pyyaml==6.0.3",
+    "pyyaml==6.0.4",
     "pydantic==2.14.4",
     # Imported by src/mergecraft/config/env/ (the typed settings layer).
     "pydantic-settings==2.16.3",
@@ -160,7 +160,11 @@ include = ["/src/mergecraft", "/tests", "/README.md", "/pyproject.toml", "/scrip
 target-version = "py311"
 line-length = 100
 src = ["src", "tests", "scripts"]
-extend-exclude = ["tests/analyzers/fixtures/repo", "tests/analyzers/fixtures/antislop"]
+extend-exclude = [
+    "tests/analyzers/fixtures/repo",
+    "tests/analyzers/fixtures/antislop",
+    "tests/scripts/fixtures/test_honesty",
+]
 
 [tool.ruff.lint]
 select = [
@@ -187,6 +191,11 @@ ignore = [
     "E501",
     "B008",
 ]
+
+# Test-honesty: S110 (try-except-pass) on ``tests/`` via ``lint_test_honesty.py``.
+# SIM105 is intentionally omitted — autofix would replace pass with ``suppress()``.
+# AST checker also flags ``contextlib.suppress``. Baseline keys are path:rule:anchor
+# (no line numbers) in ``scripts/test_honesty_baseline.json``.
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20", "RUF001", "TC001", "TC003"]

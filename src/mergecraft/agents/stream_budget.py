@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from mergecraft.jev.cost import TokenBudget
+    from mergecraft.utils.run_bounds import StreamCharges
 
 _PHASE = "reviewer_dispatch"
 
@@ -31,9 +32,13 @@ def charge_review_stream_step(
     *,
     budget_tracker: BudgetTracker | None,
     provider_budget: TokenBudget | None,
+    stream_charges: StreamCharges | None,
     cost_usd: float | None = None,
 ) -> str | None:
     """Charge one stream step against run bounds; return a stop reason when over ceiling.
+
+    ``stream_charges`` collects what this dispatch charged to ``budget_tracker``,
+    so its final usage charge adds only the remainder.
 
     Returns:
         ``None`` when the step was accepted. A human-readable reason when the run
@@ -46,7 +51,8 @@ def charge_review_stream_step(
     if budget_tracker is not None and count > 0:
         try:
             budget_tracker.record_tokens_stream_increment(count, phase=_PHASE)
-            budget_tracker.stream_tokens_charged += count
+            if stream_charges is not None:
+                stream_charges.tokens += count
         except BudgetExhausted as exc:
             return str(exc)
 
@@ -65,7 +71,8 @@ def charge_review_stream_step(
             budget_tracker.record_cost(cost_usd)
         except BudgetExhausted as exc:
             return str(exc)
-        budget_tracker.stream_cost_charged += cost_usd
+        if stream_charges is not None:
+            stream_charges.cost_usd += cost_usd
 
     return None
 

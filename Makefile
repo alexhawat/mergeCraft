@@ -21,6 +21,7 @@ SHELL := /bin/bash
 
 .PHONY: help setup install lockcheck npm-lockcheck lint format typecheck pyright test security \
 	precommit build ci ci-static ci-steps ci-resume ci-reset catalog-check docker-build clean \
+	lint-test-honesty \
 	mutation-test-decisions \
 	examples example-workflows-check agent-packages agent-packages-check cli-examples cli-examples-check docs docs-check llms llms-check mcp-server-json mcp-server-json-check reference-docs reference-docs-check bench-review eval-skill-corpus eval-cases-sync eval-cases-sync-check eval-gate eval-replay eval-convergence eval-harvest-failures eval-trajectory eval-trajectory-gate shadow-compare \
 	review-skill-taxonomy-check review-skill-spec-check \
@@ -91,6 +92,7 @@ lint: dead-code-check import-layer-check ## Ruff check + formatting + loguru-onl
 	$(UV) run python scripts/check_type_ignores.py
 	$(UV) run python scripts/check_called_workflow_permissions.py
 	$(MAKE) lint-test-hygiene
+	$(MAKE) lint-test-honesty
 	@$(MAKE) npm-lockcheck
 
 dead-code-check: ## Vulture confidence-60 scan with reviewed contract exceptions
@@ -101,6 +103,9 @@ import-layer-check: ## Enforce Action entry-point and utility import boundaries
 
 lint-test-hygiene: ## Block on tautological test patterns (D16)
 	$(UV) run python scripts/check_test_cheat_signatures.py
+
+lint-test-honesty: ## Block dishonest test patterns (sleeps, flake masking, conditional asserts)
+	$(UV) run python scripts/lint_test_honesty.py
 
 action-yml-hygiene-check: ## Fail when an action.yml description embeds a literal ${{ }} expression
 	$(UV) run python scripts/check_action_yml_hygiene.py

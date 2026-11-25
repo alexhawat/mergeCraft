@@ -1,0 +1,58 @@
+{
+  "diagnostics": [
+    {
+      "message": "Do not await a fixed delay in a test",
+      "code": "landmines/no-fixed-sleep",
+      "severity": "error",
+      "causes": [],
+      "help": "Await the operation or a signal it emits instead.",
+      "filename": "src/widget.test.ts",
+      "labels": [
+        {
+          "span": {
+            "line": 4,
+            "offset": 52,
+            "length": 18
+          }
+        }
+      ],
+      "related": []
+    },
+    {
+      "message": "Do not retry a failing test to mask flakes",
+      "code": "landmines/no-flake-masking",
+      "severity": "error",
+      "causes": [],
+      "help": "Remove test retries and fix the underlying flake.",
+      "filename": "src/widget.test.ts",
+      "labels": [
+        {
+          "span": {
+            "line": 8,
+            "offset": 120,
+            "length": 12
+          }
+        }
+      ],
+      "related": []
+    },
+    {
+      "message": "Do not replace dependency behaviour with a mock",
+      "code": "landmines/no-test-doubles",
+      "severity": "error",
+      "causes": [],
+      "help": "Use the real implementation and MSW for the network.",
+      "filename": "src/widget.test.ts",
+      "labels": [
+        {
+          "span": {
+            "line": 2,
+            "offset": 10,
+            "length": 24
+          }
+        }
+      ],
+      "related": []
+    }
+  ]
+}

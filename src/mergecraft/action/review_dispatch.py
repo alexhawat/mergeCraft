@@ -70,6 +70,7 @@ from mergecraft.utils.process_group import (
     register_process_group,
     unregister_process_group,
 )
+from mergecraft.utils.run_bounds import StreamCharges
 from mergecraft.utils.skills import install_bundled_skills
 from mergecraft.utils.workspace import (
     resolve_allowed_working_directory,
@@ -820,7 +821,12 @@ def _promote_and_finalize_agent_result(
         from mergecraft.utils.run_bounds import BudgetExhausted, record_agent_usage
 
         try:
-            record_agent_usage(ctx.budget_tracker, result.usage, phase="reviewer_dispatch")
+            record_agent_usage(
+                ctx.budget_tracker,
+                result.usage,
+                phase="reviewer_dispatch",
+                streamed=ctx.stream_charges,
+            )
         except BudgetExhausted as exc:
             ctx.budget_exhaustion = exc
 
@@ -877,15 +883,15 @@ async def _run_agent_task_with_deadline(
     bind_llm_review_timing_tracker()
 
     async def _run_agent_once(slug: str) -> AgentResult:
-        if ctx.budget_tracker is not None:
-            ctx.budget_tracker.stream_tokens_charged = 0
-            ctx.budget_tracker.stream_cost_charged = 0.0
+        ctx.stream_charges = StreamCharges()
         attempt_model = resolve_model(slug=slug, respect_env_override=False)
         attempt_agent = resolve_runtime_agent(model=attempt_model, settings=settings)
         attempt_agent_id = attempt_agent.name
 
         if attempt_agent_id == agent_id:
-            attempt_ctx = replace(run_ctx, resolved_model=attempt_model)
+            attempt_ctx = replace(
+                run_ctx, resolved_model=attempt_model, stream_charges=ctx.stream_charges
+            )
         else:
             attempt_modes = _render_run_modes(ctx, attempt_agent_id)
             # Every attempt reuses the instructions resolved at run start; an
@@ -916,6 +922,7 @@ async def _run_agent_task_with_deadline(
                 instructions=attempt_instructions,
                 subagent_denied_tools=attempt_denied,
                 verifier_denied_tools=attempt_verifier_denied,
+                stream_charges=ctx.stream_charges,
             )
             tool_context.agent_id = attempt_agent_id
             tool_context.modes = attempt_modes
@@ -932,8 +939,9 @@ async def _run_agent_task_with_deadline(
 
     async def _dispatch_selected_agent() -> tuple[str | None, AgentResult]:
         async def _single_attempt() -> tuple[str | None, AgentResult]:
+            attempt_ctx = replace(run_ctx, stream_charges=ctx.stream_charges)
             return selected_slug, await dispatch_single(
-                agent, run_ctx, settings, tool_state, ctx.resolved_model
+                agent, attempt_ctx, settings, tool_state, ctx.resolved_model
             )
 
         dispatched = await dispatch_reviewer(

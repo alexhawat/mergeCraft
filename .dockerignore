@@ -8,6 +8,8 @@
 !uv.lock
 !README.md
 !scripts/hatch_build.py
+!scripts/package.json
+!scripts/package-lock.json
 !src/**
 !evals/corpora/recall_pass_corpus.json
 !evals/cases/adversarial/**

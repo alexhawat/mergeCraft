@@ -3233,6 +3233,9 @@ mergecraft --install-completion   # bash/zsh/fish — see --show-completion
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
 
+`python -m mergecraft` runs the same CLI as the `mergecraft` command, for
+interpreter paths where the console script is not on `PATH`.
+
 Docs on `main` may describe unreleased behavior, including CLI selection rules
 and review fixes that this alpha does not contain. Use the
 [matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a6/docs)

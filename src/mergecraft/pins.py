@@ -71,7 +71,7 @@ def load_example_defaults() -> dict[str, str]:
 
 
 def action_pin_minimal() -> str:
-    """Return the canonical minimal Action pin (for example ``v0.1.0a1``)."""
+    """Return the canonical minimal Action pin (for example ``v0.1.0a6``)."""
     return load_example_defaults()["action_pin_minimal"].strip()
 
 

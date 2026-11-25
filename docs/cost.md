@@ -22,6 +22,13 @@ on your provider, model, plan and the size of the change.
 | File-group fan-out (opt-in) | Yes. Each group is a full provider dispatch, so six groups cost roughly six extra reviewer runs ([agent roster](agent-roster.md)). |
 | Jev screening (opt-in) | Calls a hosted service rather than your model provider; see [Jev gate patterns](jev-gate-patterns.md#data-sent-to-typesafe). |
 
+The cost and tokens mergeCraft reports for a run, and the run budget it charges
+(`runBounds.tokenBudget`, `runBounds.costBudgetUsd`), include every reviewer
+dispatch — the primary reviewer, each extra roster reviewer and each file-group
+reviewer — not only the primary reviewer. Reviewers that run at the same time
+are each charged their whole usage: what one streamed never reduces what another
+is charged.
+
 ## Levers you control
 
 - **Subscription or API key.** A Claude Pro/Max or ChatGPT login is billed under

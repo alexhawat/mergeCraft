@@ -63,6 +63,13 @@ repos:
         pass_filenames: false
         files: \.md$
 
+      - id: mergecraft-test-honesty
+        name: test honesty (no fixed sleeps or flake masking in tests/)
+        entry: uv run python scripts/lint_test_honesty.py
+        language: system
+        pass_filenames: false
+        files: ^tests/.*\.py$
+
       - id: conventional-commit
         name: Conventional Commits
         entry: uv run python scripts/check_conventional_commit.py
