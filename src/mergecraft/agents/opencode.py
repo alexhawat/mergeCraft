@@ -787,10 +787,11 @@ def _absorb_step_usage(
         stream_charges=stream_charges,
         cost_usd=cost_usd,
     )
+    # ``step_finish`` reports a step that already ran: a step that crosses a
+    # ceiling still belongs in the attempt's usage, it only stops the next one.
+    accumulator.absorb_usage(payload)
     if stop:
         accumulator.halt_reason = stop
-        return
-    accumulator.absorb_usage(payload)
 
 
 def _bash_only_handler(

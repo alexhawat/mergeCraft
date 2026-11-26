@@ -15,6 +15,7 @@ from mergecraft.review import offline_agent
 from mergecraft.run_outcome import RunOutcome
 from mergecraft.utils.agent_resolve import CredentialStatus
 from mergecraft.utils.offline_diff import DiffMaterialization
+from tests.support.chain_usage import CHAIN_SCRIPTS, expected_cost, install_chain_rates
 
 PRIMARY = "anthropic/claude-sonnet"
 BACKUP = "openai/gpt-5.3-codex"
@@ -452,3 +453,46 @@ async def test_offline_attempts_keep_the_nearest_instructions_under_a_tight_cap(
     for prompt in dispatch["prompts"]:
         section = section_text(prompt, REPO_INSTRUCTIONS_HEADER)
         assert "NEAREST_PACKAGE_RULE" in section
+
+
+@pytest.mark.parametrize("script", sorted(CHAIN_SCRIPTS))
+async def test_offline_accounts_for_the_scripted_chain_like_the_action(
+    dispatch: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: str
+) -> None:
+    """#1586 — the Action's chain test, scripted the same way on the offline entry point."""
+    from mergecraft.utils.run_bounds import resolve_run_bounds
+
+    attempts = CHAIN_SCRIPTS[script]
+    first, second = (
+        offline_agent.resolve_model(slug=slug, respect_env_override=False)
+        for slug in (PRIMARY, BACKUP)
+    )
+    assert first is not None
+    assert second is not None
+    models = (first, second)
+    install_chain_rates(monkeypatch, models)
+    # The fixture streams input tokens only.
+    assert all(attempt.output_tokens == 0 for attempt in attempts if attempt.streamed)
+    for model, attempt in zip(models, attempts, strict=True):
+        dispatch["results"][model] = attempt.result()
+        if attempt.streamed:
+            dispatch["streams"][model] = (attempt.input_tokens, attempt.cost_usd)
+    bounds = resolve_run_bounds(settings=dispatch["settings"])
+    tracker = offline_agent.BudgetTracker(bounds)
+    monkeypatch.setattr(offline_agent, "BudgetTracker", lambda _bounds: tracker)
+
+    result = await offline_agent.run_offline_agent_review(
+        cwd=tmp_path,
+        materialization=dispatch["materialization"],
+        prompt="review",
+        model=None,
+        tmpdir=tmp_path,
+        run_bounds=bounds,
+    )
+
+    costs = [expected_cost(attempt, position=index) for index, attempt in enumerate(attempts)]
+    assert dispatch["models"] == list(models)
+    assert result.total_tokens == sum(attempt.tokens for attempt in attempts)
+    assert result.cost_usd == pytest.approx(sum(costs))
+    assert tracker.tokens_used == sum(attempt.tokens for attempt in attempts)
+    assert tracker.cost_used == pytest.approx(sum(costs))
