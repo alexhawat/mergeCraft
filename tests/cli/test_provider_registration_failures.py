@@ -250,3 +250,35 @@ def test_workflow_provider_add_rolls_back_on_a_failed_label_write(
     assert [(entry["label"], entry["envIndex"]) for entry in entries] == [("alpha", 1)]
     assert _labels(tmp_path) == {"LLM_PROVIDER_1": "alpha"}
     assert workflow.read_text(encoding="utf-8") != WORKFLOW_ONE_STEP_TEMPLATE
+
+
+@pytest.mark.parametrize("apply", [True, False], ids=["apply", "dry-run"])
+def test_workflow_provider_add_for_a_malformed_registered_row_is_a_configuration_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, apply: bool
+) -> None:
+    """The matching-label path reads the existing row's envIndex through the shared parser."""
+    config = _repo(tmp_path, monkeypatch, config_body=_BROKEN_REGISTRY)
+    workflow = scaffold_workflow_file(tmp_path, WORKFLOW_ONE_STEP_TEMPLATE)
+    config_before = config.read_bytes()
+    argv = [
+        "workflow",
+        "provider",
+        "add",
+        "--label",
+        "broken",
+        "--url",
+        CUSTOM_BASE_URL,
+        "--workflow",
+        str(workflow),
+    ]
+
+    result = _invoke(*argv, *(["--apply"] if apply else []))
+
+    output = _output(result)
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE, output
+    assert result.exception is None or isinstance(result.exception, SystemExit), output
+    assert "envIndex" in output
+    assert "'broken'" in output
+    assert config.read_bytes() == config_before
+    assert workflow.read_text(encoding="utf-8") == WORKFLOW_ONE_STEP_TEMPLATE
+    assert _labels(tmp_path) == {}

@@ -38,6 +38,7 @@ from mergecraft.config.provider_registry import (
     allocate_env_index,
     default_auth_kind_for_label,
     default_harness_for_label,
+    entry_env_index,
     harness_supports_provider,
     list_supported_harnesses,
     supported_harness_names,
@@ -252,6 +253,17 @@ def allocate_registry_env_index(
             high_water=_env_index_high_water(data),
             occupied=_occupied_env_indices(env_path),
         )
+    except InvalidEnvIndexError as exc:
+        cli_bail(str(exc))
+
+
+def registry_env_index(entry: Mapping[str, Any]) -> int:
+    """Return a registry row's ``envIndex``, or exit with the configuration code.
+
+    The message names the provider and the ``envIndex`` field (#1592).
+    """
+    try:
+        return entry_env_index(entry)
     except InvalidEnvIndexError as exc:
         cli_bail(str(exc))
 

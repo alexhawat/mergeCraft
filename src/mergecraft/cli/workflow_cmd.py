@@ -25,6 +25,7 @@ from mergecraft.cli.provider_cmd import (
     indexed_credential_keys,
     load_provider_registry,
     register_provider_entry,
+    registry_env_index,
     resolve_provider_harness,
 )
 from mergecraft.cli.typer_group import mergecraft_typer
@@ -307,7 +308,7 @@ def _plan_provider_for_workflow(
 
     for entry in entries:
         if str(entry.get("label", "")).lower() == normalised_label.lower():
-            env_index = int(entry["envIndex"])
+            env_index = registry_env_index(entry)
             resolved_url = entry.get("url")
             if url is not None:
                 try:
