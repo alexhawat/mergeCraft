@@ -177,6 +177,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--- ` or `+++ ` (for example a removed SQL `-- comment`) are no longer moved
   one line up: those prefixes are file headers only while no hunk is open
   (#1556).
+- Offline JEV review keeps a changed line that looks like a file header in its
+  hunk unit. A removed `-- a/old.sql` (rendered `--- a/old.sql`) or an added
+  `++ b/x.py` (rendered `+++ b/x.py`) no longer renames the unit or drops out of
+  its content, id and cache key: `---`/`+++` are headers only once the open
+  hunk's line counts are consumed (#1589).
+- Offline JEV hunk units take their path from the shared diff parser, so a
+  Git-quoted path such as `"b/caf\303\251.md"` reads `café.md` and an analyzer
+  finding on that file removes its residual unit. Text before the first
+  `diff --git` line is no longer read as a file section (#1590).
 - Mutation-survivor paths and trufflehog suppression paths keep a leading dot
   (`.github/…`, `.venv-dev/…`); only one leading `./` is removed, so a dotted
   path matches its own changed path and a dotted virtualenv still hits its
