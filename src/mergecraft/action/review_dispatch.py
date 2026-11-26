@@ -47,6 +47,8 @@ from mergecraft.modes import _custom_modes, compute_modes
 from mergecraft.review.roster_execution import (
     RosterExecutionSummary,
     primary_repo_state_dir,
+    record_budget_skipped_reviewers,
+    run_budget_exhaustion,
     run_file_group_reviewers,
 )
 from mergecraft.review_policy.ignore_paths import list_pull_request_paths
@@ -70,7 +72,7 @@ from mergecraft.utils.process_group import (
     register_process_group,
     unregister_process_group,
 )
-from mergecraft.utils.run_bounds import StreamCharges
+from mergecraft.utils.run_bounds import BudgetExhausted, StreamCharges, record_agent_usage
 from mergecraft.utils.skills import install_bundled_skills
 from mergecraft.utils.workspace import (
     resolve_allowed_working_directory,
@@ -94,6 +96,69 @@ from mergecraft.review.pipeline.prep import build_reviewer_context, configured_s
 _RunAttempt = Callable[
     [Agent, AgentRunContext, "RepoSettings", ToolState, str | None], Awaitable[AgentResult]
 ]
+
+
+def _recorded_budget_exhaustion(ctx: RunContext) -> BudgetExhausted | None:
+    """Return the exhaustion this run already recorded, wherever it was tripped.
+
+    A charge the Action made itself is kept on ``ctx.budget_exhaustion``; one
+    tripped by a streamed step or an MCP tool call stays on the budget tracker.
+    Either one means no further provider dispatch may open (#1584).
+    """
+    if ctx.budget_exhaustion is not None:
+        return ctx.budget_exhaustion
+    tracker = ctx.budget_tracker
+    if tracker is not None and tracker.last_exhausted is not None:
+        return tracker.last_exhausted
+    if ctx.tool_context is not None:
+        return run_budget_exhaustion(ctx.tool_context)
+    return None
+
+
+def _note_budget_exhaustion(ctx: RunContext, exc: BudgetExhausted) -> None:
+    """Keep the run's first exhaustion for finalization; a later one never replaces it."""
+    if ctx.budget_exhaustion is None:
+        ctx.budget_exhaustion = exc
+
+
+def _charge_primary_attempt(
+    ctx: RunContext,
+    result: AgentResult,
+    *,
+    model: str | None,
+    streamed: StreamCharges,
+) -> AgentResult:
+    """Price, list and charge one primary attempt's own usage (#1586).
+
+    Every attempt of the model chain spent provider tokens, including an
+    attempt that failed and the chain moved past. Each one is priced at the
+    model it actually ran, listed as its own usage row, and charged net of what
+    its own stream already charged, so no attempt disappears from the run's
+    total and none is paid twice. An overrun is kept for finalization.
+
+    Args:
+        ctx: The Action run state.
+        result: The attempt's result.
+        model: The model the attempt ran.
+        streamed: What this attempt's stream already charged.
+
+    Returns:
+        The result carrying its priced usage.
+    """
+    assert ctx.tool_state is not None
+    if result.usage is None:
+        return result
+    from mergecraft.agents.curated_model_catalog import apply_catalog_cost_to_usage
+
+    priced = apply_catalog_cost_to_usage(result.usage, model=model)
+    if priced is None:
+        return result
+    ctx.tool_state.usage_entries.append(priced)
+    try:
+        record_agent_usage(ctx.budget_tracker, priced, phase="reviewer_dispatch", streamed=streamed)
+    except BudgetExhausted as exc:
+        _note_budget_exhaustion(ctx, exc)
+    return replace(result, usage=priced)
 
 
 def _first_runnable_in_chain(chain: list[str]) -> str:
@@ -770,12 +835,16 @@ def _run_start_harnesses(ctx: RunContext) -> list[str]:
 def _promote_and_finalize_agent_result(
     ctx: RunContext, winning_slug: str | None, result: AgentResult
 ) -> AgentResult:
-    """Post-process the dispatched ``AgentResult``: model promotion, usage, schema check.
+    """Post-process the dispatched ``AgentResult``: model promotion, timing, schema check.
 
     Split out of ``_dispatch_agent_with_deadline`` (G4.2) purely to keep
     that function's complexity down — this is the tail of the same
     original contiguous block, called immediately after the agent task
     resolves (whether via the plain await or the deadline-wrapped one).
+
+    Usage is not charged here: :func:`_run_agent_task_with_deadline` charges
+    every attempt as it finishes (:func:`_charge_primary_attempt`), so the
+    winner's usage is already listed and an earlier attempt's is never lost.
     """
     assert ctx.tool_state is not None
     assert ctx.tool_context is not None
@@ -810,25 +879,6 @@ def _promote_and_finalize_agent_result(
             executed_model=executed if isinstance(executed, str) else winning_slug,
             fallback_index=fallback_index,
         )
-
-    if result.usage:
-        from mergecraft.agents.curated_model_catalog import apply_catalog_cost_to_usage
-
-        usage = apply_catalog_cost_to_usage(result.usage, model=tool_state.model)
-        if usage is not None:
-            result = replace(result, usage=usage)
-        tool_state.usage_entries.append(result.usage)
-        from mergecraft.utils.run_bounds import BudgetExhausted, record_agent_usage
-
-        try:
-            record_agent_usage(
-                ctx.budget_tracker,
-                result.usage,
-                phase="reviewer_dispatch",
-                streamed=ctx.stream_charges,
-            )
-        except BudgetExhausted as exc:
-            ctx.budget_exhaustion = exc
 
     from mergecraft.utils.llm_review_timing import snapshot_llm_review_timing
 
@@ -882,8 +932,18 @@ async def _run_agent_task_with_deadline(
     # task is created so its first generation and every secondary share a tracker.
     bind_llm_review_timing_tracker()
 
+    # The most recent attempt that actually ran: the chain's answer when a spent
+    # budget refuses the next attempt.
+    last_attempt: list[tuple[str, AgentResult]] = []
+
     async def _run_agent_once(slug: str) -> AgentResult:
-        ctx.stream_charges = StreamCharges()
+        if (exhausted := _recorded_budget_exhaustion(ctx)) is not None:
+            # No further paid attempt opens once the run's budget is spent; the
+            # chain stops here and the attempt that ran last is its result.
+            _note_budget_exhaustion(ctx, exhausted)
+            raise exhausted
+        streamed = StreamCharges()
+        ctx.stream_charges = streamed
         attempt_model = resolve_model(slug=slug, respect_env_override=False)
         attempt_agent = resolve_runtime_agent(model=attempt_model, settings=settings)
         attempt_agent_id = attempt_agent.name
@@ -933,25 +993,43 @@ async def _run_agent_task_with_deadline(
                 attempt_agent_id,
                 attempt_model or "(auto)",
             )
-        return await dispatch_chained(
+        attempt_result = await dispatch_chained(
             attempt_agent, attempt_ctx, settings, tool_state, attempt_model
         )
+        attempt_result = _charge_primary_attempt(
+            ctx, attempt_result, model=attempt_model, streamed=streamed
+        )
+        last_attempt[:] = [(slug, attempt_result)]
+        return attempt_result
 
     async def _dispatch_selected_agent() -> tuple[str | None, AgentResult]:
         async def _single_attempt() -> tuple[str | None, AgentResult]:
             attempt_ctx = replace(run_ctx, stream_charges=ctx.stream_charges)
-            return selected_slug, await dispatch_single(
+            attempt_result = await dispatch_single(
                 agent, attempt_ctx, settings, tool_state, ctx.resolved_model
             )
+            return selected_slug, _charge_primary_attempt(
+                ctx, attempt_result, model=ctx.resolved_model, streamed=ctx.stream_charges
+            )
 
-        dispatched = await dispatch_reviewer(
-            settings,
-            model_head=model_head,
-            model_pin=model_pin,
-            tool_state=tool_state,
-            run_once=_run_agent_once,
-            single_attempt=None if use_model_chain else _single_attempt,
-        )
+        try:
+            dispatched = await dispatch_reviewer(
+                settings,
+                model_head=model_head,
+                model_pin=model_pin,
+                tool_state=tool_state,
+                run_once=_run_agent_once,
+                single_attempt=None if use_model_chain else _single_attempt,
+            )
+        except BudgetExhausted as exc:
+            _note_budget_exhaustion(ctx, exc)
+            if last_attempt:
+                return last_attempt[0]
+            return None, AgentResult(
+                success=False,
+                error=str(exc),
+                metadata={"retryable": False, "budget_exhausted": True},
+            )
         return dispatched.winning_slug, dispatched.agent_result
 
     from mergecraft.agents.token_budget import bind_run_budget
@@ -1010,6 +1088,15 @@ async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecu
     The opt-in file-group fan-out (``review.fileGroupFanout``) runs first, after
     the primary reviewer. Its failures are run-health notes recorded on the tool
     state, so its summary is never folded into the roster result.
+
+    The run's budget is checked first: once the primary (or anything else) has
+    exhausted it, no file group or secondary reviewer opens a paid dispatch
+    (#1584). An exhaustion raised by the fan-out or the roster is the run's,
+    never an infrastructure fault: it is kept on ``ctx.budget_exhaustion`` so
+    finalization publishes the inconclusive budget outcome and its reason
+    (#1585). Either way, every secondary reviewer, at every dispatch level, that
+    never ran is recorded as not dispatched, and the summary returned names the
+    required ones (:func:`record_budget_skipped_reviewers`).
     """
     assert ctx.tool_context is not None
     assert ctx.tool_state is not None
@@ -1017,6 +1104,44 @@ async def _run_server_roster_reviewers_if_needed(ctx: RunContext) -> RosterExecu
     assert ctx.run_ctx is not None
     if ctx.tool_state.selected_mode not in {"Review", "IncrementalReview"}:
         return None
+    if (exhausted := _recorded_budget_exhaustion(ctx)) is not None:
+        logger.warning(
+            "» run budget exhausted ({}); no file-group or secondary reviewer is dispatched: {}",
+            exhausted.kind,
+            exhausted,
+        )
+        return _skip_secondary_reviewers(ctx, exhausted)
+    try:
+        return await _dispatch_server_side_reviewers(ctx)
+    except BudgetExhausted as exc:
+        logger.warning(
+            "» run budget exhausted ({}) during server-side reviewer dispatch: {}",
+            exc.kind,
+            exc,
+        )
+        return _skip_secondary_reviewers(ctx, exc)
+
+
+def _skip_secondary_reviewers(
+    ctx: RunContext, exhausted: BudgetExhausted
+) -> RosterExecutionSummary:
+    """Keep the exhaustion for finalization and record every undispatched secondary."""
+    assert ctx.tool_context is not None
+    assert ctx.tool_state is not None
+    _note_budget_exhaustion(ctx, exhausted)
+    return record_budget_skipped_reviewers(
+        ctx.tool_context,
+        exhausted=exhausted,
+        repo_root=Path(primary_repo_state_dir(ctx.tool_state)),
+    )
+
+
+async def _dispatch_server_side_reviewers(ctx: RunContext) -> RosterExecutionSummary | None:
+    """Run the file-group fan-out, then every pending secondary reviewer."""
+    assert ctx.tool_context is not None
+    assert ctx.tool_state is not None
+    assert ctx.settings is not None
+    assert ctx.run_ctx is not None
     from mergecraft.review.roster_execution import run_pending_roster_reviewers
 
     def _remaining_roster_timeout_s() -> float | None:

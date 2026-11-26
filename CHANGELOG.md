@@ -136,6 +136,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silently. Streamed usage is tracked per dispatch, so reviewers running at the
   same time, and a fallback after a failed attempt, are each charged in full
   (#1559).
+- Once a run's budget is exhausted, no further paid provider call starts:
+  queued file-group reviewers, secondary reviewers and further model-chain
+  attempts are skipped and recorded as not dispatched, while work already in
+  flight finishes and is charged. A skipped file group no longer adds a
+  "produced no findings" run-health row (#1583, #1584).
+- A secondary or file-group reviewer that exhausts the run budget now ends the
+  run `inconclusive`, naming the budget, instead of `infra_error` (#1585).
+- Every Action model-chain attempt is counted, not only the winner: a failed
+  attempt that reported its usage only on completion is priced at the model it
+  ran, listed and charged once (#1586).
+- An OpenCode step that crosses the token ceiling still counts: its tokens and
+  cost are kept in the attempt's usage and charged once, and a step that crosses
+  the cost ceiling is no longer charged a second time when the attempt finishes
+  (#1587).
+- A secondary or file-group reviewer that times out or raises keeps the usage it
+  had already streamed: it is listed once under that reviewer instead of
+  appearing as unexplained context-expansion tokens. A reviewer that streamed no
+  usage still lists none (#1588).
 - A failure to write the findings file after a review keeps the run's recorded
   cost and tokens and is reported as an infrastructure error (exit `40`),
   instead of dropping the spend and reporting an operator configuration error
