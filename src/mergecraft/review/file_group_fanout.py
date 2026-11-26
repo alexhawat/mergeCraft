@@ -11,6 +11,9 @@ aggregated afterwards. This module is the *planning and degradation* half:
 * :func:`dispatch_file_groups` runs a caller-supplied async dispatcher with
   ``return_exceptions`` semantics and at most ``concurrency`` groups in flight,
   so one failed group becomes a recorded finding instead of a failed review.
+  An exception the caller names as a halt (the run's budget running out) is
+  not a group failure: it stops queued groups from starting and is returned on
+  the summary for the caller to raise.
 
 The server-side roster dispatch
 (``review/roster_execution.py::run_file_group_reviewers``) is the only caller
@@ -129,10 +132,16 @@ class FanoutSummary:
 
     ``failures`` are ``(group_id, reason)`` rows the caller records as findings
     or run-health notes. A failed group never propagates as an exception.
+
+    ``halted`` is the first halt exception a group raised (see
+    :func:`dispatch_file_groups`); ``skipped`` names the groups that were never
+    dispatched because of it. Neither is a group failure.
     """
 
     results: tuple[Any, ...] = ()
     failures: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    halted: BaseException | None = None
+    skipped: tuple[str, ...] = ()
 
     @property
     def degraded(self) -> bool:
@@ -321,12 +330,21 @@ def plan_file_groups(
     )
 
 
+class _NotDispatched:
+    """Marks a queued group that never started because the fan-out halted."""
+
+
+_NOT_DISPATCHED: Final[_NotDispatched] = _NotDispatched()
+
+
 async def dispatch_file_groups(
     plan: FanoutPlan,
     dispatch: Callable[[FileGroup], Awaitable[Any]],
     *,
     on_failure: Callable[[str, str], None] | None = None,
     concurrency: int = 1,
+    halt_on: tuple[type[BaseException], ...] = (),
+    halted: Callable[[], BaseException | None] | None = None,
 ) -> FanoutSummary:
     """Dispatch every group; a failed group is recorded, never re-raised.
 
@@ -339,26 +357,53 @@ async def dispatch_file_groups(
         concurrency: Most groups in flight at once (values below ``1`` count as
             ``1``). The default ``1`` finishes each group before starting the
             next, in plan order.
+        halt_on: Exception types that end the whole fan-out rather than one
+            group. Once a group raises one, no queued group starts; groups
+            already in flight finish, so the work they started is still
+            accounted for. A halting group is neither a failure row nor passed
+            to ``on_failure``.
+        halted: Optional check made as each group is about to start. When it
+            returns an exception (a halt recorded somewhere other than a group's
+            own dispatch), the fan-out halts with it exactly as for ``halt_on``.
 
     Returns:
         A :class:`FanoutSummary`. A run with no groups returns an empty summary
-        without calling ``dispatch``.
+        without calling ``dispatch``. ``halted`` carries the first halt
+        exception and ``skipped`` the groups it kept from starting.
     """
     if not plan.groups:
         return FanoutSummary()
     outcomes: list[Any] = []
     failures: list[tuple[str, str]] = []
+    skipped: list[str] = []
+    halts: list[BaseException] = []
     limit = asyncio.Semaphore(max(1, int(concurrency)))
 
     async def _bounded(group: FileGroup) -> Any:
         async with limit:
-            return await dispatch(group)
+            # Checked once a slot is free: a group queued behind the one that
+            # halted the fan-out must never open a provider dispatch.
+            if not halts and halted is not None and (pending := halted()) is not None:
+                halts.append(pending)
+            if halts:
+                return _NOT_DISPATCHED
+            try:
+                return await dispatch(group)
+            except halt_on as exc:
+                halts.append(exc)
+                raise
 
     results = await asyncio.gather(
         *(_bounded(group) for group in plan.groups),
         return_exceptions=True,
     )
     for group, result in zip(plan.groups, results, strict=True):
+        if result is _NOT_DISPATCHED:
+            skipped.append(group.group_id)
+            continue
+        if halt_on and isinstance(result, halt_on):
+            logger.warning("file-group fan-out {} halted the fan-out: {}", group.group_id, result)
+            continue
         if isinstance(result, BaseException):
             reason = str(result) or result.__class__.__name__
             failures.append((group.group_id, reason))
@@ -374,7 +419,18 @@ async def dispatch_file_groups(
                     )
             continue
         outcomes.append(result)
-    return FanoutSummary(results=tuple(outcomes), failures=tuple(failures))
+    if skipped:
+        logger.warning(
+            "file-group fan-out halted; {} queued group(s) never started: {}",
+            len(skipped),
+            ", ".join(skipped),
+        )
+    return FanoutSummary(
+        results=tuple(outcomes),
+        failures=tuple(failures),
+        halted=halts[0] if halts else None,
+        skipped=tuple(skipped),
+    )
 
 
 __all__ = [
