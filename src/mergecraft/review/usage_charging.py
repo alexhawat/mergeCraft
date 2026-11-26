@@ -8,6 +8,7 @@ which never read ``AgentResult.usage``.
 
 Exports:
     charge_reviewer_usage: Price, list and charge one dispatch's usage, in order.
+    observed_stream_usage: The partial usage one dispatch's stream reported.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
     from mergecraft.mcp.tool_state import ToolState
     from mergecraft.utils.run_bounds import BudgetTracker, StreamCharges
 
-__all__ = ["charge_reviewer_usage"]
+__all__ = ["charge_reviewer_usage", "observed_stream_usage"]
 
 
 def charge_reviewer_usage(
@@ -87,3 +88,46 @@ def charge_reviewer_usage(
     tool_state.usage_entries.append(priced)
     record_agent_usage(budget_tracker, priced, phase=phase, streamed=streamed)
     return priced
+
+
+def observed_stream_usage(streamed: StreamCharges | None, *, agent: str) -> AgentUsage | None:
+    """Return what one dispatch's stream reported, for a dispatch that ended abnormally.
+
+    A reviewer that times out or raises never returns its final ``AgentUsage``,
+    but the steps it streamed were already charged to the run (#1588). This is
+    that observed spend as a usage row, so it can be listed once and attributed
+    to the reviewer instead of surfacing as an unexplained residual.
+
+    Args:
+        streamed: The dispatch's own stream charges, or ``None``.
+        agent: The harness name the row is attributed to.
+
+    Returns:
+        The observed usage, or ``None`` when the stream reported no usage: an
+        unknown spend stays unknown and no estimate is made up for it.
+
+    Examples:
+        >>> from mergecraft.utils.run_bounds import StreamCharges
+        >>> observed_stream_usage(StreamCharges(), agent="opencode") is None
+        True
+        >>> row = observed_stream_usage(
+        ...     StreamCharges(tokens=30, cost_usd=0.2, input_tokens=20, output_tokens=10),
+        ...     agent="opencode",
+        ... )
+        >>> (row.input_tokens, row.output_tokens, row.cost_usd)
+        (20, 10, 0.2)
+    """
+    from mergecraft.agents.shared import AgentUsage
+
+    if streamed is None:
+        return None
+    if not (streamed.input_tokens or streamed.output_tokens or streamed.cost_usd > 0):
+        return None
+    return AgentUsage(
+        agent=agent,
+        input_tokens=streamed.input_tokens,
+        output_tokens=streamed.output_tokens,
+        cache_read_tokens=streamed.cache_read_tokens or None,
+        cache_write_tokens=streamed.cache_write_tokens or None,
+        cost_usd=streamed.cost_usd if streamed.cost_usd > 0 else None,
+    )

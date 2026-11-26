@@ -326,12 +326,17 @@ def _classify_error_outcome(error: BaseException) -> RunOutcome:
     Defaults to ``infra_error`` — that is the "infra never looks like
     success" invariant the taxonomy replaces the old plain boolean with.
     Only exceptions that already carry an unambiguous, distinct cause are
-    reclassified; an unclassified agent crash stays ``infra_error``.
+    reclassified; an unclassified agent crash stays ``infra_error``. An
+    exhausted run budget is one of those: it maps through the same
+    ``budget_exhaustion_outcome`` the finalization resolver uses (#1585).
     """
     from pydantic import ValidationError
 
     from mergecraft.config.yaml_unique import ConfigParseError
+    from mergecraft.utils.run_bounds import BudgetExhausted, budget_exhaustion_outcome
 
+    if isinstance(error, BudgetExhausted):
+        return budget_exhaustion_outcome(error)
     if isinstance(error, (_AgentTimeoutError, TimeoutError, asyncio.TimeoutError)):
         return RunOutcome.timed_out
     if isinstance(
