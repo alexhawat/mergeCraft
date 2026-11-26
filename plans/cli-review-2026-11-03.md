@@ -332,10 +332,11 @@ sync (151 rows). That is where the good news ends.
 - Well documented: `review`, `provider auth/status`, `init`, `mcp`, `findings`, `trust`,
   `verify-behavior`, `opencode`, `auth logfire`, `workflow sync`, `agent assign-model`.
 - Internal plan and ticket tokens reach users in `--help` and therefore in the generated
-  docs: `(D13)` on the `eval` group, `(#44)`, `(#140)`, `(#140, B3)`, `(RC6)`, `(EV3)`,
-  `(D9)`, `(B7)` on eval verbs, `(#483)` on `provider migrate`, `(D11)` on `learnings
-  influence`, `(W8.4 / W7.6)` on five `review` tracing flags, `(D14)` and `(TS1 / D3)` on
-  `review`, "D7 singleton secret" on `auth minimax`, and "Mirrors `sevn tracing logfire`"
+  docs: a decision id on the `eval` group, `(#44)`, `(#140)`, `(#140, B3)`, `(RC6)`, `(EV3)`,
+  `(B7)` and a second decision id on eval verbs, `(#483)` on `provider migrate`, a decision
+  id on `learnings influence`, a pair of wave ids on five `review` tracing flags, two more
+  decision ids (one beside `TS1`) on `review`, a decision id in front of "singleton secret"
+  on `auth minimax`, and "Mirrors `sevn tracing logfire`"
   on the `tracing` groups. Two help strings leak Sphinx `:class:` roles. 49 of 153 help
   texts render RST double backticks literally.
 - Deprecation is invisible: `auth <vendor>` ×7 and `agents setmodel/addbackupmodel` warn
@@ -419,8 +420,8 @@ is why half the leaves are about model selection. The plan below takes the top l
    `--format` after making `audit export`, `provider status` and `version` read the root
    option, then add JSON output to `agent list`, `provider list`, `models show`,
    `config show`, `trust show`, `jev status`, `doctor`.
-4. **Help text** must lose the plan and ticket tokens that reach users: `(D13)`, `(#44)`,
-   `(#140, B3)`, `(RC6)`, `(#483)`, `(W8.4 / W7.6)` on five `review` tracing flags, and
+4. **Help text** must lose the plan and ticket tokens that reach users: the decision id on `eval`,
+   `(#44)`, `(#140, B3)`, `(RC6)`, `(#483)`, the wave-id pair on five `review` tracing flags, and
    `sevn`. A check that greps rendered `--help` for `\(#\d+|\bD\d+\b|\bW\d+|\bRC\d|sevn`
    belongs next to `make docs-check`, because `docs/cli.md` is generated from these strings.
 5. **`.env.example`** is the most stale consumer file in the repo: it calls `mergecraft run`
@@ -451,3 +452,73 @@ non-interactive help.
   not move on. Directly relevant to the fallback tests in the companion plan.
 - PR #1125 (open): "cascade failover and gate unknowns" changes the failover semantics the
   test plan exercises. Re-run section 5.D of the plan after it merges.
+
+## Addendum — status on 2026-11-24
+
+Re-checked against `main` at `f61bc558` (version `0.1.0a7.dev0`). The body above is the
+2026-11-03 snapshot. Its only edit is in 4.5 and 5.4, where the decision and wave ids it
+quoted from `--help` are now described instead of cited, as the tracked-markdown check
+requires. Since then `main` took 1030 commits (672
+non-merge), 56 of them touching `src/mergecraft/cli/` (48 files, +2,432 / −1,503), and two
+releases (`v0.1.0a5`, `v0.1.0a6`).
+
+Size now: 48 top-level entries (46 visible, was 47), 156 leaf commands (136 visible, was
+151). The drop in visible commands is the `eval` group being hidden and `pipeline` being
+deleted; `report` and three `findings` commands were added. The 24-entry target in 5.5 is
+untouched.
+
+Status of the top ten fixes:
+
+| # | Fix | Status | Evidence |
+|---|-----|--------|----------|
+| 1 | Five tracebacks; `traces show <id>` | Mostly done | `review` with no credential exits 12 without a traceback; `lens test` on an unknown slug exits 2; `model add` and `auth gemini` handle a non-TTY. `traces show <id>` resolves. **Still open:** `agent show reviewer` with no credential raises `RuntimeError: no runnable model slug in chain` |
+| 2 | `init` gitignores `.env`; `plan` leaves no file; `analyzers docs` path | Two of three | `init` writes `.env` to `.gitignore` and refuses a tracked `.env`; `plan` leaves the tree clean. `analyzers docs` was hidden instead of fixed: it has no `--cwd` and still writes into the checkout that hosts the package |
+| 3 | One roster view; fold `provider status` into `doctor` | Not checked | `provider status` still exists; `doctor` gained a workflow-auth probe |
+| 4 | Delete the already-warning shims | Not done | `agents set/setmodel/addbackupmodel`, `workflow agents setmodel`, `workflow provider harnesses`, `provider enable`, `ask` and hidden `diff-review` are all still registered |
+| 5 | `deprecated=True` on runtime-deprecated commands; hide `auth <vendor>` | Not done | no command in the tree carries the deprecated flag; `auth` is still a visible top-level group |
+| 6 | Strip ticket and wave tokens from help | Done in the reference | `docs/cli.md` has no `(#NNN)`, wave-id or `sevn` tokens left (was 5) |
+| 7 | Rewrite `.env.example` from the registry | Done | regenerated from the provider registry (+239 / −116); not audited line by line |
+| 8 | Retarget `update` to PyPI | Done | `update --dry-run` plans `uv tool install --reinstall --upgrade` of the released package |
+| 9 | Root `--format json` as the only JSON switch | Partly | every command now honours it or exits 2 naming itself; per-command `--json` flags remain and `doctor` has no JSON under the root switch |
+| 10 | Merge `learnings`, `replay`/`traces`, `auth logfire`, `agent-local` | Not done | all four are still separate top-level surfaces |
+
+New since the review, not covered above:
+
+- **Stricter local revision reviews.** `review --head REF` and `--range` require the
+  checkout to sit on the reviewed endpoint with no staged, unstaged or untracked
+  non-ignored files. A default working-tree review now includes untracked non-ignored
+  files in the diff.
+- **Per-run cost ceiling** `MERGECRAFT_COST_BUDGET_USD` defaults to 3 (was 50);
+  `MERGECRAFT_TOKEN_BUDGET` became advisory.
+- **Lazy command loading.** The root group resolves a command's module only when it is
+  selected, and Typer now vendors click. The tree-dump snippet this review used returns
+  nothing; `plans/cli-test-plan.md` Section 8 has a working walker.
+- **Two observations worth a ticket.** A chain with no credential at all exits 12, where
+  `docs/EXIT-CODES.md` reserves 40 for credential failures. `MERGECRAFT_TRACING=banana` is
+  rejected by `review` and `config tracing` (exit 2) but ignored by `doctor`.
+
+Section 6 follow-up: PR #1125 merged on 2026-11-04 and closed #1009, so an expired Codex
+login is now failover-eligible. Section 5.D of the test plan exercises the merged behaviour.
+
+The test plan was revised the same day; its Section 0 lists every test that changed.
+
+### Re-check on 2026-11-26
+
+`main` at `14c0d6fb` (version `0.1.0a8.dev0`, `v0.1.0a7` released): 197 more commits in two
+days, 9 of them in `src/mergecraft/cli/`. The command tree and `docs/cli.md` are identical
+to 2026-11-24, so the size figures and every row of the table above still hold. In
+particular item 1 is still open: `agent show reviewer` with no credential still raises.
+Open issue #1344 tracks the remaining help hygiene and inconsistent flags.
+
+What moved is behaviour, mostly exit codes and the provider registry:
+
+- `config show` and `config explain` on an unknown key exit 2 (usage); a repo with no model
+  chain exits 30 with one line.
+- A bad `MERGECRAFT_TRACING` now exits 30 with a message naming the variable on `review`
+  and `config tracing`. `doctor` still ignores it.
+- The provider registry never reuses a deleted provider's env index, rejects a
+  non-numeric, missing or null `envIndex` with exit 30, and rolls `.env` back byte for
+  byte when `provider add` fails.
+- Budget exhaustion stops paid dispatch and maps to inconclusive; exit 40 also covers a
+  findings file that cannot be written.
+- A chain with no credential at all still exits 12.
