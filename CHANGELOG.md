@@ -165,6 +165,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The hardened reference workflow no longer grants `statuses: write`: mergeCraft
   posts check-runs and needs only `checks: write`, so the extra scope is gone from
   the template, its generated example and the dogfood mirror (#1567).
+- This repository's self-review attempt jobs no longer request
+  `statuses: write` either; they keep `checks: write` for the check-runs they
+  publish (#1595).
 - `python -m mergecraft` now runs the CLI, so an interpreter without the console
   script on `PATH` can invoke it (#1570).
 - `docs/agents.md`, `SECURITY.md` and `evals/README.md` name the current release
@@ -210,6 +213,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   token boundary for one long line) before redaction and capped again after it,
   so redaction always sees whole values while its work stays bounded by the cap.
   A quoted value the cut would leave open is dropped whole.
+- The analyzer capture limit is counted in UTF-8 bytes everywhere, not only by
+  the pipe reader: the redaction-safe cut and the cap after redaction no longer
+  count characters, so a multi-byte stream never keeps more than the limit and
+  is cut on a character boundary. The notice now reads "exceeded the capture
+  limit of N bytes (UTF-8) per stream" instead of calling the bytes characters;
+  the 8,000-character display limit is separate (#1591).
 - A dependency advisory already present on the base branch is no longer reported
   as introduced by the pull request. The base copy of a lock file is scanned from
   a scratch path, so its advisories never matched their head twins and every one
@@ -315,6 +324,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preparing a release updates the supported version in `SECURITY.md`, and the
   merge-back updates the default install ref in `evals/README.md`. Both were left
   on the previous release, which failed the release branch's own checks.
+- An install without the example-workflow defaults files falls back to the
+  current minimal Action pin (`v0.1.0a6`) instead of `v0.1.0a1`. `make
+  pins-check` now fails when the embedded fallback in `mergecraft.pins` differs
+  from `defaults.yaml`, and the release merge-back refreshes its tag and commit
+  with the other pins (#1594).
 - Invalid option values exit `2` and a missing review base exits `30`
   (#1343, #1530).
 - The hardened workflow gate fails when the review step itself failed
