@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
+from pydantic import TypeAdapter, ValidationError
+
 from mergecraft.agents.resolution.runtime import (
     NATIVE_HARNESS_PROVIDERS,
 )
@@ -25,6 +27,13 @@ _CLOUD_CHAIN_LABELS = frozenset({"bedrock", "vertex"})
 _DEVICE_CODE_LABELS = frozenset({"openai", "codex"})
 _OAUTH_LABELS = frozenset({"anthropic", "claude"})
 _OPENCODE_ZEN_LABELS = frozenset({"opencode"})
+
+# Reads a row's ``envIndex`` exactly as ``ProviderRegistryEntry`` validates one.
+_ENTRY_ENV_INDEX: TypeAdapter[int] = TypeAdapter(int)
+
+
+class InvalidEnvIndexError(ValueError):
+    """A provider registry row whose ``envIndex`` the settings model rejects (#1592)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +69,33 @@ def supported_harness_names() -> frozenset[str]:
     return frozenset(row.name for row in _harness_rows())
 
 
+def entry_env_index(entry: Mapping[str, Any]) -> int:
+    """Return *entry*'s ``envIndex``, parsed as ``RepoSettings`` parses it.
+
+    Args:
+        entry: One raw ``providers:`` row from ``.mergecraft/config.yaml``.
+
+    Returns:
+        int: The row's env index.
+
+    Raises:
+        InvalidEnvIndexError: When the value is missing or not an integer. The
+            message names the provider and the ``envIndex`` field.
+    """
+    raw = entry.get("envIndex")
+    try:
+        return _ENTRY_ENV_INDEX.validate_python(raw)
+    except ValidationError:
+        label = str(entry.get("label") or "").strip()
+        who = f"provider {label!r}" if label else "a provider row"
+        problem = "has no envIndex" if raw is None else f"has an invalid envIndex {raw!r}"
+        msg = (
+            f"{who} {problem} in the providers registry: envIndex must be an integer; "
+            "correct the row or remove it with `mergecraft provider delete`"
+        )
+        raise InvalidEnvIndexError(msg) from None
+
+
 def allocate_env_index(
     entries: Sequence[Mapping[str, Any]],
     *,
@@ -73,12 +109,15 @@ def allocate_env_index(
     also records the highest freed index as ``high_water``. ``occupied`` names
     indices whose ``LLM_PROVIDER_<N>`` keys are still in the local ``.env``, which
     covers registries written before that mark existed.
+
+    Every row is validated, as ``ProviderRegistryEntry`` validates it: a row
+    whose ``envIndex`` is missing or ``null`` is as invalid as a nonnumeric one,
+    so allocation never writes a new row into a registry settings would reject.
+
+    Raises:
+        InvalidEnvIndexError: When a row's ``envIndex`` is missing or not an integer.
     """
-    indices = [
-        int(entry["envIndex"])
-        for entry in entries
-        if isinstance(entry, Mapping) and entry.get("envIndex") is not None
-    ]
+    indices = [entry_env_index(entry) for entry in entries if isinstance(entry, Mapping)]
     return max([0, high_water, *indices, *occupied]) + 1
 
 
@@ -122,9 +161,11 @@ def default_auth_kind_for_label(label: str) -> str | None:
 __all__ = [
     "BUILTIN_HARNESS_DEFAULTS",
     "HarnessRow",
+    "InvalidEnvIndexError",
     "allocate_env_index",
     "default_auth_kind_for_label",
     "default_harness_for_label",
+    "entry_env_index",
     "harness_supports_provider",
     "list_supported_harnesses",
     "supported_harness_names",

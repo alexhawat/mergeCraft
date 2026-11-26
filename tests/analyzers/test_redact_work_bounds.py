@@ -155,7 +155,7 @@ def test_each_captured_stream_is_redacted_exactly_once(
 def test_captured_output_is_capped_before_redaction(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_CHARS", 1_000)
+    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_BYTES", 1_000)
     seen = _spy_redaction(monkeypatch)
     completed = subprocess.CompletedProcess(
         args=["ruff"], returncode=1, stdout=_lint_dump(400), stderr=""
@@ -168,7 +168,7 @@ def test_captured_output_is_capped_before_redaction(
     assert [len(raw) <= 1_000 for raw in seen] == [True]
     assert outcome.output_path is not None
     assert len(Path(outcome.output_path).read_text(encoding="utf-8")) <= 1_000
-    assert "exceeded 1000 chars" in outcome.output
+    assert "capture limit of 1000 bytes" in outcome.output
 
 
 _CAP = 1_000
@@ -192,7 +192,7 @@ def _single_line_stream() -> str:
 def test_a_credential_cut_by_the_cap_is_not_left_behind_as_a_prefix(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stream: str
 ) -> None:
-    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_CHARS", _CAP)
+    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_BYTES", _CAP)
     seen = _spy_redaction(monkeypatch)
     start = stream.index(_TOKEN)
     assert start < _CAP < start + len(_TOKEN)
@@ -208,7 +208,7 @@ def test_a_credential_cut_by_the_cap_is_not_left_behind_as_a_prefix(
         assert _TOKEN[:8] not in text
     assert [len(raw) <= _CAP for raw in seen] == [True]
     assert len(persisted) > _CAP // 2
-    assert f"exceeded {_CAP} chars" in outcome.output
+    assert f"capture limit of {_CAP} bytes" in outcome.output
 
 
 _PHRASE = "correct horse battery staple"
@@ -223,7 +223,7 @@ def test_a_quoted_value_cut_by_the_cap_is_dropped_whole(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, opening: str, closing: str
 ) -> None:
     """The assignment rules need the closing quote, so an open quoted value must not survive."""
-    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_CHARS", _CAP)
+    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_BYTES", _CAP)
     stream = "word " * 196 + opening + _PHRASE + closing + " word" * 50
     start = stream.index(_PHRASE)
     assert start < _CAP < start + len(_PHRASE)
@@ -244,7 +244,7 @@ def test_a_multiline_quoted_value_cut_at_a_newline_is_dropped_whole(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """A quoted value may span lines, so the last newline inside the cap can sit inside it."""
-    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_CHARS", _CAP)
+    monkeypatch.setattr(run_mod, "MAX_CAPTURED_OUTPUT_BYTES", _CAP)
     head = "lint: ok\n" * 105
     stream = head + 'token="aaaaaaaa\n' + "b" * 40 + '"\n' + "lint: ok\n" * 50
     inner_newline = stream.index("aaaaaaaa\n") + len("aaaaaaaa")

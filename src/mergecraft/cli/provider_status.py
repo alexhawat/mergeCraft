@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import typer
+from pydantic import ValidationError
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -25,6 +26,7 @@ from mergecraft.cli.exits import CLI_SUCCESS_EXIT_CODE
 from mergecraft.cli.global_surface import CLI_JSON_SCHEMA_VERSION, cli_json_dumps
 from mergecraft.cli.provider_toggle import resolve_provider_secrets
 from mergecraft.cli.target_dir import target_dir as resolve_target_dir
+from mergecraft.config.provider_registry import InvalidEnvIndexError, entry_env_index
 from mergecraft.config.runtime_provider_registry import (
     credential_env_keys_for_entry,
     lookup_registry_entry,
@@ -390,13 +392,17 @@ def build_status_payload(
     github: bool = False,
 ) -> dict[str, Any]:
     target = resolve_target_dir(cwd)
+    provider_cmd = _provider_cmd()
+    provider_registry = provider_cmd.load_provider_registry(provider_cmd._config_path(target))
+    # Name the provider before typed settings reject the row as an anonymous
+    # ``providers.<i>.envIndex`` (#1592); raises InvalidEnvIndexError.
+    for row in provider_registry.entries:
+        entry_env_index(row)
     settings = load_repo_settings(root=target, load_learnings_files=False)
     registry = load_registry(settings=settings, repo_root=target)
 
     workflow_path = target / DEFAULT_WORKFLOW_RELATIVE_PATH
     wired = _wired_providers(workflow_path)
-    provider_cmd = _provider_cmd()
-    provider_registry = provider_cmd.load_provider_registry(provider_cmd._config_path(target))
     dispatch_levels = _dispatch_level_map(registry)
 
     github_block: dict[str, Any] | None = None
@@ -595,6 +601,15 @@ def _render_text(payload: dict[str, Any]) -> None:
             console.print(secret_table)
 
 
+def _settings_validation_message(exc: ValidationError) -> str:
+    """Name each rejected config field without echoing its value."""
+    problems = "; ".join(
+        f"{'.'.join(str(part) for part in error['loc']) or '<root>'}: {error['msg']}"
+        for error in exc.errors()
+    )
+    return f"config validation failed: {problems}"
+
+
 def provider_status_cmd(
     cwd: Path = typer.Option(Path("."), "--cwd", help="Repository root."),
     github: bool = typer.Option(
@@ -607,8 +622,10 @@ def provider_status_cmd(
     """Show the reviewer roster, credentials, wiring, and dispatch order."""
     try:
         payload = build_status_payload(cwd=cwd, github=github)
-    except RegistryValidationError as exc:
+    except (RegistryValidationError, InvalidEnvIndexError) as exc:
         cli_bail(str(exc))
+    except ValidationError as exc:
+        cli_bail(_settings_validation_message(exc))
     if json_output:
         typer.echo(cli_json_dumps(payload))
         raise typer.Exit(CLI_SUCCESS_EXIT_CODE)

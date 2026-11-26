@@ -332,9 +332,9 @@ jobs:
       # Post inline PR review + comments.
       pull-requests: write
       issues: write
-      # Post mergecraft / mergecraft-approval check-runs.
+      # Post mergecraft / mergecraft-approval check-runs. mergeCraft never
+      # writes commit statuses, so no statuses scope (#1595).
       checks: write
-      statuses: write
       # mergeCraft can mint short-lived tokens via OIDC when configured.
       id-token: write
     # `always()` keeps the required check reporting even if the (fail-open) wait
@@ -769,9 +769,9 @@ jobs:
       # Post inline PR review + comments.
       pull-requests: write
       issues: write
-      # Post mergecraft / mergecraft-approval check-runs.
+      # Post mergecraft / mergecraft-approval check-runs. mergeCraft never
+      # writes commit statuses, so no statuses scope (#1595).
       checks: write
-      statuses: write
       # mergeCraft can mint short-lived tokens via OIDC when configured.
       id-token: write
     # Runs only where the Codex step used to: the review job finished cleanly
@@ -1061,9 +1061,9 @@ jobs:
       # Post inline PR review + comments.
       pull-requests: write
       issues: write
-      # Post mergecraft / mergecraft-approval check-runs.
+      # Post mergecraft / mergecraft-approval check-runs. mergeCraft never
+      # writes commit statuses, so no statuses scope (#1595).
       checks: write
-      statuses: write
       # mergeCraft can mint short-lived tokens via OIDC when configured.
       id-token: write
     # `always()` so the verdict is recorded (and the gate has an output to read)

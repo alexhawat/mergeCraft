@@ -136,6 +136,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silently. Streamed usage is tracked per dispatch, so reviewers running at the
   same time, and a fallback after a failed attempt, are each charged in full
   (#1559).
+- Once a run's budget is exhausted, no further paid provider call starts:
+  queued file-group reviewers, secondary reviewers and further model-chain
+  attempts are skipped and recorded as not dispatched, while work already in
+  flight finishes and is charged. A skipped file group no longer adds a
+  "produced no findings" run-health row (#1583, #1584).
+- A secondary or file-group reviewer that exhausts the run budget now ends the
+  run `inconclusive`, naming the budget, instead of `infra_error` (#1585).
+- Every Action model-chain attempt is counted, not only the winner: a failed
+  attempt that reported its usage only on completion is priced at the model it
+  ran, listed and charged once (#1586).
+- An OpenCode step that crosses the token ceiling still counts: its tokens and
+  cost are kept in the attempt's usage and charged once, and a step that crosses
+  the cost ceiling is no longer charged a second time when the attempt finishes
+  (#1587).
+- A secondary or file-group reviewer that times out or raises keeps the usage it
+  had already streamed: it is listed once under that reviewer instead of
+  appearing as unexplained context-expansion tokens. A reviewer that streamed no
+  usage still lists none (#1588).
 - A failure to write the findings file after a review keeps the run's recorded
   cost and tokens and is reported as an infrastructure error (exit `40`),
   instead of dropping the spend and reporting an operator configuration error
@@ -147,6 +165,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The hardened reference workflow no longer grants `statuses: write`: mergeCraft
   posts check-runs and needs only `checks: write`, so the extra scope is gone from
   the template, its generated example and the dogfood mirror (#1567).
+- This repository's self-review attempt jobs no longer request
+  `statuses: write` either; they keep `checks: write` for the check-runs they
+  publish (#1595).
 - `python -m mergecraft` now runs the CLI, so an interpreter without the console
   script on `PATH` can invoke it (#1570).
 - `docs/agents.md`, `SECURITY.md` and `evals/README.md` name the current release
@@ -156,6 +177,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--- ` or `+++ ` (for example a removed SQL `-- comment`) are no longer moved
   one line up: those prefixes are file headers only while no hunk is open
   (#1556).
+- Offline JEV review keeps a changed line that looks like a file header in its
+  hunk unit. A removed `-- a/old.sql` (rendered `--- a/old.sql`) or an added
+  `++ b/x.py` (rendered `+++ b/x.py`) no longer renames the unit or drops out of
+  its content, id and cache key: `---`/`+++` are headers only once the open
+  hunk's line counts are consumed (#1589).
+- Offline JEV hunk units take their path from the shared diff parser, so a
+  Git-quoted path such as `"b/caf\303\251.md"` reads `café.md` and an analyzer
+  finding on that file removes its residual unit. Text before the first
+  `diff --git` line is no longer read as a file section (#1590).
 - Mutation-survivor paths and trufflehog suppression paths keep a leading dot
   (`.github/…`, `.venv-dev/…`); only one leading `./` is removed, so a dotted
   path matches its own changed path and a dotted virtualenv still hits its
@@ -183,6 +213,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   token boundary for one long line) before redaction and capped again after it,
   so redaction always sees whole values while its work stays bounded by the cap.
   A quoted value the cut would leave open is dropped whole.
+- The analyzer capture limit is counted in UTF-8 bytes everywhere, not only by
+  the pipe reader: the redaction-safe cut and the cap after redaction no longer
+  count characters, so a multi-byte stream never keeps more than the limit and
+  is cut on a character boundary. The notice now reads "exceeded the capture
+  limit of N bytes (UTF-8) per stream" instead of calling the bytes characters;
+  the 8,000-character display limit is separate (#1591).
 - A dependency advisory already present on the base branch is no longer reported
   as introduced by the pull request. The base copy of a lock file is scanned from
   a scratch path, so its advisories never matched their head twins and every one
@@ -245,6 +281,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its confirmation naming the key it wrote. It used to read the registry from
   the working directory, so a run from a subdirectory silently wrote the flat
   legacy secret and skipped the indexed wiring (#1557).
+- A provider registry row with a nonnumeric, missing or `null` `envIndex` makes
+  `provider add`, `workflow provider add` and `provider status` (with or without
+  `--json`) exit `30` with a message naming the provider and `envIndex`, instead
+  of a traceback and exit `1`, or a new row allocated into a registry the
+  settings reject. Neither `config.yaml` nor `.env` is changed (#1592).
+- `provider add` and `workflow provider add` now fail when the local
+  `LLM_PROVIDER_<N>` label cannot be written, instead of printing success with
+  the label missing. The label is written before the registry row, and `.env`
+  is restored byte for byte (or removed, if the write created it) when either
+  write fails, so a failed attempt leaves neither and repeating the command
+  registers the provider once, at the same index (#1593).
 - `config show` and `config explain` exit `2` with a plain message for an
   unknown key instead of `30` with the message quoted twice; `config show
   models` shows the whole configured fallback chain; and a missing model chain
@@ -277,6 +324,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preparing a release updates the supported version in `SECURITY.md`, and the
   merge-back updates the default install ref in `evals/README.md`. Both were left
   on the previous release, which failed the release branch's own checks.
+- An install without the example-workflow defaults files falls back to the
+  current minimal Action pin (`v0.1.0a6`) instead of `v0.1.0a1`. `make
+  pins-check` now fails when the embedded fallback in `mergecraft.pins` differs
+  from `defaults.yaml`, and the release merge-back refreshes its tag and commit
+  with the other pins (#1594).
 - Invalid option values exit `2` and a missing review base exits `30`
   (#1343, #1530).
 - The hardened workflow gate fails when the review step itself failed

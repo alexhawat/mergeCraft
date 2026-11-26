@@ -21,10 +21,11 @@ from mergecraft.cli.provider_cmd import (
     _env_path,
     _load_config_dict,
     _provider_entries,
-    _write_env_label,
     allocate_registry_env_index,
     indexed_credential_keys,
     load_provider_registry,
+    register_provider_entry,
+    registry_env_index,
     resolve_provider_harness,
 )
 from mergecraft.cli.typer_group import mergecraft_typer
@@ -307,7 +308,7 @@ def _plan_provider_for_workflow(
 
     for entry in entries:
         if str(entry.get("label", "")).lower() == normalised_label.lower():
-            env_index = int(entry["envIndex"])
+            env_index = registry_env_index(entry)
             resolved_url = entry.get("url")
             if url is not None:
                 try:
@@ -363,10 +364,16 @@ def _plan_provider_for_workflow(
         return entry, env_index, None
 
     def _commit_new_provider() -> None:
-        entries.append(entry)
-        data["providers"] = entries
-        write_config_dict(config_path, data)
-        _write_env_label(env_index, normalised_label, repo_root)
+        # Writes both or neither; a failed label write raises an ``OSError`` so
+        # the caller rolls the workflow back too (#1593).
+        register_provider_entry(
+            config_path,
+            data,
+            entries,
+            entry,
+            cwd=repo_root,
+            write_config=write_config_dict,
+        )
 
     return entry, env_index, _commit_new_provider
 
