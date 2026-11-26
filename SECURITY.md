@@ -38,7 +38,7 @@ reporter and maintainers agree no fix is required):
 ## Supported Versions
 
 This project is under active early development; only the latest published
-pre-release (currently `0.1.0a6`) and `main` are supported.
+pre-release (currently `0.1.0a7`) and `main` are supported.
 
 ## Review-only product boundary
 

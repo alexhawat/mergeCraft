@@ -43,7 +43,7 @@ and Claude Code for `anthropic`
 1. **Install the CLI and scaffold the repo:**
 
 ```bash
-uv tool install mergecraft-action==0.1.0a6
+uv tool install mergecraft-action==0.1.0a7
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml, no secrets
 ```
 
@@ -80,7 +80,7 @@ mergecraft doctor   # git, providers, analyzers, auth, config, workflow auth, MC
    `@mergecraft review` comments.
 
 Docs on `main` may describe unreleased behavior; the
-[Release documentation](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a6/docs) match
+[Release documentation](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a7/docs) match
 this install. Offline first: `mergecraft review --dry-run` prints the review prompt
 with no credential. Something wrong? [`docs/troubleshooting.md`](docs/troubleshooting.md).
 

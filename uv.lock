@@ -1906,7 +1906,7 @@ wheels = [
 
 [[package]]
 name = "mergecraft-action"
-version = "0.1.0a7.dev0"
+version = "0.1.0a7"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },

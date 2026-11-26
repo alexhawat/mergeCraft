@@ -47,7 +47,7 @@ and Claude Code for `anthropic`
 1. **Install the CLI and scaffold the repo:**
 
 ```bash
-uv tool install mergecraft-action==0.1.0a6
+uv tool install mergecraft-action==0.1.0a7
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml, no secrets
 ```
 
@@ -84,7 +84,7 @@ mergecraft doctor   # git, providers, analyzers, auth, config, workflow auth, MC
    `@mergecraft review` comments.
 
 Docs on `main` may describe unreleased behavior; the
-[Release documentation](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a6/docs) match
+[Release documentation](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a7/docs) match
 this install. Offline first: `mergecraft review --dry-run` prints the review prompt
 with no credential. Something wrong? [`docs/troubleshooting.md`](docs/troubleshooting.md).
 
@@ -252,12 +252,12 @@ Use this when asked to add AI PR review to another repository.
    CLI binary is still `mergecraft`:
 
    ```bash
-   uv tool install mergecraft-action==0.1.0a6
+   uv tool install mergecraft-action==0.1.0a7
    mergecraft --install-completion   # optional shell completion
    ```
 
    Docs on `main` may describe unreleased behavior. Use the
-   [matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a6/docs)
+   [matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a7/docs)
    for this install; do not assume newer CLI flags or fixes are included.
 
    To run an unreleased commit instead, pin the distribution to the repository:
@@ -3260,7 +3260,7 @@ PyPI carries the pre-release `mergecraft-action` (the CLI binary stays
 `mergecraft`):
 
 ```bash
-uv tool install mergecraft-action==0.1.0a6
+uv tool install mergecraft-action==0.1.0a7
 mergecraft --install-completion   # bash/zsh/fish — see --show-completion
 mergecraft init   # writes .mergecraft/config.yaml + .github/workflows/mergecraft.yml
 ```
@@ -3270,7 +3270,7 @@ interpreter paths where the console script is not on `PATH`.
 
 Docs on `main` may describe unreleased behavior, including CLI selection rules
 and review fixes that this alpha does not contain. Use the
-[matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a6/docs)
+[matching release docs](https://github.com/alexhawat/mergeCraft/tree/v0.1.0a7/docs)
 for the installed version.
 
 For intentional development testing, replace `<full-commit-sha>` below with
