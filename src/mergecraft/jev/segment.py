@@ -17,13 +17,12 @@ import hashlib
 import re
 from typing import Any
 
-from mergecraft.diff import diff_lines
+from mergecraft.diff import diff_lines, parse_diff
 from mergecraft.jev.types import HunkUnit, JevError
 
-_DIFF_GIT_RE = re.compile(r"^diff --git a/(.*) b/(.*)$")
-_PLUSPLUS_RE = re.compile(r"^\+\+\+ (?:b/)?(.+)$")
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _DEFAULT_CONTEXT_LINES = 3
+_BODY_PREFIXES = frozenset({" ", "+", "-", "\\"})
 
 
 def segment_hunks(
@@ -32,6 +31,18 @@ def segment_hunks(
     context_lines: int = _DEFAULT_CONTEXT_LINES,
 ) -> list[HunkUnit]:
     """Split a unified diff into hunk units with bounded context.
+
+    Each unit's path is the post-image path :func:`mergecraft.diff.parse_diff`
+    names for its ``diff --git`` section (the removed path for a deletion), so a
+    quoted or prefixed Git path reads the same here as everywhere else. Text
+    before the first ``diff --git`` line is not a file section and yields no
+    units.
+
+    A line inside a hunk is content whatever it looks like: a removed
+    ``-- comment`` renders as ``--- comment`` and an added ``++ x`` as
+    ``+++ x``. ``--- ``/``+++ `` lines are read as headers only once the open
+    hunk's declared old and new line counts are consumed, so they never rename
+    a unit or drop an edit from its body.
 
     Args:
         diff_text: Unified diff text. ``None`` is ``invalid_diff``.
@@ -50,17 +61,25 @@ def segment_hunks(
 
     bound = max(0, context_lines)
     units: list[HunkUnit] = []
-    current_path: str | None = None
+    for section in parse_diff(diff_text).files:
+        if section.path is None:
+            continue
+        units.extend(_section_units(section.path, section.text, bound))
+    return units
+
+
+def _section_units(path: str, section_text: str, bound: int) -> list[HunkUnit]:
+    """Return the hunk units of one ``diff --git`` section."""
+    units: list[HunkUnit] = []
     hunk_header: str | None = None
     hunk_start = 0
     hunk_new_count = 0
+    old_remaining = 0
+    new_remaining = 0
     hunk_body: list[str] = []
 
     def flush() -> None:
-        nonlocal hunk_header, hunk_body, hunk_start, hunk_new_count
-        if current_path is None or hunk_header is None:
-            hunk_header = None
-            hunk_body = []
+        if hunk_header is None:
             return
         trimmed = _bound_context(hunk_body, bound)
         content = "\n".join([hunk_header, *trimmed])
@@ -68,7 +87,7 @@ def segment_hunks(
         actual_context = sum(1 for line in trimmed if line.startswith(" "))
         unit = HunkUnit(
             kind="hunk",
-            path=current_path,
+            path=path,
             content=content,
             context_lines=min(bound, actual_context),
             unit_id="",
@@ -76,34 +95,34 @@ def segment_hunks(
             end_line=end_line,
         )
         units.append(unit.model_copy(update={"unit_id": unit_id(unit)}))
-        hunk_header = None
-        hunk_body = []
 
-    for raw_line in diff_lines(diff_text, strip_cr=True):
-        git_match = _DIFF_GIT_RE.match(raw_line)
-        if git_match:
-            flush()
-            current_path = git_match.group(2)
-            continue
-        plus_match = _PLUSPLUS_RE.match(raw_line)
-        if plus_match and plus_match.group(1) != "/dev/null":
-            current_path = plus_match.group(1)
-            continue
+    # The first line is the ``diff --git`` header itself.
+    for raw_line in diff_lines(section_text, strip_cr=True)[1:]:
         hunk_match = _HUNK_RE.match(raw_line)
         if hunk_match:
             flush()
             hunk_start = int(hunk_match.group(3))
             hunk_new_count = int(hunk_match.group(4) or "1")
+            old_remaining = int(hunk_match.group(2) or "1")
+            new_remaining = hunk_new_count
             hunk_header = raw_line
             hunk_body = []
             continue
         if hunk_header is None:
+            # Extended header lines before the section's first hunk.
             continue
-        if raw_line.startswith(("--- ", "+++ ")):
+        in_body = old_remaining > 0 or new_remaining > 0
+        if not in_body and raw_line.startswith(("--- ", "+++ ")):
+            # A header pair after a completed hunk, not content.
             continue
         prefix = raw_line[:1]
-        if prefix in {" ", "+", "-", "\\"}:
-            hunk_body.append(raw_line)
+        if prefix not in _BODY_PREFIXES:
+            continue
+        hunk_body.append(raw_line)
+        if prefix in {" ", "-"}:
+            old_remaining -= 1
+        if prefix in {" ", "+"}:
+            new_remaining -= 1
     flush()
     return units
 
