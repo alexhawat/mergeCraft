@@ -155,7 +155,7 @@ env:
   # Single Action SHA for all three review rungs (D10 / #532). Bump here only;
   # every `uses: alexhawat/mergeCraft@…` below must match — enforced by
   # `make action-pin-check`.
-  MERGECRAFT_ACTION_SHA: "26b6b5c65f5ebfe38bec93dd48aff0e3f3fbd7ed"
+  MERGECRAFT_ACTION_SHA: "ca65b4c95c7afbbefa58033cea1b31b1197d0372"
 
 concurrency:
   # pull_request_target resolves github.ref to the default branch; key on PR number
@@ -630,7 +630,7 @@ jobs:
         id: mergecraft_opencode_go
         continue-on-error: true
         # Match env.MERGECRAFT_ACTION_SHA (make action-pin-check). See CHANGELOG.md for history.
-        uses: alexhawat/mergeCraft@26b6b5c65f5ebfe38bec93dd48aff0e3f3fbd7ed
+        uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372
 
         with:
           prompt: ${{ steps.prompt.outputs.text }}
@@ -895,7 +895,7 @@ jobs:
         id: mergecraft_codex
         continue-on-error: true
         # Match env.MERGECRAFT_ACTION_SHA (make action-pin-check). See CHANGELOG.md for history.
-        uses: alexhawat/mergeCraft@26b6b5c65f5ebfe38bec93dd48aff0e3f3fbd7ed
+        uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372
 
         with:
           prompt: ${{ needs.review.outputs.prompt }}
@@ -1318,7 +1318,7 @@ jobs:
         id: mergecraft_claude
         continue-on-error: true
         # Match env.MERGECRAFT_ACTION_SHA (make action-pin-check). See CHANGELOG.md for history.
-        uses: alexhawat/mergeCraft@26b6b5c65f5ebfe38bec93dd48aff0e3f3fbd7ed
+        uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372
 
         with:
           prompt: ${{ needs.review.outputs.prompt }}
@@ -1577,7 +1577,7 @@ jobs:
         # Advisory: a failed Sonnet review must not fail the workflow run.
         continue-on-error: true
         # Same mandatory full-SHA pin as the cascade rungs — keep in lockstep.
-        uses: alexhawat/mergeCraft@26b6b5c65f5ebfe38bec93dd48aff0e3f3fbd7ed # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
+        uses: alexhawat/mergeCraft@ca65b4c95c7afbbefa58033cea1b31b1197d0372 # env.MERGECRAFT_ACTION_SHA / digest commit / pin 10
         with:
           # The same composed prompt the cascade used (PR number, base ref, CI
           # outcome) — repo-controlled values only.
