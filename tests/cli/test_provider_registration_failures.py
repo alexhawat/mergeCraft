@@ -48,6 +48,12 @@ _BROKEN_REGISTRY = (
     "    envIndex: abc\n"
     "    url: https://broken.example/v1\n"
 )
+#: Every ``envIndex`` shape ``ProviderRegistryEntry`` rejects (#1592, MC-3f0c19).
+_MALFORMED_REGISTRIES = [
+    pytest.param(_BROKEN_REGISTRY, id="nonnumeric"),
+    pytest.param(_BROKEN_REGISTRY.replace("    envIndex: abc\n", ""), id="missing"),
+    pytest.param(_BROKEN_REGISTRY.replace("envIndex: abc", "envIndex: null"), id="null"),
+]
 _ADD_ALPHA = (
     "provider",
     "add",
@@ -91,6 +97,7 @@ def _raise(exc: BaseException) -> Any:
 # ── #1592: malformed envIndex ────────────────────────────────────────────────
 
 
+@pytest.mark.parametrize("registry", _MALFORMED_REGISTRIES)
 @pytest.mark.parametrize(
     "argv",
     [
@@ -99,10 +106,10 @@ def _raise(exc: BaseException) -> Any:
         pytest.param(("provider", "status", "--json"), id="status-json"),
     ],
 )
-def test_nonnumeric_env_index_is_a_configuration_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv: tuple[str, ...]
+def test_malformed_env_index_is_a_configuration_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv: tuple[str, ...], registry: str
 ) -> None:
-    config = _repo(tmp_path, monkeypatch, config_body=_BROKEN_REGISTRY)
+    config = _repo(tmp_path, monkeypatch, config_body=registry)
     env_file = tmp_path / ".env"
     env_file.write_text("OTHER=1\n", encoding="utf-8")
     config_before = config.read_bytes()
@@ -252,12 +259,13 @@ def test_workflow_provider_add_rolls_back_on_a_failed_label_write(
     assert workflow.read_text(encoding="utf-8") != WORKFLOW_ONE_STEP_TEMPLATE
 
 
+@pytest.mark.parametrize("registry", _MALFORMED_REGISTRIES)
 @pytest.mark.parametrize("apply", [True, False], ids=["apply", "dry-run"])
 def test_workflow_provider_add_for_a_malformed_registered_row_is_a_configuration_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, apply: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, apply: bool, registry: str
 ) -> None:
     """The matching-label path reads the existing row's envIndex through the shared parser."""
-    config = _repo(tmp_path, monkeypatch, config_body=_BROKEN_REGISTRY)
+    config = _repo(tmp_path, monkeypatch, config_body=registry)
     workflow = scaffold_workflow_file(tmp_path, WORKFLOW_ONE_STEP_TEMPLATE)
     config_before = config.read_bytes()
     argv = [
@@ -277,6 +285,39 @@ def test_workflow_provider_add_for_a_malformed_registered_row_is_a_configuration
     output = _output(result)
     assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE, output
     assert result.exception is None or isinstance(result.exception, SystemExit), output
+    assert "envIndex" in output
+    assert "'broken'" in output
+    assert config.read_bytes() == config_before
+    assert workflow.read_text(encoding="utf-8") == WORKFLOW_ONE_STEP_TEMPLATE
+    assert _labels(tmp_path) == {}
+
+
+@pytest.mark.parametrize("registry", _MALFORMED_REGISTRIES)
+def test_workflow_provider_add_of_a_new_label_rejects_a_malformed_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, registry: str
+) -> None:
+    """Allocating for a new label validates every existing row first (MC-3f0c19)."""
+    config = _repo(tmp_path, monkeypatch, config_body=registry)
+    workflow = scaffold_workflow_file(tmp_path, WORKFLOW_ONE_STEP_TEMPLATE)
+    config_before = config.read_bytes()
+
+    result = _invoke(
+        "workflow",
+        "provider",
+        "add",
+        "--label",
+        "alpha",
+        "--url",
+        CUSTOM_BASE_URL,
+        "--harness",
+        "opencode",
+        "--workflow",
+        str(workflow),
+        "--apply",
+    )
+
+    output = _output(result)
+    assert result.exit_code == CLI_CONFIGURATION_EXIT_CODE, output
     assert "envIndex" in output
     assert "'broken'" in output
     assert config.read_bytes() == config_before

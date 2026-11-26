@@ -110,14 +110,14 @@ def allocate_env_index(
     indices whose ``LLM_PROVIDER_<N>`` keys are still in the local ``.env``, which
     covers registries written before that mark existed.
 
+    Every row is validated, as ``ProviderRegistryEntry`` validates it: a row
+    whose ``envIndex`` is missing or ``null`` is as invalid as a nonnumeric one,
+    so allocation never writes a new row into a registry settings would reject.
+
     Raises:
-        InvalidEnvIndexError: When a row's ``envIndex`` is not an integer.
+        InvalidEnvIndexError: When a row's ``envIndex`` is missing or not an integer.
     """
-    indices = [
-        entry_env_index(entry)
-        for entry in entries
-        if isinstance(entry, Mapping) and entry.get("envIndex") is not None
-    ]
+    indices = [entry_env_index(entry) for entry in entries if isinstance(entry, Mapping)]
     return max([0, high_water, *indices, *occupied]) + 1
 
 
