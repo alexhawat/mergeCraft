@@ -34,9 +34,11 @@ from mergecraft.config.io import save_config_dict as _write_config_dict
 from mergecraft.config.layered import config_parse_error
 from mergecraft.config.provider_registry import (
     BUILTIN_HARNESS_DEFAULTS,
+    InvalidEnvIndexError,
     allocate_env_index,
     default_auth_kind_for_label,
     default_harness_for_label,
+    entry_env_index,
     harness_supports_provider,
     list_supported_harnesses,
     supported_harness_names,
@@ -240,19 +242,94 @@ def allocate_registry_env_index(
     *,
     env_path: Path | None = None,
 ) -> int:
-    """Allocate the next env index for the registry in *data*; never a freed one (D3)."""
-    return allocate_env_index(
-        entries,
-        high_water=_env_index_high_water(data),
-        occupied=_occupied_env_indices(env_path),
-    )
+    """Allocate the next env index for the registry in *data*; never a freed one (D3).
+
+    A row whose ``envIndex`` is not an integer exits with the configuration code
+    and names the provider, instead of a traceback (#1592).
+    """
+    try:
+        return allocate_env_index(
+            entries,
+            high_water=_env_index_high_water(data),
+            occupied=_occupied_env_indices(env_path),
+        )
+    except InvalidEnvIndexError as exc:
+        cli_bail(str(exc))
+
+
+def registry_env_index(entry: Mapping[str, Any]) -> int:
+    """Return a registry row's ``envIndex``, or exit with the configuration code.
+
+    The message names the provider and the ``envIndex`` field (#1592).
+    """
+    try:
+        return entry_env_index(entry)
+    except InvalidEnvIndexError as exc:
+        cli_bail(str(exc))
+
+
+class ProviderLabelWriteError(OSError):
+    """The local ``LLM_PROVIDER_<N>`` label of a new registration did not land."""
 
 
 def _write_env_label(env_index: int, label: str, cwd: Path | None = None) -> None:
+    """Write ``LLM_PROVIDER_<N>=<label>`` into the ``.env`` paired with *cwd*.
+
+    Raises:
+        ProviderLabelWriteError: When the ``.env`` write failed.
+    """
     from mergecraft.cli.auth_cmd import _write_env_value
 
-    key = f"LLM_PROVIDER_{env_index}"
-    _write_env_value(_env_path(cwd), key, label)
+    key = _indexed_label_key(env_index)
+    env_path = _env_path(cwd)
+    if not _write_env_value(env_path, key, label):
+        msg = f"could not write {key} to {env_path}"
+        raise ProviderLabelWriteError(msg)
+
+
+def _restore_env_file(env_path: Path, before: bytes | None) -> None:
+    """Put *env_path* back exactly as it was: *before* bytes, or absent when ``None``."""
+    try:
+        if before is None:
+            env_path.unlink(missing_ok=True)
+        else:
+            env_path.write_bytes(before)
+    except OSError as exc:
+        console.print(f"[yellow]could not restore {env_path}: {exc}[/yellow]")
+
+
+def register_provider_entry(
+    config_path: Path,
+    data: dict[str, Any],
+    entries: list[dict[str, Any]],
+    entry: dict[str, Any],
+    *,
+    cwd: Path | None,
+    write_config: Callable[[Path, dict[str, Any]], None],
+) -> None:
+    """Persist a new registry row and its local ``.env`` label, or neither (#1593).
+
+    The label is written first, after snapshotting the ``.env`` it goes into.
+    When the config write then fails, the snapshot is restored byte for byte,
+    and a ``.env`` the label write created is removed again. A label write that
+    fails leaves both files as they were, so repeating the command allocates the
+    same index; writing the row first would strand it and make the retry fail
+    the duplicate-label check.
+
+    Raises:
+        ProviderLabelWriteError: When the label write failed; nothing was written.
+    """
+    env_index = int(entry["envIndex"])
+    env_path = _env_path(cwd)
+    env_before = env_path.read_bytes() if env_path.is_file() else None
+    try:
+        _write_env_label(env_index, str(entry["label"]), cwd)
+        write_config(config_path, {**data, "providers": [*entries, entry]})
+    except BaseException:
+        _restore_env_file(env_path, env_before)
+        raise
+    entries.append(entry)
+    data["providers"] = entries
 
 
 def _harness_help_suffix() -> str:
@@ -401,10 +478,22 @@ def add_cmd(
     if resolved_url is not None:
         entry["url"] = resolved_url
 
-    entries.append(entry)
-    data["providers"] = entries
-    _write_config_dict(config_path, data)
-    _write_env_label(env_index, normalised_label, repo_root)
+    try:
+        register_provider_entry(
+            config_path,
+            data,
+            entries,
+            entry,
+            cwd=repo_root,
+            write_config=_write_config_dict,
+        )
+    except ProviderLabelWriteError as exc:
+        cli_bail(f"{exc}; provider {normalised_label!r} was not registered")
+    except OSError as exc:
+        cli_bail(
+            f"could not write {config_path}: {exc}; provider {normalised_label!r} "
+            "was not registered"
+        )
     console.print(
         f"registered provider [green]{normalised_label}[/green] "
         f"(envIndex={env_index}, harness={resolved_harness})"
