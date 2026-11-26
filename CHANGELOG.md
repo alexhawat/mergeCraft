@@ -281,6 +281,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its confirmation naming the key it wrote. It used to read the registry from
   the working directory, so a run from a subdirectory silently wrote the flat
   legacy secret and skipped the indexed wiring (#1557).
+- A provider registry row with a nonnumeric, missing or `null` `envIndex` makes
+  `provider add`, `workflow provider add` and `provider status` (with or without
+  `--json`) exit `30` with a message naming the provider and `envIndex`, instead
+  of a traceback and exit `1`, or a new row allocated into a registry the
+  settings reject. Neither `config.yaml` nor `.env` is changed (#1592).
+- `provider add` and `workflow provider add` now fail when the local
+  `LLM_PROVIDER_<N>` label cannot be written, instead of printing success with
+  the label missing. The label is written before the registry row, and `.env`
+  is restored byte for byte (or removed, if the write created it) when either
+  write fails, so a failed attempt leaves neither and repeating the command
+  registers the provider once, at the same index (#1593).
 - `config show` and `config explain` exit `2` with a plain message for an
   unknown key instead of `30` with the message quoted twice; `config show
   models` shows the whole configured fallback chain; and a missing model chain
